@@ -103,11 +103,12 @@ export interface Definition {
 }
 
 /**
- * A repository can override a seat with `.claude/agents/<seat>.md` in the agent cwd; otherwise the
- * seat file bundled with the plugin applies.
+ * A repository can override a seat with `.slp/agents/<seat>.md` in the agent cwd; otherwise the
+ * seat file bundled with the plugin applies. `.claude/agents/<seat>.md` is Claude Code's own
+ * subagent definition directory, not read by this plugin.
  */
 export async function readDefinition(cwd: string, seat: Seat): Promise<Definition> {
-  const override = path.join(cwd, ".claude", "agents", `${seat}.md`);
+  const override = path.join(cwd, ".slp", "agents", `${seat}.md`);
   try {
     const text = await readFile(override, "utf8");
     return { source: override, body: stripFrontmatter(text).trim() };

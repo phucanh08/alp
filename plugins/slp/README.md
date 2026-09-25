@@ -59,8 +59,9 @@ before creating one.
 ## Seat definitions
 
 `agents/<seat>.md` is the source, written for alp: seats talk through Paseo tools, tagged
-`<paseo-agent-message>` envelopes, and finish notifications. `.claude/agents/` at the repo root holds
-the Claude Code Agent Teams versions; the two sets diverge on purpose. `server/runtime-block.ts` adds
+`<paseo-agent-message>` envelopes, and finish notifications. `.claude/agents/` at the repo root is
+Claude Code's own subagent directory, holding the Agent Teams versions for Claude Code sessions; the
+two sets diverge on purpose and this plugin never reads that directory. `server/runtime-block.ts` adds
 the runtime facts that depend on the family and on the plugin: message sources, steer, notification
 limits, the Peer spawn call. It names no workflow skill; those live in the seat files.
 
@@ -74,8 +75,9 @@ cd plugins/slp && npm run generate
 
 `server/definitions.test.ts` fails when the generated module is stale.
 
-A repository overrides a seat with `.claude/agents/<seat>.md` in the agent's cwd. The alp checkout
-has those files, so a Lead in an alp workspace gets the Agent Teams version, not the bundled one.
+A repository overrides a seat with `.slp/agents/<seat>.md` in the agent's cwd; the plugin never falls
+back to `.claude/agents/<seat>.md`. The alp checkout has no `.slp/agents/` override, so a Lead in an
+alp workspace gets the bundled definition.
 
 ## Checks
 

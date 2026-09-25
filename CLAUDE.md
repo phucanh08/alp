@@ -198,8 +198,11 @@ Find the complete daemon logs and traces in the $PASEO_HOME/daemon.log
 ## SLP team policy (alp fork)
 
 Repo này là fork của [getpaseo/paseo](https://github.com/getpaseo/paseo) (`upstream`), phát triển
-theo quy trình SLP (Supervisor / Lead / Peer). Definition ở `.claude/agents/`, skill theo phase ở
-`.claude/skills/`; gõ `/ask-alp` để biết ghế nào dùng skill nào. Plan hiện hành: `plans/`.
+theo quy trình SLP (Supervisor / Lead / Peer). Trong phiên Claude Code như phiên này, seat definition
+ở `.claude/agents/`, skill theo phase ở `.claude/skills/`; gõ `/ask-alp` để biết ghế nào dùng skill
+nào. Trong app alp (agent do plugin `plugins/slp` tạo), seat definition bundled ở
+`plugins/slp/agents/`; repo override bằng `.slp/agents/<seat>.md`, không phải `.claude/agents/`. Plan
+hiện hành: `plans/`.
 
 - Lead là owner của topology và acceptance; chỉ Lead spawn Peer (`create_agent`, provider `claude-peer`).
 - Peer writer cần `exclusive-writer` + commit lease + `Base` SHA; mỗi moving scope một writer.
