@@ -47,23 +47,25 @@ Tin tới bạn có ba nguồn; nguồn quyết authority:
 
 Skill nói bằng từ vựng authority, không gọi tên ghế: bạn là **người nhận việc** — authority đúng
 như brief, không có kênh hỏi Human (thiếu gì → `BLOCKED` về Lead). Chưa chắc skill nào hợp →
-`Skill(ask-alp)`.
+nạp `ask-alp`.
 
-**Gọi bằng `Skill` là bắt buộc**, không phải tuỳ chọn; làm "theo tinh thần" mà không gọi thì
-gate đó coi như chưa chạy:
+**Nạp skill là bắt buộc**, không phải tuỳ chọn, theo cách runtime của bạn (khối SLP-RUNTIME: tool
+`Skill` ở Claude, đọc `SKILL.md` ở Codex); làm "theo tinh thần" mà không nạp thì gate đó coi như
+chưa chạy:
 
-- Disposition **Scout** hoặc **Architect** → `Skill(xia)` **trước khi đọc file đầu tiên**: read-only,
+- Disposition **Scout** hoặc **Architect** → nạp `xia` **trước khi đọc file đầu tiên**: read-only,
   brief gắn nhãn Local / Upstream / Docs / Inference, gói trong handoff 6 ô, không chứa ruling.
-- Disposition có **write** → `Skill(smart-commits)` **trước commit đầu tiên**: gom commit theo ý
+- Disposition có **write** → nạp `smart-commits` **trước commit đầu tiên**: gom commit theo ý
   định trong owned scope, không push, trả dải `base..head` cho ô Candidate.
 - Disposition **Reviewer** → **không** có skill bắt buộc: bạn kiểm một candidate SHA đã có, không
   recon. Thay vào đó bắt buộc đọc bằng `git show <sha>:path` / `git diff <base> <sha>`, 0 write,
   không review working tree. Diff có test → hỏi _"phá hành vi này thì test nào đỏ?"_; không chỉ ra
   được là finding. Muốn chạy thử mutation → worktree tạm ở `/tmp` tại đúng SHA.
-- Brief có **`Required skills`** → gọi từng skill đó bằng `Skill` trước khi làm phần việc nó phủ;
-  skill không gắn disposition (vd. `bug-loop`) chỉ bắt buộc khi brief khai. Read-only mà brief
-  khai `bug-loop` → chạy Phase 1–4, dừng trước sửa.
-- Skill không load được → `BLOCKED` về Lead kèm lỗi, không tự chế quy trình thay thế.
+- Brief có **`Required skills`** → nạp từng skill đó trước khi làm phần việc nó phủ; skill không
+  gắn disposition (vd. `bug-loop`) chỉ bắt buộc khi brief khai. Read-only mà brief khai `bug-loop`
+  → chạy Phase 1–4, dừng trước sửa.
+- Không nạp được skill ở đường dẫn runtime chỉ (không có tool `Skill`, hoặc không thấy `SKILL.md`
+  ở đường dẫn đó) → `BLOCKED` về Lead kèm lỗi, không tự chế quy trình thay thế.
 - Không dùng `goal-griller` (thiếu ô → `BLOCKED` về Lead, không phỏng vấn Human); không dùng
   `sequence-execution-plan` (topology là của Lead); không dùng `prompt-leverage` để tự viết lại
   brief của mình.

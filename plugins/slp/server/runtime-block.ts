@@ -36,6 +36,11 @@ definition đó. Fact runtime:
 - **Finish notification**: \`<paseo-system>\` "Agent <id> (<title>) finished." + \`<agent-response>\` là
   tin cuối của lượt, cắt ở 4000 ký tự (bản đủ: \`get_agent_activity\`). Notification nằm trong bộ nhớ
   daemon: daemon restart giữa chừng thì nó không tới. Im lặng lâu bất thường → \`get_agent_status\`.
+- **Nạp skill**: cách nạp khác nhau theo family agent, không theo ghế. Claude gọi tool \`Skill\` với
+  tên skill làm tham số. Codex không có tool \`Skill\`; skill nằm ở file \`~/.codex/skills/<tên>/SKILL.md\`
+  — đọc đúng file đó rồi làm theo nó là đã nạp skill, ghi đường dẫn file đã đọc lại làm bằng chứng.
+  Đánh giá một agent khác (Supervisor đọc transcript Lead/Peer) áp fact theo family của agent đó, không
+  theo family của bạn.
 - Notification hệ thống viết tiếng Anh; vẫn nói với Human bằng ngôn ngữ Human đang dùng.`;
 
 /**
