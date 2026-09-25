@@ -1,8 +1,11 @@
 <p align="center">
-  <img src="packages/website/public/logo.svg" width="64" height="64" alt="Paseo logo">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="packages/website/public/alp-wordmark-on-dark.svg">
+    <img src="packages/website/public/alp-wordmark-on-light.svg" alt="alp" width="220">
+  </picture>
 </p>
 
-<h1 align="center">Paseo</h1>
+<h1 align="center">alp</h1>
 
 <p align="center">
   <a href="README.md">English</a> ·
@@ -28,6 +31,8 @@
     <img src="https://img.shields.io/badge/Reddit-555?logo=reddit" alt="Reddit">
   </a>
 </p>
+
+<p align="center"><em>本项目 fork 自 <a href="https://github.com/getpaseo/paseo">Paseo</a>，遵循 Apache-2.0 许可证。</em></p>
 
 <p align="center">Claude Code、Codex、Copilot、OpenCode 和 Pi agents 的统一界面。</p>
 
