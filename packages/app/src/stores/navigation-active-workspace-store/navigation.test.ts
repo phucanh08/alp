@@ -59,6 +59,15 @@ function createLastSelectionDeps(
   };
 }
 
+function supervisorAgent(workspaceId: string, archivedAt: Date | null = null): Agent {
+  return {
+    id: `supervisor-${workspaceId}`,
+    workspaceId,
+    labels: { "slp.role": "supervisor" },
+    archivedAt,
+  } as unknown as Agent;
+}
+
 describe("workspace navigation", () => {
   it("reports when no last workspace is known", () => {
     const { deps } = createLastSelectionDeps(null);
@@ -84,6 +93,7 @@ describe("workspace navigation", () => {
       id: "agent-1",
       cwd: "/repo/workspace-a",
       workspaceId: "workspace-a",
+      labels: {},
       requiresAttention: true,
       attentionReason: "permission",
     } as unknown as Agent;
@@ -112,6 +122,7 @@ describe("workspace navigation", () => {
       id: "agent-1",
       cwd: "/repo/workspace-a",
       workspaceId: "workspace-a",
+      labels: {},
       requiresAttention: true,
       attentionReason: "permission",
     } as unknown as Agent;
@@ -245,5 +256,60 @@ describe("workspace navigation", () => {
 
     expect(navigateToLastWorkspace(deps)).toBe(true);
     expect(navigations).toEqual(["/h/server-1/workspace/workspace-a"]);
+  });
+
+  it("does not remember the SLP Supervisor workspace as the last workspace", () => {
+    const { deps, navigations, remembered } = createLastSelectionDeps(
+      { serverId: "server-1", workspaceId: "workspace-a" },
+      { getSessionAgents: () => [supervisorAgent("workspace-supervisor")] },
+    );
+
+    navigateToWorkspace({ serverId: "server-1", workspaceId: "workspace-supervisor" }, deps);
+
+    expect(navigations).toEqual(["/h/server-1/workspace/workspace-supervisor"]);
+    expect(remembered).toEqual([]);
+    expect(deps.getLastWorkspaceSelection()).toEqual({
+      serverId: "server-1",
+      workspaceId: "workspace-a",
+    });
+  });
+
+  it("remembers an ordinary workspace while a Supervisor runs elsewhere", () => {
+    const { deps, remembered } = createFakeDeps({
+      getSessionAgents: () => [supervisorAgent("workspace-supervisor")],
+    });
+
+    navigateToWorkspace({ serverId: "server-1", workspaceId: "workspace-b" }, deps);
+
+    expect(remembered).toEqual([{ serverId: "server-1", workspaceId: "workspace-b" }]);
+  });
+
+  it("remembers a workspace whose Supervisor has been archived", () => {
+    const { deps, remembered } = createFakeDeps({
+      getSessionAgents: () => [
+        supervisorAgent("workspace-supervisor", new Date("2026-09-01T00:00:00.000Z")),
+      ],
+    });
+
+    navigateToWorkspace({ serverId: "server-1", workspaceId: "workspace-supervisor" }, deps);
+
+    expect(remembered).toEqual([{ serverId: "server-1", workspaceId: "workspace-supervisor" }]);
+  });
+
+  it("returns to the ordinary workspace after the Supervisor was opened", () => {
+    const { deps, navigations } = createLastSelectionDeps(null, {
+      getSessionAgents: (serverId) =>
+        serverId === "server-1" ? [supervisorAgent("workspace-supervisor")] : [],
+    });
+
+    navigateToWorkspace({ serverId: "server-1", workspaceId: "workspace-a" }, deps);
+    navigateToWorkspace({ serverId: "server-1", workspaceId: "workspace-supervisor" }, deps);
+
+    expect(navigateToLastWorkspace(deps)).toBe(true);
+    expect(navigations).toEqual([
+      "/h/server-1/workspace/workspace-a",
+      "/h/server-1/workspace/workspace-supervisor",
+      "/h/server-1/workspace/workspace-a",
+    ]);
   });
 });

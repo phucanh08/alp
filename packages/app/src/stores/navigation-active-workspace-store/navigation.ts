@@ -11,6 +11,7 @@ import {
   resolveWorkspaceMapKeyByIdentity,
 } from "@/utils/workspace-identity";
 import type { ActiveWorkspaceSelection } from "@/stores/last-workspace-selection";
+import { collectSlpSystemWorkspaceIds } from "@/slp/system-workspaces";
 import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 import { prepareWorkspaceTab, type PrepareWorkspaceTabDeps } from "@/utils/prepare-workspace-tab";
 import type { WorkspaceTabPlacement } from "@/stores/workspace-layout-actions";
@@ -82,6 +83,25 @@ export function parseActiveWorkspaceSelection(
   return parseWorkspaceSelectionFromRouteParams(input.params);
 }
 
+/**
+ * ALP(slp): the Supervisor's system workspace is hidden from every project list, so it must not
+ * become the workspace that cold start, Settings Back, and the last-workspace shortcut return to.
+ * Navigating there keeps the previous selection.
+ */
+export function rememberLastWorkspaceUnlessSystem(
+  selection: ActiveWorkspaceSelection,
+  deps: Pick<NavigateToWorkspaceDeps, "getSessionAgents" | "rememberLastWorkspace">,
+): void {
+  const workspaceId = normalizeWorkspaceOpaqueId(selection.workspaceId);
+  const systemWorkspaceIds = collectSlpSystemWorkspaceIds(
+    deps.getSessionAgents(selection.serverId),
+  );
+  if (workspaceId && systemWorkspaceIds.has(workspaceId)) {
+    return;
+  }
+  deps.rememberLastWorkspace(selection);
+}
+
 export function navigateToWorkspace(
   input: NavigateToWorkspaceInput,
   deps: NavigateToWorkspaceDeps,
@@ -122,7 +142,10 @@ export function navigateToWorkspace(
           `agent:${input.target.agentId}`,
         )
       : buildHostWorkspaceRoute(input.serverId, input.workspaceId);
-  deps.rememberLastWorkspace({ serverId: input.serverId, workspaceId: input.workspaceId });
+  rememberLastWorkspaceUnlessSystem(
+    { serverId: input.serverId, workspaceId: input.workspaceId },
+    deps,
+  );
   deps.navigateToRoute(route);
   return route;
 }
