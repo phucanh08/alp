@@ -5,6 +5,13 @@
 - Node.js (see `.tool-versions` for exact version)
 - npm workspaces (comes with Node)
 
+### Apple Silicon: node must be arm64
+
+Desktop builds need `node -p process.arch` to print `arm64`. A Rosetta-translated (x86_64) Node
+installs `@esbuild/darwin-x64` instead of `@esbuild/darwin-arm64`, and the packaged app's plugin
+compiler (`packages/server/src/server/plugins/compiler.ts`, esbuild-based) fails to load the
+mismatched binary. Install an arm64 Node build and re-run `npm ci`.
+
 ## Running the dev server
 
 ```bash

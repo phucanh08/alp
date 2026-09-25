@@ -53,3 +53,21 @@ Get another agent's judgment on a design, diff, or question. The skill chooses a
 > /paseo-advisor did I miss anything in this migration plan?
 
 The advisor returns a second opinion without editing files.
+
+## SLP skills
+
+alp bundles seven more skills for the SLP (Supervisor / Lead / Peer) workflow, installed by
+default on a fresh host through the same mechanism as the table above.
+
+| Skill                      | Use it to                                                                         |
+| -------------------------- | --------------------------------------------------------------------------------- |
+| `/ask-alp`                 | Look up which seat you're in, which phase you're at, and which skill fits next.   |
+| `/bug-loop`                | Diagnose a bug or performance regression with a disciplined red-before-fix loop.  |
+| `/goal-griller`            | Turn a vague idea into a verifiable Task Contract before splitting up work.       |
+| `/prompt-leverage`         | Turn a raw prompt into an execution-ready prompt or handoff brief.                |
+| `/sequence-execution-plan` | Turn a Task Contract or backlog into an ordered, dependency-aware execution plan. |
+| `/smart-commits`           | Group a working tree into logical conventional commits ready for handoff.         |
+| `/xia`                     | Scout the repo and upstream docs before writing code, so nothing gets reinvented. |
+
+Uninstalling these skills in Settings and restarting the daemon reinstalls them; see
+[breaking-changes.md](../docs/breaking-changes.md#slp-defaults-on-a-fresh-host).

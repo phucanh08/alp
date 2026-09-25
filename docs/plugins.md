@@ -80,10 +80,25 @@ Never enable plugins on a user's behalf without explicit permission. Before aski
 target daemon's current `pluginsEnabled` value. State that plugins are trusted, unsandboxed code:
 backend code can access the daemon machine, while client contributions run inside the alp app.
 
+The one exception is alp's own bundled `slp` plugin: daemon start turns it on without asking. See
+[Bundled plugins](#bundled-plugins) and
+[breaking-changes.md](breaking-changes.md#slp-defaults-on-a-fresh-host) for that divergence.
+
 Source changes are explicit. Run `paseo plugin reload <id>` to stop and fully tear down the old
 plugin before compiling and starting from disk. A failed reload stays failed; alp does not restore
 the old code. Use `enable`, `disable`, and `remove` to manage one plugin. Removing a directory source
 never deletes it. The global `pluginsEnabled` switch remains available.
+
+## Bundled plugins
+
+alp ships `plugins/slp` inside the daemon and loads it with no `plugins.slp` config entry. Running
+from a built daemon, the source is `packages/server/dist/server/plugins/slp`; running from a
+checkout, it is `plugins/slp` at the repo root. Add a `plugins.slp` directory or Git source entry
+to config to replace the bundled copy with your own.
+
+Bundled plugins do not appear in `paseo plugin ls`, `reload`, `enable`, or `disable`. Turn the
+bundled `slp` plugin off with the global `pluginsEnabled: false`, which disables every plugin, or
+with an explicit `plugins.slp` override.
 
 ## Install a Git source
 
