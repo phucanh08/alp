@@ -15,9 +15,11 @@ category: Orchestration
 | Setting                       | Default | Purpose                                          |
 | ----------------------------- | ------- | ------------------------------------------------ |
 | `daemon.mcp.enabled`          | `true`  | Run the MCP server.                              |
-| `daemon.mcp.injectIntoAgents` | `false` | Give agents launched by alp access to its tools. |
+| `daemon.mcp.injectIntoAgents` | `true`  | Give agents launched by alp access to its tools. |
 
 Depending on the provider, alp delivers tools through its native tool interface or MCP. The capabilities are the same. Start a new agent or reload an existing one after changing injection settings.
+
+alp seeds `daemon.mcp.injectIntoAgents: true` on daemon start when the key is absent, so SLP agents can spawn and drive each other out of the box. Set it to `false` in `~/.paseo/config.json` to opt out; the seed never overwrites an explicit value.
 
 ## Limit alp tools by provider
 

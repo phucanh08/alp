@@ -1041,4 +1041,63 @@ describe("SLP defaults", () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  test("a config missing daemon.mcp.injectIntoAgents gets it seeded true, whether daemon or mcp is absent", () => {
+    const noDaemon = createTempHome();
+    const noMcp = createTempHome();
+    try {
+      writeConfigFile(noDaemon, { version: 1 });
+      writeConfigFile(noMcp, { version: 1, daemon: { listen: "127.0.0.1:7777" } });
+
+      seedPersistedSlpDefaults(noDaemon);
+      seedPersistedSlpDefaults(noMcp);
+
+      expect(loadPersistedConfig(noDaemon).daemon?.mcp?.injectIntoAgents).toBe(true);
+      expect(readConfigFile(noDaemon).daemon).toMatchObject({ mcp: { injectIntoAgents: true } });
+
+      const noMcpConfig = loadPersistedConfig(noMcp);
+      expect(noMcpConfig.daemon?.mcp?.injectIntoAgents).toBe(true);
+      expect(noMcpConfig.daemon?.listen).toBe("127.0.0.1:7777");
+      expect(readConfigFile(noMcp).daemon).toEqual({
+        listen: "127.0.0.1:7777",
+        mcp: { injectIntoAgents: true },
+      });
+    } finally {
+      rmSync(noDaemon, { recursive: true, force: true });
+      rmSync(noMcp, { recursive: true, force: true });
+    }
+  });
+
+  test("an explicit daemon.mcp.injectIntoAgents false is left alone", () => {
+    const home = createTempHome();
+    try {
+      writeConfigFile(home, { version: 1, daemon: { mcp: { injectIntoAgents: false } } });
+
+      seedPersistedSlpDefaults(home);
+      const config = loadPersistedConfig(home);
+
+      expect(config.daemon?.mcp?.injectIntoAgents).toBe(false);
+      expect(readConfigFile(home).daemon).toMatchObject({ mcp: { injectIntoAgents: false } });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("seeding a config that already sets injectIntoAgents true does not touch it again", () => {
+    const home = createTempHome();
+    try {
+      writeConfigFile(home, { version: 1, daemon: { mcp: { injectIntoAgents: true } } });
+      seedPersistedSlpDefaults(home); // first call may still add providers/pluginsEnabled
+      const first = readFileSync(path.join(home, "config.json"), "utf8");
+      const firstMtime = statSync(path.join(home, "config.json")).mtimeMs;
+
+      seedPersistedSlpDefaults(home);
+
+      expect(readFileSync(path.join(home, "config.json"), "utf8")).toBe(first);
+      expect(statSync(path.join(home, "config.json")).mtimeMs).toBe(firstMtime);
+      expect(readConfigFile(home).daemon).toMatchObject({ mcp: { injectIntoAgents: true } });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
 });

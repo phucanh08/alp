@@ -431,6 +431,11 @@ const DEFAULT_PERSISTED_CONFIG = PersistedConfigSchema.parse({
     relay: {
       enabled: false,
     },
+    // ALP(slp): SLP agents need alp's own MCP tools (create_agent, send_agent_prompt, ...) to
+    // spawn and drive each other; upstream ships this off.
+    mcp: {
+      injectIntoAgents: true,
+    },
   },
   app: {
     baseUrl: "https://app-alp.anhlp.com",
@@ -450,6 +455,8 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
  * ALP(slp): add the SLP defaults an existing config.json lacks, without overriding the user.
  * Works on the raw JSON so a missing `pluginsEnabled` key (never set) stays distinct from an
  * explicit `false` (user opted out), and a provider id the user already defined is kept as-is.
+ * Same rule for `daemon.mcp.injectIntoAgents`: seeded `true` only when absent, so an explicit
+ * `false` (user opted out) or `true` (already seeded) is left untouched.
  * Returns null when nothing was added or the shape is not ours to fix (the schema reports it).
  */
 function seedSlpDefaults(parsed: unknown): Record<string, unknown> | null {
@@ -458,12 +465,19 @@ function seedSlpDefaults(parsed: unknown): Record<string, unknown> | null {
   if (!isPlainRecord(agents)) return null;
   const providers = agents.providers ?? {};
   if (!isPlainRecord(providers)) return null;
+  const daemon = parsed.daemon ?? {};
+  if (!isPlainRecord(daemon)) return null;
+  const mcp = daemon.mcp ?? {};
+  if (!isPlainRecord(mcp)) return null;
 
   const missingProviders = Object.entries(SLP_DEFAULT_AGENT_PROVIDERS).filter(
     ([providerId]) => !Object.hasOwn(providers, providerId),
   );
   const seedPluginsEnabled = !Object.hasOwn(parsed, "pluginsEnabled");
-  if (missingProviders.length === 0 && !seedPluginsEnabled) return null;
+  const seedMcpInjectIntoAgents = !Object.hasOwn(mcp, "injectIntoAgents");
+  if (missingProviders.length === 0 && !seedPluginsEnabled && !seedMcpInjectIntoAgents) {
+    return null;
+  }
 
   return {
     ...parsed,
@@ -471,6 +485,10 @@ function seedSlpDefaults(parsed: unknown): Record<string, unknown> | null {
     agents: {
       ...agents,
       providers: { ...providers, ...structuredClone(Object.fromEntries(missingProviders)) },
+    },
+    daemon: {
+      ...daemon,
+      mcp: seedMcpInjectIntoAgents ? { ...mcp, injectIntoAgents: true } : mcp,
     },
   };
 }
