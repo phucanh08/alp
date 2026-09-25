@@ -707,7 +707,7 @@ function createPiPaseoExtensionFile(systemPrompt?: string): PiTempFile {
 	  });
 
 	  pi.registerCommand("${PASEO_PI_CAPTURE_EXTENSION_COMMAND}", {
-	    description: "Internal Paseo entry capture bridge",
+	    description: "Internal alp entry capture bridge",
 	    handler: async (args, ctx) => {
 	      const payload = decodePayload(args.trim());
 	      emitEntryCapture(ctx, "command", payload.requestId);
@@ -715,7 +715,7 @@ function createPiPaseoExtensionFile(systemPrompt?: string): PiTempFile {
 	  });
 
 	  pi.registerCommand("${PASEO_PI_TREE_EXTENSION_COMMAND}", {
-	    description: "Internal Paseo tree navigation bridge",
+	    description: "Internal alp tree navigation bridge",
 	    handler: async (args, ctx) => {
 	      const payload = decodePayload(args.trim());
 	      try {

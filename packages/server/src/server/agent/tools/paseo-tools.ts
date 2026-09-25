@@ -618,7 +618,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     ): Promise<PaseoToolResult> {
       const tool = tools.get(name);
       if (!tool) {
-        throw new Error(`Paseo tool not found: ${name}`);
+        throw new Error(`alp tool not found: ${name}`);
       }
       return tool.handler(await parseToolInput(tool, input), context);
     },
