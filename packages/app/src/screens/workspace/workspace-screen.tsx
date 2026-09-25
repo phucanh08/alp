@@ -157,6 +157,7 @@ import type { WorkspaceRecoveryModel } from "@/workspace-recovery/model";
 import {
   buildWorkspaceTabSnapshot,
   deriveWorkspaceAgentVisibility,
+  resolveWorkspaceLeadFocusTabId,
   workspaceAgentVisibilityEqual,
 } from "@/workspace-tabs/agent-visibility";
 import { deriveWorkspacePaneState } from "@/screens/workspace/workspace-pane-state";
@@ -2053,7 +2054,17 @@ function WorkspaceScreenContent({
         hasActivePendingDraftCreate: hasActivePendingDraftCreateInWorkspace,
       }),
     );
+    // ALP(slp): with nothing focused, land on the workspace Lead rather than an empty pane.
+    const leadTabId = resolveWorkspaceLeadFocusTabId({
+      leadAgentId: workspaceAgentVisibility.leadAgentId,
+      activeTabId: focusedPaneTabState.activeTabId,
+    });
+    if (leadTabId) {
+      focusWorkspaceTab(persistenceKey, leadTabId);
+    }
   }, [
+    focusWorkspaceTab,
+    focusedPaneTabState.activeTabId,
     hasHydratedAgents,
     hasHydratedWorkspaceLayoutStore,
     pendingTerminalCreateInput,

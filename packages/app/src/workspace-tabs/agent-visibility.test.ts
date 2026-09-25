@@ -3,6 +3,7 @@ import type { Agent } from "@/stores/session-store";
 import {
   buildWorkspaceTabSnapshot,
   deriveWorkspaceAgentVisibility,
+  resolveWorkspaceLeadFocusTabId,
   shouldPruneWorkspaceAgentTab,
   workspaceAgentVisibilityEqual,
 } from "@/workspace-tabs/agent-visibility";
@@ -15,6 +16,7 @@ function makeAgent(input: {
   archivedAt?: Date | null;
   createdAt?: Date;
   lastActivityAt?: Date;
+  labels?: Record<string, string>;
 }): Agent {
   const createdAt = input.createdAt ?? new Date("2026-03-04T00:00:00.000Z");
   const lastActivityAt = input.lastActivityAt ?? createdAt;
@@ -50,7 +52,7 @@ function makeAgent(input: {
     model: null,
     thinkingOptionId: null,
     parentAgentId: input.parentAgentId ?? null,
-    labels: {},
+    labels: input.labels ?? {},
     requiresAttention: false,
     attentionReason: null,
     attentionTimestamp: null,
@@ -312,6 +314,7 @@ describe("workspace agent visibility", () => {
     const agentVisibility = {
       activeAgentIds: new Set(["active-agent"]),
       autoOpenAgentIds: new Set(["root-agent"]),
+      leadAgentId: null,
     };
 
     expect(
@@ -341,10 +344,12 @@ describe("workspace agent visibility", () => {
       const a = {
         activeAgentIds: new Set(["a", "b"]),
         autoOpenAgentIds: new Set(["a"]),
+        leadAgentId: null,
       };
       const b = {
         activeAgentIds: new Set(["a", "b"]),
         autoOpenAgentIds: new Set(["a"]),
+        leadAgentId: null,
       };
       expect(workspaceAgentVisibilityEqual(a, b)).toBe(true);
     });
@@ -353,10 +358,12 @@ describe("workspace agent visibility", () => {
       const a = {
         activeAgentIds: new Set(["a"]),
         autoOpenAgentIds: new Set(["a"]),
+        leadAgentId: null,
       };
       const b = {
         activeAgentIds: new Set(["b"]),
         autoOpenAgentIds: new Set(["a"]),
+        leadAgentId: null,
       };
       expect(workspaceAgentVisibilityEqual(a, b)).toBe(false);
     });
@@ -365,10 +372,12 @@ describe("workspace agent visibility", () => {
       const a = {
         activeAgentIds: new Set(["a", "b"]),
         autoOpenAgentIds: new Set(["a"]),
+        leadAgentId: null,
       };
       const b = {
         activeAgentIds: new Set(["a", "b"]),
         autoOpenAgentIds: new Set(["b"]),
+        leadAgentId: null,
       };
       expect(workspaceAgentVisibilityEqual(a, b)).toBe(false);
     });
@@ -377,12 +386,115 @@ describe("workspace agent visibility", () => {
       const a = {
         activeAgentIds: new Set<string>(),
         autoOpenAgentIds: new Set<string>(),
+        leadAgentId: null,
       };
       const b = {
         activeAgentIds: new Set<string>(),
         autoOpenAgentIds: new Set<string>(),
+        leadAgentId: null,
       };
       expect(workspaceAgentVisibilityEqual(a, b)).toBe(true);
+    });
+  });
+  describe("workspace Lead (slp.role=lead)", () => {
+    const LEAD = { "slp.role": "lead" };
+
+    it("has no Lead when no agent carries the lead label", () => {
+      const result = deriveWorkspaceAgentVisibility({
+        sessionAgents: new Map<string, Agent>([
+          ["worker", makeAgent({ id: "worker", cwd: "/repo", workspaceId: WORKSPACE_ID })],
+        ]),
+        workspaceId: WORKSPACE_ID,
+      });
+
+      expect(result.leadAgentId).toBeNull();
+    });
+
+    it("picks the newest non-archived Lead of this workspace", () => {
+      const result = deriveWorkspaceAgentVisibility({
+        sessionAgents: new Map<string, Agent>([
+          [
+            "old-lead",
+            makeAgent({
+              id: "old-lead",
+              cwd: "/repo",
+              workspaceId: WORKSPACE_ID,
+              labels: LEAD,
+              createdAt: new Date("2026-09-01T00:00:00.000Z"),
+            }),
+          ],
+          [
+            "new-lead",
+            makeAgent({
+              id: "new-lead",
+              cwd: "/repo",
+              workspaceId: WORKSPACE_ID,
+              labels: LEAD,
+              createdAt: new Date("2026-09-02T00:00:00.000Z"),
+            }),
+          ],
+          [
+            "archived-lead",
+            makeAgent({
+              id: "archived-lead",
+              cwd: "/repo",
+              workspaceId: WORKSPACE_ID,
+              labels: LEAD,
+              createdAt: new Date("2026-09-03T00:00:00.000Z"),
+              archivedAt: new Date("2026-09-04T00:00:00.000Z"),
+            }),
+          ],
+          [
+            "other-ws-lead",
+            makeAgent({
+              id: "other-ws-lead",
+              cwd: "/repo",
+              workspaceId: "ws-2",
+              labels: LEAD,
+              createdAt: new Date("2026-09-05T00:00:00.000Z"),
+            }),
+          ],
+          [
+            "reviewer",
+            makeAgent({
+              id: "reviewer",
+              cwd: "/repo",
+              workspaceId: WORKSPACE_ID,
+              labels: { "slp.role": "peer" },
+              createdAt: new Date("2026-09-06T00:00:00.000Z"),
+            }),
+          ],
+        ]),
+        workspaceId: WORKSPACE_ID,
+      });
+
+      expect(result.leadAgentId).toBe("new-lead");
+    });
+
+    it("focuses the Lead tab when the workspace opens with no active tab", () => {
+      expect(resolveWorkspaceLeadFocusTabId({ leadAgentId: "lead-1", activeTabId: null })).toBe(
+        "agent_lead-1",
+      );
+    });
+
+    it("keeps the tab the user is already on", () => {
+      expect(
+        resolveWorkspaceLeadFocusTabId({ leadAgentId: "lead-1", activeTabId: "agent_worker" }),
+      ).toBeNull();
+    });
+
+    it("changes nothing when the workspace has no Lead", () => {
+      expect(resolveWorkspaceLeadFocusTabId({ leadAgentId: null, activeTabId: null })).toBeNull();
+    });
+
+    it("treats a Lead change as a visibility change", () => {
+      const base = { activeAgentIds: new Set(["a"]), autoOpenAgentIds: new Set(["a"]) };
+      expect(
+        workspaceAgentVisibilityEqual(
+          { ...base, leadAgentId: null },
+          { ...base, leadAgentId: "a" },
+        ),
+      ).toBe(false);
     });
   });
 });
