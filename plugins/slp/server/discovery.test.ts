@@ -5,6 +5,7 @@ import {
   formatRoster,
   leadAnnouncement,
   listLiveAgents,
+  selectClosedSeatAgents,
   selectSeatAgents,
   supervisorsRegisteredIn,
 } from "./discovery";
@@ -49,6 +50,52 @@ test("selectSeatAgents keeps the seat by label or provider and drops archived, c
   expect(selectSeatAgents(entries, "supervisor").map((a) => a.id)).toEqual(["S1"]);
   expect(selectSeatAgents(entries, "lead", "L1").map((a) => a.id)).toEqual(["L4"]);
   expect(selectSeatAgents(entries, "lead")[0]?.workspaceId).toBe("w1");
+});
+
+test("selectClosedSeatAgents keeps closed, unarchived agents of the seat, newest activity first", () => {
+  const closed: AgentEntryLike[] = [
+    ...entries,
+    {
+      agent: {
+        id: "S-old",
+        provider: "claude",
+        cwd: "/sup",
+        status: "closed",
+        labels: { "slp.role": "supervisor" },
+        createdAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-10T00:00:00.000Z",
+      },
+    },
+    {
+      agent: {
+        id: "S-new",
+        provider: "claude-supervisor",
+        cwd: "/sup",
+        status: "closed",
+        workspaceId: "w-sup",
+        createdAt: "2026-09-02T00:00:00.000Z",
+        updatedAt: "2026-09-24T00:00:00.000Z",
+      },
+    },
+    {
+      agent: {
+        id: "S-archived",
+        provider: "claude-supervisor",
+        cwd: "/sup",
+        status: "closed",
+        updatedAt: "2026-09-25T00:00:00.000Z",
+        archivedAt: "2026-09-25",
+      },
+    },
+    { agent: { id: "S-undated", provider: "claude-supervisor", cwd: "/sup", status: "closed" } },
+  ];
+  expect(selectClosedSeatAgents(closed, "supervisor").map((a) => a.id)).toEqual([
+    "S-new",
+    "S-old",
+    "S-undated",
+  ]);
+  expect(selectClosedSeatAgents(closed, "supervisor")[0]?.workspaceId).toBe("w-sup");
+  expect(selectClosedSeatAgents(closed, "lead").map((a) => a.id)).toEqual(["L3"]);
 });
 
 test("listLiveAgents follows every page cursor", async () => {

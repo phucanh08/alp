@@ -44,8 +44,38 @@ export function seatOfAgent(agent: {
   return seatOf(agent.provider);
 }
 
+/** Mode id each family runs a seat agent in without approval prompts. */
+const UNATTENDED_MODE: Record<Family, string> = {
+  claude: "bypassPermissions",
+  codex: "full-access",
+};
+
+/** Provider profile and mode for a seat agent of the given family. */
+export function seatProfileFor(family: Family, seat: Seat): { providerId: string; modeId: string } {
+  return { providerId: `${family}-${seat}`, modeId: UNATTENDED_MODE[family] };
+}
+
 /** Codex Supervisor: writes stay inside its cwd, standing in for Claude's Write/Edit cut. */
 export const CODEX_SUPERVISOR_OPTIONS = { sandbox_mode: "workspace-write" } as const;
+
+/**
+ * Codex Peer: `multi_agent` off stands in for Claude's Agent/Task cut; writes stay inside its cwd.
+ * A provider profile cannot carry providerOptions, so the plugin sets them at agent.create.
+ */
+export function withCodexPeerOptions(
+  providerOptions: ProviderOptions,
+): NonNullable<ProviderOptions> {
+  const features = providerOptions?.features;
+  return {
+    ...providerOptions,
+    sandbox_mode: "workspace-write",
+    features: { ...(isRecord(features) ? features : {}), multi_agent: false },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 /** Paseo MCP tools the Lead and Supervisor call without a permission card (Claude wildcard syntax). */
 export const LEAD_ALLOWED_TOOLS = ["mcp__paseo__*"] as const;
@@ -89,10 +119,15 @@ export async function readDefinition(cwd: string, seat: Seat): Promise<Definitio
 /** Seat system prompt = prompt already set by the caller + seat definition + SLP-RUNTIME block. */
 export function buildSystemPrompt(
   seat: Seat,
+  family: Family,
   definitionBody: string,
   existing: string | null | undefined,
 ): string {
-  const parts = [existing?.trim(), `# Ghế SLP: ${seat}\n\n${definitionBody}`, runtimeBlock(seat)];
+  const parts = [
+    existing?.trim(),
+    `# Ghế SLP: ${seat}\n\n${definitionBody}`,
+    runtimeBlock(seat, family),
+  ];
   return parts.filter((part): part is string => Boolean(part)).join("\n\n");
 }
 
@@ -121,8 +156,8 @@ export function withSupervisorTools(
 }
 
 /**
- * providerOptions per seat and family. Peer is unchanged: its boundary lives in the provider profile.
- * Codex has no allowedTools (MCP tools show no card), so a Codex Lead is unchanged.
+ * providerOptions per seat and family. A Claude Peer is unchanged: its boundary lives in the provider
+ * profile. Codex has no allowedTools (MCP tools show no card), so a Codex Lead is unchanged.
  */
 export function providerOptionsFor(
   seat: Seat,
@@ -130,9 +165,14 @@ export function providerOptionsFor(
   providerOptions: ProviderOptions,
 ): ProviderOptions {
   if (family === "codex") {
-    return seat === "supervisor"
-      ? { ...providerOptions, ...CODEX_SUPERVISOR_OPTIONS }
-      : providerOptions;
+    switch (seat) {
+      case "supervisor":
+        return { ...providerOptions, ...CODEX_SUPERVISOR_OPTIONS };
+      case "peer":
+        return withCodexPeerOptions(providerOptions);
+      default:
+        return providerOptions;
+    }
   }
   switch (seat) {
     case "lead":

@@ -1885,6 +1885,30 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     }
   }
 
+  // ALP(slp): stamp agent-to-agent prompts with the sender so the receiver can tell them apart
+  // from a user turn. Deliberately NOT a <paseo-system> envelope: the agent manager drops those
+  // from the timeline, and the Human must see agent-to-agent traffic. Title/provider are
+  // best-effort; the sender id is always present. A closing tag in the body is escaped so the
+  // sender cannot end the envelope early and forge text outside it.
+  async function formatAgentToAgentPrompt(senderAgentId: string, prompt: string): Promise<string> {
+    const senderRecord = await agentStorage.get(senderAgentId);
+    const senderAgent = agentManager.getAgent(senderAgentId);
+    const title = senderRecord?.title ?? senderAgent?.config?.title;
+    const provider = senderAgent?.provider ?? senderRecord?.provider;
+    const attr = (name: string, value: string | null | undefined) =>
+      value
+        ? ` ${name}="${value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")}"`
+        : "";
+    const body = prompt.replace(/<\s*\/\s*(paseo-agent-message)/gi, "<\\/$1");
+    return [
+      `<paseo-agent-message${attr("from", senderAgentId)}${attr("title", title)}${attr("provider", provider)}>`,
+      `Agent ${senderAgentId} sent you this message via send_agent_prompt. It comes from another agent, not from the user.`,
+      "",
+      body,
+      "</paseo-agent-message>",
+    ].join("\n");
+  }
+
   registerTool(
     "send_agent_prompt",
     {
@@ -1913,7 +1937,10 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
         agentManager,
         agentStorage,
         agentId,
-        prompt,
+        // ALP(slp): agent callers get a sender stamp and steer into a running turn instead of
+        // cancelling it. Human/top-level callers keep the verbatim prompt and replace semantics.
+        prompt: callerAgentId ? await formatAgentToAgentPrompt(callerAgentId, prompt) : prompt,
+        activeTurnBehavior: callerAgentId ? "steer" : undefined,
         sessionMode,
         logger: childLogger,
       });

@@ -936,6 +936,63 @@ describe("SLP defaults", () => {
     }
   });
 
+  test("a new home also gets the three Codex SLP providers", () => {
+    const home = createTempHome();
+    try {
+      const providers = loadPersistedConfig(home).agents?.providers ?? {};
+
+      expect(providers["codex-lead"]).toEqual({ extends: "codex", label: "SLP Lead (Codex)" });
+      expect(providers["codex-peer"]).toEqual({
+        extends: "codex",
+        label: "SLP Peer (Codex)",
+        paseoTools: {
+          disabledTools: [
+            "create_agent",
+            "send_agent_prompt",
+            "kill_agent",
+            "cancel_agent",
+            "archive_agent",
+            "create_schedule",
+          ],
+        },
+      });
+      expect(providers["codex-supervisor"]).toMatchObject({
+        extends: "codex",
+        label: "SLP Supervisor (Codex)",
+      });
+      const supervisorDisabled = providers["codex-supervisor"]?.paseoTools?.disabledTools ?? [];
+      expect(supervisorDisabled).toEqual(
+        expect.arrayContaining(["create_agent", "kill_agent", "set_agent_mode", "browser_click"]),
+      );
+      expect(supervisorDisabled).not.toContain("send_agent_prompt");
+      expect(supervisorDisabled).not.toContain("list_agents");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("a host that already defines codex-peer keeps it and gains the other Codex seats", () => {
+    const home = createTempHome();
+    try {
+      const mine = { extends: "codex", label: "My Codex Peer", paseoTools: { enabled: false } };
+      writeConfigFile(home, { version: 1, agents: { providers: { "codex-peer": mine } } });
+
+      seedPersistedSlpDefaults(home);
+      const providers = loadPersistedConfig(home).agents?.providers ?? {};
+
+      expect(providers["codex-peer"]).toEqual(mine);
+      expect(providers["codex-lead"]?.label).toBe("SLP Lead (Codex)");
+      expect(providers["codex-supervisor"]?.label).toBe("SLP Supervisor (Codex)");
+      expect(
+        (readConfigFile(home).agents as { providers: Record<string, unknown> }).providers[
+          "codex-peer"
+        ],
+      ).toEqual(mine);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   test("an explicit pluginsEnabled false is left alone", () => {
     const home = createTempHome();
     try {
@@ -980,6 +1037,65 @@ describe("SLP defaults", () => {
 
       expect(config.agents?.providers).toEqual({});
       expect(readConfigFile(home).agents).toEqual({ providers: {} });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("a config missing daemon.mcp.injectIntoAgents gets it seeded true, whether daemon or mcp is absent", () => {
+    const noDaemon = createTempHome();
+    const noMcp = createTempHome();
+    try {
+      writeConfigFile(noDaemon, { version: 1 });
+      writeConfigFile(noMcp, { version: 1, daemon: { listen: "127.0.0.1:7777" } });
+
+      seedPersistedSlpDefaults(noDaemon);
+      seedPersistedSlpDefaults(noMcp);
+
+      expect(loadPersistedConfig(noDaemon).daemon?.mcp?.injectIntoAgents).toBe(true);
+      expect(readConfigFile(noDaemon).daemon).toMatchObject({ mcp: { injectIntoAgents: true } });
+
+      const noMcpConfig = loadPersistedConfig(noMcp);
+      expect(noMcpConfig.daemon?.mcp?.injectIntoAgents).toBe(true);
+      expect(noMcpConfig.daemon?.listen).toBe("127.0.0.1:7777");
+      expect(readConfigFile(noMcp).daemon).toEqual({
+        listen: "127.0.0.1:7777",
+        mcp: { injectIntoAgents: true },
+      });
+    } finally {
+      rmSync(noDaemon, { recursive: true, force: true });
+      rmSync(noMcp, { recursive: true, force: true });
+    }
+  });
+
+  test("an explicit daemon.mcp.injectIntoAgents false is left alone", () => {
+    const home = createTempHome();
+    try {
+      writeConfigFile(home, { version: 1, daemon: { mcp: { injectIntoAgents: false } } });
+
+      seedPersistedSlpDefaults(home);
+      const config = loadPersistedConfig(home);
+
+      expect(config.daemon?.mcp?.injectIntoAgents).toBe(false);
+      expect(readConfigFile(home).daemon).toMatchObject({ mcp: { injectIntoAgents: false } });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("seeding a config that already sets injectIntoAgents true does not touch it again", () => {
+    const home = createTempHome();
+    try {
+      writeConfigFile(home, { version: 1, daemon: { mcp: { injectIntoAgents: true } } });
+      seedPersistedSlpDefaults(home); // first call may still add providers/pluginsEnabled
+      const first = readFileSync(path.join(home, "config.json"), "utf8");
+      const firstMtime = statSync(path.join(home, "config.json")).mtimeMs;
+
+      seedPersistedSlpDefaults(home);
+
+      expect(readFileSync(path.join(home, "config.json"), "utf8")).toBe(first);
+      expect(statSync(path.join(home, "config.json")).mtimeMs).toBe(firstMtime);
+      expect(readConfigFile(home).daemon).toMatchObject({ mcp: { injectIntoAgents: true } });
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

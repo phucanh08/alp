@@ -21,6 +21,8 @@ export interface AgentEntryLike {
     title?: string | null;
     labels?: Record<string, string>;
     archivedAt?: string | null;
+    createdAt?: string;
+    updatedAt?: string;
   };
 }
 
@@ -36,6 +38,17 @@ export interface AgentLister {
   }): Promise<AgentListPage>;
 }
 
+function toSeatAgent(agent: AgentEntryLike["agent"], seat: Seat): SeatAgent {
+  return {
+    id: agent.id,
+    seat,
+    title: agent.title ?? null,
+    cwd: agent.cwd,
+    status: agent.status,
+    workspaceId: agent.workspaceId ?? null,
+  };
+}
+
 /** Live agents in a seat: SLP label or provider, not archived, not closed; skips `excludeId`. */
 export function selectSeatAgents(
   entries: readonly AgentEntryLike[],
@@ -46,16 +59,29 @@ export function selectSeatAgents(
   for (const { agent } of entries) {
     if (agent.id === excludeId || agent.archivedAt || agent.status === "closed") continue;
     if (seatOfAgent(agent) !== seat) continue;
-    out.push({
-      id: agent.id,
-      seat,
-      title: agent.title ?? null,
-      cwd: agent.cwd,
-      status: agent.status,
-      workspaceId: agent.workspaceId ?? null,
-    });
+    out.push(toSeatAgent(agent, seat));
   }
   return out;
+}
+
+function lastActivity(agent: AgentEntryLike["agent"]): number {
+  const time = Date.parse(agent.updatedAt ?? agent.createdAt ?? "");
+  return Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time;
+}
+
+/**
+ * Closed agents in a seat, newest activity first. `closed` is resumable: the record keeps its
+ * provider session, timeline, and labels; a daemon restart leaves every agent in this state.
+ */
+export function selectClosedSeatAgents(
+  entries: readonly AgentEntryLike[],
+  seat: Seat,
+): SeatAgent[] {
+  return entries
+    .filter(({ agent }) => !agent.archivedAt && agent.status === "closed")
+    .filter(({ agent }) => seatOfAgent(agent) === seat)
+    .sort((a, b) => lastActivity(b.agent) - lastActivity(a.agent))
+    .map(({ agent }) => toSeatAgent(agent, seat));
 }
 
 /** Every page of unarchived agents; the daemon caps a page at 200. */

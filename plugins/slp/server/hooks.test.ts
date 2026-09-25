@@ -74,3 +74,22 @@ test("agent.create for a Supervisor lists Leads and cuts write and spawn tools",
 test("agent.create leaves non-SLP providers untouched", async () => {
   expect(await withSeatConfig((await request("claude")) as never, agents)).toBeUndefined();
 });
+
+test("agent.create for a Codex Peer turns off multi_agent and sandboxes writes; a Claude Peer gets neither", async () => {
+  const codex = await withSeatConfig((await request("codex-peer")) as never, agents);
+  const codexOptions = (codex?.config as { providerOptions?: Record<string, unknown> } | undefined)
+    ?.providerOptions;
+  expect(codexOptions).toEqual({
+    allowedTools: ["Bash"],
+    sandbox_mode: "workspace-write",
+    features: { multi_agent: false },
+  });
+
+  const claude = await withSeatConfig((await request("claude-peer")) as never, agents);
+  const claudeOptions = (
+    claude?.config as { providerOptions?: Record<string, unknown> } | undefined
+  )?.providerOptions;
+  expect(claudeOptions).toEqual({ allowedTools: ["Bash"] });
+  expect(claudeOptions).not.toHaveProperty("features");
+  expect(claudeOptions).not.toHaveProperty("sandbox_mode");
+});

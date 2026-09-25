@@ -341,68 +341,83 @@ export type PersistedConfig = Omit<PersistedConfigSchemaOutput, "agents"> & {
 
 const CONFIG_FILENAME = "config.json";
 
+// ALP(slp): Paseo tools a Peer seat loses: it cannot spawn, steer, or stop other agents.
+const SLP_PEER_DISABLED_TOOLS = [
+  "create_agent",
+  "send_agent_prompt",
+  "kill_agent",
+  "cancel_agent",
+  "archive_agent",
+  "create_schedule",
+] as const;
+
+// ALP(slp): the Supervisor seat is read-only: every mutating Paseo tool is off; reads and
+// send_agent_prompt stay.
+const SLP_SUPERVISOR_DISABLED_TOOLS = [
+  "create_workspace",
+  "archive_workspace",
+  "rename_workspace",
+  "create_agent",
+  "update_agent",
+  "cancel_agent",
+  "archive_agent",
+  "kill_agent",
+  "set_agent_mode",
+  "respond_to_permission",
+  "start_workspace_script",
+  "stop_workspace_script",
+  "create_terminal",
+  "kill_terminal",
+  "send_terminal_keys",
+  "create_schedule",
+  "update_schedule",
+  "pause_schedule",
+  "resume_schedule",
+  "delete_schedule",
+  "run_schedule_once",
+  "create_heartbeat",
+  "delete_heartbeat",
+  "browser_new_tab",
+  "browser_close_tab",
+  "browser_navigate",
+  "browser_click",
+  "browser_fill",
+  "browser_type",
+  "browser_keypress",
+  "browser_select",
+  "browser_drag",
+  "browser_upload",
+  "browser_scroll",
+  "browser_resize",
+  "browser_evaluate",
+] as const;
+
 // ALP(slp): the SLP seats ship as custom providers on every alp host; ids are the interface contract.
+// Codex seats carry no providerOptions: a provider profile has no such key, so the slp plugin sets
+// the Codex Peer's `features.multi_agent: false` and the sandbox at agent.create.
 const SLP_DEFAULT_AGENT_PROVIDERS = {
   "claude-lead": { extends: "claude", label: "SLP Lead" },
   "claude-peer": {
     extends: "claude",
     label: "SLP Peer",
     disallowedTools: ["Agent", "Task"],
-    paseoTools: {
-      disabledTools: [
-        "create_agent",
-        "send_agent_prompt",
-        "kill_agent",
-        "cancel_agent",
-        "archive_agent",
-        "create_schedule",
-      ],
-    },
+    paseoTools: { disabledTools: SLP_PEER_DISABLED_TOOLS },
   },
   "claude-supervisor": {
     extends: "claude",
     label: "SLP Supervisor",
-    // Read-only seat: every mutating Paseo tool is off; reads and send_agent_prompt stay.
-    paseoTools: {
-      disabledTools: [
-        "create_workspace",
-        "archive_workspace",
-        "rename_workspace",
-        "create_agent",
-        "update_agent",
-        "cancel_agent",
-        "archive_agent",
-        "kill_agent",
-        "set_agent_mode",
-        "respond_to_permission",
-        "start_workspace_script",
-        "stop_workspace_script",
-        "create_terminal",
-        "kill_terminal",
-        "send_terminal_keys",
-        "create_schedule",
-        "update_schedule",
-        "pause_schedule",
-        "resume_schedule",
-        "delete_schedule",
-        "run_schedule_once",
-        "create_heartbeat",
-        "delete_heartbeat",
-        "browser_new_tab",
-        "browser_close_tab",
-        "browser_navigate",
-        "browser_click",
-        "browser_fill",
-        "browser_type",
-        "browser_keypress",
-        "browser_select",
-        "browser_drag",
-        "browser_upload",
-        "browser_scroll",
-        "browser_resize",
-        "browser_evaluate",
-      ],
-    },
+    paseoTools: { disabledTools: SLP_SUPERVISOR_DISABLED_TOOLS },
+  },
+  "codex-lead": { extends: "codex", label: "SLP Lead (Codex)" },
+  "codex-peer": {
+    extends: "codex",
+    label: "SLP Peer (Codex)",
+    paseoTools: { disabledTools: SLP_PEER_DISABLED_TOOLS },
+  },
+  "codex-supervisor": {
+    extends: "codex",
+    label: "SLP Supervisor (Codex)",
+    paseoTools: { disabledTools: SLP_SUPERVISOR_DISABLED_TOOLS },
   },
 } as const;
 
@@ -415,6 +430,11 @@ const DEFAULT_PERSISTED_CONFIG = PersistedConfigSchema.parse({
     },
     relay: {
       enabled: false,
+    },
+    // ALP(slp): SLP agents need alp's own MCP tools (create_agent, send_agent_prompt, ...) to
+    // spawn and drive each other; upstream ships this off.
+    mcp: {
+      injectIntoAgents: true,
     },
   },
   app: {
@@ -435,6 +455,8 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
  * ALP(slp): add the SLP defaults an existing config.json lacks, without overriding the user.
  * Works on the raw JSON so a missing `pluginsEnabled` key (never set) stays distinct from an
  * explicit `false` (user opted out), and a provider id the user already defined is kept as-is.
+ * Same rule for `daemon.mcp.injectIntoAgents`: seeded `true` only when absent, so an explicit
+ * `false` (user opted out) or `true` (already seeded) is left untouched.
  * Returns null when nothing was added or the shape is not ours to fix (the schema reports it).
  */
 function seedSlpDefaults(parsed: unknown): Record<string, unknown> | null {
@@ -443,12 +465,19 @@ function seedSlpDefaults(parsed: unknown): Record<string, unknown> | null {
   if (!isPlainRecord(agents)) return null;
   const providers = agents.providers ?? {};
   if (!isPlainRecord(providers)) return null;
+  const daemon = parsed.daemon ?? {};
+  if (!isPlainRecord(daemon)) return null;
+  const mcp = daemon.mcp ?? {};
+  if (!isPlainRecord(mcp)) return null;
 
   const missingProviders = Object.entries(SLP_DEFAULT_AGENT_PROVIDERS).filter(
     ([providerId]) => !Object.hasOwn(providers, providerId),
   );
   const seedPluginsEnabled = !Object.hasOwn(parsed, "pluginsEnabled");
-  if (missingProviders.length === 0 && !seedPluginsEnabled) return null;
+  const seedMcpInjectIntoAgents = !Object.hasOwn(mcp, "injectIntoAgents");
+  if (missingProviders.length === 0 && !seedPluginsEnabled && !seedMcpInjectIntoAgents) {
+    return null;
+  }
 
   return {
     ...parsed,
@@ -456,6 +485,10 @@ function seedSlpDefaults(parsed: unknown): Record<string, unknown> | null {
     agents: {
       ...agents,
       providers: { ...providers, ...structuredClone(Object.fromEntries(missingProviders)) },
+    },
+    daemon: {
+      ...daemon,
+      mcp: seedMcpInjectIntoAgents ? { ...mcp, injectIntoAgents: true } : mcp,
     },
   };
 }
