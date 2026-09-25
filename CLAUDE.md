@@ -104,7 +104,7 @@ npm run format                       # Auto-format with Biome
 npm run format:check                 # Check formatting without writing
 ```
 
-Repo dev commands use checkout-local state by default. In this checkout, `PASEO_HOME` resolves to `.dev/paseo-home`, and `npm run cli -- ...` targets that same dev home automatically. The packaged desktop app and production-style daemon keep using `~/.paseo` on port `6767`.
+Repo dev commands use checkout-local state by default. In this checkout, `PASEO_HOME` resolves to `.dev/paseo-home`, and `npm run cli -- ...` targets that same dev home automatically. The packaged desktop app and production-style daemon keep using `~/.alp` on port `6767`.
 
 See [docs/development.md](docs/development.md) for full setup, build sync requirements, and debugging.
 
@@ -226,5 +226,5 @@ hiện hành: `plans/`.
 
 ### External side effects
 
-Agent không push, không deploy (Cloudflare/Fly/app store), không publish npm, không sửa `~/.paseo`
+Agent không push, không deploy (Cloudflare/Fly/app store), không publish npm, không sửa `~/.alp`
 hay daemon 6767 đang chạy, trừ khi Human cấp authority rõ ràng trong brief.
