@@ -1,0 +1,20 @@
+{
+  "name": "slp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "alp bundled plugin: SLP seat rules, Lead per workspace, one Supervisor per host",
+  "files": [
+    "paseo-plugin.json",
+    "index.client.tsx",
+    "index.server.ts",
+    "agents/",
+    "client/",
+    "server/",
+    "shared/"
+  ],
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "generate": "node server/scripts/generate-definitions.ts"
+  }
+}
