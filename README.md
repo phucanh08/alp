@@ -6,13 +6,6 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> ·
-  <a href="README.zh-CN.md">简体中文</a> ·
-  <a href="README.ja.md">日本語</a> ·
-  <a href="README.ko.md">한국어</a>
-</p>
-
-<p align="center">
   <a href="https://github.com/phucanh08/alp/stargazers">
     <img src="https://img.shields.io/github/stars/phucanh08/alp?style=flat&logo=github" alt="GitHub stars">
   </a>
@@ -195,12 +188,6 @@ npm run build:server
 # repo-wide checks
 npm run typecheck
 ```
-
-## Sponsors
-
-Paseo is built by one person and funded by the people who use it. Support the work on [GitHub Sponsors](https://github.com/sponsors/boudra). Companies can [sponsor Paseo](https://alp.anhlp.com/sponsor#spot) monthly and have their logo shown here and on the alp.anhlp.com homepage.
-
-<!-- Sponsor logos go here, in the same order as packages/website/src/data/sponsors.ts -->
 
 ## Related projects
 
