@@ -3207,6 +3207,104 @@ describe("create_agent MCP tool", () => {
     );
   });
 
+  // ALP(slp): create_agent from an agent caller stamps initialPrompt the same way
+  // send_agent_prompt does, so the created agent can tell a brief came from another agent.
+  it("stamps create_agent's initialPrompt with the sender when called by an agent", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    const parentAgent = {
+      id: "parent-agent",
+      cwd: existingCwd,
+      workspaceId: "wks_parent",
+      provider: "codex",
+      currentModeId: "full-access",
+    } as ManagedAgent;
+    const childAgent = {
+      id: "child-agent",
+      cwd: existingCwd,
+      lifecycle: "idle",
+      currentModeId: null,
+      availableModes: [],
+      config: { title: "Child" },
+    } as ManagedAgent;
+    spies.agentManager.getAgent.mockImplementation((agentId: string) => {
+      if (agentId === "parent-agent") return parentAgent;
+      if (agentId === "child-agent") return childAgent;
+      return null;
+    });
+    spies.agentStorage.get.mockImplementation(async (agentId: string) =>
+      agentId === "parent-agent"
+        ? createStoredRecord({
+            id: "parent-agent",
+            provider: "codex",
+            title: "Lead",
+            archivedAt: null,
+          })
+        : null,
+    );
+    spies.agentManager.createAgent.mockResolvedValue(childAgent);
+
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      providerSnapshotManager: createOpenCodeManager().manager,
+      callerAgentId: "parent-agent",
+      logger,
+    });
+
+    const tool = registeredTool(server, "create_agent");
+    await tool.handler({
+      ...subagentCurrentWorkspace(),
+      title: "Child",
+      provider: "codex/gpt-5.4",
+      initialPrompt: "Do work",
+    });
+
+    expect(spies.agentManager.streamAgent).toHaveBeenCalledWith(
+      "child-agent",
+      '<paseo-agent-message from="parent-agent" title="Lead" provider="codex">\n' +
+        "Agent parent-agent sent you this message via create_agent. It comes from another agent, not from the user.\n" +
+        "\n" +
+        "Do work\n" +
+        "</paseo-agent-message>",
+      undefined,
+    );
+  });
+
+  it("keeps create_agent's initialPrompt verbatim when there is no caller agent", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    spies.agentManager.createAgent.mockResolvedValue({
+      id: "top-level-agent",
+      provider: "codex",
+      cwd: existingCwd,
+      workspaceId: "workspace-created",
+      lifecycle: "idle",
+      currentModeId: null,
+      availableModes: [],
+      config: { title: "Top-level agent" },
+    } as ManagedAgent);
+    const ensureWorkspace = vi.fn(async () => "workspace-created");
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      providerSnapshotManager: createOpenCodeManager().manager,
+      ensureWorkspaceForCreate: ensureWorkspace,
+      logger,
+    });
+
+    await registeredTool(server, "create_agent").handler({
+      title: "Top-level agent",
+      provider: "codex/gpt-5.4",
+      initialPrompt: "Do work",
+      background: true,
+    });
+
+    expect(spies.agentManager.streamAgent).toHaveBeenCalledWith(
+      "top-level-agent",
+      "Do work",
+      undefined,
+    );
+  });
+
   it("creates detached caller agents without a parent label", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
