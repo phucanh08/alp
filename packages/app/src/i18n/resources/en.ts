@@ -872,7 +872,7 @@ export const en = {
             "Update isn't available because this branch is already up to date with {{baseRef}}",
           mergePrNoGithub: "Merge PR isn't available right now because GitHub isn't connected",
           archiveNotWorktree:
-            "Archive isn't available here because this workspace was not created as a alp worktree",
+            "Archive isn't available here because this workspace was not created as an alp worktree",
           mergePrNoForge:
             "Merge {{noun}} isn't available right now because {{brand}} isn't connected",
           mergePrMissing: "Merge PR isn't available because there isn't a pull request yet",
@@ -1659,7 +1659,7 @@ export const en = {
     },
     direct: {
       title: "Direct connection",
-      helper: "Enter the address of a alp server.",
+      helper: "Enter the address of an alp server.",
       fields: {
         host: "Host",
         port: "Port",
@@ -1701,7 +1701,7 @@ export const en = {
     },
     remoteSsh: {
       title: "Remote SSH",
-      helper: "Connect to a alp daemon running on the remote host.",
+      helper: "Connect to an alp daemon running on the remote host.",
       fields: {
         target: "SSH host",
       },
