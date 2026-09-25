@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -20,8 +20,22 @@ describe("daemon plugin config", () => {
     await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
   });
 
-  test("defaults plugins off when config is absent", async () => {
+  // ALP(slp): alp turns plugins on for any config that never set the key (Human ruling, P6).
+  test("turns plugins on at daemon start when the config never set them", async () => {
     const home = await createPaseoHome({ version: 1 });
+
+    expect(loadConfig(home, { env: {} }).pluginsEnabled).toBe(true);
+    const onDisk = JSON.parse(await readFile(path.join(home, "config.json"), "utf8"));
+    expect(onDisk.pluginsEnabled).toBe(true);
+    expect(Object.keys(onDisk.agents.providers)).toEqual([
+      "claude-lead",
+      "claude-peer",
+      "claude-supervisor",
+    ]);
+  });
+
+  test("keeps plugins off when the user turned them off", async () => {
+    const home = await createPaseoHome({ version: 1, pluginsEnabled: false });
 
     expect(loadConfig(home, { env: {} }).pluginsEnabled).toBe(false);
   });

@@ -340,6 +340,72 @@ export type PersistedConfig = Omit<PersistedConfigSchemaOutput, "agents"> & {
 };
 
 const CONFIG_FILENAME = "config.json";
+
+// ALP(slp): the SLP seats ship as custom providers on every alp host; ids are the interface contract.
+const SLP_DEFAULT_AGENT_PROVIDERS = {
+  "claude-lead": { extends: "claude", label: "SLP Lead" },
+  "claude-peer": {
+    extends: "claude",
+    label: "SLP Peer",
+    disallowedTools: ["Agent", "Task"],
+    paseoTools: {
+      disabledTools: [
+        "create_agent",
+        "send_agent_prompt",
+        "kill_agent",
+        "cancel_agent",
+        "archive_agent",
+        "create_schedule",
+      ],
+    },
+  },
+  "claude-supervisor": {
+    extends: "claude",
+    label: "SLP Supervisor",
+    // Read-only seat: every mutating Paseo tool is off; reads and send_agent_prompt stay.
+    paseoTools: {
+      disabledTools: [
+        "create_workspace",
+        "archive_workspace",
+        "rename_workspace",
+        "create_agent",
+        "update_agent",
+        "cancel_agent",
+        "archive_agent",
+        "kill_agent",
+        "set_agent_mode",
+        "respond_to_permission",
+        "start_workspace_script",
+        "stop_workspace_script",
+        "create_terminal",
+        "kill_terminal",
+        "send_terminal_keys",
+        "create_schedule",
+        "update_schedule",
+        "pause_schedule",
+        "resume_schedule",
+        "delete_schedule",
+        "run_schedule_once",
+        "create_heartbeat",
+        "delete_heartbeat",
+        "browser_new_tab",
+        "browser_close_tab",
+        "browser_navigate",
+        "browser_click",
+        "browser_fill",
+        "browser_type",
+        "browser_keypress",
+        "browser_select",
+        "browser_drag",
+        "browser_upload",
+        "browser_scroll",
+        "browser_resize",
+        "browser_evaluate",
+      ],
+    },
+  },
+} as const;
+
 const DEFAULT_PERSISTED_CONFIG = PersistedConfigSchema.parse({
   version: 1,
   daemon: {
@@ -354,7 +420,45 @@ const DEFAULT_PERSISTED_CONFIG = PersistedConfigSchema.parse({
   app: {
     baseUrl: "https://app-alp.anhlp.com",
   },
+  // ALP(slp): the bundled slp plugin needs plugins on; a new host starts with them enabled.
+  pluginsEnabled: true,
+  agents: {
+    providers: SLP_DEFAULT_AGENT_PROVIDERS,
+  },
 }) as PersistedConfig;
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * ALP(slp): add the SLP defaults an existing config.json lacks, without overriding the user.
+ * Works on the raw JSON so a missing `pluginsEnabled` key (never set) stays distinct from an
+ * explicit `false` (user opted out), and a provider id the user already defined is kept as-is.
+ * Returns null when nothing was added or the shape is not ours to fix (the schema reports it).
+ */
+function seedSlpDefaults(parsed: unknown): Record<string, unknown> | null {
+  if (!isPlainRecord(parsed)) return null;
+  const agents = parsed.agents ?? {};
+  if (!isPlainRecord(agents)) return null;
+  const providers = agents.providers ?? {};
+  if (!isPlainRecord(providers)) return null;
+
+  const missingProviders = Object.entries(SLP_DEFAULT_AGENT_PROVIDERS).filter(
+    ([providerId]) => !Object.hasOwn(providers, providerId),
+  );
+  const seedPluginsEnabled = !Object.hasOwn(parsed, "pluginsEnabled");
+  if (missingProviders.length === 0 && !seedPluginsEnabled) return null;
+
+  return {
+    ...parsed,
+    ...(seedPluginsEnabled ? { pluginsEnabled: true } : {}),
+    agents: {
+      ...agents,
+      providers: { ...providers, ...structuredClone(Object.fromEntries(missingProviders)) },
+    },
+  };
+}
 
 interface LoggerLike {
   child(bindings: Record<string, unknown>): LoggerLike;
@@ -406,6 +510,31 @@ function stripRemovedConfigFields(parsed: unknown): unknown {
 
   root.providers = providersRecord;
   return root;
+}
+
+/**
+ * ALP(slp): the daemon calls this once at startup so a host that predates the SLP defaults
+ * gains them. Startup-only on purpose: seeding on every load would re-add a provider the
+ * instant the user deleted it. A missing file is left for loadPersistedConfig to initialize.
+ */
+export function seedPersistedSlpDefaults(paseoHome: string, logger?: LoggerLike): void {
+  const configPath = getConfigPath(paseoHome);
+  let seeded: Record<string, unknown> | null;
+  try {
+    seeded = seedSlpDefaults(parseConfigText(readFileSync(configPath, "utf8")));
+  } catch {
+    return; // Missing or invalid file: loadPersistedConfig initializes or reports it.
+  }
+  if (!seeded) return;
+  try {
+    writePrivateFileAtomicSync(configPath, JSON.stringify(seeded, null, 2) + "\n");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`[Config] Failed to seed SLP defaults in ${configPath}: ${message}`, {
+      cause: err,
+    });
+  }
+  getLogger(logger)?.info(`Added missing SLP defaults to ${configPath}`);
 }
 
 export function loadPersistedConfig(paseoHome: string, logger?: LoggerLike): PersistedConfig {

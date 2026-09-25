@@ -1,0 +1,334 @@
+import { expect, test } from "vitest";
+import type { AgentEntryLike } from "./discovery";
+import {
+  type EnsureApi,
+  type SeatAgentCreate,
+  type WorkspaceLike,
+  ClientWorkspaceOrigins,
+  ensureLead,
+  ensureSupervisor,
+  handleWorkspaceCreated,
+  pickDefaultModel,
+} from "./ensure";
+import { resolvePaseoHome, supervisorDirectory } from "./paths";
+
+const SUPERVISOR_DIR = "/home/u/.alp/supervisor";
+
+interface FakeHost {
+  api: EnsureApi;
+  agents: AgentEntryLike[];
+  workspaces: WorkspaceLike[];
+  created: Array<{ workspaceId: string; options: SeatAgentCreate }>;
+  createdWorkspaces: Array<{ path: string; title: string }>;
+}
+
+function fakeHost(
+  initial: { agents?: AgentEntryLike[]; workspaces?: WorkspaceLike[] } = {},
+): FakeHost {
+  const host: FakeHost = {
+    agents: [...(initial.agents ?? [])],
+    workspaces: [...(initial.workspaces ?? [])],
+    created: [],
+    createdWorkspaces: [],
+    api: undefined as unknown as EnsureApi,
+  };
+  let nextId = 1;
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 1));
+  host.api = {
+    agents: {
+      async list() {
+        await tick();
+        return { entries: [...host.agents], pageInfo: { nextCursor: null } };
+      },
+    },
+    workspaces: {
+      async list() {
+        await tick();
+        return { entries: [...host.workspaces], pageInfo: { nextCursor: null } };
+      },
+      async create(options) {
+        await tick();
+        const workspace = {
+          id: `wks_new${nextId++}`,
+          projectRootPath: options.source.path,
+          workspaceDirectory: options.source.path,
+        };
+        host.createdWorkspaces.push({ path: options.source.path, title: options.title });
+        host.workspaces.push(workspace);
+        return { id: workspace.id };
+      },
+      ref(workspaceId) {
+        return {
+          agents: {
+            async create(options) {
+              await tick();
+              const id = `agent${nextId++}`;
+              host.created.push({ workspaceId, options });
+              host.agents.push({
+                agent: {
+                  id,
+                  provider: options.config.provider.split("/")[0],
+                  cwd: "/somewhere",
+                  status: "idle",
+                  workspaceId,
+                  title: options.title,
+                  labels: options.labels,
+                },
+              });
+              return { id };
+            },
+          },
+        };
+      },
+    },
+    providers: {
+      async listModels() {
+        return {
+          models: [
+            { id: "claude-sonnet-5", isDefault: false },
+            { id: "claude-opus-5-5", isDefault: true },
+          ],
+        };
+      },
+    },
+  };
+  return host;
+}
+
+const repo: WorkspaceLike = {
+  id: "wks_repo",
+  projectRootPath: "/r/app",
+  workspaceDirectory: "/r/app",
+};
+const supervisorWorkspace: WorkspaceLike = {
+  id: "wks_sup",
+  projectRootPath: SUPERVISOR_DIR,
+  workspaceDirectory: SUPERVISOR_DIR,
+};
+
+test("resolvePaseoHome mirrors the daemon: PASEO_HOME wins, ~ expands, default is ~/.alp", () => {
+  expect(resolvePaseoHome({}, "/home/u")).toBe("/home/u/.alp");
+  expect(resolvePaseoHome({ PASEO_HOME: "~/dev-home" }, "/home/u")).toBe("/home/u/dev-home");
+  expect(resolvePaseoHome({ PASEO_HOME: "/srv/alp" }, "/home/u")).toBe("/srv/alp");
+  expect(supervisorDirectory({}, "/home/u")).toBe(SUPERVISOR_DIR);
+});
+
+test("pickDefaultModel prefers the default model, then the first selectable one", () => {
+  expect(pickDefaultModel([{ id: "a" }, { id: "b", isDefault: true }])).toBe("b");
+  expect(pickDefaultModel([{ id: "a", isSelectable: false }, { id: "c" }])).toBe("c");
+  expect(pickDefaultModel([])).toBeNull();
+  expect(pickDefaultModel(undefined)).toBeNull();
+});
+
+test("ensureLead creates one Lead with the contract settings, then reuses it", async () => {
+  const host = fakeHost({ workspaces: [repo] });
+  const first = await ensureLead(host.api, "wks_repo", { supervisorDirectory: SUPERVISOR_DIR });
+  expect(first.created).toBe(true);
+  expect(host.created).toEqual([
+    {
+      workspaceId: "wks_repo",
+      options: {
+        config: { provider: "claude-lead/claude-opus-5-5", modeId: "bypassPermissions" },
+        title: "Lead",
+        labels: { "slp.role": "lead" },
+      },
+    },
+  ]);
+  const second = await ensureLead(host.api, "wks_repo", { supervisorDirectory: SUPERVISOR_DIR });
+  expect(second).toEqual({ agentId: first.agentId, created: false });
+  expect(host.created).toHaveLength(1);
+});
+
+test("ensureLead is idempotent under concurrent calls for the same workspace", async () => {
+  const host = fakeHost({ workspaces: [repo] });
+  const results = await Promise.all([
+    ensureLead(host.api, "wks_repo", { supervisorDirectory: SUPERVISOR_DIR }),
+    ensureLead(host.api, "wks_repo", { supervisorDirectory: SUPERVISOR_DIR }),
+    ensureLead(host.api, "wks_repo", { supervisorDirectory: SUPERVISOR_DIR }),
+  ]);
+  expect(host.created).toHaveLength(1);
+  expect(new Set(results.map((r) => r.agentId)).size).toBe(1);
+  expect(results.filter((r) => r.created)).toHaveLength(1);
+});
+
+test("ensureLead ignores Leads of other workspaces and archived or closed Leads", async () => {
+  const host = fakeHost({
+    workspaces: [repo],
+    agents: [
+      {
+        agent: {
+          id: "L-other",
+          provider: "claude-lead",
+          cwd: "/r/b",
+          status: "idle",
+          workspaceId: "wks_b",
+        },
+      },
+      {
+        agent: {
+          id: "L-closed",
+          provider: "claude-lead",
+          cwd: "/r/app",
+          status: "closed",
+          workspaceId: "wks_repo",
+        },
+      },
+    ],
+  });
+  const result = await ensureLead(host.api, "wks_repo", { supervisorDirectory: SUPERVISOR_DIR });
+  expect(result.created).toBe(true);
+});
+
+test("ensureLead refuses the Supervisor system workspace and unknown workspaces", async () => {
+  const host = fakeHost({ workspaces: [supervisorWorkspace] });
+  await expect(
+    ensureLead(host.api, "wks_sup", { supervisorDirectory: SUPERVISOR_DIR }),
+  ).rejects.toThrow(/Supervisor/);
+  await expect(
+    ensureLead(host.api, "wks_missing", { supervisorDirectory: SUPERVISOR_DIR }),
+  ).rejects.toThrow(/wks_missing/);
+  expect(host.created).toHaveLength(0);
+});
+
+test("ensureSupervisor creates the system workspace and Supervisor once per host", async () => {
+  const host = fakeHost({ workspaces: [repo] });
+  const made: string[] = [];
+  const deps = {
+    supervisorDirectory: SUPERVISOR_DIR,
+    makeDirectory: async (dir: string) => void made.push(dir),
+  };
+  const [a, b] = await Promise.all([
+    ensureSupervisor(host.api, deps),
+    ensureSupervisor(host.api, deps),
+  ]);
+  expect(made).toContain(SUPERVISOR_DIR);
+  expect(host.createdWorkspaces).toEqual([{ path: SUPERVISOR_DIR, title: "SLP Supervisor" }]);
+  expect(host.created).toEqual([
+    {
+      workspaceId: a.workspaceId,
+      options: {
+        config: { provider: "claude-supervisor/claude-opus-5-5", modeId: "bypassPermissions" },
+        title: "Supervisor",
+        labels: { "slp.role": "supervisor" },
+      },
+    },
+  ]);
+  expect(a.created).toBe(true);
+  expect(b).toEqual({ workspaceId: a.workspaceId, agentId: a.agentId, created: false });
+});
+
+test("ensureSupervisor reuses a live Supervisor and an existing system workspace", async () => {
+  const live = fakeHost({
+    workspaces: [supervisorWorkspace],
+    agents: [
+      {
+        agent: {
+          id: "S1",
+          provider: "claude",
+          cwd: SUPERVISOR_DIR,
+          status: "idle",
+          workspaceId: "wks_sup",
+          labels: { "slp.role": "supervisor" },
+        },
+      },
+    ],
+  });
+  const deps = { supervisorDirectory: SUPERVISOR_DIR, makeDirectory: async () => {} };
+  expect(await ensureSupervisor(live.api, deps)).toEqual({
+    workspaceId: "wks_sup",
+    agentId: "S1",
+    created: false,
+  });
+  expect(live.created).toHaveLength(0);
+
+  const archived = fakeHost({
+    workspaces: [supervisorWorkspace],
+    agents: [
+      {
+        agent: {
+          id: "S0",
+          provider: "claude-supervisor",
+          cwd: SUPERVISOR_DIR,
+          status: "idle",
+          workspaceId: "wks_sup",
+          archivedAt: "2026-09-01",
+        },
+      },
+    ],
+  });
+  const result = await ensureSupervisor(archived.api, deps);
+  expect(result).toMatchObject({ workspaceId: "wks_sup", created: true });
+  expect(archived.createdWorkspaces).toHaveLength(0);
+});
+
+test("workspace.created makes a Lead only for client-created workspaces, never the Supervisor one", async () => {
+  const host = fakeHost({ workspaces: [repo, supervisorWorkspace] });
+  const origins = new ClientWorkspaceOrigins();
+  const deps = { supervisorDirectory: SUPERVISOR_DIR };
+
+  // Created by an agent over MCP (no before-hook): no Lead.
+  expect(
+    await handleWorkspaceCreated(
+      host.api,
+      origins,
+      { id: "wks_repo", projectId: "p1", cwd: "/r/app" },
+      deps,
+    ),
+  ).toBeNull();
+
+  // System workspace, even when it came through the client path: no Lead.
+  origins.record({ source: { kind: "directory", path: SUPERVISOR_DIR } });
+  expect(
+    await handleWorkspaceCreated(
+      host.api,
+      origins,
+      { id: "wks_sup", projectId: "p9", cwd: SUPERVISOR_DIR },
+      deps,
+    ),
+  ).toBeNull();
+  expect(host.created).toHaveLength(0);
+
+  // Client-created directory workspace: Lead.
+  origins.record({ source: { kind: "directory", path: "/r/app" } });
+  const result = await handleWorkspaceCreated(
+    host.api,
+    origins,
+    { id: "wks_repo", projectId: "p1", cwd: "/r/app" },
+    deps,
+  );
+  expect(result?.created).toBe(true);
+  expect(host.created.map((c) => c.workspaceId)).toEqual(["wks_repo"]);
+});
+
+test("ClientWorkspaceOrigins matches directories by path and worktrees by project, once each", () => {
+  const origins = new ClientWorkspaceOrigins(() => 0, 1000);
+  origins.record({ source: { kind: "directory", path: "/r/a/" } });
+  origins.record({ source: { kind: "worktree", projectId: "p1" } });
+  origins.record({
+    source: { kind: "directory", path: "/r/lead" },
+    agent: { config: { provider: "claude-lead" } },
+  });
+
+  expect(origins.consume({ cwd: "/r/a", projectId: "pa" })).toBe(true);
+  expect(origins.consume({ cwd: "/r/a", projectId: "pa" })).toBe(false);
+  expect(origins.consume({ cwd: "/wt/y", projectId: "p2" })).toBe(false);
+  expect(origins.consume({ cwd: "/wt/x", projectId: "p1" })).toBe(true);
+  expect(origins.consume({ cwd: "/wt/x2", projectId: "p1" })).toBe(false);
+  // A workspace created together with its own Lead needs no second Lead.
+  expect(origins.consume({ cwd: "/r/lead", projectId: "pl" })).toBe(false);
+});
+
+test("ClientWorkspaceOrigins: a worktree request with unknown project matches the next workspace once", () => {
+  const origins = new ClientWorkspaceOrigins(() => 0, 1000);
+  origins.record({ source: { kind: "worktree", cwd: "/r/b" } });
+  expect(origins.consume({ cwd: "/wt/z", projectId: "p3" })).toBe(true);
+  expect(origins.consume({ cwd: "/wt/z2", projectId: "p3" })).toBe(false);
+});
+
+test("ClientWorkspaceOrigins forgets requests older than the TTL", () => {
+  let now = 0;
+  const origins = new ClientWorkspaceOrigins(() => now, 1000);
+  origins.record({ source: { kind: "directory", path: "/r/late" } });
+  now = 2000;
+  expect(origins.consume({ cwd: "/r/late", projectId: "p" })).toBe(false);
+});

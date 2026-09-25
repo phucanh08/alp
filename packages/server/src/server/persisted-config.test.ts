@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
@@ -8,6 +8,7 @@ import {
   PersistedConfigSchema,
   readPersistedConfig,
   savePersistedConfig,
+  seedPersistedSlpDefaults,
 } from "./persisted-config.js";
 import { PRIVATE_DIRECTORY_MODE, PRIVATE_FILE_MODE } from "./private-files.js";
 
@@ -836,6 +837,151 @@ describe.skipIf(process.platform === "win32")("persisted config file permissions
       expect(modeOf(path.join(home, "config.json"))).toBe(PRIVATE_FILE_MODE);
     } finally {
       rmSync(parent, { recursive: true, force: true });
+    }
+  });
+});
+
+// ALP(slp): every alp host ships the SLP seats and plugins on unless the user opted out.
+describe("SLP defaults", () => {
+  const SLP_PROVIDER_IDS = ["claude-lead", "claude-peer", "claude-supervisor"];
+
+  function readConfigFile(home: string): Record<string, unknown> {
+    return JSON.parse(readFileSync(path.join(home, "config.json"), "utf8"));
+  }
+
+  function writeConfigFile(home: string, value: unknown): void {
+    writeFileSync(path.join(home, "config.json"), `${JSON.stringify(value, null, 2)}\n`);
+  }
+
+  test("a new home gets the three SLP providers and plugins enabled", () => {
+    const home = createTempHome();
+    try {
+      const config = loadPersistedConfig(home);
+      const providers = config.agents?.providers ?? {};
+
+      expect(Object.keys(providers)).toEqual(expect.arrayContaining(SLP_PROVIDER_IDS));
+      expect(providers["claude-lead"]).toEqual({ extends: "claude", label: "SLP Lead" });
+      expect(providers["claude-peer"]).toMatchObject({
+        extends: "claude",
+        label: "SLP Peer",
+        disallowedTools: ["Agent", "Task"],
+      });
+      expect(providers["claude-peer"]?.paseoTools?.disabledTools).toEqual([
+        "create_agent",
+        "send_agent_prompt",
+        "kill_agent",
+        "cancel_agent",
+        "archive_agent",
+        "create_schedule",
+      ]);
+      expect(providers["claude-supervisor"]).toMatchObject({
+        extends: "claude",
+        label: "SLP Supervisor",
+      });
+      const supervisorDisabled = providers["claude-supervisor"]?.paseoTools?.disabledTools ?? [];
+      expect(supervisorDisabled).toEqual(
+        expect.arrayContaining(["create_agent", "kill_agent", "archive_agent", "create_schedule"]),
+      );
+      expect(supervisorDisabled).not.toContain("list_agents");
+      expect(supervisorDisabled).not.toContain("list_workspaces");
+      expect(supervisorDisabled).not.toContain("send_agent_prompt");
+      expect(config.pluginsEnabled).toBe(true);
+
+      const onDisk = readConfigFile(home);
+      expect(onDisk.pluginsEnabled).toBe(true);
+      expect(Object.keys((onDisk.agents as { providers: object }).providers)).toEqual(
+        expect.arrayContaining(SLP_PROVIDER_IDS),
+      );
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("an existing config gains the missing SLP keys and keeps everything else", () => {
+    const home = createTempHome();
+    try {
+      writeConfigFile(home, {
+        version: 1,
+        daemon: { listen: "127.0.0.1:7777" },
+        plugins: { mine: { source: "directory", path: "/tmp/mine" } },
+        agents: {
+          providers: {
+            "claude-lead": { extends: "claude", label: "My Own Lead" },
+            codex: { enabled: false },
+          },
+        },
+      });
+
+      seedPersistedSlpDefaults(home);
+      const config = loadPersistedConfig(home);
+      const providers = config.agents?.providers ?? {};
+
+      expect(providers["claude-lead"]).toEqual({ extends: "claude", label: "My Own Lead" });
+      expect(providers.codex).toEqual({ enabled: false });
+      expect(providers["claude-peer"]?.label).toBe("SLP Peer");
+      expect(providers["claude-supervisor"]?.label).toBe("SLP Supervisor");
+      expect(config.daemon?.listen).toBe("127.0.0.1:7777");
+      expect(config.plugins).toEqual({ mine: { source: "directory", path: "/tmp/mine" } });
+      expect(config.pluginsEnabled).toBe(true);
+
+      const onDisk = readConfigFile(home);
+      expect(onDisk.pluginsEnabled).toBe(true);
+      expect(
+        (onDisk.agents as { providers: Record<string, { label?: string }> }).providers[
+          "claude-lead"
+        ]?.label,
+      ).toBe("My Own Lead");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("an explicit pluginsEnabled false is left alone", () => {
+    const home = createTempHome();
+    try {
+      writeConfigFile(home, { version: 1, pluginsEnabled: false });
+
+      seedPersistedSlpDefaults(home);
+      const config = loadPersistedConfig(home);
+
+      expect(config.pluginsEnabled).toBe(false);
+      expect(readConfigFile(home).pluginsEnabled).toBe(false);
+      expect(Object.keys(config.agents?.providers ?? {})).toEqual(
+        expect.arrayContaining(SLP_PROVIDER_IDS),
+      );
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("seeding a config that already has the defaults does not rewrite it", () => {
+    const home = createTempHome();
+    try {
+      writeConfigFile(home, { version: 1 });
+      seedPersistedSlpDefaults(home);
+      const first = readFileSync(path.join(home, "config.json"), "utf8");
+      const firstMtime = statSync(path.join(home, "config.json")).mtimeMs;
+
+      seedPersistedSlpDefaults(home);
+
+      expect(readFileSync(path.join(home, "config.json"), "utf8")).toBe(first);
+      expect(statSync(path.join(home, "config.json")).mtimeMs).toBe(firstMtime);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("loading alone does not bring back an SLP provider the user deleted", () => {
+    const home = createTempHome();
+    try {
+      writeConfigFile(home, { version: 1, pluginsEnabled: true, agents: { providers: {} } });
+
+      const config = loadPersistedConfig(home);
+
+      expect(config.agents?.providers).toEqual({});
+      expect(readConfigFile(home).agents).toEqual({ providers: {} });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
     }
   });
 });

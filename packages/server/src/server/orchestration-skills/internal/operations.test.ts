@@ -535,20 +535,28 @@ describe("installSkills / updateSkills", () => {
     ).toBe("user guard");
   });
 
-  it("does not auto-install skills on a clean machine", async () => {
+  it("installs the selected skills on a clean machine at startup", async () => {
     await writeCurrentBundle(sandbox.targets.sourceDir);
 
     const status = await autoUpdateInstalledSkills(sandbox.targets, ALL_SKILLS);
 
     expect(status).toEqual({
-      state: "not-installed",
-      ops: [
-        { kind: "add", name: "paseo" },
-        { kind: "add", name: "paseo-loop" },
-      ],
+      state: "up-to-date",
+      ops: [],
       available: ["paseo", "paseo-loop"],
-      installed: [],
+      installed: ["paseo", "paseo-loop"],
     });
+    expect(await installedIn(sandbox.targets, "paseo")).toEqual([true, true, true]);
+    expect(await installedIn(sandbox.targets, "paseo-loop")).toEqual([true, true, true]);
+  });
+
+  it("leaves a clean machine alone when the selection is empty", async () => {
+    await writeCurrentBundle(sandbox.targets.sourceDir);
+
+    const status = await autoUpdateInstalledSkills(sandbox.targets, only());
+
+    expect(status.state).toBe("not-installed");
+    expect(status.ops).toEqual([]);
     expect(await installedIn(sandbox.targets, "paseo")).toEqual([false, false, false]);
   });
 

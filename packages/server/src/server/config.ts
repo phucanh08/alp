@@ -12,6 +12,7 @@ import {
   LogFormatSchema,
   LogLevelSchema,
   type PersistedConfig,
+  seedPersistedSlpDefaults,
 } from "./persisted-config.js";
 import type { AgentProvider } from "./agent/agent-sdk-types.js";
 import type {
@@ -665,6 +666,8 @@ export function loadConfig(
   paseoHome: string,
   options?: Omit<ResolveConfigFromPersistedOptions, "relayEnabledFallback">,
 ): PaseoDaemonConfig {
+  // ALP(slp): daemon startup is the one place SLP defaults are added to an existing config.
+  seedPersistedSlpDefaults(paseoHome);
   const persisted = loadPersistedConfig(paseoHome);
   return resolveConfigFromPersisted(paseoHome, persisted, options);
 }
