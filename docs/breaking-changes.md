@@ -32,6 +32,7 @@ Format: one row per change, newest last. `Since` is the alp commit or version th
 | 2026-09-25 | repository url       | `github.com/getpaseo/paseo`                        | `github.com/phucanh08/alp`                      | package.json `repository` in root + all workspaces                                               |
 | 2026-09-25 | display strings      | `Paseo` in app/CLI/server/desktop UI, README, docs | `alp` (lowercase)                               | UI copy, MCP tool descriptions, generated PR body, docs say alp; identifiers/env/scope unchanged |
 | 2026-09-25 | release download URL | `getpaseo/paseo/releases`, `Paseo-<ver>-arm64.dmg` | `phucanh08/alp/releases`, `alp-<ver>-arm64.dmg` | in-app download / CLI hint only work once alp publishes releases                                 |
+| 2026-09-25 | in-app GitHub links  | `getpaseo/paseo` issues/repo/raw CHANGELOG         | `phucanh08/alp`                                 | issue reports and in-app changelog target the fork                                               |
 
 ## Deferred (still upstream values)
 

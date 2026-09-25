@@ -29,7 +29,7 @@ interface StartupSplashScreenProps {
   };
 }
 
-const GITHUB_ISSUE_URL = "https://github.com/getpaseo/paseo/issues/new";
+const GITHUB_ISSUE_URL = "https://github.com/phucanh08/alp/issues/new";
 const DOCS_URL = "https://alp.anhlp.com/docs";
 
 const LOGO_SIZE = 96;
