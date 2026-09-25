@@ -173,4 +173,69 @@ describe("buildWorkspaceStructureProjects", () => {
       placementShapedKey,
     );
   });
+
+  test("hides every project that owns a hidden workspace and leaves the rest as they were", () => {
+    const appKey = "remote:github.com/acme/app";
+    const result = buildWorkspaceStructureProjects({
+      sessions: [
+        {
+          serverId: "host-a",
+          projects: [
+            project({ id: "prj_app", key: appKey, root: "/repos/app" }),
+            project({ id: "prj_sup", key: "local:/home/.alp/supervisor", root: "/sup" }),
+          ],
+          workspaces: [
+            workspace("ws-app", "prj_app", "/repos/app"),
+            workspace("ws-sup", "prj_sup", "/sup"),
+            workspace("ws-sup-2", "prj_sup", "/sup"),
+          ],
+          hiddenWorkspaceIds: new Set(["ws-sup"]),
+        },
+      ],
+    });
+
+    expect(result).toEqual([
+      {
+        viewKey: appKey,
+        projectKey: appKey,
+        projectName: "acme/app",
+        projectKind: "git",
+        iconWorkingDir: "/repos/app",
+        hosts: [
+          {
+            serverId: "host-a",
+            projectId: "prj_app",
+            iconWorkingDir: "/repos/app",
+            worktreeSupport: "supported",
+            customIconRevision: undefined,
+            iconRevision: undefined,
+          },
+        ],
+        workspaceKeys: ["host-a:ws-app"],
+      },
+    ]);
+  });
+
+  test("hides a grouped project only on the host whose workspace is hidden", () => {
+    const supKey = "local:/home/.alp/supervisor";
+    const result = buildWorkspaceStructureProjects({
+      sessions: [
+        {
+          serverId: "host-a",
+          projects: [project({ id: "prj_sup_a", key: supKey, root: "/a/sup" })],
+          workspaces: [workspace("ws-sup-a", "prj_sup_a", "/a/sup")],
+          hiddenWorkspaceIds: new Set(["ws-sup-a"]),
+        },
+        {
+          serverId: "host-b",
+          projects: [project({ id: "prj_sup_b", key: supKey, root: "/b/sup" })],
+          workspaces: [workspace("ws-sup-b", "prj_sup_b", "/b/sup")],
+        },
+      ],
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.hosts.map((host) => host.serverId)).toEqual(["host-b"]);
+    expect(result[0]?.workspaceKeys).toEqual(["host-b:ws-sup-b"]);
+  });
 });

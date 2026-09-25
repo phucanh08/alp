@@ -1,5 +1,6 @@
 import type { ProjectDescriptor, WorkspaceDescriptor } from "@/stores/session-store";
 import { projectDisplayNameFromProjectId } from "@/utils/project-display-name";
+import { normalizeWorkspaceOpaqueId } from "@/utils/workspace-identity";
 
 export interface WorkspaceStructureHostPlacement {
   serverId: string;
@@ -28,6 +29,12 @@ interface WorkspaceStructureSession {
   serverId: string;
   projects: Iterable<ProjectDescriptor>;
   workspaces: Iterable<WorkspaceDescriptor>;
+  /**
+   * ALP(slp): workspaces that must not appear in any project list (the SLP Supervisor workspace).
+   * The host-local project that owns one is dropped with all of its workspaces; the store keeps
+   * them, so navigation by id still works.
+   */
+  hiddenWorkspaceIds?: ReadonlySet<string>;
 }
 
 interface ProjectDraft {
@@ -49,9 +56,21 @@ export function buildWorkspaceStructureProjects(input: {
   const projectEntries: Array<{ serverId: string; project: ProjectDescriptor }> = [];
   const keyCountsByServer = new Map<string, Map<string, number>>();
   const viewKeyByServerProjectId = new Map<string, Map<string, string>>();
+  // Callers may pass one-shot iterators; read workspaces once so hidden projects can be resolved
+  // before the project pass.
+  const sessions = input.sessions.map((session) => {
+    const workspaces = Array.from(session.workspaces);
+    return {
+      serverId: session.serverId,
+      projects: session.projects,
+      workspaces,
+      hiddenProjectIds: collectHiddenProjectIds(workspaces, session.hiddenWorkspaceIds),
+    };
+  });
 
-  for (const session of input.sessions) {
+  for (const session of sessions) {
     for (const project of session.projects) {
+      if (session.hiddenProjectIds.has(project.projectId)) continue;
       projectEntries.push({ serverId: session.serverId, project });
       const sharedKey = project.projectKey ?? null;
       if (sharedKey) {
@@ -79,7 +98,7 @@ export function buildWorkspaceStructureProjects(input: {
     );
   }
 
-  for (const session of input.sessions) {
+  for (const session of sessions) {
     for (const workspace of session.workspaces) {
       const viewKey = viewKeyByServerProjectId.get(session.serverId)?.get(workspace.projectId);
       if (!viewKey) continue;
@@ -186,6 +205,20 @@ function addProjectToView(input: {
     draft.hosts.set(serverId, placement);
   }
   return viewKey;
+}
+
+/** Host-local project ids that own at least one of the hidden workspaces. */
+export function collectHiddenProjectIds(
+  workspaces: Iterable<Pick<WorkspaceDescriptor, "id" | "projectId">>,
+  hiddenWorkspaceIds: ReadonlySet<string> | undefined,
+): ReadonlySet<string> {
+  const projectIds = new Set<string>();
+  if (!hiddenWorkspaceIds || hiddenWorkspaceIds.size === 0) return projectIds;
+  for (const workspace of workspaces) {
+    const workspaceId = normalizeWorkspaceOpaqueId(workspace.id);
+    if (workspaceId && hiddenWorkspaceIds.has(workspaceId)) projectIds.add(workspace.projectId);
+  }
+  return projectIds;
 }
 
 function getOrCreate<K, V>(map: Map<K, V>, key: K, create: () => V): V {
