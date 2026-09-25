@@ -451,3 +451,109 @@ test("seat agents take provider and mode from the seat profile of the family", a
     { provider: "codex-supervisor/claude-opus-5-5", modeId: "mode-codex" },
   ]);
 });
+
+const repoAgain: WorkspaceLike = {
+  id: "wks_repo2",
+  projectRootPath: "/r/app",
+  workspaceDirectory: "/r/app",
+};
+
+function leadIn(
+  workspaceId: string,
+  overrides: Partial<AgentEntryLike["agent"]> = {},
+): AgentEntryLike {
+  return {
+    agent: {
+      id: `L-${workspaceId}`,
+      provider: "claude-lead",
+      cwd: "/r/app",
+      status: "idle",
+      workspaceId,
+      labels: { "slp.role": "lead" },
+      ...overrides,
+    },
+  };
+}
+
+async function secondClientWorkspace(host: FakeHost, cwd = "/r/app") {
+  const origins = new ClientWorkspaceOrigins();
+  origins.record({ source: { kind: "directory", path: cwd } });
+  return handleWorkspaceCreated(
+    host.api,
+    origins,
+    { id: "wks_repo2", projectId: "p1", cwd },
+    { supervisorDirectory: SUPERVISOR_DIR },
+  );
+}
+
+test("workspace.created makes no second Lead for a directory whose live Lead is in another workspace", async () => {
+  const host = fakeHost({ workspaces: [repo, repoAgain], agents: [leadIn("wks_repo")] });
+  const result = await secondClientWorkspace(host, "/r/app/");
+  expect(result).toEqual({ agentId: "L-wks_repo", created: false });
+  expect(host.created).toHaveLength(0);
+});
+
+test("workspace.created still makes a Lead when the directory's other Lead is closed, archived, or its workspace is archiving", async () => {
+  const cases: Array<{ workspaces: WorkspaceLike[]; agents: AgentEntryLike[] }> = [
+    { workspaces: [repo, repoAgain], agents: [leadIn("wks_repo", { status: "closed" })] },
+    { workspaces: [repo, repoAgain], agents: [leadIn("wks_repo", { archivedAt: "2026-09-01" })] },
+    {
+      workspaces: [{ ...repo, archivingAt: "2026-09-25T00:00:00.000Z" }, repoAgain],
+      agents: [leadIn("wks_repo")],
+    },
+    // A live agent in the directory that is not in the Lead seat does not count.
+    {
+      workspaces: [repo, repoAgain],
+      agents: [leadIn("wks_repo", { provider: "claude-peer", labels: { "slp.role": "peer" } })],
+    },
+  ];
+  for (const initial of cases) {
+    const host = fakeHost(initial);
+    const result = await secondClientWorkspace(host);
+    expect(result?.created).toBe(true);
+    expect(host.created.map((c) => c.workspaceId)).toEqual(["wks_repo2"]);
+  }
+});
+
+test("workspace.created makes a Lead for a directory whose only live Lead is elsewhere", async () => {
+  const other: WorkspaceLike = { id: "wks_b", projectRootPath: "/r/b", workspaceDirectory: "/r/b" };
+  const host = fakeHost({
+    workspaces: [other, repoAgain],
+    agents: [leadIn("wks_b", { cwd: "/r/b" })],
+  });
+  const result = await secondClientWorkspace(host);
+  expect(result?.created).toBe(true);
+  expect(host.created.map((c) => c.workspaceId)).toEqual(["wks_repo2"]);
+});
+
+test("slp.lead.ensure still gives a second workspace in the same directory its own Lead", async () => {
+  const host = fakeHost({ workspaces: [repo, repoAgain], agents: [leadIn("wks_repo")] });
+  const result = await ensureLead(host.api, "wks_repo2", { supervisorDirectory: SUPERVISOR_DIR });
+  expect(result.created).toBe(true);
+  expect(host.created.map((c) => c.workspaceId)).toEqual(["wks_repo2"]);
+});
+
+test("workspace.created makes one Lead when two workspaces in a directory are created back to back", async () => {
+  const host = fakeHost({ workspaces: [repo, repoAgain] });
+  const origins = new ClientWorkspaceOrigins();
+  origins.record({ source: { kind: "directory", path: "/r/app" } });
+  origins.record({ source: { kind: "directory", path: "/r/app" } });
+  const deps = { supervisorDirectory: SUPERVISOR_DIR };
+  const [first, second] = await Promise.all([
+    handleWorkspaceCreated(
+      host.api,
+      origins,
+      { id: "wks_repo", projectId: "p1", cwd: "/r/app" },
+      deps,
+    ),
+    handleWorkspaceCreated(
+      host.api,
+      origins,
+      { id: "wks_repo2", projectId: "p1", cwd: "/r/app" },
+      deps,
+    ),
+  ]);
+  expect(host.created.map((c) => c.workspaceId)).toEqual(["wks_repo"]);
+  expect(first?.created).toBe(true);
+  expect(second).toEqual({ agentId: first?.agentId, created: false });
+});
