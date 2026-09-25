@@ -28,16 +28,13 @@ test("stripFrontmatter drops the leading YAML block and keeps the body", () => {
   expect(stripFrontmatter("# No frontmatter\n---\nx")).toBe("# No frontmatter\n---\nx");
 });
 
-test("readDefinition prefers .claude/agents in the agent cwd", async () => {
+test("readDefinition prefers .slp/agents in the agent cwd", async () => {
   const cwd = await mkdtemp(path.join(tmpdir(), "slp-plugin-"));
-  await mkdir(path.join(cwd, ".claude", "agents"), { recursive: true });
-  await writeFile(
-    path.join(cwd, ".claude", "agents", "peer.md"),
-    "---\nname: peer\n---\nPEER BODY\n",
-  );
+  await mkdir(path.join(cwd, ".slp", "agents"), { recursive: true });
+  await writeFile(path.join(cwd, ".slp", "agents", "peer.md"), "---\nname: peer\n---\nPEER BODY\n");
   const def = await readDefinition(cwd, "peer");
   expect(def).toEqual({
-    source: path.join(cwd, ".claude", "agents", "peer.md"),
+    source: path.join(cwd, ".slp", "agents", "peer.md"),
     body: "PEER BODY",
   });
 });
@@ -49,6 +46,18 @@ test("readDefinition falls back to the bundled seat file without its frontmatter
   expect(def.body.startsWith("---")).toBe(false);
   expect(def.body).not.toMatch(/^name: lead$/m);
   expect(def.body).toMatch(/^# /);
+});
+
+test("readDefinition ignores .claude/agents and falls back to bundled", async () => {
+  const cwd = await mkdtemp(path.join(tmpdir(), "slp-plugin-"));
+  await mkdir(path.join(cwd, ".claude", "agents"), { recursive: true });
+  await writeFile(
+    path.join(cwd, ".claude", "agents", "peer.md"),
+    "---\nname: peer\n---\nCLAUDE CODE PEER BODY\n",
+  );
+  const def = await readDefinition(cwd, "peer");
+  expect(def.source).toBe("bundled");
+  expect(def.body).not.toMatch(/CLAUDE CODE PEER BODY/);
 });
 
 test("buildSystemPrompt joins existing prompt, seat definition, and the seat runtime block", () => {

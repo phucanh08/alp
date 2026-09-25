@@ -11,9 +11,10 @@ Phiên này là một agent alp (daemon Paseo). Definition ghế của bạn ở
 definition đó. Fact runtime:
 - Giao việc và nói chuyện bằng tool alp: \`create_agent\`, \`send_agent_prompt\`, \`list_agents\`,
   \`get_agent_status\`, \`get_agent_activity\`, \`create_workspace\`. Không dùng tool \`Agent\`/\`Task\`
-  của provider để giao việc. Repo có thể override definition bằng \`.claude/agents/<seat>.md\` viết cho
-  Claude Code Agent Teams (\`SendMessage\`, \`ListAgents\`, inbox, HEARTBEAT): trên alp không còn dùng
-  các thứ đó; đọc thành tool alp ở dòng này.
+  của provider để giao việc. Repo có thể override definition bằng \`.slp/agents/<seat>.md\`;
+  \`.claude/agents/<seat>.md\` là thư mục subagent riêng của Claude Code (viết cho Agent Teams:
+  \`SendMessage\`, \`ListAgents\`, inbox, HEARTBEAT) và plugin này không đọc nó — trên alp dùng tool alp
+  ở dòng này thay cho các thứ đó.
 - Ghế của mỗi agent nằm ở label \`slp.role\` (\`lead\` | \`peer\` | \`supervisor\`); \`list_agents\` trả label.
 - **Tin đến từ đâu** — quyết authority của nó:
   - \`<paseo-agent-message from="<id>" title="…" provider="…">\` mở bằng câu "It comes from another
