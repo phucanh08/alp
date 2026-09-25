@@ -11,6 +11,7 @@ import {
   navigateToLastWorkspace as navigateToLastWorkspacePure,
   navigateToWorkspace as navigateToWorkspacePure,
   parseActiveWorkspaceSelection,
+  rememberLastWorkspaceUnlessSystem,
   type NavigateToWorkspaceDeps,
   type NavigateToWorkspaceInput,
 } from "./navigation";
@@ -82,7 +83,7 @@ export function useActiveWorkspaceSelection(): ActiveWorkspaceSelection | null {
     if (!serverId || !workspaceId) {
       return;
     }
-    lastWorkspaceSelectionStore.remember({ serverId, workspaceId });
+    rememberLastWorkspaceUnlessSystem({ serverId, workspaceId }, navigateDeps());
   }, [serverId, workspaceId]);
   return selection;
 }
