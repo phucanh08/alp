@@ -12,6 +12,8 @@ import {
   type ProjectDescriptor,
   type WorkspaceDescriptor,
 } from "@/stores/session-store";
+import { selectSlpSystemWorkspaceIds } from "@/stores/session-store-hooks/selectors";
+import type { SlpSystemAgentFields } from "@/slp/system-workspaces";
 import { buildProjects, type ProjectHost, type ProjectSummary } from "@/utils/projects";
 
 export interface ProjectHostError {
@@ -25,6 +27,8 @@ export interface ProjectHostReplica {
   serverName: string;
   workspaces: WorkspaceDescriptor[];
   projects: ProjectDescriptor[];
+  /** ALP(slp): sorted so the replica stays deep-equal across unrelated agent updates. */
+  hiddenWorkspaceIds?: string[];
 }
 
 export interface ProjectHostRuntimeState {
@@ -73,10 +77,22 @@ function toProjectHostRuntimeState(
   };
 }
 
-function selectProjectHostReplicas(
+interface ProjectHostReplicaSource {
+  sessions: Record<
+    string,
+    | {
+        workspaces: ReadonlyMap<string, WorkspaceDescriptor>;
+        projects: ReadonlyMap<string, ProjectDescriptor>;
+        agents: ReadonlyMap<string, SlpSystemAgentFields>;
+      }
+    | undefined
+  >;
+}
+
+export function selectProjectHostReplicas(
   hosts: readonly { serverId: string; label: string }[],
   enabled: boolean,
-): (state: ReturnType<typeof useSessionStore.getState>) => ProjectHostReplica[] {
+): (state: ProjectHostReplicaSource) => ProjectHostReplica[] {
   if (!enabled) {
     return () => EMPTY_PROJECT_HOST_REPLICAS;
   }
@@ -88,6 +104,7 @@ function selectProjectHostReplicas(
         serverName: host.label,
         workspaces: Array.from(session?.workspaces.values() ?? []),
         projects: Array.from(session?.projects.values() ?? []),
+        hiddenWorkspaceIds: Array.from(selectSlpSystemWorkspaceIds(session?.agents)).sort(),
       };
     });
 }
@@ -107,6 +124,7 @@ export function deriveProjectsFromReplica(input: {
       isOnline: runtimeState?.isOnline ?? false,
       workspaces: replica.workspaces,
       projects: replica.projects,
+      hiddenWorkspaceIds: new Set(replica.hiddenWorkspaceIds),
     };
   });
   const hostErrors = input.replicas.flatMap((replica) => {
