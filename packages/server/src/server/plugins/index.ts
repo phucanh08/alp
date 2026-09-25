@@ -66,7 +66,23 @@ export function resolveBundledPluginDir(
     path.resolve(moduleDir, "..", "..", "plugins", pluginId),
     path.resolve(moduleDir, "..", "..", "..", "..", "..", "plugins", pluginId),
   ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
+  const directory = candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
+  const unpacked = asarUnpackedPath(directory);
+  return unpacked && existsSync(unpacked) ? unpacked : directory;
+}
+
+// ALP(slp): the packaged desktop app ships the daemon inside app.asar. esbuild compiles the
+// plugin in its own process, which bypasses Electron's asar fs shim and cannot read there, so
+// electron-builder unpacks bundled plugins (asarUnpack) and the daemon uses that real copy.
+function asarUnpackedPath(directory: string): string | null {
+  const asarSegment = `${path.sep}app.asar${path.sep}`;
+  const asarIndex = directory.indexOf(asarSegment);
+  if (asarIndex === -1) return null;
+  return path.join(
+    directory.slice(0, asarIndex),
+    "app.asar.unpacked",
+    directory.slice(asarIndex + asarSegment.length),
+  );
 }
 
 function resolvePluginStatus(input: {
