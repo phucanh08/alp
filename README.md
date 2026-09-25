@@ -198,7 +198,7 @@ npm run typecheck
 
 ## Sponsors
 
-alp is built by one person and funded by the people who use it. Support the work on [GitHub Sponsors](https://github.com/sponsors/boudra). Companies can [sponsor alp](https://alp.anhlp.com/sponsor#spot) monthly and have their logo shown here and on the alp.anhlp.com homepage.
+Paseo is built by one person and funded by the people who use it. Support the work on [GitHub Sponsors](https://github.com/sponsors/boudra). Companies can [sponsor Paseo](https://alp.anhlp.com/sponsor#spot) monthly and have their logo shown here and on the alp.anhlp.com homepage.
 
 <!-- Sponsor logos go here, in the same order as packages/website/src/data/sponsors.ts -->
 
