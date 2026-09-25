@@ -89,7 +89,7 @@ Open `~/.paseo/config.json` and set `daemon.listen` to the Tailscale IP:
 
 ```json
 {
-  "$schema": "https://paseo.sh/schemas/paseo.config.v1.json",
+  "$schema": "https://alp.anhlp.com/schemas/paseo.config.v1.json",
   "version": 1,
   "daemon": {
     "listen": "100.101.102.103:6767"

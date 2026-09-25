@@ -32,7 +32,7 @@ Minimal example that configures listening address, hostnames, and MCP:
 
 ```json
 {
-  "$schema": "https://paseo.sh/schemas/paseo.config.v1.json",
+  "$schema": "https://alp.anhlp.com/schemas/paseo.config.v1.json",
   "version": 1,
   "daemon": {
     "listen": "127.0.0.1:6767",
@@ -269,5 +269,5 @@ Set the persisted value in `config.json`:
 For editor autocomplete/validation, set `$schema` to:
 
 ```
-https://paseo.sh/schemas/paseo.config.v1.json
+https://alp.anhlp.com/schemas/paseo.config.v1.json
 ```

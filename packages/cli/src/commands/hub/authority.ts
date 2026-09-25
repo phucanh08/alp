@@ -13,7 +13,7 @@ interface ResolveHubInput {
   credentials: HubCredentialStore;
 }
 
-export const DEFAULT_HUB_ORIGIN = "https://hub.paseo.sh";
+export const DEFAULT_HUB_ORIGIN = "https://hub-alp.anhlp.com";
 
 export function resolveHubOrigin(input: ResolveHubInput): string {
   const configuredOrigin = input.options.origin ?? input.env.PASEO_HUB_URL;

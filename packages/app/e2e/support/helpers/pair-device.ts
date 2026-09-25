@@ -210,7 +210,7 @@ export async function openRelaySecurityDocs(page: Page): Promise<void> {
   await page.getByRole("link", { name: "Read how Paseo relay works" }).click();
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("@paseo:e2e-opened-url")))
-    .toBe("https://paseo.sh/docs/security");
+    .toBe("https://alp.anhlp.com/docs/security");
 }
 
 export function expectDaemonPidUnchanged(

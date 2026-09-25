@@ -16,8 +16,8 @@ function Terms() {
   return (
     <LegalPage title="Terms of Service" lastUpdated="August 29, 2026">
       <p>
-        These Terms govern the official services operated at paseo.sh, relay.paseo.sh, and
-        hub.paseo.sh. By using the official relay or hosted Hub, you agree to them. Our{" "}
+        These Terms govern the official services operated at alp.anhlp.com, relay-alp.anhlp.com, and
+        hub-alp.anhlp.com. By using the official relay or hosted Hub, you agree to them. Our{" "}
         <a href="/privacy">Privacy Policy</a> explains how those services process data.
       </p>
 

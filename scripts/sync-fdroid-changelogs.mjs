@@ -28,7 +28,7 @@ const rootDir = path.resolve(__dirname, "..");
 
 // F-Droid's documented cap. fdroidserver truncates past this, so stay under it.
 const CHANGELOG_CHARACTER_LIMIT = 500;
-const FULL_NOTES_FOOTER = "Full notes: https://paseo.sh/changelog";
+const FULL_NOTES_FOOTER = "Full notes: https://alp.anhlp.com/changelog";
 const DEFAULT_LOCALE = "en-US";
 const METADATA_DIR = path.join("fastlane", "metadata", "android");
 

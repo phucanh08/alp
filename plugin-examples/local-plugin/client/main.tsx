@@ -102,13 +102,13 @@ export function ExamplePanel({
 
   const openBrowser = navigation?.openBrowser;
   const handleOpenBrowser = useCallback(() => {
-    openBrowser?.({ url: "https://paseo.sh/docs/plugins", workspaceId });
+    openBrowser?.({ url: "https://alp.anhlp.com/docs/plugins", workspaceId });
   }, [openBrowser, workspaceId]);
 
   return (
     <View style={styles.screen}>
       <Text style={styles.title}>Workspace plugin panel</Text>
-      <ExternalLink href="https://paseo.sh/docs/plugins">Plugin documentation</ExternalLink>
+      <ExternalLink href="https://alp.anhlp.com/docs/plugins">Plugin documentation</ExternalLink>
       {openBrowser ? (
         <Pressable accessibilityRole="button" onPress={handleOpenBrowser} style={styles.button}>
           <Text style={styles.buttonText}>Read in workspace browser</Text>

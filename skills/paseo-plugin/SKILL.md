@@ -11,11 +11,11 @@ Build or manage the requested plugin directly. Use the current public docs to ca
 
 ## Check current documentation
 
-Fetch [https://paseo.sh/llms.txt](https://paseo.sh/llms.txt) first. Select and fetch the current plugin Markdown pages from that index before changing a plugin:
+Fetch [https://alp.anhlp.com/llms.txt](https://alp.anhlp.com/llms.txt) first. Select and fetch the current plugin Markdown pages from that index before changing a plugin:
 
-- [Plugin quickstart](https://paseo.sh/docs/plugins.md) ([browser page](https://paseo.sh/docs/plugins))
-- [Publishing](https://paseo.sh/docs/plugins/publishing.md): npm package contents, dependencies, Git preparation, and private registries.
-- [Plugin reference](https://paseo.sh/docs/plugins/reference.md) ([browser page](https://paseo.sh/docs/plugins/reference))
+- [Plugin quickstart](https://alp.anhlp.com/docs/plugins.md) ([browser page](https://alp.anhlp.com/docs/plugins))
+- [Publishing](https://alp.anhlp.com/docs/plugins/publishing.md): npm package contents, dependencies, Git preparation, and private registries.
+- [Plugin reference](https://alp.anhlp.com/docs/plugins/reference.md) ([browser page](https://alp.anhlp.com/docs/plugins/reference))
 
 Use the deployed docs when they disagree with this skill. Do not send the user away to read them instead of completing the work.
 
@@ -39,8 +39,8 @@ Pick the contribution that matches the request. Each row names the registration,
 | Attachment source         | `client.addAttachmentSource` + `server.handle`   | Let the user attach a searchable external resource, such as an issue, to a prompt                             | reference.md → Add a composer attachment source; `plugin-examples/linear`                          |
 | Theme                     | `addTheme`                                       | A light or dark palette under Settings → Appearance                                                           | reference.md → Contribute a theme; `plugin-examples/catppuccin`                                    |
 | Plugin RPC                | `defineRpc` + `server.handle` + `useRpc`         | Daemon-side work that is not a normal Paseo operation: vendor APIs, credentials, local files                  | reference.md → Add plugin-specific backend behavior                                                |
-| Lifecycle events          | `server.on`                                      | Observe agent/workspace lifecycle, inspect ended turns, and answer permission requests                        | [Lifecycle hooks](https://paseo.sh/docs/plugins/reference.md#lifecycle-hooks)                      |
-| Creation and launch hooks | `server.before`                                  | Change agent config, provider options, MCP servers, environment, or workspace isolation before the operation  | [Before hooks](https://paseo.sh/docs/plugins/reference.md#before-hooks)                            |
+| Lifecycle events          | `server.on`                                      | Observe agent/workspace lifecycle, inspect ended turns, and answer permission requests                        | [Lifecycle hooks](https://alp.anhlp.com/docs/plugins/reference.md#lifecycle-hooks)                 |
+| Creation and launch hooks | `server.before`                                  | Change agent config, provider options, MCP servers, environment, or workspace isolation before the operation  | [Before hooks](https://alp.anhlp.com/docs/plugins/reference.md#before-hooks)                       |
 | Paseo SDK                 | `usePaseo()` / handler `{ paseo }`               | Normal Paseo operations: workspaces, agents, providers, config                                                | reference.md → Use the Paseo SDK                                                                   |
 
 | Lifecycle task                                                      | Example                                                                                                |
@@ -84,7 +84,7 @@ by the CLI version. Raise the minimum when adopting newer APIs; add an upper bou
 Paseo release is incompatible. Use npm semver ranges and explicitly include beta versions when
 targeting betas. Missing requirements mean `<0.8.0`; complete the 0.8 entry migration before adding
 `>=0.8.0`. Verify compatibility with both the daemon and the app running client contributions.
-See [requirements](https://paseo.sh/docs/plugins/reference#requirements).
+See [requirements](https://alp.anhlp.com/docs/plugins/reference#requirements).
 
 Each runtime has its own optional entry. A plugin must have at least one. Both entries accept
 `.ts` or `.tsx`; use `.tsx` when an entry imports components.
@@ -246,7 +246,7 @@ export default function contribute(client: PluginClientContext) {
 Icons are Lucide icon names. `theme` is a typed `PluginTheme` on every surface and panel. Primary text uses `theme.colors.foreground`; labels use `theme.colors.foregroundMuted`; the root view uses `theme.colors.surface0`. `layout.compact` is true on mobile and narrow windows. Paseo owns the route, header, host picker, close action, error boundary, and per-installation query client.
 
 Before writing imports, classify each module as shared, client, or server. Follow the
-[SDK import boundaries](https://paseo.sh/docs/plugins/reference.md#runtime-modules), including
+[SDK import boundaries](https://alp.anhlp.com/docs/plugins/reference.md#runtime-modules), including
 transitive and type dependencies. The root is shared-only; hooks and client contexts belong to
 `@getpaseo/plugin/client`, server contexts to `/server`, and host UI to `/client/react-native` or `/client/ui`.
 Install dependencies locally for typechecking; Paseo supplies host runtime modules. JSX uses the
@@ -307,7 +307,7 @@ function PullRequestAction() {
 }
 ```
 
-The API covers workspaces, agents, providers, and daemon config. It omits connection lifecycle because Paseo owns the connection. Consult the current [SDK reference](https://paseo.sh/docs/sdk/reference.md) for method details.
+The API covers workspaces, agents, providers, and daemon config. It omits connection lifecycle because Paseo owns the connection. Consult the current [SDK reference](https://alp.anhlp.com/docs/sdk/reference.md) for method details.
 
 ### Add daemon-side behavior
 
@@ -614,14 +614,14 @@ paseo plugin remove my-plugin
 
 For npm, ensure npm is on the daemon's `PATH`; use that host's registry configuration and credentials. Install selectors choose
 content once; they do not pin updates. `install` and `add` are aliases. Follow the
-[publishing guide](https://paseo.sh/docs/plugins/publishing.md) for Paseo's package contents and
+[publishing guide](https://alp.anhlp.com/docs/plugins/publishing.md) for Paseo's package contents and
 preparation requirements; standard npm publishing commands apply.
 
 Use `--host <url>` when managing a daemon other than the CLI default. A Git source that must install or generate something declares `build` in `paseo-plugin.json` as a list of argv arrays; Paseo runs them without a shell on install and update and keeps the old version if one fails. Plugin source edits require `paseo plugin reload`; config changes to the global switch require `paseo reload`. A failed plugin reload stays failed; inspect `paseo plugin ls` for the load error and `paseo plugin logs <id>` for subprocess output, fix the source, typecheck, and reload again. `remove` keeps local source directories and deletes managed Git/npm installations.
 
 Do not restart the daemon to load source changes. Restarting it can kill the agent performing the work.
 
-For an old mixed entry, follow the standalone [runtime-entry migration guide](https://paseo.sh/docs/plugins/migration) mechanically.
+For an old mixed entry, follow the standalone [runtime-entry migration guide](https://alp.anhlp.com/docs/plugins/migration) mechanically.
 
 ## Verify the outcome
 

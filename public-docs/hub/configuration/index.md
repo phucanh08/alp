@@ -100,7 +100,7 @@ Origin precedence:
 1. `--hub`
 2. `PASEO_HUB_URL`
 3. Active stored login
-4. `https://hub.paseo.sh`
+4. `https://hub-alp.anhlp.com`
 
 Credential precedence:
 

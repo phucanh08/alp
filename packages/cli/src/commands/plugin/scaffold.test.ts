@@ -100,7 +100,7 @@ describe("plugin scaffold", () => {
       );
       await expect(
         readFile(path.join(directory, "client/greeting.tsx"), "utf8"),
-      ).resolves.toContain(`openExternal("https://paseo.sh")`);
+      ).resolves.toContain(`openExternal("https://alp.anhlp.com")`);
       await expect(readFile(path.join(directory, "server/greeting.ts"), "utf8")).resolves.toContain(
         '"Hello, " + name + "!"',
       );

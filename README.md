@@ -32,11 +32,11 @@
 <p align="center">One interface for Claude Code, Codex, Copilot, OpenCode, and Pi agents.</p>
 
 <p align="center">
-  <img src="https://paseo.sh/hero-mockup.png" alt="Paseo app screenshot" width="100%">
+  <img src="https://alp.anhlp.com/hero-mockup.png" alt="Paseo app screenshot" width="100%">
 </p>
 
 <p align="center">
-  <img src="https://paseo.sh/mobile-mockup.png" alt="Paseo mobile app" width="100%">
+  <img src="https://alp.anhlp.com/mobile-mockup.png" alt="Paseo mobile app" width="100%">
 </p>
 
 Run agents in parallel on your own machines. Ship from your phone or your desk.
@@ -52,7 +52,7 @@ Run agents in parallel on your own machines. Ship from your phone or your desk.
 Add themes, workspace panels, commands, settings screens, and coding-agent providers with trusted
 TypeScript plugins. Install from npm, Git, or a local directory with `paseo plugin install <source>`.
 
-Start with the [plugin quickstart](https://paseo.sh/docs/plugins). Plugins run with access to your daemon
+Start with the [plugin quickstart](https://alp.anhlp.com/docs/plugins). Plugins run with access to your daemon
 machine and inside connected clients; install only code you trust.
 
 ## Getting Started
@@ -71,7 +71,7 @@ You need at least one agent CLI installed and configured with your credentials:
 
 ### Desktop app (recommended)
 
-Download it from [paseo.sh/download](https://paseo.sh/download) or the [GitHub releases page](https://github.com/getpaseo/paseo/releases). Open the app and the daemon starts automatically. Nothing else to install.
+Download it from [alp.anhlp.com/download](https://alp.anhlp.com/download) or the [GitHub releases page](https://github.com/getpaseo/paseo/releases). Open the app and the daemon starts automatically. Nothing else to install.
 
 To connect from your phone, open **Settings → your host → Pair Device**.
 
@@ -88,9 +88,9 @@ Paseo starts locally, then asks whether to enable the end-to-end encrypted relay
 
 For full setup and configuration, see:
 
-- [Docs](https://paseo.sh/docs)
-- [Connectivity guide](https://paseo.sh/docs/connectivity)
-- [Configuration reference](https://paseo.sh/docs/configuration)
+- [Docs](https://alp.anhlp.com/docs)
+- [Connectivity guide](https://alp.anhlp.com/docs/connectivity)
+- [Configuration reference](https://alp.anhlp.com/docs/configuration)
 
 ### Docker
 
@@ -123,7 +123,7 @@ paseo send abc123 "also add tests" # follow-up task
 paseo run --host workstation.local:6767 --cwd /workspace "run the full test suite"
 ```
 
-See the [full CLI reference](https://paseo.sh/docs/cli) for more.
+See the [full CLI reference](https://alp.anhlp.com/docs/cli) for more.
 
 ## TypeScript SDK
 
@@ -147,7 +147,7 @@ console.log(result.lastMessage);
 await client.close();
 ```
 
-See the [SDK quickstart](https://paseo.sh/docs/sdk/quickstart), [recipes](https://paseo.sh/docs/sdk/recipes), and [API reference](https://paseo.sh/docs/sdk/reference).
+See the [SDK quickstart](https://alp.anhlp.com/docs/sdk/quickstart), [recipes](https://alp.anhlp.com/docs/sdk/recipes), and [API reference](https://alp.anhlp.com/docs/sdk/reference).
 
 ## Skills
 
@@ -172,7 +172,7 @@ Quick monorepo package map:
 - `packages/cli`: `paseo` CLI for daemon and agent workflows
 - `packages/desktop`: Electron desktop app
 - `packages/relay`: Relay transport and encryption used by the daemon and clients
-- `packages/website`: Marketing site and documentation (`paseo.sh`)
+- `packages/website`: Marketing site and documentation (`alp.anhlp.com`)
 
 Common commands:
 
@@ -195,7 +195,7 @@ npm run typecheck
 
 ## Sponsors
 
-Paseo is built by one person and funded by the people who use it. Support the work on [GitHub Sponsors](https://github.com/sponsors/boudra). Companies can [sponsor Paseo](https://paseo.sh/sponsor#spot) monthly and have their logo shown here and on the paseo.sh homepage.
+Paseo is built by one person and funded by the people who use it. Support the work on [GitHub Sponsors](https://github.com/sponsors/boudra). Companies can [sponsor Paseo](https://alp.anhlp.com/sponsor#spot) monthly and have their logo shown here and on the alp.anhlp.com homepage.
 
 <!-- Sponsor logos go here, in the same order as packages/website/src/data/sponsors.ts -->
 

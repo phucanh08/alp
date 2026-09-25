@@ -447,7 +447,7 @@ describe("paseo daemon bootstrap", () => {
       agentClients: createTestAgentClients(),
       agentStoragePath: path.join(paseoHome, "agents"),
       relayEnabled: false,
-      appBaseUrl: "https://app.paseo.sh",
+      appBaseUrl: "https://app-alp.anhlp.com",
       openai: undefined,
       speech: undefined,
       serviceProxy: {
@@ -562,7 +562,7 @@ describe("paseo daemon bootstrap", () => {
       relayEnabled: false,
       relayEndpoint: "127.0.0.1:9",
       relayUseTls: false,
-      appBaseUrl: "https://app.paseo.sh",
+      appBaseUrl: "https://app-alp.anhlp.com",
       openai: undefined,
       speech: undefined,
     };
@@ -698,7 +698,7 @@ export default function contribute(plugin: unknown) {
       agentClients: createTestAgentClients(),
       agentStoragePath: path.join(paseoHome, "agents"),
       relayEnabled: false,
-      appBaseUrl: "https://app.paseo.sh",
+      appBaseUrl: "https://app-alp.anhlp.com",
       openai: undefined,
       speech: undefined,
       serviceProxy: { standaloneListen: `127.0.0.1:${standalonePort}` },
@@ -787,7 +787,7 @@ export default function contribute(plugin: unknown) {
       agentClients: createTestAgentClients(),
       agentStoragePath: path.join(paseoHome, "agents"),
       relayEnabled: false,
-      appBaseUrl: "https://app.paseo.sh",
+      appBaseUrl: "https://app-alp.anhlp.com",
       openai: undefined,
       speech: {
         providers: {
@@ -925,7 +925,7 @@ export default function contribute(plugin: unknown) {
         relayEnabled: true,
         relayEndpoint: "127.0.0.1:9",
         relayPublicEndpoint: "127.0.0.1:9",
-        appBaseUrl: "https://app.paseo.sh",
+        appBaseUrl: "https://app-alp.anhlp.com",
         openai: undefined,
         speech: undefined,
       };
@@ -939,11 +939,11 @@ export default function contribute(plugin: unknown) {
           relayEnabled: true,
           relayEndpoint: "127.0.0.1:9",
           relayPublicEndpoint: "127.0.0.1:9",
-          appBaseUrl: "https://app.paseo.sh",
+          appBaseUrl: "https://app-alp.anhlp.com",
           includeQr: false,
         });
         expect(pairing.relayEnabled).toBe(true);
-        expect(pairing.url?.startsWith("https://app.paseo.sh/#offer=")).toBe(true);
+        expect(pairing.url?.startsWith("https://app-alp.anhlp.com/#offer=")).toBe(true);
       } finally {
         await daemon.stop().catch(() => undefined);
         await daemon.agentManager.flush().catch(() => undefined);

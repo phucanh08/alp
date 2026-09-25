@@ -94,7 +94,7 @@ in
         description = ''
           How the daemon reaches the relay when `relay.enable = true`:
 
-          - `"hosted"` (default): use the upstream `app.paseo.sh` relay.
+          - `"hosted"` (default): use the maintainer-hosted `relay-alp.anhlp.com` relay.
             Preserves the current behavior; no extra options needed.
           - `"remote"`: connect to a self-hosted relay at
             `relay.host:relay.port`. Sets `PASEO_RELAY_ENDPOINT` and
@@ -159,7 +159,7 @@ in
       default = { };
       example = lib.literalExpression ''
         {
-          PASEO_RELAY_ENDPOINT = "relay.paseo.sh:443";
+          PASEO_RELAY_ENDPOINT = "relay-alp.anhlp.com:443";
         }
       '';
       description = "Extra environment variables for the Paseo daemon.";

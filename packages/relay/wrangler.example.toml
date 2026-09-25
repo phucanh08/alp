@@ -1,0 +1,24 @@
+# Example Cloudflare Worker config for the alp relay.
+# Relay deployment is managed OUTSIDE this repo by the maintainer (see docs/relay.md).
+# Copy to wrangler.toml (gitignored), fill in your account, and deploy with `npx wrangler deploy`.
+name = "alp-relay"
+# account_id = "<your Cloudflare account id>"   # or set CLOUDFLARE_ACCOUNT_ID
+main = "src/cloudflare-adapter.ts"
+compatibility_date = "2024-12-01"
+
+routes = [{ pattern = "relay-alp.anhlp.com", custom_domain = true }]
+
+[observability]
+enabled = true
+
+[vars]
+# Optional upstream relay to bridge to during a cutover; leave empty to serve directly.
+PASEO_RELAY_UPSTREAM = ""
+
+[[durable_objects.bindings]]
+name = "RELAY"
+class_name = "RelayDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayDurableObject"]

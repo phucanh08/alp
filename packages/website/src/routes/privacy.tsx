@@ -19,7 +19,7 @@ function Privacy() {
         Paseo is local-first. Installing or using the open-source software does not send us your
         code, prompts, files, terminal output, or agent conversations. This policy explains the
         separate data boundaries for local Paseo, the optional official relay, the hosted Paseo Hub,
-        and paseo.sh.
+        and alp.anhlp.com.
       </p>
 
       <section>

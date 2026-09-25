@@ -93,3 +93,7 @@ app.json
 
 # Heap snapshots dumped by --heapsnapshot-near-heap-limit; keep them for debugging.
 *.heapsnapshot
+
+# Relay/website deploy config is maintainer-owned (copy from *.example.toml)
+packages/relay/wrangler.toml
+.claude/session-state/

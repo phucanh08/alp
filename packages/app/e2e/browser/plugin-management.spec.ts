@@ -246,7 +246,8 @@ async function expectPluginSourceDocsOpen(page: Page): Promise<void> {
     .context()
     .waitForEvent(
       "request",
-      (request) => request.isNavigationRequest() && request.url().startsWith("https://paseo.sh/"),
+      (request) =>
+        request.isNavigationRequest() && request.url().startsWith("https://alp.anhlp.com/"),
     );
   const docsPagePromise = page.context().waitForEvent("page");
   await page.getByRole("link", { name: "Docs", exact: true }).click();
@@ -256,7 +257,7 @@ async function expectPluginSourceDocsOpen(page: Page): Promise<void> {
     expect(new URL(request.url()).pathname).toBe("/docs/plugins/reference");
     // The deployed site can redirect while the matching website change is still in this PR.
     await docsPage.waitForURL(
-      (url) => url.origin === "https://paseo.sh" && url.hash === "#plugin-sources",
+      (url) => url.origin === "https://alp.anhlp.com" && url.hash === "#plugin-sources",
       { waitUntil: "commit" },
     );
   } finally {

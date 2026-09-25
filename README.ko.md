@@ -32,11 +32,11 @@
 <p align="center">Claude Code, Codex, Copilot, OpenCode, Pi 에이전트를 위한 하나의 인터페이스</p>
 
 <p align="center">
-  <img src="https://paseo.sh/hero-mockup.png" alt="Paseo app screenshot" width="100%">
+  <img src="https://alp.anhlp.com/hero-mockup.png" alt="Paseo app screenshot" width="100%">
 </p>
 
 <p align="center">
-  <img src="https://paseo.sh/mobile-mockup.png" alt="Paseo mobile app" width="100%">
+  <img src="https://alp.anhlp.com/mobile-mockup.png" alt="Paseo mobile app" width="100%">
 </p>
 
 내 컴퓨터에서 에이전트를 병렬로 실행하세요. 데스크톱이나 휴대폰에서 배포하세요.
@@ -63,7 +63,7 @@ Paseo는 코딩 에이전트를 관리하는 로컬 서버인 데몬을 실행�
 
 ### 데스크톱 앱(권장)
 
-[paseo.sh/download](https://paseo.sh/download) 또는 [GitHub 릴리스 페이지](https://github.com/getpaseo/paseo/releases)에서 다운로드하세요. 앱을 열면 데몬이 자동으로 시작됩니다. 별도로 설치할 것은 없습니다.
+[alp.anhlp.com/download](https://alp.anhlp.com/download) 또는 [GitHub 릴리스 페이지](https://github.com/getpaseo/paseo/releases)에서 다운로드하세요. 앱을 열면 데몬이 자동으로 시작됩니다. 별도로 설치할 것은 없습니다.
 
 휴대폰에서 연결하려면 **설정 → 호스트 → 기기 페어링**을 여세요.
 
@@ -80,9 +80,9 @@ Paseo가 로컬에서 시작된 뒤 기기 페어링을 위한 종단 간 암호
 
 자세한 설치와 설정은 아래 문서를 참고하세요.
 
-- [문서](https://paseo.sh/docs)
-- [연결 가이드](https://paseo.sh/docs/connectivity)
-- [설정 레퍼런스](https://paseo.sh/docs/configuration)
+- [문서](https://alp.anhlp.com/docs)
+- [연결 가이드](https://alp.anhlp.com/docs/connectivity)
+- [설정 레퍼런스](https://alp.anhlp.com/docs/configuration)
 
 ### Docker
 
@@ -115,7 +115,7 @@ paseo send abc123 "also add tests" # 후속 작업 전송
 paseo --host workstation.local:6767 run "run the full test suite"
 ```
 
-자세한 내용은 [전체 CLI 레퍼런스](https://paseo.sh/docs/cli)를 참고하세요.
+자세한 내용은 [전체 CLI 레퍼런스](https://alp.anhlp.com/docs/cli)를 참고하세요.
 
 ## 스킬
 
@@ -140,7 +140,7 @@ npx skills add getpaseo/paseo
 - `packages/cli`: `paseo` CLI(데몬과 에이전트 워크플로)
 - `packages/desktop`: Electron 데스크톱 앱
 - `packages/relay`: 데몬과 클라이언트가 쓰는 릴레이 전송 및 암호화 패키지
-- `packages/website`: 마케팅 사이트 및 문서(`paseo.sh`)
+- `packages/website`: 마케팅 사이트 및 문서(`alp.anhlp.com`)
 
 자주 쓰는 명령:
 
@@ -163,7 +163,7 @@ npm run typecheck
 
 ## 스폰서
 
-Paseo는 한 사람이 개발하며, 사용하는 분들의 후원으로 운영됩니다. [GitHub Sponsors](https://github.com/sponsors/boudra)로 후원할 수 있습니다. 회사는 매월 [Paseo를 후원](https://paseo.sh/sponsor#spot)하고 로고를 이곳과 paseo.sh 홈페이지에 게재할 수 있습니다.
+Paseo는 한 사람이 개발하며, 사용하는 분들의 후원으로 운영됩니다. [GitHub Sponsors](https://github.com/sponsors/boudra)로 후원할 수 있습니다. 회사는 매월 [Paseo를 후원](https://alp.anhlp.com/sponsor#spot)하고 로고를 이곳과 alp.anhlp.com 홈페이지에 게재할 수 있습니다.
 
 <!-- Sponsor logos go here, in the same order as packages/website/src/data/sponsors.ts -->
 

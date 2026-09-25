@@ -7,7 +7,7 @@ Pod::Spec.new do |s|
   s.description    = 'Hardware keyboard shortcuts for Paseo'
   s.license        = 'Apache-2.0'
   s.author         = 'Paseo'
-  s.homepage       = 'https://paseo.sh'
+  s.homepage       = 'https://alp.anhlp.com'
   s.platforms      = { :ios => '13.4' }
   s.swift_version  = '5.4'
   s.source         = { :path => '.' }

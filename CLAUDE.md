@@ -13,7 +13,7 @@ This is an npm workspace monorepo:
 - `packages/cli` — Docker-style CLI (`paseo run/ls/logs/wait`)
 - `packages/relay` — E2E encrypted relay for remote access
 - `packages/desktop` — Electron desktop wrapper
-- `packages/website` — Marketing site (paseo.sh)
+- `packages/website` — Marketing site (alp.anhlp.com)
 
 ## Docs
 
@@ -59,6 +59,8 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/browser-capture-harness.md](docs/browser-capture-harness.md)   | Real-Electron browser screenshot harness and compositor-surface gotcha                                                         |
 | [docs/android.md](docs/android.md)                                   | App variants, local/cloud builds, EAS workflows, version codes, F-Droid source builds and store metadata                       |
 | [docs/docker.md](docs/docker.md)                                     | Running the daemon and bundled web UI in Docker, volumes, agent images, security                                               |
+| [docs/relay.md](docs/relay.md)                                       | Relay: library stays in repo, deployment is maintainer-owned outside CI; default endpoints                                     |
+| [docs/breaking-changes.md](docs/breaking-changes.md)                 | Running list of intentional divergences from upstream Paseo (no compatibility goal)                                            |
 | [docs/release.md](docs/release.md)                                   | Release playbook, draft releases, completion checklist                                                                         |
 | [docs/terminal-activity.md](docs/terminal-activity.md)               | Terminal activity indicators — source-agnostic tracker, agent hook reporting, adding a new hook provider                       |
 | [SECURITY.md](SECURITY.md)                                           | Relay threat model, E2E encryption, DNS rebinding, agent auth                                                                  |
@@ -207,6 +209,7 @@ theo quy trình SLP (Supervisor / Lead / Peer). Definition ở `.claude/agents/`
 - Memory theo role: Lead ở `.claude/agent-memory-local/lead/` (không commit); Peer không có memory bền.
 
 ### Contract boundaries (fork)
+
 - `packages/protocol` wire schema: giữ luật backward-compatible ở trên; đổi tên brand không đổi tên field/RPC.
 - `packages/relay`: thư viện e2ee/crypto dùng chung server + client **giữ trong repo**; phần **deploy relay
   (wrangler, account, domain, upstream) do Human tự quản lý ngoài repo** — agent không deploy, không đổi
@@ -214,9 +217,11 @@ theo quy trình SLP (Supervisor / Lead / Peer). Definition ở `.claude/agents/`
 - Upstream sync: ưu tiên thay đổi nhỏ, tách file mới thay vì sửa lan rộng để `git merge upstream/main` còn khả thi.
 
 ### Verification
+
 - typecheck: `npm run typecheck` · lint: `npm run lint` · format: `npm run format`
 - test: **chỉ file đã sửa** `npx vitest run <file> --bail=1` (xem Critical rules); full suite = CI.
 
 ### External side effects
+
 Agent không push, không deploy (Cloudflare/Fly/app store), không publish npm, không sửa `~/.paseo`
 hay daemon 6767 đang chạy, trừ khi Human cấp authority rõ ràng trong brief.

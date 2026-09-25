@@ -35,7 +35,7 @@ export interface PairingOffer {
 }
 
 const PAIRING_DAEMON_RPC_TIMEOUT_MS = 1500;
-const RELAY_DOCS_URL = "https://paseo.sh/docs/security";
+const RELAY_DOCS_URL = "https://alp.anhlp.com/docs/security";
 
 function createProcessOutput(): PairCommandOutput {
   return {

@@ -127,7 +127,7 @@ describe("resolveWorkspaceScriptLink", () => {
   it("keeps service routes available independently of a relay connection", () => {
     const relay: ActiveConnection = {
       type: "relay",
-      endpoint: "relay.paseo.sh:443",
+      endpoint: "relay-alp.anhlp.com:443",
       display: "relay",
     };
     expect(resolveLink(relay)).toEqual({
@@ -181,7 +181,7 @@ describe("resolveWorkspaceScriptLink", () => {
     const publicUrl = "https://web--feature--paseo.services.example.com";
     expect(
       resolveLink(
-        { type: "relay", endpoint: "relay.paseo.sh:443", display: "relay" },
+        { type: "relay", endpoint: "relay-alp.anhlp.com:443", display: "relay" },
         { ...legacyLocal, proxyUrl: publicUrl },
       ).primary,
     ).toEqual({

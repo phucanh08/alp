@@ -26,7 +26,7 @@ tool injection globally, then add `paseoTools` to the exact provider IDs you lau
 
 ```json
 {
-  "$schema": "https://paseo.sh/schemas/paseo.config.v1.json",
+  "$schema": "https://alp.anhlp.com/schemas/paseo.config.v1.json",
   "version": 1,
   "daemon": {
     "mcp": {

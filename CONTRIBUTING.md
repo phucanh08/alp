@@ -18,7 +18,7 @@ Read the [product philosophy](docs/product.md) for the reasoning behind these ch
 
 Most specialized workflows and integrations are better served by plugins.
 
-Plugins let you build what you need, share it, and maintain it independently. Start with the [plugin documentation](https://paseo.sh/docs/plugins). For applications and integrations built around Paseo, see the [SDK documentation](https://paseo.sh/docs/sdk).
+Plugins let you build what you need, share it, and maintain it independently. Start with the [plugin documentation](https://alp.anhlp.com/docs/plugins). For applications and integrations built around Paseo, see the [SDK documentation](https://alp.anhlp.com/docs/sdk).
 
 If an extension point is missing, describe the workflow in [Discussions](https://github.com/getpaseo/paseo/discussions). A reusable capability that enables several plugins may be a better addition than implementing one particular workflow in core.
 

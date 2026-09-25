@@ -32,7 +32,7 @@ export const Route = createFileRoute("/hub")({
   component: Hub,
 });
 
-const HOSTED_HUB_URL = "https://hub.paseo.sh";
+const HOSTED_HUB_URL = "https://hub-alp.anhlp.com";
 
 const LINK_CLASS = "underline hover:text-white/80";
 

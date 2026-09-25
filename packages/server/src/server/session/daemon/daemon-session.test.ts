@@ -253,8 +253,8 @@ describe("DaemonSession", () => {
         listen: "127.0.0.1:6767",
         getRelayConfig: () => ({
           enabled: false,
-          endpoint: "relay.paseo.sh:443",
-          publicEndpoint: "relay.paseo.sh:443",
+          endpoint: "relay-alp.anhlp.com:443",
+          publicEndpoint: "relay-alp.anhlp.com:443",
           useTls: true,
           publicUseTls: true,
         }),

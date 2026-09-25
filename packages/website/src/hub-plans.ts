@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 
 const HUB_PLANS_URL =
-  import.meta.env.VITE_HUB_PLANS_URL ?? "https://hub.paseo.sh/api/billing/plans";
+  import.meta.env.VITE_HUB_PLANS_URL ?? "https://hub-alp.anhlp.com/api/billing/plans";
 
 export interface HubHostedOffer {
   name: string;

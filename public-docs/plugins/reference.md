@@ -174,7 +174,7 @@ Use `ExternalLink` to open documentation outside Paseo:
 import { ExternalLink } from "@getpaseo/plugin/client/ui";
 
 export function DocumentationLink() {
-  return <ExternalLink href="https://paseo.sh/docs">Open documentation</ExternalLink>;
+  return <ExternalLink href="https://alp.anhlp.com/docs">Open documentation</ExternalLink>;
 }
 ```
 
@@ -185,7 +185,7 @@ The component has accessible link semantics and uses the same opener as
 import { openExternalUrl } from "@getpaseo/plugin/client";
 
 export async function openDocumentation() {
-  await openExternalUrl("https://paseo.sh/docs");
+  await openExternalUrl("https://alp.anhlp.com/docs");
 }
 ```
 
@@ -219,7 +219,7 @@ import { Pressable, Text } from "react-native";
 
 export function DocumentationPanel({ navigation, workspaceId, theme }: PluginWorkspacePanelProps) {
   const openBrowser = navigation?.openBrowser;
-  const url = "https://paseo.sh/docs";
+  const url = "https://alp.anhlp.com/docs";
 
   if (!openBrowser) {
     return <ExternalLink href={url}>Open documentation</ExternalLink>;
