@@ -34,6 +34,9 @@ describe("daemon plugin config", () => {
       "codex-lead",
       "codex-peer",
       "codex-supervisor",
+      "gemini-lead",
+      "gemini-peer",
+      "gemini-supervisor",
     ]);
   });
 

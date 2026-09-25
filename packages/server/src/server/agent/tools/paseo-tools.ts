@@ -1457,6 +1457,12 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       }
       const selectedProvider = resolveRequiredProviderModel(parsedArgs.provider).provider;
       const inheritedConfig = resolveInheritedProviderConfig(selectedProvider);
+      // ALP(slp): agent callers get a sender stamp on the initial prompt too, same as
+      // send_agent_prompt, so the created agent can tell a brief came from another agent and not
+      // the Human. Human/top-level callers keep the verbatim prompt.
+      const stampedInitialPrompt = callerAgentId
+        ? await formatAgentToAgentPrompt(callerAgentId, parsedArgs.initialPrompt, "create_agent")
+        : parsedArgs.initialPrompt;
       const {
         snapshot,
         background: createdInBackground,
@@ -1479,7 +1485,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
           kind: "mcp",
           provider: parsedArgs.provider,
           title: parsedArgs.title,
-          initialPrompt: parsedArgs.initialPrompt,
+          initialPrompt: stampedInitialPrompt,
           config: inheritedConfig,
           cwd: resolvedArgs.cwd,
           workspaceId: resolvedArgs.workspaceId,
@@ -1889,8 +1895,13 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
   // from a user turn. Deliberately NOT a <paseo-system> envelope: the agent manager drops those
   // from the timeline, and the Human must see agent-to-agent traffic. Title/provider are
   // best-effort; the sender id is always present. A closing tag in the body is escaped so the
-  // sender cannot end the envelope early and forge text outside it.
-  async function formatAgentToAgentPrompt(senderAgentId: string, prompt: string): Promise<string> {
+  // sender cannot end the envelope early and forge text outside it. `toolName` names the tool the
+  // sender invoked (send_agent_prompt, create_agent) so the receiver knows how the message arrived.
+  async function formatAgentToAgentPrompt(
+    senderAgentId: string,
+    prompt: string,
+    toolName: string,
+  ): Promise<string> {
     const senderRecord = await agentStorage.get(senderAgentId);
     const senderAgent = agentManager.getAgent(senderAgentId);
     const title = senderRecord?.title ?? senderAgent?.config?.title;
@@ -1902,7 +1913,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     const body = prompt.replace(/<\s*\/\s*(paseo-agent-message)/gi, "<\\/$1");
     return [
       `<paseo-agent-message${attr("from", senderAgentId)}${attr("title", title)}${attr("provider", provider)}>`,
-      `Agent ${senderAgentId} sent you this message via send_agent_prompt. It comes from another agent, not from the user.`,
+      `Agent ${senderAgentId} sent you this message via ${toolName}. It comes from another agent, not from the user.`,
       "",
       body,
       "</paseo-agent-message>",
@@ -1939,7 +1950,9 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
         agentId,
         // ALP(slp): agent callers get a sender stamp and steer into a running turn instead of
         // cancelling it. Human/top-level callers keep the verbatim prompt and replace semantics.
-        prompt: callerAgentId ? await formatAgentToAgentPrompt(callerAgentId, prompt) : prompt,
+        prompt: callerAgentId
+          ? await formatAgentToAgentPrompt(callerAgentId, prompt, "send_agent_prompt")
+          : prompt,
         activeTurnBehavior: callerAgentId ? "steer" : undefined,
         sessionMode,
         logger: childLogger,

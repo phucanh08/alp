@@ -50,7 +50,7 @@ alp starts the daemon locally, then asks whether to enable the end-to-end encryp
 
 The daemon can also serve the browser web app itself, so you can use the full UI without the hosted app. See [Self-hosting the web UI](/docs/web-ui).
 
-Configuration and local state live under `PASEO_HOME` (defaults to `~/.paseo`).
+Configuration and local state live under `PASEO_HOME` (defaults to `~/.alp`).
 
 ## Docker
 

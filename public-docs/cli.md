@@ -322,7 +322,7 @@ Every daemon-connected CLI command accepts global `--home` or `--host`, before o
 | Both flags, or conflicting duplicate flags | `TARGET_AMBIGUOUS`                                     |
 | Only `PASEO_HOME` or only `PASEO_HOST`     | The corresponding target                               |
 | Both environment selectors, without a flag | `TARGET_AMBIGUOUS`                                     |
-| Neither                                    | Default local home, `~/.paseo`                         |
+| Neither                                    | Default local home, `~/.alp`                           |
 
 Local-only `start`, `daemon run`, `config`, `onboard`, and `set-password` reject explicit `--host` and ignore `PASEO_HOST`. Endpoint operations retain TCP, Unix socket, Windows pipe, SSH, and pairing-offer transports. A host-side CLI controlling a container needs `--host` or `PASEO_HOST`.
 

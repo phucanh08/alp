@@ -1,6 +1,6 @@
 ---
 title: Custom providers
-description: Configure custom providers, alternative endpoints, profiles, custom binaries, and ACP agents in ~/.paseo/config.json.
+description: Configure custom providers, alternative endpoints, profiles, custom binaries, and ACP agents in ~/.alp/config.json.
 nav: Custom providers
 order: 22
 category: Providers
@@ -8,7 +8,7 @@ category: Providers
 
 # Custom providers
 
-Everything beyond the [supported providers](/docs/supported-providers) lives under `agents.providers` in `~/.paseo/config.json`. You can:
+Everything beyond the [supported providers](/docs/supported-providers) lives under `agents.providers` in `$PASEO_HOME/config.json` (`~/.alp/config.json` by default). You can:
 
 - **Extend** a first-class provider to point at a different API (Z.AI, Alibaba/Qwen, a proxy, a self-hosted endpoint).
 - **Add profiles**, multiple entries against the same underlying provider with different credentials or curated model lists.

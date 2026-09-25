@@ -104,7 +104,7 @@ npm run format                       # Auto-format with Biome
 npm run format:check                 # Check formatting without writing
 ```
 
-Repo dev commands use checkout-local state by default. In this checkout, `PASEO_HOME` resolves to `.dev/paseo-home`, and `npm run cli -- ...` targets that same dev home automatically. The packaged desktop app and production-style daemon keep using `~/.paseo` on port `6767`.
+Repo dev commands use checkout-local state by default. In this checkout, `PASEO_HOME` resolves to `.dev/paseo-home`, and `npm run cli -- ...` targets that same dev home automatically. The packaged desktop app and production-style daemon keep using `~/.alp` on port `6767`.
 
 See [docs/development.md](docs/development.md) for full setup, build sync requirements, and debugging.
 
@@ -198,8 +198,11 @@ Find the complete daemon logs and traces in the $PASEO_HOME/daemon.log
 ## SLP team policy (alp fork)
 
 Repo này là fork của [getpaseo/paseo](https://github.com/getpaseo/paseo) (`upstream`), phát triển
-theo quy trình SLP (Supervisor / Lead / Peer). Definition ở `.claude/agents/`, skill theo phase ở
-`.claude/skills/`; gõ `/ask-alp` để biết ghế nào dùng skill nào. Plan hiện hành: `plans/`.
+theo quy trình SLP (Supervisor / Lead / Peer). Trong phiên Claude Code như phiên này, seat definition
+ở `.claude/agents/`, skill theo phase ở `.claude/skills/`; gõ `/ask-alp` để biết ghế nào dùng skill
+nào. Trong app alp (agent do plugin `plugins/slp` tạo), seat definition bundled ở
+`plugins/slp/agents/`; repo override bằng `.slp/agents/<seat>.md`, không phải `.claude/agents/`. Plan
+hiện hành: `plans/`.
 
 - Lead là owner của topology và acceptance; chỉ Lead spawn Peer (`create_agent`, provider `claude-peer`).
 - Peer writer cần `exclusive-writer` + commit lease + `Base` SHA; mỗi moving scope một writer.
@@ -223,5 +226,5 @@ theo quy trình SLP (Supervisor / Lead / Peer). Definition ở `.claude/agents/`
 
 ### External side effects
 
-Agent không push, không deploy (Cloudflare/Fly/app store), không publish npm, không sửa `~/.paseo`
+Agent không push, không deploy (Cloudflare/Fly/app store), không publish npm, không sửa `~/.alp`
 hay daemon 6767 đang chạy, trừ khi Human cấp authority rõ ràng trong brief.

@@ -12,10 +12,10 @@ Managed instances load their configuration from the home’s `config.json` and d
 
 ## Where config lives
 
-By default, alp uses `~/.paseo` as its home directory. The configuration file is:
+By default, alp uses `~/.alp` as its home directory. The configuration file is:
 
 ```bash
-~/.paseo/config.json
+~/.alp/config.json
 ```
 
 You can change the home directory by setting `PASEO_HOME` or selecting `--home` on a CLI command.

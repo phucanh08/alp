@@ -28,16 +28,13 @@ test("stripFrontmatter drops the leading YAML block and keeps the body", () => {
   expect(stripFrontmatter("# No frontmatter\n---\nx")).toBe("# No frontmatter\n---\nx");
 });
 
-test("readDefinition prefers .claude/agents in the agent cwd", async () => {
+test("readDefinition prefers .slp/agents in the agent cwd", async () => {
   const cwd = await mkdtemp(path.join(tmpdir(), "slp-plugin-"));
-  await mkdir(path.join(cwd, ".claude", "agents"), { recursive: true });
-  await writeFile(
-    path.join(cwd, ".claude", "agents", "peer.md"),
-    "---\nname: peer\n---\nPEER BODY\n",
-  );
+  await mkdir(path.join(cwd, ".slp", "agents"), { recursive: true });
+  await writeFile(path.join(cwd, ".slp", "agents", "peer.md"), "---\nname: peer\n---\nPEER BODY\n");
   const def = await readDefinition(cwd, "peer");
   expect(def).toEqual({
-    source: path.join(cwd, ".claude", "agents", "peer.md"),
+    source: path.join(cwd, ".slp", "agents", "peer.md"),
     body: "PEER BODY",
   });
 });
@@ -49,6 +46,18 @@ test("readDefinition falls back to the bundled seat file without its frontmatter
   expect(def.body.startsWith("---")).toBe(false);
   expect(def.body).not.toMatch(/^name: lead$/m);
   expect(def.body).toMatch(/^# /);
+});
+
+test("readDefinition ignores .claude/agents and falls back to bundled", async () => {
+  const cwd = await mkdtemp(path.join(tmpdir(), "slp-plugin-"));
+  await mkdir(path.join(cwd, ".claude", "agents"), { recursive: true });
+  await writeFile(
+    path.join(cwd, ".claude", "agents", "peer.md"),
+    "---\nname: peer\n---\nCLAUDE CODE PEER BODY\n",
+  );
+  const def = await readDefinition(cwd, "peer");
+  expect(def.source).toBe("bundled");
+  expect(def.body).not.toMatch(/CLAUDE CODE PEER BODY/);
 });
 
 test("buildSystemPrompt joins existing prompt, seat definition, and the seat runtime block", () => {
@@ -158,4 +167,38 @@ test("a Codex Lead spawns codex-peer in Codex's default approval mode", () => {
   const claudeLead = buildSystemPrompt("lead", "claude", "BODY", null);
   expect(claudeLead).toContain('settings.modeId: "default"');
   expect(claudeLead).not.toContain("codex-peer");
+});
+
+test("gemini profiles map to seats with no fixed unattended or spawn mode", () => {
+  expect(seatOf("gemini-lead")).toBe("lead");
+  expect(seatOf("gemini-peer")).toBe("peer");
+  expect(seatOf("gemini-supervisor")).toBe("supervisor");
+  expect(familyOf("gemini-peer")).toBe("gemini");
+  expect(familyOf("gemini")).toBeNull();
+  expect(seatProfileFor("gemini", "lead")).toEqual({ providerId: "gemini-lead" });
+  expect(seatProfileFor("gemini", "lead")).not.toHaveProperty("modeId");
+});
+
+test("a Gemini Lead spawns gemini-peer with no settings.modeId", () => {
+  const lead = buildSystemPrompt("lead", "gemini", "BODY", null);
+  expect(lead).toContain('provider: "gemini-peer/<model>"');
+  expect(lead).not.toContain("settings.modeId:");
+  expect(lead).toMatch(/không set.*settings\.modeId/);
+  expect(lead).toContain("settings.thinkingOptionId");
+  expect(lead).toMatch(/không đoán id/);
+});
+
+test("gemini runtime block names its skill file path and steer stays generic-ACP", () => {
+  const peer = buildSystemPrompt("peer", "gemini", "BODY", null);
+  expect(peer).toMatch(/~\/\.agents\/skills\/<tên>\/SKILL\.md/);
+  expect(peer).toMatch(/Provider ACP \(không phải Claude\/Codex\) vẫn thay lượt đang chạy/);
+});
+
+test("gemini providerOptionsFor falls back to the claude-shaped branch (no codex-only rules)", () => {
+  expect(providerOptionsFor("peer", "gemini", { allowedTools: ["Bash"] })).toEqual({
+    allowedTools: ["Bash"],
+  });
+  expect(providerOptionsFor("lead", "gemini", undefined)).toEqual({
+    allowedTools: ["mcp__paseo__*"],
+  });
 });

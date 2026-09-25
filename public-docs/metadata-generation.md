@@ -43,7 +43,7 @@ Open **Settings → Host → Metadata** and select **Automatic** or **Manual**. 
 
 ## Configure a custom fallback order
 
-To configure more than one preferred model or control the exact order, set `agents.metadataGeneration.providers` in `~/.paseo/config.json`. Your entries are tried before the built-in defaults.
+To configure more than one preferred model or control the exact order, set `agents.metadataGeneration.providers` in `$PASEO_HOME/config.json` (`~/.alp/config.json` by default). Your entries are tried before the built-in defaults.
 
 ```json
 {
