@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import pino from "pino";
 import { afterEach, describe, expect, it } from "vitest";
 import { DaemonConfigStore } from "../daemon-config-store.js";
-import { PluginService } from "./index.js";
+import { PluginService, resolveBundledPluginDir } from "./index.js";
 import { ManagedPluginSources } from "./managed-source.js";
 import {
   startNpmRegistry,
@@ -1067,6 +1067,129 @@ export default function contribute(plugin: unknown) {
     await service.stopAllPlugins();
 
     expect((await readFile(cleanupFile, "utf8")).trim().split("\n")).toHaveLength(4);
+  });
+});
+
+// ALP(slp): the daemon ships the slp plugin in its dist and runs it without a config entry.
+describe("PluginService bundled plugins", () => {
+  function createRecordingRuntime() {
+    const starts: Array<[string, string]> = [];
+    const running = new Set<string>();
+    const runtime: TestPluginRuntime = {
+      catalog: () => [...running].map((id) => ({ id, clientBundle: "bundle" })),
+      invoke: async () => undefined,
+      getLogs: () => [],
+      clearLogs: () => undefined,
+      startPlugin: async (pluginId, pluginPath, canPublish) => {
+        if (!canPublish()) throw new Error(`Plugin start cancelled: ${pluginId}`);
+        starts.push([pluginId, pluginPath]);
+        running.add(pluginId);
+      },
+      stopPluginById: async (pluginId) => running.delete(pluginId),
+      stopAll: async () => {
+        running.clear();
+      },
+      subscribe: () => () => undefined,
+      bindPaseoSessionHost: () => undefined,
+    };
+    return { runtime, starts };
+  }
+
+  it("resolves the bundled directory in a build and in a source checkout", async () => {
+    const build = await mkdtemp(path.join(tmpdir(), "paseo-bundled-build-"));
+    roots.push(build);
+    await mkdir(path.join(build, "server", "plugins", "slp"), { recursive: true });
+    const buildModule = pathToFileURL(path.join(build, "server", "server", "plugins", "index.js"));
+    expect(resolveBundledPluginDir("slp", buildModule)).toBe(
+      path.join(build, "server", "plugins", "slp"),
+    );
+
+    const checkout = await mkdtemp(path.join(tmpdir(), "paseo-bundled-checkout-"));
+    roots.push(checkout);
+    await mkdir(path.join(checkout, "plugins", "slp"), { recursive: true });
+    const sourceModule = pathToFileURL(
+      path.join(checkout, "packages", "server", "src", "server", "plugins", "index.ts"),
+    );
+    expect(resolveBundledPluginDir("slp", sourceModule)).toBe(
+      path.join(checkout, "plugins", "slp"),
+    );
+  });
+
+  it("runs a bundled plugin that has no config entry", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    roots.push(home);
+    const bundled = await createPlugin(
+      "slp",
+      `export default function contribute(plugin: unknown) { void plugin; return () => undefined; }`,
+    );
+    const service = createService(home, {}, { bundledPlugins: { slp: bundled } });
+
+    await service.start();
+
+    expect(catalogIds(service)).toEqual(["slp"]);
+    await service.stopAllPlugins();
+  }, 20_000);
+
+  it("lets a configured source with the same id replace the bundled one", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    roots.push(home);
+    const { runtime, starts } = createRecordingRuntime();
+    const service = createService(
+      home,
+      { slp: { source: "directory", path: "/user/slp" } },
+      { runtime, bundledPlugins: { slp: "/bundled/slp" } },
+    );
+
+    await service.start();
+
+    expect(starts).toEqual([["slp", "/user/slp"]]);
+  });
+
+  it("skips a bundled plugin whose directory is missing without failing startup", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    roots.push(home);
+    const { runtime, starts } = createRecordingRuntime();
+    const missing = path.join(home, "no-such-plugin");
+    const service = createService(home, {}, { runtime, bundledPlugins: { slp: missing } });
+
+    await expect(service.start()).resolves.toBeUndefined();
+
+    expect(starts).toEqual([]);
+  });
+
+  it("follows the global plugin switch", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    roots.push(home);
+    const bundled = await createPlugin(
+      "slp",
+      `export default function contribute(plugin: unknown) { void plugin; return () => undefined; }`,
+    );
+    const { runtime, starts } = createRecordingRuntime();
+    const store = createStore(home);
+    store.patch({ pluginsEnabled: false });
+    const service = bindTestSessionHost(
+      new PluginService(pino({ level: "silent" }), store, "0.4.0", {
+        runtime,
+        bundledPlugins: { slp: bundled },
+      }),
+    );
+
+    await service.start();
+    expect(starts).toEqual([]);
+
+    const published = new Promise<void>((resolve) => {
+      const unsubscribe = service.subscribe((pluginId) => {
+        if (pluginId !== "slp" || !catalogIds(service).includes("slp")) return;
+        unsubscribe();
+        resolve();
+      });
+    });
+    store.patch({ pluginsEnabled: true });
+    await published;
+
+    expect(starts).toEqual([["slp", bundled]]);
+    store.patch({ pluginsEnabled: false });
+    expect(catalogIds(service)).toEqual([]);
   });
 });
 

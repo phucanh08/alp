@@ -1,5 +1,7 @@
 import type { PluginLifecycle } from "./lifecycle/index.js";
+import { existsSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { stat, rm } from "node:fs/promises";
 import type pino from "pino";
 import type { ProviderRegistration } from "@getpaseo/plugin/server/provider";
@@ -50,6 +52,21 @@ interface PluginServiceDependencies {
   settingsDirectory?: string;
   runtime?: PluginRuntimePort;
   managedSources?: ManagedPluginSources;
+  // ALP(slp): plugins shipped inside the daemon, by id; a `plugins` config entry replaces one.
+  bundledPlugins?: Readonly<Record<string, string>>;
+}
+
+/** ALP(slp): dist/server/plugins/<id> in a build, <repo>/plugins/<id> when run from source. */
+export function resolveBundledPluginDir(
+  pluginId: string,
+  moduleUrl: string | URL = import.meta.url,
+): string {
+  const moduleDir = path.dirname(fileURLToPath(moduleUrl));
+  const candidates = [
+    path.resolve(moduleDir, "..", "..", "plugins", pluginId),
+    path.resolve(moduleDir, "..", "..", "..", "..", "..", "plugins", pluginId),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
 }
 
 function resolvePluginStatus(input: {
@@ -143,6 +160,7 @@ export class PluginService {
         await this.startConfigured(pluginId);
         this.notify(pluginId);
       }
+      await this.startBundled();
     }
     this.configStore.onFieldChange("pluginsEnabled", (value) => {
       this.handleGlobalSwitch(value === true);
@@ -441,6 +459,7 @@ export class PluginService {
         if (source.enabled !== false) await this.startConfigured(pluginId);
         this.notify(pluginId);
       }
+      await this.startBundled();
     }).catch((error) => this.logger.error({ err: error }, "Failed to enable plugins"));
   }
 
@@ -452,6 +471,29 @@ export class PluginService {
       await this.startPlugin(pluginId, source.path);
     } catch (error) {
       if (this.canPublish(pluginId)) this.recordFailure(pluginId, error);
+    }
+  }
+
+  // ALP(slp): start each bundled plugin the user has not replaced with a configured source.
+  private async startBundled(): Promise<void> {
+    for (const [pluginId, directory] of Object.entries(this.dependencies.bundledPlugins ?? {})) {
+      if (this.configStore.get().plugins?.[pluginId]) {
+        this.logger.info({ pluginId }, "Configured plugin source replaces the bundled plugin");
+        continue;
+      }
+      if (!(await stat(directory).catch(() => null))?.isDirectory()) {
+        this.logger.warn({ pluginId, directory }, "Bundled plugin directory is missing");
+        continue;
+      }
+      if (!this.canPublish(pluginId)) continue;
+      this.errors.delete(pluginId);
+      try {
+        await this.startPlugin(pluginId, directory);
+      } catch (error) {
+        this.logger.error({ err: error, pluginId }, "Bundled plugin failed to start");
+        if (this.canPublish(pluginId)) this.recordFailure(pluginId, error);
+      }
+      this.notify(pluginId);
     }
   }
 
@@ -469,6 +511,10 @@ export class PluginService {
 
   private canPublish(pluginId: string): boolean {
     const config = this.configStore.get();
+    // ALP(slp): a bundled plugin without a config entry follows only the global switch.
+    if (this.dependencies.bundledPlugins?.[pluginId] && !config.plugins?.[pluginId]) {
+      return !this.globalStartsBlocked && config.pluginsEnabled === true;
+    }
     return (
       !this.globalStartsBlocked &&
       config.pluginsEnabled === true &&

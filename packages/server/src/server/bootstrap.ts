@@ -229,7 +229,7 @@ import {
   type HubRelationshipRemote,
 } from "./hub/relationship-remote.js";
 import { DaemonExecutions } from "./hub/daemon-executions.js";
-import { PluginService } from "./plugins/index.js";
+import { PluginService, resolveBundledPluginDir } from "./plugins/index.js";
 import { ManagedPluginSources } from "./plugins/managed-source.js";
 
 const MCP_DEBUG_BATCH_LIMIT = 10;
@@ -611,6 +611,8 @@ export async function createPaseoDaemon(
   const pluginRuntime = new PluginService(logger, daemonConfigStore, daemonVersion, {
     managedSources: new ManagedPluginSources(config.paseoHome),
     settingsDirectory: path.join(config.paseoHome, "plugin-settings"),
+    // ALP(slp): the SLP seat plugin ships with the daemon and runs without a config entry.
+    bundledPlugins: { slp: resolveBundledPluginDir("slp") },
   });
 
   const serverId = getOrCreateServerId(config.paseoHome, { logger });
