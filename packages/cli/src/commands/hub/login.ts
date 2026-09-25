@@ -60,8 +60,8 @@ export function addHubLoginCommand(parent: Command, dependencies: HubLoginDepend
     addHubResolutionHelp(
       parent
         .command("login")
-        .description("Log in to a Paseo Hub for CLI access")
-        .argument("[origin]", "Paseo Hub origin"),
+        .description("Log in to an alp Hub for CLI access")
+        .argument("[origin]", "alp Hub origin"),
     ),
   ).action(
     withOutput(async (...args) => {
