@@ -10,12 +10,12 @@ export type Seat = "lead" | "peer" | "supervisor";
 export type ProviderOptions = PluginBeforeRequests["agent.create"]["config"]["providerOptions"];
 
 /** Base provider family of a profile: decides which providerOptions mean anything. */
-export type Family = "claude" | "codex";
+export type Family = "claude" | "codex" | "gemini";
 
 /** Agent label that names the seat. */
 export const SEAT_LABEL = "slp.role";
 
-/** Provider profile (`<family>-<seat>`, extends claude|codex in the daemon config) → SLP seat. */
+/** Provider profile (`<family>-<seat>`, extends claude|codex|acp in the daemon config) → SLP seat. */
 const SEAT_BY_PROVIDER: Record<string, Seat> = {
   "claude-lead": "lead",
   "claude-peer": "peer",
@@ -23,6 +23,9 @@ const SEAT_BY_PROVIDER: Record<string, Seat> = {
   "codex-lead": "lead",
   "codex-peer": "peer",
   "codex-supervisor": "supervisor",
+  "gemini-lead": "lead",
+  "gemini-peer": "peer",
+  "gemini-supervisor": "supervisor",
 };
 
 export function seatOf(provider: string): Seat | null {
@@ -31,7 +34,9 @@ export function seatOf(provider: string): Seat | null {
 
 export function familyOf(provider: string): Family | null {
   if (!(provider in SEAT_BY_PROVIDER)) return null;
-  return provider.startsWith("codex-") ? "codex" : "claude";
+  if (provider.startsWith("codex-")) return "codex";
+  if (provider.startsWith("gemini-")) return "gemini";
+  return "claude";
 }
 
 /** Seat from the `slp.role` label, falling back to the provider profile. */
@@ -44,15 +49,23 @@ export function seatOfAgent(agent: {
   return seatOf(agent.provider);
 }
 
-/** Mode id each family runs a seat agent in without approval prompts. */
-const UNATTENDED_MODE: Record<Family, string> = {
+/**
+ * Mode id each family runs a seat agent in without approval prompts. Gemini has none: its ACP
+ * session reports available modes only after `session/new`, so the plugin creates gemini-family
+ * seat agents with no `modeId` and the provider applies its own default.
+ */
+const UNATTENDED_MODE: Partial<Record<Family, string>> = {
   claude: "bypassPermissions",
   codex: "full-access",
 };
 
-/** Provider profile and mode for a seat agent of the given family. */
-export function seatProfileFor(family: Family, seat: Seat): { providerId: string; modeId: string } {
-  return { providerId: `${family}-${seat}`, modeId: UNATTENDED_MODE[family] };
+/** Provider profile and mode for a seat agent of the given family; `modeId` is absent for gemini. */
+export function seatProfileFor(
+  family: Family,
+  seat: Seat,
+): { providerId: string; modeId?: string } {
+  const modeId = UNATTENDED_MODE[family];
+  return modeId ? { providerId: `${family}-${seat}`, modeId } : { providerId: `${family}-${seat}` };
 }
 
 /** Codex Supervisor: writes stay inside its cwd, standing in for Claude's Write/Edit cut. */

@@ -6,29 +6,32 @@ Bundled alp plugin for the SLP seats: Supervisor, Lead, Peer. The daemon loads i
 
 ## What it does
 
-| Trigger                                                                                               | Behavior                                                                                                                                                                                                                                             |
-| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `before("agent.create")` on provider `claude-lead`, `claude-peer`, `claude-supervisor` (or `codex-*`) | Appends the seat definition, the SLP-RUNTIME block, and the counterpart roster to the system prompt. Lead and Supervisor get `allowedTools: mcp__paseo__*`; the Supervisor also loses `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Agent`, `Task`. |
-| `workspace.created` for a workspace created by the app or CLI                                         | Ensures the workspace has a Lead.                                                                                                                                                                                                                    |
-| `agent.turn_ended` of a Lead's first turn                                                             | Tells each Supervisor the Lead did not register with, now if it is idle, otherwise when its own turn ends.                                                                                                                                           |
-| `agent.permission_requested`                                                                          | Allows `mcp__paseo__*` tool cards for Lead and Supervisor.                                                                                                                                                                                           |
-| RPC `slp.lead.ensure { workspaceId }`                                                                 | Returns the workspace's live Lead, creating it when missing.                                                                                                                                                                                         |
-| RPC `slp.supervisor.ensure {}`                                                                        | Returns the host's live Supervisor, creating the system workspace and agent when missing.                                                                                                                                                            |
+| Trigger                                                                                                           | Behavior                                                                                                                                                                                                                                             |
+| ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `before("agent.create")` on provider `claude-lead`, `claude-peer`, `claude-supervisor` (or `codex-*`, `gemini-*`) | Appends the seat definition, the SLP-RUNTIME block, and the counterpart roster to the system prompt. Lead and Supervisor get `allowedTools: mcp__paseo__*`; the Supervisor also loses `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Agent`, `Task`. |
+| `workspace.created` for a workspace created by the app or CLI                                                     | Ensures the workspace has a Lead.                                                                                                                                                                                                                    |
+| `agent.turn_ended` of a Lead's first turn                                                                         | Tells each Supervisor the Lead did not register with, now if it is idle, otherwise when its own turn ends.                                                                                                                                           |
+| `agent.permission_requested`                                                                                      | Allows `mcp__paseo__*` tool cards for Lead and Supervisor.                                                                                                                                                                                           |
+| RPC `slp.lead.ensure { workspaceId }`                                                                             | Returns the workspace's live Lead, creating it when missing.                                                                                                                                                                                         |
+| RPC `slp.supervisor.ensure {}`                                                                                    | Returns the host's live Supervisor, creating the system workspace and agent when missing.                                                                                                                                                            |
 
 Contracts live in `shared/rpc.ts`. The client entry `index.client.tsx` is discovered by file name.
 The manifest schema is strict and has no field for entries.
 
 ## Seats
 
-| Seat       | Provider                                   | Title         | Label                 | Mode (Claude / Codex)               |
-| ---------- | ------------------------------------------ | ------------- | --------------------- | ----------------------------------- |
-| Lead       | `<family>-lead/<default model>`            | `Lead`        | `slp.role=lead`       | `bypassPermissions` / `full-access` |
-| Supervisor | `<family>-supervisor/<default model>`      | `Supervisor`  | `slp.role=supervisor` | `bypassPermissions` / `full-access` |
-| Peer       | `<family>-peer/<model>` chosen by the Lead | Lead's choice | `slp.role=peer`       | `default` / `auto`                  |
+| Seat       | Provider                                   | Title         | Label                 | Mode (Claude / Codex / Gemini)             |
+| ---------- | ------------------------------------------ | ------------- | --------------------- | ------------------------------------------ |
+| Lead       | `<family>-lead/<default model>`            | `Lead`        | `slp.role=lead`       | `bypassPermissions` / `full-access` / none |
+| Supervisor | `<family>-supervisor/<default model>`      | `Supervisor`  | `slp.role=supervisor` | `bypassPermissions` / `full-access` / none |
+| Peer       | `<family>-peer/<model>` chosen by the Lead | Lead's choice | `slp.role=peer`       | `default` / `auto` / none                  |
 
-`<family>` is `claude` or `codex`; `seatProfileFor` in `server/seat.ts` picks provider and mode.
-The ensure operations take the provider's default model from `listModels`. The Lead picks each
-Peer's model and `settings.thinkingOptionId` per task.
+`<family>` is `claude`, `codex`, or `gemini`; `seatProfileFor` in `server/seat.ts` picks provider and
+mode. Gemini seats get no `modeId`: the ACP session behind `gemini --acp` has no fixed mode before
+`session/new`, so the plugin creates and spawns gemini-family agents without one and the provider
+applies its own default. The ensure operations take the provider's default model from `listModels`.
+The Lead picks each Peer's model and `settings.thinkingOptionId` per task (gemini has no fixed effort
+table; use the provider's default model, no guessing).
 
 A seat is recognized by its `slp.role` label, or by its provider when the label is missing.
 
