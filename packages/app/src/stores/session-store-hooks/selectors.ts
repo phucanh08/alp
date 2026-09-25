@@ -1,11 +1,13 @@
 import equal from "fast-deep-equal";
 import {
   buildWorkspaceStructureProjects,
+  collectHiddenProjectIds,
   type WorkspaceStructure,
   type WorkspaceStructureProject,
 } from "@/projects/workspace-structure";
 import type { DesktopBadgeWorkspaceStatus } from "@/utils/desktop-badge-state";
 import { resolveWorkspaceMapKeyByIdentity } from "@/utils/workspace-identity";
+import { collectSlpSystemWorkspaceIds, type SlpSystemAgentFields } from "@/slp/system-workspaces";
 import type { ProjectDescriptor, WorkspaceDescriptor } from "../session-store";
 
 export type { DesktopBadgeWorkspaceStatus } from "@/utils/desktop-badge-state";
@@ -19,6 +21,7 @@ export interface SessionsSnapshot {
       hasWorkspaceDirectorySnapshot?: boolean;
       workspaces: Map<string, WorkspaceDescriptor>;
       projects?: Map<string, ProjectDescriptor>;
+      agents?: ReadonlyMap<string, SlpSystemAgentFields>;
     }
   >;
 }
@@ -30,6 +33,36 @@ export interface SidebarOrderSnapshot {
 
 const EMPTY_WORKSPACE_KEYS: string[] = [];
 const EMPTY_WORKSPACE_STRUCTURE: WorkspaceStructure = { projects: [] };
+const EMPTY_WORKSPACE_IDS: ReadonlySet<string> = new Set();
+
+// The agents Map is replaced on every agent update; cache per Map identity so each store update
+// scans the agents at most once, however many selectors ask.
+const slpSystemWorkspaceIdsByAgents = new WeakMap<
+  ReadonlyMap<string, SlpSystemAgentFields>,
+  ReadonlySet<string>
+>();
+
+/** ALP(slp): workspace ids the SLP plugin owns; project lists hide them, the store keeps them. */
+export function selectSlpSystemWorkspaceIds(
+  agents: ReadonlyMap<string, SlpSystemAgentFields> | undefined,
+): ReadonlySet<string> {
+  if (!agents || agents.size === 0) return EMPTY_WORKSPACE_IDS;
+  let workspaceIds = slpSystemWorkspaceIdsByAgents.get(agents);
+  if (!workspaceIds) {
+    workspaceIds = collectSlpSystemWorkspaceIds(agents.values());
+    slpSystemWorkspaceIdsByAgents.set(agents, workspaceIds);
+  }
+  return workspaceIds;
+}
+
+function sameWorkspaceIds(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  if (left === right) return true;
+  if (left.size !== right.size) return false;
+  for (const id of left) {
+    if (!right.has(id)) return false;
+  }
+  return true;
+}
 
 export const workspaceEqualityFns = {
   identity: Object.is as (a: unknown, b: unknown) => boolean,
@@ -159,6 +192,7 @@ export function selectWorkspaceStructureProjects(
     serverId: string;
     workspaces: Iterable<WorkspaceDescriptor>;
     projects: Iterable<ProjectDescriptor>;
+    hiddenWorkspaceIds: ReadonlySet<string>;
   }> = [];
 
   for (const serverId of serverIds) {
@@ -172,6 +206,7 @@ export function selectWorkspaceStructureProjects(
       serverId,
       workspaces: workspaces?.values() ?? [],
       projects: projects.values(),
+      hiddenWorkspaceIds: selectSlpSystemWorkspaceIds(session.agents),
     });
   }
 
@@ -188,6 +223,7 @@ export function createWorkspaceStructureProjectsSelector(
   let previousInputs: Array<{
     workspaces: Map<string, WorkspaceDescriptor> | undefined;
     projects: Map<string, ProjectDescriptor> | undefined;
+    hiddenWorkspaceIds: ReadonlySet<string>;
   }> | null = null;
   let previousProjects: WorkspaceStructureProject[] | null = null;
 
@@ -195,15 +231,21 @@ export function createWorkspaceStructureProjectsSelector(
     const inputs = serverIds.map((serverId) => ({
       workspaces: state.sessions[serverId]?.workspaces,
       projects: state.sessions[serverId]?.projects,
+      // Compared by content: agent updates replace the Map but rarely change this set.
+      hiddenWorkspaceIds: selectSlpSystemWorkspaceIds(state.sessions[serverId]?.agents),
     }));
     const priorInputs = previousInputs;
     const unchanged =
       priorInputs !== null &&
-      inputs.every(
-        (input, index) =>
-          input.workspaces === priorInputs[index]?.workspaces &&
-          input.projects === priorInputs[index]?.projects,
-      );
+      inputs.every((input, index) => {
+        const prior = priorInputs[index];
+        return (
+          prior !== undefined &&
+          input.workspaces === prior.workspaces &&
+          input.projects === prior.projects &&
+          sameWorkspaceIds(input.hiddenWorkspaceIds, prior.hiddenWorkspaceIds)
+        );
+      });
     if (unchanged && previousProjects) {
       return previousProjects;
     }
@@ -291,11 +333,17 @@ export function selectRecommendedProjectPaths(
   if (!serverId) {
     return EMPTY_WORKSPACE_KEYS;
   }
-  const workspaces = state.sessions[serverId]?.workspaces;
+  const session = state.sessions[serverId];
+  const workspaces = session?.workspaces;
   if (!workspaces) {
     return EMPTY_WORKSPACE_KEYS;
   }
+  const hiddenProjectIds = collectHiddenProjectIds(
+    workspaces.values(),
+    selectSlpSystemWorkspaceIds(session.agents),
+  );
   return Array.from(workspaces.values())
+    .filter((workspace) => !hiddenProjectIds.has(workspace.projectId))
     .map((workspace) => workspace.projectRootPath)
     .filter((path) => path.length > 0);
 }

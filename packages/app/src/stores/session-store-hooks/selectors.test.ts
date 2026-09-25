@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createProjectViewKey } from "@/projects/workspace-structure";
+import type { SlpSystemAgentFields } from "@/slp/system-workspaces";
 
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import {
@@ -12,6 +13,7 @@ import {
   selectRecommendedProjectPaths,
   selectWorkspace,
   selectWorkspaceDirectory,
+  selectWorkspaceExists,
   selectWorkspaceFields,
   selectWorkspaceKeys,
   selectWorkspaceOrderByScope,
@@ -617,5 +619,141 @@ describe("selectWorkspaceStatusesForBadges", () => {
     expect(tracked.current).toEqual(["failed", "attention"]);
 
     tracked.stop();
+  });
+});
+
+describe("SLP system workspaces", () => {
+  const appWorkspace = createWorkspace({
+    id: "workspace-app",
+    projectId: "project-app",
+    projectDisplayName: "App",
+    projectRootPath: "/repo/app",
+  });
+  const supervisorWorkspace = createWorkspace({
+    id: "workspace-supervisor",
+    projectId: "project-supervisor",
+    projectDisplayName: "supervisor",
+    projectRootPath: "/home/.alp/supervisor",
+    status: "running",
+  });
+
+  function supervisorAgent(
+    workspaceId: string,
+    archivedAt: Date | null = null,
+  ): SlpSystemAgentFields {
+    return { workspaceId, labels: { "slp.role": "supervisor" }, archivedAt };
+  }
+
+  function plainAgent(workspaceId: string): SlpSystemAgentFields {
+    return { workspaceId, labels: {}, archivedAt: null };
+  }
+
+  function snapshot(agents: Map<string, SlpSystemAgentFields>) {
+    const workspaces = new Map(
+      [appWorkspace, supervisorWorkspace].map((workspace) => [workspace.id, workspace]),
+    );
+    const projects = new Map(
+      [appWorkspace, supervisorWorkspace].map((workspace) => [
+        workspace.projectId,
+        projectDescriptorFromTestWorkspace(workspace),
+      ]),
+    );
+    return { sessions: { [SERVER_ID]: { workspaces, projects, agents } } };
+  }
+
+  it("hides the project whose workspace runs a live Supervisor and keeps the others", () => {
+    const state = snapshot(
+      new Map([
+        ["agent-supervisor", supervisorAgent("workspace-supervisor")],
+        ["agent-app", plainAgent("workspace-app")],
+      ]),
+    );
+
+    const projects = selectWorkspaceStructureProjects(state, [SERVER_ID]);
+
+    expect(projects.map((project) => project.viewKey)).toEqual([equivalenceViewKey("project-app")]);
+    expect(projects[0]?.workspaceKeys).toEqual([`${SERVER_ID}:workspace-app`]);
+  });
+
+  it("shows the project again once its Supervisor is archived", () => {
+    const state = snapshot(
+      new Map([
+        ["agent-supervisor", supervisorAgent("workspace-supervisor", new Date("2026-09-01"))],
+      ]),
+    );
+
+    expect(selectWorkspaceStructureProjectViewKeys(state)).toEqual([
+      equivalenceViewKey("project-app"),
+      equivalenceViewKey("project-supervisor"),
+    ]);
+  });
+
+  it("does not recommend the Supervisor project root as a new project path", () => {
+    const state = snapshot(
+      new Map([["agent-supervisor", supervisorAgent("workspace-supervisor")]]),
+    );
+
+    expect(selectRecommendedProjectPaths(state, SERVER_ID)).toEqual(["/repo/app"]);
+  });
+
+  it("keeps the Supervisor workspace in the store for lookups and badges", () => {
+    const state = snapshot(
+      new Map([["agent-supervisor", supervisorAgent("workspace-supervisor")]]),
+    );
+
+    expect(selectWorkspaceExists(state, SERVER_ID, "workspace-supervisor")).toBe(true);
+    expect(selectWorkspaceStatusesForBadges(state)).toEqual(["done", "running"]);
+  });
+
+  it("returns the same projects reference while agents, workspaces and projects are unchanged", () => {
+    const state = snapshot(
+      new Map([["agent-supervisor", supervisorAgent("workspace-supervisor")]]),
+    );
+    const selectProjects = createWorkspaceStructureProjectsSelector([SERVER_ID]);
+
+    const before = selectProjects(state);
+    const after = selectProjects({
+      sessions: { [SERVER_ID]: { ...state.sessions[SERVER_ID]!, hasHydratedWorkspaces: true } },
+    });
+
+    expect(after).toBe(before);
+    expect(before.map((project) => project.viewKey)).toEqual([equivalenceViewKey("project-app")]);
+  });
+
+  it("keeps the projects reference when only unrelated agents change", () => {
+    const state = snapshot(
+      new Map([["agent-supervisor", supervisorAgent("workspace-supervisor")]]),
+    );
+    const selectProjects = createWorkspaceStructureProjectsSelector([SERVER_ID]);
+    const before = selectProjects(state);
+
+    const agents = new Map(state.sessions[SERVER_ID]!.agents);
+    agents.set("agent-app", plainAgent("workspace-app"));
+    const after = selectProjects({
+      sessions: { [SERVER_ID]: { ...state.sessions[SERVER_ID]!, agents } },
+    });
+
+    expect(after).toBe(before);
+  });
+
+  it("recomputes when a Supervisor appears in an existing workspace", () => {
+    const state = snapshot(new Map<string, SlpSystemAgentFields>());
+    const selectProjects = createWorkspaceStructureProjectsSelector([SERVER_ID]);
+    const before = selectProjects(state);
+
+    const after = selectProjects({
+      sessions: {
+        [SERVER_ID]: {
+          ...state.sessions[SERVER_ID]!,
+          agents: new Map([["agent-supervisor", supervisorAgent("workspace-supervisor")]]),
+        },
+      },
+    });
+
+    expect(before.map((project) => project.viewKey)).toEqual([
+      equivalenceViewKey("project-app"),
+      equivalenceViewKey("project-supervisor"),
+    ]);
+    expect(after.map((project) => project.viewKey)).toEqual([equivalenceViewKey("project-app")]);
   });
 });

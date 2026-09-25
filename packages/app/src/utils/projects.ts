@@ -48,6 +48,8 @@ export interface ProjectHost {
   isOnline: boolean;
   workspaces: WorkspaceDescriptor[];
   projects: ProjectDescriptor[];
+  /** ALP(slp): workspaces whose project stays out of the list; see buildWorkspaceStructureProjects. */
+  hiddenWorkspaceIds?: ReadonlySet<string>;
 }
 
 export interface BuildProjectsInput {
@@ -125,6 +127,7 @@ function buildHostProjectEntries(hosts: ProjectHost[]): HostProjectListItem[] {
       serverId: host.serverId,
       projects: host.projects,
       workspaces: host.workspaces,
+      hiddenWorkspaceIds: host.hiddenWorkspaceIds,
     })),
   });
 }
