@@ -3,7 +3,7 @@ import { SettingsAction, SettingsCard } from "@getpaseo/plugin/client/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View } from "react-native";
 import { openSupervisor } from "./ensure-supervisor";
-import { ensureSupervisorRpc } from "./supervisor-rpc";
+import { slpSupervisorEnsure } from "../shared/rpc";
 
 type OpenStatus =
   | { readonly kind: "opening" }
@@ -25,7 +25,7 @@ function errorMessage(error: unknown): string {
  * host and navigates straight to its agent. The row stays so a return visit can reopen or retry.
  */
 export function SupervisorSurface({ theme, layout, navigation }: PluginSurfaceProps) {
-  const ensure = useRpc(ensureSupervisorRpc);
+  const ensure = useRpc(slpSupervisorEnsure);
   const [status, setStatus] = useState<OpenStatus>({ kind: "opening" });
   const mounted = useRef(true);
   const started = useRef(false);

@@ -1,7 +1,7 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { ensureSupervisorOnLoad } from "./client/ensure-supervisor";
 import { SupervisorSurface } from "./client/supervisor-surface";
-import { ensureSupervisorRpc } from "./client/supervisor-rpc";
+import { slpSupervisorEnsure } from "./shared/rpc";
 
 export default function contribute(client: PluginClientContext) {
   let stopped = false;
@@ -17,7 +17,7 @@ export default function contribute(client: PluginClientContext) {
   // The app evaluates this entry once per host connection, so the Supervisor exists on first
   // launch without a click. Unload rejects the pending call; that rejection is not worth a log.
   void ensureSupervisorOnLoad({
-    ensure: () => client.rpc(ensureSupervisorRpc, {}),
+    ensure: () => client.rpc(slpSupervisorEnsure, {}),
     warn: (message, error) => {
       if (!stopped) console.warn(message, error);
     },
