@@ -230,7 +230,11 @@ export async function autoUpdateInstalledSkills(
   selection: SkillSelection,
 ): Promise<SkillsStatus> {
   const status = await getSkillsStatus(targets, selection);
-  if (status.state !== "drift") return status;
+  // ALP(slp): a bare host reads as not-installed exactly like one where the
+  // user explicitly uninstalled everything — treat it the same as drift so a
+  // selection set before any skill exists on disk installs at startup instead
+  // of waiting for someone to open Settings and press Install.
+  if (status.state !== "drift" && status.state !== "not-installed") return status;
   // Automatic maintenance may repair selected skills, but removal is an
   // interactive operation because managed directories can contain user files.
   return applySkills(targets, selection, nonDestructivePlan(status));
