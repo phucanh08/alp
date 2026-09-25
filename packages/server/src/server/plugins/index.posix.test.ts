@@ -1115,6 +1115,46 @@ describe("PluginService bundled plugins", () => {
     );
   });
 
+  it("resolves the unpacked copy when the daemon runs from a packaged app.asar", async () => {
+    const resources = await mkdtemp(path.join(tmpdir(), "paseo-bundled-asar-"));
+    roots.push(resources);
+    const serverDist = ["node_modules", "@getpaseo", "server", "dist"];
+    // Electron reports the plugin inside app.asar too; only the unpacked copy is on disk
+    // for esbuild, which compiles in a separate non-Electron process.
+    await mkdir(path.join(resources, "app.asar", ...serverDist, "server", "plugins", "slp"), {
+      recursive: true,
+    });
+    await mkdir(
+      path.join(resources, "app.asar.unpacked", ...serverDist, "server", "plugins", "slp"),
+      {
+        recursive: true,
+      },
+    );
+    const asarModule = pathToFileURL(
+      path.join(resources, "app.asar", ...serverDist, "server", "server", "plugins", "index.js"),
+    );
+
+    expect(resolveBundledPluginDir("slp", asarModule)).toBe(
+      path.join(resources, "app.asar.unpacked", ...serverDist, "server", "plugins", "slp"),
+    );
+  });
+
+  it("keeps the app.asar path when the plugin was not unpacked", async () => {
+    const resources = await mkdtemp(path.join(tmpdir(), "paseo-bundled-asar-"));
+    roots.push(resources);
+    const serverDist = ["node_modules", "@getpaseo", "server", "dist"];
+    await mkdir(path.join(resources, "app.asar", ...serverDist, "server", "plugins", "slp"), {
+      recursive: true,
+    });
+    const asarModule = pathToFileURL(
+      path.join(resources, "app.asar", ...serverDist, "server", "server", "plugins", "index.js"),
+    );
+
+    expect(resolveBundledPluginDir("slp", asarModule)).toBe(
+      path.join(resources, "app.asar", ...serverDist, "server", "plugins", "slp"),
+    );
+  });
+
   it("runs a bundled plugin that has no config entry", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
     roots.push(home);
