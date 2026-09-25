@@ -936,6 +936,63 @@ describe("SLP defaults", () => {
     }
   });
 
+  test("a new home also gets the three Codex SLP providers", () => {
+    const home = createTempHome();
+    try {
+      const providers = loadPersistedConfig(home).agents?.providers ?? {};
+
+      expect(providers["codex-lead"]).toEqual({ extends: "codex", label: "SLP Lead (Codex)" });
+      expect(providers["codex-peer"]).toEqual({
+        extends: "codex",
+        label: "SLP Peer (Codex)",
+        paseoTools: {
+          disabledTools: [
+            "create_agent",
+            "send_agent_prompt",
+            "kill_agent",
+            "cancel_agent",
+            "archive_agent",
+            "create_schedule",
+          ],
+        },
+      });
+      expect(providers["codex-supervisor"]).toMatchObject({
+        extends: "codex",
+        label: "SLP Supervisor (Codex)",
+      });
+      const supervisorDisabled = providers["codex-supervisor"]?.paseoTools?.disabledTools ?? [];
+      expect(supervisorDisabled).toEqual(
+        expect.arrayContaining(["create_agent", "kill_agent", "set_agent_mode", "browser_click"]),
+      );
+      expect(supervisorDisabled).not.toContain("send_agent_prompt");
+      expect(supervisorDisabled).not.toContain("list_agents");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("a host that already defines codex-peer keeps it and gains the other Codex seats", () => {
+    const home = createTempHome();
+    try {
+      const mine = { extends: "codex", label: "My Codex Peer", paseoTools: { enabled: false } };
+      writeConfigFile(home, { version: 1, agents: { providers: { "codex-peer": mine } } });
+
+      seedPersistedSlpDefaults(home);
+      const providers = loadPersistedConfig(home).agents?.providers ?? {};
+
+      expect(providers["codex-peer"]).toEqual(mine);
+      expect(providers["codex-lead"]?.label).toBe("SLP Lead (Codex)");
+      expect(providers["codex-supervisor"]?.label).toBe("SLP Supervisor (Codex)");
+      expect(
+        (readConfigFile(home).agents as { providers: Record<string, unknown> }).providers[
+          "codex-peer"
+        ],
+      ).toEqual(mine);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   test("an explicit pluginsEnabled false is left alone", () => {
     const home = createTempHome();
     try {
