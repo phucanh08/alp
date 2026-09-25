@@ -222,6 +222,8 @@ function buildAgentManagerSpies() {
     tryRunOutOfBand: vi.fn().mockReturnValue(false),
     subscribe: vi.fn().mockReturnValue(() => {}),
     streamAgent: vi.fn(() => (async function* noop() {})()),
+    replaceAgentRun: vi.fn(async () => (async function* noop() {})()),
+    steerOrReplaceActiveTurn: vi.fn().mockResolvedValue({ status: "inactive" }),
     waitForAgentRunStart: vi.fn().mockResolvedValue(undefined),
     respondToPermission: vi.fn(),
     cancelAgentRun: vi.fn(),
@@ -3805,6 +3807,141 @@ describe("send_agent_prompt MCP tool", () => {
     expect(spies.agentManager.waitForAgentEvent).toHaveBeenCalledWith(
       "child-agent",
       expect.objectContaining({ waitForActive: true }),
+    );
+  });
+
+  // ALP(slp): agent-to-agent prompts carry the sender and steer instead of cancelling.
+  it("stamps agent-to-agent prompts with the sender and steers a running receiver", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    const parentAgent = createManagedAgent({
+      id: "parent-agent",
+      cwd: existingCwd,
+      provider: "codex",
+      lifecycle: "running",
+    });
+    const childAgent = createManagedAgent({
+      id: "child-agent",
+      cwd: existingCwd,
+      lifecycle: "running",
+    });
+    spies.agentManager.getAgent.mockImplementation((agentId: string) => {
+      if (agentId === "parent-agent") return parentAgent;
+      if (agentId === "child-agent") return childAgent;
+      return null;
+    });
+    spies.agentStorage.get.mockImplementation(async (agentId: string) =>
+      agentId === "parent-agent"
+        ? createStoredRecord({
+            id: "parent-agent",
+            provider: "codex",
+            title: "Lead",
+            archivedAt: null,
+          })
+        : null,
+    );
+    spies.agentManager.hasInFlightRun.mockReturnValue(true);
+    spies.agentManager.steerOrReplaceActiveTurn.mockResolvedValue({ status: "steered" });
+
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      providerSnapshotManager: createOpenCodeManager().manager,
+      callerAgentId: "parent-agent",
+      logger,
+    });
+
+    await invokeToolWithParsedInput(registeredTool(server, "send_agent_prompt"), {
+      agentId: "child-agent",
+      prompt: "Follow up",
+    });
+
+    expect(spies.agentManager.steerOrReplaceActiveTurn).toHaveBeenCalledWith(
+      "child-agent",
+      "<paseo-system>\n" +
+        "Agent parent-agent (Lead) [provider: codex] sent you this message via send_agent_prompt. It comes from another agent, not from the user.\n" +
+        "\n" +
+        "<agent-message>\n" +
+        "Follow up\n" +
+        "</agent-message>\n" +
+        "</paseo-system>",
+      undefined,
+    );
+    expect(spies.agentManager.replaceAgentRun).not.toHaveBeenCalled();
+    expect(spies.agentManager.streamAgent).not.toHaveBeenCalled();
+  });
+
+  it("starts a new stamped turn when the receiver is idle and falls back to the sender id", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    const parentAgent = createManagedAgent({
+      id: "parent-agent",
+      cwd: existingCwd,
+      provider: "claude",
+      lifecycle: "running",
+    });
+    const childAgent = createManagedAgent({
+      id: "child-agent",
+      cwd: existingCwd,
+      lifecycle: "idle",
+    });
+    spies.agentManager.getAgent.mockImplementation((agentId: string) => {
+      if (agentId === "parent-agent") return parentAgent;
+      if (agentId === "child-agent") return childAgent;
+      return null;
+    });
+
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      providerSnapshotManager: createOpenCodeManager().manager,
+      callerAgentId: "parent-agent",
+      logger,
+    });
+
+    await invokeToolWithParsedInput(registeredTool(server, "send_agent_prompt"), {
+      agentId: "child-agent",
+      prompt: "Follow up",
+    });
+
+    expect(spies.agentManager.streamAgent).toHaveBeenCalledWith(
+      "child-agent",
+      "<paseo-system>\n" +
+        "Agent parent-agent [provider: claude] sent you this message via send_agent_prompt. It comes from another agent, not from the user.\n" +
+        "\n" +
+        "<agent-message>\n" +
+        "Follow up\n" +
+        "</agent-message>\n" +
+        "</paseo-system>",
+      undefined,
+    );
+    expect(spies.agentManager.replaceAgentRun).not.toHaveBeenCalled();
+  });
+
+  it("keeps top-level prompts verbatim and still replaces the running turn", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    spies.agentManager.getAgent.mockReturnValue(
+      createManagedAgent({ id: "child-agent", cwd: existingCwd, lifecycle: "running" }),
+    );
+    spies.agentManager.hasInFlightRun.mockReturnValue(true);
+    // A steer-capable receiver: if the human path steered, replaceAgentRun would not run.
+    spies.agentManager.steerOrReplaceActiveTurn.mockResolvedValue({ status: "steered" });
+
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      providerSnapshotManager: createOpenCodeManager().manager,
+      logger,
+    });
+
+    await invokeToolWithParsedInput(registeredTool(server, "send_agent_prompt"), {
+      agentId: "child-agent",
+      prompt: "Follow up",
+      background: true,
+    });
+
+    expect(spies.agentManager.replaceAgentRun).toHaveBeenCalledWith(
+      "child-agent",
+      "Follow up",
+      undefined,
     );
   });
 });
