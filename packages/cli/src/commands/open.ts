@@ -73,7 +73,7 @@ function launchDesktop(args: string[]): void {
   const desktopApp = findDesktopApp();
   if (!desktopApp) {
     throw new Error(
-      "alp desktop app not found. Install it from https://github.com/getpaseo/paseo/releases",
+      "alp desktop app not found. Install it from https://github.com/phucanh08/alp/releases",
     );
   }
 
