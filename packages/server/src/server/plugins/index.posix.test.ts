@@ -1133,11 +1133,13 @@ describe("PluginService bundled plugins", () => {
   it("lets a configured source with the same id replace the bundled one", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
     roots.push(home);
+    // A real bundled directory, so only the configured-source rule can keep it from starting.
+    const bundled = await createPlugin("slp", `export default function contribute() {}`);
     const { runtime, starts } = createRecordingRuntime();
     const service = createService(
       home,
       { slp: { source: "directory", path: "/user/slp" } },
-      { runtime, bundledPlugins: { slp: "/bundled/slp" } },
+      { runtime, bundledPlugins: { slp: bundled } },
     );
 
     await service.start();
