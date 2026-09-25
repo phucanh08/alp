@@ -249,7 +249,7 @@ Bạn chạy trong context riêng; giữa lượt, Lead và Human chỉ thấy b
    vào `/tmp/slp-<task id>/` (hoặc đường dẫn brief chỉ định) ở mỗi vòng poll. Lead đếm chéo bằng
    `wc -l`/`stat`; context của bạn hỏng thì dữ liệu vẫn còn. Handoff ghi đường dẫn tuyệt đối. Kênh
    đọc dữ liệu trả 0 quá hai vòng poll trong khi kỳ vọng có → tới vòng thứ ba là `BLOCKED` kèm lệnh
-   - output, không tiếp tục chờ.
+   và output, không tiếp tục chờ.
 3. **Chờ Human** (quẹt mẫu, cắm máy) → kết thúc lượt bằng handoff `blocked`, ô `Unknown / risk` ghi
    "Chờ Human: <việc gì>" và file evidence. Lead nhận notification và biết bạn đang chờ gì; đừng đứng
    poll vô hạn.

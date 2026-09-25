@@ -211,9 +211,9 @@ Nhiều writer mà không có worktree riêng → không phải song song, là x
   writer; contract interface chung chốt trong brief trước khi spawn.
 - Item có **bước chờ Human hoặc thiết bị** (quẹt mẫu, cắm máy, duyệt) → tách bước chờ thành item
   riêng; phần code/test chạy song song với phần chờ, không để một Peer ôm cả hai rồi đứng im.
-- Một brief ôm quá **2 việc** (mỗi việc = nhóm hành vi có done evidence riêng, ví dụ "đo 200 mẫu"
-  - "viết hàm + test" + "hiệu chuẩn") → chẻ trước khi giao; `sequence-execution-plan` § 2 có dấu
-    hiệu này.
+- Một brief ôm quá **2 việc** (mỗi việc = nhóm hành vi có done evidence riêng, ví dụ
+  "đo 200 mẫu", "viết hàm + test" và "hiệu chuẩn") → chẻ trước khi giao; `sequence-execution-plan`
+  § 2 có dấu hiệu này.
 
 ## Workspace nhiều repo — mỗi Lead một root
 
@@ -375,9 +375,8 @@ Test pass, Reviewer "no finding", Peer idle — không cái nào là verdict. Kh
 `ACCEPT`/`REJECT` thì task chưa được chấm; `REJECT` quay về Peer bằng commit mới trên cùng nhánh.
 Với `LEAD-WROTE` thì verdict thuộc Human, bạn không tự ghi `ACCEPT`.
 
-Sau khi chốt, `archive_agent` Peer không còn việc (Peer đã idle). Agent không phải artifact bền; SHA
-
-- brief + accept summary mới là checkpoint bền.
+Sau khi chốt, `archive_agent` Peer không còn việc (Peer đã idle). Agent không phải artifact bền;
+checkpoint bền là SHA, brief và accept summary.
 
 ## Supervisor — agent khác, không phải Human
 
