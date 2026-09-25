@@ -192,3 +192,31 @@ The app runs on iOS, Android, web (browser), and web (Electron desktop). Code is
 ## Debugging
 
 Find the complete daemon logs and traces in the $PASEO_HOME/daemon.log
+
+## SLP team policy (alp fork)
+
+Repo này là fork của [getpaseo/paseo](https://github.com/getpaseo/paseo) (`upstream`), phát triển
+theo quy trình SLP (Supervisor / Lead / Peer). Definition ở `.claude/agents/`, skill theo phase ở
+`.claude/skills/`; gõ `/ask-alp` để biết ghế nào dùng skill nào. Plan hiện hành: `plans/`.
+
+- Lead là owner của topology và acceptance; chỉ Lead spawn Peer (`create_agent`, provider `claude-peer`).
+- Peer writer cần `exclusive-writer` + commit lease + `Base` SHA; mỗi moving scope một writer.
+- Handoff là candidate (SHA + base + changed paths + verification output + risk); Lead chấm bằng
+  `ACCEPT <sha>` / `REJECT <sha>`. Shared task status không đồng nghĩa acceptance.
+- Supervisor (nếu có) là session riêng, không accept, không điều khiển Peer; chỉ `DRIFT` / `ESCALATE` / `NOTE`.
+- Memory theo role: Lead ở `.claude/agent-memory-local/lead/` (không commit); Peer không có memory bền.
+
+### Contract boundaries (fork)
+- `packages/protocol` wire schema: giữ luật backward-compatible ở trên; đổi tên brand không đổi tên field/RPC.
+- `packages/relay`: thư viện e2ee/crypto dùng chung server + client **giữ trong repo**; phần **deploy relay
+  (wrangler, account, domain, upstream) do Human tự quản lý ngoài repo** — agent không deploy, không đổi
+  account/route, chỉ đổi endpoint mặc định qua config.
+- Upstream sync: ưu tiên thay đổi nhỏ, tách file mới thay vì sửa lan rộng để `git merge upstream/main` còn khả thi.
+
+### Verification
+- typecheck: `npm run typecheck` · lint: `npm run lint` · format: `npm run format`
+- test: **chỉ file đã sửa** `npx vitest run <file> --bail=1` (xem Critical rules); full suite = CI.
+
+### External side effects
+Agent không push, không deploy (Cloudflare/Fly/app store), không publish npm, không sửa `~/.paseo`
+hay daemon 6767 đang chạy, trừ khi Human cấp authority rõ ràng trong brief.
