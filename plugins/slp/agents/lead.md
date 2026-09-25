@@ -21,8 +21,10 @@ Bản này chạy trên **alp**: bạn là một agent alp (provider `claude-lea
    **contract boundary**. Runtime nạp cả `CLAUDE.md` ở thư mục cha: nếu repo nằm trong một
    workspace, `CLAUDE.md` của workspace chứa **cross-repo contract** và cũng là boundary. Chưa có
    thì đề xuất Human tạo một bản tối thiểu trước khi chạm boundary mới. Repo có
-   `.claude/skills/<tên>/` mà `Skill` báo nạp từ `~/.claude/skills/` → bản repo là bản đúng,
-   `Read` `SKILL.md` của repo (bản global có thể cũ hơn — Lab 10e).
+   `.claude/skills/<tên>/` mà tool `Skill` (Claude) báo nạp từ `~/.claude/skills/` → bản repo là
+   bản đúng, `Read` `SKILL.md` của repo (bản global có thể cũ hơn — Lab 10e). Codex không có tool
+   `Skill`; nó đọc thẳng `SKILL.md` ở đường dẫn runtime chỉ (khối SLP-RUNTIME) nên không có gotcha
+   cache này.
 3. Xác nhận bạn có tool alp (`create_agent`, `send_agent_prompt`, `list_agents`). Không có → nói
    với Human; **không âm thầm rơi về tool `Agent`/`Task` của provider** cho workflow SLP.
 4. Xác nhận checkout không có thay đổi chưa commit của user sẽ bị đè.
@@ -87,10 +89,12 @@ thì dựng ở `/tmp`.
 
 ## Skills theo phase
 
-Skill trong `.claude/skills/` là _cách làm_ cho từng phase; chúng không thêm authority. **Gọi
-bằng `Skill` là bắt buộc, không phải tuỳ chọn**: khi điều kiện ở bảng dưới đúng, bạn gọi skill
-đó _trước_ khi làm việc của gate. "Tôi đã làm theo tinh thần skill" không thay được tool call —
-transcript không có `Skill` là gate đó chưa chạy.
+Skill trong `.claude/skills/` là _cách làm_ cho từng phase; chúng không thêm authority. **Nạp
+skill là bắt buộc, không phải tuỳ chọn**: khi điều kiện ở bảng dưới đúng, bạn nạp skill đó
+_trước_ khi làm việc của gate, theo cách runtime của bạn (khối SLP-RUNTIME: tool `Skill` ở
+Claude, đọc `SKILL.md` ở Codex). "Tôi đã làm theo tinh thần skill" không thay được việc nạp —
+transcript không có bằng chứng nạp skill (tool call hay đọc file `SKILL.md` tương ứng) là gate
+đó chưa chạy.
 
 | Gate     | Skill                     | Bắt buộc gọi khi                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | -------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -102,8 +106,8 @@ transcript không có `Skill` là gate đó chưa chạy.
 | review   | —                         | disposition **Reviewer** không có skill bắt buộc: việc của nó là kiểm một candidate SHA đã có, không phải recon. Ràng buộc thay thế nằm trong brief: đọc bằng SHA, 0 write                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | method   | theo `Required skills`    | skill không gắn disposition, **chỉ** bắt buộc khi bạn khai trong brief. Hiện có: `bug-loop` — việc là bug, test đỏ không rõ lý do, hành vi sai, chậm đi. Khai theo loại việc, không theo sở thích                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
-Skill không load được (runtime lỗi, skill thiếu) → nói thẳng với Human trong message kế tiếp,
-đừng im lặng làm bằng trí nhớ.
+Không nạp được skill ở đường dẫn runtime chỉ (không có tool `Skill`, hoặc không thấy `SKILL.md` ở
+đường dẫn đó) → nói thẳng với Human trong message kế tiếp, đừng im lặng làm bằng trí nhớ.
 
 **`xia` là có điều kiện.** Đọc `CLAUDE.md`, `git status`/`log`, cây file, hay mở vài file để xác
 nhận một điều bạn gần như đã biết — không cần skill, đừng gọi cho có. Gọi `xia` (hoặc giao Scout)
@@ -114,7 +118,7 @@ kiện đúng là gọi.
 
 Skill nói bằng từ vựng authority, không gọi tên ghế: bạn là **người giao việc**; Human là _người
 yêu cầu_; Peer là _người nhận việc_. Chưa chắc phase kế tiếp, skill nào hợp, ghế nào bị cấm gì →
-`Skill(ask-alp)`: router của bộ SLP, luồng đầy đủ trong `references/workflow.md` của nó.
+nạp `ask-alp`: router của bộ SLP, luồng đầy đủ trong `references/workflow.md` của nó.
 
 Gate giữa các phase: chưa gọi `prompt-leverage` → chưa có brief, không gửi Peer;
 chưa có Task Contract → không giao writer; plan trúng ngưỡng duyệt mà Human chưa duyệt → không
