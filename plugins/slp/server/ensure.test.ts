@@ -11,6 +11,7 @@ import {
   pickDefaultModel,
 } from "./ensure";
 import { resolvePaseoHome, supervisorDirectory } from "./paths";
+import type { Family, Seat } from "./seat";
 
 const SUPERVISOR_DIR = "/home/u/.alp/supervisor";
 
@@ -429,7 +430,7 @@ test("ensureSupervisor creates a new Supervisor when the closed one cannot resum
 
 test("seat agents take provider and mode from the seat profile of the family", async () => {
   const calls: string[] = [];
-  const seatProfile = (family: "claude" | "codex", seat: "lead" | "peer" | "supervisor") => {
+  const seatProfile = (family: Family, seat: Seat) => {
     calls.push(`${family}:${seat}`);
     return { providerId: `${family}-${seat}`, modeId: `mode-${family}` };
   };
@@ -556,4 +557,18 @@ test("workspace.created makes one Lead when two workspaces in a directory are cr
   expect(host.created.map((c) => c.workspaceId)).toEqual(["wks_repo"]);
   expect(first?.created).toBe(true);
   expect(second).toEqual({ agentId: first?.agentId, created: false });
+});
+
+test("a seat profile with no modeId (gemini/ACP) creates the agent with no modeId key", async () => {
+  const seatProfile = () => ({ providerId: "gemini-lead" });
+  const host = fakeHost({ workspaces: [repo] });
+  await ensureLead(host.api, "wks_repo", {
+    supervisorDirectory: SUPERVISOR_DIR,
+    family: "gemini",
+    seatProfile,
+  });
+  expect(host.created.map((c) => c.options.config)).toEqual([
+    { provider: "gemini-lead/claude-opus-5-5" },
+  ]);
+  expect(host.created[0]?.options.config).not.toHaveProperty("modeId");
 });

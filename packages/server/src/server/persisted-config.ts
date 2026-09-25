@@ -395,6 +395,8 @@ const SLP_SUPERVISOR_DISABLED_TOOLS = [
 // ALP(slp): the SLP seats ship as custom providers on every alp host; ids are the interface contract.
 // Codex seats carry no providerOptions: a provider profile has no such key, so the slp plugin sets
 // the Codex Peer's `features.multi_agent: false` and the sandbox at agent.create.
+// Gemini seats run the Gemini CLI over the generic ACP provider (`gemini --acp`); ACP has no fixed
+// mode id, so the plugin creates gemini-family seat agents without one (see server/seat.ts).
 const SLP_DEFAULT_AGENT_PROVIDERS = {
   "claude-lead": { extends: "claude", label: "SLP Lead" },
   "claude-peer": {
@@ -417,6 +419,19 @@ const SLP_DEFAULT_AGENT_PROVIDERS = {
   "codex-supervisor": {
     extends: "codex",
     label: "SLP Supervisor (Codex)",
+    paseoTools: { disabledTools: SLP_SUPERVISOR_DISABLED_TOOLS },
+  },
+  "gemini-lead": { extends: "acp", label: "SLP Lead (Gemini)", command: ["gemini", "--acp"] },
+  "gemini-peer": {
+    extends: "acp",
+    label: "SLP Peer (Gemini)",
+    command: ["gemini", "--acp"],
+    paseoTools: { disabledTools: SLP_PEER_DISABLED_TOOLS },
+  },
+  "gemini-supervisor": {
+    extends: "acp",
+    label: "SLP Supervisor (Gemini)",
+    command: ["gemini", "--acp"],
     paseoTools: { disabledTools: SLP_SUPERVISOR_DISABLED_TOOLS },
   },
 } as const;

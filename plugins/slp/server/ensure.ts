@@ -27,15 +27,15 @@ export interface WorkspaceLike {
 }
 
 export interface SeatAgentCreate {
-  config: { provider: string; modeId: string };
+  config: { provider: string; modeId?: string };
   title: string;
   labels: Record<string, string>;
 }
 
-/** Provider profile and mode a seat agent is created with. */
+/** Provider profile and mode a seat agent is created with. Gemini has no `modeId` (see seat.ts). */
 export interface SeatProfile {
   providerId: string;
-  modeId: string;
+  modeId?: string;
 }
 
 export type SeatProfileFor = (family: Family, seat: Seat) => SeatProfile;
@@ -127,7 +127,11 @@ async function seatAgent(
 ): Promise<SeatAgentCreate> {
   const { providerId, modeId } = profileFor(seat, deps);
   const provider = await seatProvider(api, providerId);
-  return { config: { provider, modeId }, title, labels: { [SEAT_LABEL]: seat } };
+  return {
+    config: modeId ? { provider, modeId } : { provider },
+    title,
+    labels: { [SEAT_LABEL]: seat },
+  };
 }
 
 function workspaceDirectory(workspace: WorkspaceLike): string {

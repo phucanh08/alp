@@ -168,3 +168,37 @@ test("a Codex Lead spawns codex-peer in Codex's default approval mode", () => {
   expect(claudeLead).toContain('settings.modeId: "default"');
   expect(claudeLead).not.toContain("codex-peer");
 });
+
+test("gemini profiles map to seats with no fixed unattended or spawn mode", () => {
+  expect(seatOf("gemini-lead")).toBe("lead");
+  expect(seatOf("gemini-peer")).toBe("peer");
+  expect(seatOf("gemini-supervisor")).toBe("supervisor");
+  expect(familyOf("gemini-peer")).toBe("gemini");
+  expect(familyOf("gemini")).toBeNull();
+  expect(seatProfileFor("gemini", "lead")).toEqual({ providerId: "gemini-lead" });
+  expect(seatProfileFor("gemini", "lead")).not.toHaveProperty("modeId");
+});
+
+test("a Gemini Lead spawns gemini-peer with no settings.modeId", () => {
+  const lead = buildSystemPrompt("lead", "gemini", "BODY", null);
+  expect(lead).toContain('provider: "gemini-peer/<model>"');
+  expect(lead).not.toContain("settings.modeId:");
+  expect(lead).toMatch(/không set.*settings\.modeId/);
+  expect(lead).toContain("settings.thinkingOptionId");
+  expect(lead).toMatch(/không đoán id/);
+});
+
+test("gemini runtime block names its skill file path and steer stays generic-ACP", () => {
+  const peer = buildSystemPrompt("peer", "gemini", "BODY", null);
+  expect(peer).toMatch(/~\/\.agents\/skills\/<tên>\/SKILL\.md/);
+  expect(peer).toMatch(/Provider ACP \(không phải Claude\/Codex\) vẫn thay lượt đang chạy/);
+});
+
+test("gemini providerOptionsFor falls back to the claude-shaped branch (no codex-only rules)", () => {
+  expect(providerOptionsFor("peer", "gemini", { allowedTools: ["Bash"] })).toEqual({
+    allowedTools: ["Bash"],
+  });
+  expect(providerOptionsFor("lead", "gemini", undefined)).toEqual({
+    allowedTools: ["mcp__paseo__*"],
+  });
+});
