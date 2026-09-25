@@ -1,11 +1,14 @@
-import { type AgentLister, findSeatAgents } from "./discovery";
+import {
+  type AgentLister,
+  findSeatAgents,
+  listLiveAgents,
+  selectClosedSeatAgents,
+  selectSeatAgents,
+} from "./discovery";
 import { expandUserPath, isSupervisorWorkspace } from "./paths";
-import { SEAT_LABEL, type Seat, seatOf } from "./seat";
+import * as seatModule from "./seat";
+import { type Family, SEAT_LABEL, type Seat, seatOf } from "./seat";
 
-export const LEAD_PROVIDER = "claude-lead";
-export const SUPERVISOR_PROVIDER = "claude-supervisor";
-/** Lead and Supervisor call Paseo tools and read the host without permission cards. */
-export const SEAT_MODE = "bypassPermissions";
 export const LEAD_TITLE = "Lead";
 export const SUPERVISOR_TITLE = "Supervisor";
 export const SUPERVISOR_WORKSPACE_TITLE = "SLP Supervisor";
@@ -30,9 +33,43 @@ export interface SeatAgentCreate {
   labels: Record<string, string>;
 }
 
+/** Provider profile and mode a seat agent is created with. */
+export interface SeatProfile {
+  providerId: string;
+  modeId: string;
+}
+
+export type SeatProfileFor = (family: Family, seat: Seat) => SeatProfile;
+
+/**
+ * Stand-in for `seatProfileFor` in `./seat` until that export lands (alp-p8 C2); once it exists the
+ * lookup below uses it and this fallback is dead code to delete. Lead and Supervisor call Paseo
+ * tools and read the host without permission cards.
+ */
+const fallbackSeatProfileFor: SeatProfileFor = (family, seat) => ({
+  providerId: `${family}-${seat}`,
+  modeId: family === "codex" ? "full-access" : "bypassPermissions",
+});
+
+const defaultSeatProfileFor: SeatProfileFor =
+  (seatModule as unknown as { seatProfileFor?: SeatProfileFor }).seatProfileFor ??
+  fallbackSeatProfileFor;
+
+/** Seat settings shared by both ensures; `family` defaults to `claude`. */
+export interface SeatDeps {
+  family?: Family;
+  seatProfile?: SeatProfileFor;
+}
+
+function profileFor(seat: Seat, deps: SeatDeps): SeatProfile {
+  return (deps.seatProfile ?? defaultSeatProfileFor)(deps.family ?? "claude", seat);
+}
+
 /** The slice of the plugin `PaseoApi` the ensure operations use; narrow so tests can fake it. */
 export interface EnsureApi {
-  agents: AgentLister;
+  agents: AgentLister & {
+    ref(agentId: string): { send(text: string): Promise<void> };
+  };
   workspaces: {
     list(options: { page: { limit: number; cursor?: string } }): Promise<{
       entries: WorkspaceLike[];
@@ -57,6 +94,8 @@ export interface LeadEnsureResult {
 
 export interface SupervisorEnsureResult extends LeadEnsureResult {
   workspaceId: string;
+  /** Set when a closed Supervisor was resumed instead of a new one being created. */
+  resumed?: true;
 }
 
 /** Runs one task at a time per key so concurrent ensures see each other's result. */
@@ -95,8 +134,15 @@ async function seatProvider(api: EnsureApi, provider: string): Promise<string> {
   return `${provider}/${model}`;
 }
 
-function seatAgent(provider: string, seat: Seat, title: string): SeatAgentCreate {
-  return { config: { provider, modeId: SEAT_MODE }, title, labels: { [SEAT_LABEL]: seat } };
+async function seatAgent(
+  api: EnsureApi,
+  seat: Seat,
+  title: string,
+  deps: SeatDeps,
+): Promise<SeatAgentCreate> {
+  const { providerId, modeId } = profileFor(seat, deps);
+  const provider = await seatProvider(api, providerId);
+  return { config: { provider, modeId }, title, labels: { [SEAT_LABEL]: seat } };
 }
 
 function workspaceDirectory(workspace: WorkspaceLike): string {
@@ -118,7 +164,7 @@ async function listWorkspaces(api: EnsureApi): Promise<WorkspaceLike[]> {
 export function ensureLead(
   api: EnsureApi,
   workspaceId: string,
-  deps: { supervisorDirectory: string },
+  deps: { supervisorDirectory: string } & SeatDeps,
 ): Promise<LeadEnsureResult> {
   return queue.run(`lead:${workspaceId}`, async () => {
     const workspace = (await listWorkspaces(api)).find((entry) => entry.id === workspaceId);
@@ -132,27 +178,56 @@ export function ensureLead(
       (agent) => agent.workspaceId === workspaceId,
     );
     if (existing) return { agentId: existing.id, created: false };
-    const provider = await seatProvider(api, LEAD_PROVIDER);
     const agent = await api.workspaces
       .ref(workspaceId)
-      .agents.create(seatAgent(provider, "lead", LEAD_TITLE));
+      .agents.create(await seatAgent(api, "lead", LEAD_TITLE, deps));
     return { agentId: agent.id, created: true };
   });
 }
 
 /**
+ * First turn of a resumed Supervisor. Prompting a closed agent is what makes the daemon resume its
+ * provider session; the text says who sent it so the Supervisor does not treat it as the Human.
+ */
+export const SUPERVISOR_RESUME_NOTICE =
+  "[plugin slp] Supervisor resumed by alp at startup: app mở và thấy bạn đang `closed` (thường do daemon restart), nên resume bạn thay vì tạo Supervisor mới. Tin này từ plugin, không phải Human; không cần trả lời. Roster trong system prompt là ảnh cũ lúc bạn được tạo — kiểm lại Lead bằng `get_agent_status` trước khi nhắn.";
+
+/**
  * `slp.supervisor.ensure`: one Supervisor per host, in the `SLP Supervisor` workspace at
- * `$PASEO_HOME/supervisor`. A live Supervisor anywhere on the host is reused.
+ * `$PASEO_HOME/supervisor`. A live Supervisor anywhere on the host is reused; otherwise the newest
+ * closed one is resumed; a new one is created only when there is none or the resume is rejected.
+ * The system prompt of a resumed Supervisor is the one from its creation (`before("agent.create")`
+ * does not run again).
  */
 export function ensureSupervisor(
   api: EnsureApi,
-  deps: { supervisorDirectory: string; makeDirectory: (directory: string) => Promise<unknown> },
+  deps: {
+    supervisorDirectory: string;
+    makeDirectory: (directory: string) => Promise<unknown>;
+  } & SeatDeps,
 ): Promise<SupervisorEnsureResult> {
   return queue.run("supervisor", async () => {
-    const [live] = await findSeatAgents(api.agents, "supervisor");
+    const agents = await listLiveAgents(api.agents);
+    const [live] = selectSeatAgents(agents, "supervisor");
     if (live) {
       if (!live.workspaceId) throw new Error(`Supervisor ${live.id} has no workspace`);
       return { workspaceId: live.workspaceId, agentId: live.id, created: false };
+    }
+    const [closed] = selectClosedSeatAgents(agents, "supervisor");
+    if (closed?.workspaceId) {
+      try {
+        await api.agents.ref(closed.id).send(SUPERVISOR_RESUME_NOTICE);
+        return {
+          workspaceId: closed.workspaceId,
+          agentId: closed.id,
+          created: false,
+          resumed: true,
+        };
+      } catch (error) {
+        console.error(
+          `slp: could not resume Supervisor ${closed.id}, creating a new one: ${String(error)}`,
+        );
+      }
     }
     await deps.makeDirectory(deps.supervisorDirectory);
     const existing = (await listWorkspaces(api)).find(
@@ -168,10 +243,9 @@ export function ensureSupervisor(
           title: SUPERVISOR_WORKSPACE_TITLE,
         })
       ).id;
-    const provider = await seatProvider(api, SUPERVISOR_PROVIDER);
     const agent = await api.workspaces
       .ref(workspaceId)
-      .agents.create(seatAgent(provider, "supervisor", SUPERVISOR_TITLE));
+      .agents.create(await seatAgent(api, "supervisor", SUPERVISOR_TITLE, deps));
     return { workspaceId, agentId: agent.id, created: true };
   });
 }

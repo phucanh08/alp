@@ -5,7 +5,13 @@ import { z } from "zod";
 export const slpSupervisorEnsure = defineRpc({
   name: "slp.supervisor.ensure",
   input: z.object({}),
-  output: z.object({ workspaceId: z.string(), agentId: z.string(), created: z.boolean() }),
+  output: z.object({
+    workspaceId: z.string(),
+    agentId: z.string(),
+    created: z.boolean(),
+    /** A closed Supervisor was resumed instead of creating a new one. */
+    resumed: z.boolean().optional(),
+  }),
 });
 
 /** The workspace has one live Lead (label `slp.role=lead`); created when missing. */

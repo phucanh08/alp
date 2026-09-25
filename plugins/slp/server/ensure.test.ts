@@ -20,6 +20,9 @@ interface FakeHost {
   workspaces: WorkspaceLike[];
   created: Array<{ workspaceId: string; options: SeatAgentCreate }>;
   createdWorkspaces: Array<{ path: string; title: string }>;
+  sent: Array<{ agentId: string; text: string }>;
+  /** Agent ids whose resume the fake daemon rejects, like a lost provider session. */
+  failResume: Set<string>;
 }
 
 function fakeHost(
@@ -30,6 +33,8 @@ function fakeHost(
     workspaces: [...(initial.workspaces ?? [])],
     created: [],
     createdWorkspaces: [],
+    sent: [],
+    failResume: new Set(),
     api: undefined as unknown as EnsureApi,
   };
   let nextId = 1;
@@ -39,6 +44,18 @@ function fakeHost(
       async list() {
         await tick();
         return { entries: [...host.agents], pageInfo: { nextCursor: null } };
+      },
+      ref(agentId) {
+        return {
+          async send(text) {
+            await tick();
+            if (host.failResume.has(agentId)) throw new Error(`Agent ${agentId} cannot resume`);
+            host.sent.push({ agentId, text });
+            // The daemon resumes a closed agent before it starts the turn.
+            const entry = host.agents.find((e) => e.agent.id === agentId);
+            if (entry) entry.agent.status = "running";
+          },
+        };
       },
     },
     workspaces: {
@@ -331,4 +348,106 @@ test("ClientWorkspaceOrigins forgets requests older than the TTL", () => {
   origins.record({ source: { kind: "directory", path: "/r/late" } });
   now = 2000;
   expect(origins.consume({ cwd: "/r/late", projectId: "p" })).toBe(false);
+});
+
+function closedSupervisor(
+  id: string,
+  updatedAt: string,
+  extra: Partial<AgentEntryLike["agent"]> = {},
+) {
+  return {
+    agent: {
+      id,
+      provider: "claude-supervisor",
+      cwd: SUPERVISOR_DIR,
+      status: "closed",
+      workspaceId: "wks_sup",
+      labels: { "slp.role": "supervisor" },
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt,
+      ...extra,
+    },
+  };
+}
+
+test("ensureSupervisor resumes a closed Supervisor with a plugin notice instead of creating one", async () => {
+  const host = fakeHost({
+    workspaces: [supervisorWorkspace],
+    agents: [closedSupervisor("S-closed", "2026-09-25T10:00:00.000Z")],
+  });
+  const deps = { supervisorDirectory: SUPERVISOR_DIR, makeDirectory: async () => {} };
+
+  const first = await ensureSupervisor(host.api, deps);
+  expect(first).toEqual({
+    workspaceId: "wks_sup",
+    agentId: "S-closed",
+    created: false,
+    resumed: true,
+  });
+  expect(host.created).toHaveLength(0);
+  expect(host.createdWorkspaces).toHaveLength(0);
+  expect(host.sent.map((s) => s.agentId)).toEqual(["S-closed"]);
+  expect(host.sent[0]?.text).toContain("resumed by alp at startup");
+  expect(host.sent[0]?.text).toContain("không phải Human");
+
+  // Opening the app again finds it live: no second notice, no new Supervisor.
+  const second = await ensureSupervisor(host.api, deps);
+  expect(second).toEqual({ workspaceId: "wks_sup", agentId: "S-closed", created: false });
+  expect(host.sent).toHaveLength(1);
+  expect(host.created).toHaveLength(0);
+});
+
+test("ensureSupervisor resumes the newest closed Supervisor and skips archived ones", async () => {
+  const host = fakeHost({
+    workspaces: [supervisorWorkspace],
+    agents: [
+      closedSupervisor("S-old", "2026-09-20T10:00:00.000Z"),
+      closedSupervisor("S-archived", "2026-09-25T12:00:00.000Z", { archivedAt: "2026-09-25" }),
+      closedSupervisor("S-new", "2026-09-25T09:00:00.000Z"),
+    ],
+  });
+  const deps = { supervisorDirectory: SUPERVISOR_DIR, makeDirectory: async () => {} };
+  expect(await ensureSupervisor(host.api, deps)).toMatchObject({
+    agentId: "S-new",
+    resumed: true,
+  });
+  expect(host.sent.map((s) => s.agentId)).toEqual(["S-new"]);
+  expect(host.created).toHaveLength(0);
+});
+
+test("ensureSupervisor creates a new Supervisor when the closed one cannot resume", async () => {
+  const host = fakeHost({
+    workspaces: [supervisorWorkspace],
+    agents: [closedSupervisor("S-broken", "2026-09-25T10:00:00.000Z")],
+  });
+  host.failResume.add("S-broken");
+  const deps = { supervisorDirectory: SUPERVISOR_DIR, makeDirectory: async () => {} };
+  const result = await ensureSupervisor(host.api, deps);
+  expect(result).toEqual({ workspaceId: "wks_sup", agentId: "agent1", created: true });
+  expect(host.createdWorkspaces).toHaveLength(0);
+});
+
+test("seat agents take provider and mode from the seat profile of the family", async () => {
+  const calls: string[] = [];
+  const seatProfile = (family: "claude" | "codex", seat: "lead" | "peer" | "supervisor") => {
+    calls.push(`${family}:${seat}`);
+    return { providerId: `${family}-${seat}`, modeId: `mode-${family}` };
+  };
+  const host = fakeHost({ workspaces: [repo] });
+  await ensureLead(host.api, "wks_repo", {
+    supervisorDirectory: SUPERVISOR_DIR,
+    family: "codex",
+    seatProfile,
+  });
+  await ensureSupervisor(host.api, {
+    supervisorDirectory: SUPERVISOR_DIR,
+    makeDirectory: async () => {},
+    family: "codex",
+    seatProfile,
+  });
+  expect(calls).toEqual(["codex:lead", "codex:supervisor"]);
+  expect(host.created.map((c) => c.options.config)).toEqual([
+    { provider: "codex-lead/claude-opus-5-5", modeId: "mode-codex" },
+    { provider: "codex-supervisor/claude-opus-5-5", modeId: "mode-codex" },
+  ]);
 });
