@@ -2,12 +2,12 @@
   "name": "@getpaseo/desktop",
   "version": "0.9.2",
   "private": true,
-  "description": "Paseo desktop app (Electron wrapper)",
+  "description": "alp desktop app (Electron wrapper)",
   "homepage": "https://alp.anhlp.com",
   "license": "Apache-2.0",
   "author": {
-    "name": "Mohamed Boudra",
-    "email": "hello@moboudra.com"
+    "name": "anhlp",
+    "email": "phucanhdn01@gmail.com"
   },
   "repository": {
     "type": "git",
@@ -46,5 +46,5 @@
     "vitest": "^4.1.6",
     "wait-on": "8.0.5"
   },
-  "desktopName": "Paseo.desktop"
+  "desktopName": "alp.desktop"
 }
