@@ -6,8 +6,7 @@ import {
   selectSeatAgents,
 } from "./discovery";
 import { expandUserPath, isSupervisorWorkspace } from "./paths";
-import * as seatModule from "./seat";
-import { type Family, SEAT_LABEL, type Seat, seatOf } from "./seat";
+import { type Family, SEAT_LABEL, type Seat, seatOf, seatProfileFor } from "./seat";
 
 export const LEAD_TITLE = "Lead";
 export const SUPERVISOR_TITLE = "Supervisor";
@@ -41,20 +40,6 @@ export interface SeatProfile {
 
 export type SeatProfileFor = (family: Family, seat: Seat) => SeatProfile;
 
-/**
- * Stand-in for `seatProfileFor` in `./seat` until that export lands (alp-p8 C2); once it exists the
- * lookup below uses it and this fallback is dead code to delete. Lead and Supervisor call Paseo
- * tools and read the host without permission cards.
- */
-const fallbackSeatProfileFor: SeatProfileFor = (family, seat) => ({
-  providerId: `${family}-${seat}`,
-  modeId: family === "codex" ? "full-access" : "bypassPermissions",
-});
-
-const defaultSeatProfileFor: SeatProfileFor =
-  (seatModule as unknown as { seatProfileFor?: SeatProfileFor }).seatProfileFor ??
-  fallbackSeatProfileFor;
-
 /** Seat settings shared by both ensures; `family` defaults to `claude`. */
 export interface SeatDeps {
   family?: Family;
@@ -62,7 +47,7 @@ export interface SeatDeps {
 }
 
 function profileFor(seat: Seat, deps: SeatDeps): SeatProfile {
-  return (deps.seatProfile ?? defaultSeatProfileFor)(deps.family ?? "claude", seat);
+  return (deps.seatProfile ?? seatProfileFor)(deps.family ?? "claude", seat);
 }
 
 /** The slice of the plugin `PaseoApi` the ensure operations use; narrow so tests can fake it. */

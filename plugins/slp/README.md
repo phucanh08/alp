@@ -20,15 +20,15 @@ The manifest schema is strict and has no field for entries.
 
 ## Seats
 
-| Seat       | Provider                                 | Title         | Label                 | Mode                |
-| ---------- | ---------------------------------------- | ------------- | --------------------- | ------------------- |
-| Lead       | `claude-lead/<default model>`            | `Lead`        | `slp.role=lead`       | `bypassPermissions` |
-| Supervisor | `claude-supervisor/<default model>`      | `Supervisor`  | `slp.role=supervisor` | `bypassPermissions` |
-| Peer       | `claude-peer/<model>` chosen by the Lead | Lead's choice | `slp.role=peer`       | `default`           |
+| Seat       | Provider                                   | Title         | Label                 | Mode (Claude / Codex)               |
+| ---------- | ------------------------------------------ | ------------- | --------------------- | ----------------------------------- |
+| Lead       | `<family>-lead/<default model>`            | `Lead`        | `slp.role=lead`       | `bypassPermissions` / `full-access` |
+| Supervisor | `<family>-supervisor/<default model>`      | `Supervisor`  | `slp.role=supervisor` | `bypassPermissions` / `full-access` |
+| Peer       | `<family>-peer/<model>` chosen by the Lead | Lead's choice | `slp.role=peer`       | `default` / `auto`                  |
 
-The ensure operations take the provider's default model from `listModels`. The Lead's runtime block
-tells it to pick a Peer model and `settings.thinkingOptionId` per task and to write
-`Model: <model> · Effort: <effort> — <reason>` in the brief.
+`<family>` is `claude` or `codex`; `seatProfileFor` in `server/seat.ts` picks provider and mode.
+The ensure operations take the provider's default model from `listModels`. The Lead picks each
+Peer's model and `settings.thinkingOptionId` per task.
 
 A seat is recognized by its `slp.role` label, or by its provider when the label is missing.
 
@@ -58,17 +58,24 @@ before creating one.
 
 ## Seat definitions
 
-`agents/<seat>.md` is the source, copied from `.claude/agents/`. The plugin compiler bundles
-`server/` into one evaluated string: at runtime the plugin has no path to its own directory, and
-esbuild has no loader for `.md`. `server/definitions.gen.ts` embeds the files instead, and the
-frontmatter is stripped when the prompt is built. After editing a seat file, run:
+`agents/<seat>.md` is the source, written for alp: seats talk through Paseo tools, tagged
+`<paseo-agent-message>` envelopes, and finish notifications. `.claude/agents/` at the repo root holds
+the Claude Code Agent Teams versions; the two sets diverge on purpose. `server/runtime-block.ts` adds
+the runtime facts that depend on the family and on the plugin: message sources, steer, notification
+limits, the Peer spawn call. It names no workflow skill; those live in the seat files.
+
+The plugin compiler bundles `server/` into one evaluated string: at runtime the plugin has no path to
+its own directory, and esbuild has no loader for `.md`. `server/definitions.gen.ts` embeds the files
+instead, and the frontmatter is stripped when the prompt is built. After editing a seat file, run:
 
 ```bash
 cd plugins/slp && npm run generate
 ```
 
-`server/definitions.test.ts` fails when the generated module is stale. A repository can override a
-seat with `.claude/agents/<seat>.md` in the agent's cwd.
+`server/definitions.test.ts` fails when the generated module is stale.
+
+A repository overrides a seat with `.claude/agents/<seat>.md` in the agent's cwd. The alp checkout
+has those files, so a Lead in an alp workspace gets the Agent Teams version, not the bundled one.
 
 ## Checks
 
