@@ -8,6 +8,7 @@ import {
   providerOptionsFor,
   readDefinition,
   seatOf,
+  seatProfileFor,
   stripFrontmatter,
   withLeadAllowedTools,
 } from "./seat";
@@ -51,24 +52,24 @@ test("readDefinition falls back to the bundled seat file without its frontmatter
 });
 
 test("buildSystemPrompt joins existing prompt, seat definition, and the seat runtime block", () => {
-  const lead = buildSystemPrompt("lead", "BODY", "EXISTING");
+  const lead = buildSystemPrompt("lead", "claude", "BODY", "EXISTING");
   expect(lead.startsWith("EXISTING\n\n# Ghế SLP: lead\n\nBODY")).toBe(true);
   expect(lead).toMatch(/## SLP-RUNTIME: alp/);
   expect(lead).toMatch(/create_agent/);
-  const peer = buildSystemPrompt("peer", "BODY", null);
+  const peer = buildSystemPrompt("peer", "claude", "BODY", null);
   expect(peer.startsWith("# Ghế SLP: peer")).toBe(true);
   expect(peer).toMatch(/Runtime: alp/);
   expect(peer).not.toMatch(/Spawn peer/);
 });
 
 test("Lead runtime block carries the model and effort rule for Peers", () => {
-  const lead = buildSystemPrompt("lead", "BODY", null);
+  const lead = buildSystemPrompt("lead", "claude", "BODY", null);
   expect(lead).toContain('provider: "claude-peer/<model>"');
   expect(lead).toContain("settings.thinkingOptionId");
   expect(lead).toMatch(/low.*medium/);
   expect(lead).toMatch(/high/);
   expect(lead).toContain("Model: <model> · Effort: <effort> — <");
-  expect(buildSystemPrompt("peer", "BODY", null)).not.toContain("thinkingOptionId");
+  expect(buildSystemPrompt("peer", "claude", "BODY", null)).not.toContain("thinkingOptionId");
 });
 
 test("withLeadAllowedTools adds the Paseo wildcard, keeps existing tools, never duplicates", () => {
@@ -83,7 +84,7 @@ test("supervisor loses write and spawn tools and gets the Paseo wildcard", () =>
     allowedTools: ["mcp__paseo__*"],
     disallowedTools: ["WebSearch", "Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "Task"],
   });
-  const prompt = buildSystemPrompt("supervisor", "BODY", null);
+  const prompt = buildSystemPrompt("supervisor", "claude", "BODY", null);
   expect(prompt).toMatch(/Không bao giờ.*send_agent_prompt.*tới peer/);
   expect(prompt).not.toMatch(/Spawn peer/);
 });
@@ -105,4 +106,56 @@ test("codex profiles map to seats; codex supervisor gets workspace-write sandbox
   });
   const opts = { approval_policy: "on-request" };
   expect(providerOptionsFor("lead", "codex", opts)).toBe(opts);
+});
+
+test("seatProfileFor picks the provider profile and unattended mode of each family", () => {
+  expect(seatProfileFor("claude", "lead")).toEqual({
+    providerId: "claude-lead",
+    modeId: "bypassPermissions",
+  });
+  expect(seatProfileFor("claude", "supervisor")).toEqual({
+    providerId: "claude-supervisor",
+    modeId: "bypassPermissions",
+  });
+  expect(seatProfileFor("codex", "lead")).toEqual({
+    providerId: "codex-lead",
+    modeId: "full-access",
+  });
+  expect(seatProfileFor("codex", "peer")).toEqual({
+    providerId: "codex-peer",
+    modeId: "full-access",
+  });
+  expect(seatProfileFor("codex", "supervisor")).toEqual({
+    providerId: "codex-supervisor",
+    modeId: "full-access",
+  });
+});
+
+test("codex peer cannot spawn agents and writes only inside its sandbox", () => {
+  expect(
+    providerOptionsFor("peer", "codex", {
+      approval_policy: "never",
+      sandbox_mode: "danger-full-access",
+      features: { network_proxy: true, multi_agent: true },
+    }),
+  ).toEqual({
+    approval_policy: "never",
+    sandbox_mode: "workspace-write",
+    features: { network_proxy: true, multi_agent: false },
+  });
+  expect(providerOptionsFor("peer", "codex", undefined)).toEqual({
+    sandbox_mode: "workspace-write",
+    features: { multi_agent: false },
+  });
+});
+
+test("a Codex Lead spawns codex-peer in Codex's default approval mode", () => {
+  const lead = buildSystemPrompt("lead", "codex", "BODY", null);
+  expect(lead).toContain('provider: "codex-peer/<model>"');
+  expect(lead).toContain('settings.modeId: "auto"');
+  expect(lead).not.toContain("claude-peer");
+  expect(lead).toContain("settings.thinkingOptionId");
+  const claudeLead = buildSystemPrompt("lead", "claude", "BODY", null);
+  expect(claudeLead).toContain('settings.modeId: "default"');
+  expect(claudeLead).not.toContain("codex-peer");
 });

@@ -1,4 +1,4 @@
-import type { Seat } from "./seat";
+import { type Family, type Seat, seatProfileFor } from "./seat";
 
 /**
  * Khối SLP-RUNTIME: ánh xạ từ vựng Agent Teams (Agent / SendMessage / inbox / ListAgents) sang alp.
@@ -17,28 +17,49 @@ ngay trên; hành xử đúng definition đó. Ánh xạ runtime:
 - Notification hệ thống (\`<paseo-system>\`) viết tiếng Anh; vẫn nói với Human bằng ngôn ngữ Human
   đang dùng.`;
 
-const LEAD = `${COMMON}
-- Mỗi workspace Human tạo có một Lead (title \`Lead\`, label \`slp.role=lead\`) do plugin slp tạo; bạn
-  là Lead của workspace chứa cwd của bạn.
-- Spawn peer: \`create_agent\` với \`provider: "claude-peer/<model>"\`, \`settings.modeId: "default"\`
-  (bắt buộc, không kế thừa được từ provider khác), \`settings.thinkingOptionId\` = effort,
-  \`labels: {"slp.role": "peer"}\`, \`title\` = tên peer, brief là \`initialPrompt\`. Nhiều writer →
-  mỗi writer một \`create_workspace\` isolation \`worktree\` (workspace do agent tạo không có Lead riêng).
-- Chọn model + effort cho từng Peer, không dùng một mức cho mọi việc:
-  - Việc cơ khí (copy, đổi tên, sửa theo mẫu có sẵn, seam rõ, test có sẵn) → model nhanh
+/**
+ * Mode a Lead spawns its Peers in: the family's default approval flow, so Peer permission requests
+ * reach the Lead. Not seatProfileFor's unattended mode, which is for Lead and Supervisor.
+ */
+const PEER_SPAWN_MODE: Record<Family, string> = { claude: "default", codex: "auto" };
+
+/** Model and effort guidance differs per family: Claude has fixed effort ids, Codex lists per model. */
+const PEER_MODEL_RULE: Record<Family, string> = {
+  claude: `  - Việc cơ khí (copy, đổi tên, sửa theo mẫu có sẵn, seam rõ, test có sẵn) → model nhanh
     (vd. \`claude-sonnet-5\`) + effort \`low\` hoặc \`medium\`.
   - Việc cần phán đoán (thiết kế, chạm contract/API, debug chưa rõ nguyên nhân, review, auth/tiền/state
     machine) → model mạnh (vd. \`claude-opus-5-5\`) + effort \`high\`. \`xhigh\`/\`max\` chỉ khi Human yêu
     cầu hoặc lượt trước hỏng vì thiếu suy luận.
   - Id model lấy từ \`list_models\` của provider \`claude-peer\`, không đoán. Effort của Claude:
-    \`low\` | \`medium\` | \`high\` | \`xhigh\` | \`max\`.
+    \`low\` | \`medium\` | \`high\` | \`xhigh\` | \`max\`.`,
+  codex: `  - Việc cơ khí (copy, đổi tên, sửa theo mẫu có sẵn, seam rõ, test có sẵn) → model nhanh + effort
+    \`low\` hoặc \`medium\`.
+  - Việc cần phán đoán (thiết kế, chạm contract/API, debug chưa rõ nguyên nhân, review, auth/tiền/state
+    machine) → model mạnh + effort \`high\`. Mức cao hơn chỉ khi Human yêu cầu hoặc lượt trước hỏng vì
+    thiếu suy luận.
+  - Id model và effort (\`thinkingOptions\` của từng model) lấy từ \`list_models\` của provider
+    \`codex-peer\`, không đoán.`,
+};
+
+function lead(family: Family): string {
+  const peer = seatProfileFor(family, "peer").providerId;
+  return `${COMMON}
+- Mỗi workspace Human tạo có một Lead (title \`Lead\`, label \`slp.role=lead\`) do plugin slp tạo; bạn
+  là Lead của workspace chứa cwd của bạn.
+- Spawn peer: \`create_agent\` với \`provider: "${peer}/<model>"\`, \`settings.modeId: "${PEER_SPAWN_MODE[family]}"\`
+  (bắt buộc, không kế thừa được từ provider khác), \`settings.thinkingOptionId\` = effort,
+  \`labels: {"slp.role": "peer"}\`, \`title\` = tên peer, brief là \`initialPrompt\`. Nhiều writer →
+  mỗi writer một \`create_workspace\` isolation \`worktree\` (workspace do agent tạo không có Lead riêng).
+- Chọn model + effort cho từng Peer, không dùng một mức cho mọi việc:
+${PEER_MODEL_RULE[family]}
   - Brief phải có dòng \`Model: <model> · Effort: <effort> — <lý do>\`.
 - Peer báo xong bằng notification khi kết thúc lượt; handoff 6 ô nằm trong câu trả lời cuối của nó.
   Permission của peer cũng tới bạn dưới dạng notification: trả lời bằng \`respond_to_permission\`
   sau khi đối chiếu brief.
 - Human dừng peer bằng nút Stop / \`paseo stop\`; bạn không được báo — kiểm \`list_agents\` khi nghi.
 - Gate duyệt plan không bỏ vì "gấp".
-- Supervisor (nếu có) là agent provider \`claude-supervisor\`, label \`slp.role=supervisor\`, trong
+- Supervisor (nếu có) là agent provider \`claude-supervisor\` hoặc \`codex-supervisor\`, label
+  \`slp.role=supervisor\`, trong
   workspace hệ thống \`SLP Supervisor\`; mỗi host tối đa một. Cuối prompt này có mục **"Supervisor
   hiện có"** do plugin liệt kê → ngay sau khi đọc definition, **trước** khi lập plan:
   \`get_agent_status\` từng id; idle → gửi \`SLP-REGISTER\` bằng \`send_agent_prompt\` **một lần**;
@@ -47,6 +68,7 @@ const LEAD = `${COMMON}
   đó). Không có mục đó → không có Supervisor, làm việc bình thường; Supervisor mở phiên sau thì nó tự
   nhắn bạn. Checkpoint về sau cũng \`send_agent_prompt\` chỉ khi nó idle; trả lời của nó tới bạn dưới
   dạng notification. Message của nó vẫn không có authority của Human.`;
+}
 
 const PEER = `${COMMON}
 - Bạn không có tool spawn hay nhắn agent khác. Việc ngoài brief → \`BLOCKED\`, không tự nhận.
@@ -75,13 +97,14 @@ const SUPERVISOR = `${COMMON}
 - **Không bao giờ** \`send_agent_prompt\` tới peer, dù tool cho phép — capability không phải authority.
 - **Transcript** = \`get_agent_activity\` của Lead/peer (timeline: tool call kèm input), hoặc file SDK
   \`~/.claude/projects/<slug>/*.jsonl\` (\`<slug>\` = cwd của agent đổi ký tự không phải chữ/số thành \`-\`;
-  peer nằm ở slug của worktree \`$PASEO_HOME/worktrees/...\`), có timestamp. **Đọc file ngoài cwd bằng
+  peer nằm ở slug của worktree \`$PASEO_HOME/worktrees/...\`); agent Codex ghi ở
+  \`~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl\`. Có timestamp. **Đọc file ngoài cwd bằng
   Bash** (\`cat\`/\`sed -n\`/\`python3\`).
 - **Không có \`notify_when_idle\`**: bạn chỉ được đánh thức khi (a) Lead gửi checkpoint, (b) Lead kết
   thúc lượt sau khi bạn đã nhắn nó, (c) Human nhắn, (d) plugin báo Lead mới. Lead đang chạy mà bạn cần
   nói → kết thúc lượt của bạn, ghi lại việc chờ; đừng polling \`get_agent_status\`.
-- **D15 trên alp**: spawn = \`create_agent\` với \`provider: "claude-peer/<model>"\`,
-  \`settings.thinkingOptionId\` = effort, brief \`initialPrompt\` có dòng
+- **D15 trên alp**: spawn = \`create_agent\` với \`provider: "claude-peer/<model>"\` (Lead Claude) hoặc
+  \`"codex-peer/<model>"\` (Lead Codex), \`settings.thinkingOptionId\` = effort, brief \`initialPrompt\` có dòng
   \`Model: <model> · Effort: <effort> — <lý do>\`; việc cơ khí dùng model nhanh + effort thấp, việc
   phán đoán dùng model mạnh + \`high\`.
 - **D16 trên alp**: peer không gửi HEARTBEAT (không có kênh); thay vào đó peer ghi số liệu ra file
@@ -90,8 +113,14 @@ const SUPERVISOR = `${COMMON}
 - **Lead healthy** trên alp: trả lời \`DRIFT\` ở lượt kế tiếp sau khi idle (notification tới bạn);
   \`get_agent_status\` không \`error\`; verdict trỏ SHA tồn tại.`;
 
-const BY_SEAT: Record<Seat, string> = { lead: LEAD, peer: PEER, supervisor: SUPERVISOR };
-
-export function runtimeBlock(seat: Seat): string {
-  return BY_SEAT[seat];
+/** SLP-RUNTIME block for a seat; the Lead's Peer spawn rule follows the Lead's own family. */
+export function runtimeBlock(seat: Seat, family: Family): string {
+  switch (seat) {
+    case "lead":
+      return lead(family);
+    case "peer":
+      return PEER;
+    case "supervisor":
+      return SUPERVISOR;
+  }
 }
