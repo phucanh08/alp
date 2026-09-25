@@ -20,16 +20,17 @@ Format: one row per change, newest last. `Since` is the alp commit or version th
 
 ## Identity (thin rename)
 
-| Since      | Area                | Upstream                                         | alp                                            | Effect                                                                     |
-| ---------- | ------------------- | ------------------------------------------------ | ---------------------------------------------- | -------------------------------------------------------------------------- |
-| 2026-09-25 | CLI bin             | `paseo` (`packages/cli/bin/paseo`)               | `alp` (`packages/cli/bin/alp`, `.name("alp")`) | scripts and docs that call `paseo …` must call `alp …`; no `paseo` alias   |
-| 2026-09-25 | desktop CLI shim    | `Resources/bin/paseo`, `~/.local/bin/paseo`      | `Resources/bin/alp`, `~/.local/bin/alp`        | desktop "install CLI" writes `alp`; old `paseo` symlink is not cleaned up  |
-| 2026-09-25 | home dir            | `~/.paseo`                                       | `~/.alp` (`PASEO_HOME` still overrides)        | existing Paseo state is not read; fresh daemon home                        |
-| 2026-09-25 | URL scheme          | `paseo://` (desktop protocol + agent deep links) | `alp://`                                       | upstream deep links do not open alp; `parseAgentDeepLink` rejects `paseo:` |
-| 2026-09-25 | desktop identity    | appId `sh.paseo.desktop`, product/exe `Paseo`    | `com.anhlp.alp.desktop`, product/exe `alp`     | separate app; artifacts `alp-*.dmg/AppImage/exe`; helper `alp Helper.app`  |
-| 2026-09-25 | desktop auto-update | GitHub releases `getpaseo/paseo`                 | `phucanh08/alp`                                | updater only sees alp releases                                             |
-| 2026-09-25 | mobile identity     | `sh.paseo` / `sh.paseo.debug`, name Paseo        | `com.anhlp.alp` / `.debug`, name alp           | fastlane, maestro app ids follow; store listing is a new app               |
-| 2026-09-25 | repository url      | `github.com/getpaseo/paseo`                      | `github.com/phucanh08/alp`                     | package.json `repository` in root + all workspaces                         |
+| Since      | Area                | Upstream                                           | alp                                            | Effect                                                                                           |
+| ---------- | ------------------- | -------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| 2026-09-25 | CLI bin             | `paseo` (`packages/cli/bin/paseo`)                 | `alp` (`packages/cli/bin/alp`, `.name("alp")`) | scripts and docs that call `paseo …` must call `alp …`; no `paseo` alias                         |
+| 2026-09-25 | desktop CLI shim    | `Resources/bin/paseo`, `~/.local/bin/paseo`        | `Resources/bin/alp`, `~/.local/bin/alp`        | desktop "install CLI" writes `alp`; old `paseo` symlink is not cleaned up                        |
+| 2026-09-25 | home dir            | `~/.paseo`                                         | `~/.alp` (`PASEO_HOME` still overrides)        | existing Paseo state is not read; fresh daemon home                                              |
+| 2026-09-25 | URL scheme          | `paseo://` (desktop protocol + agent deep links)   | `alp://`                                       | upstream deep links do not open alp; `parseAgentDeepLink` rejects `paseo:`                       |
+| 2026-09-25 | desktop identity    | appId `sh.paseo.desktop`, product/exe `Paseo`      | `com.anhlp.alp.desktop`, product/exe `alp`     | separate app; artifacts `alp-*.dmg/AppImage/exe`; helper `alp Helper.app`                        |
+| 2026-09-25 | desktop auto-update | GitHub releases `getpaseo/paseo`                   | `phucanh08/alp`                                | updater only sees alp releases                                                                   |
+| 2026-09-25 | mobile identity     | `sh.paseo` / `sh.paseo.debug`, name Paseo          | `com.anhlp.alp` / `.debug`, name alp           | fastlane, maestro app ids follow; store listing is a new app                                     |
+| 2026-09-25 | repository url      | `github.com/getpaseo/paseo`                        | `github.com/phucanh08/alp`                     | package.json `repository` in root + all workspaces                                               |
+| 2026-09-25 | display strings     | `Paseo` in app/CLI/server/desktop UI, README, docs | `alp` (lowercase)                              | UI copy, MCP tool descriptions, generated PR body, docs say alp; identifiers/env/scope unchanged |
 
 ## Deferred (still upstream values)
 
@@ -38,7 +39,6 @@ Format: one row per change, newest last. `Since` is the alp commit or version th
 | project config file    | `paseo.json`                                       | consumed by the upstream Paseo daemon that drives the SLP workflow on this repo, and by i18n strings in 7 locales; rename later if ever |
 | hub project dir        | `.paseo/triggers`                                  | hub scaffolding, untouched until hub is re-hosted                                                                                       |
 | nix / docker bin names | `paseo-server`, `paseo`, `paseo-docker-entrypoint` | packaging wrappers, Phase 3                                                                                                             |
-| display strings        | "Paseo" in app/website UI, i18n, docs              | Phase 3 docs/UI pass                                                                                                                    |
 
 ## Kept compatible on purpose
 

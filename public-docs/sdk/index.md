@@ -1,6 +1,6 @@
 ---
 title: TypeScript SDK
-description: Run Paseo coding agents from a TypeScript program.
+description: Run alp coding agents from a TypeScript program.
 nav: Overview
 order: 50
 category: TypeScript SDK
@@ -8,9 +8,9 @@ category: TypeScript SDK
 
 # TypeScript SDK
 
-`@getpaseo/client` is a TypeScript library that drives a Paseo daemon from your own program. You pick a provider and model, give an agent a prompt and a directory, and wait for the answer.
+`@getpaseo/client` is a TypeScript library that drives an alp daemon from your own program. You pick a provider and model, give an agent a prompt and a directory, and wait for the answer.
 
-The daemon does the work: it launches the provider CLI, keeps the session alive, and streams it to the Paseo app. Your program is a client. Agents you create show up in Paseo next to the ones you started by hand, and they stay there after your program exits.
+The daemon does the work: it launches the provider CLI, keeps the session alive, and streams it to the alp app. Your program is a client. Agents you create show up in alp next to the ones you started by hand, and they stay there after your program exits.
 
 Use it to:
 

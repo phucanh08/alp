@@ -17,11 +17,11 @@ organization. Set the Hub origin in `PASEO_HUB_URL` below, for example
 - [Interactive API reference](https://hub-alp.anhlp.com/api/reference)
 - [OpenAPI 3.1 document](https://hub-alp.anhlp.com/api/openapi.json)
 
-These are the canonical reference endpoints for the hosted Paseo Hub. A self-hosted Hub exposes the same `/api/reference` and `/api/openapi.json` paths on its own origin.
+These are the canonical reference endpoints for the hosted alp Hub. A self-hosted Hub exposes the same `/api/reference` and `/api/openapi.json` paths on its own origin.
 
 ## Authentication
 
-Run `paseo hub login [origin]` for interactive CLI access. After browser approval, Paseo stores a durable, revocable organization credential under `PASEO_HOME` for that exact origin. Without an explicit origin, the CLI uses `PASEO_HUB_URL`, then the active stored login, then `https://hub-alp.anhlp.com`.
+Run `paseo hub login [origin]` for interactive CLI access. After browser approval, alp stores a durable, revocable organization credential under `PASEO_HOME` for that exact origin. Without an explicit origin, the CLI uses `PASEO_HUB_URL`, then the active stored login, then `https://hub-alp.anhlp.com`.
 
 For automation, create an organization API key from the Hub dashboard under **API keys**. Both credential types are bearer tokens:
 
@@ -57,7 +57,7 @@ API failures use RFC 9457 problem details. Missing, invalid, or revoked credenti
   "type": "https://alp.anhlp.com/problems/unauthorized",
   "title": "Authentication required",
   "status": 401,
-  "detail": "Provide an active Paseo organization credential in the Authorization: Bearer header.",
+  "detail": "Provide an active alp organization credential in the Authorization: Bearer header.",
   "code": "unauthorized",
   "requestId": "5e967c44-fc22-4f6d-8fc5-1bbff33121af"
 }
@@ -275,7 +275,7 @@ curl --fail-with-body -sS -X POST \
   -H "Authorization: Bearer $PASEO_HUB_API_KEY"
 ```
 
-Direct API consumers can pass the returned token to the daemon enrollment protocol. The Paseo CLI intentionally does not accept raw enrollment tokens; `connect` owns the authenticated single-flow exchange.
+Direct API consumers can pass the returned token to the daemon enrollment protocol. The alp CLI intentionally does not accept raw enrollment tokens; `connect` owns the authenticated single-flow exchange.
 
 An enrollment token cannot be reused. Revoking the API key immediately rejects
 future API requests and expires any unconsumed enrollment tokens that key

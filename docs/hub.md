@@ -1,6 +1,6 @@
-# Paseo Hub relationship
+# alp Hub relationship
 
-Paseo Hub is an explicit opt-in connection from one Paseo daemon to one Hub. Running a daemon does
+alp Hub is an explicit opt-in connection from one alp daemon to one Hub. Running a daemon does
 not register it with a Hub. The relationship begins only when a user runs
 `paseo hub connect [url]` from the daemon machine with an explicit API key or matching stored CLI login.
 
@@ -9,8 +9,8 @@ The human CLI login and daemon relationship are separate identities. `paseo hub 
 ## Connection and authority
 
 The daemon enrolls over HTTP(S), then opens and maintains a direct outbound WebSocket to the Hub.
-The Hub never discovers or acquires the daemon through Paseo's relay. The relay remains an optional
-encrypted path for normal Paseo clients and has no role in Hub enrollment, authentication, dispatch,
+The Hub never discovers or acquires the daemon through alp's relay. The relay remains an optional
+encrypted path for normal alp clients and has no role in Hub enrollment, authentication, dispatch,
 or reconnects.
 
 The daemon persists a relationship ID and private connection credential before enrollment. The
@@ -69,7 +69,7 @@ hashes, never prompts, environment values, or credentials.
 Before messaging an archived workspace, call `workspace.recovery.inspect.request`, then
 `workspace.recovery.restore.request` and await success. The native message handler unarchives the
 agent and loads its persisted provider session. `activeTurnBehavior: "steer"` uses the provider's
-native steering behavior, including Paseo's existing behavior when that provider cannot steer.
+native steering behavior, including alp's existing behavior when that provider cannot steer.
 Execution completion and arrival-specific output authority remain Hub responsibilities.
 
 The older `hub.execution.*` RPCs remain accepted for existing clients. Their execution ownership

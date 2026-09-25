@@ -97,12 +97,12 @@ There are two supported release paths:
 1. **Direct stable release**: you are ready to ship the resolved release source to everyone immediately (default `origin/main`).
 2. **Beta flow**: release candidates on the `beta` channel. Each beta carries its own changelog entry, publishes npm only on the explicit `beta` dist-tag, and stays behind the Stable/Beta switch on `/download`.
 
-Paseo has one linear release track even though npm dist-tags are independent
+alp has one linear release track even though npm dist-tags are independent
 pointers. The npm invariant is:
 
 - A beta release moves only `beta`; `latest` remains on the newest stable.
 - A stable release moves both `latest` and `beta` to that stable version. This
-  keeps users who install `@getpaseo/cli@beta` on the newest Paseo release after
+  keeps users who install `@getpaseo/cli@beta` on the newest alp release after
   a beta is promoted or superseded by a direct stable release.
 
 ## Release version decision
@@ -123,7 +123,7 @@ version:
 The release agent selects patch or minor during preparation and presents the
 target version with the changelog for approval. Agents never select a major
 version autonomously. A major release requires an explicit user instruction and
-approval; Paseo remains on major version zero until that deliberate decision.
+approval; alp remains on major version zero until that deliberate decision.
 
 Version bumps are never used to retry a failed build. Retry the existing version
 as described in **Fixing a failed release build**.
@@ -160,7 +160,7 @@ stable release complete.
 
 The Docker workflow builds images from the checked-out source tree on pull requests and on `main` as non-publishing checks. Stable `vX.Y.Z` tag pushes publish `ghcr.io/getpaseo/paseo:X.Y.Z` and `ghcr.io/getpaseo/paseo:latest`; beta `vX.Y.Z-beta.N` tag pushes publish only `ghcr.io/getpaseo/paseo:X.Y.Z-beta.N` and never move `latest`.
 
-The production relay is the Elixir service in [getpaseo/paseo-relay](https://github.com/getpaseo/paseo-relay), with its own deployment process. Paseo releases and pushes to this repository do not deploy it. The Cloudflare relay code and workflow in this repository are legacy and are not used in production.
+The production relay is the Elixir service in [getpaseo/paseo-relay](https://github.com/getpaseo/paseo-relay), with its own deployment process. alp releases and pushes to this repository do not deploy it. The Cloudflare relay code and workflow in this repository are legacy and are not used in production.
 
 **Stable means stable.** If the user says "stable" or "ship stable", do not ask whether they want a beta first. They picked stable; treat it as a direct stable release. Only run the beta flow when the user explicitly says "beta".
 
@@ -535,13 +535,13 @@ No prefix (`v`), no extra text. `Release Notes Sync` matches the `## X.Y.Z` (or 
 
 ## Changelog wording
 
-The changelog is shown on the Paseo homepage. Each bullet is a compact factual record of
+The changelog is shown on the alp homepage. Each bullet is a compact factual record of
 product behavior that changed.
 
 - **Name the exact change.** Prefer `Added <capability>`, `Removed <behavior>`,
   `Changed <behavior>`, or `Fixed <failure> when <condition>`.
 - **Keep the scope exact.** A conditional bug is not a general reliability problem. Do not
-  broaden one failure into claims that Paseo is now faster, smoother, responsive, or reliable.
+  broaden one failure into claims that alp is now faster, smoother, responsive, or reliable.
 - **Use concrete product and runtime terms.** Git polling, persisted cache, provider catalog,
   and WebSocket reconnects can identify the affected behavior. Component names, internal
   modules, code symbols, and implementation techniques cannot: omit `WorkingIndicator`,
@@ -553,7 +553,7 @@ product behavior that changed.
 
 | Avoid                                                        | Write                                                 |
 | ------------------------------------------------------------ | ----------------------------------------------------- |
-| Paseo stays responsive with many idle Git workspaces         | Removed periodic Git polling for idle workspaces      |
+| alp stays responsive with many idle Git workspaces           | Removed periodic Git polling for idle workspaces      |
 | Incompatible saved app data no longer crashes after upgrades | Fixed crash when persisted cache was incompatible     |
 | Splitting layouts no longer remounts the active agent        | Fixed scroll position resetting when splitting a pane |
 | Mobile model selector is faster and more straightforward     | Added search to the mobile model selector             |

@@ -1,6 +1,6 @@
 ---
 title: Docker
-description: Run the Paseo daemon and bundled web UI with the official Docker image.
+description: Run the alp daemon and bundled web UI with the official Docker image.
 nav: Docker
 order: 6
 category: Getting started
@@ -8,9 +8,9 @@ category: Getting started
 
 # Docker
 
-The official Paseo Docker image runs the daemon and serves the bundled browser UI from the same HTTP origin. It is meant for servers, dev boxes, NAS devices, homelab hosts, and other places where you want Paseo running without the desktop app.
+The official alp Docker image runs the daemon and serves the bundled browser UI from the same HTTP origin. It is meant for servers, dev boxes, NAS devices, homelab hosts, and other places where you want alp running without the desktop app.
 
-Docker images follow the stable Paseo release cadence. `ghcr.io/getpaseo/paseo:latest` points at the latest stable release, not an arbitrary `main` build.
+Docker images follow the stable alp release cadence. `ghcr.io/getpaseo/paseo:latest` points at the latest stable release, not an arbitrary `main` build.
 
 ```bash
 docker run -d --name paseo \
@@ -33,7 +33,7 @@ If you set `PASEO_PASSWORD`, use that same password when adding the direct daemo
 
 The image:
 
-- installs the Paseo daemon and CLI
+- installs the alp daemon and CLI
 - serves the bundled web UI
 - listens on `0.0.0.0:6767` inside the container
 - stores daemon state under `/home/paseo/.paseo`
@@ -101,10 +101,10 @@ Agent credentials persist in `/home/paseo`.
 
 Mount two paths for most deployments:
 
-| Mount         | Purpose                                                                   |
-| ------------- | ------------------------------------------------------------------------- |
-| `/home/paseo` | Paseo state plus agent config and credentials such as `.codex`, `.claude` |
-| `/workspace`  | Code that Paseo and launched agents can read and write                    |
+| Mount         | Purpose                                                                 |
+| ------------- | ----------------------------------------------------------------------- |
+| `/home/paseo` | alp state plus agent config and credentials such as `.codex`, `.claude` |
+| `/workspace`  | Code that alp and launched agents can read and write                    |
 
 On Linux, the built-in `paseo` user is uid/gid `1000:1000`. Make mounted directories writable by that user, or run the container with Docker's `--user` / Compose `user:` option.
 
@@ -138,7 +138,7 @@ server {
 }
 ```
 
-If you reach Paseo by DNS name, allow that host:
+If you reach alp by DNS name, allow that host:
 
 ```yaml
 environment:
