@@ -357,7 +357,7 @@ describe("DaemonSession", () => {
     });
     writeFileSync(
       join(paseoHome, "daemon.log"),
-      "first line\nrelay.secret.test:443 token=super-secret paseo://pairing-secret\n",
+      "first line\nrelay.secret.test:443 token=super-secret alp://pairing-secret\n",
     );
 
     await subsystem.handleDiagnosticsRequest({ type: "diagnostics.request", requestId: "d-1" });

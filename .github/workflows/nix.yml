@@ -101,7 +101,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          app="result-desktop/Applications/Paseo.app"
+          app="result-desktop/Applications/alp.app"
           test -x "$app/Contents/MacOS/Paseo"
           test -L result-desktop/bin/paseo-desktop
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "sh.paseo.desktop"

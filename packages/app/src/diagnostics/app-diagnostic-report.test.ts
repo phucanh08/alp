@@ -108,7 +108,7 @@ describe("app diagnostics report", () => {
         "/tmp/paseo-secret.sock",
         "\\\\.\\pipe\\paseo-secret",
         "password=tcp-password",
-        "paseo://pairing-secret",
+        "alp://pairing-secret",
       ].join("\n"),
       [host],
     );

@@ -6,10 +6,7 @@ import { buildAgentDeepLink, type AgentDeepLinkTarget } from "@getpaseo/protocol
 
 function findDesktopApp(): string | null {
   if (process.platform === "darwin") {
-    const candidates = [
-      "/Applications/Paseo.app",
-      path.join(homedir(), "Applications", "Paseo.app"),
-    ];
+    const candidates = ["/Applications/alp.app", path.join(homedir(), "Applications", "alp.app")];
 
     for (const candidate of candidates) {
       if (existsSync(candidate)) {
@@ -22,9 +19,9 @@ function findDesktopApp(): string | null {
 
   if (process.platform === "linux") {
     const candidates = [
-      "/usr/bin/Paseo",
-      "/opt/Paseo/Paseo",
-      path.join(homedir(), "Applications", "Paseo.AppImage"),
+      "/usr/bin/alp",
+      "/opt/alp/alp",
+      path.join(homedir(), "Applications", "alp.AppImage"),
     ];
 
     for (const candidate of candidates) {
@@ -42,7 +39,7 @@ function findDesktopApp(): string | null {
       return null;
     }
 
-    const candidate = path.join(localAppData, "Programs", "Paseo", "Paseo.exe");
+    const candidate = path.join(localAppData, "Programs", "alp", "alp.exe");
     return existsSync(candidate) ? candidate : null;
   }
 
