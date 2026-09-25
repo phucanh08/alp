@@ -26,7 +26,7 @@ Because you share the browser with the agent, you can watch it work — and step
 Browser tools are off by default. Turn them on per host:
 
 - **In the app:** open **Settings → your host → Agents** and turn on **Browser tools**.
-- **In `config.json`** (`~/.paseo/config.json`):
+- **In `config.json`** (`$PASEO_HOME/config.json`, `~/.alp/config.json` by default):
 
 ```json
 {

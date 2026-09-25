@@ -53,7 +53,7 @@ Missing models are downloaded at daemon startup into `$PASEO_HOME/models/local-s
   },
   "providers": {
     "local": {
-      "modelsDir": "~/.paseo/models/local-speech"
+      "modelsDir": "~/.alp/models/local-speech"
     }
   }
 }

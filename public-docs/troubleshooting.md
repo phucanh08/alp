@@ -39,7 +39,7 @@ Use the global `--host` option when the affected daemon is not the CLI's default
 
 The durable fix is to make sure the command is on `PATH` for a normal login shell, then restart alp, see [why alp's environment can differ](#why-paseos-environment-can-differ-from-your-terminal) for why that's the test that matters.
 
-If you'd rather pin it directly, set the binary path in `~/.paseo/config.json`:
+If you'd rather pin it directly, set the binary path in `$PASEO_HOME/config.json` (`~/.alp/config.json` by default):
 
 ```json
 {
@@ -72,7 +72,7 @@ This login-shell step runs on macOS and Linux. On Windows, alp uses the environm
 ## Reading the logs
 
 - **Desktop app** — the login-shell resolution is logged here. Look for `[login-shell-env]`: `applied` means it worked (it logs the `PATH` before and after); `failed; keeping inherited env` means it fell back to the stripped-down environment, with a `reason` (a timeout, a non-zero exit from your shell config, no output, …). A slow or erroring `.zshrc`/`.zprofile` is the usual cause.
-- **Daemon** — `~/.paseo/daemon.log` (`$PASEO_HOME/daemon.log` if you've set a custom home).
+- **Daemon** — `~/.alp/daemon.log` (`$PASEO_HOME/daemon.log` if you've set a custom home).
 
 Desktop app log location:
 

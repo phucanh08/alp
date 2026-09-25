@@ -1,6 +1,6 @@
 # Custom Provider Configuration
 
-alp supports configuring custom agent providers through `config.json` (located at `$PASEO_HOME/config.json`, typically `~/.paseo/config.json`). You can extend built-in providers with different API backends, add ACP-compatible agents, set custom binaries, disable providers, and create multiple profiles for the same underlying provider.
+alp supports configuring custom agent providers through `config.json` (located at `$PASEO_HOME/config.json`, typically `~/.alp/config.json`). You can extend built-in providers with different API backends, add ACP-compatible agents, set custom binaries, disable providers, and create multiple profiles for the same underlying provider.
 
 Provider definitions live under `agents.providers` in config.json:
 

@@ -19,7 +19,7 @@ This page covers the git-specific details: where worktrees live, how branches ar
 Worktrees live under `$PASEO_HOME/worktrees/` by default, grouped by a hash of the source checkout path. You can change the base directory with `worktrees.root` in `config.json`. Each worktree gets a slug and a branch when its workspace is created.
 
 ```
-~/.paseo/worktrees/
+~/.alp/worktrees/
 └── 1vnnm9k3/               # hash of source checkout path
     ├── tidy-fox/           # worktree slug
     └── bold-owl/
@@ -153,10 +153,10 @@ Omit `port` to let alp auto-assign one. Bind your process to `$PASEO_PORT` rathe
 ### Dynamic port allocation
 
 By default, alp asks the OS for an available ephemeral port. Configure a range globally in
-`~/.paseo/config.json` or per project in `paseo.json`:
+`$PASEO_HOME/config.json` (`~/.alp/config.json` by default) or per project in `paseo.json`:
 
 ```json
-// ~/.paseo/config.json
+// ~/.alp/config.json
 {
   "worktrees": {
     "servicePorts": { "range": "3000-4000" }
