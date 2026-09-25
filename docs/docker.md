@@ -1,6 +1,6 @@
-# Running Paseo in Docker
+# Running alp in Docker
 
-Paseo publishes a container image for running the daemon on a server, VM, NAS,
+alp publishes a container image for running the daemon on a server, VM, NAS,
 or homelab box. The image also serves the bundled browser web UI, so one
 container gives you both the daemon API and a self-hosted UI.
 
@@ -42,7 +42,7 @@ http://localhost:6767
 ```
 
 If you set `PASEO_PASSWORD`, enter the same password when adding the direct
-daemon connection in the web UI or another Paseo client.
+daemon connection in the web UI or another alp client.
 
 ## Docker Compose
 
@@ -73,7 +73,7 @@ services:
 ## Installing Agents
 
 The base image does not preinstall Claude Code, Codex, OpenCode, Copilot, Pi, or
-other agent CLIs. That keeps the default image small and avoids coupling Paseo
+other agent CLIs. That keeps the default image small and avoids coupling alp
 releases to third-party agent release cycles.
 
 Create a child image for the agents you use:
@@ -111,14 +111,14 @@ docker exec -it --user paseo paseo claude
 Agent credentials and config persist in `/home/paseo`, alongside daemon state.
 Provider environment variables such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
 `OPENAI_BASE_URL`, or `ANTHROPIC_BASE_URL` can be passed through `docker run -e`
-or `compose.environment`; Paseo passes them to launched agents.
+or `compose.environment`; alp passes them to launched agents.
 
 ## Volumes
 
-| Mount         | Purpose                                                                  |
-| ------------- | ------------------------------------------------------------------------ |
-| `/home/paseo` | Paseo state under `.paseo` plus agent config such as `.codex`, `.claude` |
-| `/workspace`  | Code that Paseo and launched agents can read and write                   |
+| Mount         | Purpose                                                                |
+| ------------- | ---------------------------------------------------------------------- |
+| `/home/paseo` | alp state under `.paseo` plus agent config such as `.codex`, `.claude` |
+| `/workspace`  | Code that alp and launched agents can read and write                   |
 
 The image defaults:
 
@@ -135,7 +135,7 @@ container with Docker's `--user` / Compose `user:` option.
 
 ## Reverse Proxies
 
-When serving Paseo behind a reverse proxy, forward normal HTTP requests and
+When serving alp behind a reverse proxy, forward normal HTTP requests and
 WebSocket upgrades to the same daemon port.
 
 Caddy example:
