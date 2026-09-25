@@ -41,7 +41,7 @@ export async function withSeatConfig(
   }
   const providerOptions = providerOptionsFor(seat, family, request.config.providerOptions);
   const systemPrompt = [
-    buildSystemPrompt(seat, definition.body, request.config.systemPrompt),
+    buildSystemPrompt(seat, family, definition.body, request.config.systemPrompt),
     roster,
   ]
     .filter(Boolean)

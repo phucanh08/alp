@@ -38,6 +38,17 @@ describe("provider-owned option schemas", () => {
     });
   });
 
+  test("accepts turning off Codex multi_agent and still rejects unknown features", () => {
+    expect(CodexProviderOptionsSchema.parse({ features: { multi_agent: false } })).toEqual({
+      features: { multi_agent: false },
+    });
+    expect(() =>
+      validateProviderOptions("codex", CodexProviderOptionsSchema, {
+        features: { multi_agnet: false },
+      }),
+    ).toThrow("providerOptions.features");
+  });
+
   test("reports the exact invalid Codex option path", () => {
     expect(() =>
       validateProviderOptions("codex", CodexProviderOptionsSchema, {

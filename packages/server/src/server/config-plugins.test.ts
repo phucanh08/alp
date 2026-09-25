@@ -31,6 +31,9 @@ describe("daemon plugin config", () => {
       "claude-lead",
       "claude-peer",
       "claude-supervisor",
+      "codex-lead",
+      "codex-peer",
+      "codex-supervisor",
     ]);
   });
 
