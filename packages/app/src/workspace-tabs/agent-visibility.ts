@@ -1,11 +1,14 @@
 import type { Agent } from "@/stores/session-store";
 import type { WorkspaceTabSnapshot } from "@/stores/workspace-layout-actions";
 import { isWorkspaceRootAgent } from "@/subagents/policies";
+import { buildDeterministicWorkspaceTabId } from "@/workspace-tabs/identity";
 import { normalizeWorkspaceOpaqueId } from "@/utils/workspace-identity";
 
 export interface WorkspaceAgentVisibility {
   activeAgentIds: Set<string>;
   autoOpenAgentIds: Set<string>;
+  // ALP(slp): newest non-archived agent labelled slp.role=lead; the label is the only seam.
+  leadAgentId: string | null;
 }
 
 function agentBelongsToWorkspace(agent: Agent, workspaceId: string): boolean {
@@ -23,11 +26,13 @@ export function deriveWorkspaceAgentVisibility(input: {
     return {
       activeAgentIds: new Set<string>(),
       autoOpenAgentIds: new Set<string>(),
+      leadAgentId: null,
     };
   }
 
   const activeAgentIds = new Set<string>();
   const autoOpenAgentIds = new Set<string>();
+  let lead: Agent | null = null;
   const agentsById = new Map<string, Agent>([
     ...(agentDetails?.entries() ?? []),
     ...(sessionAgents?.entries() ?? []),
@@ -38,13 +43,27 @@ export function deriveWorkspaceAgentVisibility(input: {
     }
     if (!agent.archivedAt) {
       activeAgentIds.add(agent.id);
+      if (agent.labels["slp.role"] === "lead" && (!lead || agent.createdAt > lead.createdAt)) {
+        lead = agent;
+      }
       const parentAgent = agent.parentAgentId ? agentsById.get(agent.parentAgentId) : undefined;
       if (isWorkspaceRootAgent(agent, parentAgent)) {
         autoOpenAgentIds.add(agent.id);
       }
     }
   }
-  return { activeAgentIds, autoOpenAgentIds };
+  return { activeAgentIds, autoOpenAgentIds, leadAgentId: lead?.id ?? null };
+}
+
+// ALP(slp): a workspace that opens with nothing focused lands on its Lead tab.
+export function resolveWorkspaceLeadFocusTabId(input: {
+  leadAgentId: string | null;
+  activeTabId: string | null;
+}): string | null {
+  if (!input.leadAgentId || input.activeTabId) {
+    return null;
+  }
+  return buildDeterministicWorkspaceTabId({ kind: "agent", agentId: input.leadAgentId });
 }
 
 export function buildWorkspaceTabSnapshot(input: {
@@ -74,7 +93,8 @@ export function workspaceAgentVisibilityEqual(
 ): boolean {
   return (
     setsEqual(a.activeAgentIds, b.activeAgentIds) &&
-    setsEqual(a.autoOpenAgentIds, b.autoOpenAgentIds)
+    setsEqual(a.autoOpenAgentIds, b.autoOpenAgentIds) &&
+    a.leadAgentId === b.leadAgentId
   );
 }
 
