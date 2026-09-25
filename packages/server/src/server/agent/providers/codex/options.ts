@@ -52,6 +52,8 @@ export const CodexProviderOptionsSchema = z
     features: z
       .object({
         network_proxy: z.union([z.boolean(), NetworkPolicySchema]).optional(),
+        // ALP(slp): the Codex Peer seat sets this to false so it cannot spawn its own agents.
+        multi_agent: z.boolean().optional(),
         multi_agent_v2: z.boolean().optional(),
       })
       .strict()
