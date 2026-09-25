@@ -301,7 +301,25 @@ export class ClientWorkspaceOrigins {
   }
 }
 
-/** `workspace.created`: a Lead for client-created workspaces, never for the Supervisor one. */
+/** The live Lead of any active workspace checked out at `directory`, if there is one. */
+async function liveLeadInDirectory(api: EnsureApi, directory: string): Promise<string | null> {
+  const workspaceIds = new Set(
+    (await listWorkspaces(api))
+      .filter((entry) => !entry.archivingAt && workspaceDirectory(entry) === directory)
+      .map((entry) => entry.id),
+  );
+  const lead = (await findSeatAgents(api.agents, "lead")).find(
+    (agent) => agent.workspaceId !== null && workspaceIds.has(agent.workspaceId),
+  );
+  return lead?.id ?? null;
+}
+
+/**
+ * `workspace.created`: a Lead for client-created workspaces, never for the Supervisor one. One Lead
+ * per directory: upstream `paseo run` mints a new workspace on every bare run, so a directory that
+ * already has a live Lead in another active workspace gets no second one. Only this automatic path
+ * dedupes; `slp.lead.ensure` still gives the workspace it names its own Lead.
+ */
 export async function handleWorkspaceCreated(
   api: EnsureApi,
   origins: ClientWorkspaceOrigins,
@@ -310,5 +328,11 @@ export async function handleWorkspaceCreated(
 ): Promise<LeadEnsureResult | null> {
   const fromClient = origins.consume(workspace);
   if (!fromClient || isSupervisorWorkspace(workspace.cwd, deps.supervisorDirectory)) return null;
-  return ensureLead(api, workspace.id, deps);
+  const directory = expandUserPath(workspace.cwd);
+  // Serialized per directory so two workspaces created back to back cannot both miss the Lead.
+  return queue.run(`lead-directory:${directory}`, async () => {
+    const leadId = await liveLeadInDirectory(api, directory);
+    if (leadId) return { agentId: leadId, created: false };
+    return ensureLead(api, workspace.id, deps);
+  });
 }

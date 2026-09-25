@@ -44,8 +44,15 @@ those requests and creates a Lead only for workspaces that match one:
 - A request that already brings a `claude-lead` agent gets no second Lead.
 - Records expire after 10 minutes.
 
+One Lead per directory: a matching workspace gets no Lead when another active workspace with the same
+directory already has a live Lead (not closed or archived). Upstream `paseo run` creates a new
+workspace on every run without `--workspace`, so three runs in one directory would otherwise start
+three Leads. Directories compare after `~` expansion and `path.resolve`, the way the daemon stores
+them, without resolving symlinks. A Paseo worktree has its own directory and gets its own Lead.
+
 Workspaces created by agents over MCP or by schedules get no Lead automatically. Call
-`slp.lead.ensure` for them.
+`slp.lead.ensure` for them. That RPC skips the directory check and gives the workspace it names its
+own Lead.
 
 ## The Supervisor workspace
 
