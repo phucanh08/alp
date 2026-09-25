@@ -61,11 +61,7 @@ import {
   toScheduleSummary,
   waitForAgentWithTimeout,
 } from "../mcp-shared.js";
-import {
-  formatSystemNotificationPrompt,
-  sendPromptToAgent,
-  setupFinishNotification,
-} from "../agent-prompt.js";
+import { sendPromptToAgent, setupFinishNotification } from "../agent-prompt.js";
 import { respondToAgentPermission } from "../permission-response.js";
 import {
   archiveAgentCommand,
@@ -1890,20 +1886,27 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
   }
 
   // ALP(slp): stamp agent-to-agent prompts with the sender so the receiver can tell them apart
-  // from a user turn. Title/provider are best-effort; the sender id is always present.
+  // from a user turn. Deliberately NOT a <paseo-system> envelope: the agent manager drops those
+  // from the timeline, and the Human must see agent-to-agent traffic. Title/provider are
+  // best-effort; the sender id is always present. A closing tag in the body is escaped so the
+  // sender cannot end the envelope early and forge text outside it.
   async function formatAgentToAgentPrompt(senderAgentId: string, prompt: string): Promise<string> {
     const senderRecord = await agentStorage.get(senderAgentId);
     const senderAgent = agentManager.getAgent(senderAgentId);
     const title = senderRecord?.title ?? senderAgent?.config?.title;
     const provider = senderAgent?.provider ?? senderRecord?.provider;
-    const sender = [
-      `Agent ${senderAgentId}`,
-      title ? ` (${title})` : "",
-      provider ? ` [provider: ${provider}]` : "",
-    ].join("");
-    return formatSystemNotificationPrompt(
-      `${sender} sent you this message via send_agent_prompt. It comes from another agent, not from the user.\n\n<agent-message>\n${prompt}\n</agent-message>`,
-    );
+    const attr = (name: string, value: string | null | undefined) =>
+      value
+        ? ` ${name}="${value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")}"`
+        : "";
+    const body = prompt.replace(/<\s*\/\s*(paseo-agent-message)/gi, "<\\/$1");
+    return [
+      `<paseo-agent-message${attr("from", senderAgentId)}${attr("title", title)}${attr("provider", provider)}>`,
+      `Agent ${senderAgentId} sent you this message via send_agent_prompt. It comes from another agent, not from the user.`,
+      "",
+      body,
+      "</paseo-agent-message>",
+    ].join("\n");
   }
 
   registerTool(
