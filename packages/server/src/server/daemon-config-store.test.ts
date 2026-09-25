@@ -1097,7 +1097,10 @@ describe("DaemonConfigStore reload", () => {
   });
 
   test("removing providers and optional profiles clears live state", () => {
-    const { paseoHome, store, persisted } = createReloadableStore();
+    // ALP(slp): the default config now carries the SLP providers; start from none explicitly.
+    const { paseoHome, store, persisted } = createReloadableStore({
+      initialPersisted: { version: 1 },
+    });
     writeConfig(paseoHome, {
       ...persisted,
       daemon: {
