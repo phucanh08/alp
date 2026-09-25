@@ -64,7 +64,7 @@ For maximum isolation, you can configure the daemon to listen on a Unix socket f
 
 ### VPN access
 
-Use a VPN such as [Tailscale](https://tailscale.com) when you want a direct connection outside your local network. The VPN encrypts the traffic and keeps the daemon off the public internet. Bind the daemon to its VPN address, set a alp password, then add that address as a direct connection in the client.
+Use a VPN such as [Tailscale](https://tailscale.com) when you want a direct connection outside your local network. The VPN encrypts the traffic and keeps the daemon off the public internet. Bind the daemon to its VPN address, set an alp password, then add that address as a direct connection in the client.
 
 ### Binding to 0.0.0.0
 

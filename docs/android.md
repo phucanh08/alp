@@ -4,10 +4,10 @@
 
 Controlled by `APP_VARIANT` in `packages/app/app.config.js` (vanilla Expo, no custom Gradle plugin):
 
-| Variant       | App name  | Package ID       |
-| ------------- | --------- | ---------------- |
-| `production`  | alp       | `sh.paseo`       |
-| `development` | alp Debug | `sh.paseo.debug` |
+| Variant       | App name  | Package ID            |
+| ------------- | --------- | --------------------- |
+| `production`  | alp       | `com.anhlp.alp`       |
+| `development` | alp Debug | `com.anhlp.alp.debug` |
 
 EAS profiles: `development`, `production`, and `production-apk` in `packages/app/eas.json`.
 
@@ -75,10 +75,10 @@ For a production-ID release APK that local Android profiling tools can attach to
 PASEO_PROFILE_BUILD=1 npm run android:production
 ```
 
-This keeps the `sh.paseo` package id, release Hermes bundle, and release optimizations. It adds
+This keeps the `com.anhlp.alp` package id, release Hermes bundle, and release optimizations. It adds
 `<profileable android:shell="true" />` and enables local Android trace markers for workspace mounts
 and daemon WebSocket traffic. The markers contain message types and sizes, never payload contents,
-and emit only while a system trace records the `sh.paseo` app (`perfetto -a sh.paseo ...`).
+and emit only while a system trace records the `com.anhlp.alp` app (`perfetto -a com.anhlp.alp ...`).
 
 Or from `packages/app`:
 
@@ -106,7 +106,7 @@ REACT_NATIVE_PACKAGER_HOSTNAME=10.0.2.2 \
 ```
 
 - **`REACT_NATIVE_PACKAGER_HOSTNAME=10.0.2.2`** — without it, Expo bakes your Mac's LAN IP into the dev client's Metro URL, which the emulator can't route to, and the app dies with `Failed to connect to /<lan-ip>:8081` before any JS loads.
-- **`EXPO_PUBLIC_LOCAL_DAEMON=10.0.2.2:<port>`** — the client's daemon endpoint (`packages/app/src/runtime/host-runtime.ts`); when unset it defaults to `localhost:6767`, the production daemon. Use `$PASEO_SERVICE_DAEMON_PORT` for a worktree daemon running as a alp service, or `6768` for a standalone `npm run dev:server`. It is inlined into the JS bundle at Metro bundle time, so set it on the build command and clear the Metro cache (`npx expo start -c`) if a change doesn't take.
+- **`EXPO_PUBLIC_LOCAL_DAEMON=10.0.2.2:<port>`** — the client's daemon endpoint (`packages/app/src/runtime/host-runtime.ts`); when unset it defaults to `localhost:6767`, the production daemon. Use `$PASEO_SERVICE_DAEMON_PORT` for a worktree daemon running as an alp service, or `6768` for a standalone `npm run dev:server`. It is inlined into the JS bundle at Metro bundle time, so set it on the build command and clear the Metro cache (`npx expo start -c`) if a change doesn't take.
 
 **Alternative — `adb reverse` + `localhost`** (if `10.0.2.2` misbehaves):
 

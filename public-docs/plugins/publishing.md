@@ -1,6 +1,6 @@
 ---
 title: Publish a plugin
-description: Share a alp plugin on npm, through a private registry, or from a Git repository.
+description: Share an alp plugin on npm, through a private registry, or from a Git repository.
 nav: Publishing
 order: 45
 category: Plugins

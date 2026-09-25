@@ -1,6 +1,6 @@
 ---
 title: Connectivity
-description: Connect a alp client to your daemon through SSH, the relay, or Tailscale.
+description: Connect an alp client to your daemon through SSH, the relay, or Tailscale.
 nav: Connectivity
 order: 4
 category: Getting started

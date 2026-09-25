@@ -156,7 +156,7 @@ An `ask` resolves to a permission request in alp, and `waitForFinish()` returns 
 
 ## Modes and options
 
-`modeId` picks a alp mode from the provider's published list, which the daemon shows in the app and reports through [provider discovery](/docs/sdk/providers). `options` is the provider's own configuration. They are separate controls and you can set both:
+`modeId` picks an alp mode from the provider's published list, which the daemon shows in the app and reports through [provider discovery](/docs/sdk/providers). `options` is the provider's own configuration. They are separate controls and you can set both:
 
 ```ts
 config: {

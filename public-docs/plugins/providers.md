@@ -8,7 +8,7 @@ category: Plugins
 
 # Build a provider plugin
 
-Start with the [plugin quickstart](/docs/plugins) if you have not built a alp plugin before.
+Start with the [plugin quickstart](/docs/plugins) if you have not built an alp plugin before.
 
 A provider plugin connects a coding agent to alp without adding it to alp core. [Publish the plugin](/docs/plugins/publishing) on npm or in a Git repository so users can
 install it with `paseo plugin install`.

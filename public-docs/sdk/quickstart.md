@@ -1,6 +1,6 @@
 ---
 title: SDK quickstart
-description: Connect to a alp daemon, run one coding agent, and read its reply.
+description: Connect to an alp daemon, run one coding agent, and read its reply.
 nav: Quickstart
 order: 51
 category: TypeScript SDK
