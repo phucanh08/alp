@@ -19,7 +19,7 @@ category: Orchestration
 
 Depending on the provider, alp delivers tools through its native tool interface or MCP. The capabilities are the same. Start a new agent or reload an existing one after changing injection settings.
 
-alp seeds `daemon.mcp.injectIntoAgents: true` on daemon start when the key is absent, so SLP agents can spawn and drive each other out of the box. Set it to `false` in `~/.paseo/config.json` to opt out; the seed never overwrites an explicit value.
+alp seeds `daemon.mcp.injectIntoAgents: true` on daemon start when the key is absent, so SLP agents can spawn and drive each other out of the box. Set it to `false` in `$PASEO_HOME/config.json` (`~/.alp/config.json` by default) to opt out; the seed never overwrites an explicit value.
 
 ## Limit alp tools by provider
 
@@ -61,7 +61,7 @@ tool injection globally, then add `paseoTools` to the exact provider IDs you lau
 }
 ```
 
-Run `paseo reload` after editing `~/.paseo/config.json`, then start a new agent or reload an
+Run `paseo reload` after editing `$PASEO_HOME/config.json`, then start a new agent or reload an
 existing one. A running session keeps the catalog it received at launch.
 
 Omitting `paseoTools` enables the complete catalog. Set `enabled` to `false` to remove the catalog,
