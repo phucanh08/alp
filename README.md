@@ -1,8 +1,9 @@
 <p align="center">
-  <img src="packages/website/public/logo.svg" width="64" height="64" alt="Paseo logo">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="packages/website/public/alp-wordmark-on-dark.svg">
+    <img src="packages/website/public/alp-wordmark-on-light.svg" alt="alp" width="220">
+  </picture>
 </p>
-
-<h1 align="center">Paseo</h1>
 
 <p align="center">
   <a href="README.md">English</a> ·
@@ -12,11 +13,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/getpaseo/paseo/stargazers">
-    <img src="https://img.shields.io/github/stars/getpaseo/paseo?style=flat&logo=github" alt="GitHub stars">
+  <a href="https://github.com/phucanh08/alp/stargazers">
+    <img src="https://img.shields.io/github/stars/phucanh08/alp?style=flat&logo=github" alt="GitHub stars">
   </a>
-  <a href="https://github.com/getpaseo/paseo/releases">
-    <img src="https://img.shields.io/github/v/release/getpaseo/paseo?style=flat&logo=github" alt="GitHub release">
+  <a href="https://github.com/phucanh08/alp/releases">
+    <img src="https://img.shields.io/github/v/release/phucanh08/alp?style=flat&logo=github" alt="GitHub release">
   </a>
   <a href="https://x.com/moboudra">
     <img src="https://img.shields.io/badge/%40moboudra-555?logo=x" alt="X">
@@ -29,14 +30,16 @@
   </a>
 </p>
 
+<p align="center"><em>A fork of <a href="https://github.com/getpaseo/paseo">Paseo</a>, licensed Apache-2.0.</em></p>
+
 <p align="center">One interface for Claude Code, Codex, Copilot, OpenCode, and Pi agents.</p>
 
 <p align="center">
-  <img src="https://alp.anhlp.com/hero-mockup.png" alt="Paseo app screenshot" width="100%">
+  <img src="https://alp.anhlp.com/hero-mockup.png" alt="alp app screenshot" width="100%">
 </p>
 
 <p align="center">
-  <img src="https://alp.anhlp.com/mobile-mockup.png" alt="Paseo mobile app" width="100%">
+  <img src="https://alp.anhlp.com/mobile-mockup.png" alt="alp mobile app" width="100%">
 </p>
 
 Run agents in parallel on your own machines. Ship from your phone or your desk.
@@ -45,19 +48,19 @@ Run agents in parallel on your own machines. Ship from your phone or your desk.
 - **Multi-provider:** Claude Code, Codex, Copilot, OpenCode, and Pi through the same interface. Pick the right model for each job.
 - **Voice control:** Dictate tasks or talk through problems in voice mode. Hands-free when you need it.
 - **Cross-device:** iOS, Android, desktop, web, and CLI. Start work at your desk, check in from your phone, script it from the terminal.
-- **Privacy-first:** Paseo doesn't have any telemetry, tracking, or forced log-ins.
+- **Privacy-first:** alp doesn't have any telemetry, tracking, or forced log-ins.
 
 ## Plugins
 
 Add themes, workspace panels, commands, settings screens, and coding-agent providers with trusted
-TypeScript plugins. Install from npm, Git, or a local directory with `paseo plugin install <source>`.
+TypeScript plugins. Install from npm, Git, or a local directory with `alp plugin install <source>`.
 
 Start with the [plugin quickstart](https://alp.anhlp.com/docs/plugins). Plugins run with access to your daemon
 machine and inside connected clients; install only code you trust.
 
 ## Getting Started
 
-Paseo runs a local server called the daemon that manages your coding agents. Clients like the desktop app, mobile app, web app, and CLI connect to it.
+alp runs a local server called the daemon that manages your coding agents. Clients like the desktop app, mobile app, web app, and CLI connect to it.
 
 ### Prerequisites
 
@@ -71,20 +74,20 @@ You need at least one agent CLI installed and configured with your credentials:
 
 ### Desktop app (recommended)
 
-Download it from [alp.anhlp.com/download](https://alp.anhlp.com/download) or the [GitHub releases page](https://github.com/getpaseo/paseo/releases). Open the app and the daemon starts automatically. Nothing else to install.
+Download it from [alp.anhlp.com/download](https://alp.anhlp.com/download) or the [GitHub releases page](https://github.com/phucanh08/alp/releases). Open the app and the daemon starts automatically. Nothing else to install.
 
 To connect from your phone, open **Settings → your host → Pair Device**.
 
 ### CLI / headless
 
-Install the CLI and start Paseo:
+Install the CLI and start alp:
 
 ```bash
 npm install -g @getpaseo/cli
-paseo
+alp
 ```
 
-Paseo starts locally, then asks whether to enable the end-to-end encrypted relay for device pairing. If you decline, connect directly over TCP, Tailscale, or another VPN. This path is useful for servers and remote machines.
+alp starts locally, then asks whether to enable the end-to-end encrypted relay for device pairing. If you decline, connect directly over TCP, Tailscale, or another VPN. This path is useful for servers and remote machines.
 
 For full setup and configuration, see:
 
@@ -94,7 +97,7 @@ For full setup and configuration, see:
 
 ### Docker
 
-Run the Paseo daemon and self-hosted web UI in Docker:
+Run the alp daemon and self-hosted web UI in Docker:
 
 ```bash
 docker run -d --name paseo \
@@ -112,15 +115,15 @@ Open `http://localhost:6767` after it starts. Extend the base image with the age
 Everything you can do in the app, you can do from the terminal.
 
 ```bash
-paseo run --provider claude/opus-4.6 "implement user authentication"
-paseo run --provider codex/gpt-5.5 --worktree feature-x "implement feature X"
+alp run --provider claude/opus-4.6 "implement user authentication"
+alp run --provider codex/gpt-5.5 --worktree feature-x "implement feature X"
 
-paseo ls                           # list running agents
-paseo attach abc123                # stream live output
-paseo send abc123 "also add tests" # follow-up task
+alp ls                             # list running agents
+alp attach abc123                  # stream live output
+alp send abc123 "also add tests"   # follow-up task
 
 # run on a remote daemon; --cwd is a path on that host
-paseo run --host workstation.local:6767 --cwd /workspace "run the full test suite"
+alp run --host workstation.local:6767 --cwd /workspace "run the full test suite"
 ```
 
 See the [full CLI reference](https://alp.anhlp.com/docs/cli) for more.
@@ -151,7 +154,7 @@ See the [SDK quickstart](https://alp.anhlp.com/docs/sdk/quickstart), [recipes](h
 
 ## Skills
 
-Skills teach your agent to use Paseo to orchestrate other agents.
+Skills teach your agent to use alp to orchestrate other agents.
 
 ```bash
 npx skills add getpaseo/paseo
@@ -167,9 +170,9 @@ Then use them in any agent conversation:
 
 Quick monorepo package map:
 
-- `packages/server`: Paseo daemon (agent process orchestration, WebSocket API, MCP server)
+- `packages/server`: alp daemon (agent process orchestration, WebSocket API, MCP server)
 - `packages/app`: Expo client (iOS, Android, web)
-- `packages/cli`: `paseo` CLI for daemon and agent workflows
+- `packages/cli`: `alp` CLI for daemon and agent workflows
 - `packages/desktop`: Electron desktop app
 - `packages/relay`: Relay transport and encryption used by the daemon and clients
 - `packages/website`: Marketing site and documentation (`alp.anhlp.com`)
@@ -195,7 +198,7 @@ npm run typecheck
 
 ## Sponsors
 
-Paseo is built by one person and funded by the people who use it. Support the work on [GitHub Sponsors](https://github.com/sponsors/boudra). Companies can [sponsor Paseo](https://alp.anhlp.com/sponsor#spot) monthly and have their logo shown here and on the alp.anhlp.com homepage.
+alp is built by one person and funded by the people who use it. Support the work on [GitHub Sponsors](https://github.com/sponsors/boudra). Companies can [sponsor alp](https://alp.anhlp.com/sponsor#spot) monthly and have their logo shown here and on the alp.anhlp.com homepage.
 
 <!-- Sponsor logos go here, in the same order as packages/website/src/data/sponsors.ts -->
 
