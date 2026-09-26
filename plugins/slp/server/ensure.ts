@@ -350,8 +350,9 @@ async function liveLeadInDirectory(api: EnsureApi, directory: string): Promise<s
  * per directory: upstream `paseo run` mints a new workspace on every bare run, so a directory that
  * already has a live Lead in another active workspace gets no second one. Only this automatic path
  * dedupes; `slp.lead.ensure` still gives the workspace it names its own Lead. `enabled` is the SLP
- * settings switch (default `true`); `false` ensures no Lead at all, without consuming the matched
- * client-origin entry or touching any workspace.
+ * settings switch (default `true`); `false` ensures no Lead, but still consumes the matched
+ * client-origin entry — otherwise it would outlive the TTL and attach itself to an unrelated
+ * workspace created after SLP is switched back on (ruling p11 G1).
  */
 export async function handleWorkspaceCreated(
   api: EnsureApi,
@@ -360,9 +361,10 @@ export async function handleWorkspaceCreated(
   deps: { supervisorDirectory: string },
   enabled = true,
 ): Promise<LeadEnsureResult | null> {
-  if (!enabled) return null;
   const fromClient = origins.consume(workspace);
-  if (!fromClient || isSupervisorWorkspace(workspace.cwd, deps.supervisorDirectory)) return null;
+  if (!enabled || !fromClient || isSupervisorWorkspace(workspace.cwd, deps.supervisorDirectory)) {
+    return null;
+  }
   const directory = expandUserPath(workspace.cwd);
   // Serialized per directory so two workspaces created back to back cannot both miss the Lead.
   return queue.run(`lead-directory:${directory}`, async () => {

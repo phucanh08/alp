@@ -15,12 +15,16 @@ import { slpSettings } from "./shared/settings";
 
 /**
  * slp: SLP seats (Supervisor / Lead / Peer) on alp. See README.md for behavior and boundaries.
+ * `enabled` (ruling p11 G1) is the SLP switch: every hook and RPC below reads it itself before
+ * doing anything, so `false` makes the plugin inert — it does not seat, label, ensure, announce, or
+ * auto-allow permissions, and every request passes through unchanged.
  */
 export default function contribute(server: PluginServerContext) {
   const supervisorDir = supervisorDirectory();
   const origins = new ClientWorkspaceOrigins();
   const settings = server.registerSettings(slpSettings);
   const enabled = async () => isEnabled(await settings.read());
+  const announceLeads = createLeadAnnouncer();
 
   server.handle(slpSupervisorEnsure, async (_input, { paseo }) => {
     const state = await settings.read();
@@ -79,8 +83,14 @@ export default function contribute(server: PluginServerContext) {
         );
       }
     }),
-    server.on("agent.turn_ended", createLeadAnnouncer()),
-    server.on("agent.permission_requested", allowPaseoTools),
+    server.on("agent.turn_ended", async (event, context) => {
+      if (!(await enabled())) return;
+      await announceLeads(event, context);
+    }),
+    server.on("agent.permission_requested", async (event, context) => {
+      if (!(await enabled())) return;
+      await allowPaseoTools(event, context);
+    }),
   ];
 
   return () => {
