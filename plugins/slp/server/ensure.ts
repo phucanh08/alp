@@ -97,8 +97,26 @@ export function pickDefaultModel(models: readonly ModelLike[] | undefined): stri
   return (selectable.find((model) => model.isDefault) ?? selectable[0])?.id ?? null;
 }
 
-async function seatProvider(api: EnsureApi, provider: string): Promise<string> {
+/**
+ * `overrideModel` (the `supervisorModel` setting) wins when it names a selectable model of
+ * `provider`; otherwise `pickDefaultModel` runs as it did before the setting existed, with a
+ * warning naming the ignored value.
+ */
+async function seatProvider(
+  api: EnsureApi,
+  provider: string,
+  overrideModel?: string | null,
+): Promise<string> {
   const { models, error } = await api.providers.listModels(provider);
+  if (overrideModel) {
+    const selectable = (models ?? []).filter((model) => model.isSelectable !== false);
+    if (selectable.some((model) => model.id === overrideModel)) {
+      return `${provider}/${overrideModel}`;
+    }
+    console.warn(
+      `slp: supervisorModel "${overrideModel}" is not a selectable model of ${provider}, using the default model instead`,
+    );
+  }
   const model = pickDefaultModel(models);
   if (!model) {
     throw new Error(`Provider ${provider} has no selectable model${error ? `: ${error}` : ""}`);
@@ -111,9 +129,10 @@ async function seatAgent(
   seat: Seat,
   title: string,
   deps: SeatDeps,
+  overrideModel?: string | null,
 ): Promise<SeatAgentCreate> {
   const { providerId, modeId } = seatProfileFor(deps.family ?? "claude");
-  const provider = await seatProvider(api, providerId);
+  const provider = await seatProvider(api, providerId, overrideModel);
   return {
     config: { provider, modeId },
     title,
@@ -179,7 +198,10 @@ export const SUPERVISOR_RESUME_NOTICE =
  * `$PASEO_HOME/supervisor`. A live Supervisor anywhere on the host is reused; otherwise the newest
  * closed one is resumed; a new one is created only when there is none or the resume is rejected.
  * The system prompt of a resumed Supervisor is the one from its creation (`before("agent.create")`
- * does not run again). `enabled` is the SLP settings switch (default `true`); `false` rejects with a
+ * does not run again). Reuse and resume never touch the Supervisor's model; only a freshly created
+ * one applies `deps.supervisorModel` (the `supervisorModel` setting), and only when it names a
+ * selectable model of the seat's provider — otherwise the provider's default model is used, as when
+ * the setting is unset. `enabled` is the SLP settings switch (default `true`); `false` rejects with a
  * message containing "SLP disabled" instead of touching any workspace or agent.
  */
 export function ensureSupervisor(
@@ -187,6 +209,7 @@ export function ensureSupervisor(
   deps: {
     supervisorDirectory: string;
     makeDirectory: (directory: string) => Promise<unknown>;
+    supervisorModel?: string | null;
   } & SeatDeps,
   enabled = true,
 ): Promise<SupervisorEnsureResult> {
@@ -230,7 +253,9 @@ export function ensureSupervisor(
       ).id;
     const agent = await api.workspaces
       .ref(workspaceId)
-      .agents.create(await seatAgent(api, "supervisor", SUPERVISOR_TITLE, deps));
+      .agents.create(
+        await seatAgent(api, "supervisor", SUPERVISOR_TITLE, deps, deps.supervisorModel),
+      );
     return { workspaceId, agentId: agent.id, created: true };
   });
 }

@@ -9,7 +9,7 @@ import {
 } from "./server/ensure";
 import { allowPaseoTools, createLeadAnnouncer, withSeatConfig } from "./server/hooks";
 import { supervisorDirectory } from "./server/paths";
-import { isEnabled } from "./server/settings";
+import { isEnabled, supervisorModel } from "./server/settings";
 import { slpLeadEnsure, slpSupervisorEnsure } from "./shared/rpc";
 import { slpSettings } from "./shared/settings";
 
@@ -22,16 +22,18 @@ export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(slpSettings);
   const enabled = async () => isEnabled(await settings.read());
 
-  server.handle(slpSupervisorEnsure, async (_input, { paseo }) =>
-    ensureSupervisor(
+  server.handle(slpSupervisorEnsure, async (_input, { paseo }) => {
+    const state = await settings.read();
+    return ensureSupervisor(
       paseo,
       {
         supervisorDirectory: supervisorDir,
         makeDirectory: (directory) => mkdir(directory, { recursive: true }),
+        supervisorModel: supervisorModel(state),
       },
-      await enabled(),
-    ),
-  );
+      isEnabled(state),
+    );
+  });
   server.handle(slpLeadEnsure, async ({ workspaceId }, { paseo }) =>
     ensureLead(paseo, workspaceId, { supervisorDirectory: supervisorDir }, await enabled()),
   );

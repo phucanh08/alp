@@ -10,3 +10,11 @@ export type SlpSettingsState = PluginSettingsState<typeof slpSettings.schema>;
 export function isEnabled(state: SlpSettingsState): boolean {
   return state.status !== "ready" || state.values.enabled;
 }
+
+/**
+ * `supervisorModel` as `slp.supervisor.ensure` reads it: an `invalid` stored state counts as the
+ * schema default, `null` — same ruling as `isEnabled`.
+ */
+export function supervisorModel(state: SlpSettingsState): string | null {
+  return state.status === "ready" ? state.values.supervisorModel : null;
+}
