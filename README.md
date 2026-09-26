@@ -150,7 +150,7 @@ See the [SDK quickstart](https://alp.anhlp.com/docs/sdk/quickstart), [recipes](h
 Skills teach your agent to use alp to orchestrate other agents.
 
 ```bash
-npx skills add getpaseo/paseo
+npx skills add phucanh08/alp
 ```
 
 Then use them in any agent conversation:
