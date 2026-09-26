@@ -226,6 +226,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   errorHeader: {
     alignItems: "flex-start",
+    gap: theme.spacing[3],
   },
   title: {
     color: theme.colors.foreground,

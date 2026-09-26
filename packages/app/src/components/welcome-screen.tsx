@@ -70,6 +70,7 @@ const styles = StyleSheet.create((theme) => ({
   copyBlock: {
     alignItems: "center",
     gap: theme.spacing[2],
+    marginTop: theme.spacing[4],
     marginBottom: theme.spacing[12],
   },
   actions: {
