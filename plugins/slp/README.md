@@ -67,6 +67,15 @@ the daemon sets that label only when `create_agent` names a real calling agent, 
 the signal. An agent that already carries `slp.role` — valid or not — is never touched or tagged;
 only a request that names no seat at all gets the default.
 
+On `claude`/`codex`, the draft composer's Lead / Plain chat pill decides which of these two paths a
+new agent takes: the draft tab and the New workspace screen both default to Lead, sending
+`slp.role=lead` on create; Plain chat sends no label, so the request lands in the default-Peer path
+above, tagged `slp.origin=human`. The pill is shown only on `claude`/`codex` and only while SLP is
+on — hidden on any other provider or while the setting is off or loading, per the same
+`SLP_SEAT_PROVIDERS` gate `familyOf` in `server/seat.ts` mirrors (ruling p11; the app cannot import
+this plugin). The choice is fixed once the create request goes out: nothing re-reads or re-offers it
+after the agent exists. See `packages/app/src/composer/draft/slp-seat.ts`.
+
 This defaulted Peer is a special Peer: no Lead briefed it, so its SLP-RUNTIME block gets one more
 paragraph a Lead-spawned Peer's does not. It says the Peer is independent — answer a bare Human
 message as ordinary chat, without waiting for a brief or a Lead — and only step into the ordinary
