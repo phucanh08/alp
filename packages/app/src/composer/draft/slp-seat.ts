@@ -12,31 +12,27 @@ export type DraftSeatPill =
   | { status: "hidden" }
   | { status: "shown"; seat: DraftSeat; disabled: boolean };
 
-type SlpGate = "off" | "loading" | "on";
+type SlpGate = "off" | "on";
 
-const LEAD_LABELS: Readonly<Record<string, string>> = { "slp.role": "lead" };
+// Mirrors `SEAT_LABEL`/the `lead` seat value in plugins/slp/server/seat.ts, which the app cannot
+// import; exported so `slp-seat-mirrors-contract.test.ts` can tie it to the plugin's source.
+export const LEAD_LABELS: Readonly<Record<string, string>> = { "slp.role": "lead" };
 
-// SLP seats run only on these providers; on any other the plugin ignores `slp.role`. Keep in step
-// with `familyOf` in plugins/slp/server/seat.ts, which the app cannot import.
-const SLP_SEAT_PROVIDERS: ReadonlySet<string> = new Set(["claude", "codex"]);
+// SLP seats run only on these providers; on any other the plugin ignores `slp.role`. Mirrors
+// `familyOf` in plugins/slp/server/seat.ts, which the app cannot import; exported for the same
+// contract test.
+export const SLP_SEAT_PROVIDERS: ReadonlySet<string> = new Set(["claude", "codex"]);
 
 function isSlpSeatProvider(provider: string | null): boolean {
   return provider !== null && SLP_SEAT_PROVIDERS.has(provider);
 }
 
-// A failed settings read counts as enabled, the plugin's own ruling. While settings load the app
-// still asks for the draft's seat; the plugin decides with the setting it actually has.
+// Unknown does not seat: only a ready, enabled read turns the gate on. The plugin's own ruling —
+// a failed read of its stored value counts as enabled — is about the server reading a corrupt
+// value it must run with regardless; the app not yet having a ready read is a different case, and
+// the feature contract has no fallback for it.
 function resolveSlpGate(settings: SlpSettings): SlpGate {
-  switch (settings.status) {
-    case "unavailable":
-      return "off";
-    case "loading":
-      return "loading";
-    case "error":
-      return "on";
-    case "ready":
-      return settings.enabled ? "on" : "off";
-  }
+  return settings.status === "ready" && settings.enabled ? "on" : "off";
 }
 
 /** A draft's seat as labels for the provider a create request goes out on. */
@@ -58,9 +54,10 @@ export function resolveDraftSeatPill(
   seat: DraftSeat,
   provider: string | null,
 ): DraftSeatPill {
-  const gate = resolveSlpGate(settings);
-  if (gate === "off" || !isSlpSeatProvider(provider)) return { status: "hidden" };
-  return { status: "shown", seat, disabled: gate === "loading" };
+  if (resolveSlpGate(settings) === "off" || !isSlpSeatProvider(provider)) {
+    return { status: "hidden" };
+  }
+  return { status: "shown", seat, disabled: false };
 }
 
 interface DraftSeatState {

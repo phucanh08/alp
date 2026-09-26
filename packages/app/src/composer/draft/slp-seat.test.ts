@@ -47,13 +47,13 @@ describe("draft seat labels", () => {
     expect(resolveDraftSeatLabels(ready(true), "chat", "claude")).toBeNull();
   });
 
-  it("asks for a Lead when the settings read failed, which counts as enabled", () => {
-    expect(resolveDraftSeatLabels(readFailed, "lead", "claude")).toEqual({ "slp.role": "lead" });
+  it("sends no label when the settings read failed — unknown does not seat", () => {
+    expect(resolveDraftSeatLabels(readFailed, "lead", "claude")).toBeNull();
     expect(resolveDraftSeatLabels(readFailed, "chat", "claude")).toBeNull();
   });
 
-  it("asks for a Lead while settings load and leaves the ruling to the plugin", () => {
-    expect(resolveDraftSeatLabels(loading, "lead", "claude")).toEqual({ "slp.role": "lead" });
+  it("sends no label while settings load — unknown does not seat", () => {
+    expect(resolveDraftSeatLabels(loading, "lead", "claude")).toBeNull();
   });
 
   it("asks for a Lead on codex as on claude", () => {
@@ -62,8 +62,8 @@ describe("draft seat labels", () => {
 
   it("sends no label on a provider SLP seats do not run on", () => {
     expect(resolveDraftSeatLabels(ready(true), "lead", "mock")).toBeNull();
-    expect(resolveDraftSeatLabels(readFailed, "lead", "opencode")).toBeNull();
-    expect(resolveDraftSeatLabels(loading, "lead", "copilot")).toBeNull();
+    expect(resolveDraftSeatLabels(ready(true), "lead", "opencode")).toBeNull();
+    expect(resolveDraftSeatLabels(ready(true), "lead", "copilot")).toBeNull();
   });
 
   it("sends no label before a provider is selected", () => {
@@ -93,18 +93,18 @@ describe("draft seat pill", () => {
     });
   });
 
-  it("shows the draft's seat when the settings read failed", () => {
-    expect(resolveDraftSeatPill(readFailed, "lead", "claude")).toEqual({
-      status: "shown",
-      seat: "lead",
-      disabled: false,
-    });
+  it("is hidden when the settings read failed — unknown does not seat", () => {
+    expect(resolveDraftSeatPill(readFailed, "lead", "claude")).toEqual({ status: "hidden" });
+  });
+
+  it("is hidden while settings load — unknown does not seat", () => {
+    expect(resolveDraftSeatPill(loading, "lead", "claude")).toEqual({ status: "hidden" });
   });
 
   it("is hidden on a provider SLP seats do not run on", () => {
     expect(resolveDraftSeatPill(ready(true), "lead", "mock")).toEqual({ status: "hidden" });
-    expect(resolveDraftSeatPill(readFailed, "chat", "pi")).toEqual({ status: "hidden" });
-    expect(resolveDraftSeatPill(loading, "lead", "opencode")).toEqual({ status: "hidden" });
+    expect(resolveDraftSeatPill(ready(true), "chat", "pi")).toEqual({ status: "hidden" });
+    expect(resolveDraftSeatPill(ready(true), "lead", "opencode")).toEqual({ status: "hidden" });
   });
 
   it("is hidden before a provider is selected", () => {
@@ -116,14 +116,6 @@ describe("draft seat pill", () => {
       status: "shown",
       seat: "chat",
       disabled: false,
-    });
-  });
-
-  it("shows the seat it will send, disabled, while settings load", () => {
-    expect(resolveDraftSeatPill(loading, "lead", "claude")).toEqual({
-      status: "shown",
-      seat: "lead",
-      disabled: true,
     });
   });
 });
