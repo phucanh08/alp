@@ -1,5 +1,5 @@
 name = "alp-website"
-# account_id: set CLOUDFLARE_ACCOUNT_ID env or fill in your own
+account_id = "ef4cff6844394919c511229078a6e9f6"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 main = "./src/server-entry.ts"
@@ -14,4 +14,4 @@ enabled = true
 
 [[kv_namespaces]]
 binding = "WEBSITE_CACHE"
-id = "<your KV namespace id>"
+id = "7a02ccd0f29346379f64d2ab31d1ffb8"
