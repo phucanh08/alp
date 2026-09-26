@@ -31,12 +31,14 @@ The seat is the `slp.role` label and nothing else. `<family>` is the base provid
 alone. The plugin creates Lead and Supervisor on `claude` with that provider's default model from
 `listModels`. The Lead picks each Peer's model and `settings.thinkingOptionId` per task.
 
-A `claude`/`codex` agent a Human creates directly — in the app or over the CLI, with no `slp.role`
-label at all — defaults to Peer and is tagged `slp.origin=human`, so it gets the same tool cuts and
-definition as any other Peer. The hook tells "Human made this" from "another agent made this" by
-`paseo.parent-agent-id`: the daemon sets that label only when `create_agent` names a real calling
-agent, so its absence is the signal. An agent that already carries `slp.role` — valid or not — is
-never touched or tagged; only a request that names no seat at all gets the default.
+A `claude`/`codex` agent with no `slp.role` label at all — created directly by a Human, in the app
+or over the CLI, or by a schedule run — defaults to Peer, so it gets the same tool cuts and
+definition as any other Peer. It is tagged `slp.origin=schedule` when the request carries
+`paseo.schedule-id` (the label a schedule run sets on the agent it creates) and `slp.origin=human`
+otherwise. The hook tells either of those from "another agent made this" by `paseo.parent-agent-id`:
+the daemon sets that label only when `create_agent` names a real calling agent, so its absence is
+the signal. An agent that already carries `slp.role` — valid or not — is never touched or tagged;
+only a request that names no seat at all gets the default.
 
 ## Seat tools
 
@@ -44,14 +46,17 @@ never touched or tagged; only a request that names no seat at all gets the defau
 which the daemon merges with the provider policy (cuts only add up) and freezes into the agent
 record; the provider's own tools go out through `providerOptions`.
 
-| Seat       | Paseo tools (`paseoTools.disabledTools`)                                          | Claude (`providerOptions`)                                                                          | Codex (`providerOptions`)                                      |
-| ---------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Lead       | none                                                                              | `allowedTools: mcp__paseo__*`                                                                       | unchanged                                                      |
-| Peer       | `PEER_DISABLED_PASEO_TOOLS`: spawn, steer, stop, archive, schedule                | `disallowedTools: Agent, Task`                                                                      | `features.multi_agent: false`, `sandbox_mode: workspace-write` |
-| Supervisor | `SUPERVISOR_DISABLED_PASEO_TOOLS`: every mutating tool except `send_agent_prompt` | `allowedTools: mcp__paseo__*`, `disallowedTools: Write, Edit, MultiEdit, NotebookEdit, Agent, Task` | `sandbox_mode: workspace-write`                                |
+| Seat       | Paseo tools (`paseoTools.disabledTools`)                                                                               | Claude (`providerOptions`)                                                                          | Codex (`providerOptions`)                                      |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Lead       | none                                                                                                                   | `allowedTools: mcp__paseo__*`                                                                       | unchanged                                                      |
+| Peer       | `PEER_DISABLED_PASEO_TOOLS`: spawn, steer, stop, archive, schedule, reconfigure another agent, resolve its permissions | `disallowedTools: Agent, Task`                                                                      | `features.multi_agent: false`, `sandbox_mode: workspace-write` |
+| Supervisor | `SUPERVISOR_DISABLED_PASEO_TOOLS`: every mutating tool except `send_agent_prompt`                                      | `allowedTools: mcp__paseo__*`, `disallowedTools: Write, Edit, MultiEdit, NotebookEdit, Agent, Task` | `sandbox_mode: workspace-write`                                |
 
 The lists live in `server/seat.ts`. A cut is only as strong as the label: a Lead that spawns a Peer
-without `slp.role=peer` gets an agent with no seat and no cuts.
+without `slp.role=peer` gets an agent with no seat and no cuts. It is also only as strong as the
+provider's own enforcement: `callerAgentId` on the MCP endpoint is advisory, so an agent with shell
+access can call another agent's endpoint directly and skip the cut (see
+[docs/plugins.md](../../docs/plugins.md#lifecycle-hooks)).
 
 ## Which workspaces get a Lead
 
