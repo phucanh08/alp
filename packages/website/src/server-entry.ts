@@ -89,6 +89,9 @@ export default {
         cache: env.WEBSITE_CACHE ?? null,
         waitUntil: (promise) => context.waitUntil(promise),
       });
+      if (version === null) {
+        return new Response("No alp Android release yet\n", { status: 404 });
+      }
       return plainTextResponse(`${getAndroidVersionCode(version)}\n`);
     }
 

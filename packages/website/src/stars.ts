@@ -12,19 +12,21 @@ function formatStars(count: number): string {
   return `${k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)}k`;
 }
 
-const GITHUB_REPO_URL = "https://api.github.com/repos/getpaseo/paseo";
-const STARS_CACHE_KEY = "github-stars:v1";
+const GITHUB_REPO_URL = "https://api.github.com/repos/phucanh08/alp";
+// Bumped when the site moved from getpaseo/paseo to the fork: a star count can't
+// tell which repo it came from, so only a new key keeps KV from serving upstream's.
+const STARS_CACHE_KEY = "github-stars:alp-v1";
 
 async function fetchStarCount(): Promise<string> {
   const res = await fetch(GITHUB_REPO_URL, {
     headers: {
       Accept: "application/vnd.github+json",
-      "User-Agent": "paseo-website",
+      "User-Agent": "alp-website",
     },
     cf: {
       cacheEverything: true,
       cacheTtl: 60,
-      cacheKey: "github-repo-stars",
+      cacheKey: "github-repo-stars:phucanh08/alp",
     },
   } as RequestInit);
   if (!res.ok) throw new Error(`github repo ${res.status}`);

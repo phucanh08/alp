@@ -53,14 +53,7 @@ const AGENT_LIST_GRID_STYLE = {
 const PHONE_PERSPECTIVE_STYLE = { minHeight: 480, perspective: 700 };
 import { CursorFieldProvider } from "~/components/butterfly";
 import { AGENT_PAGES } from "~/data/agent-pages";
-import {
-  appStoreUrl,
-  playStoreUrl,
-  getDesktopDownload,
-  MOBILE_STORES,
-  AppleIcon,
-  PlayStoreIcon,
-} from "~/downloads";
+import { getDesktopDownload } from "~/downloads";
 import type { DesktopPlatform, MobilePlatform } from "~/platform";
 import { isMobilePlatform } from "~/platform";
 import { useRelease, useVisitorPlatform } from "~/routes/__root";
@@ -874,18 +867,16 @@ function GetStarted() {
   const platform = useVisitorPlatform();
   return (
     <div className="pt-10">
-      {/* The primary call to action owns its own row on phones so the small icon
-          buttons never wrap and orphan one of themselves onto a line alone. It
-          still hugs its label rather than stretching across the row. */}
+      {/* The call to action hugs its label rather than stretching across the row. */}
       <div className="mx-auto flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
         {isMobilePlatform(platform) ? (
-          <StoreButton platform={platform} />
+          <>
+            <MobileAppUnavailable platform={platform} />
+            <DesktopAppLink />
+          </>
         ) : (
           <DesktopDownloadButton platform={platform} />
         )}
-        <div className="flex items-center justify-center gap-3">
-          {isMobilePlatform(platform) ? <DesktopAppLink /> : <StoreIconLinks />}
-        </div>
       </div>
       <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 pt-6">
         <span className="text-xs text-muted-foreground">Supports</span>
@@ -923,14 +914,18 @@ function DesktopDownloadButton({ platform }: { platform: DesktopPlatform }) {
   );
 }
 
-function StoreButton({ platform }: { platform: MobilePlatform }) {
-  const store = MOBILE_STORES[platform];
-  const Icon = store.icon;
+const MOBILE_APP_LABELS: Record<MobilePlatform, string> = {
+  ios: "iPhone",
+  android: "Android",
+};
+
+// alp has no App Store or Play Store listing yet, so a phone gets a notice
+// instead of a store button.
+function MobileAppUnavailable({ platform }: { platform: MobilePlatform }) {
   return (
-    <a href={store.href} target="_blank" rel="noopener noreferrer" className={PRIMARY_CTA_CLASS}>
-      <Icon className="h-4 w-4" />
-      Get the {store.label} app
-    </a>
+    <p className="text-sm text-muted-foreground">
+      The {MOBILE_APP_LABELS[platform]} app is not yet available for alp
+    </p>
   );
 }
 
@@ -942,31 +937,6 @@ function DesktopAppLink() {
       <Monitor className="h-4 w-4" strokeWidth={1.5} />
       Desktop app
     </a>
-  );
-}
-
-function StoreIconLinks() {
-  return (
-    <>
-      <a
-        href={appStoreUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={SECONDARY_CTA_CLASS}
-        aria-label="App Store"
-      >
-        <AppleIcon className="h-5 w-5" />
-      </a>
-      <a
-        href={playStoreUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={SECONDARY_CTA_CLASS}
-        aria-label="Google Play"
-      >
-        <PlayStoreIcon className="h-5 w-5" />
-      </a>
-    </>
   );
 }
 

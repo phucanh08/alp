@@ -1,13 +1,11 @@
 import type { ReactNode } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { changelogLink } from "~/changelog";
-import { CodeBlock } from "~/components/code-block";
 import { SiteShell } from "~/components/site-shell";
 import { pageMeta } from "~/meta";
 import {
   downloadUrls,
-  appStoreUrl,
-  playStoreUrl,
+  releasesUrl,
   webAppUrl,
   AppleIcon,
   AndroidIcon,
@@ -31,8 +29,8 @@ export const Route = createFileRoute("/download")({
     search.channel === "beta" ? { channel: "beta" } : {},
   head: () =>
     pageMeta(
-      "Download Paseo for macOS, Windows, Linux, iOS, and Android",
-      "Install Paseo on every platform. Native desktop apps for macOS, Windows, and Linux. Mobile apps for iOS and Android. Self-hosted, open source, free to download.",
+      "Download alp for macOS, Windows, and Linux",
+      "Install alp on your desktop. Native apps for macOS, Windows, and Linux. Self-hosted, open source, free to download.",
       "/download",
     ),
   component: Download,
@@ -97,7 +95,7 @@ function Download() {
 
           {!onBeta && (
             <PlatformRow icon={TerminalIcon} label="Homebrew">
-              <CodeBlock size="sm">brew install --cask paseo</CodeBlock>
+              <NotYetAvailable />
             </PlatformRow>
           )}
 
@@ -130,17 +128,18 @@ function Download() {
 
         <div className="divide-y divide-border">
           <PlatformRow icon={AndroidIcon} label="Android">
-            <PillGroup>
-              {!onBeta && <DownloadPill href={playStoreUrl} label="Play Store" external />}
-              <DownloadPill href={urls.androidApk} label="APK" />
-            </PillGroup>
+            {urls.androidApk ? (
+              <PillGroup>
+                <DownloadPill href={urls.androidApk} label="APK" />
+              </PillGroup>
+            ) : (
+              <NotYetAvailable />
+            )}
           </PlatformRow>
 
           {!onBeta && (
             <PlatformRow icon={AppleIcon} label="iOS">
-              <PillGroup>
-                <DownloadPill href={appStoreUrl} label="App Store" external />
-              </PillGroup>
+              <NotYetAvailable />
             </PlatformRow>
           )}
         </div>
@@ -175,7 +174,7 @@ function Download() {
           <div>
             <h2 className="text-2xl font-semibold">Server</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              Run the Paseo server anywhere, connect from any client
+              Run the alp server anywhere, connect from any client
             </p>
           </div>
           <TerminalIcon className="h-5 w-5 text-muted-foreground mt-1.5" />
@@ -183,19 +182,11 @@ function Download() {
 
         <div className="divide-y divide-border">
           <PlatformRow icon={TerminalIcon} label="npm">
-            <CodeBlock size="sm">
-              {onBeta
-                ? "npm install -g @getpaseo/cli@beta && paseo"
-                : "npm install -g @getpaseo/cli && paseo"}
-            </CodeBlock>
+            <NotYetAvailable />
           </PlatformRow>
 
           <PlatformRow icon={TerminalIcon} label="Nix">
-            <CodeBlock size="sm">
-              {onBeta
-                ? `nix run github:getpaseo/paseo/v${version}`
-                : "nix run github:getpaseo/paseo"}
-            </CodeBlock>
+            <NotYetAvailable />
           </PlatformRow>
         </div>
       </section>
@@ -203,7 +194,7 @@ function Download() {
       <p className="text-center text-xs text-muted-foreground mt-8">
         All releases are available on{" "}
         <a
-          href="https://github.com/getpaseo/paseo/releases"
+          href={releasesUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="underline hover:text-foreground transition-colors"
@@ -286,6 +277,10 @@ function PlatformRow({
       {children}
     </div>
   );
+}
+
+function NotYetAvailable() {
+  return <span className="text-sm text-muted-foreground">Not yet available for alp</span>;
 }
 
 function PillGroup({ children }: { children: ReactNode }) {
