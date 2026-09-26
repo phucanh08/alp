@@ -2348,6 +2348,19 @@ export const es: TranslationResources = {
       },
     },
     host: {
+      slp: {
+        title: "SLP",
+        loading: "Cargando la configuración de SLP…",
+        enabled: {
+          label: "Activar SLP",
+          hint: "Solo afecta a los agentes nuevos. Un Lead o Supervisor que ya está en ejecución sigue ejecutándose.",
+        },
+        supervisorModel: {
+          label: "Modelo predeterminado del Supervisor",
+          hint: "Solo se aplica a un Supervisor recién creado.",
+          default: "Predeterminado",
+        },
+      },
       appearance: {
         title: "Apariencia",
         name: {

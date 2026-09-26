@@ -2413,6 +2413,19 @@ export const en = {
       },
     },
     host: {
+      slp: {
+        title: "SLP",
+        loading: "Loading SLP settings…",
+        enabled: {
+          label: "Enable SLP",
+          hint: "Applies to new agents only. A Lead or Supervisor that is already running keeps running.",
+        },
+        supervisorModel: {
+          label: "Default Supervisor model",
+          hint: "Applies only to a newly created Supervisor.",
+          default: "Default",
+        },
+      },
       appearance: {
         title: "Appearance",
         name: {

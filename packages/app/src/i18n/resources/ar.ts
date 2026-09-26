@@ -2293,6 +2293,19 @@ export const ar: TranslationResources = {
       },
     },
     host: {
+      slp: {
+        title: "SLP",
+        loading: "جارٍ تحميل إعدادات SLP…",
+        enabled: {
+          label: "تفعيل SLP",
+          hint: "ينطبق على الوكلاء الجدد فقط. يستمر Lead أو Supervisor الذي يعمل بالفعل في العمل.",
+        },
+        supervisorModel: {
+          label: "نموذج Supervisor الافتراضي",
+          hint: "ينطبق فقط على Supervisor يُنشأ حديثًا.",
+          default: "الافتراضي",
+        },
+      },
       appearance: {
         title: "المظهر",
         name: {

@@ -2330,6 +2330,19 @@ export const ptBR: TranslationResources = {
       },
     },
     host: {
+      slp: {
+        title: "SLP",
+        loading: "Carregando configurações do SLP…",
+        enabled: {
+          label: "Ativar SLP",
+          hint: "Afeta apenas novos agentes. Um Lead ou Supervisor que já está em execução continua em execução.",
+        },
+        supervisorModel: {
+          label: "Modelo padrão do Supervisor",
+          hint: "Aplica-se apenas a um Supervisor recém-criado.",
+          default: "Padrão",
+        },
+      },
       appearance: {
         title: "Aparência",
         name: {

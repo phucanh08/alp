@@ -2268,6 +2268,19 @@ export const zhCN: TranslationResources = {
       },
     },
     host: {
+      slp: {
+        title: "SLP",
+        loading: "正在加载 SLP 设置…",
+        enabled: {
+          label: "启用 SLP",
+          hint: "仅影响新的 Agent。已在运行的 Lead 或 Supervisor 会继续运行。",
+        },
+        supervisorModel: {
+          label: "默认 Supervisor 模型",
+          hint: "仅适用于新创建的 Supervisor。",
+          default: "默认",
+        },
+      },
       appearance: {
         title: "外观",
         name: {

@@ -2334,6 +2334,19 @@ export const ru: TranslationResources = {
       },
     },
     host: {
+      slp: {
+        title: "SLP",
+        loading: "Загрузка настроек SLP…",
+        enabled: {
+          label: "Включить SLP",
+          hint: "Влияет только на новых агентов. Уже запущенные Lead или Supervisor продолжают работать.",
+        },
+        supervisorModel: {
+          label: "Модель Supervisor по умолчанию",
+          hint: "Применяется только к вновь созданному Supervisor.",
+          default: "По умолчанию",
+        },
+      },
       appearance: {
         title: "Оформление",
         name: {

@@ -66,6 +66,7 @@ import { ICON_SIZE } from "@/styles/theme";
 import type { Theme } from "@/styles/theme";
 import { getProviderIcon } from "@/components/provider-icons";
 import { BrowserToolsOptInCard } from "./browser-tools-card";
+import { SlpSettingsCard } from "./slp-settings-card";
 import { restartDaemonFromSettings, updateDaemonFromSettings } from "./daemon-lifecycle";
 
 const ThemedRestart = withUnistyles(RotateCw);
@@ -373,6 +374,8 @@ export function HostSettingsPage({
       <HostStatusBadges serverId={serverId} />
 
       <HostAppearanceSection host={host} />
+
+      <SlpSettingsCard serverId={serverId} />
 
       {isLocalDaemon ? <LocalDaemonSection /> : null}
 

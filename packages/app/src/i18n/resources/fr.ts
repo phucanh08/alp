@@ -2352,6 +2352,19 @@ export const fr: TranslationResources = {
       },
     },
     host: {
+      slp: {
+        title: "SLP",
+        loading: "Chargement des réglages SLP…",
+        enabled: {
+          label: "Activer SLP",
+          hint: "S’applique uniquement aux nouveaux agents. Un Lead ou un Supervisor déjà en cours d’exécution continue de fonctionner.",
+        },
+        supervisorModel: {
+          label: "Modèle du Supervisor par défaut",
+          hint: "S’applique uniquement à un Supervisor nouvellement créé.",
+          default: "Par défaut",
+        },
+      },
       appearance: {
         title: "Apparence",
         name: {

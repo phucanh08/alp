@@ -2304,6 +2304,19 @@ export const ko: TranslationResources = {
       },
     },
     host: {
+      slp: {
+        title: "SLP",
+        loading: "SLP 설정 불러오는 중…",
+        enabled: {
+          label: "SLP 사용",
+          hint: "새 에이전트에만 적용됩니다. 이미 실행 중인 Lead 또는 Supervisor는 계속 실행됩니다.",
+        },
+        supervisorModel: {
+          label: "기본 Supervisor 모델",
+          hint: "새로 만든 Supervisor에만 적용됩니다.",
+          default: "기본값",
+        },
+      },
       appearance: {
         title: "모양",
         name: {
