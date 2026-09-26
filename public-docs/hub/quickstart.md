@@ -8,7 +8,7 @@ category: Hub
 
 # Hub quickstart
 
-Run Hub on your machine, connect it to Slack without a public server, and answer a mention with an agent in your repository. Hub's browser setup hands off to your terminal, and `paseo hub init` writes and deploys a starter trigger for you.
+Run Hub on your machine, connect it to Slack without a public server, and answer a mention with an agent in your repository. Hub's browser setup hands off to your terminal, and `alp hub init` writes and deploys a starter trigger for you.
 
 You need [alp installed and running](/docs), Node.js, and a Slack workspace where you can create an app.
 
@@ -39,7 +39,7 @@ GitHub and Discord can wait. Their setup stays available under **Apps**.
 **Connect a daemon** shows one command with this Hub's address already in it:
 
 ```sh
-paseo hub login http://localhost:3000
+alp hub login http://localhost:3000
 ```
 
 Run it on the machine where your code lives, in the repository the agent should work in. Run the initializer below from that directory so it becomes the trigger's working directory.
@@ -53,7 +53,7 @@ After approving login, answer **Yes** to **Connect this daemon to alp Hub?** and
 Then run:
 
 ```sh
-paseo hub init
+alp hub init
 ```
 
 Choose **Custom endpoint** and confirm `http://localhost:3000`. Setup reuses your login and daemon connection, then lists the app connections ready for this trigger. With one Slack workspace connected, it selects that connection automatically. With several usable connections, choose the **Trigger connection**. If none is ready, setup sends you to **Hub → Apps** and stops before selecting an agent or writing files.
@@ -74,7 +74,7 @@ Setup validates the trigger and writes:
     └── slack-help.yml
 ```
 
-If `slack-help.yml` already exists, setup asks before replacing that file. Other files remain in place. If you decline deployment, run `paseo hub deploy` from this repository when ready.
+If `slack-help.yml` already exists, setup asks before replacing that file. Other files remain in place. If you decline deployment, run `alp hub deploy` from this repository when ready.
 
 ## 5. Mention the bot
 

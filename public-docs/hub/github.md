@@ -16,7 +16,7 @@ on: github.issue_comment
 max_runtime: 2h
 filters:
   repo: example/project
-  contains: "@paseo"
+  contains: "@alp"
   from_users: [maintainer]
 steps:
   - id: implement

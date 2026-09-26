@@ -48,7 +48,7 @@ Dispatch fails and the event is recorded as failed. Nothing is queued, so trigge
 
 ## Does logging out disconnect my daemon?
 
-No. The stored CLI login is a human organization credential; the enrolled daemon has its own relationship credential. Interactive `paseo hub logout` offers to disconnect a daemon related to the same Hub. Declining is normal, and JSON or noninteractive logout never disconnects unless you pass `--disconnect-daemon`.
+No. The stored CLI login is a human organization credential; the enrolled daemon has its own relationship credential. Interactive `alp hub logout` offers to disconnect a daemon related to the same Hub. Declining is normal, and JSON or noninteractive logout never disconnects unless you pass `--disconnect-daemon`.
 
 ## Can an agent reply back to Slack or Discord?
 

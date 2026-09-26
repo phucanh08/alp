@@ -61,7 +61,7 @@ inputs:
   repo:
     type: string
     required: true
-    choices: [paseo, hub]
+    choices: [alp, hub]
 steps:
   - id: work
     environment: ${{ paseo.inputs.repo }}
@@ -105,7 +105,7 @@ inputs:
     choices: [codex-safe, claude]
 steps:
   - id: work
-    environment: paseo
+    environment: alp
     max_runtime: 30m
     idle_timeout: 5m
     agent: ${{ paseo.inputs.agent }}
@@ -143,7 +143,7 @@ steps:
         type: object
         required: [environment, agent]
         properties:
-          environment: { enum: [paseo, hub] }
+          environment: { enum: [alp, hub] }
           agent: { enum: [codex-safe, claude] }
         additionalProperties: false
   - id: work
@@ -200,7 +200,7 @@ filters:
   from_users: [automation]
 steps:
   - id: inspect
-    environment: paseo
+    environment: alp
     max_runtime: 10m
     idle_timeout: 2m
     agent: codex-safe
@@ -215,7 +215,7 @@ steps:
         additionalProperties: false
   - id: review
     if: ${{ steps.inspect.outputs.needs_review == true }}
-    environment: paseo
+    environment: alp
     max_runtime: 30m
     idle_timeout: 5m
     agent: claude

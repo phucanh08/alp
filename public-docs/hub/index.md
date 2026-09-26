@@ -28,7 +28,7 @@ Your daemons keep running agents where they always did. Hub decides when to ask 
 
 ## What lives in your repository
 
-`paseo hub init` creates one self-contained starter trigger:
+`alp hub init` creates one self-contained starter trigger:
 
 ```text
 .paseo/
