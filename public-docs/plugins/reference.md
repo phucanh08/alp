@@ -533,6 +533,7 @@ interface PluginHookAgent {
   provider: string;
   cwd: string;
   title: string | null;
+  labels?: Record<string, string>;
 }
 
 interface PluginHookWorkspace {
@@ -559,11 +560,11 @@ type PluginTurnOutcome =
 
 ### Before hooks
 
-| Name                 | Request fields                                                          | Editable                                |
-| -------------------- | ----------------------------------------------------------------------- | --------------------------------------- |
-| `agent.create`       | `config`, optional `env`                                                | Public agent config except `cwd`; `env` |
-| `agent.session_open` | `agentId`, `workspaceId`, `provider`, `cwd`, `reason`, `purpose`, `env` | Only `env`                              |
-| `workspace.create`   | `source`, optional `title`, `firstAgentContext`                         | Entire explicit creation request        |
+| Name                 | Request fields                                                          | Editable                                                                    |
+| -------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `agent.create`       | `config`, optional `env`, `labels`, `paseoTools`                        | Public agent config except `cwd`; `env`; `labels`; `paseoTools` (cuts only) |
+| `agent.session_open` | `agentId`, `workspaceId`, `provider`, `cwd`, `reason`, `purpose`, `env` | Only `env`                                                                  |
+| `workspace.create`   | `source`, optional `title`, `firstAgentContext`                         | Entire explicit creation request                                            |
 
 **`agent.create.config`** uses `AgentSessionConfig`:
 
@@ -576,6 +577,28 @@ type PluginTurnOutcome =
 | `mcpServers`, `toolPolicy`                    | MCP configuration and exact-tool preapprovals                              |
 | `cwd`                                         | Cannot change                                                              |
 | `internal`                                    | Daemon-owned; cannot change through this hook                              |
+
+**`agent.create` optional fields:**
+
+| Field        | Shape / meaning                                                                                                                                                                           |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `labels`     | `Record<string, string>` the agent registers with. Omit to keep the received labels. The daemon restores `paseo.parent-agent-id` after hooks run.                                         |
+| `paseoTools` | `{ enabled?: boolean; disabledTools?: string[] }`, the provider [`paseoTools`](/docs/mcp#limit-alp-tools-by-provider) shape, applied to this agent only. Omit to keep the received value. |
+
+`paseoTools` only removes tools. alp merges it with the provider policy and with earlier hooks:
+`enabled: false` from any source wins, `disabledTools` lists combine, and `enabled: true` restores
+nothing. The merged policy is saved with the agent when it is created. Resume, refresh, and import
+do not run `agent.create` hooks; they reuse the saved policy, and a later provider policy can only
+remove more tools.
+
+```ts
+server.before("agent.create", ({ request }) => ({
+  ...request,
+  paseoTools: {
+    disabledTools: [...(request.paseoTools?.disabledTools ?? []), "create_agent"],
+  },
+}));
+```
 
 **`agent.session_open` request example:**
 

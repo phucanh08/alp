@@ -343,6 +343,20 @@ owns `paseo.parent-agent-id`: after the hooks run, `AgentManager` restores the v
 resolved from the real caller, so a hook can neither adopt nor orphan an agent. Every agent event
 carries `agent.labels` as they were when the event fired.
 
+`before("agent.create")` can also return `paseoTools`, the same shape as a provider's
+[`paseoTools` policy](../public-docs/mcp.md#limit-alp-tools-by-provider), to cut alp tools for that
+one agent. Cuts only add up: the daemon merges the hook result with the provider policy and with
+earlier hooks, `enabled: false` from any source wins, and no `enabled: true` can restore a tool
+someone else removed. A result that omits the field keeps what it received. `AgentManager` freezes
+the merged policy into the agent record at create (`paseoToolPolicy`, see
+[data-model.md](./data-model.md#1-agent-record)). Resume, refresh, and import never run
+`agent.create`, so they read the stored policy instead of asking plugins again; each session open
+merges it with the current provider policy, so a provider can tighten a running agent's catalog on
+its next session but cannot loosen it. A new agent opened on a provider session that a stored record
+already owns, by resume-by-handle or import, inherits that record's cuts. Treat the policy as
+catalog shaping: `callerAgentId` on the MCP endpoint is advisory, so it does not stop an agent with a
+shell.
+
 Emit from the operation owner, not a client subscription. Provider history replay must not trigger
 live hooks. Observers must not be awaited inside agent mutations: a callback can send a prompt or
 answer a permission through its own daemon session. Awaiting it there deadlocks that command.
