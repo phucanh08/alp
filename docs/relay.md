@@ -35,5 +35,30 @@ empty to serve directly.
 
 ## Verifying a relay
 
-`scripts/prove-relay-prod.mjs` pairs a throwaway daemon through the relay and the web app. Run it by
-hand after a relay change; do not add it to CI.
+Run the proof by hand after a relay deploy; do not add it to CI.
+
+```bash
+npm run build:server                 # the script drives this checkout's CLI
+node scripts/prove-relay-prod.mjs    # exit 0 = proven, prints a JSON summary
+```
+
+It starts a throwaway daemon (temp home, free port, relay on), pairs it with `alp daemon pair`,
+opens the pairing link in headless Chrome on the web app, and passes once one browser session has
+held the relay for the stability window. The daemon and its home are removed on every exit. On
+failure it exits 1 with the step that broke and the last relay error from the daemon log.
+
+| Option                           | Use                                                                                             |
+| -------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `--relay-endpoint`, `--base-url` | Prove another relay or web app (defaults above)                                                 |
+| `--timeout-ms`, `--stability-ms` | Per-step deadline (120 s; relay connect caps at 30 s) and how long the session must hold (30 s) |
+| `--cli <path>`                   | Use an installed `alp` instead of building this checkout                                        |
+| `--keep-log <path>`              | Keep the daemon log to diagnose a failure                                                       |
+| `--browser-channel`, `--headed`  | Needs Google Chrome; `none` uses Playwright's bundled Chromium                                  |
+
+Run it on an idle machine. The web app is a 20 MB bundle, first render in headless Chrome can take
+a minute under load, and the app abandons a connection that has not finished its E2EE handshake
+within 15 s. A failure that lists `relay_e2ee_handshake_failed` after the relay routed the browser
+means the browser was starved, not that the relay is broken. The app also drops its first relay
+session or two before settling, so the proof waits for one that holds instead of failing on the
+first close. The browser is blocked from `localhost` so it never reaches a real daemon on your
+machine. The pairing link is a credential; the script redacts it from all output.
