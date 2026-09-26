@@ -1164,7 +1164,6 @@ export const ko: TranslationResources = {
       diagnostics: "진단 실행",
       shortcuts: "키보드 단축키",
       reportIssue: "문제 신고",
-      discord: "Discord",
       github: "GitHub 이슈 만들기",
       whatsNew: "새로운 소식",
       appName: "alp",
