@@ -1,11 +1,12 @@
 import { useCallback, useMemo, useState } from "react";
-import { Pressable, Text } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { Crown, MessageCircle } from "lucide-react-native";
-import { composerPillStyles } from "@/composer/pill-styles";
+import { COMPOSER_PILL_CLEARANCE, composerPillStyles } from "@/composer/pill-styles";
+import { MAX_CONTENT_WIDTH } from "@/constants/layout";
 import type { Theme } from "@/styles/theme";
-import type { DraftSeat } from "./slp-seat";
+import type { DraftSeat, DraftSeatPill } from "./slp-seat";
 
 const ThemedCrownIcon = withUnistyles(Crown);
 const ThemedMessageCircleIcon = withUnistyles(MessageCircle);
@@ -65,8 +66,46 @@ export function ComposerSlpSeatPill({ seat, disabled, onChange }: ComposerSlpSea
   );
 }
 
+interface ComposerSlpSeatPillRowProps {
+  pill: DraftSeatPill;
+  disabled: boolean;
+  onChange: (seat: DraftSeat) => void;
+}
+
+/** The seat pill on its own row above a composer, for composers that have no other pills. */
+export function ComposerSlpSeatPillRow({ pill, disabled, onChange }: ComposerSlpSeatPillRowProps) {
+  if (pill.status === "hidden") {
+    return null;
+  }
+  return (
+    <View style={styles.row}>
+      <View style={styles.rowContent}>
+        <ComposerSlpSeatPill
+          seat={pill.seat}
+          disabled={pill.disabled || disabled}
+          onChange={onChange}
+        />
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create((theme) => ({
   disabled: {
     opacity: theme.opacity[50],
+  },
+  row: {
+    width: "100%",
+    paddingHorizontal: theme.spacing[4],
+    paddingBottom: {
+      xs: COMPOSER_PILL_CLEARANCE.compact,
+      md: COMPOSER_PILL_CLEARANCE.wide,
+    },
+    alignItems: "center",
+  },
+  rowContent: {
+    width: "100%",
+    maxWidth: MAX_CONTENT_WIDTH,
+    flexDirection: "row",
   },
 }));

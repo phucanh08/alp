@@ -435,6 +435,10 @@ export function WorkspaceDraftAgentTab({
   const openInSidePane = useSettings((settings) => settings.openInSidePane);
   const slpSettings = useSlpSettings(serverId);
   const draftSeat = useDraftSeat(draftId);
+  // New workspace already sent this draft's seat with its first agent; a retry keeps that seat.
+  const isSeatLocked = useWorkspaceDraftSubmissionStore(
+    (state) => state.creationByDraftId[draftId] !== undefined,
+  );
   const setDraftSeat = useCallback(
     (seat: DraftSeat) => useDraftSeatStore.getState().setSeat({ draftId, seat }),
     [draftId],
@@ -679,6 +683,7 @@ export function WorkspaceDraftAgentTab({
         <View style={animatedStaticStyles.inputAreaWrapper} onLayout={onInputAreaLayout}>
           <DraftComposerPills
             seatPill={isSubmitting ? null : seatPill}
+            isSeatLocked={isSeatLocked}
             onChangeSeat={setDraftSeat}
             importPillPress={importPillPress}
           />
@@ -714,11 +719,17 @@ export function WorkspaceDraftAgentTab({
 
 interface DraftComposerPillsProps {
   seatPill: DraftSeatPill | null;
+  isSeatLocked: boolean;
   onChangeSeat: (seat: DraftSeat) => void;
   importPillPress: (() => void) | null;
 }
 
-function DraftComposerPills({ seatPill, onChangeSeat, importPillPress }: DraftComposerPillsProps) {
+function DraftComposerPills({
+  seatPill,
+  isSeatLocked,
+  onChangeSeat,
+  importPillPress,
+}: DraftComposerPillsProps) {
   const shownSeatPill = seatPill?.status === "shown" ? seatPill : null;
   if (!shownSeatPill && !importPillPress) {
     return null;
@@ -729,7 +740,7 @@ function DraftComposerPills({ seatPill, onChangeSeat, importPillPress }: DraftCo
         {shownSeatPill ? (
           <ComposerSlpSeatPill
             seat={shownSeatPill.seat}
-            disabled={shownSeatPill.disabled}
+            disabled={shownSeatPill.disabled || isSeatLocked}
             onChange={onChangeSeat}
           />
         ) : null}

@@ -36,6 +36,19 @@ import { ScreenHeader } from "@/components/headers/screen-header";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useToast } from "@/contexts/toast-context";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
+import {
+  buildWorkspaceInitialAgent,
+  buildWorkspaceInitialAgentRetry,
+} from "@/composer/draft/workspace-initial-agent";
+import {
+  resolveDraftSeatLabels,
+  resolveDraftSeatPill,
+  useDraftSeat,
+  useDraftSeatStore,
+  type DraftSeat,
+} from "@/composer/draft/slp-seat";
+import { ComposerSlpSeatPillRow } from "@/composer/draft/slp-seat-pill";
+import { useSlpSettings } from "@/plugins/slp-settings/use-slp-settings";
 import { useForgeSearchQuery } from "@/git/use-forge-search-query";
 import { useCheckoutStatusQuery } from "@/git/use-status-query";
 import { ensureCheckoutStatus } from "@/git/checkout-status-cache";
@@ -876,6 +889,7 @@ interface CreateChatAgentInput {
   supportsForgeSearch: boolean;
   resolveClient: () => DaemonClient;
   isStillOnCreateScreen: () => boolean;
+  seatLabels: Record<string, string> | null;
   labels: {
     composerStateRequired: string;
     selectModel: string;
@@ -966,7 +980,8 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
   const images = await encodeImages(wirePayload.images);
   let navigated = false;
   let outcome: SubmitOutcome = "background";
-  const initialAgent: NonNullable<CreateWorkspaceRequestOptions["agent"]> = {
+  const initialAgent = buildWorkspaceInitialAgent({
+    draftId: input.draftId,
     config: {
       provider,
       cwd,
@@ -975,11 +990,11 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
       thinkingOptionId: composerState.effectiveThinkingOptionId || undefined,
       featureValues: composerState.featureValues,
     },
-    initialPrompt: text,
-    clientMessageId: `${input.draftId}:initial-message`,
-    images: images?.length ? images : undefined,
-    attachments: wirePayload.attachments?.length ? wirePayload.attachments : undefined,
-  };
+    text,
+    images,
+    attachments: wirePayload.attachments,
+    labels: input.seatLabels,
+  });
   const execute = async (requestedAgent = initialAgent): Promise<AgentSnapshotPayload> => {
     const { agent } = await ensureWorkspace({
       cwd,
@@ -1028,14 +1043,7 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
   const agentCreation = {
     result: Promise.resolve().then(() => execute()),
     retry: (request: CreateAgentRequestOptions) =>
-      execute({
-        ...initialAgent,
-        config: { ...request.config!, cwd },
-        initialPrompt: request.initialPrompt ?? "",
-        clientMessageId: initialAgent.clientMessageId,
-        images: request.images,
-        attachments: request.attachments,
-      }),
+      execute(buildWorkspaceInitialAgentRetry({ initialAgent, request, cwd })),
   };
   await agentCreation.result;
   if (outcome === "background") clearConsumedDraft();
@@ -1665,6 +1673,13 @@ export function NewWorkspaceScreen({
     draftId: draftId ?? generateDraftId(),
     worktreeSlug: createNameId(),
   }));
+  const slpSettings = useSlpSettings(selectedServerId);
+  const draftSeat = useDraftSeat(creationIdentity.draftId);
+  const setDraftSeat = useCallback(
+    (seat: DraftSeat) =>
+      useDraftSeatStore.getState().setSeat({ draftId: creationIdentity.draftId, seat }),
+    [creationIdentity.draftId],
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [creationResult, setCreationResult] = useState<
     WorkspaceCreationResult | { workspace: null }
@@ -2145,6 +2160,7 @@ export function NewWorkspaceScreen({
           supportsForgeSearch,
           resolveClient: withConnectedClient,
           isStillOnCreateScreen,
+          seatLabels: resolveDraftSeatLabels(slpSettings, draftSeat),
           labels: {
             composerStateRequired: t("newWorkspace.errors.composerStateRequired"),
             selectModel: t("newWorkspace.errors.selectModel"),
@@ -2166,11 +2182,13 @@ export function NewWorkspaceScreen({
       creationIdentity,
       chatDraft.clear,
       draftKey,
+      draftSeat,
       ensureWorkspace,
       forkDraftSetup,
       isStillOnCreateScreen,
       launchTarget,
       selectedServerId,
+      slpSettings,
       supportsForgeSearch,
       t,
       toast,
@@ -2396,35 +2414,42 @@ export function NewWorkspaceScreen({
       autoFocusKey={launchFocusKey}
     />
   ) : (
-    <Composer
-      key="chat"
-      agentId={draftKey}
-      serverId={selectedServerId}
-      isPaneFocused={true}
-      onSubmitMessage={handleSubmitNewWorkspace}
-      allowEmptySubmit={true}
-      submitButtonAccessibilityLabel={t("newWorkspace.create")}
-      submitButtonTestID="workspace-create-submit"
-      submitIcon="return"
-      isSubmitLoading={isPending}
-      waitForForgeAutoAttachOnSubmit
-      submitBehavior="preserve-and-lock"
-      blurOnSubmit={true}
-      textSource={chatDraft.textSource}
-      onChangeText={chatDraft.editText}
-      textReplacement={chatDraft.textReplacement}
-      attachments={chatDraft.attachments}
-      attachmentScopeKeys={visibleDraftContextScopeKeys}
-      onChangeAttachments={chatDraft.setAttachments}
-      onForgeChangeRequestDetected={handleForgeChangeRequestDetected}
-      onForgeChangeRequestAutoAttach={handleForgeChangeRequestAutoAttach}
-      cwd={selectedSourceDirectory ?? ""}
-      clearDraft={handleClearDraft}
-      autoFocus
-      autoFocusKey={launchFocusKey}
-      commandDraftConfig={composerState?.commandDraftConfig}
-      agentControls={agentControlsWithDisabled}
-    />
+    <>
+      <ComposerSlpSeatPillRow
+        pill={resolveDraftSeatPill(slpSettings, draftSeat)}
+        disabled={isPending}
+        onChange={setDraftSeat}
+      />
+      <Composer
+        key="chat"
+        agentId={draftKey}
+        serverId={selectedServerId}
+        isPaneFocused={true}
+        onSubmitMessage={handleSubmitNewWorkspace}
+        allowEmptySubmit={true}
+        submitButtonAccessibilityLabel={t("newWorkspace.create")}
+        submitButtonTestID="workspace-create-submit"
+        submitIcon="return"
+        isSubmitLoading={isPending}
+        waitForForgeAutoAttachOnSubmit
+        submitBehavior="preserve-and-lock"
+        blurOnSubmit={true}
+        textSource={chatDraft.textSource}
+        onChangeText={chatDraft.editText}
+        textReplacement={chatDraft.textReplacement}
+        attachments={chatDraft.attachments}
+        attachmentScopeKeys={visibleDraftContextScopeKeys}
+        onChangeAttachments={chatDraft.setAttachments}
+        onForgeChangeRequestDetected={handleForgeChangeRequestDetected}
+        onForgeChangeRequestAutoAttach={handleForgeChangeRequestAutoAttach}
+        cwd={selectedSourceDirectory ?? ""}
+        clearDraft={handleClearDraft}
+        autoFocus
+        autoFocusKey={launchFocusKey}
+        commandDraftConfig={composerState?.commandDraftConfig}
+        agentControls={agentControlsWithDisabled}
+      />
+    </>
   );
   return (
     <FileDropZone style={styles.container}>
