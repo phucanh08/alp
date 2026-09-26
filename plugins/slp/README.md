@@ -18,6 +18,17 @@ Bundled alp plugin for the SLP seats: Supervisor, Lead, Peer. The daemon loads i
 Contracts live in `shared/rpc.ts`. The client entry `index.client.tsx` is discovered by file name.
 The manifest schema is strict and has no field for entries.
 
+## Settings
+
+The plugin registers one host-scoped settings definition (`shared/settings.ts`, id `slp`, version
+1), stored at `$PASEO_HOME/plugin-settings/slp/slp.json`. `enabled` (default `true`) is the SLP
+switch: `false` turns off every row in the table above — `before("agent.create")` returns
+`undefined` for every request, including one that already names a valid seat; `workspace.created`
+ensures no Lead; and the `slp.lead.ensure` / `slp.supervisor.ensure` RPCs reject with an error whose
+message contains "SLP disabled". A corrupt or unreadable stored value counts as the default,
+enabled. `supervisorModel` (default `null`) is declared for a Supervisor model picker the client
+adds later; this plugin does not read it yet.
+
 ## Seats
 
 | Seat       | Provider                              | Title         | Label                 | Mode (Claude / Codex)               |
@@ -39,6 +50,12 @@ otherwise. The hook tells either of those from "another agent made this" by `pas
 the daemon sets that label only when `create_agent` names a real calling agent, so its absence is
 the signal. An agent that already carries `slp.role` — valid or not — is never touched or tagged;
 only a request that names no seat at all gets the default.
+
+This defaulted Peer is a special Peer: no Lead briefed it, so its SLP-RUNTIME block gets one more
+paragraph a Lead-spawned Peer's does not. It says the Peer is independent — answer a bare Human
+message as ordinary chat, without waiting for a brief or a Lead — and only step into the ordinary
+Peer contract (wait for the 13-field brief, answer in the six-box handoff) once a Lead's brief
+actually arrives over `send_agent_prompt`.
 
 ## Seat tools
 
