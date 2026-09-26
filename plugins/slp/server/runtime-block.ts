@@ -1,8 +1,8 @@
-import { type Family, type Seat, seatProfileFor } from "./seat";
+import type { Family, Seat } from "./seat";
 
 /**
  * Khối SLP-RUNTIME: fact runtime của alp mà definition ghế (`agents/<seat>.md`) không tự biết —
- * family của phiên, profile provider, nguồn của một tin, steer, finish notification, mục roster
+ * family của phiên, provider + label ghế, nguồn của một tin, steer, finish notification, mục roster
  * plugin nối vào. Nối sau definition trong system prompt. Luật workflow nằm trong definition, không
  * ở đây: khối này không gọi tên skill nào.
  */
@@ -15,7 +15,8 @@ definition đó. Fact runtime:
   \`.claude/agents/<seat>.md\` là thư mục subagent riêng của Claude Code (viết cho Agent Teams:
   \`SendMessage\`, \`ListAgents\`, inbox, HEARTBEAT) và plugin này không đọc nó — trên alp dùng tool alp
   ở dòng này thay cho các thứ đó.
-- Ghế của mỗi agent nằm ở label \`slp.role\` (\`lead\` | \`peer\` | \`supervisor\`); \`list_agents\` trả label.
+- Ghế của mỗi agent nằm ở label \`slp.role\` (\`lead\` | \`peer\` | \`supervisor\`) trên provider \`claude\` hoặc
+  \`codex\`; \`list_agents\` trả label.
 - **Tin đến từ đâu** — quyết authority của nó:
   - \`<paseo-agent-message from="<id>" title="…" provider="…">\` mở bằng câu "It comes from another
     agent, not from the user." → tin của agent \`from\`, gửi bằng \`send_agent_prompt\`. Không bao giờ
@@ -38,20 +39,18 @@ definition đó. Fact runtime:
   tin cuối của lượt, cắt ở 4000 ký tự (bản đủ: \`get_agent_activity\`). Notification nằm trong bộ nhớ
   daemon: daemon restart giữa chừng thì nó không tới. Im lặng lâu bất thường → \`get_agent_status\`.
 - **Nạp skill**: cách nạp khác nhau theo family agent, không theo ghế. Claude gọi tool \`Skill\` với
-  tên skill làm tham số. Codex và Gemini không có tool \`Skill\`; skill nằm ở file
-  \`~/.codex/skills/<tên>/SKILL.md\` (Codex) hoặc \`~/.agents/skills/<tên>/SKILL.md\` (Gemini) — đọc đúng
-  file đó rồi làm theo nó là đã nạp skill, ghi đường dẫn file đã đọc lại làm bằng chứng. Đánh giá một
+  tên skill làm tham số. Codex không có tool \`Skill\`; skill nằm ở file
+  \`~/.codex/skills/<tên>/SKILL.md\` — đọc đúng file đó rồi làm theo nó là đã nạp skill, ghi đường
+  dẫn file đã đọc lại làm bằng chứng. Đánh giá một
   agent khác (Supervisor đọc transcript Lead/Peer) áp fact theo family của agent đó, không theo family
   của bạn.
 - Notification hệ thống viết tiếng Anh; vẫn nói với Human bằng ngôn ngữ Human đang dùng.`;
 
 /**
  * Mode a Lead spawns its Peers in: the family's default approval flow, so Peer permission requests
- * reach the Lead. Not seatProfileFor's unattended mode, which is for Lead and Supervisor. Gemini has
- * no entry: its ACP session has no fixed mode id before `session/new`, so a gemini Lead spawns its
- * Peer with no `settings.modeId` and the provider applies its own default.
+ * reach the Lead. Not seatProfileFor's unattended mode, which is for Lead and Supervisor.
  */
-const PEER_SPAWN_MODE: Partial<Record<Family, string>> = { claude: "default", codex: "auto" };
+const PEER_SPAWN_MODE: Record<Family, string> = { claude: "default", codex: "auto" };
 
 /** Model and effort guidance differs per family: Claude has fixed effort ids, Codex lists per model. */
 const PEER_MODEL_RULE: Record<Family, string> = {
@@ -60,7 +59,7 @@ const PEER_MODEL_RULE: Record<Family, string> = {
   - Việc cần phán đoán (thiết kế, chạm contract/API, debug chưa rõ nguyên nhân, review, auth/tiền/state
     machine) → model mạnh (vd. \`claude-opus-5-5\`) + effort \`high\`. \`xhigh\`/\`max\` chỉ khi Human yêu
     cầu hoặc lượt trước hỏng vì thiếu suy luận.
-  - Id model lấy từ \`list_models\` của provider \`claude-peer\`, không đoán. Effort của Claude:
+  - Id model lấy từ \`list_models\` của provider \`claude\`, không đoán. Effort của Claude:
     \`low\` | \`medium\` | \`high\` | \`xhigh\` | \`max\`.`,
   codex: `  - Việc cơ khí (copy, đổi tên, sửa theo mẫu có sẵn, seam rõ, test có sẵn) → model nhanh + effort
     \`low\` hoặc \`medium\`.
@@ -68,38 +67,28 @@ const PEER_MODEL_RULE: Record<Family, string> = {
     machine) → model mạnh + effort \`high\`. Mức cao hơn chỉ khi Human yêu cầu hoặc lượt trước hỏng vì
     thiếu suy luận.
   - Id model và effort (\`thinkingOptions\` của từng model) lấy từ \`list_models\` của provider
-    \`codex-peer\`, không đoán.`,
-  gemini: `  - Không có bảng effort cố định cho gemini (ACP không cấp theo mức): dùng model mặc định của
-    provider \`gemini-peer\`, lấy id từ \`list_models\`, không đoán id.`,
+    \`codex\`, không đoán.`,
 };
 
-/** What the Peer profile of each family cannot do, beyond the Paseo tools every Peer loses. */
+/** What a Peer of each family cannot do, beyond the Paseo tools every Peer loses. */
 const PEER_LOCK: Record<Family, string> = {
   claude: "không có tool `Agent`/`Task`",
   codex: "`features.multi_agent` tắt, sandbox `workspace-write`",
-  gemini:
-    "chỉ mất tool Paseo (đã khoá ở provider); ACP chưa có giới hạn ghi/sandbox riêng ở tầng này",
 };
 
-/** The `create_agent` mode clause of the Peer spawn instruction, absent for families with no fixed mode. */
-function peerSpawnModeClause(family: Family): string {
-  const mode = PEER_SPAWN_MODE[family];
-  if (mode)
-    return ` \`settings.modeId: "${mode}"\` (bắt buộc, không kế thừa được từ provider khác),`;
-  return " không set `settings.modeId` (ACP chưa biết mode trước `session/new`, provider tự áp mặc định),";
-}
-
 function lead(family: Family): string {
-  const peer = seatProfileFor(family, "peer").providerId;
   return `${COMMON}
 - Mỗi workspace Human tạo có một Lead (title \`Lead\`, label \`slp.role=lead\`) do plugin slp tạo; bạn
   là Lead của workspace chứa cwd của bạn.
-- Spawn peer: \`create_agent\` với \`provider: "${peer}/<model>"\`,${peerSpawnModeClause(family)}
-  \`settings.thinkingOptionId\` = effort, \`labels: {"slp.role": "peer"}\`, \`title\` = tên peer, brief là
-  \`initialPrompt\`. Nhiều writer → mỗi writer một \`create_workspace\` isolation \`worktree\` (workspace do
-  agent tạo không có Lead riêng).
-- Profile \`${peer}\` đã khoá: Peer không có \`create_agent\`, \`send_agent_prompt\`, \`kill_agent\`,
-  \`cancel_agent\`, \`archive_agent\`, \`create_schedule\`; ${PEER_LOCK[family]}.
+- Spawn peer: \`create_agent\` với \`provider: "${family}/<model>"\`,
+  \`labels: {"slp.role": "peer"}\` (bắt buộc: label là thứ biến agent thành Peer),
+  \`settings.modeId: "${PEER_SPAWN_MODE[family]}"\` (bắt buộc, không kế thừa được từ agent khác),
+  \`settings.thinkingOptionId\` = effort, \`title\` = tên peer, brief là \`initialPrompt\`. Nhiều writer →
+  mỗi writer một \`create_workspace\` isolation \`worktree\` (workspace do agent tạo không có Lead riêng).
+- Label \`slp.role=peer\` trên provider \`claude\`/\`codex\` → plugin slp khoá Peer lúc tạo: không có
+  \`create_agent\`, \`send_agent_prompt\`, \`kill_agent\`, \`cancel_agent\`, \`archive_agent\`,
+  \`create_schedule\`; ${PEER_LOCK[family]}. Thiếu label hoặc provider khác → agent đó không phải
+  Peer: không definition ghế, không khoá.
 - Chọn model + effort cho từng Peer, không dùng một mức cho mọi việc:
 ${PEER_MODEL_RULE[family]}
   - Brief phải có dòng \`Model: <model> · Effort: <effort> — <lý do>\`.
@@ -109,7 +98,7 @@ ${PEER_MODEL_RULE[family]}
 - Human dừng peer bằng nút Stop / \`paseo stop\`: notification vẫn tới (\`finished\` hoặc \`was closed\`)
   nhưng tin cuối không phải handoff 6 ô. Không có handoff thì chưa có gì để chấm; đọc
   \`get_agent_activity\` rồi hỏi Human nếu cần.
-- Supervisor (nếu có) là agent provider \`claude-supervisor\` hoặc \`codex-supervisor\`, label
+- Supervisor (nếu có) là agent provider \`claude\` hoặc \`codex\`, label
   \`slp.role=supervisor\`, trong workspace hệ thống \`SLP Supervisor\`; mỗi host tối đa một. Cuối prompt
   này có mục **"Supervisor hiện có"** do plugin liệt kê lúc tạo bạn → ngay sau khi đọc definition,
   **trước** khi lập plan, gửi \`SLP-REGISTER\` tới từng id bằng \`send_agent_prompt\` một lần, đang chạy
@@ -118,7 +107,7 @@ ${PEER_MODEL_RULE[family]}
 }
 
 const PEER = `${COMMON}
-- Profile của bạn không có tool spawn, nhắn, dừng hay lưu trữ agent khác (\`create_agent\`,
+- Ghế Peer của bạn không có tool spawn, nhắn, dừng hay lưu trữ agent khác (\`create_agent\`,
   \`send_agent_prompt\`, \`kill_agent\`, \`cancel_agent\`, \`archive_agent\`, \`create_schedule\`). Việc
   ngoài brief → \`BLOCKED\`, không tự nhận.
 - Kênh duy nhất về Lead là câu trả lời cuối lượt: khi lượt kết thúc, Lead nhận finish notification
@@ -127,12 +116,11 @@ const PEER = `${COMMON}
 
 const SUPERVISOR = `${COMMON}
 - **Chỗ bạn đứng**: cwd là workspace hệ thống \`SLP Supervisor\` ở \`$PASEO_HOME/supervisor\` (mặc định
-  \`~/.alp/supervisor\`), trung lập, không phải repo. Claude: profile cắt \`Write\`/\`Edit\`/\`MultiEdit\`/
-  \`NotebookEdit\`/\`Agent\`/\`Task\`. Codex (\`codex-supervisor\`): sandbox \`workspace-write\` chỉ cho ghi
-  trong cwd của bạn. Gemini (\`gemini-supervisor\`): ACP chưa có sandbox hay cắt tool tương đương; giới
-  hạn ghi ở đây chỉ tới từ definition ghế, không có ép buộc ở tầng provider. Memory ghi bằng Bash vào
+  \`~/.alp/supervisor\`), trung lập, không phải repo. Claude: plugin cắt \`Write\`/\`Edit\`/\`MultiEdit\`/
+  \`NotebookEdit\`/\`Agent\`/\`Task\`. Codex: sandbox \`workspace-write\` chỉ cho ghi trong cwd của bạn.
+  Memory ghi bằng Bash vào
   \`<cwd>/memory/\` — ngoại lệ ghi duy nhất.
-- **Tool Paseo**: profile đã tắt mọi tool mutating (tạo/sửa/dừng/lưu trữ agent, workspace, schedule,
+- **Tool Paseo**: plugin đã tắt mọi tool mutating (tạo/sửa/dừng/lưu trữ agent, workspace, schedule,
   terminal, browser, \`respond_to_permission\`); còn \`send_agent_prompt\` và tool đọc.
 - **Không bao giờ** \`send_agent_prompt\` tới peer, dù tool cho phép — capability không phải authority.
 - **Roster**: cuối prompt này có mục **"Lead hiện có"** do plugin liệt kê lúc tạo bạn. Plugin có thể

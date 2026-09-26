@@ -9,63 +9,40 @@ export type Seat = "lead" | "peer" | "supervisor";
 /** providerOptions of an agent config, taken from the hook type so the plugin needs no extra deps. */
 export type ProviderOptions = PluginBeforeRequests["agent.create"]["config"]["providerOptions"];
 
-/** Base provider family of a profile: decides which providerOptions mean anything. */
-export type Family = "claude" | "codex" | "gemini";
+/** Base provider an SLP seat runs on: decides which providerOptions mean anything. */
+export type Family = "claude" | "codex";
 
 /** Agent label that names the seat. */
 export const SEAT_LABEL = "slp.role";
 
-/** Provider profile (`<family>-<seat>`, extends claude|codex|acp in the daemon config) → SLP seat. */
-const SEAT_BY_PROVIDER: Record<string, Seat> = {
-  "claude-lead": "lead",
-  "claude-peer": "peer",
-  "claude-supervisor": "supervisor",
-  "codex-lead": "lead",
-  "codex-peer": "peer",
-  "codex-supervisor": "supervisor",
-  "gemini-lead": "lead",
-  "gemini-peer": "peer",
-  "gemini-supervisor": "supervisor",
-};
-
-export function seatOf(provider: string): Seat | null {
-  return SEAT_BY_PROVIDER[provider] ?? null;
+/** Seat named by the `slp.role` label; an unknown value counts as no label. */
+export function seatOfLabels(labels: Record<string, string> | undefined): Seat | null {
+  const label = labels?.[SEAT_LABEL];
+  return label === "lead" || label === "peer" || label === "supervisor" ? label : null;
 }
 
+/** SLP seats run only on the base `claude` and `codex` providers; any other provider is not SLP. */
 export function familyOf(provider: string): Family | null {
-  if (!(provider in SEAT_BY_PROVIDER)) return null;
-  if (provider.startsWith("codex-")) return "codex";
-  if (provider.startsWith("gemini-")) return "gemini";
-  return "claude";
+  return provider === "claude" || provider === "codex" ? provider : null;
 }
 
-/** Seat from the `slp.role` label, falling back to the provider profile. */
+/** Seat of an agent: its `slp.role` label, on a `claude` or `codex` provider only. */
 export function seatOfAgent(agent: {
   provider: string;
   labels?: Record<string, string>;
 }): Seat | null {
-  const label = agent.labels?.[SEAT_LABEL];
-  if (label === "lead" || label === "peer" || label === "supervisor") return label;
-  return seatOf(agent.provider);
+  return familyOf(agent.provider) ? seatOfLabels(agent.labels) : null;
 }
 
-/**
- * Mode id each family runs a seat agent in without approval prompts. Gemini has none: its ACP
- * session reports available modes only after `session/new`, so the plugin creates gemini-family
- * seat agents with no `modeId` and the provider applies its own default.
- */
-const UNATTENDED_MODE: Partial<Record<Family, string>> = {
+/** Mode id each family runs the plugin-created Lead and Supervisor in without approval prompts. */
+const UNATTENDED_MODE: Record<Family, string> = {
   claude: "bypassPermissions",
   codex: "full-access",
 };
 
-/** Provider profile and mode for a seat agent of the given family; `modeId` is absent for gemini. */
-export function seatProfileFor(
-  family: Family,
-  seat: Seat,
-): { providerId: string; modeId?: string } {
-  const modeId = UNATTENDED_MODE[family];
-  return modeId ? { providerId: `${family}-${seat}`, modeId } : { providerId: `${family}-${seat}` };
+/** Provider and mode for a plugin-created seat agent; the seat itself travels as a label. */
+export function seatProfileFor(family: Family): { providerId: string; modeId: string } {
+  return { providerId: family, modeId: UNATTENDED_MODE[family] };
 }
 
 /** Codex Supervisor: writes stay inside its cwd, standing in for Claude's Write/Edit cut. */
@@ -73,7 +50,6 @@ export const CODEX_SUPERVISOR_OPTIONS = { sandbox_mode: "workspace-write" } as c
 
 /**
  * Codex Peer: `multi_agent` off stands in for Claude's Agent/Task cut; writes stay inside its cwd.
- * A provider profile cannot carry providerOptions, so the plugin sets them at agent.create.
  */
 export function withCodexPeerOptions(
   providerOptions: ProviderOptions,
@@ -92,6 +68,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Paseo MCP tools the Lead and Supervisor call without a permission card (Claude wildcard syntax). */
 export const LEAD_ALLOWED_TOOLS = ["mcp__paseo__*"] as const;
+
+/** Claude Peer spawns nothing with the provider's own subagent tools; it hands off to its Lead. */
+export const PEER_DISALLOWED_TOOLS = ["Agent", "Task"] as const;
 
 /** Supervisor writes no code and spawns nothing; Bash stays for Git reads and its own memory. */
 export const SUPERVISOR_DISALLOWED_TOOLS = [
@@ -159,19 +138,23 @@ export function withLeadAllowedTools(
   };
 }
 
+function withDisallowedTools(
+  providerOptions: ProviderOptions,
+  tools: readonly string[],
+): NonNullable<ProviderOptions> {
+  const current = stringList(providerOptions?.disallowedTools);
+  return { ...providerOptions, disallowedTools: [...new Set([...current, ...tools])] };
+}
+
 export function withSupervisorTools(
   providerOptions: ProviderOptions,
 ): NonNullable<ProviderOptions> {
-  const current = stringList(providerOptions?.disallowedTools);
-  return {
-    ...withLeadAllowedTools(providerOptions),
-    disallowedTools: [...new Set([...current, ...SUPERVISOR_DISALLOWED_TOOLS])],
-  };
+  return withDisallowedTools(withLeadAllowedTools(providerOptions), SUPERVISOR_DISALLOWED_TOOLS);
 }
 
 /**
- * providerOptions per seat and family. A Claude Peer is unchanged: its boundary lives in the provider
- * profile. Codex has no allowedTools (MCP tools show no card), so a Codex Lead is unchanged.
+ * providerOptions per seat and family. Codex has no allowedTools (MCP tools show no card), so a
+ * Codex Lead is unchanged.
  */
 export function providerOptionsFor(
   seat: Seat,
@@ -193,7 +176,72 @@ export function providerOptionsFor(
       return withLeadAllowedTools(providerOptions);
     case "supervisor":
       return withSupervisorTools(providerOptions);
-    default:
-      return providerOptions;
+    case "peer":
+      return withDisallowedTools(providerOptions, PEER_DISALLOWED_TOOLS);
   }
+}
+
+/** Paseo tools a Peer loses: it cannot spawn, steer, or stop other agents. */
+export const PEER_DISABLED_PASEO_TOOLS = [
+  "create_agent",
+  "send_agent_prompt",
+  "kill_agent",
+  "cancel_agent",
+  "archive_agent",
+  "create_schedule",
+] as const;
+
+/** The Supervisor is read-only: every mutating Paseo tool is off; reads and send_agent_prompt stay. */
+export const SUPERVISOR_DISABLED_PASEO_TOOLS = [
+  "create_workspace",
+  "archive_workspace",
+  "rename_workspace",
+  "create_agent",
+  "update_agent",
+  "cancel_agent",
+  "archive_agent",
+  "kill_agent",
+  "set_agent_mode",
+  "respond_to_permission",
+  "start_workspace_script",
+  "stop_workspace_script",
+  "create_terminal",
+  "kill_terminal",
+  "send_terminal_keys",
+  "create_schedule",
+  "update_schedule",
+  "pause_schedule",
+  "resume_schedule",
+  "delete_schedule",
+  "run_schedule_once",
+  "create_heartbeat",
+  "delete_heartbeat",
+  "browser_new_tab",
+  "browser_close_tab",
+  "browser_navigate",
+  "browser_click",
+  "browser_fill",
+  "browser_type",
+  "browser_keypress",
+  "browser_select",
+  "browser_drag",
+  "browser_upload",
+  "browser_scroll",
+  "browser_resize",
+  "browser_evaluate",
+] as const;
+
+export type PaseoToolsPolicy = PluginBeforeRequests["agent.create"]["paseoTools"];
+
+/**
+ * Per-agent Paseo tool cut for a seat, added to whatever the request already disabled. The daemon
+ * merges it with the provider policy and freezes it into the agent record. A Lead keeps every tool.
+ */
+export function paseoToolsFor(seat: Seat, current: PaseoToolsPolicy): PaseoToolsPolicy {
+  if (seat === "lead") return current;
+  const cut = seat === "peer" ? PEER_DISABLED_PASEO_TOOLS : SUPERVISOR_DISABLED_PASEO_TOOLS;
+  return {
+    ...current,
+    disabledTools: [...new Set([...(current?.disabledTools ?? []), ...cut])],
+  };
 }

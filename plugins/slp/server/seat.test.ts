@@ -7,19 +7,23 @@ import {
   familyOf,
   providerOptionsFor,
   readDefinition,
-  seatOf,
+  seatOfAgent,
   seatProfileFor,
   stripFrontmatter,
   withLeadAllowedTools,
 } from "./seat";
 
-test("seatOf maps only the SLP provider profiles", () => {
-  expect(seatOf("claude-lead")).toBe("lead");
-  expect(seatOf("claude-peer")).toBe("peer");
-  expect(seatOf("claude-supervisor")).toBe("supervisor");
-  expect(seatOf("claude")).toBeNull();
-  expect(seatOf("codex")).toBeNull();
-  expect(seatOf("claude-lead/claude-opus-5-5")).toBeNull();
+test("seatOfAgent reads the slp.role label on the claude and codex providers only", () => {
+  expect(seatOfAgent({ provider: "claude", labels: { "slp.role": "lead" } })).toBe("lead");
+  expect(seatOfAgent({ provider: "codex", labels: { "slp.role": "peer" } })).toBe("peer");
+  expect(seatOfAgent({ provider: "claude", labels: { "slp.role": "supervisor" } })).toBe(
+    "supervisor",
+  );
+  expect(seatOfAgent({ provider: "claude", labels: { "slp.role": "owner" } })).toBeNull();
+  expect(seatOfAgent({ provider: "claude" })).toBeNull();
+  expect(seatOfAgent({ provider: "acp", labels: { "slp.role": "lead" } })).toBeNull();
+  expect(seatOfAgent({ provider: "claude-lead" })).toBeNull();
+  expect(seatOfAgent({ provider: "claude-lead", labels: { "slp.role": "lead" } })).toBeNull();
 });
 
 test("stripFrontmatter drops the leading YAML block and keeps the body", () => {
@@ -73,7 +77,8 @@ test("buildSystemPrompt joins existing prompt, seat definition, and the seat run
 
 test("Lead runtime block carries the model and effort rule for Peers", () => {
   const lead = buildSystemPrompt("lead", "claude", "BODY", null);
-  expect(lead).toContain('provider: "claude-peer/<model>"');
+  expect(lead).toContain('provider: "claude/<model>"');
+  expect(lead).toContain('labels: {"slp.role": "peer"}');
   expect(lead).toContain("settings.thinkingOptionId");
   expect(lead).toMatch(/low.*medium/);
   expect(lead).toMatch(/high/);
@@ -98,17 +103,22 @@ test("supervisor loses write and spawn tools and gets the Paseo wildcard", () =>
   expect(prompt).not.toMatch(/Spawn peer/);
 });
 
-test("peer providerOptions pass through by reference", () => {
-  const opts = { allowedTools: ["Bash"] };
-  expect(providerOptionsFor("peer", "claude", opts)).toBe(opts);
-  expect(providerOptionsFor("peer", "claude", undefined)).toBeUndefined();
+test("a Claude Peer loses Agent and Task and keeps its other options", () => {
+  expect(providerOptionsFor("peer", "claude", { allowedTools: ["Bash"] })).toEqual({
+    allowedTools: ["Bash"],
+    disallowedTools: ["Agent", "Task"],
+  });
+  expect(providerOptionsFor("peer", "claude", { disallowedTools: ["Task", "WebFetch"] })).toEqual({
+    disallowedTools: ["Task", "WebFetch", "Agent"],
+  });
 });
 
-test("codex profiles map to seats; codex supervisor gets workspace-write sandbox", () => {
-  expect(seatOf("codex-lead")).toBe("lead");
-  expect(familyOf("codex-peer")).toBe("codex");
-  expect(familyOf("claude-peer")).toBe("claude");
-  expect(familyOf("codex")).toBeNull();
+test("familyOf accepts only the base providers; codex supervisor gets workspace-write sandbox", () => {
+  expect(familyOf("claude")).toBe("claude");
+  expect(familyOf("codex")).toBe("codex");
+  expect(familyOf("codex-peer")).toBeNull();
+  expect(familyOf("claude-peer")).toBeNull();
+  expect(familyOf("acp")).toBeNull();
   expect(providerOptionsFor("supervisor", "codex", { approval_policy: "never" })).toEqual({
     approval_policy: "never",
     sandbox_mode: "workspace-write",
@@ -117,27 +127,9 @@ test("codex profiles map to seats; codex supervisor gets workspace-write sandbox
   expect(providerOptionsFor("lead", "codex", opts)).toBe(opts);
 });
 
-test("seatProfileFor picks the provider profile and unattended mode of each family", () => {
-  expect(seatProfileFor("claude", "lead")).toEqual({
-    providerId: "claude-lead",
-    modeId: "bypassPermissions",
-  });
-  expect(seatProfileFor("claude", "supervisor")).toEqual({
-    providerId: "claude-supervisor",
-    modeId: "bypassPermissions",
-  });
-  expect(seatProfileFor("codex", "lead")).toEqual({
-    providerId: "codex-lead",
-    modeId: "full-access",
-  });
-  expect(seatProfileFor("codex", "peer")).toEqual({
-    providerId: "codex-peer",
-    modeId: "full-access",
-  });
-  expect(seatProfileFor("codex", "supervisor")).toEqual({
-    providerId: "codex-supervisor",
-    modeId: "full-access",
-  });
+test("seatProfileFor picks the base provider and unattended mode of each family", () => {
+  expect(seatProfileFor("claude")).toEqual({ providerId: "claude", modeId: "bypassPermissions" });
+  expect(seatProfileFor("codex")).toEqual({ providerId: "codex", modeId: "full-access" });
 });
 
 test("codex peer cannot spawn agents and writes only inside its sandbox", () => {
@@ -158,47 +150,22 @@ test("codex peer cannot spawn agents and writes only inside its sandbox", () => 
   });
 });
 
-test("a Codex Lead spawns codex-peer in Codex's default approval mode", () => {
+test("a Codex Lead spawns a codex Peer by label in Codex's default approval mode", () => {
   const lead = buildSystemPrompt("lead", "codex", "BODY", null);
-  expect(lead).toContain('provider: "codex-peer/<model>"');
+  expect(lead).toContain('provider: "codex/<model>"');
+  expect(lead).toContain('labels: {"slp.role": "peer"}');
   expect(lead).toContain('settings.modeId: "auto"');
-  expect(lead).not.toContain("claude-peer");
   expect(lead).toContain("settings.thinkingOptionId");
   const claudeLead = buildSystemPrompt("lead", "claude", "BODY", null);
   expect(claudeLead).toContain('settings.modeId: "default"');
-  expect(claudeLead).not.toContain("codex-peer");
 });
 
-test("gemini profiles map to seats with no fixed unattended or spawn mode", () => {
-  expect(seatOf("gemini-lead")).toBe("lead");
-  expect(seatOf("gemini-peer")).toBe("peer");
-  expect(seatOf("gemini-supervisor")).toBe("supervisor");
-  expect(familyOf("gemini-peer")).toBe("gemini");
-  expect(familyOf("gemini")).toBeNull();
-  expect(seatProfileFor("gemini", "lead")).toEqual({ providerId: "gemini-lead" });
-  expect(seatProfileFor("gemini", "lead")).not.toHaveProperty("modeId");
-});
-
-test("a Gemini Lead spawns gemini-peer with no settings.modeId", () => {
-  const lead = buildSystemPrompt("lead", "gemini", "BODY", null);
-  expect(lead).toContain('provider: "gemini-peer/<model>"');
-  expect(lead).not.toContain("settings.modeId:");
-  expect(lead).toMatch(/không set.*settings\.modeId/);
-  expect(lead).toContain("settings.thinkingOptionId");
-  expect(lead).toMatch(/không đoán id/);
-});
-
-test("gemini runtime block names its skill file path and steer stays generic-ACP", () => {
-  const peer = buildSystemPrompt("peer", "gemini", "BODY", null);
-  expect(peer).toMatch(/~\/\.agents\/skills\/<tên>\/SKILL\.md/);
-  expect(peer).toMatch(/Provider ACP \(không phải Claude\/Codex\) vẫn thay lượt đang chạy/);
-});
-
-test("gemini providerOptionsFor falls back to the claude-shaped branch (no codex-only rules)", () => {
-  expect(providerOptionsFor("peer", "gemini", { allowedTools: ["Bash"] })).toEqual({
-    allowedTools: ["Bash"],
-  });
-  expect(providerOptionsFor("lead", "gemini", undefined)).toEqual({
-    allowedTools: ["mcp__paseo__*"],
-  });
+test("runtime blocks name no retired seat provider and no Gemini", () => {
+  for (const seat of ["lead", "peer", "supervisor"] as const) {
+    for (const family of ["claude", "codex"] as const) {
+      const block = buildSystemPrompt(seat, family, "BODY", null);
+      expect(block).not.toMatch(/(claude|codex|gemini)-(lead|peer|supervisor)/);
+      expect(block).not.toMatch(/gemini/i);
+    }
+  }
 });

@@ -6,7 +6,7 @@ import {
   selectSeatAgents,
 } from "./discovery";
 import { expandUserPath, isSupervisorWorkspace } from "./paths";
-import { type Family, SEAT_LABEL, type Seat, seatOf, seatProfileFor } from "./seat";
+import { type Family, SEAT_LABEL, type Seat, seatOfAgent, seatProfileFor } from "./seat";
 
 export const LEAD_TITLE = "Lead";
 export const SUPERVISOR_TITLE = "Supervisor";
@@ -32,22 +32,9 @@ export interface SeatAgentCreate {
   labels: Record<string, string>;
 }
 
-/** Provider profile and mode a seat agent is created with. Gemini has no `modeId` (see seat.ts). */
-export interface SeatProfile {
-  providerId: string;
-  modeId?: string;
-}
-
-export type SeatProfileFor = (family: Family, seat: Seat) => SeatProfile;
-
 /** Seat settings shared by both ensures; `family` defaults to `claude`. */
 export interface SeatDeps {
   family?: Family;
-  seatProfile?: SeatProfileFor;
-}
-
-function profileFor(seat: Seat, deps: SeatDeps): SeatProfile {
-  return (deps.seatProfile ?? seatProfileFor)(deps.family ?? "claude", seat);
 }
 
 /** The slice of the plugin `PaseoApi` the ensure operations use; narrow so tests can fake it. */
@@ -125,10 +112,10 @@ async function seatAgent(
   title: string,
   deps: SeatDeps,
 ): Promise<SeatAgentCreate> {
-  const { providerId, modeId } = profileFor(seat, deps);
+  const { providerId, modeId } = seatProfileFor(deps.family ?? "claude");
   const provider = await seatProvider(api, providerId);
   return {
-    config: modeId ? { provider, modeId } : { provider },
+    config: { provider, modeId },
     title,
     labels: { [SEAT_LABEL]: seat },
   };
@@ -253,7 +240,7 @@ export interface WorkspaceCreateLike {
   source:
     | { kind: "directory"; path: string }
     | { kind: "worktree"; projectId?: string; cwd?: string };
-  agent?: { config: { provider: string } };
+  agent?: { config: { provider: string }; labels?: Record<string, string> };
 }
 
 type PendingOrigin =
@@ -276,7 +263,13 @@ export class ClientWorkspaceOrigins {
 
   record(request: WorkspaceCreateLike): void {
     // A workspace created together with its own Lead needs no second one.
-    if (request.agent && seatOf(request.agent.config.provider) === "lead") return;
+    if (
+      request.agent &&
+      seatOfAgent({ provider: request.agent.config.provider, labels: request.agent.labels }) ===
+        "lead"
+    ) {
+      return;
+    }
     const at = this.now();
     this.pending.push(
       request.source.kind === "directory"

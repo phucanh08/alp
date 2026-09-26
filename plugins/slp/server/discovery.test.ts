@@ -14,23 +14,33 @@ const entries: AgentEntryLike[] = [
   {
     agent: {
       id: "L1",
-      provider: "claude-lead",
+      provider: "claude",
       cwd: "/r/a",
       status: "idle",
       title: "lead-a",
       workspaceId: "w1",
+      labels: { "slp.role": "lead" },
     },
   },
   {
     agent: {
       id: "L2",
-      provider: "claude-lead",
+      provider: "claude",
       cwd: "/r/b",
       status: "running",
+      labels: { "slp.role": "lead" },
       archivedAt: "2026-09-24",
     },
   },
-  { agent: { id: "L3", provider: "claude-lead", cwd: "/r/c", status: "closed" } },
+  {
+    agent: {
+      id: "L3",
+      provider: "codex",
+      cwd: "/r/c",
+      status: "closed",
+      labels: { "slp.role": "lead" },
+    },
+  },
   {
     agent: {
       id: "L4",
@@ -40,12 +50,40 @@ const entries: AgentEntryLike[] = [
       labels: { "slp.role": "lead" },
     },
   },
-  { agent: { id: "S1", provider: "claude-supervisor", cwd: "/sup", status: "idle", title: "sup" } },
-  { agent: { id: "P1", provider: "claude-peer", cwd: "/r/a/wt", status: "running" } },
+  {
+    agent: {
+      id: "S1",
+      provider: "codex",
+      cwd: "/sup",
+      status: "idle",
+      title: "sup",
+      labels: { "slp.role": "supervisor" },
+    },
+  },
+  {
+    agent: {
+      id: "P1",
+      provider: "claude",
+      cwd: "/r/a/wt",
+      status: "running",
+      labels: { "slp.role": "peer" },
+    },
+  },
   { agent: { id: "X1", provider: "claude", cwd: "/x", status: "idle" } },
+  // Not seats: a retired seat provider without a label, and a label on a non-SLP provider.
+  { agent: { id: "OLD", provider: "claude-lead", cwd: "/r/o", status: "idle" } },
+  {
+    agent: {
+      id: "ACP",
+      provider: "acp",
+      cwd: "/r/p",
+      status: "idle",
+      labels: { "slp.role": "lead" },
+    },
+  },
 ];
 
-test("selectSeatAgents keeps the seat by label or provider and drops archived, closed, and self", () => {
+test("selectSeatAgents keeps the seat by label and drops archived, closed, and self", () => {
   expect(selectSeatAgents(entries, "lead").map((a) => a.id)).toEqual(["L1", "L4"]);
   expect(selectSeatAgents(entries, "supervisor").map((a) => a.id)).toEqual(["S1"]);
   expect(selectSeatAgents(entries, "lead", "L1").map((a) => a.id)).toEqual(["L4"]);
@@ -69,7 +107,8 @@ test("selectClosedSeatAgents keeps closed, unarchived agents of the seat, newest
     {
       agent: {
         id: "S-new",
-        provider: "claude-supervisor",
+        provider: "claude",
+        labels: { "slp.role": "supervisor" },
         cwd: "/sup",
         status: "closed",
         workspaceId: "w-sup",
@@ -80,14 +119,23 @@ test("selectClosedSeatAgents keeps closed, unarchived agents of the seat, newest
     {
       agent: {
         id: "S-archived",
-        provider: "claude-supervisor",
+        provider: "claude",
+        labels: { "slp.role": "supervisor" },
         cwd: "/sup",
         status: "closed",
         updatedAt: "2026-09-25T00:00:00.000Z",
         archivedAt: "2026-09-25",
       },
     },
-    { agent: { id: "S-undated", provider: "claude-supervisor", cwd: "/sup", status: "closed" } },
+    {
+      agent: {
+        id: "S-undated",
+        provider: "codex",
+        cwd: "/sup",
+        status: "closed",
+        labels: { "slp.role": "supervisor" },
+      },
+    },
   ];
   expect(selectClosedSeatAgents(closed, "supervisor").map((a) => a.id)).toEqual([
     "S-new",
