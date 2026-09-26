@@ -8,6 +8,7 @@ import {
   type SkillsSnapshot,
 } from "./internal/controller.js";
 import { resolveSkillTargets } from "./internal/paths.js";
+import type { SkillsLogger } from "./internal/renamed-skills.js";
 import { createSkillSelectionStore } from "./internal/selection-store.js";
 
 export interface OrchestrationSkills {
@@ -27,11 +28,13 @@ export interface OrchestrationSkills {
 
 export function createOrchestrationSkills(
   configStore: DaemonConfigStore,
+  logger: SkillsLogger,
   resolveTargets = resolveSkillTargets,
 ): OrchestrationSkills {
   const controller: SkillsController = createSkillsController({
     resolveTargets,
     selectionStore: createSkillSelectionStore(configStore),
+    logger,
   });
   return {
     getStatus: () => controller.status(),

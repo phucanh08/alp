@@ -120,13 +120,13 @@ function printNextSteps(pairingUrl: string | null, paseoHome: string, richUi: bo
     "2. Web app: https://app-alp.anhlp.com",
     "3. Desktop app: https://github.com/phucanh08/alp/releases/latest",
     "4. Docs: https://alp.anhlp.com/docs",
-    `5. Example: paseo run --home ${JSON.stringify(paseoHome)} --output-schema schema.json "extract fields"`,
+    `5. Example: alp run --home ${JSON.stringify(paseoHome)} --output-schema schema.json "extract fields"`,
   ];
   const quickReferenceLines = [
-    "1. paseo --help",
-    `2. paseo ls --home ${JSON.stringify(paseoHome)}`,
-    `3. paseo run --home ${JSON.stringify(paseoHome)} "your prompt"`,
-    `4. paseo status --home ${JSON.stringify(paseoHome)}`,
+    "1. alp --help",
+    `2. alp ls --home ${JSON.stringify(paseoHome)}`,
+    `3. alp run --home ${JSON.stringify(paseoHome)} "your prompt"`,
+    `4. alp status --home ${JSON.stringify(paseoHome)}`,
     `5. Daemon logs: ${daemonLogPath}`,
   ];
 

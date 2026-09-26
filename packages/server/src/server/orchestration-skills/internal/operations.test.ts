@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   autoUpdateInstalledSkills,
@@ -15,6 +15,7 @@ import {
 } from "./operations";
 
 const ALL_SKILLS: SkillSelection = { mode: "all" };
+const ignoreWarnings = { warn: () => {} };
 
 function only(...skills: string[]): SkillSelection {
   return { mode: "custom", skills };
@@ -428,7 +429,7 @@ describe("installSkills / updateSkills", () => {
     await writeOnDiskSkill(sandbox.targets.claudeDir, "paseo-chat", { "SKILL.md": "chat-old" });
     await writeOnDiskSkill(sandbox.targets.codexDir, "paseo-chat", { "SKILL.md": "chat-old" });
 
-    const status = await updateSkills(sandbox.targets, ALL_SKILLS);
+    const status = await updateSkills(sandbox.targets, ALL_SKILLS, { logger: ignoreWarnings });
 
     expect(status).toEqual({
       state: "drift",
@@ -468,7 +469,7 @@ describe("installSkills / updateSkills", () => {
       "prompts/local.md": "codex prompt",
     });
 
-    const status = await updateSkills(sandbox.targets, ALL_SKILLS);
+    const status = await updateSkills(sandbox.targets, ALL_SKILLS, { logger: ignoreWarnings });
 
     expect(status.state).toBe("up-to-date");
     expect(await getSkillsStatus(sandbox.targets, ALL_SKILLS)).toEqual({
@@ -505,7 +506,7 @@ describe("installSkills / updateSkills", () => {
     await writeOnDiskSkill(sandbox.targets.codexDir, "paseo", { "SKILL.md": "paseo-v1" });
     await writeOnDiskSkill(sandbox.targets.codexDir, "paseo-loop", { "SKILL.md": "loop-v1" });
 
-    const status = await updateSkills(sandbox.targets, ALL_SKILLS);
+    const status = await updateSkills(sandbox.targets, ALL_SKILLS, { logger: ignoreWarnings });
 
     expect(status.state).toBe("up-to-date");
     expect(
@@ -520,7 +521,9 @@ describe("installSkills / updateSkills", () => {
       "hooks/guard.sh": "user guard",
     });
 
-    const status = await autoUpdateInstalledSkills(sandbox.targets, ALL_SKILLS);
+    const status = await autoUpdateInstalledSkills(sandbox.targets, ALL_SKILLS, {
+      logger: ignoreWarnings,
+    });
 
     expect(status.state).toBe("up-to-date");
     expect((await getSkillsStatus(sandbox.targets, ALL_SKILLS)).state).toBe("up-to-date");
@@ -538,7 +541,9 @@ describe("installSkills / updateSkills", () => {
   it("installs the selected skills on a clean machine at startup", async () => {
     await writeCurrentBundle(sandbox.targets.sourceDir);
 
-    const status = await autoUpdateInstalledSkills(sandbox.targets, ALL_SKILLS);
+    const status = await autoUpdateInstalledSkills(sandbox.targets, ALL_SKILLS, {
+      logger: ignoreWarnings,
+    });
 
     expect(status).toEqual({
       state: "up-to-date",
@@ -553,7 +558,9 @@ describe("installSkills / updateSkills", () => {
   it("leaves a clean machine alone when the selection is empty", async () => {
     await writeCurrentBundle(sandbox.targets.sourceDir);
 
-    const status = await autoUpdateInstalledSkills(sandbox.targets, only());
+    const status = await autoUpdateInstalledSkills(sandbox.targets, only(), {
+      logger: ignoreWarnings,
+    });
 
     expect(status.state).toBe("not-installed");
     expect(status.ops).toEqual([]);
@@ -625,4 +632,253 @@ describe("uninstallSkills", () => {
     expect(status.state).toBe("not-installed");
     expect(await installedIn(sandbox.targets, "paseo-chat")).toEqual([false, false, false]);
   });
+});
+
+// ALP(rebrand): the bundle renamed its paseo* skills to alp*. A machine that ran
+// an older release still holds the old directories, installed with a manifest.
+describe("renamed skill cleanup", () => {
+  const RENAMED: Record<string, string> = {
+    paseo: "alp",
+    "paseo-advisor": "alp-advisor",
+    "paseo-committee": "alp-committee",
+    "paseo-handoff": "alp-handoff",
+    "paseo-help": "alp-help",
+    "paseo-plugin": "alp-plugin",
+  };
+  const OLD_NAMES = Object.keys(RENAMED);
+  const NEW_NAMES = Object.values(RENAMED).sort();
+
+  let sandbox: Sandbox;
+  let warn: ReturnType<typeof vi.fn>;
+  let logger: { warn: (fields: Record<string, unknown>, message: string) => void };
+
+  beforeEach(async () => {
+    sandbox = await makeSandbox();
+    warn = vi.fn();
+    logger = { warn };
+  });
+
+  afterEach(async () => {
+    await fs.rm(sandbox.root, { recursive: true, force: true });
+  });
+
+  function roots(): string[] {
+    return [sandbox.targets.agentsDir, sandbox.targets.claudeDir, sandbox.targets.codexDir];
+  }
+
+  /** Install an older release through the real installer, then ship the renamed bundle. */
+  async function upgradeFromOldRelease(extraOldNames: string[] = []): Promise<void> {
+    for (const name of [...OLD_NAMES, ...extraOldNames]) {
+      await writeBundleSkill(sandbox.targets.sourceDir, name, {
+        "SKILL.md": `${name}-old`,
+        "references/guide.md": `${name} guide`,
+      });
+    }
+    await installSkills(sandbox.targets, ALL_SKILLS);
+    await fs.rm(sandbox.targets.sourceDir, { recursive: true, force: true });
+    await fs.mkdir(sandbox.targets.sourceDir, { recursive: true });
+    for (const name of NEW_NAMES) {
+      await writeBundleSkill(sandbox.targets.sourceDir, name, { "SKILL.md": `${name}-new` });
+    }
+  }
+
+  async function expectNewSkillsInstalled(): Promise<void> {
+    for (const name of NEW_NAMES) {
+      for (const dir of roots()) {
+        expect(await fs.readFile(path.join(dir, name, "SKILL.md"), "utf-8")).toBe(`${name}-new`);
+      }
+    }
+  }
+
+  function warnedPaths(): string[] {
+    return warn.mock.calls.map(([fields]) => (fields as { path: string }).path);
+  }
+
+  it("removes clean old directories from all three roots on update", async () => {
+    await upgradeFromOldRelease();
+
+    const status = await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
+
+    for (const name of OLD_NAMES) {
+      expect(await installedIn(sandbox.targets, name)).toEqual([false, false, false]);
+    }
+    await expectNewSkillsInstalled();
+    expect(status.state).toBe("up-to-date");
+    expect(status.installed).toEqual(NEW_NAMES);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("removes clean old directories from all three roots on auto-update", async () => {
+    await upgradeFromOldRelease();
+
+    const status = await autoUpdateInstalledSkills(sandbox.targets, ALL_SKILLS, { logger });
+
+    for (const name of OLD_NAMES) {
+      expect(await installedIn(sandbox.targets, name)).toEqual([false, false, false]);
+    }
+    await expectNewSkillsInstalled();
+    expect(status.state).toBe("up-to-date");
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("removes clean old directories even when the selection installs nothing", async () => {
+    await upgradeFromOldRelease();
+
+    const status = await autoUpdateInstalledSkills(sandbox.targets, only(), { logger });
+
+    for (const name of OLD_NAMES) {
+      expect(await installedIn(sandbox.targets, name)).toEqual([false, false, false]);
+    }
+    expect(status.state).toBe("not-installed");
+  });
+
+  it("keeps an old directory holding a file the manifest does not list", async () => {
+    await upgradeFromOldRelease();
+    const kept = path.join(sandbox.targets.claudeDir, "paseo");
+    await writeFiles(kept, { "notes/mine.md": "user notes" });
+
+    await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
+
+    expect(await fs.readFile(path.join(kept, "notes", "mine.md"), "utf-8")).toBe("user notes");
+    expect(await fs.readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("paseo-old");
+    expect(await fs.readFile(path.join(kept, "references", "guide.md"), "utf-8")).toBe(
+      "paseo guide",
+    );
+    expect(await pathExists(path.join(kept, ".paseo-managed-files.json"))).toBe(true);
+    expect(await installedIn(sandbox.targets, "paseo")).toEqual([false, true, false]);
+    expect(warnedPaths()).toEqual([kept]);
+    expect(warn).toHaveBeenCalledWith(
+      { path: kept, reason: `file not in manifest ${path.join("notes", "mine.md")}` },
+      "Kept a skill directory from before the alp rename",
+    );
+    await expectNewSkillsInstalled();
+  });
+
+  it("keeps an old directory holding an empty directory the manifest does not explain", async () => {
+    await upgradeFromOldRelease();
+    const kept = path.join(sandbox.targets.agentsDir, "paseo-plugin");
+    await fs.mkdir(path.join(kept, "drafts"));
+
+    await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
+
+    expect(await pathExists(path.join(kept, "drafts"))).toBe(true);
+    expect(await fs.readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("paseo-plugin-old");
+    expect(await installedIn(sandbox.targets, "paseo-plugin")).toEqual([true, false, false]);
+    expect(warnedPaths()).toEqual([kept]);
+  });
+
+  it("keeps an old directory whose managed file was edited", async () => {
+    await upgradeFromOldRelease();
+    const kept = path.join(sandbox.targets.codexDir, "paseo-help");
+    await fs.writeFile(path.join(kept, "references", "guide.md"), "edited by user");
+
+    await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
+
+    expect(await fs.readFile(path.join(kept, "references", "guide.md"), "utf-8")).toBe(
+      "edited by user",
+    );
+    expect(await fs.readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("paseo-help-old");
+    expect(await installedIn(sandbox.targets, "paseo-help")).toEqual([false, false, true]);
+    expect(warnedPaths()).toEqual([kept]);
+    await expectNewSkillsInstalled();
+  });
+
+  it("keeps an old directory without a manifest", async () => {
+    await upgradeFromOldRelease();
+    const kept = path.join(sandbox.targets.agentsDir, "paseo-advisor");
+    await fs.rm(path.join(kept, ".paseo-managed-files.json"));
+
+    await autoUpdateInstalledSkills(sandbox.targets, ALL_SKILLS, { logger });
+
+    expect(await fs.readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("paseo-advisor-old");
+    expect(await fs.readFile(path.join(kept, "references", "guide.md"), "utf-8")).toBe(
+      "paseo-advisor guide",
+    );
+    expect(await installedIn(sandbox.targets, "paseo-advisor")).toEqual([true, false, false]);
+    expect(warnedPaths()).toEqual([kept]);
+    await expectNewSkillsInstalled();
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "keeps an old directory that is a symlink, and the directory it points to",
+    async () => {
+      await upgradeFromOldRelease();
+      const link = path.join(sandbox.targets.codexDir, "paseo-committee");
+      const real = path.join(sandbox.root, "dotfiles", "paseo-committee");
+      await fs.mkdir(path.dirname(real), { recursive: true });
+      await fs.rename(link, real);
+      await fs.symlink(real, link, "dir");
+
+      await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
+
+      expect((await fs.lstat(link)).isSymbolicLink()).toBe(true);
+      expect(await fs.readFile(path.join(real, "SKILL.md"), "utf-8")).toBe("paseo-committee-old");
+      expect(await pathExists(path.join(real, ".paseo-managed-files.json"))).toBe(true);
+      expect(warnedPaths()).toEqual([link]);
+      await expectNewSkillsInstalled();
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "keeps an old directory containing a symlink",
+    async () => {
+      await upgradeFromOldRelease();
+      const kept = path.join(sandbox.targets.claudeDir, "paseo-handoff");
+      const outside = path.join(sandbox.root, "outside");
+      await writeFiles(outside, { "keep.md": "outside file" });
+      await fs.symlink(outside, path.join(kept, "linked"), "dir");
+
+      await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
+
+      expect((await fs.lstat(path.join(kept, "linked"))).isSymbolicLink()).toBe(true);
+      expect(await fs.readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("paseo-handoff-old");
+      expect(await fs.readFile(path.join(outside, "keep.md"), "utf-8")).toBe("outside file");
+      expect(warnedPaths()).toEqual([kept]);
+    },
+  );
+
+  it("leaves a clean legacy directory outside the rename table alone", async () => {
+    await upgradeFromOldRelease(["paseo-chat"]);
+
+    const status = await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
+
+    expect(await installedIn(sandbox.targets, "paseo-chat")).toEqual([true, true, true]);
+    expect(await installedIn(sandbox.targets, "paseo")).toEqual([false, false, false]);
+    expect(status.ops).toEqual([{ kind: "delete", name: "paseo-chat" }]);
+  });
+
+  it("does not remove an old name the bundle still ships", async () => {
+    await writeBundleSkill(sandbox.targets.sourceDir, "paseo", { "SKILL.md": "still-shipped" });
+    await writeBundleSkill(sandbox.targets.sourceDir, "alp", { "SKILL.md": "alp-new" });
+    await installSkills(sandbox.targets, ALL_SKILLS);
+
+    // Deselected but still shipped: removing it is the interactive path's call.
+    const status = await updateSkills(sandbox.targets, only("alp"), { logger });
+
+    expect(await installedIn(sandbox.targets, "paseo")).toEqual([true, true, true]);
+    expect(status.ops).toEqual([{ kind: "delete", name: "paseo" }]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "still installs the new skills when removing an old directory fails",
+    async () => {
+      await upgradeFromOldRelease();
+      const locked = path.join(sandbox.targets.agentsDir, "paseo");
+      await fs.chmod(locked, 0o555);
+      try {
+        const status = await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
+
+        await expectNewSkillsInstalled();
+        expect(await fs.readFile(path.join(locked, "SKILL.md"), "utf-8")).toBe("paseo-old");
+        expect(await installedIn(sandbox.targets, "paseo")).toEqual([true, false, false]);
+        // Only the safe cleanup may remove it, so it is not a pending delete.
+        expect(status.ops).toEqual([]);
+        expect(status.state).toBe("up-to-date");
+        expect(warnedPaths()).toEqual([locked]);
+      } finally {
+        await fs.chmod(locked, 0o755);
+      }
+    },
+  );
 });

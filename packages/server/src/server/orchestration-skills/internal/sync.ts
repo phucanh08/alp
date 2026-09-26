@@ -16,7 +16,7 @@ export interface SkillSyncResult {
   processedSkills: number;
 }
 
-const MANAGED_FILES_MANIFEST = ".paseo-managed-files.json";
+export const MANAGED_FILES_MANIFEST = ".paseo-managed-files.json";
 
 interface ManagedFilesManifest {
   version: 1;
@@ -51,7 +51,9 @@ export async function listFilesRecursive(rootDir: string): Promise<string[]> {
   return out;
 }
 
-async function readManagedFilesManifest(dstDir: string): Promise<ManagedFilesManifest | null> {
+export async function readManagedFilesManifest(
+  dstDir: string,
+): Promise<ManagedFilesManifest | null> {
   const raw = await fs
     .readFile(path.join(dstDir, MANAGED_FILES_MANIFEST), "utf-8")
     .catch(() => null);
@@ -71,7 +73,7 @@ function safeParseJson(raw: string): unknown {
   }
 }
 
-async function hashFile(filePath: string): Promise<string> {
+export async function hashFile(filePath: string): Promise<string> {
   const buf = await fs.readFile(filePath);
   return createHash("sha256").update(buf).digest("hex");
 }

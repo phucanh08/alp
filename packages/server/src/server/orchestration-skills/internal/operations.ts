@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { AgentSkillSelection } from "@getpaseo/protocol/messages";
+import { removeRenamedSkillDirs, type SkillsLogger } from "./renamed-skills.js";
 import { listFilesRecursive, removeSkill, syncSkills } from "./sync.js";
 
 export type SkillsState = "not-installed" | "up-to-date" | "drift";
@@ -27,6 +28,10 @@ export interface SkillsStatus {
   installed: string[];
 }
 
+export interface SkillsMaintenanceOptions {
+  logger: SkillsLogger;
+}
+
 export interface SkillTargets {
   sourceDir: string;
   agentsDir: string;
@@ -35,13 +40,14 @@ export interface SkillTargets {
 }
 
 // Names the bundle used to ship. They are never selectable, but every scan still
-// covers them so an older install's copies get cleaned up.
-export const LEGACY_SKILL_NAMES = [
+// covers them so an older install's copies get cleaned up. Names renamed to alp*
+// are not here: only `removeRenamedSkillDirs` may remove those.
+export const LEGACY_SKILL_NAMES: readonly string[] = [
   "paseo-chat",
   "paseo-epic",
   "paseo-orchestrate",
   "paseo-orchestrator",
-] as const;
+];
 
 type SkillFiles = Map<string, string>;
 type TargetSkills = Map<string, SkillFiles>;
@@ -216,7 +222,9 @@ export async function installSkills(
 export async function updateSkills(
   targets: SkillTargets,
   selection: SkillSelection,
+  options: SkillsMaintenanceOptions,
 ): Promise<SkillsStatus> {
+  await removeRenamedSkillDirs(targets, await listBundledSkills(targets.sourceDir), options.logger);
   const status = await getSkillsStatus(targets, selection);
   return applySkills(targets, selection, nonDestructivePlan(status));
 }
@@ -228,7 +236,11 @@ function nonDestructivePlan(status: SkillsStatus): SkillsStatus {
 export async function autoUpdateInstalledSkills(
   targets: SkillTargets,
   selection: SkillSelection,
+  options: SkillsMaintenanceOptions,
 ): Promise<SkillsStatus> {
+  // Old directories are invisible to status, so this runs even when the renamed
+  // skills are already up to date.
+  await removeRenamedSkillDirs(targets, await listBundledSkills(targets.sourceDir), options.logger);
   const status = await getSkillsStatus(targets, selection);
   // ALP(slp): a bare host reads as not-installed exactly like one where the
   // user explicitly uninstalled everything — treat it the same as drift so a
@@ -237,6 +249,8 @@ export async function autoUpdateInstalledSkills(
   if (status.state !== "drift" && status.state !== "not-installed") return status;
   // Automatic maintenance may repair selected skills, but removal is an
   // interactive operation because managed directories can contain user files.
+  // Renamed skills are the exception: their copies are removed above only
+  // when every file in them is still the one the old bundle installed.
   return applySkills(targets, selection, nonDestructivePlan(status));
 }
 
