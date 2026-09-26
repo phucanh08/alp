@@ -1436,6 +1436,45 @@ describe("upgrading across the alp skill rename", () => {
     },
   );
 
+  // An older release saved a selection adding paseo-advisor, synced it fully,
+  // then died before it committed. The user then edited the synced file.
+  // Undoing the add has no captured backup to fall back to, so the file the
+  // interrupted sync wrote must be told apart from the user's edit by content,
+  // not discarded along with it.
+  async function interruptedOldAdd(): Promise<void> {
+    const previous: SkillSelection = { mode: "custom", skills: ["paseo"] };
+    const next: SkillSelection = { mode: "custom", skills: ["paseo", "paseo-advisor"] };
+    await upgradedHost({
+      selection: previous,
+      beforeUpgrade: async () => {
+        for (const dir of [targets.agentsDir, targets.claudeDir, targets.codexDir]) {
+          await rm(path.join(dir, "paseo-advisor"), { recursive: true, force: true });
+        }
+        await beginSkillsTransaction(targets, previous, next, [
+          { kind: "add", name: "paseo-advisor" },
+        ]);
+        await installSkills(targets, next);
+        await writeUserFile(targets, "paseo-advisor", "SKILL.md", "user edit after crash");
+      },
+    });
+  }
+
+  it.each(OPERATIONS)(
+    "%s keeps a user edit made after a pre-rename add synced but never committed",
+    async (operation) => {
+      await interruptedOldAdd();
+
+      await run(operation);
+
+      expect(await readUserFile(targets, "paseo-advisor", "SKILL.md")).toEqual([
+        "user edit after crash",
+        "user edit after crash",
+        "user edit after crash",
+      ]);
+      expect(await backupArtifacts(targets)).toEqual([[], [], []]);
+    },
+  );
+
   it.each(OPERATIONS)(
     "%s rolls back an old directory a pre-rename transaction was updating",
     async (operation) => {
