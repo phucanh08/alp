@@ -10,13 +10,10 @@
 
 import { Route as rootRouteImport } from "./routes/__root";
 import { Route as VtcodeRouteImport } from "./routes/vtcode";
-import { Route as TermsRouteImport } from "./routes/terms";
 import { Route as StakpakRouteImport } from "./routes/stakpak";
-import { Route as SponsorRouteImport } from "./routes/sponsor";
 import { Route as SigitRouteImport } from "./routes/sigit";
 import { Route as QwenCodeRouteImport } from "./routes/qwen-code";
 import { Route as QoderRouteImport } from "./routes/qoder";
-import { Route as PrivacyRouteImport } from "./routes/privacy";
 import { Route as PoolsideRouteImport } from "./routes/poolside";
 import { Route as PiRouteImport } from "./routes/pi";
 import { Route as OpencodeRouteImport } from "./routes/opencode";
@@ -62,32 +59,15 @@ import { Route as DocsIndexRouteImport } from "./routes/docs/index";
 import { Route as BlogIndexRouteImport } from "./routes/blog/index";
 import { Route as DocsSplatRouteImport } from "./routes/docs/$";
 import { Route as BlogSplatRouteImport } from "./routes/blog/$";
-import { Route as AlternativesSupersetRouteImport } from "./routes/alternatives/superset";
-import { Route as AlternativesOpencodeDesktopRouteImport } from "./routes/alternatives/opencode-desktop";
-import { Route as AlternativesOpenchamberRouteImport } from "./routes/alternatives/openchamber";
-import { Route as AlternativesHappyCoderRouteImport } from "./routes/alternatives/happy-coder";
-import { Route as AlternativesConductorRouteImport } from "./routes/alternatives/conductor";
-import { Route as AlternativesCodexAppRouteImport } from "./routes/alternatives/codex-app";
-import { Route as AlternativesClaudeDesktopRouteImport } from "./routes/alternatives/claude-desktop";
 
 const VtcodeRoute = VtcodeRouteImport.update({
   id: "/vtcode",
   path: "/vtcode",
   getParentRoute: () => rootRouteImport,
 } as any);
-const TermsRoute = TermsRouteImport.update({
-  id: "/terms",
-  path: "/terms",
-  getParentRoute: () => rootRouteImport,
-} as any);
 const StakpakRoute = StakpakRouteImport.update({
   id: "/stakpak",
   path: "/stakpak",
-  getParentRoute: () => rootRouteImport,
-} as any);
-const SponsorRoute = SponsorRouteImport.update({
-  id: "/sponsor",
-  path: "/sponsor",
   getParentRoute: () => rootRouteImport,
 } as any);
 const SigitRoute = SigitRouteImport.update({
@@ -103,11 +83,6 @@ const QwenCodeRoute = QwenCodeRouteImport.update({
 const QoderRoute = QoderRouteImport.update({
   id: "/qoder",
   path: "/qoder",
-  getParentRoute: () => rootRouteImport,
-} as any);
-const PrivacyRoute = PrivacyRouteImport.update({
-  id: "/privacy",
-  path: "/privacy",
   getParentRoute: () => rootRouteImport,
 } as any);
 const PoolsideRoute = PoolsideRouteImport.update({
@@ -335,43 +310,6 @@ const BlogSplatRoute = BlogSplatRouteImport.update({
   path: "/$",
   getParentRoute: () => BlogRoute,
 } as any);
-const AlternativesSupersetRoute = AlternativesSupersetRouteImport.update({
-  id: "/alternatives/superset",
-  path: "/alternatives/superset",
-  getParentRoute: () => rootRouteImport,
-} as any);
-const AlternativesOpencodeDesktopRoute =
-  AlternativesOpencodeDesktopRouteImport.update({
-    id: "/alternatives/opencode-desktop",
-    path: "/alternatives/opencode-desktop",
-    getParentRoute: () => rootRouteImport,
-  } as any);
-const AlternativesOpenchamberRoute = AlternativesOpenchamberRouteImport.update({
-  id: "/alternatives/openchamber",
-  path: "/alternatives/openchamber",
-  getParentRoute: () => rootRouteImport,
-} as any);
-const AlternativesHappyCoderRoute = AlternativesHappyCoderRouteImport.update({
-  id: "/alternatives/happy-coder",
-  path: "/alternatives/happy-coder",
-  getParentRoute: () => rootRouteImport,
-} as any);
-const AlternativesConductorRoute = AlternativesConductorRouteImport.update({
-  id: "/alternatives/conductor",
-  path: "/alternatives/conductor",
-  getParentRoute: () => rootRouteImport,
-} as any);
-const AlternativesCodexAppRoute = AlternativesCodexAppRouteImport.update({
-  id: "/alternatives/codex-app",
-  path: "/alternatives/codex-app",
-  getParentRoute: () => rootRouteImport,
-} as any);
-const AlternativesClaudeDesktopRoute =
-  AlternativesClaudeDesktopRouteImport.update({
-    id: "/alternatives/claude-desktop",
-    path: "/alternatives/claude-desktop",
-    getParentRoute: () => rootRouteImport,
-  } as any);
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
@@ -415,21 +353,11 @@ export interface FileRoutesByFullPath {
   "/opencode": typeof OpencodeRoute;
   "/pi": typeof PiRoute;
   "/poolside": typeof PoolsideRoute;
-  "/privacy": typeof PrivacyRoute;
   "/qoder": typeof QoderRoute;
   "/qwen-code": typeof QwenCodeRoute;
   "/sigit": typeof SigitRoute;
-  "/sponsor": typeof SponsorRoute;
   "/stakpak": typeof StakpakRoute;
-  "/terms": typeof TermsRoute;
   "/vtcode": typeof VtcodeRoute;
-  "/alternatives/claude-desktop": typeof AlternativesClaudeDesktopRoute;
-  "/alternatives/codex-app": typeof AlternativesCodexAppRoute;
-  "/alternatives/conductor": typeof AlternativesConductorRoute;
-  "/alternatives/happy-coder": typeof AlternativesHappyCoderRoute;
-  "/alternatives/openchamber": typeof AlternativesOpenchamberRoute;
-  "/alternatives/opencode-desktop": typeof AlternativesOpencodeDesktopRoute;
-  "/alternatives/superset": typeof AlternativesSupersetRoute;
   "/blog/$": typeof BlogSplatRoute;
   "/docs/$": typeof DocsSplatRoute;
   "/blog/": typeof BlogIndexRoute;
@@ -475,21 +403,11 @@ export interface FileRoutesByTo {
   "/opencode": typeof OpencodeRoute;
   "/pi": typeof PiRoute;
   "/poolside": typeof PoolsideRoute;
-  "/privacy": typeof PrivacyRoute;
   "/qoder": typeof QoderRoute;
   "/qwen-code": typeof QwenCodeRoute;
   "/sigit": typeof SigitRoute;
-  "/sponsor": typeof SponsorRoute;
   "/stakpak": typeof StakpakRoute;
-  "/terms": typeof TermsRoute;
   "/vtcode": typeof VtcodeRoute;
-  "/alternatives/claude-desktop": typeof AlternativesClaudeDesktopRoute;
-  "/alternatives/codex-app": typeof AlternativesCodexAppRoute;
-  "/alternatives/conductor": typeof AlternativesConductorRoute;
-  "/alternatives/happy-coder": typeof AlternativesHappyCoderRoute;
-  "/alternatives/openchamber": typeof AlternativesOpenchamberRoute;
-  "/alternatives/opencode-desktop": typeof AlternativesOpencodeDesktopRoute;
-  "/alternatives/superset": typeof AlternativesSupersetRoute;
   "/blog/$": typeof BlogSplatRoute;
   "/docs/$": typeof DocsSplatRoute;
   "/blog": typeof BlogIndexRoute;
@@ -538,21 +456,11 @@ export interface FileRoutesById {
   "/opencode": typeof OpencodeRoute;
   "/pi": typeof PiRoute;
   "/poolside": typeof PoolsideRoute;
-  "/privacy": typeof PrivacyRoute;
   "/qoder": typeof QoderRoute;
   "/qwen-code": typeof QwenCodeRoute;
   "/sigit": typeof SigitRoute;
-  "/sponsor": typeof SponsorRoute;
   "/stakpak": typeof StakpakRoute;
-  "/terms": typeof TermsRoute;
   "/vtcode": typeof VtcodeRoute;
-  "/alternatives/claude-desktop": typeof AlternativesClaudeDesktopRoute;
-  "/alternatives/codex-app": typeof AlternativesCodexAppRoute;
-  "/alternatives/conductor": typeof AlternativesConductorRoute;
-  "/alternatives/happy-coder": typeof AlternativesHappyCoderRoute;
-  "/alternatives/openchamber": typeof AlternativesOpenchamberRoute;
-  "/alternatives/opencode-desktop": typeof AlternativesOpencodeDesktopRoute;
-  "/alternatives/superset": typeof AlternativesSupersetRoute;
   "/blog/$": typeof BlogSplatRoute;
   "/docs/$": typeof DocsSplatRoute;
   "/blog/": typeof BlogIndexRoute;
@@ -602,21 +510,11 @@ export interface FileRouteTypes {
     | "/opencode"
     | "/pi"
     | "/poolside"
-    | "/privacy"
     | "/qoder"
     | "/qwen-code"
     | "/sigit"
-    | "/sponsor"
     | "/stakpak"
-    | "/terms"
     | "/vtcode"
-    | "/alternatives/claude-desktop"
-    | "/alternatives/codex-app"
-    | "/alternatives/conductor"
-    | "/alternatives/happy-coder"
-    | "/alternatives/openchamber"
-    | "/alternatives/opencode-desktop"
-    | "/alternatives/superset"
     | "/blog/$"
     | "/docs/$"
     | "/blog/"
@@ -662,21 +560,11 @@ export interface FileRouteTypes {
     | "/opencode"
     | "/pi"
     | "/poolside"
-    | "/privacy"
     | "/qoder"
     | "/qwen-code"
     | "/sigit"
-    | "/sponsor"
     | "/stakpak"
-    | "/terms"
     | "/vtcode"
-    | "/alternatives/claude-desktop"
-    | "/alternatives/codex-app"
-    | "/alternatives/conductor"
-    | "/alternatives/happy-coder"
-    | "/alternatives/openchamber"
-    | "/alternatives/opencode-desktop"
-    | "/alternatives/superset"
     | "/blog/$"
     | "/docs/$"
     | "/blog"
@@ -724,21 +612,11 @@ export interface FileRouteTypes {
     | "/opencode"
     | "/pi"
     | "/poolside"
-    | "/privacy"
     | "/qoder"
     | "/qwen-code"
     | "/sigit"
-    | "/sponsor"
     | "/stakpak"
-    | "/terms"
     | "/vtcode"
-    | "/alternatives/claude-desktop"
-    | "/alternatives/codex-app"
-    | "/alternatives/conductor"
-    | "/alternatives/happy-coder"
-    | "/alternatives/openchamber"
-    | "/alternatives/opencode-desktop"
-    | "/alternatives/superset"
     | "/blog/$"
     | "/docs/$"
     | "/blog/"
@@ -787,21 +665,11 @@ export interface RootRouteChildren {
   OpencodeRoute: typeof OpencodeRoute;
   PiRoute: typeof PiRoute;
   PoolsideRoute: typeof PoolsideRoute;
-  PrivacyRoute: typeof PrivacyRoute;
   QoderRoute: typeof QoderRoute;
   QwenCodeRoute: typeof QwenCodeRoute;
   SigitRoute: typeof SigitRoute;
-  SponsorRoute: typeof SponsorRoute;
   StakpakRoute: typeof StakpakRoute;
-  TermsRoute: typeof TermsRoute;
   VtcodeRoute: typeof VtcodeRoute;
-  AlternativesClaudeDesktopRoute: typeof AlternativesClaudeDesktopRoute;
-  AlternativesCodexAppRoute: typeof AlternativesCodexAppRoute;
-  AlternativesConductorRoute: typeof AlternativesConductorRoute;
-  AlternativesHappyCoderRoute: typeof AlternativesHappyCoderRoute;
-  AlternativesOpenchamberRoute: typeof AlternativesOpenchamberRoute;
-  AlternativesOpencodeDesktopRoute: typeof AlternativesOpencodeDesktopRoute;
-  AlternativesSupersetRoute: typeof AlternativesSupersetRoute;
 }
 
 declare module "@tanstack/react-router" {
@@ -813,25 +681,11 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof VtcodeRouteImport;
       parentRoute: typeof rootRouteImport;
     };
-    "/terms": {
-      id: "/terms";
-      path: "/terms";
-      fullPath: "/terms";
-      preLoaderRoute: typeof TermsRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
     "/stakpak": {
       id: "/stakpak";
       path: "/stakpak";
       fullPath: "/stakpak";
       preLoaderRoute: typeof StakpakRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/sponsor": {
-      id: "/sponsor";
-      path: "/sponsor";
-      fullPath: "/sponsor";
-      preLoaderRoute: typeof SponsorRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/sigit": {
@@ -853,13 +707,6 @@ declare module "@tanstack/react-router" {
       path: "/qoder";
       fullPath: "/qoder";
       preLoaderRoute: typeof QoderRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/privacy": {
-      id: "/privacy";
-      path: "/privacy";
-      fullPath: "/privacy";
-      preLoaderRoute: typeof PrivacyRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/poolside": {
@@ -1177,55 +1024,6 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof BlogSplatRouteImport;
       parentRoute: typeof BlogRoute;
     };
-    "/alternatives/superset": {
-      id: "/alternatives/superset";
-      path: "/alternatives/superset";
-      fullPath: "/alternatives/superset";
-      preLoaderRoute: typeof AlternativesSupersetRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/alternatives/opencode-desktop": {
-      id: "/alternatives/opencode-desktop";
-      path: "/alternatives/opencode-desktop";
-      fullPath: "/alternatives/opencode-desktop";
-      preLoaderRoute: typeof AlternativesOpencodeDesktopRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/alternatives/openchamber": {
-      id: "/alternatives/openchamber";
-      path: "/alternatives/openchamber";
-      fullPath: "/alternatives/openchamber";
-      preLoaderRoute: typeof AlternativesOpenchamberRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/alternatives/happy-coder": {
-      id: "/alternatives/happy-coder";
-      path: "/alternatives/happy-coder";
-      fullPath: "/alternatives/happy-coder";
-      preLoaderRoute: typeof AlternativesHappyCoderRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/alternatives/conductor": {
-      id: "/alternatives/conductor";
-      path: "/alternatives/conductor";
-      fullPath: "/alternatives/conductor";
-      preLoaderRoute: typeof AlternativesConductorRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/alternatives/codex-app": {
-      id: "/alternatives/codex-app";
-      path: "/alternatives/codex-app";
-      fullPath: "/alternatives/codex-app";
-      preLoaderRoute: typeof AlternativesCodexAppRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/alternatives/claude-desktop": {
-      id: "/alternatives/claude-desktop";
-      path: "/alternatives/claude-desktop";
-      fullPath: "/alternatives/claude-desktop";
-      preLoaderRoute: typeof AlternativesClaudeDesktopRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
   }
 }
 
@@ -1295,21 +1093,11 @@ const rootRouteChildren: RootRouteChildren = {
   OpencodeRoute: OpencodeRoute,
   PiRoute: PiRoute,
   PoolsideRoute: PoolsideRoute,
-  PrivacyRoute: PrivacyRoute,
   QoderRoute: QoderRoute,
   QwenCodeRoute: QwenCodeRoute,
   SigitRoute: SigitRoute,
-  SponsorRoute: SponsorRoute,
   StakpakRoute: StakpakRoute,
-  TermsRoute: TermsRoute,
   VtcodeRoute: VtcodeRoute,
-  AlternativesClaudeDesktopRoute: AlternativesClaudeDesktopRoute,
-  AlternativesCodexAppRoute: AlternativesCodexAppRoute,
-  AlternativesConductorRoute: AlternativesConductorRoute,
-  AlternativesHappyCoderRoute: AlternativesHappyCoderRoute,
-  AlternativesOpenchamberRoute: AlternativesOpenchamberRoute,
-  AlternativesOpencodeDesktopRoute: AlternativesOpencodeDesktopRoute,
-  AlternativesSupersetRoute: AlternativesSupersetRoute,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

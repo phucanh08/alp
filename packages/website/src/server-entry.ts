@@ -74,12 +74,6 @@ export default {
       return Response.redirect(url.toString(), 301);
     }
 
-    const altRedirectMatch = url.pathname.match(/^\/docs\/alternatives\/(.+?)\/?$/);
-    if (altRedirectMatch) {
-      url.pathname = `/alternatives/${altRedirectMatch[1]}`;
-      return Response.redirect(url.toString(), 301);
-    }
-
     const legacyDocsRedirect = getLegacyDocsRedirect(url.pathname);
     if (legacyDocsRedirect) {
       url.pathname = legacyDocsRedirect;
