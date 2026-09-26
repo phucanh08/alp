@@ -14,7 +14,7 @@ import {
   coerceSkillSelection,
   type SkillSelectionStore,
 } from "./selection-store.js";
-import type { SkillsLogger } from "./renamed-skills.js";
+import { renameSkillSelection, type SkillsLogger } from "./renamed-skills.js";
 import { beginSkillsTransaction, recoverInterruptedSkillTransactions } from "./transaction.js";
 
 /** Everything the settings UI needs to render skills in one round trip. */
@@ -91,7 +91,8 @@ export function createSkillsController({
 
   async function saveSelection(request: unknown): Promise<SkillsSaveResult> {
     const targets = resolveTargets();
-    const next = coerceSkillSelection(request);
+    // ALP(rebrand): a client opened before the upgrade can still send old names.
+    const next = renameSkillSelection(coerceSkillSelection(request));
     const previous = await selectionStore.get();
     await recoverInterruptedSkillTransactions(targets, previous);
     const confirmed = new Set(
@@ -162,7 +163,9 @@ export function createSkillsController({
     if (await selectionStore.isSet()) {
       return { imported: false, selection: await selectionStore.get() };
     }
-    const imported = await selectionStore.set(selection);
+    const imported = await selectionStore.set(
+      renameSkillSelection(coerceSkillSelection(selection)),
+    );
     return { imported: true, selection: imported };
   }
 

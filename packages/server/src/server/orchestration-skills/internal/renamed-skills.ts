@@ -1,11 +1,14 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import type { AgentSkillSelection } from "@getpaseo/protocol/messages";
 
 import { hashFile, MANAGED_FILES_MANIFEST, readManagedFilesManifest } from "./sync.js";
 
 // ALP(rebrand): the bundle's paseo* skills ship as alp*. Old names map to the
 // new ones so saved selections keep meaning the same skills, and installed
 // copies under an old name are removed once nothing in them is the user's.
+// Only `removeRenamedSkillDirs` deletes them: they are not managed names, so
+// status, uninstall, and save never plan, report, or delete an old directory.
 const RENAMED_SKILLS: ReadonlyMap<string, string> = new Map([
   ["paseo", "alp"],
   ["paseo-advisor", "alp-advisor"],
@@ -30,6 +33,12 @@ export interface RenamedSkillRoots {
 /** Replaces old names with their new ones, deduped and sorted like `coerceSkillNames`. */
 export function renameSkillNames(names: readonly string[]): string[] {
   return [...new Set(names.map((name) => RENAMED_SKILLS.get(name) ?? name))].sort();
+}
+
+/** Every selection entering the skills code goes through this, so old names never reach a plan. */
+export function renameSkillSelection(selection: AgentSkillSelection): AgentSkillSelection {
+  if (selection.mode === "all") return selection;
+  return { mode: "custom", skills: renameSkillNames(selection.skills) };
 }
 
 type Verdict =

@@ -2,11 +2,7 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { AgentSkillSelection } from "@getpaseo/protocol/messages";
-import {
-  RENAMED_SKILL_OLD_NAMES,
-  removeRenamedSkillDirs,
-  type SkillsLogger,
-} from "./renamed-skills.js";
+import { removeRenamedSkillDirs, type SkillsLogger } from "./renamed-skills.js";
 import { listFilesRecursive, removeSkill, syncSkills } from "./sync.js";
 
 export type SkillsState = "not-installed" | "up-to-date" | "drift";
@@ -44,13 +40,13 @@ export interface SkillTargets {
 }
 
 // Names the bundle used to ship. They are never selectable, but every scan still
-// covers them so an older install's copies get cleaned up.
+// covers them so an older install's copies get cleaned up. Names renamed to alp*
+// are not here: only `removeRenamedSkillDirs` may remove those.
 export const LEGACY_SKILL_NAMES: readonly string[] = [
   "paseo-chat",
   "paseo-epic",
   "paseo-orchestrate",
   "paseo-orchestrator",
-  ...RENAMED_SKILL_OLD_NAMES,
 ];
 
 type SkillFiles = Map<string, string>;
@@ -242,13 +238,15 @@ export async function autoUpdateInstalledSkills(
   selection: SkillSelection,
   options: SkillsMaintenanceOptions,
 ): Promise<SkillsStatus> {
+  // Old directories are invisible to status, so this runs even when the renamed
+  // skills are already up to date.
+  await removeRenamedSkillDirs(targets, await listBundledSkills(targets.sourceDir), options.logger);
   const status = await getSkillsStatus(targets, selection);
   // ALP(slp): a bare host reads as not-installed exactly like one where the
   // user explicitly uninstalled everything — treat it the same as drift so a
   // selection set before any skill exists on disk installs at startup instead
   // of waiting for someone to open Settings and press Install.
   if (status.state !== "drift" && status.state !== "not-installed") return status;
-  await removeRenamedSkillDirs(targets, status.available, options.logger);
   // Automatic maintenance may repair selected skills, but removal is an
   // interactive operation because managed directories can contain user files.
   // Renamed skills are the exception: their copies are removed above only

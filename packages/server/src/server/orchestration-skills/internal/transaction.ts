@@ -20,7 +20,8 @@ import {
   type SkillSelection,
   type SkillTargets,
 } from "./operations.js";
-import { listFilesRecursive } from "./sync.js";
+import { RENAMED_SKILL_OLD_NAMES, renameSkillSelection } from "./renamed-skills.js";
+import { listFilesRecursive, readManagedFilesManifest } from "./sync.js";
 
 export interface SkillsTransaction {
   /** Convergence stuck. Drop the staged copies. */
@@ -133,7 +134,12 @@ async function validateEntries(
   transactionDir: string,
   entries: CapturedDirectory[],
 ): Promise<boolean> {
-  const names = new Set(await listManagedSkillNames(targets.sourceDir));
+  // ALP(rebrand): a transaction left by a release before the alp rename names the
+  // old directories, and only this transaction can put them back.
+  const names = new Set([
+    ...(await listManagedSkillNames(targets.sourceDir)),
+    ...RENAMED_SKILL_OLD_NAMES,
+  ]);
   const roots = [targets.agentsDir, targets.claudeDir, targets.codexDir];
   return entries.every((entry) => {
     const rootIndex = roots.findIndex((root) => path.dirname(entry.livePath) === root);
@@ -202,6 +208,24 @@ async function expectedSyncedFiles(sourceDir: string, name: string): Promise<Map
     MANAGED_FILES_MANIFEST,
     Buffer.from(`${JSON.stringify({ version: 1, files: hashes }, null, 2)}\n`),
   );
+  return files;
+}
+
+/**
+ * ALP(rebrand): the bundle no longer ships an old name, so what the interrupted
+ * sync wrote is read back from the live directory instead: the managed-files
+ * manifest it wrote, and each file that still matches that manifest's hash.
+ */
+async function syncedFilesFromManifest(livePath: string): Promise<Map<string, Buffer>> {
+  const files = new Map<string, Buffer>();
+  const manifest = await readManagedFilesManifest(livePath);
+  if (manifest === null) return files;
+  for (const [rel, sha] of Object.entries(manifest.files)) {
+    const contents = await readFile(path.join(livePath, rel)).catch(() => null);
+    if (contents === null) continue;
+    if (createHash("sha256").update(contents).digest("hex") === sha) files.set(rel, contents);
+  }
+  files.set(MANAGED_FILES_MANIFEST, await readFile(path.join(livePath, MANAGED_FILES_MANIFEST)));
   return files;
 }
 
@@ -431,6 +455,14 @@ async function restore(
       continue;
     }
     const name = path.basename(entry.livePath);
+    if (
+      RENAMED_SKILL_OLD_NAMES.includes(name) &&
+      !(await isDirectory(path.join(targets.sourceDir, name)))
+    ) {
+      const synced = await syncedFilesFromManifest(entry.livePath);
+      await undoSyncedDirectory(transactionDir, entry.livePath, backup, synced);
+      continue;
+    }
     let expected = expectedByName.get(name);
     if (!expected) {
       expected = await expectedSyncedFiles(targets.sourceDir, name);
@@ -467,11 +499,13 @@ export async function recoverInterruptedSkillTransactions(
       const manifest = await readManifest(transactionDir);
       if (!manifest) continue;
       if (!(await validateEntries(targets, transactionDir, manifest.entries))) continue;
-      if (selectionsEqual(committedSelection, manifest.nextSelection)) {
+      // ALP(rebrand): the manifest may hold the old names; compare as new names.
+      const committed = renameSkillSelection(committedSelection);
+      if (selectionsEqual(committed, renameSkillSelection(manifest.nextSelection))) {
         await discardTransaction(transactionDir, manifest.entries);
         continue;
       }
-      if (!selectionsEqual(committedSelection, manifest.previousSelection)) {
+      if (!selectionsEqual(committed, renameSkillSelection(manifest.previousSelection))) {
         throw new Error(
           `Cannot safely recover interrupted skills transaction at ${transactionDir}`,
         );

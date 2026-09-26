@@ -1249,7 +1249,6 @@ describe("skills controller", () => {
     ]);
   });
 });
-
 // ALP(rebrand): a host that ran a release shipping paseo* skills, with a custom
 // selection saved under the old names, upgrades to the alp* bundle.
 describe("upgrading across the alp skill rename", () => {
@@ -1261,15 +1260,34 @@ describe("upgrading across the alp skill rename", () => {
     ["paseo-help", "alp-help"],
     ["paseo-plugin", "alp-plugin"],
   ] as const;
+  const OLD_SELECTION: SkillSelection = { mode: "custom", skills: ["paseo", "paseo-help", "xia"] };
+  const NEW_SELECTION: SkillSelection = { mode: "custom", skills: ["alp", "alp-help", "xia"] };
+  const OPERATIONS = ["status", "install", "update", "autoUpdate", "uninstall", "save"] as const;
   let root: string;
+  let targets: SkillTargets;
+  let config: DaemonConfigStore;
+  let controller: SkillsController;
 
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  async function upgradedHost(): Promise<{ targets: SkillTargets; controller: SkillsController }> {
+  /**
+   * Installs a release that shipped the old names, plus `alsoShipped` with their
+   * new content, then replaces the bundle with the renamed skills. `beforeUpgrade`
+   * runs while the old bundle is still in place.
+   */
+  async function upgradedHost({
+    alsoShipped = [],
+    selection = OLD_SELECTION,
+    beforeUpgrade,
+  }: {
+    alsoShipped?: string[];
+    selection?: SkillSelection | null;
+    beforeUpgrade?: () => Promise<void>;
+  } = {}): Promise<void> {
     root = await mkdtemp(path.join(os.tmpdir(), "paseo-skills-rename-"));
-    const targets: SkillTargets = {
+    targets = {
       sourceDir: path.join(root, "bundle"),
       agentsDir: path.join(root, "home", ".agents", "skills"),
       claudeDir: path.join(root, "home", ".claude", "skills"),
@@ -1279,14 +1297,19 @@ describe("upgrading across the alp skill rename", () => {
       await mkdir(path.join(targets.sourceDir, oldName), { recursive: true });
       await writeFile(path.join(targets.sourceDir, oldName, "SKILL.md"), `${oldName}-old`);
     }
+    for (const newName of alsoShipped) {
+      await mkdir(path.join(targets.sourceDir, newName), { recursive: true });
+      await writeFile(path.join(targets.sourceDir, newName, "SKILL.md"), `${newName}-new`);
+    }
     await installSkills(targets, { mode: "all" });
+    await beforeUpgrade?.();
     await rm(targets.sourceDir, { recursive: true, force: true });
     for (const [, newName] of OLD_TO_NEW) {
       await mkdir(path.join(targets.sourceDir, newName), { recursive: true });
       await writeFile(path.join(targets.sourceDir, newName, "SKILL.md"), `${newName}-new`);
     }
 
-    const config = new DaemonConfigStore(path.join(root, "paseo-home"), {
+    config = new DaemonConfigStore(path.join(root, "paseo-home"), {
       mcp: { injectIntoAgents: false },
       browserTools: { enabled: false },
       providers: {},
@@ -1295,23 +1318,48 @@ describe("upgrading across the alp skill rename", () => {
       enableTerminalAgentHooks: false,
       appendSystemPrompt: "",
     });
-    config.setAgentSkillSelection({ mode: "custom", skills: ["paseo", "paseo-help", "xia"] });
-    const controller = createSkillsController({
+    if (selection !== null) config.setAgentSkillSelection(selection);
+    controller = createSkillsController({
       resolveTargets: () => targets,
       selectionStore: createSkillSelectionStore(config),
       logger: { warn: () => {} },
     });
-    return { targets, controller };
+  }
+
+  function run(operation: (typeof OPERATIONS)[number]): Promise<unknown> {
+    if (operation === "save")
+      return controller.save({ mode: "custom", skills: ["alp", "alp-help"] });
+    return controller[operation]();
+  }
+
+  /** After a clean upgrade, the user's file keeps `paseo` under Claude only. */
+  async function upgradedHostWithKeptOldDir(): Promise<string> {
+    await upgradedHost();
+    const kept = path.join(targets.claudeDir, "paseo");
+    await mkdir(path.join(kept, "notes"), { recursive: true });
+    await writeFile(path.join(kept, "notes", "mine.md"), "user notes");
+    await controller.autoUpdate();
+    expect(await installedEverywhere(targets)).toEqual([
+      ["alp", "alp-help"],
+      ["alp", "alp-help", "paseo"],
+      ["alp", "alp-help"],
+    ]);
+    return kept;
+  }
+
+  async function expectKept(kept: string): Promise<void> {
+    expect(await readFile(path.join(kept, "notes", "mine.md"), "utf-8")).toBe("user notes");
+    expect(await readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("paseo-old");
   }
 
   it.each(["install", "update", "autoUpdate"] as const)(
     "%s removes the old directories and installs the renamed selection",
     async (operation) => {
-      const { targets, controller } = await upgradedHost();
+      await upgradedHost();
 
       const snapshot = await controller[operation]();
 
-      expect(snapshot.selection).toEqual({ mode: "custom", skills: ["alp", "alp-help", "xia"] });
+      expect(snapshot.selection).toEqual(NEW_SELECTION);
       expect(snapshot.state).toBe("up-to-date");
       expect(snapshot.installed).toEqual(["alp", "alp-help"]);
       for (const dir of [targets.agentsDir, targets.claudeDir, targets.codexDir]) {
@@ -1323,4 +1371,168 @@ describe("upgrading across the alp skill rename", () => {
       }
     },
   );
+
+  it.each(["install", "update", "autoUpdate"] as const)(
+    "%s removes the old directories when the renamed skills are already up to date",
+    async (operation) => {
+      await upgradedHost({ alsoShipped: ["alp", "alp-help"] });
+
+      const snapshot = await controller[operation]();
+
+      expect(snapshot.state).toBe("up-to-date");
+      expect(await installedEverywhere(targets)).toEqual([
+        ["alp", "alp-help"],
+        ["alp", "alp-help"],
+        ["alp", "alp-help"],
+      ]);
+    },
+  );
+
+  // An older release saved the selection, then died before it committed the
+  // transaction that deleted paseo-help.
+  async function interruptedOldSave(committed: "previous" | "next"): Promise<void> {
+    const previous: SkillSelection = { mode: "custom", skills: ["paseo", "paseo-help"] };
+    const next: SkillSelection = { mode: "custom", skills: ["paseo"] };
+    await upgradedHost({
+      selection: committed === "next" ? next : previous,
+      beforeUpgrade: async () => {
+        await writeUserFile(targets, "paseo-help", "notes/mine.md", "user notes");
+        await beginSkillsTransaction(targets, previous, next, [
+          { kind: "delete", name: "paseo-help" },
+        ]);
+      },
+    });
+  }
+
+  it.each(OPERATIONS)(
+    "%s discards a pre-rename transaction whose selection was committed",
+    async (operation) => {
+      await interruptedOldSave("next");
+
+      await run(operation);
+
+      expect(await readUserFile(targets, "paseo-help", "notes/mine.md")).toEqual([
+        null,
+        null,
+        null,
+      ]);
+      expect(await backupArtifacts(targets)).toEqual([[], [], []]);
+    },
+  );
+
+  it.each(OPERATIONS)(
+    "%s restores what a pre-rename transaction staged when its selection was not committed",
+    async (operation) => {
+      await interruptedOldSave("previous");
+
+      await run(operation);
+
+      expect(await readUserFile(targets, "paseo-help", "notes/mine.md")).toEqual([
+        "user notes",
+        "user notes",
+        "user notes",
+      ]);
+      expect(await backupArtifacts(targets)).toEqual([[], [], []]);
+    },
+  );
+
+  it.each(OPERATIONS)(
+    "%s rolls back an old directory a pre-rename transaction was updating",
+    async (operation) => {
+      const selection: SkillSelection = { mode: "custom", skills: ["paseo", "paseo-help"] };
+      await upgradedHost({
+        selection,
+        beforeUpgrade: async () => {
+          // The user's file keeps the restored directory from the safe cleanup.
+          await writeUserFile(targets, "paseo", "notes/mine.md", "user notes");
+          await writeFile(path.join(targets.sourceDir, "paseo", "SKILL.md"), "paseo-old-v2");
+          await beginSkillsTransaction(targets, selection, { mode: "all" }, [
+            { kind: "update", name: "paseo" },
+          ]);
+          await installSkills(targets, { mode: "all" });
+        },
+      });
+
+      await run(operation);
+
+      expect(await readUserFile(targets, "paseo", "SKILL.md")).toEqual([
+        "paseo-old",
+        "paseo-old",
+        "paseo-old",
+      ]);
+      expect(await readUserFile(targets, "paseo", "notes/mine.md")).toEqual([
+        "user notes",
+        "user notes",
+        "user notes",
+      ]);
+      expect(await backupArtifacts(targets)).toEqual([[], [], []]);
+      // An exact rollback leaves nothing quarantined as a conflict.
+      for (const dir of [targets.agentsDir, targets.claudeDir, targets.codexDir]) {
+        const parentEntries = await readdir(path.dirname(dir));
+        expect(
+          parentEntries.filter((entry) => entry.startsWith(".paseo-skills-recovered-")),
+        ).toEqual([]);
+      }
+    },
+  );
+
+  it("saves a selection sent with the old names under the new names", async () => {
+    await upgradedHost();
+    await controller.autoUpdate();
+
+    const result = await controller.save(OLD_SELECTION);
+
+    expect(result.confirmationRequired).toBeNull();
+    expect(result.selection).toEqual(NEW_SELECTION);
+    expect(config.get().skills?.selection).toEqual(NEW_SELECTION);
+    expect(await installedEverywhere(targets)).toEqual([
+      ["alp", "alp-help"],
+      ["alp", "alp-help"],
+      ["alp", "alp-help"],
+    ]);
+  });
+
+  it("imports a legacy selection holding the old names under the new names", async () => {
+    await upgradedHost({ selection: null });
+
+    const result = await controller.importLegacySelectionIfUnset(OLD_SELECTION);
+
+    expect(result).toEqual({ imported: true, selection: NEW_SELECTION });
+    expect(config.get().skills?.selection).toEqual(NEW_SELECTION);
+  });
+
+  it("reports a kept old directory as neither drift nor a pending delete", async () => {
+    await upgradedHostWithKeptOldDir();
+
+    const snapshot = await controller.status();
+
+    expect(snapshot.state).toBe("up-to-date");
+    expect(snapshot.ops).toEqual([]);
+    expect(snapshot.installed).toEqual(["alp", "alp-help"]);
+  });
+
+  it("uninstall leaves a kept old directory in place", async () => {
+    const kept = await upgradedHostWithKeptOldDir();
+
+    await controller.uninstall();
+
+    await expectKept(kept);
+    expect(await installedEverywhere(targets)).toEqual([[], ["paseo"], []]);
+  });
+
+  it("save neither asks to remove a kept old directory nor removes it when confirmed", async () => {
+    const kept = await upgradedHostWithKeptOldDir();
+
+    const asked = await controller.save({ mode: "custom", skills: ["alp"] });
+    const saved = await controller.save({
+      mode: "custom",
+      skills: ["alp"],
+      confirmedRemovals: ["alp-help", "paseo"],
+    });
+
+    expect(asked.confirmationRequired).toEqual({ removals: ["alp-help"] });
+    expect(saved.confirmationRequired).toBeNull();
+    await expectKept(kept);
+    expect(await installedEverywhere(targets)).toEqual([["alp"], ["alp", "paseo"], ["alp"]]);
+  });
 });

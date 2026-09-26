@@ -747,6 +747,10 @@ describe("renamed skill cleanup", () => {
     expect(await pathExists(path.join(kept, ".paseo-managed-files.json"))).toBe(true);
     expect(await installedIn(sandbox.targets, "paseo")).toEqual([false, true, false]);
     expect(warnedPaths()).toEqual([kept]);
+    expect(warn).toHaveBeenCalledWith(
+      { path: kept, reason: `file not in manifest ${path.join("notes", "mine.md")}` },
+      "Kept a skill directory from before the alp rename",
+    );
     await expectNewSkillsInstalled();
   });
 
@@ -868,7 +872,9 @@ describe("renamed skill cleanup", () => {
         await expectNewSkillsInstalled();
         expect(await fs.readFile(path.join(locked, "SKILL.md"), "utf-8")).toBe("paseo-old");
         expect(await installedIn(sandbox.targets, "paseo")).toEqual([true, false, false]);
-        expect(status.ops).toEqual([{ kind: "delete", name: "paseo" }]);
+        // Only the safe cleanup may remove it, so it is not a pending delete.
+        expect(status.ops).toEqual([]);
+        expect(status.state).toBe("up-to-date");
         expect(warnedPaths()).toEqual([locked]);
       } finally {
         await fs.chmod(locked, 0o755);
