@@ -98,3 +98,48 @@ test("session-open hooks reject changes to session identity instead of silently 
     ),
   ).rejects.toThrow("agent.session_open hooks can only change env");
 });
+
+test("agent.create hooks that omit labels keep the labels of the request they received", async () => {
+  const hooks = new PluginHookHandlers(() => {});
+  hooks.before("agent.create", ({ request }) => {
+    return { config: { ...request.config, title: "renamed" } };
+  });
+  const output = await hooks.invoke(
+    "operation",
+    "before",
+    "agent.create",
+    {
+      config: { provider: "codex", cwd: "/project" },
+      labels: { team: "infra" },
+    },
+    paseo,
+  );
+  expect(output).toEqual({
+    config: { provider: "codex", cwd: "/project", title: "renamed" },
+    labels: { team: "infra" },
+  });
+});
+
+test("agent.create hooks can only add to the Paseo tools earlier hooks disabled", async () => {
+  const hooks = new PluginHookHandlers(() => {});
+  hooks.before("agent.create", ({ request }) => ({
+    ...request,
+    paseoTools: { disabledTools: ["create_agent"] },
+  }));
+  hooks.before("agent.create", ({ request }) => ({ config: request.config }));
+  hooks.before("agent.create", ({ request }) => ({
+    ...request,
+    paseoTools: { enabled: true, disabledTools: ["send_agent_prompt"] },
+  }));
+  const output = await hooks.invoke(
+    "operation",
+    "before",
+    "agent.create",
+    { config: { provider: "codex", cwd: "/project" } },
+    paseo,
+  );
+  expect(output).toEqual({
+    config: { provider: "codex", cwd: "/project" },
+    paseoTools: { disabledTools: ["create_agent", "send_agent_prompt"] },
+  });
+});

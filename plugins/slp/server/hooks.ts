@@ -12,23 +12,50 @@ import {
   type SeatAgent,
   supervisorsRegisteredIn,
 } from "./discovery";
-import { buildSystemPrompt, familyOf, providerOptionsFor, readDefinition, seatOf } from "./seat";
+import {
+  buildSystemPrompt,
+  defaultSeatLabels,
+  familyOf,
+  paseoToolsFor,
+  providerOptionsFor,
+  readDefinition,
+  seatOfAgent,
+  seatOfLabels,
+} from "./seat";
 
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
 
 /**
- * `before("agent.create")`: an agent on a `<family>-<seat>` provider gets its seat definition, the
- * SLP-RUNTIME block, and the live roster of the counterpart seat (Lead sees Supervisors and the
- * reverse) in its system prompt. Claude Lead/Supervisor also get `allowedTools: mcp__paseo__*`;
- * the Supervisor loses Write/Edit/Agent/Task.
+ * `before("agent.create")`: an agent on the `claude` or `codex` provider with an `slp.role` label
+ * gets its seat definition, the SLP-RUNTIME block, and the live roster of the counterpart seat (Lead
+ * sees Supervisors and the reverse) in its system prompt. Claude Lead/Supervisor also get
+ * `allowedTools: mcp__paseo__*`; the Supervisor loses Write/Edit/Agent/Task, a Claude Peer loses
+ * Agent/Task. Peer and Supervisor lose Paseo tools through the returned `paseoTools`. A claude/codex
+ * request that names no seat and no parent — a Human made it directly, or a schedule run created
+ * it, not another agent — defaults to Peer, tagged `slp.origin=schedule` when the request carries
+ * `paseo.schedule-id`, `slp.origin=human` otherwise (see `defaultSeatLabels`).
  */
 export async function withSeatConfig(
   request: AgentCreateRequest,
   agents: AgentLister,
 ): Promise<AgentCreateRequest | undefined> {
-  const seat = seatOf(request.config.provider);
   const family = familyOf(request.config.provider);
-  if (!seat || !family) return undefined;
+  let seat = seatOfLabels(request.labels);
+  let labels = request.labels;
+  if (!seat && family) {
+    const defaulted = defaultSeatLabels(request.labels);
+    if (defaulted) {
+      seat = "peer";
+      labels = defaulted;
+    }
+  }
+  if (!seat) return undefined;
+  if (!family) {
+    console.log(
+      `slp: ${seat} label on provider ${request.config.provider} ignored: SLP seats run on claude or codex`,
+    );
+    return undefined;
+  }
   const definition = await readDefinition(request.config.cwd, seat);
   let roster = "";
   const other = counterpartSeat(seat);
@@ -40,6 +67,7 @@ export async function withSeatConfig(
     }
   }
   const providerOptions = providerOptionsFor(seat, family, request.config.providerOptions);
+  const paseoTools = paseoToolsFor(seat, request.paseoTools);
   const systemPrompt = [
     buildSystemPrompt(seat, family, definition.body, request.config.systemPrompt),
     roster,
@@ -51,6 +79,8 @@ export async function withSeatConfig(
   );
   return {
     ...request,
+    ...(labels !== request.labels ? { labels } : {}),
+    ...(paseoTools ? { paseoTools } : {}),
     config: {
       ...request.config,
       systemPrompt,
@@ -74,7 +104,7 @@ export function createLeadAnnouncer() {
     event: PluginLifecycleEvents["agent.turn_ended"],
     context: PluginHookContext,
   ): Promise<void> => {
-    const seat = seatOf(event.agent.provider);
+    const seat = seatOfAgent(event.agent);
     if (seat === "supervisor") {
       const pending = pendingBySupervisor.get(event.agent.id);
       if (!pending?.length) return;
@@ -123,7 +153,7 @@ export async function allowPaseoTools(
   event: PluginLifecycleEvents["agent.permission_requested"],
   context: PluginHookContext,
 ): Promise<void> {
-  const seat = seatOf(event.agent.provider);
+  const seat = seatOfAgent(event.agent);
   if (seat !== "lead" && seat !== "supervisor") return;
   if (event.request.kind !== "tool" || !event.request.name.startsWith("mcp__paseo__")) return;
   await context.paseo.agents.ref(event.agent.id).respondToPermission({

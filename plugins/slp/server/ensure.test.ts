@@ -11,7 +11,6 @@ import {
   pickDefaultModel,
 } from "./ensure";
 import { resolvePaseoHome, supervisorDirectory } from "./paths";
-import type { Family, Seat } from "./seat";
 
 const SUPERVISOR_DIR = "/home/u/.alp/supervisor";
 
@@ -146,7 +145,7 @@ test("ensureLead creates one Lead with the contract settings, then reuses it", a
     {
       workspaceId: "wks_repo",
       options: {
-        config: { provider: "claude-lead/claude-opus-5-5", modeId: "bypassPermissions" },
+        config: { provider: "claude/claude-opus-5-5", modeId: "bypassPermissions" },
         title: "Lead",
         labels: { "slp.role": "lead" },
       },
@@ -176,19 +175,21 @@ test("ensureLead ignores Leads of other workspaces and archived or closed Leads"
       {
         agent: {
           id: "L-other",
-          provider: "claude-lead",
+          provider: "claude",
           cwd: "/r/b",
           status: "idle",
           workspaceId: "wks_b",
+          labels: { "slp.role": "lead" },
         },
       },
       {
         agent: {
           id: "L-closed",
-          provider: "claude-lead",
+          provider: "claude",
           cwd: "/r/app",
           status: "closed",
           workspaceId: "wks_repo",
+          labels: { "slp.role": "lead" },
         },
       },
     ],
@@ -225,7 +226,7 @@ test("ensureSupervisor creates the system workspace and Supervisor once per host
     {
       workspaceId: a.workspaceId,
       options: {
-        config: { provider: "claude-supervisor/claude-opus-5-5", modeId: "bypassPermissions" },
+        config: { provider: "claude/claude-opus-5-5", modeId: "bypassPermissions" },
         title: "Supervisor",
         labels: { "slp.role": "supervisor" },
       },
@@ -265,10 +266,11 @@ test("ensureSupervisor reuses a live Supervisor and an existing system workspace
       {
         agent: {
           id: "S0",
-          provider: "claude-supervisor",
+          provider: "claude",
           cwd: SUPERVISOR_DIR,
           status: "idle",
           workspaceId: "wks_sup",
+          labels: { "slp.role": "supervisor" },
           archivedAt: "2026-09-01",
         },
       },
@@ -324,7 +326,7 @@ test("ClientWorkspaceOrigins matches directories by path and worktrees by projec
   origins.record({ source: { kind: "worktree", projectId: "p1" } });
   origins.record({
     source: { kind: "directory", path: "/r/lead" },
-    agent: { config: { provider: "claude-lead" } },
+    agent: { config: { provider: "claude" }, labels: { "slp.role": "lead" } },
   });
 
   expect(origins.consume({ cwd: "/r/a", projectId: "pa" })).toBe(true);
@@ -359,7 +361,7 @@ function closedSupervisor(
   return {
     agent: {
       id,
-      provider: "claude-supervisor",
+      provider: "claude",
       cwd: SUPERVISOR_DIR,
       status: "closed",
       workspaceId: "wks_sup",
@@ -428,28 +430,52 @@ test("ensureSupervisor creates a new Supervisor when the closed one cannot resum
   expect(host.createdWorkspaces).toHaveLength(0);
 });
 
-test("seat agents take provider and mode from the seat profile of the family", async () => {
-  const calls: string[] = [];
-  const seatProfile = (family: Family, seat: Seat) => {
-    calls.push(`${family}:${seat}`);
-    return { providerId: `${family}-${seat}`, modeId: `mode-${family}` };
-  };
+test("ensureLead and ensureSupervisor create seats on the plain claude provider by label", async () => {
   const host = fakeHost({ workspaces: [repo] });
-  await ensureLead(host.api, "wks_repo", {
+  await ensureLead(host.api, "wks_repo", { supervisorDirectory: SUPERVISOR_DIR });
+  await ensureSupervisor(host.api, {
     supervisorDirectory: SUPERVISOR_DIR,
-    family: "codex",
-    seatProfile,
+    makeDirectory: async () => {},
   });
+  expect(host.created.map((c) => c.options)).toEqual([
+    {
+      config: { provider: "claude/claude-opus-5-5", modeId: "bypassPermissions" },
+      title: "Lead",
+      labels: { "slp.role": "lead" },
+    },
+    {
+      config: { provider: "claude/claude-opus-5-5", modeId: "bypassPermissions" },
+      title: "Supervisor",
+      labels: { "slp.role": "supervisor" },
+    },
+  ]);
+});
+
+test("a workspace created together with a labeled Lead gets no second Lead", () => {
+  const origins = new ClientWorkspaceOrigins(() => 0, 1000);
+  origins.record({
+    source: { kind: "directory", path: "/r/with-lead" },
+    agent: { config: { provider: "claude" }, labels: { "slp.role": "lead" } },
+  });
+  origins.record({
+    source: { kind: "directory", path: "/r/old-profile" },
+    agent: { config: { provider: "claude-lead" } },
+  });
+  expect(origins.consume({ cwd: "/r/with-lead", projectId: "p" })).toBe(false);
+  expect(origins.consume({ cwd: "/r/old-profile", projectId: "p" })).toBe(true);
+});
+
+test("a codex family creates Lead and Supervisor on the plain codex provider in full-access", async () => {
+  const host = fakeHost({ workspaces: [repo] });
+  await ensureLead(host.api, "wks_repo", { supervisorDirectory: SUPERVISOR_DIR, family: "codex" });
   await ensureSupervisor(host.api, {
     supervisorDirectory: SUPERVISOR_DIR,
     makeDirectory: async () => {},
     family: "codex",
-    seatProfile,
   });
-  expect(calls).toEqual(["codex:lead", "codex:supervisor"]);
   expect(host.created.map((c) => c.options.config)).toEqual([
-    { provider: "codex-lead/claude-opus-5-5", modeId: "mode-codex" },
-    { provider: "codex-supervisor/claude-opus-5-5", modeId: "mode-codex" },
+    { provider: "codex/claude-opus-5-5", modeId: "full-access" },
+    { provider: "codex/claude-opus-5-5", modeId: "full-access" },
   ]);
 });
 
@@ -466,7 +492,7 @@ function leadIn(
   return {
     agent: {
       id: `L-${workspaceId}`,
-      provider: "claude-lead",
+      provider: "claude",
       cwd: "/r/app",
       status: "idle",
       workspaceId,
@@ -505,7 +531,7 @@ test("workspace.created still makes a Lead when the directory's other Lead is cl
     // A live agent in the directory that is not in the Lead seat does not count.
     {
       workspaces: [repo, repoAgain],
-      agents: [leadIn("wks_repo", { provider: "claude-peer", labels: { "slp.role": "peer" } })],
+      agents: [leadIn("wks_repo", { labels: { "slp.role": "peer" } })],
     },
   ];
   for (const initial of cases) {
@@ -557,18 +583,4 @@ test("workspace.created makes one Lead when two workspaces in a directory are cr
   expect(host.created.map((c) => c.workspaceId)).toEqual(["wks_repo"]);
   expect(first?.created).toBe(true);
   expect(second).toEqual({ agentId: first?.agentId, created: false });
-});
-
-test("a seat profile with no modeId (gemini/ACP) creates the agent with no modeId key", async () => {
-  const seatProfile = () => ({ providerId: "gemini-lead" });
-  const host = fakeHost({ workspaces: [repo] });
-  await ensureLead(host.api, "wks_repo", {
-    supervisorDirectory: SUPERVISOR_DIR,
-    family: "gemini",
-    seatProfile,
-  });
-  expect(host.created.map((c) => c.options.config)).toEqual([
-    { provider: "gemini-lead/claude-opus-5-5" },
-  ]);
-  expect(host.created[0]?.options.config).not.toHaveProperty("modeId");
 });

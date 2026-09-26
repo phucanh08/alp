@@ -27,17 +27,7 @@ describe("daemon plugin config", () => {
     expect(loadConfig(home, { env: {} }).pluginsEnabled).toBe(true);
     const onDisk = JSON.parse(await readFile(path.join(home, "config.json"), "utf8"));
     expect(onDisk.pluginsEnabled).toBe(true);
-    expect(Object.keys(onDisk.agents.providers)).toEqual([
-      "claude-lead",
-      "claude-peer",
-      "claude-supervisor",
-      "codex-lead",
-      "codex-peer",
-      "codex-supervisor",
-      "gemini-lead",
-      "gemini-peer",
-      "gemini-supervisor",
-    ]);
+    expect(onDisk.agents).toBeUndefined();
   });
 
   test("keeps plugins off when the user turned them off", async () => {

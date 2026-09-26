@@ -1448,7 +1448,7 @@ export async function createPaseoDaemon(
         createAgentToolHostDependencies({
           callerAgentId,
           paseoToolPolicy: callerAgentId
-            ? agentManager.getPaseoToolPolicy(callerAgentId)
+            ? await agentManager.resolveCallerPaseoToolPolicy(callerAgentId)
             : undefined,
         }),
       );

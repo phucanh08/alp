@@ -7,6 +7,7 @@ import type {
   PluginLifecycleRegistration,
 } from "@getpaseo/plugin/server";
 import { PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import { ProviderPaseoToolsPolicySchema } from "@getpaseo/protocol/provider-config";
 import type {
   PluginBeforeRequests,
   PluginHookWorkspace,
@@ -14,6 +15,7 @@ import type {
 } from "@getpaseo/plugin/server";
 import { WorkspaceCreateRequestSchema } from "@getpaseo/protocol/messages";
 import type { PersistedWorkspaceRecord } from "../../workspace-registry.js";
+import { mergePaseoToolPolicies } from "../../agent/paseo-tool-policy.js";
 
 export const lifecycleEventNames = [
   "agent.created",
@@ -28,7 +30,12 @@ export const lifecycleEventNames = [
 export const beforeHookNames = ["agent.create", "agent.session_open", "workspace.create"] as const;
 
 const beforeSchemas = {
-  "agent.create": CreateAgentRequestMessageSchema.pick({ config: true, env: true }).strict(),
+  "agent.create": CreateAgentRequestMessageSchema.pick({ config: true, env: true })
+    .extend({
+      labels: z.record(z.string(), z.string()).optional(),
+      paseoTools: ProviderPaseoToolsPolicySchema.strict().optional(),
+    })
+    .strict(),
   "agent.session_open": z
     .object({
       agentId: z.string(),
@@ -86,6 +93,7 @@ export function describeHookAgent(agent: {
     provider: agent.provider,
     cwd: agent.cwd,
     title: agent.title ?? null,
+    labels: { ...agent.labels },
   };
 }
 
@@ -154,6 +162,17 @@ export function validateBeforeResult<Name extends keyof PluginBeforeRequests>(
     const next = beforeSchemas["agent.create"].parse(result);
     if (previous.config.cwd !== next.config.cwd) {
       throw new Error("agent.create hooks cannot change the workspace directory");
+    }
+    // Hooks written before labels joined the request return `{ config, env }`; omission keeps them.
+    const labels = next.labels ?? previous.labels;
+    // A hook can only add to the tools earlier hooks disabled; omitting paseoTools keeps them.
+    const paseoTools = mergePaseoToolPolicies(previous.paseoTools, next.paseoTools);
+    if (labels !== next.labels || paseoTools !== next.paseoTools) {
+      return validateBeforeRequest(name, {
+        ...next,
+        ...(labels !== undefined ? { labels } : {}),
+        ...(paseoTools !== undefined ? { paseoTools } : {}),
+      });
     }
   }
   return result;
