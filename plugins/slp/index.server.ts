@@ -9,7 +9,9 @@ import {
 } from "./server/ensure";
 import { allowPaseoTools, createLeadAnnouncer, withSeatConfig } from "./server/hooks";
 import { supervisorDirectory } from "./server/paths";
+import { isEnabled } from "./server/settings";
 import { slpLeadEnsure, slpSupervisorEnsure } from "./shared/rpc";
+import { slpSettings } from "./shared/settings";
 
 /**
  * slp: SLP seats (Supervisor / Lead / Peer) on alp. See README.md for behavior and boundaries.
@@ -17,20 +19,26 @@ import { slpLeadEnsure, slpSupervisorEnsure } from "./shared/rpc";
 export default function contribute(server: PluginServerContext) {
   const supervisorDir = supervisorDirectory();
   const origins = new ClientWorkspaceOrigins();
+  const settings = server.registerSettings(slpSettings);
+  const enabled = async () => isEnabled(await settings.read());
 
-  server.handle(slpSupervisorEnsure, (_input, { paseo }) =>
-    ensureSupervisor(paseo, {
-      supervisorDirectory: supervisorDir,
-      makeDirectory: (directory) => mkdir(directory, { recursive: true }),
-    }),
+  server.handle(slpSupervisorEnsure, async (_input, { paseo }) =>
+    ensureSupervisor(
+      paseo,
+      {
+        supervisorDirectory: supervisorDir,
+        makeDirectory: (directory) => mkdir(directory, { recursive: true }),
+      },
+      await enabled(),
+    ),
   );
-  server.handle(slpLeadEnsure, ({ workspaceId }, { paseo }) =>
-    ensureLead(paseo, workspaceId, { supervisorDirectory: supervisorDir }),
+  server.handle(slpLeadEnsure, async ({ workspaceId }, { paseo }) =>
+    ensureLead(paseo, workspaceId, { supervisorDirectory: supervisorDir }, await enabled()),
   );
 
   const removers = [
-    server.before("agent.create", ({ request }, { paseo }) =>
-      withSeatConfig(request, paseo.agents),
+    server.before("agent.create", async ({ request }, { paseo }) =>
+      withSeatConfig(request, paseo.agents, await enabled()),
     ),
     server.before("workspace.create", async ({ request }, { paseo }) => {
       // Record only; never change or fail the user's request.
@@ -52,9 +60,13 @@ export default function contribute(server: PluginServerContext) {
     }),
     server.on("workspace.created", async ({ workspace }, { paseo }) => {
       try {
-        const result = await handleWorkspaceCreated(paseo, origins, workspace, {
-          supervisorDirectory: supervisorDir,
-        });
+        const result = await handleWorkspaceCreated(
+          paseo,
+          origins,
+          workspace,
+          { supervisorDirectory: supervisorDir },
+          await enabled(),
+        );
         if (result)
           console.log(
             `slp: workspace ${workspace.id} lead ${result.agentId} (created ${result.created})`,

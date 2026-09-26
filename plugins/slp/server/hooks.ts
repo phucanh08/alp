@@ -16,6 +16,7 @@ import {
   buildSystemPrompt,
   defaultSeatLabels,
   familyOf,
+  originOfLabels,
   paseoToolsFor,
   providerOptionsFor,
   readDefinition,
@@ -33,12 +34,16 @@ type AgentCreateRequest = PluginBeforeRequests["agent.create"];
  * Agent/Task. Peer and Supervisor lose Paseo tools through the returned `paseoTools`. A claude/codex
  * request that names no seat and no parent — a Human made it directly, or a schedule run created
  * it, not another agent — defaults to Peer, tagged `slp.origin=schedule` when the request carries
- * `paseo.schedule-id`, `slp.origin=human` otherwise (see `defaultSeatLabels`).
+ * `paseo.schedule-id`, `slp.origin=human` otherwise (see `defaultSeatLabels`). `enabled` is the SLP
+ * settings switch (default `true`); `false` returns `undefined` for every request, including one
+ * that already names a valid seat — the plugin does not touch agent creation at all while off.
  */
 export async function withSeatConfig(
   request: AgentCreateRequest,
   agents: AgentLister,
+  enabled = true,
 ): Promise<AgentCreateRequest | undefined> {
+  if (!enabled) return undefined;
   const family = familyOf(request.config.provider);
   let seat = seatOfLabels(request.labels);
   let labels = request.labels;
@@ -68,8 +73,9 @@ export async function withSeatConfig(
   }
   const providerOptions = providerOptionsFor(seat, family, request.config.providerOptions);
   const paseoTools = paseoToolsFor(seat, request.paseoTools);
+  const origin = seat === "peer" ? originOfLabels(labels) : null;
   const systemPrompt = [
-    buildSystemPrompt(seat, family, definition.body, request.config.systemPrompt),
+    buildSystemPrompt(seat, family, definition.body, request.config.systemPrompt, origin),
     roster,
   ]
     .filter(Boolean)

@@ -281,6 +281,26 @@ test("agent.create leaves non-SLP providers untouched", async () => {
   expect(await withSeatConfig((await request("acp")) as never, agents)).toBeUndefined();
 });
 
+test("withSeatConfig returns undefined for every request when SLP is disabled, even one with a valid seat label", async () => {
+  const withSeat = await withSeatConfig(
+    (await request("claude", { "slp.role": "lead" })) as never,
+    agents,
+    false,
+  );
+  expect(withSeat).toBeUndefined();
+  const defaulted = await withSeatConfig((await request("claude")) as never, agents, false);
+  expect(defaulted).toBeUndefined();
+});
+
+test("a Human-made Peer's system prompt tells it it is independent; a Lead-spawned Peer's does not", async () => {
+  const human = await seatConfig("claude");
+  expect(human?.config.systemPrompt).toContain("không có Lead nào giao brief");
+  const schedule = await seatConfig("claude", { "paseo.schedule-id": "sch1" });
+  expect(schedule?.config.systemPrompt).toContain("không có Lead nào giao brief");
+  const spawned = await seatConfig("claude", { "slp.role": "peer" });
+  expect(spawned?.config.systemPrompt).not.toContain("không có Lead nào giao brief");
+});
+
 interface HookCalls {
   sent: Array<{ agentId: string; text: string }>;
   permissions: Array<{ agentId: string; requestId: string }>;
