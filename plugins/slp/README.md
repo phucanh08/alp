@@ -26,8 +26,11 @@ switch: `false` turns off every row in the table above — `before("agent.create
 `undefined` for every request, including one that already names a valid seat; `workspace.created`
 ensures no Lead; and the `slp.lead.ensure` / `slp.supervisor.ensure` RPCs reject with an error whose
 message contains "SLP disabled". A corrupt or unreadable stored value counts as the default,
-enabled. `supervisorModel` (default `null`) is declared for a Supervisor model picker the client
-adds later; this plugin does not read it yet.
+enabled. `supervisorModel` (default `null`) picks the model a freshly created Supervisor runs on:
+`slp.supervisor.ensure` uses it in place of the provider's default model when it names a selectable
+model of the Supervisor's provider (`claude`), and falls back to the default model otherwise —
+`null`, an id that does not exist, or one marked not selectable. A live or resumed Supervisor keeps
+its own model; the setting only ever applies to a Supervisor created from nothing.
 
 ## Seats
 
