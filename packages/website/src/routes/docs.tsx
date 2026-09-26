@@ -28,8 +28,7 @@ function DocsLayout() {
       <header className="lg:hidden sticky top-0 z-50 bg-background border-b border-border">
         <div className="flex items-center justify-between p-4">
           <Link to="/" className="flex items-center gap-3">
-            <img src="/logo.svg" alt="alp" className="w-6 h-6" />
-            <span className="text-lg font-medium">alp</span>
+            <img src="/alp-wordmark-on-dark.svg" alt="alp" className="h-7 w-auto" />
           </Link>
           <button
             type="button"
@@ -52,8 +51,7 @@ function DocsLayout() {
         {/* Desktop sidebar */}
         <aside className="hidden lg:block sticky top-0 h-screen w-60 shrink-0 border-r border-border p-6 overflow-y-auto">
           <Link to="/" className="flex items-center gap-3 mb-8">
-            <img src="/logo.svg" alt="alp" className="w-6 h-6" />
-            <span className="text-lg font-medium">alp</span>
+            <img src="/alp-wordmark-on-dark.svg" alt="alp" className="h-7 w-auto" />
           </Link>
           <DocsNav nodes={tree} />
         </aside>
