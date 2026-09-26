@@ -4,6 +4,7 @@ const pkg = require("./package.json");
 const withAndroidAsyncStorageSize = require("./plugins/with-android-async-storage-size");
 const withAndroidProfileable = require("./plugins/with-android-profileable");
 const withFdroidAutolinking = require("./plugins/with-fdroid-autolinking");
+const withIosDeploymentTarget = require("./plugins/with-ios-deployment-target");
 const withIosSceneLifecycle = require("./plugins/with-ios-scene-lifecycle");
 const withPasteInput = require("./plugins/with-paste-input");
 const withAndroidScroll = require("./modules/paseo-scroll/app.plugin");
@@ -11,6 +12,8 @@ const { getNativeReleaseVersion } = require("./native-release-version");
 const appVariant = process.env.APP_VARIANT ?? "production";
 const isFdroidBuild = process.env.PASEO_FDROID_BUILD === "1";
 const isProfileBuild = process.env.PASEO_PROFILE_BUILD === "1";
+// Minimum iOS for the app target and every pod.
+const IOS_DEPLOYMENT_TARGET = "17.0";
 
 const buildProfile = isFdroidBuild
   ? {
@@ -144,6 +147,7 @@ export default {
       "expo-router",
       withPasteInput,
       withIosSceneLifecycle,
+      [withIosDeploymentTarget, { deploymentTarget: IOS_DEPLOYMENT_TARGET }],
       withAndroidScroll,
       [withAndroidAsyncStorageSize, 64],
       ...buildProfile.cameraPlugins,
@@ -171,6 +175,9 @@ export default {
       [
         "expo-build-properties",
         {
+          ios: {
+            deploymentTarget: IOS_DEPLOYMENT_TARGET,
+          },
           android: {
             minSdkVersion: 29,
             kotlinVersion: "2.1.20",
