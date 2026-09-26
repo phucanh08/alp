@@ -8,7 +8,7 @@ category: Getting started
 
 # Related projects
 
-These projects are related to Paseo and built by the community.
+These projects are related to Paseo and built by the community. They target upstream Paseo and may not work with alp; check each project's own compatibility notes before relying on it.
 
 ## Plugin directory
 
