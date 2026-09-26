@@ -136,12 +136,18 @@ async function listWorkspaces(api: EnsureApi): Promise<WorkspaceLike[]> {
   }
 }
 
-/** `slp.lead.ensure`: the workspace has one live Lead; creates it when missing. */
+/**
+ * `slp.lead.ensure`: the workspace has one live Lead; creates it when missing. `enabled` is the SLP
+ * settings switch (default `true`); `false` rejects with a message containing "SLP disabled"
+ * instead of touching any workspace or agent.
+ */
 export function ensureLead(
   api: EnsureApi,
   workspaceId: string,
   deps: { supervisorDirectory: string } & SeatDeps,
+  enabled = true,
 ): Promise<LeadEnsureResult> {
+  if (!enabled) return Promise.reject(new Error("slp.lead.ensure: SLP disabled"));
   return queue.run(`lead:${workspaceId}`, async () => {
     const workspace = (await listWorkspaces(api)).find((entry) => entry.id === workspaceId);
     if (!workspace || workspace.archivingAt) {
@@ -173,7 +179,8 @@ export const SUPERVISOR_RESUME_NOTICE =
  * `$PASEO_HOME/supervisor`. A live Supervisor anywhere on the host is reused; otherwise the newest
  * closed one is resumed; a new one is created only when there is none or the resume is rejected.
  * The system prompt of a resumed Supervisor is the one from its creation (`before("agent.create")`
- * does not run again).
+ * does not run again). `enabled` is the SLP settings switch (default `true`); `false` rejects with a
+ * message containing "SLP disabled" instead of touching any workspace or agent.
  */
 export function ensureSupervisor(
   api: EnsureApi,
@@ -181,7 +188,9 @@ export function ensureSupervisor(
     supervisorDirectory: string;
     makeDirectory: (directory: string) => Promise<unknown>;
   } & SeatDeps,
+  enabled = true,
 ): Promise<SupervisorEnsureResult> {
+  if (!enabled) return Promise.reject(new Error("slp.supervisor.ensure: SLP disabled"));
   return queue.run("supervisor", async () => {
     const agents = await listLiveAgents(api.agents);
     const [live] = selectSeatAgents(agents, "supervisor");
@@ -315,14 +324,18 @@ async function liveLeadInDirectory(api: EnsureApi, directory: string): Promise<s
  * `workspace.created`: a Lead for client-created workspaces, never for the Supervisor one. One Lead
  * per directory: upstream `paseo run` mints a new workspace on every bare run, so a directory that
  * already has a live Lead in another active workspace gets no second one. Only this automatic path
- * dedupes; `slp.lead.ensure` still gives the workspace it names its own Lead.
+ * dedupes; `slp.lead.ensure` still gives the workspace it names its own Lead. `enabled` is the SLP
+ * settings switch (default `true`); `false` ensures no Lead at all, without consuming the matched
+ * client-origin entry or touching any workspace.
  */
 export async function handleWorkspaceCreated(
   api: EnsureApi,
   origins: ClientWorkspaceOrigins,
   workspace: { id: string; projectId: string; cwd: string },
   deps: { supervisorDirectory: string },
+  enabled = true,
 ): Promise<LeadEnsureResult | null> {
+  if (!enabled) return null;
   const fromClient = origins.consume(workspace);
   if (!fromClient || isSupervisorWorkspace(workspace.cwd, deps.supervisorDirectory)) return null;
   const directory = expandUserPath(workspace.cwd);

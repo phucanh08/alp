@@ -560,6 +560,36 @@ test("slp.lead.ensure still gives a second workspace in the same directory its o
   expect(host.created.map((c) => c.workspaceId)).toEqual(["wks_repo2"]);
 });
 
+test("ensureLead rejects with an SLP disabled message when the switch is off, without creating anything", async () => {
+  const host = fakeHost({ workspaces: [repo] });
+  await expect(
+    ensureLead(host.api, "wks_repo", { supervisorDirectory: SUPERVISOR_DIR }, false),
+  ).rejects.toThrow(/SLP disabled/);
+  expect(host.created).toHaveLength(0);
+});
+
+test("ensureSupervisor rejects with an SLP disabled message when the switch is off, without creating anything", async () => {
+  const host = fakeHost({ workspaces: [repo] });
+  const deps = { supervisorDirectory: SUPERVISOR_DIR, makeDirectory: async () => {} };
+  await expect(ensureSupervisor(host.api, deps, false)).rejects.toThrow(/SLP disabled/);
+  expect(host.created).toHaveLength(0);
+});
+
+test("handleWorkspaceCreated ensures no Lead when the switch is off, even for a matched client workspace", async () => {
+  const host = fakeHost({ workspaces: [repo] });
+  const origins = new ClientWorkspaceOrigins();
+  origins.record({ source: { kind: "directory", path: "/r/app" } });
+  const result = await handleWorkspaceCreated(
+    host.api,
+    origins,
+    { id: "wks_repo", projectId: "p1", cwd: "/r/app" },
+    { supervisorDirectory: SUPERVISOR_DIR },
+    false,
+  );
+  expect(result).toBeNull();
+  expect(host.created).toHaveLength(0);
+});
+
 test("workspace.created makes one Lead when two workspaces in a directory are created back to back", async () => {
   const host = fakeHost({ workspaces: [repo, repoAgain] });
   const origins = new ClientWorkspaceOrigins();
