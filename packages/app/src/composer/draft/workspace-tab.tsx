@@ -16,6 +16,7 @@ import {
   useDraftSeatStore,
   type DraftSeat,
   type DraftSeatPill,
+  type SeatLabelsFor,
 } from "@/composer/draft/slp-seat";
 import { useSlpSettings } from "@/plugins/slp-settings/use-slp-settings";
 import { COMPOSER_PILL_CLEARANCE } from "@/composer/pill-styles";
@@ -164,7 +165,7 @@ async function submitDraftCreateRequest(input: {
     effectiveThinkingOptionId: string | null;
     featureValues: Record<string, unknown> | undefined;
   };
-  labels: Record<string, string> | null;
+  seatLabelsFor: SeatLabelsFor;
   hostDisconnectedMessage: string;
   selectModelMessage: string;
 }): Promise<{ agentId: string | null; result: AgentSnapshotPayload }> {
@@ -216,7 +217,7 @@ async function submitDraftCreateRequest(input: {
     clientMessageId: attempt.clientMessageId,
     images: imagesData,
     attachments: attachmentsArray,
-    labels: input.labels,
+    labels: input.seatLabelsFor(provider),
   });
   const creation = useWorkspaceDraftSubmissionStore.getState().creationByDraftId[input.draftId];
   const result = creation ? await creation.retry(options) : await client.createAgent(options);
@@ -526,7 +527,7 @@ export function WorkspaceDraftAgentTab({
         workspaceId: workspaceFields?.id ?? null,
         autoSubmitConfig,
         composerState,
-        labels: resolveDraftSeatLabels(slpSettings, draftSeat),
+        seatLabelsFor: (provider) => resolveDraftSeatLabels(slpSettings, draftSeat, provider),
         hostDisconnectedMessage: t("workspace.terminal.hostDisconnected"),
         selectModelMessage: t("workspaceSetup.errors.selectModel"),
       });
@@ -638,7 +639,7 @@ export function WorkspaceDraftAgentTab({
     focusInputRef.current?.();
   }, []);
   const importPillPress = resolveImportPillPress(onOpenImportSheet, isSubmitting);
-  const seatPill = resolveDraftSeatPill(slpSettings, draftSeat);
+  const seatPill = resolveDraftSeatPill(slpSettings, draftSeat, draftProvider);
   const composerAgentControls = useMemo(
     () => ({
       ...composerState.agentControls,

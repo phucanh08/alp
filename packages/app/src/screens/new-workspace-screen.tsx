@@ -46,6 +46,7 @@ import {
   useDraftSeat,
   useDraftSeatStore,
   type DraftSeat,
+  type SeatLabelsFor,
 } from "@/composer/draft/slp-seat";
 import { ComposerSlpSeatPillRow } from "@/composer/draft/slp-seat-pill";
 import { useSlpSettings } from "@/plugins/slp-settings/use-slp-settings";
@@ -889,7 +890,7 @@ interface CreateChatAgentInput {
   supportsForgeSearch: boolean;
   resolveClient: () => DaemonClient;
   isStillOnCreateScreen: () => boolean;
-  seatLabels: Record<string, string> | null;
+  seatLabelsFor: SeatLabelsFor;
   labels: {
     composerStateRequired: string;
     selectModel: string;
@@ -993,7 +994,7 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
     text,
     images,
     attachments: wirePayload.attachments,
-    labels: input.seatLabels,
+    seatLabelsFor: input.seatLabelsFor,
   });
   const execute = async (requestedAgent = initialAgent): Promise<AgentSnapshotPayload> => {
     const { agent } = await ensureWorkspace({
@@ -1043,11 +1044,22 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
   const agentCreation = {
     result: Promise.resolve().then(() => execute()),
     retry: (request: CreateAgentRequestOptions) =>
-      execute(buildWorkspaceInitialAgentRetry({ initialAgent, request, cwd })),
+      execute(
+        buildWorkspaceInitialAgentRetry({
+          initialAgent,
+          request,
+          cwd,
+          seatLabelsFor: input.seatLabelsFor,
+        }),
+      ),
   };
   await agentCreation.result;
   if (outcome === "background") clearConsumedDraft();
   return outcome;
+}
+
+function selectedProviderOf(composerState: NewWorkspaceComposerState | null): string | null {
+  return composerState?.selectedProvider ?? null;
 }
 
 function buildComposerConfig(input: {
@@ -2160,7 +2172,7 @@ export function NewWorkspaceScreen({
           supportsForgeSearch,
           resolveClient: withConnectedClient,
           isStillOnCreateScreen,
-          seatLabels: resolveDraftSeatLabels(slpSettings, draftSeat),
+          seatLabelsFor: (provider) => resolveDraftSeatLabels(slpSettings, draftSeat, provider),
           labels: {
             composerStateRequired: t("newWorkspace.errors.composerStateRequired"),
             selectModel: t("newWorkspace.errors.selectModel"),
@@ -2416,7 +2428,7 @@ export function NewWorkspaceScreen({
   ) : (
     <>
       <ComposerSlpSeatPillRow
-        pill={resolveDraftSeatPill(slpSettings, draftSeat)}
+        pill={resolveDraftSeatPill(slpSettings, draftSeat, selectedProviderOf(composerState))}
         disabled={isPending}
         onChange={setDraftSeat}
       />

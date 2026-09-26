@@ -16,6 +16,14 @@ type SlpGate = "off" | "loading" | "on";
 
 const LEAD_LABELS: Readonly<Record<string, string>> = { "slp.role": "lead" };
 
+// SLP seats run only on these providers; on any other the plugin ignores `slp.role`. Keep in step
+// with `familyOf` in plugins/slp/server/seat.ts, which the app cannot import.
+const SLP_SEAT_PROVIDERS: ReadonlySet<string> = new Set(["claude", "codex"]);
+
+function isSlpSeatProvider(provider: string | null): boolean {
+  return provider !== null && SLP_SEAT_PROVIDERS.has(provider);
+}
+
 // A failed settings read counts as enabled, the plugin's own ruling. While settings load the app
 // still asks for the draft's seat; the plugin decides with the setting it actually has.
 function resolveSlpGate(settings: SlpSettings): SlpGate {
@@ -31,17 +39,27 @@ function resolveSlpGate(settings: SlpSettings): SlpGate {
   }
 }
 
+/** A draft's seat as labels for the provider a create request goes out on. */
+export type SeatLabelsFor = (provider: string) => Record<string, string> | null;
+
+/** Labels for a create request sent on `provider`; the draft's seat survives a provider switch. */
 export function resolveDraftSeatLabels(
   settings: SlpSettings,
   seat: DraftSeat,
+  provider: string | null,
 ): Record<string, string> | null {
+  if (!isSlpSeatProvider(provider)) return null;
   if (resolveSlpGate(settings) === "off" || seat === "chat") return null;
   return { ...LEAD_LABELS };
 }
 
-export function resolveDraftSeatPill(settings: SlpSettings, seat: DraftSeat): DraftSeatPill {
+export function resolveDraftSeatPill(
+  settings: SlpSettings,
+  seat: DraftSeat,
+  provider: string | null,
+): DraftSeatPill {
   const gate = resolveSlpGate(settings);
-  if (gate === "off") return { status: "hidden" };
+  if (gate === "off" || !isSlpSeatProvider(provider)) return { status: "hidden" };
   return { status: "shown", seat, disabled: gate === "loading" };
 }
 
