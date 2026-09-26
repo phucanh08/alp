@@ -183,6 +183,8 @@ Single file, validated with `PersistedConfigSchema`.
 `agents.skills.selection` is the daemon host's orchestration-skill preference. Missing means
 `{ mode: "all" }`. Installed state is not persisted; the daemon derives it from its three managed
 skill directories and keeps config plus filesystem convergence behind one serialized owner.
+A custom selection saved before the `paseo*` skills were renamed to `alp*` still holds the old
+names on disk; the daemon reads them as the new names and writes the new names on the next save.
 
 `paseo reload` reads and validates this file once inside the daemon. That snapshot drives resolution,
 classification, application, and reload bookkeeping. `DaemonConfigStore` owns applying runtime-safe
