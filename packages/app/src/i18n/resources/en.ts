@@ -109,6 +109,12 @@ export const en = {
     },
   },
   composer: {
+    slpSeat: {
+      lead: "Lead",
+      chat: "Plain chat",
+      switchToLead: "Create as Lead",
+      switchToChat: "Create as plain chat",
+    },
     placeholders: {
       desktop: "Message the agent, tag @files, or use /commands and /skills",
       mobile: "Message, @files, /commands",

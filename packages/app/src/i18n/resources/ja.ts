@@ -114,6 +114,12 @@ export const ja: TranslationResources = {
     },
   },
   composer: {
+    slpSeat: {
+      lead: "Lead",
+      chat: "通常のチャット",
+      switchToLead: "Lead として作成",
+      switchToChat: "通常のチャットとして作成",
+    },
     placeholders: {
       desktop: "エージェントにメッセージ、@ファイル、/コマンドや/スキルを入力",
       mobile: "メッセージ、@ファイル、/コマンド",

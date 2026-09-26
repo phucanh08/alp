@@ -114,6 +114,12 @@ export const ptBR: TranslationResources = {
     },
   },
   composer: {
+    slpSeat: {
+      lead: "Lead",
+      chat: "Chat comum",
+      switchToLead: "Criar como Lead",
+      switchToChat: "Criar como chat comum",
+    },
     placeholders: {
       desktop: "Envie uma mensagem ao agente, marque @files ou use /commands e /skills",
       mobile: "Mensagem, @files, /commands",

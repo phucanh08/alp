@@ -114,6 +114,12 @@ export const ru: TranslationResources = {
     },
   },
   composer: {
+    slpSeat: {
+      lead: "Lead",
+      chat: "Обычный чат",
+      switchToLead: "Создать как Lead",
+      switchToChat: "Создать как обычный чат",
+    },
     placeholders: {
       desktop: "Напишите агенту сообщение, отметьте @files или используйте /commands и /skills.",
       mobile: "Сообщение,@files,/commands",

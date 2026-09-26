@@ -116,6 +116,12 @@ export const fr: TranslationResources = {
     },
   },
   composer: {
+    slpSeat: {
+      lead: "Lead",
+      chat: "Discussion simple",
+      switchToLead: "Créer en tant que Lead",
+      switchToChat: "Créer en discussion simple",
+    },
     placeholders: {
       desktop: "Envoyez un message à l'agent, marquez@filesou utilisez/commandset/skills",
       mobile: "Message,@files,/commands",

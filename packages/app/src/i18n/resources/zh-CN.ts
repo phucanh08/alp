@@ -113,6 +113,12 @@ export const zhCN: TranslationResources = {
     },
   },
   composer: {
+    slpSeat: {
+      lead: "Lead",
+      chat: "普通聊天",
+      switchToLead: "创建为 Lead",
+      switchToChat: "创建为普通聊天",
+    },
     placeholders: {
       desktop: "给 Agent 发消息，标记 @files，或使用 /commands 和 /skills",
       mobile: "发消息，@files，/commands",

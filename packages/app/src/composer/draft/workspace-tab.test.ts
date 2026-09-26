@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 
-import { shouldAllowEmptyDraftText, validateDraftSubmission } from "./workspace-tab-core";
+import {
+  buildDraftCreateAgentOptions,
+  shouldAllowEmptyDraftText,
+  validateDraftSubmission,
+} from "./workspace-tab-core";
 
 const baseComposerState = {
   providerDefinitions: [{ id: "codewhale" }],
@@ -67,5 +71,38 @@ describe("workspace draft empty text readiness", () => {
         attachments: [],
       }),
     ).toBe(false);
+  });
+});
+
+describe("workspace draft create options", () => {
+  const request = {
+    draftId: "draft-1",
+    config: { provider: "claude", cwd: "/tmp/project" },
+    workspaceId: "ws-1",
+    text: "hello",
+    clientMessageId: "draft-1:initial-message",
+    images: undefined,
+    attachments: undefined,
+  };
+
+  test("carries the draft's seat labels to create_agent", () => {
+    expect(buildDraftCreateAgentOptions({ ...request, labels: { "slp.role": "lead" } })).toEqual({
+      idempotencyKey: "draft-1",
+      config: { provider: "claude", cwd: "/tmp/project" },
+      workspaceId: "ws-1",
+      initialPrompt: "hello",
+      clientMessageId: "draft-1:initial-message",
+      labels: { "slp.role": "lead" },
+    });
+  });
+
+  test("sends no labels when the draft has none", () => {
+    expect(buildDraftCreateAgentOptions({ ...request, labels: null })).toEqual({
+      idempotencyKey: "draft-1",
+      config: { provider: "claude", cwd: "/tmp/project" },
+      workspaceId: "ws-1",
+      initialPrompt: "hello",
+      clientMessageId: "draft-1:initial-message",
+    });
   });
 });

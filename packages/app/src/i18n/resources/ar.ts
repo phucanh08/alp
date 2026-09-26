@@ -113,6 +113,12 @@ export const ar: TranslationResources = {
     },
   },
   composer: {
+    slpSeat: {
+      lead: "Lead",
+      chat: "دردشة عادية",
+      switchToLead: "إنشاء كـ Lead",
+      switchToChat: "إنشاء كدردشة عادية",
+    },
     placeholders: {
       desktop: "أرسل رسالة إلى الوكيل أو ضع علامة على @files أو استخدم /commands و /skills",
       mobile: "الرسالة، @files ، /commands",
