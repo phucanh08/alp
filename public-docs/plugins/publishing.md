@@ -24,7 +24,7 @@ and release version.
 From the plugin directory, set your package details and allow publication. Replace `@acme` with your npm scope:
 
 ```bash
-npm pkg set name=@acme/paseo-review version=1.0.0
+npm pkg set name=@acme/alp-review version=1.0.0
 npm pkg delete private
 ```
 
@@ -43,10 +43,10 @@ Check the pack output includes any assets you added to the project.
 On a daemon host with npm available:
 
 ```bash
-paseo plugin install npm:@acme/paseo-review@1.0.0
+alp plugin install npm:@acme/alp-review@1.0.0
 ```
 
-Users can also paste `npm:@acme/paseo-review` into **Settings → Plugins → Plugin source**.
+Users can also paste `npm:@acme/alp-review` into **Settings → Plugins → Plugin source**.
 
 :::example[Package configuration]
 
@@ -128,7 +128,7 @@ To install the plugin, configure npm **on the daemon host, as the user running a
 3. Install the plugin:
 
    ```bash
-   paseo plugin install npm:@acme/paseo-review
+   alp plugin install npm:@acme/alp-review
    ```
 
 alp uses the host's npm registry settings and credentials for installation and updates.
@@ -141,13 +141,13 @@ In the app, enter only the source identifier.
 Push the plugin project to a repository. Users can install it with:
 
 ```bash
-paseo plugin install github:acme/paseo-review
+alp plugin install github:acme/alp-review
 ```
 
 For another Git host:
 
 ```bash
-paseo plugin install git:https://git.example.com/acme/paseo-review.git
+alp plugin install git:https://git.example.com/acme/alp-review.git
 ```
 
 If your plugin has runtime npm dependencies, commit `package-lock.json` and add a preparation

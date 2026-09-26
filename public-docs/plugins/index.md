@@ -28,7 +28,7 @@ This guide scaffolds a plugin, runs it, and adds a workspace panel to it.
 Use an absolute path on the daemon machine:
 
 ```bash
-paseo plugin init /absolute/path/to/workspace-plugin
+alp plugin init /absolute/path/to/workspace-plugin
 cd /absolute/path/to/workspace-plugin
 npm install
 ```
@@ -104,15 +104,15 @@ means you trust that codebase, its dependencies, and its future updates.
 
 Turn on **Enable plugins** under **Settings → Plugins** on the daemon you are installing into. It is
 the global switch for every plugin on that daemon. It is also the root `pluginsEnabled` field in the
-daemon's `config.json`; after editing the file, apply it with `paseo reload --json`. An automated
+daemon's `config.json`; after editing the file, apply it with `alp reload --json`. An automated
 tool must read the current value and get your explicit permission before turning it on.
 
 Then typecheck and install:
 
 ```bash
 npm run typecheck
-paseo plugin install /absolute/path/to/workspace-plugin
-paseo plugin ls
+alp plugin install /absolute/path/to/workspace-plugin
+alp plugin ls
 ```
 
 Or install the directory from the app:
@@ -129,12 +129,12 @@ management actions remain available.
 Each installed plugin row shows its status and description. Use its switch to enable or disable it,
 and open its three-dot menu for settings, logs, reload, and removal.
 
-`paseo plugin ls` should report the plugin as `running`. Open alp, choose **Greeting** in the
+`alp plugin ls` should report the plugin as `running`. Open alp, choose **Greeting** in the
 sidebar, and press **Create greeting**. The message comes back from the daemon subprocess through
 the RPC.
 
 If the sidebar item is missing, check that **Enable plugins** is on, the plugin is `running`, and
-the client is viewing the host you installed into. `paseo plugin logs workspace-plugin` shows the
+the client is viewing the host you installed into. `alp plugin logs workspace-plugin` shows the
 daemon-side output, including load errors.
 
 ## Add a workspace panel
@@ -214,11 +214,11 @@ Source changes take effect only when you reload the plugin:
 
 ```bash
 npm run typecheck
-paseo plugin reload workspace-plugin
+alp plugin reload workspace-plugin
 ```
 
 A reload stops the old plugin, runs its cleanup, compiles the current source, and starts it again.
-A failed reload stays failed and reports its error in `paseo plugin ls`; fix the source and reload
+A failed reload stays failed and reports its error in `alp plugin ls`; fix the source and reload
 again.
 
 Open a workspace, press **⌘K** on macOS or **Ctrl+K** on Windows and Linux, and choose **Open
@@ -229,7 +229,7 @@ workspace overview**. The panel opens as a workspace tab.
 Install a trusted npm plugin using npm on the daemon host:
 
 ```bash
-paseo plugin install npm:@acme/paseo-review@1.2.0
+alp plugin install npm:@acme/alp-review@1.2.0
 ```
 
 Or paste the same identifier into **Settings → Plugins → Plugin source** and select **Install
@@ -243,19 +243,19 @@ See [plugin sources](/docs/plugins/reference#plugin-sources) for identifier synt
 Plugins published in a Git repository install by shorthand or URL:
 
 ```bash
-paseo plugin add owner/repository
-paseo plugin add https://gitlab.com/group/repository.git
-paseo plugin add owner/monorepo:plugins/workspace
-paseo plugin add owner/repository --ref main
+alp plugin add owner/repository
+alp plugin add https://gitlab.com/group/repository.git
+alp plugin add owner/monorepo:plugins/workspace
+alp plugin add owner/repository --ref main
 ```
 
 Append `:relative/path` when the plugin lives below the repository root. `--ref` selects the initial
 Git content once; omitting it installs the default HEAD. See the [source reference](/docs/plugins/reference#plugin-sources) for exact syntax.
 
 ```bash
-paseo plugin ls
-paseo plugin update workspace-plugin
-paseo plugin update --all
+alp plugin ls
+alp plugin update workspace-plugin
+alp plugin update --all
 ```
 
 `ls` reports source identity and the current installed revision without contacting the remote.
@@ -277,8 +277,8 @@ Read the recent output by opening the plugin's three-dot menu under **Settings �
 selecting **Logs**, or use the CLI:
 
 ```bash
-paseo plugin logs workspace-plugin
-paseo plugin logs workspace-plugin --json
+alp plugin logs workspace-plugin
+alp plugin logs workspace-plugin --json
 ```
 
 The tail includes `[paseo]` loading, ready, stopping, and stopped entries, plus compilation and load
