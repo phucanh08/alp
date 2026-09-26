@@ -113,6 +113,12 @@ export const ko: TranslationResources = {
     },
   },
   composer: {
+    slpSeat: {
+      lead: "Lead",
+      chat: "일반 채팅",
+      switchToLead: "Lead로 만들기",
+      switchToChat: "일반 채팅으로 만들기",
+    },
     placeholders: {
       desktop: "에이전트에게 메시지를 보내거나 @files 태그, /commands, /skills를 사용하세요",
       mobile: "메시지, @files, /commands",
@@ -2304,6 +2310,19 @@ export const ko: TranslationResources = {
       },
     },
     host: {
+      slp: {
+        title: "SLP",
+        loading: "SLP 설정 불러오는 중…",
+        enabled: {
+          label: "SLP 사용",
+          hint: "새 에이전트에만 적용됩니다. 이미 실행 중인 Lead 또는 Supervisor는 계속 실행됩니다.",
+        },
+        supervisorModel: {
+          label: "기본 Supervisor 모델",
+          hint: "새로 만든 Supervisor에만 적용됩니다.",
+          default: "기본값",
+        },
+      },
       appearance: {
         title: "모양",
         name: {

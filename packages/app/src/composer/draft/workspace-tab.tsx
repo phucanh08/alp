@@ -8,6 +8,17 @@ import invariant from "tiny-invariant";
 import { Composer } from "@/composer";
 import { FileDropZone } from "@/components/file-drop/file-drop-zone";
 import { ComposerImportPill } from "@/composer/draft/import-pill";
+import { ComposerSlpSeatPill } from "@/composer/draft/slp-seat-pill";
+import {
+  resolveDraftSeatLabels,
+  resolveDraftSeatPill,
+  useDraftSeat,
+  useDraftSeatStore,
+  type DraftSeat,
+  type DraftSeatPill,
+  type SeatLabelsFor,
+} from "@/composer/draft/slp-seat";
+import { useSlpSettings } from "@/plugins/slp-settings/use-slp-settings";
 import { COMPOSER_PILL_CLEARANCE } from "@/composer/pill-styles";
 import { AgentStreamView } from "@/agent-stream/view";
 import { composerWorkspaceAttachment } from "@/composer/attachments/workspace";
@@ -27,6 +38,7 @@ import { encodeImages } from "@/utils/encode-images";
 import type { WorkspaceFileOpenRequest } from "@/workspace/file-open";
 import { shouldAutoFocusWorkspaceDraftComposer } from "@/screens/workspace/workspace-draft-pane-focus";
 import {
+  buildDraftCreateAgentOptions,
   shouldAllowEmptyDraftText,
   validateDraftSubmission,
 } from "@/composer/draft/workspace-tab-core";
@@ -153,6 +165,7 @@ async function submitDraftCreateRequest(input: {
     effectiveThinkingOptionId: string | null;
     featureValues: Record<string, unknown> | undefined;
   };
+  seatLabelsFor: SeatLabelsFor;
   hostDisconnectedMessage: string;
   selectModelMessage: string;
 }): Promise<{ agentId: string | null; result: AgentSnapshotPayload }> {
@@ -196,15 +209,16 @@ async function submitDraftCreateRequest(input: {
 
   const attachmentsArray = Array.isArray(attachments) ? attachments : undefined;
   const imagesData = await encodeImages(images);
-  const options = {
-    idempotencyKey: input.draftId,
+  const options = buildDraftCreateAgentOptions({
+    draftId: input.draftId,
     config,
     workspaceId,
-    initialPrompt: text,
+    text,
     clientMessageId: attempt.clientMessageId,
-    ...(imagesData && imagesData.length > 0 ? { images: imagesData } : {}),
-    ...(attachmentsArray && attachmentsArray.length > 0 ? { attachments: attachmentsArray } : {}),
-  };
+    images: imagesData,
+    attachments: attachmentsArray,
+    labels: input.seatLabelsFor(provider),
+  });
   const creation = useWorkspaceDraftSubmissionStore.getState().creationByDraftId[input.draftId];
   const result = creation ? await creation.retry(options) : await client.createAgent(options);
 
@@ -420,6 +434,16 @@ export function WorkspaceDraftAgentTab({
   });
   const draftAttachmentScopeKey = useDraftWorkspaceAttachmentScopeKey(draftId);
   const openInSidePane = useSettings((settings) => settings.openInSidePane);
+  const slpSettings = useSlpSettings(serverId);
+  const draftSeat = useDraftSeat(draftId);
+  // New workspace already sent this draft's seat with its first agent; a retry keeps that seat.
+  const isSeatLocked = useWorkspaceDraftSubmissionStore(
+    (state) => state.creationByDraftId[draftId] !== undefined,
+  );
+  const setDraftSeat = useCallback(
+    (seat: DraftSeat) => useDraftSeatStore.getState().setSeat({ draftId, seat }),
+    [draftId],
+  );
   const attachmentScopeKeys = useMemo(
     () => [draftAttachmentScopeKey, workspaceAttachmentScopeKey].filter(Boolean),
     [draftAttachmentScopeKey, workspaceAttachmentScopeKey],
@@ -503,6 +527,7 @@ export function WorkspaceDraftAgentTab({
         workspaceId: workspaceFields?.id ?? null,
         autoSubmitConfig,
         composerState,
+        seatLabelsFor: (provider) => resolveDraftSeatLabels(slpSettings, draftSeat, provider),
         hostDisconnectedMessage: t("workspace.terminal.hostDisconnected"),
         selectModelMessage: t("workspaceSetup.errors.selectModel"),
       });
@@ -511,6 +536,7 @@ export function WorkspaceDraftAgentTab({
       clearDraftInput("sent");
       clearWorkspaceAttachments({ scopeKey: draftAttachmentScopeKey });
       useWorkspaceDraftSubmissionStore.getState().clearDraftSetup({ draftId });
+      useDraftSeatStore.getState().clear({ draftId });
       onCreated(result);
     },
   });
@@ -613,6 +639,7 @@ export function WorkspaceDraftAgentTab({
     focusInputRef.current?.();
   }, []);
   const importPillPress = resolveImportPillPress(onOpenImportSheet, isSubmitting);
+  const seatPill = resolveDraftSeatPill(slpSettings, draftSeat, draftProvider);
   const composerAgentControls = useMemo(
     () => ({
       ...composerState.agentControls,
@@ -655,13 +682,12 @@ export function WorkspaceDraftAgentTab({
       <ComposerDock>
         {dockContent}
         <View style={animatedStaticStyles.inputAreaWrapper} onLayout={onInputAreaLayout}>
-          {importPillPress ? (
-            <View style={styles.importPillRow}>
-              <View style={styles.importPillContent}>
-                <ComposerImportPill onPress={importPillPress} />
-              </View>
-            </View>
-          ) : null}
+          <DraftComposerPills
+            seatPill={isSubmitting ? null : seatPill}
+            isSeatLocked={isSeatLocked}
+            onChangeSeat={setDraftSeat}
+            importPillPress={importPillPress}
+          />
           <Composer
             agentId={tabId}
             serverId={serverId}
@@ -689,6 +715,39 @@ export function WorkspaceDraftAgentTab({
         </View>
       </ComposerDock>
     </FileDropZone>
+  );
+}
+
+interface DraftComposerPillsProps {
+  seatPill: DraftSeatPill | null;
+  isSeatLocked: boolean;
+  onChangeSeat: (seat: DraftSeat) => void;
+  importPillPress: (() => void) | null;
+}
+
+function DraftComposerPills({
+  seatPill,
+  isSeatLocked,
+  onChangeSeat,
+  importPillPress,
+}: DraftComposerPillsProps) {
+  const shownSeatPill = seatPill?.status === "shown" ? seatPill : null;
+  if (!shownSeatPill && !importPillPress) {
+    return null;
+  }
+  return (
+    <View style={styles.importPillRow}>
+      <View style={styles.importPillContent}>
+        {shownSeatPill ? (
+          <ComposerSlpSeatPill
+            seat={shownSeatPill.seat}
+            disabled={shownSeatPill.disabled || isSeatLocked}
+            onChange={onChangeSeat}
+          />
+        ) : null}
+        {importPillPress ? <ComposerImportPill onPress={importPillPress} /> : null}
+      </View>
+    </View>
   );
 }
 
@@ -739,6 +798,7 @@ const styles = StyleSheet.create((theme) => ({
     width: "100%",
     maxWidth: MAX_CONTENT_WIDTH,
     flexDirection: "row",
+    gap: theme.spacing[2],
   },
   errorContainer: {
     marginTop: theme.spacing[2],

@@ -114,6 +114,12 @@ export const ru: TranslationResources = {
     },
   },
   composer: {
+    slpSeat: {
+      lead: "Lead",
+      chat: "Обычный чат",
+      switchToLead: "Создать как Lead",
+      switchToChat: "Создать как обычный чат",
+    },
     placeholders: {
       desktop: "Напишите агенту сообщение, отметьте @files или используйте /commands и /skills.",
       mobile: "Сообщение,@files,/commands",
@@ -2334,6 +2340,19 @@ export const ru: TranslationResources = {
       },
     },
     host: {
+      slp: {
+        title: "SLP",
+        loading: "Загрузка настроек SLP…",
+        enabled: {
+          label: "Включить SLP",
+          hint: "Влияет только на новых агентов. Уже запущенные Lead или Supervisor продолжают работать.",
+        },
+        supervisorModel: {
+          label: "Модель Supervisor по умолчанию",
+          hint: "Применяется только к вновь созданному Supervisor.",
+          default: "По умолчанию",
+        },
+      },
       appearance: {
         title: "Оформление",
         name: {

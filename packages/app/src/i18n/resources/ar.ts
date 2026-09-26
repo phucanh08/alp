@@ -113,6 +113,12 @@ export const ar: TranslationResources = {
     },
   },
   composer: {
+    slpSeat: {
+      lead: "Lead",
+      chat: "دردشة عادية",
+      switchToLead: "إنشاء كـ Lead",
+      switchToChat: "إنشاء كدردشة عادية",
+    },
     placeholders: {
       desktop: "أرسل رسالة إلى الوكيل أو ضع علامة على @files أو استخدم /commands و /skills",
       mobile: "الرسالة، @files ، /commands",
@@ -2293,6 +2299,19 @@ export const ar: TranslationResources = {
       },
     },
     host: {
+      slp: {
+        title: "SLP",
+        loading: "جارٍ تحميل إعدادات SLP…",
+        enabled: {
+          label: "تفعيل SLP",
+          hint: "ينطبق على الوكلاء الجدد فقط. يستمر Lead أو Supervisor الذي يعمل بالفعل في العمل.",
+        },
+        supervisorModel: {
+          label: "نموذج Supervisor الافتراضي",
+          hint: "ينطبق فقط على Supervisor يُنشأ حديثًا.",
+          default: "الافتراضي",
+        },
+      },
       appearance: {
         title: "المظهر",
         name: {

@@ -18,6 +18,33 @@ Bundled alp plugin for the SLP seats: Supervisor, Lead, Peer. The daemon loads i
 Contracts live in `shared/rpc.ts`. The client entry `index.client.tsx` is discovered by file name.
 The manifest schema is strict and has no field for entries.
 
+## Settings
+
+The plugin registers one host-scoped settings definition (`shared/settings.ts`, id `slp`, version
+1), stored at `$PASEO_HOME/plugin-settings/slp/slp.json`. `enabled` (default `true`) is the SLP
+switch: `false` turns off every row in the table above — `before("agent.create")` returns
+`undefined` for every request, including one that already names a valid seat; `workspace.created`
+ensures no Lead; and the `slp.lead.ensure` / `slp.supervisor.ensure` RPCs reject with an error whose
+message contains "SLP disabled". On the client, the Supervisor sidebar item and the automatic
+Supervisor ensure follow `enabled` live: switching SLP off removes the item, switching it on adds
+the item back and ensures the Supervisor, with no reload. Switching SLP off stops nothing that is
+already running; a live Lead or Supervisor keeps running, and only new agents are affected. A
+corrupt or unreadable stored value counts as the default, enabled, on both server and client.
+`supervisorModel` (default `null`) picks the model a freshly created Supervisor runs on:
+`slp.supervisor.ensure` uses it in place of the provider's default model when it names a selectable
+model of the Supervisor's provider (`claude`), and falls back to the default model otherwise —
+`null`, an id that does not exist, or one marked not selectable. A live or resumed Supervisor keeps
+its own model; the setting only ever applies to a Supervisor created from nothing.
+
+You control both values from the SLP card on the host's Overview page (Settings → the host →
+Overview). The card is absent on a host without the `slp` plugin, saves each change to that host at
+once, shows a save error on the row you changed, and picks up changes made elsewhere. Its model
+list is "Default" (stored as `null`) plus the selectable `claude` models on that host. The app
+reads the settings through `useSlpSettings` (`packages/app/src/plugins/slp-settings/`). Metro does
+not bundle files outside the app workspace, so the app keeps its own copy of this definition and
+the enabled ruling; when you change `shared/settings.ts`, update that copy too, or its contract test
+fails.
+
 ## Seats
 
 | Seat       | Provider                              | Title         | Label                 | Mode (Claude / Codex)               |
@@ -39,6 +66,21 @@ otherwise. The hook tells either of those from "another agent made this" by `pas
 the daemon sets that label only when `create_agent` names a real calling agent, so its absence is
 the signal. An agent that already carries `slp.role` — valid or not — is never touched or tagged;
 only a request that names no seat at all gets the default.
+
+On `claude`/`codex`, the draft composer's Lead / Plain chat pill decides which of these two paths a
+new agent takes: the draft tab and the New workspace screen both default to Lead, sending
+`slp.role=lead` on create; Plain chat sends no label, so the request lands in the default-Peer path
+above, tagged `slp.origin=human`. The pill is shown only on `claude`/`codex` and only while SLP is
+on — hidden on any other provider or while the setting is off or loading, per the same
+`SLP_SEAT_PROVIDERS` gate `familyOf` in `server/seat.ts` mirrors (ruling p11; the app cannot import
+this plugin). The choice is fixed once the create request goes out: nothing re-reads or re-offers it
+after the agent exists. See `packages/app/src/composer/draft/slp-seat.ts`.
+
+This defaulted Peer is a special Peer: no Lead briefed it, so its SLP-RUNTIME block gets one more
+paragraph a Lead-spawned Peer's does not. It says the Peer is independent — answer a bare Human
+message as ordinary chat, without waiting for a brief or a Lead — and only step into the ordinary
+Peer contract (wait for the 13-field brief, answer in the six-box handoff) once a Lead's brief
+actually arrives over `send_agent_prompt`.
 
 ## Seat tools
 

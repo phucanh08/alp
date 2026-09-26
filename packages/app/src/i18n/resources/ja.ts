@@ -114,6 +114,12 @@ export const ja: TranslationResources = {
     },
   },
   composer: {
+    slpSeat: {
+      lead: "Lead",
+      chat: "通常のチャット",
+      switchToLead: "Lead として作成",
+      switchToChat: "通常のチャットとして作成",
+    },
     placeholders: {
       desktop: "エージェントにメッセージ、@ファイル、/コマンドや/スキルを入力",
       mobile: "メッセージ、@ファイル、/コマンド",
@@ -2315,6 +2321,19 @@ export const ja: TranslationResources = {
       },
     },
     host: {
+      slp: {
+        title: "SLP",
+        loading: "SLP 設定を読み込み中…",
+        enabled: {
+          label: "SLP を有効にする",
+          hint: "新しいエージェントにのみ適用されます。すでに実行中の Lead または Supervisor はそのまま実行を続けます。",
+        },
+        supervisorModel: {
+          label: "Supervisor の既定モデル",
+          hint: "新しく作成される Supervisor にのみ適用されます。",
+          default: "既定",
+        },
+      },
       appearance: {
         title: "外観",
         name: {

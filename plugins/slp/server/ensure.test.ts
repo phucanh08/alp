@@ -1,7 +1,8 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { AgentEntryLike } from "./discovery";
 import {
   type EnsureApi,
+  type ModelLike,
   type SeatAgentCreate,
   type WorkspaceLike,
   ClientWorkspaceOrigins,
@@ -26,7 +27,11 @@ interface FakeHost {
 }
 
 function fakeHost(
-  initial: { agents?: AgentEntryLike[]; workspaces?: WorkspaceLike[] } = {},
+  initial: {
+    agents?: AgentEntryLike[];
+    workspaces?: WorkspaceLike[];
+    models?: ModelLike[];
+  } = {},
 ): FakeHost {
   const host: FakeHost = {
     agents: [...(initial.agents ?? [])],
@@ -101,7 +106,7 @@ function fakeHost(
     providers: {
       async listModels() {
         return {
-          models: [
+          models: initial.models ?? [
             { id: "claude-sonnet-5", isDefault: false },
             { id: "claude-opus-5-5", isDefault: true },
           ],
@@ -558,6 +563,131 @@ test("slp.lead.ensure still gives a second workspace in the same directory its o
   const result = await ensureLead(host.api, "wks_repo2", { supervisorDirectory: SUPERVISOR_DIR });
   expect(result.created).toBe(true);
   expect(host.created.map((c) => c.workspaceId)).toEqual(["wks_repo2"]);
+});
+
+test("ensureLead rejects with an SLP disabled message when the switch is off, without creating anything", async () => {
+  const host = fakeHost({ workspaces: [repo] });
+  await expect(
+    ensureLead(host.api, "wks_repo", { supervisorDirectory: SUPERVISOR_DIR }, false),
+  ).rejects.toThrow(/SLP disabled/);
+  expect(host.created).toHaveLength(0);
+});
+
+test("ensureSupervisor rejects with an SLP disabled message when the switch is off, without creating anything", async () => {
+  const host = fakeHost({ workspaces: [repo] });
+  const deps = { supervisorDirectory: SUPERVISOR_DIR, makeDirectory: async () => {} };
+  await expect(ensureSupervisor(host.api, deps, false)).rejects.toThrow(/SLP disabled/);
+  expect(host.created).toHaveLength(0);
+});
+
+test("handleWorkspaceCreated ensures no Lead when the switch is off, even for a matched client workspace", async () => {
+  const host = fakeHost({ workspaces: [repo] });
+  const origins = new ClientWorkspaceOrigins();
+  origins.record({ source: { kind: "directory", path: "/r/app" } });
+  const result = await handleWorkspaceCreated(
+    host.api,
+    origins,
+    { id: "wks_repo", projectId: "p1", cwd: "/r/app" },
+    { supervisorDirectory: SUPERVISOR_DIR },
+    false,
+  );
+  expect(result).toBeNull();
+  expect(host.created).toHaveLength(0);
+});
+
+test("ensureSupervisor uses supervisorModel to create a new Supervisor when it names a selectable model", async () => {
+  const host = fakeHost({ workspaces: [repo] });
+  const deps = {
+    supervisorDirectory: SUPERVISOR_DIR,
+    makeDirectory: async () => {},
+    supervisorModel: "claude-sonnet-5",
+  };
+  const result = await ensureSupervisor(host.api, deps);
+  expect(result.created).toBe(true);
+  expect(host.created[0]?.options.config.provider).toBe("claude/claude-sonnet-5");
+});
+
+test("ensureSupervisor falls back to the default model and warns when supervisorModel is not a selectable model", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const host = fakeHost({
+    workspaces: [repo],
+    models: [
+      { id: "claude-sonnet-5", isDefault: false },
+      { id: "claude-opus-5-5", isDefault: true },
+      { id: "claude-retired", isSelectable: false },
+    ],
+  });
+  const deps = {
+    supervisorDirectory: SUPERVISOR_DIR,
+    makeDirectory: async () => {},
+    supervisorModel: "claude-retired",
+  };
+  const result = await ensureSupervisor(host.api, deps);
+  expect(result.created).toBe(true);
+  expect(host.created[0]?.options.config.provider).toBe("claude/claude-opus-5-5");
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining("claude-retired"));
+  warn.mockRestore();
+});
+
+test("ensureSupervisor uses the default model when supervisorModel is null", async () => {
+  const host = fakeHost({ workspaces: [repo] });
+  const deps = {
+    supervisorDirectory: SUPERVISOR_DIR,
+    makeDirectory: async () => {},
+    supervisorModel: null,
+  };
+  const result = await ensureSupervisor(host.api, deps);
+  expect(result.created).toBe(true);
+  expect(host.created[0]?.options.config.provider).toBe("claude/claude-opus-5-5");
+});
+
+test("ensureSupervisor keeps a live Supervisor's model unchanged regardless of supervisorModel", async () => {
+  const host = fakeHost({
+    workspaces: [supervisorWorkspace],
+    agents: [
+      {
+        agent: {
+          id: "S1",
+          provider: "claude",
+          cwd: SUPERVISOR_DIR,
+          status: "idle",
+          workspaceId: "wks_sup",
+          labels: { "slp.role": "supervisor" },
+        },
+      },
+    ],
+  });
+  const deps = {
+    supervisorDirectory: SUPERVISOR_DIR,
+    makeDirectory: async () => {},
+    supervisorModel: "claude-sonnet-5",
+  };
+  expect(await ensureSupervisor(host.api, deps)).toEqual({
+    workspaceId: "wks_sup",
+    agentId: "S1",
+    created: false,
+  });
+  expect(host.created).toHaveLength(0);
+});
+
+test("ensureSupervisor keeps a resumed Supervisor's model unchanged regardless of supervisorModel", async () => {
+  const host = fakeHost({
+    workspaces: [supervisorWorkspace],
+    agents: [closedSupervisor("S-closed", "2026-09-25T10:00:00.000Z")],
+  });
+  const deps = {
+    supervisorDirectory: SUPERVISOR_DIR,
+    makeDirectory: async () => {},
+    supervisorModel: "claude-sonnet-5",
+  };
+  const result = await ensureSupervisor(host.api, deps);
+  expect(result).toEqual({
+    workspaceId: "wks_sup",
+    agentId: "S-closed",
+    created: false,
+    resumed: true,
+  });
+  expect(host.created).toHaveLength(0);
 });
 
 test("workspace.created makes one Lead when two workspaces in a directory are created back to back", async () => {

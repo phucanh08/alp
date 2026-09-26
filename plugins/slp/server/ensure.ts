@@ -32,7 +32,10 @@ export interface SeatAgentCreate {
   labels: Record<string, string>;
 }
 
-/** Seat settings shared by both ensures; `family` defaults to `claude`. */
+/** `SeatDeps.family` when the caller names none. */
+export const DEFAULT_SEAT_FAMILY: Family = "claude";
+
+/** Seat settings shared by both ensures; `family` defaults to `DEFAULT_SEAT_FAMILY`. */
 export interface SeatDeps {
   family?: Family;
 }
@@ -97,8 +100,26 @@ export function pickDefaultModel(models: readonly ModelLike[] | undefined): stri
   return (selectable.find((model) => model.isDefault) ?? selectable[0])?.id ?? null;
 }
 
-async function seatProvider(api: EnsureApi, provider: string): Promise<string> {
+/**
+ * `overrideModel` (the `supervisorModel` setting) wins when it names a selectable model of
+ * `provider`; otherwise `pickDefaultModel` runs as it did before the setting existed, with a
+ * warning naming the ignored value.
+ */
+async function seatProvider(
+  api: EnsureApi,
+  provider: string,
+  overrideModel?: string | null,
+): Promise<string> {
   const { models, error } = await api.providers.listModels(provider);
+  if (overrideModel) {
+    const selectable = (models ?? []).filter((model) => model.isSelectable !== false);
+    if (selectable.some((model) => model.id === overrideModel)) {
+      return `${provider}/${overrideModel}`;
+    }
+    console.warn(
+      `slp: supervisorModel "${overrideModel}" is not a selectable model of ${provider}, using the default model instead`,
+    );
+  }
   const model = pickDefaultModel(models);
   if (!model) {
     throw new Error(`Provider ${provider} has no selectable model${error ? `: ${error}` : ""}`);
@@ -111,9 +132,10 @@ async function seatAgent(
   seat: Seat,
   title: string,
   deps: SeatDeps,
+  overrideModel?: string | null,
 ): Promise<SeatAgentCreate> {
-  const { providerId, modeId } = seatProfileFor(deps.family ?? "claude");
-  const provider = await seatProvider(api, providerId);
+  const { providerId, modeId } = seatProfileFor(deps.family ?? DEFAULT_SEAT_FAMILY);
+  const provider = await seatProvider(api, providerId, overrideModel);
   return {
     config: { provider, modeId },
     title,
@@ -136,12 +158,18 @@ async function listWorkspaces(api: EnsureApi): Promise<WorkspaceLike[]> {
   }
 }
 
-/** `slp.lead.ensure`: the workspace has one live Lead; creates it when missing. */
+/**
+ * `slp.lead.ensure`: the workspace has one live Lead; creates it when missing. `enabled` is the SLP
+ * settings switch (default `true`); `false` rejects with a message containing "SLP disabled"
+ * instead of touching any workspace or agent.
+ */
 export function ensureLead(
   api: EnsureApi,
   workspaceId: string,
   deps: { supervisorDirectory: string } & SeatDeps,
+  enabled = true,
 ): Promise<LeadEnsureResult> {
+  if (!enabled) return Promise.reject(new Error("slp.lead.ensure: SLP disabled"));
   return queue.run(`lead:${workspaceId}`, async () => {
     const workspace = (await listWorkspaces(api)).find((entry) => entry.id === workspaceId);
     if (!workspace || workspace.archivingAt) {
@@ -173,15 +201,22 @@ export const SUPERVISOR_RESUME_NOTICE =
  * `$PASEO_HOME/supervisor`. A live Supervisor anywhere on the host is reused; otherwise the newest
  * closed one is resumed; a new one is created only when there is none or the resume is rejected.
  * The system prompt of a resumed Supervisor is the one from its creation (`before("agent.create")`
- * does not run again).
+ * does not run again). Reuse and resume never touch the Supervisor's model; only a freshly created
+ * one applies `deps.supervisorModel` (the `supervisorModel` setting), and only when it names a
+ * selectable model of the seat's provider — otherwise the provider's default model is used, as when
+ * the setting is unset. `enabled` is the SLP settings switch (default `true`); `false` rejects with a
+ * message containing "SLP disabled" instead of touching any workspace or agent.
  */
 export function ensureSupervisor(
   api: EnsureApi,
   deps: {
     supervisorDirectory: string;
     makeDirectory: (directory: string) => Promise<unknown>;
+    supervisorModel?: string | null;
   } & SeatDeps,
+  enabled = true,
 ): Promise<SupervisorEnsureResult> {
+  if (!enabled) return Promise.reject(new Error("slp.supervisor.ensure: SLP disabled"));
   return queue.run("supervisor", async () => {
     const agents = await listLiveAgents(api.agents);
     const [live] = selectSeatAgents(agents, "supervisor");
@@ -221,7 +256,9 @@ export function ensureSupervisor(
       ).id;
     const agent = await api.workspaces
       .ref(workspaceId)
-      .agents.create(await seatAgent(api, "supervisor", SUPERVISOR_TITLE, deps));
+      .agents.create(
+        await seatAgent(api, "supervisor", SUPERVISOR_TITLE, deps, deps.supervisorModel),
+      );
     return { workspaceId, agentId: agent.id, created: true };
   });
 }
@@ -315,16 +352,22 @@ async function liveLeadInDirectory(api: EnsureApi, directory: string): Promise<s
  * `workspace.created`: a Lead for client-created workspaces, never for the Supervisor one. One Lead
  * per directory: upstream `paseo run` mints a new workspace on every bare run, so a directory that
  * already has a live Lead in another active workspace gets no second one. Only this automatic path
- * dedupes; `slp.lead.ensure` still gives the workspace it names its own Lead.
+ * dedupes; `slp.lead.ensure` still gives the workspace it names its own Lead. `enabled` is the SLP
+ * settings switch (default `true`); `false` ensures no Lead, but still consumes the matched
+ * client-origin entry — otherwise it would outlive the TTL and attach itself to an unrelated
+ * workspace created after SLP is switched back on (ruling p11 G1).
  */
 export async function handleWorkspaceCreated(
   api: EnsureApi,
   origins: ClientWorkspaceOrigins,
   workspace: { id: string; projectId: string; cwd: string },
   deps: { supervisorDirectory: string },
+  enabled = true,
 ): Promise<LeadEnsureResult | null> {
   const fromClient = origins.consume(workspace);
-  if (!fromClient || isSupervisorWorkspace(workspace.cwd, deps.supervisorDirectory)) return null;
+  if (!enabled || !fromClient || isSupervisorWorkspace(workspace.cwd, deps.supervisorDirectory)) {
+    return null;
+  }
   const directory = expandUserPath(workspace.cwd);
   // Serialized per directory so two workspaces created back to back cannot both miss the Lead.
   return queue.run(`lead-directory:${directory}`, async () => {

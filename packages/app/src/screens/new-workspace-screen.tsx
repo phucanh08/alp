@@ -36,6 +36,20 @@ import { ScreenHeader } from "@/components/headers/screen-header";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useToast } from "@/contexts/toast-context";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
+import {
+  buildWorkspaceInitialAgent,
+  buildWorkspaceInitialAgentRetry,
+} from "@/composer/draft/workspace-initial-agent";
+import {
+  resolveDraftSeatLabels,
+  resolveDraftSeatPill,
+  useDraftSeat,
+  useDraftSeatStore,
+  type DraftSeat,
+  type SeatLabelsFor,
+} from "@/composer/draft/slp-seat";
+import { ComposerSlpSeatPillRow } from "@/composer/draft/slp-seat-pill";
+import { useSlpSettings } from "@/plugins/slp-settings/use-slp-settings";
 import { useForgeSearchQuery } from "@/git/use-forge-search-query";
 import { useCheckoutStatusQuery } from "@/git/use-status-query";
 import { ensureCheckoutStatus } from "@/git/checkout-status-cache";
@@ -876,6 +890,7 @@ interface CreateChatAgentInput {
   supportsForgeSearch: boolean;
   resolveClient: () => DaemonClient;
   isStillOnCreateScreen: () => boolean;
+  seatLabelsFor: SeatLabelsFor;
   labels: {
     composerStateRequired: string;
     selectModel: string;
@@ -966,7 +981,8 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
   const images = await encodeImages(wirePayload.images);
   let navigated = false;
   let outcome: SubmitOutcome = "background";
-  const initialAgent: NonNullable<CreateWorkspaceRequestOptions["agent"]> = {
+  const initialAgent = buildWorkspaceInitialAgent({
+    draftId: input.draftId,
     config: {
       provider,
       cwd,
@@ -975,11 +991,11 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
       thinkingOptionId: composerState.effectiveThinkingOptionId || undefined,
       featureValues: composerState.featureValues,
     },
-    initialPrompt: text,
-    clientMessageId: `${input.draftId}:initial-message`,
-    images: images?.length ? images : undefined,
-    attachments: wirePayload.attachments?.length ? wirePayload.attachments : undefined,
-  };
+    text,
+    images,
+    attachments: wirePayload.attachments,
+    seatLabelsFor: input.seatLabelsFor,
+  });
   const execute = async (requestedAgent = initialAgent): Promise<AgentSnapshotPayload> => {
     const { agent } = await ensureWorkspace({
       cwd,
@@ -1028,18 +1044,29 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
   const agentCreation = {
     result: Promise.resolve().then(() => execute()),
     retry: (request: CreateAgentRequestOptions) =>
-      execute({
-        ...initialAgent,
-        config: { ...request.config!, cwd },
-        initialPrompt: request.initialPrompt ?? "",
-        clientMessageId: initialAgent.clientMessageId,
-        images: request.images,
-        attachments: request.attachments,
-      }),
+      execute(
+        buildWorkspaceInitialAgentRetry({
+          initialAgent,
+          request,
+          cwd,
+          seatLabelsFor: input.seatLabelsFor,
+        }),
+      ),
   };
   await agentCreation.result;
   if (outcome === "background") clearConsumedDraft();
   return outcome;
+}
+
+// null for a terminal launch: resolveDraftSeatPill already hides the pill for a null provider,
+// and SLP seats only chat agents, so folding the check in here keeps NewWorkspaceScreen's own
+// branching unchanged.
+function selectedProviderOf(
+  composerState: NewWorkspaceComposerState | null,
+  isTerminalLaunch: boolean,
+): string | null {
+  if (isTerminalLaunch) return null;
+  return composerState?.selectedProvider ?? null;
 }
 
 function buildComposerConfig(input: {
@@ -1665,6 +1692,13 @@ export function NewWorkspaceScreen({
     draftId: draftId ?? generateDraftId(),
     worktreeSlug: createNameId(),
   }));
+  const slpSettings = useSlpSettings(selectedServerId);
+  const draftSeat = useDraftSeat(creationIdentity.draftId);
+  const setDraftSeat = useCallback(
+    (seat: DraftSeat) =>
+      useDraftSeatStore.getState().setSeat({ draftId: creationIdentity.draftId, seat }),
+    [creationIdentity.draftId],
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [creationResult, setCreationResult] = useState<
     WorkspaceCreationResult | { workspace: null }
@@ -2145,6 +2179,7 @@ export function NewWorkspaceScreen({
           supportsForgeSearch,
           resolveClient: withConnectedClient,
           isStillOnCreateScreen,
+          seatLabelsFor: (provider) => resolveDraftSeatLabels(slpSettings, draftSeat, provider),
           labels: {
             composerStateRequired: t("newWorkspace.errors.composerStateRequired"),
             selectModel: t("newWorkspace.errors.selectModel"),
@@ -2166,11 +2201,13 @@ export function NewWorkspaceScreen({
       creationIdentity,
       chatDraft.clear,
       draftKey,
+      draftSeat,
       ensureWorkspace,
       forkDraftSetup,
       isStillOnCreateScreen,
       launchTarget,
       selectedServerId,
+      slpSettings,
       supportsForgeSearch,
       t,
       toast,
@@ -2436,6 +2473,15 @@ export function NewWorkspaceScreen({
           title={t("newWorkspace.title")}
           formStack={formStack}
         >
+          <ComposerSlpSeatPillRow
+            pill={resolveDraftSeatPill(
+              slpSettings,
+              draftSeat,
+              selectedProviderOf(composerState, isTerminalLaunch),
+            )}
+            disabled={isPending}
+            onChange={setDraftSeat}
+          />
           {composer}
           {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
         </NewWorkspaceLayout>

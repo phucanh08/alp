@@ -1,4 +1,4 @@
-import { type Family, PEER_DISABLED_PASEO_TOOLS, type Seat } from "./seat";
+import { type Family, PEER_DISABLED_PASEO_TOOLS, type Seat, type SeatOrigin } from "./seat";
 
 /**
  * Backtick-quoted, comma-joined Paseo tools a Peer loses, read from `PEER_DISABLED_PASEO_TOOLS`
@@ -115,18 +115,34 @@ ${PEER_MODEL_RULE[family]}
 }
 
 /**
+ * Appended only for a Peer with no Lead — `slp.origin` set (see `originOfLabels` in `seat.ts`):
+ * created directly by Human, or by a schedule run. Neither one has a Lead that briefed it, so the
+ * ordinary Peer contract (wait for a brief, answer only in the 6-box handoff) does not fit until a
+ * Lead actually reaches out.
+ */
+const INDEPENDENT_PEER = `
+- **Bạn là Peer độc lập**: nhãn \`slp.origin\` cho biết không có Lead nào giao brief cho bạn — Human
+  tạo bạn trực tiếp, hoặc một schedule chạy đã tạo bạn. Hai chế độ, chọn theo tin đến (xem "Tin đến
+  từ đâu" ở trên):
+  - Tin không có dấu nào (Human gõ trong app) → bạn là trợ lý độc lập, trả lời như một cuộc chat bình
+    thường. Không chờ brief 13 trường, không đòi phải có Lead hay Supervisor mới làm việc.
+  - Tin \`<paseo-agent-message from="...">\` từ một Lead (gửi qua \`send_agent_prompt\`) mang brief 13
+    trường → làm việc như một Peer bình thường đúng definition ghế ở trên, và trả handoff 6 ô trong
+    tin cuối lượt.`;
+
+/**
  * A function, not a module-level constant: `seat.ts` imports `runtimeBlock` from this file, so this
  * file importing `PEER_DISABLED_PASEO_TOOLS` from `seat.ts` makes the two modules circular. Reading
  * the array only when this runs — after both modules finish loading — avoids depending on which one
  * a caller imports first.
  */
-function peer(): string {
+function peer(origin?: SeatOrigin | null): string {
   return `${COMMON}
 - Ghế Peer của bạn không có tool spawn, nhắn, dừng, lưu trữ, sửa cấu hình, hay trả lời permission của
   agent khác (${peerToolCutList()}). Việc ngoài brief → \`BLOCKED\`, không tự nhận.
 - Kênh duy nhất về Lead là câu trả lời cuối lượt: khi lượt kết thúc, Lead nhận finish notification
   kèm tin cuối của bạn, cắt ở 4000 ký tự. Handoff 6 ô là tin cuối đó, đặt ở đầu tin, ghi thêm dòng
-  \`Runtime: alp\`.`;
+  \`Runtime: alp\`.${origin ? INDEPENDENT_PEER : ""}`;
 }
 
 const SUPERVISOR = `${COMMON}
@@ -149,13 +165,16 @@ const SUPERVISOR = `${COMMON}
   \`~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl\`. Có timestamp. Đọc file ngoài cwd bằng Bash
   (\`cat\`/\`sed -n\`/\`python3\`).`;
 
-/** SLP-RUNTIME block for a seat; the Lead's Peer spawn rule follows the Lead's own family. */
-export function runtimeBlock(seat: Seat, family: Family): string {
+/**
+ * SLP-RUNTIME block for a seat; the Lead's Peer spawn rule follows the Lead's own family. `origin`
+ * only applies to `peer` — see `INDEPENDENT_PEER`.
+ */
+export function runtimeBlock(seat: Seat, family: Family, origin?: SeatOrigin | null): string {
   switch (seat) {
     case "lead":
       return lead(family);
     case "peer":
-      return peer();
+      return peer(origin);
     case "supervisor":
       return SUPERVISOR;
   }

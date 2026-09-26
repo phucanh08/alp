@@ -1,3 +1,5 @@
+import type { CreateAgentRequestOptions } from "@getpaseo/client/internal/daemon-client";
+import type { AgentSessionConfig } from "@getpaseo/protocol/agent-types";
 import { resolveSubmissionReadiness } from "@/provider-selection/provider-selection";
 
 export interface WorkspaceDraftAutoSubmitConfig {
@@ -49,4 +51,27 @@ export function validateDraftSubmission(input: {
     hasClient,
   });
   return readiness.ok ? null : (readiness.reason ?? null);
+}
+
+export function buildDraftCreateAgentOptions(input: {
+  draftId: string;
+  config: AgentSessionConfig;
+  workspaceId: string;
+  text: string;
+  clientMessageId: string;
+  images: CreateAgentRequestOptions["images"];
+  attachments: CreateAgentRequestOptions["attachments"];
+  labels: Record<string, string> | null;
+}): CreateAgentRequestOptions {
+  const { images, attachments, labels } = input;
+  return {
+    idempotencyKey: input.draftId,
+    config: input.config,
+    workspaceId: input.workspaceId,
+    initialPrompt: input.text,
+    clientMessageId: input.clientMessageId,
+    ...(images && images.length > 0 ? { images } : {}),
+    ...(attachments && attachments.length > 0 ? { attachments } : {}),
+    ...(labels ? { labels } : {}),
+  };
 }

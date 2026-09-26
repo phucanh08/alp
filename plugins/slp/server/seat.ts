@@ -57,6 +57,17 @@ function originOf(labels: Record<string, string> | undefined): SeatOrigin {
 }
 
 /**
+ * `slp.origin` off a label set, valid values only: a Peer a Lead spawned never carries this label
+ * (`lead()` in `runtime-block.ts` spawns with `{"slp.role": "peer"}` alone), so its presence is how
+ * `buildSystemPrompt` tells an independent Peer — one with no Lead to report to — from an ordinary
+ * one.
+ */
+export function originOfLabels(labels: Record<string, string> | undefined): SeatOrigin | null {
+  const value = labels?.[ORIGIN_LABEL];
+  return value === "human" || value === "schedule" ? value : null;
+}
+
+/**
  * Seat labels for an `agent.create` request that named no seat at all: a request with no
  * `paseo.parent-agent-id` — Human made it directly, or a schedule run created it — defaults to
  * Peer, tagged `slp.origin=schedule` when the request carries `paseo.schedule-id` and
@@ -160,17 +171,22 @@ export async function readDefinition(cwd: string, seat: Seat): Promise<Definitio
   }
 }
 
-/** Seat system prompt = prompt already set by the caller + seat definition + SLP-RUNTIME block. */
+/**
+ * Seat system prompt = prompt already set by the caller + seat definition + SLP-RUNTIME block.
+ * `origin` only ever applies to a Peer with no Lead (see `originOfLabels`); it adds the
+ * independent-Peer paragraph to the runtime block.
+ */
 export function buildSystemPrompt(
   seat: Seat,
   family: Family,
   definitionBody: string,
   existing: string | null | undefined,
+  origin?: SeatOrigin | null,
 ): string {
   const parts = [
     existing?.trim(),
     `# Ghế SLP: ${seat}\n\n${definitionBody}`,
-    runtimeBlock(seat, family),
+    runtimeBlock(seat, family, origin),
   ];
   return parts.filter((part): part is string => Boolean(part)).join("\n\n");
 }

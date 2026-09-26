@@ -116,6 +116,12 @@ export const fr: TranslationResources = {
     },
   },
   composer: {
+    slpSeat: {
+      lead: "Lead",
+      chat: "Discussion simple",
+      switchToLead: "Créer en tant que Lead",
+      switchToChat: "Créer en discussion simple",
+    },
     placeholders: {
       desktop: "Envoyez un message à l'agent, marquez@filesou utilisez/commandset/skills",
       mobile: "Message,@files,/commands",
@@ -2352,6 +2358,19 @@ export const fr: TranslationResources = {
       },
     },
     host: {
+      slp: {
+        title: "SLP",
+        loading: "Chargement des réglages SLP…",
+        enabled: {
+          label: "Activer SLP",
+          hint: "S’applique uniquement aux nouveaux agents. Un Lead ou un Supervisor déjà en cours d’exécution continue de fonctionner.",
+        },
+        supervisorModel: {
+          label: "Modèle du Supervisor par défaut",
+          hint: "S’applique uniquement à un Supervisor nouvellement créé.",
+          default: "Par défaut",
+        },
+      },
       appearance: {
         title: "Apparence",
         name: {

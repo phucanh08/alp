@@ -109,6 +109,12 @@ export const en = {
     },
   },
   composer: {
+    slpSeat: {
+      lead: "Lead",
+      chat: "Plain chat",
+      switchToLead: "Create as Lead",
+      switchToChat: "Create as plain chat",
+    },
     placeholders: {
       desktop: "Message the agent, tag @files, or use /commands and /skills",
       mobile: "Message, @files, /commands",
@@ -2413,6 +2419,19 @@ export const en = {
       },
     },
     host: {
+      slp: {
+        title: "SLP",
+        loading: "Loading SLP settings…",
+        enabled: {
+          label: "Enable SLP",
+          hint: "Applies to new agents only. A Lead or Supervisor that is already running keeps running.",
+        },
+        supervisorModel: {
+          label: "Default Supervisor model",
+          hint: "Applies only to a newly created Supervisor.",
+          default: "Default",
+        },
+      },
       appearance: {
         title: "Appearance",
         name: {
