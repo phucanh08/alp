@@ -10,8 +10,7 @@ import {
   ScaledMockup,
 } from "~/components/mockup";
 
-const ALT =
-  "Paseo desktop app with coding agents, a conversation, and a code diff open side by side";
+const ALT = "alp desktop app with coding agents, a conversation, and a code diff open side by side";
 
 const PILL_TRANSITION = { duration: 0.34, ease: [0.22, 0.61, 0.36, 1] as const };
 
