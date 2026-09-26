@@ -13,7 +13,8 @@ import {
   type AgentManagerEvent,
   type ManagedAgent,
 } from "./agent-manager.js";
-import { AgentStorage } from "./agent-storage.js";
+import { AgentStorage, parseStoredAgentRecord } from "./agent-storage.js";
+import { isPaseoToolEnabled } from "./paseo-tool-policy.js";
 import { InMemoryAgentTimelineStore } from "./agent-timeline-store.js";
 import { toAgentPayload } from "./agent-projections.js";
 import { projectTimelineRows } from "./timeline-projection.js";
@@ -11387,6 +11388,344 @@ test("agent lifecycle events carry the agent's labels", async () => {
     });
   } finally {
     if (agentId) await manager.closeAgent(agentId);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+class McpCaptureClient extends TestAgentClient {
+  override readonly capabilities = { ...TEST_CAPABILITIES, supportsMcpServers: true };
+  lastConfig: AgentSessionConfig | null = null;
+
+  override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+    this.lastConfig = config;
+    return new TestAgentSession(config);
+  }
+}
+
+function agentCreateHooksDisabling(paseoTools: PluginBeforeRequests["agent.create"]["paseoTools"]) {
+  const hooks = new PluginHookHandlers(() => {});
+  hooks.before("agent.create", ({ request }) => ({ ...request, paseoTools }));
+  return pluginLifecycleFromHandlers(hooks).lifecycle;
+}
+
+function storedAgentRecordFixture(
+  workdir: string,
+  overrides: Partial<StoredAgentRecord> & { id: string },
+): StoredAgentRecord {
+  return parseStoredAgentRecord({
+    provider: "codex",
+    cwd: workdir,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    lastStatus: "idle",
+    config: null,
+    persistence: { provider: "codex", sessionId: `session-${overrides.id}` },
+    ...overrides,
+  });
+}
+
+test("agent.create hooks disable Paseo tools on top of the provider policy", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-hook-tool-policy-"));
+  const client = new McpCaptureClient();
+  const manager = new AgentManager({
+    clients: { codex: client },
+    pluginLifecycle: agentCreateHooksDisabling({ disabledTools: ["create_agent"] }),
+    mcpBaseUrl: "http://127.0.0.1:6767/mcp/agents",
+    resolvePaseoToolPolicy: () => ({ disabledTools: ["list_agents"] }),
+    logger,
+  });
+  let agentId: string | undefined;
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    agentId = agent.id;
+
+    const policy = manager.getPaseoToolPolicy(agent.id);
+    expect(policy).toEqual({ disabledTools: ["list_agents", "create_agent"] });
+    expect(isPaseoToolEnabled(policy, "list_agents")).toBe(false);
+    expect(isPaseoToolEnabled(policy, "create_agent")).toBe(false);
+    expect(isPaseoToolEnabled(policy, "send_agent_prompt")).toBe(true);
+    expect(client.lastConfig?.mcpServers?.paseo).toEqual({
+      type: "http",
+      url: `http://127.0.0.1:6767/mcp/agents?callerAgentId=${agent.id}`,
+    });
+  } finally {
+    if (agentId) await manager.closeAgent(agentId);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test.each([
+  { name: "a hook that returns nothing", paseoTools: "omit" as const },
+  { name: "a hook that omits paseoTools", paseoTools: undefined },
+  { name: "a hook that disables no tools", paseoTools: { disabledTools: [] } },
+])("$name leaves the provider policy in force", async ({ paseoTools }) => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-hook-tool-policy-empty-"));
+  const hooks = new PluginHookHandlers(() => {});
+  hooks.before("agent.create", ({ request }) => {
+    if (paseoTools === "omit") return;
+    return paseoTools === undefined ? { config: request.config } : { ...request, paseoTools };
+  });
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    pluginLifecycle: pluginLifecycleFromHandlers(hooks).lifecycle,
+    resolvePaseoToolPolicy: () => ({ disabledTools: ["list_agents"] }),
+    logger,
+  });
+  let agentId: string | undefined;
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    agentId = agent.id;
+
+    expect(manager.getPaseoToolPolicy(agent.id)).toEqual({ disabledTools: ["list_agents"] });
+  } finally {
+    if (agentId) await manager.closeAgent(agentId);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("agent.create hooks cannot re-enable Paseo tools or MCP the provider turned off", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-hook-tool-policy-off-"));
+  const client = new McpCaptureClient();
+  let catalogFactoryCalls = 0;
+  const manager = new AgentManager({
+    clients: { codex: client },
+    pluginLifecycle: agentCreateHooksDisabling({ enabled: true, disabledTools: ["create_agent"] }),
+    mcpBaseUrl: "http://127.0.0.1:6767/mcp/agents",
+    resolvePaseoToolPolicy: () => ({ enabled: false, disabledTools: ["list_agents"] }),
+    paseoToolCatalogFactory: () => {
+      catalogFactoryCalls += 1;
+      throw new Error("the catalog must not be built for a disabled policy");
+    },
+    logger,
+  });
+  let agentId: string | undefined;
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    agentId = agent.id;
+
+    const policy = manager.getPaseoToolPolicy(agent.id);
+    expect(policy).toEqual({ enabled: false, disabledTools: ["list_agents", "create_agent"] });
+    expect(isPaseoToolEnabled(policy, "list_agents")).toBe(false);
+    expect(isPaseoToolEnabled(policy, "send_agent_prompt")).toBe(false);
+    expect(client.lastConfig?.mcpServers).toBeUndefined();
+    expect(catalogFactoryCalls).toBe(0);
+  } finally {
+    if (agentId) await manager.closeAgent(agentId);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("the Paseo tool policy an agent was created with is stored and survives resume and reload", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-hook-tool-policy-resume-"));
+  const storagePath = join(workdir, "agents");
+  const storage = new AgentStorage(storagePath, logger);
+  const agentId = "00000000-0000-4000-8000-000000000f21";
+  let providerPolicy: { disabledTools: string[] } | undefined = { disabledTools: ["list_agents"] };
+  const creator = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    pluginLifecycle: agentCreateHooksDisabling({ disabledTools: ["create_agent"] }),
+    registry: storage,
+    resolvePaseoToolPolicy: () => providerPolicy,
+    logger,
+  });
+  await creator.createAgent({ provider: "codex", cwd: workdir }, agentId, {
+    workspaceId: undefined,
+  });
+  await creator.closeAgent(agentId);
+  await creator.flush();
+  await storage.flush();
+
+  // The provider re-enables list_agents after the agent was created, and no plugin is loaded.
+  providerPolicy = undefined;
+  const reopenedStorage = new AgentStorage(storagePath, logger);
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    registry: reopenedStorage,
+    resolvePaseoToolPolicy: () => providerPolicy,
+    logger,
+  });
+  try {
+    expect((await reopenedStorage.get(agentId))?.paseoToolPolicy).toEqual({
+      disabledTools: ["list_agents", "create_agent"],
+    });
+
+    await ensureAgentLoaded(agentId, {
+      agentManager: manager,
+      agentStorage: reopenedStorage,
+      logger,
+    });
+    expect(manager.getPaseoToolPolicy(agentId)).toEqual({
+      disabledTools: ["list_agents", "create_agent"],
+    });
+
+    providerPolicy = { disabledTools: ["kill_agent"] };
+    await manager.reloadAgentSession(agentId);
+    expect(manager.getPaseoToolPolicy(agentId)).toEqual({
+      disabledTools: ["kill_agent", "list_agents", "create_agent"],
+    });
+    await manager.flush();
+    await reopenedStorage.flush();
+    expect((await reopenedStorage.get(agentId))?.paseoToolPolicy).toEqual({
+      disabledTools: ["list_agents", "create_agent"],
+    });
+  } finally {
+    await manager.closeAgent(agentId).catch(() => undefined);
+    await manager.flush().catch(() => undefined);
+    await reopenedStorage.flush().catch(() => undefined);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("an agent record without a stored Paseo tool policy follows the provider policy", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-legacy-tool-policy-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const agentId = "00000000-0000-4000-8000-000000000f22";
+  const legacyRecord = storedAgentRecordFixture(workdir, { id: agentId });
+  expect(legacyRecord.paseoToolPolicy).toBeUndefined();
+  await storage.upsert(legacyRecord);
+  let providerPolicy = { disabledTools: ["list_agents"] };
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    pluginLifecycle: agentCreateHooksDisabling({ disabledTools: ["create_agent"] }),
+    registry: storage,
+    resolvePaseoToolPolicy: () => providerPolicy,
+    logger,
+  });
+  try {
+    await ensureAgentLoaded(agentId, { agentManager: manager, agentStorage: storage, logger });
+    expect(manager.getPaseoToolPolicy(agentId)).toEqual({ disabledTools: ["list_agents"] });
+
+    providerPolicy = { disabledTools: ["kill_agent"] };
+    await manager.reloadAgentSession(agentId);
+    expect(manager.getPaseoToolPolicy(agentId)).toEqual({ disabledTools: ["kill_agent"] });
+    await manager.flush();
+    await storage.flush();
+    expect((await storage.get(agentId))?.paseoToolPolicy).toBeUndefined();
+  } finally {
+    await manager.closeAgent(agentId).catch(() => undefined);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("re-creating a stored agent keeps the Paseo tools its record disabled", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-recreate-tool-policy-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const agentId = "00000000-0000-4000-8000-000000000f23";
+  await storage.upsert(
+    storedAgentRecordFixture(workdir, {
+      id: agentId,
+      persistence: null,
+      paseoToolPolicy: { disabledTools: ["create_agent"] },
+    }),
+  );
+  const hooks = new PluginHookHandlers(() => {});
+  hooks.before("agent.create", () => undefined);
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    pluginLifecycle: pluginLifecycleFromHandlers(hooks).lifecycle,
+    registry: storage,
+    logger,
+  });
+  try {
+    await ensureAgentLoaded(agentId, { agentManager: manager, agentStorage: storage, logger });
+    expect(manager.getPaseoToolPolicy(agentId)).toEqual({ disabledTools: ["create_agent"] });
+  } finally {
+    await manager.closeAgent(agentId).catch(() => undefined);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("a new agent opened on a stored provider session keeps the Paseo tools that session's agent disabled", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-handle-tool-policy-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  await storage.upsert(
+    storedAgentRecordFixture(workdir, {
+      id: "00000000-0000-4000-8000-000000000f24",
+      persistence: { provider: "codex", sessionId: "shared-session" },
+      paseoToolPolicy: { disabledTools: ["create_agent"] },
+    }),
+  );
+  const session = new TestAgentSession({ provider: "codex", cwd: workdir });
+
+  class ImportClient extends TestAgentClient {
+    async importSession(input: ImportProviderSessionInput) {
+      return {
+        session,
+        config: { provider: "codex" as const, cwd: workdir },
+        persistence: { provider: "codex" as const, sessionId: input.providerHandleId },
+        timeline: [],
+      };
+    }
+  }
+
+  const manager = new AgentManager({
+    clients: { codex: new ImportClient() },
+    registry: storage,
+    resolvePaseoToolPolicy: () => ({ disabledTools: ["list_agents"] }),
+    logger,
+  });
+  const opened: string[] = [];
+  try {
+    const resumed = await manager.resumeAgentFromPersistence(
+      { provider: "codex", sessionId: "shared-session" },
+      { cwd: workdir },
+    );
+    opened.push(resumed.id);
+    expect(manager.getPaseoToolPolicy(resumed.id)).toEqual({
+      disabledTools: ["list_agents", "create_agent"],
+    });
+
+    const imported = await manager.importProviderSession({
+      provider: "codex",
+      providerHandleId: "shared-session",
+      cwd: workdir,
+      workspaceId: "ws-imported",
+    });
+    opened.push(imported.id);
+    expect(manager.getPaseoToolPolicy(imported.id)).toEqual({
+      disabledTools: ["list_agents", "create_agent"],
+    });
+  } finally {
+    for (const id of opened) await manager.closeAgent(id).catch(() => undefined);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("MCP callers that are not loaded get the Paseo tool policy stored for them", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-caller-tool-policy-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const storedId = "00000000-0000-4000-8000-000000000f25";
+  const legacyId = "00000000-0000-4000-8000-000000000f26";
+  await storage.upsert(
+    storedAgentRecordFixture(workdir, {
+      id: storedId,
+      paseoToolPolicy: { disabledTools: ["create_agent"] },
+    }),
+  );
+  await storage.upsert(storedAgentRecordFixture(workdir, { id: legacyId }));
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    registry: storage,
+    resolvePaseoToolPolicy: () => ({ disabledTools: ["list_agents"] }),
+    logger,
+  });
+  try {
+    expect(await manager.resolveCallerPaseoToolPolicy(storedId)).toEqual({
+      disabledTools: ["list_agents", "create_agent"],
+    });
+    expect(await manager.resolveCallerPaseoToolPolicy(legacyId)).toEqual({
+      disabledTools: ["list_agents"],
+    });
+    expect(
+      await manager.resolveCallerPaseoToolPolicy("00000000-0000-4000-8000-000000000fff"),
+    ).toBeUndefined();
+  } finally {
     rmSync(workdir, { recursive: true, force: true });
   }
 });

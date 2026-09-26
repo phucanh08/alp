@@ -299,6 +299,40 @@ describe("AgentStorage", () => {
     expect(recordAfterSnapshot?.archivedAt).toBe(archivedAt);
   });
 
+  test("applySnapshot stores the agent's Paseo tool policy and never loosens it", async () => {
+    const agentId = "agent-tool-policy";
+    await storage.applySnapshot({
+      ...createManagedAgent({ id: agentId }),
+      paseoToolPolicy: { disabledTools: ["create_agent"] },
+    });
+    await storage.flush();
+    const reopened = new AgentStorage(storagePath, logger);
+    expect((await reopened.get(agentId))?.paseoToolPolicy).toEqual({
+      disabledTools: ["create_agent"],
+    });
+
+    await storage.applySnapshot(createManagedAgent({ id: agentId }));
+    expect((await storage.get(agentId))?.paseoToolPolicy).toEqual({
+      disabledTools: ["create_agent"],
+    });
+
+    await storage.applySnapshot({
+      ...createManagedAgent({ id: agentId }),
+      paseoToolPolicy: { enabled: true, disabledTools: ["list_agents"] },
+    });
+    expect((await storage.get(agentId))?.paseoToolPolicy).toEqual({
+      disabledTools: ["create_agent", "list_agents"],
+    });
+  });
+
+  test("applySnapshot leaves the Paseo tool policy absent for agents that have none", async () => {
+    const agentId = "agent-without-tool-policy";
+    await storage.applySnapshot(createManagedAgent({ id: agentId }));
+    const record = await storage.get(agentId);
+    expect(record).not.toBeNull();
+    expect(record && "paseoToolPolicy" in record).toBe(false);
+  });
+
   test("stores titles independently of snapshots", async () => {
     await storage.applySnapshot(
       createManagedAgent({

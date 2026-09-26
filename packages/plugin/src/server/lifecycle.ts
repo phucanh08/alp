@@ -6,6 +6,7 @@ import type {
 } from "@getpaseo/protocol/agent-types";
 import type { PaseoApi } from "@getpaseo/client";
 import type { WorkspaceCreateRequest } from "@getpaseo/protocol/messages";
+import type { ProviderPaseoToolsPolicy } from "@getpaseo/protocol/provider-config";
 
 export interface PluginHookContext {
   paseo: PaseoApi;
@@ -75,6 +76,13 @@ export interface PluginBeforeRequests {
      * `paseo.parent-agent-id`: setting or removing it here has no effect.
      */
     labels?: Record<string, string>;
+    /**
+     * Paseo tools to turn off for this agent only, on top of the provider's `paseoTools` policy.
+     * Cuts only add up: a tool disabled by the provider or by an earlier hook stays disabled, and
+     * `enabled: true` does not undo an `enabled: false`. Omit to keep what you received. The
+     * result is frozen into the agent record at creation; resume and reload do not run hooks.
+     */
+    paseoTools?: ProviderPaseoToolsPolicy;
   };
   "agent.session_open": PluginSessionOpenRequest;
   "workspace.create": Omit<WorkspaceCreateRequest, "type" | "requestId">;
