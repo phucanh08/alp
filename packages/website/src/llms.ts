@@ -13,7 +13,7 @@ A self-hosted daemon manages agent lifecycle, exposes a WebSocket API, and ships
 
 alp supports every major coding agent: Claude Code, Codex, GitHub Copilot, OpenCode, Cursor, Gemini, Cline, Goose, Amp, Aider, and 30+ others. Each agent runs as its own process; alp handles I/O, persistence, git worktree isolation, schedules, and skills.
 
-Distribution: native apps for Mac, Windows, Linux, iOS, and Android; web app; Homebrew; npm. Source: Apache-2.0 at https://github.com/phucanh08/alp. Marketing site: https://alp.anhlp.com.
+Distribution: desktop apps for Mac, Windows, and Linux from GitHub Releases; web app. iOS, Android, Homebrew, and npm installs are not yet available for alp. Source: Apache-2.0 at https://github.com/phucanh08/alp. Marketing site: https://alp.anhlp.com.
 `;
 
 function docLine(doc: Doc): string {
@@ -47,7 +47,7 @@ ${agents}
 ## Optional
 
 - [Changelog](${SITE_URL}/changelog): Release notes for the alp daemon, CLI, desktop, and mobile apps.
-- [Download](${SITE_URL}/download): Install alp on Mac, Windows, Linux, iOS, Android, or run the web app.
+- [Download](${SITE_URL}/download): Install alp on Mac, Windows, or Linux, or run the web app.
 - [alp Hub](${SITE_URL}/hub): Connect daemons and run GitHub, Slack, Discord, and Linear workflows through the hosted service or your own deployment.
 - [Blog](${SITE_URL}/blog): Updates and technical posts from the alp team.
 - [GitHub](https://github.com/phucanh08/alp): Source code, issues, and releases.
