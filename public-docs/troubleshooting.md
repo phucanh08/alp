@@ -27,8 +27,8 @@ Open **Settings → your host → Providers**, tap the provider, then tap **Diag
 From a terminal or agent, request the same diagnostic from the affected daemon:
 
 ```bash
-paseo provider diagnostic <provider>
-paseo --host <host:port> provider diagnostic <provider> --json
+alp provider diagnostic <provider>
+alp --host <host:port> provider diagnostic <provider> --json
 ```
 
 Use the global `--host` option when the affected daemon is not the CLI's default local daemon.
@@ -37,7 +37,7 @@ Use the global `--host` option when the affected daemon is not the CLI's default
 
 ### Fix it
 
-The durable fix is to make sure the command is on `PATH` for a normal login shell, then restart alp, see [why alp's environment can differ](#why-paseos-environment-can-differ-from-your-terminal) for why that's the test that matters.
+The durable fix is to make sure the command is on `PATH` for a normal login shell, then restart alp, see [why alp's environment can differ](#why-alps-environment-can-differ-from-your-terminal) for why that's the test that matters.
 
 If you'd rather pin it directly, set the binary path in `$PASEO_HOME/config.json` (`~/.alp/config.json` by default):
 
@@ -63,7 +63,7 @@ The same mismatch shows up anywhere alp runs your tools, an agent, or a terminal
 
 When you open the **desktop app** from the Dock or Finder, the OS hands it a stripped-down environment, not your terminal's `PATH`. To compensate, alp runs your login shell once at startup (`$SHELL -i -l -c`), captures its environment, and hands that to the daemon and everything it spawns. The rule of thumb: **if a brand-new terminal can run the command, alp should too.** That's also the test, open a fresh terminal and try it there.
 
-When you start the daemon yourself from a terminal (`paseo`), there's no login-shell step, it simply inherits that terminal's environment.
+When you start the daemon yourself from a terminal (`alp`), there's no login-shell step, it simply inherits that terminal's environment.
 
 Either way, the fix for a missing tool lives in your shell config (`.zshrc`, `.zprofile`, …), not in alp. Tools installed through version managers (asdf, mise, nvm, …) are the usual offenders, make sure they initialize for a clean login shell, not only inside one you've already opened.
 
@@ -87,16 +87,16 @@ Desktop app log location:
 Reload the file after editing:
 
 ```bash
-paseo reload
+alp reload
 ```
 
 alp applies runtime-safe settings and names any paths that require a restart. Invalid JSON or a schema error applies nothing; fix the reported error and run the command again. If a launch environment variable or flag owns a changed setting, reload reports it separately.
 
-Run `paseo daemon restart` only when reload requests it. In the app, open **Settings → your host → Overview** and use **Restart daemon**. Running agents keep going, and clients reconnect automatically.
+Run `alp daemon restart` only when reload requests it. In the app, open **Settings → your host → Overview** and use **Restart daemon**. Running agents keep going, and clients reconnect automatically.
 
 ## Still stuck?
 
 - [Custom providers](/docs/custom-providers) — endpoints, profiles, binaries, ACP agents.
 - [Configuration](/docs/configuration) — `config.json`, environment variables, logging.
-- [How alp resolves your login shell](https://github.com/getpaseo/paseo/blob/main/packages/desktop/src/login-shell-env.ts) — the exact code that loads your shell environment.
-- [Report an issue](https://github.com/getpaseo/paseo/issues).
+- [How alp resolves your login shell](https://github.com/phucanh08/alp/blob/main/packages/desktop/src/login-shell-env.ts) — the exact code that loads your shell environment.
+- [Report an issue](https://github.com/phucanh08/alp/issues).

@@ -51,15 +51,15 @@ The workspace is the product concept; a git worktree is one way to isolate its f
 You can create a workspace in the app or from the CLI:
 
 ```bash
-paseo workspace create --isolation local --path ~/dev/my-app --title main
-paseo workspace create --isolation worktree --path ~/dev/my-app --base origin/main
+alp workspace create --isolation local --path ~/dev/my-app --title main
+alp workspace create --isolation worktree --path ~/dev/my-app --base origin/main
 ```
 
 You can also create a workspace without starting an agent right away. The workspace is still there with its working directory ready; you can open terminals, run services, or browse files, then start an agent later.
 
 Either way, once the workspace exists you can add more sessions to it. Open a terminal alongside an agent, start a second agent to review changes, or open a browser tab to check a local service. Every session lives as a tab inside the same workspace.
 
-Creating an agent and creating a workspace are separate actions. Pass a workspace ID when you want an agent in a specific existing workspace. A bare `paseo run` from a human shell creates a new local workspace; when one agent runs it, alp recognizes the caller and creates a subagent in the caller's workspace.
+Creating an agent and creating a workspace are separate actions. Pass a workspace ID when you want an agent in a specific existing workspace. A bare `alp run` from a human shell creates a new local workspace; when one agent runs it, alp recognizes the caller and creates a subagent in the caller's workspace.
 
 ## Worktrees
 

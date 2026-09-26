@@ -23,14 +23,14 @@ The web app ships inside the daemon package, so the UI you serve always matches 
 The bundled web UI is off by default. Save the setting, then start the daemon:
 
 ```bash
-paseo daemon config set features.webUi.enabled true
-paseo daemon start
+alp daemon config set features.webUi.enabled true
+alp daemon start
 ```
 
 Or run a foreground deployment with an environment variable:
 
 ```bash
-PASEO_WEB_UI_ENABLED=true paseo daemon run
+PASEO_WEB_UI_ENABLED=true alp daemon run
 ```
 
 Or persist it in `config.json` so it survives restarts:
@@ -74,8 +74,8 @@ The rest of this page builds from local to public. **Verify a direct connection 
 By default the daemon listens on `127.0.0.1:6767`, reachable only from the same machine. To reach it from other devices, bind it to a network interface:
 
 ```bash
-paseo daemon config set daemon.listen 0.0.0.0:6767
-paseo daemon start
+alp daemon config set daemon.listen 0.0.0.0:6767
+alp daemon start
 ```
 
 > **Anyone who can reach the listening address can use your agents.** Before you bind beyond localhost, set a password and review your host allowlist. The relay pairing path avoids this entirely by keeping the daemon bound to localhost, see [Security](/docs/security).
@@ -85,7 +85,7 @@ Two things to configure when you expose the daemon directly:
 1. **Set a password** so only authorized clients can connect:
 
    ```bash
-   paseo daemon set-password
+   alp daemon set-password
    ```
 
    See [password authentication](/docs/configuration#password-authentication) for the persistent setup. Password auth controls access; it does not encrypt traffic, put TLS in front of it (below) on any untrusted network.
@@ -93,7 +93,7 @@ Two things to configure when you expose the daemon directly:
 2. **Allow your hostname** so the daemon's DNS-rebinding protection accepts requests for your domain:
 
    ```bash
-   paseo daemon config set daemon.hostnames '[".example.com"]'
+   alp daemon config set daemon.hostnames '[".example.com"]'
    ```
 
    See [DNS rebinding protection](/docs/security#dns-rebinding-protection) for how the host allowlist works.
@@ -122,10 +122,10 @@ map $http_upgrade $connection_upgrade {
 
 server {
   listen 443 ssl;
-  server_name paseo.example.com;
+  server_name alp.example.com;
 
-  ssl_certificate     /etc/letsencrypt/live/paseo.example.com/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/live/paseo.example.com/privkey.pem;
+  ssl_certificate     /etc/letsencrypt/live/alp.example.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/alp.example.com/privkey.pem;
 
   client_max_body_size 100m;
 
@@ -155,7 +155,7 @@ server {
 Caddy handles TLS, the WebSocket upgrade, header forwarding, and streaming for you:
 
 ```caddy
-paseo.example.com {
+alp.example.com {
   reverse_proxy 127.0.0.1:6767
 }
 ```
@@ -181,7 +181,7 @@ If your proxy reaches the daemon from another address, as in some Docker, LAN, o
 `PASEO_TRUSTED_PROXIES` accepts the same comma-separated values:
 
 ```bash
-PASEO_TRUSTED_PROXIES=loopback,172.16.0.0/12 PASEO_WEB_UI_ENABLED=true paseo daemon run
+PASEO_TRUSTED_PROXIES=loopback,172.16.0.0/12 PASEO_WEB_UI_ENABLED=true alp daemon run
 ```
 
 Only use `trustedProxies: true` when your final trusted proxy overwrites client-supplied `X-Forwarded-*` headers. Otherwise a client could spoof forwarded header values.
@@ -219,11 +219,11 @@ Self-hosting the web UI puts you in charge of who can reach the daemon. The esse
 - **Keep the daemon on localhost when you can** and let a reverse proxy or tunnel be the only exposed surface.
 - **Review your host allowlist** when serving on a custom domain.
 
-For the full threat model, relay encryption, and DNS-rebinding details, see [Security](/docs/security) and [SECURITY.md](https://github.com/getpaseo/paseo/blob/main/SECURITY.md).
+For the full threat model, relay encryption, and DNS-rebinding details, see [Security](/docs/security) and [SECURITY.md](https://github.com/phucanh08/alp/blob/main/SECURITY.md).
 
 ## Troubleshooting
 
-- **Blank page or 404 at `/`.** The web UI isn't enabled. Start the daemon with `--web-ui` and confirm with `paseo daemon status` that it's the daemon you're hitting.
+- **Blank page or 404 at `/`.** The web UI isn't enabled. Start the daemon with `--web-ui` and confirm with `alp daemon status` that it's the daemon you're hitting.
 - **Page loads but never connects.** The proxy isn't forwarding the WebSocket upgrade, or it's stripping the `Host` header. Check the upgrade headers in your proxy config.
 - **Connects, then output freezes.** Response buffering is on, or read timeouts are too short. Disable buffering and raise the timeouts.
 - **"Mixed content" / connection blocked over HTTPS.** The app fell back to `ws://`. Either the proxy isn't sending `X-Forwarded-Proto: https`, or the daemon doesn't trust the proxy address. Forward the header and configure `daemon.trustedProxies` if the proxy is not loopback.
@@ -234,5 +234,5 @@ For the full threat model, relay encryption, and DNS-rebinding details, see [Sec
 
 - [Security](/docs/security), connection methods, relay encryption, password auth, host allowlist.
 - [Configuration](/docs/configuration), `config.json`, environment variables, and CLI overrides.
-- [CLI](/docs/cli), the `paseo daemon` commands.
+- [CLI](/docs/cli), the `alp daemon` commands.
 - [Community projects](/docs/community), community-built self-hosting tooling.

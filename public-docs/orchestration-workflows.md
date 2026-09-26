@@ -53,7 +53,7 @@ Agents can prompt each other by **agent ID**, the identifier alp uses to address
 
 The receiving agent gets the prompt in its existing conversation. To have it send a separate message back, give it the sender's agent ID too.
 
-Underneath, the agent calls `send_agent_prompt` with the recipient's `agentId` and a `prompt`. Agents can also discover IDs with `list_agents`; the CLI uses [`paseo send <id>`](/docs/cli#sending-messages). For another host, use the [remote CLI workflow](#work-on-another-machine).
+Underneath, the agent calls `send_agent_prompt` with the recipient's `agentId` and a `prompt`. Agents can also discover IDs with `list_agents`; the CLI uses [`alp send <id>`](/docs/cli#sending-messages). For another host, use the [remote CLI workflow](#work-on-another-machine).
 
 ## Check, redirect, or continue work
 
@@ -98,6 +98,6 @@ Open the **Subagents track** near the composer to inspect delegated work.
 | Conversation | Full agent session you can talk to             | Read-only timeline                             |
 | Controls     | Follow up, change settings, archive, or detach | Lifecycle managed by the provider              |
 
-An alp subagent in another workspace still belongs to its parent's track. It also opens as a tab in its own workspace. To make it a top-level agent, detach it in the app or with [`paseo agent detach`](/docs/cli#agent-modes).
+An alp subagent in another workspace still belongs to its parent's track. It also opens as a tab in its own workspace. To make it a top-level agent, detach it in the app or with [`alp agent detach`](/docs/cli#agent-modes).
 
 See the [MCP reference](/docs/mcp#mental-model) for workspace and parentage rules.

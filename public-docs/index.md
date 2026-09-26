@@ -12,7 +12,7 @@ alp runs your coding agents on your machine and gives you a mobile, desktop, web
 
 ## Desktop app (recommended)
 
-Download from [alp.anhlp.com/download](https://alp.anhlp.com/download) or the [GitHub releases page](https://github.com/getpaseo/paseo/releases). Open it and you're done.
+Download from [alp.anhlp.com/download](https://alp.anhlp.com/download) or the [GitHub releases page](https://github.com/phucanh08/alp/releases). Open it and you're done.
 
 The desktop app bundles its own daemon and starts it automatically, no separate install required. On first launch you'll see a brief startup screen, then connect from your phone using **Settings → your host → Pair Device**.
 
@@ -39,14 +39,17 @@ alp checks sandbox availability each time it launches. AppImage and extracted ta
 
 ## Server / CLI
 
-For headless machines, dev boxes, or any setup where you want the daemon running without the desktop UI:
+For headless machines, dev boxes, or any setup where you want the daemon running without the desktop UI: a standalone CLI package isn't published for alp yet. Run it from a repo checkout instead:
 
 ```bash
-npm install -g @getpaseo/cli
-paseo
+git clone https://github.com/phucanh08/alp.git
+cd alp
+npm install
+npm run build
+npm run cli -- daemon start
 ```
 
-alp starts the daemon locally, then asks whether to enable the end-to-end encrypted relay and print a pairing QR code. If you decline, enter the daemon address manually over TCP, Tailscale, or another VPN.
+The daemon starts locally, then asks whether to enable the end-to-end encrypted relay and print a pairing QR code. If you decline, enter the daemon address manually over TCP, Tailscale, or another VPN.
 
 The daemon can also serve the browser web app itself, so you can use the full UI without the hosted app. See [Self-hosting the web UI](/docs/web-ui).
 
@@ -54,15 +57,15 @@ Configuration and local state live under `PASEO_HOME` (defaults to `~/.alp`).
 
 ## Docker
 
-For servers, dev boxes, NAS devices, or homelab hosts, run the official image:
+For servers, dev boxes, NAS devices, or homelab hosts: alp doesn't publish a prebuilt image yet. Build one from [`docker/`](https://github.com/phucanh08/alp/tree/main/docker) in the repo, tag it `alp:latest`, then run it:
 
 ```bash
-docker run -d --name paseo \
+docker run -d --name alp \
   -p 6767:6767 \
   -e PASEO_PASSWORD=change-me \
-  -v "$PWD/paseo-home:/home/paseo" \
+  -v "$PWD/alp-home:/home/paseo" \
   -v "$PWD:/workspace" \
-  ghcr.io/getpaseo/paseo:latest
+  alp:latest
 ```
 
 Then open `http://localhost:6767`.
@@ -79,8 +82,8 @@ The image runs the daemon and serves the bundled web UI. It does not bundle agen
 - [Plugins](/docs/plugins), add trusted local surfaces, sidebar actions, daemon behavior, and composer attachments.
 - [CLI reference](/docs/cli), every command.
 - [Self-hosting the web UI](/docs/web-ui), serve the browser app from your own daemon.
-- [GitHub repo](https://github.com/getpaseo/paseo)
-- [Report an issue](https://github.com/getpaseo/paseo/issues)
+- [GitHub repo](https://github.com/phucanh08/alp)
+- [Report an issue](https://github.com/phucanh08/alp/issues)
 
 ## Prerequisites
 

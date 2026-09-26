@@ -46,9 +46,9 @@ See the [MCP reference](/docs/mcp) for tool configuration and the full catalog. 
 Agents with shell access can also use the alp CLI. This route does not require enabling tool injection. With alp installed, a running host, and Codex configured:
 
 ```bash
-paseo run --provider codex --background \
+alp run --provider codex --background \
   "Review this branch without changing files"
-paseo ls -a
+alp ls -a
 ```
 
 The first command starts a worker and returns immediately; the second lists agents from active workspaces, including archived agents. When an alp agent runs the command, the worker becomes its subagent in the same workspace. From your own terminal, it starts in a new local workspace.

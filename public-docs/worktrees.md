@@ -30,7 +30,7 @@ With a custom root, alp keeps the same hashed layout under that directory:
 ```json
 {
   "worktrees": {
-    "root": "/mnt/fast/paseo-worktrees"
+    "root": "/mnt/fast/alp-worktrees"
   }
 }
 ```
@@ -47,7 +47,7 @@ The examples below use the current directory as the source checkout. Pass `--pat
 Branch off from a base branch:
 
 ```bash
-paseo workspace create \
+alp workspace create \
   --isolation worktree \
   --mode branch-off \
   --new-branch feature/auth \
@@ -60,7 +60,7 @@ Use `origin/main` rather than `main`. alp fetches remote refs in the background,
 Check out an existing branch:
 
 ```bash
-paseo workspace create \
+alp workspace create \
   --isolation worktree \
   --mode checkout-branch \
   --branch feature/existing \
@@ -70,7 +70,7 @@ paseo workspace create \
 Or open a pull request in its own workspace:
 
 ```bash
-paseo workspace create \
+alp workspace create \
   --isolation worktree \
   --mode checkout-pr \
   --pr-number 2186
@@ -116,7 +116,7 @@ Commands run with the worktree as `cwd`. Use `$PASEO_SOURCE_CHECKOUT_PATH` to re
 
 `scripts` are named commands you can run inside a worktree on demand. Mark one as a _service_ and alp supervises it as a long-running process, assigns it a port, and routes HTTP traffic to it through the daemon's reverse proxy.
 
-Run them from the app, or manage them from automation with [`paseo script`](/docs/cli#workspace-scripts) and the [workspace-script MCP tools](/docs/mcp#workspace-scripts).
+Run them from the app, or manage them from automation with [`alp script`](/docs/cli#workspace-scripts) and the [workspace-script MCP tools](/docs/mcp#workspace-scripts).
 
 ### Plain scripts
 
@@ -255,10 +255,10 @@ Services additionally get:
 ## Manage the workspace
 
 ```bash
-paseo workspace ls
-paseo run --workspace <workspace-id> "implement auth"
-paseo workspace rename <workspace-id> "Auth rework"
-paseo workspace archive <workspace-id>
+alp workspace ls
+alp run --workspace <workspace-id> "implement auth"
+alp workspace rename <workspace-id> "Auth rework"
+alp workspace archive <workspace-id>
 ```
 
-For the common case, `paseo run --new-workspace worktree --worktree-mode branch-off --new-branch feature/auth --base origin/main "implement auth"` creates both the workspace and its first agent.
+For the common case, `alp run --new-workspace worktree --worktree-mode branch-off --new-branch feature/auth --base origin/main "implement auth"` creates both the workspace and its first agent.
