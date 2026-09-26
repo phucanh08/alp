@@ -1,4 +1,13 @@
-import type { Family, Seat } from "./seat";
+import { type Family, PEER_DISABLED_PASEO_TOOLS, type Seat } from "./seat";
+
+/**
+ * Backtick-quoted, comma-joined Paseo tools a Peer loses, read from `PEER_DISABLED_PASEO_TOOLS`
+ * so the Lead's roster prose and the Peer's own block can never list fewer tools than the seat
+ * actually cuts.
+ */
+function peerToolCutList(): string {
+  return PEER_DISABLED_PASEO_TOOLS.map((tool) => `\`${tool}\``).join(", ");
+}
 
 /**
  * Khối SLP-RUNTIME: fact runtime của alp mà definition ghế (`agents/<seat>.md`) không tự biết —
@@ -86,8 +95,7 @@ function lead(family: Family): string {
   \`settings.thinkingOptionId\` = effort, \`title\` = tên peer, brief là \`initialPrompt\`. Nhiều writer →
   mỗi writer một \`create_workspace\` isolation \`worktree\` (workspace do agent tạo không có Lead riêng).
 - Label \`slp.role=peer\` trên provider \`claude\`/\`codex\` → plugin slp khoá Peer lúc tạo: không có
-  \`create_agent\`, \`send_agent_prompt\`, \`kill_agent\`, \`cancel_agent\`, \`archive_agent\`,
-  \`create_schedule\`; ${PEER_LOCK[family]}. Thiếu label hoặc provider khác → agent đó không phải
+  ${peerToolCutList()}; ${PEER_LOCK[family]}. Thiếu label hoặc provider khác → agent đó không phải
   Peer: không definition ghế, không khoá.
 - Chọn model + effort cho từng Peer, không dùng một mức cho mọi việc:
 ${PEER_MODEL_RULE[family]}
@@ -106,13 +114,20 @@ ${PEER_MODEL_RULE[family]}
   phiên sau thì nó tự nhắn bạn.`;
 }
 
-const PEER = `${COMMON}
-- Ghế Peer của bạn không có tool spawn, nhắn, dừng hay lưu trữ agent khác (\`create_agent\`,
-  \`send_agent_prompt\`, \`kill_agent\`, \`cancel_agent\`, \`archive_agent\`, \`create_schedule\`). Việc
-  ngoài brief → \`BLOCKED\`, không tự nhận.
+/**
+ * A function, not a module-level constant: `seat.ts` imports `runtimeBlock` from this file, so this
+ * file importing `PEER_DISABLED_PASEO_TOOLS` from `seat.ts` makes the two modules circular. Reading
+ * the array only when this runs — after both modules finish loading — avoids depending on which one
+ * a caller imports first.
+ */
+function peer(): string {
+  return `${COMMON}
+- Ghế Peer của bạn không có tool spawn, nhắn, dừng, lưu trữ, sửa cấu hình, hay trả lời permission của
+  agent khác (${peerToolCutList()}). Việc ngoài brief → \`BLOCKED\`, không tự nhận.
 - Kênh duy nhất về Lead là câu trả lời cuối lượt: khi lượt kết thúc, Lead nhận finish notification
   kèm tin cuối của bạn, cắt ở 4000 ký tự. Handoff 6 ô là tin cuối đó, đặt ở đầu tin, ghi thêm dòng
   \`Runtime: alp\`.`;
+}
 
 const SUPERVISOR = `${COMMON}
 - **Chỗ bạn đứng**: cwd là workspace hệ thống \`SLP Supervisor\` ở \`$PASEO_HOME/supervisor\` (mặc định
@@ -140,7 +155,7 @@ export function runtimeBlock(seat: Seat, family: Family): string {
     case "lead":
       return lead(family);
     case "peer":
-      return PEER;
+      return peer();
     case "supervisor":
       return SUPERVISOR;
   }
