@@ -29,7 +29,6 @@ function DocsLayout() {
         <div className="flex items-center justify-between p-4">
           <Link to="/" className="flex items-center gap-3">
             <img src="/logo.svg" alt="alp" className="w-6 h-6" />
-            <span className="text-lg font-medium">alp</span>
           </Link>
           <button
             type="button"
@@ -53,7 +52,6 @@ function DocsLayout() {
         <aside className="hidden lg:block sticky top-0 h-screen w-60 shrink-0 border-r border-border p-6 overflow-y-auto">
           <Link to="/" className="flex items-center gap-3 mb-8">
             <img src="/logo.svg" alt="alp" className="w-6 h-6" />
-            <span className="text-lg font-medium">alp</span>
           </Link>
           <DocsNav nodes={tree} />
         </aside>
