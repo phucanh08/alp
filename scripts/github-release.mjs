@@ -9,6 +9,10 @@ function isNotFoundError(error) {
   return String(error?.stderr ?? "").includes("HTTP 404");
 }
 
+export function getReleaseTitle(tag) {
+  return `alp ${tag}`;
+}
+
 export function getGitHubRelease(repo, tag, execFileSync = nodeExecFileSync) {
   try {
     return parseJson(
@@ -21,7 +25,7 @@ export function getGitHubRelease(repo, tag, execFileSync = nodeExecFileSync) {
     if (!isNotFoundError(error)) {
       throw error;
     }
-    const expectedName = `Paseo ${tag}`;
+    const expectedName = getReleaseTitle(tag);
     const output = execFileSync(
       "gh",
       [
@@ -81,7 +85,7 @@ if (isMainModule(import.meta.url)) {
     process.exitCode = 1;
   } else {
     if (cleanupDuplicates && release.draft === true) {
-      const expectedName = `Paseo ${tag}`;
+      const expectedName = getReleaseTitle(tag);
       const duplicateIds = nodeExecFileSync(
         "gh",
         [
