@@ -21,7 +21,7 @@ These are the canonical reference endpoints for the hosted alp Hub. A self-hoste
 
 ## Authentication
 
-Run `paseo hub login [origin]` for interactive CLI access. After browser approval, alp stores a durable, revocable organization credential under `PASEO_HOME` for that exact origin. Without an explicit origin, the CLI uses `PASEO_HUB_URL`, then the active stored login, then `https://hub-alp.anhlp.com`.
+Run `alp hub login [origin]` for interactive CLI access. After browser approval, alp stores a durable, revocable organization credential under `PASEO_HOME` for that exact origin. Without an explicit origin, the CLI uses `PASEO_HUB_URL`, then the active stored login, then `https://hub-alp.anhlp.com`.
 
 For automation, create an organization API key from the Hub dashboard under **API keys**. Both credential types are bearer tokens:
 
@@ -48,7 +48,7 @@ Each key has one or more selectable scopes:
 API keys do not grant dashboard access. They cannot manage connections,
 projects, or organization members.
 
-CLI credentials have the current CLI operation scopes and remain revocable independently of daemon relationships. `paseo hub logout` deletes the active local CLI credential; it does not revoke or disconnect the daemon identity.
+CLI credentials have the current CLI operation scopes and remain revocable independently of daemon relationships. `alp hub logout` deletes the active local CLI credential; it does not revoke or disconnect the daemon identity.
 
 API failures use RFC 9457 problem details. Missing, invalid, or revoked credentials return `401` with `application/problem+json`:
 
@@ -67,7 +67,7 @@ A valid key without the scope required by an endpoint returns `403` in the same 
 
 ## Trigger validation and installation
 
-`paseo hub deploy --dry-run` validates each `.paseo/triggers/*.yml` file through `POST /api/v1/triggers/validate`. `paseo hub deploy` validates all files first, then installs each through `POST /api/v1/triggers/install`.
+`alp hub deploy --dry-run` validates each `.paseo/triggers/*.yml` file through `POST /api/v1/triggers/validate`. `alp hub deploy` validates all files first, then installs each through `POST /api/v1/triggers/install`.
 
 Both endpoints accept one self-contained document:
 
@@ -95,7 +95,7 @@ Invalid YAML or an unknown organization resource returns `422` with field issues
 
 ## Project list
 
-`GET /api/v1/projects` returns active projects in the bearer credential's organization. `paseo hub projects` renders the projects as a table. With `--json`, it returns `{ "origin": "...", "projects": [...] }` so even an empty result records the resolved Hub.
+`GET /api/v1/projects` returns active projects in the bearer credential's organization. `alp hub projects` renders the projects as a table. With `--json`, it returns `{ "origin": "...", "projects": [...] }` so even an empty result records the resolved Hub.
 
 ```json
 {
@@ -122,7 +122,7 @@ On success, Hub returns `200`:
 }
 ```
 
-`paseo hub deploy --project <slug> --dry-run` calls this endpoint with the identical locally resolved payload that a deployment would send.
+`alp hub deploy --project <slug> --dry-run` calls this endpoint with the identical locally resolved payload that a deployment would send.
 
 ## Legacy configuration install
 
@@ -185,7 +185,7 @@ curl --fail-with-body -sS -X POST "$PASEO_HUB_URL/api/v1/configurations/install"
   --data @configuration-install.json
 ```
 
-`paseo hub deploy -p <project>` selects this legacy endpoint with the discovered local bundle. The command uses an exact-origin stored login when flags and environment credentials are absent. See [Deploy from the CLI](/docs/hub/configuration#deploy-from-the-cli).
+`alp hub deploy -p <project>` selects this legacy endpoint with the discovered local bundle. The command uses an exact-origin stored login when flags and environment credentials are absent. See [Deploy from the CLI](/docs/hub/configuration#deploy-from-the-cli).
 
 ## Manual run dispatch
 
@@ -267,7 +267,7 @@ No request body is required. On success, Hub returns `201`:
 
 The token expires after 10 minutes and is consumed when the daemon enrolls.
 
-`paseo hub connect [origin]` performs this request with `--api-key`, `PASEO_HUB_API_KEY`, or the matching stored login, then passes the one-time token to the daemon's enrollment operation. The daemon generates and keeps its own relationship credential.
+`alp hub connect [origin]` performs this request with `--api-key`, `PASEO_HUB_API_KEY`, or the matching stored login, then passes the one-time token to the daemon's enrollment operation. The daemon generates and keeps its own relationship credential.
 
 ```bash
 curl --fail-with-body -sS -X POST \

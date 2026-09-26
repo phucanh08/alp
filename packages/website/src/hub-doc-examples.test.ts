@@ -43,7 +43,7 @@ describe("Hub public documentation examples", () => {
     expect(markdown).not.toContain(".paseo/partials/");
     expect(markdown).not.toMatch(/^triggers:/mu);
     expect(markdown).not.toMatch(/^\s+uses:/mu);
-    expect(markdown).not.toContain("paseo hub deploy [file]");
+    expect(markdown).not.toContain("alp hub deploy [file]");
   });
 });
 

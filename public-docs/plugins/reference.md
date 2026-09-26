@@ -28,7 +28,7 @@ Plugin code is trusted and unsandboxed. Client surfaces run in the alp app. Back
 
 ## Project files
 
-`paseo plugin init /absolute/path/to/my-plugin` creates:
+`alp plugin init /absolute/path/to/my-plugin` creates:
 
 ```text
 my-plugin/
@@ -74,7 +74,7 @@ Empty strings, invalid ranges, and unknown manifest requirement keys are rejecte
 
 Prerelease alp versions also satisfy a range their stable core (`major.minor.patch`) satisfies, so `0.8.0-beta.1` satisfies `>=0.8.0` but not `<0.8.0`.
 
-`paseo plugin init` writes `>=` followed by the current CLI version and pins the matching SDK
+`alp plugin init` writes `>=` followed by the current CLI version and pins the matching SDK
 for typechecking. Raise the minimum when adopting a newer API. Add an upper bound when a later
 release is incompatible; a minimum alone does not promise protection from future breaking changes.
 
@@ -427,7 +427,7 @@ and directory lookup/import operations are unaffected.
 
 ### Send a follow-up when a turn ends
 
-Copy [server/inspect.ts](https://github.com/getpaseo/paseo/blob/main/plugin-examples/lifecycle-actions/server/inspect.ts)
+Copy [server/inspect.ts](https://github.com/phucanh08/alp/blob/main/plugin-examples/lifecycle-actions/server/inspect.ts)
 into your plugin. The helper imports types from `@getpaseo/protocol/agent-types`; add
 `@getpaseo/protocol` at the same version as your plugin SDK to your development dependencies
 and install them before loading the plugin. `latestOutputText` joins text chunks after the latest user message.
@@ -463,7 +463,7 @@ add limits or delays in your plugin when needed. Attachments and tool effects ar
 
 ### Answer a permission request
 
-Using `shellCommand` from the same [helper file](https://github.com/getpaseo/paseo/blob/main/plugin-examples/lifecycle-actions/server/inspect.ts):
+Using `shellCommand` from the same [helper file](https://github.com/phucanh08/alp/blob/main/plugin-examples/lifecycle-actions/server/inspect.ts):
 
 ```ts
 import type { PluginServerContext } from "@getpaseo/plugin/server";
@@ -660,13 +660,13 @@ saved; environment overrides are not persisted with it.
 
 ### Complete examples
 
-| Plugin                                                                                                 | Includes                                                                     |
-| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| [lifecycle-logger](https://github.com/getpaseo/paseo/tree/main/plugin-examples/lifecycle-logger)       | All eleven hooks; JSON logs with environment values redacted                 |
-| [lifecycle-actions](https://github.com/getpaseo/paseo/tree/main/plugin-examples/lifecycle-actions)     | Follow-ups, permissions, environment, provider switching, worktree selection |
-| [agent-configuration](https://github.com/getpaseo/paseo/tree/main/plugin-examples/agent-configuration) | MCP injection and Codex sandbox/approval options                             |
+| Plugin                                                                                                | Includes                                                                     |
+| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| [lifecycle-logger](https://github.com/phucanh08/alp/tree/main/plugin-examples/lifecycle-logger)       | All eleven hooks; JSON logs with environment values redacted                 |
+| [lifecycle-actions](https://github.com/phucanh08/alp/tree/main/plugin-examples/lifecycle-actions)     | Follow-ups, permissions, environment, provider switching, worktree selection |
+| [agent-configuration](https://github.com/phucanh08/alp/tree/main/plugin-examples/agent-configuration) | MCP injection and Codex sandbox/approval options                             |
 
-Read logger output with `paseo plugin logs lifecycle-logger` or the host's `daemon.log`.
+Read logger output with `alp plugin logs lifecycle-logger` or the host's `daemon.log`.
 
 ## Surfaces and sidebar items
 
@@ -882,7 +882,7 @@ Paste too, but does not register focus with the sheet; the keyboard can cover it
 API is needed for OS Paste. Avoid DOM clipboard code in native plugins and the deprecated
 `Clipboard` export from `react-native`.
 
-The runnable [modal UI example](https://github.com/getpaseo/paseo/tree/main/plugin-examples/modal-ui)
+The runnable [modal UI example](https://github.com/phucanh08/alp/tree/main/plugin-examples/modal-ui)
 contains a padded form, full-width rows, a virtualized list, horizontal tabs, and a copy/paste input.
 
 ### Toasts
@@ -1226,7 +1226,7 @@ versions produce `invalid` without silently resetting the file. Successful migra
 the new version once. These documents are ordinary host-side JSON, not a credential vault.
 Settings RPCs use the existing `daemon.manage` permission for plugin execution.
 
-See the complete [settings example](https://github.com/getpaseo/paseo/tree/main/plugin-examples/settings)
+See the complete [settings example](https://github.com/phucanh08/alp/tree/main/plugin-examples/settings)
 for immediate controls, a draft editor with validation, custom content, and Command Center navigation.
 
 ## Workspace panels
@@ -1435,7 +1435,7 @@ order wins a collision between plugins. Commands do not run while the composer h
 
 ## Header buttons
 
-Try the [button example](https://github.com/getpaseo/paseo/tree/main/plugin-examples/buttons) for
+Try the [button example](https://github.com/phucanh08/alp/tree/main/plugin-examples/buttons) for
 actions, menus, custom icons and content, and visibility updates in both the header and composer.
 It switches one header button between modes; additional actions use a named Tools menu.
 
@@ -1496,7 +1496,7 @@ const pill = client.addComposerPill({
 ```
 
 For pills that follow the agent directory, use an explicit [owned list subscription](/docs/sdk/events#follow-one-agents-status).
-The [local plugin example](https://github.com/getpaseo/paseo/blob/main/plugin-examples/local-plugin/client/main.tsx)
+The [local plugin example](https://github.com/phucanh08/alp/blob/main/plugin-examples/local-plugin/client/main.tsx)
 replaces registrations on each snapshot and aborts the observation during entry cleanup, including pending bootstrap.
 
 ## Button descriptor
@@ -1708,7 +1708,7 @@ You can also release individual subscriptions through the normal SDK API.
 
 Plugins are trusted app code; cross-host access is intentional. Summaries contain no connection
 URLs or credentials, and borrowed APIs provide no connection lifecycle controls. See the
-[host agents example](https://github.com/getpaseo/paseo/tree/main/plugin-examples/hosts).
+[host agents example](https://github.com/phucanh08/alp/tree/main/plugin-examples/hosts).
 
 ## Add plugin-specific backend behavior
 
@@ -1801,9 +1801,9 @@ Open **Settings → Plugins → Logs** for the plugin, or inspect the same recen
 CLI:
 
 ```bash
-paseo plugin logs my-plugin
-paseo plugin logs my-plugin --json
-paseo --host <url> plugin logs my-plugin
+alp plugin logs my-plugin
+alp plugin logs my-plugin --json
+alp --host <url> plugin logs my-plugin
 ```
 
 The command returns a snapshot rather than following live output. Refresh the settings view or run
@@ -1910,16 +1910,16 @@ failures stay inside the plugin error boundary.
 ## Plugin sources
 
 Paste one of these source identifiers into **Settings → Plugins**, or pass it to
-`paseo plugin install`. `paseo plugin add <source>` and `paseo plugin install <source>` are aliases.
+`alp plugin install`. `alp plugin add <source>` and `alp plugin install <source>` are aliases.
 Absolute host paths are recommended because relative paths resolve against the daemon's working
 directory. The app does not expand `~`; your shell may expand it before the CLI runs.
 
 | Source                     | Accepted form                                                              | Example                                       |
 | -------------------------- | -------------------------------------------------------------------------- | --------------------------------------------- |
-| Host directory             | Absolute or relative path on the daemon host                               | `/srv/paseo/plugins/review`                   |
-| GitHub repository          | `github:owner/repository` or `owner/repository`                            | `github:acme/paseo-review`                    |
+| Host directory             | Absolute or relative path on the daemon host                               | `/srv/alp/plugins/review`                     |
+| GitHub repository          | `github:owner/repository` or `owner/repository`                            | `github:acme/alp-review`                      |
 | Git repository             | `git:<URL or SCP source>`; the prefix is optional for URLs and SCP sources | `git:https://git.example.com/acme/review.git` |
-| npm package                | `npm:<name>[@<version, tag, or range>]`; `npm:` is optional                | `npm:@acme/paseo-review@^1.2.0`               |
+| npm package                | `npm:<name>[@<version, tag, or range>]`; `npm:` is optional                | `npm:@acme/alp-review@^1.2.0`                 |
 | Plugin below a source root | Append `:relative/plugin/path` to any source                               | `github:acme/monorepo:plugins/review`         |
 
 Git URLs use `https://`, `http://`, `ssh://`, `git://`, or `file://`. SCP sources use
@@ -1955,15 +1955,15 @@ accepts `--id <runtime-id>` to override it. An existing installation ID is rejec
 its enabled state or files.
 
 ```bash
-paseo plugin install /srv/paseo/plugins/review
-paseo plugin install github:acme/paseo-review
-paseo plugin install git:https://git.example.com:8443/acme/monorepo.git:plugins/review --ref main
-paseo plugin install git@git.example.com:acme/review.git
-paseo plugin install file:///srv/repos/monorepo:plugins/review
-paseo plugin install npm:paseo-review@1.2.0
-paseo plugin install npm:@acme/paseo-review@next
-paseo plugin install 'npm:@acme/paseo-review@>=1.2.0 <2.0.0' --id review-staging
-paseo plugin install npm:@acme/plugins@^1.2.0:plugins/review
+alp plugin install /srv/alp/plugins/review
+alp plugin install github:acme/alp-review
+alp plugin install git:https://git.example.com:8443/acme/monorepo.git:plugins/review --ref main
+alp plugin install git@git.example.com:acme/review.git
+alp plugin install file:///srv/repos/monorepo:plugins/review
+alp plugin install npm:alp-review@1.2.0
+alp plugin install npm:@acme/alp-review@next
+alp plugin install 'npm:@acme/alp-review@>=1.2.0 <2.0.0' --id review-staging
+alp plugin install npm:@acme/plugins@^1.2.0:plugins/review
 ```
 
 `--ref` applies only to Git and accepts a branch, tag, or commit for this installation. Without it,
@@ -1992,23 +1992,23 @@ deletes its managed files; removing a directory plugin keeps your source directo
 ## CLI reference
 
 ```bash
-paseo plugin init /absolute/path/to/plugin
-paseo plugin install /absolute/path/to/plugin
-paseo plugin install /absolute/path/to/plugin --id another-runtime-id
-paseo plugin add owner/repository
-paseo plugin add https://git.example.com/owner/repository.git --ref main
-paseo plugin add owner/monorepo:plugins/review
-paseo plugin ls [id]
-paseo plugin update <id>
-paseo plugin update --all --check
-paseo plugin update --all --yes
-paseo plugin update my-plugin --version 1.2.0
-paseo plugin update my-plugin --ref v2
-paseo plugin reload my-plugin
-paseo plugin logs my-plugin
-paseo plugin disable my-plugin
-paseo plugin enable my-plugin
-paseo plugin remove my-plugin
+alp plugin init /absolute/path/to/plugin
+alp plugin install /absolute/path/to/plugin
+alp plugin install /absolute/path/to/plugin --id another-runtime-id
+alp plugin add owner/repository
+alp plugin add https://git.example.com/owner/repository.git --ref main
+alp plugin add owner/monorepo:plugins/review
+alp plugin ls [id]
+alp plugin update <id>
+alp plugin update --all --check
+alp plugin update --all --yes
+alp plugin update my-plugin --version 1.2.0
+alp plugin update my-plugin --ref v2
+alp plugin reload my-plugin
+alp plugin logs my-plugin
+alp plugin disable my-plugin
+alp plugin enable my-plugin
+alp plugin remove my-plugin
 ```
 
 `ls` and Settings show source identity and the current installed revision without contacting the
@@ -2040,7 +2040,7 @@ Put `--host <url>` before a management command when the target is not the CLI's 
 never deletes a directory source; it deletes managed files for Git and npm sources. The install-time
 `--id` is the runtime ID and allows the same directory or repository to be installed more than once.
 
-> **Trust every plugin you add.** `paseo plugin add` and `paseo plugin install` mean “I trust this codebase.” Server code and preparation commands run unsandboxed with the daemon user's access on the daemon host; client contributions run inside alp. Dependencies and future updates are part of that decision. With the global `--host` option, commands run on the remote daemon host.
+> **Trust every plugin you add.** `alp plugin add` and `alp plugin install` mean “I trust this codebase.” Server code and preparation commands run unsandboxed with the daemon user's access on the daemon host; client contributions run inside alp. Dependencies and future updates are part of that decision. With the global `--host` option, commands run on the remote daemon host.
 
 Most plugins should omit `build`. Use it only when the staged checkout must install a dependency
 that alp does not provide, generate source or assets, or perform another required preparation
@@ -2066,11 +2066,11 @@ Settings; see [Plugin sources](#plugin-sources) for install syntax.
 
 The daemon-wide **Enable plugins** switch lives under **Settings → Plugins**. A configured plugin remains `disabled` until that switch and the plugin's own enabled state are both on.
 
-The switch is the root `pluginsEnabled` field in `config.json`. After changing it, run `paseo reload --json`. Enabling starts every configured plugin whose own `enabled` value is not `false`; disabling tears down all plugins. No daemon restart is required. Manual edits to plugin source entries are not reloaded; use the plugin lifecycle commands for those.
+The switch is the root `pluginsEnabled` field in `config.json`. After changing it, run `alp reload --json`. Enabling starts every configured plugin whose own `enabled` value is not `false`; disabling tears down all plugins. No daemon restart is required. Manual edits to plugin source entries are not reloaded; use the plugin lifecycle commands for those.
 
 ## Load failures
 
-Use `paseo plugin ls` to read the current status and error.
+Use `alp plugin ls` to read the current status and error.
 
 | Symptom                                                               | Check                                                                                                                                   |
 | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
@@ -2082,6 +2082,6 @@ Use `paseo plugin ls` to read the current status and error.
 | Sidebar item is missing                                               | The plugin is `running`, the item references an existing surface, the icon name is valid, and the client is on the installation's host. |
 | Client module is unavailable                                          | Import only the host-provided client modules listed above.                                                                              |
 | RPC rejects                                                           | Check both Zod schemas and the daemon-side handler error.                                                                               |
-| Edited code does not appear                                           | Run `npm run typecheck`, then `paseo plugin reload <id>`.                                                                               |
-| Reload fails                                                          | Read `paseo plugin ls` and `paseo plugin logs <id>`, fix the source error, then reload; alp does not restore the previous bundle.       |
-| Plugin exits unexpectedly                                             | Read `paseo plugin logs <id>` for retained initialization, cleanup, stderr, and final crash output.                                     |
+| Edited code does not appear                                           | Run `npm run typecheck`, then `alp plugin reload <id>`.                                                                                 |
+| Reload fails                                                          | Read `alp plugin ls` and `alp plugin logs <id>`, fix the source error, then reload; alp does not restore the previous bundle.           |
+| Plugin exits unexpectedly                                             | Read `alp plugin logs <id>` for retained initialization, cleanup, stderr, and final crash output.                                       |

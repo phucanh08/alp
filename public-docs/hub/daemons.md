@@ -15,17 +15,17 @@ A daemon is one of your machines running the alp daemon. Enroll it once with you
 Log in from the machine first:
 
 ```sh
-paseo hub login https://hub.example.com
+alp hub login https://hub.example.com
 ```
 
 The CLI prints a URL and a verification code and opens your browser. The approved login is stored under `PASEO_HOME`.
 
-In an interactive terminal, login offers to connect this daemon and separately asks whether to allow Hub automations to run agents. Connection defaults to yes; execution permission defaults to no. It then links to **Triggers** and prints `paseo hub init` for creating a starter trigger as code. `--json` or non-TTY login only logs in. [Quickstart](/docs/hub/quickstart) walks through connection and initialization.
+In an interactive terminal, login offers to connect this daemon and separately asks whether to allow Hub automations to run agents. Connection defaults to yes; execution permission defaults to no. It then links to **Triggers** and prints `alp hub init` for creating a starter trigger as code. `--json` or non-TTY login only logs in. [Quickstart](/docs/hub/quickstart) walks through connection and initialization.
 
 Enroll the daemon on its own when you declined, or when the machine is already logged in:
 
 ```sh
-paseo hub connect
+alp hub connect
 ```
 
 `connect` uses the active login to request a single-use enrollment token. The daemon exchanges it for its own relationship credential; your CLI login is never stored as daemon authority.
@@ -39,7 +39,7 @@ You can rename the slug later without changing the daemon ID. Renaming after a c
 For unattended setup, pass an organization API key without storing it:
 
 ```sh
-PASEO_HUB_URL=https://hub.example.com PASEO_HUB_API_KEY=paseo_pk_... paseo hub connect
+PASEO_HUB_URL=https://hub.example.com PASEO_HUB_API_KEY=paseo_pk_... alp hub connect
 ```
 
 Origin precedence is explicit `[origin]`, `PASEO_HUB_URL`, active stored login, then `https://hub-alp.anhlp.com`. An explicit `--api-key <secret>` takes precedence over the environment and an exact-origin stored login.
@@ -47,22 +47,22 @@ Origin precedence is explicit `[origin]`, `PASEO_HUB_URL`, active stored login, 
 Check and undo:
 
 ```sh
-paseo hub status
-paseo hub disconnect
-paseo hub disconnect --force   # drop local authority when Hub is unreachable
+alp hub status
+alp hub disconnect
+alp hub disconnect --force   # drop local authority when Hub is unreachable
 ```
 
 One daemon has one Hub relationship. Connecting a daemon that already has one is refused.
 
-`paseo hub logout` removes the active CLI login. The daemon's relationship is a separate identity and stays connected.
+`alp hub logout` removes the active CLI login. The daemon's relationship is a separate identity and stays connected.
 
 In an interactive terminal, logout offers to disconnect a daemon enrolled with the same Hub. Accepting disconnects first and then deletes the login, so a failed disconnection keeps your credential. Declining removes only the login.
 
 Noninteractive and `--json` logout never disconnect implicitly:
 
 ```sh
-paseo hub logout --disconnect-daemon           # remove both identities
-paseo hub logout --disconnect-daemon --force   # drop local authority when Hub is unreachable
+alp hub logout --disconnect-daemon           # remove both identities
+alp hub logout --disconnect-daemon --force   # drop local authority when Hub is unreachable
 ```
 
 ## Reference it from configuration

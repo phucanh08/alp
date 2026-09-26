@@ -11,7 +11,7 @@ category: Plugins
 Start with the [plugin quickstart](/docs/plugins) if you have not built an alp plugin before.
 
 A provider plugin connects a coding agent to alp without adding it to alp core. [Publish the plugin](/docs/plugins/publishing) on npm or in a Git repository so users can
-install it with `paseo plugin install`.
+install it with `alp plugin install`.
 
 Choose one implementation path:
 
@@ -22,9 +22,9 @@ Choose one implementation path:
 
 The examples are:
 
-- [`provider-direct`](https://github.com/getpaseo/paseo/tree/main/plugin-examples/provider-direct): sessions, settings, prompts, persistence, child sessions, and a provider-owned timeline renderer;
-- [`provider-acp-transformer`](https://github.com/getpaseo/paseo/tree/main/plugin-examples/provider-acp-transformer): an ACP command template with a Zod-validated vendor edit transformer. Replace `example-acp --stdio` with an installed ACP agent before loading it;
-- [`inline-thinking`](https://github.com/getpaseo/paseo/tree/main/plugin-examples/inline-thinking): a renderer-only plugin that does not implement a provider.
+- [`provider-direct`](https://github.com/phucanh08/alp/tree/main/plugin-examples/provider-direct): sessions, settings, prompts, persistence, child sessions, and a provider-owned timeline renderer;
+- [`provider-acp-transformer`](https://github.com/phucanh08/alp/tree/main/plugin-examples/provider-acp-transformer): an ACP command template with a Zod-validated vendor edit transformer. Replace `example-acp --stdio` with an installed ACP agent before loading it;
+- [`inline-thinking`](https://github.com/phucanh08/alp/tree/main/plugin-examples/inline-thinking): a renderer-only plugin that does not implement a provider.
 
 ## Register a direct provider
 

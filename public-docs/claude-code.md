@@ -32,4 +32,3 @@ You can use the terminal from alp's desktop, web, or mobile app while keeping ac
 
 - [Supported providers](/docs/supported-providers), for other agents you can run alongside Claude Code.
 - [Custom providers](/docs/custom-providers), for custom binaries, third-party endpoints, or multiple Claude profiles.
-- [alp vs Claude Desktop](/alternatives/claude-desktop), for a feature comparison.

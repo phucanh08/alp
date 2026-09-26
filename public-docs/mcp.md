@@ -61,7 +61,7 @@ tool injection globally, then add `paseoTools` to the exact provider IDs you lau
 }
 ```
 
-Run `paseo reload` after editing `$PASEO_HOME/config.json`, then start a new agent or reload an
+Run `alp reload` after editing `$PASEO_HOME/config.json`, then start a new agent or reload an
 existing one. A running session keeps the catalog it received at launch.
 
 Omitting `paseoTools` enables the complete catalog. Set `enabled` to `false` to remove the catalog,

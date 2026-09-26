@@ -1,6 +1,6 @@
 ---
 title: Docker
-description: Run the alp daemon and bundled web UI with the official Docker image.
+description: Run the alp daemon and bundled web UI with a self-built Docker image.
 nav: Docker
 order: 6
 category: Getting started
@@ -8,17 +8,17 @@ category: Getting started
 
 # Docker
 
-The official alp Docker image runs the daemon and serves the bundled browser UI from the same HTTP origin. It is meant for servers, dev boxes, NAS devices, homelab hosts, and other places where you want alp running without the desktop app.
+The alp Docker image runs the daemon and serves the bundled browser UI from the same HTTP origin. It is meant for servers, dev boxes, NAS devices, homelab hosts, and other places where you want alp running without the desktop app.
 
-Docker images follow the stable alp release cadence. `ghcr.io/getpaseo/paseo:latest` points at the latest stable release, not an arbitrary `main` build.
+alp doesn't publish a prebuilt image yet. Build one from [`docker/`](https://github.com/phucanh08/alp/tree/main/docker) in the repo and tag it `alp:latest`; the examples on this page assume that tag.
 
 ```bash
-docker run -d --name paseo \
+docker run -d --name alp \
   -p 6767:6767 \
   -e PASEO_PASSWORD=change-me \
-  -v "$PWD/paseo-home:/home/paseo" \
+  -v "$PWD/alp-home:/home/paseo" \
   -v "$PWD:/workspace" \
-  ghcr.io/getpaseo/paseo:latest
+  alp:latest
 ```
 
 Then open:
@@ -41,23 +41,23 @@ The image:
 
 The image does not bundle agent CLIs such as Claude Code, Codex, OpenCode, Copilot, or Pi. Add the agents you use with a small child image.
 
-Host-side CLI commands select the container explicitly, for example `paseo project ls --host 127.0.0.1:6767`. Without an endpoint selector the CLI looks for a local home’s supervisor. Container environment settings are deployment overrides; worker restart preserves them. Your container manager owns full supervisor replacement.
+Host-side CLI commands select the container explicitly, for example `alp project ls --host 127.0.0.1:6767`. Without an endpoint selector the CLI looks for a local home’s supervisor. Container environment settings are deployment overrides; worker restart preserves them. Your container manager owns full supervisor replacement.
 
 ## Docker Compose
 
 ```yaml
 services:
-  paseo:
-    image: ghcr.io/getpaseo/paseo:latest
-    container_name: paseo
+  alp:
+    image: alp:latest
+    container_name: alp
     restart: unless-stopped
     ports:
       - "6767:6767"
     environment:
       PASEO_PASSWORD: "change-me"
-      # PASEO_HOSTNAMES: "paseo.example.com,.lan"
+      # PASEO_HOSTNAMES: "alp.example.com,.lan"
     volumes:
-      - ./paseo-home:/home/paseo
+      - ./alp-home:/home/paseo
       - ./workspace:/workspace
 ```
 
@@ -72,7 +72,7 @@ docker compose up -d
 Create a child image for the providers you want available:
 
 ```Dockerfile
-FROM ghcr.io/getpaseo/paseo:latest
+FROM alp:latest
 
 USER root
 RUN npm install -g @openai/codex @anthropic-ai/claude-code opencode-ai
@@ -81,18 +81,18 @@ RUN npm install -g @openai/codex @anthropic-ai/claude-code opencode-ai
 Build it:
 
 ```bash
-docker build -t paseo-with-agents .
+docker build -t alp-with-agents .
 ```
 
-Then use `image: paseo-with-agents` in Compose.
+Then use `image: alp-with-agents` in Compose.
 
 Leave the child image user as root. The base entrypoint uses root only for first-run mounted-volume setup, then drops the daemon and launched agents to the non-root `paseo` user.
 
 You can authenticate agents either by passing provider environment variables or by running the provider login flow inside the container:
 
 ```bash
-docker exec -it --user paseo paseo codex
-docker exec -it --user paseo paseo claude
+docker exec -it --user paseo alp codex
+docker exec -it --user paseo alp claude
 ```
 
 Agent credentials persist in `/home/paseo`.
@@ -115,7 +115,7 @@ Forward normal HTTP traffic and WebSocket upgrades to the container.
 Caddy:
 
 ```caddy
-paseo.example.com {
+alp.example.com {
   reverse_proxy 127.0.0.1:6767
 }
 ```
@@ -125,7 +125,7 @@ Nginx:
 ```nginx
 server {
     listen 443 ssl;
-    server_name paseo.example.com;
+    server_name alp.example.com;
 
     location / {
         proxy_pass http://127.0.0.1:6767;
@@ -142,7 +142,7 @@ If you reach alp by DNS name, allow that host:
 
 ```yaml
 environment:
-  PASEO_HOSTNAMES: "paseo.example.com,.lan"
+  PASEO_HOSTNAMES: "alp.example.com,.lan"
 ```
 
 IPs and `localhost` are allowed by default.
@@ -163,4 +163,4 @@ See [Security](/docs/security) for the full daemon trust model.
 - **403 Host not allowed:** set `PASEO_HOSTNAMES` to the DNS names you use.
 - **Provider not available:** install that agent CLI in a child image or make sure the binary is on `PATH`.
 - **Permission errors in `/workspace`:** make the mounted directory writable by uid/gid `1000:1000`, or run the container as the host uid/gid.
-- **Logs:** run `docker logs paseo`, or inspect `/home/paseo/.paseo/daemon.log` inside the container.
+- **Logs:** run `docker logs alp`, or inspect `/home/paseo/.paseo/daemon.log` inside the container.

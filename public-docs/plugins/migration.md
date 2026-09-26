@@ -298,8 +298,8 @@ Run:
 
 ```bash
 npm run typecheck
-paseo plugin reload <plugin-id>
-paseo plugin ls
+alp plugin reload <plugin-id>
+alp plugin ls
 ```
 
 Require `running` with no error. Exercise every contribution. For plugins with RPCs, call the client

@@ -8,6 +8,8 @@ category: Hub
 
 # Self-hosting Hub
 
+Hub itself is upstream Paseo software; this fork doesn't publish its own Hub package or image. The alp daemon and CLI in the rest of these docs connect to whichever Hub you run.
+
 The shortest path is one command:
 
 ```sh

@@ -21,11 +21,9 @@ Use it to:
 
 ## Start a daemon
 
-```bash
-npx @getpaseo/cli
-```
+A standalone CLI package isn't published for alp yet. See [Getting started](/docs/) to run the daemon from the desktop app or a repo checkout.
 
-It listens on `ws://127.0.0.1:6767/ws`.
+Once it's running, it listens on `ws://127.0.0.1:6767/ws`.
 
 ## Run an agent
 

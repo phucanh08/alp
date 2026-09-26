@@ -27,10 +27,10 @@ Only direct `.yml` children of `.paseo/workflows/` are workflows. Each file cont
 
 ```yaml
 environments:
-  paseo:
+  alp:
     kind: daemon
     daemon: laptop
-    cwd: /Users/you/code/paseo
+    cwd: /Users/you/code/alp
   hub:
     kind: daemon
     daemon: devbox
@@ -116,7 +116,7 @@ inputs:
   repo:
     type: string
     required: true
-    choices: [paseo, hub]
+    choices: [alp, hub]
 steps:
   - id: inspect
     environment: ${{ paseo.inputs.repo }}
