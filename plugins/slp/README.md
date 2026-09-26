@@ -25,12 +25,25 @@ The plugin registers one host-scoped settings definition (`shared/settings.ts`, 
 switch: `false` turns off every row in the table above — `before("agent.create")` returns
 `undefined` for every request, including one that already names a valid seat; `workspace.created`
 ensures no Lead; and the `slp.lead.ensure` / `slp.supervisor.ensure` RPCs reject with an error whose
-message contains "SLP disabled". A corrupt or unreadable stored value counts as the default,
-enabled. `supervisorModel` (default `null`) picks the model a freshly created Supervisor runs on:
+message contains "SLP disabled". On the client, the Supervisor sidebar item and the automatic
+Supervisor ensure follow `enabled` live: switching SLP off removes the item, switching it on adds
+the item back and ensures the Supervisor, with no reload. Switching SLP off stops nothing that is
+already running; a live Lead or Supervisor keeps running, and only new agents are affected. A
+corrupt or unreadable stored value counts as the default, enabled, on both server and client.
+`supervisorModel` (default `null`) picks the model a freshly created Supervisor runs on:
 `slp.supervisor.ensure` uses it in place of the provider's default model when it names a selectable
 model of the Supervisor's provider (`claude`), and falls back to the default model otherwise —
 `null`, an id that does not exist, or one marked not selectable. A live or resumed Supervisor keeps
 its own model; the setting only ever applies to a Supervisor created from nothing.
+
+You control both values from the SLP card on the host's Overview page (Settings → the host →
+Overview). The card is absent on a host without the `slp` plugin, saves each change to that host at
+once, shows a save error on the row you changed, and picks up changes made elsewhere. Its model
+list is "Default" (stored as `null`) plus the selectable `claude` models on that host. The app
+reads the settings through `useSlpSettings` (`packages/app/src/plugins/slp-settings/`). Metro does
+not bundle files outside the app workspace, so the app keeps its own copy of this definition and
+the enabled ruling; when you change `shared/settings.ts`, update that copy too, or its contract test
+fails.
 
 ## Seats
 
