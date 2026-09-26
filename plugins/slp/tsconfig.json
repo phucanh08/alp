@@ -5,6 +5,7 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2023"],
     "types": ["node"],
+    "jsx": "react-jsx",
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
@@ -12,5 +13,12 @@
     "allowSyntheticDefaultImports": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["index.server.ts", "server/**/*.ts", "shared/**/*.ts"]
+  "include": [
+    "index.client.tsx",
+    "index.server.ts",
+    "client/**/*.ts",
+    "client/**/*.tsx",
+    "server/**/*.ts",
+    "shared/**/*.ts"
+  ]
 }
