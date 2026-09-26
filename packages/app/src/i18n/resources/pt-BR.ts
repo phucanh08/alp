@@ -1183,7 +1183,6 @@ export const ptBR: TranslationResources = {
       diagnostics: "Executar diagnóstico",
       shortcuts: "Atalhos de teclado",
       reportIssue: "Relatar um problema",
-      discord: "Discord",
       github: "Criar issue no GitHub",
       whatsNew: "Novidades",
       appName: "alp",
