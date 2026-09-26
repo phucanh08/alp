@@ -21,6 +21,40 @@ export function seatOfLabels(labels: Record<string, string> | undefined): Seat |
   return label === "lead" || label === "peer" || label === "supervisor" ? label : null;
 }
 
+/**
+ * Label the daemon sets from the real caller of `create_agent` (`PARENT_AGENT_ID_LABEL` in
+ * `packages/protocol/src/agent-labels.ts`); a hook can read it but never set or clear it. Kept as
+ * a local literal, like the Paseo tool lists this plugin copies elsewhere, so the plugin takes no
+ * runtime dependency on that package.
+ */
+const PARENT_AGENT_ID_LABEL = "paseo.parent-agent-id";
+
+/** Label marking a seat this plugin assigned by default rather than one the requester chose. */
+export const ORIGIN_LABEL = "slp.origin";
+
+/**
+ * True unless another agent made this request: the daemon sets `paseo.parent-agent-id` only when
+ * `create_agent` names a real calling agent, so its absence means a Human made the request
+ * directly, through the app or the CLI.
+ */
+export function isHumanCreated(labels: Record<string, string> | undefined): boolean {
+  return labels?.[PARENT_AGENT_ID_LABEL] === undefined;
+}
+
+/**
+ * Seat labels for an `agent.create` request that named no seat at all: a Human-made agent
+ * defaults to Peer, tagged `slp.origin=human` so it reads apart from a Peer a Lead spawned. Null
+ * once the request already opines on a seat — even an invalid `slp.role` value counts as an
+ * opinion and is left alone — or was made by another agent.
+ */
+export function defaultHumanSeatLabels(
+  labels: Record<string, string> | undefined,
+): Record<string, string> | null {
+  if (labels !== undefined && SEAT_LABEL in labels) return null;
+  if (!isHumanCreated(labels)) return null;
+  return { ...labels, [SEAT_LABEL]: "peer", [ORIGIN_LABEL]: "human" };
+}
+
 /** SLP seats run only on the base `claude` and `codex` providers; any other provider is not SLP. */
 export function familyOf(provider: string): Family | null {
   return provider === "claude" || provider === "codex" ? provider : null;

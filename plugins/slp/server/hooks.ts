@@ -14,6 +14,7 @@ import {
 } from "./discovery";
 import {
   buildSystemPrompt,
+  defaultHumanSeatLabels,
   familyOf,
   paseoToolsFor,
   providerOptionsFor,
@@ -29,15 +30,25 @@ type AgentCreateRequest = PluginBeforeRequests["agent.create"];
  * gets its seat definition, the SLP-RUNTIME block, and the live roster of the counterpart seat (Lead
  * sees Supervisors and the reverse) in its system prompt. Claude Lead/Supervisor also get
  * `allowedTools: mcp__paseo__*`; the Supervisor loses Write/Edit/Agent/Task, a Claude Peer loses
- * Agent/Task. Peer and Supervisor lose Paseo tools through the returned `paseoTools`.
+ * Agent/Task. Peer and Supervisor lose Paseo tools through the returned `paseoTools`. A claude/codex
+ * request that names no seat and no parent — a Human made it directly, not another agent —
+ * defaults to Peer and is tagged `slp.origin=human` (see `defaultHumanSeatLabels`).
  */
 export async function withSeatConfig(
   request: AgentCreateRequest,
   agents: AgentLister,
 ): Promise<AgentCreateRequest | undefined> {
-  const seat = seatOfLabels(request.labels);
-  if (!seat) return undefined;
   const family = familyOf(request.config.provider);
+  let seat = seatOfLabels(request.labels);
+  let labels = request.labels;
+  if (!seat && family) {
+    const defaulted = defaultHumanSeatLabels(request.labels);
+    if (defaulted) {
+      seat = "peer";
+      labels = defaulted;
+    }
+  }
+  if (!seat) return undefined;
   if (!family) {
     console.log(
       `slp: ${seat} label on provider ${request.config.provider} ignored: SLP seats run on claude or codex`,
@@ -67,6 +78,7 @@ export async function withSeatConfig(
   );
   return {
     ...request,
+    ...(labels !== request.labels ? { labels } : {}),
     ...(paseoTools ? { paseoTools } : {}),
     config: {
       ...request.config,

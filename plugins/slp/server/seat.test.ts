@@ -4,7 +4,9 @@ import path from "node:path";
 import { expect, test } from "vitest";
 import {
   buildSystemPrompt,
+  defaultHumanSeatLabels,
   familyOf,
+  isHumanCreated,
   providerOptionsFor,
   readDefinition,
   seatOfAgent,
@@ -158,6 +160,31 @@ test("a Codex Lead spawns a codex Peer by label in Codex's default approval mode
   expect(lead).toContain("settings.thinkingOptionId");
   const claudeLead = buildSystemPrompt("lead", "claude", "BODY", null);
   expect(claudeLead).toContain('settings.modeId: "default"');
+});
+
+test("isHumanCreated is true unless the daemon-owned parent label is set", () => {
+  expect(isHumanCreated(undefined)).toBe(true);
+  expect(isHumanCreated({})).toBe(true);
+  expect(isHumanCreated({ "slp.role": "lead" })).toBe(true);
+  expect(isHumanCreated({ "paseo.parent-agent-id": "L1" })).toBe(false);
+});
+
+test("defaultHumanSeatLabels defaults an opinion-less, Human-made request to Peer", () => {
+  expect(defaultHumanSeatLabels(undefined)).toEqual({
+    "slp.role": "peer",
+    "slp.origin": "human",
+  });
+  expect(defaultHumanSeatLabels({ foo: "bar" })).toEqual({
+    foo: "bar",
+    "slp.role": "peer",
+    "slp.origin": "human",
+  });
+});
+
+test("defaultHumanSeatLabels does nothing once the request already opined on a seat or a parent", () => {
+  expect(defaultHumanSeatLabels({ "slp.role": "lead" })).toBeNull();
+  expect(defaultHumanSeatLabels({ "slp.role": "reviewer" })).toBeNull();
+  expect(defaultHumanSeatLabels({ "paseo.parent-agent-id": "L1" })).toBeNull();
 });
 
 test("runtime blocks name no retired seat provider and no Gemini", () => {

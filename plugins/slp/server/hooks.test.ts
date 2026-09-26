@@ -177,10 +177,44 @@ test("a seat label on a provider other than claude or codex leaves the request a
   expect(await seatConfig("opencode", { "slp.role": "supervisor" })).toBeUndefined();
 });
 
-test("claude or codex with no seat label, or an unknown one, is not an SLP seat", async () => {
-  expect(await seatConfig("claude")).toBeUndefined();
-  expect(await seatConfig("codex", {})).toBeUndefined();
+test("claude or codex with an unknown slp.role value is left alone, not defaulted", async () => {
   expect(await seatConfig("claude", { "slp.role": "reviewer" })).toBeUndefined();
+});
+
+test("a Human-made Claude agent with no seat label defaults to Peer, tagged slp.origin=human", async () => {
+  const result = await seatConfig("claude");
+  expect(result?.labels).toEqual({ "slp.role": "peer", "slp.origin": "human" });
+  expect(result?.paseoTools).toEqual({ disabledTools: PEER_PASEO_CUT });
+  expect(result?.config.providerOptions).toEqual({
+    allowedTools: ["Bash"],
+    disallowedTools: ["Agent", "Task"],
+  });
+  expect(result?.config.systemPrompt).toContain("# Ghế SLP: peer");
+});
+
+test("a Human-made Codex agent with no seat label defaults to Peer, tagged slp.origin=human", async () => {
+  const result = await seatConfig("codex", {});
+  expect(result?.labels).toEqual({ "slp.role": "peer", "slp.origin": "human" });
+  expect(result?.paseoTools).toEqual({ disabledTools: PEER_PASEO_CUT });
+  expect(result?.config.providerOptions).toEqual({
+    allowedTools: ["Bash"],
+    sandbox_mode: "workspace-write",
+    features: { multi_agent: false },
+  });
+});
+
+test("an agent another agent created (paseo.parent-agent-id set) with no seat label is left alone", async () => {
+  expect(await seatConfig("claude", { "paseo.parent-agent-id": "L1" })).toBeUndefined();
+});
+
+test("a request that already names a valid seat is never tagged slp.origin", async () => {
+  const result = await seatConfig("claude", { "slp.role": "lead" });
+  expect(result?.labels).toEqual({ "slp.role": "lead" });
+});
+
+test("a Human-made agent keeps its other labels alongside the default seat and origin", async () => {
+  const result = await seatConfig("claude", { foo: "bar" });
+  expect(result?.labels).toEqual({ foo: "bar", "slp.role": "peer", "slp.origin": "human" });
 });
 
 test("the retired <family>-<seat> provider names no longer pick a seat", async () => {
@@ -229,7 +263,7 @@ test("agent.create for a Supervisor lists Leads and cuts write and spawn tools",
 });
 
 test("agent.create leaves non-SLP providers untouched", async () => {
-  expect(await withSeatConfig((await request("claude")) as never, agents)).toBeUndefined();
+  expect(await withSeatConfig((await request("acp")) as never, agents)).toBeUndefined();
 });
 
 interface HookCalls {
