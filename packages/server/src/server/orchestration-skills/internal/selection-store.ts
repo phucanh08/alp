@@ -1,6 +1,7 @@
 import type { AgentSkillSelection } from "@getpaseo/protocol/messages";
 
 import type { DaemonConfigStore } from "../../daemon-config-store.js";
+import { renameSkillNames } from "./renamed-skills.js";
 
 export type SkillSelection = AgentSkillSelection;
 
@@ -39,7 +40,10 @@ export function createSkillSelectionStore(
 ): SkillSelectionStore {
   return {
     async get() {
-      return coerceSkillSelection(configStore.get().skills?.selection);
+      const selection = coerceSkillSelection(configStore.get().skills?.selection);
+      // ALP(rebrand): read-time only; config.json keeps the old names until the next save.
+      if (selection.mode === "all") return selection;
+      return { mode: "custom", skills: renameSkillNames(selection.skills) };
     },
     async set(selection) {
       const parsed = coerceSkillSelection(selection);

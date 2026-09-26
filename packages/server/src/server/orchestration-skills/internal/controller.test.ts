@@ -17,8 +17,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { SkillSelection, SkillTargets } from "./operations";
-import type { SkillSelectionStore } from "./selection-store";
+import { DaemonConfigStore } from "../../daemon-config-store";
+import { installSkills, type SkillSelection, type SkillTargets } from "./operations";
+import { createSkillSelectionStore, type SkillSelectionStore } from "./selection-store";
 import { createSkillsController, type SkillsController } from "./controller";
 import { beginSkillsTransaction } from "./transaction";
 
@@ -60,6 +61,7 @@ async function makeHarness(selectionStore?: SkillSelectionStore): Promise<Harnes
     controller: createSkillsController({
       resolveTargets: () => targets,
       selectionStore: store,
+      logger: { warn: () => {} },
     }),
     selectionStore: store,
   };
@@ -1246,4 +1248,79 @@ describe("skills controller", () => {
       "keep this",
     ]);
   });
+});
+
+// ALP(rebrand): a host that ran a release shipping paseo* skills, with a custom
+// selection saved under the old names, upgrades to the alp* bundle.
+describe("upgrading across the alp skill rename", () => {
+  const OLD_TO_NEW = [
+    ["paseo", "alp"],
+    ["paseo-advisor", "alp-advisor"],
+    ["paseo-committee", "alp-committee"],
+    ["paseo-handoff", "alp-handoff"],
+    ["paseo-help", "alp-help"],
+    ["paseo-plugin", "alp-plugin"],
+  ] as const;
+  let root: string;
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  async function upgradedHost(): Promise<{ targets: SkillTargets; controller: SkillsController }> {
+    root = await mkdtemp(path.join(os.tmpdir(), "paseo-skills-rename-"));
+    const targets: SkillTargets = {
+      sourceDir: path.join(root, "bundle"),
+      agentsDir: path.join(root, "home", ".agents", "skills"),
+      claudeDir: path.join(root, "home", ".claude", "skills"),
+      codexDir: path.join(root, "home", ".codex", "skills"),
+    };
+    for (const [oldName] of OLD_TO_NEW) {
+      await mkdir(path.join(targets.sourceDir, oldName), { recursive: true });
+      await writeFile(path.join(targets.sourceDir, oldName, "SKILL.md"), `${oldName}-old`);
+    }
+    await installSkills(targets, { mode: "all" });
+    await rm(targets.sourceDir, { recursive: true, force: true });
+    for (const [, newName] of OLD_TO_NEW) {
+      await mkdir(path.join(targets.sourceDir, newName), { recursive: true });
+      await writeFile(path.join(targets.sourceDir, newName, "SKILL.md"), `${newName}-new`);
+    }
+
+    const config = new DaemonConfigStore(path.join(root, "paseo-home"), {
+      mcp: { injectIntoAgents: false },
+      browserTools: { enabled: false },
+      providers: {},
+      metadataGeneration: { providers: [] },
+      autoArchiveAfterMerge: false,
+      enableTerminalAgentHooks: false,
+      appendSystemPrompt: "",
+    });
+    config.setAgentSkillSelection({ mode: "custom", skills: ["paseo", "paseo-help", "xia"] });
+    const controller = createSkillsController({
+      resolveTargets: () => targets,
+      selectionStore: createSkillSelectionStore(config),
+      logger: { warn: () => {} },
+    });
+    return { targets, controller };
+  }
+
+  it.each(["install", "update", "autoUpdate"] as const)(
+    "%s removes the old directories and installs the renamed selection",
+    async (operation) => {
+      const { targets, controller } = await upgradedHost();
+
+      const snapshot = await controller[operation]();
+
+      expect(snapshot.selection).toEqual({ mode: "custom", skills: ["alp", "alp-help", "xia"] });
+      expect(snapshot.state).toBe("up-to-date");
+      expect(snapshot.installed).toEqual(["alp", "alp-help"]);
+      for (const dir of [targets.agentsDir, targets.claudeDir, targets.codexDir]) {
+        expect((await readdir(dir)).sort()).toEqual(["alp", "alp-help"]);
+        expect(await readFile(path.join(dir, "alp", "SKILL.md"), "utf-8")).toBe("alp-new");
+        expect(await readFile(path.join(dir, "alp-help", "SKILL.md"), "utf-8")).toBe(
+          "alp-help-new",
+        );
+      }
+    },
+  );
 });

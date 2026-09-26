@@ -3,6 +3,7 @@ import {
   getSkillsStatus,
   installSkills,
   type SkillSelection,
+  type SkillsMaintenanceOptions,
   type SkillsStatus,
   type SkillTargets,
   uninstallSkills,
@@ -13,6 +14,7 @@ import {
   coerceSkillSelection,
   type SkillSelectionStore,
 } from "./selection-store.js";
+import type { SkillsLogger } from "./renamed-skills.js";
 import { beginSkillsTransaction, recoverInterruptedSkillTransactions } from "./transaction.js";
 
 /** Everything the settings UI needs to render skills in one round trip. */
@@ -41,7 +43,11 @@ export interface SkillsController {
   }>;
 }
 
-type Converge = (targets: SkillTargets, selection: SkillSelection) => Promise<SkillsStatus>;
+type Converge = (
+  targets: SkillTargets,
+  selection: SkillSelection,
+  options: SkillsMaintenanceOptions,
+) => Promise<SkillsStatus>;
 const MAX_SAVE_ATTEMPTS = 3;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -58,11 +64,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function createSkillsController({
   resolveTargets,
   selectionStore,
+  logger,
 }: {
   // Resolved per operation, not at wiring time: the bundle path depends on how
   // the app was packaged, which is not knowable when the controller is built.
   resolveTargets: () => SkillTargets;
   selectionStore: SkillSelectionStore;
+  logger: SkillsLogger;
 }): SkillsController {
   let queue: Promise<unknown> = Promise.resolve();
 
@@ -78,7 +86,7 @@ export function createSkillsController({
   async function converge(apply: Converge): Promise<SkillsSnapshot> {
     const selection = await selectionStore.get();
     await recoverInterruptedSkillTransactions(resolveTargets(), selection);
-    return { ...(await apply(resolveTargets(), selection)), selection };
+    return { ...(await apply(resolveTargets(), selection, { logger })), selection };
   }
 
   async function saveSelection(request: unknown): Promise<SkillsSaveResult> {
