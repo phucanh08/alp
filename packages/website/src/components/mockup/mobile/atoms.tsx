@@ -1,4 +1,4 @@
-// Small shared bits for the mobile mockups. The Paseo butterfly mark is the
+// Small shared bits for the mobile mockups. The alp butterfly mark is the
 // app icon (packages/website/public/favicon.svg) with the black plate dropped,
 // so it can be tinted and placed on any tile. Tile fills are the app's identity
 // palette — packages/app/src/styles/identity-colors.ts — surfaced as
@@ -46,7 +46,7 @@ const TILE_TONE = {
   teal: "bg-mock-tile-teal",
 } as const;
 
-/** The Paseo project tile — white butterfly on the black app plate. */
+/** The alp project tile — white butterfly on the black app plate. */
 export function PaseoTile() {
   return (
     <span className="flex size-[18px] shrink-0 items-center justify-center rounded-[5px] bg-black text-white">

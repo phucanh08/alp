@@ -141,9 +141,9 @@ const WORKING: RowData[] = [
 
 const READY: RowData[] = [
   {
-    key: "paseo-homepage",
+    key: "alp-homepage",
     icon: <WorkspaceGlyph />,
-    title: "Paseo homepage",
+    title: "alp homepage",
     time: "now",
     pr: "3981",
     passed: true,
