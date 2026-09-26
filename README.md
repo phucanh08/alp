@@ -15,12 +15,6 @@
   <a href="https://x.com/moboudra">
     <img src="https://img.shields.io/badge/%40moboudra-555?logo=x" alt="X">
   </a>
-  <a href="https://discord.gg/jz8T2uahpH">
-    <img src="https://img.shields.io/badge/Discord-555?logo=discord" alt="Discord">
-  </a>
-  <a href="https://www.reddit.com/r/PaseoAI/">
-    <img src="https://img.shields.io/badge/Reddit-555?logo=reddit" alt="Reddit">
-  </a>
 </p>
 
 <p align="center"><em>A fork of <a href="https://github.com/getpaseo/paseo">Paseo</a>, licensed Apache-2.0.</em></p>
