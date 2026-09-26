@@ -32,7 +32,10 @@ export interface SeatAgentCreate {
   labels: Record<string, string>;
 }
 
-/** Seat settings shared by both ensures; `family` defaults to `claude`. */
+/** `SeatDeps.family` when the caller names none. */
+export const DEFAULT_SEAT_FAMILY: Family = "claude";
+
+/** Seat settings shared by both ensures; `family` defaults to `DEFAULT_SEAT_FAMILY`. */
 export interface SeatDeps {
   family?: Family;
 }
@@ -131,7 +134,7 @@ async function seatAgent(
   deps: SeatDeps,
   overrideModel?: string | null,
 ): Promise<SeatAgentCreate> {
-  const { providerId, modeId } = seatProfileFor(deps.family ?? "claude");
+  const { providerId, modeId } = seatProfileFor(deps.family ?? DEFAULT_SEAT_FAMILY);
   const provider = await seatProvider(api, providerId, overrideModel);
   return {
     config: { provider, modeId },

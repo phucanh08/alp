@@ -11,9 +11,11 @@ import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useSlpSettings, type SlpSettings } from "@/plugins/slp-settings/use-slp-settings";
 import { filterSelectableModels } from "@/provider-selection/model-catalog";
 
-// The slp plugin seats its Supervisor on claude (`seatProfileFor` in plugins/slp/server/ensure.ts)
-// and honors `supervisorModel` only when it names one of that provider's selectable model ids.
-const SUPERVISOR_PROVIDER = "claude";
+// The slp plugin seats its Supervisor on claude (`DEFAULT_SEAT_FAMILY` in
+// plugins/slp/server/ensure.ts) and honors `supervisorModel` only when it names one of that
+// provider's selectable model ids. Exported so `slp-seat-mirrors-contract.test.ts` can tie it to
+// the plugin's source, which the app cannot import at runtime.
+export const SUPERVISOR_PROVIDER = "claude";
 // Model ids are never empty, so the empty string stands for the stored `null`.
 const DEFAULT_MODEL_OPTION = "";
 
