@@ -337,6 +337,12 @@ Server entries register lifecycle observers with `server.on()` and request trans
 owns callback shapes, ordering, and failure behavior. `plugin-examples/lifecycle-logger` registers all
 eleven hooks; `plugin-examples/lifecycle-actions` demonstrates common automation callbacks.
 
+`before("agent.create")` sees and returns the request's `labels`; a result that omits `labels`
+keeps the ones it received, so hooks written before the field existed do not wipe them. The daemon
+owns `paseo.parent-agent-id`: after the hooks run, `AgentManager` restores the value the daemon
+resolved from the real caller, so a hook can neither adopt nor orphan an agent. Every agent event
+carries `agent.labels` as they were when the event fired.
+
 Emit from the operation owner, not a client subscription. Provider history replay must not trigger
 live hooks. Observers must not be awaited inside agent mutations: a callback can send a prompt or
 answer a permission through its own daemon session. Awaiting it there deadlocks that command.

@@ -49,6 +49,10 @@ import type {
   ResolveAgentDefaultModeInput,
 } from "./agent-sdk-types.js";
 import type { PaseoToolCatalog } from "./tools/types.js";
+import { createPaseoApi } from "@getpaseo/client";
+import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import type { PluginBeforeRequests, PluginLifecycleEvents } from "@getpaseo/plugin/server";
+import { PluginHookHandlers, type PluginLifecycle } from "../plugins/lifecycle/index.js";
 import type { ProviderDefinition } from "./provider-registry.js";
 
 const DESKTOP_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("desktop-client");
@@ -11241,6 +11245,148 @@ test("concurrent native restores run once before resuming the same agent", async
     restoreAllowed.resolve();
     if (agentId) await manager.closeAgent(agentId);
     await storage.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+interface RecordedLifecycleEvent {
+  name: keyof PluginLifecycleEvents;
+  event: PluginLifecycleEvents[keyof PluginLifecycleEvents];
+}
+
+function pluginLifecycleFromHandlers(hooks: PluginHookHandlers): {
+  lifecycle: PluginLifecycle;
+  events: RecordedLifecycleEvent[];
+} {
+  const paseo = createPaseoApi(
+    new DaemonClient({ url: "ws://127.0.0.1:1/ws", clientId: "agent-manager-plugin-labels" }),
+  );
+  const events: RecordedLifecycleEvent[] = [];
+  const lifecycle: PluginLifecycle = {
+    emit(name, event) {
+      events.push({ name, event: structuredClone(event) });
+    },
+    async before(name, request) {
+      return (await hooks.invoke(
+        randomUUID(),
+        "before",
+        name,
+        request,
+        paseo,
+      )) as PluginBeforeRequests[typeof name];
+    },
+  };
+  return { lifecycle, events };
+}
+
+test("agent.create hooks receive the caller's labels and the agent registers the labels they return", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-plugin-labels-"));
+  const hooks = new PluginHookHandlers(() => {});
+  const seenLabels: Array<Record<string, string> | undefined> = [];
+  hooks.before("agent.create", ({ request }) => {
+    seenLabels.push(request.labels);
+    return { ...request, labels: { ...request.labels, "slp.role": "peer" } };
+  });
+  const { lifecycle } = pluginLifecycleFromHandlers(hooks);
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    pluginLifecycle: lifecycle,
+    logger,
+  });
+  let agentId: string | undefined;
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      labels: { team: "infra" },
+      workspaceId: undefined,
+    });
+    agentId = agent.id;
+
+    expect(seenLabels).toEqual([{ team: "infra" }]);
+    expect(manager.getAgent(agent.id)?.labels).toEqual({ team: "infra", "slp.role": "peer" });
+  } finally {
+    if (agentId) await manager.closeAgent(agentId);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test.each([
+  {
+    name: "a hook forging the parent label keeps the caller's parent",
+    callerLabels: { [PARENT_AGENT_ID_LABEL]: "real-parent" },
+    hookLabels: { [PARENT_AGENT_ID_LABEL]: "forged-parent", team: "infra" },
+    expected: { [PARENT_AGENT_ID_LABEL]: "real-parent", team: "infra" },
+  },
+  {
+    name: "a hook removing the parent label keeps the caller's parent",
+    callerLabels: { [PARENT_AGENT_ID_LABEL]: "real-parent" },
+    hookLabels: { team: "infra" },
+    expected: { [PARENT_AGENT_ID_LABEL]: "real-parent", team: "infra" },
+  },
+  {
+    name: "a hook adding a parent label to a top-level agent is dropped",
+    callerLabels: {},
+    hookLabels: { [PARENT_AGENT_ID_LABEL]: "forged-parent", team: "infra" },
+    expected: { team: "infra" },
+  },
+])(
+  "agent.create hooks cannot decide the parent label: $name",
+  async ({ callerLabels, hookLabels, expected }) => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-manager-plugin-parent-label-"));
+    const hooks = new PluginHookHandlers(() => {});
+    hooks.before("agent.create", ({ request }) => ({ ...request, labels: hookLabels }));
+    const { lifecycle } = pluginLifecycleFromHandlers(hooks);
+    const manager = new AgentManager({
+      clients: { codex: new TestAgentClient() },
+      pluginLifecycle: lifecycle,
+      logger,
+    });
+    let agentId: string | undefined;
+    try {
+      const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+        labels: callerLabels,
+        workspaceId: undefined,
+      });
+      agentId = agent.id;
+
+      expect(manager.getAgent(agent.id)?.labels).toEqual(expected);
+    } finally {
+      if (agentId) await manager.closeAgent(agentId);
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  },
+);
+
+test("agent lifecycle events carry the agent's labels", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-plugin-event-labels-"));
+  const hooks = new PluginHookHandlers(() => {});
+  hooks.before("agent.create", ({ request }) => ({
+    ...request,
+    labels: { ...request.labels, "slp.role": "lead" },
+  }));
+  const { lifecycle, events } = pluginLifecycleFromHandlers(hooks);
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    pluginLifecycle: lifecycle,
+    logger,
+  });
+  let agentId: string | undefined;
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      labels: { [PARENT_AGENT_ID_LABEL]: "real-parent" },
+      workspaceId: undefined,
+    });
+    agentId = agent.id;
+
+    const created = events.find((entry) => entry.name === "agent.created");
+    expect(created?.event).toMatchObject({
+      agent: {
+        id: agent.id,
+        parentAgentId: "real-parent",
+        labels: { [PARENT_AGENT_ID_LABEL]: "real-parent", "slp.role": "lead" },
+      },
+    });
+  } finally {
+    if (agentId) await manager.closeAgent(agentId);
     rmSync(workdir, { recursive: true, force: true });
   }
 });

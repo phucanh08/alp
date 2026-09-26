@@ -27,6 +27,8 @@ export interface PluginHookAgent {
   provider: string;
   cwd: string;
   title: string | null;
+  /** The agent's labels when the event fired. `parentAgentId` mirrors `paseo.parent-agent-id`. */
+  labels?: Record<string, string>;
 }
 
 export interface PluginSessionOpenRequest {
@@ -65,7 +67,15 @@ export interface PluginLifecycleEvents {
 }
 
 export interface PluginBeforeRequests {
-  "agent.create": { config: AgentSessionConfig; env?: Record<string, string> };
+  "agent.create": {
+    config: AgentSessionConfig;
+    env?: Record<string, string>;
+    /**
+     * Labels the agent registers with. Omit to keep the labels you received. The daemon owns
+     * `paseo.parent-agent-id`: setting or removing it here has no effect.
+     */
+    labels?: Record<string, string>;
+  };
   "agent.session_open": PluginSessionOpenRequest;
   "workspace.create": Omit<WorkspaceCreateRequest, "type" | "requestId">;
 }

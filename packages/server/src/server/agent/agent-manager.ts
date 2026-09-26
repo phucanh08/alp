@@ -610,6 +610,20 @@ function validateAgentId(agentId: string, source: string): string {
   return result.data;
 }
 
+// The caller's parent label was resolved by the daemon from who is really creating the agent; an
+// agent.create hook can change every other label but cannot adopt or orphan the agent.
+function withCallerParentLabel(
+  hookLabels: Record<string, string> | undefined,
+  callerLabels: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (hookLabels === undefined) {
+    return callerLabels;
+  }
+  const { [PARENT_AGENT_ID_LABEL]: _hookParent, ...labels } = hookLabels;
+  const callerParent = callerLabels?.[PARENT_AGENT_ID_LABEL];
+  return callerParent === undefined ? labels : { ...labels, [PARENT_AGENT_ID_LABEL]: callerParent };
+}
+
 function applyLabelPatch(
   labels: Record<string, string>,
   patch: AgentLabelPatch,
@@ -1246,9 +1260,14 @@ export class AgentManager {
       const request = await this.pluginLifecycle.before("agent.create", {
         config,
         env: options.env,
+        labels: options.labels,
       });
       config = { ...request.config, internal: config.internal };
-      options = { ...options, env: request.env };
+      options = {
+        ...options,
+        env: request.env,
+        labels: withCallerParentLabel(request.labels, options.labels),
+      };
     }
     await this.deleteAgentState(resolvedAgentId);
     const { storedConfig, launchConfig, paseoToolPolicy } = await this.prepareSessionConfig(
