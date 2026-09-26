@@ -12,9 +12,6 @@
   <a href="https://github.com/phucanh08/alp/releases">
     <img src="https://img.shields.io/github/v/release/phucanh08/alp?style=flat&logo=github" alt="GitHub release">
   </a>
-  <a href="https://x.com/moboudra">
-    <img src="https://img.shields.io/badge/%40moboudra-555?logo=x" alt="X">
-  </a>
 </p>
 
 <p align="center"><em>A fork of <a href="https://github.com/getpaseo/paseo">Paseo</a>, licensed Apache-2.0.</em></p>
