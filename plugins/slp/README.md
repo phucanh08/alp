@@ -31,6 +31,13 @@ The seat is the `slp.role` label and nothing else. `<family>` is the base provid
 alone. The plugin creates Lead and Supervisor on `claude` with that provider's default model from
 `listModels`. The Lead picks each Peer's model and `settings.thinkingOptionId` per task.
 
+A `claude`/`codex` agent a Human creates directly — in the app or over the CLI, with no `slp.role`
+label at all — defaults to Peer and is tagged `slp.origin=human`, so it gets the same tool cuts and
+definition as any other Peer. The hook tells "Human made this" from "another agent made this" by
+`paseo.parent-agent-id`: the daemon sets that label only when `create_agent` names a real calling
+agent, so its absence is the signal. An agent that already carries `slp.role` — valid or not — is
+never touched or tagged; only a request that names no seat at all gets the default.
+
 ## Seat tools
 
 `before("agent.create")` cuts tools per seat. Paseo tools go out through the hook's `paseoTools`,
