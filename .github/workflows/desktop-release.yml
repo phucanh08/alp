@@ -169,6 +169,10 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=${{ matrix.node_heap_mb }}
         run: |
           set -euo pipefail
+          # A missing secret arrives as an empty string. electron-builder only skips the
+          # keychain import when CSC_LINK is unset; empty resolves to the package dir
+          # ("packages/desktop not a file"). Unsigned builds leave arm64 ad-hoc signed.
+          [[ -n "${CSC_LINK:-}" ]] || unset CSC_LINK
           build_args=(-- --publish never --mac --${{ matrix.electron_arch }})
           build_args+=("-c.publish.releaseType=$RELEASE_TYPE")
           build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
