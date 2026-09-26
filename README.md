@@ -155,9 +155,9 @@ npx skills add getpaseo/paseo
 
 Then use them in any agent conversation:
 
-- `/paseo-handoff` — hand off work between agents. I use this to plan with Claude and then handoff to Codex to implement.
-- `/paseo-advisor` — spin up a single agent as an advisor for a second opinion, without delegating the work itself.
-- `/paseo-committee` — form a committee of two contrasting agents to step back, do root cause analysis, and produce a plan.
+- `/alp-handoff` — hand off work between agents. I use this to plan with Claude and then handoff to Codex to implement.
+- `/alp-advisor` — spin up a single agent as an advisor for a second opinion, without delegating the work itself.
+- `/alp-committee` — form a committee of two contrasting agents to step back, do root cause analysis, and produce a plan.
 
 ## Development
 
