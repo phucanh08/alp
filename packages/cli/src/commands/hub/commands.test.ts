@@ -338,7 +338,7 @@ describe("Hub commands", () => {
       {
         code: "HUB_API_KEY_REQUIRED",
         message:
-          "No stored Hub login matches https://hub-alp.anhlp.com. Run `paseo hub login https://hub-alp.anhlp.com`, pass --api-key <secret>, or set PASEO_HUB_API_KEY.",
+          "No stored Hub login matches https://hub-alp.anhlp.com. Run `alp hub login https://hub-alp.anhlp.com`, pass --api-key <secret>, or set PASEO_HUB_API_KEY.",
       },
     );
 
