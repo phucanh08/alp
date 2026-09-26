@@ -7,7 +7,7 @@ export function SiteHeader() {
   return (
     <header className="flex flex-col items-center gap-4 md:flex-row md:justify-between">
       <a href="/" className="flex items-center gap-3">
-        <img src="/logo.svg" alt="alp" className="w-6 h-6" />
+        <img src="/alp-wordmark-on-dark.svg" alt="alp" className="h-7 w-auto" />
       </a>
       <div className="flex flex-wrap items-center justify-center gap-4">
         <a
