@@ -112,7 +112,7 @@ test("updates a draft release body without publishing it", () => {
           {
             id: 311163621,
             draft: true,
-            name: "Paseo v0.1.60-beta.1",
+            name: "alp v0.1.60-beta.1",
             tag_name: "untagged-draft",
             html_url: "https://github.com/getpaseo/paseo/releases/tag/untagged-draft",
           },
@@ -160,7 +160,7 @@ test("creates missing beta releases as drafts", () => {
               {
                 id: 311163621,
                 draft: true,
-                name: "Paseo v0.1.60-beta.1",
+                name: "alp v0.1.60-beta.1",
                 tag_name: "v0.1.60-beta.1",
               },
             ])
@@ -190,6 +190,49 @@ test("creates missing beta releases as drafts", () => {
     assert.ok(createCall, "the missing release should be created");
     assert.equal(createCall.args.includes("--draft"), true);
     assert.equal(createCall.args.includes("--prerelease"), true);
+  });
+});
+
+test("creates and looks up draft releases under the alp title", () => {
+  withTempChangelog(() => {
+    const calls = [];
+
+    const execFileSync = (command, args, options) => {
+      calls.push({ args, command, options });
+
+      if (args[0] === "api" && args[1] === "repos/getpaseo/paseo/releases/tags/v0.1.60-beta.1") {
+        throw notFoundError();
+      }
+
+      if (args[0] === "api" && args[1] === "repos/getpaseo/paseo/releases?per_page=100") {
+        return "[]";
+      }
+
+      if (args[0] === "release" && args[1] === "create") {
+        throw new Error("already exists");
+      }
+
+      throw new Error(`Unexpected gh call: ${command} ${args.join(" ")}`);
+    };
+
+    assert.throws(
+      () =>
+        syncReleaseNotes(
+          ["--repo", "getpaseo/paseo", "--tag", "v0.1.60-beta.1", "--create-if-missing"],
+          { execFileSync },
+        ),
+      /already exists/,
+    );
+
+    const createArgs = calls.find(
+      (call) => call.args[0] === "release" && call.args[1] === "create",
+    ).args;
+    assert.equal(createArgs[createArgs.indexOf("--title") + 1], "alp v0.1.60-beta.1");
+    const draftLookups = calls.filter((call) => call.args[1]?.endsWith("/releases?per_page=100"));
+    assert.equal(draftLookups.length, 2, "lookup runs before create and after the create race");
+    for (const lookup of draftLookups) {
+      assert.match(lookup.args[3], /\.name == "alp v0\.1\.60-beta\.1"/);
+    }
   });
 });
 

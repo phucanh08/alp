@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseChangelogEntries } from "./changelog-utils.mjs";
-import { getGitHubRelease } from "./github-release.mjs";
+import { getGitHubRelease, getReleaseTitle } from "./github-release.mjs";
 import {
   getReleaseInfoFromSourceTag,
   normalizeReleaseTag,
@@ -142,7 +142,7 @@ export function syncReleaseNotes(argv = process.argv.slice(2), deps = {}) {
     "--repo",
     args.repo,
     "--title",
-    `Paseo ${targetTag}`,
+    getReleaseTitle(targetTag),
     "--notes-file",
     notesPath,
     "--verify-tag",
