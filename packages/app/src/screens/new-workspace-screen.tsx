@@ -1058,7 +1058,14 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
   return outcome;
 }
 
-function selectedProviderOf(composerState: NewWorkspaceComposerState | null): string | null {
+// null for a terminal launch: resolveDraftSeatPill already hides the pill for a null provider,
+// and SLP seats only chat agents, so folding the check in here keeps NewWorkspaceScreen's own
+// branching unchanged.
+function selectedProviderOf(
+  composerState: NewWorkspaceComposerState | null,
+  isTerminalLaunch: boolean,
+): string | null {
+  if (isTerminalLaunch) return null;
   return composerState?.selectedProvider ?? null;
 }
 
@@ -2426,42 +2433,35 @@ export function NewWorkspaceScreen({
       autoFocusKey={launchFocusKey}
     />
   ) : (
-    <>
-      <ComposerSlpSeatPillRow
-        pill={resolveDraftSeatPill(slpSettings, draftSeat, selectedProviderOf(composerState))}
-        disabled={isPending}
-        onChange={setDraftSeat}
-      />
-      <Composer
-        key="chat"
-        agentId={draftKey}
-        serverId={selectedServerId}
-        isPaneFocused={true}
-        onSubmitMessage={handleSubmitNewWorkspace}
-        allowEmptySubmit={true}
-        submitButtonAccessibilityLabel={t("newWorkspace.create")}
-        submitButtonTestID="workspace-create-submit"
-        submitIcon="return"
-        isSubmitLoading={isPending}
-        waitForForgeAutoAttachOnSubmit
-        submitBehavior="preserve-and-lock"
-        blurOnSubmit={true}
-        textSource={chatDraft.textSource}
-        onChangeText={chatDraft.editText}
-        textReplacement={chatDraft.textReplacement}
-        attachments={chatDraft.attachments}
-        attachmentScopeKeys={visibleDraftContextScopeKeys}
-        onChangeAttachments={chatDraft.setAttachments}
-        onForgeChangeRequestDetected={handleForgeChangeRequestDetected}
-        onForgeChangeRequestAutoAttach={handleForgeChangeRequestAutoAttach}
-        cwd={selectedSourceDirectory ?? ""}
-        clearDraft={handleClearDraft}
-        autoFocus
-        autoFocusKey={launchFocusKey}
-        commandDraftConfig={composerState?.commandDraftConfig}
-        agentControls={agentControlsWithDisabled}
-      />
-    </>
+    <Composer
+      key="chat"
+      agentId={draftKey}
+      serverId={selectedServerId}
+      isPaneFocused={true}
+      onSubmitMessage={handleSubmitNewWorkspace}
+      allowEmptySubmit={true}
+      submitButtonAccessibilityLabel={t("newWorkspace.create")}
+      submitButtonTestID="workspace-create-submit"
+      submitIcon="return"
+      isSubmitLoading={isPending}
+      waitForForgeAutoAttachOnSubmit
+      submitBehavior="preserve-and-lock"
+      blurOnSubmit={true}
+      textSource={chatDraft.textSource}
+      onChangeText={chatDraft.editText}
+      textReplacement={chatDraft.textReplacement}
+      attachments={chatDraft.attachments}
+      attachmentScopeKeys={visibleDraftContextScopeKeys}
+      onChangeAttachments={chatDraft.setAttachments}
+      onForgeChangeRequestDetected={handleForgeChangeRequestDetected}
+      onForgeChangeRequestAutoAttach={handleForgeChangeRequestAutoAttach}
+      cwd={selectedSourceDirectory ?? ""}
+      clearDraft={handleClearDraft}
+      autoFocus
+      autoFocusKey={launchFocusKey}
+      commandDraftConfig={composerState?.commandDraftConfig}
+      agentControls={agentControlsWithDisabled}
+    />
   );
   return (
     <FileDropZone style={styles.container}>
@@ -2473,6 +2473,15 @@ export function NewWorkspaceScreen({
           title={t("newWorkspace.title")}
           formStack={formStack}
         >
+          <ComposerSlpSeatPillRow
+            pill={resolveDraftSeatPill(
+              slpSettings,
+              draftSeat,
+              selectedProviderOf(composerState, isTerminalLaunch),
+            )}
+            disabled={isPending}
+            onChange={setDraftSeat}
+          />
           {composer}
           {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
         </NewWorkspaceLayout>
