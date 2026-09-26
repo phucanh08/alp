@@ -48,9 +48,10 @@ async function request(provider: string, labels?: Record<string, string>) {
   };
 }
 
-// Literal copies of the daemon lists in packages/server/src/server/persisted-config.ts at 9356833d3
-// (SLP_PEER_DISABLED_TOOLS, SLP_SUPERVISOR_DISABLED_TOOLS). Not imported: a Peer or Supervisor must
-// not gain a tool, and the test is the oracle for that.
+// Independent literal copies of PEER_DISABLED_PASEO_TOOLS / SUPERVISOR_DISABLED_PASEO_TOOLS in
+// ./seat.ts (not imported, unlike the daemon lists these once mirrored in
+// packages/server/src/server/persisted-config.ts at 9356833d3, since removed with SLP provider
+// seeding): a Peer or Supervisor must not gain a tool by accident, and the test is the oracle.
 const PEER_PASEO_CUT = [
   "create_agent",
   "send_agent_prompt",
@@ -58,6 +59,9 @@ const PEER_PASEO_CUT = [
   "cancel_agent",
   "archive_agent",
   "create_schedule",
+  "update_agent",
+  "set_agent_mode",
+  "respond_to_permission",
 ];
 
 const SUPERVISOR_PASEO_CUT = [
@@ -201,6 +205,17 @@ test("a Human-made Codex agent with no seat label defaults to Peer, tagged slp.o
     sandbox_mode: "workspace-write",
     features: { multi_agent: false },
   });
+});
+
+test("a schedule-run Claude agent with no seat label defaults to Peer, tagged slp.origin=schedule", async () => {
+  const result = await seatConfig("claude", { "paseo.schedule-id": "sch1" });
+  expect(result?.labels).toEqual({
+    "paseo.schedule-id": "sch1",
+    "slp.role": "peer",
+    "slp.origin": "schedule",
+  });
+  expect(result?.paseoTools).toEqual({ disabledTools: PEER_PASEO_CUT });
+  expect(result?.config.systemPrompt).toContain("# Ghế SLP: peer");
 });
 
 test("an agent another agent created (paseo.parent-agent-id set) with no seat label is left alone", async () => {

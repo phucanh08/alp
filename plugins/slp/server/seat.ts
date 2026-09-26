@@ -34,25 +34,42 @@ export const ORIGIN_LABEL = "slp.origin";
 
 /**
  * True unless another agent made this request: the daemon sets `paseo.parent-agent-id` only when
- * `create_agent` names a real calling agent, so its absence means a Human made the request
- * directly, through the app or the CLI.
+ * `create_agent` names a real calling agent, so its absence means the request came directly from a
+ * Human (the app or the CLI) or from a schedule run, neither of which is "another agent" for this
+ * check.
  */
 export function isHumanCreated(labels: Record<string, string> | undefined): boolean {
   return labels?.[PARENT_AGENT_ID_LABEL] === undefined;
 }
 
 /**
- * Seat labels for an `agent.create` request that named no seat at all: a Human-made agent
- * defaults to Peer, tagged `slp.origin=human` so it reads apart from a Peer a Lead spawned. Null
- * once the request already opines on a seat — even an invalid `slp.role` value counts as an
- * opinion and is left alone — or was made by another agent.
+ * Label a schedule run sets on the agent it creates directly, naming the schedule
+ * (`packages/server/src/server/schedule/service.ts`). Presence of this label is how a defaulted
+ * seat is tagged `slp.origin=schedule` instead of `slp.origin=human`.
  */
-export function defaultHumanSeatLabels(
+const SCHEDULE_ID_LABEL = "paseo.schedule-id";
+
+/** The two values `slp.origin` can hold on a seat this plugin defaulted rather than the requester chose. */
+export type SeatOrigin = "human" | "schedule";
+
+function originOf(labels: Record<string, string> | undefined): SeatOrigin {
+  return labels?.[SCHEDULE_ID_LABEL] !== undefined ? "schedule" : "human";
+}
+
+/**
+ * Seat labels for an `agent.create` request that named no seat at all: a request with no
+ * `paseo.parent-agent-id` — Human made it directly, or a schedule run created it — defaults to
+ * Peer, tagged `slp.origin=schedule` when the request carries `paseo.schedule-id` and
+ * `slp.origin=human` otherwise, so it reads apart from a Peer a Lead spawned. Null once the
+ * request already opines on a seat — even an invalid `slp.role` value counts as an opinion and is
+ * left alone — or was made by another agent.
+ */
+export function defaultSeatLabels(
   labels: Record<string, string> | undefined,
 ): Record<string, string> | null {
   if (labels !== undefined && SEAT_LABEL in labels) return null;
   if (!isHumanCreated(labels)) return null;
-  return { ...labels, [SEAT_LABEL]: "peer", [ORIGIN_LABEL]: "human" };
+  return { ...labels, [SEAT_LABEL]: "peer", [ORIGIN_LABEL]: originOf(labels) };
 }
 
 /** SLP seats run only on the base `claude` and `codex` providers; any other provider is not SLP. */
@@ -215,7 +232,10 @@ export function providerOptionsFor(
   }
 }
 
-/** Paseo tools a Peer loses: it cannot spawn, steer, or stop other agents. */
+/**
+ * Paseo tools a Peer loses: it cannot spawn, steer, or stop other agents, reconfigure any agent's
+ * provider or mode, or resolve a permission prompt on another agent's behalf.
+ */
 export const PEER_DISABLED_PASEO_TOOLS = [
   "create_agent",
   "send_agent_prompt",
@@ -223,6 +243,9 @@ export const PEER_DISABLED_PASEO_TOOLS = [
   "cancel_agent",
   "archive_agent",
   "create_schedule",
+  "update_agent",
+  "set_agent_mode",
+  "respond_to_permission",
 ] as const;
 
 /** The Supervisor is read-only: every mutating Paseo tool is off; reads and send_agent_prompt stay. */

@@ -4,7 +4,7 @@ import path from "node:path";
 import { expect, test } from "vitest";
 import {
   buildSystemPrompt,
-  defaultHumanSeatLabels,
+  defaultSeatLabels,
   familyOf,
   isHumanCreated,
   providerOptionsFor,
@@ -169,22 +169,42 @@ test("isHumanCreated is true unless the daemon-owned parent label is set", () =>
   expect(isHumanCreated({ "paseo.parent-agent-id": "L1" })).toBe(false);
 });
 
-test("defaultHumanSeatLabels defaults an opinion-less, Human-made request to Peer", () => {
-  expect(defaultHumanSeatLabels(undefined)).toEqual({
+test("defaultSeatLabels defaults an opinion-less, Human-made request to Peer", () => {
+  expect(defaultSeatLabels(undefined)).toEqual({
     "slp.role": "peer",
     "slp.origin": "human",
   });
-  expect(defaultHumanSeatLabels({ foo: "bar" })).toEqual({
+  expect(defaultSeatLabels({ foo: "bar" })).toEqual({
     foo: "bar",
     "slp.role": "peer",
     "slp.origin": "human",
   });
 });
 
-test("defaultHumanSeatLabels does nothing once the request already opined on a seat or a parent", () => {
-  expect(defaultHumanSeatLabels({ "slp.role": "lead" })).toBeNull();
-  expect(defaultHumanSeatLabels({ "slp.role": "reviewer" })).toBeNull();
-  expect(defaultHumanSeatLabels({ "paseo.parent-agent-id": "L1" })).toBeNull();
+test("defaultSeatLabels does nothing once the request already opined on a seat or a parent", () => {
+  expect(defaultSeatLabels({ "slp.role": "lead" })).toBeNull();
+  expect(defaultSeatLabels({ "slp.role": "reviewer" })).toBeNull();
+  expect(defaultSeatLabels({ "paseo.parent-agent-id": "L1" })).toBeNull();
+});
+
+test("defaultSeatLabels tags a schedule run's agent slp.origin=schedule, not human", () => {
+  expect(defaultSeatLabels({ "paseo.schedule-id": "sch1" })).toEqual({
+    "paseo.schedule-id": "sch1",
+    "slp.role": "peer",
+    "slp.origin": "schedule",
+  });
+  expect(defaultSeatLabels({ "paseo.schedule-id": "sch1", "paseo.schedule-run": "run1" })).toEqual({
+    "paseo.schedule-id": "sch1",
+    "paseo.schedule-run": "run1",
+    "slp.role": "peer",
+    "slp.origin": "schedule",
+  });
+});
+
+test("defaultSeatLabels leaves a schedule-run agent alone once it already names a parent agent", () => {
+  expect(
+    defaultSeatLabels({ "paseo.schedule-id": "sch1", "paseo.parent-agent-id": "L1" }),
+  ).toBeNull();
 });
 
 test("runtime blocks name no retired seat provider and no Gemini", () => {

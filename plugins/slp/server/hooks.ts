@@ -14,7 +14,7 @@ import {
 } from "./discovery";
 import {
   buildSystemPrompt,
-  defaultHumanSeatLabels,
+  defaultSeatLabels,
   familyOf,
   paseoToolsFor,
   providerOptionsFor,
@@ -31,8 +31,9 @@ type AgentCreateRequest = PluginBeforeRequests["agent.create"];
  * sees Supervisors and the reverse) in its system prompt. Claude Lead/Supervisor also get
  * `allowedTools: mcp__paseo__*`; the Supervisor loses Write/Edit/Agent/Task, a Claude Peer loses
  * Agent/Task. Peer and Supervisor lose Paseo tools through the returned `paseoTools`. A claude/codex
- * request that names no seat and no parent — a Human made it directly, not another agent —
- * defaults to Peer and is tagged `slp.origin=human` (see `defaultHumanSeatLabels`).
+ * request that names no seat and no parent — a Human made it directly, or a schedule run created
+ * it, not another agent — defaults to Peer, tagged `slp.origin=schedule` when the request carries
+ * `paseo.schedule-id`, `slp.origin=human` otherwise (see `defaultSeatLabels`).
  */
 export async function withSeatConfig(
   request: AgentCreateRequest,
@@ -42,7 +43,7 @@ export async function withSeatConfig(
   let seat = seatOfLabels(request.labels);
   let labels = request.labels;
   if (!seat && family) {
-    const defaulted = defaultHumanSeatLabels(request.labels);
+    const defaulted = defaultSeatLabels(request.labels);
     if (defaulted) {
       seat = "peer";
       labels = defaulted;
