@@ -78,22 +78,6 @@ export function SiteFooter({ width = "default" }: SiteFooterProps) {
           <p className="text-white/60 font-medium">Community</p>
           <div className="space-y-2">
             <a
-              href="https://discord.gg/jz8T2uahpH"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Discord
-            </a>
-            <a
-              href="https://www.reddit.com/r/PaseoAI/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Reddit
-            </a>
-            <a
               href="https://github.com/phucanh08/alp"
               target="_blank"
               rel="noopener noreferrer"
