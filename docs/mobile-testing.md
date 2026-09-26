@@ -409,6 +409,22 @@ to `production` — so a bare `npm run ios` builds `sh.paseo` and collides with 
 of the `sh.paseo.debug` dev client. Ignore prebuild's `--non-interactive is not supported` warning; use
 `CI=1` if you need non-interactive.
 
+### Xcode 27 builds need the UIScene life cycle
+
+An app built with the iOS 27 SDK stops at launch with `UIScene life cycle is required for apps built with
+this SDK`. Expo SDK 54 has no scene delegate, so
+[`with-ios-scene-lifecycle.js`](../packages/app/plugins/with-ios-scene-lifecycle.js) adds one at prebuild.
+Declaring `UIApplicationSceneManifest` alone gives a black screen: the window must come from the
+`UIWindowScene`, and UIKit creates the scene after `application(_:didFinishLaunchingWithOptions:)` returns.
+
+The plugin makes that first call return early, and `SceneDelegate` calls it again with the scene's window
+and the cold-start link as launch options. The launch body keeps its order, so plugins that inject into it
+keep working, but none of it runs before the scene connects. URLs and user activities now arrive at the
+scene; `SceneDelegate` forwards them to `AppDelegate`, so handle links in the `AppDelegate` overrides.
+
+Delete the plugin when the app moves to an Expo SDK with scene support (SDK 58, or 57.0.23+ with
+`expo-build-properties` `enableSceneSupport`).
+
 ### Signing needs a working Apple ID token in Xcode
 
 Device builds fail with a trio of errors that all point away from the real cause:
