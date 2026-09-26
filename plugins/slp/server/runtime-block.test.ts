@@ -24,3 +24,18 @@ test("the Peer's own block names exactly the Paseo tools PEER_DISABLED_PASEO_TOO
     expect(runtimeBlock("peer", family)).toContain(PEER_TOOL_CUT_TEXT);
   }
 });
+
+test("a Peer carrying slp.origin gets the independent-Peer paragraph; one without it does not", () => {
+  for (const family of FAMILIES) {
+    expect(runtimeBlock("peer", family)).not.toContain("không có Lead nào giao brief");
+    expect(runtimeBlock("peer", family, "human")).toContain("không có Lead nào giao brief");
+    expect(runtimeBlock("peer", family, "schedule")).toContain("không có Lead nào giao brief");
+  }
+});
+
+test("a Lead or Supervisor block never gets the independent-Peer paragraph, origin or not", () => {
+  for (const family of FAMILIES) {
+    expect(runtimeBlock("lead", family)).not.toContain("không có Lead nào giao brief");
+    expect(runtimeBlock("supervisor", family)).not.toContain("không có Lead nào giao brief");
+  }
+});
