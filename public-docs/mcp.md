@@ -38,9 +38,9 @@ tool injection globally, then add `paseoTools` to the exact provider IDs you lau
   },
   "agents": {
     "providers": {
-      "codex-lead": {
+      "codex-planner": {
         "extends": "codex",
-        "label": "Codex Lead"
+        "label": "Codex Planner"
       },
       "codex-worker": {
         "extends": "codex",

@@ -204,7 +204,8 @@ nào. Trong app alp (agent do plugin `plugins/slp` tạo), seat definition bundl
 `plugins/slp/agents/`; repo override bằng `.slp/agents/<seat>.md`, không phải `.claude/agents/`. Plan
 hiện hành: `plans/`.
 
-- Lead là owner của topology và acceptance; chỉ Lead spawn Peer (`create_agent`, provider `claude-peer`).
+- Lead là owner của topology và acceptance; chỉ Lead spawn Peer (`create_agent`, provider `claude`/`codex` +
+  nhãn `slp.role=peer`).
 - Peer writer cần `exclusive-writer` + commit lease + `Base` SHA; mỗi moving scope một writer.
 - Handoff là candidate (SHA + base + changed paths + verification output + risk); Lead chấm bằng
   `ACCEPT <sha>` / `REJECT <sha>`. Shared task status không đồng nghĩa acceptance.
