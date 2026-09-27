@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import pino from "pino";
+import { assertPluginCompatibility } from "@alp/protocol/plugin-requirements";
 import { pluginSkillsInstallable, readPluginManifest, resolvePluginSkillsDir } from "./manifest.js";
+import { PluginRuntime } from "./runtime.js";
 
 const directories: string[] = [];
 const examplesDirectory = fileURLToPath(
@@ -43,6 +46,115 @@ describe("plugin manifest", () => {
       await writeFile(manifest, JSON.stringify({ id: "example", requirements }));
       await expect(readPluginManifest(directory)).rejects.toThrow();
     }
+  });
+
+  // alp-rename-keep-start: COMPAT(paseo-plugin-manifest) reads manifests written for upstream Paseo.
+  it("reads paseo-plugin.json when the plugin has no alp-plugin.json", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-manifest-"));
+    directories.push(directory);
+    await writeFile(path.join(directory, "paseo-plugin.json"), JSON.stringify({ id: "upstream" }));
+
+    await expect(readPluginManifest(directory)).resolves.toEqual({ id: "upstream" });
+  });
+
+  it("prefers alp-plugin.json over paseo-plugin.json", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-manifest-"));
+    directories.push(directory);
+    await writeFile(path.join(directory, "paseo-plugin.json"), JSON.stringify({ id: "upstream" }));
+    await writeFile(path.join(directory, "alp-plugin.json"), JSON.stringify({ id: "fork" }));
+
+    await expect(readPluginManifest(directory)).resolves.toEqual({ id: "fork" });
+  });
+
+  describe("a plugin written for upstream Paseo", () => {
+    async function createUpstreamPlugin(manifestFile: string, range: string): Promise<string> {
+      const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-upstream-"));
+      directories.push(directory);
+      await writeFile(
+        path.join(directory, manifestFile),
+        JSON.stringify({ id: "upstream", requirements: { paseo: range } }),
+      );
+      await writeFile(
+        path.join(directory, "index.server.ts"),
+        `import type { PluginServerContext } from "@getpaseo/plugin/server";
+export default function contribute(context: PluginServerContext) { return () => void context; }`,
+      );
+      return directory;
+    }
+
+    function validate(directory: string): Promise<void> {
+      return new PluginRuntime(pino({ level: "silent" }), "1.0.0").validatePlugin(directory);
+    }
+
+    it("loads when requirements.paseo matches the upstream base", async () => {
+      const directory = await createUpstreamPlugin("paseo-plugin.json", ">=0.9.1 <0.10.0");
+      await expect(validate(directory)).resolves.toBeUndefined();
+    });
+
+    it("rejects requirements.paseo that excludes the upstream base", async () => {
+      const directory = await createUpstreamPlugin("paseo-plugin.json", ">=0.10.0");
+      await expect(validate(directory)).rejects.toThrow(
+        'Plugin "upstream" requires Paseo >=0.10.0 (requirements.paseo in paseo-plugin.json), but this alp is built on Paseo 0.9.2.',
+      );
+    });
+
+    it("rejects an invalid requirements.paseo range", async () => {
+      const directory = await createUpstreamPlugin("paseo-plugin.json", "latest");
+      await expect(validate(directory)).rejects.toThrow(
+        'Invalid requirements.paseo in paseo-plugin.json: "latest".',
+      );
+    });
+
+    async function publishClientPlugin(
+      manifestFile: string,
+      requirements: Record<string, string>,
+    ): Promise<ReturnType<PluginRuntime["catalog"]>> {
+      const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-upstream-client-"));
+      directories.push(directory);
+      await writeFile(
+        path.join(directory, manifestFile),
+        JSON.stringify({ id: "upstream", requirements }),
+      );
+      await writeFile(
+        path.join(directory, "index.client.tsx"),
+        `import type { PluginClientContext } from "@getpaseo/plugin/client";
+export default function contribute(client: PluginClientContext) { return () => void client; }`,
+      );
+      const runtime = new PluginRuntime(pino({ level: "silent" }), "1.0.0");
+      await runtime.startPlugin("upstream", directory);
+      const catalog = runtime.catalog();
+      await runtime.stopAll();
+      return catalog;
+    }
+
+    it("publishes an alp range the app accepts for a legacy manifest", async () => {
+      const [entry] = await publishClientPlugin("paseo-plugin.json", { paseo: ">=0.9.1 <0.10.0" });
+
+      expect(entry.requirements).toEqual({ alp: ">=1.0.0" });
+      // Throws, failing the test, when the app would refuse the plugin.
+      assertPluginCompatibility({ ...entry, version: "1.0.0", runtime: "app" });
+    });
+
+    it("publishes requirements.alp as declared", async () => {
+      const [entry] = await publishClientPlugin("alp-plugin.json", { alp: ">=0.8.0" });
+
+      expect(entry.requirements).toEqual({ alp: ">=0.8.0" });
+    });
+
+    it("rejects requirements.paseo in alp-plugin.json", async () => {
+      const directory = await createUpstreamPlugin("alp-plugin.json", ">=0.9.1 <0.10.0");
+      await expect(validate(directory)).rejects.toThrow(/Unrecognized key.*paseo/);
+    });
+  });
+  // alp-rename-keep-end
+
+  it("names alp-plugin.json when the plugin has no manifest", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-manifest-"));
+    directories.push(directory);
+
+    await expect(readPluginManifest(directory)).rejects.toThrow(
+      `Plugin manifest is missing: ${path.join(directory, "alp-plugin.json")}`,
+    );
   });
 
   it("reads an optional description", async () => {

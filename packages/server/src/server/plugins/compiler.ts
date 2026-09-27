@@ -6,7 +6,10 @@ import type { Metafile, OnResolveResult, Plugin } from "esbuild";
 import {
   isPluginClientOnlySdkSpecifier,
   isPluginServerOnlySdkSpecifier,
+  PLUGIN_SDK_PACKAGE,
   PLUGIN_SDK_SPECIFIERS,
+  UPSTREAM_PLUGIN_SDK_PACKAGE,
+  canonicalPluginSdkSpecifier,
 } from "./plugin-sdk-specifiers.js";
 
 const nodeRequire = createRequire(import.meta.url);
@@ -246,7 +249,9 @@ function createRuntimeBoundaryPlugin(target: PluginBuildTarget, pluginDirectory:
           if (error) return error;
           // Host modules have separately enforced SDK boundaries and need no local installation.
           if (
-            (PLUGIN_SDK_SPECIFIERS as readonly string[]).includes(specifier) ||
+            (PLUGIN_SDK_SPECIFIERS as readonly string[]).includes(
+              canonicalPluginSdkSpecifier(specifier),
+            ) ||
             /^(zod|react|react-native|@tanstack\/react-query)(\/|$)/.test(specifier) ||
             isBuiltin(specifier) ||
             packageSpecifier === "@types/node"
@@ -314,23 +319,26 @@ function runtimeSpecifierError(
   importer: string,
 ): OnResolveResult | null {
   let kind: string | null = null;
-  if (specifier === "@alp/plugin/client/host") kind = "host-private";
+  // Checks run on the @alp/plugin name; the error keeps the specifier the author wrote.
+  const sdkSpecifier = canonicalPluginSdkSpecifier(specifier);
+  if (sdkSpecifier === "@alp/plugin/client/host") kind = "host-private";
   else if (
-    (specifier === "@alp/plugin" ||
-      specifier.startsWith("@alp/plugin/") ||
+    (sdkSpecifier === "@alp/plugin" ||
+      sdkSpecifier.startsWith("@alp/plugin/") ||
       // alp-rename-keep-start: the SDK's retired pre-@getpaseo scope
-      specifier === "@paseo/plugin" ||
-      specifier.startsWith("@paseo/plugin/")) &&
+      sdkSpecifier === "@paseo/plugin" ||
+      sdkSpecifier.startsWith("@paseo/plugin/")) &&
     // alp-rename-keep-end
-    !(PLUGIN_SDK_SPECIFIERS as readonly string[]).includes(specifier)
+    !(PLUGIN_SDK_SPECIFIERS as readonly string[]).includes(sdkSpecifier)
   )
     kind = "Unknown SDK";
   else if (target !== "server" && (isBuiltin(specifier) || specifier === "@types/node"))
     kind = "Node";
-  else if (target !== "server" && isPluginServerOnlySdkSpecifier(specifier)) kind = "server-only";
+  else if (target !== "server" && isPluginServerOnlySdkSpecifier(sdkSpecifier))
+    kind = "server-only";
   else if (
     target !== "client" &&
-    (isPluginClientOnlySdkSpecifier(specifier) ||
+    (isPluginClientOnlySdkSpecifier(sdkSpecifier) ||
       /^((?:@types\/)?react(?:-dom|-native)?|use-sync-external-store|@tanstack\/react-query)(\/|$)/.test(
         specifier,
       ))
@@ -395,6 +403,8 @@ async function compileTarget(entryPath: string, target: PluginBuildTarget): Prom
     // Metro lowers async syntax before Hermes sees app code. Plugin client bundles bypass Metro,
     // so apply the same compatibility transform before the app evaluates them from source.
     supported: target === "client" ? { "async-await": false } : undefined,
+    // COMPAT(getpaseo-sdk): bundles only ever require @alp/plugin, which the host supplies. alp-rename-keep
+    alias: { [UPSTREAM_PLUGIN_SDK_PACKAGE]: PLUGIN_SDK_PACKAGE },
     external:
       target === "client"
         ? [

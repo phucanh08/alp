@@ -27,6 +27,7 @@ export interface DaemonSelfUpdateLogger {
 }
 
 export interface DaemonSelfUpdateRuntime {
+  npmSelfUpdateEnabled: boolean;
   npm: NpmGlobalAlpCli;
   installOrigin: DaemonInstallOriginRuntime;
 }
@@ -38,22 +39,35 @@ export class DaemonSelfUpdateInProgressError extends Error {
   }
 }
 
-const defaultRuntime: DaemonSelfUpdateRuntime = {
+// alp publishes nothing to npm, so `npm install -g` cannot install this fork. Upstream's npm
+// path stays below for merges; the fork keeps it off here and in
+// server_info.features.daemonSelfUpdate.
+export const DAEMON_NPM_SELF_UPDATE_ENABLED = false;
+
+export const defaultDaemonSelfUpdateRuntime: DaemonSelfUpdateRuntime = {
+  npmSelfUpdateEnabled: DAEMON_NPM_SELF_UPDATE_ENABLED,
   npm: npmGlobalAlpCli,
   installOrigin: daemonInstallOriginRuntime,
 };
 
 const DESKTOP_MANAGED_UPDATE_ERROR =
   "This daemon is managed by alp Desktop. Update alp Desktop on the host.";
+const NPM_SELF_UPDATE_DISABLED_ERROR =
+  "alp is not published to npm, so this daemon cannot update itself. Update alp on the host the way you installed it.";
 
 export class DaemonSelfUpdater {
   private inProgress = false;
 
-  constructor(private readonly runtime: DaemonSelfUpdateRuntime = defaultRuntime) {}
+  constructor(private readonly runtime: DaemonSelfUpdateRuntime = defaultDaemonSelfUpdateRuntime) {}
 
   async update(input: DaemonSelfUpdateInput): Promise<DaemonSelfUpdateResult> {
     if (input.desktopManaged) {
       return { success: false, error: DESKTOP_MANAGED_UPDATE_ERROR, newVersion: null };
+    }
+
+    if (!this.runtime.npmSelfUpdateEnabled) {
+      input.logger.warn({}, NPM_SELF_UPDATE_DISABLED_ERROR);
+      return { success: false, error: NPM_SELF_UPDATE_DISABLED_ERROR, newVersion: null };
     }
 
     if (this.inProgress) {

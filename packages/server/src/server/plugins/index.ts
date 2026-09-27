@@ -18,12 +18,11 @@ import {
   type PluginUpdateResult,
 } from "@alp/protocol/messages";
 import { parsePluginSourceReference } from "@alp/protocol/plugin-source-reference";
-import { assertPluginCompatibility } from "@alp/protocol/plugin-requirements";
 import { BUILTIN_PROVIDER_IDS } from "@alp/protocol/provider-manifest";
 import type { DaemonConfigStore } from "../daemon-config-store.js";
 import { type ManagedPluginCandidate, ManagedPluginSources } from "./managed-source.js";
 import { isPluginEnabled } from "./enablement.js";
-import { readPluginManifest } from "./manifest.js";
+import { assertPluginManifestCompatibility, readPluginManifest } from "./manifest.js";
 import { runPluginBuild } from "./preparation.js";
 import { PluginRuntime } from "./runtime.js";
 import type { PluginProviderMetadata } from "./plugin-process-protocol.js";
@@ -233,7 +232,7 @@ export class PluginService {
     return this.enqueue(async () => {
       const directory = path.resolve(input.path);
       const manifest = await readPluginManifest(directory);
-      assertPluginCompatibility({ ...manifest, version: this.daemonVersion, runtime: "daemon" });
+      assertPluginManifestCompatibility(manifest, this.daemonVersion);
       const pluginId = PluginIdSchema.parse(input.id ?? manifest.id);
       if (this.configStore.get().plugins?.[pluginId]) {
         throw new Error(
@@ -635,7 +634,7 @@ export class PluginService {
 
   private async checkRequirements(directory: string): Promise<void> {
     const manifest = await readPluginManifest(directory);
-    assertPluginCompatibility({ ...manifest, version: this.daemonVersion, runtime: "daemon" });
+    assertPluginManifestCompatibility(manifest, this.daemonVersion);
   }
 
   private async updateSource(proposal: PluginUpdateProposal): Promise<PluginUpdateResult> {

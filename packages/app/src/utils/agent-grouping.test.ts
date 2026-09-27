@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { deriveProjectDisplayName, deriveRemoteProjectKey, groupAgents } from "./agent-grouping";
+import {
+  deriveProjectDisplayName,
+  deriveProjectKey,
+  deriveRemoteProjectKey,
+  groupAgents,
+} from "./agent-grouping";
 import type { AggregatedAgent } from "@/hooks/use-aggregated-agents";
 
 function makeAgent(overrides: Partial<AggregatedAgent> = {}): AggregatedAgent {
@@ -26,6 +31,16 @@ function makeAgent(overrides: Partial<AggregatedAgent> = {}): AggregatedAgent {
     attentionTimestamp: overrides.attentionTimestamp ?? null,
   } as AggregatedAgent;
 }
+
+describe("deriveProjectKey", () => {
+  it("groups an alp worktree under its parent repo", () => {
+    expect(deriveProjectKey("/Users/me/repo/.alp/worktrees/feature-a")).toBe("/Users/me/repo");
+  });
+
+  it("keeps a plain checkout as its own key", () => {
+    expect(deriveProjectKey("/Users/me/repo")).toBe("/Users/me/repo");
+  });
+});
 
 describe("deriveRemoteProjectKey", () => {
   it("normalizes GitHub SSH and HTTPS to the same key", () => {

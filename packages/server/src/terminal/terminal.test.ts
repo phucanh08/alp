@@ -9,6 +9,7 @@ import {
   humanizeProcessTitle,
   normalizeProcessTitle,
   resolveZshShellIntegrationDir,
+  resolveAlpCliExecutablePath,
   type TerminalSession,
 } from "./terminal.js";
 import {
@@ -1147,6 +1148,18 @@ describe.skipIf(isPlatform("win32"))("colors", () => {
     expect(outputRow[0].char).toBe("B");
     expect(outputRow[0].bg).toBe(1); // ANSI red = 1
     expect(outputRow[0].bgMode).toBe(1); // Mode 1 = 16 ANSI colors
+  });
+});
+
+describe("alp CLI resolution", () => {
+  it("resolves the npm bin shim of the alp CLI package", () => {
+    const configuredCli = process.env.ALP_CLI;
+    delete process.env.ALP_CLI;
+    try {
+      expect(resolveAlpCliExecutablePath()).toMatch(/node_modules[\\/]\.bin[\\/]alp(\.cmd)?$/);
+    } finally {
+      if (configuredCli !== undefined) process.env.ALP_CLI = configuredCli;
+    }
   });
 });
 
