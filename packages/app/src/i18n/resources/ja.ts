@@ -2332,6 +2332,10 @@ export const ja: TranslationResources = {
           hint: "新しく作成される Supervisor にのみ適用されます。",
           default: "既定",
         },
+        supervisorCheckMinutes: {
+          label: "Supervisor のチェック遅延（分）",
+          hint: "Supervisor が停止中の Lead を確認するまで待つ時間です。0 で無効になります。",
+        },
       },
       appearance: {
         title: "外観",
