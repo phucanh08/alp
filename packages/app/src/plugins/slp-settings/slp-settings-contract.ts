@@ -13,6 +13,7 @@ export const slpSettings = defineSettings({
   schema: z.object({
     enabled: z.boolean().default(true),
     supervisorModel: z.string().nullable().default(null),
+    supervisorCheckMinutes: z.number().int().min(0).default(10),
   }),
 });
 

@@ -88,10 +88,14 @@ describe("useSlpSettings on read", () => {
     expect(result.current).toEqual({ status: "unavailable" });
   });
 
-  it("reports loading, then the stored enabled flag and Supervisor model", async () => {
+  it("reports loading, then the stored enabled flag, Supervisor model, and check delay", async () => {
     const host = createFakeSlpHost({
       hasSlpPlugin: true,
-      settings: ready({ enabled: false, supervisorModel: "claude-opus-4-1" }),
+      settings: ready({
+        enabled: false,
+        supervisorModel: "claude-opus-4-1",
+        supervisorCheckMinutes: 45,
+      }),
     });
     const releaseRead = host.holdReads();
     const { result } = renderSlpSettings(host);
@@ -103,6 +107,7 @@ describe("useSlpSettings on read", () => {
       status: "ready",
       enabled: false,
       supervisorModel: "claude-opus-4-1",
+      supervisorCheckMinutes: 45,
       saving: false,
       saveError: null,
     });
@@ -116,18 +121,26 @@ describe("useSlpSettings on read", () => {
     const { result } = renderSlpSettings(host);
 
     await expect.poll(() => result.current.status).toBe("ready");
-    expect(result.current).toMatchObject({ enabled: true, supervisorModel: null });
+    expect(result.current).toMatchObject({
+      enabled: true,
+      supervisorModel: null,
+      supervisorCheckMinutes: 10,
+    });
   });
 
   it("treats stored values that fail the schema as the defaults", async () => {
     const host = createFakeSlpHost({
       hasSlpPlugin: true,
-      settings: ready({ enabled: "no", supervisorModel: 42 }),
+      settings: ready({ enabled: "no", supervisorModel: 42, supervisorCheckMinutes: -1 }),
     });
     const { result } = renderSlpSettings(host);
 
     await expect.poll(() => result.current.status).toBe("ready");
-    expect(result.current).toMatchObject({ enabled: true, supervisorModel: null });
+    expect(result.current).toMatchObject({
+      enabled: true,
+      supervisorModel: null,
+      supervisorCheckMinutes: 10,
+    });
   });
 
   it("reports a failed read as an error that still counts as enabled", async () => {
@@ -184,7 +197,10 @@ describe("useSlpSettings on save", () => {
 
     expect(saved).toBe(true);
     expect(host.writes).toEqual([
-      { revision: "r1", values: { enabled: false, supervisorModel: "claude-opus-4-1" } },
+      {
+        revision: "r1",
+        values: { enabled: false, supervisorModel: "claude-opus-4-1", supervisorCheckMinutes: 10 },
+      },
     ]);
     expect(result.current).toMatchObject({ enabled: false, supervisorModel: "claude-opus-4-1" });
   });
@@ -204,7 +220,10 @@ describe("useSlpSettings on save", () => {
     });
 
     expect(host.writes).toEqual([
-      { revision: "r3", values: { enabled: true, supervisorModel: null } },
+      {
+        revision: "r3",
+        values: { enabled: true, supervisorModel: null, supervisorCheckMinutes: 10 },
+      },
     ]);
     expect(result.current).toMatchObject({ enabled: true, supervisorModel: null });
   });
@@ -224,8 +243,43 @@ describe("useSlpSettings on save", () => {
     });
 
     expect(host.writes).toEqual([
-      { revision: "r5", values: { enabled: true, supervisorModel: "claude-sonnet-4-5" } },
+      {
+        revision: "r5",
+        values: { enabled: true, supervisorModel: "claude-sonnet-4-5", supervisorCheckMinutes: 10 },
+      },
     ]);
+  });
+
+  it("writes a changed supervisor check delay with the other stored values", async () => {
+    const host = createFakeSlpHost({
+      hasSlpPlugin: true,
+      settings: ready(
+        { enabled: true, supervisorModel: "claude-opus-4-1", supervisorCheckMinutes: 10 },
+        "r8",
+      ),
+    });
+    const { result } = renderSlpSettings(host);
+    await expect.poll(() => result.current.status).toBe("ready");
+    const current = result.current;
+    if (current.status !== "ready") throw new Error("expected ready");
+
+    let saved: boolean | undefined;
+    await act(async () => {
+      saved = await current.save({ supervisorCheckMinutes: 30 });
+    });
+
+    expect(saved).toBe(true);
+    expect(host.writes).toEqual([
+      {
+        revision: "r8",
+        values: {
+          enabled: true,
+          supervisorModel: "claude-opus-4-1",
+          supervisorCheckMinutes: 30,
+        },
+      },
+    ]);
+    expect(result.current).toMatchObject({ supervisorCheckMinutes: 30 });
   });
 
   it("reports a rejected write as a save error and keeps the stored value", async () => {
