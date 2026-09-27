@@ -166,6 +166,20 @@ test("rewrites CHANGELOG entries from 1.0.0 up and keeps older ones", () => {
   assert.equal(lines[9], "- paseo");
 });
 
+test("keeps published F-Droid changelogs whole", () => {
+  const text = "Paseo 0.8 adds plugin header buttons.\n\nFull notes: https://paseo.sh/changelog\n";
+  const result = renameText(text, { path: "fastlane/metadata/android/en-US/changelogs/80001.txt" });
+  assert.equal(result.text, text);
+  assert.deepEqual(
+    result.kept.map((hit) => hit.rule),
+    ["fastlane-changelog", "fastlane-changelog"],
+  );
+  assert.equal(
+    rename("Paseo for Android", "fastlane/metadata/android/en-US/full_description.txt"),
+    "Alp for Android",
+  );
+});
+
 test("keeps the Upstream column of docs/breaking-changes.md", () => {
   const text = [
     "| Since | Area | Upstream | alp | Effect |",

@@ -5,8 +5,8 @@
 // same input always maps to the same output and applying it twice changes nothing.
 //
 // A text rename has three layers:
-//   1. file-level exceptions: LICENSE files, CHANGELOG entries older than 1.0.0, the Upstream
-//      column of docs/breaking-changes.md, and keep markers;
+//   1. file-level exceptions: LICENSE files, CHANGELOG entries older than 1.0.0, published
+//      F-Droid changelogs, the Upstream column of docs/breaking-changes.md, and keep markers;
 //   2. protected spans inside a line: upstream URLs and references, Hub-external names, and
 //      the Electron browser partition;
 //   3. token rules, applied in order to everything outside a protected span.
@@ -113,6 +113,12 @@ export function isLicensePath(filePath) {
   return /^LICEN[CS]E(?:[.-].*)?$/i.test(basename(filePath));
 }
 
+// F-Droid shows these as plain text, so they cannot carry a keep marker. Each is written once at
+// release time from its CHANGELOG entry, which already went through the rename.
+function isFastlaneChangelogPath(filePath) {
+  return /^fastlane\/metadata\/android\/[^/]+\/changelogs\/\d+\.txt$/.test(filePath);
+}
+
 function basename(filePath) {
   return filePath.slice(filePath.lastIndexOf("/") + 1);
 }
@@ -134,6 +140,9 @@ function keptLines(lines, filePath) {
   }
   if (isLicensePath(filePath)) {
     return kept.fill("license");
+  }
+  if (isFastlaneChangelogPath(filePath)) {
+    return kept.fill("fastlane-changelog");
   }
   let inRegion = false;
   let inOldChangelogEntry = false;
