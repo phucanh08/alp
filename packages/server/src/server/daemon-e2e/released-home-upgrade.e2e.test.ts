@@ -20,6 +20,7 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { getParentAgentIdFromLabels } from "@alp/protocol/agent-labels";
 
 import { resolveAlpHome } from "../alp-home.js";
+import { applyResolvedAlpHomeEnv } from "../alp-env.js";
 import { createAlpDaemon, formatListenTarget } from "../bootstrap.js";
 import { loadConfig } from "../config.js";
 import { daemonLaunchEnvironment } from "../config-environment.js";
@@ -271,6 +272,10 @@ export default function contribute(client: PluginClientContext) { return () => v
  */
 async function startDaemonLikeWorker(afterMigration?: () => void): Promise<StartedDaemon> {
   const alpHome = resolveAlpHome();
+  // Same as daemon-worker.ts's bootstrapFromEnvironment: publish the resolved home into
+  // process.env before anything forks, so a PASEO_HOME-only environment still hands ALP_HOME to
+  // children that inherit process.env outright (the plugin host).
+  applyResolvedAlpHomeEnv(alpHome);
   await acquirePidLock(alpHome, null, { ownerPid: process.pid });
   const migration = migratePreRenameState({ alpHome });
   afterMigration?.();
@@ -516,6 +521,35 @@ describe.skipIf(process.platform === "win32")("a machine alp 1.0.0 ran on", () =
       serverId: running!.daemon.getServerId(),
     });
   }, 90_000);
+
+  // The plugin host's fork() inherits process.env outright — it never re-resolves the home from a
+  // different name. With only PASEO_HOME set, the daemon still has to publish ALP_HOME so slp
+  // builds a seat's skill directory instead of logging that ALP_HOME is not set.
+  test("slp builds a seat's skill directory under the home with only PASEO_HOME set", async () => {
+    const { client, daemon } = running!;
+    await vi.waitFor(
+      () => client.invokePluginRpc("slp-dev", "slp-dev.seat.get", { seat: "peer" }),
+      {
+        timeout: 60_000,
+        interval: 250,
+      },
+    );
+    const peer = await client.createAgent({
+      provider: "claude",
+      cwd: fixture.repo,
+      title: "Seated peer (PASEO_HOME only)",
+      labels: { "slp.role": "peer" },
+    });
+
+    expect(daemon.agentManager.getAgent(peer.id)?.config.systemPrompt).toContain("# Ghế SLP: peer");
+    const seatDir = path.join(fixture.alpHome, "slp", "seat-skills", "peer");
+    expect(readdirSync(path.join(seatDir, "skills")).sort()).toEqual([
+      "bug-loop",
+      "smart-commits",
+      "xia",
+    ]);
+    await client.archiveAgent(peer.id);
+  }, 120_000);
 
   // `alp daemon start` resolves the home the same way and hands it to the daemon as ALP_HOME.
   test("restarted by alp daemon start, it migrates nothing and leaves the tree as it was", async () => {

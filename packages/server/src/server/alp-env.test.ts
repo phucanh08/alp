@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  applyResolvedAlpHomeEnv,
   buildSelfNodeCommand,
   createExternalCommandProcessEnv,
   createExternalProcessEnv,
@@ -117,5 +118,28 @@ describe("alp env contract", () => {
       "production",
     );
     expect(resolveAlpNodeEnv({ NODE_ENV: "test", ALP_NODE_ENV: "local" })).toBeUndefined();
+  });
+
+  test("publishes the resolved home as ALP_HOME even when only the 1.0.0 legacy name was set", () => {
+    // COMPAT(paseo-env): PASEO_HOME is the legacy key under test. alp-rename-keep
+    const env: Record<string, string | undefined> = {
+      PASEO_HOME: "/old/home", // alp-rename-keep
+      PATH: "/usr/bin",
+    };
+
+    applyResolvedAlpHomeEnv("/resolved/home", env);
+
+    expect(env.ALP_HOME).toBe("/resolved/home");
+    expect(env.PASEO_HOME).toBe("/resolved/home"); // COMPAT(paseo-env): dual-export. alp-rename-keep
+    expect(env.PATH).toBe("/usr/bin");
+  });
+
+  test("leaves an env that already has the right ALP_HOME unchanged", () => {
+    const env: Record<string, string | undefined> = { ALP_HOME: "/resolved/home" };
+
+    applyResolvedAlpHomeEnv("/resolved/home", env);
+
+    // Dual-export includes the legacy key.
+    expect(env).toEqual({ ALP_HOME: "/resolved/home", PASEO_HOME: "/resolved/home" }); // alp-rename-keep
   });
 });

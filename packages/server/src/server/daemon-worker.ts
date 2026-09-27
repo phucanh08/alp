@@ -3,6 +3,7 @@ import path from "node:path";
 import { createAlpDaemon, formatListenTarget } from "./bootstrap.js";
 import { loadConfig } from "./config.js";
 import { resolveAlpHome } from "./alp-home.js";
+import { applyResolvedAlpHomeEnv } from "./alp-env.js";
 import { createRootLogger } from "./logger.js";
 import type { DaemonLifecycleIntent } from "./bootstrap.js";
 import { getProcessDiagnostics } from "./process-diagnostics.js";
@@ -72,6 +73,10 @@ function writeWorkerLifecycleLog(
 function bootstrapFromEnvironment(): BootstrapResult {
   try {
     const alpHome = resolveAlpHome();
+    // Before anything spawns a child: children that inherit process.env outright (the plugin
+    // host's fork() call takes no env override) must see ALP_HOME even when this process itself
+    // started with only the 1.0.0 legacy home name.
+    applyResolvedAlpHomeEnv(alpHome);
     // Before loadConfig: state written before the alp rename must be in place before any read.
     const renameMigration = migratePreRenameState({ alpHome });
     const config = loadConfig(alpHome);
