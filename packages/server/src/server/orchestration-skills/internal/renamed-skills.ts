@@ -20,6 +20,14 @@ const RENAMED_SKILLS: ReadonlyMap<string, string> = new Map([
 
 export const RENAMED_SKILL_OLD_NAMES: readonly string[] = [...RENAMED_SKILLS.keys()];
 
+// ALP(p21): a skill the bundle stops shipping, with nothing replacing it — as
+// opposed to a rename, which has a new name to install instead. `ask-alp` is
+// retired: seats read plugins/slp-dev/references/seats.md directly now. Like a
+// renamed old name, a retired name is never managed: status, uninstall, and
+// save never plan, report, or delete it. Only `removeRenamedSkillDirs` cleans
+// up a leftover copy, with the same safety rule as a renamed directory.
+export const RETIRED_SKILL_NAMES: readonly string[] = ["ask-alp"];
+
 export interface SkillsLogger {
   warn(fields: Record<string, unknown>, message: string): void;
   error(fields: Record<string, unknown>, message: string): void;
@@ -122,6 +130,45 @@ async function removeVerifiedDir(
   await fs.rmdir(skillDir);
 }
 
+interface StaleSkillGroup {
+  names: readonly string[];
+  keptMessage: string;
+  failedMessage: string;
+}
+
+// One group per reason a name stopped being managed. Same inspection and
+// removal for both: only the log wording tells them apart.
+const STALE_SKILL_GROUPS: readonly StaleSkillGroup[] = [
+  {
+    names: RENAMED_SKILL_OLD_NAMES,
+    keptMessage: "Kept a skill directory from before the alp rename",
+    failedMessage: "Failed to remove a skill directory from before the alp rename",
+  },
+  {
+    names: RETIRED_SKILL_NAMES,
+    keptMessage: "Kept a retired skill's directory",
+    failedMessage: "Failed to remove a retired skill's directory",
+  },
+];
+
+async function removeStaleSkillDir(
+  skillDir: string,
+  group: StaleSkillGroup,
+  logger: SkillsLogger,
+): Promise<void> {
+  try {
+    const verdict = await inspectOldSkillDir(skillDir);
+    if (verdict.kind === "absent") return;
+    if (verdict.kind === "keep") {
+      logger.warn({ path: skillDir, reason: verdict.reason }, group.keptMessage);
+      return;
+    }
+    await removeVerifiedDir(skillDir, verdict);
+  } catch (error) {
+    logger.warn({ path: skillDir, err: error }, group.failedMessage);
+  }
+}
+
 /**
  * Runs from automatic maintenance, which never deletes anything else. Failures
  * are logged and skipped so they cannot stop the renamed skills installing.
@@ -132,26 +179,11 @@ export async function removeRenamedSkillDirs(
   logger: SkillsLogger,
 ): Promise<void> {
   const shipped = new Set(shippedNames);
-  for (const name of RENAMED_SKILL_OLD_NAMES) {
-    if (shipped.has(name)) continue;
-    for (const root of [roots.agentsDir, roots.claudeDir, roots.codexDir]) {
-      const skillDir = path.join(root, name);
-      try {
-        const verdict = await inspectOldSkillDir(skillDir);
-        if (verdict.kind === "absent") continue;
-        if (verdict.kind === "keep") {
-          logger.warn(
-            { path: skillDir, reason: verdict.reason },
-            "Kept a skill directory from before the alp rename",
-          );
-          continue;
-        }
-        await removeVerifiedDir(skillDir, verdict);
-      } catch (error) {
-        logger.warn(
-          { path: skillDir, err: error },
-          "Failed to remove a skill directory from before the alp rename",
-        );
+  for (const group of STALE_SKILL_GROUPS) {
+    for (const name of group.names) {
+      if (shipped.has(name)) continue;
+      for (const root of [roots.agentsDir, roots.claudeDir, roots.codexDir]) {
+        await removeStaleSkillDir(path.join(root, name), group, logger);
       }
     }
   }

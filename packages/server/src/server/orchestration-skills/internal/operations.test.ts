@@ -885,3 +885,129 @@ describe("renamed skill cleanup", () => {
     },
   );
 });
+
+// ALP(p21): ask-alp is retired — nothing ships it now that seats read
+// plugins/slp-dev/references/seats.md directly. A leftover install gets the
+// same safety-checked cleanup as a renamed skill's old directory.
+describe("retired skill cleanup", () => {
+  const RETIRED_NAME = "ask-alp";
+
+  let sandbox: Sandbox;
+  let warn: ReturnType<typeof vi.fn>;
+  let logger: {
+    warn: (fields: Record<string, unknown>, message: string) => void;
+    error: (fields: Record<string, unknown>, message: string) => void;
+  };
+
+  beforeEach(async () => {
+    sandbox = await makeSandbox();
+    warn = vi.fn();
+    logger = { warn, error: () => {} };
+  });
+
+  afterEach(async () => {
+    await fs.rm(sandbox.root, { recursive: true, force: true });
+  });
+
+  function roots(): string[] {
+    return [sandbox.targets.agentsDir, sandbox.targets.claudeDir, sandbox.targets.codexDir];
+  }
+
+  function warnedPaths(): string[] {
+    return warn.mock.calls.map(([fields]) => (fields as { path: string }).path);
+  }
+
+  /** Install ask-alp through the real installer, then ship a bundle that no longer has it. */
+  async function installThenRetire(): Promise<void> {
+    await writeCurrentBundle(sandbox.targets.sourceDir);
+    await writeBundleSkill(sandbox.targets.sourceDir, RETIRED_NAME, {
+      "SKILL.md": "ask-alp-old",
+      "references/guide.md": "ask-alp guide",
+    });
+    await installSkills(sandbox.targets, ALL_SKILLS);
+    await fs.rm(path.join(sandbox.targets.sourceDir, RETIRED_NAME), {
+      recursive: true,
+      force: true,
+    });
+  }
+
+  it("removes a clean retired directory from all three roots on update", async () => {
+    await installThenRetire();
+
+    const status = await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
+
+    expect(await installedIn(sandbox.targets, RETIRED_NAME)).toEqual([false, false, false]);
+    expect(status.available).not.toContain(RETIRED_NAME);
+    expect(status.installed).not.toContain(RETIRED_NAME);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("removes a clean retired directory from all three roots on auto-update", async () => {
+    await installThenRetire();
+
+    const status = await autoUpdateInstalledSkills(sandbox.targets, ALL_SKILLS, { logger });
+
+    expect(await installedIn(sandbox.targets, RETIRED_NAME)).toEqual([false, false, false]);
+    expect(status.available).not.toContain(RETIRED_NAME);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("keeps a retired directory whose managed file was edited, and logs it", async () => {
+    await installThenRetire();
+    const kept = path.join(sandbox.targets.claudeDir, RETIRED_NAME);
+    await fs.writeFile(path.join(kept, "references", "guide.md"), "edited by user");
+
+    await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
+
+    expect(await fs.readFile(path.join(kept, "references", "guide.md"), "utf-8")).toBe(
+      "edited by user",
+    );
+    expect(await installedIn(sandbox.targets, RETIRED_NAME)).toEqual([false, true, false]);
+    expect(warnedPaths()).toEqual([kept]);
+  });
+
+  it("keeps a retired directory holding a file the manifest does not list", async () => {
+    await installThenRetire();
+    const kept = path.join(sandbox.targets.agentsDir, RETIRED_NAME);
+    await writeFiles(kept, { "notes/mine.md": "user notes" });
+
+    await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
+
+    expect(await fs.readFile(path.join(kept, "notes", "mine.md"), "utf-8")).toBe("user notes");
+    expect(await installedIn(sandbox.targets, RETIRED_NAME)).toEqual([true, false, false]);
+    expect(warnedPaths()).toEqual([kept]);
+  });
+
+  it("never lists ask-alp as available or installed, cleanup aside", async () => {
+    await writeCurrentBundle(sandbox.targets.sourceDir);
+    // A leftover copy sitting on disk from before it was retired; the bundle
+    // never ships it in this run, so nothing plans, reports, or deletes it.
+    await writeOnDiskSkillToAllTargets(sandbox.targets, RETIRED_NAME, {
+      "SKILL.md": "leftover",
+    });
+
+    const status = await getSkillsStatus(sandbox.targets, ALL_SKILLS);
+
+    expect(status.available).not.toContain(RETIRED_NAME);
+    expect(status.installed).not.toContain(RETIRED_NAME);
+    expect(status.ops).not.toContainEqual({ kind: "delete", name: RETIRED_NAME });
+  });
+
+  it("leaves the other SLP skill names alone while retiring ask-alp", async () => {
+    await installThenRetire();
+    // A still-current SLP skill's directory sitting beside the retired one —
+    // the cleanup sweep must only ever touch the retired name.
+    await writeOnDiskSkillToAllTargets(sandbox.targets, "bug-loop", {
+      "SKILL.md": "bug-loop-current",
+    });
+
+    await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
+
+    expect(await installedIn(sandbox.targets, RETIRED_NAME)).toEqual([false, false, false]);
+    for (const root of roots()) {
+      expect(await fs.readFile(path.join(root, "bug-loop", "SKILL.md"), "utf-8")).toBe(
+        "bug-loop-current",
+      );
+    }
+  });
+});
