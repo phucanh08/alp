@@ -1,12 +1,12 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import contributeSlpDev from "../../slp-dev/index.server";
 import { slpDevSeatGet } from "../../slp-dev/shared/rpc";
 import type { AgentLister } from "./discovery";
 import { withSeatConfig } from "./hooks";
-import { SLP_DEV_PLUGIN_ID, SLP_DEV_SEAT_GET } from "./seat-rules";
+import { readSeatRules, SLP_DEV_PLUGIN_ID, SLP_DEV_SEAT_GET } from "./seat-rules";
 
 const slpDevDirectory = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -71,4 +71,22 @@ test("with slp-dev's real seat.get, each seat gets agents/<seat>.md minus frontm
       expect(prompt).toContain(`- **Skill của ghế này** (plugin \`slp-dev\`): ${skills}.`);
     else expect(prompt).not.toContain("Skill của ghế này");
   }
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+test("readSeatRules leaves no timer behind once slp-dev answers or fails", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  await readSeatRules("/nonexistent-slp-cwd", "peer", realSlpDev());
+  expect(vi.getTimerCount()).toBe(0);
+  await readSeatRules("/nonexistent-slp-cwd", "peer", {
+    invoke: async () => {
+      throw new Error("Plugin is not available");
+    },
+  });
+  expect(vi.getTimerCount()).toBe(0);
 });
