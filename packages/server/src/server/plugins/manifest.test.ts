@@ -65,6 +65,22 @@ describe("plugin manifest", () => {
     await expect(readPluginManifest(directory)).rejects.toThrow();
   });
 
+  it("reads an optional skills directory relative to the plugin root", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-manifest-"));
+    directories.push(directory);
+    const manifest = path.join(directory, "paseo-plugin.json");
+
+    for (const skills of ["skills", "./share/skills", "share/skills/"]) {
+      await writeFile(manifest, JSON.stringify({ id: "skilled", skills }));
+      await expect(readPluginManifest(directory)).resolves.toEqual({ id: "skilled", skills });
+    }
+
+    for (const skills of ["", "   ", ".", "..", "../skills", "skills/../../x", "/abs/skills", 7]) {
+      await writeFile(manifest, JSON.stringify({ id: "skilled", skills }));
+      await expect(readPluginManifest(directory)).rejects.toThrow();
+    }
+  });
+
   it("accepts only non-empty argv arrays for build commands", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-manifest-"));
     directories.push(directory);
