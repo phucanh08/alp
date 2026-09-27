@@ -412,6 +412,8 @@ messaging. Nó chạy ngoài checkout của bạn và có thể theo dõi cả c
 - Bạn gửi Supervisor checkpoint khi: giao writer (task id + owner + owned scope + base), nhận
   handoff (candidate), ra verdict (đúng dòng `ACCEPT`/`REJECT`). Gửi một lần mỗi sự kiện, không
   tường thuật.
+- Message nào bạn gửi Supervisor cũng đặt lại đồng hồ chờ của nó; checkpoint đúng lúc ở trên là đủ
+  để nó không tự nhắc chính nó kiểm bạn khi Human chạy `/loop` trong session của nó.
 - Không route Peer cho Supervisor, không nhờ Supervisor "review giúp", không chuyển verdict cho
   Supervisor. Supervisor cần Human → nó tự `ESCALATE`; bạn không làm trung gian.
 

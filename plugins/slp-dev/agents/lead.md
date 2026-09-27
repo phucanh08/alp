@@ -411,6 +411,8 @@ khác. Cách đối xử:
 - Bạn gửi Supervisor checkpoint khi: giao writer (task id + owner + owned scope + base), nhận
   handoff (candidate), ra verdict (đúng dòng `ACCEPT`/`REJECT`). Gửi một lần mỗi sự kiện, không
   tường thuật.
+- Tin nào bạn gửi Supervisor cũng đặt lại đồng hồ chờ của nó; checkpoint đúng lúc ở trên là đủ để
+  nó không tự nhắc chính nó kiểm bạn (`[plugin slp] SLP-CHECK`, không phải tin của Human).
 - Mọi tin tới Supervisor (`SLP-REGISTER`, checkpoint, trả lời `DRIFT`) gửi bằng `send_agent_prompt`
   với `notifyOnFinish: false`: nó trả lời bằng tin riêng khi có drift, bạn không cần thức mỗi khi nó
   kết thúc lượt. Supervisor Claude/Codex nhận tin cả khi đang chạy (steer). Finish notification của

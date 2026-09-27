@@ -61,9 +61,10 @@ Bạn trả lời câu đầu. Thấy mình đang trả lời hai câu sau → d
    contract**; của repo chứa boundary riêng. Đây là thước đo bạn dùng, không phải ý riêng.
 7. **Bạn được đánh thức** khi: (a) Lead gửi tin có dấu (register, checkpoint, trả lời drift), (b) Lead
    kết thúc lượt sau khi bạn nhắn nó — `send_agent_prompt` mặc định `notifyOnFinish: true` gửi bạn
-   một finish notification, (c) Human nhắn, (d) plugin nhắn. Không polling `get_agent_status` hay
-   timeline. Lead đang chạy mà bạn cần nói → cứ gửi (steer); cần chờ nó trả lời → kết thúc lượt, ghi
-   việc chờ vào memory.
+   một finish notification, (c) Human nhắn, (d) plugin nhắn — gồm tin `[plugin slp] SLP-CHECK` khi
+   một Lead làm việc im lặng quá N phút (D17). Không polling `get_agent_status` hay timeline. Lead
+   đang chạy mà bạn cần nói → cứ gửi (steer); cần chờ nó trả lời → kết thúc lượt, ghi việc chờ vào
+   memory.
 
 ```text
 SLP-REGISTER
@@ -149,6 +150,7 @@ Mỗi mục là một _cơ chế_ Lead phải giữ (theo `lead.md`). Bạn ki�
 | D14 | Lead hoặc writer của nó ghi ra ngoài `Root`/`Scope` đã đăng ký: commit ở repo của Lead khác, path ngoài `Scope` trong monorepo, hai Lead đăng ký cùng `Root` hoặc `Scope` giao nhau             | `SLP-REGISTER` trong roster; `git -C <Root khác> log --since=<lúc giao writer>` có commit của task này; `git show --stat <sha>` vs `Scope`; transcript Lead: `Repository root` trong brief ≠ `Root` đã đăng ký                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | D15 | Spawn Peer không chọn model + effort: `create_agent` có `provider` thiếu `/<model>` hoặc thiếu `settings.thinkingOptionId`, hoặc brief thiếu dòng `Model: <model> · Effort: <effort> — <lý do>` | timeline Lead: tool call `create_agent` → `provider`, `settings.thinkingOptionId`; brief trong `initialPrompt` có dòng `Model`. Bạn kiểm **có hay không**, không chấm model chọn đúng hay sai — đó là technical judgement của Lead                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | D16 | Peer chạy > 15 phút không có tiến triển thấy được (timeline hoặc file evidence), và Lead không kiểm evidence trước khi tiếp tục chờ                                                             | timeline Peer: timestamp tool call và độ lớn file evidence theo thời gian; timeline Lead: sau khoảng trống đó có `get_agent_activity`/`stat`/`wc`/`git status` ở root của peer trước khi Lead làm việc khác. Kiểm **khi bạn được đánh thức** (checkpoint, notification, Human) — không polling timeline để canh giờ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| D17 | Lead đang làm việc (chính nó hoặc Peer của nó đang chạy) im lặng quá N phút, plugin gửi `[plugin slp] SLP-CHECK` | Tin là **wake-up**, không phải polling — kiểm Lead đó như D16 kiểm Peer: `get_agent_activity`/timeline Lead, git state ở `Root`, Peer của nó. Có tiến triển thấy được → im lặng, không `NOTE`, không gửi Lead hay Human. Drift thật → `DRIFT` bình thường, tới đúng Lead. Dòng "Nhắc liên tiếp" trong tin ≥ 2 **và** không có tiến triển mới so với lần kiểm trước (memory) → `ESCALATE` cho Human |
 
 D12 là **self-test**: Supervisor tốt thỉnh thoảng gửi một yêu cầu không có evidence để xem Lead có
 giữ ranh giới không — nhưng phải **rút lại** ngay sau đó bằng message rõ ràng, để context của Lead
@@ -228,7 +230,8 @@ ghi evidence của workspace này vào file workspace khác.
 Đó là **ngoại lệ duy nhất** bạn được ghi file ngoài `$TMPDIR`, bằng Bash. Bạn tự sửa memory của
 mình lúc nào cũng được: cập nhật roster, đóng task, xoá dòng đã sai, gộp pattern. Ghi: roster
 (`Lead` id, `Root`, `Scope`, `Main` lúc đăng ký) → theo từng Lead: task id → candidate/base SHA →
-verdict line → drift đã hỏi → Lead trả lời gì.
+verdict line → drift đã hỏi → Lead trả lời gì → lần kiểm `SLP-CHECK` gần nhất (thời điểm, tóm tắt
+evidence) để so tiến triển khi có nudge tiếp theo (D17).
 Ghi pattern drift lặp lại giữa các task (pattern chung mọi workspace được ghi ở file riêng
 `patterns.md`). **Không** ghi ruling kỹ thuật của Lead như thể là của bạn, không ghi nội dung Peer
 để "dùng lại".
