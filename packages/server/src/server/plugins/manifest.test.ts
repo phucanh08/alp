@@ -24,23 +24,6 @@ describe("plugin manifest", () => {
     });
   });
 
-  // alp-rename-keep-start: a plugin written for alp 1.0.0 uses these names.
-  it("reads a paseo-plugin.json manifest and its requirements.paseo range", async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-manifest-legacy-"));
-    directories.push(directory);
-    await writeFile(
-      path.join(directory, "paseo-plugin.json"),
-      JSON.stringify({ id: "legacy", requirements: { paseo: ">=0.9.0" } }),
-    );
-
-    await expect(readPluginManifest(directory)).resolves.toEqual({
-      id: "legacy",
-      requirements: { alp: ">=0.9.0" },
-    });
-    expect(await readdir(directory)).toEqual(["paseo-plugin.json"]);
-  });
-  // alp-rename-keep-end
-
   it("reads and validates requirements before any plugin code runs", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-manifest-"));
     directories.push(directory);

@@ -3,16 +3,8 @@ import path from "node:path";
 import { z } from "zod";
 import { PluginIdSchema, PluginRequirementsSchema } from "@alp/protocol/messages";
 import { validatePluginRequirements } from "@alp/protocol/plugin-requirements";
-import { reportLegacyNameUse } from "../rename-migration/legacy-names.js";
 
 const MANIFEST_FILENAME = "alp-plugin.json";
-// alp-rename-keep-start
-// COMPAT(paseo-plugin-manifest): added after v1.0.0 on 2026-09-27; remove after 2027-03-27.
-// A plugin written for alp 1.0.0 ships paseo-plugin.json with `requirements.paseo`. Plugins
-// live in their authors' directories, so the old names are read, never rewritten.
-const LEGACY_MANIFEST_FILENAME = "paseo-plugin.json";
-const LEGACY_REQUIREMENTS_KEY = "paseo";
-// alp-rename-keep-end
 const PluginBuildCommandSchema = z
   .array(z.string().refine((argument) => argument.trim().length > 0))
   .min(1);
@@ -54,39 +46,11 @@ const PluginManifestSchema = z
 
 export type PluginManifest = z.infer<typeof PluginManifestSchema>;
 
-async function isFile(filePath: string): Promise<boolean> {
-  const info = await stat(filePath).catch(() => null);
-  return info?.isFile() === true;
-}
-
-async function resolveManifestPath(directory: string): Promise<string> {
-  const manifestPath = path.join(directory, MANIFEST_FILENAME);
-  if (await isFile(manifestPath)) return manifestPath;
-  const legacyPath = path.join(directory, LEGACY_MANIFEST_FILENAME);
-  if (!(await isFile(legacyPath))) throw new Error(`Plugin manifest is missing: ${manifestPath}`);
-  reportLegacyNameUse({
-    kind: "plugin-manifest",
-    legacy: LEGACY_MANIFEST_FILENAME,
-    current: MANIFEST_FILENAME,
-    path: legacyPath,
-  });
-  return legacyPath;
-}
-
-function renameLegacyRequirements(raw: unknown): unknown {
-  if (typeof raw !== "object" || raw === null || !("requirements" in raw)) return raw;
-  const requirements = raw.requirements;
-  if (typeof requirements !== "object" || requirements === null) return raw;
-  if (!(LEGACY_REQUIREMENTS_KEY in requirements) || "alp" in requirements) return raw;
-  const { [LEGACY_REQUIREMENTS_KEY]: range, ...rest } = requirements as Record<string, unknown>;
-  return { ...raw, requirements: { ...rest, alp: range } };
-}
-
 export async function readPluginManifest(directory: string): Promise<PluginManifest> {
-  const manifestPath = await resolveManifestPath(directory);
-  const manifest = PluginManifestSchema.parse(
-    renameLegacyRequirements(JSON.parse(await readFile(manifestPath, "utf8"))),
-  );
+  const manifestPath = path.join(directory, MANIFEST_FILENAME);
+  const info = await stat(manifestPath).catch(() => null);
+  if (!info?.isFile()) throw new Error(`Plugin manifest is missing: ${manifestPath}`);
+  const manifest = PluginManifestSchema.parse(JSON.parse(await readFile(manifestPath, "utf8")));
   validatePluginRequirements(manifest.requirements);
   return manifest;
 }
