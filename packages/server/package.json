@@ -1,6 +1,6 @@
 {
   "name": "@alp/server",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Alp backend server",
   "files": [
     "dist/server",
@@ -105,11 +105,11 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.17.1",
-    "@alp/client": "1.0.0",
-    "@alp/highlight": "1.0.0",
-    "@alp/plugin": "1.0.0",
-    "@alp/protocol": "1.0.0",
-    "@alp/relay": "1.0.0",
+    "@alp/client": "1.1.0",
+    "@alp/highlight": "1.1.0",
+    "@alp/plugin": "1.1.0",
+    "@alp/protocol": "1.1.0",
+    "@alp/relay": "1.1.0",
     "@anthropic-ai/claude-agent-sdk": "0.3.246",
     "@anthropic-ai/sdk": "^0.104.2",
     "@isaacs/ttlcache": "^2.1.4",

@@ -1,6 +1,6 @@
 {
   "name": "alp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "alp (fork of github.com/getpaseo/paseo): voice-controlled development environment for local AI coding agents",
   "keywords": [

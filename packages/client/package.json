@@ -1,6 +1,6 @@
 {
   "name": "@alp/client",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Alp client SDK package",
   "files": [
     "dist",
@@ -39,8 +39,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@alp/protocol": "1.0.0",
-    "@alp/relay": "1.0.0",
+    "@alp/protocol": "1.1.0",
+    "@alp/relay": "1.1.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
