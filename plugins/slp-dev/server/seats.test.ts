@@ -2,7 +2,12 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
-import { readSeatSources, renderSeatsModule } from "./seats-source";
+import {
+  readSeatSources,
+  readSkillSources,
+  renderSeatsModule,
+  renderSkillsModule,
+} from "./seats-source";
 
 const pluginDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -22,6 +27,20 @@ test("every skill a seat names ships in skills/", async () => {
     for (const skill of skills) expect(shipped).toContain(skill);
   }
   expect(shipped.sort()).toEqual([
+    "bug-loop",
+    "goal-griller",
+    "prompt-leverage",
+    "sequence-execution-plan",
+    "smart-commits",
+    "xia",
+  ]);
+});
+
+test("skills.gen.ts matches skills/ (run `npm run generate` after editing a skill)", async () => {
+  const sources = await readSkillSources(pluginDirectory);
+  const generated = await readFile(path.join(pluginDirectory, "server", "skills.gen.ts"), "utf8");
+  expect(generated).toBe(renderSkillsModule(sources));
+  expect(Object.keys(sources).sort()).toEqual([
     "bug-loop",
     "goal-griller",
     "prompt-leverage",
