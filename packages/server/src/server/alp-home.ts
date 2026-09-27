@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import { readAlpEnv } from "./rename-migration/legacy-names.js";
 
 function expandHomeDir(input: string): string {
   if (input.startsWith("~/")) {
@@ -12,7 +13,7 @@ function expandHomeDir(input: string): string {
 }
 
 export function resolveAlpHome(env: NodeJS.ProcessEnv = process.env): string {
-  const raw = env.ALP_HOME ?? "~/.alp";
+  const raw = readAlpEnv(env, "ALP_HOME") ?? "~/.alp";
   const resolved = path.resolve(expandHomeDir(raw));
   return resolved;
 }

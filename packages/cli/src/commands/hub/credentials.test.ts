@@ -16,6 +16,18 @@ afterEach(async () => {
 });
 
 describe("Hub CLI credentials", () => {
+  // alp-rename-keep-start: alp 1.0.0 read PASEO_HOME.
+  it("finds the credential store under PASEO_HOME when ALP_HOME is unset", () => {
+    const home = temporaryHome();
+    new PrivateHubCredentialStore({ PASEO_HOME: home }).save({
+      origin: "https://legacy.example.com",
+      credential: "legacy-secret",
+    });
+
+    assert.deepEqual(readdirSync(home), ["hub-credentials.json"]);
+  });
+  // alp-rename-keep-end
+
   it("stores multiple normalized origins privately and selects the latest login", () => {
     const home = temporaryHome();
     const store = new PrivateHubCredentialStore({ ALP_HOME: home });
