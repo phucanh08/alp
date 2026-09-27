@@ -11,6 +11,15 @@ in
 {
   imports = [
     (lib.mkRenamedOptionModule [ "services" "alp" "allowedHosts" ] [ "services" "alp" "hostnames" ])
+    # alp-rename-keep-start
+    # COMPAT(paseo-nix-options): added after v1.0.0 on 2026-09-27; remove after 2027-03-27.
+    # alp 1.0.0 declared its options as services.paseo.*. A configuration that still sets them
+    # keeps evaluating, with a rename warning. Only option names carry over: the defaults for
+    # user, group, and dataDir are now alp and /var/lib/alp, so a host that relied on the old
+    # defaults sets `user = "paseo"; group = "paseo"; dataDir = "/var/lib/paseo";` or moves its
+    # state before switching, or the daemon starts on an empty home.
+    (lib.mkRenamedOptionModule [ "services" "paseo" ] [ "services" "alp" ])
+    # alp-rename-keep-end
   ];
 
   options.services.alp = {
