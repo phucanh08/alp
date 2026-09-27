@@ -16,6 +16,7 @@ function ready(enabled: boolean): SlpSettings {
     status: "ready",
     enabled,
     supervisorModel: null,
+    supervisorCheckMinutes: 10,
     saving: false,
     saveError: null,
     save: async () => true,

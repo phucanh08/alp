@@ -11,6 +11,7 @@ const slpOn: SlpSettings = {
   status: "ready",
   enabled: true,
   supervisorModel: null,
+  supervisorCheckMinutes: 10,
   saving: false,
   saveError: null,
   save: async () => true,
