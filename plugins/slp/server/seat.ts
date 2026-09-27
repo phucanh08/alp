@@ -1,7 +1,4 @@
 import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { BUNDLED_DEFINITIONS } from "./definitions.gen";
 import { runtimeBlock } from "./runtime-block";
 
 export type Seat = "lead" | "peer" | "supervisor";
@@ -150,43 +147,24 @@ export function stripFrontmatter(text: string): string {
   return match ? text.slice(match[0].length) : text;
 }
 
-export interface Definition {
-  /** Absolute path of the override file, or `bundled` for the copy shipped with the plugin. */
-  source: string;
-  body: string;
-}
-
-/**
- * A repository can override a seat with `.slp/agents/<seat>.md` in the agent cwd; otherwise the
- * seat file bundled with the plugin applies. `.claude/agents/<seat>.md` is Claude Code's own
- * subagent definition directory, not read by this plugin.
- */
-export async function readDefinition(cwd: string, seat: Seat): Promise<Definition> {
-  const override = path.join(cwd, ".slp", "agents", `${seat}.md`);
-  try {
-    const text = await readFile(override, "utf8");
-    return { source: override, body: stripFrontmatter(text).trim() };
-  } catch {
-    return { source: "bundled", body: stripFrontmatter(BUNDLED_DEFINITIONS[seat]).trim() };
-  }
-}
-
 /**
  * Seat system prompt = prompt already set by the caller + seat definition + SLP-RUNTIME block.
+ * A null `definitionBody` (no override and slp-dev did not answer) leaves the runtime block alone.
  * `origin` only ever applies to a Peer with no Lead (see `originOfLabels`); it adds the
- * independent-Peer paragraph to the runtime block.
+ * independent-Peer paragraph to the runtime block. `skills` are the seat's own, named in the block.
  */
 export function buildSystemPrompt(
   seat: Seat,
   family: Family,
-  definitionBody: string,
+  definitionBody: string | null,
   existing: string | null | undefined,
   origin?: SeatOrigin | null,
+  skills: readonly string[] = [],
 ): string {
   const parts = [
     existing?.trim(),
-    `# Ghế SLP: ${seat}\n\n${definitionBody}`,
-    runtimeBlock(seat, family, origin),
+    definitionBody === null ? null : `# Ghế SLP: ${seat}\n\n${definitionBody}`,
+    runtimeBlock(seat, family, origin, skills),
   ];
   return parts.filter((part): part is string => Boolean(part)).join("\n\n");
 }

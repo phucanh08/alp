@@ -8,12 +8,20 @@ import {
   familyOf,
   isHumanCreated,
   providerOptionsFor,
-  readDefinition,
   seatOfAgent,
   seatProfileFor,
   stripFrontmatter,
   withLeadAllowedTools,
 } from "./seat";
+import { readSeatRules } from "./seat-rules";
+
+/** slp-dev answering every seat with `SLP-DEV <seat>` and one skill. */
+const slpDev = {
+  async invoke(_pluginId: string, _method: string, input: unknown) {
+    const { seat } = input as { seat: string };
+    return { definition: `---\nname: ${seat}\n---\nSLP-DEV ${seat}\n`, skills: ["xia"] };
+  },
+};
 
 test("seatOfAgent reads the slp.role label on the claude and codex providers only", () => {
   expect(seatOfAgent({ provider: "claude", labels: { "slp.role": "lead" } })).toBe("lead");
@@ -34,36 +42,36 @@ test("stripFrontmatter drops the leading YAML block and keeps the body", () => {
   expect(stripFrontmatter("# No frontmatter\n---\nx")).toBe("# No frontmatter\n---\nx");
 });
 
-test("readDefinition prefers .slp/agents in the agent cwd", async () => {
+test("readSeatRules prefers .slp/agents in the agent cwd and keeps slp-dev's skills", async () => {
   const cwd = await mkdtemp(path.join(tmpdir(), "slp-plugin-"));
   await mkdir(path.join(cwd, ".slp", "agents"), { recursive: true });
   await writeFile(path.join(cwd, ".slp", "agents", "peer.md"), "---\nname: peer\n---\nPEER BODY\n");
-  const def = await readDefinition(cwd, "peer");
-  expect(def).toEqual({
+  expect(await readSeatRules(cwd, "peer", slpDev)).toEqual({
     source: path.join(cwd, ".slp", "agents", "peer.md"),
     body: "PEER BODY",
+    skills: ["xia"],
   });
 });
 
-test("readDefinition falls back to the bundled seat file without its frontmatter", async () => {
+test("readSeatRules falls back to slp-dev's seat text without its frontmatter", async () => {
   const cwd = await mkdtemp(path.join(tmpdir(), "slp-plugin-"));
-  const def = await readDefinition(cwd, "lead");
-  expect(def.source).toBe("bundled");
-  expect(def.body.startsWith("---")).toBe(false);
-  expect(def.body).not.toMatch(/^name: lead$/m);
-  expect(def.body).toMatch(/^# /);
+  expect(await readSeatRules(cwd, "lead", slpDev)).toEqual({
+    source: "slp-dev",
+    body: "SLP-DEV lead",
+    skills: ["xia"],
+  });
 });
 
-test("readDefinition ignores .claude/agents and falls back to bundled", async () => {
+test("readSeatRules ignores .claude/agents and falls back to slp-dev", async () => {
   const cwd = await mkdtemp(path.join(tmpdir(), "slp-plugin-"));
   await mkdir(path.join(cwd, ".claude", "agents"), { recursive: true });
   await writeFile(
     path.join(cwd, ".claude", "agents", "peer.md"),
     "---\nname: peer\n---\nCLAUDE CODE PEER BODY\n",
   );
-  const def = await readDefinition(cwd, "peer");
-  expect(def.source).toBe("bundled");
-  expect(def.body).not.toMatch(/CLAUDE CODE PEER BODY/);
+  const rules = await readSeatRules(cwd, "peer", slpDev);
+  expect(rules.source).toBe("slp-dev");
+  expect(rules.body).toBe("SLP-DEV peer");
 });
 
 test("buildSystemPrompt joins existing prompt, seat definition, and the seat runtime block", () => {

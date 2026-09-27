@@ -13,7 +13,7 @@ function peerToolCutList(): string {
  * Khối SLP-RUNTIME: fact runtime của alp mà definition ghế (`agents/<seat>.md`) không tự biết —
  * family của phiên, provider + label ghế, nguồn của một tin, steer, finish notification, mục roster
  * plugin nối vào. Nối sau definition trong system prompt. Luật workflow nằm trong definition, không
- * ở đây: khối này không gọi tên skill nào.
+ * ở đây: khối này chỉ gọi tên skill của ghế (danh sách slp-dev trả), không nói khi nào dùng skill nào.
  */
 const COMMON = `## SLP-RUNTIME: alp
 Phiên này là một agent alp (daemon Paseo). Definition ghế của bạn ở ngay trên; hành xử đúng
@@ -165,11 +165,14 @@ const SUPERVISOR = `${COMMON}
   \`~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl\`. Có timestamp. Đọc file ngoài cwd bằng Bash
   (\`cat\`/\`sed -n\`/\`python3\`).`;
 
-/**
- * SLP-RUNTIME block for a seat; the Lead's Peer spawn rule follows the Lead's own family. `origin`
- * only applies to `peer` — see `INDEPENDENT_PEER`.
- */
-export function runtimeBlock(seat: Seat, family: Family, origin?: SeatOrigin | null): string {
+/** The seat's own skills, as slp-dev lists them; none (Supervisor, or slp-dev silent) → no line. */
+function skillsLine(skills: readonly string[]): string {
+  if (skills.length === 0) return "";
+  const names = skills.map((skill) => `\`${skill}\``).join(", ");
+  return `\n- **Skill của ghế này** (plugin \`slp-dev\`): ${names}. Nạp theo dòng "Nạp skill" ở trên.`;
+}
+
+function seatBlock(seat: Seat, family: Family, origin?: SeatOrigin | null): string {
   switch (seat) {
     case "lead":
       return lead(family);
@@ -178,4 +181,17 @@ export function runtimeBlock(seat: Seat, family: Family, origin?: SeatOrigin | n
     case "supervisor":
       return SUPERVISOR;
   }
+}
+
+/**
+ * SLP-RUNTIME block for a seat; the Lead's Peer spawn rule follows the Lead's own family. `origin`
+ * only applies to `peer` — see `INDEPENDENT_PEER`. `skills` closes the block with the seat's skills.
+ */
+export function runtimeBlock(
+  seat: Seat,
+  family: Family,
+  origin?: SeatOrigin | null,
+  skills: readonly string[] = [],
+): string {
+  return `${seatBlock(seat, family, origin)}${skillsLine(skills)}`;
 }

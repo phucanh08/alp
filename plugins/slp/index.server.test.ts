@@ -62,6 +62,7 @@ function fakeContext(
   const created: Array<{ workspaceId: string; labels?: Record<string, string> }> = [];
   const sent: Array<{ agentId: string; text: string }> = [];
   const allowed: Array<{ agentId: string; requestId: string }> = [];
+  const invoked: Array<{ pluginId: string; method: string; input: unknown }> = [];
   let nextId = 1;
 
   const paseo = {
@@ -123,6 +124,12 @@ function fakeContext(
         return { models: [{ id: "sonnet", isDefault: true }] };
       },
     },
+    plugins: {
+      async invoke(pluginId: string, method: string, input: unknown) {
+        invoked.push({ pluginId, method, input });
+        return { definition: "---\nname: lead\n---\nSLP-DEV LEAD\n", skills: ["xia"] };
+      },
+    },
   };
 
   const onHandlers = new Map<string, OnHandler>();
@@ -175,6 +182,7 @@ function fakeContext(
     created,
     sent,
     allowed,
+    invoked,
   };
 }
 
@@ -265,6 +273,31 @@ test("agent.create passes the request through unchanged while SLP is off", async
   const result = await handler!({ request: request as never }, fx.hookContext);
 
   expect(result).toBeUndefined();
+});
+
+test("agent.create asks slp-dev through the hook's own Paseo API for the seat rules", async () => {
+  const fx = fakeContext({ enabled: true });
+  contribute(fx.server);
+  const handler = fx.beforeHandlers.get("agent.create");
+  expect(handler).toBeDefined();
+
+  const request = {
+    config: { provider: "claude", cwd: "/nonexistent-slp-cwd", systemPrompt: "EXISTING" },
+    labels: { [SEAT_LABEL]: "lead" },
+  };
+  const result = (await handler!({ request: request as never }, fx.hookContext)) as {
+    config: { systemPrompt: string };
+  };
+
+  expect(fx.invoked).toEqual([
+    { pluginId: "slp-dev", method: "slp-dev.seat.get", input: { seat: "lead" } },
+  ]);
+  expect(
+    result.config.systemPrompt.startsWith("EXISTING\n\n# Ghế SLP: lead\n\nSLP-DEV LEAD\n\n"),
+  ).toBe(true);
+  expect(result.config.systemPrompt).toContain(
+    "- **Skill của ghế này** (plugin `slp-dev`): `xia`.",
+  );
 });
 
 test("slp.lead.ensure and slp.supervisor.ensure refuse while SLP is off", async () => {

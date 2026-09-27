@@ -19,29 +19,37 @@ import {
   originOfLabels,
   paseoToolsFor,
   providerOptionsFor,
-  readDefinition,
   seatOfAgent,
   seatOfLabels,
 } from "./seat";
+import { type PluginInvoker, readSeatRules, SEAT_RULES_TIMEOUT_MS } from "./seat-rules";
 
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
 
+/** The slice of the hook's `PaseoApi` a seat needs: agents for the roster, plugins for slp-dev. */
+export interface SeatHost {
+  agents: AgentLister;
+  plugins: PluginInvoker;
+}
+
 /**
  * `before("agent.create")`: an agent on the `claude` or `codex` provider with an `slp.role` label
- * gets its seat definition, the SLP-RUNTIME block, and the live roster of the counterpart seat (Lead
- * sees Supervisors and the reverse) in its system prompt. Claude Lead/Supervisor also get
- * `allowedTools: mcp__paseo__*`; the Supervisor loses Write/Edit/Agent/Task, a Claude Peer loses
- * Agent/Task. Peer and Supervisor lose Paseo tools through the returned `paseoTools`. A claude/codex
- * request that names no seat and no parent — a Human made it directly, or a schedule run created
- * it, not another agent — defaults to Peer, tagged `slp.origin=schedule` when the request carries
- * `paseo.schedule-id`, `slp.origin=human` otherwise (see `defaultSeatLabels`). `enabled` is the SLP
- * settings switch (default `true`); `false` returns `undefined` for every request, including one
- * that already names a valid seat — the plugin does not touch agent creation at all while off.
+ * gets its seat definition and skills (see `readSeatRules`), the SLP-RUNTIME block, and the live
+ * roster of the counterpart seat (Lead sees Supervisors and the reverse) in its system prompt.
+ * Claude Lead/Supervisor also get `allowedTools: mcp__paseo__*`; the Supervisor loses
+ * Write/Edit/Agent/Task, a Claude Peer loses Agent/Task. Peer and Supervisor lose Paseo tools
+ * through the returned `paseoTools`. A claude/codex request that names no seat and no parent — a
+ * Human made it directly, or a schedule run created it, not another agent — defaults to Peer,
+ * tagged `slp.origin=schedule` when the request carries `paseo.schedule-id`, `slp.origin=human`
+ * otherwise (see `defaultSeatLabels`). `enabled` is the SLP settings switch (default `true`);
+ * `false` returns `undefined` for every request, including one that already names a valid seat —
+ * the plugin does not touch agent creation at all while off.
  */
 export async function withSeatConfig(
   request: AgentCreateRequest,
-  agents: AgentLister,
+  host: SeatHost,
   enabled = true,
+  seatRulesTimeoutMs = SEAT_RULES_TIMEOUT_MS,
 ): Promise<AgentCreateRequest | undefined> {
   if (!enabled) return undefined;
   const family = familyOf(request.config.provider);
@@ -61,12 +69,12 @@ export async function withSeatConfig(
     );
     return undefined;
   }
-  const definition = await readDefinition(request.config.cwd, seat);
+  const rules = await readSeatRules(request.config.cwd, seat, host.plugins, seatRulesTimeoutMs);
   let roster = "";
   const other = counterpartSeat(seat);
   if (other) {
     try {
-      roster = formatRoster(other, await findSeatAgents(agents, other));
+      roster = formatRoster(other, await findSeatAgents(host.agents, other));
     } catch (error) {
       console.error(`slp: could not list ${other} agents: ${String(error)}`);
     }
@@ -75,13 +83,13 @@ export async function withSeatConfig(
   const paseoTools = paseoToolsFor(seat, request.paseoTools);
   const origin = seat === "peer" ? originOfLabels(labels) : null;
   const systemPrompt = [
-    buildSystemPrompt(seat, family, definition.body, request.config.systemPrompt, origin),
+    buildSystemPrompt(seat, family, rules.body, request.config.systemPrompt, origin, rules.skills),
     roster,
   ]
     .filter(Boolean)
     .join("\n\n");
   console.log(
-    `slp: ${seat}/${family} ← ${definition.source}${roster ? ` (+roster ${other})` : ""}`,
+    `slp: ${seat}/${family} ← ${rules.source ?? "runtime block only"}${roster ? ` (+roster ${other})` : ""}`,
   );
   return {
     ...request,

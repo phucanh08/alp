@@ -7,14 +7,12 @@
     "paseo-plugin.json",
     "index.client.tsx",
     "index.server.ts",
-    "agents/",
     "client/",
     "server/",
     "shared/"
   ],
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit -p .",
-    "generate": "node server/scripts/generate-definitions.ts"
+    "typecheck": "tsc --noEmit -p ."
   }
 }
