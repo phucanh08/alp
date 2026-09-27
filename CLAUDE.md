@@ -215,11 +215,25 @@ hiện hành: `plans/`.
 
 ### Contract boundaries (fork)
 
-- `packages/protocol` wire schema: giữ luật backward-compatible ở trên; đổi tên brand không đổi tên field/RPC.
+- `packages/protocol` wire schema: giữ luật backward-compatible ở trên. Ngoại lệ một lần, Human quyết
+  2026-09-27 (alp-p22): mọi tên mang `paseo` (field, label, RPC, message type, MCP server/tool prefix,
+  env, file/dir, npm scope `@getpaseo/*` → `@alp/*`) đổi sang `alp` trong một đợt, **không** nhận tên cũ trên
+  dây (app 1.0.0 phải build lại); dữ liệu đã lưu trên máy người dùng (home, pid, manifest managed-files,
+  nhãn agent, khoá cấu hình, storage app) được migrate khi daemon/app khởi động, không xoá. Sau đợt này
+  luật backward-compatible áp lại bình thường.
+- Giữ nguyên `paseo` (không đổi): reference upstream và lịch sử (`github.com/getpaseo/*`, LICENSE,
+  CHANGELOG < 1.0.0, cột upstream của `docs/breaking-changes.md`, fixture parse URL trong test); phần do Hub
+  server ngoài repo kiểm (`.paseo/` bundle, `${{ paseo.* }}`, header `x-paseo-*`); partition Electron
+  `persist:paseo-browser` (đổi = mất session trình duyệt trong app). Tự cập nhật CLI qua npm
+  (`@getpaseo/cli`) tắt — fork không publish npm.
+- Phép đổi tên là **một hàm xác định** ở `scripts/rename-map.mjs` (rule + path map + ngoại lệ trên); mọi
+  đổi tên/merge phải đi qua nó, không sed tay.
 - `packages/relay`: thư viện e2ee/crypto dùng chung server + client **giữ trong repo**; phần **deploy relay
   (wrangler, account, domain, upstream) do Human tự quản lý ngoài repo** — agent không deploy, không đổi
   account/route, chỉ đổi endpoint mặc định qua config.
-- Upstream sync: ưu tiên thay đổi nhỏ, tách file mới thay vì sửa lan rộng để `git merge upstream/main` còn khả thi.
+- Upstream sync: **chỉ** qua `scripts/sync-upstream.mjs` (áp `rename-map` lên base và upstream rồi merge
+  bằng `git merge-tree --merge-base`), không `git merge upstream/main` trực tiếp. Ngoài ra vẫn ưu tiên thay
+  đổi nhỏ, tách file mới thay vì sửa lan rộng.
 
 ### Verification
 
