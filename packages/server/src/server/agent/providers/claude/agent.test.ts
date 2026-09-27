@@ -785,6 +785,59 @@ describe("ClaudeAgentSession features", () => {
     await session.close();
   });
 
+  const pluginAndSkillOptions = {
+    plugins: [{ type: "local" as const, path: "/opt/alp/plugins/slp-dev" }],
+    skills: ["xia", "slp-dev:bug-loop"],
+  };
+
+  test("passes local plugins and skills to the SDK on create", async () => {
+    const created = createQueryMock();
+    const createdSession = await new ClaudeAgentClient({
+      logger,
+      queryFactory: created.queryFactory,
+      resolveBinary: async () => "/test/claude/bin",
+    }).createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      providerOptions: pluginAndSkillOptions,
+    });
+    await createdSession.startTurn("hello");
+    expect(created.launches[0]?.options).toMatchObject({
+      plugins: [{ type: "local", path: "/opt/alp/plugins/slp-dev" }],
+      skills: ["xia", "slp-dev:bug-loop"],
+    });
+    expect(created.launches[0]?.options.resume).toBeUndefined();
+    await createdSession.close();
+  });
+
+  // The CLI does not persist either option, so the resumed launch must carry them again.
+  test("passes local plugins and skills to the SDK on resume", async () => {
+    const resumed = createQueryMock();
+    const resumedSession = await new ClaudeAgentClient({
+      logger,
+      queryFactory: resumed.queryFactory,
+      resolveBinary: async () => "/test/claude/bin",
+    }).resumeSession(
+      {
+        provider: "claude",
+        sessionId: "persisted-session",
+        metadata: {
+          provider: "claude",
+          cwd: process.cwd(),
+          providerOptions: pluginAndSkillOptions,
+        },
+      },
+      { cwd: process.cwd() },
+    );
+    await resumedSession.startTurn("hello again");
+    expect(resumed.launches[0]?.options).toMatchObject({
+      resume: "persisted-session",
+      plugins: [{ type: "local", path: "/opt/alp/plugins/slp-dev" }],
+      skills: ["xia", "slp-dev:bug-loop"],
+    });
+    await resumedSession.close();
+  });
+
   test("passes extra Claude Code CLI arguments to the SDK", async () => {
     const { queryFactory, launches } = createQueryMock();
     const client = new ClaudeAgentClient({
