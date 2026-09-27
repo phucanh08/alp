@@ -114,7 +114,8 @@ The names still count as shipped and managed — a copy already on disk from bef
 switched to `install: false` is still offered for cleanup in Settings, exactly like a disabled
 plugin's — but nothing installs or repairs them, whether the plugin is enabled or not, and they are
 never selectable. Use this when the plugin loads its own skills some other way and only wants
-orchestration-skills to clean up stale copies.
+orchestration-skills to clean up stale copies, as `plugins/slp-dev` does (see
+[Bundled plugins](#bundled-plugins)).
 
 Two sources shipping the same skill
 name is a collision, not a shadow: the core bundle always keeps a name a plugin also ships, and two
@@ -136,8 +137,10 @@ needed
 ## Bundled plugins
 
 alp ships two plugins inside the daemon and loads them with no config entry: `plugins/slp` (seat
-mechanics) and `plugins/slp-dev` (seat rule text and skills; see
-[plugins/slp-dev/README.md](../plugins/slp-dev/README.md)). Running from a built daemon, the source
+mechanics) and `plugins/slp-dev` (seat rule text and skill files; see
+[plugins/slp-dev/README.md](../plugins/slp-dev/README.md)). The daemon never installs slp-dev's
+skills: `plugins/slp` writes each seat's skill files to `$PASEO_HOME/slp/seat-skills/<seat>/` and
+hands that directory to each Lead and Peer it creates. Running from a built daemon, the source
 is `packages/server/dist/server/plugins/<id>`; running from a checkout, it is `plugins/<id>` at the
 repo root. Add a `plugins.<id>` directory or Git source entry to config to replace either bundled
 copy with your own.
@@ -164,7 +167,7 @@ paseo daemon reload
 A config entry whose `path` differs from the bundled directory replaces the bundled copy with that
 directory host-wide, instead of only disabling it. `plugins/slp` asks for `plugins/slp-dev` by
 plugin id, not by discovery, so a directory that replaces it must keep the manifest id `slp-dev` and
-answer its `slp-dev.seat.get` contract — see
+answer its `slp-dev.seat.get` and `slp-dev.skills.get` contracts — see
 [plugins/slp-dev/README.md](../plugins/slp-dev/README.md#copy-guide-for-another-profession).
 
 ## Install a Git source

@@ -69,5 +69,6 @@ directory under `$PASEO_HOME/slp/seat-skills/`.
 | `/smart-commits`           | Group a working tree into logical conventional commits ready for handoff.         |
 | `/xia`                     | Scout the repo and upstream docs before writing code, so nothing gets reinvented. |
 
-Uninstalling these skills in Settings and restarting the daemon reinstalls them; see
+If an earlier alp version installed them on the host, **Settings → your host → Agents →
+Orchestration skills** offers to remove those copies; see
 [breaking-changes.md](../docs/breaking-changes.md#slp-defaults-on-a-fresh-host).
