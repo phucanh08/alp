@@ -34,6 +34,7 @@ export function createFakeSlpHost(input: {
   let revision = 1;
   let catalogReads = 0;
   let heldRead: Promise<void> | null = null;
+  let heldWrite: Promise<void> | null = null;
   const writes: FakeSlpWrite[] = [];
   const observers = new Set<FakeEventObserver>();
 
@@ -86,7 +87,10 @@ export function createFakeSlpHost(input: {
         if (settings instanceof Error) throw settings;
         return settings;
       }
-      if (method === "settings.slp.write") return write(request as FakeSlpWrite);
+      if (method === "settings.slp.write") {
+        if (heldWrite) await heldWrite;
+        return write(request as FakeSlpWrite);
+      }
       throw new Error(`Unexpected plugin RPC ${method}`);
     },
   };
@@ -108,6 +112,17 @@ export function createFakeSlpHost(input: {
       heldRead = new Promise<void>((resolve) => {
         release = () => {
           heldRead = null;
+          resolve();
+        };
+      });
+      return release;
+    },
+    /** Settings writes wait until the returned function runs, to observe a save in flight. */
+    holdWrites() {
+      let release = () => undefined as void;
+      heldWrite = new Promise<void>((resolve) => {
+        release = () => {
+          heldWrite = null;
           resolve();
         };
       });

@@ -5,7 +5,7 @@ import type {
   PluginServerContext,
 } from "@getpaseo/plugin/server";
 import type { PluginRpcContract } from "@getpaseo/plugin";
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import contribute from "./index.server";
 import { SEAT_LABEL } from "./server/seat";
 import type { SlpSettingsState } from "./server/settings";
@@ -52,11 +52,13 @@ interface FakeWorkspace {
 function fakeContext(
   initial: {
     enabled: boolean;
+    supervisorCheckMinutes?: number;
     agents?: FakeAgentRecord[];
     workspaces?: FakeWorkspace[];
   } = { enabled: true },
 ) {
   let enabled = initial.enabled;
+  let supervisorCheckMinutes = initial.supervisorCheckMinutes ?? 10;
   const agents: FakeAgentRecord[] = [...(initial.agents ?? [])];
   const workspaces: FakeWorkspace[] = [...(initial.workspaces ?? [])];
   const created: Array<{ workspaceId: string; labels?: Record<string, string> }> = [];
@@ -77,6 +79,11 @@ function fakeContext(
           },
           async respondToPermission({ requestId }: { requestId: string }) {
             allowed.push({ agentId, requestId });
+          },
+          timeline: {
+            async refetch() {
+              return { entries: [] };
+            },
           },
         };
       },
@@ -143,7 +150,7 @@ function fakeContext(
           return {
             status: "ready",
             revision: "1",
-            values: { enabled, supervisorModel: null },
+            values: { enabled, supervisorModel: null, supervisorCheckMinutes },
           };
         },
         subscribe: () => () => {},
@@ -171,6 +178,9 @@ function fakeContext(
     server,
     setEnabled: (value: boolean) => {
       enabled = value;
+    },
+    setSupervisorCheckMinutes: (value: number) => {
+      supervisorCheckMinutes = value;
     },
     onHandlers,
     beforeHandlers,
@@ -362,3 +372,95 @@ test(
     expect(fx.created).toEqual([]);
   },
 );
+
+const MINUTE = 60_000;
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+/** A working Lead and an idle Supervisor: the host the Supervisor check nudges about. */
+function checkAgents(): FakeAgentRecord[] {
+  return [
+    {
+      id: "L1",
+      provider: "claude",
+      cwd: "/r",
+      status: "running",
+      title: "Lead",
+      labels: { [SEAT_LABEL]: "lead" },
+    },
+    {
+      id: "S1",
+      provider: "claude",
+      cwd: "/sup",
+      status: "idle",
+      labels: { [SEAT_LABEL]: "supervisor" },
+    },
+  ];
+}
+
+/** Fires `agent.turn_started` for L1, which hands the plugin its Paseo API. */
+async function startLeadTurn(fx: ReturnType<typeof fakeContext>) {
+  const handler = fx.onHandlers.get("agent.turn_started");
+  expect(handler).toBeDefined();
+  await handler!(
+    {
+      agent: {
+        id: "L1",
+        workspaceId: "w1",
+        parentAgentId: null,
+        provider: "claude",
+        cwd: "/r",
+        title: "Lead",
+        labels: { [SEAT_LABEL]: "lead" },
+      },
+      turnId: null,
+    } as never,
+    fx.hookContext,
+  );
+}
+
+test("the Supervisor check reads supervisorCheckMinutes every tick, so a change needs no restart", async () => {
+  vi.useFakeTimers();
+  const fx = fakeContext({ enabled: true, supervisorCheckMinutes: 0, agents: checkAgents() });
+  contribute(fx.server);
+  await startLeadTurn(fx);
+
+  await vi.advanceTimersByTimeAsync(15 * MINUTE);
+  expect(fx.sent).toEqual([]);
+
+  fx.setSupervisorCheckMinutes(5);
+  await vi.advanceTimersByTimeAsync(5 * MINUTE);
+  expect(fx.sent).toEqual([]);
+  await vi.advanceTimersByTimeAsync(MINUTE);
+  expect(fx.sent).toHaveLength(1);
+  expect(fx.sent[0].agentId).toBe("S1");
+  expect(fx.sent[0].text.startsWith("[plugin slp] SLP-CHECK\nLead `L1`")).toBe(true);
+});
+
+test("the Supervisor check sends nothing while SLP is off", async () => {
+  vi.useFakeTimers();
+  const fx = fakeContext({ enabled: false, agents: checkAgents() });
+  contribute(fx.server);
+  await startLeadTurn(fx);
+
+  await vi.advanceTimersByTimeAsync(30 * MINUTE);
+  expect(fx.sent).toEqual([]);
+
+  fx.setEnabled(true);
+  await startLeadTurn(fx);
+  await vi.advanceTimersByTimeAsync(11 * MINUTE);
+  expect(fx.sent).toHaveLength(1);
+});
+
+test("the cleanup contribute returns stops the Supervisor check", async () => {
+  vi.useFakeTimers();
+  const fx = fakeContext({ enabled: true, agents: checkAgents() });
+  const cleanup = contribute(fx.server);
+  await startLeadTurn(fx);
+
+  cleanup?.();
+  await vi.advanceTimersByTimeAsync(30 * MINUTE);
+  expect(fx.sent).toEqual([]);
+});

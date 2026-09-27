@@ -2351,6 +2351,10 @@ export const ru: TranslationResources = {
           hint: "Применяется только к вновь созданному Supervisor.",
           default: "По умолчанию",
         },
+        supervisorCheckMinutes: {
+          label: "Задержка проверки Supervisor (минуты)",
+          hint: "Сколько ждёт Supervisor перед проверкой затихшего Lead. 0 — отключает проверку.",
+        },
       },
       appearance: {
         title: "Оформление",

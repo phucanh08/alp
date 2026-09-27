@@ -23,10 +23,11 @@ export type SlpSettingsPatch = Partial<SlpSettingsValues>;
  *
  * - `unavailable`: the host runs no `slp` plugin (an upstream or older daemon, or it is offline).
  * - `error`: the read failed. SLP counts as enabled, the same ruling as the plugin's client gate.
- * - `ready`: `enabled` and `supervisorModel` are the effective values. An invalid stored state, or
- *   stored values the schema rejects, count as the defaults (enabled, no Supervisor model), the
- *   same ruling as `plugins/slp/server/settings.ts`. `save` writes the stored values merged with
- *   the patch and resolves `false` when the host rejects the write; `saveError` then says why.
+ * - `ready`: `enabled`, `supervisorModel`, and `supervisorCheckMinutes` are the effective values. An
+ *   invalid stored state, or stored values the schema rejects, count as the defaults (enabled, no
+ *   Supervisor model, a 10 minute check delay), the same ruling as `plugins/slp/server/settings.ts`.
+ *   `save` writes the stored values merged with the patch and resolves `false` when the host
+ *   rejects the write; `saveError` then says why.
  */
 export type SlpSettings =
   | { status: "unavailable" }
@@ -36,6 +37,7 @@ export type SlpSettings =
       status: "ready";
       enabled: boolean;
       supervisorModel: string | null;
+      supervisorCheckMinutes: number;
       saving: boolean;
       saveError: string | null;
       save(patch: SlpSettingsPatch): Promise<boolean>;
@@ -145,6 +147,7 @@ export function useSlpSettings(serverId: string): SlpSettings {
       status: "ready",
       enabled: isSlpEnabled(data),
       supervisorModel: storedValues(data).supervisorModel,
+      supervisorCheckMinutes: storedValues(data).supervisorCheckMinutes,
       saving,
       saveError,
       save,

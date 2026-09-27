@@ -143,6 +143,30 @@ vi.mock("@/components/settings", () => ({
       ),
       rowText({ hint, error }),
     ),
+  SettingsInput: ({
+    label,
+    hint,
+    error,
+    initialValue,
+    disabled,
+    onChangeText,
+  }: RowProps & {
+    initialValue?: string;
+    disabled?: boolean;
+    onChangeText(text: string): void;
+  }) =>
+    React.createElement(
+      "div",
+      null,
+      React.createElement("input", {
+        type: "text",
+        "aria-label": label,
+        defaultValue: initialValue,
+        disabled,
+        onChange: (event: React.ChangeEvent<HTMLInputElement>) => onChangeText(event.target.value),
+      }),
+      rowText({ hint, error }),
+    ),
 }));
 
 import { PluginCatalogSync } from "@/plugins/catalog-sync";
@@ -150,6 +174,7 @@ import { SlpSettingsCard } from "./slp-settings-card";
 
 const SWITCH = "settings.host.slp.enabled.label";
 const MODEL = "settings.host.slp.supervisorModel.label";
+const MINUTES = "settings.host.slp.supervisorCheckMinutes.label";
 
 let serverCounter = 0;
 
@@ -175,6 +200,10 @@ function switchInput() {
 
 function modelSelect() {
   return screen.getByLabelText<HTMLSelectElement>(MODEL);
+}
+
+function minutesInput() {
+  return screen.getByLabelText<HTMLInputElement>(MINUTES);
 }
 
 async function settle() {
@@ -203,19 +232,25 @@ describe("SLP card on the host Overview page", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("shows the stored switch and Supervisor model with their descriptions", async () => {
+  it("shows the stored switch, Supervisor model, and check delay with their descriptions", async () => {
     const host = createFakeSlpHost({
       hasSlpPlugin: true,
-      settings: ready({ enabled: false, supervisorModel: "claude-sonnet-4-5" }),
+      settings: ready({
+        enabled: false,
+        supervisorModel: "claude-sonnet-4-5",
+        supervisorCheckMinutes: 20,
+      }),
     });
     renderCard(host);
 
     const toggle = await screen.findByLabelText<HTMLInputElement>(SWITCH);
     expect(toggle.checked).toBe(false);
     expect(modelSelect().value).toBe("claude-sonnet-4-5");
+    expect(minutesInput().value).toBe("20");
     expect(screen.getByRole("region", { name: "settings.host.slp.title" })).toBeTruthy();
     expect(screen.getByText("settings.host.slp.enabled.hint")).toBeTruthy();
     expect(screen.getByText("settings.host.slp.supervisorModel.hint")).toBeTruthy();
+    expect(screen.getByText("settings.host.slp.supervisorCheckMinutes.hint")).toBeTruthy();
   });
 
   it("offers the default plus the selectable claude models only", async () => {
@@ -248,7 +283,14 @@ describe("SLP card on the host Overview page", () => {
     await expect
       .poll(() => host.writes)
       .toEqual([
-        { revision: "r4", values: { enabled: false, supervisorModel: "claude-opus-4-1" } },
+        {
+          revision: "r4",
+          values: {
+            enabled: false,
+            supervisorModel: "claude-opus-4-1",
+            supervisorCheckMinutes: 10,
+          },
+        },
       ]);
     await expect.poll(() => switchInput().checked).toBe(false);
   });
@@ -265,7 +307,12 @@ describe("SLP card on the host Overview page", () => {
 
     await expect
       .poll(() => host.writes)
-      .toEqual([{ revision: "r2", values: { enabled: true, supervisorModel: null } }]);
+      .toEqual([
+        {
+          revision: "r2",
+          values: { enabled: true, supervisorModel: null, supervisorCheckMinutes: 10 },
+        },
+      ]);
     await expect.poll(() => modelSelect().value).toBe("");
   });
 
@@ -282,8 +329,129 @@ describe("SLP card on the host Overview page", () => {
     await expect
       .poll(() => host.writes)
       .toEqual([
-        { revision: "r9", values: { enabled: false, supervisorModel: "claude-sonnet-4-5" } },
+        {
+          revision: "r9",
+          values: {
+            enabled: false,
+            supervisorModel: "claude-sonnet-4-5",
+            supervisorCheckMinutes: 10,
+          },
+        },
       ]);
+  });
+
+  it("saves a valid check delay with the read revision and the stored fields", async () => {
+    const host = createFakeSlpHost({
+      hasSlpPlugin: true,
+      settings: ready(
+        { enabled: true, supervisorModel: "claude-opus-4-1", supervisorCheckMinutes: 10 },
+        "r6",
+      ),
+    });
+    renderCard(host);
+    const input = await screen.findByLabelText<HTMLInputElement>(MINUTES);
+
+    fireEvent.change(input, { target: { value: "25" } });
+
+    await expect
+      .poll(() => host.writes)
+      .toEqual([
+        {
+          revision: "r6",
+          values: {
+            enabled: true,
+            supervisorModel: "claude-opus-4-1",
+            supervisorCheckMinutes: 25,
+          },
+        },
+      ]);
+  });
+
+  it("saves 0 to turn the check delay off", async () => {
+    const host = createFakeSlpHost({
+      hasSlpPlugin: true,
+      settings: ready({ enabled: true, supervisorModel: null, supervisorCheckMinutes: 10 }, "r7"),
+    });
+    renderCard(host);
+    const input = await screen.findByLabelText<HTMLInputElement>(MINUTES);
+
+    fireEvent.change(input, { target: { value: "0" } });
+
+    await expect
+      .poll(() => host.writes)
+      .toEqual([
+        {
+          revision: "r7",
+          values: { enabled: true, supervisorModel: null, supervisorCheckMinutes: 0 },
+        },
+      ]);
+  });
+
+  it("debounces the check delay so only the finished value saves, and stays editable while it saves", async () => {
+    const host = createFakeSlpHost({
+      hasSlpPlugin: true,
+      settings: ready(
+        { enabled: true, supervisorModel: "claude-opus-4-1", supervisorCheckMinutes: 10 },
+        "r8",
+      ),
+    });
+    renderCard(host);
+    const input = await screen.findByLabelText<HTMLInputElement>(MINUTES);
+
+    vi.useFakeTimers();
+    try {
+      // Typing "25" one character at a time: every keystroke lands in the field.
+      fireEvent.change(input, { target: { value: "2" } });
+      expect(input.value).toBe("2");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(host.writes).toEqual([]); // "2" is not saved on the way to "25"
+
+      fireEvent.change(input, { target: { value: "25" } });
+      expect(input.value).toBe("25");
+
+      const releaseWrite = host.holdWrites();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      // The debounced save has started but the fake host has not answered it yet.
+      expect(input.disabled).toBeFalsy();
+      expect(host.writes).toEqual([]);
+      releaseWrite();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await expect
+      .poll(() => host.writes)
+      .toEqual([
+        {
+          revision: "r8",
+          values: {
+            enabled: true,
+            supervisorModel: "claude-opus-4-1",
+            supervisorCheckMinutes: 25,
+          },
+        },
+      ]);
+  });
+
+  it("does not save an invalid check delay", async () => {
+    const host = createFakeSlpHost({
+      hasSlpPlugin: true,
+      settings: ready({ enabled: true, supervisorModel: null, supervisorCheckMinutes: 10 }, "r3"),
+    });
+    renderCard(host);
+    const input = await screen.findByLabelText<HTMLInputElement>(MINUTES);
+
+    fireEvent.change(input, { target: { value: "-5" } });
+    fireEvent.change(input, { target: { value: "abc" } });
+    fireEvent.change(input, { target: { value: "1.5" } });
+    fireEvent.change(input, { target: { value: "" } });
+    await settle();
+
+    expect(host.writes).toEqual([]);
   });
 
   it("shows SLP as enabled when the stored state is invalid", async () => {

@@ -18,3 +18,13 @@ export function isEnabled(state: SlpSettingsState): boolean {
 export function supervisorModel(state: SlpSettingsState): string | null {
   return state.status === "ready" ? state.values.supervisorModel : null;
 }
+
+/**
+ * Minutes a working Lead may stay silent towards the Supervisor before slp nudges it; `0` is off.
+ * SLP off (`enabled: false`) reads as `0`. An `invalid` stored state counts as the schema default,
+ * `10` — same ruling as `isEnabled`.
+ */
+export function supervisorCheckMinutes(state: SlpSettingsState): number {
+  if (state.status !== "ready") return 10;
+  return state.values.enabled ? state.values.supervisorCheckMinutes : 0;
+}

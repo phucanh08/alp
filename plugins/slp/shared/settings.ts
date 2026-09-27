@@ -9,6 +9,10 @@ import { z } from "zod";
  * model of the Supervisor's provider; `null`, or a value that names no such model, falls back to the
  * provider's default model. A live or resumed Supervisor keeps its own model regardless of this
  * setting. See `server/ensure.ts` (`ensureSupervisor`) and `server/settings.ts` (`supervisorModel`).
+ * `supervisorCheckMinutes` (default `10`, `0` = off) is how many working minutes a Lead may go
+ * without messaging a Supervisor before slp asks the Supervisor to check it; see
+ * `server/supervisor-check.ts`. Settings saved before the field existed read it as the default, so
+ * adding it needed no version bump.
  */
 export const slpSettings = defineSettings({
   id: "slp",
@@ -17,6 +21,7 @@ export const slpSettings = defineSettings({
   schema: z.object({
     enabled: z.boolean().default(true),
     supervisorModel: z.string().nullable().default(null),
+    supervisorCheckMinutes: z.number().int().min(0).default(10),
   }),
 });
 

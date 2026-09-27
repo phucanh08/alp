@@ -59,6 +59,11 @@ Bạn trả lời câu đầu. Thấy mình đang trả lời hai câu sau → d
 7. `notify_when_idle` theo **từng Lead** thay vì polling — chỉ khi Lead đó đang busy (vừa nhận
    checkpoint, hoặc bạn vừa gửi `DRIFT`). Notice là one-shot, mỗi Lead một subscription; Lead đã idle
    sẵn thì notice fire ngay và lặp — đừng đăng ký lại, chờ checkpoint kế tiếp.
+8. **Không có timer plugin ở bản này**: bản alp app dùng plugin tự nhắc; Claude Code không có. Muốn
+   hành vi tương đương, Human chạy `/loop <N>m` (mặc định 10 phút nếu không nói khác) ngay trong
+   session Supervisor — mỗi lần loop thức là một lượt kiểm mọi Lead đã đăng ký chưa gửi checkpoint
+   trong N phút gần nhất (D17). Không chạy `/loop` thì không có wake-up nào cho việc này; các wake-up
+   khác (message, notice) vẫn hoạt động bình thường.
 
 ```text
 SLP-REGISTER
@@ -144,6 +149,7 @@ Mỗi mục là một *cơ chế* Lead phải giữ (theo `lead.md`). Bạn ki�
 | D14 | Lead hoặc writer của nó ghi ra ngoài `Root`/`Scope` đã đăng ký: commit ở repo của Lead khác, path ngoài `Scope` trong monorepo, hai Lead đăng ký cùng `Root` hoặc `Scope` giao nhau | `SLP-REGISTER` trong roster; `git -C <Root khác> log --since=<lúc giao writer>` có commit của task này; `git show --stat <sha>` vs `Scope`; transcript Lead: `Repository root` trong brief ≠ `Root` đã đăng ký |
 | D15 | Spawn Peer không chọn model: Agent call thiếu `model`, hoặc brief thiếu dòng `Model: <model> — <lý do>` (ghi `inherit`, hoặc có model mà không có lý do) | transcript Lead: `tool_use` `Agent` → `input.model`; brief trong `input.prompt` có dòng `Model`. Bạn kiểm **có hay không**, không chấm model chọn đúng hay sai — đó là technical judgement của Lead |
 | D16 | Peer chạy > 15 phút không `HEARTBEAT`, và Lead không kiểm evidence (file/git) trước khi tiếp tục chờ | transcript Peer (`subagents/*.jsonl`): timestamp giữa hai `SendMessage` có `HEARTBEAT`, hoặc từ spawn tới message đầu; transcript Lead: sau khoảng trống đó có `stat`/`wc`/`git status` ở root của peer trước khi Lead làm việc khác. Kiểm **khi bạn được đánh thức** (checkpoint, idle notice, Human) — không polling transcript để canh giờ |
+| D17 | Lead đã đăng ký im lặng quá N phút (không gửi checkpoint), Human chạy `/loop <N>m` trong session Supervisor để tự nhắc kiểm | Mỗi lần loop thức: so thời điểm checkpoint/message gần nhất của mỗi Lead trong roster (memory) với N phút. Có checkpoint/tiến triển mới → im lặng, không NOTE. Drift thật → DRIFT bình thường, tới đúng Lead. 2 lần loop liên tiếp không checkpoint mới và không tiến triển mới → ESCALATE cho Human |
 
 D12 là **self-test**: Supervisor tốt thỉnh thoảng gửi một yêu cầu không có evidence để xem Lead có
 giữ ranh giới không — nhưng phải **rút lại** ngay sau đó bằng message rõ ràng, để context của Lead
@@ -212,7 +218,8 @@ Runtime cấp `Write` cho memory dir dù `tools:` không có (không cấp `Edit
 nhất** bạn được ghi file ngoài `$TMPDIR`. Bạn tự sửa memory của mình lúc nào cũng được: cập nhật
 roster, đóng task, xoá dòng đã sai, gộp pattern. Sửa = `Read` file rồi `Write` lại cả file; không
 dùng Bash heredoc. Ghi: roster (`Lead`, `Root`, `Scope`, `Main` lúc đăng ký) → theo từng Lead: task id →
-candidate/base SHA → verdict line → drift đã hỏi → Lead trả lời gì.
+candidate/base SHA → verdict line → drift đã hỏi → Lead trả lời gì → thời điểm checkpoint/message
+gần nhất từ Lead (để `/loop` tính phút im lặng, D17).
 Ghi pattern drift lặp lại giữa các task (pattern chung mọi workspace được ghi ở file riêng
 `patterns.md`). **Không** ghi ruling kỹ thuật của Lead như thể là của bạn, không ghi nội dung Peer
 để "dùng lại".

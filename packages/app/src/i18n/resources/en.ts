@@ -2430,6 +2430,10 @@ export const en = {
           hint: "Applies only to a newly created Supervisor.",
           default: "Default",
         },
+        supervisorCheckMinutes: {
+          label: "Supervisor check delay (minutes)",
+          hint: "How long the Supervisor waits before checking a quiet Lead. 0 turns this off.",
+        },
       },
       appearance: {
         title: "Appearance",

@@ -38,10 +38,22 @@ corrupt or unreadable stored value counts as the default, enabled, on both serve
 model of the Supervisor's provider (`claude`), and falls back to the default model otherwise —
 `null`, an id that does not exist, or one marked not selectable. A live or resumed Supervisor keeps
 its own model; the setting only ever applies to a Supervisor created from nothing.
+`supervisorCheckMinutes` (default `10`, `0` turns it off; also off whenever `enabled` is `false`) is
+how many working minutes a Lead may go without messaging its Supervisor before the plugin nudges the
+Supervisor to check it. A tick every `SUPERVISOR_CHECK_TICK_MS` (60 s) ages every working Lead's
+clock — working means the Lead itself, or a Peer under it, is running or started a turn since the
+last tick, so a Lead only waiting on the Human never accrues quiet time. Once a Lead's clock reaches
+the setting, the plugin sends the host's live Supervisor a `[plugin slp] SLP-CHECK` message naming
+that Lead, its quiet minutes, and how many nudges in a row had no report from it; a
+`send_agent_prompt` from that Lead to a Supervisor resets both. The plugin sends at most one nudge
+per tick, spaced the setting's minutes apart per Lead, and only while the Supervisor is idle — a
+nudge never replaces a Supervisor turn already running. See `server/supervisor-check.ts`.
 
-You control both values from the SLP card on the host's Overview page (Settings → the host →
-Overview). The card is absent on a host without the `slp` plugin, saves each change to that host at
-once, shows a save error on the row you changed, and picks up changes made elsewhere. Its model
+You control all three values from the SLP card on the host's Overview page (Settings → the host →
+Overview). The card is absent on a host without the `slp` plugin, shows a save error on the row you
+changed, and picks up changes made elsewhere. `enabled` and `supervisorModel` save at once;
+`supervisorCheckMinutes` is typed over several keystrokes, so the card saves it only once you stop
+typing. Its model
 list is "Default" (stored as `null`) plus the selectable `claude` models on that host. The app
 reads the settings through `useSlpSettings` (`packages/app/src/plugins/slp-settings/`). Metro does
 not bundle files outside the app workspace, so the app keeps its own copy of this definition and

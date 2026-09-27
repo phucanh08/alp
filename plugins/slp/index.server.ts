@@ -9,7 +9,12 @@ import {
 } from "./server/ensure";
 import { allowPaseoTools, createLeadAnnouncer, withSeatConfig } from "./server/hooks";
 import { supervisorDirectory } from "./server/paths";
-import { isEnabled, supervisorModel } from "./server/settings";
+import { isEnabled, supervisorCheckMinutes, supervisorModel } from "./server/settings";
+import {
+  createSupervisorCheck,
+  SUPERVISOR_CHECK_TICK_MS,
+  type SupervisorCheckHost,
+} from "./server/supervisor-check";
 import { slpLeadEnsure, slpSupervisorEnsure } from "./shared/rpc";
 import { slpSettings } from "./shared/settings";
 
@@ -18,6 +23,9 @@ import { slpSettings } from "./shared/settings";
  * `enabled` (ruling p11 G1) is the SLP switch: every hook and RPC below reads it itself before
  * doing anything, so `false` makes the plugin inert — it does not seat, label, ensure, announce, or
  * auto-allow permissions, and every request passes through unchanged.
+ * The Supervisor check (`server/supervisor-check.ts`) ticks every minute on the Paseo API the last
+ * hook received — the plugin process has one API, and `contribute` gets none — and reads
+ * `supervisorCheckMinutes` each tick, so a changed setting applies without a restart.
  */
 export default function contribute(server: PluginServerContext) {
   const supervisorDir = supervisorDirectory();
@@ -25,6 +33,16 @@ export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(slpSettings);
   const enabled = async () => isEnabled(await settings.read());
   const announceLeads = createLeadAnnouncer();
+  const supervisorCheck = createSupervisorCheck();
+  let checkHost: SupervisorCheckHost | null = null;
+  const checkTimer = setInterval(() => {
+    const host = checkHost;
+    if (!host) return;
+    void (async () => {
+      const minutes = supervisorCheckMinutes(await settings.read());
+      await supervisorCheck.tick(host, minutes, Date.now());
+    })().catch((error) => console.error(`slp: supervisor check failed: ${String(error)}`));
+  }, SUPERVISOR_CHECK_TICK_MS);
 
   server.handle(slpSupervisorEnsure, async (_input, { paseo }) => {
     const state = await settings.read();
@@ -83,17 +101,30 @@ export default function contribute(server: PluginServerContext) {
         );
       }
     }),
-    server.on("agent.turn_ended", async (event, context) => {
+    server.on("agent.turn_started", async (event, { paseo }) => {
+      checkHost = paseo;
       if (!(await enabled())) return;
+      supervisorCheck.turnStarted(event.agent.id);
+    }),
+    server.on("agent.turn_ended", async (event, context) => {
+      checkHost = context.paseo;
+      if (!(await enabled())) return;
+      try {
+        await supervisorCheck.turnEnded(context.paseo, event.agent, event.timeline);
+      } catch (error) {
+        console.error(`slp: could not read lead ${event.agent.id} reports: ${String(error)}`);
+      }
       await announceLeads(event, context);
     }),
     server.on("agent.permission_requested", async (event, context) => {
+      checkHost = context.paseo;
       if (!(await enabled())) return;
       await allowPaseoTools(event, context);
     }),
   ];
 
   return () => {
+    clearInterval(checkTimer);
     for (const remove of removers) remove();
   };
 }

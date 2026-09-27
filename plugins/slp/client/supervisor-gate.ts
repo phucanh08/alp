@@ -1,6 +1,10 @@
 import { settingsRpc, type RpcOutput } from "@getpaseo/plugin";
-import type { PaseoApi } from "@getpaseo/client";
+import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { slpSettings } from "../shared/settings";
+
+// Bundled plugin code types the host API through the plugin SDK only: the packaged app ships no
+// `@getpaseo/client` declarations, and the plugin compiler cannot resolve a type import it can't find.
+type PaseoApi = PluginClientContext["paseo"];
 
 export const slpSettingsRpc = settingsRpc(slpSettings.id);
 

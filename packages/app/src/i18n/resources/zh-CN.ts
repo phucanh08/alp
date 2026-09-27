@@ -2285,6 +2285,10 @@ export const zhCN: TranslationResources = {
           hint: "仅适用于新创建的 Supervisor。",
           default: "默认",
         },
+        supervisorCheckMinutes: {
+          label: "Supervisor 检查延迟（分钟）",
+          hint: "Supervisor 在检查沉默的 Lead 之前等待的时间。0 表示关闭。",
+        },
       },
       appearance: {
         title: "外观",

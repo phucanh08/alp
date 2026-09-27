@@ -126,33 +126,44 @@ export function formatRoster(seat: Seat, agents: readonly SeatAgent[]): string {
 }
 
 /**
- * Supervisors the Lead already reached with `send_agent_prompt`, read from the `agent.turn_ended`
- * timeline. Only `tool_call` items named `…send_agent_prompt` with `detail.input.agentId` set to a
- * Supervisor and no error count. No substring search: `get_agent_status`/`ToolSearch` output also
- * contains the text `send_agent_prompt` (false positive measured 2026-09-24).
+ * `send_agent_prompt` calls in a timeline that reached one of `targetIds`: only `tool_call` items
+ * named `…send_agent_prompt` with `detail.input.agentId` set to a target and no error count. No
+ * substring search: `get_agent_status`/`ToolSearch` output also contains the text
+ * `send_agent_prompt` (false positive measured 2026-09-24).
  */
-export function supervisorsRegisteredIn(
+export function agentPromptsIn(
   timeline: unknown,
-  supervisorIds: readonly string[],
-): Set<string> {
-  const found = new Set<string>();
+  targetIds: readonly string[],
+): Array<{ callId: string; target: string }> {
+  const found: Array<{ callId: string; target: string }> = [];
   if (!Array.isArray(timeline)) return found;
   for (const item of timeline) {
     if (!item || typeof item !== "object") continue;
-    const { type, name, detail, error } = item as {
+    const { type, name, detail, error, callId } = item as {
       type?: unknown;
       name?: unknown;
       detail?: unknown;
       error?: unknown;
+      callId?: unknown;
     };
     if (type !== "tool_call" || typeof name !== "string" || !name.endsWith("send_agent_prompt")) {
       continue;
     }
     if (error) continue;
     const target = (detail as { input?: { agentId?: unknown } } | undefined)?.input?.agentId;
-    if (typeof target === "string" && supervisorIds.includes(target)) found.add(target);
+    if (typeof target === "string" && targetIds.includes(target)) {
+      found.push({ callId: typeof callId === "string" ? callId : "", target });
+    }
   }
   return found;
+}
+
+/** Supervisors the Lead already reached with `send_agent_prompt`, read from its timeline. */
+export function supervisorsRegisteredIn(
+  timeline: unknown,
+  supervisorIds: readonly string[],
+): Set<string> {
+  return new Set(agentPromptsIn(timeline, supervisorIds).map(({ target }) => target));
 }
 
 /** Message to a Supervisor when a new Lead finished its first turn without registering. */
