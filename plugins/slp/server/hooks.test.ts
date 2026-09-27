@@ -390,6 +390,8 @@ test("a .slp/agents override wins for the rule text; the skills still come from 
   ).toBe(true);
   expect(prompt).not.toContain("PEER RULES");
   expect(prompt).toContain("- **Skill của ghế này** (plugin `slp-dev`): `xia`, `smart-commits`.");
+  expect(prompt).toContain("Definition ghế của bạn ở ngay trên");
+  expect(prompt).not.toContain("không nạp");
 });
 
 const DEGRADED: Array<[string, () => ReturnType<typeof slpDev>, RegExp]> = [
@@ -423,6 +425,9 @@ for (const [name, plugins, reason] of DEGRADED) {
     const prompt = await seatPrompt("peer", plugins(), { timeoutMs: 20 });
     expect(prompt.startsWith("EXISTING\n\n## SLP-RUNTIME: alp\n")).toBe(true);
     expect(prompt).not.toContain("# Ghế SLP");
+    expect(prompt).not.toContain("ở ngay trên");
+    expect(prompt).toContain("Luật ghế peer của bạn không nạp");
+    expect(prompt).toContain("báo Human");
     expect(prompt).not.toContain("Skill của ghế này");
     expect(prompt).toContain("Runtime: alp");
     expect(warn).toHaveBeenCalledTimes(1);
@@ -443,6 +448,8 @@ test("when slp-dev is unavailable, a .slp/agents override still supplies the rul
     prompt.startsWith("EXISTING\n\n# Ghế SLP: lead\n\nREPO LEAD\n\n## SLP-RUNTIME: alp\n"),
   ).toBe(true);
   expect(prompt).not.toContain("Skill của ghế này");
+  expect(prompt).toContain("Definition ghế của bạn ở ngay trên");
+  expect(prompt).not.toContain("không nạp");
   expect(warn).toHaveBeenCalledTimes(1);
 });
 

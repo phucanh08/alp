@@ -15,9 +15,22 @@ function peerToolCutList(): string {
  * plugin nối vào. Nối sau definition trong system prompt. Luật workflow nằm trong definition, không
  * ở đây: khối này chỉ gọi tên skill của ghế (danh sách slp-dev trả), không nói khi nào dùng skill nào.
  */
+/** The COMMON sentence that points at the seat definition; swapped out when there is none. */
+const DEFINITION_ABOVE = `Definition ghế của bạn ở ngay trên; hành xử đúng
+definition đó.`;
+
+/**
+ * Stands in for `DEFINITION_ABOVE` when no override exists and slp-dev did not answer: the prompt
+ * then has no definition, and the agent should say so rather than guess its seat rules.
+ */
+function rulesMissing(seat: Seat): string {
+  return `Luật ghế ${seat} của bạn không nạp
+được (plugin \`slp-dev\` không trả lời), nên system prompt không có definition ghế. Làm việc theo
+các fact runtime dưới đây và báo Human rằng luật ghế chưa nạp được.`;
+}
+
 const COMMON = `## SLP-RUNTIME: alp
-Phiên này là một agent alp (daemon Paseo). Definition ghế của bạn ở ngay trên; hành xử đúng
-definition đó. Fact runtime:
+Phiên này là một agent alp (daemon Paseo). ${DEFINITION_ABOVE} Fact runtime:
 - Giao việc và nói chuyện bằng tool alp: \`create_agent\`, \`send_agent_prompt\`, \`list_agents\`,
   \`get_agent_status\`, \`get_agent_activity\`, \`create_workspace\`. Không dùng tool \`Agent\`/\`Task\`
   của provider để giao việc. Repo có thể override definition bằng \`.slp/agents/<seat>.md\`;
@@ -186,12 +199,16 @@ function seatBlock(seat: Seat, family: Family, origin?: SeatOrigin | null): stri
 /**
  * SLP-RUNTIME block for a seat; the Lead's Peer spawn rule follows the Lead's own family. `origin`
  * only applies to `peer` — see `INDEPENDENT_PEER`. `skills` closes the block with the seat's skills.
+ * `hasDefinition` false (no seat text in the prompt) replaces the pointer to it with `rulesMissing`.
  */
 export function runtimeBlock(
   seat: Seat,
   family: Family,
   origin?: SeatOrigin | null,
   skills: readonly string[] = [],
+  hasDefinition = true,
 ): string {
-  return `${seatBlock(seat, family, origin)}${skillsLine(skills)}`;
+  const block = seatBlock(seat, family, origin);
+  const body = hasDefinition ? block : block.replace(DEFINITION_ABOVE, rulesMissing(seat));
+  return `${body}${skillsLine(skills)}`;
 }

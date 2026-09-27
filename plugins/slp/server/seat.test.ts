@@ -85,6 +85,20 @@ test("buildSystemPrompt joins existing prompt, seat definition, and the seat run
   expect(peer).not.toMatch(/Spawn peer/);
 });
 
+test("with no rule text, every seat's runtime block says its rules did not load instead of pointing above", () => {
+  for (const seat of ["lead", "peer", "supervisor"] as const) {
+    for (const family of ["claude", "codex"] as const) {
+      const withRules = buildSystemPrompt(seat, family, "BODY", null);
+      expect(withRules).toContain("Definition ghế của bạn ở ngay trên");
+      expect(withRules).not.toContain("không nạp");
+      const without = buildSystemPrompt(seat, family, null, null);
+      expect(without.startsWith("## SLP-RUNTIME: alp\n")).toBe(true);
+      expect(without).not.toContain("ở ngay trên");
+      expect(without).toContain(`Luật ghế ${seat} của bạn không nạp`);
+    }
+  }
+});
+
 test("Lead runtime block carries the model and effort rule for Peers", () => {
   const lead = buildSystemPrompt("lead", "claude", "BODY", null);
   expect(lead).toContain('provider: "claude/<model>"');
