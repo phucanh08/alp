@@ -103,7 +103,20 @@ skills, one skill per subdirectory, the same shape as the core skill bundle:
 ```
 
 The daemon installs a plugin's skills the same way it installs the core bundle, and only while
-`pluginsEnabled` is `true` and the plugin itself is enabled. Two sources shipping the same skill
+`pluginsEnabled` is `true` and the plugin itself is enabled. The field also accepts an object, to
+ship names the daemon never installs:
+
+```json
+{ "skills": { "dir": "skills", "install": false } }
+```
+
+The names still count as shipped and managed — a copy already on disk from before the plugin
+switched to `install: false` is still offered for cleanup in Settings, exactly like a disabled
+plugin's — but nothing installs or repairs them, whether the plugin is enabled or not, and they are
+never selectable. Use this when the plugin loads its own skills some other way and only wants
+orchestration-skills to clean up stale copies.
+
+Two sources shipping the same skill
 name is a collision, not a shadow: the core bundle always keeps a name a plugin also ships, and two
 plugins sharing a name both lose it — it stays shipped, so a copy already on disk from before the
 collision remains deletable from Settings, but neither plugin's copy is installable. A collision is
