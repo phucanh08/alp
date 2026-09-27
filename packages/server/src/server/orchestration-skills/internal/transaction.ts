@@ -16,6 +16,7 @@ import path from "node:path";
 
 import {
   listManagedSkillNames,
+  readSkillCatalog,
   type SkillOp,
   type SkillSelection,
   type SkillTargets,
@@ -136,10 +137,7 @@ async function validateEntries(
 ): Promise<boolean> {
   // ALP(rebrand): a transaction left by a release before the alp rename names the
   // old directories, and only this transaction can put them back.
-  const names = new Set([
-    ...(await listManagedSkillNames(targets.sourceDir)),
-    ...RENAMED_SKILL_OLD_NAMES,
-  ]);
+  const names = new Set([...(await listManagedSkillNames(targets)), ...RENAMED_SKILL_OLD_NAMES]);
   const roots = [targets.agentsDir, targets.claudeDir, targets.codexDir];
   return entries.every((entry) => {
     const rootIndex = roots.findIndex((root) => path.dirname(entry.livePath) === root);
@@ -407,6 +405,7 @@ async function restore(
 ): Promise<void> {
   // Nothing was converged yet, so the live tree is already the pre-save state.
   if (manifest.phase === "capturing") return;
+  const { sourceDirs } = await readSkillCatalog(targets);
   const expectedByName = new Map<string, Map<string, Buffer>>();
   const claimedQuarantines = new Set<string>();
   for (const entry of manifest.entries) {
@@ -455,9 +454,10 @@ async function restore(
       continue;
     }
     const name = path.basename(entry.livePath);
+    const sourceDir = sourceDirs.get(name) ?? targets.sourceDir;
     if (
       RENAMED_SKILL_OLD_NAMES.includes(name) &&
-      !(await isDirectory(path.join(targets.sourceDir, name)))
+      !(await isDirectory(path.join(sourceDir, name)))
     ) {
       const synced = await syncedFilesFromManifest(entry.livePath);
       await undoSyncedDirectory(transactionDir, entry.livePath, backup, synced);
@@ -465,7 +465,7 @@ async function restore(
     }
     let expected = expectedByName.get(name);
     if (!expected) {
-      expected = await expectedSyncedFiles(targets.sourceDir, name);
+      expected = await expectedSyncedFiles(sourceDir, name);
       expectedByName.set(name, expected);
     }
     await undoSyncedDirectory(transactionDir, entry.livePath, backup, expected);

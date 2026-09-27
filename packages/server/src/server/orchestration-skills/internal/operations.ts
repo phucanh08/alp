@@ -37,6 +37,25 @@ export interface SkillTargets {
   agentsDir: string;
   claudeDir: string;
   codexDir: string;
+  /** Skills shipped by plugins, beside the core bundle in `sourceDir`. */
+  pluginSources?: readonly PluginSkillSource[];
+}
+
+export interface PluginSkillSource {
+  pluginId: string;
+  /** Holds one directory per skill, like `sourceDir`. */
+  dir: string;
+  /** Only an enabled source's skills are selectable; every source's names stay managed. */
+  enabled: boolean;
+}
+
+export interface SkillCatalog {
+  /** Skills that can be installed now: the core bundle plus enabled plugins, sorted. */
+  available: string[];
+  /** Every name a known source ships, enabled or not, sorted. */
+  shipped: string[];
+  /** The source directory holding each shipped skill. */
+  sourceDirs: Map<string, string>;
 }
 
 // Names the bundle used to ship. They are never selectable, but every scan still
@@ -64,14 +83,53 @@ async function listBundledSkills(sourceDir: string): Promise<string[]> {
     .sort(compareStrings);
 }
 
+/**
+ * Two sources shipping one name is an error rather than a shadow: whichever
+ * copy won would silently replace the other in every agent home. Copies from
+ * the same plugin (a config entry replacing the bundled one) are one source.
+ */
+export async function readSkillCatalog(targets: SkillTargets): Promise<SkillCatalog> {
+  const sources = [
+    { owner: "the core skills bundle", dir: targets.sourceDir, enabled: true },
+    ...(targets.pluginSources ?? []).map((source) => ({
+      owner: `plugin "${source.pluginId}"`,
+      dir: source.dir,
+      enabled: source.enabled,
+    })),
+  ];
+  const owners = new Map<string, string>();
+  const sourceDirs = new Map<string, string>();
+  const available = new Set<string>();
+  // Enabled first, so a skill's content comes from the copy that is running.
+  for (const source of [
+    ...sources.filter((s) => s.enabled),
+    ...sources.filter((s) => !s.enabled),
+  ]) {
+    for (const name of await listBundledSkills(source.dir)) {
+      const owner = owners.get(name);
+      if (owner !== undefined && owner !== source.owner) {
+        throw new Error(`Skill "${name}" is shipped by both ${owner} and ${source.owner}`);
+      }
+      owners.set(name, source.owner);
+      if (!sourceDirs.has(name)) sourceDirs.set(name, source.dir);
+      if (source.enabled) available.add(name);
+    }
+  }
+  return {
+    available: [...available].sort(compareStrings),
+    shipped: [...owners.keys()].sort(compareStrings),
+    sourceDirs,
+  };
+}
+
 /** Every name Paseo owns on disk: what it ships now plus what it used to ship. */
-function managedSkillNames(available: readonly string[]): string[] {
-  return [...new Set([...available, ...LEGACY_SKILL_NAMES])].sort(compareStrings);
+function managedSkillNames(shipped: readonly string[]): string[] {
+  return [...new Set([...shipped, ...LEGACY_SKILL_NAMES])].sort(compareStrings);
 }
 
 /** The names a convergence may create, replace, or delete. */
-export async function listManagedSkillNames(sourceDir: string): Promise<string[]> {
-  return managedSkillNames(await listBundledSkills(sourceDir));
+export async function listManagedSkillNames(targets: SkillTargets): Promise<string[]> {
+  return managedSkillNames((await readSkillCatalog(targets)).shipped);
 }
 
 function resolveDesiredSkills(
@@ -97,10 +155,13 @@ async function hashSkillDir(skillDir: string): Promise<SkillFiles | null> {
   return files;
 }
 
-async function hashSkills(rootDir: string, names: readonly string[]): Promise<TargetSkills> {
+async function hashSkills(
+  rootDirOf: (name: string) => string,
+  names: readonly string[],
+): Promise<TargetSkills> {
   const out: TargetSkills = new Map();
   for (const name of names) {
-    const files = await hashSkillDir(path.join(rootDir, name));
+    const files = await hashSkillDir(path.join(rootDirOf(name), name));
     if (files !== null) out.set(name, files);
   }
   return out;
@@ -161,13 +222,14 @@ export async function getSkillsStatus(
   targets: SkillTargets,
   selection: SkillSelection,
 ): Promise<SkillsStatus> {
-  const available = await listBundledSkills(targets.sourceDir);
-  const names = managedSkillNames(available);
+  const catalog = await readSkillCatalog(targets);
+  const { available } = catalog;
+  const names = managedSkillNames(catalog.shipped);
   const [bundle, agentsDisk, claudeDisk, codexDisk] = await Promise.all([
-    hashSkills(targets.sourceDir, available),
-    hashSkills(targets.agentsDir, names),
-    hashSkills(targets.claudeDir, names),
-    hashSkills(targets.codexDir, names),
+    hashSkills((name) => catalog.sourceDirs.get(name)!, available),
+    hashSkills(() => targets.agentsDir, names),
+    hashSkills(() => targets.claudeDir, names),
+    hashSkills(() => targets.codexDir, names),
   ]);
   const disks = [agentsDisk, claudeDisk, codexDisk];
   const ops = diff(bundle, disks, names, resolveDesiredSkills(selection, available));
@@ -189,13 +251,22 @@ async function applySkills(
     .filter((op) => op.kind === "add" || op.kind === "update")
     .map((op) => op.name);
   if (writes.length > 0) {
-    await syncSkills({
-      sourceDir: targets.sourceDir,
-      agentsDir: targets.agentsDir,
-      claudeDir: targets.claudeDir,
-      codexDir: targets.codexDir,
-      skillNames: writes,
-    });
+    const { sourceDirs } = await readSkillCatalog(targets);
+    const bySource = new Map<string, string[]>();
+    for (const name of writes) {
+      const sourceDir = sourceDirs.get(name);
+      if (sourceDir === undefined) continue;
+      bySource.set(sourceDir, [...(bySource.get(sourceDir) ?? []), name]);
+    }
+    for (const [sourceDir, skillNames] of bySource) {
+      await syncSkills({
+        sourceDir,
+        agentsDir: targets.agentsDir,
+        claudeDir: targets.claudeDir,
+        codexDir: targets.codexDir,
+        skillNames,
+      });
+    }
   }
 
   for (const op of status.ops) {
@@ -224,7 +295,7 @@ export async function updateSkills(
   selection: SkillSelection,
   options: SkillsMaintenanceOptions,
 ): Promise<SkillsStatus> {
-  await removeRenamedSkillDirs(targets, await listBundledSkills(targets.sourceDir), options.logger);
+  await removeRenamedSkillDirs(targets, (await readSkillCatalog(targets)).shipped, options.logger);
   const status = await getSkillsStatus(targets, selection);
   return applySkills(targets, selection, nonDestructivePlan(status));
 }
@@ -240,7 +311,7 @@ export async function autoUpdateInstalledSkills(
 ): Promise<SkillsStatus> {
   // Old directories are invisible to status, so this runs even when the renamed
   // skills are already up to date.
-  await removeRenamedSkillDirs(targets, await listBundledSkills(targets.sourceDir), options.logger);
+  await removeRenamedSkillDirs(targets, (await readSkillCatalog(targets)).shipped, options.logger);
   const status = await getSkillsStatus(targets, selection);
   // ALP(slp): a bare host reads as not-installed exactly like one where the
   // user explicitly uninstalled everything — treat it the same as drift so a
@@ -258,8 +329,7 @@ export async function uninstallSkills(
   targets: SkillTargets,
   selection: SkillSelection,
 ): Promise<SkillsStatus> {
-  const available = await listBundledSkills(targets.sourceDir);
-  for (const name of managedSkillNames(available)) {
+  for (const name of await listManagedSkillNames(targets)) {
     await removeSkill(name, {
       agentsDir: targets.agentsDir,
       claudeDir: targets.claudeDir,

@@ -67,8 +67,9 @@ export function createSkillsController({
   logger,
 }: {
   // Resolved per operation, not at wiring time: the bundle path depends on how
-  // the app was packaged, which is not knowable when the controller is built.
-  resolveTargets: () => SkillTargets;
+  // the app was packaged, which is not knowable when the controller is built,
+  // and plugin sources follow the current plugin config.
+  resolveTargets: () => SkillTargets | Promise<SkillTargets>;
   selectionStore: SkillSelectionStore;
   logger: SkillsLogger;
 }): SkillsController {
@@ -85,12 +86,13 @@ export function createSkillsController({
 
   async function converge(apply: Converge): Promise<SkillsSnapshot> {
     const selection = await selectionStore.get();
-    await recoverInterruptedSkillTransactions(resolveTargets(), selection);
-    return { ...(await apply(resolveTargets(), selection, { logger })), selection };
+    const targets = await resolveTargets();
+    await recoverInterruptedSkillTransactions(targets, selection);
+    return { ...(await apply(targets, selection, { logger })), selection };
   }
 
   async function saveSelection(request: unknown): Promise<SkillsSaveResult> {
-    const targets = resolveTargets();
+    const targets = await resolveTargets();
     // ALP(rebrand): a client opened before the upgrade can still send old names.
     const next = renameSkillSelection(coerceSkillSelection(request));
     const previous = await selectionStore.get();

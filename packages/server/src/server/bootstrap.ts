@@ -602,7 +602,15 @@ export async function createPaseoDaemon(
       },
     },
   });
-  const orchestrationSkills = createOrchestrationSkills(daemonConfigStore, logger);
+  // ALP(slp): plugins shipped inside the daemon and run without a config entry. Their skills
+  // install with the core skills, so both read this one map.
+  const bundledPlugins = { slp: resolveBundledPluginDir("slp") };
+  const orchestrationSkills = createOrchestrationSkills(
+    daemonConfigStore,
+    logger,
+    undefined,
+    bundledPlugins,
+  );
   void orchestrationSkills.autoUpdate().catch((error) => {
     logger.error({ err: error }, "Failed to maintain orchestration skills at startup");
   });
@@ -611,8 +619,7 @@ export async function createPaseoDaemon(
   const pluginRuntime = new PluginService(logger, daemonConfigStore, daemonVersion, {
     managedSources: new ManagedPluginSources(config.paseoHome),
     settingsDirectory: path.join(config.paseoHome, "plugin-settings"),
-    // ALP(slp): the SLP seat plugin ships with the daemon and runs without a config entry.
-    bundledPlugins: { slp: resolveBundledPluginDir("slp") },
+    bundledPlugins,
   });
 
   const serverId = getOrCreateServerId(config.paseoHome, { logger });
