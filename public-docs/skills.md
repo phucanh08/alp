@@ -56,12 +56,12 @@ The advisor returns a second opinion without editing files.
 
 ## SLP skills
 
-alp bundles seven more skills for the SLP (Supervisor / Lead / Peer) workflow, installed by
-default on a fresh host through the same mechanism as the table above.
+alp bundles six more skills for the SLP (Supervisor / Lead / Peer) workflow. They are not
+installed on the host: each Lead and Peer agent gets its seat's skills through its own seat
+directory under `$PASEO_HOME/slp/seat-skills/`.
 
 | Skill                      | Use it to                                                                         |
 | -------------------------- | --------------------------------------------------------------------------------- |
-| `/ask-alp`                 | Look up which seat you're in, which phase you're at, and which skill fits next.   |
 | `/bug-loop`                | Diagnose a bug or performance regression with a disciplined red-before-fix loop.  |
 | `/goal-griller`            | Turn a vague idea into a verifiable Task Contract before splitting up work.       |
 | `/prompt-leverage`         | Turn a raw prompt into an execution-ready prompt or handoff brief.                |
@@ -69,5 +69,6 @@ default on a fresh host through the same mechanism as the table above.
 | `/smart-commits`           | Group a working tree into logical conventional commits ready for handoff.         |
 | `/xia`                     | Scout the repo and upstream docs before writing code, so nothing gets reinvented. |
 
-Uninstalling these skills in Settings and restarting the daemon reinstalls them; see
+If an earlier alp version installed them on the host, **Settings → your host → Agents →
+Orchestration skills** offers to remove those copies; see
 [breaking-changes.md](../docs/breaking-changes.md#slp-defaults-on-a-fresh-host).

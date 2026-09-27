@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import type { ProviderOptions, ToolPolicy } from "@getpaseo/protocol/agent-types";
 import { z } from "zod";
 
@@ -42,6 +43,14 @@ const SandboxFilesystemSchema = z
   })
   .strict();
 
+// The SDK hands the path to the CLI verbatim; a relative one would resolve per agent cwd.
+const LocalPluginSchema = z
+  .object({
+    type: z.literal("local"),
+    path: z.string().refine(isAbsolute, "must be an absolute path"),
+  })
+  .strict();
+
 // Claude Agent SDK Options, maintained against @anthropic-ai/claude-agent-sdk 0.3.246.
 export const ClaudeProviderOptionsSchema = z
   .object({
@@ -49,6 +58,8 @@ export const ClaudeProviderOptionsSchema = z
     disallowedTools: z.array(z.string()).optional(),
     additionalDirectories: z.array(z.string()).optional(),
     extraArgs: z.record(z.string(), z.string().nullable()).optional(),
+    plugins: z.array(LocalPluginSchema).optional(),
+    skills: z.union([z.array(z.string()), z.literal("all")]).optional(),
     sandbox: z
       .object({
         enabled: z.boolean().optional(),

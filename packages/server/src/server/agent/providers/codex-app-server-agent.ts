@@ -108,6 +108,7 @@ import type { WorkspaceGitService } from "../../workspace-git-service.js";
 import {
   applyCodexToolPolicy,
   CodexProviderOptionsSchema,
+  toCodexSkillsConfig,
   type CodexProviderOptions,
 } from "./codex/options.js";
 
@@ -3537,6 +3538,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     try {
       await client.request("initialize", buildCodexAppServerInitializeParams());
       client.notify("initialized", {});
+      this.setSkillExtraRoots(client);
 
       await this.loadResolvedWorkspaceWrite();
       await this.loadCollaborationModes();
@@ -3566,6 +3568,17 @@ export class CodexAppServerAgentSession implements AgentSession {
       }
       throw error;
     }
+  }
+
+  // Extra roots live in the app-server process, not the thread, so every process sets them before
+  // its thread starts or resumes. Codex applies them at once but withholds the response until the
+  // next request when this is the first request after initialize, so it is not awaited.
+  private setSkillExtraRoots(client: CodexAppServerClient): void {
+    const extraRoots = this.providerOptions.skills?.extraRoots;
+    if (!extraRoots || extraRoots.length === 0) return;
+    client.request("skills/extraRoots/set", { extraRoots }).catch((error: unknown) => {
+      this.logger.warn({ err: error, extraRoots }, "Failed to set Codex skill extra roots");
+    });
   }
 
   private async loadResolvedWorkspaceWrite(): Promise<void> {
@@ -5206,7 +5219,8 @@ export class CodexAppServerAgentSession implements AgentSession {
 
   private buildCodexInnerConfig(): Record<string, unknown> | null {
     const innerConfig: Record<string, unknown> = {};
-    Object.assign(innerConfig, this.providerOptions);
+    const { skills, ...providerConfig } = this.providerOptions;
+    Object.assign(innerConfig, providerConfig, toCodexSkillsConfig(skills));
     if (this.deps.customCodexConfig) {
       Object.assign(innerConfig, this.deps.customCodexConfig);
     }

@@ -6361,3 +6361,136 @@ describe("Codex denied plan approvals", () => {
     });
   });
 });
+
+describe("Codex skills provider options", () => {
+  const skills = {
+    config: [
+      { name: "hidden-skill", enabled: false },
+      { path: "/skills/other/SKILL.md", enabled: true },
+    ],
+    includeInstructions: false,
+    extraRoots: ["/opt/team-skills"],
+  };
+  const expectedThreadSkills = {
+    config: [
+      { name: "hidden-skill", enabled: false },
+      { path: "/skills/other/SKILL.md", enabled: true },
+    ],
+    include_instructions: false,
+  };
+
+  // Codex withholds this response until the next request when the RPC is the first one after
+  // initialize, so the fake never answers it.
+  function createAppServerThatNeverAnswersExtraRoots(): FakeCodexAppServer {
+    return createFakeCodexAppServer({
+      "skills/extraRoots/set": () => new Promise(() => {}),
+      "thread/loaded/list": () => ({ data: [] }),
+    });
+  }
+
+  function requestMethods(appServer: FakeCodexAppServer): string[] {
+    return appServer
+      .requests()
+      .filter((message) => typeof message.id === "number")
+      .map((message) => String(message.method));
+  }
+
+  function threadConfigSkills(params: Record<string, unknown>): unknown {
+    const config = params.config;
+    return config && typeof config === "object"
+      ? (config as Record<string, unknown>).skills
+      : undefined;
+  }
+
+  async function withinOneSecond<T>(label: string, work: Promise<T>): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} hung`)), 1000);
+    });
+    try {
+      return await Promise.race([work, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  test("thread/start carries skills config and extra roots are set before the thread starts", async () => {
+    const appServer = createAppServerThatNeverAnswersExtraRoots();
+    const session = new CodexAppServerAgentSession(
+      createConfig({ providerOptions: { skills } }),
+      null,
+      createTestLogger(),
+      async () => appServer.child,
+    );
+
+    try {
+      await withinOneSecond("connect", session.connect());
+      await withinOneSecond("startTurn", session.startTurn("hello"));
+
+      const threadStart = await appServer.waitForRequest("thread/start");
+      expect(threadConfigSkills(threadStart)).toEqual(expectedThreadSkills);
+      await expect(appServer.waitForRequest("skills/extraRoots/set")).resolves.toEqual({
+        extraRoots: ["/opt/team-skills"],
+      });
+      const methods = requestMethods(appServer);
+      expect(methods.indexOf("initialize")).toBeLessThan(methods.indexOf("skills/extraRoots/set"));
+      expect(methods.indexOf("skills/extraRoots/set")).toBeLessThan(
+        methods.indexOf("thread/start"),
+      );
+      appServer.assertNoErrors();
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("thread/resume carries skills config and extra roots are set before the thread resumes", async () => {
+    const appServer = createAppServerThatNeverAnswersExtraRoots();
+    const session = new CodexAppServerAgentSession(
+      createConfig({ providerOptions: { skills } }),
+      { sessionId: "persisted-thread" },
+      createTestLogger(),
+      async () => appServer.child,
+    );
+
+    try {
+      await withinOneSecond("connect", session.connect());
+
+      const threadResume = await appServer.waitForRequest("thread/resume");
+      expect(threadResume.threadId).toBe("persisted-thread");
+      expect(threadConfigSkills(threadResume)).toEqual(expectedThreadSkills);
+      await expect(appServer.waitForRequest("skills/extraRoots/set")).resolves.toEqual({
+        extraRoots: ["/opt/team-skills"],
+      });
+      const methods = requestMethods(appServer);
+      expect(methods.indexOf("initialize")).toBeLessThan(methods.indexOf("skills/extraRoots/set"));
+      expect(methods.indexOf("skills/extraRoots/set")).toBeLessThan(
+        methods.indexOf("thread/resume"),
+      );
+      appServer.assertNoErrors();
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("does not set extra roots when none are configured", async () => {
+    const appServer = createFakeCodexAppServer();
+    const session = new CodexAppServerAgentSession(
+      createConfig({ providerOptions: { skills: { includeInstructions: true } } }),
+      null,
+      createTestLogger(),
+      async () => appServer.child,
+    );
+
+    try {
+      await session.connect();
+      await session.startTurn("hello");
+
+      const threadStart = await appServer.waitForRequest("thread/start");
+      expect(threadConfigSkills(threadStart)).toEqual({ include_instructions: true });
+      expect(requestMethods(appServer)).not.toContain("skills/extraRoots/set");
+      appServer.assertNoErrors();
+    } finally {
+      await session.close();
+    }
+  });
+});

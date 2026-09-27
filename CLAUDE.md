@@ -199,8 +199,8 @@ Find the complete daemon logs and traces in the $PASEO_HOME/daemon.log
 
 Repo này là fork của [getpaseo/paseo](https://github.com/getpaseo/paseo) (`upstream`), phát triển
 theo quy trình SLP (Supervisor / Lead / Peer). Trong phiên Claude Code như phiên này, seat definition
-ở `.claude/agents/`, skill theo phase ở `.claude/skills/`; gõ `/ask-alp` để biết ghế nào dùng skill
-nào. Trong app alp (agent do plugin `plugins/slp` tạo), seat definition và skills bundled ở
+ở `.claude/agents/`, skill theo phase ở `.claude/skills/`; ghế nào dùng từ vựng nào ở
+`plugins/slp-dev/references/seats.md`. Trong app alp (agent do plugin `plugins/slp` tạo), seat definition và skills bundled ở
 `plugins/slp-dev/agents/` và `plugins/slp-dev/skills/` (plugin `slp-dev`, slp hỏi qua RPC
 `slp-dev.seat.get`); repo override bằng `.slp/agents/<seat>.md`, không phải `.claude/agents/`. Plan
 hiện hành: `plans/`.

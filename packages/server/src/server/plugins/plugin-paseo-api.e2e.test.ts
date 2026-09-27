@@ -263,7 +263,7 @@ test("bundled slp seats an agent with the rules and skills bundled slp-dev answe
     const answer = await client.invokePluginRpc("slp-dev", "slp-dev.seat.get", { seat: "peer" });
     expect(answer).toEqual({
       definition: expect.stringContaining("# Peer — independent co-worker"),
-      skills: ["xia", "smart-commits", "bug-loop", "ask-alp"],
+      skills: ["xia", "smart-commits", "bug-loop"],
     });
 
     const agent = await client.createAgent({
@@ -274,9 +274,7 @@ test("bundled slp seats an agent with the rules and skills bundled slp-dev answe
     });
     const systemPrompt = daemon.daemon.agentManager.getAgent(agent.id)?.config.systemPrompt;
     expect(systemPrompt).toContain("# Ghế SLP: peer\n\n# Peer — independent co-worker");
-    expect(systemPrompt).toContain(
-      "(plugin `slp-dev`): `xia`, `smart-commits`, `bug-loop`, `ask-alp`.",
-    );
+    expect(systemPrompt).toContain("(plugin `slp-dev`): `xia`, `smart-commits`, `bug-loop`.");
     await client.archiveAgent(agent.id);
   } finally {
     await client.close().catch(() => undefined);

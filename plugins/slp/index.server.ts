@@ -9,6 +9,8 @@ import {
 } from "./server/ensure";
 import { allowPaseoTools, createLeadAnnouncer, withSeatConfig } from "./server/hooks";
 import { supervisorDirectory } from "./server/paths";
+import { familyOf } from "./server/seat";
+import { createSeatSkills, seatSkillsRoot } from "./server/seat-skills";
 import { isEnabled, supervisorCheckMinutes, supervisorModel } from "./server/settings";
 import {
   createSupervisorCheck,
@@ -26,6 +28,10 @@ import { slpSettings } from "./shared/settings";
  * The Supervisor check (`server/supervisor-check.ts`) ticks every minute on the Paseo API the last
  * hook received — the plugin process has one API, and `contribute` gets none — and reads
  * `supervisorCheckMinutes` each tick, so a changed setting applies without a restart.
+ * Seat skill directories (`server/seat-skills.ts`) need slp-dev, so they cannot be written at
+ * start: every seat is brought up to date on the first Claude/Codex session open (the resume of a
+ * stored agent, which re-sends its stored plugin path or extra root), and a seat's own directory
+ * again right before each Lead or Peer is created.
  */
 export default function contribute(server: PluginServerContext) {
   const supervisorDir = supervisorDirectory();
@@ -34,6 +40,10 @@ export default function contribute(server: PluginServerContext) {
   const enabled = async () => isEnabled(await settings.read());
   const announceLeads = createLeadAnnouncer();
   const supervisorCheck = createSupervisorCheck();
+  const skillsRoot = seatSkillsRoot();
+  if (!skillsRoot) console.warn("slp: PASEO_HOME is not set; seats get no skill directory");
+  const seatSkills = createSeatSkills(skillsRoot);
+  let seatSkillsRefreshed = false;
   let checkHost: SupervisorCheckHost | null = null;
   const checkTimer = setInterval(() => {
     const host = checkHost;
@@ -62,8 +72,23 @@ export default function contribute(server: PluginServerContext) {
 
   const removers = [
     server.before("agent.create", async ({ request }, { paseo }) =>
-      withSeatConfig(request, paseo, await enabled()),
+      withSeatConfig(
+        request,
+        {
+          agents: paseo.agents,
+          plugins: paseo.plugins,
+          seatSkills: (seat) => seatSkills.ensure(seat, paseo.plugins),
+        },
+        await enabled(),
+      ),
     ),
+    server.before("agent.session_open", async ({ request }, { paseo }) => {
+      if (seatSkillsRefreshed || !familyOf(request.provider) || !(await enabled()))
+        return undefined;
+      seatSkillsRefreshed = true;
+      await seatSkills.ensureAll(paseo.plugins);
+      return undefined;
+    }),
     server.before("workspace.create", async ({ request }, { paseo }) => {
       // Record only; never change or fail the user's request.
       try {

@@ -169,7 +169,7 @@ test("a Supervisor by label loses the Supervisor Paseo tools on Claude and Codex
   expect(claude?.paseoTools).toEqual({ disabledTools: SUPERVISOR_PASEO_CUT });
   expect(claude?.config.providerOptions).toEqual({
     allowedTools: ["Bash", "mcp__paseo__*"],
-    disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "Task"],
+    disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "Task", "Skill"],
   });
   expect(claude?.config.systemPrompt).toMatch(/## Lead hiện có[\s\S]*`L1`/);
 
@@ -304,6 +304,7 @@ test("agent.create for a Supervisor lists Leads and cuts write and spawn tools",
     "NotebookEdit",
     "Agent",
     "Task",
+    "Skill",
   ]);
 });
 
@@ -358,13 +359,17 @@ test("each seat gets its rule text and its skills from slp-dev.seat.get; a Super
     lead.startsWith("EXISTING\n\n# Ghế SLP: lead\n\nLEAD RULES\n\n## SLP-RUNTIME: alp\n"),
   ).toBe(true);
   expect(lead).not.toContain("name: lead");
-  expect(lead).toContain("- **Skill của ghế này** (plugin `slp-dev`): `xia`, `goal-griller`.");
+  expect(lead).toContain(
+    "- **Skill của ghế này** (plugin `slp-dev`): `slp-lead:xia`, `slp-lead:goal-griller`.",
+  );
 
   const peer = await seatPrompt("peer", plugins);
   expect(
     peer.startsWith("EXISTING\n\n# Ghế SLP: peer\n\nPEER RULES\n\n## SLP-RUNTIME: alp\n"),
   ).toBe(true);
-  expect(peer).toContain("- **Skill của ghế này** (plugin `slp-dev`): `xia`, `smart-commits`.");
+  expect(peer).toContain(
+    "- **Skill của ghế này** (plugin `slp-dev`): `slp-peer:xia`, `slp-peer:smart-commits`.",
+  );
 
   const supervisor = await seatPrompt("supervisor", plugins);
   expect(
@@ -389,7 +394,9 @@ test("a .slp/agents override wins for the rule text; the skills still come from 
     prompt.startsWith("EXISTING\n\n# Ghế SLP: peer\n\nREPO PEER\n\n## SLP-RUNTIME: alp\n"),
   ).toBe(true);
   expect(prompt).not.toContain("PEER RULES");
-  expect(prompt).toContain("- **Skill của ghế này** (plugin `slp-dev`): `xia`, `smart-commits`.");
+  expect(prompt).toContain(
+    "- **Skill của ghế này** (plugin `slp-dev`): `slp-peer:xia`, `slp-peer:smart-commits`.",
+  );
   expect(prompt).toContain("Definition ghế của bạn ở ngay trên");
   expect(prompt).not.toContain("không nạp");
 });
@@ -539,4 +546,144 @@ test("the Lead announcer tells an idle Supervisor about a new Lead, both found b
   await announce(turnEnded(hookAgent("L-old", "claude-lead")), context);
   expect(calls.sent.map((s) => s.agentId)).toEqual(["S1"]);
   expect(calls.sent[0]?.text).toContain("`L1`");
+});
+
+/** `host` plus a seat skill directory per seat, as `index.server.ts` wires `createSeatSkills`. */
+function hostWithSeatSkills(directories: Partial<Record<string, string>>) {
+  const asked: string[] = [];
+  return {
+    asked,
+    host: {
+      ...host,
+      async seatSkills(seat: string) {
+        asked.push(seat);
+        return directories[seat] ?? null;
+      },
+    },
+  };
+}
+
+const SEAT_DIRS = {
+  lead: "/home/.alp/slp/seat-skills/lead",
+  peer: "/home/.alp/slp/seat-skills/peer",
+};
+
+async function seatConfigWith(
+  seatHost: unknown,
+  provider: string,
+  labels: Record<string, string>,
+  providerOptions?: Record<string, unknown>,
+) {
+  const base = await request(provider, labels);
+  return (await withSeatConfig(
+    {
+      ...base,
+      config: { ...base.config, ...(providerOptions ? { providerOptions } : {}) },
+    } as never,
+    seatHost as never,
+  )) as SeatResult | undefined;
+}
+
+test("a Claude Lead and Peer load their seat directory as a local plugin, with no skills allow-list", async () => {
+  const { host: seatHost } = hostWithSeatSkills(SEAT_DIRS);
+  const lead = await seatConfigWith(seatHost, "claude", { "slp.role": "lead" });
+  expect(lead?.config.providerOptions).toEqual({
+    allowedTools: ["Bash", "mcp__paseo__*"],
+    plugins: [{ type: "local", path: "/home/.alp/slp/seat-skills/lead" }],
+  });
+
+  const peer = await seatConfigWith(seatHost, "claude", { "slp.role": "peer" });
+  expect(peer?.config.providerOptions).toEqual({
+    allowedTools: ["Bash"],
+    disallowedTools: ["Agent", "Task"],
+    plugins: [{ type: "local", path: "/home/.alp/slp/seat-skills/peer" }],
+  });
+});
+
+test("a Codex Lead and Peer read their seat directory's skills/ as an extra skill root", async () => {
+  const { host: seatHost } = hostWithSeatSkills(SEAT_DIRS);
+  const lead = await seatConfigWith(seatHost, "codex", { "slp.role": "lead" });
+  expect(lead?.config.providerOptions).toEqual({
+    allowedTools: ["Bash"],
+    skills: { extraRoots: ["/home/.alp/slp/seat-skills/lead/skills"] },
+  });
+
+  const peer = await seatConfigWith(seatHost, "codex", { "slp.role": "peer" });
+  expect(peer?.config.providerOptions).toEqual({
+    allowedTools: ["Bash"],
+    sandbox_mode: "workspace-write",
+    features: { multi_agent: false },
+    skills: { extraRoots: ["/home/.alp/slp/seat-skills/peer/skills"] },
+  });
+});
+
+test("the Supervisor gets no seat directory and, on Claude, loses the Skill tool", async () => {
+  const { host: seatHost, asked } = hostWithSeatSkills(SEAT_DIRS);
+  const claude = await seatConfigWith(seatHost, "claude", { "slp.role": "supervisor" });
+  expect(claude?.config.providerOptions).toEqual({
+    allowedTools: ["Bash", "mcp__paseo__*"],
+    disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "Task", "Skill"],
+  });
+
+  const codex = await seatConfigWith(seatHost, "codex", { "slp.role": "supervisor" });
+  expect(codex?.config.providerOptions).toEqual({
+    allowedTools: ["Bash"],
+    sandbox_mode: "workspace-write",
+  });
+  expect(asked).toEqual([]);
+});
+
+test("seat skills merge into the request's own plugins and Codex skills options", async () => {
+  const { host: seatHost } = hostWithSeatSkills(SEAT_DIRS);
+  const claude = await seatConfigWith(
+    seatHost,
+    "claude",
+    { "slp.role": "peer" },
+    { plugins: [{ type: "local", path: "/mine" }], skills: ["web-perf"] },
+  );
+  expect(claude?.config.providerOptions).toEqual({
+    plugins: [
+      { type: "local", path: "/mine" },
+      { type: "local", path: "/home/.alp/slp/seat-skills/peer" },
+    ],
+    skills: ["web-perf"],
+    disallowedTools: ["Agent", "Task"],
+  });
+
+  const codex = await seatConfigWith(
+    seatHost,
+    "codex",
+    { "slp.role": "lead" },
+    { skills: { includeInstructions: true, extraRoots: ["/mine/skills"] } },
+  );
+  expect(codex?.config.providerOptions).toEqual({
+    skills: {
+      includeInstructions: true,
+      extraRoots: ["/mine/skills", "/home/.alp/slp/seat-skills/lead/skills"],
+    },
+  });
+});
+
+test("a seat whose directory is unavailable is created without plugins or extra roots", async () => {
+  const { host: seatHost, asked } = hostWithSeatSkills({});
+  const claude = await seatConfigWith(seatHost, "claude", { "slp.role": "lead" });
+  expect(claude?.config.providerOptions).toEqual({ allowedTools: ["Bash", "mcp__paseo__*"] });
+  const codex = await seatConfigWith(seatHost, "codex", { "slp.role": "peer" });
+  expect(codex?.config.providerOptions).not.toHaveProperty("skills");
+  expect(asked).toEqual(["lead", "peer"]);
+});
+
+test("a Codex peer's runtime block names its real seat-dir skills root, not ~/.codex/skills", async () => {
+  const { host: seatHost } = hostWithSeatSkills(SEAT_DIRS);
+  const codex = await seatConfigWith(seatHost, "codex", { "slp.role": "peer" });
+  expect(codex?.config.systemPrompt).toContain(
+    "seat dir của bạn: `/home/.alp/slp/seat-skills/peer/skills`",
+  );
+  expect(codex?.config.systemPrompt).not.toContain("~/.codex/skills");
+});
+
+test("a Codex seat with no seat directory gets no seat-dir path line in its runtime block", async () => {
+  const { host: seatHost } = hostWithSeatSkills({});
+  const codex = await seatConfigWith(seatHost, "codex", { "slp.role": "peer" });
+  expect(codex?.config.systemPrompt).not.toMatch(/seat dir của bạn: `/);
 });

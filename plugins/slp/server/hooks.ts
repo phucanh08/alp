@@ -19,6 +19,7 @@ import {
   originOfLabels,
   paseoToolsFor,
   providerOptionsFor,
+  type Seat,
   seatOfAgent,
   seatOfLabels,
 } from "./seat";
@@ -26,10 +27,14 @@ import { type PluginInvoker, readSeatRules, SEAT_RULES_TIMEOUT_MS } from "./seat
 
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
 
-/** The slice of the hook's `PaseoApi` a seat needs: agents for the roster, plugins for slp-dev. */
+/**
+ * The slice of the hook's `PaseoApi` a seat needs — agents for the roster, plugins for slp-dev —
+ * and the seat skill directory for a Lead or Peer (`SeatSkills.ensure`), null when it has none.
+ */
 export interface SeatHost {
   agents: AgentLister;
   plugins: PluginInvoker;
+  seatSkills?: (seat: Seat) => Promise<string | null>;
 }
 
 /**
@@ -37,7 +42,8 @@ export interface SeatHost {
  * gets its seat definition and skills (see `readSeatRules`), the SLP-RUNTIME block, and the live
  * roster of the counterpart seat (Lead sees Supervisors and the reverse) in its system prompt.
  * Claude Lead/Supervisor also get `allowedTools: mcp__paseo__*`; the Supervisor loses
- * Write/Edit/Agent/Task, a Claude Peer loses Agent/Task. Peer and Supervisor lose Paseo tools
+ * Write/Edit/Agent/Task/Skill, a Claude Peer loses Agent/Task. A Lead or Peer gets its seat skill
+ * directory (`host.seatSkills`) as a Claude local plugin or a Codex extra skill root. Peer and Supervisor lose Paseo tools
  * through the returned `paseoTools`. A claude/codex request that names no seat and no parent — a
  * Human made it directly, or a schedule run created it, not another agent — defaults to Peer,
  * tagged `slp.origin=schedule` when the request carries `paseo.schedule-id`, `slp.origin=human`
@@ -69,7 +75,10 @@ export async function withSeatConfig(
     );
     return undefined;
   }
-  const rules = await readSeatRules(request.config.cwd, seat, host.plugins, seatRulesTimeoutMs);
+  const [rules, seatSkillsDirectory] = await Promise.all([
+    readSeatRules(request.config.cwd, seat, host.plugins, seatRulesTimeoutMs),
+    seat === "supervisor" ? null : (host.seatSkills?.(seat) ?? null),
+  ]);
   let roster = "";
   const other = counterpartSeat(seat);
   if (other) {
@@ -79,11 +88,24 @@ export async function withSeatConfig(
       console.error(`slp: could not list ${other} agents: ${String(error)}`);
     }
   }
-  const providerOptions = providerOptionsFor(seat, family, request.config.providerOptions);
+  const providerOptions = providerOptionsFor(
+    seat,
+    family,
+    request.config.providerOptions,
+    seatSkillsDirectory,
+  );
   const paseoTools = paseoToolsFor(seat, request.paseoTools);
   const origin = seat === "peer" ? originOfLabels(labels) : null;
   const systemPrompt = [
-    buildSystemPrompt(seat, family, rules.body, request.config.systemPrompt, origin, rules.skills),
+    buildSystemPrompt(
+      seat,
+      family,
+      rules.body,
+      request.config.systemPrompt,
+      origin,
+      rules.skills,
+      seatSkillsDirectory,
+    ),
     roster,
   ]
     .filter(Boolean)

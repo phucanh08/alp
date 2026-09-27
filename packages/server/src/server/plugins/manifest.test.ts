@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { readPluginManifest } from "./manifest.js";
+import { pluginSkillsInstallable, readPluginManifest, resolvePluginSkillsDir } from "./manifest.js";
 
 const directories: string[] = [];
 const examplesDirectory = fileURLToPath(
@@ -90,6 +90,41 @@ describe("plugin manifest", () => {
       await writeFile(manifest, JSON.stringify({ id: "skilled", skills }));
       await expect(readPluginManifest(directory)).rejects.toThrow();
     }
+  });
+
+  it("accepts an object skills form only to say install: false", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-manifest-"));
+    directories.push(directory);
+    const manifest = path.join(directory, "paseo-plugin.json");
+
+    const skills = { dir: "share/skills", install: false };
+    await writeFile(manifest, JSON.stringify({ id: "skilled", skills }));
+    await expect(readPluginManifest(directory)).resolves.toEqual({ id: "skilled", skills });
+
+    for (const badSkills of [
+      { dir: "skills" },
+      { dir: "skills", install: true },
+      { install: false },
+      { dir: "../skills", install: false },
+      { dir: "skills", install: false, extra: true },
+      { dir: 7, install: false },
+    ]) {
+      await writeFile(manifest, JSON.stringify({ id: "skilled", skills: badSkills }));
+      await expect(readPluginManifest(directory)).rejects.toThrow();
+    }
+  });
+
+  it("resolves the skills dir and installability for both the string and object forms", () => {
+    const stringForm = { id: "skilled", skills: "skills" } as const;
+    expect(resolvePluginSkillsDir("/plugin", stringForm)).toBe(path.resolve("/plugin", "skills"));
+    expect(pluginSkillsInstallable(stringForm)).toBe(true);
+
+    const objectForm = { id: "skilled", skills: { dir: "skills", install: false as const } };
+    expect(resolvePluginSkillsDir("/plugin", objectForm)).toBe(path.resolve("/plugin", "skills"));
+    expect(pluginSkillsInstallable(objectForm)).toBe(false);
+
+    const noSkills = { id: "bare" };
+    expect(resolvePluginSkillsDir("/plugin", noSkills)).toBeNull();
   });
 
   it("accepts only non-empty argv arrays for build commands", async () => {

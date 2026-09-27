@@ -39,3 +39,34 @@ test("a Lead or Supervisor block never gets the independent-Peer paragraph, orig
     expect(runtimeBlock("supervisor", family)).not.toContain("không có Lead nào giao brief");
   }
 });
+
+test("Nạp skill names slp-<ghế>:<tên> for both families and never ~/.codex/skills", () => {
+  for (const family of FAMILIES) {
+    const block = runtimeBlock("peer", family);
+    expect(block).toContain("slp-<ghế>:<tên>");
+    expect(block).not.toContain("~/.codex/skills");
+  }
+});
+
+test("Skill của ghế này lists the seat's skills qualified slp-<seat>:<name>, the form each family loads", () => {
+  expect(runtimeBlock("peer", "claude", null, ["xia", "smart-commits"])).toContain(
+    "`slp-peer:xia`, `slp-peer:smart-commits`",
+  );
+  expect(runtimeBlock("lead", "codex", null, ["xia"])).toContain("`slp-lead:xia`");
+});
+
+test("a Codex seat with a real skill directory gets its literal skills root named in the block", () => {
+  const block = runtimeBlock("peer", "codex", null, [], true, "/home/.alp/slp/seat-skills/peer");
+  expect(block).toContain("seat dir của bạn: `/home/.alp/slp/seat-skills/peer/skills`");
+});
+
+test("a seat with no skill directory gets no seat-dir path line, on either family", () => {
+  for (const family of FAMILIES) {
+    expect(runtimeBlock("peer", family)).not.toMatch(/seat dir của bạn: `/);
+  }
+});
+
+test("a Claude seat with a real skill directory still gets no literal path — it loads by name", () => {
+  const block = runtimeBlock("peer", "claude", null, [], true, "/home/.alp/slp/seat-skills/peer");
+  expect(block).not.toMatch(/seat dir của bạn: `/);
+});

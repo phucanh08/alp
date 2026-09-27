@@ -8,14 +8,16 @@ no client entry — server only.
 
 ## What it contains
 
-| Path                  | Holds                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agents/<seat>.md`    | One seat's rule text, verbatim, for `lead`, `peer`, `supervisor`. The `name`/`description` frontmatter is stripped before the text reaches a system prompt.                                                                                                                                                                                                                                                                 |
-| `seats.json`          | Maps each seat to the list of skill names it uses.                                                                                                                                                                                                                                                                                                                                                                          |
-| `skills/<name>/`      | The skill directories themselves, one per name `seats.json` lists (currently `ask-alp`, `bug-loop`, `goal-griller`, `prompt-leverage`, `sequence-execution-plan`, `smart-commits`, `xia`). The manifest's `skills: "skills"` field tells the daemon to install these the way it installs the core skill bundle, only while this plugin is enabled — see [docs/plugins.md](../../docs/plugins.md#ship-skills-with-a-plugin). |
-| `server/seats.gen.ts` | Generated: `agents/*.md` and `seats.json` embedded as one module, checked in.                                                                                                                                                                                                                                                                                                                                               |
-| `shared/rpc.ts`       | The `slp-dev.seat.get` contract.                                                                                                                                                                                                                                                                                                                                                                                            |
-| `index.server.ts`     | Registers the one RPC handler, answering from `seats.gen.ts`.                                                                                                                                                                                                                                                                                                                                                               |
+| Path                   | Holds                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agents/<seat>.md`     | One seat's rule text, verbatim, for `lead`, `peer`, `supervisor`. The `name`/`description` frontmatter is stripped before the text reaches a system prompt.                                                                                                                                                                                                                                                                                              |
+| `seats.json`           | Maps each seat to the list of skill names it uses.                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `skills/<name>/`       | The skill directories themselves, one per name `seats.json` lists (currently `bug-loop`, `goal-griller`, `prompt-leverage`, `sequence-execution-plan`, `smart-commits`, `xia`). The daemon installs none of them (manifest `skills: { "dir": "skills", "install": false }`); they reach each Lead and Peer through its seat directory, which `plugins/slp` writes from `slp-dev.skills.get` — see [plugins/slp/README.md](../slp/README.md#seat-skills). |
+| `references/seats.md`  | Plain reference, not a skill: the seat → authority-vocabulary table and the Phase 8 review-trigger list, pointed at by the skills above and by both agent definitions.                                                                                                                                                                                                                                                                                   |
+| `server/seats.gen.ts`  | Generated: `agents/*.md` and `seats.json` embedded as one module, checked in.                                                                                                                                                                                                                                                                                                                                                                            |
+| `server/skills.gen.ts` | Generated: every file under `skills/`, embedded as text with its execute bit, checked in.                                                                                                                                                                                                                                                                                                                                                                |
+| `shared/rpc.ts`        | The `slp-dev.seat.get` and `slp-dev.skills.get` contracts.                                                                                                                                                                                                                                                                                                                                                                                               |
+| `index.server.ts`      | Registers both RPC handlers, answering from the two generated modules.                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ## The `seat.get` RPC
 
@@ -29,19 +31,28 @@ own, so slp has no import path to slp-dev's module
 `.slp/agents/<seat>.md` override precedence over the text (never over the skill list), and the
 degraded prompt when slp-dev is unavailable.
 
-## Generating `seats.gen.ts`
+## The `skills.get` RPC
+
+`slp-dev.skills.get({ seat })` takes the same seat and answers `{ files: { path, content,
+executable }[] }`: every file of every skill `seats.json` lists for the seat, `path` relative to
+`skills/` (`<skill>/<file>`), `content` verbatim, `executable` the owner execute bit. The
+Supervisor gets `[]`. `plugins/slp` writes these into the seat's directory
+(`plugins/slp/server/seat-skills.ts` `SLP_DEV_SKILLS_GET`).
+
+## Generating `seats.gen.ts` and `skills.gen.ts`
 
 The plugin compiler bundles `server/` into one evaluated string: at runtime the plugin has no path
 to its own directory, and esbuild has no loader for `.md`. `seats-source.ts` reads `agents/*.md`
-and `seats.json` and renders the embedded module; `server/scripts/generate-seats.ts` writes it.
-After editing a seat file or `seats.json`, run:
+and `seats.json`, and every file under `skills/`, and renders the two embedded modules;
+`server/scripts/generate-seats.ts` writes them. Skill files must be UTF-8 text: the generator fails
+on anything that would not round-trip. After editing a seat file, `seats.json`, or a skill, run:
 
 ```bash
 cd plugins/slp-dev && npm run generate
 ```
 
-`server/seats.test.ts` fails when the generated module is stale, and separately fails when a skill
-`seats.json` names for a seat is missing from `skills/`.
+`server/seats.test.ts` fails when either generated module is stale, and separately fails when a
+skill `seats.json` names for a seat is missing from `skills/`.
 
 ## Checks
 
@@ -85,8 +96,8 @@ To build one:
    `paseo-plugin.json` `id` field. Keep that field `slp-dev` anyway: a plain
    `paseo plugin install /path/to/my-pack`, with no `--id`, then lands under the config key
    `slp-dev` on its own and replaces the bundled copy without an extra flag.
-2. Keep `shared/rpc.ts`'s RPC name (`slp-dev.seat.get`) and its input/output shapes unchanged —
-   that string is what `plugins/slp` asks for, independent of any plugin id. Change `description`
+2. Keep `shared/rpc.ts`'s RPC names (`slp-dev.seat.get`, `slp-dev.skills.get`) and their
+   input/output shapes unchanged — those strings are what `plugins/slp` asks for, independent of any plugin id. Change `description`
    and `requirements.paseo` in `paseo-plugin.json` freely, but add no other key: the manifest
    schema is strict (`id`, `description`, `requirements`, `build`, `skills` only —
    `packages/server/src/server/plugins/manifest.ts:29-36`), so an unrecognized key such as
@@ -98,8 +109,8 @@ To build one:
 4. Replace `seats.json`'s skill lists and `skills/<name>/` with your own skills. Every name
    `seats.json` lists for a seat must exist in `skills/`, checked by `server/seats.test.ts`; a seat
    with no skills gets an empty array, the way `supervisor` does here.
-5. Run `npm run generate` and commit `server/seats.gen.ts` — the daemon evaluates the bundled
-   string, not the source files, at runtime.
+5. Run `npm run generate` and commit `server/seats.gen.ts` and `server/skills.gen.ts` — the
+   daemon evaluates the bundled string, not the source files, at runtime.
 6. Point a host's config at your copy as shown above, or install it with `--id`:
    ```bash
    paseo plugin install /absolute/path/to/my-pack --id slp-dev

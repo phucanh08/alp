@@ -1,5 +1,9 @@
 import { listKnownPlugins, type PluginEnablementConfig } from "../../plugins/enablement.js";
-import { readPluginManifest, resolvePluginSkillsDir } from "../../plugins/manifest.js";
+import {
+  pluginSkillsInstallable,
+  readPluginManifest,
+  resolvePluginSkillsDir,
+} from "../../plugins/manifest.js";
 import type { PluginSkillSource } from "./operations.js";
 import type { SkillsLogger } from "./renamed-skills.js";
 
@@ -8,6 +12,8 @@ import type { SkillsLogger } from "./renamed-skills.js";
  * startup maintenance does not depend on running before or after the plugins.
  * A disabled plugin still contributes a source: its names stay managed, which is
  * what lets settings offer to delete copies it installed while it was enabled.
+ * A manifest with `skills: { install: false }` reuses the same "managed, not
+ * enabled" shape: its names never become available even while the plugin runs.
  */
 export async function resolvePluginSkillSources(
   config: PluginEnablementConfig,
@@ -28,8 +34,15 @@ export async function resolvePluginSkillSources(
         );
         return null;
       });
-      const dir = manifest && resolvePluginSkillsDir(directory, manifest);
-      if (dir) sources.push({ pluginId: plugin.id, dir, enabled });
+      if (manifest === null) continue;
+      const dir = resolvePluginSkillsDir(directory, manifest);
+      if (dir) {
+        sources.push({
+          pluginId: plugin.id,
+          dir,
+          enabled: enabled && pluginSkillsInstallable(manifest),
+        });
+      }
     }
   }
   return sources;

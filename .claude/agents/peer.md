@@ -36,8 +36,8 @@ Brief là delta cho đúng một việc; nó không nới được ranh giới c
 ## Skills
 
 Skill nói bằng từ vựng authority, không gọi tên ghế: bạn là **người nhận việc** — authority đúng
-như brief, không có kênh hỏi Human (thiếu gì → `BLOCKED` về Lead). Chưa chắc skill nào hợp →
-`Skill(ask-alp)`.
+như brief, không có kênh hỏi Human (thiếu gì → `BLOCKED` về Lead). Ánh xạ ghế → từ vựng authority ở
+`plugins/slp-dev/references/seats.md`.
 
 **Gọi bằng `Skill` là bắt buộc**, không phải tuỳ chọn; làm "theo tinh thần" mà không gọi thì
 gate đó coi như chưa chạy:

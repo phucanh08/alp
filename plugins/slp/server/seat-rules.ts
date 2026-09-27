@@ -28,21 +28,24 @@ export interface SeatRules {
   skills: string[];
 }
 
-async function askSlpDev(
+/** Calls one slp-dev RPC for a seat and validates the answer; rejects past `timeoutMs`. */
+export async function invokeSlpDev<Output extends z.ZodType>(
   plugins: PluginInvoker,
+  method: string,
   seat: Seat,
+  output: Output,
   timeoutMs: number,
-): Promise<z.infer<typeof SeatGetOutput>> {
+): Promise<z.infer<Output>> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs);
   });
   try {
-    const output = await Promise.race([
-      plugins.invoke(SLP_DEV_PLUGIN_ID, SLP_DEV_SEAT_GET, { seat }),
+    const answer = await Promise.race([
+      plugins.invoke(SLP_DEV_PLUGIN_ID, method, { seat }),
       timeout,
     ]);
-    const parsed = SeatGetOutput.safeParse(output);
+    const parsed = output.safeParse(answer);
     if (!parsed.success) throw new Error(`invalid answer: ${parsed.error.message}`);
     return parsed.data;
   } finally {
@@ -74,7 +77,7 @@ export async function readSeatRules(
   timeoutMs = SEAT_RULES_TIMEOUT_MS,
 ): Promise<SeatRules> {
   const [answer, override] = await Promise.all([
-    askSlpDev(plugins, seat, timeoutMs).then(
+    invokeSlpDev(plugins, SLP_DEV_SEAT_GET, seat, SeatGetOutput, timeoutMs).then(
       (value) => ({ ok: true as const, value }),
       (error: unknown) => ({ ok: false as const, error }),
     ),

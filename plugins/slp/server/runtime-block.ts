@@ -1,3 +1,4 @@
+import path from "node:path";
 import { type Family, PEER_DISABLED_PASEO_TOOLS, type Seat, type SeatOrigin } from "./seat";
 
 /**
@@ -7,6 +8,24 @@ import { type Family, PEER_DISABLED_PASEO_TOOLS, type Seat, type SeatOrigin } fr
  */
 function peerToolCutList(): string {
   return PEER_DISABLED_PASEO_TOOLS.map((tool) => `\`${tool}\``).join(", ");
+}
+
+/**
+ * Marker inside `COMMON`'s Nạp-skill sentence, swapped in `runtimeBlock` for the seat-dir note
+ * (`codexSeatDirNote`). A token with no spaces, not the note text itself, so the swap survives
+ * `COMMON`'s own line-wrapping regardless of where the note happens to wrap.
+ */
+const CODEX_SEAT_DIR_MARKER = "__CODEX_SEAT_DIR__";
+
+/**
+ * Codex has no `Skill` tool and must open the seat's skill file itself, so it needs the real seat
+ * dir named; Claude never does, since its skills load by name (`skillsLine`). `seatSkillsDirectory`
+ * is null for the Supervisor and whenever slp has no `PASEO_HOME` (`seat-skills.ts`).
+ */
+function codexSeatDirNote(family: Family, seatSkillsDirectory: string | null): string {
+  const base = "seat dir là thư mục slp cấp cho agent";
+  if (family !== "codex" || !seatSkillsDirectory) return base;
+  return `${base}; seat dir của bạn: \`${path.join(seatSkillsDirectory, "skills")}\``;
 }
 
 /**
@@ -74,11 +93,11 @@ Phiên này là một agent alp (daemon Paseo). ${DEFINITION_ABOVE} Fact runtime
   tin cuối của lượt, cắt ở 4000 ký tự (bản đủ: \`get_agent_activity\`). Notification nằm trong bộ nhớ
   daemon: daemon restart giữa chừng thì nó không tới. Im lặng lâu bất thường → \`get_agent_status\`.
 - **Nạp skill**: cách nạp khác nhau theo family agent, không theo ghế. Claude gọi tool \`Skill\` với
-  tên skill làm tham số. Codex không có tool \`Skill\`; skill nằm ở file
-  \`~/.codex/skills/<tên>/SKILL.md\` — đọc đúng file đó rồi làm theo nó là đã nạp skill, ghi đường
-  dẫn file đã đọc lại làm bằng chứng. Đánh giá một
-  agent khác (Supervisor đọc transcript Lead/Peer) áp fact theo family của agent đó, không theo family
-  của bạn.
+  tham số \`slp-<ghế>:<tên>\` (\`<tên>\` trần cũng khớp nếu không trùng skill khác trong phiên). Codex
+  không có tool \`Skill\`; skill nằm ở file \`<seat dir>/skills/<tên>/SKILL.md\` (${CODEX_SEAT_DIR_MARKER}),
+  Codex tự liệt kê nó ở mục Skills dạng \`slp-<ghế>:<tên>\` — đọc đúng file rồi làm theo nó là đã nạp
+  skill, ghi đường dẫn đã đọc lại làm bằng chứng. Đánh giá một agent khác (Supervisor đọc transcript
+  Lead/Peer) áp fact theo family của agent đó, không theo family của bạn.
 - Notification hệ thống viết tiếng Anh; vẫn nói với Human bằng ngôn ngữ Human đang dùng.`;
 
 /**
@@ -191,10 +210,14 @@ const SUPERVISOR = `${COMMON}
   \`~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl\`. Có timestamp. Đọc file ngoài cwd bằng Bash
   (\`cat\`/\`sed -n\`/\`python3\`).`;
 
-/** The seat's own skills, as slp-dev lists them; none (Supervisor, or slp-dev silent) → no line. */
-function skillsLine(skills: readonly string[]): string {
+/**
+ * The seat's own skills, qualified \`slp-<seat>:<name>\` — the form both families actually list them
+ * under (Claude's \`Skill\` tool and its own listing, Codex's own Skills section). None (Supervisor,
+ * or slp-dev silent) → no line.
+ */
+function skillsLine(seat: Seat, skills: readonly string[]): string {
   if (skills.length === 0) return "";
-  const names = skills.map((skill) => `\`${skill}\``).join(", ");
+  const names = skills.map((skill) => `\`slp-${seat}:${skill}\``).join(", ");
   return `\n- **Skill của ghế này** (plugin \`slp-dev\`): ${names}. Nạp theo dòng "Nạp skill" ở trên.`;
 }
 
@@ -213,6 +236,8 @@ function seatBlock(seat: Seat, family: Family, origin?: SeatOrigin | null): stri
  * SLP-RUNTIME block for a seat; the Lead's Peer spawn rule follows the Lead's own family. `origin`
  * only applies to `peer` — see `INDEPENDENT_PEER`. `skills` closes the block with the seat's skills.
  * `hasDefinition` false (no seat text in the prompt) swaps every pointer to it (`withoutDefinition`).
+ * `seatSkillsDirectory` is the seat's real skill directory (`seat-skills.ts`), when it has one — see
+ * `codexSeatDirNote`.
  */
 export function runtimeBlock(
   seat: Seat,
@@ -220,10 +245,12 @@ export function runtimeBlock(
   origin?: SeatOrigin | null,
   skills: readonly string[] = [],
   hasDefinition = true,
+  seatSkillsDirectory: string | null = null,
 ): string {
   let body = seatBlock(seat, family, origin);
   if (!hasDefinition)
     for (const [pointer, replacement] of withoutDefinition(seat))
       body = body.replace(pointer, replacement);
-  return `${body}${skillsLine(skills)}`;
+  body = body.replace(CODEX_SEAT_DIR_MARKER, codexSeatDirNote(family, seatSkillsDirectory));
+  return `${body}${skillsLine(seat, skills)}`;
 }

@@ -16,7 +16,11 @@ interface PluginEntry {
 interface Harness {
   root: string;
   targets: SkillTargets;
-  plugin(id: string, skills: string[], options?: { skillsDir?: string }): Promise<string>;
+  plugin(
+    id: string,
+    skills: string[],
+    options?: { skillsDir?: string; install?: false },
+  ): Promise<string>;
   skills(options: {
     pluginsEnabled?: boolean;
     plugins?: Record<string, PluginEntry>;
@@ -71,7 +75,10 @@ async function makeHarness(coreSkills: string[] = ["alp"]): Promise<Harness> {
       await mkdir(directory, { recursive: true });
       await writeFile(
         path.join(directory, "paseo-plugin.json"),
-        JSON.stringify({ id, skills: skillsDir }),
+        JSON.stringify({
+          id,
+          skills: options.install === false ? { dir: skillsDir, install: false } : skillsDir,
+        }),
       );
       for (const name of skills) {
         await writeSkill(path.join(directory, skillsDir), name, `${id} ${name}`);
@@ -231,6 +238,58 @@ describe("plugin skills: a disabled plugin's skills stay managed", () => {
       "fork pack-plan",
     ]);
     expect(status.ops).toEqual([{ kind: "delete", name: "pack-review" }]);
+  });
+});
+
+describe("plugin skills: install: false ships names but never installs them", () => {
+  it("keeps the names managed and out of the catalog while the plugin runs enabled", async () => {
+    const harness = await makeHarness();
+    const directory = await harness.plugin("slp-dev", ["orient"], { install: false });
+
+    const status = await harness
+      .skills({ plugins: { "slp-dev": { path: directory } } })
+      .autoUpdate();
+
+    // Not selectable, and autoUpdate never installs it even though the plugin is enabled.
+    expect(status.available).toEqual(["alp"]);
+    expect(status.installed).toEqual(["alp"]);
+    expect(await installedCopies(harness.targets, "orient")).toEqual([null, null, null]);
+  });
+
+  it("offers to delete a leftover copy, exactly like a disabled plugin's, and never reinstalls it", async () => {
+    const harness = await makeHarness();
+    // Install with install:false absent first, to leave a real copy on disk...
+    const directory = await harness.plugin("slp-dev", ["orient"]);
+    await harness.skills({ plugins: { "slp-dev": { path: directory } } }).autoUpdate();
+    expect(await installedCopies(harness.targets, "orient")).toEqual([
+      "slp-dev orient",
+      "slp-dev orient",
+      "slp-dev orient",
+    ]);
+
+    // ...then the manifest switches to install:false, as if the plugin author
+    // turned it off, without anyone touching the copy already installed.
+    await writeFile(
+      path.join(directory, "paseo-plugin.json"),
+      JSON.stringify({ id: "slp-dev", skills: { dir: "skills", install: false } }),
+    );
+    const turnedOff = harness.skills({ plugins: { "slp-dev": { path: directory } } });
+    const afterRestart = await turnedOff.autoUpdate();
+
+    // Automatic maintenance never deletes: the copy stays until confirmed.
+    expect(afterRestart.available).toEqual(["alp"]);
+    expect(afterRestart.installed).toEqual(["alp", "orient"]);
+    expect(afterRestart.ops).toEqual([{ kind: "delete", name: "orient" }]);
+    expect(await installedCopies(harness.targets, "orient")).toEqual([
+      "slp-dev orient",
+      "slp-dev orient",
+      "slp-dev orient",
+    ]);
+
+    const confirmed = await turnedOff.saveSelection({ mode: "all" }, ["orient"]);
+    expect(confirmed.confirmationRequired).toBeNull();
+    expect(confirmed.installed).toEqual(["alp"]);
+    expect(await installedCopies(harness.targets, "orient")).toEqual([null, null, null]);
   });
 });
 
