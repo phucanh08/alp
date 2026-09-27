@@ -59,8 +59,9 @@ export interface SkillCatalog {
 }
 
 // Names the bundle used to ship. They are never selectable, but every scan still
-// covers them so an older install's copies get cleaned up. Names renamed to alp*
-// are not here: only `removeRenamedSkillDirs` may remove those.
+// covers them so an older install's copies get cleaned up. Names renamed to alp*,
+// and names retired with nothing replacing them, are not here: only
+// `removeRenamedSkillDirs` may remove those.
 export const LEGACY_SKILL_NAMES: readonly string[] = [
   "paseo-chat",
   "paseo-epic",
@@ -339,8 +340,8 @@ export async function autoUpdateInstalledSkills(
   selection: SkillSelection,
   options: SkillsMaintenanceOptions,
 ): Promise<SkillsStatus> {
-  // Old directories are invisible to status, so this runs even when the renamed
-  // skills are already up to date.
+  // Old and retired directories are invisible to status, so this runs even when
+  // the managed skills are already up to date.
   await removeRenamedSkillDirs(
     targets,
     (await readSkillCatalog(targets, options.logger)).shipped,
@@ -354,8 +355,9 @@ export async function autoUpdateInstalledSkills(
   if (status.state !== "drift" && status.state !== "not-installed") return status;
   // Automatic maintenance may repair selected skills, but removal is an
   // interactive operation because managed directories can contain user files.
-  // Renamed skills are the exception: their copies are removed above only
-  // when every file in them is still the one the old bundle installed.
+  // Renamed and retired skills are the exception: their copies are removed
+  // above only when every file in them is still the one the old bundle
+  // installed.
   return applySkills(targets, selection, nonDestructivePlan(status), options.logger);
 }
 
