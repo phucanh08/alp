@@ -19,6 +19,11 @@ const STORED_VALUES: unknown[] = [
   { enabled: "false" },
   { enabled: 0 },
   { supervisorModel: 42 },
+  { supervisorCheckMinutes: 30 },
+  { supervisorCheckMinutes: 0 },
+  { supervisorCheckMinutes: -1 },
+  { supervisorCheckMinutes: 1.5 },
+  { supervisorCheckMinutes: "10" },
   null,
   "enabled",
   { enabled: false, extra: "kept out by the schema" },
@@ -46,7 +51,11 @@ describe("app mirror of the slp settings contract", () => {
   });
 
   it("has the plugin's defaults", () => {
-    expect(slpSettings.schema.parse({})).toEqual({ enabled: true, supervisorModel: null });
+    expect(slpSettings.schema.parse({})).toEqual({
+      enabled: true,
+      supervisorModel: null,
+      supervisorCheckMinutes: 10,
+    });
     expect(slpSettings.schema.parse({})).toEqual(pluginSettings.schema.parse({}));
   });
 
