@@ -2369,6 +2369,10 @@ export const fr: TranslationResources = {
           hint: "S’applique uniquement à un Supervisor nouvellement créé.",
           default: "Par défaut",
         },
+        supervisorCheckMinutes: {
+          label: "Délai de vérification du Supervisor (minutes)",
+          hint: "Durée d’attente du Supervisor avant de vérifier un Lead inactif. 0 désactive cette fonction.",
+        },
       },
       appearance: {
         title: "Apparence",

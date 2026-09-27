@@ -2310,6 +2310,10 @@ export const ar: TranslationResources = {
           hint: "ينطبق فقط على Supervisor يُنشأ حديثًا.",
           default: "الافتراضي",
         },
+        supervisorCheckMinutes: {
+          label: "تأخير فحص Supervisor (بالدقائق)",
+          hint: "المدة التي ينتظرها Supervisor قبل التحقق من Lead صامت. القيمة 0 تُعطّل هذا.",
+        },
       },
       appearance: {
         title: "المظهر",

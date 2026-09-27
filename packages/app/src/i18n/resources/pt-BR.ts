@@ -2347,6 +2347,10 @@ export const ptBR: TranslationResources = {
           hint: "Aplica-se apenas a um Supervisor recém-criado.",
           default: "Padrão",
         },
+        supervisorCheckMinutes: {
+          label: "Atraso de verificação do Supervisor (minutos)",
+          hint: "Quanto tempo o Supervisor espera antes de verificar um Lead inativo. 0 desativa.",
+        },
       },
       appearance: {
         title: "Aparência",

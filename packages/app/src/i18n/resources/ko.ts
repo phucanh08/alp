@@ -2321,6 +2321,10 @@ export const ko: TranslationResources = {
           hint: "새로 만든 Supervisor에만 적용됩니다.",
           default: "기본값",
         },
+        supervisorCheckMinutes: {
+          label: "Supervisor 확인 지연(분)",
+          hint: "Supervisor가 조용한 Lead를 확인하기 전에 대기하는 시간입니다. 0이면 사용하지 않습니다.",
+        },
       },
       appearance: {
         title: "모양",
