@@ -531,6 +531,58 @@ patch every build the consumers use: Metro resolves the `react-native` field of 
 (`src/*.ts` for `react-native-svg`), while Node and Vitest resolve `main`/`module`
 (`lib/commonjs`, `lib/module`). Patching only `lib/` leaves the app bundle unfixed.
 
+## Sync with upstream
+
+<!-- alp-rename-keep-start -->
+
+alp renamed every upstream `paseo` name to `alp` once (`@getpaseo/*` → `@alp/*`, `PASEO_*` → `ALP_*`,
+`paseo-home.ts` → `alp-home.ts`, …). The rename is one deterministic function,
+`scripts/rename-map.mjs`; the exceptions it keeps are listed in `CLAUDE.md` § Contract boundaries.
+
+Merge upstream only with the sync script:
+
+```bash
+npm run sync:upstream -- --dry-run   # fetch upstream, list the files that would conflict
+npm run sync:upstream                # merge upstream/main into the current branch
+npm run sync:upstream -- --ref upstream/some-branch --no-fetch
+```
+
+Do not run `git merge upstream/main`. A plain merge sees every rename as an alp-side edit, so every
+upstream change near a renamed name conflicts, and every file upstream adds arrives with its
+`paseo` names. The script renames the merge base and the upstream tree with the same function,
+merges them with `git merge-tree --merge-base`, and records a merge commit whose parents are your
+`HEAD` and the upstream commit. On the alp 1.0.0 tree this gives the same 13 conflicted files as
+merging before the rename; a plain merge after the rename gives 43.
+
+The script needs a clean working tree and never pushes or rewrites a commit.
+
+- **No conflicts:** it creates the merge commit and fast-forwards your branch to it.
+- **Conflicts:** it stops mid-merge, like `git merge` does: conflict markers in the files,
+  unmerged index entries, and `MERGE_HEAD` set to the upstream commit. The side labelled with a
+  tree id is renamed upstream. Resolve, `git add`, and `git commit`; the commit gets the same two
+  parents. `git merge --abort` backs out.
+- **Lockfile:** the script renames `package-lock.json` as text so it merges. Run
+  `npm install --package-lock-only` afterwards and commit the lockfile if it changed.
+
+If the dry run warns that `HEAD` still holds names the rename would change, those files carry
+`paseo` names outside the exceptions and merge as alp-side edits. Rename them, or mark them as
+intentional.
+
+### Keeping an old name on purpose
+
+Code that migrates user state from the old names has to keep the old literals. Mark them so the
+rename, and every later sync, leaves them alone:
+
+- `alp-rename-keep` anywhere on a line keeps that line.
+- `alp-rename-keep-start` … `alp-rename-keep-end` keeps the lines between them, markers included.
+- `alp-rename-keep-file` in the first five lines keeps the whole file.
+
+`node scripts/apply-rename.mjs --dry-run` (or `npm run rename:dry-run`) reports what the rename
+would still change in the current checkout and every kept hit with the rule that kept it; after the
+rename it reports zero rewrites. `--report <file>` sets where the JSON report goes.
+
+<!-- alp-rename-keep-end -->
+
 ## ACP provider catalog versions
 
 The in-app ACP provider catalog pins package-runner entries (`npx`, `npm exec`,
