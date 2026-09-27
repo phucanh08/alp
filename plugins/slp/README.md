@@ -97,17 +97,46 @@ message as ordinary chat, without waiting for a brief or a Lead — and only ste
 Peer contract (wait for the 13-field brief, answer in the six-box handoff) once a Lead's brief
 actually arrives over `send_agent_prompt`.
 
+### Seat skills
+
+A seat's skills reach it through its seat directory, never through a global install: nothing is
+written to `~/.claude/skills`, `~/.codex/skills`, or `~/.agents/skills`. For each seat slp-dev
+lists skills for (Lead and Peer today), slp keeps `$PASEO_HOME/slp/seat-skills/<seat>/` as a Claude
+local plugin named `slp-<seat>`: `.claude-plugin/plugin.json` plus `skills/<skill>/`, byte for byte
+what slp-dev ships. slp-dev hands the files over through `slp-dev.skills.get`, since slp has no
+path to slp-dev's directory (`server/seat-skills.ts`).
+
+| Seat       | Claude (`providerOptions`)                                  | Codex (`providerOptions`)                           |
+| ---------- | ----------------------------------------------------------- | --------------------------------------------------- |
+| Lead, Peer | `plugins: [{ type: "local", path: <seat dir> }]` (appended) | `skills.extraRoots: [<seat dir>/skills]` (appended) |
+| Supervisor | no plugin; `Skill` joins its `disallowedTools`              | nothing                                             |
+
+No Claude `skills` allow-list is set, so the Human's own skills stay visible next to the seat's; a
+Claude seat sees them as `slp-<seat>:<skill>`, and a bare skill name also resolves.
+
+The directory is rebuilt only when slp-dev's content for the seat changes (`.content-hash` in the
+seat directory). The new directory is built next to the old one and swapped in, so a skill dropped
+from a seat disappears with the old directory. slp-dev is asked right before each Lead or Peer is
+created, and for every seat on the first Claude/Codex session open after the plugin starts — the
+plugin cannot ask at start, because `contribute` gets no Paseo API. That pass also removes anything
+else in `seat-skills/`. Resume needs nothing more: the daemon re-sends the stored `providerOptions`,
+and the path in them does not change.
+
+`PASEO_HOME` comes from the daemon's environment; every daemon launch path sets it. Without it, or
+when slp-dev does not answer within `SEAT_RULES_TIMEOUT_MS`, the seat is created without skills and
+a warning says so; slp never guesses a home directory for skills.
+
 ## Seat tools
 
 `before("agent.create")` cuts tools per seat. Paseo tools go out through the hook's `paseoTools`,
 which the daemon merges with the provider policy (cuts only add up) and freezes into the agent
 record; the provider's own tools go out through `providerOptions`.
 
-| Seat       | Paseo tools (`paseoTools.disabledTools`)                                                                               | Claude (`providerOptions`)                                                                          | Codex (`providerOptions`)                                      |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Lead       | none                                                                                                                   | `allowedTools: mcp__paseo__*`                                                                       | unchanged                                                      |
-| Peer       | `PEER_DISABLED_PASEO_TOOLS`: spawn, steer, stop, archive, schedule, reconfigure another agent, resolve its permissions | `disallowedTools: Agent, Task`                                                                      | `features.multi_agent: false`, `sandbox_mode: workspace-write` |
-| Supervisor | `SUPERVISOR_DISABLED_PASEO_TOOLS`: every mutating tool except `send_agent_prompt`                                      | `allowedTools: mcp__paseo__*`, `disallowedTools: Write, Edit, MultiEdit, NotebookEdit, Agent, Task` | `sandbox_mode: workspace-write`                                |
+| Seat       | Paseo tools (`paseoTools.disabledTools`)                                                                               | Claude (`providerOptions`)                                                                                 | Codex (`providerOptions`)                                      |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Lead       | none                                                                                                                   | `allowedTools: mcp__paseo__*`                                                                              | unchanged                                                      |
+| Peer       | `PEER_DISABLED_PASEO_TOOLS`: spawn, steer, stop, archive, schedule, reconfigure another agent, resolve its permissions | `disallowedTools: Agent, Task`                                                                             | `features.multi_agent: false`, `sandbox_mode: workspace-write` |
+| Supervisor | `SUPERVISOR_DISABLED_PASEO_TOOLS`: every mutating tool except `send_agent_prompt`                                      | `allowedTools: mcp__paseo__*`, `disallowedTools: Write, Edit, MultiEdit, NotebookEdit, Agent, Task, Skill` | `sandbox_mode: workspace-write`                                |
 
 The lists live in `server/seat.ts`. A cut is only as strong as the label: a Lead that spawns a Peer
 without `slp.role=peer` gets an agent with no seat and no cuts. It is also only as strong as the

@@ -5,6 +5,9 @@ import type {
   PluginServerContext,
 } from "@getpaseo/plugin/server";
 import type { PluginRpcContract } from "@getpaseo/plugin";
+import { mkdtemp, readdir, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import contribute from "./index.server";
 import { SEAT_LABEL } from "./server/seat";
@@ -55,8 +58,11 @@ function fakeContext(
     supervisorCheckMinutes?: number;
     agents?: FakeAgentRecord[];
     workspaces?: FakeWorkspace[];
+    /** The daemon's `PASEO_HOME` as the plugin process sees it; unset unless given. */
+    paseoHome?: string;
   } = { enabled: true },
 ) {
+  vi.stubEnv("PASEO_HOME", initial.paseoHome);
   let enabled = initial.enabled;
   let supervisorCheckMinutes = initial.supervisorCheckMinutes ?? 10;
   const agents: FakeAgentRecord[] = [...(initial.agents ?? [])];
@@ -134,6 +140,15 @@ function fakeContext(
     plugins: {
       async invoke(pluginId: string, method: string, input: unknown) {
         invoked.push({ pluginId, method, input });
+        if (method === "slp-dev.skills.get") {
+          const seat = (input as { seat: string }).seat;
+          return {
+            files:
+              seat === "supervisor"
+                ? []
+                : [{ path: "xia/SKILL.md", content: `XIA FOR ${seat}\n`, executable: false }],
+          };
+        }
         return { definition: "---\nname: lead\n---\nSLP-DEV LEAD\n", skills: ["xia"] };
       },
     },
@@ -376,6 +391,7 @@ test(
 const MINUTE = 60_000;
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.useRealTimers();
 });
 
@@ -463,4 +479,117 @@ test("the cleanup contribute returns stops the Supervisor check", async () => {
   cleanup?.();
   await vi.advanceTimersByTimeAsync(30 * MINUTE);
   expect(fx.sent).toEqual([]);
+});
+
+async function temporaryPaseoHome(): Promise<string> {
+  return mkdtemp(path.join(tmpdir(), "slp-index-home-"));
+}
+
+interface CreateResult {
+  config: { providerOptions?: Record<string, unknown> };
+}
+
+test("agent.create gives a Claude Lead its seat directory under PASEO_HOME as a local plugin", async () => {
+  const paseoHome = await temporaryPaseoHome();
+  const fx = fakeContext({ enabled: true, paseoHome });
+  contribute(fx.server);
+
+  const result = (await fx.beforeHandlers.get("agent.create")!(
+    {
+      request: {
+        config: { provider: "claude", cwd: "/nonexistent-slp-cwd" },
+        labels: { [SEAT_LABEL]: "lead" },
+      } as never,
+    },
+    fx.hookContext,
+  )) as CreateResult;
+
+  const directory = path.join(paseoHome, "slp", "seat-skills", "lead");
+  expect(result.config.providerOptions).toEqual({
+    allowedTools: ["mcp__paseo__*"],
+    plugins: [{ type: "local", path: directory }],
+  });
+  expect(fx.invoked).toContainEqual({
+    pluginId: "slp-dev",
+    method: "slp-dev.skills.get",
+    input: { seat: "lead" },
+  });
+  expect(
+    JSON.parse(await readFile(path.join(directory, ".claude-plugin", "plugin.json"), "utf8")),
+  ).toMatchObject({ name: "slp-lead" });
+  expect(await readFile(path.join(directory, "skills", "xia", "SKILL.md"), "utf8")).toBe(
+    "XIA FOR lead\n",
+  );
+});
+
+test("agent.create gives a Codex Peer its seat directory's skills/ as an extra root", async () => {
+  const paseoHome = await temporaryPaseoHome();
+  const fx = fakeContext({ enabled: true, paseoHome });
+  contribute(fx.server);
+
+  const result = (await fx.beforeHandlers.get("agent.create")!(
+    {
+      request: {
+        config: { provider: "codex", cwd: "/nonexistent-slp-cwd" },
+        labels: { [SEAT_LABEL]: "peer" },
+      } as never,
+    },
+    fx.hookContext,
+  )) as CreateResult;
+
+  expect(result.config.providerOptions?.skills).toEqual({
+    extraRoots: [path.join(paseoHome, "slp", "seat-skills", "peer", "skills")],
+  });
+});
+
+test("the first Claude/Codex session open writes every seat directory, once", async () => {
+  const paseoHome = await temporaryPaseoHome();
+  const fx = fakeContext({ enabled: true, paseoHome });
+  contribute(fx.server);
+  const sessionOpen = fx.beforeHandlers.get("agent.session_open")!;
+  const open = (provider: string) =>
+    sessionOpen(
+      {
+        request: {
+          agentId: "a1",
+          workspaceId: null,
+          provider,
+          cwd: "/r",
+          reason: "resume",
+          purpose: "interactive",
+          env: {},
+        } as never,
+      },
+      fx.hookContext,
+    );
+
+  expect(await open("acp")).toBeUndefined();
+  expect(fx.invoked).toEqual([]);
+  expect(await open("claude")).toBeUndefined();
+  expect((await readdir(path.join(paseoHome, "slp", "seat-skills"))).sort()).toEqual([
+    "lead",
+    "peer",
+  ]);
+  const calls = fx.invoked.length;
+  await open("codex");
+  expect(fx.invoked.length).toBe(calls);
+});
+
+test("without PASEO_HOME a seat is created without skills and nothing asks for them", async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const fx = fakeContext({ enabled: true });
+  contribute(fx.server);
+
+  const result = (await fx.beforeHandlers.get("agent.create")!(
+    {
+      request: {
+        config: { provider: "claude", cwd: "/nonexistent-slp-cwd" },
+        labels: { [SEAT_LABEL]: "peer" },
+      } as never,
+    },
+    fx.hookContext,
+  )) as CreateResult;
+
+  expect(result.config.providerOptions).toEqual({ disallowedTools: ["Agent", "Task"] });
+  expect(fx.invoked.map((call) => call.method)).toEqual(["slp-dev.seat.get"]);
 });

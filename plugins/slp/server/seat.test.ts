@@ -142,11 +142,25 @@ test("withLeadAllowedTools adds the Paseo wildcard, keeps existing tools, never 
   expect(merged).toEqual({ allowedTools: ["Bash", "mcp__paseo__*"], model: "x" });
 });
 
-test("supervisor loses write and spawn tools and gets the Paseo wildcard", () => {
-  const opts = providerOptionsFor("supervisor", "claude", { disallowedTools: ["WebSearch"] });
+test("supervisor loses write, spawn, and skill tools and gets the Paseo wildcard", () => {
+  const opts = providerOptionsFor(
+    "supervisor",
+    "claude",
+    { disallowedTools: ["WebSearch"] },
+    "/home/.alp/slp/seat-skills/supervisor",
+  );
   expect(opts).toEqual({
     allowedTools: ["mcp__paseo__*"],
-    disallowedTools: ["WebSearch", "Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "Task"],
+    disallowedTools: [
+      "WebSearch",
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit",
+      "Agent",
+      "Task",
+      "Skill",
+    ],
   });
   const prompt = buildSystemPrompt("supervisor", "claude", "BODY", null);
   expect(prompt).toMatch(/Không bao giờ.*send_agent_prompt.*tới peer/);
