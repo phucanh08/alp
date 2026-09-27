@@ -1,4 +1,4 @@
-alp 1.1 finishes the paseo → alp rename that 1.0 left thin: environment variables, the npm workspace scope, on-disk state file names, and wire-level identifiers all move from paseo to alp. <!-- alp-rename-keep -->
+alp 1.1 finishes the paseo → alp rename that 1.0 left thin: environment variables, the npm workspace scope, on-disk state file names, and wire-level identifiers all move from paseo to alp.
 
 Before upgrading: update the app and the daemon together. An alp 1.0.0 app cannot parse an alp 1.1.0 daemon's renamed wire labels, schema fields, message types, and MIME types, and the reverse holds too. See breaking changes.
 

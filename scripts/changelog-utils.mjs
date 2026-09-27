@@ -49,8 +49,12 @@ export function parseChangelogEntries(changelogText) {
 
 // Turns `[label](url)` into `label` and drops the trailing PR/attribution
 // parenthetical, which is pure noise in a store changelog with a 500 char budget.
+// Also drops HTML comments such as the `<!-- alp-rename-keep -->` markers the rename
+// tooling requires in CHANGELOG.md: those are instructions to the rename script, not
+// text a store listing should show.
 export function stripChangelogMarkup(text) {
   return text
+    .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/\s*\((?:[^()]*(?:#\d+|by @)[^()]*)\)\s*$/, "")
     .replace(/`([^`]*)`/g, "$1")

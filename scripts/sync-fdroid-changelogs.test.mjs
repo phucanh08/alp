@@ -313,6 +313,27 @@ test("fails loudly when the release has no changelog entry", () => {
   );
 });
 
+// CHANGELOG.md keeps `<!-- alp-rename-keep -->` markers on lines that spell out the
+// pre-rename vendor name literally. Those markers are instructions to
+// scripts/apply-rename.mjs, not text a store listing should show.
+test("drops rename-keep HTML comments from notes and bullets", () => {
+  const contents = formatFdroidChangelog([
+    "alp 1.1 finishes the rename. <!-- alp-rename-keep -->",
+    "",
+    "### Changed",
+    "",
+    "- Renamed the CLI binary from paseo to alp. <!-- alp-rename-keep -->",
+  ]);
+
+  assert.equal(contents.includes("<!--"), false);
+  assert.equal(contents.includes("-->"), false);
+  assert.equal(contents.includes("  "), false);
+  assert.match(
+    contents,
+    /^alp 1\.1 finishes the rename\.\n\nChanged\n- Renamed the CLI binary from paseo to alp\.\n\nFull notes:/, // alp-rename-keep
+  );
+});
+
 test("honours a non-default locale directory", () => {
   const changelog = "## 0.2.3 - 2026-07-27\n\n### Fixed\n\n- Something broke.\n";
   withTempRepo(
