@@ -2863,7 +2863,9 @@ test("createAgent passes daemon launch env through the provider launch context",
     agentId: snapshot.id,
     env: {
       ALP_AGENT_ID: snapshot.id,
+      PASEO_AGENT_ID: snapshot.id, // alp-rename-keep
       ALP_AGENT_CWD: workdir,
+      PASEO_AGENT_CWD: workdir, // alp-rename-keep
     },
   });
 });
@@ -4193,7 +4195,9 @@ test("resumeAgentFromPersistence keeps metadata config, applies overrides, and p
     agentId: resumed.id,
     env: {
       ALP_AGENT_ID: resumed.id,
+      PASEO_AGENT_ID: resumed.id, // alp-rename-keep
       ALP_AGENT_CWD: workdir,
+      PASEO_AGENT_CWD: workdir, // alp-rename-keep
     },
   });
 });
@@ -4301,7 +4305,9 @@ test("importProviderSession imports the selected session without listing and pub
     agentId: imported.id,
     env: {
       ALP_AGENT_ID: imported.id,
+      PASEO_AGENT_ID: imported.id, // alp-rename-keep
       ALP_AGENT_CWD: workdir,
+      PASEO_AGENT_CWD: workdir, // alp-rename-keep
     },
   });
   expect(imported.lifecycle).toBe("idle");
@@ -4404,7 +4410,9 @@ test("reloadAgentSession passes daemon launch env through the provider launch co
     agentId: snapshot.id,
     env: {
       ALP_AGENT_ID: snapshot.id,
+      PASEO_AGENT_ID: snapshot.id, // alp-rename-keep
       ALP_AGENT_CWD: workdir,
+      PASEO_AGENT_CWD: workdir, // alp-rename-keep
     },
   });
 
@@ -4416,7 +4424,9 @@ test("reloadAgentSession passes daemon launch env through the provider launch co
     agentId: snapshot.id,
     env: {
       ALP_AGENT_ID: snapshot.id,
+      PASEO_AGENT_ID: snapshot.id, // alp-rename-keep
       ALP_AGENT_CWD: workdir,
+      PASEO_AGENT_CWD: workdir, // alp-rename-keep
     },
   });
 });

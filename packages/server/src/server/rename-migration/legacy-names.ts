@@ -61,3 +61,17 @@ export function readAlpEnv(
   if (legacyValue !== undefined) reportLegacyNameUse({ kind: "env", legacy, current: name });
   return legacyValue;
 }
+
+/**
+ * `env` plus each ALP_* variable under its 1.0.0 PASEO_* name, with the same value. Applied to
+ * what the daemon writes into a child — repo scripts, service scripts, terminals, agents — so a
+ * script, hook command, or tool written for 1.0.0 still finds its variables.
+ */
+export function withPreRenameEnvNames<Env extends Record<string, string>>(env: Env): Env {
+  const next: Record<string, string> = { ...env };
+  for (const [name, value] of Object.entries(env)) {
+    const legacy = legacyEnvName(name);
+    if (legacy !== null) next[legacy] = value;
+  }
+  return next as Env;
+}

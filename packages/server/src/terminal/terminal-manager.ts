@@ -11,6 +11,7 @@ import { resolve, sep } from "node:path";
 import { assertAbsolutePath, isSameOrDescendantPath } from "../server/path-utils.js";
 import type { TerminalActivity, TerminalActivityState } from "@alp/protocol/terminal-activity";
 import { deriveTerminalActivityStatusBucket } from "@alp/protocol/terminal-activity";
+import { withPreRenameEnvNames } from "../server/rename-migration/legacy-names.js";
 
 export interface TerminalListItem {
   id: string;
@@ -335,11 +336,12 @@ export function createTerminalManager(
         options.activityUrl === undefined
           ? (managerOptions.getTerminalActivityUrl?.() ?? null)
           : options.activityUrl;
-      const activityEnv = {
+      // COMPAT(paseo-env): hook commands installed by 1.0.0 test the PASEO_* names. alp-rename-keep
+      const activityEnv = withPreRenameEnvNames({
         ALP_TERMINAL_ID: terminalId,
         ALP_ACTIVITY_TOKEN: activityToken,
         ...(terminalActivityUrl ? { ALP_TERMINAL_ACTIVITY_URL: terminalActivityUrl } : {}),
-      };
+      });
       terminalActivityTokenById.set(terminalId, activityToken);
       let session: TerminalSession;
       try {
