@@ -12,4 +12,5 @@ export default function contribute(server: PluginServerContext) {
     const { definition, skills } = SEATS[seat];
     return { definition, skills: [...skills] };
   });
+  return () => {};
 }
