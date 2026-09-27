@@ -119,6 +119,21 @@ describe("desktop packaging", () => {
     expect(runtimeTrace).toContain('"packages/server/dist/server/skills/**"');
   });
 
+  it("ships the bundled slp-dev plugin, whose skills join the catalog", () => {
+    const config = readFileSync(join(packageRoot, "electron-builder.yml"), "utf8");
+    const serverPackage = readFileSync(join(packageRoot, "..", "server", "package.json"), "utf8");
+    const runtimeTrace = readFileSync(
+      join(packageRoot, "..", "..", "scripts", "trace-daemon.mjs"),
+      "utf8",
+    );
+
+    expect(config).toContain("node_modules/@getpaseo/server/dist/server/plugins/**/*");
+    expect(serverPackage).toContain(
+      "fs.cpSync('../../plugins/slp-dev','dist/server/plugins/slp-dev',{recursive:true})",
+    );
+    expect(runtimeTrace).toContain('"packages/server/dist/server/plugins/slp-dev/**"');
+  });
+
   it("registers alp agent links with the operating system", () => {
     const config = readFileSync(join(packageRoot, "electron-builder.yml"), "utf8");
 

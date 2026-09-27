@@ -6,8 +6,10 @@ import { readDefinitionSources, renderDefinitionsModule } from "./definitions-so
 
 const serverDirectory = path.dirname(fileURLToPath(import.meta.url));
 
-test("definitions.gen.ts matches agents/*.md (run `npm run generate` after editing a seat)", async () => {
-  const sources = await readDefinitionSources(path.join(serverDirectory, "..", "agents"));
+test("definitions.gen.ts matches slp-dev/agents/*.md (run `npm run generate` after editing a seat)", async () => {
+  const sources = await readDefinitionSources(
+    path.join(serverDirectory, "..", "..", "slp-dev", "agents"),
+  );
   const generated = await readFile(path.join(serverDirectory, "definitions.gen.ts"), "utf8");
   expect(generated).toBe(renderDefinitionsModule(sources));
   expect(sources.lead.startsWith("---\nname: lead\n")).toBe(true);

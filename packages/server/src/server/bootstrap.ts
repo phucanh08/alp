@@ -604,7 +604,10 @@ export async function createPaseoDaemon(
   });
   // ALP(slp): plugins shipped inside the daemon and run without a config entry. Their skills
   // install with the core skills, so both read this one map.
-  const bundledPlugins = { slp: resolveBundledPluginDir("slp") };
+  const bundledPlugins = {
+    slp: resolveBundledPluginDir("slp"),
+    "slp-dev": resolveBundledPluginDir("slp-dev"),
+  };
   const orchestrationSkills = createOrchestrationSkills(
     daemonConfigStore,
     logger,

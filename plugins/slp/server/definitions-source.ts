@@ -2,9 +2,10 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 /**
- * Seat files shipped with the plugin. `agents/<seat>.md` is the source; `definitions.gen.ts`
- * embeds it because the plugin compiler bundles `server/` into one string that the daemon evaluates:
- * at runtime the plugin has no path to its own directory, and esbuild has no loader for `.md`.
+ * Seat files. `plugins/slp-dev/agents/<seat>.md` is the source; `definitions.gen.ts` embeds it
+ * because the plugin compiler bundles `server/` into one string that the daemon evaluates: at
+ * runtime the plugin has no path to its own directory (or slp-dev's), and esbuild has no loader
+ * for `.md`.
  */
 export const DEFINITION_SEATS = ["lead", "peer", "supervisor"] as const;
 
