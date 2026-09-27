@@ -318,8 +318,10 @@ function runtimeSpecifierError(
   else if (
     (specifier === "@alp/plugin" ||
       specifier.startsWith("@alp/plugin/") ||
-      specifier === "@alp/plugin" ||
-      specifier.startsWith("@alp/plugin/")) &&
+      // alp-rename-keep-start: the SDK's retired pre-@getpaseo scope
+      specifier === "@paseo/plugin" ||
+      specifier.startsWith("@paseo/plugin/")) &&
+    // alp-rename-keep-end
     !(PLUGIN_SDK_SPECIFIERS as readonly string[]).includes(specifier)
   )
     kind = "Unknown SDK";

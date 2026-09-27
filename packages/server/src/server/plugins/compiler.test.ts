@@ -428,7 +428,7 @@ export type Value = string;`,
   });
 
   it.each([
-    "@alp/plugin",
+    "@paseo/plugin", // alp-rename-keep: the SDK's retired pre-@getpaseo scope
     "@alp/plugin/react-native",
     "@alp/plugin/ui",
     "@alp/plugin/provider",
