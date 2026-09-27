@@ -112,9 +112,13 @@ for anything else
 (`packages/server/src/server/orchestration-skills/internal/operations.ts:91-135`).
 
 Removing a plugin's config entry, or a manifest the daemon cannot read, drops that plugin's skill
-names from the managed set: copies already on disk stay untouched but unmanaged, nothing offers to
-delete them, and reinstalling the plugin does not resume tracking them on its own
-(`packages/server/src/server/orchestration-skills/internal/plugin-sources.ts`).
+names from the managed set: copies already on disk stay untouched but unmanaged, and nothing offers
+to delete them. The catalog is read fresh from current config and bundled plugins on every status
+check, reconcile, and autoUpdate — nothing persists the old removal, so re-adding the entry, or
+fixing the manifest, makes those names shipped and managed again on the very next check, no restart
+needed
+(`packages/server/src/server/orchestration-skills/index.ts:38-42`,
+`packages/server/src/server/orchestration-skills/internal/plugin-sources.ts`).
 
 ## Bundled plugins
 
@@ -130,10 +134,17 @@ config-entry plugins, and a bundled plugin with no entry is not one. Turn a bund
 the global `pluginsEnabled: false`, which disables every plugin, or with a config entry naming the
 plugin's own directory and `enabled: false`. `plugins` holds dynamic keys, so `daemon config set`
 cannot address one plugin by a dotted path — `paseo daemon config set plugins.slp-dev.enabled false`
-fails with "Unknown configuration path: plugins.slp-dev". Set the whole `plugins` object instead:
+fails with "Unknown configuration path: plugins.slp-dev". `daemon config set plugins <value>`
+replaces the whole `plugins` object rather than merging into it, so read the current value first and
+fold your change into it — otherwise any other configured plugin silently drops out of config:
 
 ```bash
-paseo daemon config set plugins '{"slp-dev":{"source":"directory","path":"'"$PWD"'/plugins/slp-dev","enabled":false}}'
+# Checkout: BUNDLED_DIR="$PWD/plugins/slp-dev"
+# Built/packaged daemon: BUNDLED_DIR="<daemon install dir>/packages/server/dist/server/plugins/slp-dev"
+BUNDLED_DIR="$PWD/plugins/slp-dev"
+current=$(paseo daemon config get plugins --json | jq '.value // {}')
+merged=$(echo "$current" | jq --arg path "$BUNDLED_DIR" '. + {"slp-dev": {source: "directory", path: $path, enabled: false}}')
+paseo daemon config set plugins "$merged"
 paseo daemon reload
 ```
 

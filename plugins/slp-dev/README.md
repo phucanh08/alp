@@ -66,11 +66,15 @@ for every workspace on that host.
 }
 ```
 
-`plugins` holds dynamic keys and cannot be set by a dotted CLI path; set the whole object (see
+`plugins` holds dynamic keys and cannot be set by a dotted CLI path, and `daemon config set plugins
+<value>` replaces the whole object rather than merging into it — read the current value first and
+fold your entry into it, or any other configured plugin drops out of config (see
 [docs/plugins.md](../../docs/plugins.md#bundled-plugins)):
 
 ```bash
-paseo daemon config set plugins '{"slp-dev":{"source":"directory","path":"/absolute/path/to/my-pack","enabled":true}}'
+current=$(paseo daemon config get plugins --json | jq '.value // {}')
+merged=$(echo "$current" | jq --arg path "/absolute/path/to/my-pack" '. + {"slp-dev": {source: "directory", path: $path, enabled: true}}')
+paseo daemon config set plugins "$merged"
 paseo daemon reload
 ```
 
@@ -82,8 +86,12 @@ To build one:
    `paseo plugin install /path/to/my-pack`, with no `--id`, then lands under the config key
    `slp-dev` on its own and replaces the bundled copy without an extra flag.
 2. Keep `shared/rpc.ts`'s RPC name (`slp-dev.seat.get`) and its input/output shapes unchanged —
-   that string is what `plugins/slp` asks for, independent of any plugin id. Change
-   `description`, `requirements.paseo`, and `version` in `paseo-plugin.json` freely.
+   that string is what `plugins/slp` asks for, independent of any plugin id. Change `description`
+   and `requirements.paseo` in `paseo-plugin.json` freely, but add no other key: the manifest
+   schema is strict (`id`, `description`, `requirements`, `build`, `skills` only —
+   `packages/server/src/server/plugins/manifest.ts:29-36`), so an unrecognized key such as
+   `version` fails validation and the plugin will not load. Track your pack's own version in
+   `package.json` instead.
 3. Replace `agents/lead.md`, `agents/peer.md`, `agents/supervisor.md` with your profession's three
    seat texts, keeping the `name`/`description` frontmatter — slp strips it, but this plugin's own
    tests read it back to prove the file round-trips.
