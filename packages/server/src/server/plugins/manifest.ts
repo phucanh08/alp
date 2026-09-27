@@ -16,6 +16,11 @@ const PluginSkillsDirectorySchema = z.string().refine((value) => {
     value === value.trim() &&
     !path.posix.isAbsolute(normalized) &&
     !path.win32.isAbsolute(value) &&
+    // path.win32.isAbsolute treats "D:skills" as not absolute (drive-relative,
+    // no separator after the colon), but win32.resolve still resolves it
+    // against drive D's own cwd rather than the plugin directory. Reject any
+    // drive-letter prefix outright instead of relying on isAbsolute for it.
+    !/^[a-zA-Z]:/.test(value) &&
     normalized !== "." &&
     normalized !== "./" &&
     normalized !== ".." &&

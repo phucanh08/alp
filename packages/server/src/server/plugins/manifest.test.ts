@@ -75,7 +75,18 @@ describe("plugin manifest", () => {
       await expect(readPluginManifest(directory)).resolves.toEqual({ id: "skilled", skills });
     }
 
-    for (const skills of ["", "   ", ".", "..", "../skills", "skills/../../x", "/abs/skills", 7]) {
+    for (const skills of [
+      "",
+      "   ",
+      ".",
+      "..",
+      "../skills",
+      "skills/../../x",
+      "/abs/skills",
+      "D:skills",
+      "c:x",
+      7,
+    ]) {
       await writeFile(manifest, JSON.stringify({ id: "skilled", skills }));
       await expect(readPluginManifest(directory)).rejects.toThrow();
     }
