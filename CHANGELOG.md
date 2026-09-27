@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.1.0 - 2026-09-27
+
+alp 1.1 finishes the paseo → alp rename that 1.0 left thin: environment variables, the npm workspace scope, on-disk state file names, and wire-level identifiers all move from paseo to alp. <!-- alp-rename-keep -->
+
+**Before upgrading:** update the app and the daemon together. An alp 1.0.0 app cannot parse an alp 1.1.0 daemon's renamed wire labels, schema fields, message types, and MIME types, and the reverse holds too. See [breaking changes](https://github.com/phucanh08/alp/blob/main/docs/breaking-changes.md#identity-real-rename-previously-deferred).
+
+### Added
+
+- Added `scripts/sync-upstream.mjs`, which renames the merge base and the upstream Paseo tree with the same rename function before merging, replacing a plain `git merge upstream/main` that would turn every renamed identifier into a conflict ([sync with upstream](https://github.com/phucanh08/alp/blob/main/docs/development.md#sync-with-upstream)) <!-- alp-rename-keep -->
+
+### Changed
+
+- Renamed environment variables from `PASEO_*` to `ALP_*`; a script or `.env` file that still sets only `PASEO_*` keeps configuring the daemon through a fallback, and every child process still gets both names, until the fallback is removed after 2027-03-27 ([breaking changes](https://github.com/phucanh08/alp/blob/main/docs/breaking-changes.md#identity-real-rename-previously-deferred)) <!-- alp-rename-keep -->
+- Renamed the npm workspace scope from `@getpaseo/*` to `@alp/*`, including a plugin manifest's `requirements.paseo` (now `requirements.alp`); a plugin or script still pinned to `@getpaseo/*` needs updating ([breaking changes](https://github.com/phucanh08/alp/blob/main/docs/breaking-changes.md#identity-real-rename-previously-deferred)) <!-- alp-rename-keep -->
+- Renamed on-disk state file names: `paseo.json` → `alp.json`, `paseo-plugin.json` → `alp-plugin.json`, `.paseo-managed-files.json` → `.alp-managed-files.json`, and `paseo.pid` → `alp.pid` ([breaking changes](https://github.com/phucanh08/alp/blob/main/docs/breaking-changes.md#identity-real-rename-previously-deferred)) <!-- alp-rename-keep -->
+- Renamed wire-level identifiers: `paseo.*` agent labels, the `paseoTools`/`paseoOnly` schema fields, the `paseo_worktree_*`/`create_paseo_worktree_*` message types, `application/paseo-*` MIME types, and the `mcp__paseo__` tool prefix all move to their alp equivalents ([breaking changes](https://github.com/phucanh08/alp/blob/main/docs/breaking-changes.md#identity-real-rename-previously-deferred)) <!-- alp-rename-keep -->
+- Renamed the nix and Docker binary and entrypoint names to `alp-server`, `alp` (`alp-desktop` for the Nix desktop package), and `alp-docker-entrypoint`; a NixOS configuration written for 1.0.0 that sets `services.paseo.*` still evaluates, with a warning, as `services.alp.*` ([breaking changes](https://github.com/phucanh08/alp/blob/main/docs/breaking-changes.md#identity-real-rename-previously-deferred)) <!-- alp-rename-keep -->
+- Turned the CLI's npm self-update off: alp does not publish to npm, so `npm install -g` of the CLI cannot update this fork
+- On first start after upgrading, the daemon migrates a 1.0.0 home in place without deleting anything: it takes over the `paseo.pid` lock, converts managed-files manifests and agent labels to their alp names, and carries config keys and workspaces forward; a repo's `paseo.json` is still read with a warning, and the app carries its local storage over from the 1.0.0 `@paseo` keys ([breaking changes](https://github.com/phucanh08/alp/blob/main/docs/breaking-changes.md#identity-real-rename-previously-deferred)) <!-- alp-rename-keep -->
+- A plugin still shipping `paseo-plugin.json` or importing `@getpaseo/plugin` keeps loading; the app's plugin catalog reports it with `requirements.alp ">=1.0.0"` ([plugins](https://github.com/phucanh08/alp/blob/main/docs/plugins.md#install-a-directory-source)) <!-- alp-rename-keep -->
+
+### Fixed
+
+- Fixed a daemon started with only a 1.0.0 `PASEO_HOME` not handing `ALP_HOME` to its plugin host, so `slp` built no seat skill directories <!-- alp-rename-keep -->
+- Fixed provider images from history written under alp 1.0.0's `paseo-attachments` directory showing as plain text instead of images <!-- alp-rename-keep -->
+
 ## 1.0.0 - 2026-09-27
 
 alp 1.0 is the first release of the alp fork of Paseo 0.9.2. It runs the SLP (Supervisor / Lead / Peer) workflow by default and ships under the alp name, icons, and endpoints. <!-- alp-rename-keep -->
