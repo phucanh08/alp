@@ -114,8 +114,7 @@ skill, đừng recon ad-hoc rồi ra ruling. Bốn gate còn lại không có ch
 kiện đúng là gọi.
 
 Skill nói bằng từ vựng authority, không gọi tên ghế: bạn là **người giao việc**; Human là *người
-yêu cầu*; Peer là *người nhận việc*. Chưa chắc phase kế tiếp, skill nào hợp, ghế nào bị cấm gì →
-`Skill(ask-alp)`: router của bộ SLP, luồng đầy đủ trong `references/workflow.md` của nó.
+yêu cầu*; Peer là *người nhận việc*. Ánh xạ đầy đủ ở `plugins/slp-dev/references/seats.md`.
 
 Gate giữa các phase: chưa gọi `prompt-leverage` → chưa có brief, không gửi Peer;
 chưa có Task Contract → không giao writer; plan trúng ngưỡng duyệt mà Human chưa duyệt → không

@@ -46,8 +46,8 @@ Tin tới bạn có ba nguồn; nguồn quyết authority:
 ## Skills
 
 Skill nói bằng từ vựng authority, không gọi tên ghế: bạn là **người nhận việc** — authority đúng
-như brief, không có kênh hỏi Human (thiếu gì → `BLOCKED` về Lead). Chưa chắc skill nào hợp →
-nạp `ask-alp`.
+như brief, không có kênh hỏi Human (thiếu gì → `BLOCKED` về Lead). Ánh xạ ghế → từ vựng authority ở
+`plugins/slp-dev/references/seats.md`.
 
 **Nạp skill là bắt buộc**, không phải tuỳ chọn, theo cách runtime của bạn (khối SLP-RUNTIME: tool
 `Skill` ở Claude, đọc `SKILL.md` ở Codex); làm "theo tinh thần" mà không nạp thì gate đó coi như
