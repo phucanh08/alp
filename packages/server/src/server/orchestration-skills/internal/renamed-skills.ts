@@ -22,6 +22,7 @@ export const RENAMED_SKILL_OLD_NAMES: readonly string[] = [...RENAMED_SKILLS.key
 
 export interface SkillsLogger {
   warn(fields: Record<string, unknown>, message: string): void;
+  error(fields: Record<string, unknown>, message: string): void;
 }
 
 export interface RenamedSkillRoots {

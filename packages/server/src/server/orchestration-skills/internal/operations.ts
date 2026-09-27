@@ -83,14 +83,27 @@ async function listBundledSkills(sourceDir: string): Promise<string[]> {
     .sort(compareStrings);
 }
 
+const CORE_OWNER = "the core skills bundle";
+
+const NOOP_LOGGER: SkillsLogger = { warn: () => {}, error: () => {} };
+
 /**
- * Two sources shipping one name is an error rather than a shadow: whichever
+ * Two sources shipping one name is a collision rather than a shadow: whichever
  * copy won would silently replace the other in every agent home. Copies from
  * the same plugin (a config entry replacing the bundled one) are one source.
+ *
+ * The core bundle always owns its names: a plugin that ships one does not get
+ * it, and core is unaffected. Two plugins sharing a name both lose it — it is
+ * shipped (so a copy already on disk stays deletable from Settings) but never
+ * available. Either way the collision is only logged, never thrown, so one bad
+ * plugin manifest cannot block status, install, or cleanup for anything else.
  */
-export async function readSkillCatalog(targets: SkillTargets): Promise<SkillCatalog> {
+export async function readSkillCatalog(
+  targets: SkillTargets,
+  logger: SkillsLogger = NOOP_LOGGER,
+): Promise<SkillCatalog> {
   const sources = [
-    { owner: "the core skills bundle", dir: targets.sourceDir, enabled: true },
+    { owner: CORE_OWNER, dir: targets.sourceDir, enabled: true },
     ...(targets.pluginSources ?? []).map((source) => ({
       owner: `plugin "${source.pluginId}"`,
       dir: source.dir,
@@ -108,7 +121,14 @@ export async function readSkillCatalog(targets: SkillTargets): Promise<SkillCata
     for (const name of await listBundledSkills(source.dir)) {
       const owner = owners.get(name);
       if (owner !== undefined && owner !== source.owner) {
-        throw new Error(`Skill "${name}" is shipped by both ${owner} and ${source.owner}`);
+        logger.error(
+          { skill: name, owners: [owner, source.owner] },
+          `Skill "${name}" is shipped by both ${owner} and ${source.owner}`,
+        );
+        // Core keeps the name and behaves as if the plugin were absent. Between
+        // two plugins, the name is contested and neither copy is available.
+        if (owner !== CORE_OWNER) available.delete(name);
+        continue;
       }
       owners.set(name, source.owner);
       if (!sourceDirs.has(name)) sourceDirs.set(name, source.dir);
@@ -128,8 +148,11 @@ function managedSkillNames(shipped: readonly string[]): string[] {
 }
 
 /** The names a convergence may create, replace, or delete. */
-export async function listManagedSkillNames(targets: SkillTargets): Promise<string[]> {
-  return managedSkillNames((await readSkillCatalog(targets)).shipped);
+export async function listManagedSkillNames(
+  targets: SkillTargets,
+  logger: SkillsLogger = NOOP_LOGGER,
+): Promise<string[]> {
+  return managedSkillNames((await readSkillCatalog(targets, logger)).shipped);
 }
 
 function resolveDesiredSkills(
@@ -221,8 +244,9 @@ function compareStrings(a: string, b: string): number {
 export async function getSkillsStatus(
   targets: SkillTargets,
   selection: SkillSelection,
+  options?: SkillsMaintenanceOptions,
 ): Promise<SkillsStatus> {
-  const catalog = await readSkillCatalog(targets);
+  const catalog = await readSkillCatalog(targets, options?.logger);
   const { available } = catalog;
   const names = managedSkillNames(catalog.shipped);
   const [bundle, agentsDisk, claudeDisk, codexDisk] = await Promise.all([
@@ -244,14 +268,15 @@ async function applySkills(
   targets: SkillTargets,
   selection: SkillSelection,
   initialStatus?: SkillsStatus,
+  logger: SkillsLogger = NOOP_LOGGER,
 ): Promise<SkillsStatus> {
-  const status = initialStatus ?? (await getSkillsStatus(targets, selection));
+  const status = initialStatus ?? (await getSkillsStatus(targets, selection, { logger }));
 
   const writes = status.ops
     .filter((op) => op.kind === "add" || op.kind === "update")
     .map((op) => op.name);
   if (writes.length > 0) {
-    const { sourceDirs } = await readSkillCatalog(targets);
+    const { sourceDirs } = await readSkillCatalog(targets, logger);
     const bySource = new Map<string, string[]>();
     for (const name of writes) {
       const sourceDir = sourceDirs.get(name);
@@ -278,7 +303,7 @@ async function applySkills(
     });
   }
 
-  return getSkillsStatus(targets, selection);
+  return getSkillsStatus(targets, selection, { logger });
 }
 
 export async function installSkills(
@@ -286,8 +311,9 @@ export async function installSkills(
   selection: SkillSelection,
   /** Apply exactly this plan instead of rescanning, so a confirmed plan is the applied plan. */
   plan?: SkillsStatus,
+  options?: SkillsMaintenanceOptions,
 ): Promise<SkillsStatus> {
-  return applySkills(targets, selection, plan);
+  return applySkills(targets, selection, plan, options?.logger);
 }
 
 export async function updateSkills(
@@ -295,9 +321,13 @@ export async function updateSkills(
   selection: SkillSelection,
   options: SkillsMaintenanceOptions,
 ): Promise<SkillsStatus> {
-  await removeRenamedSkillDirs(targets, (await readSkillCatalog(targets)).shipped, options.logger);
-  const status = await getSkillsStatus(targets, selection);
-  return applySkills(targets, selection, nonDestructivePlan(status));
+  await removeRenamedSkillDirs(
+    targets,
+    (await readSkillCatalog(targets, options.logger)).shipped,
+    options.logger,
+  );
+  const status = await getSkillsStatus(targets, selection, options);
+  return applySkills(targets, selection, nonDestructivePlan(status), options.logger);
 }
 
 function nonDestructivePlan(status: SkillsStatus): SkillsStatus {
@@ -311,8 +341,12 @@ export async function autoUpdateInstalledSkills(
 ): Promise<SkillsStatus> {
   // Old directories are invisible to status, so this runs even when the renamed
   // skills are already up to date.
-  await removeRenamedSkillDirs(targets, (await readSkillCatalog(targets)).shipped, options.logger);
-  const status = await getSkillsStatus(targets, selection);
+  await removeRenamedSkillDirs(
+    targets,
+    (await readSkillCatalog(targets, options.logger)).shipped,
+    options.logger,
+  );
+  const status = await getSkillsStatus(targets, selection, options);
   // ALP(slp): a bare host reads as not-installed exactly like one where the
   // user explicitly uninstalled everything — treat it the same as drift so a
   // selection set before any skill exists on disk installs at startup instead
@@ -322,19 +356,20 @@ export async function autoUpdateInstalledSkills(
   // interactive operation because managed directories can contain user files.
   // Renamed skills are the exception: their copies are removed above only
   // when every file in them is still the one the old bundle installed.
-  return applySkills(targets, selection, nonDestructivePlan(status));
+  return applySkills(targets, selection, nonDestructivePlan(status), options.logger);
 }
 
 export async function uninstallSkills(
   targets: SkillTargets,
   selection: SkillSelection,
+  options?: SkillsMaintenanceOptions,
 ): Promise<SkillsStatus> {
-  for (const name of await listManagedSkillNames(targets)) {
+  for (const name of await listManagedSkillNames(targets, options?.logger)) {
     await removeSkill(name, {
       agentsDir: targets.agentsDir,
       claudeDir: targets.claudeDir,
       codexDir: targets.codexDir,
     });
   }
-  return getSkillsStatus(targets, selection);
+  return getSkillsStatus(targets, selection, options);
 }

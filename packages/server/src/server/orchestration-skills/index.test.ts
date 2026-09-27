@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DaemonConfigStore } from "../daemon-config-store";
 import { createOrchestrationSkills } from "./index";
 import type { SkillTargets } from "./internal/operations";
+import type { SkillsLogger } from "./internal/renamed-skills";
 
 interface PluginEntry {
   path: string;
@@ -20,11 +21,26 @@ interface Harness {
     pluginsEnabled?: boolean;
     plugins?: Record<string, PluginEntry>;
     bundled?: Record<string, string>;
+    logger?: SkillsLogger;
   }): ReturnType<typeof createOrchestrationSkills>;
 }
 
 const roots: string[] = [];
-const logger = { warn: () => {} };
+const logger: SkillsLogger = { warn: () => {}, error: () => {} };
+
+/** Captures every collision `logger.error` reports instead of ignoring them. */
+function collectErrorLogs(): { logger: SkillsLogger; messages: string[] } {
+  const messages: string[] = [];
+  return {
+    logger: {
+      warn: () => {},
+      error: (_fields, message) => {
+        messages.push(message);
+      },
+    },
+    messages,
+  };
+}
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -62,7 +78,7 @@ async function makeHarness(coreSkills: string[] = ["alp"]): Promise<Harness> {
       }
       return directory;
     },
-    skills({ pluginsEnabled = true, plugins = {}, bundled = {} }) {
+    skills({ pluginsEnabled = true, plugins = {}, bundled = {}, logger: loggerOverride }) {
       stores += 1;
       const configStore = new DaemonConfigStore(path.join(root, `paseo-home-${stores}`), {
         mcp: { injectIntoAgents: false },
@@ -80,7 +96,12 @@ async function makeHarness(coreSkills: string[] = ["alp"]): Promise<Harness> {
           ]),
         ),
       });
-      return createOrchestrationSkills(configStore, logger, () => targets, bundled);
+      return createOrchestrationSkills(
+        configStore,
+        loggerOverride ?? logger,
+        () => targets,
+        bundled,
+      );
     },
   };
 }
@@ -213,26 +234,86 @@ describe("plugin skills: a disabled plugin's skills stay managed", () => {
   });
 });
 
-describe("plugin skills: a name shipped by two sources is an error", () => {
-  it("rejects a plugin skill with the same name as a core skill", async () => {
+describe("plugin skills: a name collision is logged, never thrown", () => {
+  it("core keeps a name a plugin also ships; the plugin's other skills still install", async () => {
     const harness = await makeHarness();
-    const directory = await harness.plugin("pack", ["alp"]);
+    const directory = await harness.plugin("pack", ["alp", "pack-plan"]);
+    const { logger: capture, messages } = collectErrorLogs();
 
-    await expect(
-      harness.skills({ plugins: { pack: { path: directory } } }).getStatus(),
-    ).rejects.toThrow(/"alp".*core.*plugin "pack"/);
+    const status = await harness
+      .skills({ plugins: { pack: { path: directory } }, logger: capture })
+      .autoUpdate();
+
+    expect(status.available).toEqual(["alp", "pack-plan"]);
+    // Core's own copy, unreplaced — the plugin behaves as if it never shipped "alp".
+    expect(await installedCopies(harness.targets, "alp")).toEqual([
+      "core alp",
+      "core alp",
+      "core alp",
+    ]);
+    expect(await installedCopies(harness.targets, "pack-plan")).toEqual([
+      "pack pack-plan",
+      "pack pack-plan",
+      "pack pack-plan",
+    ]);
+    expect(messages.length).toBeGreaterThan(0);
+    for (const message of messages) {
+      expect(message).toMatch(/"alp".*the core skills bundle.*plugin "pack"/);
+    }
   });
 
-  it("rejects two plugins that ship the same skill name, even when one is disabled", async () => {
+  it("two enabled plugins sharing a name both lose it; each plugin's other skills still install", async () => {
     const harness = await makeHarness();
-    const first = await harness.plugin("first", ["shared"]);
-    const second = await harness.plugin("second", ["shared"]);
+    const first = await harness.plugin("first", ["shared", "first-only"]);
+    const second = await harness.plugin("second", ["shared", "second-only"]);
+    const { logger: capture, messages } = collectErrorLogs();
 
-    await expect(
-      harness
-        .skills({ plugins: { first: { path: first }, second: { path: second, enabled: false } } })
-        .autoUpdate(),
-    ).rejects.toThrow(/"shared".*plugin "first".*plugin "second"/);
+    const status = await harness
+      .skills({
+        plugins: { first: { path: first }, second: { path: second } },
+        logger: capture,
+      })
+      .autoUpdate();
+
+    expect(status.available).toEqual(["alp", "first-only", "second-only"]);
     expect(await installedCopies(harness.targets, "shared")).toEqual([null, null, null]);
+    expect(await installedCopies(harness.targets, "first-only")).toEqual([
+      "first first-only",
+      "first first-only",
+      "first first-only",
+    ]);
+    expect(await installedCopies(harness.targets, "second-only")).toEqual([
+      "second second-only",
+      "second second-only",
+      "second second-only",
+    ]);
+    expect(messages.length).toBeGreaterThan(0);
+    for (const message of messages) {
+      expect(message).toMatch(/"shared".*plugin "first".*plugin "second"/);
+    }
+  });
+
+  it("a disabled plugin colliding with core blocks nothing: status, autoUpdate, and uninstall all succeed", async () => {
+    const harness = await makeHarness();
+    const directory = await harness.plugin("bad", ["alp"]);
+    const { logger: capture, messages } = collectErrorLogs();
+    const skills = harness.skills({
+      plugins: { bad: { path: directory, enabled: false } },
+      logger: capture,
+    });
+
+    await expect(skills.getStatus()).resolves.toMatchObject({ available: ["alp"] });
+    const afterAutoUpdate = await skills.autoUpdate();
+    expect(afterAutoUpdate.available).toEqual(["alp"]);
+    expect(await installedCopies(harness.targets, "alp")).toEqual([
+      "core alp",
+      "core alp",
+      "core alp",
+    ]);
+    await expect(skills.uninstall()).resolves.toMatchObject({ available: ["alp"] });
+    expect(messages.length).toBeGreaterThan(0);
+    for (const message of messages) {
+      expect(message).toMatch(/"alp".*the core skills bundle.*plugin "bad"/);
+    }
   });
 });
