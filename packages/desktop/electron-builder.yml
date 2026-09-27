@@ -58,7 +58,7 @@ linux:
   category: Development
   icon: assets
   artifactName: "alp-${version}-${arch}.${ext}"
-  maintainer: "Mohamed Boudra <hello@moboudra.com>"
+  maintainer: "anhlp <phucanhdn01@gmail.com>"
   vendor: "alp"
   extraResources:
     - from: bin/alp
