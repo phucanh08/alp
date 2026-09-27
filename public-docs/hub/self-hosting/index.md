@@ -13,7 +13,7 @@ Hub itself is upstream Paseo software; this fork doesn't publish its own Hub pac
 The shortest path is one command:
 
 ```sh
-npx @alp/hub
+npx @getpaseo/hub  # alp-rename-keep
 ```
 
 Open <http://localhost:3000>. A fresh Hub creates its embedded database and authentication secret, then guides you through creating the operator account and the GitHub, Slack, or Discord apps you want.
@@ -27,7 +27,7 @@ Without `DATABASE_URL`, Hub stores an embedded PGlite database and its generated
 Set a different location explicitly with:
 
 ```sh
-ALP_HUB_DATA_DIR=/path/to/alp-hub-data npx @alp/hub
+ALP_HUB_DATA_DIR=/path/to/alp-hub-data npx @getpaseo/hub  # alp-rename-keep
 ```
 
 Embedded mode supports one Hub process per data directory. It is intended for a personal or single-process Hub. Back up the whole data directory before upgrading or moving it.
@@ -41,7 +41,7 @@ GitHub event triggers use webhooks and need a public HTTPS address. Repository a
 When Hub is available at a stable public origin, set it before starting:
 
 ```sh
-ALP_HUB_APP_URL=https://hub.example.com npx @alp/hub
+ALP_HUB_APP_URL=https://hub.example.com npx @getpaseo/hub  # alp-rename-keep
 ```
 
 Changing the public origin requires updating callback and webhook settings in the provider apps. The **Apps** page generates the URLs for the origin Hub is currently using.
@@ -52,7 +52,7 @@ Set `DATABASE_URL` to use PostgreSQL instead of the embedded database:
 
 ```sh
 DATABASE_URL=postgres://alp:password@localhost:5432/alp_hub \
-  npx @alp/hub
+  npx @getpaseo/hub  # alp-rename-keep
 ```
 
 Use PostgreSQL for a durable server deployment, more than one Hub process, or an existing database backup and operations setup. Migrations run automatically at startup. Hub does not start listening when a migration fails.

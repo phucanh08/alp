@@ -15,7 +15,7 @@ You need [alp installed and running](/docs), Node.js, and a Slack workspace wher
 ## 1. Start Hub
 
 ```sh
-npx @alp/hub
+npx @getpaseo/hub  # alp-rename-keep
 ```
 
 Open the address it prints, normally <http://localhost:3000>, and create the operator account Hub asks for.
