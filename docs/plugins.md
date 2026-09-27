@@ -80,8 +80,8 @@ Never enable plugins on a user's behalf without explicit permission. Before aski
 target daemon's current `pluginsEnabled` value. State that plugins are trusted, unsandboxed code:
 backend code can access the daemon machine, while client contributions run inside the alp app.
 
-The one exception is alp's own bundled `slp` plugin: daemon start turns it on without asking. See
-[Bundled plugins](#bundled-plugins) and
+The one exception is alp's own bundled plugins, `slp` and `slp-dev`: daemon start turns them on
+without asking. See [Bundled plugins](#bundled-plugins) and
 [breaking-changes.md](breaking-changes.md#slp-defaults-on-a-fresh-host) for that divergence.
 
 Source changes are explicit. Run `paseo plugin reload <id>` to stop and fully tear down the old
@@ -89,16 +89,59 @@ plugin before compiling and starting from disk. A failed reload stays failed; al
 the old code. Use `enable`, `disable`, and `remove` to manage one plugin. Removing a directory source
 never deletes it. The global `pluginsEnabled` switch remains available.
 
+## Ship skills with a plugin
+
+An optional manifest field names a directory inside the plugin whose subdirectories are agent
+skills, one skill per subdirectory, the same shape as the core skill bundle:
+
+```json
+{
+  "id": "my-plugin",
+  "requirements": { "paseo": ">=0.9.2" },
+  "skills": "skills"
+}
+```
+
+The daemon installs a plugin's skills the same way it installs the core bundle, and only while
+`pluginsEnabled` is `true` and the plugin itself is enabled. Two sources shipping the same skill
+name is a collision, not a shadow: the core bundle always keeps a name a plugin also ships, and two
+plugins sharing a name both lose it — it stays shipped, so a copy already on disk from before the
+collision remains deletable from Settings, but neither plugin's copy is installable. A collision is
+only logged, never thrown, so one bad plugin manifest cannot block skill status, install, or cleanup
+for anything else
+(`packages/server/src/server/orchestration-skills/internal/operations.ts:91-135`).
+
+Removing a plugin's config entry, or a manifest the daemon cannot read, drops that plugin's skill
+names from the managed set: copies already on disk stay untouched but unmanaged, nothing offers to
+delete them, and reinstalling the plugin does not resume tracking them on its own
+(`packages/server/src/server/orchestration-skills/internal/plugin-sources.ts`).
+
 ## Bundled plugins
 
-alp ships `plugins/slp` inside the daemon and loads it with no `plugins.slp` config entry. Running
-from a built daemon, the source is `packages/server/dist/server/plugins/slp`; running from a
-checkout, it is `plugins/slp` at the repo root. Add a `plugins.slp` directory or Git source entry
-to config to replace the bundled copy with your own.
+alp ships two plugins inside the daemon and loads them with no config entry: `plugins/slp` (seat
+mechanics) and `plugins/slp-dev` (seat rule text and skills; see
+[plugins/slp-dev/README.md](../plugins/slp-dev/README.md)). Running from a built daemon, the source
+is `packages/server/dist/server/plugins/<id>`; running from a checkout, it is `plugins/<id>` at the
+repo root. Add a `plugins.<id>` directory or Git source entry to config to replace either bundled
+copy with your own.
 
-Bundled plugins do not appear in `paseo plugin ls`, `reload`, `enable`, or `disable`. Turn the
-bundled `slp` plugin off with the global `pluginsEnabled: false`, which disables every plugin, or
-with an explicit `plugins.slp` override.
+Bundled plugins do not appear in `paseo plugin ls`, `reload`, `enable`, or `disable` — those manage
+config-entry plugins, and a bundled plugin with no entry is not one. Turn a bundled plugin off with
+the global `pluginsEnabled: false`, which disables every plugin, or with a config entry naming the
+plugin's own directory and `enabled: false`. `plugins` holds dynamic keys, so `daemon config set`
+cannot address one plugin by a dotted path — `paseo daemon config set plugins.slp-dev.enabled false`
+fails with "Unknown configuration path: plugins.slp-dev". Set the whole `plugins` object instead:
+
+```bash
+paseo daemon config set plugins '{"slp-dev":{"source":"directory","path":"'"$PWD"'/plugins/slp-dev","enabled":false}}'
+paseo daemon reload
+```
+
+A config entry whose `path` differs from the bundled directory replaces the bundled copy with that
+directory host-wide, instead of only disabling it. `plugins/slp` asks for `plugins/slp-dev` by
+plugin id, not by discovery, so a directory that replaces it must keep the manifest id `slp-dev` and
+answer its `slp-dev.seat.get` contract — see
+[plugins/slp-dev/README.md](../plugins/slp-dev/README.md#copy-guide-for-another-profession).
 
 ## Install a Git source
 
@@ -293,6 +336,14 @@ selected host's existing connection; switching the screen's host changes both `u
 `useRpc()` to that host. An offline selected host fails there and never falls through to another
 installation. A server handler owns an IPC-backed daemon session for the life of its subprocess.
 Use plugin RPC for plugin-specific backend behavior that is not a normal alp operation.
+
+`PaseoApi.plugins.invoke(pluginId, method, input)` calls another plugin's registered RPC by name;
+the caller validates its own output, the callee validates its input. It is available from both a
+server handler's `{ paseo }` and a client `usePaseo()`, and needs no separate permission — a plugin
+session already connects as the daemon owner
+(`packages/client/src/index.ts:489-506`, `packages/server/src/server/plugins/plugin-session-identity.ts`).
+`plugins/slp` uses it this way to ask `plugins/slp-dev` for a seat's rule text and skills; see
+[plugins/slp/README.md](../plugins/slp/README.md#seat-definitions).
 
 Host-targeted clients and discovery are owned by `packages/app/src/plugins/hosts`, with per-installation
 bindings supplied by the bundle loader. Bind the imperative getter to that installation; do not

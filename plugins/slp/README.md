@@ -2,7 +2,10 @@
 
 Bundled alp plugin for the SLP seats: Supervisor, Lead, Peer. The daemon loads it when
 `pluginsEnabled` is on. The build copies this directory as-is, so server code imports only
-`@getpaseo/plugin`, `zod`, and Node built-ins, which the host provides.
+`@getpaseo/plugin`, `zod`, and Node built-ins, which the host provides. It carries the seat
+mechanics — tool cuts, workspace/Lead wiring, the Supervisor host workspace — and no profession
+content: seat rule text and skills come from the bundled `slp-dev` plugin, see
+[Seat definitions](#seat-definitions).
 
 ## What it does
 
@@ -133,26 +136,25 @@ before creating one.
 
 ## Seat definitions
 
-`agents/<seat>.md` is the source, written for alp: seats talk through Paseo tools, tagged
-`<paseo-agent-message>` envelopes, and finish notifications. `.claude/agents/` at the repo root is
-Claude Code's own subagent directory, holding the Agent Teams versions for Claude Code sessions; the
-two sets diverge on purpose and this plugin never reads that directory. `server/runtime-block.ts` adds
-the runtime facts that depend on the family and on the plugin: message sources, steer, notification
-limits, the Peer spawn call. It names no workflow skill; those live in the seat files.
+This plugin carries no seat rule text and no skill list of its own. `before("agent.create")` asks
+the bundled `slp-dev` plugin's `slp-dev.seat.get` RPC for both, addressed by plugin id and method
+name (`server/seat-rules.ts` `SLP_DEV_PLUGIN_ID`, `SLP_DEV_SEAT_GET`) because the plugin compiler
+bundles each plugin on its own — slp has no path to import slp-dev's module. See
+[plugins/slp-dev/README.md](../slp-dev/README.md) for where that text and the skill lists live, how
+they are generated, and how to replace them host-wide. `server/runtime-block.ts` adds the runtime
+facts that depend on the family and on the plugin: message sources, steer, notification limits, the
+Peer spawn call, and the seat's skill list as a closing line.
 
-The plugin compiler bundles `server/` into one evaluated string: at runtime the plugin has no path to
-its own directory, and esbuild has no loader for `.md`. `server/definitions.gen.ts` embeds the files
-instead, and the frontmatter is stripped when the prompt is built. After editing a seat file, run:
+A repository overrides a seat's rule text with `.slp/agents/<seat>.md` in the agent's cwd; the
+plugin never falls back to `.claude/agents/<seat>.md`, which is Claude Code's own subagent
+directory. The override wins the text; the skill list always comes from slp-dev, override or not
+(`readSeatRules`). The alp checkout has no `.slp/agents/` override, so a Lead in an alp workspace
+gets slp-dev's bundled definition.
 
-```bash
-cd plugins/slp && npm run generate
-```
-
-`server/definitions.test.ts` fails when the generated module is stale.
-
-A repository overrides a seat with `.slp/agents/<seat>.md` in the agent's cwd; the plugin never falls
-back to `.claude/agents/<seat>.md`. The alp checkout has no `.slp/agents/` override, so a Lead in an
-alp workspace gets the bundled definition.
+Agent creation waits on slp-dev for at most `SEAT_RULES_TIMEOUT_MS` (5 s). slp-dev unavailable,
+failing, or slower than that leaves the seat with the override's text and no skills, or with the
+runtime block alone and no skills when there is no override either; a warning names which happened
+(`readSeatRules`).
 
 ## Checks
 
