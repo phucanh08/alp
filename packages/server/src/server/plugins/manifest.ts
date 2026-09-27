@@ -27,13 +27,20 @@ const PluginSkillsDirectorySchema = z.string().refine((value) => {
     !normalized.startsWith("../")
   );
 }, "skills must name a directory inside the plugin");
+// The string form means "install: true"; the object form is the only other
+// shape accepted, and only to say "install: false" — a bare { dir } or an
+// explicit install: true object is rejected the way a bad string is.
+const PluginSkillsConfigSchema = z.union([
+  PluginSkillsDirectorySchema,
+  z.object({ dir: PluginSkillsDirectorySchema, install: z.literal(false) }).strict(),
+]);
 const PluginManifestSchema = z
   .object({
     id: PluginIdSchema,
     description: z.string().trim().min(1).optional(),
     requirements: PluginRequirementsSchema.strict().optional(),
     build: z.array(PluginBuildCommandSchema).min(1).optional(),
-    skills: PluginSkillsDirectorySchema.optional(),
+    skills: PluginSkillsConfigSchema.optional(),
   })
   .strict();
 
@@ -50,5 +57,17 @@ export async function readPluginManifest(directory: string): Promise<PluginManif
 
 /** The plugin's skills directory, or null when the manifest declares none. */
 export function resolvePluginSkillsDir(directory: string, manifest: PluginManifest): string | null {
-  return manifest.skills === undefined ? null : path.resolve(directory, manifest.skills);
+  if (manifest.skills === undefined) return null;
+  const dir = typeof manifest.skills === "string" ? manifest.skills : manifest.skills.dir;
+  return path.resolve(directory, dir);
+}
+
+/**
+ * Whether the plugin's skills should ever land in an agent home. `false` only
+ * for the `{ dir, install: false }` form — the names still count as shipped
+ * and managed (see readSkillCatalog's `enabled` source flag), so an existing
+ * copy is still offered for cleanup, but nothing installs it.
+ */
+export function pluginSkillsInstallable(manifest: PluginManifest): boolean {
+  return typeof manifest.skills !== "object";
 }
