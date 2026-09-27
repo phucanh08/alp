@@ -14,62 +14,62 @@ describe("server config", () => {
     await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
   });
 
-  test("records when the daemon is managed by Paseo Desktop", async () => {
-    const paseoHome = await mkdtemp(path.join(os.tmpdir(), "paseo-config-desktop-managed-"));
-    roots.push(paseoHome);
+  test("records when the daemon is managed by Alp Desktop", async () => {
+    const alpHome = await mkdtemp(path.join(os.tmpdir(), "alp-config-desktop-managed-"));
+    roots.push(alpHome);
 
-    const desktopConfig = loadConfig(paseoHome, {
-      env: { PASEO_DESKTOP_MANAGED: "1" },
+    const desktopConfig = loadConfig(alpHome, {
+      env: { ALP_DESKTOP_MANAGED: "1" },
     });
-    const standaloneConfig = loadConfig(paseoHome, { env: {} });
+    const standaloneConfig = loadConfig(alpHome, { env: {} });
 
     expect(desktopConfig.desktopManaged).toBe(true);
     expect(standaloneConfig.desktopManaged).toBe(false);
   });
 
   test("loads the provider catalog refresh timeout", async () => {
-    const paseoHome = await mkdtemp(path.join(os.tmpdir(), "paseo-config-provider-timeout-"));
-    roots.push(paseoHome);
+    const alpHome = await mkdtemp(path.join(os.tmpdir(), "alp-config-provider-timeout-"));
+    roots.push(alpHome);
     await writeFile(
-      path.join(paseoHome, "config.json"),
+      path.join(alpHome, "config.json"),
       JSON.stringify({ agents: { catalogRefreshTimeoutMs: 180_000 } }),
     );
 
-    const config = loadConfig(paseoHome, { env: {} });
+    const config = loadConfig(alpHome, { env: {} });
 
     expect(config.providerCatalogRefreshTimeoutMs).toBe(180_000);
   });
 
   test("resolves reload state from the supplied validated snapshot", async () => {
-    const paseoHome = await mkdtemp(path.join(os.tmpdir(), "paseo-config-snapshot-"));
-    roots.push(paseoHome);
-    const snapshot = loadPersistedConfig(paseoHome);
+    const alpHome = await mkdtemp(path.join(os.tmpdir(), "alp-config-snapshot-"));
+    roots.push(alpHome);
+    const snapshot = loadPersistedConfig(alpHome);
     await writeFile(
-      path.join(paseoHome, "config.json"),
+      path.join(alpHome, "config.json"),
       JSON.stringify({
         ...snapshot,
         daemon: { ...snapshot.daemon, browserTools: { enabled: true } },
       }),
     );
 
-    expect(resolveConfigFromPersisted(paseoHome, snapshot, { env: {} }).browserToolsEnabled).toBe(
+    expect(resolveConfigFromPersisted(alpHome, snapshot, { env: {} }).browserToolsEnabled).toBe(
       false,
     );
-    expect(loadConfig(paseoHome, { env: {} }).browserToolsEnabled).toBe(true);
+    expect(loadConfig(alpHome, { env: {} }).browserToolsEnabled).toBe(true);
   });
 
   test("records mutable and startup launch overrides by persisted leaf", async () => {
-    const paseoHome = await mkdtemp(path.join(os.tmpdir(), "paseo-config-overrides-"));
-    roots.push(paseoHome);
-    const config = loadConfig(paseoHome, {
+    const alpHome = await mkdtemp(path.join(os.tmpdir(), "alp-config-overrides-"));
+    roots.push(alpHome);
+    const config = loadConfig(alpHome, {
       env: {
-        PASEO_LISTEN: "127.0.0.1:7000",
-        PASEO_PASSWORD: "secret",
-        PASEO_RELAY_ENDPOINT: "relay.example.test:443",
-        PASEO_TRUSTED_PROXIES: "true",
-        PASEO_WEB_UI_ENABLED: "true",
-        PASEO_LOG_FILE_PATH: "custom.log",
-        PASEO_VOICE_LLM_PROVIDER: "codex",
+        ALP_LISTEN: "127.0.0.1:7000",
+        ALP_PASSWORD: "secret",
+        ALP_RELAY_ENDPOINT: "relay.example.test:443",
+        ALP_TRUSTED_PROXIES: "true",
+        ALP_WEB_UI_ENABLED: "true",
+        ALP_LOG_FILE_PATH: "custom.log",
+        ALP_VOICE_LLM_PROVIDER: "codex",
       },
       cli: { relayUseTls: false },
     });
@@ -123,7 +123,7 @@ describe("server config", () => {
     },
   ])("classifies speech overrides for $name", ({ providers, expected }) => {
     const config = resolveConfigFromPersisted(
-      "/tmp/paseo-speech-override-classification",
+      "/tmp/alp-speech-override-classification",
       {
         version: 1,
         features: {
@@ -138,9 +138,9 @@ describe("server config", () => {
       {
         env: {
           OPENAI_API_KEY: "test-api-key",
-          PASEO_DICTATION_LOCAL_STT_MODEL: "parakeet-tdt-0.6b-v2-int8",
-          PASEO_VOICE_LOCAL_STT_MODEL: "parakeet-tdt-0.6b-v2-int8",
-          PASEO_VOICE_LOCAL_TTS_MODEL: "kokoro-en-v0_19",
+          ALP_DICTATION_LOCAL_STT_MODEL: "parakeet-tdt-0.6b-v2-int8",
+          ALP_VOICE_LOCAL_STT_MODEL: "parakeet-tdt-0.6b-v2-int8",
+          ALP_VOICE_LOCAL_TTS_MODEL: "kokoro-en-v0_19",
           STT_CONFIDENCE_THRESHOLD: "0.5",
           STT_MODEL: "whisper-1",
           TTS_MODEL: "tts-1",
@@ -164,7 +164,7 @@ describe("server config", () => {
   });
 
   test("resolves bundled web UI path from globally installed compiled modules", async () => {
-    const packageRoot = await mkdtemp(path.join(os.tmpdir(), "paseo-config-compiled-"));
+    const packageRoot = await mkdtemp(path.join(os.tmpdir(), "alp-config-compiled-"));
     roots.push(packageRoot);
     await mkdir(path.join(packageRoot, "dist", "server", "web-ui"), { recursive: true });
 
@@ -176,7 +176,7 @@ describe("server config", () => {
   });
 
   test("resolves packaged desktop web UI path from resources app-dist", async () => {
-    const packageRoot = await mkdtemp(path.join(os.tmpdir(), "paseo-config-packaged-"));
+    const packageRoot = await mkdtemp(path.join(os.tmpdir(), "alp-config-packaged-"));
     roots.push(packageRoot);
     await mkdir(path.join(packageRoot, "app-dist"), { recursive: true });
 
@@ -187,7 +187,7 @@ describe("server config", () => {
             packageRoot,
             "app.asar",
             "node_modules",
-            "@getpaseo",
+            "@alp",
             "server",
             "dist",
             "server",

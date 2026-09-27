@@ -1,4 +1,4 @@
-import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import type { DaemonClient } from "@alp/client/internal/daemon-client";
 
 export type FakeSettingsRead =
   | { status: "ready"; revision: string; values: unknown }
@@ -60,7 +60,7 @@ export function createFakeSlpHost(input: {
     async getPluginCatalog() {
       catalogReads += 1;
       return input.hasSlpPlugin
-        ? [{ id: "slp", requirements: { paseo: ">=0.8.0" }, clientBundle: "slp-client-bundle" }]
+        ? [{ id: "slp", requirements: { alp: ">=0.8.0" }, clientBundle: "slp-client-bundle" }]
         : [];
     },
     observeEvents() {

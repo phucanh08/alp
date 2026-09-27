@@ -3,7 +3,7 @@ import { SEAT_LABEL } from "./seat";
 import { createSupervisorCheck, SUPERVISOR_CHECK_TICK_MS } from "./supervisor-check";
 
 const MINUTE = 60_000;
-const PARENT = "paseo.parent-agent-id";
+const PARENT = "alp.parent-agent-id";
 
 interface FakeAgent {
   id: string;
@@ -44,7 +44,7 @@ const supervisor = (status: string, id = "S1"): FakeAgent => ({
 const sendTo = (callId: string, agentId: string) => ({
   type: "tool_call",
   callId,
-  name: "mcp__paseo__send_agent_prompt",
+  name: "mcp__alp__send_agent_prompt",
   detail: { type: "unknown", input: { agentId, prompt: "SLP-REPORT …" }, output: null },
   status: "completed",
   error: null,

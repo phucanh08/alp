@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { resolvePaseoHome } from "./paths";
+import { resolveAlpHome } from "./paths";
 import type { Seat } from "./seat";
 import { invokeSlpDev, type PluginInvoker, SEAT_RULES_TIMEOUT_MS } from "./seat-rules";
 
@@ -27,13 +27,13 @@ const HASH_FILE = ".content-hash";
 type Env = Readonly<Record<string, string | undefined>>;
 
 /**
- * `$PASEO_HOME/slp/seat-skills`, or null when the daemon environment has no `PASEO_HOME`. Every
+ * `$ALP_HOME/slp/seat-skills`, or null when the daemon environment has no `ALP_HOME`. Every
  * daemon launch path sets it (`daemonLaunchEnvironment`, the dev scripts, the Docker entrypoint),
  * so null means a bare server run; the seats then go without skills rather than guess a home.
  */
 export function seatSkillsRoot(env: Env = process.env, home: string = os.homedir()): string | null {
-  if (!env.PASEO_HOME) return null;
-  return path.join(resolvePaseoHome(env, home), "slp", "seat-skills");
+  if (!env.ALP_HOME) return null;
+  return path.join(resolveAlpHome(env, home), "slp", "seat-skills");
 }
 
 /** Claude plugin name of a seat directory; its skills load as `slp-<seat>:<skill>`. */

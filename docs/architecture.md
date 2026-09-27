@@ -55,7 +55,7 @@ The heart of alp. A Node.js process that:
 All paths are under `packages/server/src/`.
 
 Desktop and CLI import server capabilities through explicit package subpaths such as
-`@getpaseo/server/daemon-control`, `/configuration`, and `/process`. The root export
+`@alp/server/daemon-control`, `/configuration`, and `/process`. The root export
 loads daemon bootstrap eagerly, even when a caller only uses a path or process helper.
 Keep process-management and configuration dependencies independent of bootstrap and
 WebSocket message schemas. Shared configuration schemas belong in protocol leaf modules;
@@ -81,7 +81,7 @@ not retain non-Git directories.
 | `server/directory-sync/`        | Daemon-global latest-state sequences for projects, workspaces, and agents                                                                                                                                     |
 | `server/workspace-labels/`      | Host-local label catalog, assignment mutations, and explicit subscriptions                                                                                                                                    |
 | `server/agent/agent-manager.ts` | Agent lifecycle state machine, timeline tracking, subscriber management                                                                                                                                       |
-| `server/agent/agent-storage.ts` | File-backed JSON persistence at `$PASEO_HOME/agents/`                                                                                                                                                         |
+| `server/agent/agent-storage.ts` | File-backed JSON persistence at `$ALP_HOME/agents/`                                                                                                                                                           |
 | `server/agent/tools/`           | Transport-neutral catalog for workspaces, agents, permissions, and automation                                                                                                                                 |
 | `server/agent/mcp-server.ts`    | Thin MCP adapter that registers the alp tool catalog with the MCP SDK                                                                                                                                         |
 | `server/agent/providers/`       | Provider adapters (see "Agent providers" below)                                                                                                                                                               |
@@ -94,18 +94,18 @@ not retain non-Git directories.
 
 The source of truth for WebSocket messages, binary frame codecs, endpoint parsing,
 agent timeline types, provider config schemas, and other values shared by daemon
-and clients. Server, app, CLI, and `@getpaseo/client` all depend on this package;
+and clients. Server, app, CLI, and `@alp/client` all depend on this package;
 it does not depend on the server.
 
 ### `packages/client` — Daemon client library and SDK facade
 
-Owns the low-level daemon WebSocket driver plus the higher-level `PaseoClient`
+Owns the low-level daemon WebSocket driver plus the higher-level `AlpClient`
 facade. App and CLI may import the low-level driver from
-`@getpaseo/client/internal/daemon-client` during migration, while new SDK-shaped
-code imports from `@getpaseo/client`.
+`@alp/client/internal/daemon-client` during migration, while new SDK-shaped
+code imports from `@alp/client`.
 
-`PaseoApi` is the capability-only boundary over workspaces, agents, terminals, providers, and config.
-`PaseoClient` adds connection lifecycle. App plugin surfaces borrow an API over their selected
+`AlpApi` is the capability-only boundary over workspaces, agents, terminals, providers, and config.
+`AlpClient` adds connection lifecycle. App plugin surfaces borrow an API over their selected
 host's client; plugin subprocesses use the same facade over a host-owned IPC transport. Protocol capability ownership and subscription lifetimes follow
 [the client contract](protocol-compatibility.md#client-capability-ownership).
 
@@ -152,20 +152,20 @@ traffic. Workspace assignments stay on the workspace directory sequence.
 
 ### `packages/cli` — Command-line client
 
-Commander.js CLI with Docker-style commands. Common agent operations are also exposed at the top level (e.g. `paseo ls`, `paseo run`).
+Commander.js CLI with Docker-style commands. Common agent operations are also exposed at the top level (e.g. `alp ls`, `alp run`).
 
-- `paseo agent ls/run/import/attach/logs/stop/delete/send/inspect/wait/archive/reload/update/mode`
-- `paseo daemon start/run/stop/restart/status/reload/config/pair/set-password`
-- `paseo terminal ls/create/capture/send-keys/kill`
-- `paseo script ls/start/stop`
-- `paseo schedule create/ls/inspect/update/pause/resume/run-once/logs/delete`
-- `paseo heartbeat create/update/delete`
-- `paseo project create/ls/rename/delete`
-- `paseo workspace create/ls/rename/archive`
-- `paseo permit allow/deny/ls`
-- `paseo provider ls/models`
-- hidden legacy `paseo worktree create/ls/archive` compatibility alias
-- `paseo speech …`
+- `alp agent ls/run/import/attach/logs/stop/delete/send/inspect/wait/archive/reload/update/mode`
+- `alp daemon start/run/stop/restart/status/reload/config/pair/set-password`
+- `alp terminal ls/create/capture/send-keys/kill`
+- `alp script ls/start/stop`
+- `alp schedule create/ls/inspect/update/pause/resume/run-once/logs/delete`
+- `alp heartbeat create/update/delete`
+- `alp project create/ls/rename/delete`
+- `alp workspace create/ls/rename/archive`
+- `alp permit allow/deny/ls`
+- `alp provider ls/models`
+- hidden legacy `alp worktree create/ls/archive` compatibility alias
+- `alp speech …`
 
 Communicates with the daemon via the same WebSocket protocol as the app.
 
@@ -179,7 +179,7 @@ Enables remote access when the daemon is behind a firewall.
 - Pairing via QR code transfers the daemon's public key to the client
 - New homes keep relay disabled until pairing consent. `DaemonConfigStore` persists the desired state, while the relay runtime starts or stops the outbound transport live; pairing reads that current state instead of a startup snapshot.
 - Optional E2EE capability negotiation preserves application frame kind: text plaintext uses base64 ciphertext text frames, while binary plaintext uses raw ciphertext binary frames; mixed-version peers remain base64-only
-- Self-hosted relays opt into TLS with `daemon.relay.useTls` or `PASEO_RELAY_USE_TLS=true`; the public (client-facing) TLS setting can be overridden independently via `daemon.relay.publicUseTls` or `PASEO_RELAY_PUBLIC_USE_TLS`
+- Self-hosted relays opt into TLS with `daemon.relay.useTls` or `ALP_RELAY_USE_TLS=true`; the public (client-facing) TLS setting can be overridden independently via `daemon.relay.publicUseTls` or `ALP_RELAY_PUBLIC_USE_TLS`
 
 The production relay server lives in [getpaseo/paseo-relay](https://github.com/getpaseo/paseo-relay). It is a distributed Elixir service. The Cloudflare relay implementation in this monorepo is retained as legacy code and is not deployed. <!-- alp-rename-keep -->
 
@@ -202,7 +202,7 @@ The desktop does not manage agent skills. It retains one compatibility reader fo
 `skill-selection.json`, imports that preference into its managed local daemon, then deletes the old
 file after the daemon confirms persistence.
 
-**Multi-window (hybrid land-on model).** `createWindow()` in `main.ts` is reusable: `⌘⇧N`/File→New Window, relaunching the app (`second-instance`), and the sidebar "Open in new window" action each open a fresh `BrowserWindow`. Every window shows the full sidebar — there is no per-window project ownership or filtering. "Land on a project" is delivered by a per-`webContents` `PendingOpenProjectStore`: each window pulls its own pending project path on mount (`paseo:get-pending-open-project`) and runs the normal open-project flow, identical to a CLI `paseo <path>` launch.
+**Multi-window (hybrid land-on model).** `createWindow()` in `main.ts` is reusable: `⌘⇧N`/File→New Window, relaunching the app (`second-instance`), and the sidebar "Open in new window" action each open a fresh `BrowserWindow`. Every window shows the full sidebar — there is no per-window project ownership or filtering. "Land on a project" is delivered by a per-`webContents` `PendingOpenProjectStore`: each window pulls its own pending project path on mount (`alp:get-pending-open-project`) and runs the normal open-project flow, identical to a CLI `alp <path>` launch.
 
 > **Window-state v1 limitation:** only the _first_ window of a session restores and persists saved geometry (size/position/maximized). Windows opened via ⌘⇧N / second-instance / "Open in new window" open at the default size, OS-cascaded, and do not persist — this avoids every window stacking on the same restored bounds and fighting over the single window-state store. Lifting this needs per-window state keys.
 >
@@ -386,7 +386,7 @@ initializing → idle ⇄ running
   client-side dedup; the default fetch page is 200 items.
 - Timeline row `timestamp` values are canonical daemon-owned timestamps. Providers may supply original replay timestamps, but clients must not guess timestamp trust or hide time UI based on local clock heuristics.
 - Events stream to connected clients in real time; correctness is backed by authoritative timeline fetches and paged-to-completion catch-up.
-- Agent state persists to `$PASEO_HOME/agents/{cwd-with-dashes}/{agent-id}.json`. Timeline rows are runtime memory; provider history is the durable transcript authority and resumed agents rebuild from it. That storage path is derived from `cwd`, not from workspace id.
+- Agent state persists to `$ALP_HOME/agents/{cwd-with-dashes}/{agent-id}.json`. Timeline rows are runtime memory; provider history is the durable transcript authority and resumed agents rebuild from it. That storage path is derived from `cwd`, not from workspace id.
 
 ## Right-sidebar boundary: directory-backed vs workspace-owned
 
@@ -443,7 +443,7 @@ All providers:
 - Map tool calls to a normalized `ToolCallDetail` type
 - Expose provider-specific modes (plan, default, full-access)
 
-Providers that can accept native tool definitions should set `supportsNativePaseoTools` and read `launchContext.paseoTools`. The daemon then passes the shared alp tool catalog directly and removes the internal alp MCP server from that provider launch config. Providers that only support MCP continue to receive the same tools through the MCP fallback at `/mcp/agents`.
+Providers that can accept native tool definitions should set `supportsNativeAlpTools` and read `launchContext.alpTools`. The daemon then passes the shared alp tool catalog directly and removes the internal alp MCP server from that provider launch config. Providers that only support MCP continue to receive the same tools through the MCP fallback at `/mcp/agents`.
 
 ## Data flow: running an agent
 
@@ -457,10 +457,10 @@ Providers that can accept native tool definitions should set `supportsNativePase
 
 ## Storage
 
-`$PASEO_HOME` defaults to `~/.alp`. The most important files:
+`$ALP_HOME` defaults to `~/.alp`. The most important files:
 
 ```
-$PASEO_HOME/
+$ALP_HOME/
 ├── agents/{cwd-with-dashes}/{agent-id}.json   # Agent record
 ├── projects/projects.json                      # Project registry
 ├── projects/workspaces.json                    # Workspace registry
@@ -469,16 +469,16 @@ $PASEO_HOME/
 ├── config.json                                 # Daemon config (mutable)
 ├── daemon-keypair.json                         # Daemon identity for relay/E2EE
 ├── push-tokens.json                            # Mobile push tokens
-├── paseo.pid                                   # Supervisor identity and published bound endpoint
+├── alp.pid                                   # Supervisor identity and published bound endpoint
 └── daemon.log                                  # Daemon trace logs (rotated)
 ```
 
-The supervisor alone publishes its ready worker's endpoint in `paseo.pid`, clears it before respawn, and fails if any worker exits before first readiness. CLI home selection trusts only that live record; config expresses desired state, never an endpoint fallback. POSIX home stop signals the captured supervisor without TCP. Windows graceful stop and ordinary RPCs trust the published endpoint. This metadata is not cryptographic listener ownership: edited endpoints, copied identities, PID reuse, and address takeover races remain outside that guarantee. A stale heartbeat never permits reclaiming a live lock.
+The supervisor alone publishes its ready worker's endpoint in `alp.pid`, clears it before respawn, and fails if any worker exits before first readiness. CLI home selection trusts only that live record; config expresses desired state, never an endpoint fallback. POSIX home stop signals the captured supervisor without TCP. Windows graceful stop and ordinary RPCs trust the published endpoint. This metadata is not cryptographic listener ownership: edited endpoints, copied identities, PID reuse, and address takeover races remain outside that guarantee. A stale heartbeat never permits reclaiming a live lock.
 
 Worker restart retains supervisor arguments/environment and rereads the configuration file. Updating a package and observing its new worker version do not refresh the running supervisor code; the launcher owns full-process replacement. See [CLI lifecycle contracts](../public-docs/cli.md#daemon-management).
 
 ## Deployment models
 
-1. **Local daemon** (default): `paseo daemon start` on `127.0.0.1:6767`
+1. **Local daemon** (default): `alp daemon start` on `127.0.0.1:6767`
 2. **Managed desktop**: Electron uses the server package’s local-instance lifecycle capability for sanitized launch, published readiness, and captured-PID stop. Only a matching `{pid, startedAt}` from a spawn in the current Desktop session authorizes automatic stop or binary replacement. Preexisting instances, including legacy `desktopManaged` records, are attach-only. Keep-running survivors attach in the next session. Explicit attached Stop requires a confirmation naming the captured home/PID. Ordinary Restart uses the worker RPC on every app platform.
 3. **Remote + relay**: Daemon behind firewall, relay bridges with E2E encryption

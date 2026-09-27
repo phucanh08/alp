@@ -32,7 +32,7 @@ checkout from `mainRepoRoot`, then restores the relative path from `worktreeRoot
 
 alp uses **file-based JSON persistence** instead of a traditional database. All data is validated at runtime with Zod schemas. Most stores write atomically (write to temp file, then rename); a few still use plain `writeFile` — see each section. There is no schema-versioning/migration framework — schemas rely on optional fields with defaults for forward compatibility, with a small amount of inline normalization in `persisted-config.ts` for legacy provider/speech entries.
 
-All server-side stores live under `$PASEO_HOME` (defaults to `~/.alp`).
+All server-side stores live under `$ALP_HOME` (defaults to `~/.alp`).
 
 ## Store Surface Rules
 
@@ -43,11 +43,11 @@ Store APIs own persistence atomicity and should not make services coordinate raw
 ## Directory layout
 
 ```
-$PASEO_HOME/
+$ALP_HOME/
 ├── config.json                          # Daemon configuration
 ├── server-id                            # Stable daemon identifier (plain text, "srv_<base64url>")
 ├── daemon-keypair.json                  # E2EE keypair for relay (mode 0600)
-├── paseo.pid                            # Daemon PID lock file
+├── alp.pid                            # Daemon PID lock file
 ├── daemon.log                           # Default log file (path configurable)
 ├── agents/
 │   └── {sanitized-cwd}/
@@ -75,7 +75,7 @@ The `agents/{sanitized-cwd}/` directory name is derived from the agent's `cwd` b
 
 ## 1. Agent Record
 
-**Path:** `$PASEO_HOME/agents/{project-dir}/{agentId}.json`
+**Path:** `$ALP_HOME/agents/{project-dir}/{agentId}.json`
 
 Each agent is stored as a separate JSON file, grouped by project directory.
 
@@ -90,7 +90,7 @@ Each agent is stored as a separate JSON file, grouped by project directory.
 | `lastActivityAt`     | `string?` (ISO 8601)                     | Last activity timestamp                                                                                                                                                                                                                                                                                                                                                             |
 | `lastUserMessageAt`  | `string?` (ISO 8601)                     | Last user message timestamp                                                                                                                                                                                                                                                                                                                                                         |
 | `title`              | `string?`                                | User-visible title                                                                                                                                                                                                                                                                                                                                                                  |
-| `labels`             | `Record<string, string>`                 | Key-value labels (default `{}`). alp uses `paseo.parent-agent-id` for parentage and client-scoped `paseo.open-agent-tab.*` labels while managed subagent tabs are open — see [agent-lifecycle.md](./agent-lifecycle.md)                                                                                                                                                             |
+| `labels`             | `Record<string, string>`                 | Key-value labels (default `{}`). alp uses `alp.parent-agent-id` for parentage and client-scoped `alp.open-agent-tab.*` labels while managed subagent tabs are open — see [agent-lifecycle.md](./agent-lifecycle.md)                                                                                                                                                                 |
 | `lastStatus`         | `AgentStatus`                            | One of: `"initializing"`, `"idle"`, `"running"`, `"error"`, `"closed"`. `closed` means the record is resumable but has no live provider runtime; archive remains represented separately by `archivedAt`.                                                                                                                                                                            |
 | `lastModeId`         | `string?`                                | Last active mode ID                                                                                                                                                                                                                                                                                                                                                                 |
 | `config`             | `SerializableConfig?`                    | Agent session configuration (see below)                                                                                                                                                                                                                                                                                                                                             |
@@ -103,7 +103,7 @@ Each agent is stored as a separate JSON file, grouped by project directory.
 | `attentionTimestamp` | `string?` (ISO 8601)                     | When attention was flagged                                                                                                                                                                                                                                                                                                                                                          |
 | `internal`           | `boolean?`                               | Whether this is a system-internal agent                                                                                                                                                                                                                                                                                                                                             |
 | `archivedAt`         | `string?` (ISO 8601)                     | Soft-delete timestamp                                                                                                                                                                                                                                                                                                                                                               |
-| `paseoToolPolicy`    | `ProviderPaseoToolsPolicy?`              | alp tools removed from this agent, frozen at create: provider `paseoTools` merged with `before("agent.create")` cuts. Snapshots never loosen it. Absent on older records, which follow the provider policy. Server-side only. See [plugins.md](./plugins.md#lifecycle-hooks)                                                                                                        |
+| `alpToolPolicy`      | `ProviderAlpToolsPolicy?`                | alp tools removed from this agent, frozen at create: provider `alpTools` merged with `before("agent.create")` cuts. Snapshots never loosen it. Absent on older records, which follow the provider policy. Server-side only. See [plugins.md](./plugins.md#lifecycle-hooks)                                                                                                          |
 
 ### Nested: SerializableConfig
 
@@ -177,7 +177,7 @@ Terminal activity contributes to the workspace status bucket **per `workspaceId`
 
 ## 2. Daemon Configuration
 
-**Path:** `$PASEO_HOME/config.json`
+**Path:** `$ALP_HOME/config.json`
 
 Single file, validated with `PersistedConfigSchema`.
 
@@ -187,7 +187,7 @@ skill directories and keeps config plus filesystem convergence behind one serial
 A custom selection saved before the `paseo*` skills were renamed to `alp*` still holds the old <!-- alp-rename-keep -->
 names on disk; the daemon reads them as the new names and writes the new names on the next save.
 
-`paseo reload` reads and validates this file once inside the daemon. That snapshot drives resolution,
+`alp reload` reads and validates this file once inside the daemon. That snapshot drives resolution,
 classification, application, and reload bookkeeping. `DaemonConfigStore` owns applying runtime-safe
 fields and their removal/default semantics; session handlers and the CLI only relay the structured
 result. Normal config patches persist only the requested fields, so launch overrides and resolved
@@ -214,7 +214,7 @@ snapshot so a mixed edit can apply its live subset and still name the paths that
     baseUrl: string
   },
   worktrees?: {
-    root?: string            // optional root for new worktrees; defaults to $PASEO_HOME/worktrees
+    root?: string            // optional root for new worktrees; defaults to $ALP_HOME/worktrees
     servicePorts?: {         // optional dynamic service port allocation policy
       range?: string         // inclusive range, e.g. "3000-4000"
       portScript?: string    // executable that receives service/workspace context and prints one TCP port
@@ -295,7 +295,7 @@ Each entry may include an alp-tool policy:
       "my-claude": {
         "extends": "claude",
         "label": "My Claude",
-        "paseoTools": {
+        "alpTools": {
           "enabled": true,
           "disabledTools": ["browser_evaluate"]
         }
@@ -305,7 +305,7 @@ Each entry may include an alp-tool policy:
 }
 ```
 
-Absent `paseoTools`, or absent fields within it, means alp tools are enabled and all tools are
+Absent `alpTools`, or absent fields within it, means alp tools are enabled and all tools are
 allowed. `enabled: false` disables the provider's alp catalog; `disabledTools` lists exact tool
 IDs to omit. The policy covers the core and browser catalog, not the voice-only `speak` tool.
 Browser tools also require `daemon.browserTools.enabled` and a connected browser host.
@@ -343,13 +343,13 @@ requests.
 
 Environment variables override `config.json`:
 
-| Environment variable                 | Setting                  |
-| ------------------------------------ | ------------------------ |
-| `PASEO_GIT_MAX_PROCESSES_PER_SECOND` | `maxProcessesPerSecond`  |
-| `PASEO_GIT_MAX_PROCESS_CONCURRENCY`  | `maxProcessConcurrency`  |
-| `PASEO_GIT_CONCURRENCY`              | Legacy concurrency alias |
+| Environment variable               | Setting                  |
+| ---------------------------------- | ------------------------ |
+| `ALP_GIT_MAX_PROCESSES_PER_SECOND` | `maxProcessesPerSecond`  |
+| `ALP_GIT_MAX_PROCESS_CONCURRENCY`  | `maxProcessConcurrency`  |
+| `ALP_GIT_CONCURRENCY`              | Legacy concurrency alias |
 
-`PASEO_GIT_MAX_PROCESS_CONCURRENCY` wins when it and the legacy alias are both set. Run `paseo reload`
+`ALP_GIT_MAX_PROCESS_CONCURRENCY` wins when it and the legacy alias are both set. Run `alp reload`
 after changing `config.json`. Environment changes require a daemon restart; the launch environment
 remains authoritative during reload.
 
@@ -359,11 +359,11 @@ Local speech model ids are intentionally narrow: STT uses `parakeet-tdt-0.6b-v2-
 
 Set these to select OpenAI instead of local speech:
 
-| Env var                        | Applies to                      |
-| ------------------------------ | ------------------------------- |
-| `PASEO_VOICE_STT_PROVIDER`     | Voice mode STT provider         |
-| `PASEO_DICTATION_STT_PROVIDER` | Composer dictation STT provider |
-| `PASEO_VOICE_TTS_PROVIDER`     | Voice mode TTS provider         |
+| Env var                      | Applies to                      |
+| ---------------------------- | ------------------------------- |
+| `ALP_VOICE_STT_PROVIDER`     | Voice mode STT provider         |
+| `ALP_DICTATION_STT_PROVIDER` | Composer dictation STT provider |
+| `ALP_VOICE_TTS_PROVIDER`     | Voice mode TTS provider         |
 
 OpenAI speech can be configured under `providers.openai`. STT and TTS resolve independently, so they can point at different endpoints:
 
@@ -396,7 +396,7 @@ alp uses these paths under the configured OpenAI base URL:
 
 ## 3. Schedule
 
-**Path:** `$PASEO_HOME/schedules/{id}.json`
+**Path:** `$ALP_HOME/schedules/{id}.json`
 
 One file per schedule. ID is 8 hex characters.
 
@@ -444,7 +444,7 @@ One file per schedule. ID is 8 hex characters.
 
 ## 4. Project Registry
 
-**Path:** `$PASEO_HOME/projects/projects.json`
+**Path:** `$ALP_HOME/projects/projects.json`
 
 Array of project records.
 
@@ -479,7 +479,7 @@ workspace together with its owning project.
 
 ## 5. Workspace Registry
 
-**Path:** `$PASEO_HOME/projects/workspaces.json`
+**Path:** `$ALP_HOME/projects/workspaces.json`
 
 Array of workspace records. A workspace is a specific working directory within a project.
 
@@ -494,7 +494,7 @@ Array of workspace records. A workspace is a specific working directory within a
 | `branch`                       | `string \| null`                                             | The current Git branch for git-backed workspaces. Separate from `displayName`/`title`; a background branch refresh never rewrites the name.                                                   |
 | `worktreeRoot`                 | `string \| null`                                             | Backing checkout/worktree root. May differ from `cwd` for exact subprojects and remains persisted after the worktree is deleted so restore can reproduce the placement.                       |
 | `baseBranch`                   | `string \| null`                                             | Comparison base retained across archive and restore. Branch-off creation stores the resolved ref; legacy and PR-checkout records hold a bare name. Null means no recorded base.               |
-| `isPaseoOwnedWorktree`         | `boolean`                                                    | Whether alp owns and may remove/recreate the backing `worktreeRoot`                                                                                                                           |
+| `isAlpOwnedWorktree`           | `boolean`                                                    | Whether alp owns and may remove/recreate the backing `worktreeRoot`                                                                                                                           |
 | `mainRepoRoot`                 | `string \| null`                                             | Main repository root for worktree checkouts, independent of both exact `cwd` and backing `worktreeRoot`                                                                                       |
 | `createdAt`                    | `string` (ISO 8601)                                          |                                                                                                                                                                                               |
 | `updatedAt`                    | `string` (ISO 8601)                                          |                                                                                                                                                                                               |
@@ -508,7 +508,7 @@ Array of workspace records. A workspace is a specific working directory within a
 
 ### Workspace label catalog
 
-**Path:** `$PASEO_HOME/projects/workspace-labels.json`
+**Path:** `$ALP_HOME/projects/workspace-labels.json`
 
 The catalog is shared by every workspace on one host. A definition contains a display name and one
 of the ten identity colour names (`WORKSPACE_LABEL_COLORS` in
@@ -539,7 +539,7 @@ than treating it as valid.
 
 ## 6. Push Token Store
 
-**Path:** `$PASEO_HOME/push-tokens.json`
+**Path:** `$ALP_HOME/push-tokens.json`
 
 ```json
 {
@@ -553,13 +553,13 @@ Simple set of Expo push notification tokens. Loaded with permissive parsing (fil
 
 ## 7. Daemon meta files
 
-These small files are not validated as full Zod schemas but are persisted under `$PASEO_HOME` for daemon identity and runtime coordination.
+These small files are not validated as full Zod schemas but are persisted under `$ALP_HOME` for daemon identity and runtime coordination.
 
 | Path                  | Format                                                         | Notes                                                                             |
 | --------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `server-id`           | Plain text, e.g. `srv_<base64url>`                             | Stable per-`$PASEO_HOME` daemon ID. Overridable via `PASEO_SERVER_ID` env.        |
+| `server-id`           | Plain text, e.g. `srv_<base64url>`                             | Stable per-`$ALP_HOME` daemon ID. Overridable via `ALP_SERVER_ID` env.            |
 | `daemon-keypair.json` | `{ v: 2, publicKeyB64, secretKeyB64 }` (libsodium box keypair) | E2EE relay identity. Written with mode `0600`. Regenerated if file is unreadable. |
-| `paseo.pid`           | JSON `{ pid, startedAt, ... }`                                 | PID lock; prevents two daemons sharing one `$PASEO_HOME`.                         |
+| `alp.pid`             | JSON `{ pid, startedAt, ... }`                                 | PID lock; prevents two daemons sharing one `$ALP_HOME`.                           |
 | `daemon.log`          | Pino log output                                                | Default location; path/rotation configurable via `log.file` in `config.json`.     |
 
 ---
@@ -573,7 +573,7 @@ These live in React Native `AsyncStorage` or browser `IndexedDB`, not on the dae
 Right-sidebar client state splits on whether it is determined by the directory or owned by the workspace (two workspaces can share one `cwd`). The split is enforced by the cache key, so changing a key changes the sharing semantics — see [architecture.md](architecture.md#right-sidebar-boundary-directory-backed-vs-workspace-owned) for the full table.
 
 - **Directory-backed** (shared by same-`cwd` workspaces): keyed by `(serverId, cwd)`. Git status/diff, GitHub PR status, PR timeline, file preview content. These are TanStack Query caches, not persisted stores.
-- **Workspace-owned** (independent per workspace): keyed by `workspaceId`, with `cwd` used only as a fallback when no `workspaceId` is present. Review draft comments (`@paseo:review-draft-store`), diff-mode overrides (in-memory), workspace composer attachments, and file-explorer nav/expand state. The `workspaceId` part of these keys is **opaque** — never parse it back into a path.
+- **Workspace-owned** (independent per workspace): keyed by `workspaceId`, with `cwd` used only as a fallback when no `workspaceId` is present. Review draft comments (`@alp:review-draft-store`), diff-mode overrides (in-memory), workspace composer attachments, and file-explorer nav/expand state. The `workspaceId` part of these keys is **opaque** — never parse it back into a path.
 
 ### Replica row store
 
@@ -597,7 +597,7 @@ source code, prompts, and tool output; encrypted-at-rest storage is a separate s
 
 ### Draft Store
 
-**AsyncStorage key:** `paseo-drafts` (version 2)
+**AsyncStorage key:** `alp-drafts` (version 2)
 
 ```typescript
 {
@@ -613,7 +613,7 @@ source code, prompts, and tool output; encrypted-at-rest storage is a separate s
 
 ### Attachment Store (Web)
 
-**IndexedDB database:** `paseo-attachment-bytes`, object store: `attachments`
+**IndexedDB database:** `alp-attachment-bytes`, object store: `attachments`
 
 Stores binary attachment blobs keyed by attachment ID.
 

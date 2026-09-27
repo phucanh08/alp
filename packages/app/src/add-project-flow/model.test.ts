@@ -89,7 +89,7 @@ describe("Add Project navigation", () => {
   it("restores the GitHub destination query and active parent when reopening a repository", () => {
     const repository = {
       id: "repo-1",
-      nameWithOwner: "getpaseo/paseo",
+      nameWithOwner: "alp/alp",
       cloneUrl: "git@github.com:getpaseo/paseo.git",
       description: null,
       visibility: "public",
@@ -152,36 +152,36 @@ describe("Add Project options", () => {
     expect(buildManualGithubRepositoryChoices("git@github.com:getpaseo/paseo.git")).toEqual([
       expect.objectContaining({
         id: "manual:git@github.com:getpaseo/paseo.git",
-        nameWithOwner: "getpaseo/paseo",
+        nameWithOwner: "alp/alp",
         cloneUrl: "git@github.com:getpaseo/paseo.git",
       }),
     ]);
-    expect(buildManualGithubRepositoryChoices("getpaseo/paseo")).toEqual([
-      expect.objectContaining({ cloneProtocol: "https", cloneUrl: "getpaseo/paseo" }),
-      expect.objectContaining({ cloneProtocol: "ssh", cloneUrl: "getpaseo/paseo" }),
+    expect(buildManualGithubRepositoryChoices("alp/alp")).toEqual([
+      expect.objectContaining({ cloneProtocol: "https", cloneUrl: "alp/alp" }),
+      expect.objectContaining({ cloneProtocol: "ssh", cloneUrl: "alp/alp" }),
     ]);
-    expect(buildManualGithubRepositoryChoices("paseo")).toEqual([]);
+    expect(buildManualGithubRepositoryChoices("alp")).toEqual([]);
   });
 
   it("shows final clone paths while retaining parent paths as values", () => {
     expect(
       buildCloneLocationOptions({
         parents: ["~/dev", "~/workspace"],
-        repositoryName: "paseo",
-        existingPaths: ["~/workspace/paseo"],
+        repositoryName: "alp",
+        existingPaths: ["~/workspace/alp"],
       }),
     ).toEqual([
       {
         id: "~/dev",
         path: "~/dev",
-        displayPath: "~/dev/paseo",
+        displayPath: "~/dev/alp",
         secondaryText: "Parent directory: ~/dev",
         disabled: false,
       },
       {
         id: "~/workspace",
         path: "~/workspace",
-        displayPath: "~/workspace/paseo",
+        displayPath: "~/workspace/alp",
         secondaryText: "Already exists",
         disabled: true,
       },

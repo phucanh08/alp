@@ -189,7 +189,7 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
     router.replace(buildOpenProjectRoute());
   }, [router]);
 
-  const handleOpenPaseoSite = useCallback(() => {
+  const handleOpenAlpSite = useCallback(() => {
     void openExternalUrl("https://alp.anhlp.com");
   }, []);
 
@@ -292,7 +292,7 @@ export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
             <Text style={styles.title}>{t("onboarding.title")}</Text>
             <Text style={styles.subtitle}>{t("onboarding.subtitle")}</Text>
             {isNative ? (
-              <Pressable style={styles.setupLink} onPress={handleOpenPaseoSite}>
+              <Pressable style={styles.setupLink} onPress={handleOpenAlpSite}>
                 <Text style={styles.setupLinkText}>alp.anhlp.com</Text>
                 <ExternalLink size={14} color={theme.colors.accent} />
               </Pressable>

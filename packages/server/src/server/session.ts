@@ -1,11 +1,11 @@
 import { searchTimeline } from "./agent/chat-search/index.js";
 import type { BrowserToolsBroker } from "./browser-tools/broker.js";
-import { BrowserAutomationHostCapabilitySchema } from "@getpaseo/protocol/browser-automation/capabilities";
-import type { SessionEventSubscription } from "@getpaseo/protocol/messages";
+import { BrowserAutomationHostCapabilitySchema } from "@alp/protocol/browser-automation/capabilities";
+import type { SessionEventSubscription } from "@alp/protocol/messages";
 import { relative } from "node:path";
 import { isAbsolute } from "node:path";
 import { CreationService } from "./creation/index.js";
-import type { CreationSnapshot, AgentCreateRequest } from "@getpaseo/protocol/messages";
+import type { CreationSnapshot, AgentCreateRequest } from "@alp/protocol/messages";
 import type { MessageReceipts } from "./message-receipts/index.js";
 import equal from "fast-deep-equal";
 import { SessionDelivery, type OwnedSubscription } from "./session/owned-subscriptions/index.js";
@@ -13,8 +13,8 @@ import { v4 as uuidv4 } from "uuid";
 import { lstat, mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises";
 import { basename, resolve, sep } from "path";
 import { homedir } from "node:os";
-import { CLIENT_CAPS, type ClientCapability } from "@getpaseo/protocol/client-capabilities";
-import { formatPluginSourceReference } from "@getpaseo/protocol/plugin-source-reference";
+import { CLIENT_CAPS, type ClientCapability } from "@alp/protocol/client-capabilities";
+import { formatPluginSourceReference } from "@alp/protocol/plugin-source-reference";
 import {
   serializeAgentStreamEvent,
   type AgentSnapshotPayload,
@@ -38,8 +38,8 @@ import type {
   TerminalWorkspaceContributionChangedEvent,
 } from "../terminal/terminal-manager.js";
 import { TerminalSessionController } from "../terminal/terminal-session-controller.js";
-import type { TerminalActivity } from "@getpaseo/protocol/terminal-activity";
-import type { BinaryFrame } from "@getpaseo/protocol/binary-frames/index";
+import type { TerminalActivity } from "@alp/protocol/terminal-activity";
+import type { BinaryFrame } from "@alp/protocol/binary-frames/index";
 import { CursorError } from "./pagination/cursor.js";
 import { SortablePager, type SortSpec } from "./pagination/sortable-pager.js";
 import { matchesAgentHistoryQuery } from "./agent-history-search.js";
@@ -73,9 +73,9 @@ import {
 import type { DaemonConfigStore } from "./daemon-config-store.js";
 import { loadPersistedConfig } from "./persisted-config.js";
 import { releaseWorkspaceServicePortPlan } from "./workspace-service-port-registry.js";
-import { getErrorMessage, getErrorMessageOr } from "@getpaseo/protocol/error-utils";
-import { getAgentStatusPriority } from "@getpaseo/protocol/agent-state-bucket";
-import { getParentAgentIdFromLabels } from "@getpaseo/protocol/agent-labels";
+import { getErrorMessage, getErrorMessageOr } from "@alp/protocol/error-utils";
+import { getAgentStatusPriority } from "@alp/protocol/agent-state-bucket";
+import { getParentAgentIdFromLabels } from "@alp/protocol/agent-labels";
 import type { WorkspaceGitRuntimeSnapshot, WorkspaceGitService } from "./workspace-git-service.js";
 import type { ProjectUpdate } from "./workspace-reconciliation-service.js";
 import {
@@ -236,19 +236,19 @@ import {
 } from "./workspace-directory.js";
 import { shouldEmitPendingBootstrapUpdate } from "./workspace-bootstrap-dedupe.js";
 import {
-  createPaseoWorktree,
-  type CreatePaseoWorktreeInput,
-  type CreatePaseoWorktreeResult,
-} from "./paseo-worktree-service.js";
+  createAlpWorktree,
+  type CreateAlpWorktreeInput,
+  type CreateAlpWorktreeResult,
+} from "./alp-worktree-service.js";
 import { WorkspaceAutoName } from "./workspace-auto-name.js";
 import {
   buildAgentSessionConfig as buildWorktreeAgentSessionConfig,
-  createPaseoWorktreeWorkflow as createWorktreeWorkflow,
-  type CreatePaseoWorktreeSetupContinuationInput,
-  type CreatePaseoWorktreeWorkflowResult,
-  handleCreatePaseoWorktreeRequest as handleCreateWorktreeRequest,
-  handlePaseoWorktreeArchiveRequest as handleWorktreeArchiveRequest,
-  handlePaseoWorktreeListRequest as handleWorktreeListRequest,
+  createAlpWorktreeWorkflow as createWorktreeWorkflow,
+  type CreateAlpWorktreeSetupContinuationInput,
+  type CreateAlpWorktreeWorkflowResult,
+  handleCreateAlpWorktreeRequest as handleCreateWorktreeRequest,
+  handleAlpWorktreeArchiveRequest as handleWorktreeArchiveRequest,
+  handleAlpWorktreeListRequest as handleWorktreeListRequest,
   handleWorkspaceSetupStatusRequest as handleWorkspaceSetupStatusRequestMessage,
   handleWorkspaceSetupRunRequest as handleWorkspaceSetupRunRequestMessage,
 } from "./worktree-session.js";
@@ -262,7 +262,7 @@ function resolveWorkspaceSetupRuntime(
   return runtime ?? new WorkspaceSetupRuntime();
 }
 import { WorktreeRequestError, toWorktreeWireError } from "./worktree-errors.js";
-import { parseGitRemoteLocation } from "@getpaseo/protocol/git-remote";
+import { parseGitRemoteLocation } from "@alp/protocol/git-remote";
 import {
   createProjectDirectory,
   ProjectDirectoryRequestError,
@@ -449,7 +449,7 @@ export interface SessionOptions {
   logger: pino.Logger;
   downloadTokenStore: DownloadTokenStore;
   pushNotifications: PushNotifications;
-  paseoHome: string;
+  alpHome: string;
   worktreesRoot?: string;
   agentManager: AgentManager;
   agentStorage: AgentStorage;
@@ -473,34 +473,34 @@ export interface SessionOptions {
   pluginRuntime?: {
     before: import("./plugins/lifecycle/index.js").PluginLifecycle["before"];
     emit: import("./plugins/lifecycle/index.js").PluginLifecycle["emit"];
-    listPlugins(): Promise<import("@getpaseo/protocol/messages").PluginListItem[]>;
-    getLogs(pluginId: string): import("@getpaseo/protocol/messages").PluginLogEntry[];
+    listPlugins(): Promise<import("@alp/protocol/messages").PluginListItem[]>;
+    getLogs(pluginId: string): import("@alp/protocol/messages").PluginLogEntry[];
     installDirectory(input: {
       path: string;
       id?: string;
-    }): Promise<import("@getpaseo/protocol/messages").PluginListItem>;
+    }): Promise<import("@alp/protocol/messages").PluginListItem>;
     inspectDirectory(path: string): Promise<{ id: string }>;
     installSource(input: {
       source: string;
       id?: string;
       ref?: string;
-    }): Promise<import("@getpaseo/protocol/messages").PluginListItem>;
+    }): Promise<import("@alp/protocol/messages").PluginListItem>;
     statusSources(
       pluginId?: string,
-    ): Promise<import("@getpaseo/protocol/messages").PluginSourceStatusItem[]>;
+    ): Promise<import("@alp/protocol/messages").PluginSourceStatusItem[]>;
     previewUpdates(input: {
       pluginId?: string;
-      target?: import("@getpaseo/protocol/messages").PluginUpdateSelection;
-    }): Promise<import("@getpaseo/protocol/messages").PluginUpdatePreview[]>;
+      target?: import("@alp/protocol/messages").PluginUpdateSelection;
+    }): Promise<import("@alp/protocol/messages").PluginUpdatePreview[]>;
     applyUpdates(
-      proposals: import("@getpaseo/protocol/messages").PluginUpdateProposal[],
-    ): Promise<import("@getpaseo/protocol/messages").PluginUpdateResult[]>;
+      proposals: import("@alp/protocol/messages").PluginUpdateProposal[],
+    ): Promise<import("@alp/protocol/messages").PluginUpdateResult[]>;
     updateSources(
       pluginId?: string,
-    ): Promise<import("@getpaseo/protocol/messages").PluginSourceUpdateItem[]>;
-    reloadPlugin(pluginId: string): Promise<import("@getpaseo/protocol/messages").PluginListItem>;
-    enablePlugin(pluginId: string): Promise<import("@getpaseo/protocol/messages").PluginListItem>;
-    disablePlugin(pluginId: string): Promise<import("@getpaseo/protocol/messages").PluginListItem>;
+    ): Promise<import("@alp/protocol/messages").PluginSourceUpdateItem[]>;
+    reloadPlugin(pluginId: string): Promise<import("@alp/protocol/messages").PluginListItem>;
+    enablePlugin(pluginId: string): Promise<import("@alp/protocol/messages").PluginListItem>;
+    disablePlugin(pluginId: string): Promise<import("@alp/protocol/messages").PluginListItem>;
     removePlugin(pluginId: string): Promise<void>;
     subscribe(listener: (pluginId: string) => void): () => void;
     subscribeSettings?(listener: (pluginId: string, settingsId: string) => void): () => void;
@@ -705,7 +705,7 @@ export class Session {
     | ((workspace: PersistedWorkspaceRecord) => Promise<void>)
     | null;
   private readonly sessionLogger: pino.Logger;
-  private readonly paseoHome: string;
+  private readonly alpHome: string;
   private readonly projectIcons: ProjectIconReader;
   private readonly worktreesRoot: string | undefined;
   private readonly rewindInitiators = new Map<string, object | undefined>();
@@ -804,7 +804,7 @@ export class Session {
       logger,
       downloadTokenStore,
       pushNotifications,
-      paseoHome,
+      alpHome,
       worktreesRoot,
       agentManager,
       agentStorage,
@@ -859,10 +859,10 @@ export class Session {
     this.onLifecycleIntent = onLifecycleIntent ?? null;
     this.onWorkspaceRecovered = onWorkspaceRecovered ?? null;
     this.pushNotifications = pushNotifications;
-    this.paseoHome = paseoHome;
+    this.alpHome = alpHome;
     this.messageReceipts = options.messageReceipts;
     this.creationService = options.creationService;
-    this.projectIcons = new ProjectIconReader(paseoHome);
+    this.projectIcons = new ProjectIconReader(alpHome);
     this.worktreesRoot = worktreesRoot;
     this.pluginRuntime = pluginRuntime;
     this.orchestrationSkills = orchestrationSkills;
@@ -878,7 +878,7 @@ export class Session {
         hasBinaryChannel: () => this.onBinaryMessage !== null,
       },
       downloadTokenStore,
-      paseoHome,
+      alpHome,
       logger: this.sessionLogger,
     });
     this.agentManager = agentManager;
@@ -906,7 +906,7 @@ export class Session {
       logger: this.sessionLogger,
     });
     this.workspaceRecovery = createWorkspaceRecoveryService({
-      paseoHome: this.paseoHome,
+      alpHome: this.alpHome,
       worktreesRoot: this.worktreesRoot,
       getWorkspace: (workspaceId) => this.workspaceRegistry.get(workspaceId),
       getProject: (projectId) => this.projectRegistry.get(projectId),
@@ -936,7 +936,7 @@ export class Session {
           getFocusedSelection: (cwd) => this.getFocusedAgentSelectionForCwd(cwd),
         }),
       }),
-      paseoHome: this.paseoHome,
+      alpHome: this.alpHome,
       worktreesRoot: this.worktreesRoot,
       logger: this.sessionLogger,
     });
@@ -1022,7 +1022,7 @@ export class Session {
         emitLifecycleIntent: (intent) => this.emitLifecycleIntent(intent),
       },
       clientId: this.clientId,
-      paseoHome: this.paseoHome,
+      alpHome: this.alpHome,
       serverId,
       daemonVersion,
       daemonRuntimeConfig,
@@ -1091,14 +1091,14 @@ export class Session {
       logger: this.sessionLogger,
     });
     this.createAgentLifecycleDispatch = new CreateAgentLifecycleDispatch({
-      paseoHome: this.paseoHome,
+      alpHome: this.alpHome,
       worktreesRoot: this.worktreesRoot,
       agentManager: this.agentManager,
       agentStorage: this.agentStorage,
       github: this.github,
       workspaceGitService: this.workspaceGitService,
-      createPaseoWorktreeWorkflow: (input, workflowOptions) =>
-        this.createPaseoWorktreeWorkflow(input, workflowOptions),
+      createAlpWorktreeWorkflow: (input, workflowOptions) =>
+        this.createAlpWorktreeWorkflow(input, workflowOptions),
       archiveAgentForClose: (agentId) => this.archiveAgentForClose(agentId),
       findWorkspaceIdForCwd: (cwd) => this.findWorkspaceIdForCwd(cwd),
       listActiveWorkspaces: () => this.listActiveWorkspaceRefs(),
@@ -1140,7 +1140,7 @@ export class Session {
       wantsStatusUpdates: () => this.wantsEvent("script_status_update"),
       assertAutomationAllowed: (workspaceId) =>
         assertWorkspaceAutomationAllowedForWorkspace(this.workspaceRegistry, workspaceId),
-      globalServicePorts: loadPersistedConfig(this.paseoHome).worktrees?.servicePorts,
+      globalServicePorts: loadPersistedConfig(this.alpHome).worktrees?.servicePorts,
     });
     this.workspaceDirectory = new WorkspaceDirectory({
       logger: this.sessionLogger,
@@ -2868,12 +2868,12 @@ export class Session {
         return this.handleFetchWorkspacesRequest(msg);
       case "project.list.request":
         return this.handleProjectListRequest(msg);
-      case "paseo_worktree_list_request":
-        return this.handlePaseoWorktreeListRequest(msg);
-      case "paseo_worktree_archive_request":
-        return this.handlePaseoWorktreeArchiveRequest(msg);
-      case "create_paseo_worktree_request":
-        return this.handleCreatePaseoWorktreeRequest(msg);
+      case "alp_worktree_list_request":
+        return this.handleAlpWorktreeListRequest(msg);
+      case "alp_worktree_archive_request":
+        return this.handleAlpWorktreeArchiveRequest(msg);
+      case "create_alp_worktree_request":
+        return this.handleCreateAlpWorktreeRequest(msg);
       // COMPAT(desktopEditorBridge): added in v0.1.88, remove after 2026-12-03 once old clients no longer call daemon editor RPCs.
       case "list_available_editors_request":
         return this.handleLegacyListAvailableEditorsRequest(msg);
@@ -3509,7 +3509,7 @@ export class Session {
     const { projectId, requestId } = request;
     try {
       const updated = await setProjectCustomIcon({
-        paseoHome: this.paseoHome,
+        alpHome: this.alpHome,
         projectId,
         source: request.source,
         projects: this.projectRegistry,
@@ -3598,7 +3598,7 @@ export class Session {
 
         await this.projectRegistry.remove(resolvedProjectId);
         await removeProjectCustomIcon({
-          paseoHome: this.paseoHome,
+          alpHome: this.alpHome,
           projectId: resolvedProjectId,
         }).catch((error) => {
           this.sessionLogger.warn(
@@ -4213,7 +4213,7 @@ export class Session {
       }`,
     );
 
-    let createdWorktreeForCleanup: CreatePaseoWorktreeWorkflowResult | null = null;
+    let createdWorktreeForCleanup: CreateAlpWorktreeWorkflowResult | null = null;
     let createdAgentId: string | null = null;
     try {
       const requestedCwd = resolve(config.cwd);
@@ -4255,7 +4255,7 @@ export class Session {
           agentManager: this.agentManager,
           agentStorage: this.agentStorage,
           logger: this.sessionLogger,
-          paseoHome: this.paseoHome,
+          alpHome: this.alpHome,
           worktreesRoot: this.worktreesRoot,
           providerSnapshotManager: this.providerSnapshotManager,
         },
@@ -4316,7 +4316,7 @@ export class Session {
 
   private async resolveSessionCreateAgentIntent(input: {
     request: CreateAgentRequestMessage;
-    createdWorktree: CreatePaseoWorktreeWorkflowResult | null;
+    createdWorktree: CreateAlpWorktreeWorkflowResult | null;
     workspacePromptTitle: string | null;
   }): Promise<ResolvedSessionCreateAgentIntent> {
     const { request, createdWorktree } = input;
@@ -4755,17 +4755,17 @@ export class Session {
     firstAgentContext?: FirstAgentContext,
   ): Promise<{
     sessionConfig: AgentSessionConfig;
-    setupContinuation?: CreatePaseoWorktreeWorkflowResult["setupContinuation"];
+    setupContinuation?: CreateAlpWorktreeWorkflowResult["setupContinuation"];
     createdWorkspaceId?: string;
   }> {
     return buildWorktreeAgentSessionConfig(
       {
-        paseoHome: this.paseoHome,
+        alpHome: this.alpHome,
         worktreesRoot: this.worktreesRoot,
         sessionLogger: this.sessionLogger,
         workspaceGitService: this.workspaceGitService,
-        createPaseoWorktree: (input, serviceOptions) =>
-          this.createPaseoWorktreeWorkflow(input, {
+        createAlpWorktree: (input, serviceOptions) =>
+          this.createAlpWorktreeWorkflow(input, {
             ...serviceOptions,
             setupContinuation: {
               kind: "agent",
@@ -5078,26 +5078,26 @@ export class Session {
     }
   }
 
-  private async handlePaseoWorktreeListRequest(
-    msg: Extract<SessionInboundMessage, { type: "paseo_worktree_list_request" }>,
+  private async handleAlpWorktreeListRequest(
+    msg: Extract<SessionInboundMessage, { type: "alp_worktree_list_request" }>,
   ): Promise<void> {
     return handleWorktreeListRequest(
       {
         emit: (message) => this.emit(message),
-        paseoHome: this.paseoHome,
+        alpHome: this.alpHome,
         workspaceGitService: this.workspaceGitService,
       },
       msg,
     );
   }
 
-  private async handlePaseoWorktreeArchiveRequest(
-    msg: Extract<SessionInboundMessage, { type: "paseo_worktree_archive_request" }>,
+  private async handleAlpWorktreeArchiveRequest(
+    msg: Extract<SessionInboundMessage, { type: "alp_worktree_archive_request" }>,
   ): Promise<void> {
     return handleWorktreeArchiveRequest(
       {
-        paseoHome: this.paseoHome,
-        paseoWorktreesBaseRoot: this.worktreesRoot,
+        alpHome: this.alpHome,
+        alpWorktreesBaseRoot: this.worktreesRoot,
         github: this.github,
         workspaceGitService: this.workspaceGitService,
         agentManager: this.agentManager,
@@ -5504,7 +5504,7 @@ export class Session {
     }
 
     const worktreeSlug =
-      workspace.isPaseoOwnedWorktree && workspace.worktreeRoot
+      workspace.isAlpOwnedWorktree && workspace.worktreeRoot
         ? basename(workspace.worktreeRoot)
         : undefined;
 
@@ -5549,7 +5549,7 @@ export class Session {
     return {
       currentBranch: snapshot.git.currentBranch,
       remoteUrl: snapshot.git.remoteUrl,
-      isPaseoOwnedWorktree: snapshot.git.isPaseoOwnedWorktree,
+      isAlpOwnedWorktree: snapshot.git.isAlpOwnedWorktree,
       isDirty: snapshot.git.isDirty,
       aheadBehind: snapshot.git.aheadBehind,
       aheadOfOrigin: snapshot.git.aheadOfOrigin,
@@ -5594,7 +5594,7 @@ export class Session {
   }
 
   private async describeCreatedWorktreeWorkspace(
-    result: CreatePaseoWorktreeResult,
+    result: CreateAlpWorktreeResult,
   ): Promise<WorkspaceDescriptorPayload> {
     const projectRecord = await this.projectRegistry.get(result.workspace.projectId);
     return {
@@ -5628,7 +5628,7 @@ export class Session {
       gitRuntime: {
         currentBranch: result.worktree.branchName || null,
         remoteUrl: null,
-        isPaseoOwnedWorktree: true,
+        isAlpOwnedWorktree: true,
         isDirty: false,
         aheadBehind: null,
         aheadOfOrigin: null,
@@ -5826,13 +5826,13 @@ export class Session {
     await this.restoreWorkspaceAndEmit(record.workspaceId);
   }
 
-  private async createPaseoWorktree(
-    input: CreatePaseoWorktreeInput,
+  private async createAlpWorktree(
+    input: CreateAlpWorktreeInput,
     options?: {
       resolveDefaultBranch?: (repoRoot: string) => Promise<string>;
     },
-  ): Promise<CreatePaseoWorktreeResult> {
-    const result = await createPaseoWorktree(input, {
+  ): Promise<CreateAlpWorktreeResult> {
+    const result = await createAlpWorktree(input, {
       github: this.github,
       ...(options?.resolveDefaultBranch
         ? { resolveDefaultBranch: options.resolveDefaultBranch }
@@ -5861,7 +5861,7 @@ export class Session {
         cwd: workspace.cwd,
         kind: workspace.kind,
         worktreeRoot: workspace.worktreeRoot,
-        isPaseoOwnedWorktree: workspace.isPaseoOwnedWorktree,
+        isAlpOwnedWorktree: workspace.isAlpOwnedWorktree,
         mainRepoRoot: workspace.mainRepoRoot,
       }));
   }
@@ -6680,7 +6680,7 @@ export class Session {
 
     const sourceCwd = await resolveWorktreeSourceCwd(source, this.projectRegistry);
 
-    const result = await this.createPaseoWorktreeWorkflow(
+    const result = await this.createAlpWorktreeWorkflow(
       {
         cwd: sourceCwd,
         workspaceId,
@@ -7012,7 +7012,7 @@ export class Session {
         }
       }
 
-      const cloneStagingPath = await mkdtemp(resolve(targetParent, ".paseo-clone-"));
+      const cloneStagingPath = await mkdtemp(resolve(targetParent, ".alp-clone-"));
       try {
         await runGitCommand(["clone", repo.cloneUrl, cloneStagingPath], {
           cwd: targetParent,
@@ -7187,35 +7187,35 @@ export class Session {
     });
   }
 
-  private async handleCreatePaseoWorktreeRequest(
-    request: Extract<SessionInboundMessage, { type: "create_paseo_worktree_request" }>,
+  private async handleCreateAlpWorktreeRequest(
+    request: Extract<SessionInboundMessage, { type: "create_alp_worktree_request" }>,
   ): Promise<void> {
     return handleCreateWorktreeRequest(
       {
-        paseoHome: this.paseoHome,
+        alpHome: this.alpHome,
         worktreesRoot: this.worktreesRoot,
         describeWorkspaceRecord: (result) => this.describeCreatedWorktreeWorkspace(result),
         emit: (message) => this.emit(message),
         sessionLogger: this.sessionLogger,
-        createPaseoWorktreeWorkflow: (input) => this.createPaseoWorktreeWorkflow(input),
+        createAlpWorktreeWorkflow: (input) => this.createAlpWorktreeWorkflow(input),
       },
       request,
     );
   }
 
-  private async createPaseoWorktreeWorkflow(
-    input: CreatePaseoWorktreeInput,
+  private async createAlpWorktreeWorkflow(
+    input: CreateAlpWorktreeInput,
     options?: {
       resolveDefaultBranch?: (repoRoot: string) => Promise<string>;
-      setupContinuation?: CreatePaseoWorktreeSetupContinuationInput;
+      setupContinuation?: CreateAlpWorktreeSetupContinuationInput;
     },
-  ): Promise<CreatePaseoWorktreeWorkflowResult> {
+  ): Promise<CreateAlpWorktreeWorkflowResult> {
     return createWorktreeWorkflow(
       {
-        paseoHome: this.paseoHome,
+        alpHome: this.alpHome,
         worktreesRoot: this.worktreesRoot,
-        createPaseoWorktree: (workflowInput, serviceOptions) =>
-          this.createPaseoWorktree(workflowInput, serviceOptions),
+        createAlpWorktree: (workflowInput, serviceOptions) =>
+          this.createAlpWorktree(workflowInput, serviceOptions),
         warmWorkspaceGitData: (workspace) => this.warmWorkspaceGitDataForWorkspace(workspace),
         autoNameWorkspaceBranchForFirstAgent: (autoNameInput) =>
           this.workspaceAutoName.scheduleForWorktree(autoNameInput, {
@@ -7271,7 +7271,7 @@ export class Session {
           clearWorkspaceAutomationBlock(this.workspaceRegistry, workspaceId),
         startWorkspaceSetup: (workspaceId, operation) =>
           this.workspaceSetupRuntime.start(workspaceId, operation),
-        paseoHome: this.paseoHome,
+        alpHome: this.alpHome,
         worktreesRoot: this.worktreesRoot,
         emitWorkspaceUpdateForWorkspaceId: (workspaceId) =>
           this.emitWorkspaceUpdateForWorkspaceId(workspaceId),
@@ -7304,8 +7304,8 @@ export class Session {
 
       await archiveByScope(
         {
-          paseoHome: this.paseoHome,
-          paseoWorktreesBaseRoot: this.worktreesRoot,
+          alpHome: this.alpHome,
+          alpWorktreesBaseRoot: this.worktreesRoot,
           github: this.github,
           workspaceGitService: this.workspaceGitService,
           agentManager: this.agentManager,

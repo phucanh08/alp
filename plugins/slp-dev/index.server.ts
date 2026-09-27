@@ -1,4 +1,4 @@
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext } from "@alp/plugin/server";
 import { SEATS } from "./server/seats.gen";
 import { SKILLS } from "./server/skills.gen";
 import { slpDevSeatGet, slpDevSkillsGet } from "./shared/rpc";

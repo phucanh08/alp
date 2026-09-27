@@ -12,11 +12,11 @@ export interface HubDeployTrigger {
 export async function discoverHubTriggers(cwd: string): Promise<HubDeployTrigger[]> {
   const root = path.resolve(cwd);
   const directory = path.join(root, TRIGGER_DIRECTORY);
-  const paseoDirectory = await readStats(path.join(root, ".paseo"), {
+  const alpDirectory = await readStats(path.join(root, ".paseo"), {
     code: "HUB_TRIGGER_DIRECTORY_MISSING",
     message: `${TRIGGER_DIRECTORY} does not exist. Run this command from the project root.`,
   });
-  if (paseoDirectory.isSymbolicLink()) throw unsafeTriggerPath(TRIGGER_DIRECTORY);
+  if (alpDirectory.isSymbolicLink()) throw unsafeTriggerPath(TRIGGER_DIRECTORY);
   const directoryStats = await readTriggerDirectoryStats(root, directory);
   if (directoryStats.isSymbolicLink()) throw unsafeTriggerPath(TRIGGER_DIRECTORY);
   if (!directoryStats.isDirectory()) {

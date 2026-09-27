@@ -42,7 +42,7 @@ const ANDROID_RELEASE_CACHE_KEY = "github-android-release:alp-v1";
 
 /** The fork's android-apk-release workflow still uploads the APK under this name. */
 function androidApkAssetName(tag: string): string {
-  return `paseo-${tag}-android.apk`;
+  return `alp-${tag}-android.apk`;
 }
 
 function hasRequiredAssets(release: GitHubRelease): boolean {

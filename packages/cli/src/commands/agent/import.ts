@@ -3,7 +3,7 @@ import { connectToDaemon } from "../../utils/client.js";
 import { collectMultiple } from "../../utils/command-options.js";
 import type { CommandError, CommandOptions, SingleResult } from "../../output/index.js";
 import { agentRunSchema, type AgentRunResult } from "./run.js";
-import type { AgentSnapshotPayload } from "@getpaseo/protocol/messages";
+import type { AgentSnapshotPayload } from "@alp/protocol/messages";
 
 export function addImportOptions(cmd: Command): Command {
   return cmd

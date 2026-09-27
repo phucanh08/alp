@@ -73,9 +73,9 @@ Existing direct providers: `claude` (in `providers/claude/agent.ts`), `codex` (`
 
 Claude first-party model metadata lives in `packages/server/src/server/agent/providers/claude/model-manifest.ts`. When adding or updating a Claude model, update that manifest only; the model picker thinking options and Claude-specific feature gates are derived from the manifest. Do not add model-specific Claude capability lists in feature code.
 
-alp tools are not implemented as MCP tools internally. They live in a shared tool catalog under `packages/server/src/server/agent/tools/`; MCP is only the fallback adapter. The daemon resolves `agents.providers.<provider>.paseoTools` by the exact provider ID. The catalog policy belongs to the caller: it filters the tools exposed to the current agent. When that agent calls `create_agent`, the child receives the policy for the child provider ID; the caller's policy is not inherited.
+alp tools are not implemented as MCP tools internally. They live in a shared tool catalog under `packages/server/src/server/agent/tools/`; MCP is only the fallback adapter. The daemon resolves `agents.providers.<provider>.alpTools` by the exact provider ID. The catalog policy belongs to the caller: it filters the tools exposed to the current agent. When that agent calls `create_agent`, the child receives the policy for the child provider ID; the caller's policy is not inherited.
 
-A provider that can register runtime tools directly should set `supportsNativePaseoTools: true` and consume the already-filtered `launchContext.paseoTools` in `createSession`/`resumeSession`. When native tools are present, `AgentManager` strips the internal alp MCP server from the provider launch config so the provider does not receive the same tools twice. Providers that only know MCP should keep `supportsMcpServers: true` and let the daemon inject `/mcp/agents`; the MCP server builds the same policy-filtered catalog for that caller. Filtering is enforced at catalog registration in both paths. Browser tools remain subject to the daemon browser-tools setting and browser-host availability.
+A provider that can register runtime tools directly should set `supportsNativeAlpTools: true` and consume the already-filtered `launchContext.alpTools` in `createSession`/`resumeSession`. When native tools are present, `AgentManager` strips the internal alp MCP server from the provider launch config so the provider does not receive the same tools twice. Providers that only know MCP should keep `supportsMcpServers: true` and let the daemon inject `/mcp/agents`; the MCP server builds the same policy-filtered catalog for that caller. Filtering is enforced at catalog registration in both paths. Browser tools remain subject to the daemon browser-tools setting and browser-host availability.
 
 Pi is a process-backed provider. alp requires the user to have the `pi` binary installed and talks to it through `pi --mode rpc`; the server package does not embed Pi's SDK/runtime packages.
 
@@ -542,16 +542,16 @@ Start the daemon if not already running, then:
 
 ```bash
 # Launch an agent with your provider
-paseo run --provider my-provider
+alp run --provider my-provider
 
 # Launch with a specific model and mode
-paseo run --provider my-provider --model some-model --mode default
+alp run --provider my-provider --model some-model --mode default
 
 # List running agents
-paseo ls -a -g
+alp ls -a -g
 
 # Check if the provider reports models
-paseo models --provider my-provider
+alp models --provider my-provider
 ```
 
 ### E2E test patterns

@@ -18,7 +18,7 @@ import {
   type GitActions,
 } from "@/git/policy";
 import { deriveMergeCapability } from "@/git/merge-capability";
-import type { CheckoutPrMergeMethod } from "@getpaseo/protocol/messages";
+import type { CheckoutPrMergeMethod } from "@alp/protocol/messages";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { useToast } from "@/contexts/toast-context";
 import { useSessionStore, type WorkspaceDescriptor } from "@/stores/session-store";
@@ -127,7 +127,7 @@ interface DerivedGitActionsState {
   behindOfOrigin: number | null;
   hasPullRequest: boolean;
   hasRemote: boolean;
-  isPaseoOwnedWorktree: boolean;
+  isAlpOwnedWorktree: boolean;
   isOnBaseBranch: boolean;
   shouldPromoteArchive: boolean;
 }
@@ -170,14 +170,14 @@ function deriveGitActionsState(args: DeriveGitActionsStateArgs): DerivedGitActio
     baseRefLabel,
   } = args;
   const actionsDisabled = !isGit || Boolean(status?.error) || isStatusLoading;
-  const isPaseoOwnedWorktree = gitStatus?.isPaseoOwnedWorktree ?? false;
+  const isAlpOwnedWorktree = gitStatus?.isAlpOwnedWorktree ?? false;
   const isMergedPullRequest = Boolean(prStatus?.isMerged);
   return {
     actionsDisabled,
     ...extractGitCommitCounts(gitStatus),
     hasPullRequest: Boolean(prStatus?.url),
     hasRemote: gitStatus?.hasRemote ?? false,
-    isPaseoOwnedWorktree,
+    isAlpOwnedWorktree,
     isOnBaseBranch: gitStatus?.currentBranch === baseRefLabel,
     shouldPromoteArchive: computeShouldPromoteArchive({
       hasUncommittedChanges,
@@ -353,7 +353,7 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
     if (!gitStatus?.repoRoot) {
       return null;
     }
-    return `@paseo:changes-ship-default:${gitStatus.repoRoot}`;
+    return `@alp:changes-ship-default:${gitStatus.repoRoot}`;
   }, [gitStatus?.repoRoot]);
 
   useEffect(() => {
@@ -663,7 +663,7 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
     behindOfOrigin,
     hasPullRequest,
     hasRemote,
-    isPaseoOwnedWorktree,
+    isAlpOwnedWorktree,
     isOnBaseBranch,
     shouldPromoteArchive,
   } = derived;
@@ -693,7 +693,7 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
       pullRequestMergeable: prStatus?.mergeable ?? "UNKNOWN",
       mergeCapability: deriveMergeCapability(prStatus?.forgeSpecific, prStatus?.github),
       hasRemote,
-      isPaseoOwnedWorktree,
+      isAlpOwnedWorktree,
       isOnBaseBranch,
       hasUncommittedChanges,
       baseRefAvailable: Boolean(baseRef),
@@ -810,7 +810,7 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
     prStatus?.github,
     aheadCount,
     behindBaseCount,
-    isPaseoOwnedWorktree,
+    isAlpOwnedWorktree,
     isOnBaseBranch,
     githubFeaturesEnabled,
     forge,

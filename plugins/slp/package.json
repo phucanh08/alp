@@ -4,7 +4,7 @@
   "private": true,
   "description": "alp bundled plugin: SLP seat rules, Lead per workspace, one Supervisor per host",
   "files": [
-    "paseo-plugin.json",
+    "alp-plugin.json",
     "index.client.tsx",
     "index.server.ts",
     "client/",

@@ -50,8 +50,8 @@ function openDocs(): void {
   void openExternalUrl(DOCS_URL);
 }
 
-const WEB_SPLASH_SHIMMER_KEYFRAME_ID = "paseo-splash-shimmer-keyframes";
-const WEB_SPLASH_SHIMMER_ANIMATION_NAME = "paseo-splash-shimmer";
+const WEB_SPLASH_SHIMMER_KEYFRAME_ID = "alp-splash-shimmer-keyframes";
+const WEB_SPLASH_SHIMMER_ANIMATION_NAME = "alp-splash-shimmer";
 
 const WEB_SPLASH_SHIMMER_KEYFRAME_CSS = `
   @keyframes ${WEB_SPLASH_SHIMMER_ANIMATION_NAME} {

@@ -22,7 +22,7 @@ async function launch(
     rerun?: boolean;
   } = {},
 ) {
-  const root = mkdtempSync(join(tmpdir(), "paseo-launcher-"));
+  const root = mkdtempSync(join(tmpdir(), "alp-launcher-"));
   try {
     const app = join(root, "app with spaces");
     const commands = join(root, "commands");
@@ -57,7 +57,7 @@ async function launch(
         FORCE_COLOR: undefined,
         PATH: `${commands}:${process.env.PATH}`,
         APPIMAGE: "/tmp/alp-x86_64.AppImage",
-        PASEO_DESKTOP_SMOKE: "0",
+        ALP_DESKTOP_SMOKE: "0",
         ...options.env,
       },
     });
@@ -116,8 +116,8 @@ it("does not depend on APPIMAGE being present for an extracted portable app", as
 it("applies a debugging environment sandbox override before Chromium starts", async () => {
   const result = await launch({
     namespaces: true,
-    env: { PASEO_ELECTRON_FLAGS: "--disable-gpu\t--no-sandbox" },
+    env: { ALP_ELECTRON_FLAGS: "--disable-gpu\t--no-sandbox" },
   });
   expect(result.args).toEqual(["--no-sandbox", ...result.input]);
-  expect(result.stderr).toContain("requested by PASEO_ELECTRON_FLAGS");
+  expect(result.stderr).toContain("requested by ALP_ELECTRON_FLAGS");
 });

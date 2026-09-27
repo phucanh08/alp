@@ -19,7 +19,7 @@ Start from the old shape:
 
 ```text
 my-plugin/
-  paseo-plugin.json
+  alp-plugin.json
   package.json
   tsconfig.json
   index.ts
@@ -32,7 +32,7 @@ The finished shape is:
 
 ```text
 my-plugin/
-  paseo-plugin.json
+  alp-plugin.json
   package.json
   tsconfig.json
   index.client.tsx
@@ -55,7 +55,7 @@ Apply these rules exactly:
 4. Move every `name.shared.ts` or `name.shared.tsx` to `shared/name.ts` or `shared/name.tsx`.
 5. Preserve nested feature directories under the matching runtime directory.
 6. Update relative imports after every move.
-7. Keep `paseo-plugin.json`, `package.json`, and `tsconfig.json` at the root.
+7. Keep `alp-plugin.json`, `package.json`, and `tsconfig.json` at the root.
 8. Delete the old root entry. alp does not load it.
 
 The directories are the compiler boundaries. A file beneath `client/` compiles only into the app
@@ -67,32 +67,32 @@ is a compile error.
 
 Use this table as the complete registration checklist.
 
-| Old registration and location                                                                 | New registration and location                                                                                |
-| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `plugin.handle(contract, handler)` in the old root entry                                      | `server.handle(contract, handler)` in `index.server.ts`                                                      |
-| `plugin.addSurface(id, Component)` in the old root entry                                      | `client.addSurface(id, Component)` in `index.client.tsx`                                                     |
-| `plugin.addSidebarItem(item)` in the old root entry                                           | `client.addSidebarItem(item)` in `index.client.tsx`                                                          |
-| `plugin.addWorkspacePanel(panel)` in the old root entry                                       | `client.addWorkspacePanel(panel)` in `index.client.tsx`                                                      |
-| `plugin.addCommandCenterItem(item)` in the old root entry                                     | `client.addCommandCenterItem(item)` in `index.client.tsx`                                                    |
-| `plugin.addClientSlashCommand(command)` in the old root entry                                 | `client.addSlashCommand(command)` in `index.client.tsx`                                                      |
-| `plugin.addClientSide(fn)` in the old root entry                                              | Delete the wrapper and move the body of `fn` into the default client entry function                          |
-| `client.addComposerPill(pill)` inside the old client callback                                 | `client.addComposerPill(pill)` inside `index.client.tsx` or an imported `client/` function                   |
-| New header contribution                                                                       | `client.addHeaderButton({ id, workspaceId, button })`                                                        |
-| `plugin.addAttachmentSource(source)` in the old root entry                                    | `client.addAttachmentSource(source)` in `index.client.tsx`                                                   |
-| New settings screen contribution                                                              | `client.addSettingsScreen(screen)` in `index.client.tsx`; see [settings screens](reference#settings-screens) |
-| `plugin.addTheme(theme)` in the old root entry                                                | `client.addTheme(theme)` in `index.client.tsx`                                                               |
-| `plugin.addTimelineTransformer(transformer)` in the old root entry                            | `client.addTimelineTransformer(transformer)` in `index.client.tsx`                                           |
-| `plugin.addTimelineRenderer(renderer)` in the old root entry                                  | `client.addTimelineRenderer(renderer)` in `index.client.tsx`                                                 |
-| `import { defineRpc, defineAttachmentSource } from "@getpaseo/plugin/server"` in shared files | `import { defineRpc, defineAttachmentSource } from "@getpaseo/plugin"`                                       |
-| `ZodOutput<typeof contract.input>` handler parameter types                                    | `RpcInput<typeof contract>` from `@getpaseo/plugin`; `RpcOutput` for return types                            |
+| Old registration and location                                                            | New registration and location                                                                                |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `plugin.handle(contract, handler)` in the old root entry                                 | `server.handle(contract, handler)` in `index.server.ts`                                                      |
+| `plugin.addSurface(id, Component)` in the old root entry                                 | `client.addSurface(id, Component)` in `index.client.tsx`                                                     |
+| `plugin.addSidebarItem(item)` in the old root entry                                      | `client.addSidebarItem(item)` in `index.client.tsx`                                                          |
+| `plugin.addWorkspacePanel(panel)` in the old root entry                                  | `client.addWorkspacePanel(panel)` in `index.client.tsx`                                                      |
+| `plugin.addCommandCenterItem(item)` in the old root entry                                | `client.addCommandCenterItem(item)` in `index.client.tsx`                                                    |
+| `plugin.addClientSlashCommand(command)` in the old root entry                            | `client.addSlashCommand(command)` in `index.client.tsx`                                                      |
+| `plugin.addClientSide(fn)` in the old root entry                                         | Delete the wrapper and move the body of `fn` into the default client entry function                          |
+| `client.addComposerPill(pill)` inside the old client callback                            | `client.addComposerPill(pill)` inside `index.client.tsx` or an imported `client/` function                   |
+| New header contribution                                                                  | `client.addHeaderButton({ id, workspaceId, button })`                                                        |
+| `plugin.addAttachmentSource(source)` in the old root entry                               | `client.addAttachmentSource(source)` in `index.client.tsx`                                                   |
+| New settings screen contribution                                                         | `client.addSettingsScreen(screen)` in `index.client.tsx`; see [settings screens](reference#settings-screens) |
+| `plugin.addTheme(theme)` in the old root entry                                           | `client.addTheme(theme)` in `index.client.tsx`                                                               |
+| `plugin.addTimelineTransformer(transformer)` in the old root entry                       | `client.addTimelineTransformer(transformer)` in `index.client.tsx`                                           |
+| `plugin.addTimelineRenderer(renderer)` in the old root entry                             | `client.addTimelineRenderer(renderer)` in `index.client.tsx`                                                 |
+| `import { defineRpc, defineAttachmentSource } from "@alp/plugin/server"` in shared files | `import { defineRpc, defineAttachmentSource } from "@alp/plugin"`                                            |
+| `ZodOutput<typeof contract.input>` handler parameter types                               | `RpcInput<typeof contract>` from `@alp/plugin`; `RpcOutput` for return types                                 |
 
-Import `PluginClientContext` from `@getpaseo/plugin/client` and `PluginServerContext` from
-`@getpaseo/plugin/server`. Remove imports of the old context type. Client registrations return idempotent removal functions, except header buttons and composer pills, which return `{ update, remove }` handles. Preserve any remover the plugin calls before teardown; alp removes outstanding
+Import `PluginClientContext` from `@alp/plugin/client` and `PluginServerContext` from
+`@alp/plugin/server`. Remove imports of the old context type. Client registrations return idempotent removal functions, except header buttons and composer pills, which return `{ update, remove }` handles. Preserve any remover the plugin calls before teardown; alp removes outstanding
 registrations after the entry cleanup runs.
 
 ### Composer pills
 
-Update the plugin project's `@getpaseo/plugin` dependency, then run `npm run typecheck`.
+Update the plugin project's `@alp/plugin` dependency, then run `npm run typecheck`.
 The old contribution is missing the required `button` field, `PluginComposerPillProps` is no longer
 exported, and calling the new registration as a function is a TypeScript error. A project pinned
 to the old SDK still checks against the old contract; installing or reloading a plugin does not
@@ -126,23 +126,23 @@ show chevrons. See [buttons](./reference.md#button-descriptor) for menus, popove
 
 ## 4. Separate imports
 
-Move hooks (`usePaseo`, `useRpc`, `useSettings`, `useAgent`, `useWorkspace`) and client contribution
-types from `@getpaseo/plugin` to `@getpaseo/plugin/client`. Move `Icon` to
-`@getpaseo/plugin/client/react-native`. Import server contexts and lifecycle contracts from
-`@getpaseo/plugin/server`. Shared helpers (`defineRpc`, `defineSettings`, `defineAttachmentSource`),
+Move hooks (`useAlp`, `useRpc`, `useSettings`, `useAgent`, `useWorkspace`) and client contribution
+types from `@alp/plugin` to `@alp/plugin/client`. Move `Icon` to
+`@alp/plugin/client/react-native`. Import server contexts and lifecycle contracts from
+`@alp/plugin/server`. Shared helpers (`defineRpc`, `defineSettings`, `defineAttachmentSource`),
 schemas, and plain data types stay on the root. These rules include type imports. See
 [Runtime modules](reference#runtime-modules) for the complete contract.
 
 Move the remaining SDK subpaths under their runtime owner:
 
-| Old entry                       | 0.8 entry                              |
-| ------------------------------- | -------------------------------------- |
-| `@getpaseo/plugin/react-native` | `@getpaseo/plugin/client/react-native` |
-| `@getpaseo/plugin/ui`           | `@getpaseo/plugin/client/ui`           |
-| `@getpaseo/plugin/provider`     | `@getpaseo/plugin/server/provider`     |
-| `@getpaseo/plugin/acp`          | `@getpaseo/plugin/server/acp`          |
+| Old entry                  | 0.8 entry                         |
+| -------------------------- | --------------------------------- |
+| `@alp/plugin/react-native` | `@alp/plugin/client/react-native` |
+| `@alp/plugin/ui`           | `@alp/plugin/client/ui`           |
+| `@alp/plugin/provider`     | `@alp/plugin/server/provider`     |
+| `@alp/plugin/acp`          | `@alp/plugin/server/acp`          |
 
-The old entries and the pre-0.8 `@paseo/plugin` scope are removed. `/client/host` is private to
+The old entries and the pre-0.8 `@alp/plugin` scope are removed. `/client/host` is private to
 alp's app integration and is never a plugin-author import.
 
 The client entry imports only `client/`, `shared/`, and client-safe packages. The server entry imports
@@ -154,7 +154,7 @@ its registration; that registration belongs in the client entry.
 
 | Compiler or load error                                                                                                     | Meaning and fix                                                                                                           |
 | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `This plugin has no requirements.paseo`                                                                                    | Complete the migration and declare the range in step 7.                                                                   |
+| `This plugin has no requirements.alp`                                                                                      | Complete the migration and declare the range in step 7.                                                                   |
 | `This plugin was made for an older version of alp`                                                                         | The directory still has only the old root entry. Create a runtime entry, move registrations, then delete the old file.    |
 | `Plugin entry points are missing: expected index.client.ts or index.client.tsx and/or index.server.ts or index.server.tsx` | No supported entry exists. Add at least one exact filename.                                                               |
 | `server-only module cannot be imported into the plugin client bundle: <file>`                                              | A client import reaches `server/`. Move the call behind an RPC and import its contract from `shared/`.                    |
@@ -179,7 +179,7 @@ local-plugin/
 
 ```ts
 // index.ts
-import type { PluginContext } from "@getpaseo/plugin";
+import type { PluginContext } from "@alp/plugin";
 import { contributeClient, ExamplePanel } from "./main.client";
 import { increment } from "./increment.server";
 import { incrementRpc } from "./increment.shared";
@@ -221,7 +221,7 @@ local-plugin/
 
 ```tsx
 // index.client.tsx
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext } from "@alp/plugin/client";
 import { contributeClient, ExamplePanel } from "./client/main";
 
 export default function contribute(client: PluginClientContext) {
@@ -248,7 +248,7 @@ export default function contribute(client: PluginClientContext) {
 
 ```ts
 // index.server.ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext } from "@alp/plugin/server";
 import { increment } from "./server/increment";
 import { incrementRpc } from "./shared/increment";
 
@@ -276,18 +276,18 @@ pills or subscriptions keeps that code; only the wrapper goes away.
 
 ## 7. Declare the alp requirement
 
-After migrating the entries and imports, add the minimum runtime version to `paseo-plugin.json`:
+After migrating the entries and imports, add the minimum runtime version to `alp-plugin.json`:
 
 ```json
 {
   "id": "my-plugin",
-  "requirements": { "paseo": ">=0.8.0" }
+  "requirements": { "alp": ">=0.8.0" }
 }
 ```
 
-Keep your existing ID and build commands. Missing `requirements.paseo` means `<0.8.0`, so alp 0.8 and later
+Keep your existing ID and build commands. Missing `requirements.alp` means `<0.8.0`, so alp 0.8 and later
 reject the plugin even if its files have been moved. Adding the field alone does not migrate the
-code. Update the local `@getpaseo/plugin` development dependency to the version you target and
+code. Update the local `@alp/plugin` development dependency to the version you target and
 reinstall dependencies before typechecking.
 
 See [requirements](reference#requirements) for range and prerelease semantics.

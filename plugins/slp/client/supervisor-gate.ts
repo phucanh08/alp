@@ -1,10 +1,10 @@
-import { settingsRpc, type RpcOutput } from "@getpaseo/plugin";
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import { settingsRpc, type RpcOutput } from "@alp/plugin";
+import type { PluginClientContext } from "@alp/plugin/client";
 import { slpSettings } from "../shared/settings";
 
 // Bundled plugin code types the host API through the plugin SDK only: the packaged app ships no
-// `@getpaseo/client` declarations, and the plugin compiler cannot resolve a type import it can't find.
-type PaseoApi = PluginClientContext["paseo"];
+// `@alp/client` declarations, and the plugin compiler cannot resolve a type import it can't find.
+type AlpApi = PluginClientContext["alp"];
 
 export const slpSettingsRpc = settingsRpc(slpSettings.id);
 
@@ -30,12 +30,12 @@ export function isSlpEnabled(result: SlpSettingsRead): boolean {
  * so the entry falls back to a load-time read.
  */
 export function watchSlpSettings(
-  paseo: Pick<PaseoApi, "observeEvents">,
+  alp: Pick<AlpApi, "observeEvents">,
   refresh: () => void,
 ): () => void {
-  let observation: ReturnType<PaseoApi["observeEvents"]>;
+  let observation: ReturnType<AlpApi["observeEvents"]>;
   try {
-    observation = paseo.observeEvents(["status.plugin_settings_changed"]);
+    observation = alp.observeEvents(["status.plugin_settings_changed"]);
   } catch {
     refresh();
     return () => undefined;

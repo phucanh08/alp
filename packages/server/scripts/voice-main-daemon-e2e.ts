@@ -127,8 +127,8 @@ async function runVoiceRoundTrip(params: {
 }
 
 async function main(): Promise<void> {
-  const daemonUrl = process.env.PASEO_DAEMON_URL ?? "ws://localhost:6767".replace(/^ws/, "http");
-  const timeoutMs = Number(process.env.PASEO_VOICE_E2E_TIMEOUT_MS ?? "120000");
+  const daemonUrl = process.env.ALP_DAEMON_URL ?? "ws://localhost:6767".replace(/^ws/, "http");
+  const timeoutMs = Number(process.env.ALP_VOICE_E2E_TIMEOUT_MS ?? "120000");
   const voiceAgentId = randomUUID();
 
   const newAgentResult = await runVoiceRoundTrip({

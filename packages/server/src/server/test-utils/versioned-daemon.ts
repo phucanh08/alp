@@ -1,7 +1,7 @@
 // Browser compatibility tests run a real daemon in a separate Node runtime.
-import { createTestPaseoDaemon } from "./paseo-daemon.js";
+import { createTestAlpDaemon } from "./alp-daemon.js";
 
-const daemon = await createTestPaseoDaemon({
+const daemon = await createTestAlpDaemon({
   daemonVersion: process.argv[2],
   pluginsEnabled: true,
   mcpEnabled: false,

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { ProjectIconSource } from "@getpaseo/protocol/messages";
+import type { ProjectIconSource } from "@alp/protocol/messages";
 import {
   createPersistedProjectRecord,
   type PersistedProjectRecord,
@@ -37,8 +37,8 @@ async function tempDir(prefix: string): Promise<string> {
 
 /** A project whose root holds no discoverable icon, over an in-memory registry. */
 async function project() {
-  const rootPath = await tempDir("paseo-project-root-");
-  const paseoHome = await tempDir("paseo-home-");
+  const rootPath = await tempDir("alp-project-root-");
+  const alpHome = await tempDir("alp-home-");
   let record = createPersistedProjectRecord({
     projectId: "project-a",
     rootPath,
@@ -54,19 +54,19 @@ async function project() {
       return record;
     },
   } as unknown as ProjectRegistry;
-  const reader = new ProjectIconReader(paseoHome);
+  const reader = new ProjectIconReader(alpHome);
 
   return {
-    paseoHome,
+    alpHome,
     rootPath,
     set: (source: ProjectIconSource) =>
-      setProjectCustomIcon({ paseoHome, projectId: "project-a", source, projects }),
-    read: () => readProjectIcon({ paseoHome, project: record }),
-    snapshot: () => readProjectIconSnapshot({ paseoHome, project: record }),
+      setProjectCustomIcon({ alpHome, projectId: "project-a", source, projects }),
+    read: () => readProjectIcon({ alpHome, project: record }),
+    snapshot: () => readProjectIconSnapshot({ alpHome, project: record }),
     advertisedSnapshot: () => reader.snapshot(record),
     readAdvertised: () => reader.read(record),
     revision: () => record.customIconRevision,
-    remove: () => removeProjectCustomIcon({ paseoHome, projectId: "project-a" }),
+    remove: () => removeProjectCustomIcon({ alpHome, projectId: "project-a" }),
   };
 }
 
@@ -144,9 +144,7 @@ describe("project custom icon", () => {
 
     await target.remove();
 
-    await expect(
-      readProjectIcon({ paseoHome: target.paseoHome, project: stored }),
-    ).resolves.toBeNull();
+    await expect(readProjectIcon({ alpHome: target.alpHome, project: stored })).resolves.toBeNull();
   });
 
   it.each([

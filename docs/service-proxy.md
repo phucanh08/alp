@@ -4,7 +4,7 @@ alp proxies HTTP traffic to services running inside your workspaces. Localhost s
 
 ## How it works
 
-When a `paseo.json` script of `"type": "service"` starts, alp assigns it a local port and registers a route in the service proxy. Incoming requests whose `Host` header matches the script's generated hostname are forwarded to that port.
+When a `alp.json` script of `"type": "service"` starts, alp assigns it a local port and registers a route in the service proxy. Incoming requests whose `Host` header matches the script's generated hostname are forwarded to that port.
 
 The generated hostname is built from the script name, branch, and project:
 
@@ -28,19 +28,19 @@ Local and public routes use one combined leftmost label (`script--branch--projec
 
 ## Managing workspace scripts
 
-Configured `paseo.json` scripts can be managed without addressing their backing terminal directly:
+Configured `alp.json` scripts can be managed without addressing their backing terminal directly:
 
 ```bash
-paseo script ls [--cwd <path> | --workspace <workspace-id>]
-paseo script start <name> [--cwd <path> | --workspace <workspace-id>]
-paseo script stop <name> [--cwd <path> | --workspace <workspace-id>]
+alp script ls [--cwd <path> | --workspace <workspace-id>]
+alp script start <name> [--cwd <path> | --workspace <workspace-id>]
+alp script stop <name> [--cwd <path> | --workspace <workspace-id>]
 ```
 
 The commands return the same script metadata shown by the workspace: lifecycle, service port, proxy URLs, health, exit code, and supervised terminal ID. `stop` terminates the managed terminal rather than only removing the proxy route, so normal script lifecycle cleanup remains authoritative. MCP exposes matching `list_workspace_scripts`, `start_workspace_script`, and `stop_workspace_script` tools; those require an explicit workspace ID.
 
 ## Configuration
 
-Add a `serviceProxy` block under `daemon` in `$PASEO_HOME/config.json` (`~/.alp/config.json` by default):
+Add a `serviceProxy` block under `daemon` in `$ALP_HOME/config.json` (`~/.alp/config.json` by default):
 
 ```json
 {
@@ -48,7 +48,7 @@ Add a `serviceProxy` block under `daemon` in `$PASEO_HOME/config.json` (`~/.alp/
   "daemon": {
     "serviceProxy": {
       "listen": "0.0.0.0:8080",
-      "publicBaseUrl": "https://paseoapps.my.domain.com"
+      "publicBaseUrl": "https://alpapps.my.domain.com"
     }
   }
 }
@@ -65,15 +65,15 @@ Add a `serviceProxy` block under `daemon` in `$PASEO_HOME/config.json` (`~/.alp/
 
 For generated URLs to be reachable, you need wildcard DNS pointing to the machine running the alp daemon.
 
-**Example:** to expose services at `https://dev--miniweb.paseoapps.my.domain.com` where the daemon host is `10.1.1.1`:
+**Example:** to expose services at `https://dev--miniweb.alpapps.my.domain.com` where the daemon host is `10.1.1.1`:
 
 1. Configure a wildcard DNS record:
 
    ```
-   *.paseoapps.my.domain.com  →  10.1.1.1
+   *.alpapps.my.domain.com  →  10.1.1.1
    ```
 
-2. Set `publicBaseUrl` to `https://paseoapps.my.domain.com` in your config.
+2. Set `publicBaseUrl` to `https://alpapps.my.domain.com` in your config.
 
 3. If you put a reverse proxy (nginx, Caddy, Traefik, etc.) in front of alp, point it at either the daemon listener or the optional service-only listener and ensure it forwards the `Host` header unchanged. The proxy uses the `Host` header to route requests to the correct service — rewriting it will break routing.
 
@@ -90,14 +90,14 @@ If the same reverse proxy serves the daemon web UI over HTTPS, it must also set 
 }
 ```
 
-`PASEO_TRUSTED_PROXIES` accepts the same comma-separated values, for example `loopback,172.16.0.0/12`. Use `true` only when the final trusted proxy overwrites client-supplied `X-Forwarded-*` headers.
+`ALP_TRUSTED_PROXIES` accepts the same comma-separated values, for example `loopback,172.16.0.0/12`. Use `true` only when the final trusted proxy overwrites client-supplied `X-Forwarded-*` headers.
 
 Nginx example:
 
 ```nginx
 server {
     listen 443 ssl;
-    server_name *.paseoapps.my.domain.com;
+    server_name *.alpapps.my.domain.com;
 
     location / {
         proxy_pass http://10.1.1.1:8080;
@@ -134,8 +134,8 @@ Treat the forwarded authority as client-influenced input. A service that builds 
 
 The listen address and public base URL can also be set via environment variables, which take precedence over `config.json`:
 
-| Variable                              | Description                                                               |
-| ------------------------------------- | ------------------------------------------------------------------------- |
-| `PASEO_SERVICE_PROXY_ENABLED`         | Compatibility shim; `false` suppresses optional public/listen layers only |
-| `PASEO_SERVICE_PROXY_LISTEN`          | Starts the optional service-only listener, e.g. `0.0.0.0:8080`            |
-| `PASEO_SERVICE_PROXY_PUBLIC_BASE_URL` | Adds public service aliases and links                                     |
+| Variable                            | Description                                                               |
+| ----------------------------------- | ------------------------------------------------------------------------- |
+| `ALP_SERVICE_PROXY_ENABLED`         | Compatibility shim; `false` suppresses optional public/listen layers only |
+| `ALP_SERVICE_PROXY_LISTEN`          | Starts the optional service-only listener, e.g. `0.0.0.0:8080`            |
+| `ALP_SERVICE_PROXY_PUBLIC_BASE_URL` | Adds public service aliases and links                                     |

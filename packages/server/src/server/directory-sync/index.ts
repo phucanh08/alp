@@ -5,7 +5,7 @@ import type {
   SessionOutboundMessage,
   WorkspaceDescriptorPayload,
   WorkspaceProjectDescriptorPayload,
-} from "@getpaseo/protocol/messages";
+} from "@alp/protocol/messages";
 import { type CollectionRead, VersionedCollection } from "./internal/versioned-collection.js";
 
 interface AgentDirectoryEntry {

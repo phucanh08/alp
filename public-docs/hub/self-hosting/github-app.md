@@ -16,16 +16,16 @@ Open **Apps → GitHub**. Hub gives you the current callback URLs, required repo
 
 Repository access and installation work without a GitHub webhook. GitHub event triggers and configuration sync do not: GitHub must be able to deliver events to a public HTTPS URL.
 
-On a local HTTP Hub, the Apps guide lets you configure repository access and explains that event setup is unavailable. Reopen Hub at its public address after setting `PASEO_HUB_APP_URL` to add the webhook secret and events.
+On a local HTTP Hub, the Apps guide lets you configure repository access and explains that event setup is unavailable. Reopen Hub at its public address after setting `ALP_HUB_APP_URL` to add the webhook secret and events.
 
 GitHub uses these Hub URLs:
 
-| Setting      | Hub URL                                                |
-| ------------ | ------------------------------------------------------ |
-| Homepage URL | `<PASEO_HUB_APP_URL>`                                  |
-| Callback URL | `<PASEO_HUB_APP_URL>/api/integrations/github/callback` |
-| Setup URL    | `<PASEO_HUB_APP_URL>/api/integrations/github/setup`    |
-| Webhook URL  | `<PASEO_HUB_APP_URL>/webhook`                          |
+| Setting      | Hub URL                                              |
+| ------------ | ---------------------------------------------------- |
+| Homepage URL | `<ALP_HUB_APP_URL>`                                  |
+| Callback URL | `<ALP_HUB_APP_URL>/api/integrations/github/callback` |
+| Setup URL    | `<ALP_HUB_APP_URL>/api/integrations/github/setup`    |
+| Webhook URL  | `<ALP_HUB_APP_URL>/webhook`                          |
 
 Keep GitHub's SSL verification enabled.
 
@@ -39,7 +39,7 @@ After Hub verifies the App, choose **Install on GitHub**. Select the account or 
 
 Start from Hub rather than GitHub's own install button. The round trip binds the installation to the active Hub organization.
 
-The connection appears with a slug derived from the account. An installation on `getpaseo`, for example, becomes `getpaseo-github`. Connect as many installations as the Hub organization needs.
+The connection appears with a slug derived from the account. An installation on `alp`, for example, becomes `alp-github`. Connect as many installations as the Hub organization needs.
 
 ## What the connection provides
 

@@ -26,21 +26,21 @@ It validates the compositor behavior that unit tests cannot see:
 Run it with the repo Electron:
 
 ```bash
-npm run capture-harness --workspace=@getpaseo/desktop
+npm run capture-harness --workspace=@alp/desktop
 ```
 
 Build the desktop main process before the automation group so its production guest
 preload is available:
 
 ```bash
-npm run build:main --workspace=@getpaseo/desktop
-PASEO_CAPTURE_HARNESS_GROUP=automation npm run capture-harness --workspace=@getpaseo/desktop
+npm run build:main --workspace=@alp/desktop
+ALP_CAPTURE_HARNESS_GROUP=automation npm run capture-harness --workspace=@alp/desktop
 ```
 
 Run the shared browser profile fixture with:
 
 ```bash
-PASEO_CAPTURE_HARNESS_GROUP=browser-profile npm run capture-harness --workspace=@getpaseo/desktop
+ALP_CAPTURE_HARNESS_GROUP=browser-profile npm run capture-harness --workspace=@alp/desktop
 ```
 
 The browser profile group runs two Electron processes in sequence. It verifies that each
@@ -77,7 +77,7 @@ including fresh, settled, 75-second soak, multi-tab, viewport, and full-page che
 PNG sizes may be device-pixel scaled; on a Retina display the 1280x800 logical viewport
 is usually saved as 2560x1600.
 
-The existing `npm run test:e2e:browser-tabs --workspace=@getpaseo/desktop` journey
+The existing `npm run test:e2e:browser-tabs --workspace=@alp/desktop` journey
 verifies that a hidden window stops guest animation, captures fresh viewport pixels,
 and resumes animation after restoring the window. Its artifacts include the screenshot
 and animation measurements. Full-page content correctness remains separately tracked in

@@ -1,7 +1,7 @@
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { createPluginHosts } from "./hosts";
-import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
-import type { PluginClientOpenPanelOptions } from "@getpaseo/plugin/client";
+import type { DaemonClient } from "@alp/client/internal/daemon-client";
+import type { PluginClientOpenPanelOptions } from "@alp/plugin/client";
 import {
   createPluginAgentActionContext,
   createPluginCapabilities,

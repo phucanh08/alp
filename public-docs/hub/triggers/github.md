@@ -84,7 +84,7 @@ on: github.issue_comment_created
 max_runtime: 2h
 filters:
   repo: example/project
-  contains: "@paseo"
+  contains: "@alp"
   from_users: [maintainer]
 steps:
   - id: respond
@@ -114,7 +114,7 @@ on: github.pull_request_comment_created
 max_runtime: 2h
 filters:
   repo: example/project
-  contains: "@paseo"
+  contains: "@alp"
   from_users: [maintainer]
 steps:
   - id: respond

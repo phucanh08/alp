@@ -1,4 +1,4 @@
-import type { WorkspaceProjectDescriptorPayload } from "@getpaseo/protocol/messages";
+import type { WorkspaceProjectDescriptorPayload } from "@alp/protocol/messages";
 import type { OutputSchema } from "../../output/index.js";
 
 export interface ProjectRow {

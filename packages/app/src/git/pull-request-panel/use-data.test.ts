@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type {
-  CheckoutPrStatusResponse,
-  PullRequestTimelineResponse,
-} from "@getpaseo/protocol/messages";
+import type { CheckoutPrStatusResponse, PullRequestTimelineResponse } from "@alp/protocol/messages";
 import {
   createInMemoryUnsupportedTimelineRegistry,
   extractPrRepoIdentity,
@@ -50,8 +47,8 @@ function prStatus(overrides: Partial<CheckoutPrStatus> = {}): CheckoutPrStatus {
     mergeable: "UNKNOWN",
     checks: [],
     reviewDecision: null,
-    repoOwner: "getpaseo",
-    repoName: "paseo",
+    repoOwner: "alp",
+    repoName: "alp",
     github: githubStatus,
     ...overrides,
   };
@@ -118,8 +115,8 @@ describe("extractPrRepoIdentity", () => {
   it("reads the PR number, owner, and name from a status payload", () => {
     expect(extractPrRepoIdentity(prStatus())).toEqual({
       prNumber: 42,
-      repoOwner: "getpaseo",
-      repoName: "paseo",
+      repoOwner: "alp",
+      repoName: "alp",
     });
   });
 
@@ -152,7 +149,7 @@ describe("shouldFetchTimelineFrom", () => {
     timelineEnabled: true,
     githubFeaturesEnabled: true,
     cwd: "/repo",
-    identity: { prNumber: 42, repoOwner: "getpaseo", repoName: "paseo" },
+    identity: { prNumber: 42, repoOwner: "alp", repoName: "alp" },
     timelineUnsupported: false,
   };
 
@@ -212,12 +209,12 @@ describe("fetchPrPaneTimelinePage", () => {
       serverId: "host",
       cwd: "/repo",
       prNumber: 42,
-      repoOwner: "getpaseo",
-      repoName: "paseo",
+      repoOwner: "alp",
+      repoName: "alp",
     });
 
     expect(client.calls).toEqual([
-      { cwd: "/repo", prNumber: 42, repoOwner: "getpaseo", repoName: "paseo" },
+      { cwd: "/repo", prNumber: 42, repoOwner: "alp", repoName: "alp" },
     ]);
   });
 
@@ -243,8 +240,8 @@ describe("fetchPrPaneTimelinePage", () => {
       serverId: "host",
       cwd: "/repo",
       prNumber: 42,
-      repoOwner: "getpaseo",
-      repoName: "paseo",
+      repoOwner: "alp",
+      repoName: "alp",
     });
 
     expect(result).toBe(payload);
@@ -264,8 +261,8 @@ describe("fetchPrPaneTimelinePage", () => {
         serverId: "host",
         cwd: "/repo",
         prNumber: 99,
-        repoOwner: "getpaseo",
-        repoName: "paseo",
+        repoOwner: "alp",
+        repoName: "alp",
       }),
     ).rejects.toBe(error);
 
@@ -288,8 +285,8 @@ describe("fetchPrPaneTimelinePage", () => {
         serverId: "host",
         cwd: "/repo",
         prNumber: 99,
-        repoOwner: "getpaseo",
-        repoName: "paseo",
+        repoOwner: "alp",
+        repoName: "alp",
       }),
     ).rejects.toBe(error);
 
@@ -314,8 +311,8 @@ describe("fetchPrPaneTimelinePage", () => {
         serverId: "host",
         cwd: "/repo-a",
         prNumber: 1,
-        repoOwner: "getpaseo",
-        repoName: "paseo",
+        repoOwner: "alp",
+        repoName: "alp",
       }),
     ).rejects.toThrow();
 
@@ -325,8 +322,8 @@ describe("fetchPrPaneTimelinePage", () => {
       serverId: "host",
       cwd: "/repo-b",
       prNumber: 2,
-      repoOwner: "getpaseo",
-      repoName: "paseo",
+      repoOwner: "alp",
+      repoName: "alp",
     });
 
     expect(result.prNumber).toBe(2);

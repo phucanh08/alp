@@ -12,7 +12,7 @@ const issue = {
   priorityLabel: "High",
   state: { name: "In Progress" },
   assignee: { name: "Mohamed" },
-  project: { name: "Paseo" },
+  project: { name: "Alp" },
   labels: { nodes: [{ name: "Feature" }] },
 };
 
@@ -88,7 +88,7 @@ describe("Linear issue search", () => {
             "Status: In Progress",
             "Priority: High",
             "Assignee: Mohamed",
-            "Project: Paseo",
+            "Project: Alp",
             "Labels: Feature",
             "",
             "Let extensions attach external context.",

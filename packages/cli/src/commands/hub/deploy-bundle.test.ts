@@ -214,7 +214,7 @@ async function canonicalProject(): Promise<string> {
 }
 
 async function temporaryDirectory(): Promise<string> {
-  const directory = await mkdtemp(path.join(tmpdir(), "paseo-hub-bundle-"));
+  const directory = await mkdtemp(path.join(tmpdir(), "alp-hub-bundle-"));
   temporaryDirectories.push(directory);
   return directory;
 }

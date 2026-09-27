@@ -141,10 +141,7 @@ async function holdStreamAfterFirstCompletedToolCall(page: Page, agentId: string
 
 async function configureOverviewToolCalls(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    localStorage.setItem(
-      "@paseo:app-settings",
-      JSON.stringify({ toolCallDetailLevel: "overview" }),
-    );
+    localStorage.setItem("@alp:app-settings", JSON.stringify({ toolCallDetailLevel: "overview" }));
   });
 }
 

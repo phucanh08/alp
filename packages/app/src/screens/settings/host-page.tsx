@@ -16,11 +16,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Pressable, Text, View } from "react-native";
 import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
-import type { TerminalProfile } from "@getpaseo/protocol/messages";
-import {
-  getTerminalProfileIcon,
-  DEFAULT_TERMINAL_PROFILES,
-} from "@getpaseo/protocol/terminal-profiles";
+import type { TerminalProfile } from "@alp/protocol/messages";
+import { getTerminalProfileIcon, DEFAULT_TERMINAL_PROFILES } from "@alp/protocol/terminal-profiles";
 import { AgentProfilesSection } from "@/agent-profiles";
 import { AgentSkillsSection } from "@/agent-skills";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
@@ -278,7 +275,7 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
     <View>
       {isConnected ? (
         <SettingsSection title={t("settings.hostSections.agents")}>
-          <InjectPaseoToolsCard serverId={serverId} />
+          <InjectAlpToolsCard serverId={serverId} />
           <BrowserToolsOptInCard serverId={serverId} />
           <AppendSystemPromptCard serverId={serverId} />
         </SettingsSection>
@@ -859,7 +856,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
   );
 }
 
-function InjectPaseoToolsCard({ serverId }: { serverId: string }) {
+function InjectAlpToolsCard({ serverId }: { serverId: string }) {
   const { t } = useTranslation();
   const isConnected = useHostRuntimeIsConnected(serverId);
   const { config, patchConfig } = useDaemonConfig(serverId);

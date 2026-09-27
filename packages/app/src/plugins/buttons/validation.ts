@@ -1,4 +1,4 @@
-import type { PluginButton, PluginButtonBehavior, PluginButtonIcon } from "@getpaseo/plugin/client";
+import type { PluginButton, PluginButtonBehavior, PluginButtonIcon } from "@alp/plugin/client";
 
 export interface ButtonValidation {
   validateIconName(name: string): void;

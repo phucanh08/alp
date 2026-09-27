@@ -10,13 +10,13 @@ describe("project command-center protocol", () => {
     expect(
       SessionInboundMessageSchema.parse({
         type: "workspace.github.search_repositories.request",
-        query: "paseo",
+        query: "alp",
         limit: 12,
         requestId: "req-search",
       }),
     ).toEqual({
       type: "workspace.github.search_repositories.request",
-      query: "paseo",
+      query: "alp",
       limit: 12,
       requestId: "req-search",
     });
@@ -29,9 +29,9 @@ describe("project command-center protocol", () => {
           requestId: "req-search",
           repositories: [
             {
-              id: "R_paseo",
-              name: "paseo",
-              nameWithOwner: "getpaseo/paseo",
+              id: "R_alp",
+              name: "alp",
+              nameWithOwner: "alp/alp",
               description: "Development environment in your pocket",
               visibility: "public",
               updatedAt: "2026-07-15T10:00:00Z",
@@ -47,9 +47,9 @@ describe("project command-center protocol", () => {
       requestId: "req-search",
       repositories: [
         {
-          id: "R_paseo",
-          name: "paseo",
-          nameWithOwner: "getpaseo/paseo",
+          id: "R_alp",
+          name: "alp",
+          nameWithOwner: "alp/alp",
           description: "Development environment in your pocket",
           visibility: "public",
           updatedAt: "2026-07-15T10:00:00Z",
@@ -142,8 +142,8 @@ describe("project command-center protocol", () => {
           repositories: [
             {
               id: "repo",
-              name: " paseo ",
-              nameWithOwner: " getpaseo/paseo ",
+              name: " alp ",
+              nameWithOwner: " alp/alp ",
               description: null,
               visibility: "public",
               updatedAt: "2026-07-15T10:00:00Z",
@@ -154,7 +154,7 @@ describe("project command-center protocol", () => {
           error: null,
         },
       }).payload.repositories[0]?.name,
-    ).toBe(" paseo ");
+    ).toBe(" alp ");
   });
 
   it("keeps project command feature flags optional for older server_info payloads", () => {

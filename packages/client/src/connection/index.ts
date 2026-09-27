@@ -9,8 +9,8 @@ import {
   type SessionInboundMessage,
   type SessionOutboundMessage,
   type ServerInfoStatusPayload,
-} from "@getpaseo/protocol/messages";
-import { CLIENT_CAPS, type ClientCapability } from "@getpaseo/protocol/client-capabilities";
+} from "@alp/protocol/messages";
+import { CLIENT_CAPS, type ClientCapability } from "@alp/protocol/client-capabilities";
 
 export class ConnectionSubscriptions extends OwnedSubscriptions {
   private legacy: LegacySubscriptions | null = null;

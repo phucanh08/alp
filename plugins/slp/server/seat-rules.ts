@@ -1,4 +1,4 @@
-import type { PluginHookContext } from "@getpaseo/plugin/server";
+import type { PluginHookContext } from "@alp/plugin/server";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -17,7 +17,7 @@ const SeatGetOutput = z.object({ definition: z.string(), skills: z.array(z.strin
 /** Longest agent creation waits on slp-dev before the seat goes on with the runtime block only. */
 export const SEAT_RULES_TIMEOUT_MS = 5_000;
 
-export type PluginInvoker = Pick<PluginHookContext["paseo"]["plugins"], "invoke">;
+export type PluginInvoker = Pick<PluginHookContext["alp"]["plugins"], "invoke">;
 
 export interface SeatRules {
   /** Where the rule text came from: the override file's absolute path, `slp-dev`, or null for none. */

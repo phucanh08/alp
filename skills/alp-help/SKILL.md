@@ -35,14 +35,14 @@ Establish two facts:
 
 Use **Settings → About** to compare the app version with each connected host. For the affected host, open **Settings → your host → Overview → Full status**. On the daemon machine, `alp daemon status --json` reports facts such as server ID, hostname, version, home, listen address, process owner, log path, and whether the daemon is desktop-managed.
 
-Record which host the user is viewing and which machine or container runs it. A local `alp daemon status` describes the daemon for that CLI's local `PASEO_HOME`; it may not be the remote host visible in the app.
+Record which host the user is viewing and which machine or container runs it. A local `alp daemon status` describes the daemon for that CLI's local `ALP_HOME`; it may not be the remote host visible in the app.
 
 Apply later checks to the daemon runtime, not automatically to the client device:
 
 - Provider binaries, credentials, `PATH`, workspaces, config, and daemon logs live on the daemon machine or inside its container.
 - App version and app logs live on the client device.
 - A desktop-managed daemon follows the Desktop app lifecycle and update path.
-- A standalone daemon follows its own CLI/npm lifecycle and may use a different `PASEO_HOME` or listen address.
+- A standalone daemon follows its own CLI/npm lifecycle and may use a different `ALP_HOME` or listen address.
 - A Docker daemon uses container paths, volumes, user permissions, image versions, and container lifecycle commands.
 
 ## Diagnose before changing state
@@ -73,7 +73,7 @@ Use these defaults on the machine where the daemon or Desktop app actually runs.
 - Linux desktop log: `~/.config/alp/logs/main.log`
 - Windows desktop log: `%APPDATA%\alp\logs\main.log`
 
-Substitute the status-reported `PASEO_HOME` for `~/.alp`. In the official Docker image, the default is `/home/paseo/.paseo`; its host path depends on the volume mount, and container stdout is available through Docker. Desktop app logs describe the Desktop process; daemon logs describe the selected daemon. Read the narrowest useful slice and redact credentials, pairing offers, tokens, passwords, and user code before sharing logs.
+Substitute the status-reported `ALP_HOME` for `~/.alp`. In the official Docker image, the default is `/home/alp/.alp`; its host path depends on the volume mount, and container stdout is available through Docker. Desktop app logs describe the Desktop process; daemon logs describe the selected daemon. Read the narrowest useful slice and redact credentials, pairing offers, tokens, passwords, and user code before sharing logs.
 
 If diagnosing the bundled daemon on a computer with alp Desktop installed, but `alp` is not on `PATH`, the bundled CLI is at:
 

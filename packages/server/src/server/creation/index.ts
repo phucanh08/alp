@@ -8,7 +8,7 @@ import {
   type AgentSnapshotPayload,
   type CreationSnapshot,
   type WorkspaceDescriptorPayload,
-} from "@getpaseo/protocol/messages";
+} from "@alp/protocol/messages";
 import { writeFileAtomic } from "../atomic-file.js";
 import { generateWorkspaceId } from "../workspace-registry-model.js";
 

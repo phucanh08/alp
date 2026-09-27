@@ -1,5 +1,5 @@
-import { useRpc, type PluginSurfaceProps } from "@getpaseo/plugin/client";
-import { SettingsAction, SettingsCard } from "@getpaseo/plugin/client/ui";
+import { useRpc, type PluginSurfaceProps } from "@alp/plugin/client";
+import { SettingsAction, SettingsCard } from "@alp/plugin/client/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View } from "react-native";
 import { openSupervisor } from "./ensure-supervisor";

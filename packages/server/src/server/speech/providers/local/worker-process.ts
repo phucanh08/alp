@@ -23,7 +23,7 @@ process.title = "alp Voice";
 type LocalSttEngine = SherpaOfflineRecognizerEngine;
 
 const logger = pino({
-  level: process.env.PASEO_LOG_LEVEL ?? "info",
+  level: process.env.ALP_LOG_LEVEL ?? "info",
 }).child({ module: "speech", component: "local-worker" });
 
 const sttEngines = new Map<string, LocalSttEngine>();

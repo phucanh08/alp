@@ -16,7 +16,7 @@ export interface SkillSyncResult {
   processedSkills: number;
 }
 
-export const MANAGED_FILES_MANIFEST = ".paseo-managed-files.json";
+export const MANAGED_FILES_MANIFEST = ".alp-managed-files.json";
 
 interface ManagedFilesManifest {
   version: 1;

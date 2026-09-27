@@ -162,7 +162,7 @@ describe("AgentStorage", () => {
           systemPrompt: "Be terse and explicit.",
           providerOptions: { allowedTools: ["Read"] },
           mcpServers: {
-            paseo: {
+            alp: {
               type: "stdio",
               command: "node",
               args: ["/tmp/mcp-stdio-socket-bridge-cli.mjs", "--socket", "/tmp/test.sock"],
@@ -180,7 +180,7 @@ describe("AgentStorage", () => {
     expect(record.config?.model).toBe("gpt-5.1");
     expect(record.config?.systemPrompt).toBe("Be terse and explicit.");
     expect(record.config?.mcpServers).toEqual({
-      paseo: {
+      alp: {
         type: "stdio",
         command: "node",
         args: ["/tmp/mcp-stdio-socket-bridge-cli.mjs", "--socket", "/tmp/test.sock"],
@@ -299,38 +299,38 @@ describe("AgentStorage", () => {
     expect(recordAfterSnapshot?.archivedAt).toBe(archivedAt);
   });
 
-  test("applySnapshot stores the agent's Paseo tool policy and never loosens it", async () => {
+  test("applySnapshot stores the agent's Alp tool policy and never loosens it", async () => {
     const agentId = "agent-tool-policy";
     await storage.applySnapshot({
       ...createManagedAgent({ id: agentId }),
-      paseoToolPolicy: { disabledTools: ["create_agent"] },
+      alpToolPolicy: { disabledTools: ["create_agent"] },
     });
     await storage.flush();
     const reopened = new AgentStorage(storagePath, logger);
-    expect((await reopened.get(agentId))?.paseoToolPolicy).toEqual({
+    expect((await reopened.get(agentId))?.alpToolPolicy).toEqual({
       disabledTools: ["create_agent"],
     });
 
     await storage.applySnapshot(createManagedAgent({ id: agentId }));
-    expect((await storage.get(agentId))?.paseoToolPolicy).toEqual({
+    expect((await storage.get(agentId))?.alpToolPolicy).toEqual({
       disabledTools: ["create_agent"],
     });
 
     await storage.applySnapshot({
       ...createManagedAgent({ id: agentId }),
-      paseoToolPolicy: { enabled: true, disabledTools: ["list_agents"] },
+      alpToolPolicy: { enabled: true, disabledTools: ["list_agents"] },
     });
-    expect((await storage.get(agentId))?.paseoToolPolicy).toEqual({
+    expect((await storage.get(agentId))?.alpToolPolicy).toEqual({
       disabledTools: ["create_agent", "list_agents"],
     });
   });
 
-  test("applySnapshot leaves the Paseo tool policy absent for agents that have none", async () => {
+  test("applySnapshot leaves the Alp tool policy absent for agents that have none", async () => {
     const agentId = "agent-without-tool-policy";
     await storage.applySnapshot(createManagedAgent({ id: agentId }));
     const record = await storage.get(agentId);
     expect(record).not.toBeNull();
-    expect(record && "paseoToolPolicy" in record).toBe(false);
+    expect(record && "alpToolPolicy" in record).toBe(false);
   });
 
   test("stores titles independently of snapshots", async () => {

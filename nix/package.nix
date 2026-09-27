@@ -20,7 +20,7 @@
 }:
 
 buildNpmPackage rec {
-  pname = "paseo";
+  pname = "alp";
   version = (builtins.fromJSON (builtins.readFile ../package.json)).version;
 
   src = lib.cleanSourceWith {
@@ -57,7 +57,7 @@ buildNpmPackage rec {
       && !(lib.hasSuffix ".e2e.test.ts" baseName)
       && baseName != "node_modules"
       && baseName != ".git"
-      && baseName != ".paseo"
+      && baseName != ".alp"
       && baseName != ".DS_Store";
   };
 
@@ -111,33 +111,33 @@ buildNpmPackage rec {
     # assets read at runtime. The trace script is the single source of
     # truth for what the daemon needs at $out — auditable in plain JS, no
     # npm hoisting / .bin / workspace-symlink footguns.
-    mkdir -p $out/lib/paseo
+    mkdir -p $out/lib/alp
     node scripts/trace-daemon.mjs > daemon-files.txt
 
     while IFS= read -r path; do
       [ -z "$path" ] && continue
-      mkdir -p "$out/lib/paseo/$(dirname "$path")"
-      cp -a "$path" "$out/lib/paseo/$path"
+      mkdir -p "$out/lib/alp/$(dirname "$path")"
+      cp -a "$path" "$out/lib/alp/$path"
     done < daemon-files.txt
 
     # Root package.json lets node resolve the workspace layout when the
     # CLI/server bin starts from $out.
-    cp package.json $out/lib/paseo/
+    cp package.json $out/lib/alp/
 
     # Web UI Assets
-    cp -r packages/server/dist/server/web-ui $out/lib/paseo/packages/server/dist/server/
+    cp -r packages/server/dist/server/web-ui $out/lib/alp/packages/server/dist/server/
 
     # Create wrapper for the server entry point (for systemd / direct use)
     mkdir -p $out/bin
-    # Keep Paseo's runtime mode separate from NODE_ENV, which belongs to spawned agents.
-    makeWrapper ${nodejs}/bin/node $out/bin/paseo-server \
-      --add-flags "$out/lib/paseo/packages/server/dist/scripts/supervisor-entrypoint.js" \
-      --set PASEO_NODE_ENV production
+    # Keep Alp's runtime mode separate from NODE_ENV, which belongs to spawned agents.
+    makeWrapper ${nodejs}/bin/node $out/bin/alp-server \
+      --add-flags "$out/lib/alp/packages/server/dist/scripts/supervisor-entrypoint.js" \
+      --set ALP_NODE_ENV production
 
     # Create wrapper for the CLI
-    makeWrapper ${nodejs}/bin/node $out/bin/paseo \
-      --add-flags "$out/lib/paseo/packages/cli/dist/index.js" \
-      --set NODE_PATH "$out/lib/paseo/node_modules"
+    makeWrapper ${nodejs}/bin/node $out/bin/alp \
+      --add-flags "$out/lib/alp/packages/cli/dist/index.js" \
+      --set NODE_PATH "$out/lib/alp/node_modules"
 
     runHook postInstall
   '';
@@ -146,7 +146,7 @@ buildNpmPackage rec {
     description = "Self-hosted daemon for Claude Code, Codex, and OpenCode";
     homepage = "https://github.com/getpaseo/paseo";
     license = lib.licenses.agpl3Plus;
-    mainProgram = "paseo";
+    mainProgram = "alp";
     platforms = lib.platforms.linux ++ lib.platforms.darwin;
   };
 }

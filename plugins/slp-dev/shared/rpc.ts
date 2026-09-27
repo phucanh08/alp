@@ -1,4 +1,4 @@
-import { defineRpc } from "@getpaseo/plugin";
+import { defineRpc } from "@alp/plugin";
 import { z } from "zod";
 
 /** A seat's rule text (`agents/<seat>.md`, verbatim) and the skills that seat uses (`seats.json`). */

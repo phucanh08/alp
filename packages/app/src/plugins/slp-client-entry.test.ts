@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import type { PaseoApi, SubscriptionObserver } from "@getpaseo/client";
-import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import type { AlpApi, SubscriptionObserver } from "@alp/client";
+import type { DaemonClient } from "@alp/client/internal/daemon-client";
 // The bundled slp plugin (packages/server bootstrap) is an alp fork addition; this suite runs its
 // real client entry inside the real registry, which only the app test environment can load.
 import contribute from "../../../../plugins/slp/index.client";
@@ -58,7 +58,7 @@ function host(initial: SettingsRead | Error) {
         if (observer) observers.delete(observer);
       },
     };
-  }) as unknown as PaseoApi["observeEvents"];
+  }) as unknown as AlpApi["observeEvents"];
 
   const registry = new PluginRegistry({
     version: "0.8.0",
@@ -72,7 +72,7 @@ function host(initial: SettingsRead | Error) {
         },
         installation.lifetime.signal,
       ),
-      paseo: { observeEvents, dispose: async () => {} } as unknown as PaseoApi,
+      alp: { observeEvents, dispose: async () => {} } as unknown as AlpApi,
       rpc: rpc as never,
       openSurface: () => {},
       openSettings: () => {},
@@ -92,7 +92,7 @@ function host(initial: SettingsRead | Error) {
     [
       {
         id: "slp",
-        requirements: { paseo: ">=0.8.0" },
+        requirements: { alp: ">=0.8.0" },
         clientBundle: "(function() { return { default: globalThis.__slpClientEntry }; })",
       },
     ] as never,

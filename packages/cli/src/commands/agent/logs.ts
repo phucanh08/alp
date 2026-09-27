@@ -5,9 +5,9 @@ import {
   fetchProjectedTimelineItems,
   LIVE_HISTORY_FETCH_TIMEOUT_MS,
 } from "../../utils/timeline.js";
-import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
-import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
-import { curateAgentActivity } from "@getpaseo/server/agent-activity";
+import type { DaemonClient } from "@alp/client/internal/daemon-client";
+import type { AgentTimelineItem } from "@alp/protocol/agent-types";
+import { curateAgentActivity } from "@alp/server/agent-activity";
 
 export function addLogsOptions(cmd: Command): Command {
   return cmd

@@ -1,4 +1,4 @@
-import type { PluginSettingsState } from "@getpaseo/plugin/server";
+import type { PluginSettingsState } from "@alp/plugin/server";
 import type { slpSettings } from "../shared/settings";
 
 export type SlpSettingsState = PluginSettingsState<typeof slpSettings.schema>;

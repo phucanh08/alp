@@ -98,7 +98,7 @@ export function toStoredAgentRecord(
       : null,
     internal: options?.internal,
     owner: agent.owner,
-    ...(agent.paseoToolPolicy ? { paseoToolPolicy: agent.paseoToolPolicy } : {}),
+    ...(agent.alpToolPolicy ? { alpToolPolicy: agent.alpToolPolicy } : {}),
   } satisfies StoredAgentRecord;
 }
 

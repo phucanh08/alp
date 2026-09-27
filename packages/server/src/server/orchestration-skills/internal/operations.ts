@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { AgentSkillSelection } from "@getpaseo/protocol/messages";
+import type { AgentSkillSelection } from "@alp/protocol/messages";
 import { removeRenamedSkillDirs, type SkillsLogger } from "./renamed-skills.js";
 import { listFilesRecursive, removeSkill, syncSkills } from "./sync.js";
 
@@ -145,7 +145,7 @@ export async function readSkillCatalog(
   };
 }
 
-/** Every name Paseo owns on disk: what it ships now plus what it used to ship. */
+/** Every name Alp owns on disk: what it ships now plus what it used to ship. */
 function managedSkillNames(shipped: readonly string[]): string[] {
   return [...new Set([...shipped, ...LEGACY_SKILL_NAMES])].sort(compareStrings);
 }
@@ -219,7 +219,7 @@ function diff(
   return ops;
 }
 
-function hasInstalledPaseoSkill(disks: readonly TargetSkills[]): boolean {
+function hasInstalledAlpSkill(disks: readonly TargetSkills[]): boolean {
   return disks.some((disk) => disk.size > 0);
 }
 
@@ -262,7 +262,7 @@ export async function getSkillsStatus(
   const ops = diff(bundle, disks, names, resolveDesiredSkills(selection, available));
   const installed = installedSkillNames(disks, names);
 
-  if (!hasInstalledPaseoSkill(disks)) return { state: "not-installed", ops, available, installed };
+  if (!hasInstalledAlpSkill(disks)) return { state: "not-installed", ops, available, installed };
   if (ops.length === 0) return { state: "up-to-date", ops, available, installed };
   return { state: "drift", ops, available, installed };
 }

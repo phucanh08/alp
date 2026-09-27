@@ -4,16 +4,13 @@ import {
   type PersistedConfig,
 } from "./persisted-config.js";
 import { ProviderOverrideSchema } from "./agent/provider-launch-config.js";
-import {
-  MutableDaemonConfigSchema,
-  MutableDaemonConfigPatchSchema,
-} from "@getpaseo/protocol/messages";
-import type { AgentSkillSelection } from "@getpaseo/protocol/messages";
+import { MutableDaemonConfigSchema, MutableDaemonConfigPatchSchema } from "@alp/protocol/messages";
+import type { AgentSkillSelection } from "@alp/protocol/messages";
 
-export type { MutableDaemonConfig, MutableDaemonConfigPatch } from "@getpaseo/protocol/messages";
+export type { MutableDaemonConfig, MutableDaemonConfigPatch } from "@alp/protocol/messages";
 
-type MutableDaemonConfig = import("@getpaseo/protocol/messages").MutableDaemonConfig;
-type MutableDaemonConfigPatch = import("@getpaseo/protocol/messages").MutableDaemonConfigPatch;
+type MutableDaemonConfig = import("@alp/protocol/messages").MutableDaemonConfig;
+type MutableDaemonConfigPatch = import("@alp/protocol/messages").MutableDaemonConfigPatch;
 type ProviderOverride = import("./agent/provider-launch-config.js").ProviderOverride;
 
 interface SupportedMutableConfigPatch {
@@ -294,11 +291,11 @@ export function applyMutableProviderConfigToOverrides(
     nextOverrides[providerId] = {
       ...previousOverride,
       ...parsedOverride,
-      ...(parsedOverride.paseoTools
+      ...(parsedOverride.alpTools
         ? {
-            paseoTools: {
-              ...previousOverride?.paseoTools,
-              ...parsedOverride.paseoTools,
+            alpTools: {
+              ...previousOverride?.alpTools,
+              ...parsedOverride.alpTools,
             },
           }
         : {}),
@@ -310,7 +307,7 @@ export function applyMutableProviderConfigToOverrides(
 
 export class DaemonConfigStore {
   private current: MutableDaemonConfig;
-  private readonly paseoHome: string;
+  private readonly alpHome: string;
   private readonly logger: LoggerLike | undefined;
   private readonly changeListeners = new Set<ConfigListener>();
   private readonly applyListeners = new Set<ConfigApplyListener>();
@@ -321,7 +318,7 @@ export class DaemonConfigStore {
   private lastKnownPersisted: PersistedConfig;
 
   constructor(
-    paseoHome: string,
+    alpHome: string,
     initial: MutableDaemonConfig,
     logger?: LoggerLike,
     options: {
@@ -330,7 +327,7 @@ export class DaemonConfigStore {
       startupPersisted?: PersistedConfig;
     } = {},
   ) {
-    this.paseoHome = paseoHome;
+    this.alpHome = alpHome;
     this.logger = getLogger(logger);
     this.current = MutableDaemonConfigSchema.parse({
       ...initial,
@@ -338,7 +335,7 @@ export class DaemonConfigStore {
     });
     this.relayEnabledMutable = options.relayEnabledMutable ?? true;
     this.reloadSource = options.reloadSource;
-    this.startupPersisted = options.startupPersisted ?? loadPersistedConfig(paseoHome, this.logger);
+    this.startupPersisted = options.startupPersisted ?? loadPersistedConfig(alpHome, this.logger);
     this.lastKnownPersisted = this.startupPersisted;
   }
 
@@ -358,7 +355,7 @@ export class DaemonConfigStore {
   private applySupportedPatch(parsedPatch: SupportedMutableConfigPatch): MutableDaemonConfig {
     if (parsedPatch.relay?.enabled !== undefined && !this.relayEnabledMutable) {
       throw new Error(
-        "Relay is controlled by a daemon launch override. Remove PASEO_RELAY_ENABLED or the relay CLI flag before changing it here.",
+        "Relay is controlled by a daemon launch override. Remove ALP_RELAY_ENABLED or the relay CLI flag before changing it here.",
       );
     }
     const { removeProviders = [], ...configPatch } = parsedPatch;
@@ -394,7 +391,7 @@ export class DaemonConfigStore {
       this.applyReplacement(next, { removedProviders });
       this.lastKnownPersisted = knownNext;
     } catch (error) {
-      savePersistedConfig(this.paseoHome, persistedBeforePatch, this.logger);
+      savePersistedConfig(this.alpHome, persistedBeforePatch, this.logger);
       throw error;
     }
 
@@ -406,7 +403,7 @@ export class DaemonConfigStore {
       throw new Error("Daemon config reload is unavailable for this daemon instance");
     }
 
-    const persisted = loadPersistedConfig(this.paseoHome, this.logger);
+    const persisted = loadPersistedConfig(this.alpHome, this.logger);
     const resolved = this.reloadSource.resolve(persisted);
     // Plugin source changes require the plugin lifecycle operation or a daemon
     // restart. The global switch is independently reloadable.
@@ -560,7 +557,7 @@ export class DaemonConfigStore {
     patch: Omit<SupportedMutableConfigPatch, "removeProviders">,
     removeProviders: readonly string[],
   ): { previous: PersistedConfig; knownNext: PersistedConfig } {
-    const persisted = loadPersistedConfig(this.paseoHome, this.logger);
+    const persisted = loadPersistedConfig(this.alpHome, this.logger);
     const merge = (source: PersistedConfig) =>
       mergeMutablePatchIntoPersistedConfig({
         persisted: source,
@@ -570,7 +567,7 @@ export class DaemonConfigStore {
       });
     const nextPersisted = merge(persisted);
     const knownNext = merge(this.lastKnownPersisted);
-    savePersistedConfig(this.paseoHome, nextPersisted, this.logger);
+    savePersistedConfig(this.alpHome, nextPersisted, this.logger);
     return { previous: persisted, knownNext };
   }
 }

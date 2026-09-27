@@ -1,4 +1,4 @@
-import { defineSettings, settingsRpc, type RpcOutput } from "@getpaseo/plugin";
+import { defineSettings, settingsRpc, type RpcOutput } from "@alp/plugin";
 import { z } from "zod";
 
 // Mirror of the bundled slp plugin's settings contract: `plugins/slp/shared/settings.ts` (the

@@ -85,11 +85,11 @@ Copy the address it prints. The example below uses `100.101.102.103`.
 
 ### 2. Configure the daemon
 
-Open `$PASEO_HOME/config.json` (`~/.alp/config.json` by default) and set `daemon.listen` to the Tailscale IP:
+Open `$ALP_HOME/config.json` (`~/.alp/config.json` by default) and set `daemon.listen` to the Tailscale IP:
 
 ```json
 {
-  "$schema": "https://alp.anhlp.com/schemas/paseo.config.v1.json",
+  "$schema": "https://alp.anhlp.com/schemas/alp.config.v1.json",
   "version": 1,
   "daemon": {
     "listen": "100.101.102.103:6767"

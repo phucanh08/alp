@@ -15,8 +15,8 @@ alp doesn't publish a prebuilt image yet. Build one from [`docker/`](https://git
 ```bash
 docker run -d --name alp \
   -p 6767:6767 \
-  -e PASEO_PASSWORD=change-me \
-  -v "$PWD/alp-home:/home/paseo" \
+  -e ALP_PASSWORD=change-me \
+  -v "$PWD/alp-home:/home/alp" \
   -v "$PWD:/workspace" \
   alp:latest
 ```
@@ -27,7 +27,7 @@ Then open:
 http://localhost:6767
 ```
 
-If you set `PASEO_PASSWORD`, use that same password when adding the direct daemon connection in the web UI, mobile app, or CLI.
+If you set `ALP_PASSWORD`, use that same password when adding the direct daemon connection in the web UI, mobile app, or CLI.
 
 ## What the image includes
 
@@ -36,8 +36,8 @@ The image:
 - installs the alp daemon and CLI
 - serves the bundled web UI
 - listens on `0.0.0.0:6767` inside the container
-- stores daemon state under `/home/paseo/.paseo`
-- runs the daemon and launched agents as the non-root `paseo` user
+- stores daemon state under `/home/alp/.alp`
+- runs the daemon and launched agents as the non-root `alp` user
 
 The image does not bundle agent CLIs such as Claude Code, Codex, OpenCode, Copilot, or Pi. Add the agents you use with a small child image.
 
@@ -54,10 +54,10 @@ services:
     ports:
       - "6767:6767"
     environment:
-      PASEO_PASSWORD: "change-me"
-      # PASEO_HOSTNAMES: "alp.example.com,.lan"
+      ALP_PASSWORD: "change-me"
+      # ALP_HOSTNAMES: "alp.example.com,.lan"
     volumes:
-      - ./alp-home:/home/paseo
+      - ./alp-home:/home/alp
       - ./workspace:/workspace
 ```
 
@@ -86,27 +86,27 @@ docker build -t alp-with-agents .
 
 Then use `image: alp-with-agents` in Compose.
 
-Leave the child image user as root. The base entrypoint uses root only for first-run mounted-volume setup, then drops the daemon and launched agents to the non-root `paseo` user.
+Leave the child image user as root. The base entrypoint uses root only for first-run mounted-volume setup, then drops the daemon and launched agents to the non-root `alp` user.
 
 You can authenticate agents either by passing provider environment variables or by running the provider login flow inside the container:
 
 ```bash
-docker exec -it --user paseo alp codex
-docker exec -it --user paseo alp claude
+docker exec -it --user alp alp codex
+docker exec -it --user alp alp claude
 ```
 
-Agent credentials persist in `/home/paseo`.
+Agent credentials persist in `/home/alp`.
 
 ## Volumes
 
 Mount two paths for most deployments:
 
-| Mount         | Purpose                                                                 |
-| ------------- | ----------------------------------------------------------------------- |
-| `/home/paseo` | alp state plus agent config and credentials such as `.codex`, `.claude` |
-| `/workspace`  | Code that alp and launched agents can read and write                    |
+| Mount        | Purpose                                                                 |
+| ------------ | ----------------------------------------------------------------------- |
+| `/home/alp`  | alp state plus agent config and credentials such as `.codex`, `.claude` |
+| `/workspace` | Code that alp and launched agents can read and write                    |
 
-On Linux, the built-in `paseo` user is uid/gid `1000:1000`. Make mounted directories writable by that user, or run the container with Docker's `--user` / Compose `user:` option.
+On Linux, the built-in `alp` user is uid/gid `1000:1000`. Make mounted directories writable by that user, or run the container with Docker's `--user` / Compose `user:` option.
 
 ## Reverse proxy
 
@@ -142,25 +142,25 @@ If you reach alp by DNS name, allow that host:
 
 ```yaml
 environment:
-  PASEO_HOSTNAMES: "alp.example.com,.lan"
+  ALP_HOSTNAMES: "alp.example.com,.lan"
 ```
 
 IPs and `localhost` are allowed by default.
 
 ## Security
 
-Set `PASEO_PASSWORD` for any published port or network-reachable deployment. Use HTTPS at your reverse proxy for browser access outside localhost.
+Set `ALP_PASSWORD` for any published port or network-reachable deployment. Use HTTPS at your reverse proxy for browser access outside localhost.
 
 The static web UI is public on the daemon origin. The daemon API and WebSocket are protected by password auth when configured.
 
-Agents can access whatever you mount into `/workspace` and whatever credentials you place in `/home/paseo`. Keep those mounts scoped to what the agents should be able to use.
+Agents can access whatever you mount into `/workspace` and whatever credentials you place in `/home/alp`. Keep those mounts scoped to what the agents should be able to use.
 
 See [Security](/docs/security) for the full daemon trust model.
 
 ## Troubleshooting
 
-- **The UI loads but cannot connect:** if `PASEO_PASSWORD` is set, add a direct connection with the same password.
-- **403 Host not allowed:** set `PASEO_HOSTNAMES` to the DNS names you use.
+- **The UI loads but cannot connect:** if `ALP_PASSWORD` is set, add a direct connection with the same password.
+- **403 Host not allowed:** set `ALP_HOSTNAMES` to the DNS names you use.
 - **Provider not available:** install that agent CLI in a child image or make sure the binary is on `PATH`.
 - **Permission errors in `/workspace`:** make the mounted directory writable by uid/gid `1000:1000`, or run the container as the host uid/gid.
-- **Logs:** run `docker logs alp`, or inspect `/home/paseo/.paseo/daemon.log` inside the container.
+- **Logs:** run `docker logs alp`, or inspect `/home/alp/.alp/daemon.log` inside the container.

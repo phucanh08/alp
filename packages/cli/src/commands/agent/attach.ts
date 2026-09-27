@@ -10,8 +10,8 @@ import {
   fetchProjectedTimelineItems,
   LIVE_HISTORY_FETCH_TIMEOUT_MS,
 } from "../../utils/timeline.js";
-import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
-import type { AgentStreamEventPayload } from "@getpaseo/protocol/messages";
+import type { AgentTimelineItem } from "@alp/protocol/agent-types";
+import type { AgentStreamEventPayload } from "@alp/protocol/messages";
 
 export interface AgentAttachOptions {
   host?: string;

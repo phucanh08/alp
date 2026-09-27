@@ -8,7 +8,7 @@ import { syncReleaseNotes } from "./sync-release-notes-from-changelog.mjs";
 
 function withTempChangelog(fn, changelogText = "## 0.1.60-beta.1 - 2026-04-20\n\n- Beta notes.\n") {
   const previousCwd = process.cwd();
-  const tempDir = mkdtempSync(path.join(tmpdir(), "paseo-release-notes-test-"));
+  const tempDir = mkdtempSync(path.join(tmpdir(), "alp-release-notes-test-"));
   process.chdir(tempDir);
   writeFileSync("CHANGELOG.md", changelogText);
 
@@ -42,7 +42,7 @@ test("does not treat GitHub authentication failures as missing releases", () => 
   });
   assert.throws(
     () =>
-      getGitHubRelease("getpaseo/paseo", "v0.1.60-beta.1", (command, args) => {
+      getGitHubRelease("alp/alp", "v0.1.60-beta.1", (command, args) => {
         calls.push({ args, command });
         throw authError;
       }),
@@ -58,7 +58,7 @@ test("updates an existing release body through the release id API", () => {
     const execFileSync = (command, args, options) => {
       calls.push({ args, command, options });
 
-      if (args[0] === "api" && args[1] === "repos/getpaseo/paseo/releases/tags/v0.1.60-beta.1") {
+      if (args[0] === "api" && args[1] === "repos/alp/alp/releases/tags/v0.1.60-beta.1") {
         return JSON.stringify({ id: 311163621, draft: false });
       }
 
@@ -73,7 +73,7 @@ test("updates an existing release body through the release id API", () => {
       throw new Error(`Unexpected gh call: ${command} ${args.join(" ")}`);
     };
 
-    syncReleaseNotes(["--repo", "getpaseo/paseo", "--tag", "v0.1.60-beta.1"], {
+    syncReleaseNotes(["--repo", "alp/alp", "--tag", "v0.1.60-beta.1"], {
       execFileSync,
     });
 
@@ -88,7 +88,7 @@ test("updates an existing release body through the release id API", () => {
           call.args[0] === "api" &&
           call.args[1] === "-X" &&
           call.args[2] === "PATCH" &&
-          call.args[3] === "repos/getpaseo/paseo/releases/311163621",
+          call.args[3] === "repos/alp/alp/releases/311163621",
       ),
       true,
       "existing releases should be patched by release id",
@@ -103,11 +103,11 @@ test("updates a draft release body without publishing it", () => {
     const execFileSync = (command, args, options) => {
       calls.push({ args, command, options });
 
-      if (args[0] === "api" && args[1] === "repos/getpaseo/paseo/releases/tags/v0.1.60-beta.1") {
+      if (args[0] === "api" && args[1] === "repos/alp/alp/releases/tags/v0.1.60-beta.1") {
         throw notFoundError();
       }
 
-      if (args[0] === "api" && args[1] === "repos/getpaseo/paseo/releases?per_page=100") {
+      if (args[0] === "api" && args[1] === "repos/alp/alp/releases?per_page=100") {
         return JSON.stringify([
           {
             id: 311163621,
@@ -126,7 +126,7 @@ test("updates a draft release body without publishing it", () => {
       throw new Error(`Unexpected gh call: ${command} ${args.join(" ")}`);
     };
 
-    syncReleaseNotes(["--repo", "getpaseo/paseo", "--tag", "v0.1.60-beta.1"], {
+    syncReleaseNotes(["--repo", "alp/alp", "--tag", "v0.1.60-beta.1"], {
       execFileSync,
     });
 
@@ -150,11 +150,11 @@ test("creates missing beta releases as drafts", () => {
     const execFileSync = (command, args, options) => {
       calls.push({ args, command, options });
 
-      if (args[0] === "api" && args[1] === "repos/getpaseo/paseo/releases/tags/v0.1.60-beta.1") {
+      if (args[0] === "api" && args[1] === "repos/alp/alp/releases/tags/v0.1.60-beta.1") {
         throw notFoundError();
       }
 
-      if (args[0] === "api" && args[1] === "repos/getpaseo/paseo/releases?per_page=100") {
+      if (args[0] === "api" && args[1] === "repos/alp/alp/releases?per_page=100") {
         return created
           ? JSON.stringify([
               {
@@ -179,10 +179,9 @@ test("creates missing beta releases as drafts", () => {
       throw new Error(`Unexpected gh call: ${command} ${args.join(" ")}`);
     };
 
-    syncReleaseNotes(
-      ["--repo", "getpaseo/paseo", "--tag", "v0.1.60-beta.1", "--create-if-missing"],
-      { execFileSync },
-    );
+    syncReleaseNotes(["--repo", "alp/alp", "--tag", "v0.1.60-beta.1", "--create-if-missing"], {
+      execFileSync,
+    });
 
     const createCall = calls.find(
       (call) => call.args[0] === "release" && call.args[1] === "create",
@@ -200,11 +199,11 @@ test("creates and looks up draft releases under the alp title", () => {
     const execFileSync = (command, args, options) => {
       calls.push({ args, command, options });
 
-      if (args[0] === "api" && args[1] === "repos/getpaseo/paseo/releases/tags/v0.1.60-beta.1") {
+      if (args[0] === "api" && args[1] === "repos/alp/alp/releases/tags/v0.1.60-beta.1") {
         throw notFoundError();
       }
 
-      if (args[0] === "api" && args[1] === "repos/getpaseo/paseo/releases?per_page=100") {
+      if (args[0] === "api" && args[1] === "repos/alp/alp/releases?per_page=100") {
         return "[]";
       }
 
@@ -217,10 +216,9 @@ test("creates and looks up draft releases under the alp title", () => {
 
     assert.throws(
       () =>
-        syncReleaseNotes(
-          ["--repo", "getpaseo/paseo", "--tag", "v0.1.60-beta.1", "--create-if-missing"],
-          { execFileSync },
-        ),
+        syncReleaseNotes(["--repo", "alp/alp", "--tag", "v0.1.60-beta.1", "--create-if-missing"], {
+          execFileSync,
+        }),
       /already exists/,
     );
 
@@ -248,7 +246,7 @@ test("converts contributor profile links to mentions in synced release notes", (
     let syncedNotes = "";
 
     const execFileSync = (command, args) => {
-      if (args[0] === "api" && args[1] === "repos/getpaseo/paseo/releases/tags/v0.1.60-beta.1") {
+      if (args[0] === "api" && args[1] === "repos/alp/alp/releases/tags/v0.1.60-beta.1") {
         return JSON.stringify({ id: 311163621, draft: false });
       }
 
@@ -262,7 +260,7 @@ test("converts contributor profile links to mentions in synced release notes", (
       throw new Error(`Unexpected gh call: ${command} ${args.join(" ")}`);
     };
 
-    syncReleaseNotes(["--repo", "getpaseo/paseo", "--tag", "v0.1.60-beta.1"], {
+    syncReleaseNotes(["--repo", "alp/alp", "--tag", "v0.1.60-beta.1"], {
       execFileSync,
     });
 

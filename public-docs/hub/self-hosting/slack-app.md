@@ -45,10 +45,10 @@ The Apps guide gives you a webhook manifest and asks for the App ID, Client ID, 
 
 Slack calls:
 
-| Provider setting | Hub URL                                               |
-| ---------------- | ----------------------------------------------------- |
-| Redirect URL     | `<PASEO_HUB_APP_URL>/api/integrations/slack/callback` |
-| Request URL      | `<PASEO_HUB_APP_URL>/api/integrations/slack/events`   |
+| Provider setting | Hub URL                                             |
+| ---------------- | --------------------------------------------------- |
+| Redirect URL     | `<ALP_HUB_APP_URL>/api/integrations/slack/callback` |
+| Request URL      | `<ALP_HUB_APP_URL>/api/integrations/slack/events`   |
 
 Start the installation from Hub. An installation started only from Slack is not bound to a Hub organization.
 

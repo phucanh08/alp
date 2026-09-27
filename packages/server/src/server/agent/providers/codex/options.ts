@@ -1,4 +1,4 @@
-import type { ProviderOptions, ToolPolicy } from "@getpaseo/protocol/agent-types";
+import type { ProviderOptions, ToolPolicy } from "@alp/protocol/agent-types";
 import path from "node:path";
 import { z } from "zod";
 

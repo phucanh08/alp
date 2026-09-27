@@ -58,7 +58,7 @@ The reusable pieces live in `flows/`:
 Compose new workspace scenarios out of these primitives instead of copying the
 old full flow. The shell scripts render the top-level flows and every `flows/*.yaml`
 file into the same temp directory, so nested `runFlow: flows/...` paths keep
-working with `${PASEO_MAESTRO_*}` placeholders.
+working with `${ALP_MAESTRO_*}` placeholders.
 
 The flow is intentionally strict. It must:
 
@@ -89,8 +89,8 @@ bash packages/app/maestro/record-workspace-create-android-focus.sh
 Optional environment:
 
 ```bash
-PASEO_MAESTRO_APP_ID=com.anhlp.alp.debug
-PASEO_MAESTRO_DIRECT_ENDPOINT=127.0.0.1:6767
-PASEO_MAESTRO_DAEMON_WS_URL=ws://127.0.0.1:6767/ws
-PASEO_MAESTRO_PROJECT_PATH=/path/to/git/repo
+ALP_MAESTRO_APP_ID=com.anhlp.alp.debug
+ALP_MAESTRO_DIRECT_ENDPOINT=127.0.0.1:6767
+ALP_MAESTRO_DAEMON_WS_URL=ws://127.0.0.1:6767/ws
+ALP_MAESTRO_PROJECT_PATH=/path/to/git/repo
 ```

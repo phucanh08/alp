@@ -38,7 +38,7 @@ describe("checkout PR schemas", () => {
     ];
     const payload = {
       forge: "github",
-      projectPath: "getpaseo/paseo",
+      projectPath: "alp/alp",
       url: "https://github.com/getpaseo/paseo/pull/42",
       title: "Ship it",
       state: "open",
@@ -517,8 +517,8 @@ describe("checkout PR schemas", () => {
       CheckoutGithubGetCheckDetailsRequestSchema.parse({
         type: "checkout.github.get_check_details.request",
         cwd: "/tmp/repo",
-        repoOwner: "getpaseo",
-        repoName: "paseo",
+        repoOwner: "alp",
+        repoName: "alp",
         checkRunId: 12345,
         workflowRunId: 456,
         requestId: "request-check-details",
@@ -526,8 +526,8 @@ describe("checkout PR schemas", () => {
     ).toEqual({
       type: "checkout.github.get_check_details.request",
       cwd: "/tmp/repo",
-      repoOwner: "getpaseo",
-      repoName: "paseo",
+      repoOwner: "alp",
+      repoName: "alp",
       checkRunId: 12345,
       workflowRunId: 456,
       requestId: "request-check-details",
@@ -706,8 +706,8 @@ describe("checkout PR schemas", () => {
     const request = {
       type: "checkout.github.get_check_details.request",
       cwd: "/tmp/repo",
-      repoOwner: "getpaseo",
-      repoName: "paseo",
+      repoOwner: "alp",
+      repoName: "alp",
       checkRunId: 12345,
       requestId: "request-check-details",
     };

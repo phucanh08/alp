@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { ProjectCheckoutLitePayload } from "@getpaseo/protocol/messages";
+import type { ProjectCheckoutLitePayload } from "@alp/protocol/messages";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { createTestLogger } from "../test-utils/test-logger.js";
@@ -257,7 +257,7 @@ class ObservedPlacements {
       currentBranch: branch,
       remoteUrl: null,
       worktreeRoot: rootPath,
-      isPaseoOwnedWorktree: false,
+      isAlpOwnedWorktree: false,
       mainRepoRoot: null,
     });
   }
@@ -380,7 +380,7 @@ class ObservedPlacements {
         currentBranch: null,
         remoteUrl: null,
         worktreeRoot: null,
-        isPaseoOwnedWorktree: false,
+        isAlpOwnedWorktree: false,
         mainRepoRoot: null,
       }
     );

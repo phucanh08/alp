@@ -1,6 +1,6 @@
 import type { DaemonTarget } from "../../utils/daemon-target.js";
 import { resolve } from "node:path";
-import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import type { DaemonClient } from "@alp/client/internal/daemon-client";
 import { connectToDaemon, getDaemonHost } from "../../utils/client.js";
 import type { CommandError, CommandOptions } from "../../output/index.js";
 

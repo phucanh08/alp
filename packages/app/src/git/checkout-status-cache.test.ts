@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { CheckoutStatusUpdate } from "@getpaseo/protocol/messages";
+import type { CheckoutStatusUpdate } from "@alp/protocol/messages";
 import {
   checkoutCommitsQueryKey,
   checkoutPrStatusQueryKey,
@@ -41,7 +41,7 @@ function checkoutStatus(overrides: Partial<CheckoutStatusPayload> = {}): Checkou
     error: null,
     requestId: "checkout-status-1",
     isGit: true,
-    isPaseoOwnedWorktree: false,
+    isAlpOwnedWorktree: false,
     repoRoot: cwd,
     currentBranch: "main",
     isDirty: false,

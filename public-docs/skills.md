@@ -58,7 +58,7 @@ The advisor returns a second opinion without editing files.
 
 alp bundles six more skills for the SLP (Supervisor / Lead / Peer) workflow. They are not
 installed on the host: each Lead and Peer agent gets its seat's skills through its own seat
-directory under `$PASEO_HOME/slp/seat-skills/`.
+directory under `$ALP_HOME/slp/seat-skills/`.
 
 | Skill                      | Use it to                                                                         |
 | -------------------------- | --------------------------------------------------------------------------------- |

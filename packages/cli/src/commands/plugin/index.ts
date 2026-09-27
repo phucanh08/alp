@@ -1,11 +1,11 @@
 import { createInterface } from "node:readline/promises";
 import { reviewPluginUpdates, type UpdateOutcome } from "./update.js";
 import { Command } from "commander";
-import type { PluginListItem, PluginLogEntry } from "@getpaseo/protocol/messages";
+import type { PluginListItem, PluginLogEntry } from "@alp/protocol/messages";
 import {
   formatPluginSourceReference,
   formatPluginIdentity,
-} from "@getpaseo/protocol/plugin-source-reference";
+} from "@alp/protocol/plugin-source-reference";
 import type { CommandOptions, ListResult, OutputSchema, SingleResult } from "../../output/index.js";
 import { withOutput } from "../../output/index.js";
 import { addJsonAndDaemonHostOptions, addJsonOption } from "../../utils/command-options.js";
@@ -220,7 +220,7 @@ export function createPluginCommand(): Command {
         "<source>",
         "Host directory, Git or npm source, optionally followed by :plugin/path",
       )
-      .option("--id <id>", "Runtime plugin ID (defaults to paseo-plugin.json id)")
+      .option("--id <id>", "Runtime plugin ID (defaults to alp-plugin.json id)")
       .option("--ref <ref>", "Git branch, tag, or commit")
       .option("--path <path>", "Legacy form of the :plugin/path source suffix"),
   ).action(withOutput(runPluginInstallCommand));

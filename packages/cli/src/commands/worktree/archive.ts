@@ -1,6 +1,6 @@
 import path from "path";
 import type { Command } from "commander";
-import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import type { DaemonClient } from "@alp/client/internal/daemon-client";
 import { connectToDaemon, getDaemonHost } from "../../utils/client.js";
 import type {
   CommandOptions,
@@ -76,7 +76,7 @@ export async function runArchiveCommandWithDeps(
 
   try {
     // Get the list of worktrees first to resolve the name
-    const listResponse = await client.getPaseoWorktreeList({});
+    const listResponse = await client.getAlpWorktreeList({});
 
     if (listResponse.error) {
       const error: CommandError = {
@@ -102,8 +102,8 @@ export async function runArchiveCommandWithDeps(
     }
 
     // Archive the worktree. scope:"worktree" archives every active workspace on
-    // the directory and then removes the directory (Paseo-owned gated).
-    const response = await client.archivePaseoWorktree({
+    // the directory and then removes the directory (Alp-owned gated).
+    const response = await client.archiveAlpWorktree({
       worktreePath: worktree.worktreePath,
       scope: "worktree",
     });

@@ -2,16 +2,13 @@ import { afterEach, describe, expect, test } from "vitest";
 import pino from "pino";
 
 import { DaemonClient } from "../test-utils/daemon-client.js";
-import { createTestPaseoDaemon, type TestPaseoDaemon } from "../test-utils/paseo-daemon.js";
+import { createTestAlpDaemon, type TestAlpDaemon } from "../test-utils/alp-daemon.js";
 import { generateLocalPairingOffer } from "../pairing-offer.js";
 import { CodexAppServerAgentClient } from "../agent/providers/codex-app-server-agent.js";
-import { buildRelayWebSocketUrl } from "@getpaseo/protocol/daemon-endpoints";
-import {
-  parseConnectionOfferFromUrl,
-  type ConnectionOffer,
-} from "@getpaseo/protocol/connection-offer";
+import { buildRelayWebSocketUrl } from "@alp/protocol/daemon-endpoints";
+import { parseConnectionOfferFromUrl, type ConnectionOffer } from "@alp/protocol/connection-offer";
 
-const relayEndpoint = process.env.PASEO_LIVE_RELAY_ENDPOINT ?? "paseo-relay-next.fly.dev:443";
+const relayEndpoint = process.env.ALP_LIVE_RELAY_ENDPOINT ?? "alp-relay-next.fly.dev:443";
 const liveTest = process.env.RUN_LIVE_RELAY_E2E === "1" ? test : test.skip;
 
 function requireOffer(url: string): ConnectionOffer {
@@ -22,9 +19,9 @@ function requireOffer(url: string): ConnectionOffer {
   return offer;
 }
 
-async function pairingOfferFor(daemon: TestPaseoDaemon): Promise<ConnectionOffer> {
+async function pairingOfferFor(daemon: TestAlpDaemon): Promise<ConnectionOffer> {
   const pairing = await generateLocalPairingOffer({
-    paseoHome: daemon.paseoHome,
+    alpHome: daemon.alpHome,
     relayEnabled: true,
     relayEndpoint,
     relayPublicEndpoint: relayEndpoint,
@@ -55,7 +52,7 @@ function clientFor(offer: ConnectionOffer): DaemonClient {
 }
 
 describe("live hosted relay", () => {
-  let daemon: TestPaseoDaemon | null = null;
+  let daemon: TestAlpDaemon | null = null;
   let client: DaemonClient | null = null;
 
   afterEach(async () => {
@@ -67,7 +64,7 @@ describe("live hosted relay", () => {
     "carries a complete DaemonClient agent workflow through the hosted relay",
     async () => {
       const logger = pino({ level: "silent" });
-      daemon = await createTestPaseoDaemon({
+      daemon = await createTestAlpDaemon({
         listen: "127.0.0.1",
         relayEnabled: true,
         relayEndpoint,

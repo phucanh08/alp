@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { CheckoutPrStatusSchema } from "@getpaseo/protocol/messages";
+import { CheckoutPrStatusSchema } from "@alp/protocol/messages";
 import type { WorkspaceGitRuntimeSnapshot } from "../workspace-git-service.js";
 import {
   buildCheckoutPrStatusPayloadFromSnapshot,
@@ -49,8 +49,8 @@ describe("checkout status projection", () => {
     const payload = normalizeCheckoutPrStatusPayload(
       {
         number: 993,
-        repoOwner: "getpaseo",
-        repoName: "paseo",
+        repoOwner: "alp",
+        repoName: "alp",
         url: "https://github.com/getpaseo/paseo/pull/993",
         title: "Auto-merge UX",
         state: "open",
@@ -93,7 +93,7 @@ describe("checkout status projection", () => {
 
     expect(payload).toMatchObject({
       forge: "github",
-      projectPath: "getpaseo/paseo",
+      projectPath: "alp/alp",
       number: 993,
       mergeable: "MERGEABLE",
       checksStatus: "pending",

@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const INTERNAL_PREFIX = "/_internal/opencode";
 
-export default async function paseoPlugin(input, options) {
+export default async function alpPlugin(input, options) {
   const request = async (pathname, init) => {
     const response = await fetch(new URL(pathname, options.baseUrl), {
       ...init,
@@ -29,7 +29,7 @@ export default async function paseoPlugin(input, options) {
   }
   const tools = {};
   for (const definition of manifest.tools ?? []) {
-    tools[`paseo_${definition.name}`] = {
+    tools[`alp_${definition.name}`] = {
       description: definition.description,
       args: jsonSchemaObjectToZodShape(definition.inputSchema),
       execute: async (args, context) => {
@@ -50,7 +50,7 @@ export default async function paseoPlugin(input, options) {
         return {
           title: definition.title,
           output: formatToolResult(result),
-          metadata: { paseoTool: definition.name },
+          metadata: { alpTool: definition.name },
         };
       },
     };
@@ -73,7 +73,7 @@ export default async function paseoPlugin(input, options) {
 }
 
 function logPluginError(stage, context, error) {
-  console.error(`[paseo-opencode-plugin] ${stage} failed`, {
+  console.error(`[alp-opencode-plugin] ${stage} failed`, {
     ...context,
     error: error instanceof Error ? error.message : String(error),
   });

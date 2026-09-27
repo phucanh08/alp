@@ -1,13 +1,13 @@
 import { confirm, isCancel, log } from "@clack/prompts";
 import { Command } from "commander";
 import chalk from "chalk";
-import { generateLocalPairingOffer } from "@getpaseo/server/pairing";
-import { readDaemonInstance } from "@getpaseo/server/daemon-control";
+import { generateLocalPairingOffer } from "@alp/server/pairing";
+import { readDaemonInstance } from "@alp/server/daemon-control";
 import {
   readPersistedConfig,
   editPersistedConfig,
   resolveConfigFromPersisted,
-} from "@getpaseo/server/configuration";
+} from "@alp/server/configuration";
 import { connectToDaemon } from "../../utils/client.js";
 import type { DaemonTarget } from "../../utils/daemon-target.js";
 import { addJsonAndDaemonHostOptions, withGlobalOptions } from "../../utils/command-options.js";
@@ -66,25 +66,25 @@ export function pairCommand(): Command {
 }
 
 export async function resolveLocalPairingOffer(options: {
-  paseoHome: string;
+  alpHome: string;
   enableRelay?: boolean;
 }): Promise<PairingOffer> {
-  const instance = await readDaemonInstance(options.paseoHome);
+  const instance = await readDaemonInstance(options.alpHome);
   if (instance)
     return resolveDaemonPairingOffer(
-      { kind: "instance", home: options.paseoHome },
+      { kind: "instance", home: options.alpHome },
       options.enableRelay,
     );
   if (options.enableRelay)
-    editPersistedConfig(options.paseoHome, "daemon.relay.enabled", { value: true });
+    editPersistedConfig(options.alpHome, "daemon.relay.enabled", { value: true });
   const config = resolveConfigFromPersisted(
-    options.paseoHome,
-    readPersistedConfig(options.paseoHome, { defaultsIfMissing: true }),
+    options.alpHome,
+    readPersistedConfig(options.alpHome, { defaultsIfMissing: true }),
     { env: {} },
   );
 
   return generateLocalPairingOffer({
-    paseoHome: options.paseoHome,
+    alpHome: options.alpHome,
     relayEnabled: config.relayEnabled,
     relayEndpoint: config.relayEndpoint,
     relayPublicEndpoint: config.relayPublicEndpoint,
@@ -160,7 +160,7 @@ export async function runPairCommand(options: PairOptions): Promise<void> {
   const target = options.daemonTarget;
   const resolveOffer = (enableRelay: boolean) =>
     target.kind === "instance"
-      ? resolveLocalPairingOffer({ paseoHome: target.home, enableRelay })
+      ? resolveLocalPairingOffer({ alpHome: target.home, enableRelay })
       : resolveDaemonPairingOffer(target, enableRelay);
   const offline = target.kind === "instance" && !(await readDaemonInstance(target.home));
   const pairing = await resolveOffer(options.relay === true);

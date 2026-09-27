@@ -190,7 +190,7 @@ async function startPublicSteeringSession(
     commandName: string;
     args?: string;
   } | null>,
-): Promise<{ session: AgentSession; paseoTurnId: string }> {
+): Promise<{ session: AgentSession; alpTurnId: string }> {
   const session = new CodexAppServerAgentSession(
     createConfig({ cwd: "/workspace/project" }),
     null,
@@ -202,7 +202,7 @@ async function startPublicSteeringSession(
   await appServer.waitForTurnStart();
   appServer.startsTurn({ threadId: "thread-1", turnId: "native-A" });
   await new Promise((resolve) => setTimeout(resolve, 0));
-  return { session, paseoTurnId: started.turnId };
+  return { session, alpTurnId: started.turnId };
 }
 
 function deferred<T>() {
@@ -218,13 +218,13 @@ describe("Codex active-turn steering admission", () => {
     const appServer = createFakeCodexAppServer({
       "turn/steer": () => ({ turn: { id: "native-A" } }),
     });
-    const { session, paseoTurnId } = await startPublicSteeringSession(appServer);
+    const { session, alpTurnId } = await startPublicSteeringSession(appServer);
     castInternals<{ emitSyntheticPlanApprovalRequest: (planText: string) => void }>(
       session,
     ).emitSyntheticPlanApprovalRequest("Ship the thing");
 
     await expect(
-      session.steerActiveTurn!("background notification", { expectedTurnId: paseoTurnId }),
+      session.steerActiveTurn!("background notification", { expectedTurnId: alpTurnId }),
     ).resolves.toEqual({ status: "accepted" });
     expect(session.getPendingPermissions()).toHaveLength(1);
 
@@ -238,7 +238,7 @@ describe("Codex active-turn steering admission", () => {
     const appServer = createFakeCodexAppServer({
       "turn/steer": () => ({ turn: { id: "native-A" } }),
     });
-    const { session, paseoTurnId } = await startPublicSteeringSession(appServer);
+    const { session, alpTurnId } = await startPublicSteeringSession(appServer);
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
 
@@ -295,7 +295,7 @@ describe("Codex active-turn steering admission", () => {
 
     await expect(
       session.steerActiveTurn!("review this instead", {
-        expectedTurnId: paseoTurnId,
+        expectedTurnId: alpTurnId,
         clearPendingPermissions: true,
       }),
     ).resolves.toEqual({ status: "accepted" });
@@ -331,14 +331,14 @@ describe("Codex active-turn steering admission", () => {
     const commandResolution = deferred<{ commandName: string } | null>();
     const resolverEntered = deferred<void>();
     const appServer = createFakeCodexAppServer();
-    const { session, paseoTurnId } = await startPublicSteeringSession(appServer, async (prompt) => {
+    const { session, alpTurnId } = await startPublicSteeringSession(appServer, async (prompt) => {
       if (prompt !== "/held") return null;
       resolverEntered.resolve();
       return commandResolution.promise;
     });
 
     const steer = session.steerActiveTurn!("/held", {
-      expectedTurnId: paseoTurnId,
+      expectedTurnId: alpTurnId,
       clientMessageId: "steer-A",
     });
     await resolverEntered.promise;
@@ -350,7 +350,7 @@ describe("Codex active-turn steering admission", () => {
     commandResolution.resolve(null);
 
     await expect(steer).resolves.toEqual({ status: "unavailable" });
-    expect(startedB.turnId).not.toBe(paseoTurnId);
+    expect(startedB.turnId).not.toBe(alpTurnId);
     expect(appServer.requests().filter((request) => request.method === "turn/steer")).toEqual([]);
     await session.close();
     appServer.assertNoErrors();
@@ -385,9 +385,9 @@ describe("Codex active-turn steering admission", () => {
     const appServer = createFakeCodexAppServer({
       "turn/steer": () => ({ __jsonRpcError: { code, message, ...(data ? { data } : {}) } }),
     });
-    const { session, paseoTurnId } = await startPublicSteeringSession(appServer);
+    const { session, alpTurnId } = await startPublicSteeringSession(appServer);
     const steer = session.steerActiveTurn!("follow up", {
-      expectedTurnId: paseoTurnId,
+      expectedTurnId: alpTurnId,
       clientMessageId: "steer-frame",
     });
     if (expected === "unavailable") {
@@ -405,10 +405,10 @@ describe("Codex active-turn steering admission", () => {
         __jsonRpcError: { code: -32000, message: "connection lost" },
       }),
     });
-    const { session, paseoTurnId } = await startPublicSteeringSession(appServer);
+    const { session, alpTurnId } = await startPublicSteeringSession(appServer);
     await expect(
       session.steerActiveTurn!("follow up", {
-        expectedTurnId: paseoTurnId,
+        expectedTurnId: alpTurnId,
         clientMessageId: "steer-transport",
       }),
     ).rejects.toThrow("connection lost");
@@ -419,9 +419,9 @@ describe("Codex active-turn steering admission", () => {
     const appServer = createFakeCodexAppServer({
       "turn/steer": () => new Promise<void>(() => undefined),
     });
-    const { session, paseoTurnId } = await startPublicSteeringSession(appServer);
+    const { session, alpTurnId } = await startPublicSteeringSession(appServer);
     const steer = session.steerActiveTurn!("follow up", {
-      expectedTurnId: paseoTurnId,
+      expectedTurnId: alpTurnId,
       clientMessageId: "steer-disconnect",
     });
     await appServer.waitForRequest("turn/steer");
@@ -535,7 +535,7 @@ async function runCustomCodexProviderTurn(
     `
 const fs = require("node:fs");
 
-const capturePath = process.env.PASEO_FAKE_CODEX_CAPTURE;
+const capturePath = process.env.ALP_FAKE_CODEX_CAPTURE;
 let buffer = "";
 
 fs.appendFileSync(capturePath, JSON.stringify({
@@ -585,7 +585,7 @@ process.stdin.on("data", (chunk) => {
         env: {
           OPENAI_API_KEY: "sk-custom",
           OPENAI_BASE_URL: baseUrl,
-          PASEO_FAKE_CODEX_CAPTURE: capturedRequestsPath,
+          ALP_FAKE_CODEX_CAPTURE: capturedRequestsPath,
         },
       },
     },
@@ -1471,7 +1471,7 @@ describe("Codex app-server provider", () => {
     await session.close();
   });
 
-  test("initializes Codex app-server without making Paseo the request originator", async () => {
+  test("initializes Codex app-server without making Alp the request originator", async () => {
     let initializeParams: unknown;
     const appServer = createFakeCodexAppServer({
       initialize: (params) => {
@@ -1529,7 +1529,7 @@ describe("Codex app-server provider", () => {
     appServer.assertNoErrors();
   });
 
-  test("unarchives Codex when an active Paseo agent resumes an archived thread", async () => {
+  test("unarchives Codex when an active Alp agent resumes an archived thread", async () => {
     const threadRequests: string[] = [];
     let resumeAttempts = 0;
     const appServer = createFakeCodexAppServer({
@@ -2182,9 +2182,9 @@ describe("Codex app-server provider", () => {
               cwd: "/tmp/codex-question-test",
               skills: [
                 {
-                  name: "paseo-implement",
-                  description: "Execute an existing Paseo plan.",
-                  path: "/tmp/skills/paseo-implement/SKILL.md",
+                  name: "alp-implement",
+                  description: "Execute an existing Alp plan.",
+                  path: "/tmp/skills/alp-implement/SKILL.md",
                 },
               ],
               errors: [],
@@ -2204,7 +2204,7 @@ describe("Codex app-server provider", () => {
     session.activeForegroundTurnId = null;
     session.client = createStub<CodexClientLike>({ request });
 
-    await session.startTurn("/paseo-implement in a worktree, remember to use Claude for the UI");
+    await session.startTurn("/alp-implement in a worktree, remember to use Claude for the UI");
 
     const turnStartCall = request.mock.calls.find(([method]) => method === "turn/start");
     expect(turnStartCall?.[1]).toEqual(
@@ -2212,12 +2212,12 @@ describe("Codex app-server provider", () => {
         input: [
           {
             type: "skill",
-            name: "paseo-implement",
-            path: "/tmp/skills/paseo-implement/SKILL.md",
+            name: "alp-implement",
+            path: "/tmp/skills/alp-implement/SKILL.md",
           },
           {
             type: "text",
-            text: "$paseo-implement in a worktree, remember to use Claude for the UI",
+            text: "$alp-implement in a worktree, remember to use Claude for the UI",
             text_elements: [],
           },
         ],
@@ -2245,20 +2245,20 @@ describe("Codex app-server provider", () => {
   test("deduplicates Codex skill slash commands returned from multiple skill roots", async () => {
     const commands = await listCommandsFromFakeCodex([
       {
-        name: "paseo",
+        name: "alp",
         description: "Shared orchestration skill.",
-        path: "/Users/test/.agents/skills/paseo/SKILL.md",
+        path: "/Users/test/.agents/skills/alp/SKILL.md",
       },
       {
-        name: "paseo",
+        name: "alp",
         description: "Shared orchestration skill.",
-        path: "/Users/test/.codex/skills/paseo/SKILL.md",
+        path: "/Users/test/.codex/skills/alp/SKILL.md",
       },
     ]);
 
-    expect(commands.filter((command) => command.name === "paseo")).toEqual([
+    expect(commands.filter((command) => command.name === "alp")).toEqual([
       {
-        name: "paseo",
+        name: "alp",
         description: "Shared orchestration skill.",
         argumentHint: "",
         kind: "skill",
@@ -2509,22 +2509,22 @@ describe("Codex app-server provider", () => {
   test("builds app-server env from launch-context env overrides", () => {
     const launchContext: AgentLaunchContext = {
       env: {
-        PASEO_AGENT_ID: "00000000-0000-4000-8000-000000000301",
-        PASEO_TEST_FLAG: "codex-launch-value",
+        ALP_AGENT_ID: "00000000-0000-4000-8000-000000000301",
+        ALP_TEST_FLAG: "codex-launch-value",
       },
     };
     const env = buildCodexAppServerEnv(
       {
         env: {
-          PASEO_AGENT_ID: "runtime-value",
-          PASEO_TEST_FLAG: "runtime-test-value",
+          ALP_AGENT_ID: "runtime-value",
+          ALP_TEST_FLAG: "runtime-test-value",
         },
       },
       launchContext.env,
     );
 
-    expect(env.PASEO_AGENT_ID).toBe(launchContext.env?.PASEO_AGENT_ID);
-    expect(env.PASEO_TEST_FLAG).toBe(launchContext.env?.PASEO_TEST_FLAG);
+    expect(env.ALP_AGENT_ID).toBe(launchContext.env?.ALP_AGENT_ID);
+    expect(env.ALP_TEST_FLAG).toBe(launchContext.env?.ALP_TEST_FLAG);
   });
 
   test("projects request_user_input into a question permission and running timeline tool call", () => {
@@ -2897,7 +2897,7 @@ describe("Codex app-server provider", () => {
         id: "child-mcp-image",
         type: "mcpToolCall",
         status: "completed",
-        server: "paseo",
+        server: "alp",
         tool: "browser_screenshot",
         arguments: {},
         result: {
@@ -5427,7 +5427,7 @@ describe("Codex app-server provider", () => {
       item: {
         id: "image-view-1",
         type: "imageView",
-        path: "/tmp/paseo image.png",
+        path: "/tmp/alp image.png",
       },
     });
 
@@ -5438,7 +5438,7 @@ describe("Codex app-server provider", () => {
         turnId: "test-turn",
         item: {
           type: "assistant_message",
-          text: "![Image](file:///tmp/paseo%20image.png)",
+          text: "![Image](file:///tmp/alp%20image.png)",
         },
       },
     ]);
@@ -5505,7 +5505,7 @@ describe("Codex app-server provider", () => {
     expect(event.item.text).not.toContain("data:image");
     expect(event.item.text).not.toContain(ONE_BY_ONE_PNG_BASE64);
     const source = markdownImageSource(event.item.text);
-    expect(source).toMatch(/paseo-attachments(?:-[^\\/]+)?[\\/].+\.png$/);
+    expect(source).toMatch(/alp-attachments(?:-[^\\/]+)?[\\/].+\.png$/);
     expect(existsSync(source)).toBe(true);
     rmSync(source, { force: true });
   });
@@ -5549,7 +5549,7 @@ describe("Codex app-server provider", () => {
               id: "mcp-browser-screenshot",
               type: "mcpToolCall",
               status: "completed",
-              server: "paseo",
+              server: "alp",
               tool: "browser_screenshot",
               arguments: { browserId: "11111111-1111-4111-8111-111111111111" },
               result: {
@@ -5583,7 +5583,7 @@ describe("Codex app-server provider", () => {
           item: {
             type: "tool_call",
             callId: "mcp-browser-screenshot",
-            name: "paseo.browser_screenshot",
+            name: "alp.browser_screenshot",
             status: "completed",
             error: null,
             detail: {
@@ -5621,7 +5621,7 @@ describe("Codex app-server provider", () => {
       }
       expect(JSON.stringify(events)).not.toContain(ONE_BY_ONE_PNG_BASE64);
       const source = markdownImageSource(imageEvent.item.text);
-      expect(source).toMatch(/paseo-attachments(?:-[^\\/]+)?[\\/].+\.png$/);
+      expect(source).toMatch(/alp-attachments(?:-[^\\/]+)?[\\/].+\.png$/);
       expect(existsSync(source)).toBe(true);
       rmSync(source, { force: true });
       appServer.assertNoErrors();

@@ -12,7 +12,7 @@ export interface LocalPairingOffer {
 }
 
 export async function generateLocalPairingOffer(args: {
-  paseoHome: string;
+  alpHome: string;
   relayEnabled?: boolean;
   relayEndpoint?: string;
   relayPublicEndpoint?: string;
@@ -36,8 +36,8 @@ export async function generateLocalPairingOffer(args: {
   const relayUseTls = args.relayUseTls ?? relayEndpoint === "relay-alp.anhlp.com:443";
   const relayPublicUseTls = args.relayPublicUseTls ?? relayUseTls;
   const appBaseUrl = args.appBaseUrl ?? "https://app-alp.anhlp.com";
-  const serverId = getOrCreateServerId(args.paseoHome, { logger: args.logger });
-  const daemonKeyPair = await loadOrCreateDaemonKeyPair(args.paseoHome, args.logger);
+  const serverId = getOrCreateServerId(args.alpHome, { logger: args.logger });
+  const daemonKeyPair = await loadOrCreateDaemonKeyPair(args.alpHome, args.logger);
   const offer = await createConnectionOfferV2({
     serverId,
     daemonPublicKeyB64: daemonKeyPair.publicKeyB64,

@@ -1,7 +1,7 @@
 #!/usr/bin/env npx tsx
 
 import assert from "node:assert";
-import { runLocalPaseo } from "./helpers/local-cli.ts";
+import { runLocalAlp } from "./helpers/local-cli.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,13 +14,13 @@ if (process.platform !== "win32") {
 
 console.log("=== Windows Daemon Status Process Lookup ===\n");
 
-const paseoHome = await mkdtemp(join(tmpdir(), "paseo-windows-status-home-"));
+const alpHome = await mkdtemp(join(tmpdir(), "alp-windows-status-home-"));
 const port = await getAvailablePort();
 const env = {
-  PASEO_HOME: paseoHome,
-  PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: "0",
-  PASEO_DICTATION_ENABLED: "0",
-  PASEO_VOICE_MODE_ENABLED: "0",
+  ALP_HOME: alpHome,
+  ALP_LOCAL_SPEECH_AUTO_DOWNLOAD: "0",
+  ALP_DICTATION_ENABLED: "0",
+  ALP_VOICE_MODE_ENABLED: "0",
 };
 
 try {
@@ -30,20 +30,17 @@ try {
     ["features.dictation.enabled", "false"],
     ["features.voiceMode.enabled", "false"],
   ]) {
-    const saved = await runLocalPaseo(["daemon", "config", "set", field!, value!], env);
+    const saved = await runLocalAlp(["daemon", "config", "set", field!, value!], env);
     assert.equal(saved.exitCode, 0, saved.stderr);
   }
-  const start = await runLocalPaseo(["daemon", "start"], env);
+  const start = await runLocalAlp(["daemon", "start"], env);
   assert.strictEqual(
     start.exitCode,
     0,
     `daemon restart should succeed:\nstdout:\n${start.stdout}\nstderr:\n${start.stderr}`,
   );
 
-  const statusResult = await runLocalPaseo(
-    ["daemon", "status", "--home", paseoHome, "--json"],
-    env,
-  );
+  const statusResult = await runLocalAlp(["daemon", "status", "--home", alpHome, "--json"], env);
   assert.strictEqual(
     statusResult.exitCode,
     0,
@@ -68,8 +65,8 @@ try {
   );
   console.log("✓ daemon status resolves daemonNode on Windows\n");
 } finally {
-  await runLocalPaseo(["daemon", "stop", "--home", paseoHome, "--force"], env);
-  await rm(paseoHome, { recursive: true, force: true });
+  await runLocalAlp(["daemon", "stop", "--home", alpHome, "--force"], env);
+  await rm(alpHome, { recursive: true, force: true });
 }
 
 console.log("=== Windows daemon status process lookup passed ===");

@@ -3,14 +3,14 @@ import path from "node:path";
 import { app, ipcMain, powerMonitor } from "electron";
 import log from "electron-log/main";
 import {
-  resolvePaseoHome,
+  resolveAlpHome,
   startDaemonInstance,
   DaemonInstanceError,
   stopDaemonInstance,
   readDaemonInstance,
   isSameDaemonInstance,
   type DaemonInstance,
-} from "@getpaseo/server/daemon-control";
+} from "@alp/server/daemon-control";
 import {
   copyAttachmentFileToManagedStorage,
   deleteManagedAttachmentFile,
@@ -122,18 +122,18 @@ function parseDesktopDaemonStopReason(
 // Utilities
 // ---------------------------------------------------------------------------
 
-function getPaseoHome(): string {
-  return resolvePaseoHome(process.env);
+function getAlpHome(): string {
+  return resolveAlpHome(process.env);
 }
 
 function logFilePath(): string {
-  return path.join(getPaseoHome(), DAEMON_LOG_FILENAME);
+  return path.join(getAlpHome(), DAEMON_LOG_FILENAME);
 }
 
 export function isDesktopManagedDaemonRunningSync(): boolean {
   if (!ownedLaunch) return false;
   try {
-    const lock = JSON.parse(readFileSync(path.join(ownedLaunch.home, "paseo.pid"), "utf8"));
+    const lock = JSON.parse(readFileSync(path.join(ownedLaunch.home, "alp.pid"), "utf8"));
     return isSameDaemonInstance(lock, ownedLaunch.instance) && isProcessRunning(lock.pid);
   } catch {
     return false;
@@ -220,7 +220,7 @@ function resolveDesktopAppVersion(): string {
 // ---------------------------------------------------------------------------
 
 export async function resolveDesktopDaemonStatus(): Promise<DesktopDaemonStatus> {
-  const home = getPaseoHome();
+  const home = getAlpHome();
 
   try {
     const payload = (await runExternalCliJsonCommand([
@@ -293,7 +293,7 @@ async function startDaemon(): Promise<DesktopDaemonStatus> {
     }
   }
 
-  const home = getPaseoHome();
+  const home = getAlpHome();
   const invocation = createNodeEntrypointInvocation({
     entrypoint: resolveDaemonRunnerEntrypoint(),
     argvMode: "node-script",
@@ -305,7 +305,7 @@ async function startDaemon(): Promise<DesktopDaemonStatus> {
       home,
       timeoutMs: 30_000,
       ...invocation,
-      env: { ...invocation.env, PASEO_CLI: getBundledCliShimPath() },
+      env: { ...invocation.env, ALP_CLI: getBundledCliShimPath() },
       mode: "managed",
       desktopManaged: true,
       onAcquired: (instance) => {
@@ -322,7 +322,7 @@ export async function stopDesktopDaemon(
   reason: DesktopDaemonStopReason = DEFAULT_DESKTOP_DAEMON_STOP_REASON,
   confirmedInstance?: { pid: number; startedAt: string },
 ): Promise<DesktopDaemonStatus> {
-  const home = getPaseoHome();
+  const home = getAlpHome();
   const instance = await readDaemonInstance(home);
   const owned = Boolean(
     instance &&
@@ -354,7 +354,7 @@ export async function stopDesktopDaemon(
 }
 
 async function restartDaemon(): Promise<DesktopDaemonStatus> {
-  await runExternalCliJsonCommand(["daemon", "restart", "--home", getPaseoHome(), "--json"]);
+  await runExternalCliJsonCommand(["daemon", "restart", "--home", getAlpHome(), "--json"]);
   return resolveDesktopDaemonStatus();
 }
 
@@ -367,7 +367,7 @@ function getDaemonLogs(): DesktopDaemonLogs {
 }
 
 async function getCliDaemonStatus(): Promise<string> {
-  return await runExternalCliTextCommand(["daemon", "status", "--home", getPaseoHome()]);
+  return await runExternalCliTextCommand(["daemon", "status", "--home", getAlpHome()]);
 }
 
 async function getLocalDaemonVersion(): Promise<{ version: string | null; error: string | null }> {
@@ -412,7 +412,7 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     desktop_sandbox_diagnostics: () =>
       describeSandbox({
         disabled: app.commandLine.hasSwitch("no-sandbox"),
-        launcherReason: process.env.PASEO_DESKTOP_SANDBOX_REASON,
+        launcherReason: process.env.ALP_DESKTOP_SANDBOX_REASON,
       }),
     desktop_app_logs: () => getDesktopAppLogs(),
     desktop_update_diagnostics: () => getDesktopUpdaterDiagnostics(),
@@ -465,14 +465,11 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
 export function registerDaemonManager(): void {
   const handlers = createDaemonCommandHandlers();
 
-  ipcMain.handle(
-    "paseo:invoke",
-    async (_event, command: string, args?: Record<string, unknown>) => {
-      const handler = handlers[command];
-      if (!handler) {
-        throw new Error(`Unknown desktop command: ${command}`);
-      }
-      return await handler(args);
-    },
-  );
+  ipcMain.handle("alp:invoke", async (_event, command: string, args?: Record<string, unknown>) => {
+    const handler = handlers[command];
+    if (!handler) {
+      throw new Error(`Unknown desktop command: ${command}`);
+    }
+    return await handler(args);
+  });
 }

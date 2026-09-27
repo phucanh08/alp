@@ -1,5 +1,5 @@
 import { statSync, watch as watchPath } from "node:fs";
-import type { ProjectCheckoutLitePayload } from "@getpaseo/protocol/messages";
+import type { ProjectCheckoutLitePayload } from "@alp/protocol/messages";
 import type pino from "pino";
 import type {
   ProjectRegistry,
@@ -530,7 +530,7 @@ export class WorkspaceReconciliationService {
         currentBranch: null,
         remoteUrl: null,
         worktreeRoot: null,
-        isPaseoOwnedWorktree: false as const,
+        isAlpOwnedWorktree: false as const,
         mainRepoRoot: null,
       };
     }

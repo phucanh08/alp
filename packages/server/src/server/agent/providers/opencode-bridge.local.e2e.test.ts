@@ -6,13 +6,13 @@ import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import { expect, test } from "vitest";
 
 import { createTestLogger } from "../../../test-utils/test-logger.js";
-import type { PaseoToolCatalog } from "../tools/types.js";
+import type { AlpToolCatalog } from "../tools/types.js";
 import { OpenCodeAgentClient } from "./opencode-agent.js";
 import { OpenCodeBridge } from "./opencode/bridge.js";
 import { OpenCodeServerManager } from "./opencode/server-manager.js";
 
 test("real OpenCode server persists provider permissions across creation and resume", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "paseo-opencode-permissions-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "alp-opencode-permissions-"));
   const cwd = path.join(root, "repo");
   const logger = createTestLogger();
   const manager = new OpenCodeServerManager({ logger, resolveHomeDir: () => root });
@@ -58,11 +58,11 @@ test("real OpenCode server persists provider permissions across creation and res
 }, 120_000);
 
 test("real OpenCode server shares one process while shell.env stays session-scoped", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "paseo-opencode-real-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "alp-opencode-real-"));
   const firstCwd = path.join(root, "first");
   const secondCwd = path.join(root, "second");
   const logger = createTestLogger();
-  const bridge = new OpenCodeBridge({ paseoHome: root, logger });
+  const bridge = new OpenCodeBridge({ alpHome: root, logger });
   await bridge.start();
   const firstTools = createCallerCatalog("real-agent-one");
   const secondTools = createCallerCatalog("real-agent-two");
@@ -89,8 +89,8 @@ test("real OpenCode server shares one process while shell.env stays session-scop
       { provider: "opencode", cwd: firstCwd, model: "opencode/big-pickle", modeId: "build" },
       {
         agentId: "real-agent-one",
-        env: { PASEO_AGENT_ID: "real-agent-one", PASEO_AGENT_CWD: firstCwd },
-        paseoTools: firstTools,
+        env: { ALP_AGENT_ID: "real-agent-one", ALP_AGENT_CWD: firstCwd },
+        alpTools: firstTools,
       },
       { persistSession: false },
     );
@@ -98,8 +98,8 @@ test("real OpenCode server shares one process while shell.env stays session-scop
       { provider: "opencode", cwd: secondCwd },
       {
         agentId: "real-agent-two",
-        env: { PASEO_AGENT_ID: "real-agent-two", PASEO_AGENT_CWD: secondCwd },
-        paseoTools: secondTools,
+        env: { ALP_AGENT_ID: "real-agent-two", ALP_AGENT_CWD: secondCwd },
+        alpTools: secondTools,
       },
       { persistSession: false },
     );
@@ -111,13 +111,13 @@ test("real OpenCode server shares one process while shell.env stays session-scop
         sessionID: requireSessionId(first),
         directory: firstCwd,
         agent: "build",
-        command: 'printf "%s|%s" "$PASEO_AGENT_ID" "$PASEO_AGENT_CWD"',
+        command: 'printf "%s|%s" "$ALP_AGENT_ID" "$ALP_AGENT_CWD"',
       }),
       sdk.session.shell({
         sessionID: requireSessionId(second),
         directory: secondCwd,
         agent: "build",
-        command: 'printf "%s|%s" "$PASEO_AGENT_ID" "$PASEO_AGENT_CWD"',
+        command: 'printf "%s|%s" "$ALP_AGENT_ID" "$ALP_AGENT_CWD"',
       }),
     ]);
 
@@ -129,7 +129,7 @@ test("real OpenCode server shares one process while shell.env stays session-scop
 
     const agentResult = await first.run(
       [
-        "Use the bash tool to run: env | grep -E '^(PASEO_AGENT_ID|PASEO_AGENT_CWD)='",
+        "Use the bash tool to run: env | grep -E '^(ALP_AGENT_ID|ALP_AGENT_CWD)='",
         "Then report both values in your response:",
         "AGENT=real-agent-one",
         `CWD=${firstCwd}`,
@@ -146,7 +146,7 @@ test("real OpenCode server shares one process while shell.env stays session-scop
 
     const callerResult = await first.run(
       [
-        "Use the paseo_report_caller_agent_id tool to read your Paseo caller agent ID.",
+        "Use the alp_report_caller_agent_id tool to read your Alp caller agent ID.",
         "Then report that ID in your response.",
       ].join("\n"),
     );
@@ -154,7 +154,7 @@ test("real OpenCode server shares one process while shell.env stays session-scop
       expect.arrayContaining([
         expect.objectContaining({
           type: "tool_call",
-          name: "paseo_report_caller_agent_id",
+          name: "alp_report_caller_agent_id",
           status: "completed",
         }),
       ]),
@@ -175,11 +175,11 @@ function requireSessionId(session: { id: string | null }): string {
   return session.id;
 }
 
-function createCallerCatalog(callerAgentId: string): PaseoToolCatalog {
+function createCallerCatalog(callerAgentId: string): AlpToolCatalog {
   const tool = {
     name: "report_caller_agent_id",
-    title: "Report Paseo caller agent ID",
-    description: "Returns the caller agent ID assigned by Paseo.",
+    title: "Report Alp caller agent ID",
+    description: "Returns the caller agent ID assigned by Alp.",
     inputSchema: {},
     async handler() {
       return { content: [{ type: "text", text: callerAgentId }] };

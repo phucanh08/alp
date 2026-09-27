@@ -14,11 +14,11 @@ import {
   type ManagedAgent,
 } from "./agent-manager.js";
 import { AgentStorage, parseStoredAgentRecord } from "./agent-storage.js";
-import { isPaseoToolEnabled } from "./paseo-tool-policy.js";
+import { isAlpToolEnabled } from "./alp-tool-policy.js";
 import { InMemoryAgentTimelineStore } from "./agent-timeline-store.js";
 import { toAgentPayload } from "./agent-projections.js";
 import { projectTimelineRows } from "./timeline-projection.js";
-import { getOpenAgentTabLabel, PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import { getOpenAgentTabLabel, PARENT_AGENT_ID_LABEL } from "@alp/protocol/agent-labels";
 import { formatSystemNotificationPrompt, startAgentRun } from "./agent-prompt.js";
 import { StaleProviderSessionError } from "./stale-provider-session-error.js";
 import { ensureAgentLoaded, ensureUnarchivedAgentLoaded } from "./agent-loading.js";
@@ -49,10 +49,10 @@ import type {
   ImportProviderSessionContext,
   ResolveAgentDefaultModeInput,
 } from "./agent-sdk-types.js";
-import type { PaseoToolCatalog } from "./tools/types.js";
-import { createPaseoApi } from "@getpaseo/client";
-import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
-import type { PluginBeforeRequests, PluginLifecycleEvents } from "@getpaseo/plugin/server";
+import type { AlpToolCatalog } from "./tools/types.js";
+import { createAlpApi } from "@alp/client";
+import { DaemonClient } from "@alp/client/internal/daemon-client";
+import type { PluginBeforeRequests, PluginLifecycleEvents } from "@alp/plugin/server";
 import { PluginHookHandlers, type PluginLifecycle } from "../plugins/lifecycle/index.js";
 import type { ProviderDefinition } from "./provider-registry.js";
 
@@ -413,7 +413,7 @@ class EnvProbeAgentClient extends TestAgentClient {
     const script = `
       process.stdout.write(JSON.stringify({
         probe: process.env.CHUNK14_PROBE ?? null,
-        agentId: process.env.PASEO_AGENT_ID ?? null
+        agentId: process.env.ALP_AGENT_ID ?? null
       }));
     `;
     const child = spawn(process.execPath, ["-e", script], {
@@ -2862,8 +2862,8 @@ test("createAgent passes daemon launch env through the provider launch context",
   expect(client.lastLaunchContext).toEqual({
     agentId: snapshot.id,
     env: {
-      PASEO_AGENT_ID: snapshot.id,
-      PASEO_AGENT_CWD: workdir,
+      ALP_AGENT_ID: snapshot.id,
+      ALP_AGENT_CWD: workdir,
     },
   });
 });
@@ -2943,7 +2943,7 @@ test("createAgent persists workspaceId on the stored record and emits it in the 
   }
 });
 
-test("createAgent injects paseo MCP server only into provider launch config", async () => {
+test("createAgent injects alp MCP server only into provider launch config", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-test-"));
   const storagePath = join(workdir, "agents");
   const storage = new AgentStorage(storagePath, logger);
@@ -2990,7 +2990,7 @@ test("createAgent injects paseo MCP server only into provider launch config", as
     },
   });
   expect(client.lastConfig?.mcpServers).toEqual({
-    paseo: {
+    alp: {
       type: "http",
       url: `http://127.0.0.1:6767/mcp/agents?callerAgentId=${snapshot.id}`,
     },
@@ -3137,12 +3137,12 @@ test("reloadAgentSession preserves the live session when its replacement cannot 
     }
   }
 
-  let paseoToolPolicy = { disabledTools: ["list_agents"] };
+  let alpToolPolicy = { disabledTools: ["list_agents"] };
   const manager = new AgentManager({
     clients: { codex: new UnsupportedReloadClient() },
     registry: new AgentStorage(join(workdir, "agents"), logger),
     logger,
-    resolvePaseoToolPolicy: () => paseoToolPolicy,
+    resolveAlpToolPolicy: () => alpToolPolicy,
   });
 
   try {
@@ -3151,7 +3151,7 @@ test("reloadAgentSession preserves the live session when its replacement cannot 
       "00000000-0000-4000-8000-000000000109",
       { workspaceId: undefined },
     );
-    paseoToolPolicy = { disabledTools: ["create_agent"] };
+    alpToolPolicy = { disabledTools: ["create_agent"] };
 
     await expect(
       manager.reloadAgentSession(created.id, {
@@ -3165,7 +3165,7 @@ test("reloadAgentSession preserves the live session when its replacement cannot 
     expect(original.closed).toBe(false);
     expect(manager.getAgent(created.id)?.session).toBe(original);
     expect(manager.getAgent(created.id)?.lifecycle).toBe("idle");
-    expect(manager.getPaseoToolPolicy(created.id)).toEqual({
+    expect(manager.getAlpToolPolicy(created.id)).toEqual({
       disabledTools: ["list_agents"],
     });
   } finally {
@@ -3173,12 +3173,12 @@ test("reloadAgentSession preserves the live session when its replacement cannot 
   }
 });
 
-test("createAgent passes native Paseo tools through launch context without internal MCP", async () => {
+test("createAgent passes native Alp tools through launch context without internal MCP", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-test-"));
   const storagePath = join(workdir, "agents");
   const storage = new AgentStorage(storagePath, logger);
 
-  const paseoTools: PaseoToolCatalog = {
+  const alpTools: AlpToolCatalog = {
     tools: new Map(),
     getTool: () => undefined,
     executeTool: async () => {
@@ -3190,7 +3190,7 @@ test("createAgent passes native Paseo tools through launch context without inter
     override readonly capabilities = {
       ...TEST_CAPABILITIES,
       supportsMcpServers: true,
-      supportsNativePaseoTools: true,
+      supportsNativeAlpTools: true,
     };
     lastConfig: AgentSessionConfig | null = null;
     lastLaunchContext: AgentLaunchContext | undefined;
@@ -3213,7 +3213,7 @@ test("createAgent passes native Paseo tools through launch context without inter
     registry: storage,
     logger,
     mcpBaseUrl: "http://127.0.0.1:6767/mcp/agents",
-    paseoToolCatalogFactory: () => paseoTools,
+    alpToolCatalogFactory: () => alpTools,
     idFactory: () => "00000000-0000-4000-8000-000000000106",
   });
 
@@ -3232,7 +3232,7 @@ test("createAgent passes native Paseo tools through launch context without inter
     { workspaceId: undefined },
   );
 
-  expect(client.lastLaunchContext?.paseoTools).toBe(paseoTools);
+  expect(client.lastLaunchContext?.alpTools).toBe(alpTools);
   expect(client.lastConfig?.mcpServers).toEqual({
     custom: {
       type: "stdio",
@@ -3291,7 +3291,7 @@ test("createAgent allows best-effort internal MCP when the provider session repo
   );
 
   expect(manager.getMcpAuthToken()).toBe("cap-token");
-  expect(client.lastConfig?.mcpServers?.paseo).toEqual({
+  expect(client.lastConfig?.mcpServers?.alp).toEqual({
     type: "http",
     url: `http://127.0.0.1:6767/mcp/agents?callerAgentId=${snapshot.id}`,
     headers: { Authorization: "Bearer cap-token" },
@@ -3312,7 +3312,7 @@ test("uses each provider's current policy for new sessions and snapshots it by a
     override readonly capabilities = {
       ...TEST_CAPABILITIES,
       supportsMcpServers: true,
-      supportsNativePaseoTools: true,
+      supportsNativeAlpTools: true,
     };
     readonly launchContexts: AgentLaunchContext[] = [];
     readonly configs: AgentSessionConfig[] = [];
@@ -3329,8 +3329,8 @@ test("uses each provider's current policy for new sessions and snapshots it by a
 
   const codex = new CaptureClient("codex");
   const claude = new CaptureClient("claude");
-  const policyInputs: Array<{ callerAgentId?: string; paseoToolPolicy?: unknown }> = [];
-  const paseoTools: PaseoToolCatalog = {
+  const policyInputs: Array<{ callerAgentId?: string; alpToolPolicy?: unknown }> = [];
+  const alpTools: AlpToolCatalog = {
     tools: new Map(),
     getTool: () => undefined,
     executeTool: async () => {
@@ -3342,10 +3342,10 @@ test("uses each provider's current policy for new sessions and snapshots it by a
     registry: storage,
     logger,
     mcpBaseUrl: "http://127.0.0.1:6767/mcp/agents",
-    resolvePaseoToolPolicy: (provider) => policies.get(provider),
-    paseoToolCatalogFactory: async (context) => {
+    resolveAlpToolPolicy: (provider) => policies.get(provider),
+    alpToolCatalogFactory: async (context) => {
       policyInputs.push(context);
-      return paseoTools;
+      return alpTools;
     },
   });
 
@@ -3361,16 +3361,16 @@ test("uses each provider's current policy for new sessions and snapshots it by a
   );
 
   expect(policyInputs).toEqual([
-    { callerAgentId: codexAgent.id, paseoToolPolicy: { disabledTools: ["list_agents"] } },
+    { callerAgentId: codexAgent.id, alpToolPolicy: { disabledTools: ["list_agents"] } },
   ]);
-  expect(codex.launchContexts[0]?.paseoTools).toBe(paseoTools);
-  expect(claude.launchContexts[0]?.paseoTools).toBeUndefined();
-  expect(codex.configs[0]?.mcpServers?.paseo).toBeUndefined();
+  expect(codex.launchContexts[0]?.alpTools).toBe(alpTools);
+  expect(claude.launchContexts[0]?.alpTools).toBeUndefined();
+  expect(codex.configs[0]?.mcpServers?.alp).toBeUndefined();
   expect(claude.configs[0]?.mcpServers).toBeUndefined();
-  expect(manager.getPaseoToolPolicy(codexAgent.id)).toEqual({
+  expect(manager.getAlpToolPolicy(codexAgent.id)).toEqual({
     disabledTools: ["list_agents"],
   });
-  expect(manager.getPaseoToolPolicy(claudeAgent.id)).toEqual({ enabled: false });
+  expect(manager.getAlpToolPolicy(claudeAgent.id)).toEqual({ enabled: false });
 
   policies.set("codex", { disabledTools: ["create_agent"] });
   const nextCodexAgent = await manager.createAgent(
@@ -3379,27 +3379,27 @@ test("uses each provider's current policy for new sessions and snapshots it by a
     { workspaceId: undefined },
   );
 
-  expect(manager.getPaseoToolPolicy(codexAgent.id)).toEqual({
+  expect(manager.getAlpToolPolicy(codexAgent.id)).toEqual({
     disabledTools: ["list_agents"],
   });
-  expect(manager.getPaseoToolPolicy(nextCodexAgent.id)).toEqual({
+  expect(manager.getAlpToolPolicy(nextCodexAgent.id)).toEqual({
     disabledTools: ["create_agent"],
   });
   expect(policyInputs).toEqual([
-    { callerAgentId: codexAgent.id, paseoToolPolicy: { disabledTools: ["list_agents"] } },
+    { callerAgentId: codexAgent.id, alpToolPolicy: { disabledTools: ["list_agents"] } },
     {
       callerAgentId: nextCodexAgent.id,
-      paseoToolPolicy: { disabledTools: ["create_agent"] },
+      alpToolPolicy: { disabledTools: ["create_agent"] },
     },
   ]);
 
   await manager.archiveAgent(claudeAgent.id);
-  expect(manager.getPaseoToolPolicy(claudeAgent.id)).toBeUndefined();
+  expect(manager.getAlpToolPolicy(claudeAgent.id)).toBeUndefined();
 
   rmSync(workdir, { recursive: true, force: true });
 });
 
-test("keeps the global Paseo-tools gate outside provider policy and MCP injection", async () => {
+test("keeps the global Alp-tools gate outside provider policy and MCP injection", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-test-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);
 
@@ -3422,7 +3422,7 @@ test("keeps the global Paseo-tools gate outside provider policy and MCP injectio
     registry: storage,
     logger,
     mcpBaseUrl: "http://127.0.0.1:6767/mcp/agents",
-    resolvePaseoToolPolicy: () => ({ disabledTools: ["list_agents"] }),
+    resolveAlpToolPolicy: () => ({ disabledTools: ["list_agents"] }),
   });
   const enabledAgent = await enabledManager.createAgent(
     { provider: "codex", cwd: workdir },
@@ -3430,7 +3430,7 @@ test("keeps the global Paseo-tools gate outside provider policy and MCP injectio
     { workspaceId: undefined },
   );
 
-  expect(enabledClient.lastConfig?.mcpServers?.paseo).toEqual({
+  expect(enabledClient.lastConfig?.mcpServers?.alp).toEqual({
     type: "http",
     url: `http://127.0.0.1:6767/mcp/agents?callerAgentId=${enabledAgent.id}`,
   });
@@ -3442,11 +3442,11 @@ test("keeps the global Paseo-tools gate outside provider policy and MCP injectio
     registry: storage,
     logger,
     mcpBaseUrl: "http://127.0.0.1:6767/mcp/agents",
-    paseoToolsEnabled: false,
-    resolvePaseoToolPolicy: () => ({ enabled: true }),
-    paseoToolCatalogFactory: () => {
+    alpToolsEnabled: false,
+    resolveAlpToolPolicy: () => ({ enabled: true }),
+    alpToolCatalogFactory: () => {
       catalogFactoryCalls += 1;
-      return paseoTools;
+      return alpTools;
     },
   });
   const disabledAgent = await disabledManager.createAgent(
@@ -3457,12 +3457,12 @@ test("keeps the global Paseo-tools gate outside provider policy and MCP injectio
 
   expect(disabledClient.lastConfig?.mcpServers).toBeUndefined();
   expect(catalogFactoryCalls).toBe(0);
-  expect(disabledManager.getPaseoToolPolicy(disabledAgent.id)).toEqual({ enabled: false });
+  expect(disabledManager.getAlpToolPolicy(disabledAgent.id)).toEqual({ enabled: false });
 
   rmSync(workdir, { recursive: true, force: true });
 });
 
-test("resumeAgentFromPersistence replaces stored internal paseo MCP with current runtime URL", async () => {
+test("resumeAgentFromPersistence replaces stored internal alp MCP with current runtime URL", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-test-"));
   const storagePath = join(workdir, "agents");
   const storage = new AgentStorage(storagePath, logger);
@@ -3487,7 +3487,7 @@ test("resumeAgentFromPersistence replaces stored internal paseo MCP with current
   const snapshot = await manager.resumeAgentFromPersistence(handle, {
     cwd: workdir,
     mcpServers: {
-      paseo: {
+      alp: {
         type: "http",
         url: "http://127.0.0.1:6767/mcp/agents?callerAgentId=stale-agent",
       },
@@ -3499,7 +3499,7 @@ test("resumeAgentFromPersistence replaces stored internal paseo MCP with current
   });
 
   expect(client.resumeOverrides[0]?.mcpServers).toEqual({
-    paseo: {
+    alp: {
       type: "http",
       url: `http://127.0.0.1:6768/mcp/agents?callerAgentId=${snapshot.id}`,
     },
@@ -3516,7 +3516,7 @@ test("resumeAgentFromPersistence replaces stored internal paseo MCP with current
   });
 });
 
-test("resumeAgentFromPersistence drops stored internal paseo MCP when runtime injection is disabled", async () => {
+test("resumeAgentFromPersistence drops stored internal alp MCP when runtime injection is disabled", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-test-"));
   const storagePath = join(workdir, "agents");
   const storage = new AgentStorage(storagePath, logger);
@@ -3539,7 +3539,7 @@ test("resumeAgentFromPersistence drops stored internal paseo MCP when runtime in
   const snapshot = await manager.resumeAgentFromPersistence(handle, {
     cwd: workdir,
     mcpServers: {
-      paseo: {
+      alp: {
         type: "http",
         url: "http://127.0.0.1:6767/mcp/agents?callerAgentId=stale-agent",
       },
@@ -3550,7 +3550,7 @@ test("resumeAgentFromPersistence drops stored internal paseo MCP when runtime in
   expect(snapshot.config.mcpServers).toBeUndefined();
 });
 
-test("createAgent preserves a user-provided paseo MCP config", async () => {
+test("createAgent preserves a user-provided alp MCP config", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-test-"));
   const storagePath = join(workdir, "agents");
   const storage = new AgentStorage(storagePath, logger);
@@ -3580,9 +3580,9 @@ test("createAgent preserves a user-provided paseo MCP config", async () => {
       provider: "codex",
       cwd: workdir,
       mcpServers: {
-        paseo: {
+        alp: {
           type: "http",
-          url: "https://example.com/custom-paseo",
+          url: "https://example.com/custom-alp",
         },
       },
     },
@@ -3591,9 +3591,9 @@ test("createAgent preserves a user-provided paseo MCP config", async () => {
   );
 
   expect(snapshot.config.mcpServers).toEqual({
-    paseo: {
+    alp: {
       type: "http",
-      url: "https://example.com/custom-paseo",
+      url: "https://example.com/custom-alp",
     },
   });
   expect(client.lastConfig?.mcpServers).toEqual(snapshot.config.mcpServers);
@@ -4161,30 +4161,30 @@ test("resumeAgentFromPersistence keeps metadata config, applies overrides, and p
     cwd: workdir,
     systemPrompt: "new prompt",
     mcpServers: {
-      paseo: {
+      alp: {
         type: "stdio",
         command: "node",
-        args: ["/tmp/mcp-bridge.mjs", "--socket", "/tmp/paseo.sock"],
+        args: ["/tmp/mcp-bridge.mjs", "--socket", "/tmp/alp.sock"],
       },
     },
   });
 
   expect(resumed.config.systemPrompt).toBe("new prompt");
   expect(resumed.config.mcpServers).toEqual({
-    paseo: {
+    alp: {
       type: "stdio",
       command: "node",
-      args: ["/tmp/mcp-bridge.mjs", "--socket", "/tmp/paseo.sock"],
+      args: ["/tmp/mcp-bridge.mjs", "--socket", "/tmp/alp.sock"],
     },
   });
   expect(client.lastResumeOverrides).toMatchObject({
     model: "gpt-5.4",
     systemPrompt: "new prompt",
     mcpServers: {
-      paseo: {
+      alp: {
         type: "stdio",
         command: "node",
-        args: ["/tmp/mcp-bridge.mjs", "--socket", "/tmp/paseo.sock"],
+        args: ["/tmp/mcp-bridge.mjs", "--socket", "/tmp/alp.sock"],
       },
     },
   });
@@ -4192,8 +4192,8 @@ test("resumeAgentFromPersistence keeps metadata config, applies overrides, and p
   expect(client.lastResumeLaunchContext).toEqual({
     agentId: resumed.id,
     env: {
-      PASEO_AGENT_ID: resumed.id,
-      PASEO_AGENT_CWD: workdir,
+      ALP_AGENT_ID: resumed.id,
+      ALP_AGENT_CWD: workdir,
     },
   });
 });
@@ -4300,8 +4300,8 @@ test("importProviderSession imports the selected session without listing and pub
   expect(client.importLaunchContext).toEqual({
     agentId: imported.id,
     env: {
-      PASEO_AGENT_ID: imported.id,
-      PASEO_AGENT_CWD: workdir,
+      ALP_AGENT_ID: imported.id,
+      ALP_AGENT_CWD: workdir,
     },
   });
   expect(imported.lifecycle).toBe("idle");
@@ -4403,8 +4403,8 @@ test("reloadAgentSession passes daemon launch env through the provider launch co
   expect(client.lastCreateLaunchContext).toEqual({
     agentId: snapshot.id,
     env: {
-      PASEO_AGENT_ID: snapshot.id,
-      PASEO_AGENT_CWD: workdir,
+      ALP_AGENT_ID: snapshot.id,
+      ALP_AGENT_CWD: workdir,
     },
   });
 
@@ -4415,8 +4415,8 @@ test("reloadAgentSession passes daemon launch env through the provider launch co
   expect(client.lastResumeLaunchContext).toEqual({
     agentId: snapshot.id,
     env: {
-      PASEO_AGENT_ID: snapshot.id,
-      PASEO_AGENT_CWD: workdir,
+      ALP_AGENT_ID: snapshot.id,
+      ALP_AGENT_CWD: workdir,
     },
   });
 });
@@ -10982,7 +10982,7 @@ test("listImportableSessions searches every provider result before global rankin
   ]);
 });
 
-test("user_message events wrapping a paseo-system envelope are not added to the timeline", async () => {
+test("user_message events wrapping a alp-system envelope are not added to the timeline", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-envelope-live-"));
   const storagePath = join(workdir, "agents");
   const storage = new AgentStorage(storagePath, logger);
@@ -11017,7 +11017,7 @@ test("user_message events wrapping a paseo-system envelope are not added to the 
   expect(userMessages[0].text).toBe("plain user message");
 });
 
-test("user_message events wrapping a paseo-system envelope are not restored during history replay", async () => {
+test("user_message events wrapping a alp-system envelope are not restored during history replay", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-envelope-history-"));
   const storagePath = join(workdir, "agents");
   const storage = new AgentStorage(storagePath, logger);
@@ -11259,7 +11259,7 @@ function pluginLifecycleFromHandlers(hooks: PluginHookHandlers): {
   lifecycle: PluginLifecycle;
   events: RecordedLifecycleEvent[];
 } {
-  const paseo = createPaseoApi(
+  const alp = createAlpApi(
     new DaemonClient({ url: "ws://127.0.0.1:1/ws", clientId: "agent-manager-plugin-labels" }),
   );
   const events: RecordedLifecycleEvent[] = [];
@@ -11273,7 +11273,7 @@ function pluginLifecycleFromHandlers(hooks: PluginHookHandlers): {
         "before",
         name,
         request,
-        paseo,
+        alp,
       )) as PluginBeforeRequests[typeof name];
     },
   };
@@ -11402,9 +11402,9 @@ class McpCaptureClient extends TestAgentClient {
   }
 }
 
-function agentCreateHooksDisabling(paseoTools: PluginBeforeRequests["agent.create"]["paseoTools"]) {
+function agentCreateHooksDisabling(alpTools: PluginBeforeRequests["agent.create"]["alpTools"]) {
   const hooks = new PluginHookHandlers(() => {});
-  hooks.before("agent.create", ({ request }) => ({ ...request, paseoTools }));
+  hooks.before("agent.create", ({ request }) => ({ ...request, alpTools }));
   return pluginLifecycleFromHandlers(hooks).lifecycle;
 }
 
@@ -11424,14 +11424,14 @@ function storedAgentRecordFixture(
   });
 }
 
-test("agent.create hooks disable Paseo tools on top of the provider policy", async () => {
+test("agent.create hooks disable Alp tools on top of the provider policy", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-hook-tool-policy-"));
   const client = new McpCaptureClient();
   const manager = new AgentManager({
     clients: { codex: client },
     pluginLifecycle: agentCreateHooksDisabling({ disabledTools: ["create_agent"] }),
     mcpBaseUrl: "http://127.0.0.1:6767/mcp/agents",
-    resolvePaseoToolPolicy: () => ({ disabledTools: ["list_agents"] }),
+    resolveAlpToolPolicy: () => ({ disabledTools: ["list_agents"] }),
     logger,
   });
   let agentId: string | undefined;
@@ -11441,12 +11441,12 @@ test("agent.create hooks disable Paseo tools on top of the provider policy", asy
     });
     agentId = agent.id;
 
-    const policy = manager.getPaseoToolPolicy(agent.id);
+    const policy = manager.getAlpToolPolicy(agent.id);
     expect(policy).toEqual({ disabledTools: ["list_agents", "create_agent"] });
-    expect(isPaseoToolEnabled(policy, "list_agents")).toBe(false);
-    expect(isPaseoToolEnabled(policy, "create_agent")).toBe(false);
-    expect(isPaseoToolEnabled(policy, "send_agent_prompt")).toBe(true);
-    expect(client.lastConfig?.mcpServers?.paseo).toEqual({
+    expect(isAlpToolEnabled(policy, "list_agents")).toBe(false);
+    expect(isAlpToolEnabled(policy, "create_agent")).toBe(false);
+    expect(isAlpToolEnabled(policy, "send_agent_prompt")).toBe(true);
+    expect(client.lastConfig?.mcpServers?.alp).toEqual({
       type: "http",
       url: `http://127.0.0.1:6767/mcp/agents?callerAgentId=${agent.id}`,
     });
@@ -11457,20 +11457,20 @@ test("agent.create hooks disable Paseo tools on top of the provider policy", asy
 });
 
 test.each([
-  { name: "a hook that returns nothing", paseoTools: "omit" as const },
-  { name: "a hook that omits paseoTools", paseoTools: undefined },
-  { name: "a hook that disables no tools", paseoTools: { disabledTools: [] } },
-])("$name leaves the provider policy in force", async ({ paseoTools }) => {
+  { name: "a hook that returns nothing", alpTools: "omit" as const },
+  { name: "a hook that omits alpTools", alpTools: undefined },
+  { name: "a hook that disables no tools", alpTools: { disabledTools: [] } },
+])("$name leaves the provider policy in force", async ({ alpTools }) => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-hook-tool-policy-empty-"));
   const hooks = new PluginHookHandlers(() => {});
   hooks.before("agent.create", ({ request }) => {
-    if (paseoTools === "omit") return;
-    return paseoTools === undefined ? { config: request.config } : { ...request, paseoTools };
+    if (alpTools === "omit") return;
+    return alpTools === undefined ? { config: request.config } : { ...request, alpTools };
   });
   const manager = new AgentManager({
     clients: { codex: new TestAgentClient() },
     pluginLifecycle: pluginLifecycleFromHandlers(hooks).lifecycle,
-    resolvePaseoToolPolicy: () => ({ disabledTools: ["list_agents"] }),
+    resolveAlpToolPolicy: () => ({ disabledTools: ["list_agents"] }),
     logger,
   });
   let agentId: string | undefined;
@@ -11480,14 +11480,14 @@ test.each([
     });
     agentId = agent.id;
 
-    expect(manager.getPaseoToolPolicy(agent.id)).toEqual({ disabledTools: ["list_agents"] });
+    expect(manager.getAlpToolPolicy(agent.id)).toEqual({ disabledTools: ["list_agents"] });
   } finally {
     if (agentId) await manager.closeAgent(agentId);
     rmSync(workdir, { recursive: true, force: true });
   }
 });
 
-test("agent.create hooks cannot re-enable Paseo tools or MCP the provider turned off", async () => {
+test("agent.create hooks cannot re-enable Alp tools or MCP the provider turned off", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-hook-tool-policy-off-"));
   const client = new McpCaptureClient();
   let catalogFactoryCalls = 0;
@@ -11495,8 +11495,8 @@ test("agent.create hooks cannot re-enable Paseo tools or MCP the provider turned
     clients: { codex: client },
     pluginLifecycle: agentCreateHooksDisabling({ enabled: true, disabledTools: ["create_agent"] }),
     mcpBaseUrl: "http://127.0.0.1:6767/mcp/agents",
-    resolvePaseoToolPolicy: () => ({ enabled: false, disabledTools: ["list_agents"] }),
-    paseoToolCatalogFactory: () => {
+    resolveAlpToolPolicy: () => ({ enabled: false, disabledTools: ["list_agents"] }),
+    alpToolCatalogFactory: () => {
       catalogFactoryCalls += 1;
       throw new Error("the catalog must not be built for a disabled policy");
     },
@@ -11509,10 +11509,10 @@ test("agent.create hooks cannot re-enable Paseo tools or MCP the provider turned
     });
     agentId = agent.id;
 
-    const policy = manager.getPaseoToolPolicy(agent.id);
+    const policy = manager.getAlpToolPolicy(agent.id);
     expect(policy).toEqual({ enabled: false, disabledTools: ["list_agents", "create_agent"] });
-    expect(isPaseoToolEnabled(policy, "list_agents")).toBe(false);
-    expect(isPaseoToolEnabled(policy, "send_agent_prompt")).toBe(false);
+    expect(isAlpToolEnabled(policy, "list_agents")).toBe(false);
+    expect(isAlpToolEnabled(policy, "send_agent_prompt")).toBe(false);
     expect(client.lastConfig?.mcpServers).toBeUndefined();
     expect(catalogFactoryCalls).toBe(0);
   } finally {
@@ -11521,7 +11521,7 @@ test("agent.create hooks cannot re-enable Paseo tools or MCP the provider turned
   }
 });
 
-test("the Paseo tool policy an agent was created with is stored and survives resume and reload", async () => {
+test("the Alp tool policy an agent was created with is stored and survives resume and reload", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-hook-tool-policy-resume-"));
   const storagePath = join(workdir, "agents");
   const storage = new AgentStorage(storagePath, logger);
@@ -11531,7 +11531,7 @@ test("the Paseo tool policy an agent was created with is stored and survives res
     clients: { codex: new TestAgentClient() },
     pluginLifecycle: agentCreateHooksDisabling({ disabledTools: ["create_agent"] }),
     registry: storage,
-    resolvePaseoToolPolicy: () => providerPolicy,
+    resolveAlpToolPolicy: () => providerPolicy,
     logger,
   });
   await creator.createAgent({ provider: "codex", cwd: workdir }, agentId, {
@@ -11547,11 +11547,11 @@ test("the Paseo tool policy an agent was created with is stored and survives res
   const manager = new AgentManager({
     clients: { codex: new TestAgentClient() },
     registry: reopenedStorage,
-    resolvePaseoToolPolicy: () => providerPolicy,
+    resolveAlpToolPolicy: () => providerPolicy,
     logger,
   });
   try {
-    expect((await reopenedStorage.get(agentId))?.paseoToolPolicy).toEqual({
+    expect((await reopenedStorage.get(agentId))?.alpToolPolicy).toEqual({
       disabledTools: ["list_agents", "create_agent"],
     });
 
@@ -11560,18 +11560,18 @@ test("the Paseo tool policy an agent was created with is stored and survives res
       agentStorage: reopenedStorage,
       logger,
     });
-    expect(manager.getPaseoToolPolicy(agentId)).toEqual({
+    expect(manager.getAlpToolPolicy(agentId)).toEqual({
       disabledTools: ["list_agents", "create_agent"],
     });
 
     providerPolicy = { disabledTools: ["kill_agent"] };
     await manager.reloadAgentSession(agentId);
-    expect(manager.getPaseoToolPolicy(agentId)).toEqual({
+    expect(manager.getAlpToolPolicy(agentId)).toEqual({
       disabledTools: ["kill_agent", "list_agents", "create_agent"],
     });
     await manager.flush();
     await reopenedStorage.flush();
-    expect((await reopenedStorage.get(agentId))?.paseoToolPolicy).toEqual({
+    expect((await reopenedStorage.get(agentId))?.alpToolPolicy).toEqual({
       disabledTools: ["list_agents", "create_agent"],
     });
   } finally {
@@ -11582,38 +11582,38 @@ test("the Paseo tool policy an agent was created with is stored and survives res
   }
 });
 
-test("an agent record without a stored Paseo tool policy follows the provider policy", async () => {
+test("an agent record without a stored Alp tool policy follows the provider policy", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-legacy-tool-policy-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);
   const agentId = "00000000-0000-4000-8000-000000000f22";
   const legacyRecord = storedAgentRecordFixture(workdir, { id: agentId });
-  expect(legacyRecord.paseoToolPolicy).toBeUndefined();
+  expect(legacyRecord.alpToolPolicy).toBeUndefined();
   await storage.upsert(legacyRecord);
   let providerPolicy = { disabledTools: ["list_agents"] };
   const manager = new AgentManager({
     clients: { codex: new TestAgentClient() },
     pluginLifecycle: agentCreateHooksDisabling({ disabledTools: ["create_agent"] }),
     registry: storage,
-    resolvePaseoToolPolicy: () => providerPolicy,
+    resolveAlpToolPolicy: () => providerPolicy,
     logger,
   });
   try {
     await ensureAgentLoaded(agentId, { agentManager: manager, agentStorage: storage, logger });
-    expect(manager.getPaseoToolPolicy(agentId)).toEqual({ disabledTools: ["list_agents"] });
+    expect(manager.getAlpToolPolicy(agentId)).toEqual({ disabledTools: ["list_agents"] });
 
     providerPolicy = { disabledTools: ["kill_agent"] };
     await manager.reloadAgentSession(agentId);
-    expect(manager.getPaseoToolPolicy(agentId)).toEqual({ disabledTools: ["kill_agent"] });
+    expect(manager.getAlpToolPolicy(agentId)).toEqual({ disabledTools: ["kill_agent"] });
     await manager.flush();
     await storage.flush();
-    expect((await storage.get(agentId))?.paseoToolPolicy).toBeUndefined();
+    expect((await storage.get(agentId))?.alpToolPolicy).toBeUndefined();
   } finally {
     await manager.closeAgent(agentId).catch(() => undefined);
     rmSync(workdir, { recursive: true, force: true });
   }
 });
 
-test("re-creating a stored agent keeps the Paseo tools its record disabled", async () => {
+test("re-creating a stored agent keeps the Alp tools its record disabled", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-recreate-tool-policy-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);
   const agentId = "00000000-0000-4000-8000-000000000f23";
@@ -11621,7 +11621,7 @@ test("re-creating a stored agent keeps the Paseo tools its record disabled", asy
     storedAgentRecordFixture(workdir, {
       id: agentId,
       persistence: null,
-      paseoToolPolicy: { disabledTools: ["create_agent"] },
+      alpToolPolicy: { disabledTools: ["create_agent"] },
     }),
   );
   const hooks = new PluginHookHandlers(() => {});
@@ -11634,21 +11634,21 @@ test("re-creating a stored agent keeps the Paseo tools its record disabled", asy
   });
   try {
     await ensureAgentLoaded(agentId, { agentManager: manager, agentStorage: storage, logger });
-    expect(manager.getPaseoToolPolicy(agentId)).toEqual({ disabledTools: ["create_agent"] });
+    expect(manager.getAlpToolPolicy(agentId)).toEqual({ disabledTools: ["create_agent"] });
   } finally {
     await manager.closeAgent(agentId).catch(() => undefined);
     rmSync(workdir, { recursive: true, force: true });
   }
 });
 
-test("a new agent opened on a stored provider session keeps the Paseo tools that session's agent disabled", async () => {
+test("a new agent opened on a stored provider session keeps the Alp tools that session's agent disabled", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-handle-tool-policy-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);
   await storage.upsert(
     storedAgentRecordFixture(workdir, {
       id: "00000000-0000-4000-8000-000000000f24",
       persistence: { provider: "codex", sessionId: "shared-session" },
-      paseoToolPolicy: { disabledTools: ["create_agent"] },
+      alpToolPolicy: { disabledTools: ["create_agent"] },
     }),
   );
   const session = new TestAgentSession({ provider: "codex", cwd: workdir });
@@ -11667,7 +11667,7 @@ test("a new agent opened on a stored provider session keeps the Paseo tools that
   const manager = new AgentManager({
     clients: { codex: new ImportClient() },
     registry: storage,
-    resolvePaseoToolPolicy: () => ({ disabledTools: ["list_agents"] }),
+    resolveAlpToolPolicy: () => ({ disabledTools: ["list_agents"] }),
     logger,
   });
   const opened: string[] = [];
@@ -11677,7 +11677,7 @@ test("a new agent opened on a stored provider session keeps the Paseo tools that
       { cwd: workdir },
     );
     opened.push(resumed.id);
-    expect(manager.getPaseoToolPolicy(resumed.id)).toEqual({
+    expect(manager.getAlpToolPolicy(resumed.id)).toEqual({
       disabledTools: ["list_agents", "create_agent"],
     });
 
@@ -11688,7 +11688,7 @@ test("a new agent opened on a stored provider session keeps the Paseo tools that
       workspaceId: "ws-imported",
     });
     opened.push(imported.id);
-    expect(manager.getPaseoToolPolicy(imported.id)).toEqual({
+    expect(manager.getAlpToolPolicy(imported.id)).toEqual({
       disabledTools: ["list_agents", "create_agent"],
     });
   } finally {
@@ -11697,7 +11697,7 @@ test("a new agent opened on a stored provider session keeps the Paseo tools that
   }
 });
 
-test("MCP callers that are not loaded get the Paseo tool policy stored for them", async () => {
+test("MCP callers that are not loaded get the Alp tool policy stored for them", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-caller-tool-policy-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);
   const storedId = "00000000-0000-4000-8000-000000000f25";
@@ -11705,25 +11705,25 @@ test("MCP callers that are not loaded get the Paseo tool policy stored for them"
   await storage.upsert(
     storedAgentRecordFixture(workdir, {
       id: storedId,
-      paseoToolPolicy: { disabledTools: ["create_agent"] },
+      alpToolPolicy: { disabledTools: ["create_agent"] },
     }),
   );
   await storage.upsert(storedAgentRecordFixture(workdir, { id: legacyId }));
   const manager = new AgentManager({
     clients: { codex: new TestAgentClient() },
     registry: storage,
-    resolvePaseoToolPolicy: () => ({ disabledTools: ["list_agents"] }),
+    resolveAlpToolPolicy: () => ({ disabledTools: ["list_agents"] }),
     logger,
   });
   try {
-    expect(await manager.resolveCallerPaseoToolPolicy(storedId)).toEqual({
+    expect(await manager.resolveCallerAlpToolPolicy(storedId)).toEqual({
       disabledTools: ["list_agents", "create_agent"],
     });
-    expect(await manager.resolveCallerPaseoToolPolicy(legacyId)).toEqual({
+    expect(await manager.resolveCallerAlpToolPolicy(legacyId)).toEqual({
       disabledTools: ["list_agents"],
     });
     expect(
-      await manager.resolveCallerPaseoToolPolicy("00000000-0000-4000-8000-000000000fff"),
+      await manager.resolveCallerAlpToolPolicy("00000000-0000-4000-8000-000000000fff"),
     ).toBeUndefined();
   } finally {
     rmSync(workdir, { recursive: true, force: true });

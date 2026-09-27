@@ -7,12 +7,12 @@ import { resolveSpeechConfig } from "./speech-config-resolver.js";
 
 describe("resolveSpeechConfig", () => {
   test("resolves local-first defaults without env overrides", () => {
-    const paseoHome = "/tmp/paseo-home";
+    const alpHome = "/tmp/alp-home";
     const persisted = PersistedConfigSchema.parse({});
     const env = {} as NodeJS.ProcessEnv;
 
     const result = resolveSpeechConfig({
-      paseoHome,
+      alpHome,
       env,
       persisted,
     });
@@ -39,7 +39,7 @@ describe("resolveSpeechConfig", () => {
       enabled: true,
     });
     expect(result.speech.local).toEqual({
-      modelsDir: path.join(paseoHome, "models", "local-speech"),
+      modelsDir: path.join(alpHome, "models", "local-speech"),
       models: {
         dictationStt: "parakeet-tdt-0.6b-v2-int8",
         voiceStt: "parakeet-tdt-0.6b-v2-int8",
@@ -70,22 +70,22 @@ describe("resolveSpeechConfig", () => {
       },
     });
     const env = {
-      PASEO_DICTATION_LOCAL_STT_MODEL: "parakeet-tdt-0.6b-v2-int8",
-      PASEO_VOICE_LOCAL_STT_MODEL: "parakeet-tdt-0.6b-v2-int8",
-      PASEO_VOICE_LOCAL_TTS_MODEL: "kokoro-en-v0_19",
-      PASEO_VOICE_LOCAL_TTS_SPEAKER_ID: "5",
-      PASEO_VOICE_LOCAL_TTS_SPEED: "1.35",
-      PASEO_DICTATION_LANGUAGE: "es",
-      PASEO_VOICE_LANGUAGE: "pt",
-      PASEO_LOCAL_MODELS_DIR: "/tmp/models",
+      ALP_DICTATION_LOCAL_STT_MODEL: "parakeet-tdt-0.6b-v2-int8",
+      ALP_VOICE_LOCAL_STT_MODEL: "parakeet-tdt-0.6b-v2-int8",
+      ALP_VOICE_LOCAL_TTS_MODEL: "kokoro-en-v0_19",
+      ALP_VOICE_LOCAL_TTS_SPEAKER_ID: "5",
+      ALP_VOICE_LOCAL_TTS_SPEED: "1.35",
+      ALP_DICTATION_LANGUAGE: "es",
+      ALP_VOICE_LANGUAGE: "pt",
+      ALP_LOCAL_MODELS_DIR: "/tmp/models",
       OPENAI_API_KEY: "env-key",
-      PASEO_VOICE_STT_PROVIDER: "openai",
-      PASEO_DICTATION_STT_PROVIDER: "local",
-      PASEO_VOICE_TTS_PROVIDER: "local",
+      ALP_VOICE_STT_PROVIDER: "openai",
+      ALP_DICTATION_STT_PROVIDER: "local",
+      ALP_VOICE_TTS_PROVIDER: "local",
     } as NodeJS.ProcessEnv;
 
     const result = resolveSpeechConfig({
-      paseoHome: "/tmp/paseo-home",
+      alpHome: "/tmp/alp-home",
       env,
       persisted,
     });
@@ -151,10 +151,10 @@ describe("resolveSpeechConfig", () => {
     });
 
     const result = resolveSpeechConfig({
-      paseoHome: "/tmp/paseo-home",
+      alpHome: "/tmp/alp-home",
       env: {
-        PASEO_DICTATION_LANGUAGE: "es",
-        PASEO_VOICE_LANGUAGE: "  ",
+        ALP_DICTATION_LANGUAGE: "es",
+        ALP_VOICE_LANGUAGE: "  ",
       } as NodeJS.ProcessEnv,
       persisted,
     });
@@ -174,7 +174,7 @@ describe("resolveSpeechConfig", () => {
     });
 
     const result = resolveSpeechConfig({
-      paseoHome: "/tmp/paseo-home",
+      alpHome: "/tmp/alp-home",
       env: {} as NodeJS.ProcessEnv,
       persisted,
     });

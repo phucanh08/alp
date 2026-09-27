@@ -7,7 +7,7 @@ import { z } from "zod";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
-import type { PaseoToolCatalog } from "../../tools/types.js";
+import type { AlpToolCatalog } from "../../tools/types.js";
 import { OpenCodeBridge, loadOpenCodeBridgePluginArtifact } from "./bridge.js";
 
 const temporaryDirectories: string[] = [];
@@ -20,7 +20,7 @@ afterEach(async () => {
   );
 });
 
-function createCatalog(): PaseoToolCatalog {
+function createCatalog(): AlpToolCatalog {
   const tool = {
     name: "echo_context",
     title: "Echo context",
@@ -59,7 +59,7 @@ function readPluginOptions(env: Record<string, string>): {
 
 describe("OpenCodeBridge", () => {
   test("loads packaged bundle bytes without invoking source compilation", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "paseo-opencode-artifact-"));
+    const root = await mkdtemp(path.join(tmpdir(), "alp-opencode-artifact-"));
     temporaryDirectories.push(root);
     const moduleUrl = pathToFileURL(path.join(root, "bridge.js")).href;
     const bundle = Buffer.from("export default async () => ({})");
@@ -94,17 +94,17 @@ describe("OpenCodeBridge", () => {
   });
 
   test("serves authenticated session context and caller-scoped tools", async () => {
-    const paseoHome = await mkdtemp(path.join(tmpdir(), "paseo-opencode-bridge-"));
-    temporaryDirectories.push(paseoHome);
+    const alpHome = await mkdtemp(path.join(tmpdir(), "alp-opencode-bridge-"));
+    temporaryDirectories.push(alpHome);
     const catalog = createCatalog();
-    const bridge = new OpenCodeBridge({ paseoHome, logger: createTestLogger() });
+    const bridge = new OpenCodeBridge({ alpHome, logger: createTestLogger() });
     await bridge.start();
     bridge.setManifestCatalog(catalog);
     const release = bridge.bindSession({
       sessionId: "ses_one",
       env: {
-        PASEO_AGENT_ID: "agent-one",
-        PASEO_AGENT_CWD: "/workspace/one",
+        ALP_AGENT_ID: "agent-one",
+        ALP_AGENT_CWD: "/workspace/one",
         CUSTOM_VALUE: "one",
       },
       tools: catalog,
@@ -125,8 +125,8 @@ describe("OpenCodeBridge", () => {
       });
       expect(await context.json()).toEqual({
         env: {
-          PASEO_AGENT_ID: "agent-one",
-          PASEO_AGENT_CWD: "/workspace/one",
+          ALP_AGENT_ID: "agent-one",
+          ALP_AGENT_CWD: "/workspace/one",
           CUSTOM_VALUE: "one",
         },
       });
@@ -169,7 +169,7 @@ describe("OpenCodeBridge", () => {
         },
       );
       await expect(
-        hooks.tool.paseo_echo_context.execute(
+        hooks.tool.alp_echo_context.execute(
           { value: "through bundled plugin" },
           { sessionID: "ses_one" },
         ),
@@ -181,7 +181,7 @@ describe("OpenCodeBridge", () => {
         hooks["shell.env"]({ cwd: "/workspace/one", sessionID: "ses_one" }, { env: {} }),
       ).rejects.toThrow("not bound");
       expect(pluginError).toHaveBeenCalledWith(
-        "[paseo-opencode-plugin] shell.env failed",
+        "[alp-opencode-plugin] shell.env failed",
         expect.objectContaining({ sessionID: "ses_one", error: expect.stringContaining("bound") }),
       );
       pluginError.mockRestore();
@@ -197,9 +197,9 @@ describe("OpenCodeBridge", () => {
   });
 
   test("preserves user OpenCode config while installing one content-addressed plugin", async () => {
-    const paseoHome = await mkdtemp(path.join(tmpdir(), "paseo-opencode-bridge-config-"));
-    temporaryDirectories.push(paseoHome);
-    const bridge = new OpenCodeBridge({ paseoHome, logger: createTestLogger() });
+    const alpHome = await mkdtemp(path.join(tmpdir(), "alp-opencode-bridge-config-"));
+    temporaryDirectories.push(alpHome);
+    const bridge = new OpenCodeBridge({ alpHome, logger: createTestLogger() });
     await bridge.start();
 
     try {
@@ -218,7 +218,7 @@ describe("OpenCodeBridge", () => {
       expect(config.model).toBe("provider/model");
       expect(config.plugin[0]).toBe("user-plugin");
       expect(config.plugin).toHaveLength(2);
-      expect(config.plugin[1]?.[0]).toMatch(/paseo-[a-f0-9]{64}\.mjs$/);
+      expect(config.plugin[1]?.[0]).toMatch(/alp-[a-f0-9]{64}\.mjs$/);
     } finally {
       await bridge.close();
     }

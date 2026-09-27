@@ -3,9 +3,9 @@ import type {
   ScriptStatusUpdateMessage,
   SessionOutboundMessage,
   WorkspaceScriptPayload,
-} from "@getpaseo/protocol/messages";
-import type { PaseoConfig } from "@getpaseo/protocol/paseo-config-schema";
-import { getScriptConfigs, isServiceScript, readPaseoConfig } from "../utils/worktree.js";
+} from "@alp/protocol/messages";
+import type { AlpConfig } from "@alp/protocol/alp-config-schema";
+import { getScriptConfigs, isServiceScript, readAlpConfig } from "../utils/worktree.js";
 import { deriveProjectSlug } from "./workspace-git-metadata.js";
 import type { ScriptHealthEntry, ScriptHealthState } from "./script-health-monitor.js";
 import type {
@@ -21,7 +21,7 @@ interface SessionEmitter {
 interface BuildWorkspaceScriptPayloadsOptions {
   workspaceId: string;
   workspaceDirectory: string;
-  paseoConfig: PaseoConfig | null;
+  alpConfig: AlpConfig | null;
   serviceProxy: ServiceProxySubsystem;
   runtimeStore: WorkspaceScriptRuntimeStore;
   daemonPort: number | null;
@@ -33,17 +33,17 @@ interface BuildWorkspaceScriptPayloadsOptions {
   resolveHealth?: (hostname: string) => ScriptHealthState | null;
 }
 
-export function readPaseoConfigForProjection(
+export function readAlpConfigForProjection(
   workspaceDirectory: string,
   logger: Logger,
-): PaseoConfig | null {
-  const result = readPaseoConfig(workspaceDirectory);
+): AlpConfig | null {
+  const result = readAlpConfig(workspaceDirectory);
   if (result.ok) {
     return result.config;
   }
   logger.warn(
     { configPath: result.configPath, workspaceDirectory, err: result.error },
-    "Failed to parse paseo.json; treating workspace as having no scripts",
+    "Failed to parse alp.json; treating workspace as having no scripts",
   );
   return null;
 }
@@ -218,7 +218,7 @@ export function buildWorkspaceScriptPayloads(
   const workspaceDirectory = options.workspaceDirectory;
   const projectSlug = options.gitMetadata?.projectSlug ?? deriveProjectSlug(workspaceDirectory);
   const branchName = options.gitMetadata?.currentBranch ?? null;
-  const scriptConfigs = getScriptConfigs(options.paseoConfig);
+  const scriptConfigs = getScriptConfigs(options.alpConfig);
   const runtimeEntries = new Map(
     options.runtimeStore
       .listForWorkspace(workspaceId)
@@ -304,7 +304,7 @@ export function createScriptStatusEmitter({
       const projected = buildWorkspaceScriptPayloads({
         workspaceId,
         workspaceDirectory,
-        paseoConfig: readPaseoConfigForProjection(workspaceDirectory, logger),
+        alpConfig: readAlpConfigForProjection(workspaceDirectory, logger),
         serviceProxy,
         runtimeStore,
         daemonPort: resolvedDaemonPort,

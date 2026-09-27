@@ -9,7 +9,7 @@ category: Hub
 # Hub public API
 
 The Hub public API lets automation operate on triggers, projects, and daemons in one
-organization. Set the Hub origin in `PASEO_HUB_URL` below, for example
+organization. Set the Hub origin in `ALP_HUB_URL` below, for example
 `https://hub.example.com`.
 
 ## API reference
@@ -21,12 +21,12 @@ These are the canonical reference endpoints for the hosted alp Hub. A self-hoste
 
 ## Authentication
 
-Run `alp hub login [origin]` for interactive CLI access. After browser approval, alp stores a durable, revocable organization credential under `PASEO_HOME` for that exact origin. Without an explicit origin, the CLI uses `PASEO_HUB_URL`, then the active stored login, then `https://hub-alp.anhlp.com`.
+Run `alp hub login [origin]` for interactive CLI access. After browser approval, alp stores a durable, revocable organization credential under `ALP_HOME` for that exact origin. Without an explicit origin, the CLI uses `ALP_HUB_URL`, then the active stored login, then `https://hub-alp.anhlp.com`.
 
 For automation, create an organization API key from the Hub dashboard under **API keys**. Both credential types are bearer tokens:
 
 ```http
-Authorization: Bearer paseo_pk_...
+Authorization: Bearer alp_pk_...
 Content-Type: application/json
 ```
 
@@ -179,8 +179,8 @@ Common responses are `400` for a missing or malformed body, `404` for an inactiv
 Example:
 
 ```bash
-curl --fail-with-body -sS -X POST "$PASEO_HUB_URL/api/v1/configurations/install" \
-  -H "Authorization: Bearer $PASEO_HUB_API_KEY" \
+curl --fail-with-body -sS -X POST "$ALP_HUB_URL/api/v1/configurations/install" \
+  -H "Authorization: Bearer $ALP_HUB_API_KEY" \
   -H "Content-Type: application/json" \
   --data @configuration-install.json
 ```
@@ -231,8 +231,8 @@ Common responses are `400` for an invalid request, `403` when the actor is not a
 Example:
 
 ```bash
-curl --fail-with-body -sS -X POST "$PASEO_HUB_URL/api/v1/manual-runs" \
-  -H "Authorization: Bearer $PASEO_HUB_API_KEY" \
+curl --fail-with-body -sS -X POST "$ALP_HUB_URL/api/v1/manual-runs" \
+  -H "Authorization: Bearer $ALP_HUB_API_KEY" \
   -H "Content-Type: application/json" \
   --data '{
     "projectSlug": "my-project",
@@ -267,12 +267,12 @@ No request body is required. On success, Hub returns `201`:
 
 The token expires after 10 minutes and is consumed when the daemon enrolls.
 
-`alp hub connect [origin]` performs this request with `--api-key`, `PASEO_HUB_API_KEY`, or the matching stored login, then passes the one-time token to the daemon's enrollment operation. The daemon generates and keeps its own relationship credential.
+`alp hub connect [origin]` performs this request with `--api-key`, `ALP_HUB_API_KEY`, or the matching stored login, then passes the one-time token to the daemon's enrollment operation. The daemon generates and keeps its own relationship credential.
 
 ```bash
 curl --fail-with-body -sS -X POST \
-  "$PASEO_HUB_URL/api/v1/daemons/enrollment-tokens" \
-  -H "Authorization: Bearer $PASEO_HUB_API_KEY"
+  "$ALP_HUB_URL/api/v1/daemons/enrollment-tokens" \
+  -H "Authorization: Bearer $ALP_HUB_API_KEY"
 ```
 
 Direct API consumers can pass the returned token to the daemon enrollment protocol. The alp CLI intentionally does not accept raw enrollment tokens; `connect` owns the authenticated single-flow exchange.

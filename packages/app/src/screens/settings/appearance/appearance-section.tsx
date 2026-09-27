@@ -4,11 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Text, View, type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { ChevronDown, Monitor, Moon, Sun } from "lucide-react-native";
-import {
-  SYNTAX_THEME_OPTIONS,
-  type SyntaxThemeId,
-  type SyntaxThemeOption,
-} from "@getpaseo/highlight";
+import { SYNTAX_THEME_OPTIONS, type SyntaxThemeId, type SyntaxThemeOption } from "@alp/highlight";
 import {
   DropdownMenu,
   DropdownMenuContent,

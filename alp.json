@@ -1,0 +1,32 @@
+{
+  "worktree": {
+    "setup": [
+      "npm ci",
+      "node ./scripts/seed-ios-native-cache.mjs",
+      "node ./scripts/seed-worktree-dev-state.mjs",
+      "npm run build:server",
+      "npm run build --workspace=@alp/expo-two-way-audio"
+    ]
+  },
+  "scripts": {
+    "daemon": {
+      "type": "service",
+      "command": "ALP_DEV_MANAGED_HOME=1 ALP_DEV_ROOT=\"${ALP_WORKTREE_PATH:-$PWD}\" ALP_HOME=\"${ALP_WORKTREE_PATH:-$PWD}/.dev/alp-home\" ALP_SKIP_DEV_SERVER_BUILD=1 ALP_LISTEN=0.0.0.0:${ALP_PORT:-6768} ./scripts/dev-daemon.sh"
+    },
+    "app": {
+      "type": "service",
+      "command": "ALP_DEV_MANAGED_HOME=1 ALP_DEV_ROOT=\"${ALP_WORKTREE_PATH:-$PWD}\" ALP_HOME=\"${ALP_WORKTREE_PATH:-$PWD}/.dev/alp-home\" ALP_LISTEN=0.0.0.0:${ALP_SERVICE_DAEMON_PORT:-6768} ALP_DEV_DAEMON_ENDPOINT=localhost:${ALP_SERVICE_DAEMON_PORT:-6768} EXPO_PORT=${ALP_PORT:-} ./scripts/dev-app.sh"
+    },
+    "desktop": {
+      "type": "service",
+      "command": "ALP_DEV_MANAGED_HOME=1 ALP_DEV_ROOT=\"${ALP_WORKTREE_PATH:-$PWD}\" ALP_HOME=\"${ALP_WORKTREE_PATH:-$PWD}/.dev/alp-home\" ALP_LISTEN=0.0.0.0:${ALP_SERVICE_DAEMON_PORT:-6768} ALP_DEV_DAEMON_ENDPOINT=localhost:${ALP_SERVICE_DAEMON_PORT:-6768} EXPO_PORT=${ALP_PORT:-} exec ./packages/desktop/scripts/dev.sh"
+    },
+    "ios-simulator": {
+      "type": "service",
+      "command": "ALP_DEV_MANAGED_HOME=1 ALP_DEV_ROOT=\"$PWD\" ALP_HOME=\"$PWD/.dev/alp-home\" ALP_LISTEN=0.0.0.0:${ALP_SERVICE_DAEMON_PORT} ALP_DEV_DAEMON_ENDPOINT=localhost:${ALP_SERVICE_DAEMON_PORT} ./scripts/alp-ios-simulator-service.sh"
+    },
+    "typecheck": {
+      "command": "npm run typecheck"
+    }
+  }
+}

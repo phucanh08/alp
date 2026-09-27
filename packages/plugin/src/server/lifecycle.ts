@@ -3,13 +3,13 @@ import type {
   AgentPermissionResponse,
   AgentTimelineItem,
   AgentSessionConfig,
-} from "@getpaseo/protocol/agent-types";
-import type { PaseoApi } from "@getpaseo/client";
-import type { WorkspaceCreateRequest } from "@getpaseo/protocol/messages";
-import type { ProviderPaseoToolsPolicy } from "@getpaseo/protocol/provider-config";
+} from "@alp/protocol/agent-types";
+import type { AlpApi } from "@alp/client";
+import type { WorkspaceCreateRequest } from "@alp/protocol/messages";
+import type { ProviderAlpToolsPolicy } from "@alp/protocol/provider-config";
 
 export interface PluginHookContext {
-  paseo: PaseoApi;
+  alp: AlpApi;
   signal: AbortSignal;
 }
 
@@ -28,7 +28,7 @@ export interface PluginHookAgent {
   provider: string;
   cwd: string;
   title: string | null;
-  /** The agent's labels when the event fired. `parentAgentId` mirrors `paseo.parent-agent-id`. */
+  /** The agent's labels when the event fired. `parentAgentId` mirrors `alp.parent-agent-id`. */
   labels?: Record<string, string>;
 }
 
@@ -73,16 +73,16 @@ export interface PluginBeforeRequests {
     env?: Record<string, string>;
     /**
      * Labels the agent registers with. Omit to keep the labels you received. The daemon owns
-     * `paseo.parent-agent-id`: setting or removing it here has no effect.
+     * `alp.parent-agent-id`: setting or removing it here has no effect.
      */
     labels?: Record<string, string>;
     /**
-     * Paseo tools to turn off for this agent only, on top of the provider's `paseoTools` policy.
+     * Alp tools to turn off for this agent only, on top of the provider's `alpTools` policy.
      * Cuts only add up: a tool disabled by the provider or by an earlier hook stays disabled, and
      * `enabled: true` does not undo an `enabled: false`. Omit to keep what you received. The
      * result is frozen into the agent record at creation; resume and reload do not run hooks.
      */
-    paseoTools?: ProviderPaseoToolsPolicy;
+    alpTools?: ProviderAlpToolsPolicy;
   };
   "agent.session_open": PluginSessionOpenRequest;
   "workspace.create": Omit<WorkspaceCreateRequest, "type" | "requestId">;

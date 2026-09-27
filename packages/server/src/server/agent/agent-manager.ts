@@ -1,24 +1,21 @@
 import { projectTimelineRows } from "./timeline-projection.js";
 import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/index.js";
-import type { PluginSessionOpenRequest } from "@getpaseo/plugin/server";
+import type { PluginSessionOpenRequest } from "@alp/plugin/server";
 import { randomUUID } from "node:crypto";
 import { basename, resolve } from "node:path";
 import { stat } from "node:fs/promises";
-import {
-  AGENT_LIFECYCLE_STATUSES,
-  type AgentLifecycleStatus,
-} from "@getpaseo/protocol/agent-lifecycle";
+import { AGENT_LIFECYCLE_STATUSES, type AgentLifecycleStatus } from "@alp/protocol/agent-lifecycle";
 import {
   getParentAgentIdFromLabels,
   hasOpenAgentTab,
   isDelegatedAgent,
   isOpenAgentTabLabel,
   PARENT_AGENT_ID_LABEL,
-} from "@getpaseo/protocol/agent-labels";
+} from "@alp/protocol/agent-labels";
 import type { Logger } from "pino";
-import type { ProviderOptions, ToolPolicy } from "@getpaseo/protocol/agent-types";
-import type { ProviderPaseoToolsPolicy } from "@getpaseo/protocol/provider-config";
+import type { ProviderOptions, ToolPolicy } from "@alp/protocol/agent-types";
+import type { ProviderAlpToolsPolicy } from "@alp/protocol/provider-config";
 import { z } from "zod";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
 
@@ -80,10 +77,10 @@ import {
 import { invokeRewindCapability, type RewindMode } from "./rewind/rewind.js";
 import { isSystemInjectedEnvelope } from "./agent-prompt.js";
 import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
-import { stripInternalPaseoMcpServer, withRuntimePaseoMcpServer } from "./runtime-mcp-config.js";
+import { stripInternalAlpMcpServer, withRuntimeAlpMcpServer } from "./runtime-mcp-config.js";
 import { resolveCreateAgentTitles } from "./create-agent-title.js";
-import type { PaseoToolCatalogFactory } from "./tools/types.js";
-import { isPaseoToolPolicyEnabled, mergePaseoToolPolicies } from "./paseo-tool-policy.js";
+import type { AlpToolCatalogFactory } from "./tools/types.js";
+import { isAlpToolPolicyEnabled, mergeAlpToolPolicies } from "./alp-tool-policy.js";
 import {
   ProviderSubagentStore,
   type ProviderSubagentDescriptor,
@@ -165,10 +162,10 @@ async function assertUsableWorkingDirectory(cwd: string): Promise<void> {
 interface PreparedSessionConfig {
   storedConfig: AgentSessionConfig;
   launchConfig: AgentSessionConfig;
-  /** What this session may use: `agentPaseoToolPolicy`, or all off when Paseo tools are off. */
-  paseoToolPolicy: ProviderPaseoToolsPolicy | undefined;
+  /** What this session may use: `agentAlpToolPolicy`, or all off when Alp tools are off. */
+  alpToolPolicy: ProviderAlpToolsPolicy | undefined;
   /** The provider's current policy merged with the agent's own. A new agent freezes this one. */
-  agentPaseoToolPolicy: ProviderPaseoToolsPolicy | undefined;
+  agentAlpToolPolicy: ProviderAlpToolsPolicy | undefined;
 }
 
 interface NormalizeConfigOptions {
@@ -212,7 +209,7 @@ function buildStoredAgentConfig(record: StoredAgentRecord): AgentSessionConfig {
     config.systemPrompt = record.config.systemPrompt;
   }
   if (record.config.mcpServers != null) config.mcpServers = record.config.mcpServers;
-  return stripInternalPaseoMcpServer(config);
+  return stripInternalAlpMcpServer(config);
 }
 
 export { AGENT_LIFECYCLE_STATUSES, type AgentLifecycleStatus };
@@ -331,9 +328,9 @@ export interface AgentManagerOptions {
   terminalManager?: TerminalManager | null;
   mcpBaseUrl?: string;
   mcpAuthToken?: string;
-  paseoToolsEnabled?: boolean;
-  paseoToolCatalogFactory?: PaseoToolCatalogFactory;
-  resolvePaseoToolPolicy?: (provider: AgentProvider) => ProviderPaseoToolsPolicy | undefined;
+  alpToolsEnabled?: boolean;
+  alpToolCatalogFactory?: AlpToolCatalogFactory;
+  resolveAlpToolPolicy?: (provider: AgentProvider) => ProviderAlpToolsPolicy | undefined;
   appendSystemPrompt?: string;
   agentStreamCoalesceWindowMs?: number;
   rescueTimeouts?: AgentManagerRescueTimeouts;
@@ -445,11 +442,11 @@ interface ManagedAgentBase {
    */
   labels: Record<string, string>;
   /**
-   * Paseo tools policy frozen when the agent was created (provider policy plus what
+   * Alp tools policy frozen when the agent was created (provider policy plus what
    * `agent.create` hooks disabled). Every later session merges the provider's current policy on
    * top, so it can only narrow. Undefined for agents recorded before the policy was stored.
    */
-  paseoToolPolicy?: ProviderPaseoToolsPolicy;
+  alpToolPolicy?: ProviderAlpToolsPolicy;
 }
 
 type ManagedAgentWithSession = ManagedAgentBase & {
@@ -765,12 +762,12 @@ export class AgentManager {
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
   private mcpBaseUrl: string | null;
   private readonly mcpAuthToken: string | null;
-  private paseoToolsEnabled = true;
-  private paseoToolCatalogFactory: PaseoToolCatalogFactory | null = null;
-  private readonly paseoToolPolicies = new Map<string, ProviderPaseoToolsPolicy | undefined>();
-  private readonly resolvePaseoToolPolicy: (
+  private alpToolsEnabled = true;
+  private alpToolCatalogFactory: AlpToolCatalogFactory | null = null;
+  private readonly alpToolPolicies = new Map<string, ProviderAlpToolsPolicy | undefined>();
+  private readonly resolveAlpToolPolicy: (
     provider: AgentProvider,
-  ) => ProviderPaseoToolsPolicy | undefined;
+  ) => ProviderAlpToolsPolicy | undefined;
   private appendSystemPrompt: string;
   private onAgentAttention?: AgentAttentionCallback;
   private onAgentArchived?: AgentArchivedCallback;
@@ -789,8 +786,8 @@ export class AgentManager {
     this.onWorkspaceStateMayHaveChanged = options?.onWorkspaceStateMayHaveChanged;
     this.mcpBaseUrl = options?.mcpBaseUrl ?? null;
     this.mcpAuthToken = options?.mcpAuthToken ?? null;
-    this.configurePaseoTools(options);
-    this.resolvePaseoToolPolicy = options.resolvePaseoToolPolicy ?? (() => undefined);
+    this.configureAlpTools(options);
+    this.resolveAlpToolPolicy = options.resolveAlpToolPolicy ?? (() => undefined);
     this.appendSystemPrompt = options.appendSystemPrompt ?? "";
     this.logger = options.logger.child({ module: "agent", component: "agent-manager" });
     this.rescueTimeouts = {
@@ -814,9 +811,9 @@ export class AgentManager {
     });
   }
 
-  private configurePaseoTools(options: AgentManagerOptions): void {
-    this.paseoToolsEnabled = options.paseoToolsEnabled ?? true;
-    this.paseoToolCatalogFactory = options.paseoToolCatalogFactory ?? null;
+  private configureAlpTools(options: AgentManagerOptions): void {
+    this.alpToolsEnabled = options.alpToolsEnabled ?? true;
+    this.alpToolCatalogFactory = options.alpToolCatalogFactory ?? null;
   }
 
   registerClient(provider: AgentProvider, client: AgentClient): void {
@@ -877,57 +874,54 @@ export class AgentManager {
     this.acceptingAgentRegistrations = false;
   }
 
-  setPaseoToolsEnabled(enabled: boolean): void {
-    this.paseoToolsEnabled = enabled;
+  setAlpToolsEnabled(enabled: boolean): void {
+    this.alpToolsEnabled = enabled;
   }
 
-  setPaseoToolCatalogFactory(factory: PaseoToolCatalogFactory | null): void {
-    this.paseoToolCatalogFactory = factory;
+  setAlpToolCatalogFactory(factory: AlpToolCatalogFactory | null): void {
+    this.alpToolCatalogFactory = factory;
   }
 
-  getPaseoToolPolicy(agentId: string): ProviderPaseoToolsPolicy | undefined {
-    return this.paseoToolPolicies.get(agentId);
+  getAlpToolPolicy(agentId: string): ProviderAlpToolsPolicy | undefined {
+    return this.alpToolPolicies.get(agentId);
   }
 
   /**
    * The policy for an MCP caller. A loaded agent uses the policy its session opened with; an
    * agent that is not loaded gets the one its record would open with. Unknown callers get none.
    */
-  async resolveCallerPaseoToolPolicy(
-    agentId: string,
-  ): Promise<ProviderPaseoToolsPolicy | undefined> {
-    if (this.paseoToolPolicies.has(agentId)) {
-      return this.paseoToolPolicies.get(agentId);
+  async resolveCallerAlpToolPolicy(agentId: string): Promise<ProviderAlpToolsPolicy | undefined> {
+    if (this.alpToolPolicies.has(agentId)) {
+      return this.alpToolPolicies.get(agentId);
     }
     const record = this.registry ? await this.registry.get(agentId) : null;
     if (!record) {
       return undefined;
     }
-    return this.resolveSessionPaseoToolPolicy(record.provider, record.paseoToolPolicy)
-      .paseoToolPolicy;
+    return this.resolveSessionAlpToolPolicy(record.provider, record.alpToolPolicy).alpToolPolicy;
   }
 
-  private async storedProviderSessionPaseoToolPolicy(
+  private async storedProviderSessionAlpToolPolicy(
     provider: AgentProvider,
     providerHandleId: string,
-  ): Promise<ProviderPaseoToolsPolicy | undefined> {
+  ): Promise<ProviderAlpToolsPolicy | undefined> {
     const records = this.registry
       ? await this.registry.listByProviderSession(provider, providerHandleId)
       : [];
-    return mergePaseoToolPolicies(...records.map((record) => record.paseoToolPolicy));
+    return mergeAlpToolPolicies(...records.map((record) => record.alpToolPolicy));
   }
 
-  private resolveSessionPaseoToolPolicy(
+  private resolveSessionAlpToolPolicy(
     provider: AgentProvider,
-    agentPolicy: ProviderPaseoToolsPolicy | undefined,
-  ): Pick<PreparedSessionConfig, "paseoToolPolicy" | "agentPaseoToolPolicy"> {
-    const agentPaseoToolPolicy = mergePaseoToolPolicies(
-      this.resolvePaseoToolPolicy(provider),
+    agentPolicy: ProviderAlpToolsPolicy | undefined,
+  ): Pick<PreparedSessionConfig, "alpToolPolicy" | "agentAlpToolPolicy"> {
+    const agentAlpToolPolicy = mergeAlpToolPolicies(
+      this.resolveAlpToolPolicy(provider),
       agentPolicy,
     );
     return {
-      agentPaseoToolPolicy,
-      paseoToolPolicy: this.paseoToolsEnabled ? agentPaseoToolPolicy : { enabled: false },
+      agentAlpToolPolicy,
+      alpToolPolicy: this.alpToolsEnabled ? agentAlpToolPolicy : { enabled: false },
     };
   }
 
@@ -1307,14 +1301,14 @@ export class AgentManager {
   ): Promise<ManagedAgent> {
     this.assertAcceptingAgentRegistrations();
     const resolvedAgentId = validateAgentId(agentId ?? this.idFactory(), "createAgent");
-    let hookPaseoToolPolicy: ProviderPaseoToolsPolicy | undefined;
+    let hookAlpToolPolicy: ProviderAlpToolsPolicy | undefined;
     if (this.pluginLifecycle && !config.internal) {
       const request = await this.pluginLifecycle.before("agent.create", {
         config,
         env: options.env,
         labels: options.labels,
       });
-      hookPaseoToolPolicy = request.paseoTools;
+      hookAlpToolPolicy = request.alpTools;
       config = { ...request.config, internal: config.internal };
       options = {
         ...options,
@@ -1325,24 +1319,21 @@ export class AgentManager {
     // Starting a stored agent's first session again must not drop what its record disabled.
     const storedRecord = this.registry ? await this.registry.get(resolvedAgentId) : null;
     await this.deleteAgentState(resolvedAgentId);
-    const { storedConfig, launchConfig, paseoToolPolicy, agentPaseoToolPolicy } =
+    const { storedConfig, launchConfig, alpToolPolicy, agentAlpToolPolicy } =
       await this.prepareSessionConfig(config, resolvedAgentId, {
         env: options?.env,
-        agentPaseoToolPolicy: mergePaseoToolPolicies(
-          hookPaseoToolPolicy,
-          storedRecord?.paseoToolPolicy,
-        ),
+        agentAlpToolPolicy: mergeAlpToolPolicies(hookAlpToolPolicy, storedRecord?.alpToolPolicy),
       });
     this.requireEnabledProvider(storedConfig.provider);
     const client = await this.requireAvailableClient({
       provider: storedConfig.provider,
     });
-    this.paseoToolPolicies.set(resolvedAgentId, paseoToolPolicy);
+    this.alpToolPolicies.set(resolvedAgentId, alpToolPolicy);
     const launchContext = await this.buildLaunchContext(
       resolvedAgentId,
       client,
       storedConfig.cwd,
-      paseoToolPolicy,
+      alpToolPolicy,
       options?.env,
       { reason: "create", purpose: "interactive", workspaceId: options.workspaceId ?? null },
     );
@@ -1356,7 +1347,7 @@ export class AgentManager {
       workspaceId: options.workspaceId,
       owner: options.owner,
       historyPrimed: true,
-      paseoToolPolicy: agentPaseoToolPolicy,
+      alpToolPolicy: agentAlpToolPolicy,
     });
     if (!agent.internal) {
       this.pluginLifecycle?.emit("agent.created", {
@@ -1445,14 +1436,14 @@ export class AgentManager {
     const purpose = currentResumeOptions?.purpose ?? "interactive";
     // The policy frozen at creation, never recomputed. A new agent opened on a stored provider
     // session inherits what that session's agents disabled.
-    const frozenPaseoToolPolicy = record
-      ? record.paseoToolPolicy
-      : await this.storedProviderSessionPaseoToolPolicy(handle.provider, handle.sessionId);
+    const frozenAlpToolPolicy = record
+      ? record.alpToolPolicy
+      : await this.storedProviderSessionAlpToolPolicy(handle.provider, handle.sessionId);
 
-    const { storedConfig, launchConfig, paseoToolPolicy } = await this.prepareSessionConfig(
+    const { storedConfig, launchConfig, alpToolPolicy } = await this.prepareSessionConfig(
       mergedConfig,
       resolvedAgentId,
-      { purpose, agentPaseoToolPolicy: frozenPaseoToolPolicy },
+      { purpose, agentAlpToolPolicy: frozenAlpToolPolicy },
     );
     const client = this.requireClient(handle.provider);
     const available = await client.isAvailable();
@@ -1461,12 +1452,12 @@ export class AgentManager {
         `Provider '${handle.provider}' is not available. Please ensure the CLI is installed.`,
       );
     }
-    this.paseoToolPolicies.set(resolvedAgentId, paseoToolPolicy);
+    this.alpToolPolicies.set(resolvedAgentId, alpToolPolicy);
     const launchContext = await this.buildLaunchContext(
       resolvedAgentId,
       client,
       storedConfig.cwd,
-      paseoToolPolicy,
+      alpToolPolicy,
       undefined,
       {
         reason: "resume",
@@ -1486,7 +1477,7 @@ export class AgentManager {
       ...options,
       persistence: handle,
       restoring: true,
-      paseoToolPolicy: frozenPaseoToolPolicy,
+      alpToolPolicy: frozenAlpToolPolicy,
     });
   }
 
@@ -1516,7 +1507,7 @@ export class AgentManager {
       throw new Error(`Provider '${input.provider}' does not support importing sessions`);
     }
 
-    const { storedConfig, launchConfig, paseoToolPolicy, agentPaseoToolPolicy } =
+    const { storedConfig, launchConfig, alpToolPolicy, agentAlpToolPolicy } =
       await this.prepareSessionConfig(
         {
           provider: input.provider,
@@ -1524,18 +1515,18 @@ export class AgentManager {
         },
         resolvedAgentId,
         {
-          agentPaseoToolPolicy: await this.storedProviderSessionPaseoToolPolicy(
+          agentAlpToolPolicy: await this.storedProviderSessionAlpToolPolicy(
             input.provider,
             input.providerHandleId,
           ),
         },
       );
-    this.paseoToolPolicies.set(resolvedAgentId, paseoToolPolicy);
+    this.alpToolPolicies.set(resolvedAgentId, alpToolPolicy);
     const launchContext = await this.buildLaunchContext(
       resolvedAgentId,
       client,
       storedConfig.cwd,
-      paseoToolPolicy,
+      alpToolPolicy,
       undefined,
       { reason: "import", purpose: "interactive", workspaceId: input.workspaceId },
     );
@@ -1549,9 +1540,7 @@ export class AgentManager {
     );
     let handedToRegistration = false;
     try {
-      const importedConfig = await this.normalizeConfig(
-        stripInternalPaseoMcpServer(imported.config),
-      );
+      const importedConfig = await this.normalizeConfig(stripInternalAlpMcpServer(imported.config));
       const timelineRows = buildImportedTimelineRows(imported.timeline);
       const initialTitle = resolveImportedAgentTitle(importedConfig, timelineRows);
 
@@ -1565,7 +1554,7 @@ export class AgentManager {
         historyPrimed: true,
         initialTitle,
         publishWhenReady: true,
-        paseoToolPolicy: agentPaseoToolPolicy,
+        alpToolPolicy: agentAlpToolPolicy,
       });
       for (const event of imported.providerSubagentEvents ?? []) {
         const update = this.providerSubagents.apply(agent.id, event.provider, event.event);
@@ -1584,7 +1573,7 @@ export class AgentManager {
   // config swaps). When `rehydrateFromDisk` is set, the timeline is wiped so a
   // new epoch is minted and provider history is re-streamed — this is what the
   // user-facing "Reload agent" action wants when the on-disk session was
-  // mutated outside Paseo.
+  // mutated outside Alp.
   reloadAgentSession(
     agentId: string,
     overrides?: Partial<AgentSessionConfig>,
@@ -1621,18 +1610,18 @@ export class AgentManager {
       ...overrides,
       provider,
     } as AgentSessionConfig;
-    const { storedConfig, launchConfig, paseoToolPolicy } = await this.prepareSessionConfig(
+    const { storedConfig, launchConfig, alpToolPolicy } = await this.prepareSessionConfig(
       refreshConfig,
       agentId,
-      { agentPaseoToolPolicy: existing.paseoToolPolicy },
+      { agentAlpToolPolicy: existing.alpToolPolicy },
     );
-    const hadPreviousPaseoToolPolicy = this.paseoToolPolicies.has(agentId);
-    const previousPaseoToolPolicy = this.paseoToolPolicies.get(agentId);
+    const hadPreviousAlpToolPolicy = this.alpToolPolicies.has(agentId);
+    const previousAlpToolPolicy = this.alpToolPolicies.get(agentId);
     const launchContext = await this.buildLaunchContext(
       agentId,
       client,
       storedConfig.cwd,
-      paseoToolPolicy,
+      alpToolPolicy,
       undefined,
       { reason: "refresh", purpose: "interactive", workspaceId: existing.workspaceId },
     );
@@ -1656,7 +1645,7 @@ export class AgentManager {
       await this.persistSnapshot(closedExisting);
       this.assertAcceptingAgentRegistrations();
 
-      this.paseoToolPolicies.set(agentId, paseoToolPolicy);
+      this.alpToolPolicies.set(agentId, alpToolPolicy);
       session = handle
         ? await client.resumeSession(handle, providerLaunchConfig, launchContext)
         : await client.createSession(providerLaunchConfig, launchContext);
@@ -1686,7 +1675,7 @@ export class AgentManager {
         lastError: preservedLastError,
         attention: preservedAttention,
         restoring: true,
-        paseoToolPolicy: existing.paseoToolPolicy,
+        alpToolPolicy: existing.alpToolPolicy,
       });
     } catch (error) {
       if (closedExisting) {
@@ -1699,10 +1688,10 @@ export class AgentManager {
       throw error;
     } finally {
       if (!handedToRegistration) {
-        if (hadPreviousPaseoToolPolicy) {
-          this.paseoToolPolicies.set(agentId, previousPaseoToolPolicy);
+        if (hadPreviousAlpToolPolicy) {
+          this.alpToolPolicies.set(agentId, previousAlpToolPolicy);
         } else {
-          this.paseoToolPolicies.delete(agentId);
+          this.alpToolPolicies.delete(agentId);
         }
         if (session) {
           await this.closeUnregisteredSession(session);
@@ -3551,7 +3540,7 @@ export class AgentManager {
       publishWhenReady?: boolean;
       workspaceId?: string;
       owner?: AgentOwner;
-      paseoToolPolicy?: ProviderPaseoToolsPolicy;
+      alpToolPolicy?: ProviderAlpToolsPolicy;
     },
   ): Promise<ManagedAgent> {
     let registered = false;
@@ -3708,7 +3697,7 @@ export class AgentManager {
           persistence?: AgentPersistenceHandle;
           workspaceId?: string;
           owner?: AgentOwner;
-          paseoToolPolicy?: ProviderPaseoToolsPolicy;
+          alpToolPolicy?: ProviderAlpToolsPolicy;
         }
       | undefined;
   }): ActiveManagedAgent {
@@ -3749,7 +3738,7 @@ export class AgentManager {
       attention: resolveInitialAttention(options?.attention),
       internal: config.internal ?? false,
       labels: options?.labels ?? {},
-      paseoToolPolicy: options?.paseoToolPolicy,
+      alpToolPolicy: options?.alpToolPolicy,
     } as ActiveManagedAgent;
   }
 
@@ -3803,7 +3792,7 @@ export class AgentManager {
 
   private discardRetainedAgentState(agentId: string): void {
     this.timelineStore.delete(agentId);
-    this.paseoToolPolicies.delete(agentId);
+    this.alpToolPolicies.delete(agentId);
     for (const event of this.providerSubagents.deleteParent(agentId)) {
       this.dispatch({ type: "provider_subagent", event });
     }
@@ -5222,29 +5211,27 @@ export class AgentManager {
       env?: Record<string, string>;
       purpose?: AgentResumePurpose;
       /** The agent's own policy, merged on top of the provider's current one. */
-      agentPaseoToolPolicy?: ProviderPaseoToolsPolicy;
+      agentAlpToolPolicy?: ProviderAlpToolsPolicy;
     } = {},
   ): Promise<PreparedSessionConfig> {
-    const storedConfig = await this.normalizeConfig(stripInternalPaseoMcpServer(config), {
+    const storedConfig = await this.normalizeConfig(stripInternalAlpMcpServer(config), {
       env: options.env,
       purpose: options.purpose,
     });
-    const { paseoToolPolicy, agentPaseoToolPolicy } = this.resolveSessionPaseoToolPolicy(
+    const { alpToolPolicy, agentAlpToolPolicy } = this.resolveSessionAlpToolPolicy(
       storedConfig.provider,
-      options.agentPaseoToolPolicy,
+      options.agentAlpToolPolicy,
     );
     const launchConfig = this.applyDaemonAppendSystemPrompt(
-      withRuntimePaseoMcpServer({
+      withRuntimeAlpMcpServer({
         config: storedConfig,
         agentId,
         mcpBaseUrl:
-          this.paseoToolsEnabled && isPaseoToolPolicyEnabled(paseoToolPolicy)
-            ? this.mcpBaseUrl
-            : null,
+          this.alpToolsEnabled && isAlpToolPolicyEnabled(alpToolPolicy) ? this.mcpBaseUrl : null,
         mcpAuthToken: this.mcpAuthToken,
       }),
     );
-    return { storedConfig, launchConfig, paseoToolPolicy, agentPaseoToolPolicy };
+    return { storedConfig, launchConfig, alpToolPolicy, agentAlpToolPolicy };
   }
 
   private applyDaemonAppendSystemPrompt(config: AgentSessionConfig): AgentSessionConfig {
@@ -5264,7 +5251,7 @@ export class AgentManager {
     agentId: string,
     client: AgentClient,
     cwd: string,
-    paseoToolPolicy: ProviderPaseoToolsPolicy | undefined,
+    alpToolPolicy: ProviderAlpToolsPolicy | undefined,
     env?: Record<string, string>,
     opening?: {
       reason: PluginSessionOpenRequest["reason"];
@@ -5289,19 +5276,19 @@ export class AgentManager {
       agentId,
       env: {
         ...env,
-        PASEO_AGENT_ID: agentId,
-        PASEO_AGENT_CWD: cwd,
+        ALP_AGENT_ID: agentId,
+        ALP_AGENT_CWD: cwd,
       },
     };
     if (
-      this.paseoToolsEnabled &&
-      isPaseoToolPolicyEnabled(paseoToolPolicy) &&
-      client.capabilities.supportsNativePaseoTools &&
-      this.paseoToolCatalogFactory
+      this.alpToolsEnabled &&
+      isAlpToolPolicyEnabled(alpToolPolicy) &&
+      client.capabilities.supportsNativeAlpTools &&
+      this.alpToolCatalogFactory
     ) {
-      context.paseoTools = await this.paseoToolCatalogFactory({
+      context.alpTools = await this.alpToolCatalogFactory({
         callerAgentId: agentId,
-        paseoToolPolicy,
+        alpToolPolicy,
       });
     }
     return context;
@@ -5311,7 +5298,7 @@ export class AgentManager {
     launchConfig: AgentSessionConfig,
     launchContext: AgentLaunchContext,
   ): AgentSessionConfig {
-    return launchContext.paseoTools ? stripInternalPaseoMcpServer(launchConfig) : launchConfig;
+    return launchContext.alpTools ? stripInternalAlpMcpServer(launchConfig) : launchConfig;
   }
 
   private async requireAvailableClient(options: { provider: AgentProvider }): Promise<AgentClient> {

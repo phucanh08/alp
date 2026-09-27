@@ -138,7 +138,7 @@ async function gateSecondToolCall(page: Page, agentId: string) {
 async function readShimmerEvidence(locator: Locator): Promise<ShimmerEvidence> {
   return locator.evaluate((root) => {
     const shimmer = Array.from(root.querySelectorAll<HTMLElement>("*")).find((element) =>
-      getComputedStyle(element).animationName.includes("paseo-toolcall-shimmer"),
+      getComputedStyle(element).animationName.includes("alp-toolcall-shimmer"),
     );
     if (!shimmer) {
       throw new Error("Expected a running shimmer inside the badge");
@@ -146,10 +146,10 @@ async function readShimmerEvidence(locator: Locator): Promise<ShimmerEvidence> {
     const style = getComputedStyle(shimmer);
     return {
       animationDuration: style.animationDuration,
-      endPx: Number.parseFloat(style.getPropertyValue("--paseo-shimmer-end")),
+      endPx: Number.parseFloat(style.getPropertyValue("--alp-shimmer-end")),
       label: shimmer.textContent ?? "",
       renderedWidth: shimmer.getBoundingClientRect().width,
-      startPx: Number.parseFloat(style.getPropertyValue("--paseo-shimmer-start")),
+      startPx: Number.parseFloat(style.getPropertyValue("--alp-shimmer-start")),
     };
   });
 }
@@ -159,10 +159,7 @@ test("measures an overview heading that becomes loading after its idle mount", a
 }, testInfo) => {
   test.setTimeout(120_000);
   await page.addInitScript(() => {
-    localStorage.setItem(
-      "@paseo:app-settings",
-      JSON.stringify({ toolCallDetailLevel: "overview" }),
-    );
+    localStorage.setItem("@alp:app-settings", JSON.stringify({ toolCallDetailLevel: "overview" }));
   });
   const agent = await seedMockAgentWorkspace({
     repoPrefix: "tool-call-shimmer-",
@@ -186,11 +183,11 @@ test("measures an overview heading that becomes loading after its idle mount", a
     if (!idleGroupHandle) {
       throw new Error("Expected the idle tool-call group to be mounted");
     }
-    await expect(group.locator('[style*="paseo-toolcall-shimmer"]')).toHaveCount(0);
+    await expect(group.locator('[style*="alp-toolcall-shimmer"]')).toHaveCount(0);
 
     await gate.waitForSecondRunning();
     gate.releaseSecondRunning();
-    await expect(group.locator('[style*="paseo-toolcall-shimmer"]')).not.toHaveCount(0);
+    await expect(group.locator('[style*="alp-toolcall-shimmer"]')).not.toHaveCount(0);
     const sameGroupNode = await group.evaluate(
       (node, previous) => node === previous,
       idleGroupHandle,

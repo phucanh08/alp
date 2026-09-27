@@ -7,7 +7,7 @@ Agent Device `.ad` scripts are the primary mobile E2E format. An agent discovers
 Record a flow while driving the app normally:
 
 ```bash
-agent-device open sh.paseo.debug \
+agent-device open com.anhlp.alp.debug \
   --platform ios \
   --session terminal-author \
   --save-script ./packages/app/e2e/mobile/agent-device/terminal.ios.ad
@@ -27,10 +27,10 @@ npm run test:e2e:mobile
 
 The runner uses an isolated Agent Device state directory, verifies or starts Metro for this checkout, prewarms the iOS runner, discovers each script's platform from its `context` header, and cleans its sessions, runner lease, daemon, and any Metro process it started. Attempt results, timings, logs, and failure artifacts go under `.dev/agent-device-artifacts`.
 
-Set `PASEO_MOBILE_E2E_METRO_PORT` when this worktree already has Metro on a non-default port:
+Set `ALP_MOBILE_E2E_METRO_PORT` when this worktree already has Metro on a non-default port:
 
 ```bash
-PASEO_MOBILE_E2E_METRO_PORT=62093 npm run test:e2e:mobile
+ALP_MOBILE_E2E_METRO_PORT=62093 npm run test:e2e:mobile
 ```
 
 [native-terminal-basic.ios.ad](../packages/app/e2e/mobile/agent-device/native-terminal-basic.ios.ad) and [native-terminal-basic.android.ad](../packages/app/e2e/mobile/agent-device/native-terminal-basic.android.ad) are the smallest examples. Each opens a fresh terminal, types a command at zero delay, submits it, and asserts its distinct output. The app must be connected to a daemon with an active workspace.
@@ -44,7 +44,7 @@ ANDROID_SERIAL=emulator-5554 node packages/app/e2e/mobile/terminal-keyboard/andr
 
 Use a real docked software keyboard. The harness taps Ctrl, Esc, and Enter and checks Android's
 focused input identity and IME hide/show events. It saves screenshots and logs under
-`.dev/agent-device-artifacts/terminal-keyboard-android`. Set `PASEO_TERMINAL_KEYBOARD_APP_ID=sh.paseo`
+`.dev/agent-device-artifacts/terminal-keyboard-android`. Set `ALP_TERMINAL_KEYBOARD_APP_ID=com.anhlp.alp`
 to test an installed production build. It never submits a chat message.
 
 `npm run test:e2e:composer-keyboard:android` preserves the chat control and
@@ -60,7 +60,7 @@ fade. The image comparison excludes the scrollbar; keyboard dismissal alone
 does not prove that native scrolling receives touches.
 Artifacts are grouped by host under
 `.dev/agent-device-artifacts/composer-keyboard-android`. Configure its daemon,
-Metro, and device through the `PASEO_COMPOSER_KEYBOARD_*` variables in
+Metro, and device through the `ALP_COMPOSER_KEYBOARD_*` variables in
 `packages/app/e2e/mobile/composer-keyboard/android.sh`. Use a software keyboard;
 the headless input helper cannot verify the
 [visible composer constraints](floating-panels.md#gotcha-3--keyboard-layout-and-portal-anchors).
@@ -180,7 +180,7 @@ Two reusable flows handle Expo dev client screens after launch:
 `flows/land-in-chat.yaml` is the canonical "get into a chat" primitive. It `clearState`s, runs `launch.yaml`, taps the welcome screen's direct-connection option, types `127.0.0.1:6767`, submits, and waits for `message-input-root`. Compose any composer-level fixture on top of it:
 
 ```yaml
-appId: sh.paseo
+appId: com.anhlp.alp
 ---
 - runFlow: flows/land-in-chat.yaml
 # ...your scenario here, starting from a ready composer
@@ -215,7 +215,7 @@ New workspace scenarios should compose the reusable subflows in `packages/app/ma
 - `new-workspace-select-codex-gpt54.yaml`
 - `new-workspace-submit-and-assert-created.yaml`
 
-The workspace-create shell scripts render those subflows into a temp directory before running Maestro, which keeps nested `runFlow` paths and `${PASEO_MAESTRO_*}` placeholders working together.
+The workspace-create shell scripts render those subflows into a temp directory before running Maestro, which keeps nested `runFlow` paths and `${ALP_MAESTRO_*}` placeholders working together.
 
 ### Inputs that Maestro types into
 
@@ -283,7 +283,7 @@ done
 Voice mode uses the custom `expo-two-way-audio` Android module, so incoming calls and other system audio owners must be tested with emulator/system commands, not a JS-only test. To verify that voice resume handles denied audio focus without crashing:
 
 ```bash
-adb shell am start -n sh.paseo/.MainActivity
+adb shell am start -n com.anhlp.alp/.MainActivity
 # Start voice mode in an existing composer, then background alp with Home.
 adb emu gsm call 5551234
 # Foreground alp while the call is still ringing.
@@ -405,8 +405,8 @@ APP_VARIANT=development npx expo run:ios --device
 ```
 
 `APP_VARIANT=development` is required. The `ios` npm script does not set it, and `app.config.js` defaults
-to `production` — so a bare `npm run ios` builds `sh.paseo` and collides with the App Store install instead
-of the `sh.paseo.debug` dev client. Ignore prebuild's `--non-interactive is not supported` warning; use
+to `production` — so a bare `npm run ios` builds `com.anhlp.alp` and collides with the App Store install instead
+of the `com.anhlp.alp.debug` dev client. Ignore prebuild's `--non-interactive is not supported` warning; use
 `CI=1` if you need non-interactive.
 
 ### Xcode 27 builds need the UIScene life cycle
@@ -486,7 +486,7 @@ To verify only that native Swift compiles, skip signing entirely — the pods ha
 
 ```bash
 cd packages/app/ios
-xcodebuild -workspace PaseoDebug.xcworkspace -scheme ExpoTwoWayAudio \
+xcodebuild -workspace AlpDebug.xcworkspace -scheme ExpoTwoWayAudio \
   -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
 ```
 
@@ -513,4 +513,4 @@ xcrun simctl ui booted appearance dark     # set dark
 xcrun simctl ui booted appearance light    # set light
 ```
 
-Expo dev server logs are in the tmux pane running `npm run dev`. Daemon logs are at `$PASEO_HOME/daemon.log` (see [development.md](development.md)).
+Expo dev server logs are in the tmux pane running `npm run dev`. Daemon logs are at `$ALP_HOME/daemon.log` (see [development.md](development.md)).

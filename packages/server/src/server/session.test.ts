@@ -13,15 +13,15 @@ import {
   assertPullRequestAutoMergeDisableReady,
   assertPullRequestAutoMergeEnableReady,
 } from "../services/github-service.js";
-import { PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
-import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
-import type { WorkspaceDescriptorPayload } from "@getpaseo/protocol/messages";
+import { PARENT_AGENT_ID_LABEL } from "@alp/protocol/agent-labels";
+import { CLIENT_CAPS } from "@alp/protocol/client-capabilities";
+import type { WorkspaceDescriptorPayload } from "@alp/protocol/messages";
 import {
   decodeFileTransferFrame,
   encodeFileTransferFrame,
   FileTransferOpcode,
   type FileTransferFrame,
-} from "@getpaseo/protocol/binary-frames/index";
+} from "@alp/protocol/binary-frames/index";
 import { Session } from "./session.js";
 import { OWNER_PERMISSIONS, type DaemonPermission } from "./authorization/index.js";
 import { DownloadTokenStore } from "./file-download/token-store.js";
@@ -88,7 +88,7 @@ interface SessionHandlerInternals {
   handleStashListRequest(params: unknown): Promise<unknown>;
   handleStashSaveRequest(params: unknown): Promise<unknown>;
   handleStashPopRequest(params: unknown): Promise<unknown>;
-  createPaseoWorktree(params: unknown): Promise<unknown>;
+  createAlpWorktree(params: unknown): Promise<unknown>;
   handleStartWorkspaceScriptRequest(params: unknown): Promise<unknown>;
 }
 
@@ -214,8 +214,8 @@ const gitCommandMocks = vi.hoisted(() => ({
   runGitCommand: vi.fn(),
 }));
 
-const paseoWorktreeServiceMocks = vi.hoisted(() => ({
-  createPaseoWorktree: vi.fn(),
+const alpWorktreeServiceMocks = vi.hoisted(() => ({
+  createAlpWorktree: vi.fn(),
 }));
 
 interface Deferred<T> {
@@ -254,11 +254,11 @@ vi.mock("../utils/checkout-git.js", async (importOriginal) => {
   };
 });
 
-vi.mock("./paseo-worktree-service.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./paseo-worktree-service.js")>();
+vi.mock("./alp-worktree-service.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./alp-worktree-service.js")>();
   return {
     ...actual,
-    createPaseoWorktree: paseoWorktreeServiceMocks.createPaseoWorktree,
+    createAlpWorktree: alpWorktreeServiceMocks.createAlpWorktree,
   };
 });
 
@@ -320,7 +320,7 @@ interface SessionForTestOptions {
   hubExecutionAgents?: SessionOptions["hubExecutionAgents"];
   stt?: SessionOptions["stt"];
   voice?: SessionOptions["voice"];
-  paseoHome?: string;
+  alpHome?: string;
   serverId?: SessionOptions["serverId"];
   daemonVersion?: SessionOptions["daemonVersion"];
   daemonRuntimeConfig?: SessionOptions["daemonRuntimeConfig"];
@@ -384,7 +384,7 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
     logger,
     downloadTokenStore: options.downloadTokenStore ?? asDownloadTokenStore(),
     pushNotifications: options.pushNotifications ?? asPushNotifications(),
-    paseoHome: options.paseoHome ?? "/tmp/paseo-home",
+    alpHome: options.alpHome ?? "/tmp/alp-home",
     agentManager: asAgentManager({
       listAgents: vi.fn(() => []),
       listProviderSubagentActivity: vi.fn(() => []),
@@ -449,8 +449,8 @@ test("routes host-scoped agent skills requests through the daemon owner", async 
   const status = {
     state: "up-to-date" as const,
     ops: [],
-    available: ["paseo"],
-    installed: ["paseo"],
+    available: ["alp"],
+    installed: ["alp"],
     selection: { mode: "all" as const },
   };
   const orchestrationSkills: NonNullable<SessionOptions["orchestrationSkills"]> = {
@@ -469,13 +469,13 @@ test("routes host-scoped agent skills requests through the daemon owner", async 
   await session.handleMessage({
     type: "agent.skills.save_selection.request",
     requestId: "save-skills",
-    selection: { mode: "custom", skills: ["paseo"] },
-    confirmedRemovals: ["paseo-loop"],
+    selection: { mode: "custom", skills: ["alp"] },
+    confirmedRemovals: ["alp-loop"],
   });
 
   expect(orchestrationSkills.saveSelection).toHaveBeenCalledWith(
-    { mode: "custom", skills: ["paseo"] },
-    ["paseo-loop"],
+    { mode: "custom", skills: ["alp"] },
+    ["alp-loop"],
   );
   expect(messages).toContainEqual({
     type: "agent.skills.save_selection.response",
@@ -845,9 +845,9 @@ describe("project command-center RPCs", () => {
     const messages: SessionOutboundMessage[] = [];
     const searchRepositories = vi.fn().mockResolvedValue([
       {
-        id: "R_paseo",
-        name: "paseo",
-        nameWithOwner: "getpaseo/paseo",
+        id: "R_alp",
+        name: "alp",
+        nameWithOwner: "alp/alp",
         description: "Development environment in your pocket",
         visibility: "public",
         updatedAt: "2026-07-15T10:00:00Z",
@@ -858,14 +858,14 @@ describe("project command-center RPCs", () => {
 
     await session.handleMessage({
       type: "workspace.github.search_repositories.request",
-      query: "paseo",
+      query: "alp",
       limit: 10,
       requestId: "req-repositories",
     });
 
     expect(searchRepositories).toHaveBeenCalledWith({
       cwd: expect.any(String),
-      query: "paseo",
+      query: "alp",
       limit: 10,
     });
     expect(messages).toEqual([
@@ -876,9 +876,9 @@ describe("project command-center RPCs", () => {
           requestId: "req-repositories",
           repositories: [
             {
-              id: "R_paseo",
-              name: "paseo",
-              nameWithOwner: "getpaseo/paseo",
+              id: "R_alp",
+              name: "alp",
+              nameWithOwner: "alp/alp",
               description: "Development environment in your pocket",
               visibility: "public",
               updatedAt: "2026-07-15T10:00:00Z",
@@ -916,7 +916,7 @@ describe("project command-center RPCs", () => {
     },
     {
       error: new GitHubCommandError({
-        args: ["search", "repos", "paseo"],
+        args: ["search", "repos", "alp"],
         cwd: "/tmp",
         exitCode: 1,
         stderr: "GitHub API unavailable",
@@ -938,7 +938,7 @@ describe("project command-center RPCs", () => {
 
     await session.handleMessage({
       type: "workspace.github.search_repositories.request",
-      query: "paseo",
+      query: "alp",
       requestId: "req-repositories-error",
     });
 
@@ -951,7 +951,7 @@ describe("project command-center RPCs", () => {
   });
 
   test("creates a directory and returns its normalized Project descriptor", async () => {
-    const parentDirectory = realpathSync(mkdtempSync(join(tmpdir(), "paseo-project-session-")));
+    const parentDirectory = realpathSync(mkdtempSync(join(tmpdir(), "alp-project-session-")));
     const directoryPath = join(parentDirectory, "new-project");
     const messages: SessionOutboundMessage[] = [];
     const projectAllocation = vi.fn(async (input) =>
@@ -976,7 +976,7 @@ describe("project command-center RPCs", () => {
           currentBranch: null,
           remoteUrl: null,
           worktreeRoot: null,
-          isPaseoOwnedWorktree: false as const,
+          isAlpOwnedWorktree: false as const,
           mainRepoRoot: null,
         })),
       },
@@ -1029,7 +1029,7 @@ describe("project command-center RPCs", () => {
   });
 
   test("rolls back the directory when Project registration fails", async () => {
-    const parentDirectory = realpathSync(mkdtempSync(join(tmpdir(), "paseo-project-session-")));
+    const parentDirectory = realpathSync(mkdtempSync(join(tmpdir(), "alp-project-session-")));
     const directoryPath = join(parentDirectory, "unregistered");
     const messages: SessionOutboundMessage[] = [];
     const session = createSessionForTest({
@@ -1044,7 +1044,7 @@ describe("project command-center RPCs", () => {
           currentBranch: null,
           remoteUrl: null,
           worktreeRoot: null,
-          isPaseoOwnedWorktree: false as const,
+          isAlpOwnedWorktree: false as const,
           mainRepoRoot: null,
         })),
       },
@@ -1317,9 +1317,9 @@ describe("workspace file access (behavior preservation)", () => {
   });
 
   test("file upload round-trips bytes through binary frames", async () => {
-    const paseoHome = makeDir("file-access-upload-");
+    const alpHome = makeDir("file-access-upload-");
     const messages: SessionOutboundMessage[] = [];
-    const session = createSessionForTest({ messages, paseoHome });
+    const session = createSessionForTest({ messages, alpHome });
 
     const source = {};
     await session.handleMessage(
@@ -1642,7 +1642,7 @@ describe("project config RPC authorization", () => {
 
   test("read_project_config_request accepts the same root with a trailing slash", async () => {
     const repoRoot = makeRoot();
-    writeFileSync(join(repoRoot, "paseo.json"), JSON.stringify({ worktree: { setup: "npm ci" } }));
+    writeFileSync(join(repoRoot, "alp.json"), JSON.stringify({ worktree: { setup: "npm ci" } }));
     const messages: unknown[] = [];
     const session = createSessionForTest({
       messages,
@@ -1677,10 +1677,7 @@ describe("project config RPC authorization", () => {
     "read_project_config_request accepts a symlink to an active project root",
     async () => {
       const repoRoot = makeRoot();
-      writeFileSync(
-        join(repoRoot, "paseo.json"),
-        JSON.stringify({ worktree: { setup: "npm ci" } }),
-      );
+      writeFileSync(join(repoRoot, "alp.json"), JSON.stringify({ worktree: { setup: "npm ci" } }));
       const linkRoot = join(makeRoot(), "link");
       symlinkSync(repoRoot, linkRoot, "dir");
       const messages: unknown[] = [];
@@ -1762,7 +1759,7 @@ describe("project config RPC authorization", () => {
   test("read_project_config_request emits raw lifecycle forms for a known project root", async () => {
     const repoRoot = makeRoot();
     writeFileSync(
-      join(repoRoot, "paseo.json"),
+      join(repoRoot, "alp.json"),
       JSON.stringify({ worktree: { setup: "npm install", teardown: ["npm run clean"] } }),
     );
     const messages: unknown[] = [];
@@ -1796,7 +1793,7 @@ describe("project config RPC authorization", () => {
 
   test("write_project_config_request emits stale and write-failed inline domain failures", async () => {
     const staleRoot = makeRoot();
-    writeFileSync(join(staleRoot, "paseo.json"), JSON.stringify({ worktree: { setup: "old" } }));
+    writeFileSync(join(staleRoot, "alp.json"), JSON.stringify({ worktree: { setup: "old" } }));
     const writeFailedRoot = join(makeRoot(), "not-a-directory");
     writeFileSync(writeFailedRoot, "file");
     const messages: unknown[] = [];
@@ -1957,7 +1954,7 @@ describe("daemon status + pairing RPC", () => {
     const messages: unknown[] = [];
     const session = createSessionForTest({
       messages,
-      paseoHome: makeHome(),
+      alpHome: makeHome(),
       serverId: "srv-test",
       daemonVersion: "9.9.9",
       daemonRuntimeConfig: { listen: "127.0.0.1:6767", getRelayConfig: () => null },
@@ -1996,7 +1993,7 @@ describe("daemon status + pairing RPC", () => {
     const messages: unknown[] = [];
     const session = createSessionForTest({
       messages,
-      paseoHome: makeHome(),
+      alpHome: makeHome(),
       serverId: "srv-test",
       daemonVersion: "9.9.9",
       daemonRuntimeConfig: { listen: "127.0.0.1:6767", getRelayConfig: () => null },
@@ -2032,7 +2029,7 @@ describe("daemon status + pairing RPC", () => {
     const messages: unknown[] = [];
     const session = createSessionForTest({
       messages,
-      paseoHome: makeHome(),
+      alpHome: makeHome(),
       daemonRuntimeConfig: {
         listen: "127.0.0.1:6767",
         getRelayConfig: () => ({
@@ -2079,7 +2076,7 @@ function createWorkspaceGitSnapshot(
       mainRepoRoot: null,
       currentBranch: "feature/service",
       remoteUrl: "https://github.com/getpaseo/paseo.git",
-      isPaseoOwnedWorktree: false,
+      isAlpOwnedWorktree: false,
       isDirty: true,
       baseRef: "main",
       aheadBehind: { ahead: 2, behind: 1 },
@@ -2378,7 +2375,7 @@ describe("session checkout merge handling", () => {
         baseRef: "main",
         mode: "merge",
       },
-      { paseoHome: "/tmp/paseo-home" },
+      { alpHome: "/tmp/alp-home" },
     );
     expect(workspaceGitService.getSnapshot).toHaveBeenCalledWith("/tmp/base-worktree", {
       force: true,
@@ -2463,7 +2460,7 @@ describe("session checkout merge handling", () => {
         baseRef: "main",
         requireCleanTarget: true,
       },
-      { paseoHome: "/tmp/paseo-home", worktreesRoot: undefined },
+      { alpHome: "/tmp/alp-home", worktreesRoot: undefined },
     );
     expect(workspaceGitService.getSnapshot).toHaveBeenCalledWith("/tmp/request-worktree", {
       force: true,
@@ -2510,13 +2507,13 @@ diff --git a/file.txt b/file.txt
   }
 
   function writeConfig(repoRoot: string, config: unknown): void {
-    writeFileSync(join(repoRoot, "paseo.json"), `${JSON.stringify(config)}\n`);
+    writeFileSync(join(repoRoot, "alp.json"), `${JSON.stringify(config)}\n`);
   }
 
   async function generateCommitPromptWithConfig(config: unknown): Promise<string> {
     const repoRoot = makeRoot();
     if (typeof config === "string") {
-      writeFileSync(join(repoRoot, "paseo.json"), config);
+      writeFileSync(join(repoRoot, "alp.json"), config);
     } else if (config !== undefined) {
       writeConfig(repoRoot, config);
     }
@@ -2658,9 +2655,9 @@ diff --git a/file.txt b/file.txt
   });
 
   test.each([
-    ["paseo.json missing", undefined],
-    ["paseo.json exists but invalid JSON", "{ nope"],
-    ["paseo.json valid but missing metadataGeneration", {}],
+    ["alp.json missing", undefined],
+    ["alp.json exists but invalid JSON", "{ nope"],
+    ["alp.json valid but missing metadataGeneration", {}],
     ["metadataGeneration is schema-invalid", { metadataGeneration: "not an object" }],
     [
       "metadataGeneration exists but missing commitMessage",
@@ -2806,13 +2803,13 @@ diff --git a/file.txt b/file.txt
   }
 
   function writeConfig(repoRoot: string, config: unknown): void {
-    writeFileSync(join(repoRoot, "paseo.json"), `${JSON.stringify(config)}\n`);
+    writeFileSync(join(repoRoot, "alp.json"), `${JSON.stringify(config)}\n`);
   }
 
   async function generatePullRequestCallWithConfig(config: unknown): Promise<unknown> {
     const repoRoot = makeRoot();
     if (typeof config === "string") {
-      writeFileSync(join(repoRoot, "paseo.json"), config);
+      writeFileSync(join(repoRoot, "alp.json"), config);
     } else if (config !== undefined) {
       writeConfig(repoRoot, config);
     }
@@ -2921,7 +2918,7 @@ diff --git a/file.txt b/file.txt
         base: "main",
       },
       expect.anything(),
-      { paseoHome: "/tmp/paseo-home", worktreesRoot: undefined },
+      { alpHome: "/tmp/alp-home", worktreesRoot: undefined },
     );
     expect(messages).toContainEqual({
       type: "checkout_pr_create_response",
@@ -2936,9 +2933,9 @@ diff --git a/file.txt b/file.txt
   });
 
   test.each([
-    ["paseo.json missing", undefined],
-    ["paseo.json exists but invalid JSON", "{ nope"],
-    ["paseo.json valid but missing metadataGeneration", {}],
+    ["alp.json missing", undefined],
+    ["alp.json exists but invalid JSON", "{ nope"],
+    ["alp.json valid but missing metadataGeneration", {}],
     ["metadataGeneration is schema-invalid", { metadataGeneration: "not an object" }],
     [
       "metadataGeneration exists but missing pullRequest",
@@ -3046,7 +3043,7 @@ diff --git a/file.txt b/file.txt
         base: "main",
       },
       expect.anything(),
-      { paseoHome: "/tmp/paseo-home", worktreesRoot: undefined },
+      { alpHome: "/tmp/alp-home", worktreesRoot: undefined },
     );
     expect(messages).toContainEqual({
       type: "checkout_pr_create_response",
@@ -3923,7 +3920,7 @@ describe("session checkout status handling", () => {
         upstreamRef: null,
         hasRemote: true,
         remoteUrl: "https://github.com/getpaseo/paseo.git",
-        isPaseoOwnedWorktree: false,
+        isAlpOwnedWorktree: false,
         error: null,
         requestId: "request-status",
       },
@@ -4007,7 +4004,7 @@ describe("session workspace descriptors", () => {
             git: {
               remoteUrl: "https://github.com/acme/app.git",
               currentBranch: "main",
-              isPaseoOwnedWorktree: false,
+              isAlpOwnedWorktree: false,
               mainRepoRoot: null,
             },
           }),
@@ -4039,7 +4036,7 @@ describe("session workspace descriptors", () => {
                 currentBranch: "app",
                 remoteUrl: null,
                 worktreeRoot: "/repo/app",
-                isPaseoOwnedWorktree: false,
+                isAlpOwnedWorktree: false,
                 mainRepoRoot: null,
               }),
             }),
@@ -4080,7 +4077,7 @@ describe("session workspace descriptors", () => {
             git: {
               remoteUrl: null,
               currentBranch: "main",
-              isPaseoOwnedWorktree: false,
+              isAlpOwnedWorktree: false,
               mainRepoRoot: null,
             },
           }),
@@ -4111,7 +4108,7 @@ describe("session workspace descriptors", () => {
                 currentBranch: "local",
                 remoteUrl: null,
                 worktreeRoot: "/repo/local",
-                isPaseoOwnedWorktree: false,
+                isAlpOwnedWorktree: false,
                 mainRepoRoot: null,
               }),
             }),
@@ -4224,7 +4221,7 @@ describe("session branch validation", () => {
   });
 
   test("does not validate tags as branches", async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "paseo-session-branch-validation-"));
+    const tempDir = mkdtempSync(join(tmpdir(), "alp-session-branch-validation-"));
     const repoDir = join(tempDir, "repo");
 
     try {
@@ -4561,9 +4558,9 @@ describe("session stash list handling", () => {
     const entries = [
       {
         index: 0,
-        message: "paseo-auto-stash: feature",
+        message: "alp-auto-stash: feature",
         branch: "feature",
-        isPaseo: true,
+        isAlp: true,
       },
     ];
     const workspaceGitService = {
@@ -4576,13 +4573,13 @@ describe("session stash list handling", () => {
     await session.handleMessage({
       type: "stash_list_request",
       cwd: "/tmp/repo",
-      paseoOnly: true,
+      alpOnly: true,
       requestId: "request-stashes",
     });
 
     expect(workspaceGitService.listStashes).toHaveBeenCalledTimes(1);
     expect(workspaceGitService.listStashes).toHaveBeenCalledWith("/tmp/repo", {
-      paseoOnly: true,
+      alpOnly: true,
     });
     expect(messages).toContainEqual({
       type: "stash_list_response",
@@ -4612,7 +4609,7 @@ describe("session stash mutation handling", () => {
     });
 
     expect(gitCommandMocks.runGitCommand).toHaveBeenCalledWith(
-      ["stash", "push", "--include-untracked", "-m", "paseo-auto-stash: feature"],
+      ["stash", "push", "--include-untracked", "-m", "alp-auto-stash: feature"],
       { cwd: "/tmp/repo", timeout: 120_000 },
     );
     expect(workspaceGitService.getSnapshot).toHaveBeenCalledWith("/tmp/repo", {
@@ -4669,27 +4666,27 @@ describe("session stash mutation handling", () => {
   });
 });
 
-describe("session paseo worktree creation handling", () => {
+describe("session alp worktree creation handling", () => {
   test("forces workspace git refreshes for the source repo and created worktree", async () => {
     const workspaceGitService = { getSnapshot: vi.fn().mockResolvedValue({}) };
     const session = createSessionForTest({ workspaceGitService });
-    paseoWorktreeServiceMocks.createPaseoWorktree.mockResolvedValue({
+    alpWorktreeServiceMocks.createAlpWorktree.mockResolvedValue({
       repoRoot: "/tmp/repo",
       worktree: {
         branchName: "feature/new-worktree",
-        worktreePath: "/tmp/paseo/worktrees/new-worktree",
+        worktreePath: "/tmp/alp/worktrees/new-worktree",
       },
       workspace: {
         workspaceId: "workspace-new-worktree",
         projectId: "project-repo",
-        cwd: "/tmp/paseo/worktrees/new-worktree",
+        cwd: "/tmp/alp/worktrees/new-worktree",
         kind: "worktree",
         displayName: "feature/new-worktree",
       },
       created: true,
     });
 
-    await asSessionInternals(session).createPaseoWorktree({
+    await asSessionInternals(session).createAlpWorktree({
       cwd: "/tmp/repo",
       worktreeSlug: "new-worktree",
       runSetup: false,
@@ -4700,7 +4697,7 @@ describe("session paseo worktree creation handling", () => {
       reason: "create-worktree",
     });
     expect(workspaceGitService.getSnapshot).toHaveBeenCalledWith(
-      "/tmp/paseo/worktrees/new-worktree",
+      "/tmp/alp/worktrees/new-worktree",
       {
         force: true,
         reason: "create-worktree",
@@ -4720,7 +4717,7 @@ describe("session workspace script handling", () => {
     });
     const workspaceGitService = {
       peekSnapshot: vi.fn(() => snapshot),
-      getProjectSlug: vi.fn().mockResolvedValue("paseo"),
+      getProjectSlug: vi.fn().mockResolvedValue("alp"),
     };
     const workspaceRegistry = {
       get: vi.fn().mockResolvedValue({
@@ -4757,7 +4754,7 @@ describe("session workspace script handling", () => {
       expect.objectContaining({
         repoRoot: "/tmp/repo",
         workspaceId: "workspace-1",
-        projectSlug: "paseo",
+        projectSlug: "alp",
         branchName: "feature/service-scripts",
         scriptName: "api",
         daemonPort: 6767,
@@ -4895,8 +4892,8 @@ describe("session pull request timeline handling", () => {
       isAuthenticated: vi.fn().mockResolvedValue(true),
       getPullRequestTimeline: vi.fn().mockResolvedValue({
         prNumber: 42,
-        repoOwner: "getpaseo",
-        repoName: "paseo",
+        repoOwner: "alp",
+        repoName: "alp",
         items: [
           {
             id: "review-1",
@@ -4920,16 +4917,16 @@ describe("session pull request timeline handling", () => {
       type: "pull_request_timeline_request",
       cwd: "/tmp/repo",
       prNumber: 42,
-      repoOwner: "getpaseo",
-      repoName: "paseo",
+      repoOwner: "alp",
+      repoName: "alp",
       requestId: "request-1",
     });
 
     expect(github.getPullRequestTimeline).toHaveBeenCalledWith({
       cwd: "/tmp/repo",
       prNumber: 42,
-      repoOwner: "getpaseo",
-      repoName: "paseo",
+      repoOwner: "alp",
+      repoName: "alp",
     });
     expect(messages).toContainEqual({
       type: "pull_request_timeline_response",
@@ -4958,14 +4955,14 @@ describe("session pull request timeline handling", () => {
   });
 
   test.each([
-    { prNumber: 0, repoOwner: "getpaseo", repoName: "paseo" },
-    { prNumber: -1, repoOwner: "getpaseo", repoName: "paseo" },
-    { prNumber: 42, repoOwner: "get paseo", repoName: "paseo" },
-    { prNumber: 42, repoOwner: "getpaseo/cli", repoName: "paseo" },
-    { prNumber: 42, repoOwner: "get$paseo", repoName: "paseo" },
-    { prNumber: 42, repoOwner: "getpaseo", repoName: "pa seo" },
-    { prNumber: 42, repoOwner: "getpaseo", repoName: "paseo/app" },
-    { prNumber: 42, repoOwner: "getpaseo", repoName: "paseo!" },
+    { prNumber: 0, repoOwner: "alp", repoName: "alp" },
+    { prNumber: -1, repoOwner: "alp", repoName: "alp" },
+    { prNumber: 42, repoOwner: "get alp", repoName: "alp" },
+    { prNumber: 42, repoOwner: "alp/cli", repoName: "alp" },
+    { prNumber: 42, repoOwner: "get$alp", repoName: "alp" },
+    { prNumber: 42, repoOwner: "alp", repoName: "pa seo" },
+    { prNumber: 42, repoOwner: "alp", repoName: "alp/app" },
+    { prNumber: 42, repoOwner: "alp", repoName: "alp!" },
   ])("returns an unknown error when request identity is invalid: %j", async (identity) => {
     const messages: unknown[] = [];
     const github = {
@@ -5014,8 +5011,8 @@ describe("session pull request timeline handling", () => {
       type: "pull_request_timeline_request",
       cwd: "/tmp/repo",
       prNumber: 42,
-      repoOwner: "getpaseo",
-      repoName: "paseo",
+      repoOwner: "alp",
+      repoName: "alp",
       requestId: "request-3",
     });
 
@@ -5080,8 +5077,8 @@ describe("session pull request timeline handling", () => {
     await session.handleMessage({
       type: "checkout.forge.get_check_details.request",
       cwd: "/tmp/repo",
-      repoOwner: "getpaseo",
-      repoName: "paseo",
+      repoOwner: "alp",
+      repoName: "alp",
       checkRunId: 12345,
       workflowRunId: 456,
       requestId: "request-check-details",
@@ -5090,8 +5087,8 @@ describe("session pull request timeline handling", () => {
     expect(checkDetailRequests).toEqual([
       {
         cwd: "/tmp/repo",
-        repoOwner: "getpaseo",
-        repoName: "paseo",
+        repoOwner: "alp",
+        repoName: "alp",
         checkRunId: 12345,
         workflowRunId: 456,
       },

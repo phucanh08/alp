@@ -21,7 +21,7 @@ describe("buildGitHubAttachmentFromSearchItem", () => {
 
     expect(attachment).toEqual({
       type: "forge_change_request",
-      mimeType: "application/paseo-forge-change-request",
+      mimeType: "application/alp-forge-change-request",
       forge: "github",
       number: 123,
       title: "Fix race in worktree setup",
@@ -45,7 +45,7 @@ describe("buildGitHubAttachmentFromSearchItem", () => {
 
     expect(attachment).toEqual({
       type: "forge_issue",
-      mimeType: "application/paseo-forge-issue",
+      mimeType: "application/alp-forge-issue",
       forge: "github",
       number: 55,
       title: "Improve startup error details",

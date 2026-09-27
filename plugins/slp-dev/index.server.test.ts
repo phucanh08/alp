@@ -1,5 +1,5 @@
-import type { PluginRpcContract } from "@getpaseo/plugin";
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginRpcContract } from "@alp/plugin";
+import type { PluginServerContext } from "@alp/plugin/server";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,7 +10,7 @@ import { slpDevSeatGet, slpDevSkillsGet } from "./shared/rpc";
 
 const pluginDirectory = path.dirname(fileURLToPath(import.meta.url));
 
-type RpcHandler = (input: unknown, context: { paseo: unknown }) => unknown;
+type RpcHandler = (input: unknown, context: { alp: unknown }) => unknown;
 
 /**
  * Registers the plugin against a fake `PluginServerContext` and calls one of its RPCs the way the
@@ -31,7 +31,7 @@ function invoke<Contract extends typeof slpDevSeatGet | typeof slpDevSkillsGet>(
   if (!handler) throw new Error(`${contract.name} is not registered`);
   return contract.input
     .parseAsync(input)
-    .then((parsed) => handler(parsed, { paseo: {} }))
+    .then((parsed) => handler(parsed, { alp: {} }))
     .then((output) => contract.output.parseAsync(output) as Promise<z.output<Contract["output"]>>);
 }
 

@@ -6,7 +6,7 @@ import type {
   CommandError,
   AnyCommandResult,
 } from "../../output/index.js";
-import type { AgentMode } from "@getpaseo/protocol/agent-types";
+import type { AgentMode } from "@alp/protocol/agent-types";
 
 /** Result for setting mode */
 export interface SetModeResult {

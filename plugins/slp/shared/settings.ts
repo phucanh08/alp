@@ -1,4 +1,4 @@
-import { defineSettings } from "@getpaseo/plugin";
+import { defineSettings } from "@alp/plugin";
 import { z } from "zod";
 
 /**

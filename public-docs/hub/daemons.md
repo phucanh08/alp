@@ -18,7 +18,7 @@ Log in from the machine first:
 alp hub login https://hub.example.com
 ```
 
-The CLI prints a URL and a verification code and opens your browser. The approved login is stored under `PASEO_HOME`.
+The CLI prints a URL and a verification code and opens your browser. The approved login is stored under `ALP_HOME`.
 
 In an interactive terminal, login offers to connect this daemon and separately asks whether to allow Hub automations to run agents. Connection defaults to yes; execution permission defaults to no. It then links to **Triggers** and prints `alp hub init` for creating a starter trigger as code. `--json` or non-TTY login only logs in. [Quickstart](/docs/hub/quickstart) walks through connection and initialization.
 
@@ -39,10 +39,10 @@ You can rename the slug later without changing the daemon ID. Renaming after a c
 For unattended setup, pass an organization API key without storing it:
 
 ```sh
-PASEO_HUB_URL=https://hub.example.com PASEO_HUB_API_KEY=paseo_pk_... alp hub connect
+ALP_HUB_URL=https://hub.example.com ALP_HUB_API_KEY=alp_pk_... alp hub connect
 ```
 
-Origin precedence is explicit `[origin]`, `PASEO_HUB_URL`, active stored login, then `https://hub-alp.anhlp.com`. An explicit `--api-key <secret>` takes precedence over the environment and an exact-origin stored login.
+Origin precedence is explicit `[origin]`, `ALP_HUB_URL`, active stored login, then `https://hub-alp.anhlp.com`. An explicit `--api-key <secret>` takes precedence over the environment and an exact-origin stored login.
 
 Check and undo:
 

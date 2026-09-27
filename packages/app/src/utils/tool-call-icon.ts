@@ -10,7 +10,7 @@ import {
   SquareTerminal,
   Wrench,
 } from "lucide-react-native";
-import type { ToolCallDetail } from "@getpaseo/protocol/agent-types";
+import type { ToolCallDetail } from "@alp/protocol/agent-types";
 import { AlpMark } from "@/components/icons/alp-logo";
 import { resolveToolCallIconName, type ToolCallIcon } from "./tool-call-icon-name";
 
@@ -26,7 +26,7 @@ const ICON_COMPONENTS: Record<ToolCallIcon, ToolCallIconComponent> = {
   sparkles: Sparkles,
   brain: Brain,
   mic_vocal: MicVocal,
-  paseo: AlpMark,
+  alp: AlpMark,
 };
 
 export function componentForToolCallIcon(name: ToolCallIcon): ToolCallIconComponent {

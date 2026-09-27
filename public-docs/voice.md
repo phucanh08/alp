@@ -27,7 +27,7 @@ This keeps credentials and execution in your environment and avoids introducing 
 
 Local speech defaults to model IDs `parakeet-tdt-0.6b-v2-int8` (STT) and `kokoro-en-v0_19` (TTS, speaker 0 / voice 00).
 
-Missing models are downloaded at daemon startup into `$PASEO_HOME/models/local-speech`. Downloads happen only for missing files.
+Missing models are downloaded at daemon startup into `$ALP_HOME/models/local-speech`. Downloads happen only for missing files.
 
 ### Local STT models and language support
 
@@ -113,16 +113,16 @@ alp uses these paths under the configured OpenAI base URL:
 
 ## Environment Variables
 
-- `PASEO_VOICE_LLM_PROVIDER`, voice agent provider override
-- `PASEO_DICTATION_STT_PROVIDER`, `PASEO_VOICE_STT_PROVIDER`, `PASEO_VOICE_TTS_PROVIDER`, speech provider selection (`local` or `openai`)
+- `ALP_VOICE_LLM_PROVIDER`, voice agent provider override
+- `ALP_DICTATION_STT_PROVIDER`, `ALP_VOICE_STT_PROVIDER`, `ALP_VOICE_TTS_PROVIDER`, speech provider selection (`local` or `openai`)
 - `OPENAI_STT_API_KEY`, `OPENAI_STT_BASE_URL`, OpenAI speech-to-text endpoint (dictation + voice mode STT)
 - `OPENAI_TTS_API_KEY`, `OPENAI_TTS_BASE_URL`, OpenAI text-to-speech endpoint (voice mode TTS)
-- `PASEO_LOCAL_MODELS_DIR`, local model storage directory
-- `PASEO_DICTATION_LOCAL_STT_MODEL`, local dictation STT model ID
-- `PASEO_VOICE_LOCAL_STT_MODEL`, `PASEO_VOICE_LOCAL_TTS_MODEL`, local voice STT/TTS model IDs
-- `PASEO_DICTATION_LANGUAGE`, dictation STT language (OpenAI STT only; ignored by local Parakeet)
-- `PASEO_VOICE_LANGUAGE`, voice mode STT language; falls back to `PASEO_DICTATION_LANGUAGE` when unset (OpenAI STT only; ignored by local Parakeet)
-- `PASEO_VOICE_LOCAL_TTS_SPEAKER_ID`, `PASEO_VOICE_LOCAL_TTS_SPEED`, optional local voice TTS tuning
+- `ALP_LOCAL_MODELS_DIR`, local model storage directory
+- `ALP_DICTATION_LOCAL_STT_MODEL`, local dictation STT model ID
+- `ALP_VOICE_LOCAL_STT_MODEL`, `ALP_VOICE_LOCAL_TTS_MODEL`, local voice STT/TTS model IDs
+- `ALP_DICTATION_LANGUAGE`, dictation STT language (OpenAI STT only; ignored by local Parakeet)
+- `ALP_VOICE_LANGUAGE`, voice mode STT language; falls back to `ALP_DICTATION_LANGUAGE` when unset (OpenAI STT only; ignored by local Parakeet)
+- `ALP_VOICE_LOCAL_TTS_SPEAKER_ID`, `ALP_VOICE_LOCAL_TTS_SPEED`, optional local voice TTS tuning
 
 ## Operational Notes
 

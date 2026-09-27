@@ -11,7 +11,7 @@ import {
   handleWorkspaceCreated,
   pickDefaultModel,
 } from "./ensure";
-import { resolvePaseoHome, supervisorDirectory } from "./paths";
+import { resolveAlpHome, supervisorDirectory } from "./paths";
 
 const SUPERVISOR_DIR = "/home/u/.alp/supervisor";
 
@@ -128,10 +128,10 @@ const supervisorWorkspace: WorkspaceLike = {
   workspaceDirectory: SUPERVISOR_DIR,
 };
 
-test("resolvePaseoHome mirrors the daemon: PASEO_HOME wins, ~ expands, default is ~/.alp", () => {
-  expect(resolvePaseoHome({}, "/home/u")).toBe("/home/u/.alp");
-  expect(resolvePaseoHome({ PASEO_HOME: "~/dev-home" }, "/home/u")).toBe("/home/u/dev-home");
-  expect(resolvePaseoHome({ PASEO_HOME: "/srv/alp" }, "/home/u")).toBe("/srv/alp");
+test("resolveAlpHome mirrors the daemon: ALP_HOME wins, ~ expands, default is ~/.alp", () => {
+  expect(resolveAlpHome({}, "/home/u")).toBe("/home/u/.alp");
+  expect(resolveAlpHome({ ALP_HOME: "~/dev-home" }, "/home/u")).toBe("/home/u/dev-home");
+  expect(resolveAlpHome({ ALP_HOME: "/srv/alp" }, "/home/u")).toBe("/srv/alp");
   expect(supervisorDirectory({}, "/home/u")).toBe(SUPERVISOR_DIR);
 });
 

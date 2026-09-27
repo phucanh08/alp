@@ -32,7 +32,7 @@ Plugin code is trusted and unsandboxed. Client surfaces run in the alp app. Back
 
 ```text
 my-plugin/
-  paseo-plugin.json
+  alp-plugin.json
   index.client.tsx
   index.server.ts
   client/greeting.tsx
@@ -42,13 +42,13 @@ my-plugin/
   tsconfig.json
 ```
 
-The required root manifest is `paseo-plugin.json`:
+The required root manifest is `alp-plugin.json`:
 
 ```json
 {
   "id": "my-plugin",
   "description": "Reviews changes before merge",
-  "requirements": { "paseo": ">=0.8.0" }
+  "requirements": { "alp": ">=0.8.0" }
 }
 ```
 
@@ -61,8 +61,8 @@ The required root manifest is `paseo-plugin.json`:
 
 ### Requirements
 
-`requirements` is an optional object. Its currently supported key, `paseo`, accepts an npm semver
-range. An omitted `requirements.paseo` means `<0.8.0`: the plugin predates the first breaking
+`requirements` is an optional object. Its currently supported key, `alp`, accepts an npm semver
+range. An omitted `requirements.alp` means `<0.8.0`: the plugin predates the first breaking
 plugin release. alp 0.8 and later reject it with a link to the [migration guide](migration).
 Empty strings, invalid ranges, and unknown manifest requirement keys are rejected.
 
@@ -101,7 +101,7 @@ old `index.ts` fails to load and points at the [migration guide](/docs/plugins/m
 Plugin, surface, sidebar-item, workspace-panel, Command Center item, attachment-source, and
 slash-command IDs start with a lowercase letter and contain lowercase letters, numbers, or hyphens.
 
-The generated `package.json` installs `@getpaseo/plugin` and the other host modules as development
+The generated `package.json` installs `@alp/plugin` and the other host modules as development
 dependencies for local typechecking and tests. alp supplies their runtime instances. Consumers do
 not install them when adding the plugin.
 
@@ -121,7 +121,7 @@ from `server/` into the app bundle, or of a Node module anywhere in the app bund
 error. Server imports of React, React Native, or client SDK entries also fail. Shared code imports
 only shared code: no Node, React, runtime-specific SDK entries, or runtime-specific types.
 
-The SDK root (`@getpaseo/plugin`) contains shared data, schemas, and runtime-neutral helpers only.
+The SDK root (`@alp/plugin`) contains shared data, schemas, and runtime-neutral helpers only.
 Import client contexts and hooks from `/client`, server contexts and lifecycle contracts from
 `/server`, and UI from `/client/react-native` or `/client/ui`. These rules include type imports and transitive
 dependencies. `/client/host` is private to the app host; plugins cannot import it.
@@ -130,17 +130,17 @@ dependencies. `/client/host` is private to the app host; plugins cannot import i
 
 alp provides these modules to client code:
 
-| Module                                 | Use it for                                                                                        |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `@getpaseo/plugin`                     | Shared data, `defineRpc`, `defineSettings`, `defineAttachmentSource`, `RpcInput`, and `RpcOutput` |
-| `@getpaseo/plugin/client/ui`           | Named, composable settings components                                                             |
-| `@getpaseo/plugin/client/react-native` | alp UI components and UI hooks                                                                    |
-| `@getpaseo/plugin/client`              | Client contribution contexts, `usePaseo`, `useRpc`, `useSettings`, and data hooks                 |
-| `@tanstack/react-query`                | Request state and caching                                                                         |
-| `react`                                | Components and hooks                                                                              |
-| `react/jsx-runtime`                    | Compiled JSX                                                                                      |
-| `react-native`                         | Cross-platform UI                                                                                 |
-| `zod`                                  | Shared schemas                                                                                    |
+| Module                            | Use it for                                                                                        |
+| --------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `@alp/plugin`                     | Shared data, `defineRpc`, `defineSettings`, `defineAttachmentSource`, `RpcInput`, and `RpcOutput` |
+| `@alp/plugin/client/ui`           | Named, composable settings components                                                             |
+| `@alp/plugin/client/react-native` | alp UI components and UI hooks                                                                    |
+| `@alp/plugin/client`              | Client contribution contexts, `useAlp`, `useRpc`, `useSettings`, and data hooks                   |
+| `@tanstack/react-query`           | Request state and caching                                                                         |
+| `react`                           | Components and hooks                                                                              |
+| `react/jsx-runtime`               | Compiled JSX                                                                                      |
+| `react-native`                    | Cross-platform UI                                                                                 |
+| `zod`                             | Shared schemas                                                                                    |
 
 The host owns its paired React and renderer versions. The SDK's React peer range permits patch
 versions for tooling and Node consumers; it does not change the app's pinned React version or
@@ -171,7 +171,7 @@ components; do not add `/// <reference lib="dom" />` or `"DOM"` to `lib`.
 Use `ExternalLink` to open documentation outside alp:
 
 ```tsx
-import { ExternalLink } from "@getpaseo/plugin/client/ui";
+import { ExternalLink } from "@alp/plugin/client/ui";
 
 export function DocumentationLink() {
   return <ExternalLink href="https://alp.anhlp.com/docs">Open documentation</ExternalLink>;
@@ -182,7 +182,7 @@ The component has accessible link semantics and uses the same opener as
 `openExternalUrl(url: string): Promise<void>`:
 
 ```ts
-import { openExternalUrl } from "@getpaseo/plugin/client";
+import { openExternalUrl } from "@alp/plugin/client";
 
 export async function openDocumentation() {
   await openExternalUrl("https://alp.anhlp.com/docs");
@@ -213,8 +213,8 @@ Use `navigation.openBrowser` from a surface or panel. Check availability before 
 the action. This workspace panel chooses an external link on other platforms:
 
 ```tsx
-import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { ExternalLink } from "@getpaseo/plugin/client/ui";
+import type { PluginWorkspacePanelProps } from "@alp/plugin/client";
+import { ExternalLink } from "@alp/plugin/client/ui";
 import { Pressable, Text } from "react-native";
 
 export function DocumentationPanel({ navigation, workspaceId, theme }: PluginWorkspacePanelProps) {
@@ -267,8 +267,8 @@ Use `openSettings`, `openSurface`, and `openPanel` for your own registered contr
 
 ### Server runtime
 
-alp provides `@getpaseo/plugin`, `@getpaseo/plugin/server`,
-`@getpaseo/plugin/server/provider`, `@getpaseo/plugin/server/acp`, and `zod` to server code. Backend
+alp provides `@alp/plugin`, `@alp/plugin/server`,
+`@alp/plugin/server/provider`, `@alp/plugin/server/acp`, and `zod` to server code. Backend
 contributions run in a daemon subprocess with Node access to the host machine. Keep filesystem,
 process, credential, and other machine-local work under `server/`. A plugin without
 `index.server.ts` starts no subprocess.
@@ -279,7 +279,7 @@ Follow [Build a provider plugin](/docs/plugins/providers) for direct and ACP imp
 session lifecycle, composer settings, timeline renderers, testing, and distribution.
 
 Call `server.registerProvider()` with a `ProviderRegistration` from
-`@getpaseo/plugin/server/provider`. Its connection accepts inputs with `send()` and emits complete state
+`@alp/plugin/server/provider`. Its connection accepts inputs with `send()` and emits complete state
 snapshots through `onEvent()`. `send()` reports acceptance only; prompt disposition, turns,
 configuration, persistence, permissions, and failures are events.
 
@@ -294,7 +294,7 @@ session config.
 alp refreshes an agent by closing its current provider session and opening it with current
 configuration and persistence. Providers re-read external state during `session.open`.
 
-Use `runAcpProvider()` from `@getpaseo/plugin/server/acp` to adapt a command-backed ACP. Add transformer
+Use `runAcpProvider()` from `@alp/plugin/server/acp` to adapt a command-backed ACP. Add transformer
 hooks only for a vendor's discovery, configuration, notification, or tool-call differences.
 
 `ProviderRegistration.icon` is a file path relative to the plugin directory, such as `icon.svg`.
@@ -311,7 +311,7 @@ receive `PluginClientContext`; server entries receive `PluginServerContext`. Cli
 which return `{ update, remove }` handles. The entry cleanup runs before alp removes remaining registrations.
 
 ```ts
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext } from "@alp/plugin/client";
 import { Main } from "./client/main";
 
 export default function contribute(client: PluginClientContext) {
@@ -327,7 +327,7 @@ Cleanup can be async. Release timers, watchers, sockets, and other resources cre
 In `index.server.ts`:
 
 ```ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext } from "@alp/plugin/server";
 
 export default function contribute(server: PluginServerContext) {
   server.on("agent.turn_ended", (event) => {
@@ -338,10 +338,10 @@ export default function contribute(server: PluginServerContext) {
 }
 ```
 
-| Register                        | Callback receives                  | Return                                                       |
-| ------------------------------- | ---------------------------------- | ------------------------------------------------------------ |
-| `server.on(name, callback)`     | `(event, { paseo, signal })`       | `void` or `Promise<void>`                                    |
-| `server.before(name, callback)` | `({ request }, { paseo, signal })` | Modified request, or `undefined` to keep it; async supported |
+| Register                        | Callback receives                | Return                                                       |
+| ------------------------------- | -------------------------------- | ------------------------------------------------------------ |
+| `server.on(name, callback)`     | `(event, { alp, signal })`       | `void` or `Promise<void>`                                    |
+| `server.before(name, callback)` | `({ request }, { alp, signal })` | Modified request, or `undefined` to keep it; async supported |
 
 Hooks run on the daemon while the plugin is enabled, even with no app connected.
 
@@ -428,12 +428,12 @@ and directory lookup/import operations are unaffected.
 ### Send a follow-up when a turn ends
 
 Copy [server/inspect.ts](https://github.com/phucanh08/alp/blob/main/plugin-examples/lifecycle-actions/server/inspect.ts)
-into your plugin. The helper imports types from `@getpaseo/protocol/agent-types`; add
-`@getpaseo/protocol` at the same version as your plugin SDK to your development dependencies
+into your plugin. The helper imports types from `@alp/protocol/agent-types`; add
+`@alp/protocol` at the same version as your plugin SDK to your development dependencies
 and install them before loading the plugin. `latestOutputText` joins text chunks after the latest user message.
 
 ```ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext } from "@alp/plugin/server";
 import { latestOutputText } from "./server/inspect";
 
 export default function contribute(server: PluginServerContext) {
@@ -444,7 +444,7 @@ export default function contribute(server: PluginServerContext) {
 
     const text = latestOutputText(event.timeline);
     if (/out of credits/i.test(text)) {
-      await context.paseo.agents.ref(event.agent.id).send("Try again.");
+      await context.alp.agents.ref(event.agent.id).send("Try again.");
     }
   });
 
@@ -466,7 +466,7 @@ add limits or delays in your plugin when needed. Attachments and tool effects ar
 Using `shellCommand` from the same [helper file](https://github.com/phucanh08/alp/blob/main/plugin-examples/lifecycle-actions/server/inspect.ts):
 
 ```ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext } from "@alp/plugin/server";
 import { shellCommand } from "./server/inspect";
 
 export default function contribute(server: PluginServerContext) {
@@ -476,7 +476,7 @@ export default function contribute(server: PluginServerContext) {
       return;
     }
 
-    const agent = context.paseo.agents.ref(event.agent.id);
+    const agent = context.alp.agents.ref(event.agent.id);
     if (/\brm\s+-rf\b/.test(command)) {
       await agent.respondToPermission({
         requestId: event.request.id,
@@ -523,7 +523,7 @@ plans, and mode changes; requesting permission does not end the turn.
 Agent events exclude internal utility agents. Archive events can precede runtime/worktree cleanup;
 `workspace.created` is not a setup barrier before agent startup.
 
-**Shared payload shapes** (`@getpaseo/plugin/server`):
+**Shared payload shapes** (`@alp/plugin/server`):
 
 ```ts
 interface PluginHookAgent {
@@ -560,11 +560,11 @@ type PluginTurnOutcome =
 
 ### Before hooks
 
-| Name                 | Request fields                                                          | Editable                                                                    |
-| -------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `agent.create`       | `config`, optional `env`, `labels`, `paseoTools`                        | Public agent config except `cwd`; `env`; `labels`; `paseoTools` (cuts only) |
-| `agent.session_open` | `agentId`, `workspaceId`, `provider`, `cwd`, `reason`, `purpose`, `env` | Only `env`                                                                  |
-| `workspace.create`   | `source`, optional `title`, `firstAgentContext`                         | Entire explicit creation request                                            |
+| Name                 | Request fields                                                          | Editable                                                                  |
+| -------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `agent.create`       | `config`, optional `env`, `labels`, `alpTools`                          | Public agent config except `cwd`; `env`; `labels`; `alpTools` (cuts only) |
+| `agent.session_open` | `agentId`, `workspaceId`, `provider`, `cwd`, `reason`, `purpose`, `env` | Only `env`                                                                |
+| `workspace.create`   | `source`, optional `title`, `firstAgentContext`                         | Entire explicit creation request                                          |
 
 **`agent.create.config`** uses `AgentSessionConfig`:
 
@@ -580,12 +580,12 @@ type PluginTurnOutcome =
 
 **`agent.create` optional fields:**
 
-| Field        | Shape / meaning                                                                                                                                                                           |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `labels`     | `Record<string, string>` the agent registers with. Omit to keep the received labels. The daemon restores `paseo.parent-agent-id` after hooks run.                                         |
-| `paseoTools` | `{ enabled?: boolean; disabledTools?: string[] }`, the provider [`paseoTools`](/docs/mcp#limit-alp-tools-by-provider) shape, applied to this agent only. Omit to keep the received value. |
+| Field      | Shape / meaning                                                                                                                                                                         |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `labels`   | `Record<string, string>` the agent registers with. Omit to keep the received labels. The daemon restores `alp.parent-agent-id` after hooks run.                                         |
+| `alpTools` | `{ enabled?: boolean; disabledTools?: string[] }`, the provider [`alpTools`](/docs/mcp#limit-alp-tools-by-provider) shape, applied to this agent only. Omit to keep the received value. |
 
-`paseoTools` only removes tools. alp merges it with the provider policy and with earlier hooks:
+`alpTools` only removes tools. alp merges it with the provider policy and with earlier hooks:
 `enabled: false` from any source wins, `disabledTools` lists combine, and `enabled: true` restores
 nothing. The merged policy is saved with the agent when it is created. Resume, refresh, and import
 do not run `agent.create` hooks; they reuse the saved policy, and a later provider policy can only
@@ -594,8 +594,8 @@ remove more tools.
 ```ts
 server.before("agent.create", ({ request }) => ({
   ...request,
-  paseoTools: {
-    disabledTools: [...(request.paseoTools?.disabledTools ?? []), "create_agent"],
+  alpTools: {
+    disabledTools: [...(request.alpTools?.disabledTools ?? []), "create_agent"],
   },
 }));
 ```
@@ -629,7 +629,7 @@ Creation request
   → resolve defaults and validate provider configuration
   → derive launch configuration with alp runtime tools and daemon prompt
   → agent.session_open hooks (same ordering; env only)
-  → set PASEO_AGENT_ID and PASEO_AGENT_CWD
+  → set ALP_AGENT_ID and ALP_AGENT_CWD
   → open provider session and save agent configuration
 ```
 
@@ -647,7 +647,7 @@ saved; environment overrides are not persisted with it.
 
 | Contract                           | Behavior                                                                                                  |
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `context.paseo`                    | Existing SDK connected to this daemon                                                                     |
+| `context.alp`                      | Existing SDK connected to this daemon                                                                     |
 | `context.signal`                   | Aborted on invocation timeout or plugin stop; pass to external requests                                   |
 | Input data                         | Detached snapshot; change state through returned requests or SDK commands                                 |
 | Registration result                | Idempotent remover, e.g. `const remove = server.on(...); remove();`                                       |
@@ -675,7 +675,7 @@ Register a component, then point a sidebar item at its surface ID:
 `client/main.tsx`:
 
 ```tsx
-import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
+import type { PluginSurfaceProps } from "@alp/plugin/client";
 import { useMemo } from "react";
 import { Text, View } from "react-native";
 
@@ -704,7 +704,7 @@ export function Main({ theme, host, layout }: PluginSurfaceProps) {
 `index.client.tsx`:
 
 ```ts
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext } from "@alp/plugin/client";
 import { Main } from "./client/main";
 
 export default function contribute(client: PluginClientContext) {
@@ -732,12 +732,12 @@ alp owns the route, header, close action, host picker, error boundary, and query
 
 ## Host UI
 
-Import alp-owned UI from `@getpaseo/plugin/client/react-native` in client code. This example
+Import alp-owned UI from `@alp/plugin/client/react-native` in client code. This example
 opens a controlled modal, renders a host icon, and confirms the action with a toast:
 
 ```tsx
-import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
-import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";
+import type { PluginSurfaceProps } from "@alp/plugin/client";
+import { Icon, Modal, useToast } from "@alp/plugin/client/react-native";
 import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 
@@ -811,12 +811,12 @@ and wide tablets.
 The close button, backdrop, platform back action, web Escape key, and compact sheet gesture dismiss
 the modal. Dismissal calls `onOpenChange(false)`; the plugin must update `open` to close it.
 
-Modal children keep the plugin runtime context. `usePaseo`, `useRpc`, `useWorkspace`, and
+Modal children keep the plugin runtime context. `useAlp`, `useRpc`, `useWorkspace`, and
 `useAgent` work inside them.
 
 ### Scrolling
 
-Import `ScrollView` and `FlatList` from `@getpaseo/plugin/client/react-native` when content can appear in a
+Import `ScrollView` and `FlatList` from `@alp/plugin/client/react-native` when content can appear in a
 alp modal. They accept React Native props and refs and integrate with the sheet's gestures. Outside
 a sheet they use ordinary React Native scrolling. Do not import bottom-sheet libraries directly.
 
@@ -830,7 +830,7 @@ container without changing these gestures. Expand the sheet before using list me
 `scrollToEnd`; the sheet locks list offsets below its largest height.
 
 ```tsx
-import { FlatList, Modal } from "@getpaseo/plugin/client/react-native";
+import { FlatList, Modal } from "@alp/plugin/client/react-native";
 import { Text } from "react-native";
 
 // Inside your controlled Modal:
@@ -860,7 +860,7 @@ user action and await it before reporting success. It rejects if the platform de
 clipboard is unavailable; browser permissions and secure-context requirements still apply.
 
 ```tsx
-import { copyText, useToast } from "@getpaseo/plugin/client/react-native";
+import { copyText, useToast } from "@alp/plugin/client/react-native";
 
 // Inside your component:
 const toast = useToast();
@@ -875,7 +875,7 @@ async function copyResult() {
 ```
 
 Programmatic copying and native text selection are separate interactions. Use `<Text selectable>`
-for long-press selection and OS Copy. Import `TextInput` from `@getpaseo/plugin/client/react-native` for modal forms. It accepts React Native
+for long-press selection and OS Copy. Import `TextInput` from `@alp/plugin/client/react-native` for modal forms. It accepts React Native
 input props and refs, supports OS Paste, and registers focus with the native sheet so the keyboard
 can raise the form. Outside a sheet it uses the ordinary input. A plain React Native input supports
 Paste too, but does not register focus with the sheet; the keyboard can cover it. No clipboard read
@@ -921,7 +921,7 @@ registrations are client contributions. alp applies the transformer while buildi
 model, including every live streaming update.
 
 ```tsx
-import type { PluginClientContext, PluginTimelineItemProps } from "@getpaseo/plugin/client";
+import type { PluginClientContext, PluginTimelineItemProps } from "@alp/plugin/client";
 import { Text } from "react-native";
 import { z } from "zod";
 
@@ -982,10 +982,10 @@ assistant rows.
 A server handler can add a plugin-owned row to canonical history:
 
 ```ts
-import type { PluginHandlerContext } from "@getpaseo/plugin/server";
+import type { PluginHandlerContext } from "@alp/plugin/server";
 
-async function publishReview(agentId: string, { paseo }: PluginHandlerContext) {
-  await paseo.agents.ref(agentId).timeline.append({
+async function publishReview(agentId: string, { alp }: PluginHandlerContext) {
+  await alp.agents.ref(agentId).timeline.append({
     type: "plugin",
     id: "review",
     kind: "review-result",
@@ -1041,7 +1041,7 @@ Workspace and agent panels receive the same `theme`, `layout`, and optional `nav
 `name`. A theme is data, so it needs no component file:
 
 ```ts
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext } from "@alp/plugin/client";
 
 export default function contribute(client: PluginClientContext) {
   client.addTheme({
@@ -1106,12 +1106,12 @@ A disabled or removed plugin leaves an unavailable screen with working Back navi
 
 ### Named UI components
 
-Import settings components from `@getpaseo/plugin/client/ui`. They work with your own state and RPCs;
+Import settings components from `@alp/plugin/client/ui`. They work with your own state and RPCs;
 no form wrapper or storage binding is required.
 
 ```tsx
 import { useState } from "react";
-import { SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
+import { SettingsCard, SettingsSection, SettingsSwitch } from "@alp/plugin/client/ui";
 
 export function DisplaySettings() {
   const [visible, setVisible] = useState(true);
@@ -1145,7 +1145,7 @@ can sit beside or inside these components.
 Define a settings document in `shared/`:
 
 ```ts
-import { defineSettings } from "@getpaseo/plugin";
+import { defineSettings } from "@alp/plugin";
 import { z } from "zod";
 
 export const preferences = defineSettings({
@@ -1236,7 +1236,7 @@ Register one panel for workspace or agent context:
 `client/review.tsx`:
 
 ```tsx
-import { type PluginAgentPanelProps, useAgent, useWorkspace } from "@getpaseo/plugin/client";
+import { type PluginAgentPanelProps, useAgent, useWorkspace } from "@alp/plugin/client";
 import { useMemo } from "react";
 import { Text, View } from "react-native";
 
@@ -1267,7 +1267,7 @@ export function ReviewPanel({ theme, layout, workspaceId, agentId }: PluginAgent
 `index.client.tsx`:
 
 ```ts
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext } from "@alp/plugin/client";
 import { ReviewPanel } from "./client/review";
 
 export default function contribute(client: PluginClientContext) {
@@ -1348,7 +1348,7 @@ Open the Command Center with **⌘K** on macOS or **Ctrl+K** on Windows and Linu
 Register an action and open a panel from the callback:
 
 ```tsx
-import { defineRpc } from "@getpaseo/plugin";
+import { defineRpc } from "@alp/plugin";
 import { z } from "zod";
 
 const refreshReview = defineRpc({
@@ -1363,8 +1363,8 @@ client.addCommandCenterItem({
   icon: "Scan",
   keywords: ["inspect"],
   context: "agent",
-  async onSelect({ paseo, rpc, workspace, agent, openPanel }) {
-    await paseo.workspaces.ref(workspace.id).setTitle(`Review ${agent.id}`);
+  async onSelect({ alp, rpc, workspace, agent, openPanel }) {
+    await alp.workspaces.ref(workspace.id).setTitle(`Review ${agent.id}`);
     await rpc(refreshReview, { agentId: agent.id });
     openPanel("review");
   },
@@ -1389,14 +1389,14 @@ Every callback receives:
 | Field                     | Context             | Meaning                                                                                                         |
 | ------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `context`                 | All                 | Matching discriminator.                                                                                         |
-| `paseo`                   | All                 | Selected host's existing `PaseoApi`.                                                                            |
+| `alp`                     | All                 | Selected host's existing `AlpApi`.                                                                              |
 | `rpc(contract, input)`    | All                 | Typed call to this installation's daemon-side plugin handler.                                                   |
 | `openSurface(id)`         | All                 | Opens one of this plugin's registered global surfaces.                                                          |
 | `workspace`               | Workspace and agent | Synchronous workspace snapshot.                                                                                 |
 | `agent`                   | Agent               | Synchronous matching agent snapshot.                                                                            |
 | `openPanel(id, options?)` | Workspace and agent | Opens a registered panel in the callback's current context. Pass `{ location: "explorer" }` to target Explorer. |
 
-An agent callback may open either an agent panel or a workspace panel. A workspace callback may open only a workspace panel. Unknown surface and panel IDs fail visibly. Use `paseo` for normal workspace, agent, provider, and daemon-config operations. Use `rpc` for plugin-specific filesystem, credential, vendor, or daemon-local work.
+An agent callback may open either an agent panel or a workspace panel. A workspace callback may open only a workspace panel. Unknown surface and panel IDs fail visibly. Use `alp` for normal workspace, agent, provider, and daemon-config operations. Use `rpc` for plugin-specific filesystem, credential, vendor, or daemon-local work.
 
 ## Slash commands
 
@@ -1501,7 +1501,7 @@ replaces registrations on each snapshot and aborts the observation during entry 
 
 ## Button descriptor
 
-These contracts are exported from `@getpaseo/plugin/client`.
+These contracts are exported from `@alp/plugin/client`.
 
 | Field      | Required | Meaning                                                                 |
 | ---------- | -------- | ----------------------------------------------------------------------- |
@@ -1520,7 +1520,7 @@ type PluginButtonBehavior =
 ```
 
 An action runs on the client. alp marks the button busy until its promise settles, blocks repeated
-presses, and shows failures in a toast. A failed action can be retried. Use the client's `paseo` for
+presses, and shows failures in a toast. A failed action can be retried. Use the client's `alp` for
 ordinary operations and `rpc` for plugin-specific backend work.
 
 Menus and popovers open anchored surfaces on wide layouts and bottom sheets on compact layouts.
@@ -1569,7 +1569,7 @@ owns all pointer interaction. The icon component can use plugin hooks.
 
 `PluginButtonContentProps` contains `theme`, `host`, `layout`, the target context, and `close()`.
 Render the body only; alp owns anchoring, scrolling, padding, and sheet presentation. Content can
-use `usePaseo`, `useRpc`, `useWorkspace`, `useAgent`, and the installation's React Query cache.
+use `useAlp`, `useRpc`, `useWorkspace`, `useAgent`, and the installation's React Query cache.
 
 The target context is one of:
 
@@ -1599,17 +1599,17 @@ your subscriptions, timers, and other resources.
 
 ## Use the alp SDK
 
-Use `usePaseo()` for ordinary alp operations from a surface. It borrows the selected host's existing connection; do not create another client.
+Use `useAlp()` for ordinary alp operations from a surface. It borrows the selected host's existing connection; do not create another client.
 
 ```tsx
-import { type PluginSurfaceProps, usePaseo } from "@getpaseo/plugin/client";
+import { type PluginSurfaceProps, useAlp } from "@alp/plugin/client";
 import { Pressable, Text } from "react-native";
 
 function PullRequestAction({ theme }: PluginSurfaceProps) {
-  const paseo = usePaseo();
+  const alp = useAlp();
 
   async function createReviewWorkspace() {
-    const workspace = await paseo.workspaces.create({
+    const workspace = await alp.workspaces.create({
       title: "Review PR 42",
       source: {
         kind: "worktree",
@@ -1636,11 +1636,11 @@ The returned API covers projects, workspaces, agents, terminals, providers, and 
 
 ### Discover hosts and target another host
 
-Use `useHosts()` to display configured hosts and `getPaseoClient(serverId)` in an action callback
+Use `useHosts()` to display configured hosts and `getAlpClient(serverId)` in an action callback
 to run SDK operations on one of them:
 
 ```tsx
-import { getPaseoClient, useHosts, type PluginSurfaceProps } from "@getpaseo/plugin/client";
+import { getAlpClient, useHosts, type PluginSurfaceProps } from "@alp/plugin/client";
 import { useMemo, useState, type ReactElement } from "react";
 import { Pressable, Text, View } from "react-native";
 
@@ -1651,7 +1651,7 @@ export function HostAgents({ theme }: Pick<PluginSurfaceProps, "theme">): ReactE
 
   async function listAgents(serverId: string): Promise<void> {
     try {
-      const { entries } = await getPaseoClient(serverId).agents.list();
+      const { entries } = await getAlpClient(serverId).agents.list();
       setResult(`${entries.length} agents`);
     } catch (error) {
       setResult(error instanceof Error ? error.message : String(error));
@@ -1685,11 +1685,11 @@ labels, or statuses change.
 
 | Summary field | Type or values                                               | Meaning                                                      |
 | ------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| `serverId`    | `string`                                                     | ID to pass to `getPaseoClient`.                              |
+| `serverId`    | `string`                                                     | ID to pass to `getAlpClient`.                                |
 | `label`       | `string`                                                     | Host's display name.                                         |
 | `status`      | `"idle"`, `"connecting"`, `"online"`, `"offline"`, `"error"` | Current app connection status. SDK calls require `"online"`. |
 
-`getPaseoClient(serverId: string): PaseoApi` borrows the host's authenticated app connection.
+`getAlpClient(serverId: string): AlpApi` borrows the host's authenticated app connection.
 Call it in client entry code or callbacks; it opens no socket and does not require the plugin
 on the target daemon. Acquire the API when performing an action to use the current connection.
 
@@ -1698,11 +1698,11 @@ on the target daemon. Acquire the API when performing an action to use the curre
 | Unknown host ID                                                                          | Throws `Unknown alp host: <id>`; never falls through to another host.                                                                                           |
 | Host is not online                                                                       | Throws `alp host is disconnected: <id>`, including calls through a retained API. Retry when online.                                                             |
 | Same connection reconnects                                                               | Retained APIs remain usable after reconnection; observations resume automatically.                                                                              |
-| Connection settings change or the app switches connections, including automatic failover | The old API is released. Call `getPaseoClient(serverId)` again and recreate subscriptions.                                                                      |
+| Connection settings change or the app switches connections, including automatic failover | The old API is released. Call `getAlpClient(serverId)` again and recreate subscriptions.                                                                        |
 | Host is removed                                                                          | Its API is released; the removed ID is unknown.                                                                                                                 |
 | `client.dispose()`                                                                       | Releases that API and its observations. A later getter call returns a fresh API over the app connection. Disposing the old API again leaves the new API usable. |
 | Originating plugin unloads                                                               | All its borrowed APIs and observations are released, including those targeting other hosts. Retained handles cannot outlive the installation.                   |
-| Surface host selection changes                                                           | `usePaseo()` follows the selected host. An explicitly acquired API keeps its original target.                                                                   |
+| Surface host selection changes                                                           | `useAlp()` follows the selected host. An explicitly acquired API keeps its original target.                                                                     |
 
 You can also release individual subscriptions through the normal SDK API.
 
@@ -1719,7 +1719,7 @@ Define one contract with Zod, handle it in the subprocess, and call it from the 
 `shared/greeting.ts`:
 
 ```ts
-import { defineRpc } from "@getpaseo/plugin";
+import { defineRpc } from "@alp/plugin";
 import { z } from "zod";
 
 export const greeting = defineRpc({
@@ -1732,7 +1732,7 @@ export const greeting = defineRpc({
 `client/greeting.tsx`:
 
 ```tsx
-import { useRpc } from "@getpaseo/plugin/client";
+import { useRpc } from "@alp/plugin/client";
 import { greeting } from "../shared/greeting";
 
 export function GreetingButton() {
@@ -1745,7 +1745,7 @@ export function GreetingButton() {
 `server/greeting.ts`:
 
 ```ts
-import type { RpcInput } from "@getpaseo/plugin";
+import type { RpcInput } from "@alp/plugin";
 import { greeting } from "../shared/greeting";
 
 export function createGreeting({ name }: RpcInput<typeof greeting>) {
@@ -1756,7 +1756,7 @@ export function createGreeting({ name }: RpcInput<typeof greeting>) {
 `index.client.tsx`:
 
 ```ts
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext } from "@alp/plugin/client";
 import { GreetingButton } from "./client/greeting";
 
 export default function contribute(client: PluginClientContext) {
@@ -1768,7 +1768,7 @@ export default function contribute(client: PluginClientContext) {
 `index.server.ts`:
 
 ```ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext } from "@alp/plugin/server";
 import { createGreeting } from "./server/greeting";
 import { greeting } from "./shared/greeting";
 
@@ -1780,7 +1780,7 @@ export default function contribute(server: PluginServerContext) {
 
 Inputs and outputs are validated on both sides. RPC names start with a lowercase letter and contain lowercase letters, numbers, dots, hyphens, or underscores. `useRpc()` returns a typed async function. Use TanStack Query for request state, caching, and mutations.
 
-Backend handlers receive the same `PaseoApi` as `{ paseo }`. Their connection belongs to the subprocess and closes when the plugin stops. It does not subscribe to timelines or catalog events until plugin code subscribes. Follow the [SDK event contract](../../sdk/events.md) for cleanup and timeline replacements. Backend code can use Node APIs and dependencies installed in the plugin directory.
+Backend handlers receive the same `AlpApi` as `{ alp }`. Their connection belongs to the subprocess and closes when the plugin stops. It does not subscribe to timelines or catalog events until plugin code subscribes. Follow the [SDK event contract](../../sdk/events.md) for cleanup and timeline replacements. Backend code can use Node APIs and dependencies installed in the plugin directory.
 
 ## Debug backend output
 
@@ -1791,7 +1791,7 @@ console.log("Refreshing issues");
 console.error("Issue refresh failed", error);
 ```
 
-alp adds `[paseo]` entries when the plugin starts loading, becomes ready, starts stopping, and has
+alp adds `[alp]` entries when the plugin starts loading, becomes ready, starts stopping, and has
 stopped. It records compilation and load failures as stderr entries, including failures that happen
 before the plugin subprocess starts. alp also captures output emitted during initialization, RPC
 handlers, cleanup, and process failure. Protocol traffic uses a separate channel, so `console.log()`
@@ -1813,7 +1813,7 @@ sequence, and message.
 alp retains up to 500 entries and 256 KiB per plugin in memory. Individual lines are capped at
 16 KiB. Reload, disable, compilation failure, initialization failure, and process failure retain the
 tail. Removing the plugin clears it, and a daemon restart starts a new tail. Structured copies are
-also written to the daemon log at `$PASEO_HOME/daemon.log`.
+also written to the daemon log at `$ALP_HOME/daemon.log`.
 
 Only daemon-side output is captured. Logs from client surfaces remain in the app runtime. Do not log
 credentials, access tokens, or other secrets: connected users can read the retained tail, and the
@@ -1826,7 +1826,7 @@ An attachment source searches external resources and returns a stable text snaps
 `shared/issues.ts`:
 
 ```ts
-import { defineAttachmentSource, defineRpc } from "@getpaseo/plugin";
+import { defineAttachmentSource, defineRpc } from "@alp/plugin";
 import { z } from "zod";
 
 export const searchIssues = defineRpc({
@@ -1860,7 +1860,7 @@ export const issues = defineAttachmentSource({
 `server/issues.ts`:
 
 ```ts
-import type { RpcInput } from "@getpaseo/plugin";
+import type { RpcInput } from "@alp/plugin";
 import { searchIssues } from "../shared/issues";
 
 export function search({ query }: RpcInput<typeof searchIssues>) {
@@ -1871,7 +1871,7 @@ export function search({ query }: RpcInput<typeof searchIssues>) {
 `index.client.tsx`:
 
 ```ts
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext } from "@alp/plugin/client";
 import { issues } from "./shared/issues";
 
 export default function contribute(client: PluginClientContext) {
@@ -1883,7 +1883,7 @@ export default function contribute(client: PluginClientContext) {
 `index.server.ts`:
 
 ```ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext } from "@alp/plugin/server";
 import { search } from "./server/issues";
 import { searchIssues } from "./shared/issues";
 
@@ -1950,7 +1950,7 @@ alp resolves an identifier in this order:
 6. Resolve a remaining npm package name with its optional selector through the host's registry.
    Reject anything else.
 
-Directory lookup happens on the daemon host. The app uses the `paseo-plugin.json` ID; the CLI
+Directory lookup happens on the daemon host. The app uses the `alp-plugin.json` ID; the CLI
 accepts `--id <runtime-id>` to override it. An existing installation ID is rejected without changing
 its enabled state or files.
 
@@ -2049,7 +2049,7 @@ step:
 ```json
 {
   "id": "review",
-  "requirements": { "paseo": ">=0.8.0" },
+  "requirements": { "alp": ">=0.8.0" },
   "build": [["npm", "ci", "--omit=dev"]]
 }
 ```

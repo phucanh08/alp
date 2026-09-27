@@ -6,22 +6,20 @@ import {
 
 describe("projectDisplayNameFromProjectId", () => {
   it("shows owner and repo for GitHub remote ids", () => {
-    expect(projectDisplayNameFromProjectId("remote:github.com/getpaseo/paseo")).toBe(
-      "getpaseo/paseo",
-    );
+    expect(projectDisplayNameFromProjectId("remote:github.com/getpaseo/paseo")).toBe("alp/alp");
   });
 
   it("shows the trailing directory name for local projects", () => {
-    expect(projectDisplayNameFromProjectId("/Users/me/dev/paseo")).toBe("paseo");
+    expect(projectDisplayNameFromProjectId("/Users/me/dev/alp")).toBe("alp");
   });
 });
 
 describe("projectIconPlaceholderLabelFromDisplayName", () => {
   it("uses repo name instead of owner for GitHub-style display names", () => {
-    expect(projectIconPlaceholderLabelFromDisplayName("getpaseo/paseo")).toBe("paseo");
+    expect(projectIconPlaceholderLabelFromDisplayName("alp/alp")).toBe("alp");
   });
 
   it("returns the original display name when it has no path separator", () => {
-    expect(projectIconPlaceholderLabelFromDisplayName("paseo")).toBe("paseo");
+    expect(projectIconPlaceholderLabelFromDisplayName("alp")).toBe("alp");
   });
 });

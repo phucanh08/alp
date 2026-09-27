@@ -274,7 +274,7 @@ function canonicalFiles() {
 }
 
 async function canonicalProject(): Promise<string> {
-  const cwd = await mkdtemp(path.join(tmpdir(), "paseo-hub-deploy-"));
+  const cwd = await mkdtemp(path.join(tmpdir(), "alp-hub-deploy-"));
   temporaryDirectories.push(cwd);
   const workflows = path.join(cwd, ".paseo", "workflows");
   await mkdir(path.join(workflows, "partials"), { recursive: true });
@@ -285,7 +285,7 @@ async function canonicalProject(): Promise<string> {
 }
 
 async function triggerProject(): Promise<string> {
-  const cwd = await mkdtemp(path.join(tmpdir(), "paseo-hub-trigger-deploy-"));
+  const cwd = await mkdtemp(path.join(tmpdir(), "alp-hub-trigger-deploy-"));
   temporaryDirectories.push(cwd);
   const triggers = path.join(cwd, ".paseo", "triggers");
   await mkdir(triggers, { recursive: true });

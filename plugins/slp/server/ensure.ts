@@ -40,7 +40,7 @@ export interface SeatDeps {
   family?: Family;
 }
 
-/** The slice of the plugin `PaseoApi` the ensure operations use; narrow so tests can fake it. */
+/** The slice of the plugin `AlpApi` the ensure operations use; narrow so tests can fake it. */
 export interface EnsureApi {
   agents: AgentLister & {
     ref(agentId: string): { send(text: string): Promise<void> };
@@ -198,7 +198,7 @@ export const SUPERVISOR_RESUME_NOTICE =
 
 /**
  * `slp.supervisor.ensure`: one Supervisor per host, in the `SLP Supervisor` workspace at
- * `$PASEO_HOME/supervisor`. A live Supervisor anywhere on the host is reused; otherwise the newest
+ * `$ALP_HOME/supervisor`. A live Supervisor anywhere on the host is reused; otherwise the newest
  * closed one is resumed; a new one is created only when there is none or the resume is rejected.
  * The system prompt of a resumed Supervisor is the one from its creation (`before("agent.create")`
  * does not run again). Reuse and resume never touch the Supervisor's model; only a freshly created

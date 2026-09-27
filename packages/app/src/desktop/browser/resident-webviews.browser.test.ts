@@ -18,7 +18,7 @@ import {
   takeCommandCenterFocusRestoreElement,
 } from "../../utils/command-center-focus-restore";
 
-const RESIDENT_HOST_ID = "paseo-browser-resident-webviews";
+const RESIDENT_HOST_ID = "alp-browser-resident-webviews";
 const attachedBrowsers: Array<{
   browserId: string;
   workspaceId: string;
@@ -213,7 +213,7 @@ describe("resident browser webviews", () => {
 
     expect(webview).not.toBeNull();
     expect(webview?.isConnected).toBe(true);
-    expect(webview?.getAttribute("data-paseo-browser-id")).toBe("browser-agent");
+    expect(webview?.getAttribute("data-alp-browser-id")).toBe("browser-agent");
     expect(webview?.getAttribute("partition")).toBe("persist:paseo-browser");
     expect((webview as HTMLUnknownElement & { src?: string })?.src).toContain(
       "https://example.com",

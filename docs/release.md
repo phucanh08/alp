@@ -102,7 +102,7 @@ pointers. The npm invariant is:
 
 - A beta release moves only `beta`; `latest` remains on the newest stable.
 - A stable release moves both `latest` and `beta` to that stable version. This
-  keeps users who install `@getpaseo/cli@beta` on the newest alp release after
+  keeps users who install `@alp/cli@beta` on the newest alp release after
   a beta is promoted or superseded by a direct stable release.
 
 ## Release version decision
@@ -149,13 +149,13 @@ version for every published package. This changes dist-tags only; do not
 republish the packages:
 
 ```bash
-PASEO_VERSION=$(node -p "require('./package.json').version")
+ALP_VERSION=$(node -p "require('./package.json').version")
 for package in highlight relay protocol client plugin server cli; do
-  npm dist-tag add "@getpaseo/$package@$PASEO_VERSION" beta
+  npm dist-tag add "@alp/$package@$ALP_VERSION" beta
 done
 ```
 
-Verify both npm tags now resolve to `PASEO_VERSION` before considering the
+Verify both npm tags now resolve to `ALP_VERSION` before considering the
 stable release complete.
 
 The Docker workflow builds images from the checked-out source tree on pull requests and on `main` as non-publishing checks. Stable `vX.Y.Z` tag pushes publish `ghcr.io/getpaseo/paseo:X.Y.Z` and `ghcr.io/getpaseo/paseo:latest`; beta `vX.Y.Z-beta.N` tag pushes publish only `ghcr.io/getpaseo/paseo:X.Y.Z-beta.N` and never move `latest`.
@@ -188,8 +188,8 @@ npm run release:promote          # Promote X.Y.Z-beta.N to stable X.Y.Z
 ```
 
 - Beta tags are published GitHub prereleases like `v0.1.41-beta.1`
-- Betas publish npm packages with `--tag beta`, so `npm install @getpaseo/cli@beta` opts in while plain `npm install @getpaseo/cli` stays on `latest`
-- Betas publish desktop assets and APKs for testing. They also build iOS, upload it to TestFlight, add it to the `Paseo Beta` external group, and submit it for Beta App Review. They do not submit mobile builds to the production stores.
+- Betas publish npm packages with `--tag beta`, so `npm install @alp/cli@beta` opts in while plain `npm install @alp/cli` stays on `latest`
+- Betas publish desktop assets and APKs for testing. They also build iOS, upload it to TestFlight, add it to the `Alp Beta` external group, and submit it for Beta App Review. They do not submit mobile builds to the production stores.
 - `release:promote` creates a fresh stable tag like `v0.1.41`; the final release never reuses the beta tag
 - Desktop assets now come from the Electron package at `packages/desktop`
 - Require the Linux artifact CI checks with both restricted and usable user namespaces to pass before publication; see [packaged desktop smoke](testing.md#packaged-desktop-smoke). Keep the installed-package and AppImage checks together.
@@ -310,7 +310,7 @@ iOS and Android store builds are not in `.github/workflows`. They are triggered 
 
 EAS uses the local app version source. `packages/app/app.config.js` derives the native version from the package version. Android `versionCode` is `major * 1_000_000 + minor * 1_000 + patch`. iOS reserves 1,000 build slots per app version: beta `N` uses slot `N`, and stable uses slot `999`. For example, `0.2.6-beta.2` appears in App Store Connect as version `0.2.6` build `2006002`; stable uses build `2006999`. Rebuilding the same tag produces the same native build number; if a store has already accepted a binary and you need a different binary, cut the next beta or patch instead of relying on EAS remote auto-increment.
 
-Beta tags run `Release iOS Beta`. The workflow uploads the build to TestFlight, distributes it to the persistent `Paseo Beta` external group, and submits it for Beta App Review. Testers and the group are managed once in App Store Connect; releases require no dashboard action.
+Beta tags run `Release iOS Beta`. The workflow uploads the build to TestFlight, distributes it to the persistent `Alp Beta` external group, and submits it for Beta App Review. Testers and the group are managed once in App Store Connect; releases require no dashboard action.
 
 There is no mobile-release workflow under `.github/workflows`. The EAS GitHub app reads the workflows under `packages/app/.eas/workflows` and handles tag triggering directly.
 
@@ -389,7 +389,7 @@ then report the release as shipped.
 Pattern:
 
 ```jsonc
-// mcp__paseo__create_heartbeat arguments
+// mcp__alp__create_heartbeat arguments
 {
   "name": "vX.Y.Z release babysit heartbeat",
   "cron": "*/10 * * * *",
@@ -430,13 +430,13 @@ and EAS mobile release builds. Use the Docker workflow dispatch instead:
 ```bash
 gh workflow run docker.yml \
   --ref main \
-  -f paseo_version=X.Y.Z-beta.N \
+  -f alp_version=X.Y.Z-beta.N \
   -f publish=true
 ```
 
 This replaces `ghcr.io/getpaseo/paseo:X.Y.Z-beta.N` in place without touching
 desktop, APK, or EAS release builders. The Docker exception is safe because the
-dispatch runs from `--ref main` and uses the explicit `paseo_version`; it does
+dispatch runs from `--ref main` and uses the explicit `alp_version`; it does
 not check out or move the `v*` release tag.
 
 To retry a failed non-Docker release workflow, push a retry tag on the commit
@@ -498,7 +498,7 @@ intentionally unavailable to desktop updater clients.
 
 ## Notes
 
-- `version:all:*` bumps root + syncs workspace versions and `@getpaseo/*` dependency versions
+- `version:all:*` bumps root + syncs workspace versions and `@alp/*` dependency versions
 - The npm `version` lifecycle regenerates F-Droid changelog files from `CHANGELOG.md` for stable releases only (`npm run fdroid:changelogs`) and stages them, so the release tag carries them. Betas are a no-op. A stable run **aborts the release** if `CHANGELOG.md` has no entry for the version being cut — commit the changelog entry first. See [docs/android.md](android.md) for why these files are generated per ABI.
 - `release:prepare` refreshes workspace `node_modules` links to prevent stale types
 - `npm run dev:desktop` and `npm run build:desktop` target the Electron desktop package in `packages/desktop`

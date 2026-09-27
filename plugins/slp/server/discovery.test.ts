@@ -187,11 +187,11 @@ test("supervisorsRegisteredIn counts only successful send_agent_prompt calls to 
     error,
   });
   const timeline = [
-    call("ToolSearch", { query: "select:mcp__paseo__send_agent_prompt" }),
-    call("mcp__paseo__get_agent_status", { agentId: "S1" }),
+    call("ToolSearch", { query: "select:mcp__alp__send_agent_prompt" }),
+    call("mcp__alp__get_agent_status", { agentId: "S1" }),
     { type: "assistant_message", text: 'Sẽ send_agent_prompt {"agentId":"S2"} sau.' },
-    call("mcp__paseo__send_agent_prompt", { agentId: "S1", prompt: "SLP-REGISTER …" }),
-    call("mcp__paseo__send_agent_prompt", { agentId: "S3" }, { message: "not found" }),
+    call("mcp__alp__send_agent_prompt", { agentId: "S1", prompt: "SLP-REGISTER …" }),
+    call("mcp__alp__send_agent_prompt", { agentId: "S3" }, { message: "not found" }),
   ];
   expect([...supervisorsRegisteredIn(timeline, ["S1", "S2", "S3"])]).toEqual(["S1"]);
   expect(supervisorsRegisteredIn(undefined, ["S1"]).size).toBe(0);

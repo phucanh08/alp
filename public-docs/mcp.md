@@ -19,16 +19,16 @@ category: Orchestration
 
 Depending on the provider, alp delivers tools through its native tool interface or MCP. The capabilities are the same. Start a new agent or reload an existing one after changing injection settings.
 
-alp seeds `daemon.mcp.injectIntoAgents: true` on daemon start when the key is absent, so SLP agents can spawn and drive each other out of the box. Set it to `false` in `$PASEO_HOME/config.json` (`~/.alp/config.json` by default) to opt out; the seed never overwrites an explicit value.
+alp seeds `daemon.mcp.injectIntoAgents: true` on daemon start when the key is absent, so SLP agents can spawn and drive each other out of the box. Set it to `false` in `$ALP_HOME/config.json` (`~/.alp/config.json` by default) to opt out; the seed never overwrites an explicit value.
 
 ## Limit alp tools by provider
 
 Use provider policies when different agent profiles should receive different alp tools. Enable
-tool injection globally, then add `paseoTools` to the exact provider IDs you launch:
+tool injection globally, then add `alpTools` to the exact provider IDs you launch:
 
 ```json
 {
-  "$schema": "https://alp.anhlp.com/schemas/paseo.config.v1.json",
+  "$schema": "https://alp.anhlp.com/schemas/alp.config.v1.json",
   "version": 1,
   "daemon": {
     "mcp": {
@@ -45,14 +45,14 @@ tool injection globally, then add `paseoTools` to the exact provider IDs you lau
       "codex-worker": {
         "extends": "codex",
         "label": "Codex Worker",
-        "paseoTools": {
+        "alpTools": {
           "disabledTools": ["create_agent", "send_agent_prompt", "kill_agent"]
         }
       },
       "codex-isolated": {
         "extends": "codex",
         "label": "Codex Isolated",
-        "paseoTools": {
+        "alpTools": {
           "enabled": false
         }
       }
@@ -61,10 +61,10 @@ tool injection globally, then add `paseoTools` to the exact provider IDs you lau
 }
 ```
 
-Run `alp reload` after editing `$PASEO_HOME/config.json`, then start a new agent or reload an
+Run `alp reload` after editing `$ALP_HOME/config.json`, then start a new agent or reload an
 existing one. A running session keeps the catalog it received at launch.
 
-Omitting `paseoTools` enables the complete catalog. Set `enabled` to `false` to remove the catalog,
+Omitting `alpTools` enables the complete catalog. Set `enabled` to `false` to remove the catalog,
 or list exact tool IDs in `disabledTools` to remove selected tools. Custom profiles do not inherit
 this policy from `extends`; configure each custom provider ID separately.
 
@@ -115,7 +115,7 @@ For worktree isolation, `create_workspace` accepts the same useful choices as th
 
 ### Workspace scripts
 
-These tools manage scripts configured in a workspace's `paseo.json`. Each requires an explicit `workspaceId`; start and stop also require the configured `scriptName`.
+These tools manage scripts configured in a workspace's `alp.json`. Each requires an explicit `workspaceId`; start and stop also require the configured `scriptName`.
 
 | Tool                     | Function                                                                                |
 | ------------------------ | --------------------------------------------------------------------------------------- |
@@ -123,7 +123,7 @@ These tools manage scripts configured in a workspace's `paseo.json`. Each requir
 | `start_workspace_script` | Start a configured script through alp's managed launcher.                               |
 | `stop_workspace_script`  | Stop a running script through its supervised terminal.                                  |
 
-See [Git worktrees](/docs/worktrees#scripts-and-services) for `paseo.json` configuration.
+See [Git worktrees](/docs/worktrees#scripts-and-services) for `alp.json` configuration.
 
 ### Terminals
 

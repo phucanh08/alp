@@ -1,8 +1,8 @@
 import {
   waitForDaemonReady,
-  resolvePaseoHome,
+  resolveAlpHome,
   type DaemonInstance,
-} from "@getpaseo/server/daemon-control";
+} from "@alp/server/daemon-control";
 import { describeDaemonTarget, type DaemonTarget } from "./daemon-target.js";
 export type { DaemonTarget } from "./daemon-target.js";
 import {
@@ -11,13 +11,10 @@ import {
   normalizeHostPort,
   parseConnectionUri,
   shouldUseTlsForDefaultHostedRelay,
-} from "@getpaseo/protocol/daemon-endpoints";
-import {
-  parseConnectionOfferFromUrl,
-  type ConnectionOffer,
-} from "@getpaseo/protocol/connection-offer";
-import { parseSshTransportUri } from "@getpaseo/protocol/ssh-transport";
-import { DaemonClient, type WebSocketLike } from "@getpaseo/client/internal/daemon-client";
+} from "@alp/protocol/daemon-endpoints";
+import { parseConnectionOfferFromUrl, type ConnectionOffer } from "@alp/protocol/connection-offer";
+import { parseSshTransportUri } from "@alp/protocol/ssh-transport";
+import { DaemonClient, type WebSocketLike } from "@alp/client/internal/daemon-client";
 import { WebSocket } from "ws";
 import { getOrCreateCliClientId } from "./client-id.js";
 import { resolveCliVersion } from "../version.js";
@@ -58,9 +55,9 @@ export function buildDaemonConnectionCommandError(options: ConnectOptions & { er
 
 function describeConnectionRemedy(code: string, target: DaemonTarget): string {
   if (code === "AUTH_REQUIRED")
-    return "The daemon requires a password. Set PASEO_PASSWORD and retry.";
+    return "The daemon requires a password. Set ALP_PASSWORD and retry.";
   if (code === "AUTH_FAILED")
-    return "The daemon rejected the password. Check PASEO_PASSWORD and retry.";
+    return "The daemon rejected the password. Check ALP_PASSWORD and retry.";
   if (target.kind === "instance")
     return `Start with: alp daemon start --home ${JSON.stringify(target.home)}`;
   return "Check the selected endpoint and credentials. SSH transport does not install or start the daemon.";
@@ -168,7 +165,7 @@ export function resolveDaemonPassword(host: string): string | undefined {
     const fromUri = parseConnectionUri(trimmed).password;
     if (fromUri) return fromUri;
   }
-  const fromEnv = process.env.PASEO_PASSWORD;
+  const fromEnv = process.env.ALP_PASSWORD;
   return fromEnv && fromEnv.length > 0 ? fromEnv : undefined;
 }
 
@@ -287,7 +284,7 @@ async function connectSelectedDaemon(options: ConnectOptions): Promise<DaemonCli
             instance: options.instance,
           })
         ).listen;
-  const clientId = await getOrCreateCliClientId(resolvePaseoHome({}));
+  const clientId = await getOrCreateCliClientId(resolveAlpHome({}));
   const nodeWebSocketFactory = createNodeWebSocketFactory();
 
   if (explicitHost?.trim().startsWith("ssh://")) {

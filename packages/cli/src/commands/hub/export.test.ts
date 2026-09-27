@@ -113,7 +113,7 @@ class MemoryCredentials implements HubCredentialStore {
 }
 
 async function temporaryDirectory(): Promise<string> {
-  const directory = await mkdtemp(path.join(tmpdir(), "paseo-hub-export-"));
+  const directory = await mkdtemp(path.join(tmpdir(), "alp-hub-export-"));
   directories.push(directory);
   return directory;
 }

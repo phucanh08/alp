@@ -1,9 +1,9 @@
 import { expect, test } from "vitest";
-import { createPaseoApi } from "@getpaseo/client";
-import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import { createAlpApi } from "@alp/client";
+import { DaemonClient } from "@alp/client/internal/daemon-client";
 import { PluginHookHandlers } from "./index.js";
 
-const paseo = createPaseoApi(
+const alp = createAlpApi(
   new DaemonClient({ url: "ws://127.0.0.1:1/ws", clientId: "lifecycle-unit" }),
 );
 
@@ -24,7 +24,7 @@ test("removing an old registration twice preserves a newer registration for the 
     {
       source: { kind: "directory", path: "/project" },
     },
-    paseo,
+    alp,
   );
   expect(output).toEqual({ source: { kind: "directory", path: "/project" }, title: "new" });
 });
@@ -41,7 +41,7 @@ test("before hooks compose returned requests and preserve the original input", a
     return { ...request, title: request.title + ":second" };
   });
   const input = { source: { kind: "directory", path: "/project" } };
-  expect(await hooks.invoke("operation", "before", "workspace.create", input, paseo)).toEqual({
+  expect(await hooks.invoke("operation", "before", "workspace.create", input, alp)).toEqual({
     source: { kind: "directory", path: "/project" },
     title: "first:second",
   });
@@ -68,7 +68,7 @@ test("teardown aborts an active callback and removes its registrations", async (
     {
       source: { kind: "directory", path: "/project" },
     },
-    paseo,
+    alp,
   );
   hooks.close();
   await expect(invocation).rejects.toThrow("Hook aborted");
@@ -94,7 +94,7 @@ test("session-open hooks reject changes to session identity instead of silently 
         purpose: "interactive",
         env: {},
       },
-      paseo,
+      alp,
     ),
   ).rejects.toThrow("agent.session_open hooks can only change env");
 });
@@ -112,7 +112,7 @@ test("agent.create hooks that omit labels keep the labels of the request they re
       config: { provider: "codex", cwd: "/project" },
       labels: { team: "infra" },
     },
-    paseo,
+    alp,
   );
   expect(output).toEqual({
     config: { provider: "codex", cwd: "/project", title: "renamed" },
@@ -120,26 +120,26 @@ test("agent.create hooks that omit labels keep the labels of the request they re
   });
 });
 
-test("agent.create hooks can only add to the Paseo tools earlier hooks disabled", async () => {
+test("agent.create hooks can only add to the Alp tools earlier hooks disabled", async () => {
   const hooks = new PluginHookHandlers(() => {});
   hooks.before("agent.create", ({ request }) => ({
     ...request,
-    paseoTools: { disabledTools: ["create_agent"] },
+    alpTools: { disabledTools: ["create_agent"] },
   }));
   hooks.before("agent.create", ({ request }) => ({ config: request.config }));
   hooks.before("agent.create", ({ request }) => ({
     ...request,
-    paseoTools: { enabled: true, disabledTools: ["send_agent_prompt"] },
+    alpTools: { enabled: true, disabledTools: ["send_agent_prompt"] },
   }));
   const output = await hooks.invoke(
     "operation",
     "before",
     "agent.create",
     { config: { provider: "codex", cwd: "/project" } },
-    paseo,
+    alp,
   );
   expect(output).toEqual({
     config: { provider: "codex", cwd: "/project" },
-    paseoTools: { disabledTools: ["create_agent", "send_agent_prompt"] },
+    alpTools: { disabledTools: ["create_agent", "send_agent_prompt"] },
   });
 });

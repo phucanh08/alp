@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import type { PaseoConfigRaw } from "@getpaseo/protocol/paseo-config-schema";
+import type { AlpConfigRaw } from "@alp/protocol/alp-config-schema";
 import { hasUncommittedWorktreeSetupChanges } from "./worktree-setup-commit-status.js";
 
 const tempDirs: string[] = [];
@@ -14,7 +14,7 @@ afterEach(() => {
   }
 });
 
-function makeGitRepo(config?: PaseoConfigRaw): string {
+function makeGitRepo(config?: AlpConfigRaw): string {
   const repoRoot = realpathSync(mkdtempSync(join(tmpdir(), "worktree-setup-status-test-")));
   tempDirs.push(repoRoot);
   execFileSync("git", ["init", "-b", "main"], { cwd: repoRoot });
@@ -27,8 +27,8 @@ function makeGitRepo(config?: PaseoConfigRaw): string {
   return repoRoot;
 }
 
-function writeConfig(repoRoot: string, config: PaseoConfigRaw): void {
-  writeFileSync(join(repoRoot, "paseo.json"), `${JSON.stringify(config, null, 2)}\n`);
+function writeConfig(repoRoot: string, config: AlpConfigRaw): void {
+  writeFileSync(join(repoRoot, "alp.json"), `${JSON.stringify(config, null, 2)}\n`);
 }
 
 describe("worktree setup commit status", () => {
@@ -50,7 +50,7 @@ describe("worktree setup commit status", () => {
       true,
     );
 
-    execFileSync("git", ["add", "paseo.json"], { cwd: repoRoot });
+    execFileSync("git", ["add", "alp.json"], { cwd: repoRoot });
     await expect(hasUncommittedWorktreeSetupChanges({ repoRoot, currentConfig })).resolves.toBe(
       true,
     );
@@ -81,12 +81,12 @@ describe("worktree setup commit status", () => {
     );
   });
 
-  test("resolves paseo.json relative to a nested project root", async () => {
+  test("resolves alp.json relative to a nested project root", async () => {
     const repoRoot = makeGitRepo();
     const projectRoot = join(repoRoot, "packages", "app");
     mkdirSync(projectRoot, { recursive: true });
     writeConfig(projectRoot, { worktree: { setup: "npm ci" } });
-    execFileSync("git", ["add", "packages/app/paseo.json"], { cwd: repoRoot });
+    execFileSync("git", ["add", "packages/app/alp.json"], { cwd: repoRoot });
     execFileSync("git", ["commit", "-m", "add nested config"], { cwd: repoRoot });
     const currentConfig = { worktree: { setup: "npm install" } };
     writeConfig(projectRoot, currentConfig);

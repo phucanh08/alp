@@ -3,9 +3,9 @@ import { existsSync, realpathSync } from "fs";
 import { open as openFile, readFile, stat as statFile } from "fs/promises";
 import { setImmediate } from "node:timers/promises";
 import { TTLCache } from "@isaacs/ttlcache";
-import type { CheckoutCommit, CheckoutCommitFile } from "@getpaseo/protocol/messages";
-import { parseGitHubRemoteIdentity, parseGitRemoteLocation } from "@getpaseo/protocol/git-remote";
-import { maxBase64EncryptedPlaintextByteLength } from "@getpaseo/relay";
+import type { CheckoutCommit, CheckoutCommitFile } from "@alp/protocol/messages";
+import { parseGitHubRemoteIdentity, parseGitRemoteLocation } from "@alp/protocol/git-remote";
+import { maxBase64EncryptedPlaintextByteLength } from "@alp/relay";
 import type { Logger } from "pino";
 import type { ParsedDiffFile } from "../server/utils/diff-highlighter.js";
 import {
@@ -31,13 +31,13 @@ import {
 import { parseGitRevParsePath, resolveGitRevParsePath } from "./git-rev-parse-path.js";
 import { runGitCommand, type RunGitCommand } from "./run-git-command.js";
 import { readGitFileContents } from "./git-file-contents.js";
-import { isPaseoOwnedWorktreeCwd, resolvePaseoWorktreesBaseRoot } from "./worktree.js";
+import { isAlpOwnedWorktreeCwd, resolveAlpWorktreesBaseRoot } from "./worktree.js";
 import {
   branchNameFromRef,
-  getPaseoWorktreeChangeRequestHintForBranch,
-  type PaseoWorktreeMetadata,
-  readPaseoWorktreeMetadata,
-  rebindPaseoWorktreeChangeRequestHint,
+  getAlpWorktreeChangeRequestHintForBranch,
+  type AlpWorktreeMetadata,
+  readAlpWorktreeMetadata,
+  rebindAlpWorktreeChangeRequestHint,
 } from "./worktree-metadata.js";
 const READ_ONLY_GIT_ENV = {
   GIT_OPTIONAL_LOCKS: "0",
@@ -834,7 +834,7 @@ export interface CheckoutStatus {
   isGit: false;
 }
 
-export interface CheckoutStatusGitNonPaseo {
+export interface CheckoutStatusGitNonAlp {
   isGit: true;
   repoRoot: string;
   mainRepoRoot: string | null;
@@ -850,10 +850,10 @@ export interface CheckoutStatusGitNonPaseo {
   behindOfOrigin: number | null;
   hasRemote: boolean;
   remoteUrl: string | null;
-  isPaseoOwnedWorktree: false;
+  isAlpOwnedWorktree: false;
 }
 
-export interface CheckoutStatusGitPaseo {
+export interface CheckoutStatusGitAlp {
   isGit: true;
   repoRoot: string;
   mainRepoRoot: string;
@@ -866,10 +866,10 @@ export interface CheckoutStatusGitPaseo {
   behindOfOrigin: number | null;
   hasRemote: boolean;
   remoteUrl: string | null;
-  isPaseoOwnedWorktree: true;
+  isAlpOwnedWorktree: true;
 }
 
-export type CheckoutStatusGit = CheckoutStatusGitNonPaseo | CheckoutStatusGitPaseo;
+export type CheckoutStatusGit = CheckoutStatusGitNonAlp | CheckoutStatusGitAlp;
 
 export type CheckoutStatusResult = CheckoutStatus | CheckoutStatusGit;
 
@@ -896,7 +896,7 @@ export interface MergeFromBaseOptions {
 }
 
 export interface CheckoutContext {
-  paseoHome?: string;
+  alpHome?: string;
   worktreesRoot?: string;
   logger?: Pick<Logger, "trace" | "warn">;
   facts?: CheckoutSnapshotFacts | null;
@@ -914,7 +914,7 @@ export type CheckoutSnapshotFacts =
       remoteUrl: string | null;
       absoluteGitDir: string | null;
       gitCommonDir: string | null;
-      paseoWorktree: PaseoWorktreeForCwd;
+      alpWorktree: AlpWorktreeForCwd;
       storedBaseRef: string | null;
       resolvedBaseRef: string | null;
       mainRepoRoot: string | null;
@@ -1085,17 +1085,17 @@ async function getMainRepoRootFromCommonDir(
     },
   );
   const worktrees = parseWorktreeList(worktreeOut);
-  const nonBareNonPaseo = worktrees.filter(
+  const nonBareNonAlp = worktrees.filter(
     (wt) =>
       !wt.isBare &&
-      !isPaseoWorktreePath(wt.path, {
-        paseoHome: context?.paseoHome,
+      !isAlpWorktreePath(wt.path, {
+        alpHome: context?.alpHome,
         worktreesRoot: context?.worktreesRoot,
       }),
   );
-  const childrenOfBareRepo = nonBareNonPaseo.filter((wt) => isDescendantPath(wt.path, normalized));
+  const childrenOfBareRepo = nonBareNonAlp.filter((wt) => isDescendantPath(wt.path, normalized));
   const mainChild = childrenOfBareRepo.find((wt) => basename(wt.path) === "main");
-  return mainChild?.path ?? childrenOfBareRepo[0]?.path ?? nonBareNonPaseo[0]?.path ?? normalized;
+  return mainChild?.path ?? childrenOfBareRepo[0]?.path ?? nonBareNonAlp[0]?.path ?? normalized;
 }
 
 export interface GitWorktreeEntry {
@@ -1104,15 +1104,15 @@ export interface GitWorktreeEntry {
   isBare?: boolean;
 }
 
-/** Check whether a path is under Paseo's worktree root. */
-export function isPaseoWorktreePath(
+/** Check whether a path is under Alp's worktree root. */
+export function isAlpWorktreePath(
   p: string,
-  options?: { paseoHome?: string; worktreesRoot?: string },
+  options?: { alpHome?: string; worktreesRoot?: string },
 ): boolean {
-  if (options?.worktreesRoot || options?.paseoHome) {
-    return isDescendantPath(p, resolvePaseoWorktreesBaseRoot(options));
+  if (options?.worktreesRoot || options?.alpHome) {
+    return isDescendantPath(p, resolveAlpWorktreesBaseRoot(options));
   }
-  return /[/\\]\.paseo[/\\]worktrees[/\\]/.test(p);
+  return /[/\\]\.alp[/\\]worktrees[/\\]/.test(p);
 }
 
 /** True when `child` is strictly inside `parent` (handles both `/` and `\`). */
@@ -1193,53 +1193,53 @@ export async function renameCurrentBranch(
 
   const currentBranch = await getCurrentBranch(cwd);
   if (currentBranch) {
-    rebindPaseoWorktreeChangeRequestHint(worktreeRoot, previousBranch, currentBranch);
+    rebindAlpWorktreeChangeRequestHint(worktreeRoot, previousBranch, currentBranch);
   }
   return { previousBranch, currentBranch };
 }
 
-type PaseoWorktreeForCwd =
-  | { isPaseoOwnedWorktree: false }
-  | { isPaseoOwnedWorktree: true; worktreeRoot: string };
+type AlpWorktreeForCwd =
+  | { isAlpOwnedWorktree: false }
+  | { isAlpOwnedWorktree: true; worktreeRoot: string };
 
-interface PaseoWorktreeLookupOptions {
+interface AlpWorktreeLookupOptions {
   context?: CheckoutContext;
   knownWorktreeRoot?: string | null;
   knownGitCommonDir?: string | null;
 }
 
-async function getPaseoWorktreeForCwd(
+async function getAlpWorktreeForCwd(
   cwd: string,
-  options: PaseoWorktreeLookupOptions = {},
-): Promise<PaseoWorktreeForCwd> {
+  options: AlpWorktreeLookupOptions = {},
+): Promise<AlpWorktreeForCwd> {
   // Fast-path reject: non-worktree paths do not need expensive ownership checks.
   if (!/[\\/]worktrees[\\/]/.test(cwd)) {
-    return { isPaseoOwnedWorktree: false };
+    return { isAlpOwnedWorktree: false };
   }
 
-  const ownership = await isPaseoOwnedWorktreeCwd(cwd, {
-    paseoHome: options.context?.paseoHome,
+  const ownership = await isAlpOwnedWorktreeCwd(cwd, {
+    alpHome: options.context?.alpHome,
     worktreesRoot: options.context?.worktreesRoot,
     knownGitCommonDir: options.knownGitCommonDir,
   });
   if (!ownership.allowed) {
-    return { isPaseoOwnedWorktree: false };
+    return { isAlpOwnedWorktree: false };
   }
 
   return {
-    isPaseoOwnedWorktree: true,
+    isAlpOwnedWorktree: true,
     worktreeRoot: options.knownWorktreeRoot ?? (await getWorktreeRoot(cwd, options.context)) ?? cwd,
   };
 }
 
 // Worktrees created before baseRef existed only stored the stripped name; it resolves
 // local-first, which is the base they were actually cut from.
-function storedBaseRefFromMetadata(metadata: PaseoWorktreeMetadata | null): string | null {
+function storedBaseRefFromMetadata(metadata: AlpWorktreeMetadata | null): string | null {
   return metadata?.baseRef ?? metadata?.baseRefName ?? null;
 }
 
-function readPaseoWorktreeBaseRef(worktreeRoot: string): string | null {
-  return storedBaseRefFromMetadata(readPaseoWorktreeMetadata(worktreeRoot));
+function readAlpWorktreeBaseRef(worktreeRoot: string): string | null {
+  return storedBaseRefFromMetadata(readAlpWorktreeMetadata(worktreeRoot));
 }
 
 async function getStoredBaseRefForCwd(
@@ -1249,12 +1249,12 @@ async function getStoredBaseRefForCwd(
   if (context?.facts?.isGit) {
     return context.facts.storedBaseRef;
   }
-  const paseoWorktree = await getPaseoWorktreeForCwd(cwd, { context });
-  if (!paseoWorktree.isPaseoOwnedWorktree) {
+  const alpWorktree = await getAlpWorktreeForCwd(cwd, { context });
+  if (!alpWorktree.isAlpOwnedWorktree) {
     return null;
   }
 
-  return readPaseoWorktreeBaseRef(paseoWorktree.worktreeRoot);
+  return readAlpWorktreeBaseRef(alpWorktree.worktreeRoot);
 }
 
 async function getResolvedBaseRefForCwd(
@@ -1778,7 +1778,7 @@ interface CheckoutInspectionContext {
   remoteUrl: string | null;
   absoluteGitDir: string | null;
   gitCommonDir: string | null;
-  paseoWorktree: PaseoWorktreeForCwd;
+  alpWorktree: AlpWorktreeForCwd;
 }
 
 async function inspectCheckoutContext(
@@ -1796,7 +1796,7 @@ async function inspectCheckoutContext(
     resolveAbsoluteGitDir(cwd, context),
     resolveGitCommonDir(cwd, context),
   ]);
-  const paseoWorktree = await getPaseoWorktreeForCwd(cwd, {
+  const alpWorktree = await getAlpWorktreeForCwd(cwd, {
     context,
     knownWorktreeRoot: root,
     knownGitCommonDir: gitCommonDir,
@@ -1808,7 +1808,7 @@ async function inspectCheckoutContext(
     remoteUrl,
     absoluteGitDir,
     gitCommonDir,
-    paseoWorktree,
+    alpWorktree,
   };
 }
 
@@ -1900,10 +1900,10 @@ function buildPullRequestLookupTargetFromPushConfig(
 }
 
 function buildPullRequestLookupTargetFromMetadata(
-  metadata: PaseoWorktreeMetadata | null,
+  metadata: AlpWorktreeMetadata | null,
   currentBranch: string,
 ): PullRequestStatusLookupTarget | null {
-  const target = getPaseoWorktreeChangeRequestHintForBranch(metadata, currentBranch);
+  const target = getAlpWorktreeChangeRequestHintForBranch(metadata, currentBranch);
   if (!target) {
     return null;
   }
@@ -1984,7 +1984,7 @@ async function resolvePullRequestLookupTargetFromPushConfig(
 async function resolveFactsPullRequestLookupTarget(input: {
   cwd: string;
   inspected: CheckoutInspectionContext;
-  metadata: PaseoWorktreeMetadata | null;
+  metadata: AlpWorktreeMetadata | null;
   branchRemoteName: string | null;
   branchMergeRef: string | null;
   branchRemoteUrl: string | null;
@@ -2037,10 +2037,10 @@ export async function getCheckoutSnapshotFacts(
     return { isGit: false };
   }
 
-  const paseoWorktreeMetadata = inspected.paseoWorktree.isPaseoOwnedWorktree
-    ? readPaseoWorktreeMetadata(inspected.paseoWorktree.worktreeRoot)
+  const alpWorktreeMetadata = inspected.alpWorktree.isAlpOwnedWorktree
+    ? readAlpWorktreeMetadata(inspected.alpWorktree.worktreeRoot)
     : null;
-  const storedBaseRef = storedBaseRefFromMetadata(paseoWorktreeMetadata);
+  const storedBaseRef = storedBaseRefFromMetadata(alpWorktreeMetadata);
   const resolvedBaseRef = storedBaseRef ?? (await resolveBaseRef(cwd, context));
   const mainRepoRoot = await getMainRepoRootFromCommonDir(
     cwd,
@@ -2082,7 +2082,7 @@ export async function getCheckoutSnapshotFacts(
   let pullRequestLookupTarget = await resolveFactsPullRequestLookupTarget({
     cwd,
     inspected,
-    metadata: paseoWorktreeMetadata,
+    metadata: alpWorktreeMetadata,
     branchRemoteName,
     branchMergeRef,
     branchRemoteUrl,
@@ -2103,7 +2103,7 @@ export async function getCheckoutSnapshotFacts(
     remoteUrl: inspected.remoteUrl,
     absoluteGitDir: inspected.absoluteGitDir,
     gitCommonDir: inspected.gitCommonDir,
-    paseoWorktree: inspected.paseoWorktree,
+    alpWorktree: inspected.alpWorktree,
     storedBaseRef,
     resolvedBaseRef,
     mainRepoRoot,
@@ -2119,7 +2119,7 @@ const PER_FILE_DIFF_MAX_BYTES = 1024 * 1024; // 1MB
 const TOTAL_DIFF_MAX_BYTES = 2 * 1024 * 1024; // 2MB
 const RELAY_MAX_FRAME_BYTES = 32 * 1024 * 1024;
 const CHECKOUT_DIFF_FRAME_HEADROOM_BYTES = 1024 * 1024;
-// Temporary until diffs load lazily per file. The Paseo relay's 32 MiB frame limit is
+// Temporary until diffs load lazily per file. The Alp relay's 32 MiB frame limit is
 // binding: string frames are encrypted and base64-encoded. Reserve 1 MiB plaintext for
 // the surrounding WebSocket JSON envelope after inverting that exact wire expansion.
 export const CHECKOUT_DIFF_MAX_STRUCTURED_BYTES =
@@ -2269,7 +2269,7 @@ export async function getCheckoutStatus(
   const worktreeRoot = facts.worktreeRoot;
   const currentBranch = facts.currentBranch;
   const remoteUrl = facts.remoteUrl;
-  const paseoWorktree = facts.paseoWorktree;
+  const alpWorktree = facts.alpWorktree;
   const isDirty = await isWorkingTreeDirty(cwd, context);
   const hasRemote = remoteUrl !== null;
   const baseRef = facts.resolvedBaseRef;
@@ -2288,7 +2288,7 @@ export async function getCheckoutStatus(
   const aheadOfOrigin = upstreamStatus?.aheadBehind.ahead ?? null;
   const behindOfOrigin = upstreamStatus?.aheadBehind.behind ?? null;
 
-  if (paseoWorktree.isPaseoOwnedWorktree && baseRef) {
+  if (alpWorktree.isAlpOwnedWorktree && baseRef) {
     return {
       isGit: true,
       repoRoot: worktreeRoot,
@@ -2302,7 +2302,7 @@ export async function getCheckoutStatus(
       behindOfOrigin,
       hasRemote,
       remoteUrl,
-      isPaseoOwnedWorktree: true,
+      isAlpOwnedWorktree: true,
     };
   }
 
@@ -2320,7 +2320,7 @@ export async function getCheckoutStatus(
     behindOfOrigin,
     hasRemote,
     remoteUrl,
-    isPaseoOwnedWorktree: false,
+    isAlpOwnedWorktree: false,
   };
 }
 
@@ -4190,7 +4190,7 @@ function getUnavailablePullRequestStatus(
   }
   if (
     facts?.isGit === true &&
-    facts.paseoWorktree.isPaseoOwnedWorktree &&
+    facts.alpWorktree.isAlpOwnedWorktree &&
     facts.pullRequestLookupTarget === null
   ) {
     return buildPullRequestStatusResult(null, "authenticated");

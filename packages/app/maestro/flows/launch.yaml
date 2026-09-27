@@ -27,6 +27,6 @@ appId: com.anhlp.alp
 
 - runFlow:
     when:
-      visible: "Welcome to Paseo"
+      visible: "Welcome to Alp"
     commands:
-      - assertVisible: "Welcome to Paseo"
+      - assertVisible: "Welcome to Alp"

@@ -121,9 +121,9 @@ import { VoiceAssistantWebSocketServer } from "./websocket-server.js";
 import { WorkspaceSetupRuntime } from "./workspace-setup-runtime.js";
 import { createWorkspaceLabelService } from "./workspace-labels/index.js";
 import { createGitHubService } from "../services/github-service.js";
-import { createPaseoWorktree as createRegisteredPaseoWorktree } from "./paseo-worktree-service.js";
+import { createAlpWorktree as createRegisteredAlpWorktree } from "./alp-worktree-service.js";
 import { createWorkspaceProvisioningService } from "./session/workspace-provisioning/workspace-provisioning-service.js";
-import { createPaseoWorktreeWorkflow } from "./worktree-session.js";
+import { createAlpWorktreeWorkflow } from "./worktree-session.js";
 import { DownloadTokenStore } from "./file-download/token-store.js";
 import type { OpenAiSpeechProviderConfig } from "./speech/providers/openai/config.js";
 import type { LocalSpeechProviderConfig } from "./speech/providers/local/config.js";
@@ -133,11 +133,8 @@ import { AgentManager } from "./agent/agent-manager.js";
 import { AgentStorage } from "./agent/agent-storage.js";
 import { attachAgentStoragePersistence } from "./persistence-hooks.js";
 import { createAgentMcpServer } from "./agent/mcp-server.js";
-import {
-  createPaseoToolCatalog,
-  type PaseoToolHostDependencies,
-} from "./agent/tools/paseo-tools.js";
-import type { PaseoToolRuntimeContext } from "./agent/tools/types.js";
+import { createAlpToolCatalog, type AlpToolHostDependencies } from "./agent/tools/alp-tools.js";
+import type { AlpToolRuntimeContext } from "./agent/tools/types.js";
 import { createAgentProviderRuntime } from "./agent/provider-runtime.js";
 import { bootstrapWorkspaceRegistries } from "./workspace-registry-bootstrap.js";
 import { WorkspaceReconciliationService } from "./workspace-reconciliation-service.js";
@@ -151,7 +148,7 @@ import { ScheduleService } from "./schedule/service.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { createOrchestrationSkills } from "./orchestration-skills/index.js";
 import { resolveConfigFromPersisted, type CliConfigOverrides } from "./config.js";
-import { resolvePaseoToolPolicy } from "./agent/paseo-tool-policy.js";
+import { resolveAlpToolPolicy } from "./agent/alp-tool-policy.js";
 import { BrowserToolsBroker } from "./browser-tools/broker.js";
 import { DaemonConfigBrowserToolsPolicy } from "./browser-tools/policy.js";
 import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
@@ -179,7 +176,7 @@ import type {
   FirstAgentContext,
   PluginSource,
   TerminalProfile,
-} from "@getpaseo/protocol/messages";
+} from "@alp/protocol/messages";
 import type {
   AgentProviderRuntimeSettingsMap,
   ProviderOverride,
@@ -356,18 +353,18 @@ function describeMcpDebugPayload(value: unknown): Record<string, unknown> {
   };
 }
 
-export type PaseoOpenAIConfig = OpenAiSpeechProviderConfig;
-export type PaseoLocalSpeechConfig = LocalSpeechProviderConfig;
+export type AlpOpenAIConfig = OpenAiSpeechProviderConfig;
+export type AlpLocalSpeechConfig = LocalSpeechProviderConfig;
 
-export interface PaseoSpeechSttLanguages {
+export interface AlpSpeechSttLanguages {
   dictation: string;
   voice: string;
 }
 
-export interface PaseoSpeechConfig {
+export interface AlpSpeechConfig {
   providers: RequestedSpeechProviders;
-  sttLanguages?: PaseoSpeechSttLanguages;
-  local?: PaseoLocalSpeechConfig;
+  sttLanguages?: AlpSpeechSttLanguages;
+  local?: AlpLocalSpeechConfig;
 }
 
 export type DaemonLifecycleIntent =
@@ -384,9 +381,9 @@ export type DaemonLifecycleIntent =
       reason: string;
     };
 
-export interface PaseoDaemonConfig {
+export interface AlpDaemonConfig {
   listen: string;
-  paseoHome: string;
+  alpHome: string;
   daemonVersion?: string;
   desktopManaged?: boolean;
   worktreesRoot?: string;
@@ -430,8 +427,8 @@ export interface PaseoDaemonConfig {
   };
   appBaseUrl?: string;
   auth?: DaemonAuthConfig;
-  openai?: PaseoOpenAIConfig;
-  speech?: PaseoSpeechConfig;
+  openai?: AlpOpenAIConfig;
+  speech?: AlpSpeechConfig;
   voiceLlmProvider?: AgentProvider | null;
   voiceLlmProviderExplicit?: boolean;
   voiceLlmModel?: string | null;
@@ -460,8 +457,8 @@ export interface PaseoDaemonConfig {
   };
 }
 
-export interface PaseoDaemon {
-  config: PaseoDaemonConfig;
+export interface AlpDaemon {
+  config: AlpDaemonConfig;
   agentManager: AgentManager;
   agentStorage: AgentStorage;
   terminalManager: TerminalManager;
@@ -474,7 +471,7 @@ export interface PaseoDaemon {
   getServerId(): string;
 }
 
-export interface PaseoDaemonDependencies {
+export interface AlpDaemonDependencies {
   hubRelationshipRemote?: HubRelationshipRemote;
   hubRelationshipClock?: HubRelationshipClock;
   hubRelationshipRetryPolicy?: HubRelationshipRetryPolicy;
@@ -486,7 +483,7 @@ export interface PaseoDaemonDependencies {
 }
 
 function createBootstrapManagedProcessRegistry(
-  config: Pick<PaseoDaemonConfig, "paseoHome" | "managedProcesses">,
+  config: Pick<AlpDaemonConfig, "alpHome" | "managedProcesses">,
   logger: Logger,
 ): ManagedProcessRegistry {
   if (config.managedProcesses) {
@@ -494,7 +491,7 @@ function createBootstrapManagedProcessRegistry(
   }
 
   return createManagedProcessRegistry({
-    paseoHome: config.paseoHome,
+    alpHome: config.alpHome,
     processTable: createSystemManagedProcessTable(),
     terminateProcess: terminateWithTreeKill,
     logger,
@@ -511,7 +508,7 @@ async function reconcileManagedProcessLedger(
   }
 }
 
-function mountWebUi(app: express.Application, config: PaseoDaemonConfig, logger: Logger): void {
+function mountWebUi(app: express.Application, config: AlpDaemonConfig, logger: Logger): void {
   app.use(
     createWebUiMiddleware({
       enabled: config.webUi?.enabled ?? false,
@@ -522,11 +519,11 @@ function mountWebUi(app: express.Application, config: PaseoDaemonConfig, logger:
   );
 }
 
-function resolveExpressTrustProxySetting(config: PaseoDaemonConfig): true | string[] {
+function resolveExpressTrustProxySetting(config: AlpDaemonConfig): true | string[] {
   return config.trustedProxies ?? ["loopback"];
 }
 
-function createInitialMutableDaemonConfig(config: PaseoDaemonConfig): MutableDaemonConfig {
+function createInitialMutableDaemonConfig(config: AlpDaemonConfig): MutableDaemonConfig {
   const providers = config.providerOverrides ?? {};
 
   const initialConfig: MutableDaemonConfig = {
@@ -567,14 +564,14 @@ function createInitialMutableDaemonConfig(config: PaseoDaemonConfig): MutableDae
   return initialConfig;
 }
 
-export async function createPaseoDaemon(
-  config: PaseoDaemonConfig,
+export async function createAlpDaemon(
+  config: AlpDaemonConfig,
   rootLogger: Logger,
-  dependencies: PaseoDaemonDependencies = {},
-): Promise<PaseoDaemon> {
+  dependencies: AlpDaemonDependencies = {},
+): Promise<AlpDaemon> {
   configureGitProcessPolicy(config.git ?? resolveGitProcessPolicy({ env: process.env }));
   const logger = rootLogger.child({ module: "bootstrap" });
-  const obsoleteTimelineDirectory = path.join(config.paseoHome, "agent-timelines");
+  const obsoleteTimelineDirectory = path.join(config.alpHome, "agent-timelines");
   await rm(obsoleteTimelineDirectory, { recursive: true, force: true }).catch((error) => {
     logger.warn(
       { err: error, path: obsoleteTimelineDirectory },
@@ -585,12 +582,12 @@ export async function createPaseoDaemon(
   const elapsed = () => `${(performance.now() - bootstrapStart).toFixed(0)}ms`;
   const daemonVersion = config.daemonVersion ?? resolveDaemonVersion(import.meta.url);
   const initialMutableConfig = createInitialMutableDaemonConfig(config);
-  const daemonConfigStore = new DaemonConfigStore(config.paseoHome, initialMutableConfig, logger, {
+  const daemonConfigStore = new DaemonConfigStore(config.alpHome, initialMutableConfig, logger, {
     relayEnabledMutable: config.relayEnabledMutable ?? true,
     startupPersisted: config.configReload?.startupPersisted,
     reloadSource: {
       resolve: (persisted) => {
-        const reloaded = resolveConfigFromPersisted(config.paseoHome, persisted, {
+        const reloaded = resolveConfigFromPersisted(config.alpHome, persisted, {
           env: config.configReload?.env ?? process.env,
           cli: config.configReload?.cli,
           relayEnabledFallback: config.configReload?.relayEnabledFallback,
@@ -620,13 +617,13 @@ export async function createPaseoDaemon(
   const browserToolsPolicy = new DaemonConfigBrowserToolsPolicy(daemonConfigStore);
   const browserToolsBroker = new BrowserToolsBroker({});
   const pluginRuntime = new PluginService(logger, daemonConfigStore, daemonVersion, {
-    managedSources: new ManagedPluginSources(config.paseoHome),
-    settingsDirectory: path.join(config.paseoHome, "plugin-settings"),
+    managedSources: new ManagedPluginSources(config.alpHome),
+    settingsDirectory: path.join(config.alpHome, "plugin-settings"),
     bundledPlugins,
   });
 
-  const serverId = getOrCreateServerId(config.paseoHome, { logger });
-  const daemonKeyPair = await loadOrCreateDaemonKeyPair(config.paseoHome, logger);
+  const serverId = getOrCreateServerId(config.alpHome, { logger });
+  const daemonKeyPair = await loadOrCreateDaemonKeyPair(config.alpHome, logger);
   const managedProcesses = createBootstrapManagedProcessRegistry(config, logger);
   // Reconcile the helper-process ledger in the background so it never blocks the
   // daemon from coming up; terminating a live leftover can take a few seconds.
@@ -872,21 +869,21 @@ export async function createPaseoDaemon(
 
   const agentStorage = new AgentStorage(config.agentStoragePath, logger);
   const projectRegistry = new FileBackedProjectRegistry(
-    path.join(config.paseoHome, "projects", "projects.json"),
+    path.join(config.alpHome, "projects", "projects.json"),
     logger,
   );
   workspaceRegistry = new FileBackedWorkspaceRegistry(
-    path.join(config.paseoHome, "projects", "workspaces.json"),
+    path.join(config.alpHome, "projects", "workspaces.json"),
     logger,
   );
   const workspaceLabelService = createWorkspaceLabelService({
-    paseoHome: config.paseoHome,
+    alpHome: config.alpHome,
     workspaceRegistry,
   });
   const github = createGitHubService();
   const workspaceGitService = new WorkspaceGitServiceImpl({
     logger,
-    paseoHome: config.paseoHome,
+    alpHome: config.alpHome,
     worktreesRoot: config.worktreesRoot,
     deps: {
       forgeOverrides: { github },
@@ -909,7 +906,7 @@ export async function createPaseoDaemon(
     logger,
   });
   const agentProviderRuntime = await createAgentProviderRuntime({
-    paseoHome: config.paseoHome,
+    alpHome: config.alpHome,
     logger,
     snapshotManager: {
       refreshTimeoutMs: config.providerCatalogRefreshTimeoutMs,
@@ -944,8 +941,8 @@ export async function createPaseoDaemon(
       workspaceGitService.onWorkspaceStateMayHaveChanged(cwd);
     },
     mcpAuthToken: agentMcpAuthToken,
-    resolvePaseoToolPolicy: (provider) =>
-      resolvePaseoToolPolicy(provider, daemonConfigStore.get().providers),
+    resolveAlpToolPolicy: (provider) =>
+      resolveAlpToolPolicy(provider, daemonConfigStore.get().providers),
     logger,
   });
   const syncPluginProviders = () => {
@@ -965,7 +962,7 @@ export async function createPaseoDaemon(
   logger.info({ elapsed: elapsed() }, "Agent storage initialized");
   await bootstrapWorkspaceRegistries({
     serverId,
-    paseoHome: config.paseoHome,
+    alpHome: config.alpHome,
     agentStorage,
     projectRegistry,
     workspaceRegistry,
@@ -1000,7 +997,7 @@ export async function createPaseoDaemon(
   });
   const checkoutDiffManager = new CheckoutDiffManager({
     logger,
-    paseoHome: config.paseoHome,
+    alpHome: config.alpHome,
     workspaceGitService,
   });
   const archiveWorkspaceRecordExternal = async (
@@ -1046,7 +1043,7 @@ export async function createPaseoDaemon(
         cwd: workspace.cwd,
         kind: workspace.kind,
         worktreeRoot: workspace.worktreeRoot,
-        isPaseoOwnedWorktree: workspace.isPaseoOwnedWorktree,
+        isAlpOwnedWorktree: workspace.isAlpOwnedWorktree,
         mainRepoRoot: workspace.mainRepoRoot,
       }));
   };
@@ -1103,8 +1100,8 @@ export async function createPaseoDaemon(
   });
 
   setupAutoArchiveOnMerge({
-    paseoHome: config.paseoHome,
-    paseoWorktreesBaseRoot: config.worktreesRoot,
+    alpHome: config.alpHome,
+    alpWorktreesBaseRoot: config.worktreesRoot,
     daemonConfigStore,
     workspaceGitService,
     github,
@@ -1122,16 +1119,16 @@ export async function createPaseoDaemon(
     emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
   });
 
-  const createPaseoWorktreeForTools = async (
-    input: Parameters<typeof createPaseoWorktreeWorkflow>[1],
-    serviceOptions?: Parameters<typeof createPaseoWorktreeWorkflow>[2],
+  const createAlpWorktreeForTools = async (
+    input: Parameters<typeof createAlpWorktreeWorkflow>[1],
+    serviceOptions?: Parameters<typeof createAlpWorktreeWorkflow>[2],
   ) => {
-    return createPaseoWorktreeWorkflow(
+    return createAlpWorktreeWorkflow(
       {
-        paseoHome: config.paseoHome,
+        alpHome: config.alpHome,
         worktreesRoot: config.worktreesRoot,
-        createPaseoWorktree: async (workflowInput, workflowOptions) => {
-          return createRegisteredPaseoWorktree(workflowInput, {
+        createAlpWorktree: async (workflowInput, workflowOptions) => {
+          return createRegisteredAlpWorktree(workflowInput, {
             github,
             ...(workflowOptions?.resolveDefaultBranch
               ? {
@@ -1179,11 +1176,11 @@ export async function createPaseoDaemon(
     agentManager,
     agentStorage,
     logger,
-    paseoHome: config.paseoHome,
+    alpHome: config.alpHome,
     worktreesRoot: config.worktreesRoot,
     terminalManager,
     providerSnapshotManager,
-    createPaseoWorktree: createPaseoWorktreeForTools,
+    createAlpWorktree: createAlpWorktreeForTools,
     ensureWorkspaceForCreate: ensureWorkspaceForCreateAndBroadcastExternal,
   };
   const createAgent = (input: Parameters<typeof createAgentCommand>[1]) =>
@@ -1191,8 +1188,8 @@ export async function createPaseoDaemon(
   const archiveWorkspaceByIdExternal = (workspaceId: string, requestId: string) =>
     archiveByScope(
       {
-        paseoHome: config.paseoHome,
-        paseoWorktreesBaseRoot: config.worktreesRoot,
+        alpHome: config.alpHome,
+        alpWorktreesBaseRoot: config.worktreesRoot,
         github,
         workspaceGitService,
         agentManager,
@@ -1214,13 +1211,13 @@ export async function createPaseoDaemon(
       { scope: { kind: "workspace", workspaceId }, requestId },
     );
   const hubAgentLifecycle = new CreateAgentLifecycleDispatch({
-    paseoHome: config.paseoHome,
+    alpHome: config.alpHome,
     worktreesRoot: config.worktreesRoot,
     agentManager,
     agentStorage,
     github,
     workspaceGitService,
-    createPaseoWorktreeWorkflow: createPaseoWorktreeForTools,
+    createAlpWorktreeWorkflow: createAlpWorktreeForTools,
     archiveAgentForClose: (agentId) =>
       archiveAgentCommand({ agentManager, agentStorage, logger }, agentId),
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
@@ -1236,7 +1233,7 @@ export async function createPaseoDaemon(
     logger,
   });
   const hubRelationships = new HubRelationshipController({
-    paseoHome: config.paseoHome,
+    alpHome: config.alpHome,
     hostname: getHostname(),
     serverId,
     daemonPublicKey: daemonKeyPair.publicKeyB64,
@@ -1298,11 +1295,11 @@ export async function createPaseoDaemon(
     await emitWorkspaceUpdatesExternal([workspace.workspaceId]);
     return workspace;
   };
-  const createSchedulePaseoWorktreeExternal = async (input: {
+  const createScheduleAlpWorktreeExternal = async (input: {
     cwd: string;
     firstAgentContext: FirstAgentContext;
   }) => {
-    const result = await createPaseoWorktreeForTools({
+    const result = await createAlpWorktreeForTools({
       cwd: input.cwd,
       firstAgentContext: input.firstAgentContext,
     });
@@ -1312,8 +1309,8 @@ export async function createPaseoDaemon(
   const archiveScheduleWorkspaceExternal = async (workspaceId: string) => {
     await archiveByScope(
       {
-        paseoHome: config.paseoHome,
-        paseoWorktreesBaseRoot: config.worktreesRoot,
+        alpHome: config.alpHome,
+        alpWorktreesBaseRoot: config.worktreesRoot,
         github,
         workspaceGitService,
         agentManager,
@@ -1345,13 +1342,13 @@ export async function createPaseoDaemon(
     );
   };
   const scheduleService = new ScheduleService({
-    paseoHome: config.paseoHome,
+    alpHome: config.alpHome,
     logger,
     agentManager,
     agentStorage,
     createAgent,
     createDirectoryWorkspace: createScheduleLocalWorkspaceExternal,
-    createPaseoWorktreeWorkspace: createSchedulePaseoWorktreeExternal,
+    createAlpWorktreeWorkspace: createScheduleAlpWorktreeExternal,
     archiveWorkspace: archiveScheduleWorkspaceExternal,
   });
   await scheduleService.start();
@@ -1375,8 +1372,8 @@ export async function createPaseoDaemon(
   logger.info({ elapsed: elapsed() }, "Preparing voice and MCP runtime");
 
   const createAgentToolHostDependencies = (
-    runtime: PaseoToolRuntimeContext,
-  ): PaseoToolHostDependencies => ({
+    runtime: AlpToolRuntimeContext,
+  ): AlpToolHostDependencies => ({
     agentManager,
     agentStorage,
     terminalManager,
@@ -1419,18 +1416,18 @@ export async function createPaseoDaemon(
       spawnWorkspaceScript,
       assertAutomationAllowed: (workspaceId) =>
         assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, workspaceId),
-      globalServicePorts: loadPersistedConfig(config.paseoHome).worktrees?.servicePorts,
+      globalServicePorts: loadPersistedConfig(config.alpHome).worktrees?.servicePorts,
     }),
     markWorkspaceArchiving: markWorkspaceArchivingExternal,
     clearWorkspaceArchiving: clearWorkspaceArchivingExternal,
     ensureWorkspaceForCreate: createAgentCommandDependencies.ensureWorkspaceForCreate,
-    createPaseoWorktree: createAgentCommandDependencies.createPaseoWorktree,
+    createAlpWorktree: createAgentCommandDependencies.createAlpWorktree,
     browserToolsEnabled: browserToolsPolicy.isEnabled(),
     browserToolsBroker,
-    paseoToolPolicy:
-      runtime.paseoToolPolicy ??
-      (runtime.callerAgentId ? agentManager.getPaseoToolPolicy(runtime.callerAgentId) : undefined),
-    paseoHome: config.paseoHome,
+    alpToolPolicy:
+      runtime.alpToolPolicy ??
+      (runtime.callerAgentId ? agentManager.getAlpToolPolicy(runtime.callerAgentId) : undefined),
+    alpHome: config.alpHome,
     worktreesRoot: config.worktreesRoot,
     callerAgentId: runtime.callerAgentId,
     enableVoiceTools: runtime.enableVoiceTools,
@@ -1439,13 +1436,13 @@ export async function createPaseoDaemon(
     resolveCallerContext: (agentId) => wsServer?.resolveVoiceCallerContext(agentId) ?? null,
     logger,
   });
-  const createAgentToolCatalog = (runtime: PaseoToolRuntimeContext) =>
-    createPaseoToolCatalog(createAgentToolHostDependencies(runtime));
+  const createAgentToolCatalog = (runtime: AlpToolRuntimeContext) =>
+    createAlpToolCatalog(createAgentToolHostDependencies(runtime));
   const setAgentProviderToolsEnabled = (enabled: boolean) => {
-    agentProviderRuntime.setPaseoToolCatalog(enabled ? createAgentToolCatalog({}) : null);
+    agentProviderRuntime.setAlpToolCatalog(enabled ? createAgentToolCatalog({}) : null);
   };
-  agentManager.setPaseoToolCatalogFactory(createAgentToolCatalog);
-  agentManager.setPaseoToolsEnabled(config.mcpInjectIntoAgents !== false);
+  agentManager.setAlpToolCatalogFactory(createAgentToolCatalog);
+  agentManager.setAlpToolsEnabled(config.mcpInjectIntoAgents !== false);
   setAgentProviderToolsEnabled(config.mcpEnabled !== false && config.mcpInjectIntoAgents !== false);
 
   let mcpEnabled = config.mcpEnabled ?? true;
@@ -1457,8 +1454,8 @@ export async function createPaseoDaemon(
       const agentMcpServer = await createAgentMcpServer(
         createAgentToolHostDependencies({
           callerAgentId,
-          paseoToolPolicy: callerAgentId
-            ? await agentManager.resolveCallerPaseoToolPolicy(callerAgentId)
+          alpToolPolicy: callerAgentId
+            ? await agentManager.resolveCallerAlpToolPolicy(callerAgentId)
             : undefined,
         }),
       );
@@ -1618,17 +1615,17 @@ export async function createPaseoDaemon(
             agentMcpBaseUrl =
               !mcpEnabled || config.mcpInjectIntoAgents === false ? null : mcpBaseUrl;
             agentManager.setMcpBaseUrl(agentMcpBaseUrl);
-            agentManager.setPaseoToolsEnabled(mcpEnabled && config.mcpInjectIntoAgents !== false);
+            agentManager.setAlpToolsEnabled(mcpEnabled && config.mcpInjectIntoAgents !== false);
             daemonConfigStore.onFieldChange("mcp.enabled", (value) => {
               mcpEnabled = value !== false;
               const inject = daemonConfigStore.get().mcp.injectIntoAgents !== false;
               agentManager.setMcpBaseUrl(mcpEnabled && inject ? mcpBaseUrl : null);
-              agentManager.setPaseoToolsEnabled(mcpEnabled && inject);
+              agentManager.setAlpToolsEnabled(mcpEnabled && inject);
               setAgentProviderToolsEnabled(mcpEnabled && inject);
             });
             daemonConfigStore.onFieldChange("mcp.injectIntoAgents", (value) => {
               agentManager.setMcpBaseUrl(mcpEnabled && value ? mcpBaseUrl : null);
-              agentManager.setPaseoToolsEnabled(mcpEnabled && value !== false);
+              agentManager.setAlpToolsEnabled(mcpEnabled && value !== false);
               setAgentProviderToolsEnabled(mcpEnabled && value !== false);
             });
             daemonConfigStore.onFieldChange("appendSystemPrompt", (value) => {
@@ -1670,7 +1667,7 @@ export async function createPaseoDaemon(
               agentManager,
               agentStorage,
               downloadTokenStore,
-              config.paseoHome,
+              config.alpHome,
               daemonConfigStore,
               mcpBaseUrl,
               {
@@ -1733,7 +1730,7 @@ export async function createPaseoDaemon(
               orchestrationSkills,
               workspaceLabelService,
             );
-            pluginRuntime.bindPaseoSessionHost(wsServer);
+            pluginRuntime.bindAlpSessionHost(wsServer);
             await pluginRuntime.start();
             wsServer.beginAcceptingConnections();
             relayRuntime = createRelayRuntime({

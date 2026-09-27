@@ -1,5 +1,5 @@
-const VOICE_PROMPT_BLOCK_START = "<paseo_voice_mode>";
-const VOICE_PROMPT_BLOCK_END = "</paseo_voice_mode>";
+const VOICE_PROMPT_BLOCK_START = "<alp_voice_mode>";
+const VOICE_PROMPT_BLOCK_END = "</alp_voice_mode>";
 
 const VOICE_AGENT_SYSTEM_INSTRUCTION = [
   "alp voice mode is now on.",

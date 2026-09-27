@@ -12,11 +12,11 @@ Git worktrees are one kind of workspace.
 
 A [workspace](/docs/workspaces) is the place where a task happens. When that workspace is backed by a git worktree, alp creates a separate directory on a separate branch so parallel agents never step on each other.
 
-This page covers the git-specific details: where worktrees live, how branches are chosen, and how to configure setup hooks, scripts, terminals, and long-running services through `paseo.json`.
+This page covers the git-specific details: where worktrees live, how branches are chosen, and how to configure setup hooks, scripts, terminals, and long-running services through `alp.json`.
 
 ## Layout and workflow
 
-Worktrees live under `$PASEO_HOME/worktrees/` by default, grouped by a hash of the source checkout path. You can change the base directory with `worktrees.root` in `config.json`. Each worktree gets a slug and a branch when its workspace is created.
+Worktrees live under `$ALP_HOME/worktrees/` by default, grouped by a hash of the source checkout path. You can change the base directory with `worktrees.root` in `config.json`. Each worktree gets a slug and a branch when its workspace is created.
 
 ```
 ~/.alp/worktrees/
@@ -78,9 +78,9 @@ alp workspace create \
 
 Add `--forge <name>` when alp cannot infer the forge from the source checkout.
 
-## paseo.json
+## alp.json
 
-Drop a `paseo.json` in your repo root. alp reads it from the committed version of the base branch you picked, so uncommitted changes in other branches don't apply.
+Drop a `alp.json` in your repo root. alp reads it from the committed version of the base branch you picked, so uncommitted changes in other branches don't apply.
 
 ```json
 {
@@ -102,7 +102,7 @@ Drop a `paseo.json` in your repo root. alp reads it from the committed version o
 ```json
 {
   "worktree": {
-    "setup": "npm ci\ncp \"$PASEO_SOURCE_CHECKOUT_PATH/.env\" .env\nnpm run db:migrate",
+    "setup": "npm ci\ncp \"$ALP_SOURCE_CHECKOUT_PATH/.env\" .env\nnpm run db:migrate",
     "teardown": "npm run db:drop || true"
   }
 }
@@ -110,7 +110,7 @@ Drop a `paseo.json` in your repo root. alp reads it from the committed version o
 
 Both fields accept a multiline shell script or an array of commands; commands run sequentially either way.
 
-Commands run with the worktree as `cwd`. Use `$PASEO_SOURCE_CHECKOUT_PATH` to reach files in the original checkout (untracked config, local caches, etc).
+Commands run with the worktree as `cwd`. Use `$ALP_SOURCE_CHECKOUT_PATH` to reach files in the original checkout (untracked config, local caches, etc).
 
 ## Scripts and services
 
@@ -137,23 +137,23 @@ Run them from the app, or manage them from automation with [`alp script`](/docs/
   "scripts": {
     "web": {
       "type": "service",
-      "command": "npm run dev -- --port $PASEO_PORT",
+      "command": "npm run dev -- --port $ALP_PORT",
       "port": 3000
     },
     "api": {
       "type": "service",
-      "command": "npm run api -- --port $PASEO_PORT"
+      "command": "npm run api -- --port $ALP_PORT"
     }
   }
 }
 ```
 
-Omit `port` to let alp auto-assign one. Bind your process to `$PASEO_PORT` rather than hard-coding, each worktree gets a distinct port so multiple copies of the same service coexist.
+Omit `port` to let alp auto-assign one. Bind your process to `$ALP_PORT` rather than hard-coding, each worktree gets a distinct port so multiple copies of the same service coexist.
 
 ### Dynamic port allocation
 
 By default, alp asks the OS for an available ephemeral port. Configure a range globally in
-`$PASEO_HOME/config.json` (`~/.alp/config.json` by default) or per project in `paseo.json`:
+`$ALP_HOME/config.json` (`~/.alp/config.json` by default) or per project in `alp.json`:
 
 ```json
 // ~/.alp/config.json
@@ -165,7 +165,7 @@ By default, alp asks the OS for an available ephemeral port. Configure a range g
 ```
 
 ```json
-// paseo.json
+// alp.json
 {
   "worktree": {
     "servicePorts": { "range": "3000-4000" }
@@ -188,8 +188,8 @@ For an external allocator, configure `portScript` instead:
 
 alp runs the executable in the workspace directory with four arguments: service name, workspace
 ID, branch name, and worktree path. Since the script is executed directly without a shell, `portScript` must point to a real executable (such as a compiled binary or a script with a proper shebang line like `#!/bin/bash`) rather than an inline shell command or pipeline. If you need shell evaluation or pipelines, wrap them in a small executable script. A missing branch is passed as an empty string. The same values
-are available as `PASEO_SCRIPTNAME`, `PASEO_WORKSPACE_ID`, `PASEO_BRANCH_NAME`, and
-`PASEO_WORKTREE_PATH`. It must print one valid TCP port to stdout. `portScript` wins over `range` in
+are available as `ALP_SCRIPTNAME`, `ALP_WORKSPACE_ID`, `ALP_BRANCH_NAME`, and
+`ALP_WORKTREE_PATH`. It must print one valid TCP port to stdout. `portScript` wins over `range` in
 the same block. alp trusts the external allocator, so the returned port may already be in use, for
 example by a service alp will attach to.
 
@@ -211,15 +211,15 @@ http://<script>--<project>.localhost:<daemon-port>
 Services launched from the same workspace see each other's ports and proxy URLs. Given `web` and `api` above, each process gets:
 
 ```
-PASEO_PORT=3000                         # this service's port
-PASEO_URL=http://web--my-app.localhost:6767  # this service's proxy URL
-PASEO_SERVICE_API_PORT=51732
-PASEO_SERVICE_API_URL=http://api--my-app.localhost:6767
-PASEO_SERVICE_WEB_PORT=3000
-PASEO_SERVICE_WEB_URL=http://web--my-app.localhost:6767
+ALP_PORT=3000                         # this service's port
+ALP_URL=http://web--my-app.localhost:6767  # this service's proxy URL
+ALP_SERVICE_API_PORT=51732
+ALP_SERVICE_API_URL=http://api--my-app.localhost:6767
+ALP_SERVICE_WEB_PORT=3000
+ALP_SERVICE_WEB_URL=http://web--my-app.localhost:6767
 ```
 
-Script names are upper-cased and non-alphanumerics become `_`. Point your frontend at `$PASEO_SERVICE_API_URL` instead of hard-coding a port.
+Script names are upper-cased and non-alphanumerics become `_`. Point your frontend at `$ALP_SERVICE_API_URL` instead of hard-coding a port.
 
 ## Terminals
 
@@ -240,16 +240,16 @@ Open terminals automatically when a worktree is created. Useful for tailing logs
 
 Setup, teardown, scripts, and services all see:
 
-- `$PASEO_SOURCE_CHECKOUT_PATH`, the original repo root
-- `$PASEO_WORKTREE_PATH`, the worktree directory
-- `$PASEO_BRANCH_NAME`, the worktree's branch
-- `$PASEO_WORKTREE_PORT`, legacy per-worktree port (prefer `$PASEO_PORT` inside services)
+- `$ALP_SOURCE_CHECKOUT_PATH`, the original repo root
+- `$ALP_WORKTREE_PATH`, the worktree directory
+- `$ALP_BRANCH_NAME`, the worktree's branch
+- `$ALP_WORKTREE_PORT`, legacy per-worktree port (prefer `$ALP_PORT` inside services)
 
 Services additionally get:
 
-- `$PASEO_PORT`, this service's assigned port
-- `$PASEO_URL`, this service's proxy URL
-- `$PASEO_SERVICE_<NAME>_PORT` / `_URL`, peer service ports and URLs
+- `$ALP_PORT`, this service's assigned port
+- `$ALP_URL`, this service's proxy URL
+- `$ALP_SERVICE_<NAME>_PORT` / `_URL`, peer service ports and URLs
 - `$HOST`, `127.0.0.1` for local-only daemons, `0.0.0.0` when the daemon binds all interfaces
 
 ## Manage the workspace

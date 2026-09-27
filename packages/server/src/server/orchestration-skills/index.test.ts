@@ -56,7 +56,7 @@ async function writeSkill(dir: string, name: string, contents: string): Promise<
 }
 
 async function makeHarness(coreSkills: string[] = ["alp"]): Promise<Harness> {
-  const root = await mkdtemp(path.join(os.tmpdir(), "paseo-plugin-skills-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "alp-plugin-skills-"));
   roots.push(root);
   const targets: SkillTargets = {
     sourceDir: path.join(root, "core"),
@@ -74,7 +74,7 @@ async function makeHarness(coreSkills: string[] = ["alp"]): Promise<Harness> {
       const skillsDir = options.skillsDir ?? "skills";
       await mkdir(directory, { recursive: true });
       await writeFile(
-        path.join(directory, "paseo-plugin.json"),
+        path.join(directory, "alp-plugin.json"),
         JSON.stringify({
           id,
           skills: options.install === false ? { dir: skillsDir, install: false } : skillsDir,
@@ -87,7 +87,7 @@ async function makeHarness(coreSkills: string[] = ["alp"]): Promise<Harness> {
     },
     skills({ pluginsEnabled = true, plugins = {}, bundled = {}, logger: loggerOverride }) {
       stores += 1;
-      const configStore = new DaemonConfigStore(path.join(root, `paseo-home-${stores}`), {
+      const configStore = new DaemonConfigStore(path.join(root, `alp-home-${stores}`), {
         mcp: { injectIntoAgents: false },
         browserTools: { enabled: false },
         providers: {},
@@ -222,7 +222,7 @@ describe("plugin skills: a disabled plugin's skills stay managed", () => {
     const fork = path.join(harness.root, "fork");
     await mkdir(fork, { recursive: true });
     await writeFile(
-      path.join(fork, "paseo-plugin.json"),
+      path.join(fork, "alp-plugin.json"),
       JSON.stringify({ id: "pack", skills: "skills" }),
     );
     await writeSkill(path.join(fork, "skills"), "pack-plan", "fork pack-plan");
@@ -270,7 +270,7 @@ describe("plugin skills: install: false ships names but never installs them", ()
     // ...then the manifest switches to install:false, as if the plugin author
     // turned it off, without anyone touching the copy already installed.
     await writeFile(
-      path.join(directory, "paseo-plugin.json"),
+      path.join(directory, "alp-plugin.json"),
       JSON.stringify({ id: "slp-dev", skills: { dir: "skills", install: false } }),
     );
     const turnedOff = harness.skills({ plugins: { "slp-dev": { path: directory } } });

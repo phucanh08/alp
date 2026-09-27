@@ -1,4 +1,4 @@
-import type { MutableDaemonConfig } from "@getpaseo/protocol/messages";
+import type { MutableDaemonConfig } from "@alp/protocol/messages";
 
 export const BROWSER_TOOLS_TITLE = "Browser tools";
 export const BROWSER_TOOLS_WARNING =

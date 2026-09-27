@@ -46,9 +46,9 @@ describe("Hub init planning", () => {
 
 describe("Hub init scaffold", () => {
   it.each([
-    ["github", { connection: "github-getpaseo", repo: "getpaseo/paseo", user: "boudra" }],
-    ["slack", { connection: "slack-paseo", user: "U123456" }],
-    ["discord", { connection: "discord-paseo", user: "987654321" }],
+    ["github", { connection: "github-alp", repo: "alp/alp", user: "boudra" }],
+    ["slack", { connection: "slack-alp", user: "U123456" }],
+    ["discord", { connection: "discord-alp", user: "987654321" }],
   ] satisfies readonly [HubInitProvider, Record<string, string>][])(
     "creates a self-contained %s organization trigger",
     (provider, providerFilters) => {
@@ -89,9 +89,9 @@ describe("Hub init scaffold", () => {
       ]);
       const event = Object.values(parsed.on)[0]!;
       expect(event.filters.from_users).toEqual([providerFilters.user]);
-      if (provider === "github") expect(event.connection).toBe("github-getpaseo");
-      if (provider === "slack") expect(event.connection).toBe("slack-paseo");
-      if (provider === "discord") expect(event.connection).toBe("discord-paseo");
+      if (provider === "github") expect(event.connection).toBe("github-alp");
+      if (provider === "slack") expect(event.connection).toBe("slack-alp");
+      if (provider === "discord") expect(event.connection).toBe("discord-alp");
       expect(event.filters.channels).toBeUndefined();
       expect(parsed.run).toMatchObject({
         target: { daemon: "build-studio", cwd: "/workspace" },
@@ -111,9 +111,9 @@ describe("Hub init scaffold", () => {
 
 describe("GitHub origin detection", () => {
   it.each([
-    ["git@github.com:getpaseo/paseo.git", "getpaseo/paseo"],
-    ["ssh://git@github.com/getpaseo/paseo.git", "getpaseo/paseo"],
-    ["https://github.com/getpaseo/paseo.git", "getpaseo/paseo"],
+    ["git@github.com:getpaseo/paseo.git", "alp/alp"],
+    ["ssh://git@github.com/getpaseo/paseo.git", "alp/alp"],
+    ["https://github.com/getpaseo/paseo.git", "alp/alp"],
     ["https://gitlab.com/getpaseo/paseo.git", undefined],
   ])("resolves %s", (remote, expected) => {
     expect(githubRepositoryFromRemote(remote)).toBe(expected);

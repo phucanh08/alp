@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { PluginSource } from "@getpaseo/protocol/messages";
+import type { PluginSource } from "@alp/protocol/messages";
 
 export interface PluginEnablementConfig {
   pluginsEnabled?: boolean;

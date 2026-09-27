@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Command } from "commander";
-import { isBearerTokenValid } from "@getpaseo/server/auth";
+import { isBearerTokenValid } from "@alp/server/auth";
 import {
   runSetPasswordCommand,
   setDaemonPasswordInConfig,
@@ -14,8 +14,8 @@ import {
 
 console.log("=== Daemon Set Password Command ===\n");
 
-const root = await mkdtemp(join(tmpdir(), "paseo-set-password-"));
-const paseoHome = join(root, ".paseo");
+const root = await mkdtemp(join(tmpdir(), "alp-set-password-"));
+const alpHome = join(root, ".alp");
 
 function promptSequence(values: string[]): PromptPassword {
   return async () => {
@@ -30,9 +30,9 @@ function promptSequence(values: string[]): PromptPassword {
 try {
   {
     console.log("Test 1: setDaemonPasswordInConfig writes hash and preserves config fields");
-    await mkdir(paseoHome, { recursive: true });
+    await mkdir(alpHome, { recursive: true });
     await writeFile(
-      join(paseoHome, "config.json"),
+      join(alpHome, "config.json"),
       `${JSON.stringify(
         {
           version: 1,
@@ -47,13 +47,13 @@ try {
       )}\n`,
     );
 
-    const result = await setDaemonPasswordInConfig("shared-secret", { home: paseoHome });
-    const config = JSON.parse(await readFile(join(paseoHome, "config.json"), "utf-8"));
+    const result = await setDaemonPasswordInConfig("shared-secret", { home: alpHome });
+    const config = JSON.parse(await readFile(join(alpHome, "config.json"), "utf-8"));
 
-    assert.strictEqual(result.configPath, join(paseoHome, "config.json"));
+    assert.strictEqual(result.configPath, join(alpHome, "config.json"));
     assert.strictEqual(
       result.restartCommand,
-      `paseo daemon restart --home ${JSON.stringify(paseoHome)}`,
+      `alp daemon restart --home ${JSON.stringify(alpHome)}`,
     );
     assert.strictEqual(config.daemon.listen, "127.0.0.1:9999");
     assert.strictEqual(config.daemon.relay.enabled, false);
@@ -70,13 +70,13 @@ try {
     console.log("Test 2: command prompts twice and accepts matching confirmation");
     const result = await runSetPasswordCommand(
       {
-        home: paseoHome,
-        daemonTarget: { kind: "instance", home: paseoHome },
+        home: alpHome,
+        daemonTarget: { kind: "instance", home: alpHome },
         promptPassword: promptSequence(["new-secret", "new-secret"]),
       },
       {} as Command,
     );
-    const config = JSON.parse(await readFile(join(paseoHome, "config.json"), "utf-8"));
+    const config = JSON.parse(await readFile(join(alpHome, "config.json"), "utf-8"));
 
     assert.strictEqual(result.data.action, "password_set");
     assert.strictEqual(
@@ -91,8 +91,8 @@ try {
     await assert.rejects(
       runSetPasswordCommand(
         {
-          home: paseoHome,
-          daemonTarget: { kind: "instance", home: paseoHome },
+          home: alpHome,
+          daemonTarget: { kind: "instance", home: alpHome },
           promptPassword: promptSequence(["first-secret", "second-secret"]),
         },
         {} as Command,

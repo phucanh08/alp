@@ -1,16 +1,13 @@
-import {
-  normalizeHostPort,
-  normalizeLoopbackToLocalhost,
-} from "@getpaseo/protocol/daemon-endpoints";
+import { normalizeHostPort, normalizeLoopbackToLocalhost } from "@alp/protocol/daemon-endpoints";
 import {
   DirectTcpHostConnectionSchema,
   type DirectTcpHostConnection,
-} from "@getpaseo/protocol/host-connection-schema";
+} from "@alp/protocol/host-connection-schema";
 import {
   DEFAULT_SSH_DAEMON_PORT,
   validatePort,
   validateSshHost,
-} from "@getpaseo/protocol/ssh-transport";
+} from "@alp/protocol/ssh-transport";
 import {
   type HostAppearance,
   defaultHostAppearance,

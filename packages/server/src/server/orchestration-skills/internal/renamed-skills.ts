@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { AgentSkillSelection } from "@getpaseo/protocol/messages";
+import type { AgentSkillSelection } from "@alp/protocol/messages";
 
 import { hashFile, MANAGED_FILES_MANIFEST, readManagedFilesManifest } from "./sync.js";
 

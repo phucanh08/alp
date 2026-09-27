@@ -25,18 +25,18 @@ describe("plugin manifest", () => {
   });
 
   it("reads and validates requirements before any plugin code runs", async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-manifest-"));
+    const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-manifest-"));
     directories.push(directory);
-    const manifest = path.join(directory, "paseo-plugin.json");
-    await writeFile(manifest, JSON.stringify({ id: "example", requirements: { paseo: "^0.8.0" } }));
+    const manifest = path.join(directory, "alp-plugin.json");
+    await writeFile(manifest, JSON.stringify({ id: "example", requirements: { alp: "^0.8.0" } }));
     await expect(readPluginManifest(directory)).resolves.toEqual({
       id: "example",
-      requirements: { paseo: "^0.8.0" },
+      requirements: { alp: "^0.8.0" },
     });
     for (const requirements of [
-      { paseo: "latest" },
-      { paseo: "" },
-      { paseo: 8 },
+      { alp: "latest" },
+      { alp: "" },
+      { alp: 8 },
       { node: ">=20" },
       "0.8.0",
     ]) {
@@ -46,10 +46,10 @@ describe("plugin manifest", () => {
   });
 
   it("reads an optional description", async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-manifest-"));
+    const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-manifest-"));
     directories.push(directory);
     await writeFile(
-      path.join(directory, "paseo-plugin.json"),
+      path.join(directory, "alp-plugin.json"),
       JSON.stringify({ id: "described", description: "Reviews changes before merge" }),
     );
 
@@ -59,16 +59,16 @@ describe("plugin manifest", () => {
     });
 
     await writeFile(
-      path.join(directory, "paseo-plugin.json"),
+      path.join(directory, "alp-plugin.json"),
       JSON.stringify({ id: "described", description: "   " }),
     );
     await expect(readPluginManifest(directory)).rejects.toThrow();
   });
 
   it("reads an optional skills directory relative to the plugin root", async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-manifest-"));
+    const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-manifest-"));
     directories.push(directory);
-    const manifest = path.join(directory, "paseo-plugin.json");
+    const manifest = path.join(directory, "alp-plugin.json");
 
     for (const skills of ["skills", "./share/skills", "share/skills/"]) {
       await writeFile(manifest, JSON.stringify({ id: "skilled", skills }));
@@ -93,9 +93,9 @@ describe("plugin manifest", () => {
   });
 
   it("accepts an object skills form only to say install: false", async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-manifest-"));
+    const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-manifest-"));
     directories.push(directory);
-    const manifest = path.join(directory, "paseo-plugin.json");
+    const manifest = path.join(directory, "alp-plugin.json");
 
     const skills = { dir: "share/skills", install: false };
     await writeFile(manifest, JSON.stringify({ id: "skilled", skills }));
@@ -128,9 +128,9 @@ describe("plugin manifest", () => {
   });
 
   it("accepts only non-empty argv arrays for build commands", async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-manifest-"));
+    const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-manifest-"));
     directories.push(directory);
-    const manifest = path.join(directory, "paseo-plugin.json");
+    const manifest = path.join(directory, "alp-plugin.json");
 
     await writeFile(
       manifest,

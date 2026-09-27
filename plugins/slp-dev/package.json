@@ -4,7 +4,7 @@
   "private": true,
   "description": "alp bundled plugin: SLP developer seat rules and skills",
   "files": [
-    "paseo-plugin.json",
+    "alp-plugin.json",
     "index.server.ts",
     "seats.json",
     "agents/",

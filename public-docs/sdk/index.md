@@ -8,7 +8,7 @@ category: TypeScript SDK
 
 # TypeScript SDK
 
-`@getpaseo/client` is a TypeScript library that drives an alp daemon from your own program. You pick a provider and model, give an agent a prompt and a directory, and wait for the answer.
+`@alp/client` is a TypeScript library that drives an alp daemon from your own program. You pick a provider and model, give an agent a prompt and a directory, and wait for the answer.
 
 The daemon does the work: it launches the provider CLI, keeps the session alive, and streams it to the alp app. Your program is a client. Agents you create show up in alp next to the ones you started by hand, and they stay there after your program exits.
 
@@ -28,9 +28,9 @@ Once it's running, it listens on `ws://127.0.0.1:6767/ws`.
 ## Run an agent
 
 ```ts
-import { createPaseoClient } from "@getpaseo/client";
+import { createAlpClient } from "@alp/client";
 
-const client = createPaseoClient({ url: "ws://127.0.0.1:6767/ws" });
+const client = createAlpClient({ url: "ws://127.0.0.1:6767/ws" });
 await client.connect();
 
 const agent = await client.agents.create({

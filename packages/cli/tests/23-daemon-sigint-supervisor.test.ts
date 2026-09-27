@@ -17,9 +17,9 @@ $.verbose = false;
 
 const pollIntervalMs = 100;
 const testEnv = {
-  PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: process.env.PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD ?? "0",
-  PASEO_DICTATION_ENABLED: process.env.PASEO_DICTATION_ENABLED ?? "0",
-  PASEO_VOICE_MODE_ENABLED: process.env.PASEO_VOICE_MODE_ENABLED ?? "0",
+  ALP_LOCAL_SPEECH_AUTO_DOWNLOAD: process.env.ALP_LOCAL_SPEECH_AUTO_DOWNLOAD ?? "0",
+  ALP_DICTATION_ENABLED: process.env.ALP_DICTATION_ENABLED ?? "0",
+  ALP_VOICE_MODE_ENABLED: process.env.ALP_VOICE_MODE_ENABLED ?? "0",
 };
 
 function sleep(ms: number): Promise<void> {
@@ -66,9 +66,9 @@ interface DaemonStatus {
   pid: number | null;
 }
 
-async function readDaemonStatus(paseoHome: string): Promise<DaemonStatus> {
+async function readDaemonStatus(alpHome: string): Promise<DaemonStatus> {
   const result =
-    await $`PASEO_HOME=${paseoHome} PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD=${testEnv.PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD} PASEO_DICTATION_ENABLED=${testEnv.PASEO_DICTATION_ENABLED} PASEO_VOICE_MODE_ENABLED=${testEnv.PASEO_VOICE_MODE_ENABLED} npx paseo daemon status --home ${paseoHome} --json`.nothrow();
+    await $`ALP_HOME=${alpHome} ALP_LOCAL_SPEECH_AUTO_DOWNLOAD=${testEnv.ALP_LOCAL_SPEECH_AUTO_DOWNLOAD} ALP_DICTATION_ENABLED=${testEnv.ALP_DICTATION_ENABLED} ALP_VOICE_MODE_ENABLED=${testEnv.ALP_VOICE_MODE_ENABLED} npx alp daemon status --home ${alpHome} --json`.nothrow();
   if (result.exitCode !== 0) {
     return { localDaemon: null, pid: null };
   }
@@ -124,14 +124,14 @@ function waitForProcessExit(processRef: ChildProcess, timeoutMs: number): Promis
 console.log("=== Daemon SIGINT (supervisor regression) ===\n");
 
 const port = await getAvailablePort();
-const paseoHome = await mkdtemp(join(tmpdir(), "paseo-sigint-supervisor-"));
+const alpHome = await mkdtemp(join(tmpdir(), "alp-sigint-supervisor-"));
 const cliRoot = join(import.meta.dirname, "..");
 
 let supervisorProcess: ChildProcess | null = null;
 let recentSupervisorLogs = "";
 
 try {
-  console.log("Test 1: start supervisor-entrypoint in dev mode with isolated PASEO_HOME");
+  console.log("Test 1: start supervisor-entrypoint in dev mode with isolated ALP_HOME");
 
   supervisorProcess = spawn(
     process.execPath,
@@ -141,9 +141,9 @@ try {
       env: {
         ...process.env,
         ...testEnv,
-        PASEO_HOME: paseoHome,
-        PASEO_LISTEN: `127.0.0.1:${port}`,
-        PASEO_RELAY_ENABLED: "false",
+        ALP_HOME: alpHome,
+        ALP_LISTEN: `127.0.0.1:${port}`,
+        ALP_RELAY_ENABLED: "false",
         CI: "true",
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -160,7 +160,7 @@ try {
 
   await waitFor(
     async () => {
-      const status = await readDaemonStatus(paseoHome);
+      const status = await readDaemonStatus(alpHome);
       return (
         status.localDaemon === "running" && status.pid !== null && isProcessRunning(status.pid)
       );
@@ -188,7 +188,7 @@ try {
 
   await waitFor(
     async () => {
-      const status = await readDaemonStatus(paseoHome);
+      const status = await readDaemonStatus(alpHome);
       return status.localDaemon === "stopped";
     },
     15000,
@@ -223,8 +223,8 @@ try {
     });
   }
 
-  await $`PASEO_HOME=${paseoHome} PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD=${testEnv.PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD} PASEO_DICTATION_ENABLED=${testEnv.PASEO_DICTATION_ENABLED} PASEO_VOICE_MODE_ENABLED=${testEnv.PASEO_VOICE_MODE_ENABLED} npx paseo daemon stop --home ${paseoHome} --force`.nothrow();
-  await rm(paseoHome, { recursive: true, force: true });
+  await $`ALP_HOME=${alpHome} ALP_LOCAL_SPEECH_AUTO_DOWNLOAD=${testEnv.ALP_LOCAL_SPEECH_AUTO_DOWNLOAD} ALP_DICTATION_ENABLED=${testEnv.ALP_DICTATION_ENABLED} ALP_VOICE_MODE_ENABLED=${testEnv.ALP_VOICE_MODE_ENABLED} npx alp daemon stop --home ${alpHome} --force`.nothrow();
+  await rm(alpHome, { recursive: true, force: true });
 }
 
 if (recentSupervisorLogs.trim().length === 0) {

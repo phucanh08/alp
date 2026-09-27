@@ -8,7 +8,7 @@ import type { HostProfile } from "@/types/host-connection";
 import { useHosts, useHostMutations } from "@/runtime/host-runtime";
 import { decodeOfferFragmentPayload, normalizeHostPort } from "@/utils/daemon-endpoints";
 import { connectToDaemon } from "@/utils/test-daemon-connection";
-import { ConnectionOfferSchema } from "@getpaseo/protocol/connection-offer";
+import { ConnectionOfferSchema } from "@alp/protocol/connection-offer";
 import { AdaptiveModalSheet, AdaptiveTextInput, type SheetHeader } from "./adaptive-modal-sheet";
 import { Button } from "@/components/ui/button";
 import type { EditingTextInputHandle } from "@/components/ui/text-input";

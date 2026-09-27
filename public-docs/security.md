@@ -31,7 +31,7 @@ Relay is off on new installations. When you pair a device from `alp`, `alp daemo
 
 ### How it works
 
-1. The daemon generates a persistent ECDH keypair and stores it in `$PASEO_HOME/daemon-keypair.json`
+1. The daemon generates a persistent ECDH keypair and stores it in `$ALP_HOME/daemon-keypair.json`
 2. When you scan the QR code or click the pairing link, your phone receives the daemon's public key
 3. Your phone sends a handshake message with its own public key. The daemon will not accept any commands until this handshake completes.
 4. Each side combines its Curve25519 key with the peer public key, then uses the resulting NaCl
@@ -111,13 +111,13 @@ The official Docker image runs the daemon and bundled web UI in one container. I
 
 For Docker deployments:
 
-- Set `PASEO_PASSWORD` before publishing the port to a LAN, VPN, or public address.
+- Set `ALP_PASSWORD` before publishing the port to a LAN, VPN, or public address.
 - Use HTTPS at your reverse proxy for browser access outside localhost.
-- Set `PASEO_HOSTNAMES` for any DNS names you use to reach the container.
+- Set `ALP_HOSTNAMES` for any DNS names you use to reach the container.
 - Keep `/workspace` mounts scoped to repositories the agents should be able to read and write.
-- Treat `/home/paseo` as sensitive, it can contain daemon state and provider credentials.
+- Treat `/home/alp` as sensitive, it can contain daemon state and provider credentials.
 
-The image runs the daemon and launched agents as the non-root `paseo` user, but container user isolation is not a substitute for careful mounts. Agents can still access whatever code and credentials you mount into the container.
+The image runs the daemon and launched agents as the non-root `alp` user, but container user isolation is not a substitute for careful mounts. Agents can still access whatever code and credentials you mount into the container.
 
 See [Docker](/docs/docker) for Compose and reverse proxy examples.
 
@@ -133,13 +133,13 @@ alp never stores or transmits provider API keys. Agents run in your user context
 
 ## Hub identities and credentials
 
-Hub CLI login and daemon enrollment are separate identities. `alp hub login [origin]` stores a durable organization-scoped human credential in a private file under `PASEO_HOME`, keyed by the normalized Hub origin. A stored credential is never sent to another origin. Protect `PASEO_HOME` as sensitive local state.
+Hub CLI login and daemon enrollment are separate identities. `alp hub login [origin]` stores a durable organization-scoped human credential in a private file under `ALP_HOME`, keyed by the normalized Hub origin. A stored credential is never sent to another origin. Protect `ALP_HOME` as sensitive local state.
 
 Hub CLI credentials are bearer secrets. Remote Hub origins must use HTTPS; cleartext HTTP is accepted only for loopback development origins (`localhost`, `127.0.0.1`, and `[::1]`).
 
 `alp hub connect [origin]` uses that credential, or an explicit API key, only to request a short-lived one-time enrollment token. The daemon exchanges the token and retains its own independently generated relationship credential. Logging out of the CLI does not silently remove daemon authority. Interactive logout completes any accepted same-origin daemon disconnection before deleting the login. In JSON and noninteractive use, `logout` never prompts or disconnects; pass `--disconnect-daemon` only when automation intends to remove both identities.
 
-`--api-key` and `PASEO_HUB_API_KEY` override stored login without being persisted. Prefer environment or secret-manager injection for automation, and avoid command-line flags when local process listings or shell history are visible to other users.
+`--api-key` and `ALP_HUB_API_KEY` override stored login without being persisted. Prefer environment or secret-manager injection for automation, and avoid command-line flags when local process listings or shell history are visible to other users.
 
 ## Recommendations
 
@@ -149,4 +149,4 @@ Hub CLI credentials are bearer secrets. Remote Hub origins must use HTTPS; clear
 - **Never bind to 0.0.0.0 without a password**, without one, any device on your network can connect
 - **Scope Docker mounts tightly**, agents can access mounted workspaces and provider credentials
 - **Keep your daemon updated**, security improvements are released regularly
-- **Protect the Hub configuration branch**, push access to the `.paseo` bundle controls what that project can reach, see [How Hub works](/docs/hub/concepts)
+- **Protect the Hub configuration branch**, push access to the `.alp` bundle controls what that project can reach, see [How Hub works](/docs/hub/concepts)

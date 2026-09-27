@@ -2,14 +2,14 @@ import { Command, Option } from "commander";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { startDaemonInstance, resolvePaseoHome } from "@getpaseo/server/daemon-control";
+import { startDaemonInstance, resolveAlpHome } from "@alp/server/daemon-control";
 const require = createRequire(import.meta.url);
 function resolveServerRunnerFromDir(currentDir: string): string | null {
   const packageJsonPath = path.join(currentDir, "package.json");
   if (!existsSync(packageJsonPath)) return null;
   try {
     const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as { name?: string };
-    if (packageJson.name !== "@getpaseo/server") return null;
+    if (packageJson.name !== "@alp/server") return null;
     const distRunner = path.join(currentDir, "dist", "scripts", "supervisor-entrypoint.js");
     if (existsSync(distRunner)) {
       return distRunner;
@@ -21,7 +21,7 @@ function resolveServerRunnerFromDir(currentDir: string): string | null {
 }
 
 function resolveDaemonRunnerEntry(): string {
-  const serverExportPath = require.resolve("@getpaseo/server");
+  const serverExportPath = require.resolve("@alp/server");
   let currentDir = path.dirname(serverExportPath);
 
   while (true) {
@@ -37,7 +37,7 @@ function resolveDaemonRunnerEntry(): string {
     currentDir = parentDir;
   }
 
-  throw new Error("Unable to resolve @getpaseo/server package root for daemon runner");
+  throw new Error("Unable to resolve @alp/server package root for daemon runner");
 }
 
 export async function launchLocalDaemon(options: {
@@ -52,7 +52,7 @@ export async function launchLocalDaemon(options: {
   try {
     const entry = resolveDaemonRunnerEntry();
     return await startDaemonInstance({
-      home: resolvePaseoHome({ PASEO_HOME: options.home }),
+      home: resolveAlpHome({ ALP_HOME: options.home }),
       command: process.execPath,
       args: [...(entry.endsWith(".ts") ? ["--import", "tsx"] : []), entry],
       env: process.env,

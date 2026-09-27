@@ -6,8 +6,8 @@ import {
   readPersistedConfig as loadPersistedConfig,
   savePersistedConfig,
   type PersistedConfig,
-} from "@getpaseo/server/configuration";
-import { readDaemonInstance, waitForDaemonReady } from "@getpaseo/server/daemon-control";
+} from "@alp/server/configuration";
+import { readDaemonInstance, waitForDaemonReady } from "@alp/server/daemon-control";
 import { withGlobalOptions } from "../utils/command-options.js";
 import type { CommandOptions } from "../output/index.js";
 import { launchLocalDaemon, parseTimeoutMs } from "./daemon/local-daemon.js";
@@ -111,8 +111,8 @@ async function resolveVoiceSelection(mode: OnboardOptions["voice"]): Promise<boo
   return answer;
 }
 
-function printNextSteps(pairingUrl: string | null, paseoHome: string, richUi: boolean): void {
-  const daemonLogPath = path.join(paseoHome, "daemon.log");
+function printNextSteps(pairingUrl: string | null, alpHome: string, richUi: boolean): void {
+  const daemonLogPath = path.join(alpHome, "daemon.log");
   const nextStepsLines = [
     pairingUrl
       ? "1. Open alp and scan the QR code above, or paste the pairing link."
@@ -120,13 +120,13 @@ function printNextSteps(pairingUrl: string | null, paseoHome: string, richUi: bo
     "2. Web app: https://app-alp.anhlp.com",
     "3. Desktop app: https://github.com/phucanh08/alp/releases/latest",
     "4. Docs: https://alp.anhlp.com/docs",
-    `5. Example: alp run --home ${JSON.stringify(paseoHome)} --output-schema schema.json "extract fields"`,
+    `5. Example: alp run --home ${JSON.stringify(alpHome)} --output-schema schema.json "extract fields"`,
   ];
   const quickReferenceLines = [
     "1. alp --help",
-    `2. alp ls --home ${JSON.stringify(paseoHome)}`,
-    `3. alp run --home ${JSON.stringify(paseoHome)} "your prompt"`,
-    `4. alp status --home ${JSON.stringify(paseoHome)}`,
+    `2. alp ls --home ${JSON.stringify(alpHome)}`,
+    `3. alp run --home ${JSON.stringify(alpHome)} "your prompt"`,
+    `4. alp status --home ${JSON.stringify(alpHome)}`,
     `5. Daemon logs: ${daemonLogPath}`,
   ];
 
@@ -174,11 +174,8 @@ export function onboardCommand(): Command {
     );
 }
 
-async function resolveAndPersistVoice(
-  paseoHome: string,
-  options: OnboardOptions,
-): Promise<boolean> {
-  let persisted = loadPersistedConfig(paseoHome) as OnboardPersistedConfig;
+async function resolveAndPersistVoice(alpHome: string, options: OnboardOptions): Promise<boolean> {
+  let persisted = loadPersistedConfig(alpHome) as OnboardPersistedConfig;
   const persistedVoiceSelection = resolvePersistedVoiceSelection(persisted);
   const shouldPrompt = options.voice === "ask" || options.voice === undefined;
   let voiceEnabled: boolean;
@@ -200,12 +197,12 @@ async function resolveAndPersistVoice(
   }
 
   persisted = applyVoiceSelection(persisted, voiceEnabled);
-  savePersistedConfig(paseoHome, persisted);
+  savePersistedConfig(alpHome, persisted);
   return voiceEnabled;
 }
 
-function persistSetupChoices(paseoHome: string, options: OnboardOptions): void {
-  const persisted = loadPersistedConfig(paseoHome, { defaultsIfMissing: true });
+function persistSetupChoices(alpHome: string, options: OnboardOptions): void {
+  const persisted = loadPersistedConfig(alpHome, { defaultsIfMissing: true });
   if (options.listen || options.port) {
     persisted.daemon = {
       ...persisted.daemon,
@@ -227,7 +224,7 @@ function persistSetupChoices(paseoHome: string, options: OnboardOptions): void {
       ...persisted.daemon,
       hostnames: options.hostnames === "true" ? true : options.hostnames.split(","),
     };
-  savePersistedConfig(paseoHome, persisted);
+  savePersistedConfig(alpHome, persisted);
 }
 
 export async function runOnboard(options: OnboardOptions): Promise<void> {
@@ -244,14 +241,14 @@ export async function runOnboard(options: OnboardOptions): Promise<void> {
   const timeoutMs = parseTimeoutMs(options.timeout);
 
   if (options.daemonTarget.kind !== "instance") throw new Error("Onboarding requires a local home");
-  const paseoHome = options.daemonTarget.home;
-  const alreadyRunning = await readDaemonInstance(paseoHome);
-  persistSetupChoices(paseoHome, options);
+  const alpHome = options.daemonTarget.home;
+  const alreadyRunning = await readDaemonInstance(alpHome);
+  persistSetupChoices(alpHome, options);
   if (richUi) {
-    renderNote(paseoHome, "alp home");
+    renderNote(alpHome, "alp home");
   }
 
-  const voiceEnabled = await resolveAndPersistVoice(paseoHome, options);
+  const voiceEnabled = await resolveAndPersistVoice(alpHome, options);
   log.message(
     voiceEnabled
       ? "Voice features enabled. Local speech models will be downloaded automatically if missing."
@@ -267,20 +264,20 @@ export async function runOnboard(options: OnboardOptions): Promise<void> {
       await client.close();
     }
   } else {
-    await launchLocalDaemon({ home: paseoHome, timeoutMs });
+    await launchLocalDaemon({ home: alpHome, timeoutMs });
   }
-  const ready = await waitForDaemonReady(paseoHome, { timeoutMs });
+  const ready = await waitForDaemonReady(alpHome, { timeoutMs });
   log.message(`Daemon ready on ${ready.listen}`);
 
   if (options.relay === false) {
     log.message("Relay pairing skipped because --no-relay was provided.");
-    printNextSteps(null, paseoHome, richUi);
+    printNextSteps(null, alpHome, richUi);
     if (richUi) outro("alp daemon is running.");
     return;
   }
 
   let pairing = await resolveLocalPairingOffer({
-    paseoHome,
+    alpHome,
     enableRelay: options.relay === true,
   });
 
@@ -288,17 +285,17 @@ export async function runOnboard(options: OnboardOptions): Promise<void> {
     const shouldEnable = richUi ? await confirmRelayPairing() : false;
     if (!shouldEnable) {
       printDirectConnectionGuidance();
-      printNextSteps(null, paseoHome, richUi);
+      printNextSteps(null, alpHome, richUi);
       if (richUi) outro("alp daemon is running.");
       return;
     }
-    pairing = await resolveLocalPairingOffer({ paseoHome, enableRelay: true });
+    pairing = await resolveLocalPairingOffer({ alpHome, enableRelay: true });
     log.success("Relay enabled");
   }
 
   if (!pairing.url) {
     log.warn("Relay pairing URL is unavailable for this daemon configuration.");
-    printNextSteps(null, paseoHome, richUi);
+    printNextSteps(null, alpHome, richUi);
     if (richUi) {
       outro("alp daemon is running.");
     }
@@ -312,7 +309,7 @@ export async function runOnboard(options: OnboardOptions): Promise<void> {
       columns: process.stdout.columns,
     }),
   );
-  printNextSteps(pairing.url, paseoHome, richUi);
+  printNextSteps(pairing.url, alpHome, richUi);
   if (richUi) {
     outro("alp is ready!");
   }

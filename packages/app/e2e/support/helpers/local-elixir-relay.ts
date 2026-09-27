@@ -64,10 +64,10 @@ export async function startLocalElixirRelay(): Promise<LocalElixirRelay> {
   }
 
   const relayRoot =
-    process.env.PASEO_RELAY_CHECKOUT ?? path.resolve(__dirname, "../../../../../..", "paseo-relay");
+    process.env.ALP_RELAY_CHECKOUT ?? path.resolve(__dirname, "../../../../../..", "alp-relay");
   if (!existsSync(path.join(relayRoot, "mix.exs"))) {
     throw new Error(
-      `Expected the Elixir relay checkout at ${relayRoot}. Set PASEO_RELAY_CHECKOUT to override it.`,
+      `Expected the Elixir relay checkout at ${relayRoot}. Set ALP_RELAY_CHECKOUT to override it.`,
     );
   }
 
@@ -85,9 +85,9 @@ export async function startLocalElixirRelay(): Promise<LocalElixirRelay> {
       env: {
         ...process.env,
         MIX_ENV: "prod",
-        PASEO_RELAY_HOST: "127.0.0.1",
-        PASEO_RELAY_PORT: String(port),
-        PASEO_RELAY_MIN_CLUSTER_SIZE: "1",
+        ALP_RELAY_HOST: "127.0.0.1",
+        ALP_RELAY_PORT: String(port),
+        ALP_RELAY_MIN_CLUSTER_SIZE: "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });

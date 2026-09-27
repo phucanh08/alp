@@ -16,7 +16,7 @@ function createWorkspaceDescriptor(input: Partial<WorkspaceDescriptor> = {}): Wo
   return {
     id: "/repo/main",
     projectId: "remote:github.com/getpaseo/paseo",
-    projectDisplayName: "getpaseo/paseo",
+    projectDisplayName: "alp/alp",
     projectRootPath: "/repo/main",
     workspaceDirectory: "/repo/main",
     projectKind: "git",
@@ -42,7 +42,7 @@ describe("workspace source of truth consumption", () => {
     });
 
     expect(header.title).toBe("feat/workspace-sot");
-    expect(header.subtitle).toBe("getpaseo/paseo");
+    expect(header.subtitle).toBe("alp/alp");
     expect(sidebarWorkspace.name).toBe(header.title);
     expect(sidebarWorkspace.statusBucket).toBe("running");
   });
@@ -104,7 +104,7 @@ describe("workspace source of truth consumption", () => {
     ).toEqual({
       kind: "ready",
       title: "feat/workspace-sot",
-      subtitle: "getpaseo/paseo",
+      subtitle: "alp/alp",
       isSubtitleDistinct: true,
       isGitCheckout: false,
       currentBranchName: null,
@@ -144,7 +144,7 @@ describe("workspace source of truth consumption", () => {
     ).toEqual({
       kind: "ready",
       title: "feat/workspace-sot",
-      subtitle: "getpaseo/paseo",
+      subtitle: "alp/alp",
       isSubtitleDistinct: true,
       isGitCheckout: true,
       currentBranchName: "feat/workspace-sot",
@@ -184,7 +184,7 @@ describe("workspace source of truth consumption", () => {
     ).toEqual({
       kind: "ready",
       title: "feat/workspace-sot",
-      subtitle: "getpaseo/paseo",
+      subtitle: "alp/alp",
       isSubtitleDistinct: true,
       isGitCheckout: false,
       currentBranchName: null,

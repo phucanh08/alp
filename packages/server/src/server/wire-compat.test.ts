@@ -6,14 +6,14 @@ import pino from "pino";
 import { z } from "zod";
 import { describe, expect, test } from "vitest";
 
-import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
+import { CLIENT_CAPS } from "@alp/protocol/client-capabilities";
 import {
   AgentTimelineItemPayloadSchema,
   FetchAgentTimelineResponseMessageSchema,
   SessionInboundMessageSchema,
   SessionOutboundMessageSchema,
   type SessionOutboundMessage,
-} from "@getpaseo/protocol/messages";
+} from "@alp/protocol/messages";
 import { Session, type SessionOptions } from "./session.js";
 import { OWNER_PERMISSIONS } from "./authorization/index.js";
 import { DirectorySyncService } from "./directory-sync/index.js";
@@ -21,7 +21,7 @@ import { createProviderSnapshotManagerStub } from "./test-utils/session-stubs.js
 import type { AgentTimelineRow } from "./agent/agent-manager.js";
 import { InMemoryAgentTimelineStore } from "./agent/agent-timeline-store.js";
 import type { AgentTimelineFetchOptions } from "./agent/agent-timeline-store-types.js";
-import { handleCreatePaseoWorktreeRequest } from "./worktree-session.js";
+import { handleCreateAlpWorktreeRequest } from "./worktree-session.js";
 import { createPersistedProjectRecord } from "./workspace-registry.js";
 
 const LegacyTimelineEntryPayloadSchema = z.object({
@@ -221,7 +221,7 @@ function createSessionForWireCompatTest(options?: {
     logger: pino({ level: "silent" }),
     downloadTokenStore: {} as SessionOptions["downloadTokenStore"],
     pushNotifications: {} as SessionOptions["pushNotifications"],
-    paseoHome: "/tmp/paseo-home",
+    alpHome: "/tmp/alp-home",
     agentManager: new InMemoryAgentManager(
       options?.rows ?? rows,
     ) as unknown as SessionOptions["agentManager"],
@@ -461,7 +461,7 @@ describe("wire compatibility", () => {
     const workflow = new InMemoryWorktreeWorkflow();
 
     const dependencies = {
-      paseoHome: "/tmp/paseo-home",
+      alpHome: "/tmp/alp-home",
       describeWorkspaceRecord: async () =>
         ({
           id: "ws-1",
@@ -478,11 +478,11 @@ describe("wire compatibility", () => {
         }) as never,
       emit() {},
       sessionLogger: pino({ level: "silent" }),
-      createPaseoWorktreeWorkflow: workflow.create.bind(workflow),
+      createAlpWorktreeWorkflow: workflow.create.bind(workflow),
     };
 
     const legacyRequest = SessionInboundMessageSchema.parse({
-      type: "create_paseo_worktree_request",
+      type: "create_alp_worktree_request",
       requestId: "req-legacy",
       cwd: "/tmp/repo",
       worktreeSlug: "legacy-worktree",
@@ -499,7 +499,7 @@ describe("wire compatibility", () => {
     });
 
     const newRequest = SessionInboundMessageSchema.parse({
-      type: "create_paseo_worktree_request",
+      type: "create_alp_worktree_request",
       requestId: "req-new",
       cwd: "/tmp/repo",
       worktreeSlug: "legacy-worktree",
@@ -517,15 +517,15 @@ describe("wire compatibility", () => {
       },
     });
 
-    if (legacyRequest.type !== "create_paseo_worktree_request") {
+    if (legacyRequest.type !== "create_alp_worktree_request") {
       throw new Error("Expected legacy worktree request");
     }
-    if (newRequest.type !== "create_paseo_worktree_request") {
+    if (newRequest.type !== "create_alp_worktree_request") {
       throw new Error("Expected new worktree request");
     }
 
-    await handleCreatePaseoWorktreeRequest(dependencies, legacyRequest);
-    await handleCreatePaseoWorktreeRequest(dependencies, newRequest);
+    await handleCreateAlpWorktreeRequest(dependencies, legacyRequest);
+    await handleCreateAlpWorktreeRequest(dependencies, newRequest);
 
     expect(workflow.capturedInputs).toHaveLength(2);
     expect(workflow.capturedInputs[0]).toEqual(workflow.capturedInputs[1]);
@@ -548,7 +548,7 @@ describe("wire compatibility", () => {
       action: undefined,
       githubPrNumber: undefined,
       runSetup: false,
-      paseoHome: "/tmp/paseo-home",
+      alpHome: "/tmp/alp-home",
     });
   });
 });

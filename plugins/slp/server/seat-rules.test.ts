@@ -21,7 +21,7 @@ const noAgents: AgentLister = {
   },
 };
 
-/** `paseo.plugins` backed by slp-dev's own `seat.get` handler, validated like the daemon does. */
+/** `alp.plugins` backed by slp-dev's own `seat.get` handler, validated like the daemon does. */
 function realSlpDev() {
   let handler: ((input: unknown, context: unknown) => unknown) | undefined;
   contributeSlpDev({
@@ -32,7 +32,7 @@ function realSlpDev() {
   return {
     async invoke(pluginId: string, method: string, input: unknown) {
       const manifest = JSON.parse(
-        await readFile(path.join(slpDevDirectory, "paseo-plugin.json"), "utf8"),
+        await readFile(path.join(slpDevDirectory, "alp-plugin.json"), "utf8"),
       );
       if (pluginId !== manifest.id || method !== slpDevSeatGet.name || !handler)
         throw new Error("Plugin is not available");
@@ -43,7 +43,7 @@ function realSlpDev() {
 
 test("slp addresses slp-dev's seat.get by slp-dev's own plugin id and method name", async () => {
   const manifest = JSON.parse(
-    await readFile(path.join(slpDevDirectory, "paseo-plugin.json"), "utf8"),
+    await readFile(path.join(slpDevDirectory, "alp-plugin.json"), "utf8"),
   );
   expect(SLP_DEV_PLUGIN_ID).toBe(manifest.id);
   expect(SLP_DEV_SEAT_GET).toBe(slpDevSeatGet.name);

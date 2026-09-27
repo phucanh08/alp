@@ -87,8 +87,8 @@ function providerScaffold(
       name: "github-help",
       event: "github.issue_comment",
       connection,
-      filters: { repo, contains: "@paseo", from_users: [user] },
-      testAction: `Comment \`@paseo have a look\` on ${repo}.`,
+      filters: { repo, contains: "@alp", from_users: [user] },
+      testAction: `Comment \`@alp have a look\` on ${repo}.`,
     };
   }
 
@@ -100,7 +100,7 @@ function providerScaffold(
       connection,
       filters: { from_users: [user] },
       reply: "slack.reply",
-      testAction: "Mention `@Paseo have a look` in Slack.",
+      testAction: "Mention `@Alp have a look` in Slack.",
     };
   }
 
@@ -110,7 +110,7 @@ function providerScaffold(
     connection,
     filters: { from_users: [user] },
     reply: "discord.reply",
-    testAction: "Mention `@Paseo have a look` in Discord.",
+    testAction: "Mention `@Alp have a look` in Discord.",
   };
 }
 

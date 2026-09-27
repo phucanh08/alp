@@ -32,7 +32,7 @@ Add a server entry:
 
 ```ts
 // index.server.ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext } from "@alp/plugin/server";
 import { createProvider } from "./server/provider";
 
 export default function contribute(server: PluginServerContext) {
@@ -47,7 +47,7 @@ export default function contribute(server: PluginServerContext) {
 import {
   negotiateProviderCapabilities,
   type ProviderRegistration,
-} from "@getpaseo/plugin/server/provider";
+} from "@alp/plugin/server/provider";
 
 const supported = ["prompt.message"] as const;
 
@@ -307,7 +307,7 @@ emit({
 Register the renderer independently in `index.client.tsx`:
 
 ```tsx
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext } from "@alp/plugin/client";
 import { z } from "zod";
 import { ReviewVerdict } from "./client/review-verdict";
 
@@ -335,8 +335,8 @@ daemon timeline append. A renderer does not require a provider implementation.
 Use the ACP shim when the agent already speaks ACP:
 
 ```ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { runAcpProvider } from "@getpaseo/plugin/server/acp";
+import type { PluginServerContext } from "@alp/plugin/server";
+import { runAcpProvider } from "@alp/plugin/server/acp";
 
 export default function contribute(server: PluginServerContext) {
   server.registerProvider(
@@ -358,7 +358,7 @@ Use `transformers` only for vendor differences ACP cannot describe. Validate ven
 Zod and leave malformed or unrelated values unchanged:
 
 ```ts
-import type { AcpTransformer } from "@getpaseo/plugin/server/acp";
+import type { AcpTransformer } from "@alp/plugin/server/acp";
 import { z } from "zod";
 
 const editSchema = z.object({

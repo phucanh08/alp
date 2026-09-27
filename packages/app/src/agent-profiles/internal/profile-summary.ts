@@ -1,5 +1,5 @@
-import type { ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
-import type { AgentProfile } from "@getpaseo/protocol/messages";
+import type { ProviderSnapshotEntry } from "@alp/protocol/agent-types";
+import type { AgentProfile } from "@alp/protocol/messages";
 import { formatAgentModeLabel, formatThinkingOptionLabel } from "@/agent-controls/labels";
 
 export interface AgentProfileTag {

@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { QueryObserver, useMutation, type QueryObserverResult } from "@tanstack/react-query";
-import { callPluginRpc } from "@getpaseo/plugin/client/host";
-import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import { callPluginRpc } from "@alp/plugin/client/host";
+import type { DaemonClient } from "@alp/client/internal/daemon-client";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useInstalledPlugin } from "../registry";
 import { pluginSettingsKey } from "../settings/use-settings";

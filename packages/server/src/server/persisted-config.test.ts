@@ -16,7 +16,7 @@ const MODE_MASK = 0o777;
 const PERMISSIVE_FILE_MODE = 0o644;
 
 function createTempHome(): string {
-  return mkdtempSync(path.join(tmpdir(), "paseo-config-"));
+  return mkdtempSync(path.join(tmpdir(), "alp-config-"));
 }
 
 function modeOf(filePath: string): number {
@@ -121,11 +121,11 @@ describe("PersistedConfigSchema worktrees config", () => {
   test("accepts optional worktree root", () => {
     const parsed = PersistedConfigSchema.parse({
       worktrees: {
-        root: "/mnt/fast/paseo-worktrees",
+        root: "/mnt/fast/alp-worktrees",
       },
     });
 
-    expect(parsed.worktrees?.root).toBe("/mnt/fast/paseo-worktrees");
+    expect(parsed.worktrees?.root).toBe("/mnt/fast/alp-worktrees");
   });
 
   test("accepts service port allocation", () => {
@@ -664,7 +664,7 @@ describe("PersistedConfigSchema voice mode config", () => {
 });
 
 describe("loadPersistedConfig", () => {
-  test("materializes relay disabled for a new Paseo home", () => {
+  test("materializes relay disabled for a new Alp home", () => {
     const home = createTempHome();
     try {
       const config = loadPersistedConfig(home);
@@ -682,7 +682,7 @@ describe("loadPersistedConfig", () => {
         configPath,
         `${JSON.stringify(
           {
-            $schema: "https://alp.anhlp.com/schemas/paseo.config.v1.json",
+            $schema: "https://alp.anhlp.com/schemas/alp.config.v1.json",
             version: 1,
             daemon: {
               listen: "127.0.0.1:6767",

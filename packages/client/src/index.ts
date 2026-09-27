@@ -1,7 +1,7 @@
 import type { OwnedSubscription } from "./connection/index.js";
 export type { OwnedSubscription, SubscriptionObserver } from "./connection/index.js";
 import type { DaemonClientConfig } from "./daemon-client.js";
-import type { AgentPermissionResponse } from "@getpaseo/protocol/agent-types";
+import type { AgentPermissionResponse } from "@alp/protocol/agent-types";
 import type {
   AgentSnapshotPayload,
   CreationSnapshot,
@@ -28,25 +28,25 @@ import type {
   SessionOutboundMessage,
   WorkspaceDescriptorPayload,
   WorkspaceCreateRequest,
-} from "@getpaseo/protocol/messages";
+} from "@alp/protocol/messages";
 import { DaemonClient, type CreateAgentRequestOptions } from "./daemon-client.js";
 import {
   createTerminalActions,
-  type PaseoTerminalActions,
-  type PaseoWorkspaceTerminalActions,
+  type AlpTerminalActions,
+  type AlpWorkspaceTerminalActions,
 } from "./terminals/index.js";
 export type {
-  PaseoTerminal,
-  PaseoTerminalActions,
-  PaseoTerminalHandle,
-  PaseoTerminalCreateOptions,
-  PaseoTerminalListOptions,
-  PaseoTerminalListResult,
-  PaseoTerminalCaptureOptions,
-  PaseoTerminalCaptureResult,
-  PaseoWorkspaceTerminalActions,
+  AlpTerminal,
+  AlpTerminalActions,
+  AlpTerminalHandle,
+  AlpTerminalCreateOptions,
+  AlpTerminalListOptions,
+  AlpTerminalListResult,
+  AlpTerminalCaptureOptions,
+  AlpTerminalCaptureResult,
+  AlpWorkspaceTerminalActions,
 } from "./terminals/index.js";
-import type { PluginTimelineItem } from "@getpaseo/protocol/agent-types";
+import type { PluginTimelineItem } from "@alp/protocol/agent-types";
 import type {
   FetchAgentsEntry,
   FetchAgentsOptions,
@@ -71,14 +71,14 @@ export type ConnectionState =
   | { status: "disconnected"; reason?: string }
   | { status: "disposed" };
 
-export interface PaseoLogger {
+export interface AlpLogger {
   debug(obj: object, msg?: string): void;
   info(obj: object, msg?: string): void;
   warn(obj: object, msg?: string): void;
   error(obj: object, msg?: string): void;
 }
 
-export interface PaseoClientConfig {
+export interface AlpClientConfig {
   capabilities?: DaemonClientConfig["capabilities"];
   url: string;
   clientId?: string;
@@ -87,7 +87,7 @@ export interface PaseoClientConfig {
   password?: string;
   authHeader?: string;
   suppressSendErrors?: boolean;
-  logger?: PaseoLogger;
+  logger?: AlpLogger;
   connectTimeoutMs?: number;
   e2ee?: {
     enabled?: boolean;
@@ -102,152 +102,146 @@ export interface PaseoClientConfig {
   runtimeMetricsWindowMs?: number;
 }
 
-export type PaseoWorkspace = WorkspaceDescriptorPayload;
-export type PaseoAgent = AgentSnapshotPayload;
-export type PaseoAgentListOptions = FetchAgentsOptions;
-export type PaseoProject = WorkspaceProjectDescriptorPayload;
-export type PaseoProjectListOptions = Omit<ProjectListRequestMessage, "type" | "requestId"> & {
+export type AlpWorkspace = WorkspaceDescriptorPayload;
+export type AlpAgent = AgentSnapshotPayload;
+export type AlpAgentListOptions = FetchAgentsOptions;
+export type AlpProject = WorkspaceProjectDescriptorPayload;
+export type AlpProjectListOptions = Omit<ProjectListRequestMessage, "type" | "requestId"> & {
   requestId?: string;
 };
-export type PaseoProjectListResult = ProjectListResponseMessage["payload"];
-export type PaseoProjectUpdate = Extract<
+export type AlpProjectListResult = ProjectListResponseMessage["payload"];
+export type AlpProjectUpdate = Extract<
   SessionOutboundMessage,
   { type: "project.update" }
 >["payload"];
-export type PaseoProjectUpdateHandler = (update: PaseoProjectUpdate) => void;
+export type AlpProjectUpdateHandler = (update: AlpProjectUpdate) => void;
 
-export interface PaseoAgentListResult {
-  subscription?: OwnedSubscription<PaseoAgentListResult>;
+export interface AlpAgentListResult {
+  subscription?: OwnedSubscription<AlpAgentListResult>;
   requestId: string;
   subscriptionId?: string | null;
   entries: FetchAgentsEntry[];
   pageInfo: FetchAgentsPageInfo;
 }
-export type PaseoWorkspaceListOptions = Omit<
-  FetchWorkspacesRequestMessage,
-  "type" | "requestId"
-> & {
+export type AlpWorkspaceListOptions = Omit<FetchWorkspacesRequestMessage, "type" | "requestId"> & {
   requestId?: string;
 };
 
-export interface PaseoWorkspaceListResult {
-  subscription?: OwnedSubscription<PaseoWorkspaceListResult>;
+export interface AlpWorkspaceListResult {
+  subscription?: OwnedSubscription<AlpWorkspaceListResult>;
   requestId: string;
   subscriptionId?: string | null;
-  entries: PaseoWorkspace[];
+  entries: AlpWorkspace[];
   pageInfo: FetchWorkspacesResponseMessage["payload"]["pageInfo"];
 }
 
-export interface PaseoWorkspaceOpenOptions {
+export interface AlpWorkspaceOpenOptions {
   cwd: string;
   requestId?: string;
 }
 
-export type PaseoWorkspaceCreateOptions = Omit<
+export type AlpWorkspaceCreateOptions = Omit<
   WorkspaceCreateRequest,
   "type" | "requestId" | "agent" | "subscribe"
 > & {
   requestId?: string;
   agent?: Omit<
-    PaseoAgentCreateOptions,
+    AlpAgentCreateOptions,
     "worktree" | "git" | "onEvent" | "idempotencyKey" | "requestId"
   >;
   onEvent?: (snapshot: CreationSnapshot) => void;
 };
 
-export interface PaseoWorkspaceArchiveResult {
+export interface AlpWorkspaceArchiveResult {
   requestId: string;
   workspaceId: string;
   archivedAt: string | null;
   error: string | null;
 }
 
-export type PaseoWorkspaceUpdate = Extract<
+export type AlpWorkspaceUpdate = Extract<
   SessionOutboundMessage,
   { type: "workspace_update" }
 >["payload"];
 
-export type PaseoWorkspaceUpdateHandler = (update: PaseoWorkspaceUpdate) => void;
+export type AlpWorkspaceUpdateHandler = (update: AlpWorkspaceUpdate) => void;
 
-export interface PaseoWorkspaceHandle {
+export interface AlpWorkspaceHandle {
   readonly id: string;
   readonly projectId: string | null;
   readonly directory: string | null;
   readonly name: string | null;
-  readonly status: PaseoWorkspace["status"] | null;
+  readonly status: AlpWorkspace["status"] | null;
   readonly agents: {
-    create(options: PaseoWorkspaceAgentCreateOptions): Promise<PaseoAgentHandle>;
+    create(options: AlpWorkspaceAgentCreateOptions): Promise<AlpAgentHandle>;
   };
-  readonly terminals: PaseoWorkspaceTerminalActions;
-  current(): PaseoWorkspace | null;
-  refresh(options?: { requestId?: string }): Promise<PaseoWorkspace | null>;
+  readonly terminals: AlpWorkspaceTerminalActions;
+  current(): AlpWorkspace | null;
+  refresh(options?: { requestId?: string }): Promise<AlpWorkspace | null>;
   setTitle(title: string | null, requestId?: string): Promise<{ title: string | null }>;
-  archive(requestId?: string): Promise<PaseoWorkspaceArchiveResult>;
+  archive(requestId?: string): Promise<AlpWorkspaceArchiveResult>;
   /**
    * Subscribes to already-emitted daemon workspace_update events for this id.
    * This returns a local unsubscribe function; it does not own app cache state or
    * send a daemon unsubscribe RPC. Call `workspaces.list({ subscribe: {} })` when
    * the daemon should start streaming workspace directory updates.
    */
-  subscribe(handler: (update: PaseoWorkspaceUpdate) => void): () => void;
+  subscribe(handler: (update: AlpWorkspaceUpdate) => void): () => void;
 }
 
-export interface PaseoProjectActions {
-  list(options?: PaseoProjectListOptions): Promise<PaseoProjectListResult>;
-  subscribe(handler: PaseoProjectUpdateHandler): () => void;
+export interface AlpProjectActions {
+  list(options?: AlpProjectListOptions): Promise<AlpProjectListResult>;
+  subscribe(handler: AlpProjectUpdateHandler): () => void;
 }
 
-export interface PaseoWorkspaceActions {
-  list(options: PaseoWorkspaceListOptions & { subscribe: {} }): Promise<
-    PaseoWorkspaceListResult & {
+export interface AlpWorkspaceActions {
+  list(options: AlpWorkspaceListOptions & { subscribe: {} }): Promise<
+    AlpWorkspaceListResult & {
       subscriptionId: string;
-      subscription: OwnedSubscription<PaseoWorkspaceListResult>;
+      subscription: OwnedSubscription<AlpWorkspaceListResult>;
     }
   >;
-  list(options?: PaseoWorkspaceListOptions): Promise<PaseoWorkspaceListResult>;
-  ref(workspace: string | PaseoWorkspace): PaseoWorkspaceHandle;
-  open(
-    input: string | PaseoWorkspaceOpenOptions,
-    requestId?: string,
-  ): Promise<PaseoWorkspaceHandle>;
-  create(options: PaseoWorkspaceCreateOptions): Promise<PaseoWorkspaceHandle>;
+  list(options?: AlpWorkspaceListOptions): Promise<AlpWorkspaceListResult>;
+  ref(workspace: string | AlpWorkspace): AlpWorkspaceHandle;
+  open(input: string | AlpWorkspaceOpenOptions, requestId?: string): Promise<AlpWorkspaceHandle>;
+  create(options: AlpWorkspaceCreateOptions): Promise<AlpWorkspaceHandle>;
   archive(
-    workspace: string | PaseoWorkspaceHandle,
+    workspace: string | AlpWorkspaceHandle,
     requestId?: string,
-  ): Promise<PaseoWorkspaceArchiveResult>;
+  ): Promise<AlpWorkspaceArchiveResult>;
   /**
    * Local event subscription over the low-level driver's workspace_update stream.
    * The returned function only removes this SDK listener.
    */
-  subscribe(handler: PaseoWorkspaceUpdateHandler): () => void;
+  subscribe(handler: AlpWorkspaceUpdateHandler): () => void;
 }
 
-type PaseoAgentSessionConfig = CreateAgentRequestMessage["config"];
-export type PaseoAgentProvider = PaseoAgentSessionConfig["provider"];
+type AlpAgentSessionConfig = CreateAgentRequestMessage["config"];
+export type AlpAgentProvider = AlpAgentSessionConfig["provider"];
 
-export type PaseoProviderFeatureValues = Record<string, unknown>;
+export type AlpProviderFeatureValues = Record<string, unknown>;
 
-export interface PaseoAgentConfig {
+export interface AlpAgentConfig {
   /** Provider and model in `provider/model` format. */
   provider: string;
-  modeId?: PaseoAgentSessionConfig["modeId"];
-  thinkingOptionId?: PaseoAgentSessionConfig["thinkingOptionId"];
-  featureValues?: PaseoProviderFeatureValues;
+  modeId?: AlpAgentSessionConfig["modeId"];
+  thinkingOptionId?: AlpAgentSessionConfig["thinkingOptionId"];
+  featureValues?: AlpProviderFeatureValues;
   /** JSON-safe provider-native settings, validated by the selected provider. */
-  options?: PaseoAgentSessionConfig["providerOptions"];
-  systemPrompt?: PaseoAgentSessionConfig["systemPrompt"];
-  toolPolicy?: PaseoAgentSessionConfig["toolPolicy"];
-  mcpServers?: PaseoAgentSessionConfig["mcpServers"];
+  options?: AlpAgentSessionConfig["providerOptions"];
+  systemPrompt?: AlpAgentSessionConfig["systemPrompt"];
+  toolPolicy?: AlpAgentSessionConfig["toolPolicy"];
+  mcpServers?: AlpAgentSessionConfig["mcpServers"];
 }
 
-export interface PaseoAgentCreateOptions {
+export interface AlpAgentCreateOptions {
   idempotencyKey?: string;
   agentId?: string;
   onEvent?: (snapshot: CreationSnapshot) => void;
-  config: PaseoAgentConfig;
+  config: AlpAgentConfig;
   cwd: string;
-  parent?: string | PaseoAgentHandle;
-  title?: PaseoAgentSessionConfig["title"];
+  parent?: string | AlpAgentHandle;
+  title?: AlpAgentSessionConfig["title"];
   env?: CreateAgentRequestMessage["env"];
   prompt?: string;
   clientMessageId?: string;
@@ -261,14 +255,14 @@ export interface PaseoAgentCreateOptions {
   labels?: Record<string, string>;
 }
 
-export type PaseoWorkspaceAgentCreateOptions = Omit<PaseoAgentCreateOptions, "cwd">;
+export type AlpWorkspaceAgentCreateOptions = Omit<AlpAgentCreateOptions, "cwd">;
 
-export interface PaseoAgentRefetchResult {
-  agent: PaseoAgent;
+export interface AlpAgentRefetchResult {
+  agent: AlpAgent;
   project: ProjectPlacementPayload | null;
 }
 
-export interface PaseoAgentTimelineRefetchOptions {
+export interface AlpAgentTimelineRefetchOptions {
   direction?: FetchAgentTimelineDirection;
   cursor?: FetchAgentTimelineCursor;
   limit?: number;
@@ -276,38 +270,38 @@ export interface PaseoAgentTimelineRefetchOptions {
   requestId?: string;
 }
 
-export interface PaseoAgentSendOptions {
+export interface AlpAgentSendOptions {
   messageId?: string;
   images?: Array<{ data: string; mimeType: string }>;
   attachments?: SendAgentMessageRequest["attachments"];
 }
 
-export interface PaseoAgentRunOptions extends PaseoAgentSendOptions {
+export interface AlpAgentRunOptions extends AlpAgentSendOptions {
   timeoutMs?: number;
 }
 
-export type PaseoAgentRunResult = WaitForFinishResult;
-export type PaseoAgentPermissionResponse = AgentPermissionResponse;
+export type AlpAgentRunResult = WaitForFinishResult;
+export type AlpAgentPermissionResponse = AgentPermissionResponse;
 
-export interface PaseoAgentRespondToPermissionOptions {
+export interface AlpAgentRespondToPermissionOptions {
   requestId: string;
-  response: PaseoAgentPermissionResponse;
+  response: AlpAgentPermissionResponse;
 }
 
-export interface PaseoAgentCommandsOptions {
+export interface AlpAgentCommandsOptions {
   requestId?: string;
 }
 
-export type PaseoAgentCommandsResult = ListCommandsResponse["payload"];
+export type AlpAgentCommandsResult = ListCommandsResponse["payload"];
 
-export type PaseoAgentUpdate = Extract<SessionOutboundMessage, { type: "agent_update" }>["payload"];
+export type AlpAgentUpdate = Extract<SessionOutboundMessage, { type: "agent_update" }>["payload"];
 
-export type PaseoAgentStream = Extract<SessionOutboundMessage, { type: "agent_stream" }>["payload"];
+export type AlpAgentStream = Extract<SessionOutboundMessage, { type: "agent_stream" }>["payload"];
 
-export type PaseoAgentUpdateHandler = (update: PaseoAgentUpdate) => void;
+export type AlpAgentUpdateHandler = (update: AlpAgentUpdate) => void;
 
-export type PaseoAgentTimelineEvent =
-  | PaseoAgentStream
+export type AlpAgentTimelineEvent =
+  | AlpAgentStream
   | {
       agentId: string;
       event: { type: "replacement"; epoch: string };
@@ -319,16 +313,16 @@ export type PaseoAgentTimelineEvent =
     }
   | { agentId: string; event: { type: "error"; error: string } };
 
-export type PaseoAgentTimelineSubscription = ReturnType<DaemonClient["subscribeAgentTimeline"]>;
+export type AlpAgentTimelineSubscription = ReturnType<DaemonClient["subscribeAgentTimeline"]>;
 
-export interface PaseoAgentTimelineHandle {
+export interface AlpAgentTimelineHandle {
   append(item: Omit<PluginTimelineItem, "pluginId">): Promise<{ seq: number; epoch: string }>;
   /**
    * Fetches a fresh timeline page through the existing daemon RPC. If the daemon
    * includes an agent snapshot in the response, the parent handle is updated to
    * that value.
    */
-  refetch(options?: PaseoAgentTimelineRefetchOptions): Promise<FetchAgentTimelinePayload>;
+  refetch(options?: AlpAgentTimelineRefetchOptions): Promise<FetchAgentTimelinePayload>;
   /**
    * Delivers live events only. After reconnect, subscription_restored precedes
    * subsequent updates. History may have been missed; use refetch() to request
@@ -337,10 +331,10 @@ export interface PaseoAgentTimelineHandle {
    * Await the returned unsubscribe function's `ready` promise before starting
    * work that must be observed. It rejects if establishment fails.
    */
-  subscribe(handler: (event: PaseoAgentTimelineEvent) => void): PaseoAgentTimelineSubscription;
+  subscribe(handler: (event: AlpAgentTimelineEvent) => void): AlpAgentTimelineSubscription;
 }
 
-export interface PaseoAgentHandle {
+export interface AlpAgentHandle {
   readonly id: string;
   /**
    * `workspaceId` through `archivedAt` mirror the last snapshot this handle
@@ -351,25 +345,25 @@ export interface PaseoAgentHandle {
    */
   readonly workspaceId: string | null;
   readonly cwd: string | null;
-  readonly status: PaseoAgent["status"] | null;
-  readonly capabilities: PaseoAgent["capabilities"] | null;
-  readonly availableModes: PaseoAgent["availableModes"] | null;
-  readonly pendingPermissions: PaseoAgent["pendingPermissions"] | null;
-  readonly activeTurn: NonNullable<PaseoAgent["activeTurn"]> | null;
-  readonly lastUsage: NonNullable<PaseoAgent["lastUsage"]> | null;
-  readonly lastError: NonNullable<PaseoAgent["lastError"]> | null;
-  readonly features: NonNullable<PaseoAgent["features"]> | null;
-  readonly runtimeInfo: NonNullable<PaseoAgent["runtimeInfo"]> | null;
-  readonly archivedAt: NonNullable<PaseoAgent["archivedAt"]> | null;
-  readonly timeline: PaseoAgentTimelineHandle;
-  current(): PaseoAgent | null;
-  refresh(requestId?: string): Promise<PaseoAgentRefetchResult | null>;
-  send(text: string, options?: PaseoAgentSendOptions): Promise<void>;
-  respondToPermission(options: PaseoAgentRespondToPermissionOptions): Promise<void>;
+  readonly status: AlpAgent["status"] | null;
+  readonly capabilities: AlpAgent["capabilities"] | null;
+  readonly availableModes: AlpAgent["availableModes"] | null;
+  readonly pendingPermissions: AlpAgent["pendingPermissions"] | null;
+  readonly activeTurn: NonNullable<AlpAgent["activeTurn"]> | null;
+  readonly lastUsage: NonNullable<AlpAgent["lastUsage"]> | null;
+  readonly lastError: NonNullable<AlpAgent["lastError"]> | null;
+  readonly features: NonNullable<AlpAgent["features"]> | null;
+  readonly runtimeInfo: NonNullable<AlpAgent["runtimeInfo"]> | null;
+  readonly archivedAt: NonNullable<AlpAgent["archivedAt"]> | null;
+  readonly timeline: AlpAgentTimelineHandle;
+  current(): AlpAgent | null;
+  refresh(requestId?: string): Promise<AlpAgentRefetchResult | null>;
+  send(text: string, options?: AlpAgentSendOptions): Promise<void>;
+  respondToPermission(options: AlpAgentRespondToPermissionOptions): Promise<void>;
   /** Sends a prompt and resolves when that turn finishes or needs attention. */
-  run(text: string, options?: PaseoAgentRunOptions): Promise<PaseoAgentRunResult>;
+  run(text: string, options?: AlpAgentRunOptions): Promise<AlpAgentRunResult>;
   /** Waits for the current turn, including one started with `prompt`. */
-  waitForFinish(timeoutMs?: number): Promise<PaseoAgentRunResult>;
+  waitForFinish(timeoutMs?: number): Promise<AlpAgentRunResult>;
   /**
    * Asks the running session for the slash commands and skills it actually
    * loaded. Providers answer from the live session, so this sees built-in and
@@ -377,95 +371,95 @@ export interface PaseoAgentHandle {
    * `error` string; a provider that cannot answer reports it there rather than
    * rejecting.
    */
-  commands(options?: PaseoAgentCommandsOptions): Promise<PaseoAgentCommandsResult>;
+  commands(options?: AlpAgentCommandsOptions): Promise<AlpAgentCommandsResult>;
   archive(): Promise<{ archivedAt: string }>;
   detach(): Promise<void>;
-  subscribe(handler: (update: PaseoAgentUpdate) => void): () => void;
+  subscribe(handler: (update: AlpAgentUpdate) => void): () => void;
 }
 
-export interface PaseoAgentActions {
-  list(options: PaseoAgentListOptions & { subscribe: {} }): Promise<
-    PaseoAgentListResult & {
+export interface AlpAgentActions {
+  list(options: AlpAgentListOptions & { subscribe: {} }): Promise<
+    AlpAgentListResult & {
       subscriptionId: string;
-      subscription: OwnedSubscription<PaseoAgentListResult>;
+      subscription: OwnedSubscription<AlpAgentListResult>;
     }
   >;
-  list(options?: PaseoAgentListOptions): Promise<PaseoAgentListResult>;
-  ref(agent: string | PaseoAgent): PaseoAgentHandle;
-  create(options: PaseoAgentCreateOptions): Promise<PaseoAgentHandle>;
+  list(options?: AlpAgentListOptions): Promise<AlpAgentListResult>;
+  ref(agent: string | AlpAgent): AlpAgentHandle;
+  create(options: AlpAgentCreateOptions): Promise<AlpAgentHandle>;
   /**
    * Local event subscription over the low-level driver's agent_update stream.
    * The returned function only removes this SDK listener.
    */
-  subscribe(handler: PaseoAgentUpdateHandler): () => void;
+  subscribe(handler: AlpAgentUpdateHandler): () => void;
 }
 
-export type PaseoProviderModelsResult = ListProviderModelsResponseMessage["payload"];
-export type PaseoProviderModesResult = ListProviderModesResponseMessage["payload"];
-type PaseoProviderFeaturesDraft = ListProviderFeaturesRequestMessage["draftConfig"];
-export interface PaseoProviderFeaturesInput extends Omit<
-  PaseoProviderFeaturesDraft,
+export type AlpProviderModelsResult = ListProviderModelsResponseMessage["payload"];
+export type AlpProviderModesResult = ListProviderModesResponseMessage["payload"];
+type AlpProviderFeaturesDraft = ListProviderFeaturesRequestMessage["draftConfig"];
+export interface AlpProviderFeaturesInput extends Omit<
+  AlpProviderFeaturesDraft,
   "provider" | "model"
 > {
   /** Provider and model in `provider/model` format. */
   provider: string;
 }
-export type PaseoProviderFeaturesResult = ListProviderFeaturesResponseMessage["payload"];
-export type PaseoProviderAvailabilityResult = ListAvailableProvidersResponse["payload"];
-export type PaseoProviderSnapshotResult = GetProvidersSnapshotResponseMessage["payload"];
-export type PaseoProviderSnapshotUpdate = Extract<
+export type AlpProviderFeaturesResult = ListProviderFeaturesResponseMessage["payload"];
+export type AlpProviderAvailabilityResult = ListAvailableProvidersResponse["payload"];
+export type AlpProviderSnapshotResult = GetProvidersSnapshotResponseMessage["payload"];
+export type AlpProviderSnapshotUpdate = Extract<
   SessionOutboundMessage,
   { type: "providers_snapshot_update" }
 >["payload"];
-export type PaseoProviderRefreshResult = RefreshProvidersSnapshotResponseMessage["payload"];
-export type PaseoProviderDiagnosticResult = ProviderDiagnosticResponseMessage["payload"];
-export type PaseoProviderUsageResult = ProviderUsageListResponseMessage["payload"];
-export interface PaseoProviderUsageOptions {
+export type AlpProviderRefreshResult = RefreshProvidersSnapshotResponseMessage["payload"];
+export type AlpProviderDiagnosticResult = ProviderDiagnosticResponseMessage["payload"];
+export type AlpProviderUsageResult = ProviderUsageListResponseMessage["payload"];
+export interface AlpProviderUsageOptions {
   requestId?: string;
 }
 
-export interface PaseoProviderListOptions {
+export interface AlpProviderListOptions {
   cwd?: string;
   requestId?: string;
 }
 
-export interface PaseoProviderRefreshOptions {
+export interface AlpProviderRefreshOptions {
   cwd?: string;
-  providers?: PaseoAgentProvider[];
+  providers?: AlpAgentProvider[];
   requestId?: string;
 }
 
-export interface PaseoProviderWaitOptions extends PaseoProviderListOptions {
+export interface AlpProviderWaitOptions extends AlpProviderListOptions {
   timeoutMs?: number;
 }
 
-export interface PaseoProviderActions {
+export interface AlpProviderActions {
   listModels(
-    provider: PaseoAgentProvider,
-    options?: PaseoProviderListOptions,
-  ): Promise<PaseoProviderModelsResult>;
+    provider: AlpAgentProvider,
+    options?: AlpProviderListOptions,
+  ): Promise<AlpProviderModelsResult>;
   listModes(
-    provider: PaseoAgentProvider,
-    options?: PaseoProviderListOptions,
-  ): Promise<PaseoProviderModesResult>;
+    provider: AlpAgentProvider,
+    options?: AlpProviderListOptions,
+  ): Promise<AlpProviderModesResult>;
   listFeatures(
-    draftConfig: PaseoProviderFeaturesInput,
+    draftConfig: AlpProviderFeaturesInput,
     options?: { requestId?: string },
-  ): Promise<PaseoProviderFeaturesResult>;
-  listAvailable(options?: { requestId?: string }): Promise<PaseoProviderAvailabilityResult>;
-  snapshot(options?: PaseoProviderListOptions): Promise<PaseoProviderSnapshotResult>;
+  ): Promise<AlpProviderFeaturesResult>;
+  listAvailable(options?: { requestId?: string }): Promise<AlpProviderAvailabilityResult>;
+  snapshot(options?: AlpProviderListOptions): Promise<AlpProviderSnapshotResult>;
   /** Resolves after the daemon's lazy provider discovery has finished. */
-  waitForReady(options?: PaseoProviderWaitOptions): Promise<PaseoProviderSnapshotResult>;
-  refresh(options?: PaseoProviderRefreshOptions): Promise<PaseoProviderRefreshResult>;
+  waitForReady(options?: AlpProviderWaitOptions): Promise<AlpProviderSnapshotResult>;
+  refresh(options?: AlpProviderRefreshOptions): Promise<AlpProviderRefreshResult>;
   diagnostic(
-    provider: PaseoAgentProvider,
+    provider: AlpAgentProvider,
     options?: { requestId?: string },
-  ): Promise<PaseoProviderDiagnosticResult>;
-  listUsage(options?: PaseoProviderUsageOptions): Promise<PaseoProviderUsageResult>;
-  subscribe(handler: (update: PaseoProviderSnapshotUpdate) => void): () => void;
+  ): Promise<AlpProviderDiagnosticResult>;
+  listUsage(options?: AlpProviderUsageOptions): Promise<AlpProviderUsageResult>;
+  subscribe(handler: (update: AlpProviderSnapshotUpdate) => void): () => void;
 }
 
-export interface PaseoConfigActions {
+export interface AlpConfigActions {
   /**
    * Reads daemon config through the existing config RPC. Provider profiles,
    * custom provider entries, keys/env, custom binaries, and provider enablement
@@ -486,7 +480,7 @@ export interface PaseoConfigActions {
 }
 
 // ALP(slp): lets one plugin call another plugin's RPC over the existing plugin RPC request.
-export interface PaseoPluginActions {
+export interface AlpPluginActions {
   /**
    * Invokes `method` on plugin `pluginId` and resolves with its raw output. The target plugin
    * validates the input; validate the output yourself. Rejects when the plugin is not running.
@@ -494,32 +488,32 @@ export interface PaseoPluginActions {
   invoke(pluginId: string, method: string, input: unknown): Promise<unknown>;
 }
 
-export interface PaseoApi {
+export interface AlpApi {
   dispose(): Promise<void>;
   observeEvents: DaemonClient["observeEvents"];
-  readonly terminals: PaseoTerminalActions;
-  readonly workspaces: PaseoWorkspaceActions;
-  readonly projects: PaseoProjectActions;
-  readonly agents: PaseoAgentActions;
-  readonly providers: PaseoProviderActions;
-  readonly config: PaseoConfigActions;
-  readonly plugins: PaseoPluginActions;
+  readonly terminals: AlpTerminalActions;
+  readonly workspaces: AlpWorkspaceActions;
+  readonly projects: AlpProjectActions;
+  readonly agents: AlpAgentActions;
+  readonly providers: AlpProviderActions;
+  readonly config: AlpConfigActions;
+  readonly plugins: AlpPluginActions;
 }
 
-export interface PaseoClient extends PaseoApi {
+export interface AlpClient extends AlpApi {
   connect(): Promise<void>;
   close(): Promise<void>;
   ensureConnected(): void;
   getConnectionState(): ConnectionState;
 }
 
-export function createPaseoClient(config: PaseoClientConfig): PaseoClient {
+export function createAlpClient(config: AlpClientConfig): AlpClient {
   const daemonClient = new DaemonClient({
     ...config,
     clientId: config.clientId ?? createGeneratedClientId(),
     clientType: "cli",
   });
-  const api = createPaseoApi(daemonClient);
+  const api = createAlpApi(daemonClient);
   return {
     ...api,
     connect: () => daemonClient.connect(),
@@ -536,7 +530,7 @@ export function createPaseoClient(config: PaseoClientConfig): PaseoClient {
 }
 
 function toDaemonAgentCreateOptions(
-  options: PaseoAgentCreateOptions,
+  options: AlpAgentCreateOptions,
   placement?: { workspaceId: string; cwd: string },
 ): CreateAgentRequestOptions {
   const { config: agentConfig, cwd, parent, title, prompt, ...requestOptions } = options;
@@ -558,16 +552,16 @@ function toDaemonAgentCreateOptions(
   };
 }
 
-export function createPaseoApi(
+export function createAlpApi(
   daemonClient: DaemonClient,
   scopeOptions?: { signal?: AbortSignal },
-): PaseoApi {
+): AlpApi {
   const handles = new Set<{ release(): Promise<void> }>();
-  const agentListeners = new Set<PaseoAgentUpdateHandler>();
-  const workspaceListeners = new Set<PaseoWorkspaceUpdateHandler>();
+  const agentListeners = new Set<AlpAgentUpdateHandler>();
+  const workspaceListeners = new Set<AlpWorkspaceUpdateHandler>();
   const lifetime = new AbortController();
   const own = <T extends { release(): Promise<void> }>(create: () => T): T => {
-    if (lifetime.signal.aborted) throw new Error("Paseo API is disposed");
+    if (lifetime.signal.aborted) throw new Error("Alp API is disposed");
     const handle = create();
     handles.add(handle);
     const release = handle.release.bind(handle);
@@ -577,15 +571,15 @@ export function createPaseoApi(
     };
     return handle;
   };
-  const listenAgents = (handler: PaseoAgentUpdateHandler) => {
-    if (lifetime.signal.aborted) throw new Error("Paseo API is disposed");
+  const listenAgents = (handler: AlpAgentUpdateHandler) => {
+    if (lifetime.signal.aborted) throw new Error("Alp API is disposed");
     agentListeners.add(handler);
     return () => {
       agentListeners.delete(handler);
     };
   };
-  const listenWorkspaces = (handler: PaseoWorkspaceUpdateHandler) => {
-    if (lifetime.signal.aborted) throw new Error("Paseo API is disposed");
+  const listenWorkspaces = (handler: AlpWorkspaceUpdateHandler) => {
+    if (lifetime.signal.aborted) throw new Error("Alp API is disposed");
     workspaceListeners.add(handler);
     return () => {
       workspaceListeners.delete(handler);
@@ -597,7 +591,7 @@ export function createPaseoApi(
     (agentId, handler) => own(() => daemonClient.subscribeAgentTimeline(agentId, handler)),
   );
   const createAgent = async (
-    options: PaseoAgentCreateOptions,
+    options: AlpAgentCreateOptions,
     placement?: { workspaceId: string; cwd: string },
   ) => {
     const agent = await daemonClient.createAgent(toDaemonAgentCreateOptions(options, placement));
@@ -659,16 +653,16 @@ export function createPaseoApi(
     };
   };
 
-  function listWorkspaces(options: PaseoWorkspaceListOptions & { subscribe: {} }): Promise<
-    PaseoWorkspaceListResult & {
+  function listWorkspaces(options: AlpWorkspaceListOptions & { subscribe: {} }): Promise<
+    AlpWorkspaceListResult & {
       subscriptionId: string;
-      subscription: OwnedSubscription<PaseoWorkspaceListResult>;
+      subscription: OwnedSubscription<AlpWorkspaceListResult>;
     }
   >;
-  function listWorkspaces(options?: PaseoWorkspaceListOptions): Promise<PaseoWorkspaceListResult>;
+  function listWorkspaces(options?: AlpWorkspaceListOptions): Promise<AlpWorkspaceListResult>;
   async function listWorkspaces(
-    options?: PaseoWorkspaceListOptions,
-  ): Promise<PaseoWorkspaceListResult> {
+    options?: AlpWorkspaceListOptions,
+  ): Promise<AlpWorkspaceListResult> {
     if (!options?.subscribe) return daemonClient.fetchWorkspaces(options);
     if (options.subscribe.subscriptionId !== undefined)
       throw new Error("Subscription IDs are assigned by the host");
@@ -683,14 +677,14 @@ export function createPaseoApi(
     return { ...(await subscription.ready), subscription };
   }
 
-  function listAgents(options: PaseoAgentListOptions & { subscribe: {} }): Promise<
-    PaseoAgentListResult & {
+  function listAgents(options: AlpAgentListOptions & { subscribe: {} }): Promise<
+    AlpAgentListResult & {
       subscriptionId: string;
-      subscription: OwnedSubscription<PaseoAgentListResult>;
+      subscription: OwnedSubscription<AlpAgentListResult>;
     }
   >;
-  function listAgents(options?: PaseoAgentListOptions): Promise<PaseoAgentListResult>;
-  async function listAgents(options?: PaseoAgentListOptions): Promise<PaseoAgentListResult> {
+  function listAgents(options?: AlpAgentListOptions): Promise<AlpAgentListResult>;
+  async function listAgents(options?: AlpAgentListOptions): Promise<AlpAgentListResult> {
     if (!options?.subscribe) return daemonClient.fetchAgents(options);
     if (options.subscribe.subscriptionId !== undefined)
       throw new Error("Subscription IDs are assigned by the host");
@@ -771,25 +765,25 @@ export function createPaseoApi(
       get: (requestId) => daemonClient.getDaemonConfig(requestId),
       patch: (patch, requestId) => daemonClient.patchDaemonConfig(patch, requestId),
     },
-    // ALP(slp): plugin-to-plugin RPC, see PaseoPluginActions.
+    // ALP(slp): plugin-to-plugin RPC, see AlpPluginActions.
     plugins: {
       invoke: (pluginId, method, input) => daemonClient.invokePluginRpc(pluginId, method, input),
     },
   };
 }
 
-type WorkspaceHandleFactory = (workspace: string | PaseoWorkspace) => PaseoWorkspaceHandle;
-type AgentHandleFactory = (agent: string | PaseoAgent) => PaseoAgentHandle;
+type WorkspaceHandleFactory = (workspace: string | AlpWorkspace) => AlpWorkspaceHandle;
+type AgentHandleFactory = (agent: string | AlpAgent) => AlpAgentHandle;
 type CreateAgent = (
-  options: PaseoAgentCreateOptions,
+  options: AlpAgentCreateOptions,
   placement?: { workspaceId: string; cwd: string },
-) => Promise<PaseoAgentHandle>;
+) => Promise<AlpAgentHandle>;
 
 function createWorkspaceHandleFactory(
   daemonClient: DaemonClient,
   createAgent: CreateAgent,
-  terminals: PaseoTerminalActions,
-  listen: (handler: PaseoWorkspaceUpdateHandler) => () => void,
+  terminals: AlpTerminalActions,
+  listen: (handler: AlpWorkspaceUpdateHandler) => () => void,
 ): WorkspaceHandleFactory {
   return (workspace) => {
     const id = typeof workspace === "string" ? workspace : workspace.id;
@@ -871,14 +865,14 @@ function createWorkspaceHandleFactory(
 
 function createAgentHandleFactory(
   daemonClient: DaemonClient,
-  listen: (handler: PaseoAgentUpdateHandler) => () => void,
+  listen: (handler: AlpAgentUpdateHandler) => () => void,
   subscribeTimeline: DaemonClient["subscribeAgentTimeline"],
 ): AgentHandleFactory {
   return (agent) => {
     const id = typeof agent === "string" ? agent : agent.id;
     let current = typeof agent === "string" ? null : agent;
 
-    const handle: PaseoAgentHandle = {
+    const handle: AlpAgentHandle = {
       id,
       timeline: {
         append: (item) => daemonClient.appendAgentTimelineItem(id, item),
@@ -1013,9 +1007,9 @@ function createAgentHandleFactory(
 async function openWorkspace(
   daemonClient: DaemonClient,
   createWorkspaceHandle: WorkspaceHandleFactory,
-  input: string | PaseoWorkspaceOpenOptions,
+  input: string | AlpWorkspaceOpenOptions,
   requestId?: string,
-): Promise<PaseoWorkspaceHandle> {
+): Promise<AlpWorkspaceHandle> {
   const options = typeof input === "string" ? { cwd: input, requestId } : input;
   const result = await daemonClient.openProject(options.cwd, options.requestId);
   if (result.error || !result.workspace) {
@@ -1024,11 +1018,11 @@ async function openWorkspace(
   return createWorkspaceHandle(result.workspace);
 }
 
-function resolveWorkspaceId(workspace: string | PaseoWorkspaceHandle): string {
+function resolveWorkspaceId(workspace: string | AlpWorkspaceHandle): string {
   return typeof workspace === "string" ? workspace : workspace.id;
 }
 
-function resolveAgentId(agent: string | PaseoAgentHandle): string {
+function resolveAgentId(agent: string | AlpAgentHandle): string {
   return typeof agent === "string" ? agent : agent.id;
 }
 
@@ -1045,8 +1039,8 @@ function parseProviderModel(selection: string): { provider: string; model: strin
 
 function listProviderUsage(
   daemonClient: DaemonClient,
-  options?: PaseoProviderUsageOptions,
-): Promise<PaseoProviderUsageResult> {
+  options?: AlpProviderUsageOptions,
+): Promise<AlpProviderUsageResult> {
   // COMPAT(providerUsageList): added in v0.1.98, remove after 2027-02-28 once daemon floor >= v0.1.98.
   if (daemonClient.getLastServerInfoMessage()?.features?.providerUsageList !== true) {
     return Promise.reject(new Error("Update the host to list provider usage."));
@@ -1058,26 +1052,26 @@ async function waitForProvidersReady(
   daemonClient: DaemonClient,
   observation: ReturnType<DaemonClient["observeEvents"]>,
   signal: AbortSignal,
-  options: PaseoProviderWaitOptions = {},
-): Promise<PaseoProviderSnapshotResult> {
+  options: AlpProviderWaitOptions = {},
+): Promise<AlpProviderSnapshotResult> {
   const { timeoutMs = 60_000, ...snapshotOptions } = options;
 
   try {
     await observation.ready;
     signal.throwIfAborted();
-    return await new Promise<PaseoProviderSnapshotResult>((resolve, reject) => {
+    return await new Promise<AlpProviderSnapshotResult>((resolve, reject) => {
       let settled = false;
       let requestId: string | null = null;
       let snapshotCwd: string | undefined;
-      const pendingUpdates = new Map<string | undefined, PaseoProviderSnapshotUpdate>();
-      let latestEntries: PaseoProviderSnapshotResult["entries"] = [];
+      const pendingUpdates = new Map<string | undefined, AlpProviderSnapshotUpdate>();
+      let latestEntries: AlpProviderSnapshotResult["entries"] = [];
 
       const cleanup = () => {
         clearTimeout(timeout);
         unsubscribe();
         signal.removeEventListener("abort", abort);
       };
-      const finish = (snapshot: PaseoProviderSnapshotResult) => {
+      const finish = (snapshot: AlpProviderSnapshotResult) => {
         if (settled) return;
         settled = true;
         cleanup();
@@ -1089,7 +1083,7 @@ async function waitForProvidersReady(
         cleanup();
         reject(error instanceof Error ? error : new Error(String(error)));
       };
-      const updateMatches = (update: PaseoProviderSnapshotUpdate) => update.cwd === snapshotCwd;
+      const updateMatches = (update: AlpProviderSnapshotUpdate) => update.cwd === snapshotCwd;
 
       const unsubscribe = observation.subscribe({
         snapshot: () => {},
@@ -1106,7 +1100,7 @@ async function waitForProvidersReady(
           finish({ ...update, requestId });
         },
       });
-      const abort = () => fail(new Error("Paseo API is disposed"));
+      const abort = () => fail(new Error("Alp API is disposed"));
       signal.addEventListener("abort", abort, { once: true });
 
       const timeout = setTimeout(() => {
@@ -1151,5 +1145,5 @@ function createGeneratedClientId(): string {
     typeof globalThis.crypto?.randomUUID === "function"
       ? globalThis.crypto.randomUUID()
       : Math.random().toString(36).slice(2);
-  return `paseo-sdk-${randomId}`;
+  return `alp-sdk-${randomId}`;
 }

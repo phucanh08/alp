@@ -8,37 +8,37 @@ describe("starter trigger connections", () => {
         {
           github: [
             {
-              slug: "github-getpaseo",
-              accountLogin: "getpaseo",
+              slug: "github-alp",
+              accountLogin: "alp",
               accountType: "Organization",
-              repositories: ["getpaseo/paseo"],
+              repositories: ["alp/alp"],
             },
           ],
-          slack: [{ slug: "paseo", teamName: "Paseo" }],
-          discord: [{ slug: "paseo-discord", guildName: "Paseo Discord" }],
+          slack: [{ slug: "alp", teamName: "Alp" }],
+          discord: [{ slug: "alp-discord", guildName: "Alp Discord" }],
           daemons: [],
           linear: [],
         },
-        "getpaseo/paseo",
+        "alp/alp",
       ),
     ).toEqual([
       {
-        id: "github:getpaseo/paseo",
-        label: "GitHub — getpaseo/paseo",
+        id: "github:alp/alp",
+        label: "GitHub — alp/alp",
         provider: "github",
-        filters: { connection: "github-getpaseo", repo: "getpaseo/paseo" },
+        filters: { connection: "github-alp", repo: "alp/alp" },
       },
       {
-        id: "slack:paseo",
-        label: "Slack — Paseo",
+        id: "slack:alp",
+        label: "Slack — Alp",
         provider: "slack",
-        filters: { connection: "paseo" },
+        filters: { connection: "alp" },
       },
       {
-        id: "discord:paseo-discord",
-        label: "Discord — Paseo Discord",
+        id: "discord:alp-discord",
+        label: "Discord — Alp Discord",
         provider: "discord",
-        filters: { connection: "paseo-discord" },
+        filters: { connection: "alp-discord" },
       },
     ]);
   });
@@ -49,10 +49,10 @@ describe("starter trigger connections", () => {
         {
           github: [
             {
-              slug: "github-getpaseo",
-              accountLogin: "getpaseo",
+              slug: "github-alp",
+              accountLogin: "alp",
               accountType: "Organization",
-              repositories: ["getpaseo/hub"],
+              repositories: ["alp/hub"],
             },
           ],
           slack: [],
@@ -60,7 +60,7 @@ describe("starter trigger connections", () => {
           daemons: [],
           linear: [],
         },
-        "getpaseo/paseo",
+        "alp/alp",
       ),
     ).toEqual([]);
   });

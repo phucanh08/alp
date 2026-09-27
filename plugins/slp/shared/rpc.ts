@@ -1,7 +1,7 @@
-import { defineRpc } from "@getpaseo/plugin";
+import { defineRpc } from "@alp/plugin";
 import { z } from "zod";
 
-/** One Supervisor per host, in the `SLP Supervisor` workspace at `$PASEO_HOME/supervisor`. */
+/** One Supervisor per host, in the `SLP Supervisor` workspace at `$ALP_HOME/supervisor`. */
 export const slpSupervisorEnsure = defineRpc({
   name: "slp.supervisor.ensure",
   input: z.object({}),

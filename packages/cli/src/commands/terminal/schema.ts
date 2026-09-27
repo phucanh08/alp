@@ -1,7 +1,7 @@
-import type { PaseoTerminal } from "@getpaseo/client";
+import type { AlpTerminal } from "@alp/client";
 import type { OutputSchema } from "../../output/index.js";
 
-export type TerminalRow = PaseoTerminal;
+export type TerminalRow = AlpTerminal;
 
 export interface TerminalKillRow {
   terminalId: string;

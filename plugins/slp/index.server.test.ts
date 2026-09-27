@@ -3,8 +3,8 @@ import type {
   PluginHookContext,
   PluginLifecycleEvents,
   PluginServerContext,
-} from "@getpaseo/plugin/server";
-import type { PluginRpcContract } from "@getpaseo/plugin";
+} from "@alp/plugin/server";
+import type { PluginRpcContract } from "@alp/plugin";
 import { mkdtemp, readdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -26,7 +26,7 @@ type BeforeHandler = (
   input: { request: never },
   context: PluginHookContext,
 ) => unknown | Promise<unknown>;
-type RpcHandler = (input: unknown, context: { paseo: unknown }) => unknown;
+type RpcHandler = (input: unknown, context: { alp: unknown }) => unknown;
 
 interface FakeAgentRecord {
   id: string;
@@ -47,7 +47,7 @@ interface FakeWorkspace {
 }
 
 /**
- * A fake `PluginServerContext` plus the fake `PaseoApi` its hook/RPC handlers receive, wired
+ * A fake `PluginServerContext` plus the fake `AlpApi` its hook/RPC handlers receive, wired
  * together like the daemon would: `contribute(server)` registers against `server`, and the test
  * invokes the captured handlers directly with `hookContext`/`rpcContext`, which read and mutate the
  * same fake host state (`agents`, `workspaces`, `created`, `sent`, `allowed`).
@@ -58,11 +58,11 @@ function fakeContext(
     supervisorCheckMinutes?: number;
     agents?: FakeAgentRecord[];
     workspaces?: FakeWorkspace[];
-    /** The daemon's `PASEO_HOME` as the plugin process sees it; unset unless given. */
-    paseoHome?: string;
+    /** The daemon's `ALP_HOME` as the plugin process sees it; unset unless given. */
+    alpHome?: string;
   } = { enabled: true },
 ) {
-  vi.stubEnv("PASEO_HOME", initial.paseoHome);
+  vi.stubEnv("ALP_HOME", initial.alpHome);
   let enabled = initial.enabled;
   let supervisorCheckMinutes = initial.supervisorCheckMinutes ?? 10;
   const agents: FakeAgentRecord[] = [...(initial.agents ?? [])];
@@ -73,7 +73,7 @@ function fakeContext(
   const invoked: Array<{ pluginId: string; method: string; input: unknown }> = [];
   let nextId = 1;
 
-  const paseo = {
+  const alp = {
     agents: {
       async list() {
         return { entries: agents.map((agent) => ({ agent })), pageInfo: { nextCursor: null } };
@@ -185,7 +185,7 @@ function fakeContext(
   };
 
   const hookContext: PluginHookContext = {
-    paseo: paseo as never,
+    alp: alp as never,
     signal: new AbortController().signal,
   };
 
@@ -201,7 +201,7 @@ function fakeContext(
     beforeHandlers,
     rpcHandlers,
     hookContext,
-    paseo,
+    alp,
     agents,
     workspaces,
     created,
@@ -211,7 +211,7 @@ function fakeContext(
   };
 }
 
-test("permission_requested does not auto-allow mcp__paseo__ tools for a labelled Lead while SLP is off", async () => {
+test("permission_requested does not auto-allow mcp__alp__ tools for a labelled Lead while SLP is off", async () => {
   const fx = fakeContext({
     enabled: false,
     agents: [
@@ -239,7 +239,7 @@ test("permission_requested does not auto-allow mcp__paseo__ tools for a labelled
         title: "Lead",
         labels: { [SEAT_LABEL]: "lead" },
       },
-      request: { id: "perm1", provider: "claude", kind: "tool", name: "mcp__paseo__create_agent" },
+      request: { id: "perm1", provider: "claude", kind: "tool", name: "mcp__alp__create_agent" },
     } as never,
     fx.hookContext,
   );
@@ -300,7 +300,7 @@ test("agent.create passes the request through unchanged while SLP is off", async
   expect(result).toBeUndefined();
 });
 
-test("agent.create asks slp-dev through the hook's own Paseo API for the seat rules", async () => {
+test("agent.create asks slp-dev through the hook's own Alp API for the seat rules", async () => {
   const fx = fakeContext({ enabled: true });
   contribute(fx.server);
   const handler = fx.beforeHandlers.get("agent.create");
@@ -333,8 +333,8 @@ test("slp.lead.ensure and slp.supervisor.ensure refuse while SLP is off", async 
   expect(lead).toBeDefined();
   expect(supervisor).toBeDefined();
 
-  await expect(lead!({ workspaceId: "w1" }, { paseo: fx.paseo })).rejects.toThrow(/SLP disabled/);
-  await expect(supervisor!({}, { paseo: fx.paseo })).rejects.toThrow(/SLP disabled/);
+  await expect(lead!({ workspaceId: "w1" }, { alp: fx.alp })).rejects.toThrow(/SLP disabled/);
+  await expect(supervisor!({}, { alp: fx.alp })).rejects.toThrow(/SLP disabled/);
 });
 
 test(
@@ -416,7 +416,7 @@ function checkAgents(): FakeAgentRecord[] {
   ];
 }
 
-/** Fires `agent.turn_started` for L1, which hands the plugin its Paseo API. */
+/** Fires `agent.turn_started` for L1, which hands the plugin its Alp API. */
 async function startLeadTurn(fx: ReturnType<typeof fakeContext>) {
   const handler = fx.onHandlers.get("agent.turn_started");
   expect(handler).toBeDefined();
@@ -481,7 +481,7 @@ test("the cleanup contribute returns stops the Supervisor check", async () => {
   expect(fx.sent).toEqual([]);
 });
 
-async function temporaryPaseoHome(): Promise<string> {
+async function temporaryAlpHome(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), "slp-index-home-"));
 }
 
@@ -489,9 +489,9 @@ interface CreateResult {
   config: { providerOptions?: Record<string, unknown> };
 }
 
-test("agent.create gives a Claude Lead its seat directory under PASEO_HOME as a local plugin", async () => {
-  const paseoHome = await temporaryPaseoHome();
-  const fx = fakeContext({ enabled: true, paseoHome });
+test("agent.create gives a Claude Lead its seat directory under ALP_HOME as a local plugin", async () => {
+  const alpHome = await temporaryAlpHome();
+  const fx = fakeContext({ enabled: true, alpHome });
   contribute(fx.server);
 
   const result = (await fx.beforeHandlers.get("agent.create")!(
@@ -504,9 +504,9 @@ test("agent.create gives a Claude Lead its seat directory under PASEO_HOME as a 
     fx.hookContext,
   )) as CreateResult;
 
-  const directory = path.join(paseoHome, "slp", "seat-skills", "lead");
+  const directory = path.join(alpHome, "slp", "seat-skills", "lead");
   expect(result.config.providerOptions).toEqual({
-    allowedTools: ["mcp__paseo__*"],
+    allowedTools: ["mcp__alp__*"],
     plugins: [{ type: "local", path: directory }],
   });
   expect(fx.invoked).toContainEqual({
@@ -523,8 +523,8 @@ test("agent.create gives a Claude Lead its seat directory under PASEO_HOME as a 
 });
 
 test("agent.create gives a Codex Peer its seat directory's skills/ as an extra root", async () => {
-  const paseoHome = await temporaryPaseoHome();
-  const fx = fakeContext({ enabled: true, paseoHome });
+  const alpHome = await temporaryAlpHome();
+  const fx = fakeContext({ enabled: true, alpHome });
   contribute(fx.server);
 
   const result = (await fx.beforeHandlers.get("agent.create")!(
@@ -538,13 +538,13 @@ test("agent.create gives a Codex Peer its seat directory's skills/ as an extra r
   )) as CreateResult;
 
   expect(result.config.providerOptions?.skills).toEqual({
-    extraRoots: [path.join(paseoHome, "slp", "seat-skills", "peer", "skills")],
+    extraRoots: [path.join(alpHome, "slp", "seat-skills", "peer", "skills")],
   });
 });
 
 test("the first Claude/Codex session open writes every seat directory, once", async () => {
-  const paseoHome = await temporaryPaseoHome();
-  const fx = fakeContext({ enabled: true, paseoHome });
+  const alpHome = await temporaryAlpHome();
+  const fx = fakeContext({ enabled: true, alpHome });
   contribute(fx.server);
   const sessionOpen = fx.beforeHandlers.get("agent.session_open")!;
   const open = (provider: string) =>
@@ -566,7 +566,7 @@ test("the first Claude/Codex session open writes every seat directory, once", as
   expect(await open("acp")).toBeUndefined();
   expect(fx.invoked).toEqual([]);
   expect(await open("claude")).toBeUndefined();
-  expect((await readdir(path.join(paseoHome, "slp", "seat-skills"))).sort()).toEqual([
+  expect((await readdir(path.join(alpHome, "slp", "seat-skills"))).sort()).toEqual([
     "lead",
     "peer",
   ]);
@@ -575,7 +575,7 @@ test("the first Claude/Codex session open writes every seat directory, once", as
   expect(fx.invoked.length).toBe(calls);
 });
 
-test("without PASEO_HOME a seat is created without skills and nothing asks for them", async () => {
+test("without ALP_HOME a seat is created without skills and nothing asks for them", async () => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
   const fx = fakeContext({ enabled: true });
   contribute(fx.server);

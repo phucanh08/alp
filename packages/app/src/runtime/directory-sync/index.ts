@@ -1,9 +1,9 @@
-import type { OwnedSubscription } from "@getpaseo/client";
+import type { OwnedSubscription } from "@alp/client";
 import type {
   DaemonClient,
   FetchAgentsEntry,
   FetchAgentsOptions,
-} from "@getpaseo/client/internal/daemon-client";
+} from "@alp/client/internal/daemon-client";
 import { fetchAgentTimelineOnce } from "@/timeline/fetch-agent-timeline-once";
 import {
   normalizeProjectDescriptor,

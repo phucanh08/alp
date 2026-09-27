@@ -3,10 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Pressable, Text, View, type GestureResponderEvent } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { ExternalLink, Folder, GitBranch, Globe } from "lucide-react-native";
-import {
-  workspaceLabelKey,
-  type WorkspaceLabelDefinition,
-} from "@getpaseo/protocol/workspace-labels";
+import { workspaceLabelKey, type WorkspaceLabelDefinition } from "@alp/protocol/workspace-labels";
 import type { HostBadgeModel } from "@/hosts/appearance";
 import { HostBadge, HOST_BADGE_ICON_SIZE } from "@/hosts/host-badge";
 import { WorkspaceLabelChip, WORKSPACE_LABEL_CHIP_INSET } from "@/workspace-labels/chip";

@@ -3,7 +3,7 @@ import type {
   ProviderEvent,
   ProviderInput,
   ProviderRegistration,
-} from "@getpaseo/plugin/server/provider";
+} from "@alp/plugin/server/provider";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { describe, expect, test } from "vitest";
 import { createTestLogger } from "../../test-utils/test-logger.js";

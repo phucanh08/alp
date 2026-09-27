@@ -136,13 +136,13 @@ test("Lead runtime block carries the model and effort rule for Peers", () => {
   expect(buildSystemPrompt("peer", "claude", "BODY", null)).not.toContain("thinkingOptionId");
 });
 
-test("withLeadAllowedTools adds the Paseo wildcard, keeps existing tools, never duplicates", () => {
-  expect(withLeadAllowedTools(undefined)).toEqual({ allowedTools: ["mcp__paseo__*"] });
-  const merged = withLeadAllowedTools({ allowedTools: ["Bash", "mcp__paseo__*"], model: "x" });
-  expect(merged).toEqual({ allowedTools: ["Bash", "mcp__paseo__*"], model: "x" });
+test("withLeadAllowedTools adds the Alp wildcard, keeps existing tools, never duplicates", () => {
+  expect(withLeadAllowedTools(undefined)).toEqual({ allowedTools: ["mcp__alp__*"] });
+  const merged = withLeadAllowedTools({ allowedTools: ["Bash", "mcp__alp__*"], model: "x" });
+  expect(merged).toEqual({ allowedTools: ["Bash", "mcp__alp__*"], model: "x" });
 });
 
-test("supervisor loses write, spawn, and skill tools and gets the Paseo wildcard", () => {
+test("supervisor loses write, spawn, and skill tools and gets the Alp wildcard", () => {
   const opts = providerOptionsFor(
     "supervisor",
     "claude",
@@ -150,7 +150,7 @@ test("supervisor loses write, spawn, and skill tools and gets the Paseo wildcard
     "/home/.alp/slp/seat-skills/supervisor",
   );
   expect(opts).toEqual({
-    allowedTools: ["mcp__paseo__*"],
+    allowedTools: ["mcp__alp__*"],
     disallowedTools: [
       "WebSearch",
       "Write",
@@ -228,7 +228,7 @@ test("isHumanCreated is true unless the daemon-owned parent label is set", () =>
   expect(isHumanCreated(undefined)).toBe(true);
   expect(isHumanCreated({})).toBe(true);
   expect(isHumanCreated({ "slp.role": "lead" })).toBe(true);
-  expect(isHumanCreated({ "paseo.parent-agent-id": "L1" })).toBe(false);
+  expect(isHumanCreated({ "alp.parent-agent-id": "L1" })).toBe(false);
 });
 
 test("defaultSeatLabels defaults an opinion-less, Human-made request to Peer", () => {
@@ -246,27 +246,25 @@ test("defaultSeatLabels defaults an opinion-less, Human-made request to Peer", (
 test("defaultSeatLabels does nothing once the request already opined on a seat or a parent", () => {
   expect(defaultSeatLabels({ "slp.role": "lead" })).toBeNull();
   expect(defaultSeatLabels({ "slp.role": "reviewer" })).toBeNull();
-  expect(defaultSeatLabels({ "paseo.parent-agent-id": "L1" })).toBeNull();
+  expect(defaultSeatLabels({ "alp.parent-agent-id": "L1" })).toBeNull();
 });
 
 test("defaultSeatLabels tags a schedule run's agent slp.origin=schedule, not human", () => {
-  expect(defaultSeatLabels({ "paseo.schedule-id": "sch1" })).toEqual({
-    "paseo.schedule-id": "sch1",
+  expect(defaultSeatLabels({ "alp.schedule-id": "sch1" })).toEqual({
+    "alp.schedule-id": "sch1",
     "slp.role": "peer",
     "slp.origin": "schedule",
   });
-  expect(defaultSeatLabels({ "paseo.schedule-id": "sch1", "paseo.schedule-run": "run1" })).toEqual({
-    "paseo.schedule-id": "sch1",
-    "paseo.schedule-run": "run1",
+  expect(defaultSeatLabels({ "alp.schedule-id": "sch1", "alp.schedule-run": "run1" })).toEqual({
+    "alp.schedule-id": "sch1",
+    "alp.schedule-run": "run1",
     "slp.role": "peer",
     "slp.origin": "schedule",
   });
 });
 
 test("defaultSeatLabels leaves a schedule-run agent alone once it already names a parent agent", () => {
-  expect(
-    defaultSeatLabels({ "paseo.schedule-id": "sch1", "paseo.parent-agent-id": "L1" }),
-  ).toBeNull();
+  expect(defaultSeatLabels({ "alp.schedule-id": "sch1", "alp.parent-agent-id": "L1" })).toBeNull();
 });
 
 test("runtime blocks name no retired seat provider and no Gemini", () => {

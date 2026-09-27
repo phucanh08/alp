@@ -7,11 +7,11 @@ import {
   type TimelineSubscription,
 } from "./connection/index.js";
 import { CreationClient } from "./creation/index.js";
-import type { CreationSnapshot } from "@getpaseo/protocol/messages";
+import type { CreationSnapshot } from "@alp/protocol/messages";
 import type { z } from "zod";
-import type { SessionEventSubscription } from "@getpaseo/protocol/messages";
-import type { ClientCapability } from "@getpaseo/protocol/client-capabilities";
-import type { AgentAttentionNotificationPayload } from "@getpaseo/protocol/agent-attention-notification";
+import type { SessionEventSubscription } from "@alp/protocol/messages";
+import type { ClientCapability } from "@alp/protocol/client-capabilities";
+import type { AgentAttentionNotificationPayload } from "@alp/protocol/agent-attention-notification";
 import {
   AgentCreateFailedStatusPayloadSchema,
   AgentCreatedStatusPayloadSchema,
@@ -26,15 +26,15 @@ import {
   SessionInboundMessageSchema,
   type ActiveTurnBehavior,
   type ServerInfoStatusPayload,
-} from "@getpaseo/protocol/messages";
-import { validateWSOutboundMessage } from "@getpaseo/protocol/validation/ws-outbound";
+} from "@alp/protocol/messages";
+import { validateWSOutboundMessage } from "@alp/protocol/validation/ws-outbound";
 import type {
   AgentStreamEventPayload,
   AgentSnapshotPayload,
   ProjectPlacementPayload,
   AgentPermissionResolvedMessage,
   CreateAgentRequestMessage,
-  CreatePaseoWorktreeRequest,
+  CreateAlpWorktreeRequest,
   FileDownloadTokenResponse,
   FileUploadResponse,
   FileExplorerResponse,
@@ -72,8 +72,8 @@ import type {
   GitHubSearchResponse,
   GitHubSearchRequest,
   DirectorySuggestionsResponse,
-  PaseoWorktreeListResponse,
-  PaseoWorktreeArchiveResponse,
+  AlpWorktreeListResponse,
+  AlpWorktreeArchiveResponse,
   ProjectIconSource,
   ProjectIconResponse,
   ProjectIconGetResponse,
@@ -110,8 +110,8 @@ import type {
   SessionInboundMessage,
   SessionOutboundMessage,
   SendAgentMessageRequest,
-  PaseoConfigRaw,
-  PaseoConfigRevision,
+  AlpConfigRaw,
+  AlpConfigRevision,
   WorkspaceCreateRequest,
   WorkspaceRecoveryState,
   PluginListItem,
@@ -125,7 +125,7 @@ import type {
   AgentSkillSelection,
   AgentSkillsStatus,
   AgentSkillsSaveResult,
-} from "@getpaseo/protocol/messages";
+} from "@alp/protocol/messages";
 import type {
   AgentPermissionRequest,
   AgentPermissionResponse,
@@ -133,13 +133,13 @@ import type {
   AgentProviderNotice,
   AgentProvider,
   AgentSessionConfig,
-} from "@getpaseo/protocol/agent-types";
+} from "@alp/protocol/agent-types";
 import type {
   AgentConfigApply,
   MutableDaemonConfig,
   MutableDaemonConfigPatch,
-} from "@getpaseo/protocol/messages";
-import { isRelayClientWebSocketUrl } from "@getpaseo/protocol/daemon-endpoints";
+} from "@alp/protocol/messages";
+import { isRelayClientWebSocketUrl } from "@alp/protocol/daemon-endpoints";
 import {
   asUint8Array,
   decodeFileTransferFrame,
@@ -148,7 +148,7 @@ import {
   FileTransferOpcode,
   TerminalStreamOpcode,
   type FileTransferFrame,
-} from "@getpaseo/protocol/binary-frames/index";
+} from "@alp/protocol/binary-frames/index";
 import {
   createRelayE2eeTransportFactory,
   createWebSocketTransportFactory,
@@ -170,7 +170,7 @@ import { TerminalStreamRouter, type TerminalStreamEvent } from "./terminal-strea
 import type {
   BrowserAutomationExecuteRequest,
   BrowserAutomationExecuteResponse,
-} from "@getpaseo/protocol/browser-automation/rpc-schemas";
+} from "@alp/protocol/browser-automation/rpc-schemas";
 
 export interface Logger {
   debug(obj: object, msg?: string): void;
@@ -413,8 +413,8 @@ export interface CreateWorkspaceRequestOptions {
   requestId?: string;
 }
 
-export interface CreatePaseoWorktreeInput extends Pick<
-  CreatePaseoWorktreeRequest,
+export interface CreateAlpWorktreeInput extends Pick<
+  CreateAlpWorktreeRequest,
   | "cwd"
   | "projectId"
   | "worktreeSlug"
@@ -455,11 +455,11 @@ type BranchSuggestionsPayload = BranchSuggestionsResponse["payload"];
 type ForgeSearchPayload = ForgeSearchResponse["payload"];
 type GitHubSearchPayload = GitHubSearchResponse["payload"];
 type DirectorySuggestionsPayload = DirectorySuggestionsResponse["payload"];
-type PaseoWorktreeListPayload = PaseoWorktreeListResponse["payload"];
-type PaseoWorktreeArchivePayload = PaseoWorktreeArchiveResponse["payload"];
-type CreatePaseoWorktreePayload = Extract<
+type AlpWorktreeListPayload = AlpWorktreeListResponse["payload"];
+type AlpWorktreeArchivePayload = AlpWorktreeArchiveResponse["payload"];
+type CreateAlpWorktreePayload = Extract<
   SessionOutboundMessage,
-  { type: "create_paseo_worktree_response" }
+  { type: "create_alp_worktree_response" }
 >["payload"];
 type WorkspaceCreatePayload = Extract<
   SessionOutboundMessage,
@@ -514,8 +514,8 @@ type ListCommandsDraftConfig = Pick<
 >;
 export interface WriteProjectConfigInput {
   repoRoot: string;
-  config: PaseoConfigRaw;
-  expectedRevision: PaseoConfigRevision | null;
+  config: AlpConfigRaw;
+  expectedRevision: AlpConfigRevision | null;
   requestId?: string;
 }
 interface ListCommandsOptions {
@@ -1284,7 +1284,7 @@ export class DaemonClient {
     } else if (this.config.authHeader) {
       headers.Authorization = this.config.authHeader;
     }
-    const protocols = password ? [`paseo.bearer.${password}`] : undefined;
+    const protocols = password ? [`alp.bearer.${password}`] : undefined;
 
     try {
       // Reconnect can overlap with browser close/error delivery ordering.
@@ -1642,7 +1642,7 @@ export class DaemonClient {
   }
 
   private sendJsonMessage(envelopeType: string, messageType: string, message: unknown): void {
-    this.traceInstant("paseo.ws.message.outbound", {
+    this.traceInstant("alp.ws.message.outbound", {
       envelopeType,
       messageType,
     });
@@ -1653,7 +1653,7 @@ export class DaemonClient {
     if (!this.transport) {
       throw new DaemonConnectionError("Transport not connected");
     }
-    const isOpen = this.beginTraceSection("paseo.ws.frame.outbound", {
+    const isOpen = this.beginTraceSection("alp.ws.frame.outbound", {
       kind: typeof frame === "string" ? "text" : "binary",
       size: String(getTransportFrameSize(frame)),
     });
@@ -1695,7 +1695,7 @@ export class DaemonClient {
       throw new Error(`Transport not connected (status: ${this.connectionState.status})`);
     }
     try {
-      this.traceInstant("paseo.ws.message.outbound", {
+      this.traceInstant("alp.ws.message.outbound", {
         envelopeType: "binary",
         messageType: "binary",
       });
@@ -3166,7 +3166,7 @@ export class DaemonClient {
 
   async appendAgentTimelineItem(
     agentId: string,
-    item: Omit<import("@getpaseo/protocol/agent-types").PluginTimelineItem, "pluginId">,
+    item: Omit<import("@alp/protocol/agent-types").PluginTimelineItem, "pluginId">,
   ): Promise<{ seq: number; epoch: string }> {
     const requestId = this.createRequestId();
     const payload = await this.sendCorrelatedSessionRequest({
@@ -4371,7 +4371,7 @@ export class DaemonClient {
 
   async stashList(
     cwd: string,
-    options?: { paseoOnly?: boolean },
+    options?: { alpOnly?: boolean },
     requestId?: string,
   ): Promise<StashListPayload> {
     return this.sendCorrelatedSessionRequest({
@@ -4379,28 +4379,28 @@ export class DaemonClient {
       message: {
         type: "stash_list_request",
         cwd,
-        paseoOnly: options?.paseoOnly,
+        alpOnly: options?.alpOnly,
       },
       responseType: "stash_list_response",
     });
   }
 
-  async getPaseoWorktreeList(
+  async getAlpWorktreeList(
     input: { cwd?: string; repoRoot?: string },
     requestId?: string,
-  ): Promise<PaseoWorktreeListPayload> {
+  ): Promise<AlpWorktreeListPayload> {
     return this.sendCorrelatedSessionRequest({
       requestId,
       message: {
-        type: "paseo_worktree_list_request",
+        type: "alp_worktree_list_request",
         cwd: input.cwd,
         repoRoot: input.repoRoot,
       },
-      responseType: "paseo_worktree_list_response",
+      responseType: "alp_worktree_list_response",
     });
   }
 
-  async archivePaseoWorktree(
+  async archiveAlpWorktree(
     input: {
       worktreePath?: string;
       repoRoot?: string;
@@ -4409,29 +4409,29 @@ export class DaemonClient {
       scope?: "workspace" | "worktree";
     },
     requestId?: string,
-  ): Promise<PaseoWorktreeArchivePayload> {
+  ): Promise<AlpWorktreeArchivePayload> {
     return this.sendCorrelatedSessionRequest({
       requestId,
       message: {
-        type: "paseo_worktree_archive_request",
+        type: "alp_worktree_archive_request",
         worktreePath: input.worktreePath,
         repoRoot: input.repoRoot,
         branchName: input.branchName,
         ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
         ...(input.scope !== undefined ? { scope: input.scope } : {}),
       },
-      responseType: "paseo_worktree_archive_response",
+      responseType: "alp_worktree_archive_response",
     });
   }
 
-  async createPaseoWorktree(
-    input: CreatePaseoWorktreeInput,
+  async createAlpWorktree(
+    input: CreateAlpWorktreeInput,
     requestId?: string,
-  ): Promise<CreatePaseoWorktreePayload> {
+  ): Promise<CreateAlpWorktreePayload> {
     return this.sendCorrelatedSessionRequest({
       requestId,
       message: {
-        type: "create_paseo_worktree_request",
+        type: "create_alp_worktree_request",
         cwd: input.cwd,
         ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
         worktreeSlug: input.worktreeSlug,
@@ -4443,7 +4443,7 @@ export class DaemonClient {
         ...(input.checkoutSource !== undefined ? { checkoutSource: input.checkoutSource } : {}),
         ...(input.githubPrNumber !== undefined ? { githubPrNumber: input.githubPrNumber } : {}),
       },
-      responseType: "create_paseo_worktree_response",
+      responseType: "create_alp_worktree_response",
     });
   }
 
@@ -6089,7 +6089,7 @@ export class DaemonClient {
 
     const rawBytes = asUint8Array(rawData);
     const isOpen = this.beginTraceSection(
-      "paseo.ws.frame.inbound",
+      "alp.ws.frame.inbound",
       describeInboundTransportFrame(rawData, rawBytes),
     );
     try {
@@ -6110,7 +6110,7 @@ export class DaemonClient {
     const bytes = rawBytesLength ?? payload.length;
     const startMs = perfNow();
     let parsedJson: unknown;
-    const parseTraceOpen = this.beginTraceSection("paseo.ws.json.parse", {
+    const parseTraceOpen = this.beginTraceSection("alp.ws.json.parse", {
       size: String(bytes),
     });
     try {
@@ -6145,7 +6145,7 @@ export class DaemonClient {
     this.consecutiveLivenessFailures = 0;
 
     if (parsed.data.type === "pong") {
-      this.traceInstant("paseo.ws.message.inbound", {
+      this.traceInstant("alp.ws.message.inbound", {
         envelopeType: "pong",
         messageType: "pong",
       });
@@ -6154,7 +6154,7 @@ export class DaemonClient {
       return;
     }
 
-    this.traceInstant("paseo.ws.message.inbound", {
+    this.traceInstant("alp.ws.message.inbound", {
       envelopeType: "session",
       messageType: parsed.data.message.type,
     });
@@ -6169,7 +6169,7 @@ export class DaemonClient {
   private tryHandleBinaryFrame(rawBytes: Uint8Array): boolean {
     const fileFrame = decodeFileTransferFrame(rawBytes);
     if (fileFrame) {
-      this.traceInstant("paseo.ws.message.inbound", {
+      this.traceInstant("alp.ws.message.inbound", {
         envelopeType: "binary",
         messageType: "file",
         opcode: String(fileFrame.opcode),
@@ -6184,7 +6184,7 @@ export class DaemonClient {
     if (!frame) {
       return false;
     }
-    this.traceInstant("paseo.ws.message.inbound", {
+    this.traceInstant("alp.ws.message.inbound", {
       envelopeType: "binary",
       messageType: "terminal",
       opcode: String(frame.opcode),

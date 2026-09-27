@@ -31,10 +31,10 @@ jobs:
         run: npm run build:app-deps
 
       - name: Typecheck
-        run: npm run typecheck --workspace=@getpaseo/app
+        run: npm run typecheck --workspace=@alp/app
 
       - name: Build and deploy to Cloudflare Pages
-        run: npm run deploy:web --workspace=@getpaseo/app
+        run: npm run deploy:web --workspace=@alp/app
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

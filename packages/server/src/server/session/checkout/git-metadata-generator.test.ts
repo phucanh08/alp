@@ -20,7 +20,7 @@ function createDiffSource(result: CheckoutDiffResult) {
       diffCalls.push({ cwd, options });
       return result;
     },
-    // buildMetadataPrompt reads paseo.json overrides from here; an unknown root
+    // buildMetadataPrompt reads alp.json overrides from here; an unknown root
     // means no override applies, so the default style is used.
     resolveRepoRoot: async () => "/tmp/git-metadata-generator-test-missing-root",
   };

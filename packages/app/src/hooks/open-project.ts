@@ -1,9 +1,9 @@
-import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import type { DaemonClient } from "@alp/client/internal/daemon-client";
 import type {
   ProjectGithubCloneProtocol,
   ProjectAddResponse,
   WorkspaceProjectDescriptorPayload,
-} from "@getpaseo/protocol/messages";
+} from "@alp/protocol/messages";
 import { normalizeProjectDescriptor, type ProjectDescriptor } from "@/stores/session-store";
 
 type OpenProjectPayload = ProjectAddResponse["payload"];

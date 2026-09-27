@@ -6,20 +6,20 @@ the maintainer. Agents never deploy, rotate, or reconfigure the relay.
 
 ## What is in the repo
 
-| Piece                                          | Owner      | Notes                                                                                |
-| ---------------------------------------------- | ---------- | ------------------------------------------------------------------------------------ |
-| `packages/relay/src/*` (e2ee, crypto, channel) | repo       | Imported by `@getpaseo/server` and `@getpaseo/client`. Protocol-level, keep in sync. |
-| `packages/relay/src/cloudflare-adapter.ts`     | repo       | Worker entry. Built and tested here; deployed by the maintainer.                     |
-| `packages/relay/wrangler.example.toml`         | repo       | Template only. Real `wrangler.toml` is gitignored.                                   |
-| Cloudflare account, DNS `relay-alp.anhlp.com`  | maintainer | Not in git. No CI job deploys it (`deploy-relay.yml` was removed).                   |
+| Piece                                          | Owner      | Notes                                                                      |
+| ---------------------------------------------- | ---------- | -------------------------------------------------------------------------- |
+| `packages/relay/src/*` (e2ee, crypto, channel) | repo       | Imported by `@alp/server` and `@alp/client`. Protocol-level, keep in sync. |
+| `packages/relay/src/cloudflare-adapter.ts`     | repo       | Worker entry. Built and tested here; deployed by the maintainer.           |
+| `packages/relay/wrangler.example.toml`         | repo       | Template only. Real `wrangler.toml` is gitignored.                         |
+| Cloudflare account, DNS `relay-alp.anhlp.com`  | maintainer | Not in git. No CI job deploys it (`deploy-relay.yml` was removed).         |
 
 ## Defaults
 
-| Setting             | Value                                                                        | Where                                                                               |
-| ------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Relay endpoint      | `relay-alp.anhlp.com:443`                                                    | `packages/protocol/src/daemon-endpoints.ts`, `packages/server/src/server/config.ts` |
-| Web app base URL    | `https://app-alp.anhlp.com`                                                  | `packages/server/src/server/config.ts`                                              |
-| Override at runtime | `PASEO_RELAY_ENDPOINT`, `PASEO_RELAY_PUBLIC_ENDPOINT`, `PASEO_RELAY_USE_TLS` | env or `daemon.relay.*` in persisted config                                         |
+| Setting             | Value                                                                  | Where                                                                               |
+| ------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Relay endpoint      | `relay-alp.anhlp.com:443`                                              | `packages/protocol/src/daemon-endpoints.ts`, `packages/server/src/server/config.ts` |
+| Web app base URL    | `https://app-alp.anhlp.com`                                            | `packages/server/src/server/config.ts`                                              |
+| Override at runtime | `ALP_RELAY_ENDPOINT`, `ALP_RELAY_PUBLIC_ENDPOINT`, `ALP_RELAY_USE_TLS` | env or `daemon.relay.*` in persisted config                                         |
 
 ## Deploying (maintainer, outside CI)
 
@@ -30,7 +30,7 @@ npm run typecheck && npm test
 npx wrangler deploy
 ```
 
-`PASEO_RELAY_UPSTREAM` in the worker vars is only for a cutover bridge to another relay; leave it
+`ALP_RELAY_UPSTREAM` in the worker vars is only for a cutover bridge to another relay; leave it
 empty to serve directly.
 
 ## Verifying a relay

@@ -13,21 +13,21 @@ directories:
 files:
   - dist/**/*
   - "!**/*.map"
-  - "!node_modules/@getpaseo/*/src/**"
-  - "!node_modules/@getpaseo/**/*.test.*"
-  - "!node_modules/@getpaseo/**/*.spec.*"
-  - "!node_modules/@getpaseo/server/dist/server/web-ui/**"
+  - "!node_modules/@alp/*/src/**"
+  - "!node_modules/@alp/**/*.test.*"
+  - "!node_modules/@alp/**/*.spec.*"
+  - "!node_modules/@alp/server/dist/server/web-ui/**"
   # Workspace packages are symlinked, so anything a dev generates inside them
   # lands in the asar. CI never has these; a local .debug run adds gigabytes.
-  - "!node_modules/@getpaseo/*/.debug/**"
-  - "!node_modules/@getpaseo/*/.tasks/**"
-  - "!node_modules/@getpaseo/*/conversations/**"
-  - "!node_modules/@getpaseo/*/test-results/**"
+  - "!node_modules/@alp/*/.debug/**"
+  - "!node_modules/@alp/*/.tasks/**"
+  - "!node_modules/@alp/*/conversations/**"
+  - "!node_modules/@alp/*/test-results/**"
 asarUnpack:
   - dist/daemon/node-entrypoint-runner.js
-  - node_modules/@getpaseo/server/dist/server/terminal/shell-integration/**/*
+  - node_modules/@alp/server/dist/server/terminal/shell-integration/**/*
   # ALP(slp): esbuild compiles bundled plugins outside Electron, so it cannot read app.asar.
-  - node_modules/@getpaseo/server/dist/server/plugins/**/*
+  - node_modules/@alp/server/dist/server/plugins/**/*
 extraResources:
   - from: ../app/dist
     to: app-dist

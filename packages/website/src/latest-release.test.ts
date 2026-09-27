@@ -19,7 +19,7 @@ function release({
   const tag = `v${version}`;
   return {
     tag_name: tag,
-    assets: hasApk ? [{ name: `paseo-${tag}-android.apk` }] : [],
+    assets: hasApk ? [{ name: `alp-${tag}-android.apk` }] : [],
     prerelease,
     draft: false,
   };
@@ -168,9 +168,9 @@ describe("alp fork releases", () => {
     const upstreamChannels = {
       stable: {
         version: "0.1.70",
-        linuxAppImageAsset: "Paseo-0.1.70-x86_64.AppImage",
-        windowsX64Asset: "Paseo-Setup-0.1.70-x64.exe",
-        windowsArm64Asset: "Paseo-Setup-0.1.70-arm64.exe",
+        linuxAppImageAsset: "Alp-0.1.70-x86_64.AppImage",
+        windowsX64Asset: "Alp-Setup-0.1.70-x64.exe",
+        windowsArm64Asset: "Alp-Setup-0.1.70-arm64.exe",
       },
       beta: null,
     };

@@ -13,7 +13,7 @@ enabled = true
 
 [vars]
 # Optional upstream relay to bridge to during a cutover; leave empty to serve directly.
-PASEO_RELAY_UPSTREAM = ""
+ALP_RELAY_UPSTREAM = ""
 
 [[durable_objects.bindings]]
 name = "RELAY"

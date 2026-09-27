@@ -114,7 +114,7 @@ describe("deriveProjectGroupingDisplayName", () => {
         remoteUrl: "git@github.com:getpaseo/paseo.git",
         worktreeRoot: path.resolve("repo"),
       }),
-    ).toBe("getpaseo/paseo");
+    ).toBe("alp/alp");
   });
 
   test("uses the selected directory name without a remote", () => {

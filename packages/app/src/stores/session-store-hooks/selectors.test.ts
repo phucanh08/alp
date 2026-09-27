@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createProjectViewKey } from "@/projects/workspace-structure";
 import type { SlpSystemAgentFields } from "@/slp/system-workspaces";
 
-import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import type { DaemonClient } from "@alp/client/internal/daemon-client";
 import {
   composeWorkspaceStructure,
   createWorkspaceStructureProjectsSelector,

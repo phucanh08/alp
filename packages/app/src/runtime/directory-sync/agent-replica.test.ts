@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { DaemonClient, FetchAgentsEntry } from "@getpaseo/client/internal/daemon-client";
-import type { AgentSnapshotPayload } from "@getpaseo/protocol/messages";
+import type { DaemonClient, FetchAgentsEntry } from "@alp/client/internal/daemon-client";
+import type { AgentSnapshotPayload } from "@alp/protocol/messages";
 import {
   selectAgentTimelineState,
   selectAgentTurnPresentation,
@@ -49,7 +49,7 @@ function entry(agent: AgentSnapshotPayload): FetchAgentsEntry {
         currentBranch: null,
         remoteUrl: null,
         worktreeRoot: null,
-        isPaseoOwnedWorktree: false,
+        isAlpOwnedWorktree: false,
         mainRepoRoot: null,
       },
     },

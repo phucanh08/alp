@@ -758,7 +758,7 @@ export const en = {
       },
       routes: {
         public: "Reverse proxy",
-        paseo: "Memorable",
+        alp: "Memorable",
         direct: "Direct",
       },
       states: {
@@ -1924,7 +1924,7 @@ export const en = {
       one: "used {{count}} other tool",
       other: "used {{count}} other tools",
     },
-    paseoCalls: {
+    alpCalls: {
       one: "called alp {{count}} time",
       other: "called alp {{count}} times",
     },
@@ -2771,13 +2771,13 @@ export const en = {
         savedToast: "Project updated",
       },
       readFailures: {
-        invalidTitle: "paseo.json couldn't be parsed",
+        invalidTitle: "alp.json couldn't be parsed",
         invalidDescription: "Fix the file on disk, then reload.",
         missingTitle: "This host doesn't have this project",
         missingSingleHost: "The selected host has no record of this project.",
-        transportTitle: "Couldn't load paseo.json",
+        transportTitle: "Couldn't load alp.json",
         transportFallback: "The host didn't respond.",
-        failedTitle: "Couldn't load paseo.json",
+        failedTitle: "Couldn't load alp.json",
         failedDescription: "Reload to try again.",
       },
       worktree: {
@@ -2788,7 +2788,7 @@ export const en = {
           "See docs for more details and the environment variables available to these commands",
         setup: "Setup",
         setupAccessibility: "Worktree setup commands",
-        uncommittedTitle: "Commit paseo.json changes",
+        uncommittedTitle: "Commit alp.json changes",
         uncommittedDescription:
           "New worktrees use the setup script from the base branch you select.",
         teardown: "Teardown",
@@ -2813,7 +2813,7 @@ export const en = {
         newScript: "New script",
         editScript: "Edit {{name}}",
         runAsService: "Run as a service",
-        serviceHint: "alp supervises the process and assigns a port via $PASEO_PORT",
+        serviceHint: "alp supervises the process and assigns a port via $ALP_PORT",
         actions: {
           add: "Add script",
           edit: "Edit",
@@ -2832,8 +2832,8 @@ export const en = {
       },
       writeFailures: {
         staleTitle: "Config changed on disk",
-        staleDescription: "Reload to fetch the latest paseo.json before saving.",
-        failedTitle: "Couldn't save paseo.json",
+        staleDescription: "Reload to fetch the latest alp.json before saving.",
+        failedTitle: "Couldn't save alp.json",
         failedDescription: "Try again, or reload the latest version from disk.",
       },
       actions: {

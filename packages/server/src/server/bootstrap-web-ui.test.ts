@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 
-import { createTestPaseoDaemon, type TestPaseoDaemon } from "./test-utils/paseo-daemon.js";
+import { createTestAlpDaemon, type TestAlpDaemon } from "./test-utils/alp-daemon.js";
 
 interface InitialDaemonConnectionHint {
   listen: string;
@@ -44,9 +44,7 @@ function fetchDaemonWebUi(options: {
 }
 
 function readInjectedConnectionHint(html: string): InitialDaemonConnectionHint {
-  const match = html.match(
-    /window\.__PASEO_INITIAL_DAEMON_CONNECTION__=(?<json>\{[^<]+})<\/script>/,
-  );
+  const match = html.match(/window\.__ALP_INITIAL_DAEMON_CONNECTION__=(?<json>\{[^<]+})<\/script>/);
   if (!match?.groups?.json) {
     throw new Error("Missing initial daemon connection hint");
   }
@@ -55,10 +53,10 @@ function readInjectedConnectionHint(html: string): InitialDaemonConnectionHint {
 
 describe("daemon web UI bootstrap", () => {
   let tempRoot: string | null = null;
-  let daemonHandle: TestPaseoDaemon | null = null;
+  let daemonHandle: TestAlpDaemon | null = null;
 
   async function createWebUiDist(): Promise<string> {
-    tempRoot = await mkdtemp(path.join(os.tmpdir(), "paseo-bootstrap-web-ui-"));
+    tempRoot = await mkdtemp(path.join(os.tmpdir(), "alp-bootstrap-web-ui-"));
     const distDir = path.join(tempRoot, "dist");
     await mkdir(distDir, { recursive: true });
     await writeFile(
@@ -80,7 +78,7 @@ describe("daemon web UI bootstrap", () => {
   test("injects a TLS initial connection hint only for HTTPS forwarded by a trusted proxy", async () => {
     const distDir = await createWebUiDist();
 
-    daemonHandle = await createTestPaseoDaemon({
+    daemonHandle = await createTestAlpDaemon({
       mcpEnabled: false,
       webUi: {
         enabled: true,
@@ -113,7 +111,7 @@ describe("daemon web UI bootstrap", () => {
   test("ignores forwarded HTTPS when proxy trust is disabled", async () => {
     const distDir = await createWebUiDist();
 
-    daemonHandle = await createTestPaseoDaemon({
+    daemonHandle = await createTestAlpDaemon({
       mcpEnabled: false,
       trustedProxies: [],
       webUi: {

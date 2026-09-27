@@ -1,4 +1,4 @@
-import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
+import type { PluginBeforeRequests } from "@alp/plugin/server";
 import path from "node:path";
 import { runtimeBlock } from "./runtime-block";
 
@@ -22,16 +22,16 @@ export function seatOfLabels(labels: Record<string, string> | undefined): Seat |
 /**
  * Label the daemon sets from the real caller of `create_agent` (`PARENT_AGENT_ID_LABEL` in
  * `packages/protocol/src/agent-labels.ts`); a hook can read it but never set or clear it. Kept as
- * a local literal, like the Paseo tool lists this plugin copies elsewhere, so the plugin takes no
+ * a local literal, like the Alp tool lists this plugin copies elsewhere, so the plugin takes no
  * runtime dependency on that package.
  */
-const PARENT_AGENT_ID_LABEL = "paseo.parent-agent-id";
+const PARENT_AGENT_ID_LABEL = "alp.parent-agent-id";
 
 /** Label marking a seat this plugin assigned by default rather than one the requester chose. */
 export const ORIGIN_LABEL = "slp.origin";
 
 /**
- * True unless another agent made this request: the daemon sets `paseo.parent-agent-id` only when
+ * True unless another agent made this request: the daemon sets `alp.parent-agent-id` only when
  * `create_agent` names a real calling agent, so its absence means the request came directly from a
  * Human (the app or the CLI) or from a schedule run, neither of which is "another agent" for this
  * check.
@@ -45,7 +45,7 @@ export function isHumanCreated(labels: Record<string, string> | undefined): bool
  * (`packages/server/src/server/schedule/service.ts`). Presence of this label is how a defaulted
  * seat is tagged `slp.origin=schedule` instead of `slp.origin=human`.
  */
-const SCHEDULE_ID_LABEL = "paseo.schedule-id";
+const SCHEDULE_ID_LABEL = "alp.schedule-id";
 
 /** The two values `slp.origin` can hold on a seat this plugin defaulted rather than the requester chose. */
 export type SeatOrigin = "human" | "schedule";
@@ -67,8 +67,8 @@ export function originOfLabels(labels: Record<string, string> | undefined): Seat
 
 /**
  * Seat labels for an `agent.create` request that named no seat at all: a request with no
- * `paseo.parent-agent-id` — Human made it directly, or a schedule run created it — defaults to
- * Peer, tagged `slp.origin=schedule` when the request carries `paseo.schedule-id` and
+ * `alp.parent-agent-id` — Human made it directly, or a schedule run created it — defaults to
+ * Peer, tagged `slp.origin=schedule` when the request carries `alp.schedule-id` and
  * `slp.origin=human` otherwise, so it reads apart from a Peer a Lead spawned. Null once the
  * request already opines on a seat — even an invalid `slp.role` value counts as an opinion and is
  * left alone — or was made by another agent.
@@ -126,8 +126,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Paseo MCP tools the Lead and Supervisor call without a permission card (Claude wildcard syntax). */
-export const LEAD_ALLOWED_TOOLS = ["mcp__paseo__*"] as const;
+/** Alp MCP tools the Lead and Supervisor call without a permission card (Claude wildcard syntax). */
+export const LEAD_ALLOWED_TOOLS = ["mcp__alp__*"] as const;
 
 /** Claude Peer spawns nothing with the provider's own subagent tools; it hands off to its Lead. */
 export const PEER_DISALLOWED_TOOLS = ["Agent", "Task"] as const;
@@ -275,10 +275,10 @@ export function providerOptionsFor(
 }
 
 /**
- * Paseo tools a Peer loses: it cannot spawn, steer, or stop other agents, reconfigure any agent's
+ * Alp tools a Peer loses: it cannot spawn, steer, or stop other agents, reconfigure any agent's
  * provider or mode, or resolve a permission prompt on another agent's behalf.
  */
-export const PEER_DISABLED_PASEO_TOOLS = [
+export const PEER_DISABLED_ALP_TOOLS = [
   "create_agent",
   "send_agent_prompt",
   "kill_agent",
@@ -290,8 +290,8 @@ export const PEER_DISABLED_PASEO_TOOLS = [
   "respond_to_permission",
 ] as const;
 
-/** The Supervisor is read-only: every mutating Paseo tool is off; reads and send_agent_prompt stay. */
-export const SUPERVISOR_DISABLED_PASEO_TOOLS = [
+/** The Supervisor is read-only: every mutating Alp tool is off; reads and send_agent_prompt stay. */
+export const SUPERVISOR_DISABLED_ALP_TOOLS = [
   "create_workspace",
   "archive_workspace",
   "rename_workspace",
@@ -330,15 +330,15 @@ export const SUPERVISOR_DISABLED_PASEO_TOOLS = [
   "browser_evaluate",
 ] as const;
 
-export type PaseoToolsPolicy = PluginBeforeRequests["agent.create"]["paseoTools"];
+export type AlpToolsPolicy = PluginBeforeRequests["agent.create"]["alpTools"];
 
 /**
- * Per-agent Paseo tool cut for a seat, added to whatever the request already disabled. The daemon
+ * Per-agent Alp tool cut for a seat, added to whatever the request already disabled. The daemon
  * merges it with the provider policy and freezes it into the agent record. A Lead keeps every tool.
  */
-export function paseoToolsFor(seat: Seat, current: PaseoToolsPolicy): PaseoToolsPolicy {
+export function alpToolsFor(seat: Seat, current: AlpToolsPolicy): AlpToolsPolicy {
   if (seat === "lead") return current;
-  const cut = seat === "peer" ? PEER_DISABLED_PASEO_TOOLS : SUPERVISOR_DISABLED_PASEO_TOOLS;
+  const cut = seat === "peer" ? PEER_DISABLED_ALP_TOOLS : SUPERVISOR_DISABLED_ALP_TOOLS;
   return {
     ...current,
     disabledTools: [...new Set([...(current?.disabledTools ?? []), ...cut])],

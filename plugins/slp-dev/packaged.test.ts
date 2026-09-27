@@ -6,7 +6,7 @@ import { compilePlugin } from "@server/server/plugins/compiler";
 import { afterEach, expect, test } from "vitest";
 
 /**
- * The packaged desktop app ships this directory with no `@getpaseo/*` declaration files reachable
+ * The packaged desktop app ships this directory with no `@alp/*` declaration files reachable
  * from it, so any type import outside the plugin SDK fails the compiler's type-dependency check
  * there while still compiling inside the repo. Compiling a copy outside the repo reproduces the
  * packaged resolution.
@@ -19,7 +19,7 @@ afterEach(() => {
   }
 });
 
-test("compiles from a copy with no @getpaseo packages reachable, as the packaged app loads it", async () => {
+test("compiles from a copy with no @alp packages reachable, as the packaged app loads it", async () => {
   const directory = mkdtempSync(path.join(tmpdir(), "slp-dev-packaged-"));
   temporaryDirectories.push(directory);
   cpSync(import.meta.dirname, directory, {
@@ -27,7 +27,7 @@ test("compiles from a copy with no @getpaseo packages reachable, as the packaged
     filter: (source) => path.basename(source) !== "node_modules",
   });
   expect(() =>
-    createRequire(path.join(directory, "index.server.ts")).resolve("@getpaseo/client"),
+    createRequire(path.join(directory, "index.server.ts")).resolve("@alp/client"),
   ).toThrow();
 
   const result = await compilePlugin({

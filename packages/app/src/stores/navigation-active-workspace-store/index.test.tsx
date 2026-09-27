@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { renderHook } from "@testing-library/react";
-import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import type { DaemonClient } from "@alp/client/internal/daemon-client";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { useSessionStore, type Agent } from "@/stores/session-store";
 import {
@@ -62,7 +62,7 @@ function supervisorAgent(workspaceId: string): Agent {
     lastUsage: undefined,
     lastError: null,
     title: "Supervisor",
-    cwd: "/tmp/paseo-home/supervisor",
+    cwd: "/tmp/alp-home/supervisor",
     workspaceId,
     model: null,
     features: undefined,

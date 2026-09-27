@@ -10,17 +10,17 @@ function expandHome(input: string, home: string): string {
 }
 
 /**
- * The daemon resolves its home from `PASEO_HOME` (default `~/.alp`), and the plugin subprocess
+ * The daemon resolves its home from `ALP_HOME` (default `~/.alp`), and the plugin subprocess
  * inherits the daemon's environment, so the same rule gives the same directory. Mirrors
- * packages/server/src/server/paseo-home.ts; the plugin API does not expose the home directly.
+ * packages/server/src/server/alp-home.ts; the plugin API does not expose the home directly.
  */
-export function resolvePaseoHome(env: Env = process.env, home: string = os.homedir()): string {
-  return path.resolve(expandHome(env.PASEO_HOME ?? "~/.alp", home));
+export function resolveAlpHome(env: Env = process.env, home: string = os.homedir()): string {
+  return path.resolve(expandHome(env.ALP_HOME ?? "~/.alp", home));
 }
 
-/** `$PASEO_HOME/supervisor`: the Supervisor system workspace directory. */
+/** `$ALP_HOME/supervisor`: the Supervisor system workspace directory. */
 export function supervisorDirectory(env: Env = process.env, home: string = os.homedir()): string {
-  return path.join(resolvePaseoHome(env, home), "supervisor");
+  return path.join(resolveAlpHome(env, home), "supervisor");
 }
 
 export function expandUserPath(input: string, home: string = os.homedir()): string {

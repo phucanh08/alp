@@ -1,7 +1,4 @@
-import type {
-  CheckoutPrStatusResponse,
-  PullRequestTimelineResponse,
-} from "@getpaseo/protocol/messages";
+import type { CheckoutPrStatusResponse, PullRequestTimelineResponse } from "@alp/protocol/messages";
 import { type Forge, getForgePresentation } from "@/git/forge";
 import type { PresentableCheck } from "@/git/check-presentation";
 import { parseClientForgeFacts } from "@/git/forges";

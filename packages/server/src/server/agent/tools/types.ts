@@ -1,47 +1,47 @@
 import type { z } from "zod";
-import type { ProviderPaseoToolsPolicy } from "@getpaseo/protocol/provider-config";
+import type { ProviderAlpToolsPolicy } from "@alp/protocol/provider-config";
 
-export interface PaseoToolExecutionContext {
+export interface AlpToolExecutionContext {
   signal?: AbortSignal;
-  sendUpdate?: (update: PaseoToolResult) => void;
+  sendUpdate?: (update: AlpToolResult) => void;
 }
 
-export interface PaseoToolResult {
+export interface AlpToolResult {
   content: Array<{ type: string; text?: string; [key: string]: unknown }>;
   structuredContent?: unknown;
   isError?: boolean;
 }
 
-export interface PaseoToolConfig {
+export interface AlpToolConfig {
   title?: string;
   description?: string;
   inputSchema?: z.ZodRawShape | z.ZodType;
   outputSchema?: z.ZodRawShape;
 }
 
-export interface PaseoToolDefinition extends PaseoToolConfig {
+export interface AlpToolDefinition extends AlpToolConfig {
   name: string;
   description: string;
-  handler: (input: unknown, context: PaseoToolExecutionContext) => Promise<PaseoToolResult>;
+  handler: (input: unknown, context: AlpToolExecutionContext) => Promise<AlpToolResult>;
 }
 
-export interface PaseoToolCatalog {
-  tools: ReadonlyMap<string, PaseoToolDefinition>;
-  getTool(name: string): PaseoToolDefinition | undefined;
+export interface AlpToolCatalog {
+  tools: ReadonlyMap<string, AlpToolDefinition>;
+  getTool(name: string): AlpToolDefinition | undefined;
   executeTool(
     name: string,
     input: unknown,
-    context?: PaseoToolExecutionContext,
-  ): Promise<PaseoToolResult>;
+    context?: AlpToolExecutionContext,
+  ): Promise<AlpToolResult>;
 }
 
-export interface PaseoToolRuntimeContext {
+export interface AlpToolRuntimeContext {
   callerAgentId?: string;
-  paseoToolPolicy?: ProviderPaseoToolsPolicy;
+  alpToolPolicy?: ProviderAlpToolsPolicy;
   enableVoiceTools?: boolean;
   voiceOnly?: boolean;
 }
 
-export type PaseoToolCatalogFactory = (
-  context: PaseoToolRuntimeContext,
-) => PaseoToolCatalog | Promise<PaseoToolCatalog>;
+export type AlpToolCatalogFactory = (
+  context: AlpToolRuntimeContext,
+) => AlpToolCatalog | Promise<AlpToolCatalog>;

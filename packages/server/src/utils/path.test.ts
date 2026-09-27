@@ -13,7 +13,7 @@ import {
 describe("path equivalence", () => {
   test.each([
     ["C:/Users/Administrator/GhostFactory", "C:\\Users\\Administrator\\GhostFactory"],
-    ["d:\\Projects\\paseo", "D:\\Projects\\paseo"],
+    ["d:\\Projects\\alp", "D:\\Projects\\alp"],
     ["C:\\Users\\Administrator\\GhostFactory\\", "C:\\Users\\Administrator\\GhostFactory"],
     [String.raw`\\?\C:\Users\Administrator\GhostFactory`, "C:\\Users\\Administrator\\GhostFactory"],
     [String.raw`\\?\UNC\server\share\GhostFactory`, String.raw`\\server\share\GhostFactory`],
@@ -29,17 +29,13 @@ describe("path equivalence", () => {
   });
 
   test("checks POSIX root containment without prefix false positives", () => {
-    expect(isPathInsideRoot("/opt/paseo", "/opt/paseo/node_modules/@getpaseo/server")).toBe(true);
-    expect(isPathInsideRoot("/opt/paseo", "/opt/paseo-other")).toBe(false);
+    expect(isPathInsideRoot("/opt/alp", "/opt/alp/node_modules/@alp/server")).toBe(true);
+    expect(isPathInsideRoot("/opt/alp", "/opt/alp-other")).toBe(false);
   });
 
   test("checks Windows root containment case-insensitively", () => {
-    expect(
-      isPathInsideRoot("C:\\Paseo\\node_modules", "c:/paseo/node_modules/@getpaseo/server"),
-    ).toBe(true);
-    expect(isPathInsideRoot("C:\\Paseo\\node_modules", "C:\\Paseo\\node_modules-other")).toBe(
-      false,
-    );
+    expect(isPathInsideRoot("C:\\Alp\\node_modules", "c:/alp/node_modules/@alp/server")).toBe(true);
+    expect(isPathInsideRoot("C:\\Alp\\node_modules", "C:\\Alp\\node_modules-other")).toBe(false);
   });
 
   test("preserves the casing of Windows relative suffixes", () => {
@@ -52,7 +48,7 @@ describe("path equivalence", () => {
   test.skipIf(process.platform === "win32")(
     "derives the contained suffix from a realpath-equivalent root",
     () => {
-      const tempDir = mkdtempSync(join(tmpdir(), "paseo-path-"));
+      const tempDir = mkdtempSync(join(tmpdir(), "alp-path-"));
       try {
         const realRoot = join(tempDir, "real-root");
         const nestedPath = join(realRoot, "packages", "app");

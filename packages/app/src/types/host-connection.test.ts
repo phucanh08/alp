@@ -123,9 +123,7 @@ describe("normalizeStoredHostProfile", () => {
   it("gives a host stored before appearance existed the default appearance", () => {
     const profile = normalizeStoredHostProfile({
       serverId: "srv_old",
-      connections: [
-        { id: "socket:/tmp/paseo.sock", type: "directSocket", path: "/tmp/paseo.sock" },
-      ],
+      connections: [{ id: "socket:/tmp/alp.sock", type: "directSocket", path: "/tmp/alp.sock" }],
     });
 
     expect(profile?.appearance).toEqual({ color: "none", badgeDisplay: null });
@@ -135,9 +133,7 @@ describe("normalizeStoredHostProfile", () => {
     const profile = normalizeStoredHostProfile({
       serverId: "srv_new",
       appearance: { color: "teal", badgeDisplay: "icon" },
-      connections: [
-        { id: "socket:/tmp/paseo.sock", type: "directSocket", path: "/tmp/paseo.sock" },
-      ],
+      connections: [{ id: "socket:/tmp/alp.sock", type: "directSocket", path: "/tmp/alp.sock" }],
     });
 
     expect(profile?.appearance).toEqual({ color: "teal", badgeDisplay: "icon" });
@@ -191,9 +187,9 @@ describe("createRemoteSshHostConnection", () => {
 
 describe("upsertHostConnectionInProfiles", () => {
   const connection: HostConnection = {
-    id: "socket:/tmp/paseo.sock",
+    id: "socket:/tmp/alp.sock",
     type: "directSocket",
-    path: "/tmp/paseo.sock",
+    path: "/tmp/alp.sock",
   };
 
   it("gives a newly discovered host the default appearance", () => {

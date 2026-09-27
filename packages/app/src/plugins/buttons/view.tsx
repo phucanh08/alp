@@ -1,11 +1,11 @@
-import { PluginClientStateProvider } from "@getpaseo/plugin/client/host";
+import { PluginClientStateProvider } from "@alp/plugin/client/host";
 import type {
   PluginButtonBehavior,
   PluginButtonIcon,
   PluginButtonMenuEntry,
   PluginHostProps,
-} from "@getpaseo/plugin/client";
-import type { PluginTheme } from "@getpaseo/plugin";
+} from "@alp/plugin/client";
+import type { PluginTheme } from "@alp/plugin";
 import { useCallback, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { Platform, Pressable, Text, View, useWindowDimensions } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";

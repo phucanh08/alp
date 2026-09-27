@@ -33,7 +33,7 @@ describe("Hub HTTP client", () => {
         body: {
           status: "authorized",
           interval: 5,
-          credential: "paseo_cli_prefix_durable-secret-value",
+          credential: "alp_cli_prefix_durable-secret-value",
           organizationId: "organization-1",
         },
       };
@@ -63,8 +63,8 @@ describe("Hub HTTP client", () => {
             projects: [
               {
                 id: "a50e05af-4f20-4c8f-8dcc-58e5ea360663",
-                slug: "paseo",
-                name: "Paseo",
+                slug: "alp",
+                name: "Alp",
               },
             ],
           },
@@ -83,7 +83,7 @@ describe("Hub HTTP client", () => {
     const projects = await hub.listProjects(origin, "human-secret");
     const token = await hub.issueEnrollmentToken(origin, "human-secret");
 
-    assert.equal(projects[0]?.slug, "paseo");
+    assert.equal(projects[0]?.slug, "alp");
     assert.equal(token, "one-time-enrollment-token-with-enough-length");
     assert.deepEqual(
       requests.map((request) => request.url),
@@ -160,15 +160,15 @@ describe("Hub HTTP client", () => {
           daemons: [{ id: "a50e05af-4f20-4c8f-8dcc-58e5ea360663", slug: "macbook" }],
           github: [
             {
-              slug: "getpaseo",
-              accountLogin: "getpaseo",
+              slug: "alp",
+              accountLogin: "alp",
               accountType: "Organization",
-              repositories: ["getpaseo/paseo"],
+              repositories: ["alp/alp"],
             },
           ],
-          discord: [{ slug: "paseo", guildName: "Paseo" }],
-          slack: [{ slug: "paseo", teamName: "Paseo" }],
-          linear: [{ slug: "paseo-linear", organizationName: "Paseo" }],
+          discord: [{ slug: "alp", guildName: "Alp" }],
+          slack: [{ slug: "alp", teamName: "Alp" }],
+          linear: [{ slug: "alp-linear", organizationName: "Alp" }],
         },
       }),
       requests,
@@ -177,8 +177,8 @@ describe("Hub HTTP client", () => {
     const resources = await new HubHttpClient().listConfigurationResources(origin, "secret");
 
     assert.equal(resources.daemons[0]?.slug, "macbook");
-    assert.equal(resources.discord[0]?.slug, "paseo");
-    assert.equal(resources.linear[0]?.slug, "paseo-linear");
+    assert.equal(resources.discord[0]?.slug, "alp");
+    assert.equal(resources.linear[0]?.slug, "alp-linear");
     assert.equal(requests[0]?.url, "/api/v1/configuration-resources");
   });
 

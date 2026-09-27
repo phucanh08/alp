@@ -1,9 +1,9 @@
-# Example child image that adds agent CLIs to the official Paseo image.
+# Example child image that adds agent CLIs to the official Alp image.
 #
 # Build:
-#   docker build -f docker/Dockerfile.agents.example -t paseo-with-agents .
+#   docker build -f docker/Dockerfile.agents.example -t alp-with-agents .
 #
-# Then set `image: paseo-with-agents` in docker/docker-compose.example.yml.
+# Then set `image: alp-with-agents` in docker/docker-compose.example.yml.
 
 FROM ghcr.io/getpaseo/paseo:latest
 
@@ -14,4 +14,4 @@ RUN npm install -g \
   opencode-ai
 
 # Leave the image user as root. The base entrypoint prepares mounted volumes,
-# then drops the daemon and launched agents to the non-root `paseo` user.
+# then drops the daemon and launched agents to the non-root `alp` user.

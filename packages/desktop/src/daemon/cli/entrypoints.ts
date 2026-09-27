@@ -9,7 +9,7 @@ import {
   resolvePackagedAsarPath,
 } from "../package-paths.js";
 
-const CLI_PACKAGE_NAME = "@getpaseo/cli";
+const CLI_PACKAGE_NAME = "@alp/cli";
 const CLI_BIN_ENTRY = `${CLI_PACKAGE_NAME}/bin/alp`;
 const CLI_RUN_ENTRY = `${CLI_PACKAGE_NAME}/dist/run.js`;
 
@@ -30,7 +30,7 @@ export function resolveExternalCliEntrypoint(): NodeEntrypointSpec {
         filePath: path.join(
           resolvePackagedAsarPath(),
           "node_modules",
-          "@getpaseo",
+          "@alp",
           "cli",
           "dist",
           "index.js",
@@ -65,7 +65,7 @@ export function resolvePassthroughCliEntrypoint(): string {
       filePath: path.join(
         resolvePackagedAsarPath(),
         "node_modules",
-        "@getpaseo",
+        "@alp",
         "cli",
         "dist",
         "run.js",

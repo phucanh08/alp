@@ -1,7 +1,7 @@
 {
-  "name": "@getpaseo/relay",
+  "name": "@alp/relay",
   "version": "1.0.0",
-  "description": "Paseo relay for bridging daemon and client connections",
+  "description": "Alp relay for bridging daemon and client connections",
   "files": [
     "dist",
     "!dist/**/*.map"

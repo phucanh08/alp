@@ -6,7 +6,7 @@ import type {
   ProviderUsageStatus,
   ProviderUsageTone,
   ProviderUsageWindow,
-} from "@getpaseo/protocol/messages";
+} from "@alp/protocol/messages";
 
 export type {
   ProviderUsage,

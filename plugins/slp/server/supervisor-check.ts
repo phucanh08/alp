@@ -7,9 +7,9 @@ export const SUPERVISOR_CHECK_TICK_MS = 60_000;
 /** Timeline entries `tick` reads from a Lead before it nudges; reports older than that are old. */
 const TIMELINE_TAIL = 200;
 
-const PARENT_AGENT_ID_LABEL = "paseo.parent-agent-id";
+const PARENT_AGENT_ID_LABEL = "alp.parent-agent-id";
 
-/** The slice of `PaseoApi` the check needs; kept narrow so tests need no SDK. */
+/** The slice of `AlpApi` the check needs; kept narrow so tests need no SDK. */
 export interface SupervisorCheckHost {
   agents: AgentLister & {
     ref(agentId: string): {

@@ -6,9 +6,9 @@ import type { AddressInfo } from "node:net";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { runLocalPaseo } from "./helpers/local-cli.js";
+import { runLocalAlp } from "./helpers/local-cli.js";
 
-const cwd = await mkdtemp(path.join(tmpdir(), "paseo-hub-installed-"));
+const cwd = await mkdtemp(path.join(tmpdir(), "alp-hub-installed-"));
 const requests: Array<{ url: string | undefined; body: unknown }> = [];
 const server = createServer((request, response) => {
   let body = "";
@@ -59,7 +59,7 @@ try {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address() as AddressInfo;
   const origin = `http://127.0.0.1:${address.port}`;
-  const validate = await runLocalPaseo(
+  const validate = await runLocalAlp(
     [
       "hub",
       "deploy",
@@ -83,7 +83,7 @@ try {
     origin,
   });
 
-  const install = await runLocalPaseo(
+  const install = await runLocalAlp(
     ["hub", "deploy", "-p", "studio", "--hub", origin, "--api-key", "test-secret", "--json"],
     {},
     cwd,

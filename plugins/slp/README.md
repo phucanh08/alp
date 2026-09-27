@@ -2,7 +2,7 @@
 
 Bundled alp plugin for the SLP seats: Supervisor, Lead, Peer. The daemon loads it when
 `pluginsEnabled` is on. The build copies this directory as-is, so server code imports only
-`@getpaseo/plugin`, `zod`, and Node built-ins, which the host provides. It carries the seat
+`@alp/plugin`, `zod`, and Node built-ins, which the host provides. It carries the seat
 mechanics — tool cuts, workspace/Lead wiring, the Supervisor host workspace — and no profession
 content: seat rule text and skills come from the bundled `slp-dev` plugin, see
 [Seat definitions](#seat-definitions).
@@ -14,7 +14,7 @@ content: seat rule text and skills come from the bundled `slp-dev` plugin, see
 | `before("agent.create")` on provider `claude` or `codex` with label `slp.role` | Appends the seat definition, the SLP-RUNTIME block, and the counterpart roster to the system prompt, and cuts the seat's tools (see [Seat tools](#seat-tools)). |
 | `workspace.created` for a workspace created by the app or CLI                  | Ensures the workspace has a Lead.                                                                                                                               |
 | `agent.turn_ended` of a Lead's first turn                                      | Tells each Supervisor the Lead did not register with, now if it is idle, otherwise when its own turn ends.                                                      |
-| `agent.permission_requested`                                                   | Allows `mcp__paseo__*` tool cards for Lead and Supervisor.                                                                                                      |
+| `agent.permission_requested`                                                   | Allows `mcp__alp__*` tool cards for Lead and Supervisor.                                                                                                        |
 | RPC `slp.lead.ensure { workspaceId }`                                          | Returns the workspace's live Lead, creating it when missing.                                                                                                    |
 | RPC `slp.supervisor.ensure {}`                                                 | Returns the host's live Supervisor, creating the system workspace and agent when missing.                                                                       |
 
@@ -24,7 +24,7 @@ The manifest schema is strict and has no field for entries.
 ## Settings
 
 The plugin registers one host-scoped settings definition (`shared/settings.ts`, id `slp`, version
-1), stored at `$PASEO_HOME/plugin-settings/slp/slp.json`. `enabled` (default `true`) is the SLP
+1), stored at `$ALP_HOME/plugin-settings/slp/slp.json`. `enabled` (default `true`) is the SLP
 switch: `false` turns off every row in the table above — `before("agent.create")` returns
 `undefined` for every request, including one that already names a valid seat; `workspace.created`
 ensures no Lead; and the `slp.lead.ensure` / `slp.supervisor.ensure` RPCs reject with an error whose
@@ -76,8 +76,8 @@ alone. The plugin creates Lead and Supervisor on `claude` with that provider's d
 A `claude`/`codex` agent with no `slp.role` label at all — created directly by a Human, in the app
 or over the CLI, or by a schedule run — defaults to Peer, so it gets the same tool cuts and
 definition as any other Peer. It is tagged `slp.origin=schedule` when the request carries
-`paseo.schedule-id` (the label a schedule run sets on the agent it creates) and `slp.origin=human`
-otherwise. The hook tells either of those from "another agent made this" by `paseo.parent-agent-id`:
+`alp.schedule-id` (the label a schedule run sets on the agent it creates) and `slp.origin=human`
+otherwise. The hook tells either of those from "another agent made this" by `alp.parent-agent-id`:
 the daemon sets that label only when `create_agent` names a real calling agent, so its absence is
 the signal. An agent that already carries `slp.role` — valid or not — is never touched or tagged;
 only a request that names no seat at all gets the default.
@@ -101,7 +101,7 @@ actually arrives over `send_agent_prompt`.
 
 A seat's skills reach it through its seat directory, never through a global install: nothing is
 written to `~/.claude/skills`, `~/.codex/skills`, or `~/.agents/skills`. For each seat slp-dev
-lists skills for (Lead and Peer today), slp keeps `$PASEO_HOME/slp/seat-skills/<seat>/` as a Claude
+lists skills for (Lead and Peer today), slp keeps `$ALP_HOME/slp/seat-skills/<seat>/` as a Claude
 local plugin named `slp-<seat>`: `.claude-plugin/plugin.json` plus `skills/<skill>/`, byte for byte
 what slp-dev ships. slp-dev hands the files over through `slp-dev.skills.get`, since slp has no
 path to slp-dev's directory (`server/seat-skills.ts`).
@@ -118,25 +118,25 @@ The directory is rebuilt only when slp-dev's content for the seat changes (`.con
 seat directory). The new directory is built next to the old one and swapped in, so a skill dropped
 from a seat disappears with the old directory. slp-dev is asked right before each Lead or Peer is
 created, and for every seat on the first Claude/Codex session open after the plugin starts — the
-plugin cannot ask at start, because `contribute` gets no Paseo API. That pass also removes anything
+plugin cannot ask at start, because `contribute` gets no Alp API. That pass also removes anything
 else in `seat-skills/`. Resume needs nothing more: the daemon re-sends the stored `providerOptions`,
 and the path in them does not change.
 
-`PASEO_HOME` comes from the daemon's environment; every daemon launch path sets it. Without it, or
+`ALP_HOME` comes from the daemon's environment; every daemon launch path sets it. Without it, or
 when slp-dev does not answer within `SEAT_RULES_TIMEOUT_MS`, the seat is created without skills and
 a warning says so; slp never guesses a home directory for skills.
 
 ## Seat tools
 
-`before("agent.create")` cuts tools per seat. Paseo tools go out through the hook's `paseoTools`,
+`before("agent.create")` cuts tools per seat. Alp tools go out through the hook's `alpTools`,
 which the daemon merges with the provider policy (cuts only add up) and freezes into the agent
 record; the provider's own tools go out through `providerOptions`.
 
-| Seat       | Paseo tools (`paseoTools.disabledTools`)                                                                               | Claude (`providerOptions`)                                                                                 | Codex (`providerOptions`)                                      |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Lead       | none                                                                                                                   | `allowedTools: mcp__paseo__*`                                                                              | unchanged                                                      |
-| Peer       | `PEER_DISABLED_PASEO_TOOLS`: spawn, steer, stop, archive, schedule, reconfigure another agent, resolve its permissions | `disallowedTools: Agent, Task`                                                                             | `features.multi_agent: false`, `sandbox_mode: workspace-write` |
-| Supervisor | `SUPERVISOR_DISABLED_PASEO_TOOLS`: every mutating tool except `send_agent_prompt`                                      | `allowedTools: mcp__paseo__*`, `disallowedTools: Write, Edit, MultiEdit, NotebookEdit, Agent, Task, Skill` | `sandbox_mode: workspace-write`                                |
+| Seat       | Alp tools (`alpTools.disabledTools`)                                                                                 | Claude (`providerOptions`)                                                                               | Codex (`providerOptions`)                                      |
+| ---------- | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Lead       | none                                                                                                                 | `allowedTools: mcp__alp__*`                                                                              | unchanged                                                      |
+| Peer       | `PEER_DISABLED_ALP_TOOLS`: spawn, steer, stop, archive, schedule, reconfigure another agent, resolve its permissions | `disallowedTools: Agent, Task`                                                                           | `features.multi_agent: false`, `sandbox_mode: workspace-write` |
+| Supervisor | `SUPERVISOR_DISABLED_ALP_TOOLS`: every mutating tool except `send_agent_prompt`                                      | `allowedTools: mcp__alp__*`, `disallowedTools: Write, Edit, MultiEdit, NotebookEdit, Agent, Task, Skill` | `sandbox_mode: workspace-write`                                |
 
 The lists live in `server/seat.ts`. A cut is only as strong as the label: a Lead that spawns a Peer
 without `slp.role=peer` gets an agent with no seat and no cuts. It is also only as strong as the
@@ -160,7 +160,7 @@ One Lead per directory: a matching workspace gets no Lead when another active wo
 directory already has a live Lead (not closed or archived). Upstream `paseo run` creates a new <!-- alp-rename-keep -->
 workspace on every run without `--workspace`, so three runs in one directory would otherwise start
 three Leads. Directories compare after `~` expansion and `path.resolve`, the way the daemon stores
-them, without resolving symlinks. A Paseo worktree has its own directory and gets its own Lead.
+them, without resolving symlinks. A Alp worktree has its own directory and gets its own Lead.
 
 Workspaces created by agents over MCP or by schedules get no Lead automatically. Call
 `slp.lead.ensure` for them. That RPC skips the directory check and gives the workspace it names its
@@ -168,9 +168,9 @@ own Lead.
 
 ## The Supervisor workspace
 
-The Supervisor lives in the `SLP Supervisor` workspace at `$PASEO_HOME/supervisor`. The plugin
+The Supervisor lives in the `SLP Supervisor` workspace at `$ALP_HOME/supervisor`. The plugin
 subprocess inherits the daemon's environment and resolves the home the same way the daemon does:
-`PASEO_HOME`, default `~/.alp`. Workspaces have no key=value labels, so the path is the identity.
+`ALP_HOME`, default `~/.alp`. Workspaces have no key=value labels, so the path is the identity.
 `isSupervisorWorkspace` in `server/paths.ts` is the only place that decides it. That workspace never
 gets a Lead. There is one Supervisor per host: `slp.supervisor.ensure` reuses any live Supervisor
 before creating one.

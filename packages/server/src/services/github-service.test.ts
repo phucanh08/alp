@@ -17,7 +17,7 @@ import {
   type GitHubPullRequestStatusFacts,
 } from "./github-service.js";
 import { isPlatform } from "../test-utils/platform.js";
-import { CheckoutPrStatusResponseSchema } from "@getpaseo/protocol/messages";
+import { CheckoutPrStatusResponseSchema } from "@alp/protocol/messages";
 
 const EXPECTED_GITHUB_FAST_POLL_MS = 20_000;
 const EXPECTED_GITHUB_SLOW_POLL_MS = 120_000;
@@ -430,8 +430,8 @@ function pullRequestCheckoutTargetJson(): string {
 
 function repoViewJson(): string {
   return JSON.stringify({
-    owner: { login: "getpaseo" },
-    name: "paseo",
+    owner: { login: "alp" },
+    name: "alp",
     parent: null,
   });
 }
@@ -806,8 +806,8 @@ describe("ForgeService", () => {
     });
     expect(runner.calls[1]?.cwd).toBe("/repo");
     expect(runner.calls[1]?.args.slice(0, 3)).toEqual(["api", "graphql", "-f"]);
-    expect(runner.calls[1]?.args).toContain("owner=getpaseo");
-    expect(runner.calls[1]?.args).toContain("name=paseo");
+    expect(runner.calls[1]?.args).toContain("owner=alp");
+    expect(runner.calls[1]?.args).toContain("name=alp");
     expect(runner.calls[1]?.args).toContain("number=526");
   });
 

@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { BrowserAutomationBrowserIdSchema } from "@getpaseo/protocol/browser-automation/rpc-schemas";
+import { BrowserAutomationBrowserIdSchema } from "@alp/protocol/browser-automation/rpc-schemas";
 import type { BrowserToolsBroker } from "./broker.js";
 import type { BrowserToolsResponsePayload } from "./errors.js";
 import type {
-  PaseoToolConfig,
-  PaseoToolExecutionContext,
-  PaseoToolResult,
+  AlpToolConfig,
+  AlpToolExecutionContext,
+  AlpToolResult,
 } from "../agent/tools/types.js";
 
 interface CallerAgentContext {
@@ -17,12 +17,12 @@ interface CallerAgentContext {
 export interface RegisterBrowserToolsOptions {
   registerTool: (
     name: string,
-    config: PaseoToolConfig,
+    config: AlpToolConfig,
     handler: (
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool inputs are validated by the catalog before execution.
       input: any,
-      context: PaseoToolExecutionContext,
-    ) => Promise<PaseoToolResult>,
+      context: AlpToolExecutionContext,
+    ) => Promise<AlpToolResult>,
   ) => void;
   broker: Pick<BrowserToolsBroker, "execute">;
   callerAgentId?: string;
@@ -749,7 +749,7 @@ function requireWorkspaceContext(context: {
   agentId?: string;
   cwd?: string;
   workspaceId?: string;
-}): PaseoToolResult | null {
+}): AlpToolResult | null {
   if (context.workspaceId) {
     return null;
   }
@@ -771,7 +771,7 @@ function requireWorkspaceContext(context: {
 function browserToolResult(params: {
   payload: BrowserToolsResponsePayload;
   context: { agentId?: string; cwd?: string; workspaceId?: string; browserId?: string };
-}): PaseoToolResult {
+}): AlpToolResult {
   const { payload, context } = params;
   if (payload.ok) {
     return {
@@ -814,7 +814,7 @@ function browserToolStructuredResult(
 
 function browserToolSuccessContent(
   payload: Extract<BrowserToolsResponsePayload, { ok: true }>,
-): PaseoToolResult["content"] {
+): AlpToolResult["content"] {
   const textContent = { type: "text" as const, text: summarizeBrowserSuccess(payload) };
   const imageContent = browserToolImageContent(payload.result);
   return imageContent ? [textContent, imageContent] : [textContent];
@@ -822,7 +822,7 @@ function browserToolSuccessContent(
 
 function browserToolImageContent(
   result: Extract<BrowserToolsResponsePayload, { ok: true }>["result"],
-): PaseoToolResult["content"][number] | null {
+): AlpToolResult["content"][number] | null {
   if (result.command !== "screenshot") {
     return null;
   }

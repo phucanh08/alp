@@ -4,7 +4,7 @@ Local plugins contribute daemon RPCs, native app surfaces, workspace panels, Com
 client slash commands, timeline items, header buttons, composer pills, app themes, composer attachment sources, and settings screens.
 alp executes `index.server.ts` in a subprocess and `index.client.tsx` in every connected app.
 
-> **Trust every plugin you add.** `paseo plugin add` and `paseo plugin install` mean “I trust this codebase.” Plugins are unsandboxed: server code and preparation commands run with the daemon user's access on the daemon host, and client contributions run inside alp. The repository's dependencies and future updates are part of that trust decision. With `--host`, preparation runs on that remote daemon host.
+> **Trust every plugin you add.** `alp plugin add` and `alp plugin install` mean “I trust this codebase.” Plugins are unsandboxed: server code and preparation commands run with the daemon user's access on the daemon host, and client contributions run inside alp. The repository's dependencies and future updates are part of that trust decision. With `--host`, preparation runs on that remote daemon host.
 
 ## Install a directory source
 
@@ -12,13 +12,13 @@ Create a typecheckable plugin project, install its development dependencies, the
 the daemon. `init` only writes the project files; it does not run the package manager.
 
 ```bash
-paseo plugin init /absolute/path/to/my-plugin
+alp plugin init /absolute/path/to/my-plugin
 cd /absolute/path/to/my-plugin
 npm install
 npm run typecheck
-paseo plugin install /absolute/path/to/my-plugin
-paseo plugin install /absolute/path/to/my-plugin --id another-runtime-id
-paseo plugin ls
+alp plugin install /absolute/path/to/my-plugin
+alp plugin install /absolute/path/to/my-plugin --id another-runtime-id
+alp plugin ls
 ```
 
 The daemon stores directory sources under the root `plugins` object:
@@ -37,7 +37,7 @@ The daemon stores directory sources under the root `plugins` object:
 ```
 
 The plugin system is disabled unless `pluginsEnabled` is `true`. Changing that root field is
-runtime-safe: run `paseo reload` after editing `config.json`. Enabling starts every configured,
+runtime-safe: run `alp reload` after editing `config.json`. Enabling starts every configured,
 enabled plugin; disabling tears them all down without restarting the daemon. Plugin source entries
 remain lifecycle-owned and do not reload from manual config edits.
 
@@ -46,7 +46,7 @@ directories, and local typechecking support. At least one entry is required.
 
 ```text
 my-plugin/
-  paseo-plugin.json
+  alp-plugin.json
   package.json
   tsconfig.json
   index.client.tsx
@@ -56,14 +56,14 @@ my-plugin/
   shared/greeting.ts
 ```
 
-The generated `package.json` installs `@getpaseo/plugin` and the other host modules as development
+The generated `package.json` installs `@alp/plugin` and the other host modules as development
 dependencies for local typechecking and tests. alp compiles TypeScript and TSX and supplies the
 runtime modules, so consumers do not install these packages when adding the plugin.
 
 ```json
 {
   "id": "my-plugin",
-  "requirements": { "paseo": ">=0.8.0" }
+  "requirements": { "alp": ">=0.8.0" }
 }
 ```
 
@@ -84,7 +84,7 @@ The one exception is alp's own bundled plugins, `slp` and `slp-dev`: daemon star
 without asking. See [Bundled plugins](#bundled-plugins) and
 [breaking-changes.md](breaking-changes.md#slp-defaults-on-a-fresh-host) for that divergence.
 
-Source changes are explicit. Run `paseo plugin reload <id>` to stop and fully tear down the old
+Source changes are explicit. Run `alp plugin reload <id>` to stop and fully tear down the old
 plugin before compiling and starting from disk. A failed reload stays failed; alp does not restore
 the old code. Use `enable`, `disable`, and `remove` to manage one plugin. Removing a directory source
 never deletes it. The global `pluginsEnabled` switch remains available.
@@ -97,7 +97,7 @@ skills, one skill per subdirectory, the same shape as the core skill bundle:
 ```json
 {
   "id": "my-plugin",
-  "requirements": { "paseo": ">=0.9.2" },
+  "requirements": { "alp": ">=0.9.2" },
   "skills": "skills"
 }
 ```
@@ -139,17 +139,17 @@ needed
 alp ships two plugins inside the daemon and loads them with no config entry: `plugins/slp` (seat
 mechanics) and `plugins/slp-dev` (seat rule text and skill files; see
 [plugins/slp-dev/README.md](../plugins/slp-dev/README.md)). The daemon never installs slp-dev's
-skills: `plugins/slp` writes each seat's skill files to `$PASEO_HOME/slp/seat-skills/<seat>/` and
+skills: `plugins/slp` writes each seat's skill files to `$ALP_HOME/slp/seat-skills/<seat>/` and
 hands that directory to each Lead and Peer it creates. Running from a built daemon, the source
 is `packages/server/dist/server/plugins/<id>`; running from a checkout, it is `plugins/<id>` at the
 repo root. Add a `plugins.<id>` directory or Git source entry to config to replace either bundled
 copy with your own.
 
-Bundled plugins do not appear in `paseo plugin ls`, `reload`, `enable`, or `disable` — those manage
+Bundled plugins do not appear in `alp plugin ls`, `reload`, `enable`, or `disable` — those manage
 config-entry plugins, and a bundled plugin with no entry is not one. Turn a bundled plugin off with
 the global `pluginsEnabled: false`, which disables every plugin, or with a config entry naming the
 plugin's own directory and `enabled: false`. `plugins` holds dynamic keys, so `daemon config set`
-cannot address one plugin by a dotted path — `paseo daemon config set plugins.slp-dev.enabled false`
+cannot address one plugin by a dotted path — `alp daemon config set plugins.slp-dev.enabled false`
 fails with "Unknown configuration path: plugins.slp-dev". `daemon config set plugins <value>`
 replaces the whole `plugins` object rather than merging into it, so read the current value first and
 fold your change into it — otherwise any other configured plugin silently drops out of config:
@@ -158,10 +158,10 @@ fold your change into it — otherwise any other configured plugin silently drop
 # Checkout: BUNDLED_DIR="$PWD/plugins/slp-dev"
 # Built/packaged daemon: BUNDLED_DIR="<daemon install dir>/packages/server/dist/server/plugins/slp-dev"
 BUNDLED_DIR="$PWD/plugins/slp-dev"
-current=$(paseo daemon config get plugins --json | jq '.value // {}')
+current=$(alp daemon config get plugins --json | jq '.value // {}')
 merged=$(echo "$current" | jq --arg path "$BUNDLED_DIR" '. + {"slp-dev": {source: "directory", path: $path, enabled: false}}')
-paseo daemon config set plugins "$merged"
-paseo daemon reload
+alp daemon config set plugins "$merged"
+alp daemon reload
 ```
 
 A config entry whose `path` differs from the bundled directory replaces the bundled copy with that
@@ -176,14 +176,14 @@ GitHub repositories use an `owner/repository` shorthand. Other hosts use a Git U
 directory always wins over shorthand resolution.
 
 ```bash
-paseo plugin add owner/repository
-paseo plugin add https://gitlab.com/group/repository.git
-paseo plugin add https://git.example.com/owner/repository.git
-paseo plugin add owner/monorepo:plugins/review
-paseo plugin add owner/repository --ref main
-paseo plugin ls
-paseo plugin update review
-paseo plugin update --all
+alp plugin add owner/repository
+alp plugin add https://gitlab.com/group/repository.git
+alp plugin add https://git.example.com/owner/repository.git
+alp plugin add owner/monorepo:plugins/review
+alp plugin add owner/repository --ref main
+alp plugin ls
+alp plugin update review
+alp plugin update --all
 ```
 
 Append `:relative/path` to the source when the plugin lives below the repository root.
@@ -227,7 +227,7 @@ step:
 ```json
 {
   "id": "review",
-  "requirements": { "paseo": ">=0.8.0" },
+  "requirements": { "alp": ">=0.8.0" },
   "build": [
     ["npm", "ci"],
     ["npm", "run", "build"]
@@ -245,13 +245,13 @@ output in the daemon log. If a command fails, the error includes its output, alp
 candidate, and the existing installed and running version stays untouched. On a remote daemon, all
 of this happens on the remote daemon host.
 
-Server contributions can write to stdout and stderr with normal Node logging. alp adds `[paseo]`
+Server contributions can write to stdout and stderr with normal Node logging. alp adds `[alp]`
 entries for loading, ready, stopping, and stopped transitions. Compilation and load failures are
 recorded as stderr entries before a subprocess exists. Inspect the recent in-memory
-tail from the host plugin settings or with `paseo plugin logs <id>`. Git preparation commands are
-recorded in `$PASEO_HOME/daemon.log` before a plugin exists, rather than the plugin log tail. Reload, disable, and process
+tail from the host plugin settings or with `alp plugin logs <id>`. Git preparation commands are
+recorded in `$ALP_HOME/daemon.log` before a plugin exists, rather than the plugin log tail. Reload, disable, and process
 failure retain the tail; removing the plugin clears it. Daemon restarts do not retain the tail, but
-structured copies remain in `$PASEO_HOME/daemon.log`. Plugin output can contain secrets, so do not
+structured copies remain in `$ALP_HOME/daemon.log`. Plugin output can contain secrets, so do not
 log credentials or tokens.
 
 ## Contribute behavior and UI
@@ -267,9 +267,9 @@ wiring. Runtime code lives behind directory boundaries:
 
 Do not put any other code modules in the plugin root.
 
-Shared files import contract helpers and types from `@getpaseo/plugin`. Server handler files import
-`PluginHandlerContext` from `@getpaseo/plugin/server`. Client files import alp UI from
-`@getpaseo/plugin/client/react-native`. Its `Icon` resolves a Lucide name using the client's installed icon
+Shared files import contract helpers and types from `@alp/plugin`. Server handler files import
+`PluginHandlerContext` from `@alp/plugin/server`. Client files import alp UI from
+`@alp/plugin/client/react-native`. Its `Icon` resolves a Lucide name using the client's installed icon
 set; an unknown name renders nothing so it cannot break the plugin surface.
 Its controlled modal keeps presentation metadata on `<Modal title="…" icon={…}>` and body UI in
 `<Modal.Content>`. Body layout, sheet-aware scrolling, and clipboard actions follow the
@@ -285,14 +285,14 @@ Classify every SDK export before adding it. All client entry points and implemen
 Zod schemas, and functions that run in both runtimes. A type-only import is still an architectural
 dependency; shared types must not refer to React components, hooks, Node APIs, or server contexts.
 
-| Entry                                                | Owns                                                                       | May depend on          |
-| ---------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------- |
-| `@getpaseo/plugin`                                   | Shared data, schemas, RPC/settings definitions, runtime-neutral helpers    | Shared code only       |
-| `@getpaseo/plugin/server`                            | Server contribution/handler contexts and lifecycle contracts               | Shared and server code |
-| `@getpaseo/plugin/server/provider`, `/server/acp`    | Server provider contracts and adapters                                     | Shared and server code |
-| `@getpaseo/plugin/client`                            | Client contribution contexts, hooks, navigation, and UI contribution types | Shared and client code |
-| `@getpaseo/plugin/client/react-native`, `/client/ui` | Host-provided UI components                                                | Shared and client code |
-| `@getpaseo/plugin/client/host`                       | App-owned rendering integration; not a plugin-author entry                 | Shared and client code |
+| Entry                                           | Owns                                                                       | May depend on          |
+| ----------------------------------------------- | -------------------------------------------------------------------------- | ---------------------- |
+| `@alp/plugin`                                   | Shared data, schemas, RPC/settings definitions, runtime-neutral helpers    | Shared code only       |
+| `@alp/plugin/server`                            | Server contribution/handler contexts and lifecycle contracts               | Shared and server code |
+| `@alp/plugin/server/provider`, `/server/acp`    | Server provider contracts and adapters                                     | Shared and server code |
+| `@alp/plugin/client`                            | Client contribution contexts, hooks, navigation, and UI contribution types | Shared and client code |
+| `@alp/plugin/client/react-native`, `/client/ui` | Host-provided UI components                                                | Shared and client code |
+| `@alp/plugin/client/host`                       | App-owned rendering integration; not a plugin-author entry                 | Shared and client code |
 
 Server code imports shared helpers from the root and server capabilities from `/server`. Client
 code imports shared helpers from the root and client capabilities from `/client`. Neither runtime
@@ -322,7 +322,7 @@ pattern.
 
 ```ts
 // index.server.ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext } from "@alp/plugin/server";
 import { createGreeting } from "./server/greeting";
 import { greetRpc } from "./shared/greeting";
 
@@ -334,7 +334,7 @@ export default function contribute(server: PluginServerContext) {
 
 ```tsx
 // index.client.tsx
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext } from "@alp/plugin/client";
 import { Greeting } from "./client/greeting";
 
 export default function contribute(client: PluginClientContext) {
@@ -357,16 +357,16 @@ RPC contracts validate inputs and outputs in both the app and plugin subprocess.
 typed async function. Use the host-provided `@tanstack/react-query` for request state and caching;
 alp gives each plugin installation its own query client.
 
-`usePaseo()` and the handler's `{ paseo }` context expose the same `PaseoApi`: projects,
+`useAlp()` and the handler's `{ alp }` context expose the same `AlpApi`: projects,
 workspaces, agents, terminals, providers, and daemon config. They do not expose connection lifecycle. A surface borrows the
-selected host's existing connection; switching the screen's host changes both `usePaseo()` and
+selected host's existing connection; switching the screen's host changes both `useAlp()` and
 `useRpc()` to that host. An offline selected host fails there and never falls through to another
 installation. A server handler owns an IPC-backed daemon session for the life of its subprocess.
 Use plugin RPC for plugin-specific backend behavior that is not a normal alp operation.
 
-`PaseoApi.plugins.invoke(pluginId, method, input)` calls another plugin's registered RPC by name;
+`AlpApi.plugins.invoke(pluginId, method, input)` calls another plugin's registered RPC by name;
 the caller validates its own output, the callee validates its input. It is available from both a
-server handler's `{ paseo }` and a client `usePaseo()`, and needs no separate permission — a plugin
+server handler's `{ alp }` and a client `useAlp()`, and needs no separate permission — a plugin
 session already connects as the daemon owner
 (`packages/client/src/index.ts:489-506`, `packages/server/src/server/plugins/plugin-session-identity.ts`).
 `plugins/slp` uses it this way to ask `plugins/slp-dev` for a seat's rule text and skills; see
@@ -401,7 +401,7 @@ workspace only. Location controls hosting, not context. An agent panel target ke
 when moved between hosts. Explorer configuration can create workspace-context panels and remove
 existing agent-context instances, but it cannot create an agent panel without an agent-aware command.
 
-Command Center callbacks use the selected host's existing `PaseoApi` for normal alp operations.
+Command Center callbacks use the selected host's existing `AlpApi` for normal alp operations.
 They use typed plugin RPC only for plugin-specific backend work. Surface and panel navigation
 belongs to the app; plugins do not receive Expo Router or workspace-layout store access.
 See the public [navigation fields](../public-docs/plugins/reference.md#surfaces-and-sidebar-items)
@@ -417,16 +417,16 @@ eleven hooks; `plugin-examples/lifecycle-actions` demonstrates common automation
 
 `before("agent.create")` sees and returns the request's `labels`; a result that omits `labels`
 keeps the ones it received, so hooks written before the field existed do not wipe them. The daemon
-owns `paseo.parent-agent-id`: after the hooks run, `AgentManager` restores the value the daemon
+owns `alp.parent-agent-id`: after the hooks run, `AgentManager` restores the value the daemon
 resolved from the real caller, so a hook can neither adopt nor orphan an agent. Every agent event
 carries `agent.labels` as they were when the event fired.
 
-`before("agent.create")` can also return `paseoTools`, the same shape as a provider's
-[`paseoTools` policy](../public-docs/mcp.md#limit-alp-tools-by-provider), to cut alp tools for that
+`before("agent.create")` can also return `alpTools`, the same shape as a provider's
+[`alpTools` policy](../public-docs/mcp.md#limit-alp-tools-by-provider), to cut alp tools for that
 one agent. Cuts only add up: the daemon merges the hook result with the provider policy and with
 earlier hooks, `enabled: false` from any source wins, and no `enabled: true` can restore a tool
 someone else removed. A result that omits the field keeps what it received. `AgentManager` freezes
-the merged policy into the agent record at create (`paseoToolPolicy`, see
+the merged policy into the agent record at create (`alpToolPolicy`, see
 [data-model.md](./data-model.md#1-agent-record)). Resume, refresh, and import never run
 `agent.create`, so they read the stored policy instead of asking plugins again; each session open
 merges it with the current provider policy, so a provider can tighten a running agent's catalog on
@@ -445,8 +445,8 @@ Register a provider from `index.server.ts`. The provider connection is callback-
 of its sessions; plugin RPC is not part of the provider data path.
 
 ```ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
-import type { ProviderRegistration } from "@getpaseo/plugin/server/provider";
+import type { PluginServerContext } from "@alp/plugin/server";
+import type { ProviderRegistration } from "@alp/plugin/server/provider";
 import { createProvider } from "./server/provider";
 
 export default function contribute(server: PluginServerContext) {
@@ -472,7 +472,7 @@ persistence. Providers re-read credentials, environment, global configuration, a
 `session.open`; there is no provider reload input.
 
 For an ACP command, register `runAcpProvider({ id, label, command })` from
-`@getpaseo/plugin/server/acp`. Its transformer hooks cover narrow vendor differences; do not translate the
+`@alp/plugin/server/acp`. Its transformer hooks cover narrow vendor differences; do not translate the
 whole provider event stream. The direct and ACP examples live in `plugin-examples/provider-direct`
 and `plugin-examples/provider-acp-transformer`.
 
@@ -500,7 +500,7 @@ Native sheets teleport their children. Button surfaces rebuild the installation'
 query, and toast providers inside the surface content, including overflow pages from different
 plugins. Providers only around the trigger do not reach those bodies.
 
-Request observation with `client.paseo.agents.list({ subscribe: {} })` and consume the returned
+Request observation with `client.alp.agents.list({ subscribe: {} })` and consume the returned
 `subscription` handle. Plain `list()` and agent/workspace directory `.subscribe(handler)` listeners create no daemon
 demand. Provider and project `subscribe()` calls establish their own demand. On capable daemons, each
 list-and-subscribe call has its own server ID, even for the same query. Older daemons retain
@@ -537,7 +537,7 @@ See `plugin-examples/timeline-items` for the complete contract.
 A plugin subprocess can also append a canonical plugin row from a server handler:
 
 ```ts
-await paseo.agents.ref(agentId).timeline.append({
+await alp.agents.ref(agentId).timeline.append({
   type: "plugin",
   id: "review",
   kind: "review-result",
@@ -558,7 +558,7 @@ be rendered intact. The daemon advertises this RPC through
 
 `addSlashCommand` registers an agent- or workspace-context command in the composer. The
 callback runs in the app, receives the trimmed text after the command name as `args`, and receives
-the same `paseo`, `rpc`, `openSurface`, workspace, agent, and `openPanel` capabilities as the matching
+the same `alp`, `rpc`, `openSurface`, workspace, agent, and `openPanel` capabilities as the matching
 Command Center callback.
 
 ```ts
@@ -586,7 +586,7 @@ credentials and vendor API calls stay in the daemon handler.
 
 ```ts
 // index.server.ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext } from "@alp/plugin/server";
 import { search } from "./server/issues";
 import { searchIssues } from "./shared/issues";
 
@@ -598,7 +598,7 @@ export default function contribute(server: PluginServerContext) {
 
 ```tsx
 // index.client.tsx
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext } from "@alp/plugin/client";
 import { issues } from "./shared/issues";
 
 export default function contribute(client: PluginClientContext) {

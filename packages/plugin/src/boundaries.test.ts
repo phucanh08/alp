@@ -49,12 +49,12 @@ function boundaryViolations(entry: string, runtime: "shared" | "server" | "clien
         if (runtime !== "server" && serverModule.test(module)) violations.push(label);
         pending.push(local);
       } else if (runtime === "shared") {
-        if (specifier !== "zod" && specifier !== "@getpaseo/protocol/agent-types")
+        if (specifier !== "zod" && specifier !== "@alp/protocol/agent-types")
           violations.push(label);
       } else if (runtime === "server") {
-        if (uiDependency.test(specifier) || /^@getpaseo\/plugin\/client(\/|$)/.test(specifier))
+        if (uiDependency.test(specifier) || /^@alp\/plugin\/client(\/|$)/.test(specifier))
           violations.push(label);
-      } else if (isBuiltin(specifier) || /^@getpaseo\/plugin\/server(\/|$)/.test(specifier)) {
+      } else if (isBuiltin(specifier) || /^@alp\/plugin\/server(\/|$)/.test(specifier)) {
         violations.push(label);
       }
     }
@@ -103,8 +103,8 @@ describe("plugin example import boundaries", () => {
       if (specifier.startsWith(".")) {
         const imported = owner(resolveLocal(file, specifier));
         if (imported !== "shared" && imported !== runtime) violations.push(specifier);
-      } else if (specifier.startsWith("@getpaseo/plugin")) {
-        const entry = specifier.replace("@getpaseo/plugin", ".") as keyof typeof entries;
+      } else if (specifier.startsWith("@alp/plugin")) {
+        const entry = specifier.replace("@alp/plugin", ".") as keyof typeof entries;
         if (
           entry === "./client/host" ||
           !(entry in entries) ||

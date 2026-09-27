@@ -43,7 +43,7 @@ Open **Settings → Host → Metadata** and select **Automatic** or **Manual**. 
 
 ## Configure a custom fallback order
 
-To configure more than one preferred model or control the exact order, set `agents.metadataGeneration.providers` in `$PASEO_HOME/config.json` (`~/.alp/config.json` by default). Your entries are tried before the built-in defaults.
+To configure more than one preferred model or control the exact order, set `agents.metadataGeneration.providers` in `$ALP_HOME/config.json` (`~/.alp/config.json` by default). Your entries are tried before the built-in defaults.
 
 ```json
 {
@@ -68,7 +68,7 @@ The Settings screen replaces only the first entry and preserves the rest of a cu
 
 ## Per-project instructions
 
-You can steer the wording of each kind of metadata per repository with a `paseo.json` file at your repo root. alp reads it from the committed version of the base branch, the same way it reads worktree config.
+You can steer the wording of each kind of metadata per repository with a `alp.json` file at your repo root. alp reads it from the committed version of the base branch, the same way it reads worktree config.
 
 ```json
 {

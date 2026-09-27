@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
-import { DaemonClient, type DaemonTransport } from "@getpaseo/client/internal/daemon-client";
-import type { SessionInboundMessage, SessionOutboundMessage } from "@getpaseo/protocol/messages";
+import { DaemonClient, type DaemonTransport } from "@alp/client/internal/daemon-client";
+import type { SessionInboundMessage, SessionOutboundMessage } from "@alp/protocol/messages";
 import type { ProjectedTimelineForwardFetchPlan } from "./timeline-sync-plan";
 import {
   consumeForcedTimelineTailReplacement,

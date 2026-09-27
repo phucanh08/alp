@@ -2,7 +2,7 @@ import pino from "pino";
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 
-import type { PaseoToolCatalog, PaseoToolDefinition, PaseoToolResult } from "../../tools/types.js";
+import type { AlpToolCatalog, AlpToolDefinition, AlpToolResult } from "../../tools/types.js";
 import {
   clearOmpHostToolState,
   handleOmpHostToolRuntimeEvent,
@@ -12,7 +12,7 @@ import {
 import type { OmpRpcHostToolResult } from "./rpc-types.js";
 import { FakeOmp } from "./test-utils/fake-omp.js";
 
-function createCatalog(tools: PaseoToolDefinition[]): PaseoToolCatalog {
+function createCatalog(tools: AlpToolDefinition[]): AlpToolCatalog {
   const toolMap = new Map(tools.map((tool) => [tool.name, tool]));
   return {
     tools: toolMap,
@@ -27,7 +27,7 @@ function createCatalog(tools: PaseoToolDefinition[]): PaseoToolCatalog {
 
 class OmpHostToolHarness {
   private readonly logger = pino({ level: "silent" });
-  private resolveControlledResult: ((result: PaseoToolResult) => void) | null = null;
+  private resolveControlledResult: ((result: AlpToolResult) => void) | null = null;
   private controlledSignal: AbortSignal | null = null;
   private resolveControlledStart: (() => void) | null = null;
   private readonly controlledStart = new Promise<void>((resolve) => {
@@ -35,11 +35,11 @@ class OmpHostToolHarness {
   });
 
   private constructor(
-    private readonly catalog: PaseoToolCatalog,
+    private readonly catalog: AlpToolCatalog,
     private readonly runtimeSession: Awaited<ReturnType<FakeOmp["startSession"]>>,
   ) {}
 
-  static async withTools(tools: PaseoToolDefinition[]): Promise<OmpHostToolHarness> {
+  static async withTools(tools: AlpToolDefinition[]): Promise<OmpHostToolHarness> {
     const omp = new FakeOmp();
     const runtimeSession = await omp.startSession({ cwd: "/workspace/project" });
     return new OmpHostToolHarness(createCatalog(tools), runtimeSession);
@@ -47,13 +47,13 @@ class OmpHostToolHarness {
 
   static async cancellable(): Promise<OmpHostToolHarness> {
     let harness: OmpHostToolHarness;
-    const tool: PaseoToolDefinition = {
+    const tool: AlpToolDefinition = {
       name: "wait_for_agent",
-      description: "Wait for a Paseo agent.",
+      description: "Wait for a Alp agent.",
       handler: async (_input, context) => {
         harness.controlledSignal = context.signal ?? null;
         harness.resolveControlledStart?.();
-        return await new Promise<PaseoToolResult>((resolve) => {
+        return await new Promise<AlpToolResult>((resolve) => {
           harness.resolveControlledResult = resolve;
         });
       },
@@ -97,7 +97,7 @@ class OmpHostToolHarness {
     );
   }
 
-  completeControlledCall(result: PaseoToolResult): void {
+  completeControlledCall(result: AlpToolResult): void {
     if (!this.resolveControlledResult) throw new Error("Controlled host tool has not started");
     this.resolveControlledResult(result);
   }
@@ -123,17 +123,17 @@ class OmpHostToolHarness {
   }
 
   private routerInput() {
-    return { runtimeSession: this.runtimeSession, paseoTools: this.catalog, logger: this.logger };
+    return { runtimeSession: this.runtimeSession, alpTools: this.catalog, logger: this.logger };
   }
 }
 
 describe("OMP host tools", () => {
-  test("marks every caller-scoped Paseo tool essential for direct invocation", () => {
+  test("marks every caller-scoped Alp tool essential for direct invocation", () => {
     const catalog = createCatalog([
       {
         name: "create_agent",
         title: "Create agent",
-        description: "Create a Paseo agent.",
+        description: "Create a Alp agent.",
         inputSchema: { initialPrompt: z.string().describe("Prompt for the new agent.") },
         handler: async () => ({ content: [] }),
       },
@@ -148,7 +148,7 @@ describe("OMP host tools", () => {
       {
         name: "create_agent",
         label: "Create agent",
-        description: "Create a Paseo agent.",
+        description: "Create a Alp agent.",
         loadMode: "essential",
         parameters: expect.objectContaining({ type: "object", required: ["initialPrompt"] }),
       },
@@ -165,7 +165,7 @@ describe("OMP host tools", () => {
     const omp = await OmpHostToolHarness.withTools([
       {
         name: "create_agent",
-        description: "Create a Paseo agent.",
+        description: "Create a Alp agent.",
         handler: async (input, context) => {
           context.sendUpdate?.({ content: [{ type: "text", text: "creating" }] });
           return { content: [], structuredContent: { input, agentId: "child-1" } };

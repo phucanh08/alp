@@ -18,9 +18,9 @@ const roots: string[] = [];
 type TestPluginRuntime = NonNullable<ConstructorParameters<typeof PluginService>[3]["runtime"]>;
 
 async function createPlugin(id: string, source: string): Promise<string> {
-  const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-service-"));
+  const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-service-"));
   roots.push(directory);
-  await writeFile(path.join(directory, "paseo-plugin.json"), JSON.stringify({ id }));
+  await writeFile(path.join(directory, "alp-plugin.json"), JSON.stringify({ id }));
   await writeFile(path.join(directory, "index.server.ts"), source);
   return directory;
 }
@@ -53,7 +53,7 @@ function createService(
 }
 
 function bindTestSessionHost(service: PluginService): PluginService {
-  service.bindPaseoSessionHost({
+  service.bindAlpSessionHost({
     async attachPluginSocket(_pluginId, socket) {
       const closed = new Promise<void>((resolve) => socket.once("close", resolve));
       socket.on("message", (data) => {
@@ -119,7 +119,7 @@ function createPausedRuntime() {
       running.clear();
     },
     subscribe: () => () => undefined,
-    bindPaseoSessionHost: () => undefined,
+    bindAlpSessionHost: () => undefined,
   };
   return { runtime, started, releaseStart };
 }
@@ -154,14 +154,14 @@ function createPluginSelectivePausedRuntime(pausedPluginId: string) {
       running.clear();
     },
     subscribe: () => () => undefined,
-    bindPaseoSessionHost: () => undefined,
+    bindAlpSessionHost: () => undefined,
   };
   return { runtime, started, releaseStart, starts };
 }
 
 describe("PluginService", () => {
   it("resolves a provider icon path to sanitized inline SVG", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const directory = await createPlugin(
       "provider-icon",
@@ -197,7 +197,7 @@ describe("PluginService", () => {
   });
 
   it("publishes provider registrations only while their plugin is running", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const directory = await createPlugin(
       "provider-lifecycle",
@@ -223,7 +223,7 @@ describe("PluginService", () => {
   });
 
   it("retains logs when disabled and clears them only when removed", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const entries = [
       {
@@ -246,7 +246,7 @@ describe("PluginService", () => {
       stopPluginById: async () => false,
       stopAll: async () => undefined,
       subscribe: () => () => undefined,
-      bindPaseoSessionHost: () => undefined,
+      bindAlpSessionHost: () => undefined,
     };
     const service = createService(
       home,
@@ -265,7 +265,7 @@ describe("PluginService", () => {
   });
 
   it("publishes each configured plugin after its startup state settles", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const first = await createPlugin(
       "startup-first",
@@ -289,7 +289,7 @@ describe("PluginService", () => {
   }, 20_000);
 
   it("uses an explicit config key, exposes reload failure, and retries from disk", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const directory = await createPlugin(
       "manifest-default",
@@ -327,20 +327,20 @@ describe("PluginService", () => {
   }, 20_000);
 
   it("lists manifest descriptions for running and disabled plugins without hiding malformed entries", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const running = await createPlugin("running", "export default () => () => {};");
     const disabled = await createPlugin("disabled", "export default () => () => {};");
     const malformed = await createPlugin("malformed", "export default () => () => {};");
     await writeFile(
-      path.join(running, "paseo-plugin.json"),
+      path.join(running, "alp-plugin.json"),
       JSON.stringify({ id: "running", description: "Runs checks" }),
     );
     await writeFile(
-      path.join(disabled, "paseo-plugin.json"),
+      path.join(disabled, "alp-plugin.json"),
       JSON.stringify({ id: "disabled", description: "Waits until enabled" }),
     );
-    await writeFile(path.join(malformed, "paseo-plugin.json"), "{");
+    await writeFile(path.join(malformed, "alp-plugin.json"), "{");
     const service = createService(home, {
       running: { source: "directory", path: running },
       disabled: { source: "directory", path: disabled, enabled: false },
@@ -360,14 +360,14 @@ describe("PluginService", () => {
   });
 
   it("prefers an existing directory and installs its selected plugin subdirectory", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const repository = await mkdtemp(path.join(tmpdir(), "owner-repository-"));
     roots.push(repository);
     const pluginDirectory = path.join(repository, "plugins", "review");
     await mkdir(pluginDirectory, { recursive: true });
     await writeFile(
-      path.join(pluginDirectory, "paseo-plugin.json"),
+      path.join(pluginDirectory, "alp-plugin.json"),
       JSON.stringify({ id: "local-monorepo" }),
     );
     await writeFile(
@@ -386,22 +386,22 @@ describe("PluginService", () => {
   it.each([true, false])(
     "updates the shipped legacy Git layout with enabled=%s",
     async (enabled) => {
-      const home = await mkdtemp(path.join(tmpdir(), "paseo-legacy-layout-"));
+      const home = await mkdtemp(path.join(tmpdir(), "alp-legacy-layout-"));
       roots.push(home);
-      const repository = await mkdtemp(path.join(tmpdir(), "paseo-legacy-remote-"));
+      const repository = await mkdtemp(path.join(tmpdir(), "alp-legacy-remote-"));
       roots.push(repository);
       const id = "legacy-review";
       const pluginPath = "plugins/review";
       await mkdir(path.join(repository, pluginPath), { recursive: true });
       await writeFile(
-        path.join(repository, pluginPath, "paseo-plugin.json"),
-        JSON.stringify({ id, requirements: { paseo: ">=0.8.0" } }),
+        path.join(repository, pluginPath, "alp-plugin.json"),
+        JSON.stringify({ id, requirements: { alp: ">=0.8.0" } }),
       );
       await writeFile(
         path.join(repository, pluginPath, "index.server.ts"),
-        `import { defineSettings } from "@getpaseo/plugin";
+        `import { defineSettings } from "@alp/plugin";
 import { z } from "zod";
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext } from "@alp/plugin/server";
 export default function contribute(server: PluginServerContext) {
   server.registerSettings(defineSettings({ id: "preferences", scope: "host", version: 1, schema: z.object({ message: z.string().default("default") }) }));
   return () => {};
@@ -528,17 +528,14 @@ export default function contribute(server: PluginServerContext) {
   );
 
   it("keeps the running commit when a Git update build command fails", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
-    const repository = await mkdtemp(path.join(tmpdir(), "paseo-plugin-repository-"));
+    const repository = await mkdtemp(path.join(tmpdir(), "alp-plugin-repository-"));
     roots.push(repository);
     await runGitCommand(["init", "-b", "main"], { cwd: repository });
-    await runGitCommand(["config", "user.name", "Paseo Tests"], { cwd: repository });
-    await runGitCommand(["config", "user.email", "paseo@example.test"], { cwd: repository });
-    await writeFile(
-      path.join(repository, "paseo-plugin.json"),
-      JSON.stringify({ id: "git-update" }),
-    );
+    await runGitCommand(["config", "user.name", "Alp Tests"], { cwd: repository });
+    await runGitCommand(["config", "user.email", "alp@example.test"], { cwd: repository });
+    await writeFile(path.join(repository, "alp-plugin.json"), JSON.stringify({ id: "git-update" }));
     await writeFile(
       path.join(repository, "index.server.ts"),
       "export default function contribute(plugin: unknown) { void plugin; return () => undefined; }",
@@ -558,7 +555,7 @@ export default function contribute(server: PluginServerContext) {
     const installedCommit = installed.commit;
 
     await writeFile(
-      path.join(repository, "paseo-plugin.json"),
+      path.join(repository, "alp-plugin.json"),
       JSON.stringify({
         id: "git-update",
         build: [
@@ -592,15 +589,15 @@ export default function contribute(server: PluginServerContext) {
   }, 30_000);
 
   it("runs Git build commands in staging before validation and activation on install and update", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
-    const repository = await mkdtemp(path.join(tmpdir(), "paseo-plugin-repository-"));
+    const repository = await mkdtemp(path.join(tmpdir(), "alp-plugin-repository-"));
     roots.push(repository);
     await runGitCommand(["init", "-b", "main"], { cwd: repository });
-    await runGitCommand(["config", "user.name", "Paseo Tests"], { cwd: repository });
-    await runGitCommand(["config", "user.email", "paseo@example.test"], { cwd: repository });
+    await runGitCommand(["config", "user.name", "Alp Tests"], { cwd: repository });
+    await runGitCommand(["config", "user.email", "alp@example.test"], { cwd: repository });
     await writeFile(
-      path.join(repository, "paseo-plugin.json"),
+      path.join(repository, "alp-plugin.json"),
       JSON.stringify({
         id: "prepared-git-plugin",
         build: [
@@ -636,7 +633,7 @@ export default function contribute(server: PluginServerContext) {
       stopPluginById: async (pluginId) => running.delete(pluginId),
       stopAll: async () => running.clear(),
       subscribe: () => () => undefined,
-      bindPaseoSessionHost: () => undefined,
+      bindAlpSessionHost: () => undefined,
     };
     const service = createService(
       home,
@@ -654,7 +651,7 @@ export default function contribute(server: PluginServerContext) {
     await expect(stat(path.join(installed.path, "shell-injection"))).rejects.toThrow();
 
     await writeFile(
-      path.join(repository, "paseo-plugin.json"),
+      path.join(repository, "alp-plugin.json"),
       JSON.stringify({
         id: "prepared-git-plugin",
         build: [
@@ -677,15 +674,15 @@ export default function contribute(server: PluginServerContext) {
   }, 30_000);
 
   it("activates an update when the enabled plugin previously failed to start", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
-    const repository = await mkdtemp(path.join(tmpdir(), "paseo-plugin-repository-"));
+    const repository = await mkdtemp(path.join(tmpdir(), "alp-plugin-repository-"));
     roots.push(repository);
     await runGitCommand(["init", "-b", "main"], { cwd: repository });
-    await runGitCommand(["config", "user.name", "Paseo Tests"], { cwd: repository });
-    await runGitCommand(["config", "user.email", "paseo@example.test"], { cwd: repository });
+    await runGitCommand(["config", "user.name", "Alp Tests"], { cwd: repository });
+    await runGitCommand(["config", "user.email", "alp@example.test"], { cwd: repository });
     await writeFile(
-      path.join(repository, "paseo-plugin.json"),
+      path.join(repository, "alp-plugin.json"),
       JSON.stringify({ id: "failed-update" }),
     );
     await writeFile(path.join(repository, "index.server.ts"), "export default () => () => {};\n");
@@ -719,7 +716,7 @@ export default function contribute(server: PluginServerContext) {
       stopPluginById: async (pluginId) => running.delete(pluginId),
       stopAll: async () => running.clear(),
       subscribe: () => () => undefined,
-      bindPaseoSessionHost: () => undefined,
+      bindAlpSessionHost: () => undefined,
     };
     const store = createStore(home, {
       "failed-update": { source: "directory", path: initial.directory, enabled: true },
@@ -754,7 +751,7 @@ export default function contribute(server: PluginServerContext) {
   it.each([false, true])(
     "cleans a failed update when restoration also fails=%s",
     async (failRestore) => {
-      const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-recovery-"));
+      const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-recovery-"));
       roots.push(home);
       const repository = await createPlugin("recovery", "export default () => () => {};\n");
       for (const args of [
@@ -780,7 +777,7 @@ export default function contribute(server: PluginServerContext) {
         stopPluginById: async (id) => running.delete(id),
         stopAll: async () => running.clear(),
         subscribe: () => () => undefined,
-        bindPaseoSessionHost: () => undefined,
+        bindAlpSessionHost: () => undefined,
       };
       const service = createService(
         home,
@@ -822,7 +819,7 @@ export default function contribute(server: PluginServerContext) {
   );
 
   it("disables and removes a plugin without touching its source directory", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const cleanupFile = path.join(home, "cleanup.txt");
     const directory = await createPlugin(
@@ -852,7 +849,7 @@ export default function contribute(plugin: unknown) {
   }, 20_000);
 
   it("detaches every plugin synchronously when the global switch turns off and recovers", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const first = await createPlugin(
       "first",
@@ -886,7 +883,7 @@ export default function contribute(plugin: unknown) {
   }, 20_000);
 
   it("does not publish an in-flight start after a later global disable", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const store = createStore(home, {
       slow: { source: "directory", path: "/plugins/slow", enabled: true },
@@ -911,7 +908,7 @@ export default function contribute(plugin: unknown) {
   });
 
   it("does not publish an in-flight enable after a later plugin disable", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const store = createStore(home, {
       slow: { source: "directory", path: "/plugins/slow", enabled: false },
@@ -935,7 +932,7 @@ export default function contribute(plugin: unknown) {
   });
 
   it("keeps a later disable authoritative over an enable waiting behind another plugin", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const store = createStore(home, {
       occupier: { source: "directory", path: "/plugins/occupier", enabled: false },
@@ -969,7 +966,7 @@ export default function contribute(plugin: unknown) {
   });
 
   it("notifies exactly once after successful and failed configured installs", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const successful = await createPlugin(
       "successful-install",
@@ -994,10 +991,10 @@ export default function contribute(plugin: unknown) {
   });
 
   it("reports invalid manifests, missing entries, and startup failures", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const invalid = await createPlugin("valid-before-corruption", "export default () => () => {};");
-    await writeFile(path.join(invalid, "paseo-plugin.json"), JSON.stringify({}));
+    await writeFile(path.join(invalid, "alp-plugin.json"), JSON.stringify({}));
     const missingEntry = await createPlugin("missing-entry", "export default () => () => {};");
     await rm(path.join(missingEntry, "index.server.ts"));
     const legacy = await createPlugin("legacy-plugin", "export default () => () => {};");
@@ -1042,7 +1039,7 @@ export default function contribute(plugin: unknown) {
   });
 
   it("contains cleanup errors and invokes server cleanup once per stopped installation", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const cleanupFile = path.join(home, "cleanups.txt");
     const directory = await createPlugin(
@@ -1090,13 +1087,13 @@ describe("PluginService bundled plugins", () => {
         running.clear();
       },
       subscribe: () => () => undefined,
-      bindPaseoSessionHost: () => undefined,
+      bindAlpSessionHost: () => undefined,
     };
     return { runtime, starts };
   }
 
   it("resolves the bundled directory in a build and in a source checkout", async () => {
-    const build = await mkdtemp(path.join(tmpdir(), "paseo-bundled-build-"));
+    const build = await mkdtemp(path.join(tmpdir(), "alp-bundled-build-"));
     roots.push(build);
     await mkdir(path.join(build, "server", "plugins", "slp"), { recursive: true });
     const buildModule = pathToFileURL(path.join(build, "server", "server", "plugins", "index.js"));
@@ -1104,7 +1101,7 @@ describe("PluginService bundled plugins", () => {
       path.join(build, "server", "plugins", "slp"),
     );
 
-    const checkout = await mkdtemp(path.join(tmpdir(), "paseo-bundled-checkout-"));
+    const checkout = await mkdtemp(path.join(tmpdir(), "alp-bundled-checkout-"));
     roots.push(checkout);
     await mkdir(path.join(checkout, "plugins", "slp"), { recursive: true });
     const sourceModule = pathToFileURL(
@@ -1116,9 +1113,9 @@ describe("PluginService bundled plugins", () => {
   });
 
   it("resolves the unpacked copy when the daemon runs from a packaged app.asar", async () => {
-    const resources = await mkdtemp(path.join(tmpdir(), "paseo-bundled-asar-"));
+    const resources = await mkdtemp(path.join(tmpdir(), "alp-bundled-asar-"));
     roots.push(resources);
-    const serverDist = ["node_modules", "@getpaseo", "server", "dist"];
+    const serverDist = ["node_modules", "@alp", "server", "dist"];
     // Electron reports the plugin inside app.asar too; only the unpacked copy is on disk
     // for esbuild, which compiles in a separate non-Electron process.
     await mkdir(path.join(resources, "app.asar", ...serverDist, "server", "plugins", "slp"), {
@@ -1140,9 +1137,9 @@ describe("PluginService bundled plugins", () => {
   });
 
   it("keeps the app.asar path when the plugin was not unpacked", async () => {
-    const resources = await mkdtemp(path.join(tmpdir(), "paseo-bundled-asar-"));
+    const resources = await mkdtemp(path.join(tmpdir(), "alp-bundled-asar-"));
     roots.push(resources);
-    const serverDist = ["node_modules", "@getpaseo", "server", "dist"];
+    const serverDist = ["node_modules", "@alp", "server", "dist"];
     await mkdir(path.join(resources, "app.asar", ...serverDist, "server", "plugins", "slp"), {
       recursive: true,
     });
@@ -1156,7 +1153,7 @@ describe("PluginService bundled plugins", () => {
   });
 
   it("runs a bundled plugin that has no config entry", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const bundled = await createPlugin(
       "slp",
@@ -1171,7 +1168,7 @@ describe("PluginService bundled plugins", () => {
   }, 20_000);
 
   it("lets a configured source with the same id replace the bundled one", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     // A real bundled directory, so only the configured-source rule can keep it from starting.
     const bundled = await createPlugin("slp", `export default function contribute() {}`);
@@ -1188,7 +1185,7 @@ describe("PluginService bundled plugins", () => {
   });
 
   it("skips a bundled plugin whose directory is missing without failing startup", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const { runtime, starts } = createRecordingRuntime();
     const missing = path.join(home, "no-such-plugin");
@@ -1200,7 +1197,7 @@ describe("PluginService bundled plugins", () => {
   });
 
   it("follows the global plugin switch", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-plugin-home-"));
     roots.push(home);
     const bundled = await createPlugin(
       "slp",
@@ -1241,13 +1238,13 @@ describe("npm plugin installation", () => {
     const fixture = packages[1];
     packages.push({ ...fixture, version: "2.0.0", tags: ["future"] });
     const failures: Array<[string, Record<string, string>]> = [
-      ["bad-manifest", { "paseo-plugin.json": "{}" }],
+      ["bad-manifest", { "alp-plugin.json": "{}" }],
       [
         "bad-build",
         {
-          "paseo-plugin.json": JSON.stringify({
+          "alp-plugin.json": JSON.stringify({
             id: "bad-build",
-            requirements: { paseo: ">=0.4.0" },
+            requirements: { alp: ">=0.4.0" },
             build: [[process.execPath, "-e", "throw new Error('preparation failed')"]],
           }),
         },
@@ -1255,9 +1252,9 @@ describe("npm plugin installation", () => {
       [
         "bad-requirements",
         {
-          "paseo-plugin.json": JSON.stringify({
+          "alp-plugin.json": JSON.stringify({
             id: "bad-requirements",
-            requirements: { paseo: ">=999.0.0" },
+            requirements: { alp: ">=999.0.0" },
           }),
         },
       ],
@@ -1274,14 +1271,14 @@ describe("npm plugin installation", () => {
     const registry = await startNpmRegistry([
       ...packages,
       {
-        name: "paseo-prepared-plugin",
+        name: "alp-prepared-plugin",
         version: "1.0.0",
-        dependencies: { "paseo-fixture-dependency": "1.0.0" },
+        dependencies: { "alp-fixture-dependency": "1.0.0" },
         scripts: { postinstall: "node -e \"throw new Error('npm lifecycle must not run')\"" },
         files: {
-          "nested/paseo-plugin.json": JSON.stringify({
+          "nested/alp-plugin.json": JSON.stringify({
             id: "prepared",
-            requirements: { paseo: ">=0.4.0" },
+            requirements: { alp: ">=0.4.0" },
             build: [
               [
                 process.execPath,
@@ -1291,7 +1288,7 @@ describe("npm plugin installation", () => {
             ],
           }),
           "nested/index.server.ts": `import generated from "./server/generated.js";
-import dependency from "paseo-fixture-dependency";
+import dependency from "alp-fixture-dependency";
 import { z } from "zod";
 export default function contribute() {
   if (generated !== 42 || z.string().parse(dependency) !== "dependency loaded") throw new Error("Preparation failed");
@@ -1301,7 +1298,7 @@ export default function contribute() {
       },
       ...failedPackages,
     ]);
-    const home = await mkdtemp(path.join(tmpdir(), "paseo-npm-service-"));
+    const home = await mkdtemp(path.join(tmpdir(), "alp-npm-service-"));
     roots.push(home);
     const previousConfig = process.env.npm_config_userconfig;
     const previousPath = process.env.PATH;
@@ -1316,12 +1313,12 @@ export default function contribute() {
     let service = open();
     try {
       await service.start();
-      const installed = await service.installSource({ source: "npm:paseo-fixture-plugin@^1.0.0" });
+      const installed = await service.installSource({ source: "npm:alp-fixture-plugin@^1.0.0" });
       expect(installed).toMatchObject({
         id: "npm-review",
         status: "running",
         installation: {
-          identity: { kind: "npm", packageName: "paseo-fixture-plugin", pluginPath: "." },
+          identity: { kind: "npm", packageName: "alp-fixture-plugin", pluginPath: "." },
           currentRevision: "1.1.0",
         },
       });
@@ -1341,13 +1338,13 @@ export default function contribute() {
       ).toEqual({ kind: "npm" });
       expect(
         JSON.parse(await readFile(path.join(installRoot, "package-lock.json"), "utf8")).packages[
-          "node_modules/paseo-fixture-dependency"
+          "node_modules/alp-fixture-dependency"
         ].version,
       ).toBe("1.0.0");
       for (const [source, id, version] of [
-        ["npm:paseo-fixture-plugin@1.0.0", "exact", "1.0.0"],
-        ["paseo-fixture-plugin@stable", "tag", "1.0.0"],
-        ["npm:@paseo-fixture/review", "scoped", "2.0.0"],
+        ["npm:alp-fixture-plugin@1.0.0", "exact", "1.0.0"],
+        ["alp-fixture-plugin@stable", "tag", "1.0.0"],
+        ["npm:@alp-fixture/review", "scoped", "2.0.0"],
       ]) {
         expect(await service.installSource({ source, id })).toMatchObject({
           id,
@@ -1363,7 +1360,7 @@ export default function contribute() {
       });
       const before = (await service.listPlugins()).find((item) => item.id === "exact")!;
       await service.disablePlugin("exact");
-      registry.setTag("paseo-fixture-plugin", "latest", "2.0.0");
+      registry.setTag("alp-fixture-plugin", "latest", "2.0.0");
       const results = await service.applyUpdates([
         { ...preview!.proposal!, id: "missing-plugin" },
         preview!.proposal!,
@@ -1376,7 +1373,7 @@ export default function contribute() {
         },
       ]);
       expect(results[1]?.plugin?.installation?.identity).toEqual(before.installation?.identity);
-      registry.setTag("paseo-fixture-plugin", "latest", "1.1.0");
+      registry.setTag("alp-fixture-plugin", "latest", "1.1.0");
       expect(await service.applyUpdates([preview!.proposal!])).toMatchObject([
         { outcome: "error", error: expect.stringContaining("changed since review") },
       ]);
@@ -1410,7 +1407,7 @@ export default function contribute() {
       expect((await service.previewUpdates({ pluginId: "exact" }))[0]?.outcome).toBe("update");
       await expect(service.updateSources("exact")).rejects.toThrow("Update the client");
       const prepared = await service.installSource({
-        source: "npm:paseo-prepared-plugin@1.0.0:nested",
+        source: "npm:alp-prepared-plugin@1.0.0:nested",
       });
       expect(prepared).toMatchObject({ id: "prepared", status: "running" });
       expect(await readFile(path.join(prepared.path, "server/generated.js"), "utf8")).toBe(
@@ -1418,12 +1415,12 @@ export default function contribute() {
       );
       expect(prepared.installation).toMatchObject({ identity: { pluginPath: "nested" } });
       await service.removePlugin("prepared");
-      expect(registry.requests).not.toContain("/@getpaseo/plugin");
+      expect(registry.requests).not.toContain("/@alp/plugin");
       await expect(service.installSource({ source: "npm:missing-plugin" })).rejects.toThrow();
       await expect(
-        service.installSource({ source: "npm:paseo-fixture-plugin", ref: "main" }),
+        service.installSource({ source: "npm:alp-fixture-plugin", ref: "main" }),
       ).rejects.toThrow("--ref is only valid for Git");
-      await expect(service.installSource({ source: "npm:paseo-fixture-plugin" })).rejects.toThrow(
+      await expect(service.installSource({ source: "npm:alp-fixture-plugin" })).rejects.toThrow(
         "already configured",
       );
       expect(await readdir(path.join(home, "plugins", ".staging"))).toEqual([]);
@@ -1473,7 +1470,7 @@ export default function contribute() {
         installation: installed.installation,
       });
       await expect(
-        service.installSource({ source: "npm:paseo-fixture-plugin", id: "missing-npm" }),
+        service.installSource({ source: "npm:alp-fixture-plugin", id: "missing-npm" }),
       ).rejects.toThrow("npm is required on the daemon host");
       expect(await readdir(path.join(home, "plugins", ".staging"))).toEqual([]);
       const packagePath = path.join(installed.path, "package.json");

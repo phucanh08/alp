@@ -1,5 +1,5 @@
 import { isAbsolute } from "node:path";
-import type { ProviderOptions, ToolPolicy } from "@getpaseo/protocol/agent-types";
+import type { ProviderOptions, ToolPolicy } from "@alp/protocol/agent-types";
 import { z } from "zod";
 
 const PermissionRulesSchema = z

@@ -83,22 +83,22 @@ fold your entry into it, or any other configured plugin drops out of config (see
 [docs/plugins.md](../../docs/plugins.md#bundled-plugins)):
 
 ```bash
-current=$(paseo daemon config get plugins --json | jq '.value // {}')
+current=$(alp daemon config get plugins --json | jq '.value // {}')
 merged=$(echo "$current" | jq --arg path "/absolute/path/to/my-pack" '. + {"slp-dev": {source: "directory", path: $path, enabled: true}}')
-paseo daemon config set plugins "$merged"
-paseo daemon reload
+alp daemon config set plugins "$merged"
+alp daemon reload
 ```
 
 To build one:
 
 1. Copy this directory. What slp actually addresses is the config key `plugins["slp-dev"]` (or,
    for the bundled copy, the fixed slot name in the daemon's own bundle map) — not your copy's
-   `paseo-plugin.json` `id` field. Keep that field `slp-dev` anyway: a plain
-   `paseo plugin install /path/to/my-pack`, with no `--id`, then lands under the config key
+   `alp-plugin.json` `id` field. Keep that field `slp-dev` anyway: a plain
+   `alp plugin install /path/to/my-pack`, with no `--id`, then lands under the config key
    `slp-dev` on its own and replaces the bundled copy without an extra flag.
 2. Keep `shared/rpc.ts`'s RPC names (`slp-dev.seat.get`, `slp-dev.skills.get`) and their
    input/output shapes unchanged — those strings are what `plugins/slp` asks for, independent of any plugin id. Change `description`
-   and `requirements.paseo` in `paseo-plugin.json` freely, but add no other key: the manifest
+   and `requirements.alp` in `alp-plugin.json` freely, but add no other key: the manifest
    schema is strict (`id`, `description`, `requirements`, `build`, `skills` only —
    `packages/server/src/server/plugins/manifest.ts:29-36`), so an unrecognized key such as
    `version` fails validation and the plugin will not load. Track your pack's own version in
@@ -113,7 +113,7 @@ To build one:
    daemon evaluates the bundled string, not the source files, at runtime.
 6. Point a host's config at your copy as shown above, or install it with `--id`:
    ```bash
-   paseo plugin install /absolute/path/to/my-pack --id slp-dev
+   alp plugin install /absolute/path/to/my-pack --id slp-dev
    ```
    Needed only if you changed the manifest id in step 1.
 

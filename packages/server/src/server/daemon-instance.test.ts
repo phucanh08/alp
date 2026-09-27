@@ -14,8 +14,8 @@ function bootedAt(): number {
   return Date.now() - uptime() * 1000;
 }
 
-async function writeLock(paseoHome: string, lock: PidLockInfo): Promise<void> {
-  await writeFile(join(paseoHome, "paseo.pid"), JSON.stringify(lock));
+async function writeLock(alpHome: string, lock: PidLockInfo): Promise<void> {
+  await writeFile(join(alpHome, "alp.pid"), JSON.stringify(lock));
 }
 
 function lockFor(pid: number, startedAt: Date): PidLockInfo {
@@ -31,44 +31,44 @@ function lockFor(pid: number, startedAt: Date): PidLockInfo {
 }
 
 describe("daemon instance identity across a reboot", () => {
-  let paseoHome: string;
+  let alpHome: string;
   let bystander: ChildProcess | undefined;
 
   beforeEach(async () => {
-    paseoHome = await mkdtemp(join(tmpdir(), "paseo-daemon-instance-"));
+    alpHome = await mkdtemp(join(tmpdir(), "alp-daemon-instance-"));
   });
 
   afterEach(async () => {
     bystander?.kill("SIGKILL");
     bystander = undefined;
-    await rm(paseoHome, { recursive: true, force: true });
+    await rm(alpHome, { recursive: true, force: true });
   });
 
   test("a lock stamped before this boot has no running owner", async () => {
-    await writeLock(paseoHome, lockFor(process.pid, new Date(bootedAt() - 60 * 60_000)));
+    await writeLock(alpHome, lockFor(process.pid, new Date(bootedAt() - 60 * 60_000)));
 
-    expect(await readDaemonInstance(paseoHome)).toBeNull();
-    expect(await isLocked(paseoHome)).toMatchObject({ locked: false });
+    expect(await readDaemonInstance(alpHome)).toBeNull();
+    expect(await isLocked(alpHome)).toMatchObject({ locked: false });
   });
 
   test("a supervisor started during this boot still holds the lock", async () => {
-    await writeLock(paseoHome, lockFor(process.pid, new Date()));
+    await writeLock(alpHome, lockFor(process.pid, new Date()));
 
-    expect(await readDaemonInstance(paseoHome)).toMatchObject({ pid: process.pid });
-    expect(await isLocked(paseoHome)).toMatchObject({ locked: true });
+    expect(await readDaemonInstance(alpHome)).toMatchObject({ pid: process.pid });
+    expect(await isLocked(alpHome)).toMatchObject({ locked: true });
   });
 
   test("a new supervisor takes over a lock stamped before this boot", async () => {
-    await writeLock(paseoHome, lockFor(process.pid, new Date(bootedAt() - 60 * 60_000)));
+    await writeLock(alpHome, lockFor(process.pid, new Date(bootedAt() - 60 * 60_000)));
 
-    await acquirePidLock(paseoHome, null, { ownerPid: process.pid + 10_000 });
+    await acquirePidLock(alpHome, null, { ownerPid: process.pid + 10_000 });
 
-    expect(await getPidLockInfo(paseoHome)).toMatchObject({ pid: process.pid + 10_000 });
+    expect(await getPidLockInfo(alpHome)).toMatchObject({ pid: process.pid + 10_000 });
   });
 
   test("stopping a lock stamped before this boot leaves the process holding that pid alone", async () => {
     // Records delivery rather than dying of it, so a signal cannot be missed by arriving late.
-    const signalMarker = join(paseoHome, "bystander-signalled");
+    const signalMarker = join(alpHome, "bystander-signalled");
     bystander = spawn(
       process.execPath,
       [
@@ -85,12 +85,12 @@ describe("daemon instance identity across a reboot", () => {
       exited = true;
     });
 
-    await writeLock(paseoHome, lockFor(bystanderPid, new Date(bootedAt() - 60 * 60_000)));
+    await writeLock(alpHome, lockFor(bystanderPid, new Date(bootedAt() - 60 * 60_000)));
 
-    expect(await stopDaemonInstance(paseoHome)).toMatchObject({ action: "not_running" });
+    expect(await stopDaemonInstance(alpHome)).toMatchObject({ action: "not_running" });
 
     expect(existsSync(signalMarker)).toBe(false);
     expect(exited).toBe(false);
-    await expect(readFile(join(paseoHome, "paseo.pid"), "utf-8")).rejects.toThrow(/ENOENT/);
+    await expect(readFile(join(alpHome, "alp.pid"), "utf-8")).rejects.toThrow(/ENOENT/);
   });
 });

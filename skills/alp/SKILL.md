@@ -17,7 +17,7 @@ alp project rename <project-id> --reset
 alp project delete <project-id>
 ```
 
-For a local daemon, `project create` defaults to the current directory and resolves relative paths on the CLI machine. With `--host` or `PASEO_HOST`, always provide a path; the target daemon interprets it on its own machine. Deleting a project archives its active workspaces and removes the project from alp without deleting the project directory.
+For a local daemon, `project create` defaults to the current directory and resolves relative paths on the CLI machine. With `--host` or `ALP_HOST`, always provide a path; the target daemon interprets it on its own machine. Deleting a project archives its active workspaces and removes the project from alp without deleting the project directory.
 
 ## Workspaces
 
@@ -33,7 +33,7 @@ Choose `baseBranch` explicitly: `origin/main` selects the remote-tracking branch
 
 ## Workspace scripts
 
-Configured `paseo.json` scripts use the same supervised lifecycle from tools and the CLI.
+Configured `alp.json` scripts use the same supervised lifecycle from tools and the CLI.
 
 **`list_workspace_scripts`** — `{ workspaceId }`. Lists configured scripts with lifecycle, service port, proxy URLs, health, exit code, and terminal ID.
 

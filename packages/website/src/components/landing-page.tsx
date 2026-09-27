@@ -585,11 +585,11 @@ function AgentListOutput() {
 function SdkAutomationExample() {
   return (
     <pre className="overflow-x-auto font-mono text-[11px] leading-5 text-white/60">
-      <span className="text-purple-300">import</span> {"{"} createPaseoClient {"}"}{" "}
+      <span className="text-purple-300">import</span> {"{"} createAlpClient {"}"}{" "}
       <span className="text-purple-300">from</span>{" "}
-      <span className="text-emerald-300/80">{'"@getpaseo/client"'}</span>;{"\n\n"}
+      <span className="text-emerald-300/80">{'"@alp/client"'}</span>;{"\n\n"}
       <span className="text-purple-300">const</span> client ={" "}
-      <span className="text-sky-300">createPaseoClient</span>({"{"}
+      <span className="text-sky-300">createAlpClient</span>({"{"}
       {"\n"} url: <span className="text-emerald-300/80">{'"ws://127.0.0.1:6767/ws"'}</span>,{"\n"}
       {"}"});
       {"\n"}

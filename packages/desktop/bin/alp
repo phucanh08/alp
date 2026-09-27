@@ -42,6 +42,6 @@ else
 fi
 
 RUNNER_PATH="${RESOURCES_DIR}/app.asar.unpacked/dist/daemon/node-entrypoint-runner.js"
-CLI_ENTRYPOINT="${RESOURCES_DIR}/app.asar/node_modules/@getpaseo/cli/dist/index.js"
+CLI_ENTRYPOINT="${RESOURCES_DIR}/app.asar/node_modules/@alp/cli/dist/index.js"
 
-exec env ELECTRON_RUN_AS_NODE=1 PASEO_NODE_ENV=production PASEO_CLI="${SCRIPT_PATH}" "${APP_EXECUTABLE}" --disable-warning=DEP0040 "${RUNNER_PATH}" node-script "${CLI_ENTRYPOINT}" "$@"
+exec env ELECTRON_RUN_AS_NODE=1 ALP_NODE_ENV=production ALP_CLI="${SCRIPT_PATH}" "${APP_EXECUTABLE}" --disable-warning=DEP0040 "${RUNNER_PATH}" node-script "${CLI_ENTRYPOINT}" "$@"

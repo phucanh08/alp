@@ -1,6 +1,6 @@
 import { KeyboardTranslateView } from "@/keyboard/shift";
-import type { CreateWorkspaceRequestOptions } from "@getpaseo/client/internal/daemon-client";
-import type { AgentSnapshotPayload } from "@getpaseo/protocol/messages";
+import type { CreateWorkspaceRequestOptions } from "@alp/client/internal/daemon-client";
+import type { AgentSnapshotPayload } from "@alp/protocol/messages";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Text, View } from "react-native";
@@ -29,10 +29,7 @@ import {
   resolveComposerAttachmentSubmitFormat,
   splitComposerAttachmentsForSubmit,
 } from "@/composer/attachments/submit";
-import type {
-  CreateAgentRequestOptions,
-  DaemonClient,
-} from "@getpaseo/client/internal/daemon-client";
+import type { CreateAgentRequestOptions, DaemonClient } from "@alp/client/internal/daemon-client";
 import { projectIconPlaceholderLabelFromDisplayName } from "@/utils/project-display-name";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";

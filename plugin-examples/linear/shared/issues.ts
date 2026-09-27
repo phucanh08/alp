@@ -1,4 +1,4 @@
-import { defineAttachmentSource, defineRpc } from "@getpaseo/plugin";
+import { defineAttachmentSource, defineRpc } from "@alp/plugin";
 import { z } from "zod";
 
 const SearchPayloadSchema = z.object({

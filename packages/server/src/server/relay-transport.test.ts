@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type pino from "pino";
-import { createClientChannel, type Transport } from "@getpaseo/relay/e2ee";
-import { exportPublicKey, generateKeyPair } from "@getpaseo/relay";
+import { createClientChannel, type Transport } from "@alp/relay/e2ee";
+import { exportPublicKey, generateKeyPair } from "@alp/relay";
 import { startRelayTransport } from "./relay-transport";
 
 function createMockLogger() {

@@ -2,7 +2,7 @@ import type { Agent } from "@/stores/session-store";
 import { normalizeWorkspaceOpaqueId } from "@/utils/workspace-identity";
 
 // ALP(slp): the bundled slp plugin labels its Supervisor agent `slp.role=supervisor` and runs it in
-// a system workspace under $PASEO_HOME/supervisor. The label is the only seam the app reads.
+// a system workspace under $ALP_HOME/supervisor. The label is the only seam the app reads.
 export const SLP_ROLE_LABEL = "slp.role";
 export const SLP_SUPERVISOR_ROLE = "supervisor";
 

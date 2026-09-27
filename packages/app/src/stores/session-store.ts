@@ -1,7 +1,7 @@
 import equal from "fast-deep-equal";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
-import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import type { DaemonClient } from "@alp/client/internal/daemon-client";
 import type { ViewedTimelineOwner } from "@/timeline/viewed-timeline-sync";
 import type { AgentDirectoryEntry } from "@/types/agent-directory";
 import {
@@ -23,7 +23,7 @@ import {
 } from "@/composer/submission/model";
 import type { PendingPermission } from "@/types/shared";
 import type { ComposerAttachment } from "@/attachments/types";
-import type { AgentLifecycleStatus } from "@getpaseo/protocol/agent-lifecycle";
+import type { AgentLifecycleStatus } from "@alp/protocol/agent-lifecycle";
 import type {
   AgentPermissionRequest,
   AgentFeature,
@@ -32,14 +32,14 @@ import type {
   AgentCapabilityFlags,
   AgentUsage,
   AgentPersistenceHandle,
-} from "@getpaseo/protocol/agent-types";
+} from "@alp/protocol/agent-types";
 import type {
   ServerInfoStatusPayload,
   ProjectPlacementPayload,
   ServerCapabilities,
   WorkspaceDescriptorPayload,
   WorkspaceProjectDescriptorPayload,
-} from "@getpaseo/protocol/messages";
+} from "@alp/protocol/messages";
 import {
   normalizeWorkspaceOpaqueId,
   normalizeWorkspacePath,

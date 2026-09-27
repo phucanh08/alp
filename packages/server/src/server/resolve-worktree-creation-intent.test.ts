@@ -162,7 +162,7 @@ describe("resolveWorktreeCreationIntent", () => {
       number: 1790,
       baseRefName: "main",
       headRefName: "daemon-shutdown-diagnostics",
-      headOwnerLogin: "getpaseo",
+      headOwnerLogin: "alp",
       headRepositorySshUrl: "git@github.com:getpaseo/paseo.git",
       headRepositoryUrl: "https://github.com/getpaseo/paseo",
       isCrossRepository: false,
@@ -204,7 +204,7 @@ describe("resolveWorktreeCreationIntent", () => {
       baseRefName: "main",
       checkoutRefs: [{ remoteName: "origin", remoteRef: "refs/pull/526/head" }],
       headRepositoryOwner: "therainisme",
-      headRepository: "therainisme/paseo",
+      headRepository: "therainisme/alp",
       localBranchName: "therainisme/main",
       pushRemoteUrl: "git@github.com:therainisme/paseo.git",
     });

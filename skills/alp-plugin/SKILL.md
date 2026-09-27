@@ -35,13 +35,13 @@ Pick the contribution that matches the request. Each row names the registration,
 | Client slash command      | `addSlashCommand`                                | A `/command args` in the composer that runs plugin code instead of prompting the agent                        | reference.md → Client slash commands                                                               |
 | Composer pill             | `addComposerPill`                                | A per-agent button in the composer track bar next to Tasks and Subagents                                      | reference.md → Composer pills                                                                      |
 | Timeline transformer      | `addTimelineTransformer` + `addTimelineRenderer` | Replace, explode, or hide a built-in timeline item, including while it streams                                | reference.md → Timeline items; `plugin-examples/timeline-items`, `plugin-examples/inline-thinking` |
-| Timeline row              | `paseo.agents.ref(id).timeline.append(...)`      | Push a plugin-owned row into an agent timeline from a server handler and update it later                      | reference.md → Append a timeline row from the daemon                                               |
+| Timeline row              | `alp.agents.ref(id).timeline.append(...)`        | Push a plugin-owned row into an agent timeline from a server handler and update it later                      | reference.md → Append a timeline row from the daemon                                               |
 | Attachment source         | `client.addAttachmentSource` + `server.handle`   | Let the user attach a searchable external resource, such as an issue, to a prompt                             | reference.md → Add a composer attachment source; `plugin-examples/linear`                          |
 | Theme                     | `addTheme`                                       | A light or dark palette under Settings → Appearance                                                           | reference.md → Contribute a theme; `plugin-examples/catppuccin`                                    |
 | Plugin RPC                | `defineRpc` + `server.handle` + `useRpc`         | Daemon-side work that is not a normal alp operation: vendor APIs, credentials, local files                    | reference.md → Add plugin-specific backend behavior                                                |
 | Lifecycle events          | `server.on`                                      | Observe agent/workspace lifecycle, inspect ended turns, and answer permission requests                        | [Lifecycle hooks](https://alp.anhlp.com/docs/plugins/reference.md#lifecycle-hooks)                 |
 | Creation and launch hooks | `server.before`                                  | Change agent config, provider options, MCP servers, environment, or workspace isolation before the operation  | [Before hooks](https://alp.anhlp.com/docs/plugins/reference.md#before-hooks)                       |
-| alp SDK                   | `usePaseo()` / handler `{ paseo }`               | Normal alp operations: workspaces, agents, providers, config                                                  | reference.md → Use the alp SDK                                                                     |
+| alp SDK                   | `useAlp()` / handler `{ alp }`                   | Normal alp operations: workspaces, agents, providers, config                                                  | reference.md → Use the alp SDK                                                                     |
 
 | Lifecycle task                                                      | Example                                                                                                |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -63,7 +63,7 @@ The generated project contains:
 
 ```text
 my-plugin/
-  paseo-plugin.json
+  alp-plugin.json
   package.json
   tsconfig.json
   index.client.tsx
@@ -76,10 +76,10 @@ my-plugin/
 The manifest supplies the default install ID and supported alp versions:
 
 ```json
-{ "id": "my-plugin", "requirements": { "paseo": ">=0.8.0" } }
+{ "id": "my-plugin", "requirements": { "alp": ">=0.8.0" } }
 ```
 
-Keep `requirements.paseo` correct whenever creating or editing a plugin. `init` uses `>=` followed
+Keep `requirements.alp` correct whenever creating or editing a plugin. `init` uses `>=` followed
 by the CLI version. Raise the minimum when adopting newer APIs; add an upper bound when a later
 alp release is incompatible. Use npm semver ranges and explicitly include beta versions when
 targeting betas. Missing requirements mean `<0.8.0`; complete the 0.8 entry migration before adding
@@ -106,7 +106,7 @@ Default-export one contribution function from each entry and return cleanup:
 
 ```tsx
 // index.client.tsx
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext } from "@alp/plugin/client";
 
 export default function contribute(client: PluginClientContext) {
   // Register components and client callbacks here.
@@ -116,7 +116,7 @@ export default function contribute(client: PluginClientContext) {
 
 ```ts
 // index.server.ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext } from "@alp/plugin/server";
 
 export default function contribute(server: PluginServerContext) {
   // Register daemon-side RPC handlers here.
@@ -140,7 +140,7 @@ import {
   type PluginClientContext,
   type PluginWorkspacePanelProps,
   useWorkspace,
-} from "@getpaseo/plugin/client";
+} from "@alp/plugin/client";
 import { useMemo } from "react";
 import { Text, View } from "react-native";
 
@@ -188,7 +188,7 @@ export default function contribute(client: PluginClientContext) {
 
 Use `useWorkspace(id, selector)` and `useAgent(id, selector)`. Selectors are required
 and their results use shallow equality. Never select the whole snapshot or add an RPC to discover
-the active workspace or agent. Command callbacks receive the selected host's `paseo`, typed
+the active workspace or agent. Command callbacks receive the selected host's `alp`, typed
 `rpc(contract, input)`, `openSurface(id)`, and contextual `openPanel(id)` capabilities.
 
 ## Add a sidebar surface
@@ -196,7 +196,7 @@ the active workspace or agent. Command callbacks receive the selected host's `pa
 Plugin surfaces use React Native primitives and work across desktop, browser, iOS, and Android. Register the surface before its sidebar item. Color text from `theme.colors` and pad from `layout.compact`.
 
 ```tsx
-import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/client";
+import type { PluginClientContext, PluginSurfaceProps } from "@alp/plugin/client";
 import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 
@@ -248,7 +248,7 @@ Icons are Lucide icon names. `theme` is a typed `PluginTheme` on every surface a
 Before writing imports, classify each module as shared, client, or server. Follow the
 [SDK import boundaries](https://alp.anhlp.com/docs/plugins/reference.md#runtime-modules), including
 transitive and type dependencies. The root is shared-only; hooks and client contexts belong to
-`@getpaseo/plugin/client`, server contexts to `/server`, and host UI to `/client/react-native` or `/client/ui`.
+`@alp/plugin/client`, server contexts to `/server`, and host UI to `/client/react-native` or `/client/ui`.
 Install dependencies locally for typechecking; alp supplies host runtime modules. JSX uses the
 automatic runtime. Do not import `/client/host` from plugin code.
 
@@ -278,16 +278,16 @@ Use the existing alp SDK for normal alp operations. Use plugin RPC only for plug
 
 ### Call alp from a surface
 
-`usePaseo()` borrows the selected host's current connection. Never create another client inside a surface.
+`useAlp()` borrows the selected host's current connection. Never create another client inside a surface.
 
 ```tsx
-import { usePaseo } from "@getpaseo/plugin/client";
+import { useAlp } from "@alp/plugin/client";
 
 function PullRequestAction() {
-  const paseo = usePaseo();
+  const alp = useAlp();
 
   async function createReviewWorkspace() {
-    const workspace = await paseo.workspaces.create({
+    const workspace = await alp.workspaces.create({
       title: "Review PR 42",
       source: {
         kind: "worktree",
@@ -316,7 +316,7 @@ call it from client code with `useRpc()`:
 
 ```ts
 // shared/greeting.ts
-import { defineRpc } from "@getpaseo/plugin";
+import { defineRpc } from "@alp/plugin";
 import { z } from "zod";
 
 const greeting = defineRpc({
@@ -328,7 +328,7 @@ const greeting = defineRpc({
 
 ```ts
 // server/greeting.ts
-import type { RpcInput } from "@getpaseo/plugin";
+import type { RpcInput } from "@alp/plugin";
 import { greeting } from "../shared/greeting";
 
 export async function createGreeting({ name }: RpcInput<typeof greeting>) {
@@ -338,7 +338,7 @@ export async function createGreeting({ name }: RpcInput<typeof greeting>) {
 
 ```ts
 // index.server.ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext } from "@alp/plugin/server";
 import { createGreeting } from "./server/greeting";
 import { greeting } from "./shared/greeting";
 
@@ -350,7 +350,7 @@ export default function contribute(server: PluginServerContext) {
 
 ```tsx
 // client/greeting.tsx
-import { useRpc } from "@getpaseo/plugin/client";
+import { useRpc } from "@alp/plugin/client";
 import { greeting } from "../shared/greeting";
 
 function Greeting() {
@@ -360,7 +360,7 @@ function Greeting() {
 }
 ```
 
-Inputs and outputs are validated on both sides. Backend handlers receive the same `PaseoApi` as `{ paseo }`; their IPC-backed daemon session lives exactly as long as the subprocess. Backend code can use Node APIs and installed dependencies. Keep credentials, filesystem access, shell commands, and vendor API calls in the handler rather than the client surface.
+Inputs and outputs are validated on both sides. Backend handlers receive the same `AlpApi` as `{ alp }`; their IPC-backed daemon session lives exactly as long as the subprocess. Backend code can use Node APIs and installed dependencies. Keep credentials, filesystem access, shell commands, and vendor API calls in the handler rather than the client surface.
 
 Use TanStack Query for async request state, caching, and mutations.
 
@@ -389,7 +389,7 @@ the client:
 
 ```ts
 // shared/issues.ts
-import { defineAttachmentSource, defineRpc } from "@getpaseo/plugin";
+import { defineAttachmentSource, defineRpc } from "@alp/plugin";
 import { z } from "zod";
 
 const searchIssues = defineRpc({
@@ -422,7 +422,7 @@ const issues = defineAttachmentSource({
 
 ```ts
 // index.server.ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext } from "@alp/plugin/server";
 import { searchIssues } from "./shared/issues";
 
 export default function contribute(server: PluginServerContext) {
@@ -433,7 +433,7 @@ export default function contribute(server: PluginServerContext) {
 
 ```tsx
 // index.client.tsx
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext } from "@alp/plugin/client";
 import { issues } from "./shared/issues";
 
 export default function contribute(client: PluginClientContext) {
@@ -470,7 +470,7 @@ A pill is a per-agent button in the composer track bar next to Tasks and Subagen
 ```tsx
 export function contributeClient(client: PluginClientContext) {
   const pills = new Map<string, () => void>();
-  const unsubscribe = client.paseo.agents.subscribe((update) => {
+  const unsubscribe = client.alp.agents.subscribe((update) => {
     if (update.kind !== "upsert" || !update.agent.workspaceId) return;
     const { id: agentId, workspaceId } = update.agent;
     pills.get(agentId)?.();
@@ -519,15 +519,15 @@ client.addTimelineRenderer({
 });
 ```
 
-Transformers run while the render model is built, on fetched history and on every live update, so `phase` is `"streaming"` for a loading thought or running tool call. Identity comes from the source item, so a streaming item keeps its mounted component; set an output `id` when one source explodes into several items. Transformers must be synchronous and deterministic, `data` must be JSON, and a transformer that throws is logged and skipped. Use `useRevealedText(text, phase)` from `@getpaseo/plugin/client/react-native` to pace streaming text. `plugin-examples/inline-thinking` replaces the thinking row with inline text; `plugin-examples/timeline-items` replaces a Pi todo tool call with a task card.
+Transformers run while the render model is built, on fetched history and on every live update, so `phase` is `"streaming"` for a loading thought or running tool call. Identity comes from the source item, so a streaming item keeps its mounted component; set an output `id` when one source explodes into several items. Transformers must be synchronous and deterministic, `data` must be JSON, and a transformer that throws is logged and skipped. Use `useRevealedText(text, phase)` from `@alp/plugin/client/react-native` to pace streaming text. `plugin-examples/inline-thinking` replaces the thinking row with inline text; `plugin-examples/timeline-items` replaces a Pi todo tool call with a task card.
 
 ## Append a timeline row from the daemon
 
 A server handler can push a plugin-owned row into any agent timeline. The same renderer registration draws it.
 
 ```ts
-server.handle(publishReview, async ({ agentId, verdict }, { paseo }) => {
-  await paseo.agents.ref(agentId).timeline.append({
+server.handle(publishReview, async ({ agentId, verdict }, { alp }) => {
+  await alp.agents.ref(agentId).timeline.append({
     type: "plugin",
     id: "review",
     kind: "review-result",
@@ -617,7 +617,7 @@ content once; they do not pin updates. `install` and `add` are aliases. Follow t
 [publishing guide](https://alp.anhlp.com/docs/plugins/publishing.md) for alp's package contents and
 preparation requirements; standard npm publishing commands apply.
 
-Use `--host <url>` when managing a daemon other than the CLI default. A Git source that must install or generate something declares `build` in `paseo-plugin.json` as a list of argv arrays; alp runs them without a shell on install and update and keeps the old version if one fails. Plugin source edits require `alp plugin reload`; config changes to the global switch require `alp reload`. A failed plugin reload stays failed; inspect `alp plugin ls` for the load error and `alp plugin logs <id>` for subprocess output, fix the source, typecheck, and reload again. `remove` keeps local source directories and deletes managed Git/npm installations.
+Use `--host <url>` when managing a daemon other than the CLI default. A Git source that must install or generate something declares `build` in `alp-plugin.json` as a list of argv arrays; alp runs them without a shell on install and update and keeps the old version if one fails. Plugin source edits require `alp plugin reload`; config changes to the global switch require `alp reload`. A failed plugin reload stays failed; inspect `alp plugin ls` for the load error and `alp plugin logs <id>` for subprocess output, fix the source, typecheck, and reload again. `remove` keeps local source directories and deletes managed Git/npm installations.
 
 Do not restart the daemon to load source changes. Restarting it can kill the agent performing the work.
 

@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import appPackage from "../../../package.json";
-import { DaemonClient, type DaemonTransport } from "@getpaseo/client/internal/daemon-client";
+import { DaemonClient, type DaemonTransport } from "@alp/client/internal/daemon-client";
 import React, { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,7 +21,7 @@ vi.mock("../navigation", () => ({
 }));
 vi.mock("../client-runtime", () => ({
   createPluginClientRuntime: () => ({
-    paseo: {},
+    alp: {},
     dispose: () => {},
     rpc: async () => undefined,
     openSurface: () => undefined,
@@ -118,7 +118,7 @@ describe("PluginTimelineItemView", () => {
   it("validates and renders the matching plugin component", async () => {
     pluginRegistry.installCatalog(
       "host-1",
-      [{ id: "reports", requirements: { paseo: `>=${appPackage.version}` }, clientBundle: bundle }],
+      [{ id: "reports", requirements: { alp: `>=${appPackage.version}` }, clientBundle: bundle }],
       {
         client: daemonClient,
       },
@@ -144,7 +144,7 @@ describe("PluginTimelineItemView", () => {
       [
         {
           id: "reports",
-          requirements: { paseo: `>=${appPackage.version}` },
+          requirements: { alp: `>=${appPackage.version}` },
           clientBundle: failingBundle,
         },
       ],
@@ -181,7 +181,7 @@ describe("PluginTimelineItemView", () => {
       [
         {
           id: "reports",
-          requirements: { paseo: `>=${appPackage.version}` },
+          requirements: { alp: `>=${appPackage.version}` },
           clientBundle: recoveringBundle,
         },
       ],
@@ -281,16 +281,16 @@ it("releases a crashed renderer's observations and recovers a fresh scope in Str
   selectedHost.client = client;
   const liveBundle = `(function(require) {
     const React = require("react");
-    const { usePaseo } = require("@getpaseo/plugin/client");
+    const { useAlp } = require("@alp/plugin/client");
     return { default(plugin) {
       function Card(props) {
-        const paseo = usePaseo();
+        const alp = useAlp();
         const failed = React.useRef(false);
         failed.current = props.item.data.label === "explode";
         React.useEffect(() => {
-          const owner = paseo.observeEvents(["project.update"]);
+          const owner = alp.observeEvents(["project.update"]);
           return () => { if (failed.current) throw new Error("plugin cleanup failed"); void owner.release(); };
-        }, [paseo]);
+        }, [alp]);
         if (props.item.data.label === "explode") throw new Error("owned renderer failed");
         return React.createElement("span", null, props.item.data.label);
       }
@@ -307,7 +307,7 @@ it("releases a crashed renderer's observations and recovers a fresh scope in Str
     [
       {
         id: "reports",
-        requirements: { paseo: `>=${appPackage.version}` },
+        requirements: { alp: `>=${appPackage.version}` },
         clientBundle: liveBundle,
       },
     ],

@@ -771,7 +771,7 @@ export const fr: TranslationResources = {
       },
       routes: {
         public: "Proxy inverse",
-        paseo: "Memorable",
+        alp: "Memorable",
         direct: "Directe",
       },
       states: {
@@ -1952,7 +1952,7 @@ export const fr: TranslationResources = {
       one: "a utilisé {{count}} autre outil",
       other: "a utilisé {{count}} autres outils",
     },
-    paseoCalls: {
+    alpCalls: {
       one: "a appelé alp {{count}} fois",
       other: "a appelé alp {{count}} fois",
     },
@@ -2713,13 +2713,13 @@ export const fr: TranslationResources = {
         savedToast: "Projet mis à jour",
       },
       readFailures: {
-        invalidTitle: "paseo.json n'a pas pu être analysé",
+        invalidTitle: "alp.json n'a pas pu être analysé",
         invalidDescription: "Corrigez le fichier sur le disque, puis rechargez.",
         missingTitle: "Cet hôte n'a pas ce projet",
         missingSingleHost: "L'hôte sélectionné n'a aucune trace de ce projet.",
-        transportTitle: "Impossible de charger paseo.json",
+        transportTitle: "Impossible de charger alp.json",
         transportFallback: "L'hôte n'a pas répondu.",
-        failedTitle: "Impossible de charger paseo.json",
+        failedTitle: "Impossible de charger alp.json",
         failedDescription: "Rechargez pour réessayer.",
       },
       worktree: {
@@ -2730,7 +2730,7 @@ export const fr: TranslationResources = {
           "Voir la documentation pour plus de détails et les variables d'environnement disponibles pour ces commandes",
         setup: "Installation",
         setupAccessibility: "Commandes de configuration de Worktree",
-        uncommittedTitle: "Validez les modifications de paseo.json",
+        uncommittedTitle: "Validez les modifications de alp.json",
         uncommittedDescription:
           "Les nouveaux worktrees utilisent le script de configuration de la branche de base sélectionnée.",
         teardown: "Démolir",
@@ -2755,7 +2755,7 @@ export const fr: TranslationResources = {
         newScript: "Nouveau scénario",
         editScript: "Modifier{{name}}",
         runAsService: "Exécuter en tant que service",
-        serviceHint: "alpsupervise le processus et attribue un port via $PASEO_PORT",
+        serviceHint: "alpsupervise le processus et attribue un port via $ALP_PORT",
         actions: {
           add: "Ajouter un script",
           edit: "Modifier",
@@ -2776,8 +2776,8 @@ export const fr: TranslationResources = {
       },
       writeFailures: {
         staleTitle: "Configuration modifiée sur le disque",
-        staleDescription: "Rechargez pour récupérer le dernier paseo.json avant de sauvegarder.",
-        failedTitle: "Impossible d'enregistrer paseo.json",
+        staleDescription: "Rechargez pour récupérer le dernier alp.json avant de sauvegarder.",
+        failedTitle: "Impossible d'enregistrer alp.json",
         failedDescription: "Réessayez ou rechargez la dernière version à partir du disque.",
       },
       actions: {

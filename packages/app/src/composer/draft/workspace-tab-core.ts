@@ -1,5 +1,5 @@
-import type { CreateAgentRequestOptions } from "@getpaseo/client/internal/daemon-client";
-import type { AgentSessionConfig } from "@getpaseo/protocol/agent-types";
+import type { CreateAgentRequestOptions } from "@alp/client/internal/daemon-client";
+import type { AgentSessionConfig } from "@alp/protocol/agent-types";
 import { resolveSubmissionReadiness } from "@/provider-selection/provider-selection";
 
 export interface WorkspaceDraftAutoSubmitConfig {

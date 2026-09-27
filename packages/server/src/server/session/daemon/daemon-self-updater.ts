@@ -1,10 +1,10 @@
-import { getErrorMessage } from "@getpaseo/protocol/error-utils";
+import { getErrorMessage } from "@alp/protocol/error-utils";
 import {
   daemonInstallOriginRuntime,
   validateDaemonInstallOrigin,
   type DaemonInstallOriginRuntime,
 } from "./install-origin.js";
-import { npmGlobalPaseoCli, type NpmGlobalPaseoCli } from "./npm-global-cli.js";
+import { npmGlobalAlpCli, type NpmGlobalAlpCli } from "./npm-global-cli.js";
 
 export type DaemonSelfUpdatePhase = "starting" | "downloading" | "installing" | "complete";
 
@@ -27,7 +27,7 @@ export interface DaemonSelfUpdateLogger {
 }
 
 export interface DaemonSelfUpdateRuntime {
-  npm: NpmGlobalPaseoCli;
+  npm: NpmGlobalAlpCli;
   installOrigin: DaemonInstallOriginRuntime;
 }
 
@@ -39,7 +39,7 @@ export class DaemonSelfUpdateInProgressError extends Error {
 }
 
 const defaultRuntime: DaemonSelfUpdateRuntime = {
-  npm: npmGlobalPaseoCli,
+  npm: npmGlobalAlpCli,
   installOrigin: daemonInstallOriginRuntime,
 };
 

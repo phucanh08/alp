@@ -55,12 +55,9 @@ export async function withTimelinePlugin(
 ): Promise<void> {
   info.setTimeout(120_000);
   await page.addInitScript(() => {
-    localStorage.setItem(
-      "@paseo:app-settings",
-      JSON.stringify({ toolCallDetailLevel: "overview" }),
-    );
+    localStorage.setItem("@alp:app-settings", JSON.stringify({ toolCallDetailLevel: "overview" }));
   });
-  const directory = await mkdtemp(path.join(tmpdir(), "paseo-timeline-plugin-"));
+  const directory = await mkdtemp(path.join(tmpdir(), "alp-timeline-plugin-"));
   const agent = await seedMockAgentWorkspace({
     repoPrefix: "timeline-plugin-",
     title: "Timeline plugin regression",
@@ -77,7 +74,7 @@ export async function withTimelinePlugin(
   const previous = await pluginClient.getDaemonConfig();
   try {
     await writeFile(
-      path.join(directory, "paseo-plugin.json"),
+      path.join(directory, "alp-plugin.json"),
       JSON.stringify({ id: PLUGIN_ID, requirements: pluginRequirements }),
     );
     await writeFile(path.join(directory, "index.client.tsx"), CLIENT_SOURCE);

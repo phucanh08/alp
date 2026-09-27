@@ -9,10 +9,10 @@ import {
 } from "./agent/provider-launch-config.js";
 import type { AgentProviderRuntimeSettingsMap } from "./agent/provider-launch-config.js";
 import { ensurePrivateFile, writePrivateFileAtomicSync } from "./private-files.js";
-import { AgentProfileSchema, AgentSkillSelectionSchema } from "@getpaseo/protocol/agent-profile";
-import { PluginIdSchema, PluginSourceSchema } from "@getpaseo/protocol/plugin-config";
-import { TerminalProfileSchema } from "@getpaseo/protocol/terminal-profile";
-import { PaseoServicePortAllocationSchema } from "@getpaseo/protocol/paseo-config-schema";
+import { AgentProfileSchema, AgentSkillSelectionSchema } from "@alp/protocol/agent-profile";
+import { PluginIdSchema, PluginSourceSchema } from "@alp/protocol/plugin-config";
+import { TerminalProfileSchema } from "@alp/protocol/terminal-profile";
+import { AlpServicePortAllocationSchema } from "@alp/protocol/alp-config-schema";
 
 export const LogLevelSchema = z.enum(["trace", "debug", "info", "warn", "error", "fatal"]);
 export const LogFormatSchema = z.enum(["pretty", "json"]);
@@ -80,7 +80,7 @@ const ProvidersSchema = z
 const WorktreesConfigSchema = z
   .object({
     root: z.string().min(1).optional(),
-    servicePorts: PaseoServicePortAllocationSchema.optional(),
+    servicePorts: AlpServicePortAllocationSchema.optional(),
   })
   .strict();
 
@@ -435,8 +435,8 @@ interface LoggerLike {
   info(...args: unknown[]): void;
 }
 
-function getConfigPath(paseoHome: string): string {
-  return path.join(paseoHome, CONFIG_FILENAME);
+function getConfigPath(alpHome: string): string {
+  return path.join(alpHome, CONFIG_FILENAME);
 }
 
 function getLogger(logger: LoggerLike | undefined): LoggerLike | undefined {
@@ -488,8 +488,8 @@ function stripRemovedConfigFields(parsed: unknown): unknown {
  * load would re-add a key the instant the user deleted it. A missing file is left for
  * loadPersistedConfig to initialize.
  */
-export function seedPersistedSlpDefaults(paseoHome: string, logger?: LoggerLike): void {
-  const configPath = getConfigPath(paseoHome);
+export function seedPersistedSlpDefaults(alpHome: string, logger?: LoggerLike): void {
+  const configPath = getConfigPath(alpHome);
   let seeded: Record<string, unknown> | null;
   try {
     seeded = seedSlpDefaults(parseConfigText(readFileSync(configPath, "utf8")));
@@ -508,9 +508,9 @@ export function seedPersistedSlpDefaults(paseoHome: string, logger?: LoggerLike)
   getLogger(logger)?.info(`Updated SLP defaults in ${configPath}`);
 }
 
-export function loadPersistedConfig(paseoHome: string, logger?: LoggerLike): PersistedConfig {
+export function loadPersistedConfig(alpHome: string, logger?: LoggerLike): PersistedConfig {
   const log = getLogger(logger);
-  const configPath = getConfigPath(paseoHome);
+  const configPath = getConfigPath(alpHome);
 
   if (!existsSync(configPath)) {
     try {
@@ -543,10 +543,10 @@ export function loadPersistedConfig(paseoHome: string, logger?: LoggerLike): Per
 
 /** Observe the file without initializing a home, identity, or default configuration. */
 export function readPersistedConfig(
-  paseoHome: string,
+  alpHome: string,
   options: { defaultsIfMissing?: boolean } = {},
 ): PersistedConfig {
-  const configPath = getConfigPath(paseoHome);
+  const configPath = getConfigPath(alpHome);
   let raw: string;
   try {
     raw = readFileSync(configPath, "utf8");
@@ -616,7 +616,7 @@ export function getPersistedConfigValue(config: PersistedConfig, field: string):
 }
 
 export function editPersistedConfig(
-  paseoHome: string,
+  alpHome: string,
   field: string,
   edit: { value: unknown } | { unset: true },
 ): PersistedConfig {
@@ -624,7 +624,7 @@ export function editPersistedConfig(
   if (field === "daemon.auth" || field.startsWith("daemon.auth.")) {
     throw new Error("Use daemon set-password to change the daemon password.");
   }
-  const config = readPersistedConfig(paseoHome, { defaultsIfMissing: true });
+  const config = readPersistedConfig(alpHome, { defaultsIfMissing: true });
   let object = config as Record<string, unknown>;
   for (const part of parts.slice(0, -1)) {
     object[part] ??= {};
@@ -642,17 +642,17 @@ export function editPersistedConfig(
   }
   if ("unset" in edit) delete object[key];
   else object[key] = edit.value;
-  savePersistedConfig(paseoHome, config);
+  savePersistedConfig(alpHome, config);
   return config;
 }
 
 export function savePersistedConfig(
-  paseoHome: string,
+  alpHome: string,
   config: PersistedConfig,
   logger?: LoggerLike,
 ): void {
   const log = getLogger(logger);
-  const configPath = getConfigPath(paseoHome);
+  const configPath = getConfigPath(alpHome);
 
   const result = PersistedConfigSchema.safeParse(config);
   if (!result.success) {

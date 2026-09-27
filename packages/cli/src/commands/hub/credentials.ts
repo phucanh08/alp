@@ -59,7 +59,7 @@ export class PrivateHubCredentialStore implements HubCredentialStore {
   private readonly filePath: string;
 
   constructor(env: Readonly<Record<string, string | undefined>> = process.env) {
-    this.filePath = path.join(resolvePaseoHome(env), "hub-credentials.json");
+    this.filePath = path.join(resolveAlpHome(env), "hub-credentials.json");
   }
 
   active(): StoredHubCredential | null {
@@ -136,8 +136,8 @@ export class PrivateHubCredentialStore implements HubCredentialStore {
   }
 }
 
-function resolvePaseoHome(env: Readonly<Record<string, string | undefined>>): string {
-  const configured = env.PASEO_HOME ?? "~/.alp";
+function resolveAlpHome(env: Readonly<Record<string, string | undefined>>): string {
+  const configured = env.ALP_HOME ?? "~/.alp";
   const expanded = configured === "~" ? homedir() : configured.replace(/^~\//u, `${homedir()}/`);
   return path.resolve(expanded);
 }
@@ -165,6 +165,6 @@ function invalidCredentialFile(): HubCommandError {
 function credentialStorageError(): HubCommandError {
   return new HubCommandError(
     "HUB_CREDENTIALS_UNAVAILABLE",
-    "Could not access the private Hub credential store under PASEO_HOME.",
+    "Could not access the private Hub credential store under ALP_HOME.",
   );
 }

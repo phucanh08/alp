@@ -4,7 +4,7 @@ import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { afterEach, expect, test, vi } from "vitest";
 import type { AgentLister } from "./discovery";
-import { allowPaseoTools, createLeadAnnouncer, withSeatConfig } from "./hooks";
+import { allowAlpTools, createLeadAnnouncer, withSeatConfig } from "./hooks";
 
 const agents: AgentLister = {
   async list() {
@@ -43,7 +43,7 @@ const SEAT_RULES: Record<string, { definition: string; skills: string[] }> = {
   supervisor: { definition: "---\nname: supervisor\n---\nSUPERVISOR RULES\n", skills: [] },
 };
 
-/** A fake `paseo.plugins` whose `invoke` answers with `answer(seat)`; records every call. */
+/** A fake `alp.plugins` whose `invoke` answers with `answer(seat)`; records every call. */
 function slpDev(answer: (seat: string) => Promise<unknown>) {
   const calls: Array<{ pluginId: string; method: string; input: unknown }> = [];
   return {
@@ -76,11 +76,11 @@ async function request(provider: string, labels?: Record<string, string>) {
   };
 }
 
-// Independent literal copies of PEER_DISABLED_PASEO_TOOLS / SUPERVISOR_DISABLED_PASEO_TOOLS in
+// Independent literal copies of PEER_DISABLED_ALP_TOOLS / SUPERVISOR_DISABLED_ALP_TOOLS in
 // ./seat.ts (not imported, unlike the daemon lists these once mirrored in
 // packages/server/src/server/persisted-config.ts at 9356833d3, since removed with SLP provider
 // seeding): a Peer or Supervisor must not gain a tool by accident, and the test is the oracle.
-const PEER_PASEO_CUT = [
+const PEER_ALP_CUT = [
   "create_agent",
   "send_agent_prompt",
   "kill_agent",
@@ -92,7 +92,7 @@ const PEER_PASEO_CUT = [
   "respond_to_permission",
 ];
 
-const SUPERVISOR_PASEO_CUT = [
+const SUPERVISOR_ALP_CUT = [
   "create_workspace",
   "archive_workspace",
   "rename_workspace",
@@ -134,7 +134,7 @@ const SUPERVISOR_PASEO_CUT = [
 interface SeatResult {
   config: { systemPrompt: string; providerOptions?: Record<string, unknown> };
   labels?: Record<string, string>;
-  paseoTools?: { enabled?: boolean; disabledTools?: string[] };
+  alpTools?: { enabled?: boolean; disabledTools?: string[] };
 }
 
 async function seatConfig(provider: string, labels?: Record<string, string>) {
@@ -143,9 +143,9 @@ async function seatConfig(provider: string, labels?: Record<string, string>) {
     | undefined;
 }
 
-test("a Claude Peer by label loses the Peer Paseo tools and Agent/Task", async () => {
+test("a Claude Peer by label loses the Peer Alp tools and Agent/Task", async () => {
   const result = await seatConfig("claude", { "slp.role": "peer" });
-  expect(result?.paseoTools).toEqual({ disabledTools: PEER_PASEO_CUT });
+  expect(result?.alpTools).toEqual({ disabledTools: PEER_ALP_CUT });
   expect(result?.config.providerOptions).toEqual({
     allowedTools: ["Bash"],
     disallowedTools: ["Agent", "Task"],
@@ -154,9 +154,9 @@ test("a Claude Peer by label loses the Peer Paseo tools and Agent/Task", async (
   expect(result?.labels).toEqual({ "slp.role": "peer" });
 });
 
-test("a Codex Peer by label loses the Peer Paseo tools, multi_agent, and writes outside its cwd", async () => {
+test("a Codex Peer by label loses the Peer Alp tools, multi_agent, and writes outside its cwd", async () => {
   const result = await seatConfig("codex", { "slp.role": "peer" });
-  expect(result?.paseoTools).toEqual({ disabledTools: PEER_PASEO_CUT });
+  expect(result?.alpTools).toEqual({ disabledTools: PEER_ALP_CUT });
   expect(result?.config.providerOptions).toEqual({
     allowedTools: ["Bash"],
     sandbox_mode: "workspace-write",
@@ -164,43 +164,43 @@ test("a Codex Peer by label loses the Peer Paseo tools, multi_agent, and writes 
   });
 });
 
-test("a Supervisor by label loses the Supervisor Paseo tools on Claude and Codex", async () => {
+test("a Supervisor by label loses the Supervisor Alp tools on Claude and Codex", async () => {
   const claude = await seatConfig("claude", { "slp.role": "supervisor" });
-  expect(claude?.paseoTools).toEqual({ disabledTools: SUPERVISOR_PASEO_CUT });
+  expect(claude?.alpTools).toEqual({ disabledTools: SUPERVISOR_ALP_CUT });
   expect(claude?.config.providerOptions).toEqual({
-    allowedTools: ["Bash", "mcp__paseo__*"],
+    allowedTools: ["Bash", "mcp__alp__*"],
     disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "Task", "Skill"],
   });
   expect(claude?.config.systemPrompt).toMatch(/## Lead hiện có[\s\S]*`L1`/);
 
   const codex = await seatConfig("codex", { "slp.role": "supervisor" });
-  expect(codex?.paseoTools).toEqual({ disabledTools: SUPERVISOR_PASEO_CUT });
+  expect(codex?.alpTools).toEqual({ disabledTools: SUPERVISOR_ALP_CUT });
   expect(codex?.config.providerOptions).toEqual({
     allowedTools: ["Bash"],
     sandbox_mode: "workspace-write",
   });
 });
 
-test("a Peer cut adds to Paseo tools the request already disabled", async () => {
+test("a Peer cut adds to Alp tools the request already disabled", async () => {
   const base = await request("claude", { "slp.role": "peer" });
   const result = (await withSeatConfig(
-    { ...base, paseoTools: { disabledTools: ["browser_click", "kill_agent"] } } as never,
+    { ...base, alpTools: { disabledTools: ["browser_click", "kill_agent"] } } as never,
     host,
   )) as SeatResult | undefined;
-  expect(result?.paseoTools).toEqual({
+  expect(result?.alpTools).toEqual({
     disabledTools: [
       "browser_click",
       "kill_agent",
-      ...PEER_PASEO_CUT.filter((t) => t !== "kill_agent"),
+      ...PEER_ALP_CUT.filter((t) => t !== "kill_agent"),
     ],
   });
 });
 
-test("a Claude Lead by label keeps every Paseo tool and gets the Paseo wildcard", async () => {
+test("a Claude Lead by label keeps every Alp tool and gets the Alp wildcard", async () => {
   const result = await seatConfig("claude", { "slp.role": "lead" });
   expect(result).toBeDefined();
-  expect(result).not.toHaveProperty("paseoTools");
-  expect(result?.config.providerOptions).toEqual({ allowedTools: ["Bash", "mcp__paseo__*"] });
+  expect(result).not.toHaveProperty("alpTools");
+  expect(result?.config.providerOptions).toEqual({ allowedTools: ["Bash", "mcp__alp__*"] });
   expect(result?.config.systemPrompt).toMatch(/## Supervisor hiện có[\s\S]*`S1`/);
 });
 
@@ -216,7 +216,7 @@ test("claude or codex with an unknown slp.role value is left alone, not defaulte
 test("a Human-made Claude agent with no seat label defaults to Peer, tagged slp.origin=human", async () => {
   const result = await seatConfig("claude");
   expect(result?.labels).toEqual({ "slp.role": "peer", "slp.origin": "human" });
-  expect(result?.paseoTools).toEqual({ disabledTools: PEER_PASEO_CUT });
+  expect(result?.alpTools).toEqual({ disabledTools: PEER_ALP_CUT });
   expect(result?.config.providerOptions).toEqual({
     allowedTools: ["Bash"],
     disallowedTools: ["Agent", "Task"],
@@ -227,7 +227,7 @@ test("a Human-made Claude agent with no seat label defaults to Peer, tagged slp.
 test("a Human-made Codex agent with no seat label defaults to Peer, tagged slp.origin=human", async () => {
   const result = await seatConfig("codex", {});
   expect(result?.labels).toEqual({ "slp.role": "peer", "slp.origin": "human" });
-  expect(result?.paseoTools).toEqual({ disabledTools: PEER_PASEO_CUT });
+  expect(result?.alpTools).toEqual({ disabledTools: PEER_ALP_CUT });
   expect(result?.config.providerOptions).toEqual({
     allowedTools: ["Bash"],
     sandbox_mode: "workspace-write",
@@ -236,18 +236,18 @@ test("a Human-made Codex agent with no seat label defaults to Peer, tagged slp.o
 });
 
 test("a schedule-run Claude agent with no seat label defaults to Peer, tagged slp.origin=schedule", async () => {
-  const result = await seatConfig("claude", { "paseo.schedule-id": "sch1" });
+  const result = await seatConfig("claude", { "alp.schedule-id": "sch1" });
   expect(result?.labels).toEqual({
-    "paseo.schedule-id": "sch1",
+    "alp.schedule-id": "sch1",
     "slp.role": "peer",
     "slp.origin": "schedule",
   });
-  expect(result?.paseoTools).toEqual({ disabledTools: PEER_PASEO_CUT });
+  expect(result?.alpTools).toEqual({ disabledTools: PEER_ALP_CUT });
   expect(result?.config.systemPrompt).toContain("# Ghế SLP: peer");
 });
 
-test("an agent another agent created (paseo.parent-agent-id set) with no seat label is left alone", async () => {
-  expect(await seatConfig("claude", { "paseo.parent-agent-id": "L1" })).toBeUndefined();
+test("an agent another agent created (alp.parent-agent-id set) with no seat label is left alone", async () => {
+  expect(await seatConfig("claude", { "alp.parent-agent-id": "L1" })).toBeUndefined();
 });
 
 test("a request that already names a valid seat is never tagged slp.origin", async () => {
@@ -267,7 +267,7 @@ test("the retired <family>-<seat> provider names no longer pick a seat", async (
   expect(await seatConfig("claude-peer", { "slp.role": "peer" })).toBeUndefined();
 });
 
-test("agent.create for a Lead injects the slp-dev seat rules, runtime block, Supervisor roster, and Paseo tools", async () => {
+test("agent.create for a Lead injects the slp-dev seat rules, runtime block, Supervisor roster, and Alp tools", async () => {
   const result = await withSeatConfig(
     (await request("claude", { "slp.role": "lead" })) as never,
     host,
@@ -284,7 +284,7 @@ test("agent.create for a Lead injects the slp-dev seat rules, runtime block, Sup
   expect(config.systemPrompt).toContain("Model: <model> · Effort: <effort> — <lý do>");
   expect(config.systemPrompt).toMatch(/## Supervisor hiện có[\s\S]*`S1`/);
   expect(config.systemPrompt).not.toContain("`L1`");
-  expect(config.providerOptions).toEqual({ allowedTools: ["Bash", "mcp__paseo__*"] });
+  expect(config.providerOptions).toEqual({ allowedTools: ["Bash", "mcp__alp__*"] });
 });
 
 test("agent.create for a Supervisor lists Leads and cuts write and spawn tools", async () => {
@@ -326,7 +326,7 @@ test("withSeatConfig returns undefined for every request when SLP is disabled, e
 test("a Human-made Peer's system prompt tells it it is independent; a Lead-spawned Peer's does not", async () => {
   const human = await seatConfig("claude");
   expect(human?.config.systemPrompt).toContain("không có Lead nào giao brief");
-  const schedule = await seatConfig("claude", { "paseo.schedule-id": "sch1" });
+  const schedule = await seatConfig("claude", { "alp.schedule-id": "sch1" });
   expect(schedule?.config.systemPrompt).toContain("không có Lead nào giao brief");
   const spawned = await seatConfig("claude", { "slp.role": "peer" });
   expect(spawned?.config.systemPrompt).not.toContain("không có Lead nào giao brief");
@@ -468,7 +468,7 @@ interface HookCalls {
 function hookContext(entries: Awaited<ReturnType<AgentLister["list"]>>["entries"]) {
   const calls: HookCalls = { sent: [], permissions: [] };
   const context = {
-    paseo: {
+    alp: {
       agents: {
         async list() {
           return { entries, pageInfo: { nextCursor: null } };
@@ -501,24 +501,24 @@ function hookAgent(id: string, provider: string, labels?: Record<string, string>
   };
 }
 
-function paseoPermission(agent: ReturnType<typeof hookAgent>) {
+function alpPermission(agent: ReturnType<typeof hookAgent>) {
   return {
     agent,
-    request: { id: `req-${agent.id}`, kind: "tool", name: "mcp__paseo__list_agents" },
+    request: { id: `req-${agent.id}`, kind: "tool", name: "mcp__alp__list_agents" },
   } as never;
 }
 
-test("allowPaseoTools allows Paseo tools for a Lead or Supervisor by label, not for a Peer", async () => {
+test("allowAlpTools allows Alp tools for a Lead or Supervisor by label, not for a Peer", async () => {
   const { calls, context } = hookContext([]);
-  await allowPaseoTools(paseoPermission(hookAgent("L", "claude", { "slp.role": "lead" })), context);
-  await allowPaseoTools(
-    paseoPermission(hookAgent("S", "codex", { "slp.role": "supervisor" })),
+  await allowAlpTools(alpPermission(hookAgent("L", "claude", { "slp.role": "lead" })), context);
+  await allowAlpTools(
+    alpPermission(hookAgent("S", "codex", { "slp.role": "supervisor" })),
     context,
   );
-  await allowPaseoTools(paseoPermission(hookAgent("P", "claude", { "slp.role": "peer" })), context);
-  await allowPaseoTools(paseoPermission(hookAgent("X", "claude")), context);
-  await allowPaseoTools(paseoPermission(hookAgent("OLD", "claude-lead")), context);
-  await allowPaseoTools(paseoPermission(hookAgent("ACP", "acp", { "slp.role": "lead" })), context);
+  await allowAlpTools(alpPermission(hookAgent("P", "claude", { "slp.role": "peer" })), context);
+  await allowAlpTools(alpPermission(hookAgent("X", "claude")), context);
+  await allowAlpTools(alpPermission(hookAgent("OLD", "claude-lead")), context);
+  await allowAlpTools(alpPermission(hookAgent("ACP", "acp", { "slp.role": "lead" })), context);
   expect(calls.permissions).toEqual([
     { agentId: "L", requestId: "req-L" },
     { agentId: "S", requestId: "req-S" },
@@ -588,7 +588,7 @@ test("a Claude Lead and Peer load their seat directory as a local plugin, with n
   const { host: seatHost } = hostWithSeatSkills(SEAT_DIRS);
   const lead = await seatConfigWith(seatHost, "claude", { "slp.role": "lead" });
   expect(lead?.config.providerOptions).toEqual({
-    allowedTools: ["Bash", "mcp__paseo__*"],
+    allowedTools: ["Bash", "mcp__alp__*"],
     plugins: [{ type: "local", path: "/home/.alp/slp/seat-skills/lead" }],
   });
 
@@ -621,7 +621,7 @@ test("the Supervisor gets no seat directory and, on Claude, loses the Skill tool
   const { host: seatHost, asked } = hostWithSeatSkills(SEAT_DIRS);
   const claude = await seatConfigWith(seatHost, "claude", { "slp.role": "supervisor" });
   expect(claude?.config.providerOptions).toEqual({
-    allowedTools: ["Bash", "mcp__paseo__*"],
+    allowedTools: ["Bash", "mcp__alp__*"],
     disallowedTools: ["Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "Task", "Skill"],
   });
 
@@ -667,7 +667,7 @@ test("seat skills merge into the request's own plugins and Codex skills options"
 test("a seat whose directory is unavailable is created without plugins or extra roots", async () => {
   const { host: seatHost, asked } = hostWithSeatSkills({});
   const claude = await seatConfigWith(seatHost, "claude", { "slp.role": "lead" });
-  expect(claude?.config.providerOptions).toEqual({ allowedTools: ["Bash", "mcp__paseo__*"] });
+  expect(claude?.config.providerOptions).toEqual({ allowedTools: ["Bash", "mcp__alp__*"] });
   const codex = await seatConfigWith(seatHost, "codex", { "slp.role": "peer" });
   expect(codex?.config.providerOptions).not.toHaveProperty("skills");
   expect(asked).toEqual(["lead", "peer"]);

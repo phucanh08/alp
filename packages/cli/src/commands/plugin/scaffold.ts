@@ -1,6 +1,6 @@
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { PluginIdSchema } from "@getpaseo/protocol/messages";
+import { PluginIdSchema } from "@alp/protocol/messages";
 import { resolveCliVersion } from "../../version.js";
 
 const TSCONFIG = {
@@ -20,7 +20,7 @@ const TSCONFIG = {
   include: ["**/*.ts", "**/*.tsx"],
 };
 
-const CLIENT_ENTRY = `import type { PluginClientContext } from "@getpaseo/plugin/client";
+const CLIENT_ENTRY = `import type { PluginClientContext } from "@alp/plugin/client";
 import { GreetingSurface } from "./client/greeting";
 
 export default function contribute(client: PluginClientContext) {
@@ -35,7 +35,7 @@ export default function contribute(client: PluginClientContext) {
 }
 `;
 
-const SERVER_ENTRY = `import type { PluginServerContext } from "@getpaseo/plugin/server";
+const SERVER_ENTRY = `import type { PluginServerContext } from "@alp/plugin/server";
 import { createGreeting } from "./server/greeting";
 import { greetingRpc } from "./shared/greeting";
 
@@ -45,7 +45,7 @@ export default function contribute(server: PluginServerContext) {
 }
 `;
 
-const SHARED_GREETING = `import { defineRpc } from "@getpaseo/plugin";
+const SHARED_GREETING = `import { defineRpc } from "@alp/plugin";
 import { z } from "zod";
 
 export const greetingRpc = defineRpc({
@@ -55,7 +55,7 @@ export const greetingRpc = defineRpc({
 });
 `;
 
-const SERVER_GREETING = `import type { RpcInput } from "@getpaseo/plugin";
+const SERVER_GREETING = `import type { RpcInput } from "@alp/plugin";
 import { greetingRpc } from "../shared/greeting";
 
 export function createGreeting({ name }: RpcInput<typeof greetingRpc>) {
@@ -63,8 +63,8 @@ export function createGreeting({ name }: RpcInput<typeof greetingRpc>) {
 }
 `;
 
-const CLIENT_GREETING = `import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
-import { useRpc } from "@getpaseo/plugin/client";
+const CLIENT_GREETING = `import type { PluginSurfaceProps } from "@alp/plugin/client";
+import { useRpc } from "@alp/plugin/client";
 import { useMutation } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
@@ -148,7 +148,7 @@ export async function scaffoldPluginDirectory(
     private: true,
     version: "0.0.0",
     files: [
-      "paseo-plugin.json",
+      "alp-plugin.json",
       "index.client.ts",
       "index.client.tsx",
       "index.server.ts",
@@ -159,7 +159,7 @@ export async function scaffoldPluginDirectory(
     ],
     scripts: { typecheck: "tsc --noEmit" },
     devDependencies: {
-      "@getpaseo/plugin": version,
+      "@alp/plugin": version,
       "@tanstack/react-query": "^5.90.11",
       "@types/react": "~19.2.0",
       react: "19.1.0",
@@ -170,8 +170,8 @@ export async function scaffoldPluginDirectory(
   };
   const files = new Map<string, string>([
     [
-      "paseo-plugin.json",
-      `${JSON.stringify({ id, requirements: { paseo: `>=${version}` } }, null, 2)}\n`,
+      "alp-plugin.json",
+      `${JSON.stringify({ id, requirements: { alp: `>=${version}` } }, null, 2)}\n`,
     ],
     ["package.json", `${JSON.stringify(packageJson, null, 2)}\n`],
     ["tsconfig.json", `${JSON.stringify(TSCONFIG, null, 2)}\n`],

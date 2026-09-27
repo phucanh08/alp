@@ -22,8 +22,8 @@ describe("pull request timeline message schemas", () => {
       type: "pull_request_timeline_request",
       cwd: "/tmp/repo",
       prNumber: 42,
-      repoOwner: "getpaseo",
-      repoName: "paseo",
+      repoOwner: "alp",
+      repoName: "alp",
       requestId: "request-1",
     });
 
@@ -31,8 +31,8 @@ describe("pull request timeline message schemas", () => {
       type: "pull_request_timeline_request",
       cwd: "/tmp/repo",
       prNumber: 42,
-      repoOwner: "getpaseo",
-      repoName: "paseo",
+      repoOwner: "alp",
+      repoName: "alp",
       requestId: "request-1",
     });
   });
@@ -42,8 +42,8 @@ describe("pull request timeline message schemas", () => {
       type: "pull_request_timeline_request",
       cwd: "/tmp/repo",
       prNumber: 42,
-      repoOwner: "getpaseo",
-      repoName: "paseo",
+      repoOwner: "alp",
+      repoName: "alp",
       requestId: "request-1",
     });
 
@@ -51,8 +51,8 @@ describe("pull request timeline message schemas", () => {
       type: "pull_request_timeline_request",
       cwd: "/tmp/repo",
       prNumber: 42,
-      repoOwner: "getpaseo",
-      repoName: "paseo",
+      repoOwner: "alp",
+      repoName: "alp",
       requestId: "request-1",
     });
   });

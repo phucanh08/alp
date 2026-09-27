@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DaemonClientConfig } from "@getpaseo/client/internal/daemon-client";
+import type { DaemonClientConfig } from "@alp/client/internal/daemon-client";
 import type { DaemonConnectionDependencies, DaemonProbeClient } from "./test-daemon-connection";
 
 class FakeDaemonClient implements DaemonProbeClient {
@@ -46,9 +46,9 @@ class FakeDaemonProbe {
     createDesktopTransportFactory: () => null,
     buildDesktopTransportUrl: (target) => {
       if (target.transportType === "ssh") {
-        return `paseo+desktop://ssh?host=${encodeURIComponent(target.host)}`;
+        return `alp+desktop://ssh?host=${encodeURIComponent(target.host)}`;
       }
-      return `paseo+desktop://${target.transportType}?path=${encodeURIComponent(target.transportPath)}`;
+      return `alp+desktop://${target.transportType}?path=${encodeURIComponent(target.transportPath)}`;
     },
     createClient: (config) => {
       const client = new FakeDaemonClient(this, config);
@@ -132,16 +132,16 @@ describe("test-daemon-connection connectToDaemon", () => {
     const { connectToDaemon } = await import("./test-daemon-connection");
     const result = await connectToDaemon(
       {
-        id: "socket:/tmp/paseo.sock",
+        id: "socket:/tmp/alp.sock",
         type: "directSocket",
-        path: "/tmp/paseo.sock",
+        path: "/tmp/alp.sock",
       },
       undefined,
       probe.deps,
     );
     await result.client.close();
 
-    expect(probe.createdConfigs()[0]?.url).toBe("paseo+desktop://socket?path=%2Ftmp%2Fpaseo.sock");
+    expect(probe.createdConfigs()[0]?.url).toBe("alp+desktop://socket?path=%2Ftmp%2Falp.sock");
   });
 
   it("uses the desktop transport for Remote SSH connections", async () => {
@@ -149,7 +149,7 @@ describe("test-daemon-connection connectToDaemon", () => {
     const transportFactory = vi.fn();
     const result = await connectToDaemon(
       {
-        id: "ssh:deploy%40example.com:2222:%2Fkeys%2Fpaseo",
+        id: "ssh:deploy%40example.com:2222:%2Fkeys%2Falp",
         type: "remoteSsh",
         host: "deploy@example.com",
         sshPort: 2222,
@@ -164,7 +164,7 @@ describe("test-daemon-connection connectToDaemon", () => {
     await result.client.close();
 
     expect(probe.createdConfigs()[0]).toMatchObject({
-      url: "paseo+desktop://ssh?host=deploy%40example.com",
+      url: "alp+desktop://ssh?host=deploy%40example.com",
       transportFactory,
     });
   });

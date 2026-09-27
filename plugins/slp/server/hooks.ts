@@ -2,7 +2,7 @@ import type {
   PluginBeforeRequests,
   PluginHookContext,
   PluginLifecycleEvents,
-} from "@getpaseo/plugin/server";
+} from "@alp/plugin/server";
 import {
   type AgentLister,
   counterpartSeat,
@@ -17,7 +17,7 @@ import {
   defaultSeatLabels,
   familyOf,
   originOfLabels,
-  paseoToolsFor,
+  alpToolsFor,
   providerOptionsFor,
   type Seat,
   seatOfAgent,
@@ -28,7 +28,7 @@ import { type PluginInvoker, readSeatRules, SEAT_RULES_TIMEOUT_MS } from "./seat
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
 
 /**
- * The slice of the hook's `PaseoApi` a seat needs — agents for the roster, plugins for slp-dev —
+ * The slice of the hook's `AlpApi` a seat needs — agents for the roster, plugins for slp-dev —
  * and the seat skill directory for a Lead or Peer (`SeatSkills.ensure`), null when it has none.
  */
 export interface SeatHost {
@@ -41,12 +41,12 @@ export interface SeatHost {
  * `before("agent.create")`: an agent on the `claude` or `codex` provider with an `slp.role` label
  * gets its seat definition and skills (see `readSeatRules`), the SLP-RUNTIME block, and the live
  * roster of the counterpart seat (Lead sees Supervisors and the reverse) in its system prompt.
- * Claude Lead/Supervisor also get `allowedTools: mcp__paseo__*`; the Supervisor loses
+ * Claude Lead/Supervisor also get `allowedTools: mcp__alp__*`; the Supervisor loses
  * Write/Edit/Agent/Task/Skill, a Claude Peer loses Agent/Task. A Lead or Peer gets its seat skill
- * directory (`host.seatSkills`) as a Claude local plugin or a Codex extra skill root. Peer and Supervisor lose Paseo tools
- * through the returned `paseoTools`. A claude/codex request that names no seat and no parent — a
+ * directory (`host.seatSkills`) as a Claude local plugin or a Codex extra skill root. Peer and Supervisor lose Alp tools
+ * through the returned `alpTools`. A claude/codex request that names no seat and no parent — a
  * Human made it directly, or a schedule run created it, not another agent — defaults to Peer,
- * tagged `slp.origin=schedule` when the request carries `paseo.schedule-id`, `slp.origin=human`
+ * tagged `slp.origin=schedule` when the request carries `alp.schedule-id`, `slp.origin=human`
  * otherwise (see `defaultSeatLabels`). `enabled` is the SLP settings switch (default `true`);
  * `false` returns `undefined` for every request, including one that already names a valid seat —
  * the plugin does not touch agent creation at all while off.
@@ -94,7 +94,7 @@ export async function withSeatConfig(
     request.config.providerOptions,
     seatSkillsDirectory,
   );
-  const paseoTools = paseoToolsFor(seat, request.paseoTools);
+  const alpTools = alpToolsFor(seat, request.alpTools);
   const origin = seat === "peer" ? originOfLabels(labels) : null;
   const systemPrompt = [
     buildSystemPrompt(
@@ -116,7 +116,7 @@ export async function withSeatConfig(
   return {
     ...request,
     ...(labels !== request.labels ? { labels } : {}),
-    ...(paseoTools ? { paseoTools } : {}),
+    ...(alpTools ? { alpTools } : {}),
     config: {
       ...request.config,
       systemPrompt,
@@ -146,7 +146,7 @@ export function createLeadAnnouncer() {
       if (!pending?.length) return;
       pendingBySupervisor.delete(event.agent.id);
       for (const lead of pending) {
-        await context.paseo.agents.ref(event.agent.id).send(leadAnnouncement(lead));
+        await context.alp.agents.ref(event.agent.id).send(leadAnnouncement(lead));
         console.log(
           `slp: supervisor ${event.agent.id} finished its turn → told about lead ${lead.id}`,
         );
@@ -155,7 +155,7 @@ export function createLeadAnnouncer() {
     }
     if (seat !== "lead" || announcedLeads.has(event.agent.id)) return;
     announcedLeads.add(event.agent.id);
-    const supervisors = await findSeatAgents(context.paseo.agents, "supervisor", event.agent.id);
+    const supervisors = await findSeatAgents(context.alp.agents, "supervisor", event.agent.id);
     if (supervisors.length === 0) return;
     const registered = supervisorsRegisteredIn(
       event.timeline,
@@ -178,21 +178,21 @@ export function createLeadAnnouncer() {
         ]);
         continue;
       }
-      await context.paseo.agents.ref(supervisor.id).send(leadAnnouncement(lead));
+      await context.alp.agents.ref(supervisor.id).send(leadAnnouncement(lead));
       console.log(`slp: told supervisor ${supervisor.id} about new lead ${lead.id}`);
     }
   };
 }
 
-/** `on("agent.permission_requested")`: safety net that allows Paseo tools for Lead and Supervisor. */
-export async function allowPaseoTools(
+/** `on("agent.permission_requested")`: safety net that allows Alp tools for Lead and Supervisor. */
+export async function allowAlpTools(
   event: PluginLifecycleEvents["agent.permission_requested"],
   context: PluginHookContext,
 ): Promise<void> {
   const seat = seatOfAgent(event.agent);
   if (seat !== "lead" && seat !== "supervisor") return;
-  if (event.request.kind !== "tool" || !event.request.name.startsWith("mcp__paseo__")) return;
-  await context.paseo.agents.ref(event.agent.id).respondToPermission({
+  if (event.request.kind !== "tool" || !event.request.name.startsWith("mcp__alp__")) return;
+  await context.alp.agents.ref(event.agent.id).respondToPermission({
     requestId: event.request.id,
     response: { behavior: "allow" },
   });

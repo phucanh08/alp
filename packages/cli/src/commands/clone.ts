@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { isCompleteGitRemote } from "@getpaseo/protocol/git-remote";
+import { isCompleteGitRemote } from "@alp/protocol/git-remote";
 import { connectToDaemon } from "../utils/client.js";
 import type { CommandError, OutputSchema, SingleResult } from "../output/index.js";
 import type { CommandOptions } from "../output/with-output.js";

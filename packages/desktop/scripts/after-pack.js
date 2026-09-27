@@ -38,7 +38,7 @@ function pruneClaudeAgentSdk(nodeModules, platform, arch) {
   }
 
   // SDK ≥0.2.113 ships per-platform Claude Code binaries via optionalDependencies
-  // (~210 MB each). Paseo requires user-installed `claude` on PATH, matching how
+  // (~210 MB each). Alp requires user-installed `claude` on PATH, matching how
   // Codex/OpenCode are integrated, so drop every bundled copy.
   const anthropicDir = path.join(nodeModules, "@anthropic-ai");
   if (fs.existsSync(anthropicDir)) {
@@ -133,7 +133,7 @@ exports.default = async function afterPack(context) {
 };
 
 async function smokeUnpackedAppIfRequested(appOutDir) {
-  if (process.env.PASEO_DESKTOP_SMOKE !== "1") {
+  if (process.env.ALP_DESKTOP_SMOKE !== "1") {
     return;
   }
 

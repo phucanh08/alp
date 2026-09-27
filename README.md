@@ -67,7 +67,7 @@ To connect from your phone, open **Settings → your host → Pair Device**.
 Install the CLI and start alp:
 
 ```bash
-npm install -g @getpaseo/cli
+npm install -g @alp/cli
 alp
 ```
 
@@ -84,15 +84,15 @@ For full setup and configuration, see:
 Run the alp daemon and self-hosted web UI in Docker:
 
 ```bash
-docker run -d --name paseo \
+docker run -d --name alp \
   -p 6767:6767 \
-  -e PASEO_PASSWORD=change-me \
-  -v "$PWD/paseo-home:/home/paseo" \
+  -e ALP_PASSWORD=change-me \
+  -v "$PWD/alp-home:/home/alp" \
   -v "$PWD:/workspace" \
   ghcr.io/getpaseo/paseo:latest
 ```
 
-Open `http://localhost:6767` after it starts. Extend the base image with the agent CLIs you use, then provide credentials through environment variables or the persistent `/home/paseo` volume. See the [Docker documentation](docs/docker.md) for full setup details.
+Open `http://localhost:6767` after it starts. Extend the base image with the agent CLIs you use, then provide credentials through environment variables or the persistent `/home/alp` volume. See the [Docker documentation](docs/docker.md) for full setup details.
 
 ## CLI
 
@@ -114,12 +114,12 @@ See the [full CLI reference](https://alp.anhlp.com/docs/cli) for more.
 
 ## TypeScript SDK
 
-Build issue integrations, dashboards, and orchestration services with `@getpaseo/client`:
+Build issue integrations, dashboards, and orchestration services with `@alp/client`:
 
 ```ts
-import { createPaseoClient } from "@getpaseo/client";
+import { createAlpClient } from "@alp/client";
 
-const client = createPaseoClient({ url: "ws://127.0.0.1:6767/ws" });
+const client = createAlpClient({ url: "ws://127.0.0.1:6767/ws" });
 await client.connect();
 
 const agent = await client.agents.create({

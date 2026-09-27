@@ -53,7 +53,7 @@ From a human shell, a bare `alp run` creates a new local workspace for the curre
 
 Worktree creation accepts `--worktree-mode branch-off|checkout-branch|checkout-pr` plus the matching `--new-branch`/`--base`, `--branch`, or `--pr-number`/`--forge` options. Use `--worktree-slug` to choose the managed directory slug.
 
-When an existing alp agent runs the same command, alp recognizes it through `PASEO_AGENT_ID`. Without explicit placement, the new agent becomes its subagent in the same workspace. `--workspace` can place that subagent elsewhere without changing its parent.
+When an existing alp agent runs the same command, alp recognizes it through `ALP_AGENT_ID`. Without explicit placement, the new agent becomes its subagent in the same workspace. `--workspace` can place that subagent elsewhere without changing its parent.
 
 Use `--output-schema` to return only matching JSON output. You can pass a schema file path or an inline JSON schema object. This mode cannot be used with `--background`.
 
@@ -79,7 +79,7 @@ alp project delete <project-id>
 
 `--reset` restores the name derived from the project directory. Deleting a project archives its active workspaces and removes the project from alp. It does not delete the project directory.
 
-For a local daemon, `alp project create [path]` defaults to the current directory and resolves relative paths on the CLI machine. When you use the global `--host` option or `PASEO_HOST`, provide a path that the target daemon can access:
+For a local daemon, `alp project create [path]` defaults to the current directory and resolves relative paths on the CLI machine. When you use the global `--host` option or `ALP_HOST`, provide a path that the target daemon can access:
 
 ```bash
 alp --host devbox:6767 project create /srv/repos/api
@@ -149,7 +149,7 @@ Create and list results include `id`, `name`, `cwd`, and `workspaceId`. Use `--j
 
 ## Workspace scripts
 
-List, start, and stop the scripts configured in a workspace's `paseo.json`:
+List, start, and stop the scripts configured in a workspace's `alp.json`:
 
 ```bash
 alp script ls
@@ -159,7 +159,7 @@ alp script stop web
 
 By default, alp selects the workspace whose directory is the current directory. Pass `--cwd <path>` to select a different directory, or `--workspace <workspace-id>` when a directory has multiple workspaces. Use the global `--host` option to target another daemon. These commands also accept standard output options such as `--json`.
 
-The output includes each script's lifecycle and supervised terminal ID. Services also include their assigned port, proxy URL, and health. See [Git worktrees](/docs/worktrees#scripts-and-services) for `paseo.json` configuration.
+The output includes each script's lifecycle and supervised terminal ID. Services also include their assigned port, proxy URL, and health. See [Git worktrees](/docs/worktrees#scripts-and-services) for `alp.json` configuration.
 
 ## Plugins
 
@@ -304,12 +304,12 @@ The root aliases `start`, `status`, `restart`, `reload`, and `pair` use the same
 Use environment overrides with the foreground deployment command:
 
 ```bash
-PASEO_LISTEN=127.0.0.1:6799 PASEO_RELAY_ENABLED=false alp daemon run --home ~/alp-test
+ALP_LISTEN=127.0.0.1:6799 ALP_RELAY_ENABLED=false alp daemon run --home ~/alp-test
 ```
 
 It stays attached until the supervisor exits or you cancel, without a readiness timeout. Worker restart retains these launch inputs. Stop and relaunch the deployment to change them. If the home already has a live supervisor, `run` returns `already_running` without owning or launching a foreground process.
 
-Managed `start` ignores inherited daemon-setting overrides, including `PORT`, `PASEO_LISTEN`, relay, voice, and web UI settings. It preserves provider credentials and executable/runtime controls. `start --foreground` is removed; use `daemon run`. Former start/restart configuration flags such as `--port`, `--no-relay`, and `--web-ui` fail before side effects, with the corresponding `config set` migration. See [configuration edits](/docs/configuration#apply-changes).
+Managed `start` ignores inherited daemon-setting overrides, including `PORT`, `ALP_LISTEN`, relay, voice, and web UI settings. It preserves provider credentials and executable/runtime controls. `start --foreground` is removed; use `daemon run`. Former start/restart configuration flags such as `--port`, `--no-relay`, and `--web-ui` fail before side effects, with the corresponding `config set` migration. See [configuration edits](/docs/configuration#apply-changes).
 
 ### Select one daemon
 
@@ -320,11 +320,11 @@ Every daemon-connected CLI command accepts global `--home` or `--host`, before o
 | `--home`                                   | That local home, overriding both environment selectors |
 | `--host`                                   | That endpoint, overriding both environment selectors   |
 | Both flags, or conflicting duplicate flags | `TARGET_AMBIGUOUS`                                     |
-| Only `PASEO_HOME` or only `PASEO_HOST`     | The corresponding target                               |
+| Only `ALP_HOME` or only `ALP_HOST`         | The corresponding target                               |
 | Both environment selectors, without a flag | `TARGET_AMBIGUOUS`                                     |
 | Neither                                    | Default local home, `~/.alp`                           |
 
-Local-only `start`, `daemon run`, `config`, `onboard`, and `set-password` reject explicit `--host` and ignore `PASEO_HOST`. Endpoint operations retain TCP, Unix socket, Windows pipe, SSH, and pairing-offer transports. A host-side CLI controlling a container needs `--host` or `PASEO_HOST`.
+Local-only `start`, `daemon run`, `config`, `onboard`, and `set-password` reject explicit `--host` and ignore `ALP_HOST`. Endpoint operations retain TCP, Unix socket, Windows pipe, SSH, and pairing-offer transports. A host-side CLI controlling a container needs `--host` or `ALP_HOST`.
 
 ## Hub
 
@@ -345,7 +345,7 @@ Run deploy from the repository root. By default it reads every direct `.paseo/tr
 
 Pass `-p, --project <slug>` for an existing legacy bundle: `.paseo/hub.yml`, direct `.paseo/workflows/*.yml` files, and referenced workflow partials. See [Deploy from the CLI](/docs/hub/configuration#deploy-from-the-cli).
 
-`login` opens the Hub approval page and stores a durable organization-scoped CLI credential under `PASEO_HOME`. In an interactive terminal it offers to connect this daemon, then separately asks whether to allow Hub automations to run agents. Connection defaults to yes; execution permission defaults to no. It then links to Hub's **Triggers** page and prints `alp hub init` for setup as code. `--json` and non-TTY login remain login-only and never prompt. The stored login is separate from the daemon relationship created by `connect`.
+`login` opens the Hub approval page and stores a durable organization-scoped CLI credential under `ALP_HOME`. In an interactive terminal it offers to connect this daemon, then separately asks whether to allow Hub automations to run agents. Connection defaults to yes; execution permission defaults to no. It then links to Hub's **Triggers** page and prints `alp hub init` for setup as code. `--json` and non-TTY login remain login-only and never prompt. The stored login is separate from the daemon relationship created by `connect`.
 
 `init` requires a TTY. It signs in and connects the daemon as needed, then lists the organization's app connections that can back a starter trigger. One usable connection is selected automatically; with several, you choose a **Trigger connection**. If none is ready, setup sends you to **Hub → Apps** and stops before selecting an agent or writing files.
 
@@ -353,7 +353,7 @@ Setup asks which agent provider, model, and mode to run. Providers must be enabl
 
 Interactive logout checks the same-origin daemon relationship and asks whether to disconnect before deleting the login. Declining removes only the login. JSON and noninteractive logout never prompt or disconnect implicitly; `--disconnect-daemon` is the explicit automation path, and `--force` applies to that daemon disconnection. If a requested disconnection fails, the login is preserved.
 
-Every command resolves and normalizes its destination before Hub or daemon work. Origin precedence is an explicit command origin or `--hub`, then `PASEO_HUB_URL`, then the active stored login origin, then the hosted default `https://hub-alp.anhlp.com`. The hosted default never overrides an active login. Credential precedence is `--api-key <secret>`, then `PASEO_HUB_API_KEY`, then a stored login for the exact resolved origin. A stored credential is never sent to a different origin. API keys passed through flags or the environment are not stored.
+Every command resolves and normalizes its destination before Hub or daemon work. Origin precedence is an explicit command origin or `--hub`, then `ALP_HUB_URL`, then the active stored login origin, then the hosted default `https://hub-alp.anhlp.com`. The hosted default never overrides an active login. Credential precedence is `--api-key <secret>`, then `ALP_HUB_API_KEY`, then a stored login for the exact resolved origin. A stored credential is never sent to a different origin. API keys passed through flags or the environment are not stored.
 
 Human output reports the resolved destination before each action. JSON output keeps stdout machine-readable and includes the normalized Hub origin. Bundle diagnostics identify paths without printing configuration contents or credentials.
 
@@ -380,7 +380,7 @@ alp --host 'https://app-alp.anhlp.com/#offer=eyJ2IjoyLC...' ls
 alp --host "$OFFER_URL" run "fix the failing tests"
 ```
 
-You can also set it once via `PASEO_HOST` instead of passing `--host` on every command. An explicit flag overrides the environment variable.
+You can also set it once via `ALP_HOST` instead of passing `--host` on every command. An explicit flag overrides the environment variable.
 
 ## Multi-agent workflows
 

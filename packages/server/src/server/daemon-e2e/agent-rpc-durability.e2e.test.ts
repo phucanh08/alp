@@ -4,7 +4,7 @@ import path from "node:path";
 import { expect, test } from "vitest";
 
 import { DaemonClient } from "../test-utils/daemon-client.js";
-import { createTestPaseoDaemon, type TestPaseoDaemon } from "../test-utils/paseo-daemon.js";
+import { createTestAlpDaemon, type TestAlpDaemon } from "../test-utils/alp-daemon.js";
 
 const CREATED_AT = "2026-06-29T11:12:42.000Z";
 const HEALTHY_UPDATED_AT = "2026-06-29T11:40:00.000Z";
@@ -16,17 +16,17 @@ interface StaleAgentFixture {
   orphanWorkspaceId: string;
   healthyAgentId: string;
   orphanAgentId: string;
-  paseoHomeRoot: string;
+  alpHomeRoot: string;
   cleanupPaths: string[];
 }
 
 test("agent fetch RPCs tolerate an agent whose workspace project record is gone", async () => {
   const fixture = seedStaleAgentFixture();
-  let daemon: TestPaseoDaemon | null = null;
+  let daemon: TestAlpDaemon | null = null;
   let client: DaemonClient | null = null;
 
   try {
-    daemon = await createTestPaseoDaemon({ paseoHomeRoot: fixture.paseoHomeRoot, cleanup: false });
+    daemon = await createTestAlpDaemon({ alpHomeRoot: fixture.alpHomeRoot, cleanup: false });
     client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws` });
     await client.connect();
 
@@ -76,10 +76,10 @@ test("agent fetch RPCs tolerate an agent whose workspace project record is gone"
 
 test("history search filters before pagination and keeps newest matches first", async () => {
   const fixture = seedStaleAgentFixture();
-  let daemon: TestPaseoDaemon | null = null;
+  let daemon: TestAlpDaemon | null = null;
   let client: DaemonClient | null = null;
   try {
-    const agentsDir = path.join(fixture.paseoHomeRoot, ".paseo", "agents");
+    const agentsDir = path.join(fixture.alpHomeRoot, ".alp", "agents");
     const template = JSON.parse(
       readFileSync(path.join(agentsDir, `${fixture.healthyAgentId}.json`), "utf8"),
     );
@@ -96,7 +96,7 @@ test("history search filters before pagination and keeps newest matches first", 
         lastActivityAt: updatedAt,
       });
     }
-    daemon = await createTestPaseoDaemon({ paseoHomeRoot: fixture.paseoHomeRoot, cleanup: false });
+    daemon = await createTestAlpDaemon({ alpHomeRoot: fixture.alpHomeRoot, cleanup: false });
     client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws` });
     await client.connect();
     const first = await client.fetchAgentHistory({ search: "bill", page: { limit: 1 } });
@@ -118,15 +118,15 @@ test("history search filters before pagination and keeps newest matches first", 
 });
 
 function seedStaleAgentFixture(): StaleAgentFixture {
-  const healthyCwd = mkdtempSync(path.join(os.tmpdir(), "paseo-healthy-agent-"));
-  const orphanCwd = mkdtempSync(path.join(os.tmpdir(), "paseo-orphan-agent-"));
-  const paseoHomeRoot = mkdtempSync(path.join(os.tmpdir(), "paseo-orphan-agent-home-"));
-  const paseoHome = path.join(paseoHomeRoot, ".paseo");
-  const projectsDir = path.join(paseoHome, "projects");
-  const agentsDir = path.join(paseoHome, "agents");
+  const healthyCwd = mkdtempSync(path.join(os.tmpdir(), "alp-healthy-agent-"));
+  const orphanCwd = mkdtempSync(path.join(os.tmpdir(), "alp-orphan-agent-"));
+  const alpHomeRoot = mkdtempSync(path.join(os.tmpdir(), "alp-orphan-agent-home-"));
+  const alpHome = path.join(alpHomeRoot, ".alp");
+  const projectsDir = path.join(alpHome, "projects");
+  const agentsDir = path.join(alpHome, "agents");
   const healthyProjectId = "proj-healthy-agent-rpc";
   const healthyWorkspaceId = "ws-healthy-agent-rpc";
-  const orphanWorkspaceId = "c:\\Users\\paseo\\stale-project";
+  const orphanWorkspaceId = "c:\\Users\\alp\\stale-project";
   const orphanProjectId = "proj-removed-agent-rpc";
   const healthyAgentId = "agent-healthy-rpc";
   const orphanAgentId = "agent-orphan-rpc";
@@ -213,8 +213,8 @@ function seedStaleAgentFixture(): StaleAgentFixture {
     orphanWorkspaceId,
     healthyAgentId,
     orphanAgentId,
-    paseoHomeRoot,
-    cleanupPaths: [healthyCwd, orphanCwd, paseoHomeRoot],
+    alpHomeRoot,
+    cleanupPaths: [healthyCwd, orphanCwd, alpHomeRoot],
   };
 }
 

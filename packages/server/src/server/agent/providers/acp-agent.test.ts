@@ -139,7 +139,7 @@ function createSession(
   return new ACPAgentSession(
     {
       provider: "claude-acp",
-      cwd: "/tmp/paseo-acp-test",
+      cwd: "/tmp/alp-acp-test",
     },
     {
       provider: "claude-acp",
@@ -197,7 +197,7 @@ function createSessionWithConfig(
   return new ACPAgentSession(
     {
       provider: config.provider ?? "claude-acp",
-      cwd: "/tmp/paseo-acp-test",
+      cwd: "/tmp/alp-acp-test",
       modeId: config.modeId ?? undefined,
       model: config.model ?? undefined,
       featureValues: config.featureValues,
@@ -226,7 +226,7 @@ function createKiroSession(
   return new ACPAgentSession(
     {
       provider: "kiro",
-      cwd: "/tmp/paseo-acp-test",
+      cwd: "/tmp/alp-acp-test",
     },
     {
       provider: "kiro",
@@ -297,7 +297,7 @@ function createCopilotSessionWithConfig(
   return new ACPAgentSession(
     {
       provider: "copilot",
-      cwd: "/tmp/paseo-acp-test",
+      cwd: "/tmp/alp-acp-test",
       modeId: modeId ?? undefined,
       ...(featureValues ? { featureValues } : {}),
     },
@@ -678,7 +678,7 @@ describe("ACPAgentSession terminal tools", () => {
 
     const readLaunchIdentityArgs = [
       "-e",
-      "process.stdout.write(JSON.stringify({ id: process.env.PASEO_AGENT_ID ?? null, cwd: process.env.PASEO_AGENT_CWD ?? null, extra: process.env.PASEO_TEST_EXTRA ?? null }))",
+      "process.stdout.write(JSON.stringify({ id: process.env.ALP_AGENT_ID ?? null, cwd: process.env.ALP_AGENT_CWD ?? null, extra: process.env.ALP_TEST_EXTRA ?? null }))",
     ];
 
     async function readLaunchIdentity(
@@ -704,13 +704,13 @@ describe("ACPAgentSession terminal tools", () => {
     }
 
     test("gives the terminal the agent's identity", async () => {
-      // The daemon itself does not run inside a Paseo agent.
-      vi.stubEnv("PASEO_AGENT_ID", undefined);
-      vi.stubEnv("PASEO_AGENT_CWD", undefined);
+      // The daemon itself does not run inside a Alp agent.
+      vi.stubEnv("ALP_AGENT_ID", undefined);
+      vi.stubEnv("ALP_AGENT_CWD", undefined);
       const session = createSession({
         launchEnv: {
-          PASEO_AGENT_ID: "agent-1",
-          PASEO_AGENT_CWD: "/repo",
+          ALP_AGENT_ID: "agent-1",
+          ALP_AGENT_CWD: "/repo",
         },
       });
 
@@ -721,13 +721,13 @@ describe("ACPAgentSession terminal tools", () => {
     });
 
     test("prefers the agent's identity over the daemon's own environment", async () => {
-      // A daemon started from inside another Paseo agent carries that agent's id.
-      vi.stubEnv("PASEO_AGENT_ID", "daemon-host-agent");
-      vi.stubEnv("PASEO_AGENT_CWD", "/elsewhere");
+      // A daemon started from inside another Alp agent carries that agent's id.
+      vi.stubEnv("ALP_AGENT_ID", "daemon-host-agent");
+      vi.stubEnv("ALP_AGENT_CWD", "/elsewhere");
       const session = createSession({
         launchEnv: {
-          PASEO_AGENT_ID: "agent-1",
-          PASEO_AGENT_CWD: "/repo",
+          ALP_AGENT_ID: "agent-1",
+          ALP_AGENT_CWD: "/repo",
         },
       });
 
@@ -740,14 +740,14 @@ describe("ACPAgentSession terminal tools", () => {
     test("lets the requested terminal environment win over the launch environment", async () => {
       const session = createSession({
         launchEnv: {
-          PASEO_AGENT_ID: "agent-1",
-          PASEO_TEST_EXTRA: "from-launch",
+          ALP_AGENT_ID: "agent-1",
+          ALP_TEST_EXTRA: "from-launch",
         },
       });
 
       await expect(
         readLaunchIdentity(session, {
-          env: [{ name: "PASEO_TEST_EXTRA", value: "from-request" }],
+          env: [{ name: "ALP_TEST_EXTRA", value: "from-request" }],
         }),
       ).resolves.toMatchObject({ id: "agent-1", extra: "from-request" });
     });
@@ -755,11 +755,11 @@ describe("ACPAgentSession terminal tools", () => {
     test("carries the agent's identity into single-string shell commands", async () => {
       const child = createTerminalChildStub();
       const spawn = vi.spyOn(spawnUtils, "spawnProcess").mockReturnValue(child);
-      const session = createSession({ launchEnv: { PASEO_AGENT_ID: "agent-1" } });
+      const session = createSession({ launchEnv: { ALP_AGENT_ID: "agent-1" } });
 
       await session.createTerminal({
         sessionId: "session-1",
-        command: "paseo heartbeat create --every 5m",
+        command: "alp heartbeat create --every 5m",
         cwd: "/repo",
       });
 
@@ -768,7 +768,7 @@ describe("ACPAgentSession terminal tools", () => {
         expect.any(Array),
         expect.objectContaining({
           envOverlay: expect.objectContaining({
-            PASEO_AGENT_ID: "agent-1",
+            ALP_AGENT_ID: "agent-1",
             BASH_ENV: undefined,
           }),
         }),
@@ -806,7 +806,7 @@ describe("ACPAgentSession terminal tools", () => {
 });
 
 describe("mapACPUsage", () => {
-  test("maps ACP usage fields into Paseo usage", () => {
+  test("maps ACP usage fields into Alp usage", () => {
     expect(
       mapACPUsage({
         inputTokens: 11,
@@ -1310,7 +1310,7 @@ describe("ACPAgentSession Zed parity", () => {
             type: "content",
             content: {
               type: "text",
-              text: "Which path should Paseo take?",
+              text: "Which path should Alp take?",
             },
           },
         ],
@@ -1331,7 +1331,7 @@ describe("ACPAgentSession Zed parity", () => {
         detail: {
           type: "plain_text",
           label: "AskUserQuestion",
-          text: "Which path should Paseo take?",
+          text: "Which path should Alp take?",
         },
         actions: [
           { id: "q0_opt_0", label: "Narrow fix", behavior: "allow" },
@@ -2444,7 +2444,7 @@ describe("ACPAgentSession slash commands", () => {
     const session = new ACPAgentSession(
       {
         provider: "claude-acp",
-        cwd: "/tmp/paseo-acp-test",
+        cwd: "/tmp/alp-acp-test",
       },
       {
         provider: "claude-acp",
@@ -2470,7 +2470,7 @@ describe("ACPAgentSession slash commands", () => {
     const session = new ACPAgentSession(
       {
         provider: "claude-acp",
-        cwd: "/tmp/paseo-acp-test",
+        cwd: "/tmp/alp-acp-test",
       },
       {
         provider: "claude-acp",
@@ -2543,9 +2543,9 @@ describe("ACPAgentSession", () => {
     const session = new ACPAgentSession(
       {
         provider: "no-mcp-acp",
-        cwd: "/tmp/paseo-acp-test",
+        cwd: "/tmp/alp-acp-test",
         mcpServers: {
-          paseo: {
+          alp: {
             type: "http",
             url: "http://127.0.0.1:6767/mcp/agents?callerAgentId=agent-1",
           },
@@ -3356,11 +3356,11 @@ describe("ACPAgentSession", () => {
     await connection.initialize({
       protocolVersion: PROTOCOL_VERSION,
       clientCapabilities: {},
-      clientInfo: { name: "Paseo test", version: "dev" },
+      clientInfo: { name: "Alp test", version: "dev" },
     });
     expect(agentConnection.signal.aborted).toBe(false);
     const sessionResponse = await connection.newSession({
-      cwd: "/tmp/paseo-acp-test",
+      cwd: "/tmp/alp-acp-test",
       mcpServers: [],
     });
     const turnFailed = new Promise<Extract<AgentStreamEvent, { type: "turn_failed" }>>(
@@ -3538,7 +3538,7 @@ describe("ACPAgentSession initialization cleanup", () => {
     }
 
     const session = new FailingNewSession(
-      { provider: "copilot", cwd: "/tmp/paseo-acp-test" },
+      { provider: "copilot", cwd: "/tmp/alp-acp-test" },
       {
         provider: "copilot",
         logger: createTestLogger(),
@@ -3574,7 +3574,7 @@ describe("ACPAgentSession initialization cleanup", () => {
     }
 
     const session = new FailingLoadSession(
-      { provider: "cursor", cwd: "/tmp/paseo-acp-test" },
+      { provider: "cursor", cwd: "/tmp/alp-acp-test" },
       {
         provider: "cursor",
         logger: createTestLogger(),
@@ -3922,7 +3922,7 @@ describe("ACP session/load invariant — cwd and mcpServers always passed", () =
 
     // Pass handle through the typed constructor option (no private-field casts).
     const session = new TestSession(
-      { provider: "claude-acp", cwd: "/tmp/paseo-acp-test" },
+      { provider: "claude-acp", cwd: "/tmp/alp-acp-test" },
       {
         provider: "claude-acp",
         logger: createTestLogger(),
@@ -3954,7 +3954,7 @@ describe("ACP session/load invariant — cwd and mcpServers always passed", () =
 
     expect(loadSession).toHaveBeenCalledWith({
       sessionId: "session-1",
-      cwd: "/tmp/paseo-acp-test",
+      cwd: "/tmp/alp-acp-test",
       mcpServers: [],
     });
   });
@@ -4129,7 +4129,7 @@ describe("ACP session/load invariant — cwd and mcpServers always passed", () =
     // Even with supportsMcpServers=false, mcpServers: [] must still be passed
     expect(loadSession).toHaveBeenCalledWith({
       sessionId: "session-1",
-      cwd: "/tmp/paseo-acp-test",
+      cwd: "/tmp/alp-acp-test",
       mcpServers: [],
     });
   });
@@ -4144,7 +4144,7 @@ describe("ACP session/load invariant — cwd and mcpServers always passed", () =
 
     expect(unstableResumeSession).toHaveBeenCalledWith({
       sessionId: "session-1",
-      cwd: "/tmp/paseo-acp-test",
+      cwd: "/tmp/alp-acp-test",
       mcpServers: [],
     });
   });

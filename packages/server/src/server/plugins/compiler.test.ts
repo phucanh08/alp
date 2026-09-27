@@ -83,7 +83,7 @@ async function createSplitPlugin(): Promise<{
 }> {
   // Keep the platform's original spelling (including Windows short names) in symlink
   // targets. Only diagnostic expectations use canonical paths.
-  const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-compiler-"));
+  const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-compiler-"));
   temporaryDirectories.push(directory);
   await Promise.all([
     mkdir(path.join(directory, "client")),
@@ -130,7 +130,7 @@ export default function contribute(server) {
 }
 
 async function createRootAlias(directory: string): Promise<string> {
-  const aliases = await mkdtemp(path.join(tmpdir(), "paseo-plugin-root-alias-"));
+  const aliases = await mkdtemp(path.join(tmpdir(), "alp-plugin-root-alias-"));
   temporaryDirectories.push(aliases);
   const rootAlias = path.join(aliases, "plugin");
   await symlink(directory, rootAlias, process.platform === "win32" ? "junction" : "dir");
@@ -142,8 +142,8 @@ describe("plugin runtime entries", () => {
     "react",
     "react/jsx-runtime",
     "react-native",
-    "@getpaseo/plugin/client",
-    "@getpaseo/plugin/client/ui",
+    "@alp/plugin/client",
+    "@alp/plugin/client/ui",
   ])("rejects %s from server code", async (specifier) => {
     const entries = await createSplitPlugin();
     await writeFile(
@@ -153,25 +153,24 @@ describe("plugin runtime entries", () => {
     await expect(compilePlugin(entries)).rejects.toThrow("client-only module");
   });
 
-  it.each([
-    "@getpaseo/plugin/server",
-    "@getpaseo/plugin/server/provider",
-    "@getpaseo/plugin/server/acp",
-  ])("rejects %s from client code", async (specifier) => {
-    const entries = await createSplitPlugin();
-    await writeFile(
-      entries.client,
-      `import * as value from "${specifier}"; export default function contribute() { return value; }`,
-    );
-    await expect(compilePlugin(entries)).rejects.toThrow("server-only module");
-  });
+  it.each(["@alp/plugin/server", "@alp/plugin/server/provider", "@alp/plugin/server/acp"])(
+    "rejects %s from client code",
+    async (specifier) => {
+      const entries = await createSplitPlugin();
+      await writeFile(
+        entries.client,
+        `import * as value from "${specifier}"; export default function contribute() { return value; }`,
+      );
+      await expect(compilePlugin(entries)).rejects.toThrow("server-only module");
+    },
+  );
 
   it.each([
     "react",
     "node:fs",
     "fs",
-    "@getpaseo/plugin/client",
-    "@getpaseo/plugin/server",
+    "@alp/plugin/client",
+    "@alp/plugin/server",
     "../client/surface",
     "../server/handler",
   ])("rejects %s from shared code", async (specifier) => {
@@ -186,7 +185,7 @@ describe("plugin runtime entries", () => {
   it.each([
     { target: "client", dependency: "react" },
     { target: "server", dependency: "node:fs" },
-    { target: "server", dependency: "@getpaseo/plugin/server/provider" },
+    { target: "server", dependency: "@alp/plugin/server/provider" },
   ] as const)(
     "rejects a shared dependency reaching $dependency in the $target bundle",
     async ({ target, dependency }) => {
@@ -212,10 +211,10 @@ describe("plugin runtime entries", () => {
   );
 
   it.each([
-    'import type { PluginClientContext } from "@getpaseo/plugin/client"; export type Context = PluginClientContext;',
-    'export type { PluginClientContext } from "@getpaseo/plugin/client";',
-    'export type Context = import("@getpaseo/plugin/client").PluginClientContext;',
-    'import { type PluginClientContext } from "@getpaseo/plugin/client"; export type Context = PluginClientContext;',
+    'import type { PluginClientContext } from "@alp/plugin/client"; export type Context = PluginClientContext;',
+    'export type { PluginClientContext } from "@alp/plugin/client";',
+    'export type Context = import("@alp/plugin/client").PluginClientContext;',
+    'import { type PluginClientContext } from "@alp/plugin/client"; export type Context = PluginClientContext;',
     'import type { ComponentType } from "react"; export type Component = ComponentType;',
   ])("rejects runtime-owned types in shared code: %s", async (typeSource) => {
     const entries = await createSplitPlugin();
@@ -326,7 +325,7 @@ export type Value = string;`,
       );
       await writeFile(
         referencedFile,
-        'export type { PluginClientContext } from "@getpaseo/plugin/client";',
+        'export type { PluginClientContext } from "@alp/plugin/client";',
       );
       await writeFile(
         path.join(entries.directory, "shared/labels.ts"),
@@ -377,16 +376,16 @@ export type Value = string;`,
     });
     await writeFile(
       path.join(entries.directory, "shared/types.ts"),
-      'export type { PluginClientContext as Value } from "@getpaseo/plugin/client";',
+      'export type { PluginClientContext as Value } from "@alp/plugin/client";',
     );
     await expect(compilePlugin(entries)).rejects.toThrow("plugin shared");
   });
 
   it.each([
-    { specifier: "@getpaseo/plugin/client", importKind: "import type" },
-    { specifier: "@getpaseo/plugin/server", importKind: "import type" },
-    { specifier: "@getpaseo/plugin/client", importKind: "import" },
-    { specifier: "@getpaseo/plugin/server", importKind: "import" },
+    { specifier: "@alp/plugin/client", importKind: "import type" },
+    { specifier: "@alp/plugin/server", importKind: "import type" },
+    { specifier: "@alp/plugin/client", importKind: "import" },
+    { specifier: "@alp/plugin/server", importKind: "import" },
   ])(
     "rejects transitive declaration dependencies on $specifier through $importKind",
     async ({ specifier, importKind }) => {
@@ -419,7 +418,7 @@ export type Value = string;`,
     const entries = await createSplitPlugin();
     await writeFile(
       path.join(entries.directory, "shared/types.ts"),
-      'export type { PluginClientContext } from "@getpaseo/plugin/client";',
+      'export type { PluginClientContext } from "@alp/plugin/client";',
     );
     await writeFile(
       path.join(entries.directory, "shared/labels.ts"),
@@ -429,12 +428,12 @@ export type Value = string;`,
   });
 
   it.each([
-    "@paseo/plugin",
-    "@getpaseo/plugin/react-native",
-    "@getpaseo/plugin/ui",
-    "@getpaseo/plugin/provider",
-    "@getpaseo/plugin/acp",
-    "@getpaseo/plugin/host",
+    "@alp/plugin",
+    "@alp/plugin/react-native",
+    "@alp/plugin/ui",
+    "@alp/plugin/provider",
+    "@alp/plugin/acp",
+    "@alp/plugin/host",
   ])("rejects retired entry %s", async (specifier) => {
     const entries = await createSplitPlugin();
     await writeFile(
@@ -527,7 +526,7 @@ export default function contribute() { void value; return () => undefined; }`,
   });
 
   it("rejects relative imports that escape the plugin root", async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), "paseo-plugin-compiler-parent-"));
+    const parent = await mkdtemp(path.join(tmpdir(), "alp-plugin-compiler-parent-"));
     temporaryDirectories.push(parent);
     const pluginDirectory = path.join(parent, "plugin");
     const server = path.join(pluginDirectory, "index.server.ts");
@@ -548,7 +547,7 @@ export default function contribute() { void secret; return () => undefined; }`,
 
   it("rejects absolute imports from outside the plugin root", async () => {
     const entries = await createSplitPlugin();
-    const outsideDirectory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-outside-"));
+    const outsideDirectory = await mkdtemp(path.join(tmpdir(), "alp-plugin-outside-"));
     temporaryDirectories.push(outsideDirectory);
     const outside = path.join(outsideDirectory, "secret.ts");
     await writeFile(outside, `export const secret = "outside";`);
@@ -564,7 +563,7 @@ export default function contribute() { void secret; return () => undefined; }`,
   });
 
   it("rejects plugin-authored relative imports that escape into node_modules", async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), "paseo-plugin-node-modules-parent-"));
+    const parent = await mkdtemp(path.join(tmpdir(), "alp-plugin-node-modules-parent-"));
     temporaryDirectories.push(parent);
     const pluginDirectory = path.join(parent, "plugin");
     const server = path.join(pluginDirectory, "index.server.ts");
@@ -781,7 +780,7 @@ export default function contribute() { void handler; return () => undefined; }`,
 
   it("allows linked dependencies to resolve within their own package root", async () => {
     const entries = await createSplitPlugin();
-    const linkedPackage = await mkdtemp(path.join(tmpdir(), "paseo-plugin-linked-dependency-"));
+    const linkedPackage = await mkdtemp(path.join(tmpdir(), "alp-plugin-linked-dependency-"));
     temporaryDirectories.push(linkedPackage);
     await mkdir(path.join(entries.directory, "node_modules"));
     await Promise.all([
@@ -842,7 +841,7 @@ export default function contribute() { void secret; return () => undefined; }`,
 
   it("does not let remembered linked roots hide plugin-local runtime boundaries", async () => {
     const entries = await createSplitPlugin();
-    const linkedPackage = await mkdtemp(path.join(tmpdir(), "paseo-plugin-linked-boundary-"));
+    const linkedPackage = await mkdtemp(path.join(tmpdir(), "alp-plugin-linked-boundary-"));
     temporaryDirectories.push(linkedPackage);
     await mkdir(path.join(entries.directory, "node_modules"));
     await Promise.all([

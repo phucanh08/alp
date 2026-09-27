@@ -2,7 +2,7 @@ appId: com.anhlp.alp
 ---
 - runFlow:
     when:
-      visible: "Open in.*Paseo.*\\?"
+      visible: "Open in.*Alp.*\\?"
     commands:
       - tapOn: "Open"
 

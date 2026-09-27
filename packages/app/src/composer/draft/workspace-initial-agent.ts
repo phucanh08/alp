@@ -1,8 +1,8 @@
 import type {
   CreateAgentRequestOptions,
   CreateWorkspaceRequestOptions,
-} from "@getpaseo/client/internal/daemon-client";
-import type { AgentSessionConfig } from "@getpaseo/protocol/agent-types";
+} from "@alp/client/internal/daemon-client";
+import type { AgentSessionConfig } from "@alp/protocol/agent-types";
 import type { SeatLabelsFor } from "./slp-seat";
 
 export type WorkspaceInitialAgent = NonNullable<CreateWorkspaceRequestOptions["agent"]>;

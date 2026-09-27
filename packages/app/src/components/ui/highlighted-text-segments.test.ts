@@ -64,7 +64,7 @@ describe("findHighlightRanges", () => {
   });
   it("uses the search matcher for typo and scattered-character matches", () => {
     expect(marked("billing", findHighlightRanges("bulling", "billing"))).toBe("[billing]");
-    expect(marked("paseo-babysit", findHighlightRanges("pasbab", "paseo-babysit"))).toBe(
+    expect(marked("alp-babysit", findHighlightRanges("pasbab", "alp-babysit"))).toBe(
       "[pas]eo-[bab]ysit",
     );
   });

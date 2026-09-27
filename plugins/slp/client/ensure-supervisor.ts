@@ -1,4 +1,4 @@
-import type { RpcOutput } from "@getpaseo/plugin";
+import type { RpcOutput } from "@alp/plugin";
 import type { slpSupervisorEnsure } from "../shared/rpc";
 
 type SupervisorTarget = RpcOutput<typeof slpSupervisorEnsure>;

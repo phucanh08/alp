@@ -1,9 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import type {
-  ProjectCheckoutLitePayload,
-  ProjectPlacementPayload,
-} from "@getpaseo/protocol/messages";
+import type { ProjectCheckoutLitePayload, ProjectPlacementPayload } from "@alp/protocol/messages";
 import type { PersistedWorkspaceRecord } from "./workspace-registry.js";
 
 export type PersistedProjectKind = "git" | "non_git";
@@ -47,13 +44,13 @@ export type PersistedWorkspacePlacement = Pick<
   | "branch"
   | "worktreeRoot"
   | "baseBranch"
-  | "isPaseoOwnedWorktree"
+  | "isAlpOwnedWorktree"
   | "mainRepoRoot"
 >;
 
 export type MutableWorkspacePlacement = Pick<
   PersistedWorkspaceRecord,
-  "kind" | "branch" | "worktreeRoot" | "isPaseoOwnedWorktree" | "mainRepoRoot"
+  "kind" | "branch" | "worktreeRoot" | "isAlpOwnedWorktree" | "mainRepoRoot"
 >;
 
 export type InitialWorkspacePlacementInput =
@@ -88,7 +85,7 @@ export function initialWorkspacePlacement(
       branch: input.branch,
       worktreeRoot: input.worktreeRoot,
       baseBranch: input.baseBranch,
-      isPaseoOwnedWorktree: true,
+      isAlpOwnedWorktree: true,
       mainRepoRoot: input.mainRepoRoot,
     };
   }
@@ -101,7 +98,7 @@ export function initialWorkspacePlacement(
     branch,
     worktreeRoot: input.checkout.isGit ? (input.checkout.worktreeRoot ?? input.cwd) : null,
     baseBranch: null,
-    isPaseoOwnedWorktree: input.checkout.isGit && input.checkout.isPaseoOwnedWorktree,
+    isAlpOwnedWorktree: input.checkout.isGit && input.checkout.isAlpOwnedWorktree,
     mainRepoRoot: input.checkout.isGit ? input.checkout.mainRepoRoot : null,
   };
 }
@@ -130,8 +127,8 @@ export function reconcileWorkspacePlacement(input: {
   if (input.workspace.branch !== observed.branch) fields.branch = observed.branch;
   if (input.workspace.worktreeRoot !== observed.worktreeRoot)
     fields.worktreeRoot = observed.worktreeRoot;
-  if (input.workspace.isPaseoOwnedWorktree !== observed.isPaseoOwnedWorktree)
-    fields.isPaseoOwnedWorktree = observed.isPaseoOwnedWorktree;
+  if (input.workspace.isAlpOwnedWorktree !== observed.isAlpOwnedWorktree)
+    fields.isAlpOwnedWorktree = observed.isAlpOwnedWorktree;
   if (input.workspace.mainRepoRoot !== observed.mainRepoRoot)
     fields.mainRepoRoot = observed.mainRepoRoot;
 
@@ -156,7 +153,7 @@ export function checkoutFromPersistedWorkspacePlacement(input: {
       currentBranch: null,
       remoteUrl: null,
       worktreeRoot: null,
-      isPaseoOwnedWorktree: false,
+      isAlpOwnedWorktree: false,
       mainRepoRoot: null,
     };
   }
@@ -167,18 +164,18 @@ export function checkoutFromPersistedWorkspacePlacement(input: {
     remoteUrl: null,
     worktreeRoot: workspace.worktreeRoot ?? input.fallbackWorktreeRoot ?? workspace.cwd,
   };
-  if (workspace.isPaseoOwnedWorktree && workspace.mainRepoRoot) {
+  if (workspace.isAlpOwnedWorktree && workspace.mainRepoRoot) {
     return {
       ...checkout,
       isGit: true,
-      isPaseoOwnedWorktree: true,
+      isAlpOwnedWorktree: true,
       mainRepoRoot: workspace.mainRepoRoot,
     };
   }
   return {
     ...checkout,
     isGit: true,
-    isPaseoOwnedWorktree: false,
+    isAlpOwnedWorktree: false,
     mainRepoRoot: workspace.mainRepoRoot ?? null,
   };
 }
@@ -195,7 +192,7 @@ export function checkoutLiteFromGitSnapshot(
     currentBranch: string | null;
     remoteUrl: string | null;
     repoRoot: string | null;
-    isPaseoOwnedWorktree: boolean;
+    isAlpOwnedWorktree: boolean;
     mainRepoRoot: string | null;
   },
 ): ProjectCheckoutLitePayload {
@@ -206,18 +203,18 @@ export function checkoutLiteFromGitSnapshot(
       currentBranch: null,
       remoteUrl: null,
       worktreeRoot: null,
-      isPaseoOwnedWorktree: false,
+      isAlpOwnedWorktree: false,
       mainRepoRoot: null,
     };
   }
-  if (git.isPaseoOwnedWorktree && git.mainRepoRoot) {
+  if (git.isAlpOwnedWorktree && git.mainRepoRoot) {
     return {
       cwd,
       isGit: true,
       currentBranch: git.currentBranch,
       remoteUrl: git.remoteUrl,
       worktreeRoot: git.repoRoot ?? cwd,
-      isPaseoOwnedWorktree: true,
+      isAlpOwnedWorktree: true,
       mainRepoRoot: git.mainRepoRoot,
     };
   }
@@ -227,7 +224,7 @@ export function checkoutLiteFromGitSnapshot(
     currentBranch: git.currentBranch,
     remoteUrl: git.remoteUrl,
     worktreeRoot: git.repoRoot ?? cwd,
-    isPaseoOwnedWorktree: false,
+    isAlpOwnedWorktree: false,
     mainRepoRoot: git.mainRepoRoot,
   };
 }

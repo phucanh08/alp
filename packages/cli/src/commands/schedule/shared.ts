@@ -13,7 +13,7 @@ import type {
 } from "./types.js";
 import { parseDuration } from "../../utils/duration.js";
 import { resolveProviderAndModel } from "../../utils/provider-model.js";
-import { everyMsToFiveFieldCron } from "@getpaseo/protocol/schedule/cadence";
+import { everyMsToFiveFieldCron } from "@alp/protocol/schedule/cadence";
 
 export interface ScheduleCommandOptions extends CommandOptions {
   host?: string;
@@ -122,9 +122,9 @@ function resolveScheduleTarget(args: {
   }
 
   if (targetValue === "self") {
-    // COMPAT(scheduleSelfTarget): heartbeat creation moved to `paseo heartbeat create`.
+    // COMPAT(scheduleSelfTarget): heartbeat creation moved to `alp heartbeat create`.
     // Added in v0.2.0; remove after 2027-01-17.
-    const currentAgentId = process.env.PASEO_AGENT_ID?.trim();
+    const currentAgentId = process.env.ALP_AGENT_ID?.trim();
     if (!currentAgentId) {
       throw {
         code: "INVALID_TARGET",

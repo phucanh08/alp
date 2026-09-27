@@ -19,7 +19,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** `paseo.plugins` backed by slp-dev's own `skills.get` handler, validated like the daemon does. */
+/** `alp.plugins` backed by slp-dev's own `skills.get` handler, validated like the daemon does. */
 function realSlpDev() {
   let handler: ((input: unknown, context: unknown) => unknown) | undefined;
   contributeSlpDev({
@@ -70,13 +70,13 @@ test("slp addresses slp-dev's skills.get by its contract name", () => {
   expect(SLP_DEV_SKILLS_GET).toBe(slpDevSkillsGet.name);
 });
 
-test("the seat skills root is $PASEO_HOME/slp/seat-skills, and there is none without PASEO_HOME", () => {
-  expect(seatSkillsRoot({ PASEO_HOME: "/srv/alp" }, "/home/u")).toBe("/srv/alp/slp/seat-skills");
-  expect(seatSkillsRoot({ PASEO_HOME: "~/dev-home" }, "/home/u")).toBe(
+test("the seat skills root is $ALP_HOME/slp/seat-skills, and there is none without ALP_HOME", () => {
+  expect(seatSkillsRoot({ ALP_HOME: "/srv/alp" }, "/home/u")).toBe("/srv/alp/slp/seat-skills");
+  expect(seatSkillsRoot({ ALP_HOME: "~/dev-home" }, "/home/u")).toBe(
     "/home/u/dev-home/slp/seat-skills",
   );
   expect(seatSkillsRoot({}, "/home/u")).toBeNull();
-  expect(seatSkillsRoot({ PASEO_HOME: "" }, "/home/u")).toBeNull();
+  expect(seatSkillsRoot({ ALP_HOME: "" }, "/home/u")).toBeNull();
 });
 
 test("the lead seat directory is a Claude local plugin `slp-lead` holding the six lead skills byte for byte", async () => {

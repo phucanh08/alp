@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 
-import { FileTransferOpcode, type FileTransferFrame } from "@getpaseo/protocol/binary-frames/index";
-import { getErrorMessage } from "@getpaseo/protocol/error-utils";
+import { FileTransferOpcode, type FileTransferFrame } from "@alp/protocol/binary-frames/index";
+import { getErrorMessage } from "@alp/protocol/error-utils";
 import type { FileUploadRequest, FileUploadResponse } from "../messages.js";
 
 interface FileUploadStoreOptions {
-  paseoHome: string;
+  alpHome: string;
   staleUploadTimeoutMs?: number;
 }
 
@@ -31,13 +31,13 @@ interface PendingUpload {
 export class FileUploadStore {
   private static readonly defaultStaleUploadTimeoutMs = 10 * 60 * 1000;
 
-  private readonly paseoHome: string;
+  private readonly alpHome: string;
   private readonly staleUploadTimeoutMs: number;
   private readonly defaultSource = {};
   private readonly pending = new Map<object, Map<string, PendingUpload>>();
 
   constructor(options: FileUploadStoreOptions) {
-    this.paseoHome = options.paseoHome;
+    this.alpHome = options.alpHome;
     this.staleUploadTimeoutMs =
       options.staleUploadTimeoutMs ?? FileUploadStore.defaultStaleUploadTimeoutMs;
   }
@@ -51,7 +51,7 @@ export class FileUploadStore {
     if (existingUpload) void this.cancel(existingUpload).catch(() => {});
     const fileName = sanitizeFileName(request.fileName);
     const id = `upload_${randomUUID()}`;
-    const uploadDir = join(this.paseoHome, "uploads", id);
+    const uploadDir = join(this.alpHome, "uploads", id);
     const upload: PendingUpload = {
       requestId: request.requestId,
       id,
@@ -123,7 +123,7 @@ export class FileUploadStore {
   }
 
   private async startWriting(upload: PendingUpload): Promise<void> {
-    await mkdir(join(this.paseoHome, "uploads", upload.id), { recursive: true });
+    await mkdir(join(this.alpHome, "uploads", upload.id), { recursive: true });
     await writeFile(upload.path, new Uint8Array());
     upload.started = true;
   }
@@ -196,7 +196,7 @@ export class FileUploadStore {
   }
 
   private async removeUploadDirectory(upload: PendingUpload): Promise<void> {
-    await rm(join(this.paseoHome, "uploads", upload.id), { recursive: true, force: true });
+    await rm(join(this.alpHome, "uploads", upload.id), { recursive: true, force: true });
   }
 }
 

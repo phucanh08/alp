@@ -6,13 +6,13 @@ import { fileURLToPath } from "node:url";
 import { Terminal as HeadlessTerminal, type IBufferCell, type IBufferLine } from "@xterm/headless";
 import { expect, test } from "vitest";
 
-import type { TerminalCell, TerminalState } from "@getpaseo/protocol/messages";
-import { renderTerminalSnapshotToAnsi } from "@getpaseo/protocol/terminal-snapshot";
-import type { TerminalStreamEvent } from "@getpaseo/client/internal/daemon-client";
+import type { TerminalCell, TerminalState } from "@alp/protocol/messages";
+import { renderTerminalSnapshotToAnsi } from "@alp/protocol/terminal-snapshot";
+import type { TerminalStreamEvent } from "@alp/client/internal/daemon-client";
 import { DaemonClient } from "../test-utils/daemon-client.js";
-import { createTestPaseoDaemon } from "../test-utils/paseo-daemon.js";
+import { createTestAlpDaemon } from "../test-utils/alp-daemon.js";
 
-const BYTE_DONE_MARKER = "__PASEO_BYTE_PACKAGE_LOCK_DONE__";
+const BYTE_DONE_MARKER = "__ALP_BYTE_PACKAGE_LOCK_DONE__";
 const BYTE_TEST_SIZE = { rows: 24, cols: 100 };
 
 interface PackageLockTerminalCwd {
@@ -25,7 +25,7 @@ interface CreatedTerminal {
 }
 
 test("byte-stream headless terminal matches daemon state after high-output attach and restore", async () => {
-  const daemon = await createTestPaseoDaemon();
+  const daemon = await createTestAlpDaemon();
   const client = new DaemonClient({
     url: `ws://127.0.0.1:${daemon.port}/ws`,
     appVersion: "0.1.96",
@@ -219,7 +219,7 @@ function waitForTerminalStreamEvent<TType extends TerminalStreamEvent["type"]>(
 }
 
 async function createPackageLockTerminalCwd(): Promise<PackageLockTerminalCwd> {
-  const cwd = await mkdtemp(path.join(tmpdir(), "paseo-byte-package-lock-"));
+  const cwd = await mkdtemp(path.join(tmpdir(), "alp-byte-package-lock-"));
   return {
     path: cwd,
     gatePath: path.join(cwd, "start-package-lock-output"),

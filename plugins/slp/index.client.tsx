@@ -1,4 +1,4 @@
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext } from "@alp/plugin/client";
 import { ensureSupervisorOnLoad } from "./client/ensure-supervisor";
 import {
   gateSupervisor,
@@ -19,7 +19,7 @@ export default function contribute(client: PluginClientContext) {
   // Supervisor. Unload rejects a pending ensure; that rejection is not worth a log.
   const stopGate = gateSupervisor({
     readEnabled: () => client.rpc(slpSettingsRpc.read, {}).then(isSlpEnabled),
-    watch: (refresh) => watchSlpSettings(client.paseo, refresh),
+    watch: (refresh) => watchSlpSettings(client.alp, refresh),
     show: () =>
       client.addSidebarItem({
         id: "supervisor",

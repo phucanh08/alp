@@ -1,21 +1,21 @@
 import type { AgentStreamEvent, AgentTimelineItem } from "../../agent/agent-sdk-types.js";
 import { z } from "zod";
-import { CreateAgentRequestMessageSchema } from "@getpaseo/protocol/messages";
+import { CreateAgentRequestMessageSchema } from "@alp/protocol/messages";
 import type {
   PluginHookAgent,
   PluginHookContext,
   PluginLifecycleRegistration,
-} from "@getpaseo/plugin/server";
-import { PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
-import { ProviderPaseoToolsPolicySchema } from "@getpaseo/protocol/provider-config";
+} from "@alp/plugin/server";
+import { PARENT_AGENT_ID_LABEL } from "@alp/protocol/agent-labels";
+import { ProviderAlpToolsPolicySchema } from "@alp/protocol/provider-config";
 import type {
   PluginBeforeRequests,
   PluginHookWorkspace,
   PluginLifecycleEvents,
-} from "@getpaseo/plugin/server";
-import { WorkspaceCreateRequestSchema } from "@getpaseo/protocol/messages";
+} from "@alp/plugin/server";
+import { WorkspaceCreateRequestSchema } from "@alp/protocol/messages";
 import type { PersistedWorkspaceRecord } from "../../workspace-registry.js";
-import { mergePaseoToolPolicies } from "../../agent/paseo-tool-policy.js";
+import { mergeAlpToolPolicies } from "../../agent/alp-tool-policy.js";
 
 export const lifecycleEventNames = [
   "agent.created",
@@ -33,7 +33,7 @@ const beforeSchemas = {
   "agent.create": CreateAgentRequestMessageSchema.pick({ config: true, env: true })
     .extend({
       labels: z.record(z.string(), z.string()).optional(),
-      paseoTools: ProviderPaseoToolsPolicySchema.strict().optional(),
+      alpTools: ProviderAlpToolsPolicySchema.strict().optional(),
     })
     .strict(),
   "agent.session_open": z
@@ -165,13 +165,13 @@ export function validateBeforeResult<Name extends keyof PluginBeforeRequests>(
     }
     // Hooks written before labels joined the request return `{ config, env }`; omission keeps them.
     const labels = next.labels ?? previous.labels;
-    // A hook can only add to the tools earlier hooks disabled; omitting paseoTools keeps them.
-    const paseoTools = mergePaseoToolPolicies(previous.paseoTools, next.paseoTools);
-    if (labels !== next.labels || paseoTools !== next.paseoTools) {
+    // A hook can only add to the tools earlier hooks disabled; omitting alpTools keeps them.
+    const alpTools = mergeAlpToolPolicies(previous.alpTools, next.alpTools);
+    if (labels !== next.labels || alpTools !== next.alpTools) {
       return validateBeforeRequest(name, {
         ...next,
         ...(labels !== undefined ? { labels } : {}),
-        ...(paseoTools !== undefined ? { paseoTools } : {}),
+        ...(alpTools !== undefined ? { alpTools } : {}),
       });
     }
   }
@@ -214,26 +214,24 @@ export class PluginHookHandlers implements PluginLifecycleRegistration {
     kind: "event" | "before",
     name: string,
     input: unknown,
-    paseo: PluginHookContext["paseo"],
+    alp: PluginHookContext["alp"],
   ): Promise<unknown> {
     const controller = new AbortController();
     this.active.set(id, controller);
     try {
       if (kind === "before") {
         if (
-          !beforeHookNames.includes(
-            name as keyof import("@getpaseo/plugin/server").PluginBeforeRequests,
-          )
+          !beforeHookNames.includes(name as keyof import("@alp/plugin/server").PluginBeforeRequests)
         ) {
           throw new Error(`Unknown before hook: ${name}`);
         }
-        const hookName = name as keyof import("@getpaseo/plugin/server").PluginBeforeRequests;
+        const hookName = name as keyof import("@alp/plugin/server").PluginBeforeRequests;
         let request = validateBeforeRequest(hookName, input);
         for (const handler of this.transforms.get(name) ?? []) {
           controller.signal.throwIfAborted();
           const result = await handler(
             { request: structuredClone(request) },
-            { paseo, signal: controller.signal },
+            { alp, signal: controller.signal },
           );
           if (result !== undefined) {
             request = validateBeforeResult(hookName, request, result);
@@ -244,7 +242,7 @@ export class PluginHookHandlers implements PluginLifecycleRegistration {
       for (const handler of this.events.get(name) ?? []) {
         controller.signal.throwIfAborted();
         try {
-          await handler(structuredClone(input), { paseo, signal: controller.signal });
+          await handler(structuredClone(input), { alp, signal: controller.signal });
         } catch (error) {
           console.error(`Lifecycle hook ${name} failed`, error);
         }

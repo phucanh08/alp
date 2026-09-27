@@ -1,7 +1,7 @@
 {
-  "name": "@getpaseo/protocol",
+  "name": "@alp/protocol",
   "version": "1.0.0",
-  "description": "Paseo shared protocol schemas and wire types",
+  "description": "Alp shared protocol schemas and wire types",
   "files": [
     "dist",
     "!dist/**/*.map",

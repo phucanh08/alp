@@ -10,8 +10,8 @@ import type {
   CreateScheduleOptions,
   DaemonClient,
   UpdateScheduleOptions,
-} from "@getpaseo/client/internal/daemon-client";
-import type { ScheduleSummary } from "@getpaseo/protocol/schedule/types";
+} from "@alp/client/internal/daemon-client";
+import type { ScheduleSummary } from "@alp/protocol/schedule/types";
 import type {
   AggregatedSchedule,
   FetchAggregatedSchedulesState,

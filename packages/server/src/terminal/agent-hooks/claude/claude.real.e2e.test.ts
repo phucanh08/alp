@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import * as pty from "node-pty";
 import { afterEach, describe, expect, it } from "vitest";
-import { createTerminal, resolvePaseoCliBinDir, type TerminalSession } from "../../terminal.js";
+import { createTerminal, resolveAlpCliBinDir, type TerminalSession } from "../../terminal.js";
 import { installRegisteredAgentHooks } from "../provider-registry.js";
 
 interface ActivityPost {
@@ -144,11 +144,11 @@ describe.skipIf(!claudeAvailability.available)(
       const recorder = await createActivityRecorder();
       const terminalId = "real-claude-terminal";
       const token = "real-claude-token";
-      const configDir = createTempDir("paseo-real-claude-config-");
-      const cwd = createTempDir("paseo-real-claude-cwd-");
-      const paseoCliBinDir = resolvePaseoCliBinDir();
-      if (!paseoCliBinDir) {
-        throw new Error("Could not resolve paseo CLI bin directory");
+      const configDir = createTempDir("alp-real-claude-config-");
+      const cwd = createTempDir("alp-real-claude-cwd-");
+      const alpCliBinDir = resolveAlpCliBinDir();
+      if (!alpCliBinDir) {
+        throw new Error("Could not resolve alp CLI bin directory");
       }
 
       installRegisteredAgentHooks({ configDir });
@@ -164,10 +164,10 @@ describe.skipIf(!claudeAvailability.available)(
             cwd,
             env: {
               ...process.env,
-              PASEO_TERMINAL_ID: terminalId,
-              PASEO_ACTIVITY_TOKEN: token,
-              PASEO_TERMINAL_ACTIVITY_URL: recorder.url,
-              PATH: [paseoCliBinDir, process.env.PATH].filter(isString).join(delimiter),
+              ALP_TERMINAL_ID: terminalId,
+              ALP_ACTIVITY_TOKEN: token,
+              ALP_TERMINAL_ACTIVITY_URL: recorder.url,
+              PATH: [alpCliBinDir, process.env.PATH].filter(isString).join(delimiter),
             },
           },
         );
@@ -196,10 +196,10 @@ describe.skipIf(!claudeAvailability.available)(
         if (post.state === "idle") session?.setActivity("idle");
         if (post.state === "needs-input") session?.setActivity("attention");
       });
-      const configDir = createTempDir("paseo-real-claude-interrupt-config-");
-      const paseoCliBinDir = resolvePaseoCliBinDir();
-      if (!paseoCliBinDir) {
-        throw new Error("Could not resolve paseo CLI bin directory");
+      const configDir = createTempDir("alp-real-claude-interrupt-config-");
+      const alpCliBinDir = resolveAlpCliBinDir();
+      if (!alpCliBinDir) {
+        throw new Error("Could not resolve alp CLI bin directory");
       }
 
       installRegisteredAgentHooks({ configDir });
@@ -213,10 +213,10 @@ describe.skipIf(!claudeAvailability.available)(
           args: ["--settings", join(configDir, "settings.json")],
           env: {
             ...process.env,
-            PASEO_TERMINAL_ID: terminalId,
-            PASEO_ACTIVITY_TOKEN: token,
-            PASEO_TERMINAL_ACTIVITY_URL: recorder.url,
-            PATH: [paseoCliBinDir, process.env.PATH].filter(isString).join(delimiter),
+            ALP_TERMINAL_ID: terminalId,
+            ALP_ACTIVITY_TOKEN: token,
+            ALP_TERMINAL_ACTIVITY_URL: recorder.url,
+            PATH: [alpCliBinDir, process.env.PATH].filter(isString).join(delimiter),
           },
         });
 

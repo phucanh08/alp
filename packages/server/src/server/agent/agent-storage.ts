@@ -9,8 +9,8 @@ import { toStoredAgentRecord } from "./agent-projections.js";
 import type { ManagedAgent } from "./agent-manager.js";
 import type { AgentSessionConfig } from "./agent-sdk-types.js";
 import { AgentOwnerSchema, daemonExecutionKey, type DaemonAgentOwner } from "./agent-owner.js";
-import { ProviderPaseoToolsPolicySchema } from "@getpaseo/protocol/provider-config";
-import { mergePaseoToolPolicies } from "./paseo-tool-policy.js";
+import { ProviderAlpToolsPolicySchema } from "@alp/protocol/provider-config";
+import { mergeAlpToolPolicies } from "./alp-tool-policy.js";
 
 const SERIALIZABLE_CONFIG_SCHEMA = z
   .object({
@@ -78,11 +78,11 @@ const STORED_AGENT_SCHEMA = z.object({
   archivedAt: z.string().nullable().optional(),
   owner: AgentOwnerSchema.optional(),
   /**
-   * Paseo tools policy frozen when the agent was created: the provider policy merged with what
+   * Alp tools policy frozen when the agent was created: the provider policy merged with what
    * `agent.create` hooks disabled. Absent on records written before it existed; those follow the
    * provider policy alone.
    */
-  paseoToolPolicy: ProviderPaseoToolsPolicySchema.optional(),
+  alpToolPolicy: ProviderAlpToolsPolicySchema.optional(),
 });
 
 export type SerializableAgentConfig = Pick<
@@ -268,12 +268,9 @@ export class AgentStorage {
         record.archivedAt = existing.archivedAt;
       }
       // A snapshot never loosens the stored tool policy, even from a runtime that lost it.
-      const paseoToolPolicy = mergePaseoToolPolicies(
-        existing?.paseoToolPolicy,
-        record.paseoToolPolicy,
-      );
-      if (paseoToolPolicy) {
-        record.paseoToolPolicy = paseoToolPolicy;
+      const alpToolPolicy = mergeAlpToolPolicies(existing?.alpToolPolicy, record.alpToolPolicy);
+      if (alpToolPolicy) {
+        record.alpToolPolicy = alpToolPolicy;
       }
       return record;
     });

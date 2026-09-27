@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CreateAgentRequestOptions } from "@getpaseo/client/internal/daemon-client";
+import type { CreateAgentRequestOptions } from "@alp/client/internal/daemon-client";
 import type { SlpSettings } from "@/plugins/slp-settings/use-slp-settings";
 import { type DraftSeat, resolveDraftSeatLabels } from "./slp-seat";
 import {

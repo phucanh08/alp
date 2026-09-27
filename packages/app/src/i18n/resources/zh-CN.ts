@@ -759,7 +759,7 @@ export const zhCN: TranslationResources = {
       },
       routes: {
         public: "反向代理",
-        paseo: "Memorable",
+        alp: "Memorable",
         direct: "直接地址",
       },
       states: {
@@ -1878,7 +1878,7 @@ export const zhCN: TranslationResources = {
       one: "使用了 {{count}} 个其他工具",
       other: "使用了 {{count}} 个其他工具",
     },
-    paseoCalls: {
+    alpCalls: {
       one: "调用了 alp {{count}} 次",
       other: "调用了 alp {{count}} 次",
     },
@@ -2616,13 +2616,13 @@ export const zhCN: TranslationResources = {
         savedToast: "Project 已更新",
       },
       readFailures: {
-        invalidTitle: "无法解析 paseo.json",
+        invalidTitle: "无法解析 alp.json",
         invalidDescription: "修复磁盘上的文件，然后重新加载。",
         missingTitle: "这个 Host 没有这个 Project",
         missingSingleHost: "所选 Host 没有这个 Project 的记录。",
-        transportTitle: "无法加载 paseo.json",
+        transportTitle: "无法加载 alp.json",
         transportFallback: "Host 没有响应。",
-        failedTitle: "无法加载 paseo.json",
+        failedTitle: "无法加载 alp.json",
         failedDescription: "重新加载以重试。",
       },
       worktree: {
@@ -2632,7 +2632,7 @@ export const zhCN: TranslationResources = {
         docsTooltip: "查看命令可用的环境变量和更多细节",
         setup: "Setup",
         setupAccessibility: "Worktree setup 命令",
-        uncommittedTitle: "提交 paseo.json 更改",
+        uncommittedTitle: "提交 alp.json 更改",
         uncommittedDescription: "新工作树使用所选基础分支中的设置脚本。",
         teardown: "Teardown",
         teardownAccessibility: "Worktree teardown 命令",
@@ -2656,7 +2656,7 @@ export const zhCN: TranslationResources = {
         newScript: "新建 script",
         editScript: "编辑 {{name}}",
         runAsService: "作为服务运行",
-        serviceHint: "alp 会监管该进程，并通过 $PASEO_PORT 分配端口",
+        serviceHint: "alp 会监管该进程，并通过 $ALP_PORT 分配端口",
         actions: {
           add: "添加 script",
           edit: "编辑",
@@ -2675,8 +2675,8 @@ export const zhCN: TranslationResources = {
       },
       writeFailures: {
         staleTitle: "磁盘上的配置已变更",
-        staleDescription: "保存前请重新加载最新的 paseo.json。",
-        failedTitle: "无法保存 paseo.json",
+        staleDescription: "保存前请重新加载最新的 alp.json。",
+        failedTitle: "无法保存 alp.json",
         failedDescription: "重试，或从磁盘重新加载最新版本。",
       },
       actions: {

@@ -58,7 +58,7 @@ describe("Hub trigger deployment discovery", () => {
 });
 
 async function temporaryDirectory(): Promise<string> {
-  const directory = await mkdtemp(path.join(tmpdir(), "paseo-hub-triggers-"));
+  const directory = await mkdtemp(path.join(tmpdir(), "alp-hub-triggers-"));
   temporaryDirectories.push(directory);
   return directory;
 }

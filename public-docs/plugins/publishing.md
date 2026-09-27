@@ -55,7 +55,7 @@ The scaffold includes this `files` list in `package.json`:
 ```json
 {
   "files": [
-    "paseo-plugin.json",
+    "alp-plugin.json",
     "index.client.ts",
     "index.client.tsx",
     "index.server.ts",
@@ -151,7 +151,7 @@ alp plugin install git:https://git.example.com/acme/alp-review.git
 ```
 
 If your plugin has runtime npm dependencies, commit `package-lock.json` and add a preparation
-command to `paseo-plugin.json`:
+command to `alp-plugin.json`:
 
 ```json
 {

@@ -8,7 +8,7 @@ category: Providers
 
 # Custom providers
 
-Everything beyond the [supported providers](/docs/supported-providers) lives under `agents.providers` in `$PASEO_HOME/config.json` (`~/.alp/config.json` by default). You can:
+Everything beyond the [supported providers](/docs/supported-providers) lives under `agents.providers` in `$ALP_HOME/config.json` (`~/.alp/config.json` by default). You can:
 
 - **Extend** a first-class provider to point at a different API (Z.AI, Alibaba/Qwen, a proxy, a self-hosted endpoint).
 - **Add profiles**, multiple entries against the same underlying provider with different credentials or curated model lists.
@@ -192,4 +192,4 @@ Any agent that speaks [ACP](https://agentclientprotocol.com) over stdio can be a
 
 ## Full reference
 
-For the complete field reference (`extends`, `label`, `command`, `env`, `models`, `additionalModels`, `disallowedTools`, `paseoTools`, `enabled`, `order`), model and thinking-option schemas, and deeper examples for each plan, see [docs/custom-providers.md](https://github.com/phucanh08/alp/blob/main/docs/custom-providers.md) on GitHub. See [Limit alp tools by provider](/docs/mcp#limit-alp-tools-by-provider) for `paseoTools` configuration.
+For the complete field reference (`extends`, `label`, `command`, `env`, `models`, `additionalModels`, `disallowedTools`, `alpTools`, `enabled`, `order`), model and thinking-option schemas, and deeper examples for each plan, see [docs/custom-providers.md](https://github.com/phucanh08/alp/blob/main/docs/custom-providers.md) on GitHub. See [Limit alp tools by provider](/docs/mcp#limit-alp-tools-by-provider) for `alpTools` configuration.

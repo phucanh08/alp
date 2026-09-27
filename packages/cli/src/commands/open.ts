@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { spawnProcess } from "@getpaseo/server/process";
-import { buildAgentDeepLink, type AgentDeepLinkTarget } from "@getpaseo/protocol/agent-deep-link";
+import { spawnProcess } from "@alp/server/process";
+import { buildAgentDeepLink, type AgentDeepLinkTarget } from "@alp/protocol/agent-deep-link";
 
 function findDesktopApp(): string | null {
   if (process.platform === "darwin") {
@@ -53,7 +53,7 @@ function cleanEnvForDesktopLaunch(): NodeJS.ProcessEnv {
   // desktop app would start as a bare Node process instead of Electron.
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.ELECTRON_NO_ATTACH_CONSOLE;
-  delete env.PASEO_NODE_ENV;
+  delete env.ALP_NODE_ENV;
   return env;
 }
 
@@ -66,7 +66,7 @@ function spawnDetached(command: string, args: string[]): void {
 }
 
 function launchDesktop(args: string[]): void {
-  if (process.env.PASEO_DESKTOP_CLI === "1") {
+  if (process.env.ALP_DESKTOP_CLI === "1") {
     throw new Error("Cannot open alp Desktop while running in desktop CLI passthrough mode.");
   }
 

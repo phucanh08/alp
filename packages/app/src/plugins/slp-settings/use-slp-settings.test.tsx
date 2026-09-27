@@ -5,7 +5,7 @@ import React, { type ReactNode } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import type { DaemonClient } from "@alp/client/internal/daemon-client";
 import { createFakeSlpHost, type FakeSettingsRead, type FakeSlpHost } from "./fakes";
 
 const { hostClients } = vi.hoisted(() => ({ hostClients: new Map<string, DaemonClient>() }));
@@ -29,7 +29,7 @@ vi.mock("../evaluate", () => ({
   }),
 }));
 vi.mock("../client-runtime", () => ({
-  createPluginClientRuntime: () => ({ paseo: { dispose: async () => undefined } }),
+  createPluginClientRuntime: () => ({ alp: { dispose: async () => undefined } }),
 }));
 vi.mock("@/runtime/host-runtime", () => ({
   useHostRuntimeClient: (serverId: string) => hostClients.get(serverId) ?? null,

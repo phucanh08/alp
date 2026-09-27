@@ -74,12 +74,12 @@ if (args.help) {
 }
 
 const relayEndpoint =
-  args["relay-endpoint"] ?? process.env.PASEO_RELAY_ENDPOINT ?? "relay-alp.anhlp.com:443";
+  args["relay-endpoint"] ?? process.env.ALP_RELAY_ENDPOINT ?? "relay-alp.anhlp.com:443";
 const baseUrl = String(
-  args["base-url"] ?? process.env.PASEO_APP_URL ?? "https://app-alp.anhlp.com",
+  args["base-url"] ?? process.env.ALP_APP_URL ?? "https://app-alp.anhlp.com",
 ).replace(/\/$/, "");
-const timeoutMs = Number(args["timeout-ms"] ?? process.env.PASEO_PROVE_TIMEOUT_MS ?? 120_000);
-const stabilityMs = Number(args["stability-ms"] ?? process.env.PASEO_PROVE_STABILITY_MS ?? 30_000);
+const timeoutMs = Number(args["timeout-ms"] ?? process.env.ALP_PROVE_TIMEOUT_MS ?? 120_000);
+const stabilityMs = Number(args["stability-ms"] ?? process.env.ALP_PROVE_STABILITY_MS ?? 30_000);
 const relayUseTls =
   args["relay-use-tls"] === undefined
     ? String(relayEndpoint).endsWith(":443")
@@ -125,13 +125,13 @@ function findFreePort() {
   });
 }
 
-// The CLI must only ever see the temp home: drop every inherited PASEO_* setting so a stray
-// PASEO_HOME, PASEO_HOST or PASEO_LISTEN cannot point it at a real daemon.
+// The CLI must only ever see the temp home: drop every inherited ALP_* setting so a stray
+// ALP_HOME, ALP_HOST or ALP_LISTEN cannot point it at a real daemon.
 function cliEnvironment(home) {
   const env = Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !key.startsWith("PASEO_")),
+    Object.entries(process.env).filter(([key]) => !key.startsWith("ALP_")),
   );
-  env.PASEO_HOME = home;
+  env.ALP_HOME = home;
   return env;
 }
 

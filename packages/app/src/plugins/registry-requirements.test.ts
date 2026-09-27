@@ -1,7 +1,7 @@
 import { createPluginHosts } from "./hosts";
 import { afterEach, expect, it } from "vitest";
-import { createPaseoApi } from "@getpaseo/client";
-import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import { createAlpApi } from "@alp/client";
+import { DaemonClient } from "@alp/client/internal/daemon-client";
 import { PluginRegistry } from "./registry";
 
 const client = new DaemonClient({ url: "ws://unused.test", clientId: "plugin-requirements-test" });
@@ -23,7 +23,7 @@ function registry(version: string) {
           },
           installation.lifetime.signal,
         ),
-        paseo: createPaseoApi(client),
+        alp: createAlpApi(client),
         rpc: async () => {
           throw new Error("No RPC in this plugin");
         },
@@ -53,7 +53,7 @@ it("checks the app version before creating a runtime or evaluating plugin code",
     [
       {
         id: "example",
-        requirements: { paseo: ">=0.9.0" },
+        requirements: { alp: ">=0.9.0" },
         clientBundle: "throw new Error('executed')",
       },
     ],
@@ -62,7 +62,7 @@ it("checks the app version before creating a runtime or evaluating plugin code",
   expect(starts()).toBe(0);
   expect(result.getSnapshot()).toEqual([]);
   expect(result.getEvaluationError("host", "example")).toBe(
-    'Plugin "example" requires Paseo >=0.9.0. Your app is 0.8.0. Use a compatible plugin version or update the app.',
+    'Plugin "example" requires Alp >=0.9.0. Your app is 0.8.0. Use a compatible plugin version or update the app.',
   );
 });
 
@@ -77,8 +77,8 @@ it("rejects catalogs without requirements from pre-0.8 daemons", () => {
 
 it("unloads on a requirement-only edit and recovers after correction", () => {
   const { result, starts, cleanups } = registry("0.8.0");
-  const install = (paseo: string) =>
-    result.installCatalog("host", [{ id: "example", clientBundle, requirements: { paseo } }], {
+  const install = (alp: string) =>
+    result.installCatalog("host", [{ id: "example", clientBundle, requirements: { alp } }], {
       client,
     });
   install("^0.8.0");
@@ -89,7 +89,7 @@ it("unloads on a requirement-only edit and recovers after correction", () => {
   expect(cleanups()).toBe(1);
   expect(starts()).toBe(1);
   expect(result.getSnapshot()).toEqual([]);
-  expect(result.getEvaluationError("host", "example")).toContain("requires Paseo >=0.9.0");
+  expect(result.getEvaluationError("host", "example")).toContain("requires Alp >=0.9.0");
   install(">=0.8.0");
   expect(starts()).toBe(2);
   expect(result.getSnapshot().map(({ id }) => id)).toEqual(["example"]);

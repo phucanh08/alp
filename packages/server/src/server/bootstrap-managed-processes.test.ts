@@ -10,7 +10,7 @@ import type {
   ManagedProcessRegistry,
   ManagedProcessReapResult,
 } from "./managed-processes/managed-processes.js";
-import { createPaseoDaemon, type PaseoDaemonConfig } from "./bootstrap.js";
+import { createAlpDaemon, type AlpDaemonConfig } from "./bootstrap.js";
 import { createTestAgentClients } from "./test-utils/fake-agent-client.js";
 
 let tempRoot: string | null = null;
@@ -27,25 +27,25 @@ afterEach(async () => {
 
 describe("daemon managed process bootstrap", () => {
   test("reaps stale helper process records during daemon bootstrap", async () => {
-    tempRoot = await mkdtemp(path.join(os.tmpdir(), "paseo-managed-bootstrap-"));
-    staticDir = await mkdtemp(path.join(os.tmpdir(), "paseo-static-"));
-    const paseoHome = path.join(tempRoot, ".paseo");
+    tempRoot = await mkdtemp(path.join(os.tmpdir(), "alp-managed-bootstrap-"));
+    staticDir = await mkdtemp(path.join(os.tmpdir(), "alp-static-"));
+    const alpHome = path.join(tempRoot, ".alp");
     const managedProcesses = new FakeManagedProcesses();
-    const daemon = await createPaseoDaemon(
+    const daemon = await createAlpDaemon(
       {
         listen: "127.0.0.1:0",
-        paseoHome,
+        alpHome,
         corsAllowedOrigins: [],
         hostnames: true,
         mcpEnabled: false,
         staticDir,
         mcpDebug: false,
         agentClients: createTestAgentClients(),
-        agentStoragePath: path.join(paseoHome, "agents"),
+        agentStoragePath: path.join(alpHome, "agents"),
         relayEnabled: false,
         appBaseUrl: "https://app-alp.anhlp.com",
         managedProcesses,
-      } as PaseoDaemonConfig,
+      } as AlpDaemonConfig,
       pino({ level: "silent" }),
     );
 

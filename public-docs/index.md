@@ -53,7 +53,7 @@ The daemon starts locally, then asks whether to enable the end-to-end encrypted 
 
 The daemon can also serve the browser web app itself, so you can use the full UI without the hosted app. See [Self-hosting the web UI](/docs/web-ui).
 
-Configuration and local state live under `PASEO_HOME` (defaults to `~/.alp`).
+Configuration and local state live under `ALP_HOME` (defaults to `~/.alp`).
 
 ## Docker
 
@@ -62,8 +62,8 @@ For servers, dev boxes, NAS devices, or homelab hosts: alp doesn't publish a pre
 ```bash
 docker run -d --name alp \
   -p 6767:6767 \
-  -e PASEO_PASSWORD=change-me \
-  -v "$PWD/alp-home:/home/paseo" \
+  -e ALP_PASSWORD=change-me \
+  -v "$PWD/alp-home:/home/alp" \
   -v "$PWD:/workspace" \
   alp:latest
 ```

@@ -15,7 +15,7 @@ You need [alp installed and running](/docs), Node.js, and a Slack workspace wher
 ## 1. Start Hub
 
 ```sh
-npx @getpaseo/hub
+npx @alp/hub
 ```
 
 Open the address it prints, normally <http://localhost:3000>, and create the operator account Hub asks for.
@@ -93,4 +93,4 @@ Hub starts the agent on your daemon and posts its reply in the Slack thread. The
 - [Workflows](/docs/hub/workflows) — routing, prompts, and provider replies.
 - [Hub security](/docs/hub/security) — read this before widening `from_users` or giving an agent GitHub authority.
 
-Hub keeps its local state in your user data directory, normally `~/.local/share/paseo-hub`. [Self-hosting](/docs/hub/self-hosting) covers deployment and advanced configuration when you outgrow the local run.
+Hub keeps its local state in your user data directory, normally `~/.local/share/alp-hub`. [Self-hosting](/docs/hub/self-hosting) covers deployment and advanced configuration when you outgrow the local run.

@@ -9,8 +9,8 @@ import type { AgentManager, ManagedAgent } from "./agent-manager.js";
 import type { AgentStorage } from "./agent-storage.js";
 import { ensureAgentLoaded } from "./agent-loading.js";
 import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
-import { getParentAgentIdFromLabels } from "@getpaseo/protocol/agent-labels";
-import type { ActiveTurnBehavior } from "@getpaseo/protocol/messages";
+import { getParentAgentIdFromLabels } from "@alp/protocol/agent-labels";
+import type { ActiveTurnBehavior } from "@alp/protocol/messages";
 
 export type AgentUnarchiveController = Pick<AgentManager, "notifyAgentState" | "unarchiveSnapshot">;
 
@@ -207,15 +207,15 @@ export async function unarchiveAgentState(
 }
 
 /**
- * Wrap a body in <paseo-system>…</paseo-system> so the receiving agent
+ * Wrap a body in <alp-system>…</alp-system> so the receiving agent
  * recognizes the prompt as system-injected context — not a user turn.
  * Used by chat mentions, schedule fires, and notify-on-finish.
  */
 export function formatSystemNotificationPrompt(reason: string): string {
-  return `<paseo-system>\n${reason}\n</paseo-system>`;
+  return `<alp-system>\n${reason}\n</alp-system>`;
 }
 
-const SYSTEM_ENVELOPE_PATTERN = /^<paseo-system>\n[\s\S]*\n<\/paseo-system>$/;
+const SYSTEM_ENVELOPE_PATTERN = /^<alp-system>\n[\s\S]*\n<\/alp-system>$/;
 
 export function isSystemInjectedEnvelope(text: string): boolean {
   return SYSTEM_ENVELOPE_PATTERN.test(text);

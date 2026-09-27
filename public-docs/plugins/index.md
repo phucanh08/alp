@@ -42,7 +42,7 @@ greeting through an RPC.
 
 ```text
 workspace-plugin/
-  paseo-plugin.json      # plugin ID and supported alp versions
+  alp-plugin.json      # plugin ID and supported alp versions
   index.client.tsx       # runs in the alp app
   index.server.ts        # runs in a daemon subprocess
   client/greeting.tsx    # the surface component
@@ -57,7 +57,7 @@ Each entry default-exports one function that registers contributions and returns
 function. `index.client.tsx` registers the surface and the sidebar item that opens it:
 
 ```tsx
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext } from "@alp/plugin/client";
 import { GreetingSurface } from "./client/greeting";
 
 export default function contribute(client: PluginClientContext) {
@@ -75,7 +75,7 @@ export default function contribute(client: PluginClientContext) {
 `index.server.ts` registers the handler for the contract in `shared/greeting.ts`:
 
 ```ts
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginServerContext } from "@alp/plugin/server";
 import { createGreeting } from "./server/greeting";
 import { greetingRpc } from "./shared/greeting";
 
@@ -119,7 +119,7 @@ Or install the directory from the app:
 
 1. Open **Settings → Plugins** on the target host.
 2. Paste `/absolute/path/to/workspace-plugin` into **Plugin source**.
-3. Select **Install plugin**. The app uses the plugin ID from `paseo-plugin.json`.
+3. Select **Install plugin**. The app uses the plugin ID from `alp-plugin.json`.
 
 The source field also accepts Git repositories, npm packages, and plugin subdirectories. See
 [Plugin sources](/docs/plugins/reference#plugin-sources) for the accepted syntax and resolution
@@ -142,7 +142,7 @@ daemon-side output, including load errors.
 A workspace panel opens as a tab next to agents, terminals, and files. Create `client/overview.tsx`:
 
 ```tsx
-import { type PluginWorkspacePanelProps, useWorkspace } from "@getpaseo/plugin/client";
+import { type PluginWorkspacePanelProps, useWorkspace } from "@alp/plugin/client";
 import { useMemo } from "react";
 import { Text, View } from "react-native";
 
@@ -281,7 +281,7 @@ alp plugin logs workspace-plugin
 alp plugin logs workspace-plugin --json
 ```
 
-The tail includes `[paseo]` loading, ready, stopping, and stopped entries, plus compilation and load
+The tail includes `[alp]` loading, ready, stopping, and stopped entries, plus compilation and load
 failures, and it survives reloads and crashes. Client-side output stays in the app. See
 [Debug backend output](/docs/plugins/reference#debug-backend-output) for retention and what not to
 log.
@@ -295,5 +295,5 @@ log.
   modules, hosts, and the CLI.
 - [Migrate a plugin to runtime entries](/docs/plugins/migration): move a plugin written against the
   single `index.ts` entry, step by step.
-- [TypeScript SDK](/docs/sdk): the workspace, agent, provider, and config API available as `paseo`
+- [TypeScript SDK](/docs/sdk): the workspace, agent, provider, and config API available as `alp`
   in client and server code.

@@ -8,7 +8,7 @@ import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { UserComposerAttachment } from "@/attachments/types";
 import type { ForgeSearchClient } from "@/git/use-forge-search-query";
-import type { ForgeSearchItem, ForgeSearchResponse } from "@getpaseo/protocol/messages";
+import type { ForgeSearchItem, ForgeSearchResponse } from "@alp/protocol/messages";
 import { useComposerForgeAutoAttach } from "./forge-auto-attach";
 
 type ForgeSearchPayload = ForgeSearchResponse["payload"];
@@ -57,7 +57,7 @@ const gitlabMr73: ForgeSearchItem = {
   state: "opened",
   body: null,
   labels: [],
-  projectPath: "acme/paseo",
+  projectPath: "acme/alp",
   baseRefName: "main",
   headRefName: "feature",
 };
@@ -67,7 +67,7 @@ const giteaIssue27: ForgeSearchItem = {
   kind: "issue",
   number: 27,
   title: "Attach Gitea issue",
-  url: "https://gitea.example.com/acme/paseo/issues/27",
+  url: "https://gitea.example.com/acme/alp/issues/27",
   state: "open",
   body: null,
   labels: [],
@@ -225,13 +225,13 @@ describe("useComposerForgeAutoAttach", () => {
     const { result } = renderHook(
       () =>
         useHarness(client, {
-          remote: "git@gitea.example.com:acme/paseo.git",
+          remote: "git@gitea.example.com:acme/alp.git",
         }),
       { wrapper: createWrapper() },
     );
 
     act(() => {
-      result.current.setText("See https://gitea.example.com/acme/paseo/issues/27");
+      result.current.setText("See https://gitea.example.com/acme/alp/issues/27");
     });
     await flushDebounce();
 

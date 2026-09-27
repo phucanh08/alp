@@ -1,13 +1,13 @@
 import path from "node:path";
 import type { Command } from "commander";
 import { isCancel, password as passwordPrompt } from "@clack/prompts";
-import { hashDaemonPassword } from "@getpaseo/server/auth";
+import { hashDaemonPassword } from "@alp/server/auth";
 import {
   readPersistedConfig,
   savePersistedConfig,
   type PersistedConfig,
-} from "@getpaseo/server/configuration";
-import { resolvePaseoHome } from "@getpaseo/server/daemon-control";
+} from "@alp/server/configuration";
+import { resolveAlpHome } from "@alp/server/daemon-control";
 import type {
   CommandError,
   CommandOptions,
@@ -81,9 +81,9 @@ export async function setDaemonPasswordInConfig(
   newPassword: string,
   options: SetPasswordOptions = {},
 ): Promise<SetPasswordResult> {
-  const paseoHome = resolvePaseoHome({ PASEO_HOME: options.home });
-  const configPath = path.join(paseoHome, CONFIG_FILENAME);
-  const persisted = readPersistedConfig(paseoHome);
+  const alpHome = resolveAlpHome({ ALP_HOME: options.home });
+  const configPath = path.join(alpHome, CONFIG_FILENAME);
+  const persisted = readPersistedConfig(alpHome);
   const nextConfig: PersistedConfig = {
     ...persisted,
     daemon: {
@@ -95,13 +95,13 @@ export async function setDaemonPasswordInConfig(
     },
   };
 
-  savePersistedConfig(paseoHome, nextConfig);
+  savePersistedConfig(alpHome, nextConfig);
 
   return {
     action: "password_set",
     configPath,
-    restartCommand: `alp daemon restart --home ${JSON.stringify(paseoHome)}`,
-    message: `Password written to ${configPath}\nRestart the daemon for the change to take effect.\nRun: alp daemon restart --home ${JSON.stringify(paseoHome)}`,
+    restartCommand: `alp daemon restart --home ${JSON.stringify(alpHome)}`,
+    message: `Password written to ${configPath}\nRestart the daemon for the change to take effect.\nRun: alp daemon restart --home ${JSON.stringify(alpHome)}`,
   };
 }
 

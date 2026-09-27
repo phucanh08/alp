@@ -1,7 +1,7 @@
-import type { PaseoAgentHandle, PaseoClient } from "@getpaseo/client";
+import type { AlpAgentHandle, AlpClient } from "@alp/client";
 
-export async function reviewInParallel(client: PaseoClient, cwd: string): Promise<string[]> {
-  const agents: PaseoAgentHandle[] = [];
+export async function reviewInParallel(client: AlpClient, cwd: string): Promise<string[]> {
+  const agents: AlpAgentHandle[] = [];
 
   try {
     agents.push(
