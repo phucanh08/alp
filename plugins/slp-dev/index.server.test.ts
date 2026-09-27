@@ -36,11 +36,10 @@ function seatFile(seat: string): Promise<string> {
   return readFile(path.join(pluginDirectory, "agents", `${seat}.md`), "utf8");
 }
 
-test("slp-dev.seat.get answers the lead seat with its rule file and all seven skills", async () => {
+test("slp-dev.seat.get answers the lead seat with its rule file and all six skills", async () => {
   expect(await seatGet({ seat: "lead" })).toEqual({
     definition: await seatFile("lead"),
     skills: [
-      "ask-alp",
       "bug-loop",
       "goal-griller",
       "prompt-leverage",
@@ -51,10 +50,10 @@ test("slp-dev.seat.get answers the lead seat with its rule file and all seven sk
   });
 });
 
-test("slp-dev.seat.get answers the peer seat with its rule file and four skills", async () => {
+test("slp-dev.seat.get answers the peer seat with its rule file and three skills", async () => {
   expect(await seatGet({ seat: "peer" })).toEqual({
     definition: await seatFile("peer"),
-    skills: ["xia", "smart-commits", "bug-loop", "ask-alp"],
+    skills: ["xia", "smart-commits", "bug-loop"],
   });
 });
 

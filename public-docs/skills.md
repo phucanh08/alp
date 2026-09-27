@@ -56,12 +56,11 @@ The advisor returns a second opinion without editing files.
 
 ## SLP skills
 
-alp bundles seven more skills for the SLP (Supervisor / Lead / Peer) workflow, installed by
+alp bundles six more skills for the SLP (Supervisor / Lead / Peer) workflow, installed by
 default on a fresh host through the same mechanism as the table above.
 
 | Skill                      | Use it to                                                                         |
 | -------------------------- | --------------------------------------------------------------------------------- |
-| `/ask-alp`                 | Look up which seat you're in, which phase you're at, and which skill fits next.   |
 | `/bug-loop`                | Diagnose a bug or performance regression with a disciplined red-before-fix loop.  |
 | `/goal-griller`            | Turn a vague idea into a verifiable Task Contract before splitting up work.       |
 | `/prompt-leverage`         | Turn a raw prompt into an execution-ready prompt or handoff brief.                |

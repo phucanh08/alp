@@ -6,7 +6,7 @@
   "mode": "project",
   "installedAt": "2026-09-25T02:07:55Z",
   "agents": ["agents/lead.md", "agents/peer.md", "agents/supervisor.md"],
-  "skills": ["skills/ask-alp", "skills/goal-griller", "skills/xia", "skills/sequence-execution-plan", "skills/prompt-leverage", "skills/smart-commits", "skills/bug-loop"],
+  "skills": ["skills/goal-griller", "skills/xia", "skills/sequence-execution-plan", "skills/prompt-leverage", "skills/smart-commits", "skills/bug-loop"],
   "files": ["slp-supervisor.settings.json"],
   "settings": { "created": true, "keys": ["env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "teammateMode"] },
   "claudeMd": { "created": false, "sha256": "" }
