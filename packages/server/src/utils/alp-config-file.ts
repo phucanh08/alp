@@ -7,6 +7,7 @@ import {
   type AlpConfigRevision,
   type ProjectConfigRpcError,
 } from "@alp/protocol/alp-config-schema";
+import { reportLegacyNameUse } from "../server/rename-migration/legacy-names.js";
 export {
   AlpConfigRevisionSchema,
   ProjectConfigRpcErrorSchema,
@@ -15,6 +16,12 @@ export {
 } from "@alp/protocol/alp-config-schema";
 
 export const ALP_CONFIG_FILE_NAME = "alp.json";
+// alp-rename-keep-start
+// COMPAT(paseo-repo-config): added after v1.0.0 on 2026-09-27; remove after 2027-03-27.
+// A repo set up for alp 1.0.0 has paseo.json. It is read while alp.json is absent and never
+// written: the first edit from the app creates alp.json beside it.
+const LEGACY_CONFIG_FILE_NAME = "paseo.json";
+// alp-rename-keep-end
 
 export type ReadAlpConfigForEditResult =
   | { ok: true; config: AlpConfigRaw | null; revision: AlpConfigRevision | null }
@@ -48,10 +55,20 @@ export function statAlpConfigPath(repoRoot: string): AlpConfigRevision | null {
 
 export function readAlpConfigJson(repoRoot: string): unknown {
   const configPath = resolveAlpConfigPath(repoRoot);
-  if (!existsSync(configPath)) {
+  if (existsSync(configPath)) {
+    return JSON.parse(readFileSync(configPath, "utf8"));
+  }
+  const legacyPath = join(repoRoot, LEGACY_CONFIG_FILE_NAME);
+  if (!existsSync(legacyPath)) {
     return null;
   }
-  return JSON.parse(readFileSync(configPath, "utf8"));
+  reportLegacyNameUse({
+    kind: "repo-config",
+    legacy: LEGACY_CONFIG_FILE_NAME,
+    current: ALP_CONFIG_FILE_NAME,
+    path: legacyPath,
+  });
+  return JSON.parse(readFileSync(legacyPath, "utf8"));
 }
 
 export function readAlpConfigForEdit(repoRoot: string): ReadAlpConfigForEditResult {
