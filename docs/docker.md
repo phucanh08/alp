@@ -1,14 +1,13 @@
 # Running alp in Docker
 
-alp publishes a container image for running the daemon on a server, VM, NAS,
-or homelab box. The image also serves the bundled browser web UI, so one
-container gives you both the daemon API and a self-hosted UI.
-
-The image source lives in [`docker/`](../docker/).
+alp doesn't publish a prebuilt container image yet. Build one yourself from the image source in
+[`docker/`](../docker/) and run the daemon on a server, VM, NAS, or homelab box. The image also
+serves the bundled browser web UI, so one container gives you both the daemon API and a self-hosted
+UI.
 
 ## How it works
 
-The official image:
+The image:
 
 - builds `@alp/server` and `@alp/cli` from source-built workspace tarballs
 - runs the daemon as the non-root `alp` user
@@ -26,13 +25,21 @@ Host-side CLI commands select the container explicitly, for example `alp project
 
 ## Quick Start
 
+Build the image once from the repo checkout:
+
+```bash
+docker build -f docker/base/Dockerfile -t alp:local .
+```
+
+Then run it:
+
 ```bash
 docker run -d --name alp \
   -p 6767:6767 \
   -e ALP_PASSWORD=change-me \
   -v "$PWD/alp-home:/home/alp" \
   -v "$PWD:/workspace" \
-  ghcr.io/getpaseo/paseo:latest
+  alp:local
 ```
 
 Then open:
@@ -54,12 +61,12 @@ $EDITOR docker-compose.yml
 docker compose up -d
 ```
 
-Minimal example:
+Minimal example, using the `alp:local` tag from [Quick Start](#quick-start):
 
 ```yaml
 services:
   alp:
-    image: ghcr.io/getpaseo/paseo:latest
+    image: alp:local
     restart: unless-stopped
     ports:
       - "6767:6767"
@@ -76,10 +83,11 @@ The base image does not preinstall Claude Code, Codex, OpenCode, Copilot, Pi, or
 other agent CLIs. That keeps the default image small and avoids coupling alp
 releases to third-party agent release cycles.
 
-Create a child image for the agents you use:
+Create a child image for the agents you use, on top of the `alp:local` tag from
+[Quick Start](#quick-start):
 
 ```Dockerfile
-FROM ghcr.io/getpaseo/paseo:latest
+FROM alp:local
 
 USER root
 RUN npm install -g @openai/codex @anthropic-ai/claude-code opencode-ai
@@ -191,11 +199,8 @@ See [SECURITY.md](../SECURITY.md) for the daemon trust model.
 
 ## Building Locally
 
-```bash
-docker build -f docker/base/Dockerfile -t alp:local .
-```
-
-To assert the source tree version while building:
+The [Quick Start](#quick-start) tag is untagged with a version. To assert the source tree version
+while building:
 
 ```bash
 docker build \
@@ -206,10 +211,10 @@ docker build \
 ```
 
 The Docker workflow builds the image on pull requests and on `main` as a
-non-publishing check. Stable `vX.Y.Z` tag pushes publish
-`ghcr.io/getpaseo/paseo:X.Y.Z` and `ghcr.io/getpaseo/paseo:latest`. Beta tags
-publish only the exact prerelease tag, such as
-`ghcr.io/getpaseo/paseo:0.1.102-beta.1`, and do not update `latest`.
+non-publishing check. Nothing has published a tagged release from it yet, but a stable `vX.Y.Z`
+tag push publishes `ghcr.io/phucanh08/alp:X.Y.Z` and `ghcr.io/phucanh08/alp:latest`, and a beta tag
+publishes only the exact prerelease tag, such as `ghcr.io/phucanh08/alp:0.1.102-beta.1`, without
+updating `latest`.
 
 To replace a Docker image in place without rebuilding desktop, APK, or EAS
 mobile release artifacts, dispatch the Docker workflow manually instead of
