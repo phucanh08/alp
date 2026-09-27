@@ -76,9 +76,10 @@ manifests and prerelease matching.
 Plugins written for upstream Paseo load without edits. `COMPAT(paseo-plugin-manifest)` in
 `packages/server/src/server/plugins/manifest.ts` reads `paseo-plugin.json` when a directory has no
 `alp-plugin.json`. `COMPAT(getpaseo-sdk)` in `plugin-sdk-specifiers.ts` compiles `@getpaseo/plugin`
-and its subpaths as `@alp/plugin`, with the same boundary checks. A manifest that declares
-`requirements.paseo` is still rejected; rename the key to `requirements.alp`. Both shims go when
-upstream-authored plugins ship `alp-plugin.json` and `@alp/plugin`.
+and its subpaths as `@alp/plugin`, with the same boundary checks. Only a `paseo-plugin.json` may
+declare `requirements.paseo`; the daemon checks that range against `UPSTREAM_BASE_VERSION` in
+`manifest.ts`, the upstream release alp is built on, so bump it when an upstream sync moves the base.
+Both shims go when upstream-authored plugins ship `alp-plugin.json` and `@alp/plugin`.
 
 <!-- alp-rename-keep-end -->
 

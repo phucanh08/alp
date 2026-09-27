@@ -17,9 +17,8 @@ import {
 } from "@alp/plugin/server/provider";
 import type { PluginLogEntry } from "@alp/protocol/messages";
 import { compilePlugin } from "./compiler.js";
-import { readPluginManifest } from "./manifest.js";
+import { assertPluginManifestCompatibility, readPluginManifest } from "./manifest.js";
 import type { PluginRequirements } from "@alp/protocol/messages";
-import { assertPluginCompatibility } from "@alp/protocol/plugin-requirements";
 import type {
   PluginProcessMessage,
   PluginProcessRequest,
@@ -335,7 +334,7 @@ export class PluginRuntime {
   async validatePlugin(configuredPath: string): Promise<void> {
     const directory = path.resolve(configuredPath);
     const manifest = await readPluginManifest(directory);
-    assertPluginCompatibility({ ...manifest, version: this.daemonVersion, runtime: "daemon" });
+    assertPluginManifestCompatibility(manifest, this.daemonVersion);
     const entryPaths = await resolveEntryPaths(directory);
     await compilePlugin(entryPaths);
   }
@@ -554,7 +553,7 @@ export class PluginRuntime {
   ): Promise<LoadedPlugin> {
     const directory = path.resolve(configuredPath);
     const manifest = await readPluginManifest(directory);
-    assertPluginCompatibility({ ...manifest, version: this.daemonVersion, runtime: "daemon" });
+    assertPluginManifestCompatibility(manifest, this.daemonVersion);
     const entryPaths = await resolveEntryPaths(directory);
     const bundles = await compilePlugin(entryPaths);
     const serverBundle = bundles.serverBundle;

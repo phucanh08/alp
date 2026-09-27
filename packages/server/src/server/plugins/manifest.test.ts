@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import pino from "pino";
 import { pluginSkillsInstallable, readPluginManifest, resolvePluginSkillsDir } from "./manifest.js";
+import { PluginRuntime } from "./runtime.js";
 
 const directories: string[] = [];
 const examplesDirectory = fileURLToPath(
@@ -61,6 +63,42 @@ describe("plugin manifest", () => {
     await writeFile(path.join(directory, "alp-plugin.json"), JSON.stringify({ id: "fork" }));
 
     await expect(readPluginManifest(directory)).resolves.toEqual({ id: "fork" });
+  });
+
+  describe("a plugin written for upstream Paseo", () => {
+    async function createUpstreamPlugin(manifestFile: string, range: string): Promise<string> {
+      const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-upstream-"));
+      directories.push(directory);
+      await writeFile(
+        path.join(directory, manifestFile),
+        JSON.stringify({ id: "upstream", requirements: { paseo: range } }),
+      );
+      await writeFile(
+        path.join(directory, "index.server.ts"),
+        `import type { PluginServerContext } from "@getpaseo/plugin/server";
+export default function contribute(context: PluginServerContext) { return () => void context; }`,
+      );
+      return directory;
+    }
+
+    function validate(directory: string): Promise<void> {
+      return new PluginRuntime(pino({ level: "silent" }), "1.0.0").validatePlugin(directory);
+    }
+
+    it("loads when requirements.paseo matches the upstream base", async () => {
+      const directory = await createUpstreamPlugin("paseo-plugin.json", ">=0.9.1 <0.10.0");
+      await expect(validate(directory)).resolves.toBeUndefined();
+    });
+
+    it("rejects requirements.paseo that excludes the upstream base", async () => {
+      const directory = await createUpstreamPlugin("paseo-plugin.json", ">=0.10.0");
+      await expect(validate(directory)).rejects.toThrow(/>=0\.10\.0.*0\.9\.2/);
+    });
+
+    it("rejects requirements.paseo in alp-plugin.json", async () => {
+      const directory = await createUpstreamPlugin("alp-plugin.json", ">=0.9.1 <0.10.0");
+      await expect(validate(directory)).rejects.toThrow(/Unrecognized key.*paseo/);
+    });
   });
   // alp-rename-keep-end
 

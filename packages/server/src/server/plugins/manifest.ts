@@ -2,13 +2,20 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { PluginIdSchema, PluginRequirementsSchema } from "@alp/protocol/messages";
-import { validatePluginRequirements } from "@alp/protocol/plugin-requirements";
+import {
+  assertPluginCompatibility,
+  validatePluginRequirements,
+} from "@alp/protocol/plugin-requirements";
+import { getErrorMessage } from "@alp/protocol/error-utils";
 
 const MANIFEST_FILENAME = "alp-plugin.json";
 // alp-rename-keep-start
 // COMPAT(paseo-plugin-manifest): added in v1.0.0, remove after 2027-03-27 once plugins written
-// for upstream Paseo ship alp-plugin.json.
+// for upstream Paseo ship alp-plugin.json. Only this file may carry requirements.paseo.
 const UPSTREAM_MANIFEST_FILENAME = "paseo-plugin.json";
+// The upstream Paseo release this alp is built on; requirements.paseo is checked against it.
+// Bump it whenever scripts/sync-upstream.mjs merges a newer upstream release.
+export const UPSTREAM_BASE_VERSION = "0.9.2";
 // alp-rename-keep-end
 const PluginBuildCommandSchema = z
   .array(z.string().refine((argument) => argument.trim().length > 0))
@@ -49,20 +56,79 @@ const PluginManifestSchema = z
   })
   .strict();
 
-export type PluginManifest = z.infer<typeof PluginManifestSchema>;
+// alp-rename-keep-start
+const UpstreamPluginManifestSchema = PluginManifestSchema.extend({
+  requirements: PluginRequirementsSchema.extend({ paseo: z.string().optional() })
+    .strict()
+    .optional(),
+}).strict();
+
+export type PluginManifest = z.infer<typeof PluginManifestSchema> & {
+  /** COMPAT(paseo-plugin-manifest): requirements.paseo from a paseo-plugin.json. */
+  paseoRequirement?: string;
+};
+// alp-rename-keep-end
 
 export async function readPluginManifest(directory: string): Promise<PluginManifest> {
-  const manifestPath = await resolveManifestPath(directory);
-  const manifest = PluginManifestSchema.parse(JSON.parse(await readFile(manifestPath, "utf8")));
+  const { manifestPath, upstream } = await resolveManifestPath(directory);
+  const raw: unknown = JSON.parse(await readFile(manifestPath, "utf8"));
+  const manifest = upstream ? parseUpstreamManifest(raw) : PluginManifestSchema.parse(raw);
   validatePluginRequirements(manifest.requirements);
   return manifest;
 }
 
-async function resolveManifestPath(directory: string): Promise<string> {
+// alp-rename-keep-start
+function parseUpstreamManifest(raw: unknown): PluginManifest {
+  const { requirements, ...manifest } = UpstreamPluginManifestSchema.parse(raw);
+  if (!requirements) return manifest;
+  const { paseo, ...alpRequirements } = requirements;
+  return {
+    ...manifest,
+    ...(Object.keys(alpRequirements).length > 0 ? { requirements: alpRequirements } : {}),
+    ...(paseo !== undefined ? { paseoRequirement: paseo } : {}),
+  };
+}
+// alp-rename-keep-end
+
+// alp-rename-keep-start
+/**
+ * Throws when this daemon cannot run the plugin. A requirements.paseo range from a
+ * paseo-plugin.json is checked against UPSTREAM_BASE_VERSION instead of the alp version.
+ */
+export function assertPluginManifestCompatibility(
+  manifest: PluginManifest,
+  daemonVersion: string | null,
+): void {
+  const range = manifest.paseoRequirement;
+  if (range === undefined || manifest.requirements?.alp !== undefined) {
+    assertPluginCompatibility({ ...manifest, version: daemonVersion, runtime: "daemon" });
+  }
+  if (range === undefined) return;
+  try {
+    assertPluginCompatibility({
+      id: manifest.id,
+      requirements: { alp: range },
+      version: UPSTREAM_BASE_VERSION,
+      runtime: "daemon",
+    });
+  } catch (error) {
+    throw new Error(
+      `paseo-plugin.json requirements.paseo is checked against upstream Paseo ${UPSTREAM_BASE_VERSION}, the base of this alp: ${getErrorMessage(error)}`,
+      { cause: error },
+    );
+  }
+}
+// alp-rename-keep-end
+
+async function resolveManifestPath(
+  directory: string,
+): Promise<{ manifestPath: string; upstream: boolean }> {
   const manifestPath = path.join(directory, MANIFEST_FILENAME);
-  if (await isFile(manifestPath)) return manifestPath;
+  if (await isFile(manifestPath)) return { manifestPath, upstream: false };
   const upstreamManifestPath = path.join(directory, UPSTREAM_MANIFEST_FILENAME);
-  if (await isFile(upstreamManifestPath)) return upstreamManifestPath;
+  if (await isFile(upstreamManifestPath)) {
+    return { manifestPath: upstreamManifestPath, upstream: true };
+  }
   throw new Error(`Plugin manifest is missing: ${manifestPath}`);
 }
 
