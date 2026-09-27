@@ -98,6 +98,7 @@ import { CLIENT_CAPS } from "@alp/protocol/client-capabilities";
 
 import type { BrowserToolsBroker } from "./browser-tools/broker.js";
 import type { DaemonRuntimeConfig } from "./session/daemon/daemon-session.js";
+import { DAEMON_NPM_SELF_UPDATE_ENABLED } from "./session/daemon/daemon-self-updater.js";
 import { DirectorySyncService } from "./directory-sync/index.js";
 import { OWNER_PERMISSIONS, type DaemonPermission } from "./authorization/index.js";
 import type { WorkspaceLabelService } from "./workspace-labels/index.js";
@@ -1769,7 +1770,9 @@ export class VoiceAssistantWebSocketServer {
         // COMPAT(daemonDiagnostics): added in v0.1.100, remove gate after 2026-12-25 once daemon floor >= v0.1.100.
         daemonDiagnostics: true,
         // COMPAT(daemonSelfUpdate): added in v0.1.93, remove gate after 2026-12-13.
-        daemonSelfUpdate: this.daemonRuntimeConfig?.desktopManaged !== true,
+        // alp: keep DAEMON_NPM_SELF_UPDATE_ENABLED here when the COMPAT gate goes; the fork publishes no npm CLI.
+        daemonSelfUpdate:
+          DAEMON_NPM_SELF_UPDATE_ENABLED && this.daemonRuntimeConfig?.desktopManaged !== true,
         // COMPAT(agentForkContext): added in v0.1.102, remove gate after 2026-12-28.
         agentForkContext: true,
         // COMPAT(agentForkContextCursor): added in v0.1.108, remove gate after 2027-01-14.

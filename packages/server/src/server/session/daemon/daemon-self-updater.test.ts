@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   DaemonSelfUpdateInProgressError,
   DaemonSelfUpdater,
+  defaultDaemonSelfUpdateRuntime,
   type DaemonSelfUpdateRuntime,
   type DaemonSelfUpdatePhase,
 } from "./daemon-self-updater.js";
@@ -50,9 +51,11 @@ function createRuntime(input: {
   currentServerPackageRoot?: string | null;
   installResult?: CommandResult;
   calls?: RuntimeCall[];
+  npmSelfUpdateEnabled?: boolean;
 }): DaemonSelfUpdateRuntime {
   const calls = input.calls ?? [];
   return {
+    npmSelfUpdateEnabled: input.npmSelfUpdateEnabled ?? true,
     npm: {
       async inspect() {
         calls.push("inspect");
@@ -110,6 +113,28 @@ describe("DaemonSelfUpdater", () => {
     });
     expect(phases).toEqual([]);
     expect(calls).toEqual([]);
+  });
+
+  test("ships with npm self-update turned off", () => {
+    expect(defaultDaemonSelfUpdateRuntime.npmSelfUpdateEnabled).toBe(false);
+  });
+
+  test("refuses npm self-update without touching npm when it is turned off", async () => {
+    const calls: RuntimeCall[] = [];
+    const runtime = createRuntime({
+      calls,
+      npmSelfUpdateEnabled: false,
+      inspections: [npmGlobalAlpInstall("0.1.15"), npmGlobalAlpInstall("0.1.96")],
+    });
+
+    const { result, phases, logger } = await runUpdate({ runtime });
+
+    const error =
+      "alp is not published to npm, so this daemon cannot update itself. Update alp on the host the way you installed it.";
+    expect(result).toEqual({ success: false, error, newVersion: null });
+    expect(phases).toEqual([]);
+    expect(calls).toEqual([]);
+    expect(logger.warnings).toEqual([{ obj: {}, msg: error }]);
   });
 
   test("updates a daemon that is running from the npm global cli install", async () => {
@@ -204,6 +229,7 @@ describe("DaemonSelfUpdater", () => {
       installStartedResolve = resolve;
     });
     const runtime: DaemonSelfUpdateRuntime = {
+      npmSelfUpdateEnabled: true,
       npm: {
         async inspect() {
           calls.push("inspect");
