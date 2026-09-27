@@ -71,6 +71,17 @@ Declare the supported alp range and keep it current when adopting newer APIs. Se
 [requirements contract](../public-docs/plugins/reference.md#requirements), including legacy
 manifests and prerelease matching.
 
+<!-- alp-rename-keep-start: upstream names this paragraph maps from -->
+
+Plugins written for upstream Paseo load without edits. `COMPAT(paseo-plugin-manifest)` in
+`packages/server/src/server/plugins/manifest.ts` reads `paseo-plugin.json` when a directory has no
+`alp-plugin.json`. `COMPAT(getpaseo-sdk)` in `plugin-sdk-specifiers.ts` compiles `@getpaseo/plugin`
+and its subpaths as `@alp/plugin`, with the same boundary checks. A manifest that declares
+`requirements.paseo` is still rejected; rename the key to `requirements.alp`. Both shims go when
+upstream-authored plugins ship `alp-plugin.json` and `@alp/plugin`.
+
+<!-- alp-rename-keep-end -->
+
 The config key is the runtime plugin ID. The manifest ID is the default selected during install;
 `--id` overrides it. Existing configuration is not renamed when the manifest changes, and the
 runtime does not compare the two IDs. The same directory can be installed under several config
