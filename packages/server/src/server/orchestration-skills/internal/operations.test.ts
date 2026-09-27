@@ -145,9 +145,13 @@ describe("getSkillsStatus", () => {
 
   it("reports legacy skill directories left on disk as installed", async () => {
     await writeCurrentBundle(sandbox.targets.sourceDir);
-    await writeOnDiskSkill(sandbox.targets.agentsDir, "alp-chat", { "SKILL.md": "chat-old" });
+    // alp-rename-keep-start
+    await writeOnDiskSkill(sandbox.targets.agentsDir, "paseo-chat", { "SKILL.md": "chat-old" });
+    // alp-rename-keep-end
 
-    expect((await getSkillsStatus(sandbox.targets, ALL_SKILLS)).installed).toEqual(["alp-chat"]);
+    // alp-rename-keep-start
+    expect((await getSkillsStatus(sandbox.targets, ALL_SKILLS)).installed).toEqual(["paseo-chat"]);
+    // alp-rename-keep-end
   });
 
   it("returns not-installed when only user-personal skill dirs exist (the live bug)", async () => {
@@ -249,12 +253,14 @@ describe("getSkillsStatus", () => {
     await writeCurrentBundle(sandbox.targets.sourceDir);
     await writeOnDiskSkillToAllTargets(sandbox.targets, "alp", { "SKILL.md": "alp-v1" });
     await writeOnDiskSkillToAllTargets(sandbox.targets, "alp-loop", { "SKILL.md": "loop-v1" });
-    await writeOnDiskSkill(sandbox.targets.agentsDir, "alp-chat", { "SKILL.md": "chat-old" });
+    // alp-rename-keep-start
+    await writeOnDiskSkill(sandbox.targets.agentsDir, "paseo-chat", { "SKILL.md": "chat-old" });
+    // alp-rename-keep-end
 
     const status = await getSkillsStatus(sandbox.targets, ALL_SKILLS);
 
     expect(status.state).toBe("drift");
-    expect(status.ops).toEqual([{ kind: "delete", name: "alp-chat" }]);
+    expect(status.ops).toEqual([{ kind: "delete", name: "paseo-chat" }]); // alp-rename-keep
   });
 
   it("emits add + update + delete ops sorted by name when state is mixed", async () => {
@@ -262,15 +268,17 @@ describe("getSkillsStatus", () => {
     await writeOnDiskSkill(sandbox.targets.agentsDir, "alp", { "SKILL.md": "stale" });
     await writeOnDiskSkill(sandbox.targets.claudeDir, "alp", { "SKILL.md": "alp-v1" });
     await writeOnDiskSkill(sandbox.targets.codexDir, "alp", { "SKILL.md": "alp-v1" });
-    await writeOnDiskSkill(sandbox.targets.agentsDir, "alp-chat", { "SKILL.md": "chat-old" });
+    // alp-rename-keep-start
+    await writeOnDiskSkill(sandbox.targets.agentsDir, "paseo-chat", { "SKILL.md": "chat-old" });
+    // alp-rename-keep-end
 
     const status = await getSkillsStatus(sandbox.targets, ALL_SKILLS);
 
     expect(status.state).toBe("drift");
     expect(status.ops).toEqual([
       { kind: "update", name: "alp" },
-      { kind: "delete", name: "alp-chat" },
       { kind: "add", name: "alp-loop" },
+      { kind: "delete", name: "paseo-chat" }, // alp-rename-keep
     ]);
   });
 });
@@ -375,13 +383,17 @@ describe("custom skill selection", () => {
   });
 
   it("still deletes legacy skill names that are not selectable", async () => {
-    await writeOnDiskSkillToAllTargets(sandbox.targets, "alp-orchestrator", {
+    // alp-rename-keep-start
+    await writeOnDiskSkillToAllTargets(sandbox.targets, "paseo-orchestrator", {
+      // alp-rename-keep-end
       "SKILL.md": "orchestrator-old",
     });
 
     await installSkills(sandbox.targets, only("alp"));
 
-    expect(await installedIn(sandbox.targets, "alp-orchestrator")).toEqual([false, false, false]);
+    // alp-rename-keep-start
+    expect(await installedIn(sandbox.targets, "paseo-orchestrator")).toEqual([false, false, false]);
+    // alp-rename-keep-end
   });
 });
 
@@ -425,17 +437,23 @@ describe("installSkills / updateSkills", () => {
   it("repairs missing and edited skills without deleting a legacy directory", async () => {
     await writeCurrentBundle(sandbox.targets.sourceDir);
     await writeOnDiskSkill(sandbox.targets.agentsDir, "alp", { "SKILL.md": "stale" });
-    await writeOnDiskSkill(sandbox.targets.agentsDir, "alp-chat", { "SKILL.md": "chat-old" });
-    await writeOnDiskSkill(sandbox.targets.claudeDir, "alp-chat", { "SKILL.md": "chat-old" });
-    await writeOnDiskSkill(sandbox.targets.codexDir, "alp-chat", { "SKILL.md": "chat-old" });
+    // alp-rename-keep-start
+    await writeOnDiskSkill(sandbox.targets.agentsDir, "paseo-chat", { "SKILL.md": "chat-old" });
+    // alp-rename-keep-end
+    // alp-rename-keep-start
+    await writeOnDiskSkill(sandbox.targets.claudeDir, "paseo-chat", { "SKILL.md": "chat-old" });
+    // alp-rename-keep-end
+    // alp-rename-keep-start
+    await writeOnDiskSkill(sandbox.targets.codexDir, "paseo-chat", { "SKILL.md": "chat-old" });
+    // alp-rename-keep-end
 
     const status = await updateSkills(sandbox.targets, ALL_SKILLS, { logger: ignoreWarnings });
 
     expect(status).toEqual({
       state: "drift",
-      ops: [{ kind: "delete", name: "alp-chat" }],
+      ops: [{ kind: "delete", name: "paseo-chat" }], // alp-rename-keep
       available: ["alp", "alp-loop"],
-      installed: ["alp", "alp-chat", "alp-loop"],
+      installed: ["alp", "alp-loop", "paseo-chat"], // alp-rename-keep
     });
     expect(
       await fs.readFile(path.join(sandbox.targets.agentsDir, "alp", "SKILL.md"), "utf-8"),
@@ -448,7 +466,7 @@ describe("installSkills / updateSkills", () => {
       sandbox.targets.claudeDir,
       sandbox.targets.codexDir,
     ]) {
-      expect(await pathExists(path.join(dir, "alp-chat"))).toBe(true);
+      expect(await pathExists(path.join(dir, "paseo-chat"))).toBe(true); // alp-rename-keep
     }
   });
 
@@ -612,13 +630,15 @@ describe("uninstallSkills", () => {
       sandbox.targets.claudeDir,
       sandbox.targets.codexDir,
     ]) {
-      await writeOnDiskSkill(dir, "alp-chat", { "SKILL.md": "chat-old" });
+      await writeOnDiskSkill(dir, "paseo-chat", { "SKILL.md": "chat-old" }); // alp-rename-keep
     }
 
     const status = await uninstallSkills(sandbox.targets, ALL_SKILLS);
 
     expect(status.state).toBe("not-installed");
-    expect(await installedIn(sandbox.targets, "alp-chat")).toEqual([false, false, false]);
+    // alp-rename-keep-start
+    expect(await installedIn(sandbox.targets, "paseo-chat")).toEqual([false, false, false]);
+    // alp-rename-keep-end
   });
 });
 
@@ -626,12 +646,12 @@ describe("uninstallSkills", () => {
 // an older release still holds the old directories, installed with a manifest.
 describe("renamed skill cleanup", () => {
   const RENAMED: Record<string, string> = {
-    alp: "alp",
-    "alp-advisor": "alp-advisor",
-    "alp-committee": "alp-committee",
-    "alp-handoff": "alp-handoff",
-    "alp-help": "alp-help",
-    "alp-plugin": "alp-plugin",
+    paseo: "alp", // alp-rename-keep
+    "paseo-advisor": "alp-advisor", // alp-rename-keep
+    "paseo-committee": "alp-committee", // alp-rename-keep
+    "paseo-handoff": "alp-handoff", // alp-rename-keep
+    "paseo-help": "alp-help", // alp-rename-keep
+    "paseo-plugin": "alp-plugin", // alp-rename-keep
   };
   const OLD_NAMES = Object.keys(RENAMED);
   const NEW_NAMES = Object.values(RENAMED).sort();
@@ -725,16 +745,22 @@ describe("renamed skill cleanup", () => {
 
   it("keeps an old directory holding a file the manifest does not list", async () => {
     await upgradeFromOldRelease();
-    const kept = path.join(sandbox.targets.claudeDir, "alp");
+    const kept = path.join(sandbox.targets.claudeDir, "paseo"); // alp-rename-keep
     await writeFiles(kept, { "notes/mine.md": "user notes" });
 
     await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
 
     expect(await fs.readFile(path.join(kept, "notes", "mine.md"), "utf-8")).toBe("user notes");
-    expect(await fs.readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("alp-old");
-    expect(await fs.readFile(path.join(kept, "references", "guide.md"), "utf-8")).toBe("alp guide");
+    // alp-rename-keep-start
+    expect(await fs.readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("paseo-old");
+    // alp-rename-keep-end
+    expect(await fs.readFile(path.join(kept, "references", "guide.md"), "utf-8")).toBe(
+      "paseo guide", // alp-rename-keep
+    );
     expect(await pathExists(path.join(kept, ".alp-managed-files.json"))).toBe(true);
-    expect(await installedIn(sandbox.targets, "alp")).toEqual([false, true, false]);
+    // alp-rename-keep-start
+    expect(await installedIn(sandbox.targets, "paseo")).toEqual([false, true, false]);
+    // alp-rename-keep-end
     expect(warnedPaths()).toEqual([kept]);
     expect(warn).toHaveBeenCalledWith(
       { path: kept, reason: `file not in manifest ${path.join("notes", "mine.md")}` },
@@ -745,20 +771,24 @@ describe("renamed skill cleanup", () => {
 
   it("keeps an old directory holding an empty directory the manifest does not explain", async () => {
     await upgradeFromOldRelease();
-    const kept = path.join(sandbox.targets.agentsDir, "alp-plugin");
+    const kept = path.join(sandbox.targets.agentsDir, "paseo-plugin"); // alp-rename-keep
     await fs.mkdir(path.join(kept, "drafts"));
 
     await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
 
     expect(await pathExists(path.join(kept, "drafts"))).toBe(true);
-    expect(await fs.readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("alp-plugin-old");
-    expect(await installedIn(sandbox.targets, "alp-plugin")).toEqual([true, false, false]);
+    // alp-rename-keep-start
+    expect(await fs.readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("paseo-plugin-old");
+    // alp-rename-keep-end
+    // alp-rename-keep-start
+    expect(await installedIn(sandbox.targets, "paseo-plugin")).toEqual([true, false, false]);
+    // alp-rename-keep-end
     expect(warnedPaths()).toEqual([kept]);
   });
 
   it("keeps an old directory whose managed file was edited", async () => {
     await upgradeFromOldRelease();
-    const kept = path.join(sandbox.targets.codexDir, "alp-help");
+    const kept = path.join(sandbox.targets.codexDir, "paseo-help"); // alp-rename-keep
     await fs.writeFile(path.join(kept, "references", "guide.md"), "edited by user");
 
     await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
@@ -766,24 +796,32 @@ describe("renamed skill cleanup", () => {
     expect(await fs.readFile(path.join(kept, "references", "guide.md"), "utf-8")).toBe(
       "edited by user",
     );
-    expect(await fs.readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("alp-help-old");
-    expect(await installedIn(sandbox.targets, "alp-help")).toEqual([false, false, true]);
+    // alp-rename-keep-start
+    expect(await fs.readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("paseo-help-old");
+    // alp-rename-keep-end
+    // alp-rename-keep-start
+    expect(await installedIn(sandbox.targets, "paseo-help")).toEqual([false, false, true]);
+    // alp-rename-keep-end
     expect(warnedPaths()).toEqual([kept]);
     await expectNewSkillsInstalled();
   });
 
   it("keeps an old directory without a manifest", async () => {
     await upgradeFromOldRelease();
-    const kept = path.join(sandbox.targets.agentsDir, "alp-advisor");
+    const kept = path.join(sandbox.targets.agentsDir, "paseo-advisor"); // alp-rename-keep
     await fs.rm(path.join(kept, ".alp-managed-files.json"));
 
     await autoUpdateInstalledSkills(sandbox.targets, ALL_SKILLS, { logger });
 
-    expect(await fs.readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("alp-advisor-old");
+    // alp-rename-keep-start
+    expect(await fs.readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("paseo-advisor-old");
+    // alp-rename-keep-end
     expect(await fs.readFile(path.join(kept, "references", "guide.md"), "utf-8")).toBe(
-      "alp-advisor guide",
+      "paseo-advisor guide", // alp-rename-keep
     );
-    expect(await installedIn(sandbox.targets, "alp-advisor")).toEqual([true, false, false]);
+    // alp-rename-keep-start
+    expect(await installedIn(sandbox.targets, "paseo-advisor")).toEqual([true, false, false]);
+    // alp-rename-keep-end
     expect(warnedPaths()).toEqual([kept]);
     await expectNewSkillsInstalled();
   });
@@ -792,8 +830,8 @@ describe("renamed skill cleanup", () => {
     "keeps an old directory that is a symlink, and the directory it points to",
     async () => {
       await upgradeFromOldRelease();
-      const link = path.join(sandbox.targets.codexDir, "alp-committee");
-      const real = path.join(sandbox.root, "dotfiles", "alp-committee");
+      const link = path.join(sandbox.targets.codexDir, "paseo-committee"); // alp-rename-keep
+      const real = path.join(sandbox.root, "dotfiles", "paseo-committee"); // alp-rename-keep
       await fs.mkdir(path.dirname(real), { recursive: true });
       await fs.rename(link, real);
       await fs.symlink(real, link, "dir");
@@ -801,7 +839,9 @@ describe("renamed skill cleanup", () => {
       await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
 
       expect((await fs.lstat(link)).isSymbolicLink()).toBe(true);
-      expect(await fs.readFile(path.join(real, "SKILL.md"), "utf-8")).toBe("alp-committee-old");
+      // alp-rename-keep-start
+      expect(await fs.readFile(path.join(real, "SKILL.md"), "utf-8")).toBe("paseo-committee-old");
+      // alp-rename-keep-end
       expect(await pathExists(path.join(real, ".alp-managed-files.json"))).toBe(true);
       expect(warnedPaths()).toEqual([link]);
       await expectNewSkillsInstalled();
@@ -812,7 +852,7 @@ describe("renamed skill cleanup", () => {
     "keeps an old directory containing a symlink",
     async () => {
       await upgradeFromOldRelease();
-      const kept = path.join(sandbox.targets.claudeDir, "alp-handoff");
+      const kept = path.join(sandbox.targets.claudeDir, "paseo-handoff"); // alp-rename-keep
       const outside = path.join(sandbox.root, "outside");
       await writeFiles(outside, { "keep.md": "outside file" });
       await fs.symlink(outside, path.join(kept, "linked"), "dir");
@@ -820,32 +860,42 @@ describe("renamed skill cleanup", () => {
       await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
 
       expect((await fs.lstat(path.join(kept, "linked"))).isSymbolicLink()).toBe(true);
-      expect(await fs.readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("alp-handoff-old");
+      // alp-rename-keep-start
+      expect(await fs.readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("paseo-handoff-old");
+      // alp-rename-keep-end
       expect(await fs.readFile(path.join(outside, "keep.md"), "utf-8")).toBe("outside file");
       expect(warnedPaths()).toEqual([kept]);
     },
   );
 
   it("leaves a clean legacy directory outside the rename table alone", async () => {
-    await upgradeFromOldRelease(["alp-chat"]);
+    await upgradeFromOldRelease(["paseo-chat"]); // alp-rename-keep
 
     const status = await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
 
-    expect(await installedIn(sandbox.targets, "alp-chat")).toEqual([true, true, true]);
-    expect(await installedIn(sandbox.targets, "alp")).toEqual([false, false, false]);
-    expect(status.ops).toEqual([{ kind: "delete", name: "alp-chat" }]);
+    // alp-rename-keep-start
+    expect(await installedIn(sandbox.targets, "paseo-chat")).toEqual([true, true, true]);
+    // alp-rename-keep-end
+    // alp-rename-keep-start
+    expect(await installedIn(sandbox.targets, "paseo")).toEqual([false, false, false]);
+    // alp-rename-keep-end
+    expect(status.ops).toEqual([{ kind: "delete", name: "paseo-chat" }]); // alp-rename-keep
   });
 
   it("does not remove an old name the bundle still ships", async () => {
-    await writeBundleSkill(sandbox.targets.sourceDir, "alp", { "SKILL.md": "still-shipped" });
+    // alp-rename-keep-start
+    await writeBundleSkill(sandbox.targets.sourceDir, "paseo", { "SKILL.md": "still-shipped" });
+    // alp-rename-keep-end
     await writeBundleSkill(sandbox.targets.sourceDir, "alp", { "SKILL.md": "alp-new" });
     await installSkills(sandbox.targets, ALL_SKILLS);
 
     // Deselected but still shipped: removing it is the interactive path's call.
     const status = await updateSkills(sandbox.targets, only("alp"), { logger });
 
-    expect(await installedIn(sandbox.targets, "alp")).toEqual([true, true, true]);
-    expect(status.ops).toEqual([{ kind: "delete", name: "alp" }]);
+    // alp-rename-keep-start
+    expect(await installedIn(sandbox.targets, "paseo")).toEqual([true, true, true]);
+    // alp-rename-keep-end
+    expect(status.ops).toEqual([{ kind: "delete", name: "paseo" }]); // alp-rename-keep
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -853,14 +903,18 @@ describe("renamed skill cleanup", () => {
     "still installs the new skills when removing an old directory fails",
     async () => {
       await upgradeFromOldRelease();
-      const locked = path.join(sandbox.targets.agentsDir, "alp");
+      const locked = path.join(sandbox.targets.agentsDir, "paseo"); // alp-rename-keep
       await fs.chmod(locked, 0o555);
       try {
         const status = await updateSkills(sandbox.targets, ALL_SKILLS, { logger });
 
         await expectNewSkillsInstalled();
-        expect(await fs.readFile(path.join(locked, "SKILL.md"), "utf-8")).toBe("alp-old");
-        expect(await installedIn(sandbox.targets, "alp")).toEqual([true, false, false]);
+        // alp-rename-keep-start
+        expect(await fs.readFile(path.join(locked, "SKILL.md"), "utf-8")).toBe("paseo-old");
+        // alp-rename-keep-end
+        // alp-rename-keep-start
+        expect(await installedIn(sandbox.targets, "paseo")).toEqual([true, false, false]);
+        // alp-rename-keep-end
         // Only the safe cleanup may remove it, so it is not a pending delete.
         expect(status.ops).toEqual([]);
         expect(status.state).toBe("up-to-date");

@@ -1138,7 +1138,9 @@ describe("skills controller", () => {
 
   it("asks again when another directory appears before the retry", async () => {
     await harness.controller.install();
-    await writeUserFile(harness.targets, "alp-chat", "SKILL.md", "retired but present");
+    // alp-rename-keep-start
+    await writeUserFile(harness.targets, "paseo-chat", "SKILL.md", "retired but present");
+    // alp-rename-keep-end
 
     const result = await harness.controller.save({
       mode: "custom",
@@ -1147,12 +1149,12 @@ describe("skills controller", () => {
     });
 
     expect(result.confirmationRequired).toEqual({
-      removals: ["alp-advisor", "alp-chat", "alp-loop"],
+      removals: ["alp-advisor", "alp-loop", "paseo-chat"], // alp-rename-keep
     });
     expect(await installedEverywhere(harness.targets)).toEqual([
-      ["alp", "alp-advisor", "alp-chat", "alp-loop"],
-      ["alp", "alp-advisor", "alp-chat", "alp-loop"],
-      ["alp", "alp-advisor", "alp-chat", "alp-loop"],
+      ["alp", "alp-advisor", "alp-loop", "paseo-chat"], // alp-rename-keep
+      ["alp", "alp-advisor", "alp-loop", "paseo-chat"], // alp-rename-keep
+      ["alp", "alp-advisor", "alp-loop", "paseo-chat"], // alp-rename-keep
     ]);
   });
 
@@ -1164,13 +1166,17 @@ describe("skills controller", () => {
     const transactionStarted = waitForTransactionDirectory(path.dirname(harness.targets.agentsDir));
     const save = harness.controller.save(selection);
     await transactionStarted;
-    await writeUserFile(harness.targets, "alp-chat", "notes/mine.md", "hand written");
+    // alp-rename-keep-start
+    await writeUserFile(harness.targets, "paseo-chat", "notes/mine.md", "hand written");
+    // alp-rename-keep-end
 
     const result = await save;
 
-    expect(result.confirmationRequired).toEqual({ removals: ["alp-chat"] });
+    expect(result.confirmationRequired).toEqual({ removals: ["paseo-chat"] }); // alp-rename-keep
     expect(result.selection).toEqual(selection);
-    expect(await readUserFile(harness.targets, "alp-chat", "notes/mine.md")).toEqual([
+    // alp-rename-keep-start
+    expect(await readUserFile(harness.targets, "paseo-chat", "notes/mine.md")).toEqual([
+      // alp-rename-keep-end
       "hand written",
       "hand written",
       "hand written",
@@ -1253,14 +1259,16 @@ describe("skills controller", () => {
 // selection saved under the old names, upgrades to the alp* bundle.
 describe("upgrading across the alp skill rename", () => {
   const OLD_TO_NEW = [
-    ["alp", "alp"],
-    ["alp-advisor", "alp-advisor"],
-    ["alp-committee", "alp-committee"],
-    ["alp-handoff", "alp-handoff"],
-    ["alp-help", "alp-help"],
-    ["alp-plugin", "alp-plugin"],
+    ["paseo", "alp"], // alp-rename-keep
+    ["paseo-advisor", "alp-advisor"], // alp-rename-keep
+    ["paseo-committee", "alp-committee"], // alp-rename-keep
+    ["paseo-handoff", "alp-handoff"], // alp-rename-keep
+    ["paseo-help", "alp-help"], // alp-rename-keep
+    ["paseo-plugin", "alp-plugin"], // alp-rename-keep
   ] as const;
-  const OLD_SELECTION: SkillSelection = { mode: "custom", skills: ["alp", "alp-help", "xia"] };
+  // alp-rename-keep-start
+  const OLD_SELECTION: SkillSelection = { mode: "custom", skills: ["paseo", "paseo-help", "xia"] };
+  // alp-rename-keep-end
   const NEW_SELECTION: SkillSelection = { mode: "custom", skills: ["alp", "alp-help", "xia"] };
   const OPERATIONS = ["status", "install", "update", "autoUpdate", "uninstall", "save"] as const;
   let root: string;
@@ -1332,16 +1340,16 @@ describe("upgrading across the alp skill rename", () => {
     return controller[operation]();
   }
 
-  /** After a clean upgrade, the user's file keeps `alp` under Claude only. */
+  /** After a clean upgrade, the user's file keeps `paseo` under Claude only. */ // alp-rename-keep
   async function upgradedHostWithKeptOldDir(): Promise<string> {
     await upgradedHost();
-    const kept = path.join(targets.claudeDir, "alp");
+    const kept = path.join(targets.claudeDir, "paseo"); // alp-rename-keep
     await mkdir(path.join(kept, "notes"), { recursive: true });
     await writeFile(path.join(kept, "notes", "mine.md"), "user notes");
     await controller.autoUpdate();
     expect(await installedEverywhere(targets)).toEqual([
       ["alp", "alp-help"],
-      ["alp", "alp-help", "alp"],
+      ["alp", "alp-help", "paseo"], // alp-rename-keep
       ["alp", "alp-help"],
     ]);
     return kept;
@@ -1349,7 +1357,9 @@ describe("upgrading across the alp skill rename", () => {
 
   async function expectKept(kept: string): Promise<void> {
     expect(await readFile(path.join(kept, "notes", "mine.md"), "utf-8")).toBe("user notes");
-    expect(await readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("alp-old");
+    // alp-rename-keep-start
+    expect(await readFile(path.join(kept, "SKILL.md"), "utf-8")).toBe("paseo-old");
+    // alp-rename-keep-end
   }
 
   it.each(["install", "update", "autoUpdate"] as const)(
@@ -1391,14 +1401,18 @@ describe("upgrading across the alp skill rename", () => {
   // An older release saved the selection, then died before it committed the
   // transaction that deleted alp-help.
   async function interruptedOldSave(committed: "previous" | "next"): Promise<void> {
-    const previous: SkillSelection = { mode: "custom", skills: ["alp", "alp-help"] };
-    const next: SkillSelection = { mode: "custom", skills: ["alp"] };
+    // alp-rename-keep-start
+    const previous: SkillSelection = { mode: "custom", skills: ["paseo", "paseo-help"] };
+    // alp-rename-keep-end
+    const next: SkillSelection = { mode: "custom", skills: ["paseo"] }; // alp-rename-keep
     await upgradedHost({
       selection: committed === "next" ? next : previous,
       beforeUpgrade: async () => {
-        await writeUserFile(targets, "alp-help", "notes/mine.md", "user notes");
+        // alp-rename-keep-start
+        await writeUserFile(targets, "paseo-help", "notes/mine.md", "user notes");
+        // alp-rename-keep-end
         await beginSkillsTransaction(targets, previous, next, [
-          { kind: "delete", name: "alp-help" },
+          { kind: "delete", name: "paseo-help" }, // alp-rename-keep
         ]);
       },
     });
@@ -1411,7 +1425,13 @@ describe("upgrading across the alp skill rename", () => {
 
       await run(operation);
 
-      expect(await readUserFile(targets, "alp-help", "notes/mine.md")).toEqual([null, null, null]);
+      // alp-rename-keep-start
+      expect(await readUserFile(targets, "paseo-help", "notes/mine.md")).toEqual([
+        // alp-rename-keep-end
+        null,
+        null,
+        null,
+      ]);
       expect(await backupArtifacts(targets)).toEqual([[], [], []]);
     },
   );
@@ -1423,7 +1443,9 @@ describe("upgrading across the alp skill rename", () => {
 
       await run(operation);
 
-      expect(await readUserFile(targets, "alp-help", "notes/mine.md")).toEqual([
+      // alp-rename-keep-start
+      expect(await readUserFile(targets, "paseo-help", "notes/mine.md")).toEqual([
+        // alp-rename-keep-end
         "user notes",
         "user notes",
         "user notes",
@@ -1432,25 +1454,31 @@ describe("upgrading across the alp skill rename", () => {
     },
   );
 
-  // An older release saved a selection adding alp-advisor, synced it fully,
+  // An older release saved a selection adding paseo-advisor, synced it fully, // alp-rename-keep
   // then died before it committed. The user then edited the synced file.
   // Undoing the add has no captured backup to fall back to, so the file the
   // interrupted sync wrote must be told apart from the user's edit by content,
   // not discarded along with it.
   async function interruptedOldAdd(): Promise<void> {
-    const previous: SkillSelection = { mode: "custom", skills: ["alp"] };
-    const next: SkillSelection = { mode: "custom", skills: ["alp", "alp-advisor"] };
+    const previous: SkillSelection = { mode: "custom", skills: ["paseo"] }; // alp-rename-keep
+    // alp-rename-keep-start
+    const next: SkillSelection = { mode: "custom", skills: ["paseo", "paseo-advisor"] };
+    // alp-rename-keep-end
     await upgradedHost({
       selection: previous,
       beforeUpgrade: async () => {
         for (const dir of [targets.agentsDir, targets.claudeDir, targets.codexDir]) {
-          await rm(path.join(dir, "alp-advisor"), { recursive: true, force: true });
+          // alp-rename-keep-start
+          await rm(path.join(dir, "paseo-advisor"), { recursive: true, force: true });
+          // alp-rename-keep-end
         }
         await beginSkillsTransaction(targets, previous, next, [
-          { kind: "add", name: "alp-advisor" },
+          { kind: "add", name: "paseo-advisor" }, // alp-rename-keep
         ]);
         await installSkills(targets, next);
-        await writeUserFile(targets, "alp-advisor", "SKILL.md", "user edit after crash");
+        // alp-rename-keep-start
+        await writeUserFile(targets, "paseo-advisor", "SKILL.md", "user edit after crash");
+        // alp-rename-keep-end
       },
     });
   }
@@ -1462,7 +1490,9 @@ describe("upgrading across the alp skill rename", () => {
 
       await run(operation);
 
-      expect(await readUserFile(targets, "alp-advisor", "SKILL.md")).toEqual([
+      // alp-rename-keep-start
+      expect(await readUserFile(targets, "paseo-advisor", "SKILL.md")).toEqual([
+        // alp-rename-keep-end
         "user edit after crash",
         "user edit after crash",
         "user edit after crash",
@@ -1474,15 +1504,19 @@ describe("upgrading across the alp skill rename", () => {
   it.each(OPERATIONS)(
     "%s rolls back an old directory a pre-rename transaction was updating",
     async (operation) => {
-      const selection: SkillSelection = { mode: "custom", skills: ["alp", "alp-help"] };
+      // alp-rename-keep-start
+      const selection: SkillSelection = { mode: "custom", skills: ["paseo", "paseo-help"] };
+      // alp-rename-keep-end
       await upgradedHost({
         selection,
         beforeUpgrade: async () => {
           // The user's file keeps the restored directory from the safe cleanup.
-          await writeUserFile(targets, "alp", "notes/mine.md", "user notes");
-          await writeFile(path.join(targets.sourceDir, "alp", "SKILL.md"), "alp-old-v2");
+          await writeUserFile(targets, "paseo", "notes/mine.md", "user notes"); // alp-rename-keep
+          // alp-rename-keep-start
+          await writeFile(path.join(targets.sourceDir, "paseo", "SKILL.md"), "paseo-old-v2");
+          // alp-rename-keep-end
           await beginSkillsTransaction(targets, selection, { mode: "all" }, [
-            { kind: "update", name: "alp" },
+            { kind: "update", name: "paseo" }, // alp-rename-keep
           ]);
           await installSkills(targets, { mode: "all" });
         },
@@ -1490,12 +1524,16 @@ describe("upgrading across the alp skill rename", () => {
 
       await run(operation);
 
-      expect(await readUserFile(targets, "alp", "SKILL.md")).toEqual([
-        "alp-old",
-        "alp-old",
-        "alp-old",
+      // alp-rename-keep-start
+      expect(await readUserFile(targets, "paseo", "SKILL.md")).toEqual([
+        // alp-rename-keep-end
+        "paseo-old", // alp-rename-keep
+        "paseo-old", // alp-rename-keep
+        "paseo-old", // alp-rename-keep
       ]);
-      expect(await readUserFile(targets, "alp", "notes/mine.md")).toEqual([
+      // alp-rename-keep-start
+      expect(await readUserFile(targets, "paseo", "notes/mine.md")).toEqual([
+        // alp-rename-keep-end
         "user notes",
         "user notes",
         "user notes",
@@ -1552,7 +1590,7 @@ describe("upgrading across the alp skill rename", () => {
     await controller.uninstall();
 
     await expectKept(kept);
-    expect(await installedEverywhere(targets)).toEqual([[], ["alp"], []]);
+    expect(await installedEverywhere(targets)).toEqual([[], ["paseo"], []]); // alp-rename-keep
   });
 
   it("save neither asks to remove a kept old directory nor removes it when confirmed", async () => {
@@ -1562,13 +1600,15 @@ describe("upgrading across the alp skill rename", () => {
     const saved = await controller.save({
       mode: "custom",
       skills: ["alp"],
-      confirmedRemovals: ["alp-help", "alp"],
+      confirmedRemovals: ["alp-help", "paseo"], // alp-rename-keep
     });
 
     expect(asked.confirmationRequired).toEqual({ removals: ["alp-help"] });
     expect(saved.confirmationRequired).toBeNull();
     await expectKept(kept);
-    expect(await installedEverywhere(targets)).toEqual([["alp"], ["alp", "alp"], ["alp"]]);
+    // alp-rename-keep-start
+    expect(await installedEverywhere(targets)).toEqual([["alp"], ["alp", "paseo"], ["alp"]]);
+    // alp-rename-keep-end
   });
 });
 

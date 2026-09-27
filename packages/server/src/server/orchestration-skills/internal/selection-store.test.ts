@@ -70,12 +70,12 @@ describe("daemon agent skill selection", () => {
 describe("renamed skills in a saved selection", () => {
   it("reads old skill names as their new names without rewriting the config", async () => {
     const { root, store } = await createStore();
-    await store.set({ mode: "custom", skills: ["alp", "alp-help", "xia"] });
+    await store.set({ mode: "custom", skills: ["paseo", "paseo-help", "xia"] }); // alp-rename-keep
 
     expect(await store.get()).toEqual({ mode: "custom", skills: ["alp", "alp-help", "xia"] });
     expect(loadPersistedConfig(root).agents?.skills?.selection).toEqual({
       mode: "custom",
-      skills: ["alp", "alp-help", "xia"],
+      skills: ["paseo", "paseo-help", "xia"], // alp-rename-keep
     });
   });
 
@@ -84,12 +84,12 @@ describe("renamed skills in a saved selection", () => {
     await store.set({
       mode: "custom",
       skills: [
-        "alp",
-        "alp-advisor",
-        "alp-committee",
-        "alp-handoff",
-        "alp-help",
-        "alp-plugin",
+        "paseo", // alp-rename-keep
+        "paseo-advisor", // alp-rename-keep
+        "paseo-committee", // alp-rename-keep
+        "paseo-handoff", // alp-rename-keep
+        "paseo-help", // alp-rename-keep
+        "paseo-plugin", // alp-rename-keep
         "alp",
       ],
     });
@@ -102,10 +102,12 @@ describe("renamed skills in a saved selection", () => {
 
   it("leaves names outside the rename table and the all mode unchanged", async () => {
     const { store } = await createStore();
-    await store.set({ mode: "custom", skills: ["alp-chat", "alp-loop", "xia"] });
+    // alp-rename-keep-start
+    await store.set({ mode: "custom", skills: ["paseo-chat", "paseo-loop", "xia"] });
+    // alp-rename-keep-end
     expect(await store.get()).toEqual({
       mode: "custom",
-      skills: ["alp-chat", "alp-loop", "xia"],
+      skills: ["paseo-chat", "paseo-loop", "xia"], // alp-rename-keep
     });
 
     await store.set({ mode: "all" });
