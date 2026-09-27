@@ -22,7 +22,6 @@ test("every skill a seat names ships in skills/", async () => {
     for (const skill of skills) expect(shipped).toContain(skill);
   }
   expect(shipped.sort()).toEqual([
-    "ask-alp",
     "bug-loop",
     "goal-griller",
     "prompt-leverage",

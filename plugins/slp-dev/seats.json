@@ -1,6 +1,5 @@
 {
   "lead": [
-    "ask-alp",
     "bug-loop",
     "goal-griller",
     "prompt-leverage",
@@ -8,6 +7,6 @@
     "smart-commits",
     "xia"
   ],
-  "peer": ["xia", "smart-commits", "bug-loop", "ask-alp"],
+  "peer": ["xia", "smart-commits", "bug-loop"],
   "supervisor": []
 }
