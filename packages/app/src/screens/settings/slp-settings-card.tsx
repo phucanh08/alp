@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   SettingsCard,
+  SettingsInput,
   SettingsRow,
   SettingsSection,
   SettingsSelect,
@@ -20,11 +21,20 @@ export const SUPERVISOR_PROVIDER = "claude";
 const DEFAULT_MODEL_OPTION = "";
 
 type ReadySlpSettings = Extract<SlpSettings, { status: "ready" }>;
-type SavedField = "enabled" | "supervisorModel";
+type SavedField = "enabled" | "supervisorModel" | "supervisorCheckMinutes";
 
 interface ModelOption {
   label: string;
   value: string;
+}
+
+/** A non-negative integer, the only input `supervisorCheckMinutes` accepts. Anything else, including
+ * a decimal, a sign, or leading/trailing text, is not a valid minute count and is not saved. */
+function parseSupervisorCheckMinutes(text: string): number | null {
+  const trimmed = text.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const value = Number.parseInt(trimmed, 10);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 function useSupervisorModelOptions(serverId: string): ModelOption[] {
@@ -61,6 +71,15 @@ function SlpSettingsRows({ serverId, slp }: { serverId: string; slp: ReadySlpSet
     },
     [save],
   );
+  const changeSupervisorCheckMinutes = useCallback(
+    (text: string) => {
+      const minutes = parseSupervisorCheckMinutes(text);
+      if (minutes === null) return;
+      setSavedField("supervisorCheckMinutes");
+      void save({ supervisorCheckMinutes: minutes });
+    },
+    [save],
+  );
 
   return (
     <SettingsCard>
@@ -80,6 +99,14 @@ function SlpSettingsRows({ serverId, slp }: { serverId: string; slp: ReadySlpSet
         options={options}
         disabled={slp.saving}
         onValueChange={changeSupervisorModel}
+      />
+      <SettingsInput
+        label={t("settings.host.slp.supervisorCheckMinutes.label")}
+        hint={t("settings.host.slp.supervisorCheckMinutes.hint")}
+        error={savedField === "supervisorCheckMinutes" ? slp.saveError : null}
+        initialValue={String(slp.supervisorCheckMinutes)}
+        disabled={slp.saving}
+        onChangeText={changeSupervisorCheckMinutes}
       />
     </SettingsCard>
   );
