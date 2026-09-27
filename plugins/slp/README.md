@@ -118,7 +118,7 @@ The directory is rebuilt only when slp-dev's content for the seat changes (`.con
 seat directory). The new directory is built next to the old one and swapped in, so a skill dropped
 from a seat disappears with the old directory. slp-dev is asked right before each Lead or Peer is
 created, and for every seat on the first Claude/Codex session open after the plugin starts — the
-plugin cannot ask at start, because `contribute` gets no Alp API. That pass also removes anything
+plugin cannot ask at start, because `contribute` gets no alp API. That pass also removes anything
 else in `seat-skills/`. Resume needs nothing more: the daemon re-sends the stored `providerOptions`,
 and the path in them does not change.
 
@@ -128,11 +128,11 @@ a warning says so; slp never guesses a home directory for skills.
 
 ## Seat tools
 
-`before("agent.create")` cuts tools per seat. Alp tools go out through the hook's `alpTools`,
+`before("agent.create")` cuts tools per seat. alp tools go out through the hook's `alpTools`,
 which the daemon merges with the provider policy (cuts only add up) and freezes into the agent
 record; the provider's own tools go out through `providerOptions`.
 
-| Seat       | Alp tools (`alpTools.disabledTools`)                                                                                 | Claude (`providerOptions`)                                                                               | Codex (`providerOptions`)                                      |
+| Seat       | alp tools (`alpTools.disabledTools`)                                                                                 | Claude (`providerOptions`)                                                                               | Codex (`providerOptions`)                                      |
 | ---------- | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | Lead       | none                                                                                                                 | `allowedTools: mcp__alp__*`                                                                              | unchanged                                                      |
 | Peer       | `PEER_DISABLED_ALP_TOOLS`: spawn, steer, stop, archive, schedule, reconfigure another agent, resolve its permissions | `disallowedTools: Agent, Task`                                                                           | `features.multi_agent: false`, `sandbox_mode: workspace-write` |
@@ -160,7 +160,7 @@ One Lead per directory: a matching workspace gets no Lead when another active wo
 directory already has a live Lead (not closed or archived). Upstream `paseo run` creates a new <!-- alp-rename-keep -->
 workspace on every run without `--workspace`, so three runs in one directory would otherwise start
 three Leads. Directories compare after `~` expansion and `path.resolve`, the way the daemon stores
-them, without resolving symlinks. A Alp worktree has its own directory and gets its own Lead.
+them, without resolving symlinks. An alp worktree has its own directory and gets its own Lead.
 
 Workspaces created by agents over MCP or by schedules get no Lead automatically. Call
 `slp.lead.ensure` for them. That RPC skips the directory check and gives the workspace it names its
