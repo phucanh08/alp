@@ -359,13 +359,17 @@ test("each seat gets its rule text and its skills from slp-dev.seat.get; a Super
     lead.startsWith("EXISTING\n\n# Ghế SLP: lead\n\nLEAD RULES\n\n## SLP-RUNTIME: alp\n"),
   ).toBe(true);
   expect(lead).not.toContain("name: lead");
-  expect(lead).toContain("- **Skill của ghế này** (plugin `slp-dev`): `xia`, `goal-griller`.");
+  expect(lead).toContain(
+    "- **Skill của ghế này** (plugin `slp-dev`): `slp-lead:xia`, `slp-lead:goal-griller`.",
+  );
 
   const peer = await seatPrompt("peer", plugins);
   expect(
     peer.startsWith("EXISTING\n\n# Ghế SLP: peer\n\nPEER RULES\n\n## SLP-RUNTIME: alp\n"),
   ).toBe(true);
-  expect(peer).toContain("- **Skill của ghế này** (plugin `slp-dev`): `xia`, `smart-commits`.");
+  expect(peer).toContain(
+    "- **Skill của ghế này** (plugin `slp-dev`): `slp-peer:xia`, `slp-peer:smart-commits`.",
+  );
 
   const supervisor = await seatPrompt("supervisor", plugins);
   expect(
@@ -390,7 +394,9 @@ test("a .slp/agents override wins for the rule text; the skills still come from 
     prompt.startsWith("EXISTING\n\n# Ghế SLP: peer\n\nREPO PEER\n\n## SLP-RUNTIME: alp\n"),
   ).toBe(true);
   expect(prompt).not.toContain("PEER RULES");
-  expect(prompt).toContain("- **Skill của ghế này** (plugin `slp-dev`): `xia`, `smart-commits`.");
+  expect(prompt).toContain(
+    "- **Skill của ghế này** (plugin `slp-dev`): `slp-peer:xia`, `slp-peer:smart-commits`.",
+  );
   expect(prompt).toContain("Definition ghế của bạn ở ngay trên");
   expect(prompt).not.toContain("không nạp");
 });
@@ -665,4 +671,19 @@ test("a seat whose directory is unavailable is created without plugins or extra 
   const codex = await seatConfigWith(seatHost, "codex", { "slp.role": "peer" });
   expect(codex?.config.providerOptions).not.toHaveProperty("skills");
   expect(asked).toEqual(["lead", "peer"]);
+});
+
+test("a Codex peer's runtime block names its real seat-dir skills root, not ~/.codex/skills", async () => {
+  const { host: seatHost } = hostWithSeatSkills(SEAT_DIRS);
+  const codex = await seatConfigWith(seatHost, "codex", { "slp.role": "peer" });
+  expect(codex?.config.systemPrompt).toContain(
+    "seat dir của bạn: `/home/.alp/slp/seat-skills/peer/skills`",
+  );
+  expect(codex?.config.systemPrompt).not.toContain("~/.codex/skills");
+});
+
+test("a Codex seat with no seat directory gets no seat-dir path line in its runtime block", async () => {
+  const { host: seatHost } = hostWithSeatSkills({});
+  const codex = await seatConfigWith(seatHost, "codex", { "slp.role": "peer" });
+  expect(codex?.config.systemPrompt).not.toMatch(/seat dir của bạn: `/);
 });

@@ -158,6 +158,8 @@ export function stripFrontmatter(text: string): string {
  * which then says the seat rules did not load.
  * `origin` only ever applies to a Peer with no Lead (see `originOfLabels`); it adds the
  * independent-Peer paragraph to the runtime block. `skills` are the seat's own, named in the block.
+ * `seatSkillsDirectory` is the seat's real skill directory (`seat-skills.ts`), forwarded to the block
+ * for a Codex seat that has one — see `runtimeBlock`.
  */
 export function buildSystemPrompt(
   seat: Seat,
@@ -166,11 +168,12 @@ export function buildSystemPrompt(
   existing: string | null | undefined,
   origin?: SeatOrigin | null,
   skills: readonly string[] = [],
+  seatSkillsDirectory: string | null = null,
 ): string {
   const parts = [
     existing?.trim(),
     definitionBody === null ? null : `# Ghế SLP: ${seat}\n\n${definitionBody}`,
-    runtimeBlock(seat, family, origin, skills, definitionBody !== null),
+    runtimeBlock(seat, family, origin, skills, definitionBody !== null, seatSkillsDirectory),
   ];
   return parts.filter((part): part is string => Boolean(part)).join("\n\n");
 }

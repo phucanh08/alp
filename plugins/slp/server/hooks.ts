@@ -97,7 +97,15 @@ export async function withSeatConfig(
   const paseoTools = paseoToolsFor(seat, request.paseoTools);
   const origin = seat === "peer" ? originOfLabels(labels) : null;
   const systemPrompt = [
-    buildSystemPrompt(seat, family, rules.body, request.config.systemPrompt, origin, rules.skills),
+    buildSystemPrompt(
+      seat,
+      family,
+      rules.body,
+      request.config.systemPrompt,
+      origin,
+      rules.skills,
+      seatSkillsDirectory,
+    ),
     roster,
   ]
     .filter(Boolean)
