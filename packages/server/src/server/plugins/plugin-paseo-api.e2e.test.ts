@@ -168,8 +168,8 @@ export default function contribute(server: PluginServerContext) {
   return () => undefined;
 }`,
   );
-  // "asker" sorts after "answerer", so its before hook runs while the answerer is idle; the
-  // answer travels plugin -> daemon -> plugin while the daemon waits on this same hook.
+  // Only "asker" registers before(agent.create), so the daemon runs just its hook and waits on it
+  // while the answer travels asker -> daemon -> answerer -> daemon -> asker.
   await writeFile(
     path.join(askerDirectory, "paseo-plugin.json"),
     JSON.stringify({ id: "asker", requirements }),

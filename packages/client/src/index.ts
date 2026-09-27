@@ -771,6 +771,7 @@ export function createPaseoApi(
       get: (requestId) => daemonClient.getDaemonConfig(requestId),
       patch: (patch, requestId) => daemonClient.patchDaemonConfig(patch, requestId),
     },
+    // ALP(slp): plugin-to-plugin RPC, see PaseoPluginActions.
     plugins: {
       invoke: (pluginId, method, input) => daemonClient.invokePluginRpc(pluginId, method, input),
     },
