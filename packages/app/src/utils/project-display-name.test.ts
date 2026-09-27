@@ -6,7 +6,11 @@ import {
 
 describe("projectDisplayNameFromProjectId", () => {
   it("shows owner and repo for GitHub remote ids", () => {
-    expect(projectDisplayNameFromProjectId("remote:github.com/getpaseo/paseo")).toBe("alp/alp");
+    // alp-rename-keep-start: the owner/repo is parsed from the upstream remote id
+    expect(projectDisplayNameFromProjectId("remote:github.com/getpaseo/paseo")).toBe(
+      "getpaseo/paseo",
+    );
+    // alp-rename-keep-end
   });
 
   it("shows the trailing directory name for local projects", () => {

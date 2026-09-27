@@ -48,7 +48,7 @@ describe("deriveProjectDisplayName", () => {
         projectKey: "remote:github.com/getpaseo/paseo",
         projectName: "alp",
       }),
-    ).toBe("alp/alp");
+    ).toBe("getpaseo/paseo"); // alp-rename-keep: parsed from the upstream remote above
   });
 
   it("shows remote path for non-GitHub remote keys", () => {

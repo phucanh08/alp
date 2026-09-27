@@ -339,7 +339,7 @@ describe("start", () => {
     expect(spawnCalls[0]).toMatchObject({
       repoRoot: "/tmp/repo",
       workspaceId: "ws-1",
-      projectSlug: "alp",
+      projectSlug: "paseo", // alp-rename-keep: derived from the upstream remote URL in this fixture
       branchName: "feature/scripts",
       scriptName: "app",
       daemonPort: 6767,

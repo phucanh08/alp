@@ -4717,7 +4717,7 @@ describe("session workspace script handling", () => {
     });
     const workspaceGitService = {
       peekSnapshot: vi.fn(() => snapshot),
-      getProjectSlug: vi.fn().mockResolvedValue("alp"),
+      getProjectSlug: vi.fn().mockResolvedValue("paseo"), // alp-rename-keep: derived from the upstream remote URL in this fixture
     };
     const workspaceRegistry = {
       get: vi.fn().mockResolvedValue({
@@ -4754,7 +4754,7 @@ describe("session workspace script handling", () => {
       expect.objectContaining({
         repoRoot: "/tmp/repo",
         workspaceId: "workspace-1",
-        projectSlug: "alp",
+        projectSlug: "paseo", // alp-rename-keep: derived from the upstream remote URL in this fixture
         branchName: "feature/service-scripts",
         scriptName: "api",
         daemonPort: 6767,

@@ -114,7 +114,7 @@ describe("deriveProjectGroupingDisplayName", () => {
         remoteUrl: "git@github.com:getpaseo/paseo.git",
         worktreeRoot: path.resolve("repo"),
       }),
-    ).toBe("alp/alp");
+    ).toBe("getpaseo/paseo"); // alp-rename-keep: derived from the upstream remote URL in this fixture
   });
 
   test("uses the selected directory name without a remote", () => {

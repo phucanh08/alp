@@ -1958,7 +1958,9 @@ describe("WorkspaceGitServiceImpl D2 read methods", () => {
       now: () => new Date(nowMs),
     });
 
-    await expect(service.getProjectSlug(REPO_CWD)).resolves.toBe("alp");
+    // alp-rename-keep-start: the slug is derived from the upstream remote URL above
+    await expect(service.getProjectSlug(REPO_CWD)).resolves.toBe("paseo");
+    // alp-rename-keep-end
 
     nowMs = 1_000;
     await service.getProjectSlug(join(REPO_CWD, "."));

@@ -204,7 +204,7 @@ describe("resolveWorktreeCreationIntent", () => {
       baseRefName: "main",
       checkoutRefs: [{ remoteName: "origin", remoteRef: "refs/pull/526/head" }],
       headRepositoryOwner: "therainisme",
-      headRepository: "therainisme/alp",
+      headRepository: "therainisme/paseo", // alp-rename-keep: derived from the upstream remote URL in this fixture
       localBranchName: "therainisme/main",
       pushRemoteUrl: "git@github.com:therainisme/paseo.git",
     });

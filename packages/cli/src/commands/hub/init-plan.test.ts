@@ -110,12 +110,14 @@ describe("Hub init scaffold", () => {
 });
 
 describe("GitHub origin detection", () => {
+  // alp-rename-keep-start: the owner/repo is parsed from the upstream remote
   it.each([
-    ["git@github.com:getpaseo/paseo.git", "alp/alp"],
-    ["ssh://git@github.com/getpaseo/paseo.git", "alp/alp"],
-    ["https://github.com/getpaseo/paseo.git", "alp/alp"],
+    ["git@github.com:getpaseo/paseo.git", "getpaseo/paseo"],
+    ["ssh://git@github.com/getpaseo/paseo.git", "getpaseo/paseo"],
+    ["https://github.com/getpaseo/paseo.git", "getpaseo/paseo"],
     ["https://gitlab.com/getpaseo/paseo.git", undefined],
   ])("resolves %s", (remote, expected) => {
     expect(githubRepositoryFromRemote(remote)).toBe(expected);
   });
+  // alp-rename-keep-end
 });

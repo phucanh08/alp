@@ -152,7 +152,7 @@ describe("Add Project options", () => {
     expect(buildManualGithubRepositoryChoices("git@github.com:getpaseo/paseo.git")).toEqual([
       expect.objectContaining({
         id: "manual:git@github.com:getpaseo/paseo.git",
-        nameWithOwner: "alp/alp",
+        nameWithOwner: "getpaseo/paseo", // alp-rename-keep: parsed from the upstream URL above
         cloneUrl: "git@github.com:getpaseo/paseo.git",
       }),
     ]);
