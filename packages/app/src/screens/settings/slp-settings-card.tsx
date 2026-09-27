@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   SettingsCard,
@@ -19,6 +19,8 @@ import { filterSelectableModels } from "@/provider-selection/model-catalog";
 export const SUPERVISOR_PROVIDER = "claude";
 // Model ids are never empty, so the empty string stands for the stored `null`.
 const DEFAULT_MODEL_OPTION = "";
+// The Human types a number over several keystrokes; save the value once they stop, not each digit.
+const SUPERVISOR_CHECK_MINUTES_DEBOUNCE_MS = 300;
 
 type ReadySlpSettings = Extract<SlpSettings, { status: "ready" }>;
 type SavedField = "enabled" | "supervisorModel" | "supervisorCheckMinutes";
@@ -71,12 +73,25 @@ function SlpSettingsRows({ serverId, slp }: { serverId: string; slp: ReadySlpSet
     },
     [save],
   );
+  // Debounced separately from `enabled`/`supervisorModel`: those save on the spot, but a minute
+  // count is typed over several keystrokes, and saving each intermediate digit would send stale
+  // values and disable the field mid-type (see SettingsInput below, which stays editable).
+  const minutesSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (minutesSaveTimer.current) clearTimeout(minutesSaveTimer.current);
+    },
+    [],
+  );
   const changeSupervisorCheckMinutes = useCallback(
     (text: string) => {
-      const minutes = parseSupervisorCheckMinutes(text);
-      if (minutes === null) return;
-      setSavedField("supervisorCheckMinutes");
-      void save({ supervisorCheckMinutes: minutes });
+      if (minutesSaveTimer.current) clearTimeout(minutesSaveTimer.current);
+      minutesSaveTimer.current = setTimeout(() => {
+        const minutes = parseSupervisorCheckMinutes(text);
+        if (minutes === null) return;
+        setSavedField("supervisorCheckMinutes");
+        void save({ supervisorCheckMinutes: minutes });
+      }, SUPERVISOR_CHECK_MINUTES_DEBOUNCE_MS);
     },
     [save],
   );
@@ -105,7 +120,6 @@ function SlpSettingsRows({ serverId, slp }: { serverId: string; slp: ReadySlpSet
         hint={t("settings.host.slp.supervisorCheckMinutes.hint")}
         error={savedField === "supervisorCheckMinutes" ? slp.saveError : null}
         initialValue={String(slp.supervisorCheckMinutes)}
-        disabled={slp.saving}
         onChangeText={changeSupervisorCheckMinutes}
       />
     </SettingsCard>

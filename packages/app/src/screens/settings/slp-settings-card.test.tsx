@@ -387,6 +387,56 @@ describe("SLP card on the host Overview page", () => {
       ]);
   });
 
+  it("debounces the check delay so only the finished value saves, and stays editable while it saves", async () => {
+    const host = createFakeSlpHost({
+      hasSlpPlugin: true,
+      settings: ready(
+        { enabled: true, supervisorModel: "claude-opus-4-1", supervisorCheckMinutes: 10 },
+        "r8",
+      ),
+    });
+    renderCard(host);
+    const input = await screen.findByLabelText<HTMLInputElement>(MINUTES);
+
+    vi.useFakeTimers();
+    try {
+      // Typing "25" one character at a time: every keystroke lands in the field.
+      fireEvent.change(input, { target: { value: "2" } });
+      expect(input.value).toBe("2");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(host.writes).toEqual([]); // "2" is not saved on the way to "25"
+
+      fireEvent.change(input, { target: { value: "25" } });
+      expect(input.value).toBe("25");
+
+      const releaseWrite = host.holdWrites();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      // The debounced save has started but the fake host has not answered it yet.
+      expect(input.disabled).toBeFalsy();
+      expect(host.writes).toEqual([]);
+      releaseWrite();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await expect
+      .poll(() => host.writes)
+      .toEqual([
+        {
+          revision: "r8",
+          values: {
+            enabled: true,
+            supervisorModel: "claude-opus-4-1",
+            supervisorCheckMinutes: 25,
+          },
+        },
+      ]);
+  });
+
   it("does not save an invalid check delay", async () => {
     const host = createFakeSlpHost({
       hasSlpPlugin: true,
