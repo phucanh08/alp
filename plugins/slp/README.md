@@ -50,8 +50,10 @@ per tick, spaced the setting's minutes apart per Lead, and only while the Superv
 nudge never replaces a Supervisor turn already running. See `server/supervisor-check.ts`.
 
 You control all three values from the SLP card on the host's Overview page (Settings → the host →
-Overview). The card is absent on a host without the `slp` plugin, saves each change to that host at
-once, shows a save error on the row you changed, and picks up changes made elsewhere. Its model
+Overview). The card is absent on a host without the `slp` plugin, shows a save error on the row you
+changed, and picks up changes made elsewhere. `enabled` and `supervisorModel` save at once;
+`supervisorCheckMinutes` is typed over several keystrokes, so the card saves it only once you stop
+typing. Its model
 list is "Default" (stored as `null`) plus the selectable `claude` models on that host. The app
 reads the settings through `useSlpSettings` (`packages/app/src/plugins/slp-settings/`). Metro does
 not bundle files outside the app workspace, so the app keeps its own copy of this definition and
