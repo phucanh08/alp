@@ -66,7 +66,7 @@ test("with slp-dev's real seat.get, each seat gets agents/<seat>.md minus frontm
     )) as { config: { systemPrompt: string } } | undefined;
     const prompt = result?.config.systemPrompt ?? "";
     expect(prompt.startsWith(`# Ghế SLP: ${seat}\n\n${body}\n\n## SLP-RUNTIME: alp\n`)).toBe(true);
-    const skills = seats[seat].map((skill) => `\`${skill}\``).join(", ");
+    const skills = seats[seat].map((skill) => `\`slp-${seat}:${skill}\``).join(", ");
     if (seats[seat].length > 0)
       expect(prompt).toContain(`- **Skill của ghế này** (plugin \`slp-dev\`): ${skills}.`);
     else expect(prompt).not.toContain("Skill của ghế này");

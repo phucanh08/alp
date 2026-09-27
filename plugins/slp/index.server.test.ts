@@ -321,7 +321,7 @@ test("agent.create asks slp-dev through the hook's own Paseo API for the seat ru
     result.config.systemPrompt.startsWith("EXISTING\n\n# Ghế SLP: lead\n\nSLP-DEV LEAD\n\n"),
   ).toBe(true);
   expect(result.config.systemPrompt).toContain(
-    "- **Skill của ghế này** (plugin `slp-dev`): `xia`.",
+    "- **Skill của ghế này** (plugin `slp-dev`): `slp-lead:xia`.",
   );
 });
 
