@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 
 import { ensurePrivateFile, writePrivateFileAtomicSync } from "./private-files.js";
+import { readAlpEnv } from "./rename-migration/legacy-names.js";
 
 interface LoggerLike {
   child(bindings: Record<string, unknown>): LoggerLike;
@@ -40,10 +41,8 @@ export function getOrCreateServerId(
   const log = getLogger(options?.logger);
   const serverIdPath = getServerIdPath(alpHome);
 
-  const envOverride =
-    typeof env.ALP_SERVER_ID === "string" && env.ALP_SERVER_ID.trim().length > 0
-      ? env.ALP_SERVER_ID.trim()
-      : null;
+  const envServerId = readAlpEnv(env, "ALP_SERVER_ID")?.trim();
+  const envOverride = envServerId && envServerId.length > 0 ? envServerId : null;
 
   if (envOverride) {
     // Persist the override for consistent identity across restarts.

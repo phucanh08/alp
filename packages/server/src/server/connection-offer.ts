@@ -1,6 +1,7 @@
 import os from "node:os";
 
 import { ConnectionOfferV2Schema, type ConnectionOffer } from "@alp/protocol/connection-offer";
+import { readAlpEnv } from "./rename-migration/legacy-names.js";
 
 interface BuildOfferEndpointsArgs {
   listenHost: string;
@@ -50,7 +51,7 @@ export function encodeOfferToFragmentUrl(args: {
 }
 
 function getPrimaryLanIp(): string | null {
-  const override = process.env.ALP_PRIMARY_LAN_IP?.trim();
+  const override = readAlpEnv(process.env, "ALP_PRIMARY_LAN_IP")?.trim();
   if (override) return override;
 
   const nets = os.networkInterfaces();
