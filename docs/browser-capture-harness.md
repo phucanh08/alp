@@ -81,7 +81,7 @@ The existing `npm run test:e2e:browser-tabs --workspace=@alp/desktop` journey
 verifies that a hidden window stops guest animation, captures fresh viewport pixels,
 and resumes animation after restoring the window. Its artifacts include the screenshot
 and animation measurements. Full-page content correctness remains separately tracked in
-[the full-page repetition bug](https://github.com/getpaseo/paseo/issues/3196).
+[the full-page repetition bug](https://github.com/getpaseo/paseo/issues/3196), filed upstream. <!-- alp-rename-keep -->
 
 ## Mechanism
 

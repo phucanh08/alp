@@ -64,10 +64,14 @@ To connect from your phone, open **Settings → your host → Pair Device**.
 
 ### CLI / headless
 
-Install the CLI and start alp:
+This fork doesn't publish `@alp/cli` to npm. Build the CLI from a checkout and run it:
 
 ```bash
-npm install -g @alp/cli
+git clone https://github.com/phucanh08/alp.git
+cd alp
+npm install
+npm run build:server
+npm link -w packages/cli
 alp
 ```
 
@@ -81,15 +85,16 @@ For full setup and configuration, see:
 
 ### Docker
 
-Run the alp daemon and self-hosted web UI in Docker:
+alp doesn't publish a prebuilt image yet. Build one from the checkout and run it:
 
 ```bash
+docker build -f docker/base/Dockerfile -t alp:local .
 docker run -d --name alp \
   -p 6767:6767 \
   -e ALP_PASSWORD=change-me \
   -v "$PWD/alp-home:/home/alp" \
   -v "$PWD:/workspace" \
-  ghcr.io/getpaseo/paseo:latest
+  alp:local
 ```
 
 Open `http://localhost:6767` after it starts. Extend the base image with the agent CLIs you use, then provide credentials through environment variables or the persistent `/home/alp` volume. See the [Docker documentation](docs/docker.md) for full setup details.

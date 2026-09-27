@@ -95,9 +95,10 @@ the daemon does not retry revocation in the background.
 
 ## Cross-repository compatibility
 
-The consumer implementation lives in Alp Cloud. Cloud owns its copy of the Hub wire schemas and
-has no Alp runtime or build dependency. Cross-repository end-to-end verification separately builds
-a Alp source checkout and exercises the real daemon, CLI, direct WebSocket, Cloud service, and
-Postgres. That compatibility fixture is not a package dependency or fallback implementation.
+The consumer implementation lives in Paseo Cloud, upstream's own hosted product; this fork has no <!-- alp-rename-keep -->
+equivalent. Cloud owns its copy of the Hub wire schemas and has no Paseo runtime or build <!-- alp-rename-keep -->
+dependency. Cross-repository end-to-end verification separately builds a Paseo source checkout and <!-- alp-rename-keep -->
+exercises the real daemon, CLI, direct WebSocket, Cloud service, and Postgres. That compatibility
+fixture is not a package dependency or fallback implementation.
 Its `hub-e2e` ACP provider accepts only exact tool names on the injected `hub` MCP server. Other
 custom ACP providers remain unsupported for unattended preapproval.
