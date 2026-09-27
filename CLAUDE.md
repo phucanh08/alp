@@ -60,7 +60,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/android.md](docs/android.md)                                   | App variants, local/cloud builds, EAS workflows, version codes, F-Droid source builds and store metadata                       |
 | [docs/docker.md](docs/docker.md)                                     | Running the daemon and bundled web UI in Docker, volumes, agent images, security                                               |
 | [docs/relay.md](docs/relay.md)                                       | Relay: library stays in repo, deployment is maintainer-owned outside CI; default endpoints                                     |
-| [docs/breaking-changes.md](docs/breaking-changes.md)                 | Running list of intentional divergences from upstream Paseo (no compatibility goal)                                            |
+| [docs/breaking-changes.md](docs/breaking-changes.md)                 | Running list of intentional divergences from upstream Paseo (no compatibility goal) <!-- alp-rename-keep -->                   |
 | [docs/release.md](docs/release.md)                                   | Release playbook, draft releases, completion checklist                                                                         |
 | [docs/terminal-activity.md](docs/terminal-activity.md)               | Terminal activity indicators — source-agnostic tracker, agent hook reporting, adding a new hook provider                       |
 | [SECURITY.md](SECURITY.md)                                           | Relay threat model, E2E encryption, DNS rebinding, agent auth                                                                  |
@@ -197,7 +197,7 @@ Find the complete daemon logs and traces in the $PASEO_HOME/daemon.log
 
 ## SLP team policy (alp fork)
 
-Repo này là fork của [getpaseo/paseo](https://github.com/getpaseo/paseo) (`upstream`), phát triển
+Repo này là fork của [getpaseo/paseo](https://github.com/getpaseo/paseo) (`upstream`), phát triển <!-- alp-rename-keep -->
 theo quy trình SLP (Supervisor / Lead / Peer). Trong phiên Claude Code như phiên này, seat definition
 ở `.claude/agents/`, skill theo phase ở `.claude/skills/`; ghế nào dùng từ vựng nào ở
 `plugins/slp-dev/references/seats.md`. Trong app alp (agent do plugin `plugins/slp` tạo), seat definition và skills bundled ở
@@ -214,6 +214,8 @@ hiện hành: `plans/`.
 - Memory theo role: Lead ở `.claude/agent-memory-local/lead/` (không commit); Peer không có memory bền.
 
 ### Contract boundaries (fork)
+
+<!-- alp-rename-keep-start -->
 
 - `packages/protocol` wire schema: giữ luật backward-compatible ở trên. Ngoại lệ một lần, Human quyết
   2026-09-27 (alp-p22): mọi tên mang `paseo` (field, label, RPC, message type, MCP server/tool prefix,
@@ -234,6 +236,8 @@ hiện hành: `plans/`.
 - Upstream sync: **chỉ** qua `scripts/sync-upstream.mjs` (áp `rename-map` lên base và upstream rồi merge
   bằng `git merge-tree --merge-base`), không `git merge upstream/main` trực tiếp. Ngoài ra vẫn ưu tiên thay
   đổi nhỏ, tách file mới thay vì sửa lan rộng.
+
+<!-- alp-rename-keep-end -->
 
 ### Verification
 

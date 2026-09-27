@@ -1,3 +1,4 @@
+<!-- alp-rename-keep-file: plan history -->
 # Handoff: fork paseo → alp, Phase 0–2 → lead-alp
 
 **Từ:** session alp-ae (bootstrap) · **Tới:** lead-alp · **Ngày:** 2026-09-25 · **Runtime:** Claude Code Agent Teams (SLP beta cài trong repo)

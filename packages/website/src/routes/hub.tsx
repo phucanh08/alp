@@ -543,8 +543,10 @@ function FaqSection() {
           </p>
         </FAQItem>
         <FAQItem question="Can I run it myself?">
+          {/* alp-rename-keep-start: the upstream Hub and its npm package */}
           Yes. alp connects to the upstream Paseo Hub: run <code>npx @getpaseo/hub</code> and
           complete setup in the browser. The upstream Paseo Hub source is available on{" "}
+          {/* alp-rename-keep-end */}
           <a href="https://github.com/getpaseo/hub" className={LINK_CLASS}>
             GitHub
           </a>

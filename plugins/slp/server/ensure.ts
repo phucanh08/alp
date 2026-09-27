@@ -350,7 +350,7 @@ async function liveLeadInDirectory(api: EnsureApi, directory: string): Promise<s
 
 /**
  * `workspace.created`: a Lead for client-created workspaces, never for the Supervisor one. One Lead
- * per directory: upstream `paseo run` mints a new workspace on every bare run, so a directory that
+ * per directory: upstream `paseo run` mints a new workspace on every bare run, so a directory that (alp-rename-keep)
  * already has a live Lead in another active workspace gets no second one. Only this automatic path
  * dedupes; `slp.lead.ensure` still gives the workspace it names its own Lead. `enabled` is the SLP
  * settings switch (default `true`); `false` ensures no Lead, but still consumes the matched

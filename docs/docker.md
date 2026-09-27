@@ -178,7 +178,7 @@ IPs and `localhost` are allowed by default.
 
 - Set `PASEO_PASSWORD` for any published port or network-reachable deployment.
 - Prefer HTTPS at the reverse proxy for direct browser access.
-- Use the [official Paseo relay](https://github.com/getpaseo/paseo-relay) for
+- Use the [official Paseo relay](https://github.com/getpaseo/paseo-relay) for <!-- alp-rename-keep -->
   untrusted networks or mobile access when you do not want to expose the daemon
   port directly.
 - The container is the isolation boundary for agents. Agents can read and write

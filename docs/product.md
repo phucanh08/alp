@@ -1,6 +1,6 @@
 # Product
 
-alp is an environment for running, monitoring, and interacting with coding agents across desktop, mobile, web, and the command line. alp is a fork of [Paseo](https://github.com/getpaseo/paseo).
+alp is an environment for running, monitoring, and interacting with coding agents across desktop, mobile, web, and the command line. alp is a fork of [Paseo](https://github.com/getpaseo/paseo). <!-- alp-rename-keep -->
 
 **alp has a lean, opinionated core built to be extended.** It should be easy to start using and leave room for people to build far beyond the default experience.
 

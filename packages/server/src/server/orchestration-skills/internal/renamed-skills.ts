@@ -4,6 +4,7 @@ import type { AgentSkillSelection } from "@getpaseo/protocol/messages";
 
 import { hashFile, MANAGED_FILES_MANIFEST, readManagedFilesManifest } from "./sync.js";
 
+// alp-rename-keep-start: the old skill names are what this migration reads.
 // ALP(rebrand): the bundle's paseo* skills ship as alp*. Old names map to the
 // new ones so saved selections keep meaning the same skills, and installed
 // copies under an old name are removed once nothing in them is the user's.
@@ -17,6 +18,7 @@ const RENAMED_SKILLS: ReadonlyMap<string, string> = new Map([
   ["paseo-help", "alp-help"],
   ["paseo-plugin", "alp-plugin"],
 ]);
+// alp-rename-keep-end
 
 export const RENAMED_SKILL_OLD_NAMES: readonly string[] = [...RENAMED_SKILLS.keys()];
 

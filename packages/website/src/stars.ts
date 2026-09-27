@@ -13,7 +13,7 @@ function formatStars(count: number): string {
 }
 
 const GITHUB_REPO_URL = "https://api.github.com/repos/phucanh08/alp";
-// Bumped when the site moved from getpaseo/paseo to the fork: a star count can't
+// Bumped when the site moved from getpaseo/paseo to the fork: a star count can't (alp-rename-keep)
 // tell which repo it came from, so only a new key keeps KV from serving upstream's.
 const STARS_CACHE_KEY = "github-stars:alp-v1";
 

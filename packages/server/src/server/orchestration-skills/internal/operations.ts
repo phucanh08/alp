@@ -62,12 +62,14 @@ export interface SkillCatalog {
 // covers them so an older install's copies get cleaned up. Names renamed to alp*,
 // and names retired with nothing replacing them, are not here: only
 // `removeRenamedSkillDirs` may remove those.
+// alp-rename-keep-start: names older releases installed on disk.
 export const LEGACY_SKILL_NAMES: readonly string[] = [
   "paseo-chat",
   "paseo-epic",
   "paseo-orchestrate",
   "paseo-orchestrator",
 ];
+// alp-rename-keep-end
 
 type SkillFiles = Map<string, string>;
 type TargetSkills = Map<string, SkillFiles>;

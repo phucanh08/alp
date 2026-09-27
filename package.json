@@ -2,7 +2,7 @@
   "name": "alp",
   "version": "1.0.0",
   "private": true,
-  "description": "alp (fork of Paseo): voice-controlled development environment for local AI coding agents",
+  "description": "alp (fork of github.com/getpaseo/paseo): voice-controlled development environment for local AI coding agents",
   "keywords": [
     "development",
     "mcp",

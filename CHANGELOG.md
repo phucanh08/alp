@@ -2,9 +2,9 @@
 
 ## 1.0.0 - 2026-09-27
 
-alp 1.0 is the first release of the alp fork of Paseo 0.9.2. It runs the SLP (Supervisor / Lead / Peer) workflow by default and ships under the alp name, icons, and endpoints.
+alp 1.0 is the first release of the alp fork of Paseo 0.9.2. It runs the SLP (Supervisor / Lead / Peer) workflow by default and ships under the alp name, icons, and endpoints. <!-- alp-rename-keep -->
 
-**Before upgrading:** alp does not interoperate with upstream Paseo. It uses `~/.alp`, the `alp` CLI, `alp://` links, its own app ids, relay, and web app, so Paseo state, pairings, and installs do not carry over. See [breaking changes](https://github.com/phucanh08/alp/blob/main/docs/breaking-changes.md).
+**Before upgrading:** alp does not interoperate with upstream Paseo. It uses `~/.alp`, the `alp` CLI, `alp://` links, its own app ids, relay, and web app, so Paseo state, pairings, and installs do not carry over. See [breaking changes](https://github.com/phucanh08/alp/blob/main/docs/breaking-changes.md). <!-- alp-rename-keep -->
 
 ### Added
 
@@ -23,9 +23,9 @@ alp 1.0 is the first release of the alp fork of Paseo 0.9.2. It runs the SLP (Su
 ### Changed
 
 - Renamed the app, desktop app, CLI, website, and docs to alp: `alp` CLI, `~/.alp` home, `alp://` links, `com.anhlp.alp` app ids, and desktop updates from [phucanh08/alp](https://github.com/phucanh08/alp/releases) releases
-- Replaced the Paseo mark with the alp mark on the app icon, splash screen, Android and F-Droid icons, desktop icons, favicons, and PWA and Safari touch icons
+- Replaced the Paseo mark with the alp mark on the app icon, splash screen, Android and F-Droid icons, desktop icons, favicons, and PWA and Safari touch icons <!-- alp-rename-keep -->
 - Changed the default relay to `relay-alp.anhlp.com`, the web app to `app-alp.anhlp.com`, the Hub to `hub-alp.anhlp.com`, and in-app links to `alp.anhlp.com`
-- Renamed the bundled `paseo*` skills to `alp*`, carrying over installed copies and saved selections
+- Renamed the bundled `paseo*` skills to `alp*`, carrying over installed copies and saved selections <!-- alp-rename-keep -->
 - Changed daemon start to set `pluginsEnabled` and `daemon.mcp.injectIntoAgents` to `true` when they are absent, so the bundled plugins run and seats get the alp MCP tools on a fresh host
 - Changed the automatic Lead to one per directory: a new workspace in a directory that already has a live Lead gets none
 - Removed `update_agent`, `set_agent_mode`, and `respond_to_permission` from a Peer's alp tools

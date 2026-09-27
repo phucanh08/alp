@@ -35,7 +35,7 @@ const REQUIRED_ASSET_PATTERNS = [
 ];
 
 const GITHUB_RELEASES_URL = "https://api.github.com/repos/phucanh08/alp/releases?per_page=10";
-// Bumped when the site moved from getpaseo/paseo to the fork, so KV never serves
+// Bumped when the site moved from getpaseo/paseo to the fork, so KV never serves (alp-rename-keep)
 // the upstream release under the new source.
 const RELEASE_CACHE_KEY = "github-release:alp-v1";
 const ANDROID_RELEASE_CACHE_KEY = "github-android-release:alp-v1";

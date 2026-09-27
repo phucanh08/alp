@@ -14,7 +14,7 @@
   </a>
 </p>
 
-<p align="center"><em>A fork of <a href="https://github.com/getpaseo/paseo">Paseo</a>, licensed Apache-2.0.</em></p>
+<p align="center"><em>A fork of <a href="https://github.com/getpaseo/paseo">Paseo</a>, licensed Apache-2.0.</em></p> <!-- alp-rename-keep -->
 
 <p align="center">One interface for Claude Code, Codex, Copilot, OpenCode, and Pi agents.</p>
 
@@ -182,8 +182,8 @@ npm run typecheck
 
 ## Related projects
 
-- [getpaseo/paseo-relay](https://github.com/getpaseo/paseo-relay) — official distributed relay, written in Elixir
-- [paseo-vscode](https://marketplace.visualstudio.com/items?itemName=hinnes.paseo-vscode) — VS Code extension
+- [getpaseo/paseo-relay](https://github.com/getpaseo/paseo-relay) — official distributed relay, written in Elixir <!-- alp-rename-keep -->
+- [paseo-vscode](https://marketplace.visualstudio.com/items?itemName=hinnes.paseo-vscode) — VS Code extension <!-- alp-rename-keep -->
 
 ## License
 

@@ -157,7 +157,7 @@ those requests and creates a Lead only for workspaces that match one:
 - Records expire after 10 minutes.
 
 One Lead per directory: a matching workspace gets no Lead when another active workspace with the same
-directory already has a live Lead (not closed or archived). Upstream `paseo run` creates a new
+directory already has a live Lead (not closed or archived). Upstream `paseo run` creates a new <!-- alp-rename-keep -->
 workspace on every run without `--workspace`, so three runs in one directory would otherwise start
 three Leads. Directories compare after `~` expansion and `path.resolve`, the way the daemon stores
 them, without resolving symlinks. A Paseo worktree has its own directory and gets its own Lead.
