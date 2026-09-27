@@ -99,6 +99,32 @@ test("with no rule text, every seat's runtime block says its rules did not load 
   }
 });
 
+/**
+ * Mentions of a seat definition that stay true when the prompt has none: the missing-rules notice
+ * itself, the override fact, and the Lead's note that a non-Peer agent gets no seat definition.
+ */
+const TRUE_WITHOUT_DEFINITION = [
+  "nên system prompt không có definition ghế",
+  "Repo có thể override definition bằng `.slp/agents/<seat>.md`",
+  "Peer: không definition ghế, không khoá",
+];
+
+test("with no rule text, no seat, family, or origin prompt points at a seat definition", () => {
+  const cases = [
+    ...(["lead", "supervisor"] as const).map((seat) => [seat, null] as const),
+    ...([null, "human", "schedule"] as const).map((origin) => ["peer", origin] as const),
+  ];
+  for (const [seat, origin] of cases) {
+    for (const family of ["claude", "codex"] as const) {
+      let text = buildSystemPrompt(seat, family, null, null, origin).replace(/\s+/g, " ");
+      for (const phrase of TRUE_WITHOUT_DEFINITION) text = text.split(phrase).join("");
+      const label = `${seat}/${family}/${origin ?? "none"}`;
+      expect(text, label).not.toMatch(/definition/i);
+      expect(text, label).not.toMatch(/(luật|định nghĩa) ghế[^.]*ở (ngay )?trên/i);
+    }
+  }
+});
+
 test("Lead runtime block carries the model and effort rule for Peers", () => {
   const lead = buildSystemPrompt("lead", "claude", "BODY", null);
   expect(lead).toContain('provider: "claude/<model>"');
