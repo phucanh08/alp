@@ -21,7 +21,11 @@ import {
   type SkillSelection,
   type SkillTargets,
 } from "./operations.js";
-import { RENAMED_SKILL_OLD_NAMES, renameSkillSelection } from "./renamed-skills.js";
+import {
+  RENAMED_SKILL_OLD_NAMES,
+  renameSkillSelection,
+  type SkillsLogger,
+} from "./renamed-skills.js";
 import { listFilesRecursive, readManagedFilesManifest } from "./sync.js";
 
 export interface SkillsTransaction {
@@ -51,6 +55,15 @@ interface CapturedDirectory {
   kind: SkillOp["kind"];
   /** Relative to the manifest directory, or an absolute same-filesystem delete stage. */
   backupPath: string | null;
+  /**
+   * The directory this skill was synced from when the transaction began: core
+   * or a plugin. Add/update rollback needs it to tell the interrupted sync's
+   * own files apart from the user's. Recomputing it at recovery time instead
+   * would follow the catalog as it stands then, which can name the wrong
+   * source once a plugin's config, enablement, or manifest has since changed.
+   * Absent on delete entries and on manifests written before this field existed.
+   */
+  sourceDir?: string;
 }
 
 const MANIFEST_OWNER = "paseo-skills-transaction";
@@ -99,7 +112,8 @@ async function readManifest(transactionDir: string): Promise<TransactionManifest
     (entry) =>
       typeof entry?.livePath === "string" &&
       (entry.kind === "add" || entry.kind === "update" || entry.kind === "delete") &&
-      (entry.backupPath === null || typeof entry.backupPath === "string"),
+      (entry.backupPath === null || typeof entry.backupPath === "string") &&
+      (entry.sourceDir === undefined || typeof entry.sourceDir === "string"),
   );
   if (!validEntries) return null;
   const entries = manifest.entries as CapturedDirectory[];
@@ -134,10 +148,14 @@ async function validateEntries(
   targets: SkillTargets,
   transactionDir: string,
   entries: CapturedDirectory[],
+  logger?: SkillsLogger,
 ): Promise<boolean> {
   // ALP(rebrand): a transaction left by a release before the alp rename names the
   // old directories, and only this transaction can put them back.
-  const names = new Set([...(await listManagedSkillNames(targets)), ...RENAMED_SKILL_OLD_NAMES]);
+  const names = new Set([
+    ...(await listManagedSkillNames(targets, logger)),
+    ...RENAMED_SKILL_OLD_NAMES,
+  ]);
   const roots = [targets.agentsDir, targets.claudeDir, targets.codexDir];
   return entries.every((entry) => {
     const rootIndex = roots.findIndex((root) => path.dirname(entry.livePath) === root);
@@ -398,14 +416,29 @@ async function undoSyncedDirectory(
   }
 }
 
+/**
+ * The captured value wins: it names the source this entry actually synced
+ * from when the transaction began. The freshly resolved catalog is only a
+ * fallback for a manifest written before entries recorded their own source.
+ */
+function resolveEntrySourceDir(
+  entry: CapturedDirectory,
+  sourceDirs: ReadonlyMap<string, string>,
+  targets: SkillTargets,
+): string {
+  const name = path.basename(entry.livePath);
+  return entry.sourceDir ?? sourceDirs.get(name) ?? targets.sourceDir;
+}
+
 async function restore(
   targets: SkillTargets,
   transactionDir: string,
   manifest: TransactionManifest,
+  logger?: SkillsLogger,
 ): Promise<void> {
   // Nothing was converged yet, so the live tree is already the pre-save state.
   if (manifest.phase === "capturing") return;
-  const { sourceDirs } = await readSkillCatalog(targets);
+  const { sourceDirs } = await readSkillCatalog(targets, logger);
   const expectedByName = new Map<string, Map<string, Buffer>>();
   const claimedQuarantines = new Set<string>();
   for (const entry of manifest.entries) {
@@ -454,7 +487,7 @@ async function restore(
       continue;
     }
     const name = path.basename(entry.livePath);
-    const sourceDir = sourceDirs.get(name) ?? targets.sourceDir;
+    const sourceDir = resolveEntrySourceDir(entry, sourceDirs, targets);
     if (
       RENAMED_SKILL_OLD_NAMES.includes(name) &&
       !(await isDirectory(path.join(sourceDir, name)))
@@ -490,6 +523,7 @@ function transactionParents(targets: SkillTargets): string[] {
 export async function recoverInterruptedSkillTransactions(
   targets: SkillTargets,
   committedSelection: SkillSelection,
+  logger?: SkillsLogger,
 ): Promise<void> {
   for (const parent of transactionParents(targets)) {
     const entries = await readdir(parent).catch(() => []);
@@ -498,7 +532,7 @@ export async function recoverInterruptedSkillTransactions(
       const transactionDir = path.join(parent, entry);
       const manifest = await readManifest(transactionDir);
       if (!manifest) continue;
-      if (!(await validateEntries(targets, transactionDir, manifest.entries))) continue;
+      if (!(await validateEntries(targets, transactionDir, manifest.entries, logger))) continue;
       // ALP(rebrand): the manifest may hold the old names; compare as new names.
       const committed = renameSkillSelection(committedSelection);
       if (selectionsEqual(committed, renameSkillSelection(manifest.nextSelection))) {
@@ -510,7 +544,7 @@ export async function recoverInterruptedSkillTransactions(
           `Cannot safely recover interrupted skills transaction at ${transactionDir}`,
         );
       }
-      await restore(targets, transactionDir, manifest);
+      await restore(targets, transactionDir, manifest, logger);
       await discardTransaction(transactionDir, manifest.entries);
     }
   }
@@ -526,7 +560,13 @@ export async function beginSkillsTransaction(
   previousSelection: SkillSelection,
   nextSelection: SkillSelection,
   ops: readonly SkillOp[],
+  logger?: SkillsLogger,
 ): Promise<SkillsTransaction> {
+  // Captured now, while the source that is about to sync each name is known.
+  // Recovery reads this back instead of resolving the catalog again, so a
+  // config or enablement change before recovery cannot point it at the wrong
+  // plugin's directory (or core's).
+  const { sourceDirs } = await readSkillCatalog(targets, logger);
   const roots = [targets.agentsDir, targets.claudeDir, targets.codexDir];
   const seenRoots = new Set<string>();
   const uniqueRoots: Array<{ root: string; rootIndex: number }> = [];
@@ -560,9 +600,10 @@ export async function beginSkillsTransaction(
       for (const op of ops) {
         const name = op.name;
         const livePath = path.join(root, name);
+        const sourceDir = op.kind === "delete" ? undefined : sourceDirs.get(name);
         const liveInfo = await lstat(livePath).catch(() => null);
         if (liveInfo === null) {
-          entries.push({ livePath, kind: op.kind, backupPath: null });
+          entries.push({ livePath, kind: op.kind, backupPath: null, sourceDir });
           continue;
         }
         const liveIsDirectory = await isDirectory(livePath);
@@ -580,7 +621,7 @@ export async function beginSkillsTransaction(
             verbatimSymlinks: true,
           });
         }
-        entries.push({ livePath, kind: op.kind, backupPath });
+        entries.push({ livePath, kind: op.kind, backupPath, sourceDir });
       }
     }
     await writeManifest(transactionDir, {
@@ -612,14 +653,19 @@ export async function beginSkillsTransaction(
       await rename(entry.livePath, backup);
     }
   } catch (error) {
-    await restore(targets, transactionDir, {
-      owner: MANIFEST_OWNER,
-      version: 1,
-      phase: "converging",
-      previousSelection,
-      nextSelection,
-      entries,
-    });
+    await restore(
+      targets,
+      transactionDir,
+      {
+        owner: MANIFEST_OWNER,
+        version: 1,
+        phase: "converging",
+        previousSelection,
+        nextSelection,
+        entries,
+      },
+      logger,
+    );
     await discard();
     throw error;
   }
@@ -627,14 +673,19 @@ export async function beginSkillsTransaction(
   return {
     commit: discard,
     async rollback(): Promise<void> {
-      await restore(targets, transactionDir, {
-        owner: MANIFEST_OWNER,
-        version: 1,
-        phase: "converging",
-        previousSelection,
-        nextSelection,
-        entries,
-      });
+      await restore(
+        targets,
+        transactionDir,
+        {
+          owner: MANIFEST_OWNER,
+          version: 1,
+          phase: "converging",
+          previousSelection,
+          nextSelection,
+          entries,
+        },
+        logger,
+      );
       await discard();
     },
   };
