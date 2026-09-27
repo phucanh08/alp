@@ -22,6 +22,7 @@ import { assertPluginCompatibility } from "@getpaseo/protocol/plugin-requirement
 import { BUILTIN_PROVIDER_IDS } from "@getpaseo/protocol/provider-manifest";
 import type { DaemonConfigStore } from "../daemon-config-store.js";
 import { type ManagedPluginCandidate, ManagedPluginSources } from "./managed-source.js";
+import { isPluginEnabled } from "./enablement.js";
 import { readPluginManifest } from "./manifest.js";
 import { runPluginBuild } from "./preparation.js";
 import { PluginRuntime } from "./runtime.js";
@@ -526,17 +527,8 @@ export class PluginService {
   }
 
   private canPublish(pluginId: string): boolean {
-    const config = this.configStore.get();
-    // ALP(slp): a bundled plugin without a config entry follows only the global switch.
-    if (this.dependencies.bundledPlugins?.[pluginId] && !config.plugins?.[pluginId]) {
-      return !this.globalStartsBlocked && config.pluginsEnabled === true;
-    }
-    return (
-      !this.globalStartsBlocked &&
-      config.pluginsEnabled === true &&
-      config.plugins?.[pluginId]?.enabled !== false &&
-      config.plugins?.[pluginId] !== undefined
-    );
+    const bundled = this.dependencies.bundledPlugins?.[pluginId] !== undefined;
+    return !this.globalStartsBlocked && isPluginEnabled(this.configStore.get(), pluginId, bundled);
   }
 
   private async startPlugin(pluginId: string, sourcePath: string): Promise<void> {

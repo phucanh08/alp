@@ -3,7 +3,8 @@ import { resolveDaemonVersion } from "../daemon-version.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, expect, test } from "vitest";
+import pino from "pino";
+import { afterEach, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { DaemonClient } from "../test-utils/daemon-client.js";
 import { createTestPaseoDaemon } from "../test-utils/paseo-daemon.js";
@@ -135,6 +136,148 @@ export default function contribute(server: PluginServerContext) {
     expect(agents.entries.map((entry) => entry.agent.id)).toContain(
       Reflect.get(created, "agentId"),
     );
+  } finally {
+    await client.close().catch(() => undefined);
+    await daemon.close();
+  }
+}, 60_000);
+
+test("a before(agent.create) hook invokes another plugin's RPC and the create applies its answer", async () => {
+  const answererDirectory = await mkdtemp(path.join(tmpdir(), "paseo-answerer-plugin-"));
+  const askerDirectory = await mkdtemp(path.join(tmpdir(), "paseo-asker-plugin-"));
+  const workspaceDirectory = await mkdtemp(path.join(tmpdir(), "paseo-asker-workspace-"));
+  roots.push(answererDirectory, askerDirectory, workspaceDirectory);
+  const requirements = { paseo: `>=${resolveDaemonVersion(import.meta.url)}` };
+  await writeFile(
+    path.join(answererDirectory, "paseo-plugin.json"),
+    JSON.stringify({ id: "answerer", requirements }),
+  );
+  await writeFile(
+    path.join(answererDirectory, "index.server.ts"),
+    `import { defineRpc } from "@getpaseo/plugin";
+import { type PluginServerContext } from "@getpaseo/plugin/server";
+import { z } from "zod";
+
+const answer = defineRpc({
+  name: "answerer.answer",
+  input: z.object({ seat: z.string() }),
+  output: z.object({ text: z.string() }),
+});
+
+export default function contribute(server: PluginServerContext) {
+  server.handle(answer, ({ seat }) => ({ text: "answer for " + seat }));
+  return () => undefined;
+}`,
+  );
+  // Only "asker" registers before(agent.create), so the daemon runs just its hook and waits on it
+  // while the answer travels asker -> daemon -> answerer -> daemon -> asker.
+  await writeFile(
+    path.join(askerDirectory, "paseo-plugin.json"),
+    JSON.stringify({ id: "asker", requirements }),
+  );
+  await writeFile(
+    path.join(askerDirectory, "index.server.ts"),
+    `import { type PluginServerContext } from "@getpaseo/plugin/server";
+
+export default function contribute(server: PluginServerContext) {
+  return server.before("agent.create", async ({ request }, { paseo }) => {
+    const output = (await paseo.plugins.invoke("answerer", "answerer.answer", {
+      seat: request.labels?.seat ?? "none",
+    })) as { text: string };
+    return { ...request, labels: { ...request.labels, answer: output.text } };
+  });
+}`,
+  );
+
+  const daemon = await createTestPaseoDaemon({
+    agentClients: { ...createTestAgentClients(), pi: createTestAgentClient("pi") },
+  });
+  const client = new DaemonClient({
+    url: `ws://127.0.0.1:${daemon.port}/ws`,
+    appVersion: "0.4.0",
+  });
+
+  try {
+    await client.connect();
+    await client.patchDaemonConfig({ pluginsEnabled: true });
+    await expect(client.installDirectoryPlugin(answererDirectory)).resolves.toMatchObject({
+      id: "answerer",
+      status: "running",
+    });
+    await expect(client.installDirectoryPlugin(askerDirectory)).resolves.toMatchObject({
+      id: "asker",
+      status: "running",
+    });
+
+    const agent = await client.createAgent({
+      provider: "pi",
+      cwd: workspaceDirectory,
+      title: "Asked",
+      labels: { seat: "lead" },
+    });
+
+    expect(agent.labels).toMatchObject({ seat: "lead", answer: "answer for lead" });
+    await client.archiveAgent(agent.id);
+  } finally {
+    await client.close().catch(() => undefined);
+    await daemon.close();
+  }
+}, 60_000);
+
+// ALP(slp): the daemon ships plugins/slp and plugins/slp-dev (bootstrap `bundledPlugins`), so this
+// runs the repo's own copies through the real plugin compiler and child process, not a fake context.
+test("bundled slp seats an agent with the rules and skills bundled slp-dev answers", async () => {
+  const workspaceDirectory = await mkdtemp(path.join(tmpdir(), "paseo-slp-seat-workspace-"));
+  roots.push(workspaceDirectory);
+  const bundledFailures: string[] = [];
+  const logger = pino(
+    { level: "error" },
+    {
+      write(line: string) {
+        const record = JSON.parse(line);
+        if (record.msg === "Bundled plugin failed to start") {
+          bundledFailures.push(`${record.pluginId}: ${record.err?.message}`);
+        }
+      },
+    },
+  );
+  const daemon = await createTestPaseoDaemon({ logger });
+  const client = new DaemonClient({
+    url: `ws://127.0.0.1:${daemon.port}/ws`,
+    appVersion: "0.4.0",
+  });
+
+  try {
+    await client.connect();
+    await client.patchDaemonConfig({ pluginsEnabled: true });
+    // Bundled plugins start in the background after the switch; slp starts before slp-dev.
+    await vi.waitFor(
+      async () => {
+        if (bundledFailures.length > 0) return;
+        await client.invokePluginRpc("slp-dev", "slp-dev.seat.get", { seat: "peer" });
+      },
+      { timeout: 30_000, interval: 250 },
+    );
+    expect(bundledFailures).toEqual([]);
+
+    const answer = await client.invokePluginRpc("slp-dev", "slp-dev.seat.get", { seat: "peer" });
+    expect(answer).toEqual({
+      definition: expect.stringContaining("# Peer — independent co-worker"),
+      skills: ["xia", "smart-commits", "bug-loop", "ask-alp"],
+    });
+
+    const agent = await client.createAgent({
+      provider: "claude",
+      cwd: workspaceDirectory,
+      title: "Seated peer",
+      labels: { "slp.role": "peer" },
+    });
+    const systemPrompt = daemon.daemon.agentManager.getAgent(agent.id)?.config.systemPrompt;
+    expect(systemPrompt).toContain("# Ghế SLP: peer\n\n# Peer — independent co-worker");
+    expect(systemPrompt).toContain(
+      "(plugin `slp-dev`): `xia`, `smart-commits`, `bug-loop`, `ask-alp`.",
+    );
+    await client.archiveAgent(agent.id);
   } finally {
     await client.close().catch(() => undefined);
     await daemon.close();

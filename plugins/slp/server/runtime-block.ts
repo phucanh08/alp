@@ -13,11 +13,37 @@ function peerToolCutList(): string {
  * Khối SLP-RUNTIME: fact runtime của alp mà definition ghế (`agents/<seat>.md`) không tự biết —
  * family của phiên, provider + label ghế, nguồn của một tin, steer, finish notification, mục roster
  * plugin nối vào. Nối sau definition trong system prompt. Luật workflow nằm trong definition, không
- * ở đây: khối này không gọi tên skill nào.
+ * ở đây: khối này chỉ gọi tên skill của ghế (danh sách slp-dev trả), không nói khi nào dùng skill nào.
  */
+/**
+ * Phrases that point at the seat definition above the block. With no definition in the prompt,
+ * `runtimeBlock` swaps each for the text in `WITHOUT_DEFINITION`, so no sentence points at nothing.
+ */
+const DEFINITION_ABOVE = `Definition ghế của bạn ở ngay trên; hành xử đúng
+definition đó.`;
+const LEAD_AFTER_DEFINITION = "ngay sau khi đọc definition,";
+const PEER_BY_DEFINITION = "đúng definition ghế ở trên";
+
+/**
+ * Stands in for `DEFINITION_ABOVE` when no override exists and slp-dev did not answer: the prompt
+ * then has no definition, and the agent should say so rather than guess its seat rules.
+ */
+function rulesMissing(seat: Seat): string {
+  return `Luật ghế ${seat} của bạn không nạp
+được (plugin \`slp-dev\` không trả lời), nên system prompt không có definition ghế. Làm việc theo
+các fact runtime dưới đây và báo Human rằng luật ghế chưa nạp được.`;
+}
+
+function withoutDefinition(seat: Seat): Array<[string, string]> {
+  return [
+    [DEFINITION_ABOVE, rulesMissing(seat)],
+    [LEAD_AFTER_DEFINITION, "ngay đầu phiên,"],
+    [PEER_BY_DEFINITION, "theo các fact runtime ở đây"],
+  ];
+}
+
 const COMMON = `## SLP-RUNTIME: alp
-Phiên này là một agent alp (daemon Paseo). Definition ghế của bạn ở ngay trên; hành xử đúng
-definition đó. Fact runtime:
+Phiên này là một agent alp (daemon Paseo). ${DEFINITION_ABOVE} Fact runtime:
 - Giao việc và nói chuyện bằng tool alp: \`create_agent\`, \`send_agent_prompt\`, \`list_agents\`,
   \`get_agent_status\`, \`get_agent_activity\`, \`create_workspace\`. Không dùng tool \`Agent\`/\`Task\`
   của provider để giao việc. Repo có thể override definition bằng \`.slp/agents/<seat>.md\`;
@@ -108,7 +134,7 @@ ${PEER_MODEL_RULE[family]}
   \`get_agent_activity\` rồi hỏi Human nếu cần.
 - Supervisor (nếu có) là agent provider \`claude\` hoặc \`codex\`, label
   \`slp.role=supervisor\`, trong workspace hệ thống \`SLP Supervisor\`; mỗi host tối đa một. Cuối prompt
-  này có mục **"Supervisor hiện có"** do plugin liệt kê lúc tạo bạn → ngay sau khi đọc definition,
+  này có mục **"Supervisor hiện có"** do plugin liệt kê lúc tạo bạn → ${LEAD_AFTER_DEFINITION}
   **trước** khi lập plan, gửi \`SLP-REGISTER\` tới từng id bằng \`send_agent_prompt\` một lần, đang chạy
   hay idle đều được (steer). Không có mục đó → không có Supervisor lúc bạn được tạo; Supervisor mở
   phiên sau thì nó tự nhắn bạn.`;
@@ -127,7 +153,7 @@ const INDEPENDENT_PEER = `
   - Tin không có dấu nào (Human gõ trong app) → bạn là trợ lý độc lập, trả lời như một cuộc chat bình
     thường. Không chờ brief 13 trường, không đòi phải có Lead hay Supervisor mới làm việc.
   - Tin \`<paseo-agent-message from="...">\` từ một Lead (gửi qua \`send_agent_prompt\`) mang brief 13
-    trường → làm việc như một Peer bình thường đúng definition ghế ở trên, và trả handoff 6 ô trong
+    trường → làm việc như một Peer bình thường ${PEER_BY_DEFINITION}, và trả handoff 6 ô trong
     tin cuối lượt.`;
 
 /**
@@ -165,11 +191,14 @@ const SUPERVISOR = `${COMMON}
   \`~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl\`. Có timestamp. Đọc file ngoài cwd bằng Bash
   (\`cat\`/\`sed -n\`/\`python3\`).`;
 
-/**
- * SLP-RUNTIME block for a seat; the Lead's Peer spawn rule follows the Lead's own family. `origin`
- * only applies to `peer` — see `INDEPENDENT_PEER`.
- */
-export function runtimeBlock(seat: Seat, family: Family, origin?: SeatOrigin | null): string {
+/** The seat's own skills, as slp-dev lists them; none (Supervisor, or slp-dev silent) → no line. */
+function skillsLine(skills: readonly string[]): string {
+  if (skills.length === 0) return "";
+  const names = skills.map((skill) => `\`${skill}\``).join(", ");
+  return `\n- **Skill của ghế này** (plugin \`slp-dev\`): ${names}. Nạp theo dòng "Nạp skill" ở trên.`;
+}
+
+function seatBlock(seat: Seat, family: Family, origin?: SeatOrigin | null): string {
   switch (seat) {
     case "lead":
       return lead(family);
@@ -178,4 +207,23 @@ export function runtimeBlock(seat: Seat, family: Family, origin?: SeatOrigin | n
     case "supervisor":
       return SUPERVISOR;
   }
+}
+
+/**
+ * SLP-RUNTIME block for a seat; the Lead's Peer spawn rule follows the Lead's own family. `origin`
+ * only applies to `peer` — see `INDEPENDENT_PEER`. `skills` closes the block with the seat's skills.
+ * `hasDefinition` false (no seat text in the prompt) swaps every pointer to it (`withoutDefinition`).
+ */
+export function runtimeBlock(
+  seat: Seat,
+  family: Family,
+  origin?: SeatOrigin | null,
+  skills: readonly string[] = [],
+  hasDefinition = true,
+): string {
+  let body = seatBlock(seat, family, origin);
+  if (!hasDefinition)
+    for (const [pointer, replacement] of withoutDefinition(seat))
+      body = body.replace(pointer, replacement);
+  return `${body}${skillsLine(skills)}`;
 }

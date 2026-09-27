@@ -1,7 +1,8 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, test } from "vitest";
+import { mkdir, writeFile } from "node:fs/promises";
+import { afterEach, expect, test, vi } from "vitest";
 import type { AgentLister } from "./discovery";
 import { allowPaseoTools, createLeadAnnouncer, withSeatConfig } from "./hooks";
 
@@ -34,6 +35,33 @@ const agents: AgentLister = {
     };
   },
 };
+
+/** What a working slp-dev answers to `slp-dev.seat.get`: frontmatter-led text, as `agents/<seat>.md`. */
+const SEAT_RULES: Record<string, { definition: string; skills: string[] }> = {
+  lead: { definition: "---\nname: lead\n---\nLEAD RULES\n", skills: ["xia", "goal-griller"] },
+  peer: { definition: "---\nname: peer\n---\nPEER RULES\n", skills: ["xia", "smart-commits"] },
+  supervisor: { definition: "---\nname: supervisor\n---\nSUPERVISOR RULES\n", skills: [] },
+};
+
+/** A fake `paseo.plugins` whose `invoke` answers with `answer(seat)`; records every call. */
+function slpDev(answer: (seat: string) => Promise<unknown>) {
+  const calls: Array<{ pluginId: string; method: string; input: unknown }> = [];
+  return {
+    calls,
+    async invoke(pluginId: string, method: string, input: unknown) {
+      calls.push({ pluginId, method, input });
+      return answer((input as { seat: string }).seat);
+    },
+  };
+}
+
+const workingSlpDev = () => slpDev(async (seat) => SEAT_RULES[seat]);
+
+const host = { agents, plugins: workingSlpDev() };
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 async function request(provider: string, labels?: Record<string, string>) {
   const cwd = await mkdtemp(path.join(tmpdir(), "slp-hooks-"));
@@ -110,7 +138,7 @@ interface SeatResult {
 }
 
 async function seatConfig(provider: string, labels?: Record<string, string>) {
-  return (await withSeatConfig((await request(provider, labels)) as never, agents)) as
+  return (await withSeatConfig((await request(provider, labels)) as never, host)) as
     | SeatResult
     | undefined;
 }
@@ -157,7 +185,7 @@ test("a Peer cut adds to Paseo tools the request already disabled", async () => 
   const base = await request("claude", { "slp.role": "peer" });
   const result = (await withSeatConfig(
     { ...base, paseoTools: { disabledTools: ["browser_click", "kill_agent"] } } as never,
-    agents,
+    host,
   )) as SeatResult | undefined;
   expect(result?.paseoTools).toEqual({
     disabledTools: [
@@ -239,16 +267,18 @@ test("the retired <family>-<seat> provider names no longer pick a seat", async (
   expect(await seatConfig("claude-peer", { "slp.role": "peer" })).toBeUndefined();
 });
 
-test("agent.create for a Lead injects the bundled seat rules, runtime block, Supervisor roster, and Paseo tools", async () => {
+test("agent.create for a Lead injects the slp-dev seat rules, runtime block, Supervisor roster, and Paseo tools", async () => {
   const result = await withSeatConfig(
     (await request("claude", { "slp.role": "lead" })) as never,
-    agents,
+    host,
   );
   const config = result?.config as {
     systemPrompt: string;
     providerOptions: Record<string, unknown>;
   };
-  expect(config.systemPrompt.startsWith("EXISTING\n\n# Ghế SLP: lead\n\n")).toBe(true);
+  expect(config.systemPrompt.startsWith("EXISTING\n\n# Ghế SLP: lead\n\nLEAD RULES\n\n")).toBe(
+    true,
+  );
   expect(config.systemPrompt).not.toMatch(/^name: lead$/m);
   expect(config.systemPrompt).not.toMatch(/^tools: Agent\(peer\)/m);
   expect(config.systemPrompt).toContain("Model: <model> · Effort: <effort> — <lý do>");
@@ -260,7 +290,7 @@ test("agent.create for a Lead injects the bundled seat rules, runtime block, Sup
 test("agent.create for a Supervisor lists Leads and cuts write and spawn tools", async () => {
   const result = await withSeatConfig(
     (await request("claude", { "slp.role": "supervisor" })) as never,
-    agents,
+    host,
   );
   const config = result?.config as {
     systemPrompt: string;
@@ -278,17 +308,17 @@ test("agent.create for a Supervisor lists Leads and cuts write and spawn tools",
 });
 
 test("agent.create leaves non-SLP providers untouched", async () => {
-  expect(await withSeatConfig((await request("acp")) as never, agents)).toBeUndefined();
+  expect(await withSeatConfig((await request("acp")) as never, host)).toBeUndefined();
 });
 
 test("withSeatConfig returns undefined for every request when SLP is disabled, even one with a valid seat label", async () => {
   const withSeat = await withSeatConfig(
     (await request("claude", { "slp.role": "lead" })) as never,
-    agents,
+    host,
     false,
   );
   expect(withSeat).toBeUndefined();
-  const defaulted = await withSeatConfig((await request("claude")) as never, agents, false);
+  const defaulted = await withSeatConfig((await request("claude")) as never, host, false);
   expect(defaulted).toBeUndefined();
 });
 
@@ -299,6 +329,128 @@ test("a Human-made Peer's system prompt tells it it is independent; a Lead-spawn
   expect(schedule?.config.systemPrompt).toContain("không có Lead nào giao brief");
   const spawned = await seatConfig("claude", { "slp.role": "peer" });
   expect(spawned?.config.systemPrompt).not.toContain("không có Lead nào giao brief");
+});
+
+/** Everything the seat-rules source put in a prompt: seat heading + text, and the skills line. */
+async function seatPrompt(
+  seat: "lead" | "peer" | "supervisor",
+  plugins: ReturnType<typeof slpDev>,
+  options: { override?: string; timeoutMs?: number } = {},
+) {
+  const base = await request("claude", { "slp.role": seat });
+  if (options.override !== undefined) {
+    await mkdir(path.join(base.config.cwd, ".slp", "agents"), { recursive: true });
+    await writeFile(path.join(base.config.cwd, ".slp", "agents", `${seat}.md`), options.override);
+  }
+  const result = (await withSeatConfig(
+    base as never,
+    { agents, plugins },
+    true,
+    options.timeoutMs,
+  )) as SeatResult | undefined;
+  return result?.config.systemPrompt ?? "";
+}
+
+test("each seat gets its rule text and its skills from slp-dev.seat.get; a Supervisor gets no skills line", async () => {
+  const plugins = workingSlpDev();
+  const lead = await seatPrompt("lead", plugins);
+  expect(
+    lead.startsWith("EXISTING\n\n# Ghế SLP: lead\n\nLEAD RULES\n\n## SLP-RUNTIME: alp\n"),
+  ).toBe(true);
+  expect(lead).not.toContain("name: lead");
+  expect(lead).toContain("- **Skill của ghế này** (plugin `slp-dev`): `xia`, `goal-griller`.");
+
+  const peer = await seatPrompt("peer", plugins);
+  expect(
+    peer.startsWith("EXISTING\n\n# Ghế SLP: peer\n\nPEER RULES\n\n## SLP-RUNTIME: alp\n"),
+  ).toBe(true);
+  expect(peer).toContain("- **Skill của ghế này** (plugin `slp-dev`): `xia`, `smart-commits`.");
+
+  const supervisor = await seatPrompt("supervisor", plugins);
+  expect(
+    supervisor.startsWith(
+      "EXISTING\n\n# Ghế SLP: supervisor\n\nSUPERVISOR RULES\n\n## SLP-RUNTIME: alp\n",
+    ),
+  ).toBe(true);
+  expect(supervisor).not.toContain("Skill của ghế này");
+
+  expect(plugins.calls).toEqual([
+    { pluginId: "slp-dev", method: "slp-dev.seat.get", input: { seat: "lead" } },
+    { pluginId: "slp-dev", method: "slp-dev.seat.get", input: { seat: "peer" } },
+    { pluginId: "slp-dev", method: "slp-dev.seat.get", input: { seat: "supervisor" } },
+  ]);
+});
+
+test("a .slp/agents override wins for the rule text; the skills still come from slp-dev", async () => {
+  const prompt = await seatPrompt("peer", workingSlpDev(), {
+    override: "---\nname: peer\n---\nREPO PEER\n",
+  });
+  expect(
+    prompt.startsWith("EXISTING\n\n# Ghế SLP: peer\n\nREPO PEER\n\n## SLP-RUNTIME: alp\n"),
+  ).toBe(true);
+  expect(prompt).not.toContain("PEER RULES");
+  expect(prompt).toContain("- **Skill của ghế này** (plugin `slp-dev`): `xia`, `smart-commits`.");
+  expect(prompt).toContain("Definition ghế của bạn ở ngay trên");
+  expect(prompt).not.toContain("không nạp");
+});
+
+const DEGRADED: Array<[string, () => ReturnType<typeof slpDev>, RegExp]> = [
+  [
+    "slp-dev's handler throws",
+    () =>
+      slpDev(async () => {
+        throw new Error("seat table exploded");
+      }),
+    /seat table exploded/,
+  ],
+  [
+    "slp-dev is not running",
+    () =>
+      slpDev(async () => {
+        throw new Error("Plugin is not available");
+      }),
+    /Plugin is not available/,
+  ],
+  ["slp-dev never answers", () => slpDev(() => new Promise(() => {})), /timed out after 20ms/],
+  [
+    "slp-dev answers with the wrong shape",
+    () => slpDev(async () => ({ definition: 42 })),
+    /invalid answer/,
+  ],
+];
+
+for (const [name, plugins, reason] of DEGRADED) {
+  test(`when ${name}, the seat is created with the runtime block only and a warning names the reason`, async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const prompt = await seatPrompt("peer", plugins(), { timeoutMs: 20 });
+    expect(prompt.startsWith("EXISTING\n\n## SLP-RUNTIME: alp\n")).toBe(true);
+    expect(prompt).not.toContain("# Ghế SLP");
+    expect(prompt).not.toContain("ở ngay trên");
+    expect(prompt).toContain("Luật ghế peer của bạn không nạp");
+    expect(prompt).toContain("báo Human");
+    expect(prompt).not.toContain("Skill của ghế này");
+    expect(prompt).toContain("Runtime: alp");
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toMatch(
+      /^slp: peer seat rules from slp-dev unavailable/,
+    );
+    expect(String(warn.mock.calls[0]?.[0])).toMatch(reason);
+  });
+}
+
+test("when slp-dev is unavailable, a .slp/agents override still supplies the rule text", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const plugins = slpDev(async () => {
+    throw new Error("Plugin is not available");
+  });
+  const prompt = await seatPrompt("lead", plugins, { override: "REPO LEAD\n" });
+  expect(
+    prompt.startsWith("EXISTING\n\n# Ghế SLP: lead\n\nREPO LEAD\n\n## SLP-RUNTIME: alp\n"),
+  ).toBe(true);
+  expect(prompt).not.toContain("Skill của ghế này");
+  expect(prompt).toContain("Definition ghế của bạn ở ngay trên");
+  expect(prompt).not.toContain("không nạp");
+  expect(warn).toHaveBeenCalledTimes(1);
 });
 
 interface HookCalls {

@@ -15,7 +15,7 @@ import {
 } from "./operations";
 
 const ALL_SKILLS: SkillSelection = { mode: "all" };
-const ignoreWarnings = { warn: () => {} };
+const ignoreWarnings = { warn: () => {}, error: () => {} };
 
 function only(...skills: string[]): SkillSelection {
   return { mode: "custom", skills };
@@ -650,12 +650,15 @@ describe("renamed skill cleanup", () => {
 
   let sandbox: Sandbox;
   let warn: ReturnType<typeof vi.fn>;
-  let logger: { warn: (fields: Record<string, unknown>, message: string) => void };
+  let logger: {
+    warn: (fields: Record<string, unknown>, message: string) => void;
+    error: (fields: Record<string, unknown>, message: string) => void;
+  };
 
   beforeEach(async () => {
     sandbox = await makeSandbox();
     warn = vi.fn();
-    logger = { warn };
+    logger = { warn, error: () => {} };
   });
 
   afterEach(async () => {

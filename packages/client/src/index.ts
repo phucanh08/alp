@@ -485,6 +485,15 @@ export interface PaseoConfigActions {
   ): Promise<{ requestId: string; config: MutableDaemonConfig }>;
 }
 
+// ALP(slp): lets one plugin call another plugin's RPC over the existing plugin RPC request.
+export interface PaseoPluginActions {
+  /**
+   * Invokes `method` on plugin `pluginId` and resolves with its raw output. The target plugin
+   * validates the input; validate the output yourself. Rejects when the plugin is not running.
+   */
+  invoke(pluginId: string, method: string, input: unknown): Promise<unknown>;
+}
+
 export interface PaseoApi {
   dispose(): Promise<void>;
   observeEvents: DaemonClient["observeEvents"];
@@ -494,6 +503,7 @@ export interface PaseoApi {
   readonly agents: PaseoAgentActions;
   readonly providers: PaseoProviderActions;
   readonly config: PaseoConfigActions;
+  readonly plugins: PaseoPluginActions;
 }
 
 export interface PaseoClient extends PaseoApi {
@@ -760,6 +770,10 @@ export function createPaseoApi(
     config: {
       get: (requestId) => daemonClient.getDaemonConfig(requestId),
       patch: (patch, requestId) => daemonClient.patchDaemonConfig(patch, requestId),
+    },
+    // ALP(slp): plugin-to-plugin RPC, see PaseoPluginActions.
+    plugins: {
+      invoke: (pluginId, method, input) => daemonClient.invokePluginRpc(pluginId, method, input),
     },
   };
 }

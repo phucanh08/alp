@@ -67,8 +67,9 @@ export function createSkillsController({
   logger,
 }: {
   // Resolved per operation, not at wiring time: the bundle path depends on how
-  // the app was packaged, which is not knowable when the controller is built.
-  resolveTargets: () => SkillTargets;
+  // the app was packaged, which is not knowable when the controller is built,
+  // and plugin sources follow the current plugin config.
+  resolveTargets: () => SkillTargets | Promise<SkillTargets>;
   selectionStore: SkillSelectionStore;
   logger: SkillsLogger;
 }): SkillsController {
@@ -85,16 +86,17 @@ export function createSkillsController({
 
   async function converge(apply: Converge): Promise<SkillsSnapshot> {
     const selection = await selectionStore.get();
-    await recoverInterruptedSkillTransactions(resolveTargets(), selection);
-    return { ...(await apply(resolveTargets(), selection, { logger })), selection };
+    const targets = await resolveTargets();
+    await recoverInterruptedSkillTransactions(targets, selection, logger);
+    return { ...(await apply(targets, selection, { logger })), selection };
   }
 
   async function saveSelection(request: unknown): Promise<SkillsSaveResult> {
-    const targets = resolveTargets();
+    const targets = await resolveTargets();
     // ALP(rebrand): a client opened before the upgrade can still send old names.
     const next = renameSkillSelection(coerceSkillSelection(request));
     const previous = await selectionStore.get();
-    await recoverInterruptedSkillTransactions(targets, previous);
+    await recoverInterruptedSkillTransactions(targets, previous, logger);
     const confirmed = new Set(
       coerceSkillNames(isRecord(request) ? request.confirmedRemovals : null),
     );
@@ -102,12 +104,12 @@ export function createSkillsController({
     // The plan comes from a scan taken here, inside the queue, and is the exact
     // plan applied below. Deciding what will be deleted from an older snapshot
     // leaves a window for a directory to appear and be deleted unannounced.
-    let plan = await getSkillsStatus(targets, next);
+    let plan = await getSkillsStatus(targets, next, { logger });
     for (let attempt = 0; attempt < MAX_SAVE_ATTEMPTS; attempt += 1) {
       const removals = plan.ops.filter((op) => op.kind === "delete").map((op) => op.name);
       if (removals.some((name) => !confirmed.has(name))) {
         return {
-          ...(await getSkillsStatus(targets, previous)),
+          ...(await getSkillsStatus(targets, previous, { logger })),
           selection: previous,
           confirmationRequired: { removals },
         };
@@ -116,15 +118,20 @@ export function createSkillsController({
       // Capture only paths this frozen plan can mutate. Capturing every managed
       // path would make rollback delete a new external directory that appeared
       // after the scan merely because it was absent from the snapshot.
-      const transaction = await beginSkillsTransaction(targets, previous, next, plan.ops);
+      const transaction = await beginSkillsTransaction(targets, previous, next, plan.ops, logger);
       let status: SkillsStatus;
       try {
-        status = await installSkills(targets, next, {
-          ...plan,
-          // beginSkillsTransaction atomically staged these directories. Running
-          // removeSkill afterward would delete a path another writer recreated.
-          ops: plan.ops.filter((op) => op.kind !== "delete"),
-        });
+        status = await installSkills(
+          targets,
+          next,
+          {
+            ...plan,
+            // beginSkillsTransaction atomically staged these directories. Running
+            // removeSkill afterward would delete a path another writer recreated.
+            ops: plan.ops.filter((op) => op.kind !== "delete"),
+          },
+          { logger },
+        );
       } catch (error) {
         await transaction.rollback();
         throw error;
@@ -153,7 +160,7 @@ export function createSkillsController({
       // its mutations back, rescan, and either request confirmation for a new
       // deletion or retry harmless additions/updates from the fresh plan.
       await transaction.rollback();
-      plan = await getSkillsStatus(targets, next);
+      plan = await getSkillsStatus(targets, next, { logger });
     }
 
     throw new Error("Skills changed repeatedly while the selection was being saved");

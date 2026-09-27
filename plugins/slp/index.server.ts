@@ -44,7 +44,7 @@ export default function contribute(server: PluginServerContext) {
 
   const removers = [
     server.before("agent.create", async ({ request }, { paseo }) =>
-      withSeatConfig(request, paseo.agents, await enabled()),
+      withSeatConfig(request, paseo, await enabled()),
     ),
     server.before("workspace.create", async ({ request }, { paseo }) => {
       // Record only; never change or fail the user's request.

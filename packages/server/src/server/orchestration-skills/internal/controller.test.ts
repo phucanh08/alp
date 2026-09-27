@@ -21,7 +21,7 @@ import { DaemonConfigStore } from "../../daemon-config-store";
 import { installSkills, type SkillSelection, type SkillTargets } from "./operations";
 import { createSkillSelectionStore, type SkillSelectionStore } from "./selection-store";
 import { createSkillsController, type SkillsController } from "./controller";
-import { beginSkillsTransaction } from "./transaction";
+import { beginSkillsTransaction, recoverInterruptedSkillTransactions } from "./transaction";
 
 interface Harness {
   root: string;
@@ -61,7 +61,7 @@ async function makeHarness(selectionStore?: SkillSelectionStore): Promise<Harnes
     controller: createSkillsController({
       resolveTargets: () => targets,
       selectionStore: store,
-      logger: { warn: () => {} },
+      logger: { warn: () => {}, error: () => {} },
     }),
     selectionStore: store,
   };
@@ -1322,7 +1322,7 @@ describe("upgrading across the alp skill rename", () => {
     controller = createSkillsController({
       resolveTargets: () => targets,
       selectionStore: createSkillSelectionStore(config),
-      logger: { warn: () => {} },
+      logger: { warn: () => {}, error: () => {} },
     });
   }
 
@@ -1573,5 +1573,51 @@ describe("upgrading across the alp skill rename", () => {
     expect(saved.confirmationRequired).toBeNull();
     await expectKept(kept);
     expect(await installedEverywhere(targets)).toEqual([["alp"], ["alp", "paseo"], ["alp"]]);
+  });
+});
+
+describe("recovering a plugin skill's interrupted transaction", () => {
+  it("restores from the source it actually synced from, even if a different plugin claims the name by recovery time", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "paseo-skills-plugin-recovery-"));
+    const packDir = path.join(root, "plugin-pack");
+    await mkdir(path.join(packDir, "pack-plan"), { recursive: true });
+    await writeFile(path.join(packDir, "pack-plan", "SKILL.md"), "pack-plan-v1");
+    // A second plugin that happens to ship a same-named skill with different
+    // content — standing in for "pack" being replaced before recovery runs.
+    const pack2Dir = path.join(root, "plugin-pack2");
+    await mkdir(path.join(pack2Dir, "pack-plan"), { recursive: true });
+    await writeFile(path.join(pack2Dir, "pack-plan", "SKILL.md"), "pack2-plan-v2");
+
+    const targets: SkillTargets = {
+      // Core never ships "pack-plan" — only a plugin does, in either version.
+      sourceDir: await mkdtemp(path.join(os.tmpdir(), "paseo-skills-core-")),
+      agentsDir: path.join(root, "home", ".agents", "skills"),
+      claudeDir: path.join(root, "home", ".claude", "skills"),
+      codexDir: path.join(root, "home", ".codex", "skills"),
+      pluginSources: [{ pluginId: "pack", dir: packDir, enabled: true }],
+    };
+    const previous: SkillSelection = { mode: "custom", skills: [] };
+    const next: SkillSelection = { mode: "custom", skills: ["pack-plan"] };
+
+    // Mirror an interrupted saveSelection(): stage the transaction (capturing
+    // "pack-plan"'s source as plugin "pack"'s directory), converge the disk
+    // from it, then crash before commit or rollback runs.
+    await beginSkillsTransaction(targets, previous, next, [{ kind: "add", name: "pack-plan" }]);
+    await installSkills(targets, next);
+
+    // Before the next startup's recovery runs, plugin "pack" is replaced by
+    // "pack2", which ships a "pack-plan" of its own from different content.
+    // The name is still managed, so recovery must not skip this transaction —
+    // it must undo the interrupted add using what it actually synced from
+    // ("pack"'s v1 content), not whichever source currently owns the name.
+    const recoveryTargets: SkillTargets = {
+      ...targets,
+      pluginSources: [{ pluginId: "pack2", dir: pack2Dir, enabled: true }],
+    };
+    await recoverInterruptedSkillTransactions(recoveryTargets, previous);
+
+    for (const dir of [targets.agentsDir, targets.claudeDir, targets.codexDir]) {
+      await expect(access(path.join(dir, "pack-plan"))).rejects.toThrow();
+    }
   });
 });

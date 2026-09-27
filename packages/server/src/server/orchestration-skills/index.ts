@@ -7,7 +7,9 @@ import {
   type SkillsSaveResult,
   type SkillsSnapshot,
 } from "./internal/controller.js";
+import type { SkillTargets } from "./internal/operations.js";
 import { resolveSkillTargets } from "./internal/paths.js";
+import { resolvePluginSkillSources } from "./internal/plugin-sources.js";
 import type { SkillsLogger } from "./internal/renamed-skills.js";
 import { createSkillSelectionStore } from "./internal/selection-store.js";
 
@@ -27,12 +29,17 @@ export interface OrchestrationSkills {
 }
 
 export function createOrchestrationSkills(
-  configStore: DaemonConfigStore,
+  configStore: Pick<DaemonConfigStore, "get" | "setAgentSkillSelection">,
   logger: SkillsLogger,
-  resolveTargets = resolveSkillTargets,
+  resolveTargets: () => SkillTargets = resolveSkillTargets,
+  // ALP(slp): plugins shipped inside the daemon, by id, as passed to PluginService.
+  bundledPlugins: Readonly<Record<string, string>> = {},
 ): OrchestrationSkills {
   const controller: SkillsController = createSkillsController({
-    resolveTargets,
+    resolveTargets: async () => ({
+      ...resolveTargets(),
+      pluginSources: await resolvePluginSkillSources(configStore.get(), bundledPlugins, logger),
+    }),
     selectionStore: createSkillSelectionStore(configStore),
     logger,
   });
