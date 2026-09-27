@@ -141,6 +141,88 @@ export default function contribute(server: PluginServerContext) {
   }
 }, 60_000);
 
+test("a before(agent.create) hook invokes another plugin's RPC and the create applies its answer", async () => {
+  const answererDirectory = await mkdtemp(path.join(tmpdir(), "paseo-answerer-plugin-"));
+  const askerDirectory = await mkdtemp(path.join(tmpdir(), "paseo-asker-plugin-"));
+  const workspaceDirectory = await mkdtemp(path.join(tmpdir(), "paseo-asker-workspace-"));
+  roots.push(answererDirectory, askerDirectory, workspaceDirectory);
+  const requirements = { paseo: `>=${resolveDaemonVersion(import.meta.url)}` };
+  await writeFile(
+    path.join(answererDirectory, "paseo-plugin.json"),
+    JSON.stringify({ id: "answerer", requirements }),
+  );
+  await writeFile(
+    path.join(answererDirectory, "index.server.ts"),
+    `import { defineRpc } from "@getpaseo/plugin";
+import { type PluginServerContext } from "@getpaseo/plugin/server";
+import { z } from "zod";
+
+const answer = defineRpc({
+  name: "answerer.answer",
+  input: z.object({ seat: z.string() }),
+  output: z.object({ text: z.string() }),
+});
+
+export default function contribute(server: PluginServerContext) {
+  server.handle(answer, ({ seat }) => ({ text: "answer for " + seat }));
+  return () => undefined;
+}`,
+  );
+  // "asker" sorts after "answerer", so its before hook runs while the answerer is idle; the
+  // answer travels plugin -> daemon -> plugin while the daemon waits on this same hook.
+  await writeFile(
+    path.join(askerDirectory, "paseo-plugin.json"),
+    JSON.stringify({ id: "asker", requirements }),
+  );
+  await writeFile(
+    path.join(askerDirectory, "index.server.ts"),
+    `import { type PluginServerContext } from "@getpaseo/plugin/server";
+
+export default function contribute(server: PluginServerContext) {
+  return server.before("agent.create", async ({ request }, { paseo }) => {
+    const output = (await paseo.plugins.invoke("answerer", "answerer.answer", {
+      seat: request.labels?.seat ?? "none",
+    })) as { text: string };
+    return { ...request, labels: { ...request.labels, answer: output.text } };
+  });
+}`,
+  );
+
+  const daemon = await createTestPaseoDaemon({
+    agentClients: { ...createTestAgentClients(), pi: createTestAgentClient("pi") },
+  });
+  const client = new DaemonClient({
+    url: `ws://127.0.0.1:${daemon.port}/ws`,
+    appVersion: "0.4.0",
+  });
+
+  try {
+    await client.connect();
+    await client.patchDaemonConfig({ pluginsEnabled: true });
+    await expect(client.installDirectoryPlugin(answererDirectory)).resolves.toMatchObject({
+      id: "answerer",
+      status: "running",
+    });
+    await expect(client.installDirectoryPlugin(askerDirectory)).resolves.toMatchObject({
+      id: "asker",
+      status: "running",
+    });
+
+    const agent = await client.createAgent({
+      provider: "pi",
+      cwd: workspaceDirectory,
+      title: "Asked",
+      labels: { seat: "lead" },
+    });
+
+    expect(agent.labels).toMatchObject({ seat: "lead", answer: "answer for lead" });
+    await client.archiveAgent(agent.id);
+  } finally {
+    await client.close().catch(() => undefined);
+    await daemon.close();
+  }
+}, 60_000);
+
 test("daemon config reload enables and disables configured plugins without restarting", async () => {
   const pluginDirectory = await mkdtemp(path.join(tmpdir(), "paseo-reload-plugin-"));
   const paseoHomeRoot = await mkdtemp(path.join(tmpdir(), "paseo-reload-home-"));
