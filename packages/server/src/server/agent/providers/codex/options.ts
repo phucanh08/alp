@@ -1,4 +1,5 @@
 import type { ProviderOptions, ToolPolicy } from "@getpaseo/protocol/agent-types";
+import path from "node:path";
 import { z } from "zod";
 
 const ApprovalPolicySchema = z.union([
@@ -34,6 +35,31 @@ const NetworkPolicySchema = z
   })
   .strict();
 
+// A Codex skills.config entry selects its skill by exactly one of name or path.
+const SkillConfigEntrySchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    path: z.string().min(1).optional(),
+    enabled: z.boolean(),
+  })
+  .strict()
+  .refine((entry) => (entry.name === undefined) !== (entry.path === undefined), {
+    message: "Set exactly one of name or path",
+  });
+
+// ALP(slp): config and includeInstructions go into the thread config as Codex skills.config and
+// skills.include_instructions. extraRoots has no config key; it is sent per app-server process
+// through the skills/extraRoots/set RPC.
+const SkillsOptionsSchema = z
+  .object({
+    config: z.array(SkillConfigEntrySchema).optional(),
+    includeInstructions: z.boolean().optional(),
+    extraRoots: z
+      .array(z.string().refine((root) => path.isAbsolute(root), "Must be an absolute path"))
+      .optional(),
+  })
+  .strict();
+
 // Codex config reference, maintained against Codex CLI 0.143+.
 export const CodexProviderOptionsSchema = z
   .object({
@@ -58,10 +84,23 @@ export const CodexProviderOptionsSchema = z
       })
       .strict()
       .optional(),
+    skills: SkillsOptionsSchema.optional(),
   })
   .strict() satisfies z.ZodType<ProviderOptions>;
 
 export type CodexProviderOptions = z.infer<typeof CodexProviderOptionsSchema>;
+
+export function toCodexSkillsConfig(
+  skills: CodexProviderOptions["skills"],
+): Record<string, unknown> {
+  const codexSkills = {
+    ...(skills?.config ? { config: skills.config } : {}),
+    ...(skills?.includeInstructions !== undefined
+      ? { include_instructions: skills.includeInstructions }
+      : {}),
+  };
+  return Object.keys(codexSkills).length > 0 ? { skills: codexSkills } : {};
+}
 
 export function applyCodexToolPolicy(
   config: Record<string, unknown>,
