@@ -13,6 +13,7 @@ import type { TerminalCell, TerminalState } from "@alp/protocol/messages";
 import { TerminalInputModeTracker } from "@alp/protocol/terminal-input-mode";
 import { TerminalActivityTracker } from "./activity/terminal-activity-tracker.js";
 import type { TerminalActivity, TerminalActivityState } from "@alp/protocol/terminal-activity";
+import { withPreRenameEnvNames } from "../server/rename-migration/legacy-names.js";
 
 const { Terminal } = xterm;
 const require = createRequire(import.meta.url);
@@ -525,9 +526,10 @@ function injectAlpHookCli(
     return env;
   }
 
+  // COMPAT(paseo-env): hook commands installed by 1.0.0 run "${PASEO_HOOK_CLI:-...}". alp-rename-keep
   return {
     ...env,
-    ALP_HOOK_CLI: resolvePath(resolveExternalProcessPath(cliPath)),
+    ...withPreRenameEnvNames({ ALP_HOOK_CLI: resolvePath(resolveExternalProcessPath(cliPath)) }),
   };
 }
 
@@ -951,7 +953,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
       env: {
         ...env,
         ...activityEnv,
-        ALP_WORKSPACE_ID: workspaceId,
+        ...withPreRenameEnvNames({ ALP_WORKSPACE_ID: workspaceId }),
       },
     }),
   });

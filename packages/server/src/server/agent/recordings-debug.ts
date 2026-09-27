@@ -1,4 +1,5 @@
 import { resolve } from "path";
+import { readAlpEnv } from "../rename-migration/legacy-names.js";
 
 function isTruthyEnv(value: string | undefined): boolean {
   const normalized = (value ?? "").trim().toLowerCase();
@@ -6,7 +7,7 @@ function isTruthyEnv(value: string | undefined): boolean {
 }
 
 export function isAlpDictationDebugEnabled(): boolean {
-  return isTruthyEnv(process.env.ALP_DICTATION_DEBUG);
+  return isTruthyEnv(readAlpEnv(process.env, "ALP_DICTATION_DEBUG"));
 }
 
 export function resolveRecordingsDebugDir(explicitEnvVarName: string): string | null {

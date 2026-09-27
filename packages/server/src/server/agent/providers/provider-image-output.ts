@@ -103,8 +103,11 @@ export function materializeProviderImage(image: {
 // file in the attachments dir. Matching the full <hash>.<ext> shape (not just a leading "![")
 // keeps user-authored text from being mistaken for a provider image during history replay. The
 // separator still accepts old doubled-backslash Windows history; new Windows output uses file URIs.
+// COMPAT(paseo-attachments-history): added after v1.0.0 on 2026-09-27; remove after 2027-03-27. alp-rename-keep
+// History written by alp 1.0.0 names the dir paseo-attachments. alp-rename-keep
+const LEGACY_PROVIDER_IMAGE_ATTACHMENT_DIR = "paseo-attachments"; // alp-rename-keep
 const PROVIDER_IMAGE_MARKDOWN = new RegExp(
-  `^!\\[[^\\]]*\\]\\([^)]*${PROVIDER_IMAGE_ATTACHMENT_DIR}(?:-[^/\\\\)]+)?[/\\\\]+(?:[^/\\\\)]+[/\\\\]+)?[0-9a-f]{64}\\.[a-z0-9]+\\)`,
+  `^!\\[[^\\]]*\\]\\([^)]*(?:${PROVIDER_IMAGE_ATTACHMENT_DIR}|${LEGACY_PROVIDER_IMAGE_ATTACHMENT_DIR})(?:-[^/\\\\)]+)?[/\\\\]+(?:[^/\\\\)]+[/\\\\]+)?[0-9a-f]{64}\\.[a-z0-9]+\\)`,
 );
 
 export function isProviderImageMarkdown(text: string): boolean {

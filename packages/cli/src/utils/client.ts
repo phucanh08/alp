@@ -19,6 +19,7 @@ import { WebSocket } from "ws";
 import { getOrCreateCliClientId } from "./client-id.js";
 import { resolveCliVersion } from "../version.js";
 import { createSshTunnel } from "../ssh/ssh-tunnel.js";
+import { readAlpEnv } from "./legacy-env.js";
 
 export interface ConnectOptions {
   target: DaemonTarget;
@@ -165,7 +166,7 @@ export function resolveDaemonPassword(host: string): string | undefined {
     const fromUri = parseConnectionUri(trimmed).password;
     if (fromUri) return fromUri;
   }
-  const fromEnv = process.env.ALP_PASSWORD;
+  const fromEnv = readAlpEnv(process.env, "ALP_PASSWORD");
   return fromEnv && fromEnv.length > 0 ? fromEnv : undefined;
 }
 

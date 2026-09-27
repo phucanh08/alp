@@ -1,3 +1,5 @@
+import { legacyEnvName, readAlpEnv } from "./rename-migration/legacy-names.js";
+
 // Daemon configuration inputs. General provider credentials and executable/runtime
 // controls remain available to managed launches and their agent processes.
 export const DAEMON_SETTING_ENV_KEYS = [
@@ -67,9 +69,17 @@ const CONFIG_CONTEXT_ENV_KEYS = [
 ] as const;
 
 export function configurationEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(
-    [...DAEMON_SETTING_ENV_KEYS, ...CONFIG_CONTEXT_ENV_KEYS].map((key) => [key, env[key]]),
-  );
+  return Object.fromEntries([
+    // COMPAT(paseo-env): daemon settings still read their 1.0.0 names; see readAlpEnv. alp-rename-keep
+    ...DAEMON_SETTING_ENV_KEYS.map((key) => [key, readAlpEnv(env, key)]),
+    ...CONFIG_CONTEXT_ENV_KEYS.map((key) => [key, env[key]]),
+  ]);
+}
+
+function deleteWithLegacyName(env: NodeJS.ProcessEnv, key: string): void {
+  delete env[key];
+  const legacy = legacyEnvName(key);
+  if (legacy !== null) delete env[legacy];
 }
 
 export function daemonLaunchEnvironment(input: {
@@ -80,10 +90,10 @@ export function daemonLaunchEnvironment(input: {
 }): NodeJS.ProcessEnv {
   const env = { ...input.env };
   if (input.mode === "managed") {
-    for (const key of DAEMON_SETTING_ENV_KEYS) delete env[key];
+    for (const key of DAEMON_SETTING_ENV_KEYS) deleteWithLegacyName(env, key);
   }
-  delete env.ALP_HOST;
-  delete env.ALP_DESKTOP_MANAGED;
+  deleteWithLegacyName(env, "ALP_HOST");
+  deleteWithLegacyName(env, "ALP_DESKTOP_MANAGED");
   env.ALP_HOME = input.home;
   if (input.desktopManaged) env.ALP_DESKTOP_MANAGED = "1";
   return env;

@@ -6,6 +6,8 @@ import { resolveAlpHome } from "./alp-home.js";
 import { createRootLogger } from "./logger.js";
 import type { DaemonLifecycleIntent } from "./bootstrap.js";
 import { getProcessDiagnostics } from "./process-diagnostics.js";
+import { logPreRenameMigration, migratePreRenameState } from "./rename-migration/home-state.js";
+import { setLegacyNameReporter } from "./rename-migration/legacy-names.js";
 
 process.title = "alp Daemon";
 
@@ -70,8 +72,17 @@ function writeWorkerLifecycleLog(
 function bootstrapFromEnvironment(): BootstrapResult {
   try {
     const alpHome = resolveAlpHome();
+    // Before loadConfig: state written before the alp rename must be in place before any read.
+    const renameMigration = migratePreRenameState({ alpHome });
     const config = loadConfig(alpHome);
     const logger = createRootLogger({ log: config.log }, { alpHome, file: false });
+    setLegacyNameReporter((use) =>
+      logger.warn(
+        { ...use },
+        `Read ${use.legacy} from before the alp rename; rename it to ${use.current}`,
+      ),
+    );
+    logPreRenameMigration(logger, renameMigration);
     return { alpHome, logger, config };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

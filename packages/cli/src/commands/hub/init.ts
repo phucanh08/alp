@@ -45,6 +45,7 @@ import {
   availableStarterTriggerConnections,
   type HubStarterTriggerConnection,
 } from "./starter-trigger.js";
+import { readAlpEnv } from "../../utils/legacy-env.js";
 
 const execFileAsync = promisify(execFile);
 const DAEMON_READY_TIMEOUT_MS = 60_000;
@@ -255,7 +256,7 @@ async function ensureLogin(
           message: "Custom Hub URL",
           initialValue:
             activeOrigin === undefined || activeOrigin === DEFAULT_HUB_ORIGIN
-              ? environment.env.ALP_HUB_URL
+              ? readAlpEnv(environment.env, "ALP_HUB_URL")
               : activeOrigin,
           validate(value) {
             try {

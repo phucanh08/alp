@@ -348,7 +348,13 @@ type OpenCodeAgentConfig = Omit<AgentSessionConfig, "providerOptions"> & {
   providerOptions: OpenCodeProviderOptions;
 };
 
-const OPENCODE_SESSION_ENV_KEYS = new Set(["ALP_AGENT_ID", "ALP_AGENT_CWD"]);
+const OPENCODE_SESSION_ENV_KEYS = new Set([
+  "ALP_AGENT_ID",
+  "ALP_AGENT_CWD",
+  // COMPAT(paseo-env): the agent-manager writes both names. alp-rename-keep
+  "PASEO_AGENT_ID", // alp-rename-keep
+  "PASEO_AGENT_CWD", // alp-rename-keep
+]);
 
 function requiresDedicatedOpenCodeServer(
   config: OpenCodeAgentConfig,

@@ -65,9 +65,13 @@ describe("buildWorkspaceServiceEnv", () => {
     ).toEqual({
       HOST: "127.0.0.1",
       ALP_PORT: "5173",
+      PASEO_PORT: "5173", // alp-rename-keep
       ALP_URL: "http://daemon--alp.localhost:6767",
+      PASEO_URL: "http://daemon--alp.localhost:6767", // alp-rename-keep
       ALP_SERVICE_DAEMON_PORT: "5173",
+      PASEO_SERVICE_DAEMON_PORT: "5173", // alp-rename-keep
       ALP_SERVICE_DAEMON_URL: "http://daemon--alp.localhost:6767",
+      PASEO_SERVICE_DAEMON_URL: "http://daemon--alp.localhost:6767", // alp-rename-keep
     });
   });
 
@@ -84,11 +88,38 @@ describe("buildWorkspaceServiceEnv", () => {
     ).toEqual({
       HOST: "127.0.0.1",
       ALP_PORT: "5173",
+      PASEO_PORT: "5173", // alp-rename-keep
       ALP_URL: "http://daemon--feature-x--alp.localhost:6767",
+      PASEO_URL: "http://daemon--feature-x--alp.localhost:6767", // alp-rename-keep
       ALP_SERVICE_DAEMON_PORT: "5173",
+      PASEO_SERVICE_DAEMON_PORT: "5173", // alp-rename-keep
       ALP_SERVICE_DAEMON_URL: "http://daemon--feature-x--alp.localhost:6767",
+      PASEO_SERVICE_DAEMON_URL: "http://daemon--feature-x--alp.localhost:6767", // alp-rename-keep
     });
   });
+
+  // alp-rename-keep-start: service scripts written for alp 1.0.0 read the PASEO_* names.
+  it("hands every variable to service scripts under its 1.0.0 PASEO_* name as well", () => {
+    const env = buildWorkspaceServiceEnv({
+      scriptName: "web",
+      projectSlug: "alp",
+      branchName: "main",
+      daemonPort: 6767,
+      daemonListenHost: null,
+      peers: [
+        { scriptName: "web", port: 5173 },
+        { scriptName: "api", port: 4000 },
+      ],
+    });
+
+    const current = Object.keys(env).filter((name) => name.startsWith("ALP_"));
+    expect(current).toHaveLength(6);
+    for (const name of current) {
+      expect(env[`PASEO_${name.slice("ALP_".length)}`]).toBe(env[name]);
+    }
+    expect(env.PASEO_PORT).toBe("5173");
+  });
+  // alp-rename-keep-end
 
   it("omits PORT while keeping ALP_PORT", () => {
     const env = buildWorkspaceServiceEnv({
@@ -117,7 +148,9 @@ describe("buildWorkspaceServiceEnv", () => {
     ).toEqual({
       HOST: "127.0.0.1",
       ALP_PORT: "5173",
+      PASEO_PORT: "5173", // alp-rename-keep
       ALP_SERVICE_DAEMON_PORT: "5173",
+      PASEO_SERVICE_DAEMON_PORT: "5173", // alp-rename-keep
     });
   });
 
@@ -137,11 +170,17 @@ describe("buildWorkspaceServiceEnv", () => {
     ).toEqual({
       HOST: "127.0.0.1",
       ALP_PORT: "5173",
+      PASEO_PORT: "5173", // alp-rename-keep
       ALP_URL: "http://web--feature-x--alp.localhost:6767",
+      PASEO_URL: "http://web--feature-x--alp.localhost:6767", // alp-rename-keep
       ALP_SERVICE_API_PORT: "4000",
+      PASEO_SERVICE_API_PORT: "4000", // alp-rename-keep
       ALP_SERVICE_API_URL: "http://api--feature-x--alp.localhost:6767",
+      PASEO_SERVICE_API_URL: "http://api--feature-x--alp.localhost:6767", // alp-rename-keep
       ALP_SERVICE_WEB_PORT: "5173",
+      PASEO_SERVICE_WEB_PORT: "5173", // alp-rename-keep
       ALP_SERVICE_WEB_URL: "http://web--feature-x--alp.localhost:6767",
+      PASEO_SERVICE_WEB_URL: "http://web--feature-x--alp.localhost:6767", // alp-rename-keep
     });
   });
 

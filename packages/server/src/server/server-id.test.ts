@@ -60,6 +60,13 @@ describe("getOrCreateServerId", () => {
     expect(readFileSync(idPath, "utf8").trim()).toBe("test-daemon-id");
   });
 
+  // alp-rename-keep-start: alp 1.0.0 read PASEO_SERVER_ID.
+  it("respects the 1.0.0 PASEO_SERVER_ID override when ALP_SERVER_ID is unset", () => {
+    const id = getOrCreateServerId(home, { env: { PASEO_SERVER_ID: "legacy-id" } });
+    expect(id).toBe("legacy-id");
+  });
+  // alp-rename-keep-end
+
   describe.skipIf(process.platform === "win32")("file permissions", () => {
     it("creates server-id with private permissions", () => {
       getOrCreateServerId(home);

@@ -88,6 +88,7 @@ import {
 } from "./provider-subagents/store.js";
 import { withTimeout } from "../../utils/promise-timeout.js";
 import { extractAttention } from "../persistence-hooks.js";
+import { withPreRenameEnvNames } from "../rename-migration/legacy-names.js";
 
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
@@ -5276,8 +5277,7 @@ export class AgentManager {
       agentId,
       env: {
         ...env,
-        ALP_AGENT_ID: agentId,
-        ALP_AGENT_CWD: cwd,
+        ...withPreRenameEnvNames({ ALP_AGENT_ID: agentId, ALP_AGENT_CWD: cwd }),
       },
     };
     if (

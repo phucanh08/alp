@@ -31,3 +31,25 @@ test("endpoint descriptions redact pairing material and credentials", () => {
     describeDaemonTarget({ kind: "endpoint", host: "https://app-alp.anhlp.com/#offer=private" }),
   ).not.toContain("private");
 });
+
+// alp-rename-keep-start: alp 1.0.0 read PASEO_HOME and PASEO_HOST.
+test("an environment that still uses the 1.0.0 names selects the same target", () => {
+  expect(selectDaemonTarget({}, { PASEO_HOME: "/tmp/legacy" })).toEqual({
+    kind: "instance",
+    home: "/tmp/legacy",
+  });
+  expect(selectDaemonTarget({}, { PASEO_HOME: "/tmp/legacy" }, true)).toEqual({
+    kind: "instance",
+    home: "/tmp/legacy",
+  });
+  expect(selectDaemonTarget({}, { PASEO_HOST: "legacy:6767" })).toEqual({
+    kind: "endpoint",
+    host: "legacy:6767",
+  });
+  expect(selectDaemonTarget({}, { ALP_HOME: "/tmp/new", PASEO_HOME: "/tmp/legacy" })).toEqual({
+    kind: "instance",
+    home: "/tmp/new",
+  });
+  expect(() => selectDaemonTarget({}, { PASEO_HOME: "/tmp/a", PASEO_HOST: "b:1" })).toThrow();
+});
+// alp-rename-keep-end

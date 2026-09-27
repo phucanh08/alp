@@ -2,6 +2,7 @@ import net from "node:net";
 import { execCommand } from "../utils/spawn.js";
 import { findFreePort } from "./service-proxy.js";
 import type { AlpServicePortAllocation } from "@alp/protocol/alp-config-schema";
+import { withPreRenameEnvNames } from "./rename-migration/legacy-names.js";
 
 const PORT_SCRIPT_TIMEOUT_MS = 10_000;
 const PORT_SCRIPT_MAX_OUTPUT_BYTES = 1024;
@@ -59,12 +60,12 @@ async function allocatePortFromScript(options: {
       [options.scriptName, options.workspaceId, options.branchName ?? "", options.cwd],
       {
         cwd: options.cwd,
-        envOverlay: {
+        envOverlay: withPreRenameEnvNames({
           ALP_SCRIPTNAME: options.scriptName,
           ALP_WORKSPACE_ID: options.workspaceId,
           ALP_BRANCH_NAME: options.branchName ?? "",
           ALP_WORKTREE_PATH: options.cwd,
-        },
+        }),
         timeout: PORT_SCRIPT_TIMEOUT_MS,
         maxBuffer: PORT_SCRIPT_MAX_OUTPUT_BYTES,
         shell: false,

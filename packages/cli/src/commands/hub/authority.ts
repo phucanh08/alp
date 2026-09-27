@@ -1,6 +1,7 @@
 import type { HubCredentialStore } from "./credentials.js";
 import { HubCommandError } from "./error.js";
 import { normalizeHubOrigin } from "./origin.js";
+import { readAlpEnv } from "../../utils/legacy-env.js";
 
 export interface HubAuthorityOptions {
   origin?: string;
@@ -16,14 +17,14 @@ interface ResolveHubInput {
 export const DEFAULT_HUB_ORIGIN = "https://hub-alp.anhlp.com";
 
 export function resolveHubOrigin(input: ResolveHubInput): string {
-  const configuredOrigin = input.options.origin ?? input.env.ALP_HUB_URL;
+  const configuredOrigin = input.options.origin ?? readAlpEnv(input.env, "ALP_HUB_URL");
   const selectedOrigin =
     configuredOrigin ?? input.credentials.active()?.origin ?? DEFAULT_HUB_ORIGIN;
   return normalizeHubOrigin(selectedOrigin);
 }
 
 export function resolveHubCredential(input: ResolveHubInput & { origin: string }): string {
-  const explicitCredential = input.options.apiKey ?? input.env.ALP_HUB_API_KEY;
+  const explicitCredential = input.options.apiKey ?? readAlpEnv(input.env, "ALP_HUB_API_KEY");
   if (explicitCredential !== undefined) return explicitCredential;
   const stored = input.credentials.get(input.origin);
   if (stored !== null) return stored.credential;

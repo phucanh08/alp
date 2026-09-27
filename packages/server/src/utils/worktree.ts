@@ -45,6 +45,7 @@ import { createExternalProcessEnv } from "../server/alp-env.js";
 import { parseGitRevParsePath, resolveGitRevParsePath } from "./git-rev-parse-path.js";
 import { expandTilde, getRealpathAwareRelativePath, isPathInsideRoot } from "./path.js";
 import { terminateWithTreeKill } from "./tree-kill.js";
+import { withPreRenameEnvNames } from "../server/rename-migration/legacy-names.js";
 
 export { slugify, validateBranchSlug } from "@alp/protocol/branch-slug";
 
@@ -739,7 +740,8 @@ export async function resolveWorktreeRuntimeEnv(options: {
     await assertPortAvailable(worktreePort);
   }
 
-  return {
+  // COMPAT(paseo-env): repo scripts written for 1.0.0 read the PASEO_* names. alp-rename-keep
+  return withPreRenameEnvNames({
     // Source checkout path is the original git repo root (shared across worktrees), not the
     // worktree itself. This allows setup scripts to copy local files (e.g. .env) from the
     // source checkout.
@@ -749,7 +751,7 @@ export async function resolveWorktreeRuntimeEnv(options: {
     ALP_WORKTREE_PATH: options.worktreePath,
     ALP_BRANCH_NAME: branchName,
     ALP_WORKTREE_PORT: String(worktreePort),
-  };
+  });
 }
 
 export async function runWorktreeTeardownCommands(options: {
@@ -774,17 +776,20 @@ export async function runWorktreeTeardownCommands(options: {
   const worktreePort = readAlpWorktreeRuntimePort(options.worktreePath);
 
   const teardownEnv: NodeJS.ProcessEnv = createStringCommandShellEnv(
-    createExternalProcessEnv(process.env, {
-      // Source checkout path is the original git repo root (shared across worktrees), not the
-      // worktree itself. This allows lifecycle scripts to copy or clean resources using paths
-      // from the source checkout.
-      ALP_SOURCE_CHECKOUT_PATH: repoRootPath,
-      // Backward-compatible alias.
-      ALP_ROOT_PATH: repoRootPath,
-      ALP_WORKTREE_PATH: options.worktreePath,
-      ALP_BRANCH_NAME: branchName,
-      ...(worktreePort !== null ? { ALP_WORKTREE_PORT: String(worktreePort) } : {}),
-    }),
+    createExternalProcessEnv(
+      process.env,
+      withPreRenameEnvNames({
+        // Source checkout path is the original git repo root (shared across worktrees), not the
+        // worktree itself. This allows lifecycle scripts to copy or clean resources using paths
+        // from the source checkout.
+        ALP_SOURCE_CHECKOUT_PATH: repoRootPath,
+        // Backward-compatible alias.
+        ALP_ROOT_PATH: repoRootPath,
+        ALP_WORKTREE_PATH: options.worktreePath,
+        ALP_BRANCH_NAME: branchName,
+        ...(worktreePort !== null ? { ALP_WORKTREE_PORT: String(worktreePort) } : {}),
+      }),
+    ),
   );
 
   const results: WorktreeTeardownCommandResult[] = [];

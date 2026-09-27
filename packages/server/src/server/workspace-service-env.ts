@@ -1,4 +1,5 @@
 import { projectServiceProxyUrls } from "./service-proxy.js";
+import { withPreRenameEnvNames } from "./rename-migration/legacy-names.js";
 
 export interface WorkspaceServicePeer {
   scriptName: string;
@@ -65,7 +66,8 @@ export function buildWorkspaceServiceEnv(
     }
   }
 
-  return env;
+  // COMPAT(paseo-env): service scripts written for 1.0.0 read $PASEO_PORT and friends. alp-rename-keep
+  return withPreRenameEnvNames(env);
 }
 
 export function resolveServiceBindHost(daemonListenHost: string | null | undefined): string {
