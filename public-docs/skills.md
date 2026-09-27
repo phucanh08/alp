@@ -56,8 +56,9 @@ The advisor returns a second opinion without editing files.
 
 ## SLP skills
 
-alp bundles six more skills for the SLP (Supervisor / Lead / Peer) workflow, installed by
-default on a fresh host through the same mechanism as the table above.
+alp bundles six more skills for the SLP (Supervisor / Lead / Peer) workflow. They are not
+installed on the host: each Lead and Peer agent gets its seat's skills through its own seat
+directory under `$PASEO_HOME/slp/seat-skills/`.
 
 | Skill                      | Use it to                                                                         |
 | -------------------------- | --------------------------------------------------------------------------------- |
