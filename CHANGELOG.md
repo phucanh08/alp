@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.0.0 - 2026-09-27
+
+alp 1.0 is the first release of the alp fork of Paseo 0.9.2. It runs the SLP (Supervisor / Lead / Peer) workflow by default and ships under the alp name, icons, and endpoints.
+
+**Before upgrading:** alp does not interoperate with upstream Paseo. It uses `~/.alp`, the `alp` CLI, `alp://` links, its own app ids, relay, and web app, so Paseo state, pairings, and installs do not carry over. See [breaking changes](https://github.com/phucanh08/alp/blob/main/docs/breaking-changes.md).
+
+### Added
+
+- Added the bundled `slp` plugin: a workspace created from the app or CLI gets a Lead agent, and each host gets one Supervisor agent in a system workspace hidden from project lists ([slp](https://github.com/phucanh08/alp/blob/main/plugins/slp/README.md))
+- Added the bundled `slp-dev` plugin, which serves each seat's rules and skills to `slp` over `slp-dev.seat.get` and `slp-dev.skills.get` ([slp-dev](https://github.com/phucanh08/alp/blob/main/plugins/slp-dev/README.md))
+- Added SLP seats as an `slp.role` label (`supervisor`, `lead`, `peer`) on Claude and Codex agents; an agent you or a schedule create without a seat becomes an independent Peer tagged with `slp.origin` ([seats](https://github.com/phucanh08/alp/blob/main/plugins/slp/README.md#seats))
+- Added per-seat skill directories at `$PASEO_HOME/slp/seat-skills/<seat>`: a Claude Lead or Peer loads its seat's skills as the local plugin `slp-<seat>`, a Codex Lead or Peer as an extra skill root, and the Supervisor gets none ([seat skills](https://github.com/phucanh08/alp/blob/main/plugins/slp/README.md#seat-skills))
+- Added seat rule overrides from `.slp/agents/<seat>.md` in the workspace ([seat definitions](https://github.com/phucanh08/alp/blob/main/plugins/slp/README.md#seat-definitions))
+- Added the SLP card to the host's Overview settings: turn SLP off, pick the Supervisor model, and set `supervisorCheckMinutes` ([settings](https://github.com/phucanh08/alp/blob/main/plugins/slp/README.md#settings))
+- Added Supervisor self-checks: the Supervisor gets an `SLP-CHECK` message when a working Lead has not reported for `supervisorCheckMinutes` (default 10, `0` turns it off) ([settings](https://github.com/phucanh08/alp/blob/main/plugins/slp/README.md#settings))
+- Added a Lead / Plain chat pill to the New workspace screen and draft tabs for Claude and Codex, defaulting to Lead while SLP is on ([seats](https://github.com/phucanh08/alp/blob/main/plugins/slp/README.md#seats))
+- Added a `skills` field to the plugin manifest, as a directory or `{ "dir", "install": false }` for skills the plugin serves without installing them into host skill directories ([plugins](https://github.com/phucanh08/alp/blob/main/docs/plugins.md#ship-skills-with-a-plugin))
+- Added `plugins` and `skills` to Claude `providerOptions`, and `skills` (`config`, `includeInstructions`, `extraRoots`) to Codex `providerOptions`, applied on every create and resume
+- Added `plugins.invoke` to the plugin client API so a plugin can call another plugin's RPC
+
+### Changed
+
+- Renamed the app, desktop app, CLI, website, and docs to alp: `alp` CLI, `~/.alp` home, `alp://` links, `com.anhlp.alp` app ids, and desktop updates from [phucanh08/alp](https://github.com/phucanh08/alp/releases) releases
+- Replaced the Paseo mark with the alp mark on the app icon, splash screen, Android and F-Droid icons, desktop icons, favicons, and PWA and Safari touch icons
+- Changed the default relay to `relay-alp.anhlp.com`, the web app to `app-alp.anhlp.com`, the Hub to `hub-alp.anhlp.com`, and in-app links to `alp.anhlp.com`
+- Renamed the bundled `paseo*` skills to `alp*`, carrying over installed copies and saved selections
+- Changed daemon start to set `pluginsEnabled` and `daemon.mcp.injectIntoAgents` to `true` when they are absent, so the bundled plugins run and seats get the alp MCP tools on a fresh host
+- Changed the automatic Lead to one per directory: a new workspace in a directory that already has a live Lead gets none
+- Removed `update_agent`, `set_agent_mode`, and `respond_to_permission` from a Peer's alp tools
+- Removed the nine `claude-*`, `codex-*`, and `gemini-*` seat providers seeded by earlier alp builds from `agents.providers` on daemon start
+- Moved the SLP skills out of `~/.claude/skills`, `~/.codex/skills`, and `~/.agents/skills`; seats read them from their seat directory, and they no longer appear in the Orchestration skills list
+- Retired the `ask-alp` skill into [`plugins/slp-dev/references/seats.md`](https://github.com/phucanh08/alp/blob/main/plugins/slp-dev/references/seats.md); an installed copy nobody edited is removed on the next skills sync
+- Raised the iOS minimum to 17 and adopted the UIScene life cycle for Xcode 27 builds
+- Built the macOS desktop app unsigned when Apple signing secrets are absent
+
+### Fixed
+
+- Fixed the packaged desktop app failing to load the `slp` plugin outside the repository checkout
+- Fixed Safari showing the old icon from its cache after the alp rebrand
+
 ## 0.9.2 - 2026-09-24
 
 ### Added
