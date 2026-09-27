@@ -443,6 +443,61 @@ export type Value = string;`,
     await expect(compilePlugin(entries)).rejects.toThrow(specifier);
   });
 
+  // alp-rename-keep-start: COMPAT(getpaseo-sdk) keeps plugins written for upstream Paseo loading.
+  it("compiles @getpaseo/plugin imports against the @alp/plugin host modules", async () => {
+    const entries = await createSplitPlugin();
+    await writeFile(
+      entries.server,
+      `import { definePlugin } from "@getpaseo/plugin/server";
+import * as shared from "@getpaseo/plugin";
+export default function contribute() { return [definePlugin, shared]; }`,
+    );
+    await writeFile(
+      entries.client,
+      `import { usePaseo } from "@getpaseo/plugin/client";
+export default function contribute() { return usePaseo; }`,
+    );
+
+    const { clientBundle, serverBundle } = await compilePlugin(entries);
+
+    expect(serverBundle).toContain('require("@alp/plugin/server")');
+    expect(serverBundle).toContain('require("@alp/plugin")');
+    expect(clientBundle).toContain('require("@alp/plugin/client")');
+    expect(`${serverBundle}${clientBundle}`).not.toContain("@getpaseo");
+  });
+
+  it("keeps runtime boundaries for @getpaseo/plugin imports", async () => {
+    const serverEntries = await createSplitPlugin();
+    await writeFile(
+      serverEntries.server,
+      `import * as sdk from "@getpaseo/plugin/client"; export default function contribute() { return sdk; }`,
+    );
+    await expect(compilePlugin(serverEntries)).rejects.toThrow(
+      "client-only module cannot be imported into the plugin server bundle: @getpaseo/plugin/client",
+    );
+
+    const clientEntries = await createSplitPlugin();
+    await writeFile(
+      clientEntries.client,
+      `import * as sdk from "@getpaseo/plugin/server"; export default function contribute() { return sdk; }`,
+    );
+    await expect(compilePlugin(clientEntries)).rejects.toThrow(
+      "server-only module cannot be imported into the plugin client bundle: @getpaseo/plugin/server",
+    );
+  });
+
+  it("rejects unknown @getpaseo/plugin entries", async () => {
+    const entries = await createSplitPlugin();
+    await writeFile(
+      entries.server,
+      `import * as sdk from "@getpaseo/plugin/ui"; export default function contribute() { return sdk; }`,
+    );
+    await expect(compilePlugin(entries)).rejects.toThrow(
+      "Unknown SDK module cannot be imported into the plugin server bundle: @getpaseo/plugin/ui",
+    );
+  });
+  // alp-rename-keep-end
+
   it("builds each runtime from its own entry and shares neutral modules", async () => {
     const entries = await createSplitPlugin();
 
