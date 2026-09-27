@@ -1,4 +1,5 @@
 import { resolveAlpHome } from "@alp/server/daemon-control";
+import { readAlpEnv } from "./legacy-env.js";
 
 export type DaemonTarget = { kind: "instance"; home: string } | { kind: "endpoint"; host: string };
 
@@ -13,6 +14,8 @@ export function selectDaemonTarget(
   }
   if (options.home !== undefined && options.host !== undefined)
     throw { code: "TARGET_AMBIGUOUS", message: "Choose either --home or --host, not both." };
+  const envHome = readAlpEnv(env, "ALP_HOME");
+  const envHost = readAlpEnv(env, "ALP_HOST");
   if (localOnly) {
     if (options.host !== undefined)
       throw {
@@ -21,19 +24,19 @@ export function selectDaemonTarget(
       };
     return {
       kind: "instance",
-      home: resolveAlpHome({ ALP_HOME: options.home ?? env.ALP_HOME }),
+      home: resolveAlpHome({ ALP_HOME: options.home ?? envHome }),
     };
   }
   if (options.home !== undefined)
     return { kind: "instance", home: resolveAlpHome({ ALP_HOME: options.home }) };
   if (options.host !== undefined) return { kind: "endpoint", host: options.host };
-  if (env.ALP_HOME && env.ALP_HOST)
+  if (envHome && envHost)
     throw {
       code: "TARGET_AMBIGUOUS",
       message: "ALP_HOME and ALP_HOST are both set. Choose --home or --host explicitly.",
     };
-  if (env.ALP_HOST) return { kind: "endpoint", host: env.ALP_HOST };
-  return { kind: "instance", home: resolveAlpHome({ ALP_HOME: env.ALP_HOME }) };
+  if (envHost) return { kind: "endpoint", host: envHost };
+  return { kind: "instance", home: resolveAlpHome({ ALP_HOME: envHome }) };
 }
 
 export function describeDaemonTarget(target: DaemonTarget): string {

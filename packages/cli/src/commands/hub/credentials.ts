@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { resolveAlpHome } from "@alp/server/daemon-control";
+import { readAlpEnv } from "../../utils/legacy-env.js";
 import { z } from "zod";
 import { HubCommandError } from "./error.js";
 import { normalizeHubOrigin } from "./origin.js";
@@ -59,7 +60,8 @@ export class PrivateHubCredentialStore implements HubCredentialStore {
   private readonly filePath: string;
 
   constructor(env: Readonly<Record<string, string | undefined>> = process.env) {
-    this.filePath = path.join(resolveAlpHome(env), "hub-credentials.json");
+    const home = resolveAlpHome({ ALP_HOME: readAlpEnv(env, "ALP_HOME") });
+    this.filePath = path.join(home, "hub-credentials.json");
   }
 
   active(): StoredHubCredential | null {
