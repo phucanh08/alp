@@ -1,12 +1,16 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { PluginIdSchema, PluginRequirementsSchema } from "@alp/protocol/messages";
+import {
+  PluginIdSchema,
+  PluginRequirementsSchema,
+  type PluginRequirements,
+} from "@alp/protocol/messages";
 import {
   assertPluginCompatibility,
   validatePluginRequirements,
 } from "@alp/protocol/plugin-requirements";
-import { getErrorMessage } from "@alp/protocol/error-utils";
+import validRange from "semver/ranges/valid.js";
 
 const MANIFEST_FILENAME = "alp-plugin.json";
 // alp-rename-keep-start
@@ -16,6 +20,9 @@ const UPSTREAM_MANIFEST_FILENAME = "paseo-plugin.json";
 // The upstream Paseo release this alp is built on; requirements.paseo is checked against it.
 // Bump it whenever scripts/sync-upstream.mjs merges a newer upstream release.
 export const UPSTREAM_BASE_VERSION = "0.9.2";
+// The first alp release built on UPSTREAM_BASE_VERSION. The app only checks requirements.alp, so a
+// legacy plugin whose requirements.paseo passed is published to it with this range.
+const UPSTREAM_BASE_ALP_RANGE = ">=1.0.0";
 // alp-rename-keep-end
 const PluginBuildCommandSchema = z
   .array(z.string().refine((argument) => argument.trim().length > 0))
@@ -82,6 +89,11 @@ function parseUpstreamManifest(raw: unknown): PluginManifest {
   const { requirements, ...manifest } = UpstreamPluginManifestSchema.parse(raw);
   if (!requirements) return manifest;
   const { paseo, ...alpRequirements } = requirements;
+  if (paseo !== undefined && (!paseo.trim() || validRange(paseo) === null)) {
+    throw new Error(
+      `Invalid requirements.paseo in paseo-plugin.json: ${JSON.stringify(paseo)}. Use an npm semver range such as ">=0.9.0".`,
+    );
+  }
   return {
     ...manifest,
     ...(Object.keys(alpRequirements).length > 0 ? { requirements: alpRequirements } : {}),
@@ -113,10 +125,24 @@ export function assertPluginManifestCompatibility(
     });
   } catch (error) {
     throw new Error(
-      `paseo-plugin.json requirements.paseo is checked against upstream Paseo ${UPSTREAM_BASE_VERSION}, the base of this alp: ${getErrorMessage(error)}`,
+      `Plugin "${manifest.id}" requires Paseo ${range} (requirements.paseo in paseo-plugin.json), but this alp is built on Paseo ${UPSTREAM_BASE_VERSION}. Use a plugin version that supports it.`,
       { cause: error },
     );
   }
+}
+
+/**
+ * The requirements the app checks for this plugin. The wire carries only requirements.alp, so a
+ * legacy requirements.paseo (already checked by assertPluginManifestCompatibility) becomes
+ * UPSTREAM_BASE_ALP_RANGE.
+ */
+export function pluginCatalogRequirements(
+  manifest: PluginManifest,
+): PluginRequirements | undefined {
+  if (manifest.requirements?.alp !== undefined || manifest.paseoRequirement === undefined) {
+    return manifest.requirements;
+  }
+  return { ...manifest.requirements, alp: UPSTREAM_BASE_ALP_RANGE };
 }
 // alp-rename-keep-end
 

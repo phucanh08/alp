@@ -17,7 +17,11 @@ import {
 } from "@alp/plugin/server/provider";
 import type { PluginLogEntry } from "@alp/protocol/messages";
 import { compilePlugin } from "./compiler.js";
-import { assertPluginManifestCompatibility, readPluginManifest } from "./manifest.js";
+import {
+  assertPluginManifestCompatibility,
+  pluginCatalogRequirements,
+  readPluginManifest,
+} from "./manifest.js";
 import type { PluginRequirements } from "@alp/protocol/messages";
 import type {
   PluginProcessMessage,
@@ -561,7 +565,7 @@ export class PluginRuntime {
       return {
         id: pluginId,
         clientBundle: bundles.clientBundle ?? "",
-        requirements: manifest.requirements,
+        requirements: pluginCatalogRequirements(manifest),
         methods: new Set(),
         hooks: { events: [], before: [] },
         providers: [],
@@ -669,7 +673,7 @@ export class PluginRuntime {
     loaded = {
       id: pluginId,
       clientBundle: bundles.clientBundle ?? "",
-      requirements: manifest.requirements,
+      requirements: pluginCatalogRequirements(manifest),
       methods: new Set(ready.methods),
       hooks: ready.hooks ?? { events: [], before: [] },
       providers: ready.providers ?? [],
