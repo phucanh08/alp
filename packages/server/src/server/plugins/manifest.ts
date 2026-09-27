@@ -5,6 +5,11 @@ import { PluginIdSchema, PluginRequirementsSchema } from "@alp/protocol/messages
 import { validatePluginRequirements } from "@alp/protocol/plugin-requirements";
 
 const MANIFEST_FILENAME = "alp-plugin.json";
+// alp-rename-keep-start
+// COMPAT(paseo-plugin-manifest): added in v1.0.0, remove after 2027-03-27 once plugins written
+// for upstream Paseo ship alp-plugin.json.
+const UPSTREAM_MANIFEST_FILENAME = "paseo-plugin.json";
+// alp-rename-keep-end
 const PluginBuildCommandSchema = z
   .array(z.string().refine((argument) => argument.trim().length > 0))
   .min(1);
@@ -47,12 +52,23 @@ const PluginManifestSchema = z
 export type PluginManifest = z.infer<typeof PluginManifestSchema>;
 
 export async function readPluginManifest(directory: string): Promise<PluginManifest> {
-  const manifestPath = path.join(directory, MANIFEST_FILENAME);
-  const info = await stat(manifestPath).catch(() => null);
-  if (!info?.isFile()) throw new Error(`Plugin manifest is missing: ${manifestPath}`);
+  const manifestPath = await resolveManifestPath(directory);
   const manifest = PluginManifestSchema.parse(JSON.parse(await readFile(manifestPath, "utf8")));
   validatePluginRequirements(manifest.requirements);
   return manifest;
+}
+
+async function resolveManifestPath(directory: string): Promise<string> {
+  const manifestPath = path.join(directory, MANIFEST_FILENAME);
+  if (await isFile(manifestPath)) return manifestPath;
+  const upstreamManifestPath = path.join(directory, UPSTREAM_MANIFEST_FILENAME);
+  if (await isFile(upstreamManifestPath)) return upstreamManifestPath;
+  throw new Error(`Plugin manifest is missing: ${manifestPath}`);
+}
+
+async function isFile(filePath: string): Promise<boolean> {
+  const info = await stat(filePath).catch(() => null);
+  return info?.isFile() === true;
 }
 
 /** The plugin's skills directory, or null when the manifest declares none. */

@@ -45,6 +45,34 @@ describe("plugin manifest", () => {
     }
   });
 
+  // alp-rename-keep-start: COMPAT(paseo-plugin-manifest) reads manifests written for upstream Paseo.
+  it("reads paseo-plugin.json when the plugin has no alp-plugin.json", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-manifest-"));
+    directories.push(directory);
+    await writeFile(path.join(directory, "paseo-plugin.json"), JSON.stringify({ id: "upstream" }));
+
+    await expect(readPluginManifest(directory)).resolves.toEqual({ id: "upstream" });
+  });
+
+  it("prefers alp-plugin.json over paseo-plugin.json", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-manifest-"));
+    directories.push(directory);
+    await writeFile(path.join(directory, "paseo-plugin.json"), JSON.stringify({ id: "upstream" }));
+    await writeFile(path.join(directory, "alp-plugin.json"), JSON.stringify({ id: "fork" }));
+
+    await expect(readPluginManifest(directory)).resolves.toEqual({ id: "fork" });
+  });
+  // alp-rename-keep-end
+
+  it("names alp-plugin.json when the plugin has no manifest", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-manifest-"));
+    directories.push(directory);
+
+    await expect(readPluginManifest(directory)).rejects.toThrow(
+      `Plugin manifest is missing: ${path.join(directory, "alp-plugin.json")}`,
+    );
+  });
+
   it("reads an optional description", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "alp-plugin-manifest-"));
     directories.push(directory);
