@@ -28,11 +28,11 @@ describe("isProviderImageMarkdown", () => {
     expect(isProviderImageMarkdown(`![shot](/var/folders/x/alp-attachments/${HASH}.webp)`)).toBe(
       true,
     );
-    // History written by alp 1.0.0 names the attachments dir before the rename.
+    // alp-rename-keep-start: history written by alp 1.0.0 names the attachments dir before the rename.
     expect(isProviderImageMarkdown(`![Image](/tmp/paseo-attachments-a1B2c3/${HASH}.png)`)).toBe(
-      // alp-rename-keep
       true,
     );
+    // alp-rename-keep-end
     // Windows: backslash path separators are doubled by escapeMarkdownImageSource.
     expect(
       isProviderImageMarkdown(
