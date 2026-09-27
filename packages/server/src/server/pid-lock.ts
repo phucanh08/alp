@@ -1,4 +1,4 @@
-import { open, readFile, stat, unlink, utimes } from "node:fs/promises";
+import { link, open, readFile, stat, unlink, utimes } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { ensurePrivateDirectory } from "./private-files.js";
 import { join } from "node:path";
@@ -76,6 +76,57 @@ export function isPidLockOwnerRunning(lock: PidLockInfo): boolean {
 
 function getPidFilePath(alpHome: string): string {
   return join(alpHome, "alp.pid");
+}
+
+// alp-rename-keep-start
+// COMPAT(paseo-pid): added after v1.0.0 on 2026-09-27; remove after 2027-03-27.
+// alp 1.0.0 wrote its lock as paseo.pid, and a 1.0.0 supervisor can still be running when the
+// renamed build starts. Its lock is read wherever alp.pid is missing, and taken over at acquire.
+const LEGACY_PID_FILENAME = "paseo.pid";
+// alp-rename-keep-end
+
+function getLegacyPidFilePath(alpHome: string): string {
+  return join(alpHome, LEGACY_PID_FILENAME);
+}
+
+/** The pre-rename lock, or null when it is missing or unreadable. Never throws. */
+async function readLegacyPidLock(alpHome: string): Promise<PidLockInfo | null> {
+  try {
+    return parsePidLockInfo(JSON.parse(await readFile(getLegacyPidFilePath(alpHome), "utf-8")));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Links the pre-rename lock in as alp.pid, so the lock below sees its owner. A running owner
+ * keeps its own name (its heartbeat and release still find it) and the acquire then refuses;
+ * an abandoned lock loses the old name, which leaves it exactly like an abandoned alp.pid.
+ * An unreadable lock is left where it is.
+ */
+async function adoptLegacyPidLock(alpHome: string): Promise<void> {
+  const legacyPath = getLegacyPidFilePath(alpHome);
+  const legacyLock = await readLegacyPidLock(alpHome);
+  if (!legacyLock) {
+    if (await stat(legacyPath).catch(() => null)) {
+      process.stderr.write(`Left an unreadable pre-rename daemon lock at ${legacyPath}\n`);
+    }
+    return;
+  }
+  try {
+    await link(legacyPath, getPidFilePath(alpHome));
+  } catch (error) {
+    if (isErrnoException(error) && (error.code === "EEXIST" || error.code === "ENOENT")) return;
+    throw error;
+  }
+  if (isPidLockOwnerRunning(legacyLock)) {
+    process.stderr.write(
+      `A daemon from before the alp rename is running (PID ${legacyLock.pid}); its lock ${legacyPath} is linked as alp.pid\n`,
+    );
+    return;
+  }
+  await unlink(legacyPath).catch(() => {});
+  process.stderr.write(`Moved the pre-rename daemon lock ${legacyPath} to alp.pid\n`);
 }
 
 async function touchPidLockFile(pidPath: string): Promise<void> {
@@ -197,6 +248,7 @@ export async function acquirePidLock(
   const pidPath = getPidFilePath(alpHome);
 
   ensurePrivateDirectory(alpHome);
+  await adoptLegacyPidLock(alpHome);
 
   // Try to read existing lock
   const existingLock = await readPidLock(pidPath);
@@ -372,7 +424,7 @@ export async function releasePidLock(
 
 export async function getPidLockInfo(alpHome: string): Promise<PidLockInfo | null> {
   const pidPath = getPidFilePath(alpHome);
-  return readPidLock(pidPath);
+  return (await readPidLock(pidPath)) ?? readLegacyPidLock(alpHome);
 }
 
 export async function isLocked(alpHome: string): Promise<{ locked: boolean; info?: PidLockInfo }> {

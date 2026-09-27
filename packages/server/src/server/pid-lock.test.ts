@@ -1,4 +1,4 @@
-import { mkdtemp, open, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, open, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -291,3 +291,81 @@ describe("pid-lock ownership", () => {
     }
   });
 });
+
+// alp-rename-keep-start: alp 1.0.0 wrote its lock as paseo.pid.
+describe("pid-lock across the paseo.pid → alp.pid rename", () => {
+  function legacyLock(startedAt: string) {
+    return JSON.stringify({
+      pid: process.pid,
+      startedAt,
+      hostname: "old-host",
+      uid: process.getuid?.() ?? 0,
+      listen: "127.0.0.1:6767",
+      heartbeat: true,
+    });
+  }
+
+  test("moves an abandoned paseo.pid to alp.pid and takes the lock", async () => {
+    const alpHome = await mkdtemp(join(tmpdir(), "alp-pid-lock-legacy-stale-"));
+    const ownerPid = process.pid + 10_000;
+    try {
+      await writeFile(join(alpHome, "paseo.pid"), legacyLock("2000-01-01T00:00:00.000Z"));
+
+      await acquirePidLock(alpHome, null, { ownerPid });
+
+      expect((await getPidLockInfo(alpHome))?.pid).toBe(ownerPid);
+      expect(await readdir(alpHome)).toEqual(["alp.pid"]);
+    } finally {
+      await rm(alpHome, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses to start beside a running 1.0.0 daemon and leaves its lock where it is", async () => {
+    const alpHome = await mkdtemp(join(tmpdir(), "alp-pid-lock-legacy-live-"));
+    const contents = legacyLock(new Date().toISOString());
+    try {
+      await writeFile(join(alpHome, "paseo.pid"), contents);
+
+      await expect(
+        acquirePidLock(alpHome, null, { ownerPid: process.pid + 10_000 }),
+      ).rejects.toThrow("Another alp daemon is already running");
+
+      expect(await readFile(join(alpHome, "paseo.pid"), "utf8")).toBe(contents);
+      expect((await getPidLockInfo(alpHome))?.pid).toBe(process.pid);
+    } finally {
+      await rm(alpHome, { recursive: true, force: true });
+    }
+  });
+
+  test("reports a running 1.0.0 daemon without writing anything", async () => {
+    const alpHome = await mkdtemp(join(tmpdir(), "alp-pid-lock-legacy-read-"));
+    try {
+      await writeFile(join(alpHome, "paseo.pid"), legacyLock(new Date().toISOString()));
+
+      await expect(isLocked(alpHome)).resolves.toMatchObject({
+        locked: true,
+        info: { pid: process.pid },
+      });
+      expect(await readdir(alpHome)).toEqual(["paseo.pid"]);
+    } finally {
+      await rm(alpHome, { recursive: true, force: true });
+    }
+  });
+
+  test("leaves an unreadable paseo.pid in place and starts", async () => {
+    const alpHome = await mkdtemp(join(tmpdir(), "alp-pid-lock-legacy-corrupt-"));
+    const ownerPid = process.pid + 10_000;
+    try {
+      await writeFile(join(alpHome, "paseo.pid"), "{not json");
+
+      await expect(getPidLockInfo(alpHome)).resolves.toBeNull();
+      await acquirePidLock(alpHome, null, { ownerPid });
+
+      expect((await getPidLockInfo(alpHome))?.pid).toBe(ownerPid);
+      expect(await readFile(join(alpHome, "paseo.pid"), "utf8")).toBe("{not json");
+    } finally {
+      await rm(alpHome, { recursive: true, force: true });
+    }
+  });
+});
+// alp-rename-keep-end
