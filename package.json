@@ -9,6 +9,7 @@
     "src/core",
     "dist/alpd.js",
     "dist/acp.js",
+    "dist/web-app",
     "templates",
     "README.md"
   ],
@@ -18,7 +19,7 @@
   "scripts": {
     "pretest": "node scripts/build-paseo.mjs",
     "test": "ALP_HOME=\"$(mktemp -d)\" node --test 'test/*.test.js'",
-    "check": "tsc -p tsconfig.paseo.json && tsc -p tsconfig.client.json && tsc -p web/tsconfig.json",
+    "check": "tsc -p tsconfig.paseo.json && tsc -p tsconfig.client.json",
     "build": "node scripts/build-paseo.mjs",
     "test:init": "node --test test/init.test.js",
     "test:skills": "node scripts/build-paseo.mjs && node --test test/skills.test.js",
@@ -39,7 +40,8 @@
     "test:e2e:human": "node scripts/human-e2e.mjs cli && node scripts/human-e2e.mjs paseo",
     "test:e2e:board": "node scripts/build-paseo.mjs && node scripts/board-e2e.mjs",
     "test:daemon": "node scripts/build-paseo.mjs && node --test test/daemon.test.js",
-    "prepack": "node scripts/build-paseo.mjs"
+    "prepack": "node scripts/build-paseo.mjs && node scripts/check-web-app.mjs",
+    "build:web": "node scripts/build-paseo-web.mjs"
   },
   "engines": {
     "node": ">=20"

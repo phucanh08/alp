@@ -164,18 +164,22 @@ Finished assignments stay recallable for 14 days: main, or the agent that assign
 
 ## The web app
 
-alpd serves a web app on your machine, so installing ALP is enough to work from a browser:
+alpd serves the ALP web app on your machine, so installing ALP is enough to work from a browser:
 
 ```sh
 alp web            # opens http://127.0.0.1:7433 with its access token
+alp web --print    # prints the address instead
 ```
 
-- **Left:** your projects and their sessions, newest first. "Open a project" browses your folders; a folder that is not an ALP project yet is set up on its first session.
-- **Middle:** the session. Main's replies, commands and tool calls (click one for its output), delegations with a link to the assignment's own session, mail, notices and compactions, and the composer. Writing while main works adds to its turn; stop ends the turn and the work it started. Questions from the team appear above the composer, with their options.
-- **Right:** the team at work (each agent's state, assignments, worktrees waiting to merge), the project's tasks (approve, close, reopen, add), and the checkout's changes with their diff.
-- A new session chooses its team and permissions first, as in Paseo.
+The app is [Paseo](https://github.com/getpaseo/paseo)'s web app (Apache 2.0), built from a pinned commit with ALP's patches (`paseo-web/`) and run over alpd, so it looks and works like Paseo:
 
-alpd listens on 127.0.0.1 only. The page needs the token `alp web` puts in its address (kept in `~/.alp/web.json`), and alpd refuses requests for another host name and sockets from another site. `"web": { "port": 8000 }` in `~/.alp/settings.json` moves it, and `"web": { "enabled": false }` turns it off. Details: [ALPD §61](plans/reference/ALPD.md#61-the-local-web-app-2026-10-10).
+- **Sidebar:** your projects and their workspaces, with their branch, pins, labels and unread marks. Add a project by typing its folder; a new workspace starts with its first agent.
+- **Agents:** each session is an agent of the provider ALP, its team (Phở, Cafe, …) as the model. The timeline streams main's replies and tool calls; questions from the team are cards to answer; History and Find in chat search past sessions. The team members are the agent's subagents, each with its own timeline.
+- **ALP's own parts:** the Tasks panel and screen, the ALP project panel and the ALP settings screen (Settings → Plugins → alp-provider) come from ALP's Paseo plugin, which alpd runs.
+- **Changes and Files:** the checkout's diff, uncommitted or against its base branch, and its files, read-only.
+- What Paseo has and ALP not yet (terminals, committing and pushing, worktrees from the app, voice, …) says "Tính năng đang phát triển" (in your language) when used.
+
+alpd listens on 127.0.0.1 only. The page needs the token `alp web` puts in its address (kept in `~/.alp/web.json`), and alpd refuses requests for another host name and sockets from another site. `"web": { "port": 8000 }` in `~/.alp/settings.json` moves it, and `"web": { "enabled": false }` turns it off. In a checkout of this repository, build the app with `npm run build:web` (it clones Paseo into `.cache/paseo-web`). Details: [ALPD §62](plans/reference/ALPD.md#62-the-alp-web-app-on-paseos-app-2026-10-10).
 
 ## Editors (ACP)
 

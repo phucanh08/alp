@@ -48,23 +48,8 @@ await build({ entryPoints: ['src/acp/main.ts'], outfile: 'dist/acp.js', bundle: 
 // The ACP agent on its own, for tests.
 await build({ entryPoints: ['src/acp/agent.ts'], outfile: 'dist/acp/agent.js', bundle: true, format: 'esm', platform: 'node', target: 'node20' });
 
-// The web app alpd serves (ALPD §61), embedded in alpd so it needs no files beside it.
-const web = await build({ entryPoints: { app: 'web/src/app.tsx' }, outdir: 'dist/web', bundle: true, format: 'esm', platform: 'browser', target: 'es2022', minify: true, write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' }, legalComments: 'none' });
-const webAssets = { '/index.html': { type: 'text/html; charset=utf-8', body: await readFile('web/index.html', 'utf8') } };
-for (const file of web.outputFiles) {
-  const name = `/${path.basename(file.path)}`;
-  webAssets[name] = { type: name.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8', body: file.text };
-}
-const embeddedWeb = {
-  name: 'embedded-alp-web',
-  setup(build) {
-    build.onResolve({ filter: /^alp:web$/ }, () => ({ path: 'web', namespace: 'alp-web' }));
-    build.onLoad({ filter: /.*/, namespace: 'alp-web' }, () => ({ contents: `export default ${JSON.stringify(webAssets)}`, loader: 'js' }));
-  },
-};
-
 // alpd: for the CLI, and next to the plugin bundle so an installed plugin can start it.
 const { version } = JSON.parse(await readFile('plugins/paseo/package.json', 'utf8'));
 for (const outfile of ['dist/alpd.js', 'plugins/paseo/server/dist/alpd.js']) {
-  await build({ entryPoints: ['src/daemon/main.ts'], outfile, bundle: true, format: 'esm', platform: 'node', target: 'node20', external: ['@anthropic-ai/claude-agent-sdk'], plugins: [embeddedTemplates, embeddedWeb, embeddedPluginClient], define: { __ALP_VERSION__: JSON.stringify(version) }, banner: requireShim });
+  await build({ entryPoints: ['src/daemon/main.ts'], outfile, bundle: true, format: 'esm', platform: 'node', target: 'node20', external: ['@anthropic-ai/claude-agent-sdk'], plugins: [embeddedTemplates, embeddedPluginClient], define: { __ALP_VERSION__: JSON.stringify(version) }, banner: requireShim });
 }

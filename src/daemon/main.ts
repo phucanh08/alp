@@ -4,7 +4,6 @@ import { mkdir, open, readFile, rename, stat, unlink, utimes, writeFile } from '
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import templates from 'alp:templates';
-import webAssets from 'alp:web';
 import { alpHome, daemonPaths, PROTOCOL_VERSION } from '../client/index.js';
 import { createAlpRuntime, reclaimCopies, reclaimWorktrees } from '../runtime/index.js';
 import { createDaemonServer } from './server.js';
@@ -161,10 +160,11 @@ async function run(home: string) {
   }
   // The local web app (ALPD §61); alpd works without it.
   const webLog = (message: string) => console.log(`${new Date().toISOString()} web: ${message}`);
-  // The built ALP web app (Paseo's app, ALPD §62) when it is here; else the classic page.
-  const appDir = settings?.web?.app === 'classic' ? undefined : webAppDir(fileURLToPath(import.meta.url));
+  // The ALP web app (Paseo's app, ALPD §62), built beside alpd.
+  const appDir = webAppDir(fileURLToPath(import.meta.url));
+  if (!appDir) webLog('the web app is not built beside alpd; the page says how to build it');
   const gateway = appDir ? createPaseoBridge({ daemon: server, version: VERSION, home, token: () => web?.token ?? '', serverId: () => web?.serverId ?? '', log: webLog }) : undefined;
-  web = settings?.web?.enabled === false ? undefined : createWebServer({ daemon: server, assets: webAssets, app: appDir && gateway ? { dir: appDir, gateway } : undefined, home, port: settings?.web?.port, log: webLog });
+  web = settings?.web?.enabled === false ? undefined : createWebServer({ app: appDir && gateway ? { dir: appDir, gateway } : undefined, home, port: settings?.web?.port, log: webLog });
   await web?.listen()
     .then(info => console.log(`${new Date().toISOString()} web app on ${info.url}`))
     .catch(error => console.error(`${new Date().toISOString()} web app not started`, error));

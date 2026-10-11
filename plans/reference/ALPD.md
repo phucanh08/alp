@@ -1906,6 +1906,8 @@ Live: `node src/cli.js acp` on a temp `ALP_HOME` answered `initialize` (version 
 
 ## 61. The local web app (2026-10-10)
 
+> Superseded by §62 (D31): since step 9 the page described here is gone; alpd serves the ALP web app, Paseo's app, and its socket speaks Paseo's protocol. The serving rules (127.0.0.1, host check, token, origin, `web.json`, the `web` settings) still hold.
+
 Goal (D30, steps 2–3): installing ALP is enough to code from a browser. alpd serves a web app shaped after Paseo's, and the page speaks alpd's own protocol, so it sees whole trees, tasks and questions.
 
 - **Serving** (`src/daemon/web.ts`): an HTTP server on `127.0.0.1`, port 7433 or `settings.web.port` (the next of 10 when busy), started after the socket unless `settings.web.enabled` is false; alpd runs on without it if it cannot start. `$ALP_HOME/web.json` (0600) holds `{ port, token, url, pid }`; the token is made once and kept, so an open page survives restarts.
@@ -2042,3 +2044,15 @@ Goal (D31): the browser app is Paseo's own web app, so it feels like Paseo, with
 **Evidence.**
 - `test/paseo-web.test.js`, frames checked with Paseo's validator, on a temp repository: the team list of the folder writes nothing into it; status on `main` dirty with `main` as its base, and "not git" elsewhere; the uncommitted diff with the modified file's hunk line by line, the untracked text file new, the untracked binary binary; a rename pushed after a refresh with its old path; on a branch one commit ahead of `main`, the base diff; the Files panel's root and a folder listed, a link out of the workspace left out, text, an image and a binary read, a file over the limit and a path outside refused; a commit "in development".
 - Live, on the temp `ALP_HOME` at port 7533 with a small repository opened as a project: the workspace named `main` after its branch; the Changes panel listed `src/greet.js` (+2 −1) and `NOTES.md` (+1), and the diff showed the Vietnamese lines; the Files panel listed `.git`, `src`, `NOTES.md`, `README.md`, and README's preview rendered; Commit showed "Tính năng đang phát triển"; the repository had no `ALP.md` or `.alp` afterwards.
+
+**Step 9: packaged, built in CI, and the classic page gone (2026-10-11).**
+
+- **Packaged**: `@anhlp/alp` carries `dist/web-app` beside `dist/alpd.js`, and `alp-paseo-plugin` carries it in `server/dist/web-app` beside its alpd (about 14 MB packed each; the app's bundle is Paseo's, 22 MB with its brotli and gzip copies). `prepack` of both runs `scripts/check-web-app.mjs`, which refuses to pack a missing app or one built from another Paseo commit or another set of patches. `npm run build:web` builds it.
+- **CI** (`.github/workflows/ci.yml`, job `web-app`): builds the app from Paseo's pinned commit with the patches, builds alpd and the plugin, checks the build, runs `scripts/web-app-smoke.mjs`, and keeps the app as an artifact for 14 days. npm's cache is kept by the lockfile and the pinned commit.
+- **Smoke test** (`scripts/web-app-smoke.mjs`): alpd in the process with scripted agents serves the built app; headless Chrome (Playwright from the Paseo checkout) opens it with the token; the app must connect and show its start page, be titled ALP, drop the token from the address, register ALP's plugin, and log no CSP refusal, plugin failure or page error.
+- **`alp web`** opens the app (or prints its address with `--print`), starting alpd when it is not running.
+- **The classic page goes**: `web/` (the D30 app), its build, `web.app`, the JSON-RPC socket with the token in the address, and the RPCs only it used (`tasks.*`, `project.browse`, `project.info`, `project.reveal`, `project.changes`; the Tasks panel and the Changes panel do these through the plugin and Paseo's protocol). alpd built without the app answers every address with a page that says how to build it, and refuses the socket. A `web.app` setting is now refused as an unknown field.
+
+**Evidence.**
+- `test/web.test.js`: without the app, every address gets the page that says how to build it, under the CSP; another host name is refused; the socket is refused; `web.app` is refused. `test/daemon.test.js`: renaming and archiving a root, moved from the classic page's test. `npm pack --dry-run` of both packages: the check passes and `web-app/index.html` is in each.
+- `scripts/web-app-smoke.mjs` locally: connected after 51 s, the plugin registered, no CSP refusals.
