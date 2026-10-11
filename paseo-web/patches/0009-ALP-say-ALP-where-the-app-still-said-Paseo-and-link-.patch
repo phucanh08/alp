@@ -1,0 +1,618 @@
+From 366c7f01d02f6abd6138b104622a1ffc4a66a7d1 Mon Sep 17 00:00:00 2001
+From: anhlp <phucanhdn08@gmail.com>
+Date: Sun, 11 Oct 2026 22:39:30 +0700
+Subject: [PATCH] ALP: say ALP where the app still said Paseo, and link to
+ ALP's docs
+
+---
+ packages/app/src/agent-skills/index.tsx            |  2 +-
+ .../app/src/changelog/internal/changelog-sheet.tsx |  2 +-
+ .../desktop/components/desktop-updates-section.tsx |  2 +-
+ .../desktop/components/integrations-section.tsx    |  2 +-
+ .../src/desktop/components/pair-device-section.tsx |  2 +-
+ .../src/desktop/updates/rosetta-callout-source.tsx |  2 +-
+ packages/app/src/git/use-actions.tsx               |  2 +-
+ packages/app/src/i18n/resources/ar.ts              | 12 ++++++------
+ packages/app/src/i18n/resources/en.ts              | 12 ++++++------
+ packages/app/src/i18n/resources/es.ts              | 12 ++++++------
+ packages/app/src/i18n/resources/fr.ts              | 12 ++++++------
+ packages/app/src/i18n/resources/ja.ts              | 12 ++++++------
+ packages/app/src/i18n/resources/ko.ts              | 12 ++++++------
+ packages/app/src/i18n/resources/pt-BR.ts           | 12 ++++++------
+ packages/app/src/i18n/resources/ru.ts              | 14 +++++++-------
+ packages/app/src/i18n/resources/zh-CN.ts           | 12 ++++++------
+ packages/app/src/plugins/hosts/index.ts            |  8 ++++----
+ .../app/src/screens/project-settings-screen.tsx    |  2 +-
+ packages/app/src/screens/schedules-screen.tsx      |  2 +-
+ packages/app/src/screens/settings/host-page.tsx    |  2 +-
+ .../screens/settings/metadata-generation-page.tsx  |  2 +-
+ packages/app/src/screens/settings/plugins-page.tsx |  2 +-
+ packages/client/src/daemon-client.ts               |  2 +-
+ packages/protocol/src/plugin-requirements.ts       |  2 +-
+ 24 files changed, 73 insertions(+), 73 deletions(-)
+
+diff --git a/packages/app/src/agent-skills/index.tsx b/packages/app/src/agent-skills/index.tsx
+index 04fdbd2..2a6fe71 100644
+--- a/packages/app/src/agent-skills/index.tsx
++++ b/packages/app/src/agent-skills/index.tsx
+@@ -24,7 +24,7 @@ const ThemedBlocks = withUnistyles(Blocks);
+ const ThemedCheck = withUnistyles(Check);
+ const ThemedSettings = withUnistyles(Settings2);
+ const ThemedArrowUpRight = withUnistyles(ArrowUpRight);
+-const SKILLS_DOCS_URL = "https://paseo.sh/docs/skills";
++const SKILLS_DOCS_URL = "https://github.com/phucanh08/alp-paseo#readme";
+ const foregroundMapping = (theme: Theme) => ({ color: theme.colors.foreground });
+ const mutedMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+ 
+diff --git a/packages/app/src/changelog/internal/changelog-sheet.tsx b/packages/app/src/changelog/internal/changelog-sheet.tsx
+index 04afdca..62c1643 100644
+--- a/packages/app/src/changelog/internal/changelog-sheet.tsx
++++ b/packages/app/src/changelog/internal/changelog-sheet.tsx
+@@ -25,7 +25,7 @@ import {
+   type ChangelogSection,
+ } from "./parse-changelog";
+ 
+-const WEBSITE_CHANGELOG_URL = "https://paseo.sh/changelog";
++const WEBSITE_CHANGELOG_URL = "https://github.com/phucanh08/alp-paseo#readme";
+ 
+ const ThemedGift = withUnistyles(Gift);
+ const ThemedExternalLink = withUnistyles(ExternalLink);
+diff --git a/packages/app/src/desktop/components/desktop-updates-section.tsx b/packages/app/src/desktop/components/desktop-updates-section.tsx
+index bb5c153..4777349 100644
+--- a/packages/app/src/desktop/components/desktop-updates-section.tsx
++++ b/packages/app/src/desktop/components/desktop-updates-section.tsx
+@@ -504,7 +504,7 @@ export function LocalDaemonSection() {
+   );
+ }
+ 
+-const ADVANCED_DAEMON_SETTINGS_URL = "https://paseo.sh/docs/configuration";
++const ADVANCED_DAEMON_SETTINGS_URL = "https://github.com/phucanh08/alp-paseo#readme";
+ 
+ const styles = StyleSheet.create((theme) => ({
+   actionGroup: {
+diff --git a/packages/app/src/desktop/components/integrations-section.tsx b/packages/app/src/desktop/components/integrations-section.tsx
+index 609aa9a..d44b885 100644
+--- a/packages/app/src/desktop/components/integrations-section.tsx
++++ b/packages/app/src/desktop/components/integrations-section.tsx
+@@ -11,7 +11,7 @@ import { settingsStyles } from "@/styles/settings";
+ import { openExternalUrl } from "@/utils/open-external-url";
+ import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
+ 
+-const CLI_DOCS_URL = "https://paseo.sh/docs/cli";
++const CLI_DOCS_URL = "https://github.com/phucanh08/alp-paseo#readme";
+ 
+ export function IntegrationsSection() {
+   const { t } = useTranslation();
+diff --git a/packages/app/src/desktop/components/pair-device-section.tsx b/packages/app/src/desktop/components/pair-device-section.tsx
+index 9209f6f..64b3792 100644
+--- a/packages/app/src/desktop/components/pair-device-section.tsx
++++ b/packages/app/src/desktop/components/pair-device-section.tsx
+@@ -21,7 +21,7 @@ import {
+   type EditingTextInputHandle,
+ } from "@/components/ui/text-input";
+ 
+-const RELAY_DOCS_URL = "https://paseo.sh/docs/security";
++const RELAY_DOCS_URL = "https://github.com/phucanh08/alp-paseo#readme";
+ const FLEX_ONE_STYLE = { flex: 1 } as const;
+ const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
+ const ThemedShieldCheck = withUnistyles(ShieldCheck);
+diff --git a/packages/app/src/desktop/updates/rosetta-callout-source.tsx b/packages/app/src/desktop/updates/rosetta-callout-source.tsx
+index 43b2a46..26d330e 100644
+--- a/packages/app/src/desktop/updates/rosetta-callout-source.tsx
++++ b/packages/app/src/desktop/updates/rosetta-callout-source.tsx
+@@ -11,7 +11,7 @@ import {
+ import { useStableEvent } from "@/hooks/use-stable-event";
+ import { openExternalUrl } from "@/utils/open-external-url";
+ 
+-const FALLBACK_DOWNLOAD_URL = "https://paseo.sh/download";
++const FALLBACK_DOWNLOAD_URL = "https://github.com/phucanh08/alp-paseo#readme";
+ 
+ function RosettaCalloutDescription({ t }: { t: ReturnType<typeof useTranslation>["t"] }) {
+   return (
+diff --git a/packages/app/src/git/use-actions.tsx b/packages/app/src/git/use-actions.tsx
+index 05e65a2..b9e045d 100644
+--- a/packages/app/src/git/use-actions.tsx
++++ b/packages/app/src/git/use-actions.tsx
+@@ -1067,7 +1067,7 @@ function translateGitActionUnavailableMessage(
+       "workspace.git.actions.unavailable.updateDirty",
+     "Merge PR isn't available right now because GitHub isn't connected":
+       "workspace.git.actions.unavailable.mergePrNoGithub",
+-    "Archive isn't available here because this workspace was not created as a Paseo worktree":
++    "Archive isn't available here because this workspace was not created as an ALP worktree":
+       "workspace.git.actions.unavailable.archiveNotWorktree",
+     "Merge PR isn't available because there isn't a pull request yet":
+       "workspace.git.actions.unavailable.mergePrMissing",
+diff --git a/packages/app/src/i18n/resources/ar.ts b/packages/app/src/i18n/resources/ar.ts
+index 126fdb6..7cb10ec 100644
+--- a/packages/app/src/i18n/resources/ar.ts
++++ b/packages/app/src/i18n/resources/ar.ts
+@@ -2746,13 +2746,13 @@ export const ar: TranslationResources = {
+         savedToast: "تم تحديث المشروع",
+       },
+       readFailures: {
+-        invalidTitle: "تعذر تحليل paseo.json",
++        invalidTitle: "تعذر تحليل .alp/settings.json",
+         invalidDescription: "قم بإصلاح الملف على القرص، ثم أعد تحميله.",
+         missingTitle: "هذا المضيف ليس لديه هذا المشروع",
+         missingSingleHost: "المضيف المحدد ليس لديه سجل لهذا المشروع.",
+-        transportTitle: "تعذر تحميل paseo.json",
++        transportTitle: "تعذر تحميل .alp/settings.json",
+         transportFallback: "المضيف لم يستجب.",
+-        failedTitle: "تعذر تحميل paseo.json",
++        failedTitle: "تعذر تحميل .alp/settings.json",
+         failedDescription: "أعد التحميل للمحاولة مرة أخرى.",
+       },
+       worktree: {
+@@ -2762,7 +2762,7 @@ export const ar: TranslationResources = {
+         docsTooltip: "راجع المستندات لمزيد من التفاصيل ومتغيرات البيئة المتاحة لهذه الأوامر",
+         setup: "يثبت",
+         setupAccessibility: "أوامر إعداد شجرة العمل",
+-        uncommittedTitle: "ثبّت تغييرات paseo.json",
++        uncommittedTitle: "ثبّت تغييرات .alp/settings.json",
+         uncommittedDescription:
+           "تستخدم أشجار العمل الجديدة نص الإعداد البرمجي من الفرع الأساسي الذي تحدده.",
+         teardown: "هدم",
+@@ -2806,8 +2806,8 @@ export const ar: TranslationResources = {
+       },
+       writeFailures: {
+         staleTitle: "تم تغيير التكوين على القرص",
+-        staleDescription: "أعد التحميل لجلب أحدث ملف paseo.json قبل الحفظ.",
+-        failedTitle: "تعذر حفظ paseo.json",
++        staleDescription: "أعد التحميل لجلب أحدث ملف .alp/settings.json قبل الحفظ.",
++        failedTitle: "تعذر حفظ .alp/settings.json",
+         failedDescription: "حاول مرة أخرى، أو أعد تحميل الإصدار الأحدث من القرص.",
+       },
+       actions: {
+diff --git a/packages/app/src/i18n/resources/en.ts b/packages/app/src/i18n/resources/en.ts
+index 6cd9c62..50c5116 100644
+--- a/packages/app/src/i18n/resources/en.ts
++++ b/packages/app/src/i18n/resources/en.ts
+@@ -2874,13 +2874,13 @@ export const en = {
+         savedToast: "Project updated",
+       },
+       readFailures: {
+-        invalidTitle: "paseo.json couldn't be parsed",
++        invalidTitle: ".alp/settings.json couldn't be parsed",
+         invalidDescription: "Fix the file on disk, then reload.",
+         missingTitle: "This host doesn't have this project",
+         missingSingleHost: "The selected host has no record of this project.",
+-        transportTitle: "Couldn't load paseo.json",
++        transportTitle: "Couldn't load .alp/settings.json",
+         transportFallback: "The host didn't respond.",
+-        failedTitle: "Couldn't load paseo.json",
++        failedTitle: "Couldn't load .alp/settings.json",
+         failedDescription: "Reload to try again.",
+       },
+       worktree: {
+@@ -2891,7 +2891,7 @@ export const en = {
+           "See docs for more details and the environment variables available to these commands",
+         setup: "Setup",
+         setupAccessibility: "Worktree setup commands",
+-        uncommittedTitle: "Commit paseo.json changes",
++        uncommittedTitle: "Commit .alp/settings.json changes",
+         uncommittedDescription:
+           "New worktrees use the setup script from the base branch you select.",
+         teardown: "Teardown",
+@@ -2935,8 +2935,8 @@ export const en = {
+       },
+       writeFailures: {
+         staleTitle: "Config changed on disk",
+-        staleDescription: "Reload to fetch the latest paseo.json before saving.",
+-        failedTitle: "Couldn't save paseo.json",
++        staleDescription: "Reload to fetch the latest .alp/settings.json before saving.",
++        failedTitle: "Couldn't save .alp/settings.json",
+         failedDescription: "Try again, or reload the latest version from disk.",
+       },
+       actions: {
+diff --git a/packages/app/src/i18n/resources/es.ts b/packages/app/src/i18n/resources/es.ts
+index 55ef77c..947233b 100644
+--- a/packages/app/src/i18n/resources/es.ts
++++ b/packages/app/src/i18n/resources/es.ts
+@@ -2805,13 +2805,13 @@ export const es: TranslationResources = {
+         savedToast: "Proyecto actualizado",
+       },
+       readFailures: {
+-        invalidTitle: "paseo.json no se pudo analizar",
++        invalidTitle: ".alp/settings.json no se pudo analizar",
+         invalidDescription: "Fije el archivo en el disco y luego vuelva a cargarlo.",
+         missingTitle: "Este anfitrión no tiene este proyecto",
+         missingSingleHost: "El anfitrión seleccionado no tiene registro de este proyecto.",
+-        transportTitle: "No se pudo cargar paseo.json",
++        transportTitle: "No se pudo cargar .alp/settings.json",
+         transportFallback: "El anfitrión no respondió.",
+-        failedTitle: "No se pudo cargar paseo.json",
++        failedTitle: "No se pudo cargar .alp/settings.json",
+         failedDescription: "Vuelva a cargar para intentarlo de nuevo.",
+       },
+       worktree: {
+@@ -2822,7 +2822,7 @@ export const es: TranslationResources = {
+           "Consulte los documentos para obtener más detalles y las variables de entorno disponibles para estos comandos.",
+         setup: "Configuración",
+         setupAccessibility: "Comandos de configuración del árbol de trabajo",
+-        uncommittedTitle: "Confirma los cambios de paseo.json",
++        uncommittedTitle: "Confirma los cambios de .alp/settings.json",
+         uncommittedDescription:
+           "Los árboles de trabajo nuevos usan el script de configuración de la rama base que selecciones.",
+         teardown: "Demoler",
+@@ -2867,8 +2867,8 @@ export const es: TranslationResources = {
+       },
+       writeFailures: {
+         staleTitle: "Configuración cambiada en el disco",
+-        staleDescription: "Vuelva a cargar para obtener el último paseo.json antes de guardar.",
+-        failedTitle: "No se pudo guardar paseo.json",
++        staleDescription: "Vuelva a cargar para obtener el último .alp/settings.json antes de guardar.",
++        failedTitle: "No se pudo guardar .alp/settings.json",
+         failedDescription: "Inténtelo de nuevo o vuelva a cargar la última versión desde el disco.",
+       },
+       actions: {
+diff --git a/packages/app/src/i18n/resources/fr.ts b/packages/app/src/i18n/resources/fr.ts
+index 3eb83c2..6eab5be 100644
+--- a/packages/app/src/i18n/resources/fr.ts
++++ b/packages/app/src/i18n/resources/fr.ts
+@@ -2811,13 +2811,13 @@ export const fr: TranslationResources = {
+         savedToast: "Projet mis à jour",
+       },
+       readFailures: {
+-        invalidTitle: "Impossible d’analyser paseo.json",
++        invalidTitle: "Impossible d’analyser .alp/settings.json",
+         invalidDescription: "Corrigez le fichier sur le disque, puis rechargez.",
+         missingTitle: "Ce projet n’existe pas sur cet hôte",
+         missingSingleHost: "L’hôte sélectionné n’a aucune trace de ce projet.",
+-        transportTitle: "Impossible de charger paseo.json",
++        transportTitle: "Impossible de charger .alp/settings.json",
+         transportFallback: "L’hôte n’a pas répondu.",
+-        failedTitle: "Impossible de charger paseo.json",
++        failedTitle: "Impossible de charger .alp/settings.json",
+         failedDescription: "Rechargez pour réessayer.",
+       },
+       worktree: {
+@@ -2828,7 +2828,7 @@ export const fr: TranslationResources = {
+           "Consultez la documentation pour plus de détails et la liste des variables d’environnement disponibles pour ces commandes",
+         setup: "Configuration",
+         setupAccessibility: "Commandes de configuration du worktree",
+-        uncommittedTitle: "Commitez les modifications de paseo.json",
++        uncommittedTitle: "Commitez les modifications de .alp/settings.json",
+         uncommittedDescription:
+           "Les nouveaux worktrees utilisent le script de configuration de la branche de base sélectionnée.",
+         teardown: "Démontage",
+@@ -2875,8 +2875,8 @@ export const fr: TranslationResources = {
+       writeFailures: {
+         staleTitle: "Configuration modifiée sur le disque",
+         staleDescription:
+-          "Rechargez pour récupérer la dernière version de paseo.json avant d’enregistrer.",
+-        failedTitle: "Impossible d’enregistrer paseo.json",
++          "Rechargez pour récupérer la dernière version de .alp/settings.json avant d’enregistrer.",
++        failedTitle: "Impossible d’enregistrer .alp/settings.json",
+         failedDescription: "Réessayez ou rechargez la dernière version depuis le disque.",
+       },
+       actions: {
+diff --git a/packages/app/src/i18n/resources/ja.ts b/packages/app/src/i18n/resources/ja.ts
+index 15fa597..01339b3 100644
+--- a/packages/app/src/i18n/resources/ja.ts
++++ b/packages/app/src/i18n/resources/ja.ts
+@@ -2775,13 +2775,13 @@ export const ja: TranslationResources = {
+         savedToast: "プロジェクトを更新しました",
+       },
+       readFailures: {
+-        invalidTitle: "paseo.jsonを解析できませんでした",
++        invalidTitle: ".alp/settings.jsonを解析できませんでした",
+         invalidDescription: "ディスク上のファイルを修正してから再読み込みしてください。",
+         missingTitle: "このホストにはこのプロジェクトがありません",
+         missingSingleHost: "選択したホストにはこのプロジェクトの記録がありません。",
+-        transportTitle: "paseo.jsonを読み込めませんでした",
++        transportTitle: ".alp/settings.jsonを読み込めませんでした",
+         transportFallback: "ホストが応答しませんでした。",
+-        failedTitle: "paseo.jsonを読み込めませんでした",
++        failedTitle: ".alp/settings.jsonを読み込めませんでした",
+         failedDescription: "再読み込みして再試行してください。",
+       },
+       worktree: {
+@@ -2792,7 +2792,7 @@ export const ja: TranslationResources = {
+           "これらのコマンドで使用可能な詳細と環境変数についてはドキュメントを参照してください",
+         setup: "セットアップ",
+         setupAccessibility: "ワークツリーセットアップコマンド",
+-        uncommittedTitle: "paseo.json の変更をコミットしてください",
++        uncommittedTitle: ".alp/settings.json の変更をコミットしてください",
+         uncommittedDescription:
+           "新しいワークツリーでは、選択したベースブランチのセットアップスクリプトが使われます。",
+         teardown: "削除時",
+@@ -2836,8 +2836,8 @@ export const ja: TranslationResources = {
+       },
+       writeFailures: {
+         staleTitle: "設定がディスク上で変更されました",
+-        staleDescription: "保存する前に最新のpaseo.jsonを取得するために再読み込みしてください。",
+-        failedTitle: "paseo.jsonを保存できませんでした",
++        staleDescription: "保存する前に最新の.alp/settings.jsonを取得するために再読み込みしてください。",
++        failedTitle: ".alp/settings.jsonを保存できませんでした",
+         failedDescription: "再試行するか、ディスクから最新バージョンを再読み込みしてください。",
+       },
+       actions: {
+diff --git a/packages/app/src/i18n/resources/ko.ts b/packages/app/src/i18n/resources/ko.ts
+index df0fa94..7a4abca 100644
+--- a/packages/app/src/i18n/resources/ko.ts
++++ b/packages/app/src/i18n/resources/ko.ts
+@@ -2761,13 +2761,13 @@ export const ko: TranslationResources = {
+         savedToast: "프로젝트가 업데이트되었습니다.",
+       },
+       readFailures: {
+-        invalidTitle: "paseo.json을 파싱할 수 없습니다",
++        invalidTitle: ".alp/settings.json을 파싱할 수 없습니다",
+         invalidDescription: "디스크의 파일을 수정한 후 다시 로드하세요.",
+         missingTitle: "이 호스트에는 이 프로젝트가 없습니다",
+         missingSingleHost: "선택한 호스트에 이 프로젝트의 기록이 없습니다.",
+-        transportTitle: "paseo.json을 불러올 수 없습니다",
++        transportTitle: ".alp/settings.json을 불러올 수 없습니다",
+         transportFallback: "호스트가 응답하지 않았습니다.",
+-        failedTitle: "paseo.json을 불러올 수 없습니다",
++        failedTitle: ".alp/settings.json을 불러올 수 없습니다",
+         failedDescription: "다시 로드하여 재시도하세요.",
+       },
+       worktree: {
+@@ -2777,7 +2777,7 @@ export const ko: TranslationResources = {
+         docsTooltip: "자세한 내용과 이 명령에 사용할 수 있는 환경 변수는 문서를 참조하세요",
+         setup: "설정",
+         setupAccessibility: "워크트리 설정 명령",
+-        uncommittedTitle: "paseo.json 변경 사항을 커밋하세요",
++        uncommittedTitle: ".alp/settings.json 변경 사항을 커밋하세요",
+         uncommittedDescription: "새 워크트리는 선택한 기본 브랜치의 설정 스크립트를 사용합니다.",
+         teardown: "정리",
+         teardownAccessibility: "워크트리 정리 명령",
+@@ -2821,8 +2821,8 @@ export const ko: TranslationResources = {
+       },
+       writeFailures: {
+         staleTitle: "디스크에서 구성이 변경되었습니다",
+-        staleDescription: "저장하기 전에 다시 로드하여 최신 paseo.json을 가져오세요.",
+-        failedTitle: "paseo.json을 저장할 수 없습니다",
++        staleDescription: "저장하기 전에 다시 로드하여 최신 .alp/settings.json을 가져오세요.",
++        failedTitle: ".alp/settings.json을 저장할 수 없습니다",
+         failedDescription: "다시 시도하거나 디스크에서 최신 버전을 다시 로드하세요.",
+       },
+       actions: {
+diff --git a/packages/app/src/i18n/resources/pt-BR.ts b/packages/app/src/i18n/resources/pt-BR.ts
+index b4f11a8..24d83c8 100644
+--- a/packages/app/src/i18n/resources/pt-BR.ts
++++ b/packages/app/src/i18n/resources/pt-BR.ts
+@@ -2788,13 +2788,13 @@ export const ptBR: TranslationResources = {
+         savedToast: "Projeto atualizado",
+       },
+       readFailures: {
+-        invalidTitle: "Não foi possível analisar paseo.json",
++        invalidTitle: "Não foi possível analisar .alp/settings.json",
+         invalidDescription: "Corrija o arquivo no disco e recarregue.",
+         missingTitle: "Este host não tem este projeto",
+         missingSingleHost: "O host selecionado não tem registro deste projeto.",
+-        transportTitle: "Não foi possível carregar paseo.json",
++        transportTitle: "Não foi possível carregar .alp/settings.json",
+         transportFallback: "O host não respondeu.",
+-        failedTitle: "Não foi possível carregar paseo.json",
++        failedTitle: "Não foi possível carregar .alp/settings.json",
+         failedDescription: "Recarregue para tentar novamente.",
+       },
+       worktree: {
+@@ -2805,7 +2805,7 @@ export const ptBR: TranslationResources = {
+           "Veja a documentação para mais detalhes e as variáveis de ambiente disponíveis para estes comandos",
+         setup: "Configuração",
+         setupAccessibility: "Comandos de configuração do worktree",
+-        uncommittedTitle: "Faça commit das alterações no paseo.json",
++        uncommittedTitle: "Faça commit das alterações no .alp/settings.json",
+         uncommittedDescription:
+           "Novos worktrees usam o script de configuração do branch base selecionado.",
+         teardown: "Desmontagem",
+@@ -2849,8 +2849,8 @@ export const ptBR: TranslationResources = {
+       },
+       writeFailures: {
+         staleTitle: "Configuração alterada no disco",
+-        staleDescription: "Recarregue para buscar o paseo.json mais recente antes de salvar.",
+-        failedTitle: "Não foi possível salvar paseo.json",
++        staleDescription: "Recarregue para buscar o .alp/settings.json mais recente antes de salvar.",
++        failedTitle: "Não foi possível salvar .alp/settings.json",
+         failedDescription: "Tente novamente ou recarregue a versão mais recente do disco.",
+       },
+       actions: {
+diff --git a/packages/app/src/i18n/resources/ru.ts b/packages/app/src/i18n/resources/ru.ts
+index 4c0f9ac..8fb4de2 100644
+--- a/packages/app/src/i18n/resources/ru.ts
++++ b/packages/app/src/i18n/resources/ru.ts
+@@ -2797,13 +2797,13 @@ export const ru: TranslationResources = {
+         savedToast: "Проект обновлён",
+       },
+       readFailures: {
+-        invalidTitle: "Не удалось разобрать paseo.json",
++        invalidTitle: "Не удалось разобрать .alp/settings.json",
+         invalidDescription: "Исправьте файл на диске, затем загрузите его заново.",
+         missingTitle: "У этого хоста нет этого проекта",
+         missingSingleHost: "У выбранного хоста нет записей об этом проекте.",
+-        transportTitle: "Не удалось загрузить paseo.json.",
++        transportTitle: "Не удалось загрузить .alp/settings.json.",
+         transportFallback: "Хост не ответил.",
+-        failedTitle: "Не удалось загрузить paseo.json.",
++        failedTitle: "Не удалось загрузить .alp/settings.json.",
+         failedDescription: "Загрузите данные заново, чтобы повторить попытку.",
+       },
+       worktree: {
+@@ -2814,7 +2814,7 @@ export const ru: TranslationResources = {
+           "Дополнительную информацию и переменные среды, доступные для этих команд, см. в документации.",
+         setup: "Настройка",
+         setupAccessibility: "Команды настройки worktree",
+-        uncommittedTitle: "Закоммитьте изменения в paseo.json",
++        uncommittedTitle: "Закоммитьте изменения в .alp/settings.json",
+         uncommittedDescription:
+           "Новые worktree используют скрипт настройки из выбранной базовой ветки.",
+         teardown: "Удаление",
+@@ -2860,9 +2860,9 @@ export const ru: TranslationResources = {
+       },
+       writeFailures: {
+         staleTitle: "Конфигурация изменена на диске",
+-        staleDescription: "Перед сохранением загрузите с диска последнюю версию paseo.json.",
+-        failedTitle: "Не удалось сохранить paseo.json.",
+-        failedDescription: "Повторите попытку или загрузите с диска последнюю версию paseo.json.",
++        staleDescription: "Перед сохранением загрузите с диска последнюю версию .alp/settings.json.",
++        failedTitle: "Не удалось сохранить .alp/settings.json.",
++        failedDescription: "Повторите попытку или загрузите с диска последнюю версию .alp/settings.json.",
+       },
+       actions: {
+         reload: "Загрузить заново",
+diff --git a/packages/app/src/i18n/resources/zh-CN.ts b/packages/app/src/i18n/resources/zh-CN.ts
+index ad9feb9..f78921b 100644
+--- a/packages/app/src/i18n/resources/zh-CN.ts
++++ b/packages/app/src/i18n/resources/zh-CN.ts
+@@ -2713,13 +2713,13 @@ export const zhCN: TranslationResources = {
+         savedToast: "Project 已更新",
+       },
+       readFailures: {
+-        invalidTitle: "无法解析 paseo.json",
++        invalidTitle: "无法解析 .alp/settings.json",
+         invalidDescription: "修复磁盘上的文件，然后重新加载。",
+         missingTitle: "这个 Host 没有这个 Project",
+         missingSingleHost: "所选 Host 没有这个 Project 的记录。",
+-        transportTitle: "无法加载 paseo.json",
++        transportTitle: "无法加载 .alp/settings.json",
+         transportFallback: "Host 没有响应。",
+-        failedTitle: "无法加载 paseo.json",
++        failedTitle: "无法加载 .alp/settings.json",
+         failedDescription: "重新加载以重试。",
+       },
+       worktree: {
+@@ -2729,7 +2729,7 @@ export const zhCN: TranslationResources = {
+         docsTooltip: "查看命令可用的环境变量和更多细节",
+         setup: "Setup",
+         setupAccessibility: "Worktree setup 命令",
+-        uncommittedTitle: "提交 paseo.json 更改",
++        uncommittedTitle: "提交 .alp/settings.json 更改",
+         uncommittedDescription: "新工作树使用所选基础分支中的设置脚本。",
+         teardown: "Teardown",
+         teardownAccessibility: "Worktree teardown 命令",
+@@ -2772,8 +2772,8 @@ export const zhCN: TranslationResources = {
+       },
+       writeFailures: {
+         staleTitle: "磁盘上的配置已变更",
+-        staleDescription: "保存前请重新加载最新的 paseo.json。",
+-        failedTitle: "无法保存 paseo.json",
++        staleDescription: "保存前请重新加载最新的 .alp/settings.json。",
++        failedTitle: "无法保存 .alp/settings.json",
+         failedDescription: "重试，或从磁盘重新加载最新版本。",
+       },
+       actions: {
+diff --git a/packages/app/src/plugins/hosts/index.ts b/packages/app/src/plugins/hosts/index.ts
+index f3a6ace..ac80430 100644
+--- a/packages/app/src/plugins/hosts/index.ts
++++ b/packages/app/src/plugins/hosts/index.ts
+@@ -30,11 +30,11 @@ export function createPluginHosts(source: PluginHostsSource, signal: AbortSignal
+   function resolve(serverId: string): DaemonClient {
+     if (signal.aborted) throw new Error("Plugin has stopped");
+     if (!source.getHosts().some((host) => host.serverId === serverId)) {
+-      throw new Error(`Unknown Paseo host: ${serverId}`);
++      throw new Error(`Unknown ALP host: ${serverId}`);
+     }
+     const host = source.getSnapshot(serverId);
+     if (host?.connectionStatus !== "online" || !host.client) {
+-      throw new Error(`Paseo host is disconnected: ${serverId}`);
++      throw new Error(`ALP host is disconnected: ${serverId}`);
+     }
+     return host.client;
+   }
+@@ -87,9 +87,9 @@ export function createPluginHosts(source: PluginHostsSource, signal: AbortSignal
+           const value: unknown = Reflect.get(target, key, target);
+           if (typeof value !== "function") return value;
+           return (...args: unknown[]) => {
+-            if (lifetime.signal.aborted) throw new Error(`Paseo client is released: ${serverId}`);
++            if (lifetime.signal.aborted) throw new Error(`ALP client is released: ${serverId}`);
+             if (resolve(serverId) !== client) {
+-              throw new Error(`Paseo connection changed; call getPaseoClient again: ${serverId}`);
++              throw new Error(`ALP connection changed; call getPaseoClient again: ${serverId}`);
+             }
+             return Reflect.apply(value, target, args);
+           };
+diff --git a/packages/app/src/screens/project-settings-screen.tsx b/packages/app/src/screens/project-settings-screen.tsx
+index 50c81a0..e8da26a 100644
+--- a/packages/app/src/screens/project-settings-screen.tsx
++++ b/packages/app/src/screens/project-settings-screen.tsx
+@@ -87,7 +87,7 @@ const METADATA_PROMPT_FIELDS: Record<MetadataPromptKey, MetadataPromptField> = {
+   },
+ };
+ 
+-const WORKTREE_DOCS_URL = "https://paseo.sh/docs/worktrees";
++const WORKTREE_DOCS_URL = "https://github.com/phucanh08/alp-paseo#readme";
+ 
+ type ReadProjectConfigData = Awaited<ReturnType<DaemonClient["readProjectConfig"]>>;
+ 
+diff --git a/packages/app/src/screens/schedules-screen.tsx b/packages/app/src/screens/schedules-screen.tsx
+index ce2f8b9..126ba3f 100644
+--- a/packages/app/src/screens/schedules-screen.tsx
++++ b/packages/app/src/screens/schedules-screen.tsx
+@@ -321,7 +321,7 @@ function SchedulesEmptyState({
+       <View style={styles.emptyTextStack}>
+         <Text style={styles.emptyTitle}>No active schedules</Text>
+         <Text style={styles.emptyDescription}>Schedules run agents on a cadence.</Text>
+-        <ExternalLink href="https://paseo.sh/docs/schedules" label="See docs" />
++        <ExternalLink href="https://github.com/phucanh08/alp-paseo#readme" label="See docs" />
+       </View>
+       <Button variant="outline" leftIcon={Plus} onPress={onCreate} testID="schedules-empty-new">
+         New schedule
+diff --git a/packages/app/src/screens/settings/host-page.tsx b/packages/app/src/screens/settings/host-page.tsx
+index 6b30854..f257ea5 100644
+--- a/packages/app/src/screens/settings/host-page.tsx
++++ b/packages/app/src/screens/settings/host-page.tsx
+@@ -923,7 +923,7 @@ function AutoArchiveMergedWorkspacesCard({ serverId }: { serverId: string }) {
+         <View style={settingsStyles.rowContent}>
+           <Text style={settingsStyles.rowTitle}>Archive merged PR workspaces</Text>
+           <Text style={settingsStyles.rowHint}>
+-            Automatically archive clean Paseo workspaces after their pull request is merged
++            Automatically archive clean ALP workspaces after their pull request is merged
+           </Text>
+         </View>
+         <Switch
+diff --git a/packages/app/src/screens/settings/metadata-generation-page.tsx b/packages/app/src/screens/settings/metadata-generation-page.tsx
+index be13772..f587071 100644
+--- a/packages/app/src/screens/settings/metadata-generation-page.tsx
++++ b/packages/app/src/screens/settings/metadata-generation-page.tsx
+@@ -13,7 +13,7 @@ import { buildSelectableProviderSelectorProviders } from "@/provider-selection/p
+ import { SettingsSection } from "@/components/settings/headings/settings-section";
+ import { settingsStyles } from "@/styles/settings";
+ 
+-const METADATA_GENERATION_DOCS_URL = "https://paseo.sh/docs/metadata-generation";
++const METADATA_GENERATION_DOCS_URL = "https://github.com/phucanh08/alp-paseo#readme";
+ type SelectionMode = "automatic" | "preferred";
+ 
+ export function MetadataGenerationPage({ serverId }: { serverId: string }) {
+diff --git a/packages/app/src/screens/settings/plugins-page.tsx b/packages/app/src/screens/settings/plugins-page.tsx
+index f3bdab3..44a072e 100644
+--- a/packages/app/src/screens/settings/plugins-page.tsx
++++ b/packages/app/src/screens/settings/plugins-page.tsx
+@@ -33,7 +33,7 @@ import { settingsStyles } from "@/styles/settings";
+ import { confirmDialog } from "@/utils/confirm-dialog";
+ 
+ const pluginQueryKey = (serverId: string) => ["plugins", serverId] as const;
+-const PLUGIN_SOURCE_DOCS_URL = "https://paseo.sh/docs/plugins/reference#plugin-sources";
++const PLUGIN_SOURCE_DOCS_URL = "https://github.com/phucanh08/alp-paseo#readme";
+ type PluginRowAction = "reload" | "enable" | "disable" | "remove";
+ 
+ function errorMessage(error: unknown): string {
+diff --git a/packages/client/src/daemon-client.ts b/packages/client/src/daemon-client.ts
+index a60f2c7..d5ae8a8 100644
+--- a/packages/client/src/daemon-client.ts
++++ b/packages/client/src/daemon-client.ts
+@@ -3488,7 +3488,7 @@ export class DaemonClient {
+       options?.sourceAgentId &&
+       this.lastServerInfoMessage?.features?.agentMessageProvenance !== true
+     ) {
+-      throw new Error("Update the Paseo host to send messages with agent provenance.");
++      throw new Error("Update alpd to send messages with agent provenance.");
+     }
+     const requestId = this.createRequestId();
+     const messageId = options?.messageId ?? crypto.randomUUID();
+diff --git a/packages/protocol/src/plugin-requirements.ts b/packages/protocol/src/plugin-requirements.ts
+index 0cdd1f3..d3c60f9 100644
+--- a/packages/protocol/src/plugin-requirements.ts
++++ b/packages/protocol/src/plugin-requirements.ts
+@@ -36,6 +36,6 @@ export function assertPluginCompatibility(input: PluginCompatibilityInput): void
+       ? "This plugin has no requirements.paseo and targets Paseo before 0.8. Ask its author to migrate it: https://paseo.sh/docs/plugins/migration"
+       : `Use a compatible plugin version or update the ${input.runtime}.`;
+   throw new Error(
+-    `Plugin "${input.id}" requires Paseo ${range}. Your ${input.runtime} is ${input.version}. ${action}`,
++    `Plugin "${input.id}" requires ALP ${range}. Your ${input.runtime} is ${input.version}. ${action}`,
+   );
+ }
+-- 
+2.54.0 (Apple Git-157)
+

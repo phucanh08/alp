@@ -511,7 +511,7 @@ export function TeamForm({ content, update, lists, styles, theme, tab }: FormPro
   return (
     <>
       {show('general') ? <SettingsSection title="Team">
-        <SettingsInput label="Label" hint="Shown in Paseo's model picker" initialValue={team.label ?? ''} onChangeText={text('label')} />
+        <SettingsInput label="Label" hint="Shown in the model picker" initialValue={team.label ?? ''} onChangeText={text('label')} />
         <SettingsInput label="Description" initialValue={team.description ?? ''} onChangeText={text('description')} />
         <SettingsSelect label="Main" hint="The agent the user talks with" value={team.main ?? ''} options={agents.filter(agent => agent !== team.supervisor?.agent).map(agent => ({ label: agent, value: agent }))} onValueChange={main => update(draft => { draft.team = withMain(draft.team, main); })} />
         <SettingsInput label="Most peers at once" initialValue={team.maxPeers === undefined ? '' : String(team.maxPeers)} onChangeText={value => update(draft => { setOrDelete(draft.team, 'maxPeers', value.trim() ? Number(value) : ''); })} />
