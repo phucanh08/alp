@@ -23,3 +23,29 @@ jobs:
       - run: npm run check
       # pretest builds alpd and the Paseo plugin; the suite uses fake transports, no model calls.
       - run: npm test
+
+  # The ALP web app (ALPD §62): Paseo's app at the pinned commit with ALP's patches, built and opened in Chrome.
+  web-app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # npm's cache for ALP's own install and the Paseo monorepo's, which changes only with the pinned commit.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-web-app-${{ hashFiles('package-lock.json', 'paseo-web/upstream.json') }}
+          restore-keys: npm-web-app-
+      - run: npm ci
+      - run: node scripts/build-paseo-web.mjs
+      - run: node scripts/build-paseo.mjs
+      - run: node scripts/check-web-app.mjs
+      - run: node scripts/web-app-smoke.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alp-web-app
+          path: dist/web-app
+          retention-days: 14

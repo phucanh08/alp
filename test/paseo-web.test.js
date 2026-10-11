@@ -31,7 +31,7 @@ async function setup(t) {
   const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test' });
   let web;
   const gateway = createPaseoBridge({ daemon, version: 'test', home, token: () => web.token, serverId: () => web.serverId });
-  web = createWebServer({ daemon, home, port: 0, assets: {}, app: { dir, gateway } });
+  web = createWebServer({ home, port: 0, app: { dir, gateway } });
   const info = await web.listen();
   t.after(async () => { await web.close(); await runtime.shutdown(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   const origin = `http://127.0.0.1:${info.port}`;

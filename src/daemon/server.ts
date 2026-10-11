@@ -5,7 +5,6 @@ import path from 'node:path';
 import { AlpRpcError, MAX_FRAME, PROTOCOL_VERSION } from '../client/index.js';
 import { DEFAULT_MODEL, models, modes, thinkingOptions, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '../runtime/index.js';
 import type { Receipt, SessionRecord, SessionStatus, Store } from './store.js';
-import { workspaceHandlers } from './workspace-rpc.js';
 
 /**
  * alpd's JSON-RPC surface over one shared runtime (plans/reference/ALPD.md §3, §6, §14).
@@ -394,7 +393,6 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   const handlers: Record<string, (connection: Connection, params: any) => Promise<unknown> | unknown> = {
-    ...Object.fromEntries(Object.entries(workspaceHandlers()).map(([name, handler]) => [name, (_connection: Connection, params: any) => handler(params)])),
     'daemon.status': () => ({ pid: process.pid, startedAt, version, protocolVersion: PROTOCOL_VERSION, sessions: runtime.list().length, questions: runtime.questions().length, ...(previousExit ? { previousExit } : {}) }),
 
     'session.status'(_connection, { sessionId }) {

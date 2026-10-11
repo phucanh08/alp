@@ -287,4 +287,4 @@ Decided by the user on 2026-10-10, after using the D30 web app: "it does not fee
 - **The protocol.** alpd speaks Paseo's daemon protocol to the app on the page's origin. ALP sessions show as Paseo agents and ALP's teams as models; the protocol grows step by step. A request ALP does not have yet is answered with `rpc_error` code `not_implemented`, which the app shows as "feature in development"; features that would only fail are not advertised.
 - **ALP's own parts** (team, tasks, questions, settings) appear inside the app as Paseo panels and cards.
 - **Tracking.** Every Paseo feature is listed with its state (in ALP, in progress, planned, in development, not applicable) on the tracker artifact the user follows, and reported to the user.
-- The D30 app stays as `"web": { "app": "classic" }` until the new app covers it, then goes.
+- The D30 app stayed as `"web": { "app": "classic" }` until the new app covered it, and went with step 9 (2026-10-11).
