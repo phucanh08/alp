@@ -9,6 +9,7 @@ import { createCheckouts } from './checkout.js';
 import { directorySuggestions, fileExplorer } from './files.js';
 import { createPlugins } from './plugins.js';
 import { createWorkspaces } from './workspaces.js';
+import { createDaemonConfig, createRelay, type RelaySettings } from './relay.js';
 import type { DaemonServer } from '../server.js';
 
 export { createPaseoGateway, NOT_IMPLEMENTED, PASEO_PROTOCOL_VERSION } from './gateway.js';
@@ -36,8 +37,12 @@ const ENTRY_POINTS = {
  * features they light up grow step by step (D31); everything else answers "in development".
  * ALP's state is read on the first client's hello, not at alpd's start.
  */
-export function createPaseoBridge({ daemon, version, token, serverId, home, log }: {
+export function createPaseoBridge({ daemon, version, token, serverId, home, relay: relaySettings, listen = () => null, log }: {
   daemon: DaemonServer;
+  /** The user's web.relay setting (ALPD §64). */
+  relay?: RelaySettings;
+  /** Where the web app listens, as daemon.get_status reports it. */
+  listen?: () => string | null;
   /** ALP's home, whose settings name the user's language. */
   home?: string;
   version: string;
@@ -60,7 +65,13 @@ export function createPaseoBridge({ daemon, version, token, serverId, home, log 
   const agents = createAgents({ daemon, broadcast, directory: workspaces, log });
   const plugins = createPlugins({ log });
   const checkouts = createCheckouts({ broadcast, log });
-  Object.assign(handlers, quietHandlers, agents.handlers, workspaces.handlers, plugins.handlers, checkouts.handlers, { directory_suggestions_request: directorySuggestions, file_explorer_request: fileExplorer });
-  Object.assign(features, ENTRY_POINTS, agents.features, workspaces.features, plugins.features, checkouts.features);
-  return Object.assign(gateway, { close: () => { agents.close(); checkouts.close(); return workspaces.close(); }, scripts: { '/alp-plugins.js': plugins.script } });
+  const relay = createRelay({ home, serverId, attach: socket => gateway.attach(socket), initial: relaySettings, log: message => log?.(message) });
+  const daemonConfig = createDaemonConfig({ relay, serverId, broadcast, inDevelopment, version, listen, startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString() });
+  Object.assign(handlers, quietHandlers, daemonConfig.handlers, agents.handlers, workspaces.handlers, plugins.handlers, checkouts.handlers, { directory_suggestions_request: directorySuggestions, file_explorer_request: fileExplorer });
+  Object.assign(features, ENTRY_POINTS, daemonConfig.features, agents.features, workspaces.features, plugins.features, checkouts.features);
+  return Object.assign(gateway, {
+    relay,
+    close: () => { agents.close(); checkouts.close(); void relay.stop(); return workspaces.close(); },
+    scripts: { '/alp-plugins.js': plugins.script },
+  });
 }

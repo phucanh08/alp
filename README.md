@@ -251,6 +251,17 @@ The app is [Paseo](https://github.com/getpaseo/paseo)'s web app (Apache 2.0), bu
 
 alpd listens on 127.0.0.1 only. The page needs the token `alp web` puts in its address (kept in `~/.alp/web.json`), and alpd refuses requests for another host name and sockets from another site. `"web": { "port": 8000 }` in `~/.alp/settings.json` moves it, and `"web": { "enabled": false }` turns it off. In a checkout of this repository, build the app with `npm run build:web` (it clones Paseo into `.cache/paseo-web`). Details: [ALPD §62](plans/reference/ALPD.md#62-the-alp-web-app-on-paseos-app-2026-10-10).
 
+### Paseo's app on your phone
+
+alpd can also be reached by [Paseo](https://paseo.sh)'s own app on another device, through Paseo's relay (`relay.paseo.sh`):
+
+```sh
+alp web pair --on     # turns the relay on and prints the pairing link
+alp web pair          # the link again; --off turns the relay off
+```
+
+Or in the web app: Settings → your host → Pair device → Enable relay, then scan the QR code with Paseo's app. Traffic between the device and alpd is end-to-end encrypted; the relay only passes it on. The link carries alpd's public key, not its token: when Paseo's app asks for a password, give it the token (the part after `#token=` in `alp web --print`). The relay stays off until you turn it on; `"web": { "relay": { "endpoint": "host:port" } }` points alpd at another relay. Paseo's app shows ALP's sessions and teams, and answers what ALP has not built yet as an error. Details: [ALPD §64](plans/reference/ALPD.md#64-paseos-relay-and-its-app-on-another-device-2026-10-12).
+
 ## Editors (ACP)
 
 `alp acp` serves ALP over the [Agent Client Protocol](https://agentclientprotocol.com) on stdio, so an editor such as Zed or a JetBrains IDE can use ALP as its agent. In Zed's `settings.json`:

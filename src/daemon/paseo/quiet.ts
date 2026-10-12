@@ -3,7 +3,7 @@ import type { Handler } from './gateway.js';
 
 /**
  * What the app reads by itself, all the time, for features ALP has not got yet: project icons,
- * terminals, workspace setup, the daemon's config, a draft agent's provider features.
+ * terminals, workspace setup, a draft agent's provider features. The daemon's config is relay.ts's.
  * A refusal there would make the app retry and log errors without the user doing anything, so
  * these get the empty answer a daemon without that feature would give (ALPD §62). What the user
  * asks for by hand still answers "in development".
@@ -24,16 +24,6 @@ export const quietHandlers: Record<string, Handler> = {
 
   workspace_setup_status_request: (message: Inbound<'workspace_setup_status_request'>) =>
     ({ type: 'workspace_setup_status_response', payload: { requestId: message.requestId, workspaceId: message.workspaceId, snapshot: null } }) satisfies Outbound,
-
-  get_daemon_config_request: (message: Inbound<'get_daemon_config_request'>) =>
-    ({
-      type: 'get_daemon_config_response',
-      payload: {
-        requestId: message.requestId,
-        // Paseo's defaults: no Paseo MCP tools, no browser tools; ALP's own plugin runs (step 7).
-        config: { mcp: { enabled: false, injectIntoAgents: false }, browserTools: { enabled: false }, providers: {}, metadataGeneration: { providers: [] }, autoArchiveAfterMerge: false, enableTerminalAgentHooks: false, appendSystemPrompt: '', pluginsEnabled: true },
-      },
-    }) satisfies Outbound,
 
   list_provider_features_request: (message: Inbound<'list_provider_features_request'>) =>
     ({ type: 'list_provider_features_response', payload: { requestId: message.requestId, provider: message.draftConfig.provider, features: [], error: null, fetchedAt: new Date().toISOString() } }) satisfies Outbound,
