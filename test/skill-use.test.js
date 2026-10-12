@@ -59,3 +59,15 @@ test('a read-only Claude session may run its skills', async () => {
   assert.equal((await live.canUseTool('Skill', { skill: 'alp:xia' })).behavior, 'allow');
   assert.equal((await live.canUseTool('Write', { file_path: '/tmp/x', content: '' })).behavior, 'deny');
 });
+
+test('a supervised agent reading a SKILL.md goes on with its turn, and alp_skill saving one is still told apart (#69)', async t => {
+  const { main, root, runLog } = await tree(t, { prefix: 'alp-skill-', open: { model: 'claude:claude-opus-5-5' }, options: () => ({ supervisor: true }) });
+  const command = `cat ${root}/.alp/agents/main/skills/prompt-leverage/SKILL.md | head -60`;
+  // A skill use was logged under the event alp_skill's saves use; the supervisor's journal read it as a save and threw.
+  main.notification('item/started', { threadId: main.threadId, item: { type: 'commandExecution', id: 'c1', command, cwd: root, status: 'inProgress', aggregatedOutput: '' } });
+  main.notification('item/completed', { threadId: main.threadId, item: { type: 'commandExecution', id: 'c1', command, cwd: root, status: 'completed', exitCode: 0, aggregatedOutput: '---\nname: prompt-leverage\n---\n' } });
+  await until(async () => (await runLog()).some(entry => entry.event === 'skill'), 'the skill use');
+  assert.deepEqual((await runLog()).filter(entry => entry.event === 'skill').map(entry => [entry.skill, entry.via]), [['prompt-leverage', 'read']]);
+  assert.equal((await runLog()).filter(entry => entry.event === 'runtime.slip').length, 0);
+  assert.deepEqual(renderLog('root', [{ ts: '2026-01-01T10:00:00.000Z', event: 'skill', agent: 'main', name: 'xia', roles: ['main', 'lead'] }]), ['10:00:00  ✦ main saved skill xia for main, lead']);
+});
