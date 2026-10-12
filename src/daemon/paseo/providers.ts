@@ -205,7 +205,8 @@ export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
     },
   };
 
-  return { handlers, config, apply, push };
+  // providerRemoval: the app offers Remove on the library's providers.
+  return { handlers, features: { providerRemoval: true }, config, apply, push };
 }
 
 export type Providers = ReturnType<typeof createProviders>;
