@@ -108,8 +108,10 @@ export type Relay = ReturnType<typeof createRelay>;
  * rest are Paseo's defaults (no Paseo MCP tools, no browser tools; ALP's own plugin runs). A change
  * to anything but the relay answers "in development".
  */
-export function createDaemonConfig({ relay, serverId, broadcast, inDevelopment, version, listen, startedAt }: {
+export function createDaemonConfig({ relay, providers, serverId, broadcast, inDevelopment, version, listen, startedAt }: {
   relay: Relay;
+  /** The library's ACP providers (providers.ts, ALPD §65). */
+  providers?: { config(): Promise<Record<string, unknown>>; apply(patch?: Record<string, Record<string, unknown>>, remove?: string[]): Promise<void> };
   serverId: () => string;
   broadcast: (message: Outbound) => void;
   inDevelopment: () => Promise<string>;
@@ -117,25 +119,25 @@ export function createDaemonConfig({ relay, serverId, broadcast, inDevelopment, 
   listen: () => string | null;
   startedAt: string;
 }) {
-  const config = () => ({
+  const config = async () => ({
     relay: { enabled: relay.config().enabled },
-    mcp: { enabled: false, injectIntoAgents: false }, browserTools: { enabled: false }, providers: {}, metadataGeneration: { providers: [] },
+    mcp: { enabled: false, injectIntoAgents: false }, browserTools: { enabled: false }, providers: await providers?.config() ?? {}, metadataGeneration: { providers: [] },
     autoArchiveAfterMerge: false, enableTerminalAgentHooks: false, appendSystemPrompt: '', pluginsEnabled: true,
   });
 
   const handlers: Record<string, Handler> = {
-    get_daemon_config_request: (message: Inbound<'get_daemon_config_request'>) =>
-      ({ type: 'get_daemon_config_response', payload: { requestId: message.requestId, config: config() } }) satisfies SessionOutboundMessage,
+    get_daemon_config_request: async (message: Inbound<'get_daemon_config_request'>) =>
+      ({ type: 'get_daemon_config_response', payload: { requestId: message.requestId, config: await config() as any } }) satisfies SessionOutboundMessage,
 
     set_daemon_config_request: async (message: Inbound<'set_daemon_config_request'>) => {
-      const { relay: relayPatch, ...rest } = (message.config ?? {}) as { relay?: { enabled?: unknown } } & Record<string, unknown>;
-      if (Object.keys(rest).length) throw Object.assign(new Error(await inDevelopment()), { code: NOT_IMPLEMENTED });
-      if (relayPatch?.enabled !== undefined) {
-        if (typeof relayPatch.enabled !== 'boolean') throw new Error('relay.enabled must be true or false');
-        await relay.setEnabled(relayPatch.enabled);
-        broadcast({ type: 'status', payload: { status: 'daemon_config_changed', config: config() } });
-      }
-      return { type: 'set_daemon_config_response', payload: { requestId: message.requestId, config: config() } } satisfies SessionOutboundMessage;
+      const { relay: relayPatch, providers: providersPatch, removeProviders, ...rest } = (message.config ?? {}) as { relay?: { enabled?: unknown }; providers?: Record<string, Record<string, unknown>>; removeProviders?: string[] } & Record<string, unknown>;
+      if (Object.keys(rest).length || ((providersPatch || removeProviders) && !providers)) throw Object.assign(new Error(await inDevelopment()), { code: NOT_IMPLEMENTED });
+      if (relayPatch?.enabled !== undefined && typeof relayPatch.enabled !== 'boolean') throw new Error('relay.enabled must be true or false');
+      if (providersPatch || removeProviders) await providers!.apply(providersPatch, removeProviders);
+      if (typeof relayPatch?.enabled === 'boolean') await relay.setEnabled(relayPatch.enabled);
+      const current = await config();
+      if (relayPatch || providersPatch || removeProviders) broadcast({ type: 'status', payload: { status: 'daemon_config_changed', config: current } } as Outbound);
+      return { type: 'set_daemon_config_response', payload: { requestId: message.requestId, config: current as any } } satisfies SessionOutboundMessage;
     },
 
     'daemon.get_status.request': (message: Inbound<'daemon.get_status.request'>) => ({

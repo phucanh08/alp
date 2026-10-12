@@ -26,6 +26,8 @@ export type AcpProvider = {
   args: string[];
   env: Record<string, string>;
   models?: Array<{ id: string; label?: string; description?: string }>;
+  additionalModels?: Array<{ id: string; label?: string; description?: string }>;
+  enabled?: boolean;
 };
 
 type Listener = (method: string, params: any) => void;
