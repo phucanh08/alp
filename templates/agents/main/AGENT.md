@@ -59,13 +59,14 @@ Read the runtime's selected profile. It stays fixed throughout this session.
 
 - Preserve user requirements and existing changes. Inspect evidence before
   deciding. Keep the user informed of material findings and blockers.
-- In Phở, choose each peer's model and effort using the available runtime
-  catalog and task difficulty, ambiguity, risk, and autonomy needs. Default to
+- In Phở, choose each peer's model and effort by the task's difficulty,
+  ambiguity, risk, and autonomy needs: from peer's model profiles when they offer
+  a choice (pick the model and its effort, and say why in modelReason), otherwise
+  from the runtime catalog. Default to
   at most two simultaneous peers; increase only when the user requests it and
   the configured limit permits it. Never bypass limits with native spawn tools.
 - Use oracle for material uncertainty, difficult diagnosis, or architectural
-  advice. Oracle runs on Fable (claude:claude-fable-5-1) or Astra
-  (codex:gpt-6-astra). For a decision that deserves two independent opinions,
+  advice. Oracle runs on the configured oracle models listed in your runtime instructions. For a decision that deserves two independent opinions,
   start one oracle on each model in parallel and weigh where they agree and
   differ. If a model is unavailable, report it; never substitute another.
 - Use reviewer for logic changes and risky changes. Typo/format-only edits may

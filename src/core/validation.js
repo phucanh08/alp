@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { AlpError } from './errors.js';
+import { MODELS } from './models.js';
 import { validatePermissions } from './permissions.js';
 import { validateVerify } from './verify.js';
 
@@ -10,8 +11,10 @@ function requireValue(condition, code, source, message) {
   if (!condition) throw new AlpError(code, `${source}: ${message}`);
 }
 
+/** Efforts a profile may name; a model ALP knows takes only its own (src/core/models.js). */
+const EFFORTS = ['none', 'off', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode'];
 /** Top-level keys of a project's .alp/settings.json. */
-export const PROJECT_SETTINGS = ['$schema', 'defaultAgent', 'workflow', 'runtime', 'permissions', 'verify', 'delegation'];
+export const PROJECT_SETTINGS = ['$schema', 'defaultAgent', 'workflow', 'runtime', 'permissions', 'verify', 'delegation', 'profile'];
 /** Top-level keys of the user's $ALP_HOME/settings.json. */
 export const USER_SETTINGS = ['$schema', 'language', 'permissions', 'limits', 'recovery', 'web'];
 /**
@@ -73,6 +76,63 @@ export function validateSettings(settings, source) {
     if (settings.workflow.maxPeers !== undefined) check(Number.isSafeInteger(settings.workflow.maxPeers) && settings.workflow.maxPeers > 0, 'workflow.maxPeers must be a positive integer');
     if (settings.workflow.supervisor !== undefined) check(typeof settings.workflow.supervisor === 'boolean', 'workflow.supervisor must be true or false');
   }
+  if (settings.profile !== undefined) {
+    check(object(settings.profile), 'profile must map team names to agent configurations');
+    const validateChoice = (config, where) => {
+      check(object(config), `${where} must be an object`);
+      check(Object.keys(config).every(key => ['provider', 'model', 'effort'].includes(key)), `${where}: use provider, model and effort`);
+      if (config.provider !== undefined) check(['codex', 'claude'].includes(config.provider), `${where}.provider must be codex or claude`);
+      if (config.model !== undefined) {
+        check(nonempty(config.model) && !/\s/.test(config.model), `${where}.model must be a model ID`);
+        check(config.provider !== undefined || /^(codex|claude):.+$/.test(config.model), `${where}: model needs a provider`);
+        if (config.model.includes(':')) check(/^(codex|claude):.+$/.test(config.model) && (!config.provider || config.model.startsWith(`${config.provider}:`)), `${where}: model and provider disagree`);
+      }
+      if (config.effort !== undefined) check(EFFORTS.includes(config.effort), `${where}.effort is unsupported`);
+    };
+    for (const [team, agents] of Object.entries(settings.profile)) {
+      check(/^[\w.-]+$/.test(team) && object(agents), `profile.${team} must map agent names to configurations`);
+      for (const [agent, config] of Object.entries(agents)) {
+        const where = `profile.${team}.${agent}`;
+        check(object(config), `${where} must be an object`);
+        if (config.autocompact !== undefined) validateAutoCompact(config.autocompact, check, `${where}.autocompact`);
+        if (Object.hasOwn(config, 'profiles')) {
+          check(Object.keys(config).every(key => ['profiles', 'autocompact'].includes(key)), `${where}: use profiles and autocompact`);
+          check(Array.isArray(config.profiles) && config.profiles.length > 0, `${where}.profiles must be a nonempty list`);
+          const models = [];
+          for (const [index, entry] of config.profiles.entries()) {
+            if (typeof entry === 'string') {
+              const at = `${where}.profiles[${index}]`;
+              check(/^(codex|claude):(\*|[^\s:*]+(:[a-z]+)?)$/.test(entry), `${at} must be "provider:model", "provider:model:effort" (such as "claude:claude-opus-5-5:high"), or "codex:*" / "claude:*" for any model of that provider`);
+              const [provider, model, effort] = entry.split(':');
+              check(model !== '*' || (agent !== 'oracle' && agent !== 'main'), `${at}: ${agent} runs on a named model, not any model`);
+              if (effort !== undefined) {
+                const known = MODELS.find(candidate => candidate.runtime === provider && candidate.id === model);
+                check(EFFORTS.includes(effort), `${at}: effort ${effort} is unsupported`);
+                check(!known?.efforts.length || known.efforts.includes(effort), `${at}: ${provider}:${model} takes effort ${known?.efforts.join(', ')}`);
+              }
+              models.push(`${provider}:${model}`);
+              continue;
+            }
+            validateChoice(entry, `${where}.profiles[${index}]`);
+            check(['claude', 'codex'].includes(entry.provider) && nonempty(entry.model), `${where}.profiles[${index}]: specify provider and model`);
+            models.push(entry.model.includes(':') ? entry.model : `${entry.provider}:${entry.model}`);
+          }
+          check(new Set(models).size === models.length, `${where}.profiles must not repeat the same model`);
+          check(agent !== 'main' || config.profiles.length === 1, `${where}.profiles: main runs on exactly one model`);
+        } else if (agent === 'oracle') {
+          const entries = Object.entries(config).filter(([key]) => key !== 'autocompact');
+          check(entries.length > 0 && entries.every(([provider]) => ['claude', 'codex'].includes(provider)), `${where} must define profiles or claude/codex lenses`);
+          for (const [provider, lens] of entries) {
+            validateChoice(lens, `${where}.${provider}`);
+            check(lens.provider === provider && nonempty(lens.model), `${where}.${provider}: specify matching provider and model`);
+          }
+        } else {
+          const { autocompact, ...legacy } = config;
+          validateChoice(legacy, where);
+        }
+      }
+    }
+  }
   validatePermissions(settings.permissions, source);
   validateVerify(settings.verify, source);
   const runtime = settings.runtime ?? {};
@@ -110,9 +170,14 @@ export function validateUserSettings(settings, source) {
 }
 
 /** Keys of an agent's agent.json (ALPD §41). */
-export const AGENT_SETTINGS = ['$schema', 'description', 'provider', 'model', 'thinking', 'mode', 'context', 'skills', 'mcp', 'hooks'];
+export const AGENT_SETTINGS = ['$schema', 'description', 'provider', 'model', 'thinking', 'mode', 'context', 'autocompact', 'skills', 'mcp', 'hooks'];
 /** The context window an agent may set (ALPD §57), in tokens; 'auto' is the model's. */
 export const CONTEXT_TOKENS = { min: 100_000, max: 1_000_000 };
+/** Use the common native compaction-window range; Codex receives the exact token limit. */
+function validateAutoCompact(value, check, where) {
+  check(value === 'auto' || (Number.isSafeInteger(value) && value >= CONTEXT_TOKENS.min && value <= CONTEXT_TOKENS.max),
+    `${where} must be "auto" or a number of tokens from ${CONTEXT_TOKENS.min} to ${CONTEXT_TOKENS.max}`);
+}
 const AGENT_MODES = ['read-only', 'workspace-write', 'full-access'];
 const entryName = value => typeof value === 'string' && /^[\w.-]+$/.test(value) && value !== '.' && value !== '..';
 
@@ -155,6 +220,7 @@ export function validateAgentConfig(config, source) {
     check(config.context === 'auto' || (Number.isSafeInteger(config.context) && config.context >= CONTEXT_TOKENS.min && config.context <= CONTEXT_TOKENS.max),
       `context must be "auto" or a number of tokens from ${CONTEXT_TOKENS.min} to ${CONTEXT_TOKENS.max}`);
   }
+  if (config.autocompact !== undefined) validateAutoCompact(config.autocompact, check, 'autocompact');
   for (const key of ['skills', 'mcp', 'hooks']) {
     if (config[key] === undefined) continue;
     check(Array.isArray(config[key]) && config[key].every(entryName), `${key} must list names of letters, digits, '.', '_' or '-'`);

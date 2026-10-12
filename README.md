@@ -12,7 +12,27 @@ alp doctor          # checks Codex and Claude, settings, and leftovers; --fix re
 alp daemon start
 ```
 
-Only have Codex? See [running ALP on Codex only](docs/alp/codex-only.md): two commands point Phở and Cafe's main and supervisor at Codex models.
+Choose the models Phở and Cafe run on in a project, for Codex only, Claude only, or a mix:
+
+```sh
+alp setup                              # select boxes: runtime, which provider first, then Save / Change a model
+alp setup --runtime codex              # Codex only
+alp setup --runtime claude             # Claude only
+alp setup --runtime mix                # both, Claude first
+alp setup --runtime mix --prefer codex --codex-model gpt-6-sol --claude-oracle claude-fable-5-1
+```
+
+Setup writes `profile.pho` and `profile.cafe` into the project's `.alp/settings.json`
+(running `alp init` first when there is none) and keeps the rest of the file. Main runs
+on one model, of the preferred provider. Lead and reviewer take `--claude-model` /
+`--codex-model`, the supervisor `--claude-supervisor` / `--codex-supervisor`, and the
+oracle `--claude-oracle` / `--codex-oracle`; in mix each lists both providers, the
+preferred one first, and an only mode lists its own. Peers get `claude:*` and/or
+`codex:*`: any model of the enabled providers, chosen with its effort for each task by
+whoever assigns it. Defaults: Opus 5.5 / GPT-6.1 Sol at high, Sonnet 5 / GPT-6 Luna at
+medium, Fable 5.1 at high / GPT-6 Astra at low (the only effort it takes). Setup does
+not install CLIs, log in or call models: run `alp doctor` for that. New sessions use
+the profiles; running sessions keep theirs.
 
 The package provides the `alp` command and `alpd`, the per-user daemon that runs ALP sessions. To view and drive sessions in Paseo, also install the [Paseo plugin](plugins/paseo/README.md).
 
@@ -65,6 +85,54 @@ your-project/
 ```
 
 `alp agents`, `alp skills`, `alp mcp` and `alp hooks` list what a project can use: ALP's built-ins, your library in `~/.alp`, and the project's own entries, with what each overrides and which agents use it. `alp agent|team|skill|mcp|hook new|edit|cp|mv|rm` change them, in your library or with `--project` in the project, and `alp mcp test` and `alp hook test` try one out ([editing](docs/alp/agent-library.md#editing)).
+
+`alp init` now writes editable `profile.pho` and `profile.cafe` choices into
+`.alp/settings.json`, taking a snapshot of your current user team configuration.
+`alp upgrade` adds these profiles to older projects, backs up the settings it changes,
+and converts earlier single-model choices to lists without changing their values.
+Every agent (main, lead, peer, reviewer, supervisor, oracle, or a custom member) has
+`profiles`: a list of `"provider:model:effort"` (the effort may be left out), or
+`"provider:*"` for any model of that provider. Main and oracle name their models, and
+main runs on exactly one. Include both providers for dual-lens oracle advice:
+
+```json
+{
+  "workflow": { "mode": "cafe", "maxPeers": 2 },
+  "profile": {
+    "cafe": {
+      "main": { "profiles": ["claude:claude-opus-5-5:high"], "autocompact": "auto" },
+      "lead": { "profiles": ["claude:claude-opus-5-5:high", "codex:gpt-6.1-sol:high"] },
+      "peer": { "profiles": ["claude:*", "codex:*"], "autocompact": 200000 },
+      "oracle": { "profiles": ["claude:claude-fable-5-1:high", "codex:gpt-6-astra:low"] }
+    }
+  }
+}
+```
+
+An agent that runs by itself (main, the supervisor) starts on its first profile, at its
+effort or else its team's. When main or lead assigns work to an agent with several
+profiles or a `provider:*`, such as a peer, it picks a model they offer and an effort
+that model takes for each task, by its difficulty, risk and the autonomy it needs, and
+says why; a listed effort is only the usual one. ALP refuses an assignment without both
+or with a model they do not offer. An agent with one named profile runs on it. A list
+does not enable automatic fallback. Oracle still requires an explicit lens selection.
+An effort a model does not take is refused (GPT-6 Astra takes only low). The earlier
+form, `{ "provider", "model", "effort" }`, still works; `alp upgrade` rewrites it as
+`"provider:model:effort"`.
+
+`autocompact` belongs to the agent, beside `profiles`, and applies to every model in
+its list. A whole number from 100000 to 1000000 requests compaction at that many tokens
+on Codex, or sets Claude's native auto-compact window (Claude can compact earlier to
+reserve response space). The model's capacity still applies. `"auto"` or omission
+keeps the agent's existing native/context defaults. The same field is supported in
+`agent.json`; a numeric project setting takes precedence. 200000 here is an example,
+not a shipped default. New and upgraded configurations use `"auto"`.
+
+Unspecified agents keep the team's choices. Explicit session/delegation model and
+effort win, then project profile choices, then the older `runtime` settings, then
+team and agent defaults. Run `alp setup` again to rewrite Phở and Cafe's profiles, or
+edit the file to change one agent. Only configured oracle lenses are available, and an
+unavailable lens is reported rather than substituted.
 
 Example `.alp/settings.json`:
 

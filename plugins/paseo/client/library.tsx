@@ -320,7 +320,7 @@ export function blank(kind: Kind, name = 'new'): Content {
 export function entryTabs(kind: Kind, saved: boolean): Tab[] {
   const tabs: Record<Kind, Array<[string, string]>> = {
     agents: [['general', 'General'], ['instructions', 'Instructions'], ['capabilities', 'Skills, MCP & hooks']],
-    teams: [['general', 'General'], ['members', 'Members'], ['delegation', 'Delegation'], ['supervisor', 'Supervisor'], ['rules', 'House rules']],
+    teams: [['models', 'Models & effort'], ['general', 'General'], ['members', 'Members'], ['delegation', 'Delegation'], ['supervisor', 'Supervisor'], ['rules', 'House rules']],
     skills: [['body', 'SKILL.md']],
     mcp: [['server', 'Server'], ['test', 'Test']],
     hooks: [['hook', 'Hook'], ['test', 'Test']],
@@ -499,6 +499,49 @@ export function withDelegation(team: Content, owner: string, target: string, on:
   return next;
 }
 
+const EFFORTS = ['', 'none', 'low', 'medium', 'high', 'xhigh', 'max'];
+const effortOptions = EFFORTS.map(value => ({ label: value || 'Inherit', value }));
+
+/** Model choices where they take effect: the team's members, supervisor and oracle lenses. */
+export function TeamModels({ content, update }: FormProps) {
+  const team = content.team ?? {};
+  const oracleModels: string[] = team.oracleModels ?? ['claude:claude-fable-5-1', 'codex:gpt-6-astra'];
+  return <>
+    <SettingsSection title="Models & effort" info={<Text>Applies to new sessions in this team. Project and explicit session choices take precedence. Model access and supported effort depend on your provider.</Text>}>
+      <SettingsRow label="Model IDs" hint="Use codex:model or claude:model. Empty model/effort inherits existing agent defaults." />
+    </SettingsSection>
+    {Object.entries(team.members ?? {}).filter(([name]) => name !== 'oracle').map(([name, value]) => {
+      const member = value as Content;
+      return <SettingsSection key={name} title={name === team.main ? `${name} · main` : name}>
+        <SettingsInput label="Model" initialValue={member.model ?? ''} onChangeText={value => update(draft => { setOrDelete(draft.team.members[name], 'model', value.trim()); })} />
+        <SettingsSelect label="Effort" value={member.thinking ?? ''} options={effortOptions} onValueChange={value => update(draft => { setOrDelete(draft.team.members[name], 'thinking', value); })} />
+      </SettingsSection>;
+    })}
+    {team.members?.oracle ? ['claude', 'codex'].map(provider => {
+      const selected = oracleModels.find(model => model.startsWith(`${provider}:`));
+      return <SettingsSection key={provider} title={`Oracle · ${provider === 'claude' ? 'Claude' : 'Codex'}`}>
+        <SettingsSwitch label="Enable lens" hint={selected && oracleModels.length === 1 ? "Keep at least one oracle lens enabled" : undefined} disabled={!!selected && oracleModels.length === 1} value={!!selected} onValueChange={on => update(draft => {
+          draft.team.oracleModels = oracleModels.filter(model => !model.startsWith(`${provider}:`));
+          if (on) draft.team.oracleModels.push(provider === 'claude' ? 'claude:claude-fable-5-1' : 'codex:gpt-6-astra');
+        })} />
+        {selected ? <>
+          <SettingsInput label="Model" hint={`Use ${provider}:model. Dual-lens can consult both providers when needed.`} initialValue={selected} onChangeText={value => update(draft => {
+            draft.team.oracleModels = oracleModels.map(model => model.startsWith(`${provider}:`) ? value.trim() : model);
+          })} />
+          <SettingsSelect label="Effort" value={team.oracleThinking?.[provider] ?? ''} options={effortOptions.map(option => option.value ? option : { label: 'Default (high)', value: '' })} onValueChange={value => update(draft => {
+            draft.team.oracleThinking ??= {};
+            setOrDelete(draft.team.oracleThinking, provider, value);
+          })} />
+        </> : null}
+      </SettingsSection>;
+    }) : null}
+    {team.supervisor ? <SettingsSection title="Supervisor">
+      <SettingsInput label="Model" initialValue={team.supervisor.model ?? ''} onChangeText={value => update(draft => { setOrDelete(draft.team.supervisor, 'model', value.trim()); })} />
+      <SettingsSelect label="Effort" value={team.supervisor.thinking ?? ''} options={effortOptions} onValueChange={value => update(draft => { setOrDelete(draft.team.supervisor, 'thinking', value); })} />
+    </SettingsSection> : null}
+  </>;
+}
+
 /** A team, by tab: members and roles, who may delegate to whom, the supervisor and the house rules. Without a tab, all of it. */
 export function TeamForm({ content, update, lists, styles, theme, tab }: FormProps) {
   const show = (key: string) => !tab || tab === key;
@@ -510,10 +553,10 @@ export function TeamForm({ content, update, lists, styles, theme, tab }: FormPro
   const text = (key: string) => (value: string) => update(draft => { setOrDelete(draft.team, key, value.trim()); });
   return (
     <>
+      {show('models') ? <TeamModels content={content} update={update} lists={lists} styles={styles} theme={theme} /> : null}
       {show('general') ? <SettingsSection title="Team">
         <SettingsInput label="Label" hint="Shown in the model picker" initialValue={team.label ?? ''} onChangeText={text('label')} />
         <SettingsInput label="Description" initialValue={team.description ?? ''} onChangeText={text('description')} />
-        <SettingsSelect label="Main" hint="The agent the user talks with" value={team.main ?? ''} options={agents.filter(agent => agent !== team.supervisor?.agent).map(agent => ({ label: agent, value: agent }))} onValueChange={main => update(draft => { draft.team = withMain(draft.team, main); })} />
         <SettingsInput label="Most peers at once" initialValue={team.maxPeers === undefined ? '' : String(team.maxPeers)} onChangeText={value => update(draft => { setOrDelete(draft.team, 'maxPeers', value.trim() ? Number(value) : ''); })} />
       </SettingsSection> : null}
       {show('members') ? (
@@ -522,11 +565,9 @@ export function TeamForm({ content, update, lists, styles, theme, tab }: FormPro
             const member = team.members?.[agent];
             const main = agent === team.main;
             return (
-              <SettingsSection key={agent} title={main ? `${agent} · main` : agent} info={main ? <Text style={styles!.small}>The agent the user talks with; change it under General.</Text> : undefined}>
+              <SettingsSection key={agent} title={main ? `${agent} · main` : agent} info={main ? <Text style={styles!.small}>The agent you talk with.</Text> : undefined}>
                 {!main ? <SettingsSwitch label="In this team" value={!!member} onValueChange={on => update(draft => { draft.team = withMember(draft.team, agent, on); })} /> : null}
                 {member && !main ? <SettingsSelect label="Role" value={member.role ?? 'peer'} options={ROLES.map(role => ({ label: role, value: role }))} onValueChange={role => update(draft => { draft.team.members[agent].role = role; })} /> : null}
-                {member ? <SettingsInput label="Model" hint="Empty: the agent's own" initialValue={member.model ?? ''} onChangeText={value => update(draft => { setOrDelete(draft.team.members[agent], 'model', value.trim()); })} /> : null}
-                {member ? <SettingsInput label="Thinking" hint="Empty: the agent's own" initialValue={member.thinking ?? ''} onChangeText={value => update(draft => { setOrDelete(draft.team.members[agent], 'thinking', value.trim()); })} /> : null}
               </SettingsSection>
             );
           })}
@@ -550,8 +591,7 @@ export function TeamForm({ content, update, lists, styles, theme, tab }: FormPro
         {team.supervisor ? (
           <>
             <SettingsSelect label="Supervisor agent" value={team.supervisor.agent} options={agents.filter(agent => !members.includes(agent)).map(agent => ({ label: agent, value: agent }))} onValueChange={agent => update(draft => { draft.team.supervisor.agent = agent; })} />
-            <SettingsInput label="Supervisor's model" initialValue={team.supervisor.model ?? ''} onChangeText={value => update(draft => { setOrDelete(draft.team.supervisor, 'model', value.trim()); })} />
-            <SettingsInput label="Supervisor's thinking" initialValue={team.supervisor.thinking ?? ''} onChangeText={value => update(draft => { setOrDelete(draft.team.supervisor, 'thinking', value.trim()); })} />
+            <SettingsRow label="Model & effort" hint="Configure in Models & effort" />
           </>
         ) : null}
       </SettingsSection> : null}

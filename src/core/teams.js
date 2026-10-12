@@ -12,7 +12,7 @@ import { settingsKeys, unknownMessage } from './validation.js';
  */
 
 export const BUILTIN_TEAMS = ['pho', 'cafe'];
-export const TEAM_SETTINGS = ['$schema', 'label', 'description', 'main', 'members', 'delegation', 'maxPeers', 'supervisor'];
+export const TEAM_SETTINGS = ['$schema', 'label', 'description', 'main', 'members', 'delegation', 'maxPeers', 'supervisor', 'oracleModels', 'oracleThinking'];
 export const TEAM_ROLES = ['lead', 'peer', 'advisor', 'reviewer'];
 const MEMBER_SETTINGS = ['role', 'model', 'thinking'];
 const SUPERVISOR_SETTINGS = ['agent', 'model', 'thinking'];
@@ -66,6 +66,14 @@ export function validateTeam(config, source) {
     visited.add(owner);
   };
   for (const owner of Object.keys(config.delegation)) visit(owner);
+  if (config.oracleModels !== undefined) {
+    check(Array.isArray(config.oracleModels) && config.oracleModels.length > 0, 'oracleModels must list runtime-prefixed models');
+    check(config.oracleModels.every(model => typeof model === 'string' && /^(codex|claude):[^\s]+$/.test(model)) && new Set(config.oracleModels).size === config.oracleModels.length, 'oracleModels must list each model once');
+  }
+  if (config.oracleThinking !== undefined) {
+    check(object(config.oracleThinking), 'oracleThinking must map providers to effort');
+    for (const [provider, effort] of Object.entries(config.oracleThinking)) check((['codex', 'claude'].includes(provider) || /^(codex|claude):[^\s]+$/.test(provider)) && ['none', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort), 'oracleThinking requires a provider or model ID and a supported effort');
+  }
   if (config.maxPeers !== undefined) check(Number.isSafeInteger(config.maxPeers) && config.maxPeers >= 1, 'maxPeers must be a positive integer');
   if (config.supervisor !== undefined && config.supervisor !== false) {
     check(object(config.supervisor), 'supervisor must be false or { agent, model, thinking }');
@@ -107,7 +115,7 @@ export async function teamSources(root, { library, templates } = {}) {
  * A team by id, with its house rules.
  * @returns {Promise<{ id: string, source: 'builtin' | 'library' | 'project', label: string, description?: string, main: string,
  *   members: Record<string, { role?: string, model?: string, thinking?: string }>, delegation: Record<string, string[]>,
- *   maxPeers?: number, supervisor: false | { agent: string, model?: string, thinking?: string }, houseRules: string }>}
+ *   oracleThinking?: Record<string, string>, oracleModels?: string[], maxPeers?: number, supervisor: false | { agent: string, model?: string, thinking?: string }, houseRules: string }>}
  */
 export async function resolveTeam(root, id, { library, templates } = {}) {
   const team = teamOf(id);
@@ -127,6 +135,8 @@ export async function resolveTeam(root, id, { library, templates } = {}) {
     main: config.main, members: config.members, delegation: config.delegation,
     ...(config.maxPeers !== undefined ? { maxPeers: config.maxPeers } : {}),
     supervisor: config.supervisor ?? false,
+    oracleModels: config.oracleModels,
+    oracleThinking: config.oracleThinking,
     houseRules: houseRules.trim(),
   };
 }

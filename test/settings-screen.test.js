@@ -187,10 +187,13 @@ test('editors: an agent picks skills, MCP servers and hooks; a team its members,
     team: { label: 'Docs', main: 'main', members: { main: { model: 'claude:claude-opus-5-5' }, writer: { role: 'peer' } }, delegation: { main: ['writer'] }, supervisor: { agent: 'supervisor', model: 'claude:claude-sonnet-4-6' } },
     houseRules: 'Review every page.\n',
   } };
-  assert.deepEqual(entryTabs('teams', true).map(tab => tab.label), ['General', 'Members', 'Delegation', 'Supervisor', 'House rules']);
-  assert.match(editor('teams', team), /<select data-label="Main" data-value="main">/);
+  assert.deepEqual(entryTabs('teams', true).map(tab => tab.label), ['Models & effort', 'General', 'Members', 'Delegation', 'Supervisor', 'House rules']);
+  assert.doesNotMatch(editor('teams', team, 'general'), /data-label="Main"/);
+  const models = editor('teams', team);
+  assert.match(section(models, 'main · main'), /<field data-label="Model" data-value="claude:claude-opus-5-5">/);
+  assert.match(section(models, 'main · main'), /data-label="Effort"/);
   const members = editor('teams', team, 'members');
-  assert.match(section(members, 'main · main'), /<field data-label="Model" data-value="claude:claude-opus-5-5">/);
+  assert.doesNotMatch(members, /data-label="Model"/);
   assert.match(section(members, 'writer'), /<switch data-label="In this team" data-value="true">[\s\S]*<select data-label="Role" data-value="peer">/);
   assert.match(section(members, 'peer'), /<switch data-label="In this team" data-value="false">/);
   assert.doesNotMatch(section(members, 'peer'), /Role/);
@@ -199,6 +202,11 @@ test('editors: an agent picks skills, MCP servers and hooks; a team its members,
   // Main is never assigned work.
   assert.doesNotMatch(section(delegation, 'writer may delegate to'), /data-label="main"/);
   assert.match(editor('teams', team, 'supervisor'), /<select data-label="Supervisor agent" data-value="supervisor">/);
+  const dual = { ...team, content: { ...team.content, team: { ...team.content.team, members: { ...team.content.team.members, oracle: { role: 'advisor' } }, oracleModels: ['claude:sonnet', 'codex:custom'], oracleThinking: { claude: 'medium', codex: 'high' } } } };
+  const lenses = editor('teams', dual);
+  assert.match(section(lenses, 'Oracle · Claude'), /data-label="Model" data-value="claude:sonnet"/);
+  assert.match(section(lenses, 'Oracle · Claude'), /data-label="Effort" data-value="medium"/);
+  assert.match(section(lenses, 'Oracle · Codex'), /data-label="Model" data-value="codex:custom"/);
   assert.match(editor('teams', team, 'rules'), /data-label="House rules" data-value="Review every page.\n"/);
   assert.match(editor('teams', team), />Remove</);
   assert.equal(delegationCycle({ main: ['lead'], lead: ['peer'], peer: ['lead'] }), 'lead');

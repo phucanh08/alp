@@ -13,6 +13,7 @@ import { exportBeads, importBeads, parseJsonl } from './core/beads.js';
 import { findFormula, formulaDirs, listFormulas, pourFormula } from './core/formulas.js';
 import { commandDecision, profileFor } from './core/permissions.js';
 import { describeVerification, runVerify, verifyConfig } from './core/verify.js';
+import { setup } from './client/setup.js';
 import { diagnose, repair } from './client/doctor.js';
 import { ago, duration, renderLog, renderPs } from './client/render.js';
 import { installedProgram, installService, serviceFor, uninstallService } from './client/service.js';
@@ -29,6 +30,9 @@ import { languageSetting, setLanguage } from './core/user-settings.js';
 
 const USAGE = `Usage:
   alp <init|upgrade> [directory]
+  alp setup [directory] [--runtime codex|claude|mix] [--prefer claude|codex]
+            [--claude-model M] [--codex-model M] [--claude-supervisor M] [--codex-supervisor M]
+            [--claude-oracle M] [--codex-oracle M]   write Phở/Cafe's agent profiles to .alp/settings.json
   alp daemon <start|stop|status|restart>
   alp daemon <install|uninstall>         run alpd as a login service that restarts after a crash
   alp acp                                serve ALP to an editor (Zed, JetBrains) over the Agent Client Protocol on stdio
@@ -1184,7 +1188,7 @@ async function interrupt(args) {
   console.log('Interrupted');
 }
 
-const commands = { init: args => project('init', args), upgrade: args => project('upgrade', args), daemon, doctor, run, ps, top, attach, send, questions, answer, log, board, tasks: tasksCommand, task: taskCommand, formula: formulaCommand, permissions: permissionsCommand, agents: args => libraryCommand('agents', args), skills: args => libraryCommand('skills', args), mcp: args => ['add', 'rm', 'mv', 'cp', 'test', 'show', 'edit'].includes(args[0]) ? editCommand('mcp', args) : libraryCommand('mcp', args), hooks: args => libraryCommand('hooks', args), providers: args => libraryCommand('providers', args), provider: args => editCommand('providers', args), teams: teamsCommand, trust: trustCommand, agent: args => editCommand('agents', args), team: args => editCommand('teams', args), skill: args => editCommand('skills', args), hook: args => editCommand('hooks', args), verify, recall, pause, resume, language, interrupt, acp: acpCommand, web: webCommand };
+const commands = { setup: args => setup(args, alpHome()), init: args => project('init', args), upgrade: args => project('upgrade', args), daemon, doctor, run, ps, top, attach, send, questions, answer, log, board, tasks: tasksCommand, task: taskCommand, formula: formulaCommand, permissions: permissionsCommand, agents: args => libraryCommand('agents', args), skills: args => libraryCommand('skills', args), mcp: args => ['add', 'rm', 'mv', 'cp', 'test', 'show', 'edit'].includes(args[0]) ? editCommand('mcp', args) : libraryCommand('mcp', args), hooks: args => libraryCommand('hooks', args), providers: args => libraryCommand('providers', args), provider: args => editCommand('providers', args), teams: teamsCommand, trust: trustCommand, agent: args => editCommand('agents', args), team: args => editCommand('teams', args), skill: args => editCommand('skills', args), hook: args => editCommand('hooks', args), verify, recall, pause, resume, language, interrupt, acp: acpCommand, web: webCommand };
 const [command, ...args] = process.argv.slice(2);
 try {
   if (!Object.hasOwn(commands, command)) throw new UsageError();

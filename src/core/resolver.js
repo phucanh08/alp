@@ -231,6 +231,7 @@ export async function resolveAgent(projectRoot, { agent, library, templates } = 
     ...(config.mode !== undefined ? { mode: config.mode } : {}),
     ...(config.description !== undefined ? { description: config.description } : {}),
     ...(typeof config.context === 'number' ? { context: config.context } : {}),
+    ...(config.autocompact !== undefined ? { autocompact: config.autocompact } : {}),
     mcp: { mcpServers: servers },
   });
 }

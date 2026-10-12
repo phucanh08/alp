@@ -24,6 +24,10 @@ expected here. If Codex is not on `PATH`, set `ALP_CODEX_BIN` to its absolute pa
 
 ## 2. Point Phở and Cafe at Codex
 
+In a project, `alp setup --runtime codex` writes Codex-only profiles for every Phở and
+Cafe agent, the oracle included, into `.alp/settings.json`. To point every project at
+Codex instead, override the teams in your library:
+
 ```sh
 alp team edit pho  --member-model main=codex:gpt-6.1-sol --member-thinking main=high \
                    --supervisor-model codex:gpt-6-luna --supervisor-thinking medium

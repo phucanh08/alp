@@ -349,6 +349,20 @@ default) or 100000 to 1000000 tokens, to work with less before compaction. Claud
 gets it as its compaction window; Codex compacts at 90% of it. In Paseo it is the
 Context select on the agent's General tab.
 
+For project-specific choices, each `profile.<team>.<agent>` in `.alp/settings.json`
+can hold `profiles: ["provider:model:effort", "provider:*", ...]` and `autocompact`;
+the effort may be left out, and `provider:*` stands for any model of that provider.
+Main runs on exactly one named model. An agent that runs by itself starts on its first
+named model. An agent assigned work with several profiles or a
+`provider:*` runs on the model and effort its requester picks for that task (with a
+`modelReason`), never a default. `autocompact` is `"auto"` or 100000–1000000 tokens,
+shared by the agent's model choices. A numeric value goes directly to Codex's
+compaction token limit or Claude's auto-compact window; Claude reserves response
+space and may compact before that window fills. Unlike the older `context` option,
+ALP does not multiply a Codex `autocompact` value by 90%. `"auto"` keeps the existing
+native/agent context defaults. Agent JSON may also set `autocompact`; a numeric
+project value takes precedence.
+
 ## Doctor
 
 `alp doctor` checks what ALP needs on this machine and, inside an ALP project

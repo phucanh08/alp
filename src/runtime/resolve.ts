@@ -2,7 +2,8 @@ import path from 'node:path';
 import { access, readFile, stat } from 'node:fs/promises';
 import { resolveWorkflow } from '../core/workflow.js';
 import { initProject } from '../core/init.js';
-import { resolveAgent } from '../core/resolver.js';
+import { profileModel, agentProfiles, selectedProfile } from '../core/profiles.js';
+import { jsonObject, resolveAgent } from '../core/resolver.js';
 import { resolveTeam } from '../core/teams.js';
 import { loadHooks } from '../core/hooks.js';
 import { acpModel, loadProvider } from '../core/providers.js';
@@ -14,7 +15,7 @@ import { userLanguage } from '../core/user-settings.js';
 import { claudeSandboxAvailable } from './claude-transport.js';
 import type { ResolvedAgent } from '../core/types.js';
 import type { AlpRuntimeAdapter } from '../core/adapter.js';
-import { DEFAULT_CLAUDE_MODEL, DEFAULT_MODEL, ORACLE_MODELS, ORACLE_THINKING, modes, thinkingOptions, thinkingOptionsFor } from './catalog.js';
+import { DEFAULT_CLAUDE_MODEL, DEFAULT_MODEL, ORACLE_MODELS, ORACLE_THINKING, models, modes, thinkingOptions, thinkingOptionsFor } from './catalog.js';
 
 /** Codex and Claude Code, or an ACP agent the user's library defines (ALPD §46). */
 export type RuntimeKind = 'codex' | 'claude' | 'acp';
@@ -116,13 +117,20 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
   if (!path.isAbsolute(spec.cwd) || !(await stat(spec.cwd)).isDirectory()) throw new Error('Session cwd must be an existing absolute directory');
   if (spec.workdir !== undefined && (!path.isAbsolute(spec.workdir) || !(await stat(spec.workdir)).isDirectory())) throw new Error('Session workdir must be an existing absolute directory');
   const starter = options.templates ? { templates: options.templates } : {};
-  if (options.initialize !== false && (!(await exists(path.join(spec.cwd, 'ALP.md'))) || !(await exists(path.join(spec.cwd, '.alp', 'settings.json'))))) await initProject(spec.cwd, starter);
+  if (options.initialize !== false && (!(await exists(path.join(spec.cwd, 'ALP.md'))) || !(await exists(path.join(spec.cwd, '.alp', 'settings.json'))))) await initProject(spec.cwd, { ...starter, library: options.library });
   if (options.library) await ensureLibrary(options.library, options.templates ? { templates: options.templates } : {});
   const restored = spec.restore;
   if (restored && spec.agent !== undefined && spec.agent !== restored.agent) throw new Error('Cannot resume a thread as a different ALP agent');
   const { team, ...workflow } = await resolveWorkflow(spec.cwd, spec.workflow, restored?.workflow, { library: options.library, templates: options.templates });
   const agent = await resolveAgent(spec.cwd, { agent: spec.agent ?? restored?.agent, library: options.library, templates: options.templates });
-  if (agent.name === 'oracle' && !restored && !ORACLE_MODELS.includes(spec.model ?? '')) throw new Error(`Oracle runs on ${ORACLE_MODELS.join(' or ')}; choose one`);
+  const oracleModels = team?.oracleModels ?? ORACLE_MODELS;
+  if (agent.name === 'oracle' && !restored && !oracleModels.includes(spec.model ?? '')) throw new Error(`Oracle runs on ${oracleModels.join(' or ')}; choose one`);
+  const projectSettings: import('../core/types.js').RawSettings = await jsonObject(path.join(spec.cwd, '.alp/settings.json'), 'INVALID_SETTINGS');
+  const profile = projectSettings.profile?.[workflow.mode]?.[agent.name];
+  const modelProfiles: Record<string, import('../core/types.js').AgentModelConfig[]> = Object.fromEntries(Object.entries(projectSettings.profile?.[workflow.mode] ?? {}).map(([name, config]) => [name, agentProfiles(config, name)]));
+  const requestedModel = restored?.model ? `${restored.runtime ?? agent.runtime.provider ?? 'codex'}:${restored.model}` : spec.model;
+  const profileChoice = selectedProfile(modelProfiles[agent.name] ?? [], requestedModel);
+  const projectModel = profileModel(profileChoice);
   const compiled = await compileAgent(new InstructionsAdapter(), agent);
   // Order (ALPD §42): the caller, then settings.json's runtime, then the team's choice for this member, then the agent's own.
   // A resumed session keeps its model; it keeps the team's effort while it still runs on the team's model.
@@ -132,8 +140,8 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
   const member = Object.hasOwn(base.members, agent.name) && (team || agent.name === main) ? base.members[agent.name] : undefined;
   const sameModel = (id?: string) => id === undefined || restored?.model === undefined || `${restored.runtime}:${restored.model}` === id || restored.model === id;
   const teamChoice = member && !agent.projectRuntime?.model && !agent.projectRuntime?.provider && spec.model === undefined && sameModel(member.model) ? member : undefined;
-  let runtimeKind = restored?.runtime ?? (teamChoice?.model ? undefined : agent.runtime.provider) ?? 'codex';
-  let model = restored?.model ?? spec.model ?? teamChoice?.model ?? agent.runtime.model ?? (runtimeKind === 'claude' ? DEFAULT_CLAUDE_MODEL : DEFAULT_MODEL);
+  let runtimeKind = restored?.runtime ?? profileChoice?.provider ?? (teamChoice?.model ? undefined : agent.runtime.provider) ?? 'codex';
+  let model = restored?.model ?? spec.model ?? projectModel ?? teamChoice?.model ?? agent.runtime.model ?? (runtimeKind === 'claude' ? DEFAULT_CLAUDE_MODEL : DEFAULT_MODEL);
   if (model.startsWith('codex:')) { runtimeKind = 'codex'; model = model.slice('codex:'.length); }
   if (model.startsWith('claude:')) { runtimeKind = 'claude'; model = model.slice('claude:'.length); }
   if (model.startsWith('codex/')) { runtimeKind = 'codex'; model = model.slice('codex/'.length); }
@@ -156,8 +164,12 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
   const mode = permissions ? capMode(requested, permissions.base) : requested;
   // An ACP agent chooses its own effort.
   const availableThinking = runtimeKind === 'acp' ? [] : thinkingOptionsFor(runtimeKind as 'codex' | 'claude', model);
-  const thinking = runtimeKind === 'acp' ? 'none' : spec.thinking ?? agent.projectRuntime?.reasoning ?? teamChoice?.thinking ?? agent.runtime.reasoning ??
+  const preferred = runtimeKind === 'acp' ? 'none' : spec.thinking ?? profileChoice?.effort ?? agent.projectRuntime?.reasoning ?? (agent.name === 'oracle' ? team?.oracleThinking?.[`${runtimeKind}:${model}`] ?? team?.oracleThinking?.[runtimeKind] : undefined) ?? teamChoice?.thinking ?? agent.runtime.reasoning ??
     (agent.name === 'oracle' ? ORACLE_THINKING : availableThinking.length ? 'medium' : 'none');
+  // A default the model does not take gives way to the model's own (GPT-6 Astra runs at low only); an explicit choice is checked below.
+  const thinking = spec.thinking === undefined && availableThinking.length && !availableThinking.some(candidate => candidate.id === preferred)
+    ? models.find(candidate => candidate.id === `${runtimeKind}:${model}`)?.defaultThinkingOptionId ?? availableThinking[0].id
+    : preferred;
   if (!model.trim()) throw new Error('Model must be nonempty');
   if (!modes.some(m => m.id === mode)) throw new Error(`Unsupported mode '${mode}'`);
   // Only Claude's Bash sandbox keeps a session in a copy from writing elsewhere.
@@ -191,7 +203,7 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
   const houseRules = base.houseRules;
   const hooks = await loadHooks(agent);
   return {
-    agent, workflow, team, houseRules, hooks, runtimeKind: runtimeKind as RuntimeKind, model, ...(acp ? { acp } : {}), mode, permissions, thinking, threadId: restored?.threadId,
+    agent, workflow, team, oracleModels, modelProfiles, houseRules, hooks, runtimeKind: runtimeKind as RuntimeKind, model, ...(acp ? { acp } : {}), mode, permissions, thinking, threadId: restored?.threadId,
     workdir: spec.workdir ?? agent.projectRoot,
     copy: Boolean(spec.copy && spec.workdir),
     ...(spec.copy && spec.copyOf ? { copyOf: spec.copyOf } : {}),
@@ -199,6 +211,7 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
     mcp, env: { ...spec.env }, persist: spec.persist ?? false, keepThread: spec.keepThread ?? false,
     // ALPD §57: the window the agent works in before its runtime compacts; absent, the model's.
     ...(agent.context ? { context: agent.context } : {}),
+    autocompact: typeof profile?.autocompact === 'number' ? profile.autocompact as number : typeof agent.autocompact === 'number' ? agent.autocompact : undefined,
     // ALPD §54: the language everything the user reads is written in.
     language: options.language ?? await userLanguage(options.library),
   };
