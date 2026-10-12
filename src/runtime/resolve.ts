@@ -155,7 +155,9 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
     const { provider: id, model: native } = acpModel(model);
     acp = await loadProvider(options.library, id) as AcpProvider | undefined;
     if (!acp) throw new Error(`No ACP provider '${id}': add one to your library with alp provider add ${id}, or name codex or claude`);
-    if (native && acp.models && !acp.models.some(candidate => candidate.id === native)) throw new Error(`ACP provider '${id}' lists no model '${native}'`);
+    if (acp.enabled === false) throw new Error(`ACP provider '${id}' is turned off; turn it on in the web app's Providers settings or in providers/${id}.json`);
+    const listed = [...(acp.models ?? []), ...(acp.additionalModels ?? [])];
+    if (native && acp.models && !listed.some(candidate => candidate.id === native)) throw new Error(`ACP provider '${id}' lists no model '${native}'`);
     if (spec.copy) throw new Error('A review copy cannot run on an ACP agent: ALP cannot keep its commands inside the copy');
   }
   // Main has full access unless the caller limits it; a permission profile caps the mode at its base.

@@ -170,6 +170,12 @@ test('models, resuming, and what an ACP session cannot do', async t => {
   // A provider listing models refuses others.
   await saveEntry('providers', 'listed', { provider: { kind: 'acp', command: process.execPath, args: [FAKE], models: [{ id: 'small' }] } }, { scope: 'library', library: home });
   await assert.rejects(runtime.open('other', { cwd: root, model: 'acp:listed/huge' }), /ACP provider 'listed' lists no model 'huge'/);
+  // Models added in the web app count as listed; a provider turned off there runs nothing.
+  await saveEntry('providers', 'added', { provider: { kind: 'acp', command: process.execPath, args: [FAKE], env: { FAKE_ACP_MODELS: 'small,large' }, models: [{ id: 'small' }], additionalModels: [{ id: 'large' }] } }, { scope: 'library', library: home });
+  await runtime.open('added', { cwd: root, model: 'acp:added/large' });
+  await runtime.close('added');
+  await saveEntry('providers', 'off', { provider: { kind: 'acp', command: process.execPath, args: [FAKE], enabled: false } }, { scope: 'library', library: home });
+  await assert.rejects(runtime.open('off', { cwd: root, model: 'acp:off' }), /ACP provider 'off' is turned off/);
   // A resumed session loads the agent's session; the history it replays is not shown again, and the instructions are not sent again.
   const resumed = await runtime.open('again', { cwd: root, restore: { agent: 'main', threadId: sessionId, runtime: 'acp', model: 'fake/large' } });
   assert.equal(resumed.runtime, 'acp');

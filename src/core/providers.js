@@ -12,11 +12,17 @@ import { settingsKeys, unknownMessage } from './validation.js';
  *
  *   { "kind": "acp", "label": "Gemini", "command": "gemini", "args": ["--experimental-acp"],
  *     "env": {}, "models": [{ "id": "gemini-2.5-pro" }] }
+ *
+ * The web app's Providers screen (ALPD §65) adds `enabled` (false turns it off), `additionalModels`
+ * (added to the models the agent reports, where `models` replaces them) and `params`, which
+ * Paseo's catalog carries and ALP keeps without using.
  */
 
-export const PROVIDER_SETTINGS = ['$schema', 'kind', 'label', 'description', 'command', 'args', 'env', 'models'];
+export const PROVIDER_SETTINGS = ['$schema', 'kind', 'label', 'description', 'command', 'args', 'env', 'models', 'additionalModels', 'enabled', 'params'];
 /** Runtimes ALP has built in; no provider takes their names. */
 export const BUILTIN_RUNTIMES = ['codex', 'claude', 'acp'];
+/** Names no provider takes: the runtimes, and `alp`, which the web app lists ALP's teams under. */
+export const RESERVED_PROVIDERS = [...BUILTIN_RUNTIMES, 'alp'];
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const nonempty = value => typeof value === 'string' && value.trim().length > 0;
@@ -25,7 +31,7 @@ const validId = id => typeof id === 'string' && /^[\w.-]+$/.test(id) && id !== '
 /** Checks a provider definition. */
 export function validateProvider(config, source, id) {
   const check = (ok, message) => { if (!ok) throw new AlpError('INVALID_PROVIDER', `${source}: ${message}`); };
-  if (id !== undefined) check(validId(id) && !BUILTIN_RUNTIMES.includes(id), `'${id}' cannot name a provider: ${BUILTIN_RUNTIMES.join(', ')} are built in`);
+  if (id !== undefined) check(validId(id) && !RESERVED_PROVIDERS.includes(id), `'${id}' cannot name a provider: ${RESERVED_PROVIDERS.join(', ')} are taken`);
   check(object(config), 'expected an object');
   const { unknown } = settingsKeys(config, PROVIDER_SETTINGS);
   check(!unknown.length, unknown.length ? unknownMessage(unknown[0], PROVIDER_SETTINGS) : '');
@@ -34,21 +40,24 @@ export function validateProvider(config, source, id) {
   check(nonempty(config.command), 'command must be a nonempty string');
   if (config.args !== undefined) check(Array.isArray(config.args) && config.args.every(arg => typeof arg === 'string'), 'args must be a list of strings');
   if (config.env !== undefined) check(object(config.env) && Object.values(config.env).every(value => typeof value === 'string'), 'env must map names to strings');
-  if (config.models !== undefined) {
-    check(Array.isArray(config.models) && config.models.every(model => object(model) && nonempty(model.id) && !/\s/.test(model.id) &&
-      Object.keys(model).every(key => ['id', 'label', 'description'].includes(key)) &&
-      ['label', 'description'].every(key => model[key] === undefined || typeof model[key] === 'string')), 'models must list { id, label?, description? }');
-    check(new Set(config.models.map(model => model.id)).size === config.models.length, 'models lists an id twice');
+  for (const key of ['models', 'additionalModels']) {
+    if (config[key] === undefined) continue;
+    check(Array.isArray(config[key]) && config[key].every(model => object(model) && nonempty(model.id) && !/\s/.test(model.id) &&
+      Object.keys(model).every(field => ['id', 'label', 'description'].includes(field)) &&
+      ['label', 'description'].every(field => model[field] === undefined || typeof model[field] === 'string')), `${key} must list { id, label?, description? }`);
+    check(new Set(config[key].map(model => model.id)).size === config[key].length, `${key} lists an id twice`);
   }
+  if (config.enabled !== undefined) check(typeof config.enabled === 'boolean', 'enabled must be true or false');
+  if (config.params !== undefined) check(object(config.params), 'params must be an object');
   return config;
 }
 
 /**
  * A provider of the library, with its id; undefined when there is none.
- * @returns {Promise<{ id: string, kind: 'acp', label: string, description?: string, command: string, args: string[], env: Record<string, string>, models?: Array<{ id: string, label?: string, description?: string }> } | undefined>}
+ * @returns {Promise<{ id: string, kind: 'acp', label: string, description?: string, command: string, args: string[], env: Record<string, string>, models?: Array<{ id: string, label?: string, description?: string }>, additionalModels?: Array<{ id: string, label?: string, description?: string }>, enabled?: boolean, params?: Record<string, unknown> } | undefined>}
  */
 export async function loadProvider(library, id) {
-  if (!library || !validId(id) || BUILTIN_RUNTIMES.includes(id)) return undefined;
+  if (!library || !validId(id) || RESERVED_PROVIDERS.includes(id)) return undefined;
   const file = path.join(library, 'providers', `${id}.json`);
   let text;
   try { text = await readFile(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }

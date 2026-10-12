@@ -10,6 +10,7 @@ import { directorySuggestions, fileExplorer } from './files.js';
 import { createPlugins } from './plugins.js';
 import { createWorkspaces } from './workspaces.js';
 import { createDaemonConfig, createRelay, type RelaySettings } from './relay.js';
+import { createProviders } from './providers.js';
 import type { DaemonServer } from '../server.js';
 
 export { createPaseoGateway, NOT_IMPLEMENTED, PASEO_PROTOCOL_VERSION } from './gateway.js';
@@ -66,8 +67,9 @@ export function createPaseoBridge({ daemon, version, token, serverId, home, rela
   const plugins = createPlugins({ log });
   const checkouts = createCheckouts({ broadcast, log });
   const relay = createRelay({ home, serverId, attach: socket => gateway.attach(socket), initial: relaySettings, log: message => log?.(message) });
-  const daemonConfig = createDaemonConfig({ relay, serverId, broadcast, inDevelopment, version, listen, startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString() });
-  Object.assign(handlers, quietHandlers, daemonConfig.handlers, agents.handlers, workspaces.handlers, plugins.handlers, checkouts.handlers, { directory_suggestions_request: directorySuggestions, file_explorer_request: fileExplorer });
+  const providers = createProviders({ home, broadcast, alpEntry: cwd => agents.providerEntry(cwd), log: message => log?.(message) });
+  const daemonConfig = createDaemonConfig({ relay, providers, serverId, broadcast, inDevelopment, version, listen, startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString() });
+  Object.assign(handlers, quietHandlers, daemonConfig.handlers, providers.handlers, agents.handlers, workspaces.handlers, plugins.handlers, checkouts.handlers, { directory_suggestions_request: directorySuggestions, file_explorer_request: fileExplorer });
   Object.assign(features, ENTRY_POINTS, daemonConfig.features, agents.features, workspaces.features, plugins.features, checkouts.features);
   return Object.assign(gateway, {
     relay,

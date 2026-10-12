@@ -523,27 +523,6 @@ export function createAgents({ daemon, broadcast, directory, log = () => {} }: {
       }
     },
 
-    async get_providers_snapshot_request(message: Inbound<'get_providers_snapshot_request'>) {
-      const preview = await teams(message.cwd);
-      return {
-        type: 'get_providers_snapshot_response',
-        payload: {
-          requestId: message.requestId,
-          generatedAt: new Date().toISOString(),
-          entries: [{
-            provider: PROVIDER,
-            status: 'ready',
-            enabled: true,
-            label: 'ALP',
-            description: 'Teams of Codex and Claude Code agents',
-            models: preview.teams.map(team => ({ provider: PROVIDER, id: team.id, label: team.label, ...(team.description ? { description: team.description } : {}), isDefault: team.id === preview.team })),
-            modes: availableModes,
-            defaultModeId: preview.mode,
-          }],
-        },
-      } satisfies Outbound;
-    },
-
     async create_agent_request(message: Inbound<'create_agent_request'>, client: ClientContext) {
       const { config } = message;
       const fail = (error: unknown): Outbound => ({ type: 'status', payload: { status: 'agent_create_failed', requestId: message.requestId, error: error instanceof Error ? error.message : String(error) } });
@@ -653,6 +632,21 @@ export function createAgents({ daemon, broadcast, directory, log = () => {} }: {
   return {
     handlers,
     view,
+    /** ALP itself as the app lists providers: its teams are the models (ALPD §62 step 3). */
+    async providerEntry(cwd?: string) {
+      const preview = await teams(cwd);
+      return {
+        provider: PROVIDER,
+        status: 'ready' as const,
+        enabled: true,
+        source: 'builtin' as const,
+        label: 'ALP',
+        description: 'Teams of Codex and Claude Code agents',
+        models: preview.teams.map(team => ({ provider: PROVIDER, id: team.id, label: team.label, ...(team.description ? { description: team.description } : {}), isDefault: team.id === preview.team })),
+        modes: availableModes,
+        defaultModeId: preview.mode,
+      };
+    },
     features: { providersSnapshot: true, providerSubagents: true, projectedSubagentTimeline: true, providerSubagentNesting: true },
     start() {
       started ??= (async () => {
