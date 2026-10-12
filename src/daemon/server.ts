@@ -61,6 +61,8 @@ export type DaemonServer = {
    * it says daemon.hello first, as a socket client does, and gets JSON-RPC messages back through `send`.
    */
   accept(send: (message: unknown) => void): { receive(message: unknown): void; close(): void };
+  /** Adds a method that lives outside the runtime, such as the web app's pairing link (ALPD §64). */
+  extend(method: string, handler: (params: any) => Promise<unknown> | unknown): void;
   close(): Promise<void>;
 };
 
@@ -644,6 +646,11 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   });
 
   return {
+    extend(method, handler) {
+      if (Object.hasOwn(handlers, method)) throw new Error(`${method} is already a method`);
+      handlers[method] = (_connection, params) => handler(params);
+    },
+
     async listen() {
       await unlink(socketPath).catch(() => {});
       await new Promise<void>((resolve, reject) => {

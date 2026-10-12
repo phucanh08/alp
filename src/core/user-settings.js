@@ -57,3 +57,19 @@ export async function setLanguage(home, language) {
   await rename(temporary, file);
   return languageSetting(home);
 }
+
+/**
+ * Changes the relay setting under web (ALPD §64), keeping everything else in settings.json.
+ * @param {string} home
+ * @param {{ enabled?: boolean, endpoint?: string, useTls?: boolean }} patch
+ */
+export async function setWebRelay(home, patch) {
+  const { file, settings } = await readSettings(home);
+  const next = { ...settings, web: { ...settings.web, relay: { ...settings.web?.relay, ...patch } } };
+  validateUserSettings(next, file);
+  await mkdir(home, { recursive: true });
+  const temporary = `${file}.${randomUUID().slice(0, 8)}.tmp`;
+  await writeFile(temporary, JSON.stringify(next, null, 2) + '\n');
+  await rename(temporary, file);
+  return next.web.relay;
+}

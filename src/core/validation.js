@@ -159,8 +159,18 @@ export function validateUserSettings(settings, source) {
   }
   if (settings.web !== undefined) {
     check(object(settings.web), 'web must be an object');
-    const extra = Object.keys(settings.web).find(field => !['enabled', 'port'].includes(field));
-    check(!extra, `unsupported web field '${extra}'; use enabled or port`);
+    const extra = Object.keys(settings.web).find(field => !['enabled', 'port', 'relay'].includes(field));
+    check(!extra, `unsupported web field '${extra}'; use enabled, port or relay`);
+    // The relay that lets Paseo's app reach alpd from another device (ALPD §64).
+    const relay = settings.web.relay;
+    if (relay !== undefined) {
+      check(object(relay), 'web.relay must be an object');
+      const unsupported = Object.keys(relay).find(field => !['enabled', 'endpoint', 'useTls'].includes(field));
+      check(!unsupported, `unsupported web.relay field '${unsupported}'; use enabled, endpoint or useTls`);
+      if (relay.enabled !== undefined) check(typeof relay.enabled === 'boolean', 'web.relay.enabled must be true or false');
+      if (relay.endpoint !== undefined) check(typeof relay.endpoint === 'string' && /^[a-z0-9.-]+:\d{1,5}$/i.test(relay.endpoint), 'web.relay.endpoint must be host:port, such as relay.paseo.sh:443');
+      if (relay.useTls !== undefined) check(typeof relay.useTls === 'boolean', 'web.relay.useTls must be true or false');
+    }
     if (settings.web.enabled !== undefined) check(typeof settings.web.enabled === 'boolean', 'web.enabled must be true or false');
     if (settings.web.port !== undefined) check(Number.isInteger(settings.web.port) && settings.web.port >= 1024 && settings.web.port <= 65535, 'web.port must be a port from 1024 to 65535');
   }

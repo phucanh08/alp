@@ -37,6 +37,7 @@ const USAGE = `Usage:
   alp daemon <install|uninstall>         run alpd as a login service that restarts after a crash
   alp acp                                serve ALP to an editor (Zed, JetBrains) over the Agent Client Protocol on stdio
   alp web [--print]                      open the local web app alpd serves; --print only prints its address
+  alp web pair [--on|--off]              the link that pairs Paseo's app on another device through the relay; --on or --off turns the relay on or off
   alp doctor [--project DIR] [--fix] [--json]   check this machine and project; --fix repairs what is safe to
   alp run [--agent A] [--team pho|cafe|ID] [--model M] [--mode read-only|workspace-write|full-access] [--thinking T] [--project DIR] [--json] <prompt>
   alp ps [--all]
@@ -1150,6 +1151,7 @@ async function recall(args) {
 
 /** alp web: opens the web app alpd serves on 127.0.0.1, with the token in the address (ALPD §61). */
 async function webCommand(args) {
+  if (args[0] === 'pair') return pairCommand(args.slice(1));
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { print: { type: 'boolean' } } });
   if (positionals.length) throw new UsageError();
   const lock = await readLock(alpHome()).catch(() => undefined);
@@ -1171,6 +1173,29 @@ async function webCommand(args) {
   if (values.print) return;
   const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
   spawn(opener, [url], { stdio: 'ignore', detached: true }).on('error', () => console.error('Open the address above in your browser')).unref();
+}
+
+/**
+ * alp web pair: the link that pairs Paseo's app on another device with alpd through Paseo's relay
+ * (ALPD §64). The device then signs in with the token that `alp web --print` shows.
+ */
+async function pairCommand(args) {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { on: { type: 'boolean' }, off: { type: 'boolean' } } });
+  if (positionals.length || (values.on && values.off)) throw new UsageError();
+  await start();
+  const client = await running();
+  try {
+    const pairing = await client.request('web.pairing', values.on ? { enable: true } : values.off ? { enable: false } : {});
+    if (!pairing.relayEnabled) {
+      console.log(`The relay is off${values.off ? ' now' : ''}. Turn it on with: alp web pair --on`);
+      return;
+    }
+    console.log(`Relay ${pairing.endpoint}: ${pairing.connected ? 'connected' : 'connecting'}`);
+    console.log(`Open this link on the device, or scan the QR code in the web app (Settings → host → Pair device):\n${pairing.url}`);
+    console.log("When Paseo's app asks for a password, give it alpd's token: the part after #token= in alp web --print.");
+  } finally {
+    client.close();
+  }
 }
 
 /** alp acp: ALP as an ACP agent for editors; stdout carries only the protocol (ALPD §60). */
