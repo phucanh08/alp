@@ -89,7 +89,10 @@ export function renderLog(rootId, entries) {
           : `◔ ${entry.agent} context ${entry.percent}% full: ${entry.level === 'now' ? 'told to hand off now' : 'told to plan a handoff'}`;
         break;
       case 'skill':
-        text = `✦ ${entry.agent} uses skill ${entry.skill}${entry.via === 'skill' ? ' (Skill tool)' : ''}`;
+        // alp_skill saving a skill (name, roles) shares the name with an agent using one (skill, via).
+        text = Array.isArray(entry.roles)
+          ? `✦ ${entry.agent} saved skill ${entry.name} for ${entry.roles.join(', ')}`
+          : `✦ ${entry.agent} uses skill ${entry.skill}${entry.via === 'skill' ? ' (Skill tool)' : ''}`;
         break;
       case 'compacted':
         text = entry.failed
@@ -120,6 +123,9 @@ export function renderLog(rootId, entries) {
         break;
       case 'hook.trust':
         text = `${entry.trusted ? '✓ the user trusts' : '✗ the user did not trust'} the hooks of ${entry.project}${entry.outcome ? ` (${entry.outcome})` : ''}`;
+        break;
+      case 'runtime.slip':
+        text = `⚠ ALP could not handle ${entry.agent}'s ${entry.method}: ${entry.error}; the session went on`;
         break;
       default:
         text = `${entry.event}${entry.branch ? ` ${entry.branch}` : ''}${entry.status ? ` ${entry.status}` : ''}`;

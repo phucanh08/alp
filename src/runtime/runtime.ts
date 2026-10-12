@@ -1807,7 +1807,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       : entry.event === 'human.answer' ? `user ${entry.outcome} ${entry.questionId}${entry.answer ? `: ${clip(entry.answer)}` : ''}`
       : entry.event === 'board.pin' ? `${entry.agent} pinned ${entry.kind}${entry.paths ? ` ${entry.paths.join(', ')}` : ''}: ${clip(entry.body)}`
       : entry.event === 'lesson' ? `${entry.agent} recorded a ${entry.scope} lesson: ${clip(entry.lesson)}`
-      : entry.event === 'skill' ? `${entry.agent} saved skill ${entry.name} for ${entry.roles.join(', ')} with the user's approval`
+      // Two entries share the name: alp_skill saving one (name, roles), and an agent using one (skill, via), which skillUse journals itself.
+      : entry.event === 'skill' && Array.isArray(entry.roles) ? `${entry.agent} saved skill ${entry.name} for ${entry.roles.join(', ')} with the user's approval`
       : entry.event === 'task' ? `${entry.agent} ${TASK_PAST[entry.action] ?? entry.action} task ${entry.id} "${clip(entry.title, 120)}"${entry.status ? ` (now ${entry.status})` : ''}${entry.detail ? `: ${clip(entry.detail)}` : ''}`
       : entry.event === 'epic.landed' ? `${entry.agent} closed ${entry.id} "${clip(entry.title, 120)}": ${entry.tasks} tasks, ${entry.reworked} reworked, ${entry.unverified?.length ?? 0} closed unverified`
       : entry.event === 'recall' ? `${entry.agent} recalled ${entry.recalled} assignment ${entry.assignmentId}: ${clip(entry.question)}`
@@ -4090,7 +4091,16 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
           : method === 'item/acp/permission' ? acpPermissionRequest(sessionId, session, params)
           : approve(sessionId, session, method, params),
     );
-    transport.onNotification((method, params) => notification(sessionId, session, method, params));
+    // What ALP makes of a notification is its own bookkeeping: a slip in it is logged, never thrown into the
+    // transport's read loop, where it would end the runtime's process in the middle of a turn (#69).
+    transport.onNotification((method, params) => {
+      try {
+        notification(sessionId, session, method, params);
+      } catch (error: any) {
+        console.error(`${new Date().toISOString()} ${session.mapping.agent.name} ${sessionId}: handling ${method} failed: ${error?.stack ?? error}`);
+        try { runLog(rootOf(sessionId), { event: 'runtime.slip', sessionId, agent: session.mapping.agent.name, method, error: String(error?.message ?? error).slice(0, 500) }); } catch {}
+      }
+    });
     transport.onFailure((error) => {
       // A transport ALP already replaced reports nothing.
       if (session.closed || session.runtime !== transport) return;
