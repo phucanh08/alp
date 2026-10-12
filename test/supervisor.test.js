@@ -110,6 +110,9 @@ test('main starts a supervisor on Sonnet 5 that reviews each turn and asks main 
   supervisor.finish('Asked about the claimed test result');
   await until(() => main.started.length === 2);
   assert.match(main.started[1].params.input.at(-1).text, /note from supervisor[\s\S]*exit 1 but you said they pass/);
+  // Main answers in its reply; mail to the supervisor says so instead of "not one of your assignments".
+  assert.match((await main.call('alp_send', { to: 'supervisor', kind: 'note', body: 'I will report what the command printed.' })).error, /answer its note in your reply/);
+  assert.match((await main.call('alp_send', { to: 'nobody', kind: 'note', body: 'x' })).error, /Not one of your live assignments/);
 
   assert.equal((await main.call('alp_lesson', { scope: 'project', lesson: 'Report the test result the command actually printed.' })).recorded, true);
   assert.equal((await main.call('alp_lesson', { scope: 'user', lesson: 'Never claim checks that did not pass.' })).recorded, true);

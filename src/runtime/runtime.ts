@@ -3290,6 +3290,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const named = [...session.assignments.values()].filter(candidate => candidate.agent === args.to);
     const assignment = session.assignments.get(args.to) ?? (named.length === 1 ? named[0] : undefined);
     if (named.length > 1) return toolResult(false, { error: `Several live ${args.to} assignments; use the assignment id` });
+    // Models (GPT especially) answer the supervisor's note by mail; it reads main's reply instead.
+    const watcher = session.supervisor ? sessions.get(session.supervisor) : undefined;
+    if (!assignment && watcher && (args.to === session.supervisor || args.to === watcher.mapping.agent.name || args.to === 'supervisor')) {
+      return toolResult(false, { error: 'The supervisor takes no mail: answer its note in your reply, where it reads it, and record what you learned with alp_lesson' });
+    }
     if (!assignment) return toolResult(false, { error: 'Not one of your live assignments; other agents are reached through your requester' });
     if (args.kind === 'answer') {
       if (!assignment.ask || args.replyTo !== assignment.ask.id) return toolResult(false, { error: 'No pending question with that replyTo on this assignment' });

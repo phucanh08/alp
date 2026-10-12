@@ -12,6 +12,8 @@ alp doctor          # checks Codex and Claude, settings, and leftovers; --fix re
 alp daemon start
 ```
 
+Only have Codex? See [running ALP on Codex only](docs/alp/codex-only.md): two commands point Phở and Cafe's main and supervisor at Codex models.
+
 The package provides the `alp` command and `alpd`, the per-user daemon that runs ALP sessions. To view and drive sessions in Paseo, also install the [Paseo plugin](plugins/paseo/README.md).
 
 ## Initialize a project
