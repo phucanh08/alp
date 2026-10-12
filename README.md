@@ -243,7 +243,7 @@ alp web --print    # prints the address instead
 
 The app is [Paseo](https://github.com/getpaseo/paseo)'s web app (Apache 2.0), built from a pinned commit with ALP's patches (`paseo-web/`) and run over alpd, so it looks and works like Paseo:
 
-- **Sidebar:** your projects and their workspaces, with their branch, pins, labels and unread marks. Add a project by typing its folder; a new workspace starts with its first agent.
+- **Sidebar:** your projects and their workspaces, with their branch, pins, labels and unread marks. Add a project by typing its folder or browsing to it (Add project → Browse folders); a new workspace starts with its first agent.
 - **Agents:** each session is an agent of the provider ALP, its team (Phở, Cafe, …) as the model. The timeline streams main's replies and tool calls; questions from the team are cards to answer; History and Find in chat search past sessions. The team members are the agent's subagents, each with its own timeline.
 - **ALP's own parts:** the Tasks panel and screen, the ALP project panel and the ALP settings screen (Settings → Plugins → alp-provider) come from ALP's Paseo plugin, which alpd runs.
 - **Changes and Files:** the checkout's diff, uncommitted or against its base branch, and its files, read-only.
