@@ -117,6 +117,24 @@ test('an agent\'s context setting reaches the runtime that compacts: a window fo
   validateAgentConfig({ context: 1_000_000 }, 'agent.json');
 });
 
+test('agent.json autocompact overrides legacy context and reaches each native runtime', async t => {
+  const { directory, root } = await project(t);
+  const main = path.join(root, '.alp', 'agents', 'main');
+  await mkdir(main, { recursive: true });
+  await writeFile(path.join(main, 'AGENT.md'), 'You are main.\n');
+  await writeFile(path.join(main, 'agent.json'), JSON.stringify({ context: 400000, autocompact: 200000 }));
+  for (const model of ['claude:claude-opus-5-5', 'codex:gpt-6.1-sol']) {
+    const agents = [];
+    const runtime = createAlpRuntime({ transport: fakeTransport(agents), supervisor: false, libraryDir: path.join(directory, 'home') });
+    try {
+      await runtime.open('root', { cwd: root, model });
+      assert.equal(model.startsWith('claude:') ? agents[0].config.context : agents[0].config.config.model_auto_compact_token_limit, 200000);
+    } finally { await runtime.shutdown(); }
+  }
+  validateAgentConfig({ autocompact: 'auto' }, 'agent.json');
+  assert.throws(() => validateAgentConfig({ autocompact: '200k' }, 'agent.json'), /autocompact/);
+});
+
 test('Claude reports the window and compaction point it resolved, and no guessed window before', async () => {
   const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env);
   const seen = [];

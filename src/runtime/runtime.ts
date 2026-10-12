@@ -8,11 +8,12 @@ import { discoverAgents } from '../core/resolver.js';
 import { CodexTransport } from './transport.js';
 import { ClaudeTransport } from './claude-transport.js';
 import { AcpTransport, acpDecision, acpWhat, type AcpPermission, type AcpProvider } from './acp-transport.js';
-import { modes, ORACLE_MODELS, withinMode, writes } from './catalog.js';
+import { models, modes, thinkingOptionsFor, withinMode, writes } from './catalog.js';
 import { runHook } from '../core/hook-run.js';
 import { hookMatches } from '../core/hooks.js';
 import { isTrusted, trustProject } from '../core/trust.js';
 import { listTeams } from '../core/teams.js';
+import { anyModel, offers, profileModel, selectedProfile } from '../core/profiles.js';
 import { LESSONS_FILE, READ_ONLY_AGENTS, resolveSession, type ResolvedSession, type RuntimeKind, type SessionSpec } from './resolve.js';
 import { MAIL_BODY_CHARS, publicEvent, renderMail, takeBatch, USER, type MailEvent } from './mailbox.js';
 import type { AlpEvent, AssignmentSnapshot, Envelope, SessionSnapshot, TreeStatus, TurnOrigin, UserQuestion } from './events.js';
@@ -967,11 +968,39 @@ function targetNote(profiles: Record<string, PermissionProfile | null>) {
       (profile!.workdir === 'copy' ? ', and works in a disposable copy of your tree, so name paths relative to the project, not absolute paths in your tree' : '')).join('; ') + '.'];
 }
 
+/** Model and effort choices available when assigning work to a configured agent. */
+function modelProfileNote(mapping: ResolvedSession, targets: string[]) {
+  const choices = Object.entries(mapping.modelProfiles).filter(([agent, profiles]) => targets.includes(agent) && agent !== 'oracle' && profiles.length);
+  if (!choices.length) return [];
+  const one = (profile: import('../core/types.js').AgentModelConfig) => `${profileModel(profile) ?? 'inherited model'}${profile.effort ? ` (effort ${profile.effort})` : ''}`;
+  const option = (id: string, effort?: string) => {
+    const about = models.find(model => model.id === id)?.description;
+    const efforts = profileEfforts(id);
+    return `${id}${about ? `: ${about}` : ''}${efforts.length ? ` Efforts ${efforts.join('|')}` : ''}${effort ? `, usually ${effort}` : ''}`;
+  };
+  const options = (profile: import('../core/types.js').AgentModelConfig) => anyModel(profile)
+    ? `any ${profile.provider} model (the runtime catalog snapshot lists what ${profile.provider} offers when you run on it), such as ${models.filter(model => model.id.startsWith(`${profile.provider}:`)).map(model => option(model.id)).join('; ')}`
+    : option(profileModel(profile)!, profile.effort);
+  return ['Model profiles of your targets. An agent with one named profile runs on it unless you pass another model. For an agent with several, or with any model of a provider, you choose both for each assignment: weigh the task\'s difficulty, ambiguity, risk and the autonomy it needs against speed and cost, pass the model with alp_delegate model and the effort with thinking, and say why in modelReason. There is no default, and a model outside its profiles is refused. ' +
+    choices.map(([agent, profiles]) => profiles.length === 1 && !anyModel(profiles[0]) ? `${agent}: ${one(profiles[0])}` : `${agent}, choose a model and effort: ${profiles.map(options).join('; ')}`).join('. ') + '.'];
+}
+
+/** The efforts a runtime-prefixed model takes; none for a model ALP does not know. */
+function profileEfforts(id: string) {
+  const [runtime, native] = [id.slice(0, id.indexOf(':')), id.slice(id.indexOf(':') + 1)];
+  if (!models.some(model => model.id === id) || (runtime !== 'codex' && runtime !== 'claude')) return [];
+  return thinkingOptionsFor(runtime, native).map(option => option.id);
+}
+
 /**
- * The agent's context setting, for the runtime that compacts (ALPD §57): Claude works in a
- * window of that size, Codex compacts at COMPACT_SHARE of it. Absent: the model's own.
+ * Explicit autocompact: Claude's native window or Codex's token limit. The older
+ * context setting still scales Codex's window by COMPACT_SHARE (ALPD §57).
  */
 function contextConfig(runtimeKind: RuntimeKind, mapping: ResolvedSession) {
+  if (mapping.autocompact) {
+    if (runtimeKind === 'claude') return { context: mapping.autocompact };
+    if (runtimeKind === 'codex') return { config: { model_auto_compact_token_limit: mapping.autocompact } };
+  }
   if (!mapping.context) return {};
   if (runtimeKind === 'claude') return { context: mapping.context };
   if (runtimeKind === 'codex') return { config: { model_auto_compact_token_limit: Math.round(mapping.context * COMPACT_SHARE) } };
@@ -1057,9 +1086,10 @@ function nativeSessionConfig(
       ...(skillConfig(runtimeKind, mapping).skills ? [`Your skills are also Claude Code skills named ${SKILL_PLUGIN}:<name>: run one with the Skill tool, or read its file.`] : []),
       ...permissionNote(mapping),
       ...targetNote(targetProfiles),
+      ...modelProfileNote(mapping, targets),
       // The team's house rules (ALPD §42); Phở and Cafe's are the text this line held before teams.
       `Profile: ${mapping.workflow.mode}; fixed for this session.${mapping.houseRules ? ` ${mapping.houseRules}` : ''}`,
-      `Oracle runs on ${ORACLE_MODELS.join(' or ')}; pass one as model (thinking defaults to high). For two independent opinions, start one oracle on each model with wait: false and compare their advice. If the model you need is unavailable, say so rather than choosing another. Usage context is advisory, may be unavailable or stale; never infer quota from token counts. Respect known exhausted limits and report them.`,
+      `Oracle runs on ${mapping.oracleModels.join(' or ')}; pass one as model (effort follows the team's oracle settings, otherwise high). For two independent opinions, start one oracle on each model with wait: false and compare their advice. If the model you need is unavailable, say so rather than choosing another. Usage context is advisory, may be unavailable or stale; never infer quota from token counts. Respect known exhausted limits and report them.`,
       ...(supervised
         ? ['A supervisor reviews your process after each turn. Its notes ask about process mistakes: answer them in your reply, then record each lesson with alp_lesson (scope project for this project, user for every project). Do not argue a note away; when it is wrong, say why in one line. ' +
           'When three or more lessons cover one theme, or a lesson recurs, distill them into a skill with alp_skill: a method with steps and checks, listing the lessons it replaces. Scope it to the roles whose work it guides: yourself, lead, peer, oracle, reviewer, supervisor, or a custom agent; a lesson about briefing peers is yours, a lesson about verifying a change belongs to whoever makes it. The user approves it first.']
@@ -1130,7 +1160,7 @@ function nativeSessionConfig(
                   description:
                     'Complete brief: objective, scope, constraints, verification, handoff.',
                 },
-                model: { type: 'string', description: `Explicit runtime-prefixed model ID from the available catalog. Oracle: ${ORACLE_MODELS.join(' or ')}.` },
+                model: { type: 'string', description: `Explicit runtime-prefixed model ID from the available catalog. Oracle: ${mapping.oracleModels.join(' or ')}.` },
                 thinking: { type: 'string', description: 'Effort supported by the selected model.' },
                 modelReason: { type: 'string', description: 'Why this model suits the task.' },
                 mode: {
@@ -2313,7 +2343,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (session.role === 'supervisor' || typeof used !== 'number' || typeof window !== 'number' || window <= 0) return;
     const compactAt = typeof usage.autoCompactTokens === 'number' && usage.autoCompactTokens > 0
       ? usage.autoCompactTokens
-      : Math.round(Math.min(session.mapping.context ?? window, window) * COMPACT_SHARE);
+      : session.runtimeKind === 'codex' && session.mapping.autocompact
+        ? Math.min(session.mapping.autocompact, Math.round(window * COMPACT_SHARE))
+        : Math.round(Math.min(session.mapping.autocompact ?? session.mapping.context ?? window, window) * COMPACT_SHARE);
     const fill = used / compactAt;
     if (fill < CONTEXT_RESET) { session.contextLevel = 0; return; }
     if (fill < CONTEXT_SOON || session.contextLevel) return;
@@ -3626,15 +3658,30 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (args[key] !== undefined && (typeof args[key] !== 'string' || !args[key].trim())) return toolResult(false, { error: `Invalid ${key}` });
     }
     if (args.model !== undefined && !/^(codex|claude|acp):[^\s]+$/.test(args.model)) return toolResult(false, { error: 'Use a runtime-prefixed model ID' });
-    if (args.agent === 'oracle' && !ORACLE_MODELS.includes(args.model)) return toolResult(false, { error: `Oracle runs on ${ORACLE_MODELS.join(' or ')}; pass one as model. For two opinions, start one on each with wait: false` });
+    if (args.agent === 'oracle' && !session.mapping.oracleModels.includes(args.model)) return toolResult(false, { error: `Oracle runs on ${session.mapping.oracleModels.join(' or ')}; pass one as model. For two opinions, start one on each with wait: false` });
+    const configuredModels = args.agent === 'oracle' ? [] : session.mapping.modelProfiles[args.agent] ?? [];
+    const listed = configuredModels.map(profileModel).filter((id): id is string => Boolean(id));
+    // The requester picks a model and effort for each task among several profiles, or any model of a provider:*; one named profile needs no choice.
+    const choosing = configuredModels.length > 1 || configuredModels.some(anyModel);
+    if (choosing && (args.model === undefined || args.thinking === undefined)) return toolResult(false, { error: `${args.agent} has several model profiles: choose one for this task as model, its effort as thinking, and say why in modelReason`, models: listed });
+    if (choosing && !offers(configuredModels, args.model)) return toolResult(false, { error: `${args.model} is not one of ${args.agent}'s model profiles`, models: listed });
+    const efforts = choosing ? profileEfforts(args.model) : [];
+    if (efforts.length && !efforts.includes(args.thinking)) return toolResult(false, { error: `${args.model} takes effort ${efforts.join(', ')}`, efforts });
+    const configuredDefault = !choosing && listed.length === 1 ? listed[0] : undefined;
+    const delegatedModel = args.model ?? configuredDefault ?? `${session.runtimeKind}:${session.mapping.model}`;
+    const delegatedThinking = args.thinking ?? selectedProfile(configuredModels, delegatedModel)?.effort ?? (args.model || configuredDefault ? undefined : session.mapping.thinking);
     // A paused runtime takes no new assignments; another runtime may.
-    const childRuntime = (args.model?.split(':')[0] ?? session.runtimeKind) as RuntimeKind;
+    const childRuntime = delegatedModel.split(':')[0] as RuntimeKind;
     // A limit may have lifted since the last check: ask the runtime before refusing (ALPD §58).
     if (!paused.all && paused.runtimes[childRuntime]?.by === 'alpd') await checkLimit(childRuntime, LIMIT_FRESH_MS);
     const hold = pauseOf(childRuntime);
     if (hold) {
       const other = RUNTIMES.find(kind => kind !== childRuntime && !pauseOf(kind));
-      return toolResult(false, { error: describePause(hold, paused.all ? undefined : childRuntime), next: other ? `Pass a model of ${other}: from the catalog to run it on ${label(other)}, or wait` : 'Wait until the user resumes ALP' });
+      const instead = listed.filter(id => other && id.startsWith(`${other}:`)).map(id => id.endsWith(':*') ? `any ${id.slice(0, -1)} model` : id);
+      const next = !other ? 'Wait until the user resumes ALP'
+        : !choosing ? `Pass a model of ${other}: from the catalog to run it on ${label(other)}, or wait`
+        : instead.length ? `Pass ${instead.join(' or ')} to run it on ${label(other)}, or wait` : `None of ${args.agent}'s model profiles runs on ${label(other)}: wait`;
+      return toolResult(false, { error: describePause(hold, paused.all ? undefined : childRuntime), next });
     }
     // The child's permission profile caps its mode, as resolving its session will.
     const childProfile = await profileFor(session.mapping.agent.projectRoot, options.libraryDir, args.agent).catch(() => null);
@@ -3761,8 +3808,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       ],
     });
 
-    const model = args.model ?? `${session.runtimeKind}:${session.mapping.model}`;
-    const thinking = args.thinking ?? (args.model ? undefined : session.mapping.thinking);
+    const model = delegatedModel;
+    const thinking = delegatedThinking;
 
     runLog(rootId, {
       event: 'assignment.started',

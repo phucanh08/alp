@@ -1,5 +1,6 @@
 import { mkdir, writeFile, lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { projectProfiles } from './profiles.js';
 
 /**
  * Fill missing scaffold files without replacing existing user content: ALP.md and
@@ -7,16 +8,16 @@ import path from 'node:path';
  * and the user's library (ALPD §41); a project adds its own under .alp/ only to
  * override them.
  * @param {string} projectRoot
- * @param {{ templateRoot?: URL, templates?: Record<string, string> }} [options]
+ * @param {{ templateRoot?: URL, templates?: Record<string, string>, library?: string }} [options]
  */
-export async function initProject(projectRoot, { templateRoot, templates } = {}) {
+export async function initProject(projectRoot, { templateRoot, templates, library } = {}) {
   const root = path.resolve(projectRoot);
   const sourceRoot = () => templateRoot ?? new URL('../../templates/', import.meta.url);
   const template = name => templates ? Promise.resolve(templates[name]) : readFile(new URL(name, sourceRoot()), 'utf8');
   // Load the complete starter before modifying the destination.
   const files = {
     'ALP.md': await template('ALP.md'),
-    '.alp/settings.json': JSON.stringify({ defaultAgent: 'main', workflow: { mode: 'pho' } }, null, 2) + '\n',
+    '.alp/settings.json': JSON.stringify({ defaultAgent: 'main', workflow: { mode: 'pho' }, profile: await projectProfiles({ templates, library }) }, null, 2) + '\n',
   };
   const directories = ['.alp'];
   const created = [];

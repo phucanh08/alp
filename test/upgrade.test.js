@@ -37,7 +37,11 @@ test('upgrade preserves customized instructions and routing', async t => {
   const result = await upgradeProject(root);
   assert.deepEqual(result.customInstructions, ['.alp/agents/main/AGENT.md']);
   assert.equal(await readFile(path.join(root, '.alp/agents/main/AGENT.md'), 'utf8'), 'My custom main');
-  assert.equal(await readFile(path.join(root, '.alp/settings.json'), 'utf8'), '{"defaultAgent":"custom","delegation":{}}');
+  const settings = JSON.parse(await readFile(path.join(root, '.alp/settings.json'), 'utf8'));
+  assert.equal(settings.defaultAgent, 'custom');
+  assert.deepEqual(settings.delegation, {});
+  assert.ok(settings.profile.cafe.main);
+  assert.ok(result.backup);
 });
 test('malformed settings are rejected before migrating instructions', async t => {
   const root = await fixture(t);

@@ -1,3 +1,4 @@
+import { projectProfiles, normalizeAgentProfiles } from './profiles.js';
 import { readFile, writeFile, mkdir, mkdtemp, lstat, readdir, rename, rm, rmdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -85,10 +86,17 @@ export async function upgradeProject(projectRoot) {
   }
   const oldGraph = settings?.delegation;
   const shippedGraph = oldGraph && Object.keys(oldGraph).length === 2 && JSON.stringify(oldGraph.main) === '["lead"]' && JSON.stringify(oldGraph.lead) === '["peer"]';
-  if (settings !== undefined && settings.workflow === undefined && (oldGraph === undefined || shippedGraph)) {
-    await replace('.alp/settings.json', settingsText, JSON.stringify({ ...settings, ...(shippedGraph ? { delegation: undefined } : {}), workflow: { mode: shippedGraph ? 'cafe' : 'pho', maxPeers: 2 } }, null, 2) + '\n');
-  } else if (settings !== undefined && Object.hasOwn(renamedProfiles, settings.workflow?.mode)) {
-    await replace('.alp/settings.json', settingsText, JSON.stringify({ ...settings, workflow: { ...settings.workflow, mode: renamedProfiles[settings.workflow.mode] } }, null, 2) + '\n');
+  if (settings !== undefined) {
+    const next = structuredClone(settings);
+    if (next.workflow === undefined && (oldGraph === undefined || shippedGraph)) {
+      if (shippedGraph) delete next.delegation;
+      next.workflow = { mode: shippedGraph ? 'cafe' : 'pho', maxPeers: 2 };
+    } else if (Object.hasOwn(renamedProfiles, next.workflow?.mode)) next.workflow.mode = renamedProfiles[next.workflow.mode];
+    if (next.profile === undefined) next.profile = await projectProfiles({ runtime: next.runtime });
+    for (const profile of Object.values(next.profile ?? {})) {
+      for (const [name, config] of Object.entries(profile)) profile[name] = normalizeAgentProfiles(config, name);
+    }
+    if (JSON.stringify(next) !== JSON.stringify(settings)) await replace('.alp/settings.json', settingsText, JSON.stringify(next, null, 2) + '\n');
   }
   // Skills now come from the user's library; archive project copies that still match what ALP shipped.
   const shipped = JSON.parse(await readFile(new URL('../../templates/role-skills.json', import.meta.url), 'utf8'));

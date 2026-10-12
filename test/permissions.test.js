@@ -124,7 +124,7 @@ test('Codex asks ALP before leaving its sandbox, and ALP answers by the profile'
   assert.deepEqual(await ask(main, "/bin/zsh -lc 'npm install'"), { decision: 'accept' });
 
   // A read-only reviewer with allow rules: commands run sandboxed, and only allowed ones leave the sandbox.
-  await main.call('alp_delegate', { agent: 'reviewer', task: 'Run the tests', wait: false });
+  await main.call('alp_delegate', { agent: 'reviewer', task: 'Run the tests', model: 'codex:gpt-6.1-sol', wait: false });
   await until(() => runtimes.length === 3 && runtimes[2].started.length === 1);
   const reviewer = runtimes[2];
   assert.deepEqual([reviewer.config.approvalPolicy, reviewer.config.sandbox, reviewer.started[0].params.approvalPolicy], ['on-request', 'read-only', 'on-request']);
@@ -139,7 +139,7 @@ test('Codex asks ALP before leaving its sandbox, and ALP answers by the profile'
   await main.call('alp_wait', {});
 
   // A peer's profile caps the mode main asks for; a worktree is still a writer.
-  const started = await main.call('alp_delegate', { agent: 'peer', task: 'Fix it', mode: 'full-access', wait: false });
+  const started = await main.call('alp_delegate', { agent: 'peer', task: 'Fix it', model: 'codex:gpt-6.1-sol', mode: 'full-access', wait: false });
   assert.deepEqual([started.mode, started.modeNote], ['workspace-write', 'peer runs workspace-write: its permission profile builder caps it']);
   await until(() => runtimes.length === 4 && runtimes[3].started.length === 1);
   assert.deepEqual([runtimes[3].config.sandbox, runtimes[3].config.approvalPolicy], ['workspace-write', 'never']);

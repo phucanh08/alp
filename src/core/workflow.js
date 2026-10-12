@@ -1,5 +1,7 @@
 import path from 'node:path';
 import { jsonObject } from './resolver.js';
+import { applyProfile } from './profiles.js';
+import { validateSettings } from './validation.js';
 import { resolveTeam, teamOf } from './teams.js';
 
 export { teamOf as profileOf } from './teams.js';
@@ -12,11 +14,12 @@ export { teamOf as profileOf } from './teams.js';
  */
 export async function resolveWorkflow(root, selected, restored, { library, templates } = {}) {
   const settings = await jsonObject(path.join(root, '.alp/settings.json'), 'INVALID_SETTINGS');
+  validateSettings(settings, '.alp/settings.json');
   const chosen = selected === undefined ? undefined : teamOf(selected);
   if (chosen === 'custom') throw new Error('Choose a team, such as pho (Phở) or cafe (Cafe)');
   const mode = chosen ?? teamOf(restored?.mode ?? settings.workflow?.mode ?? 'custom');
   if (restored && mode !== teamOf(restored.mode)) throw new Error('Cannot change team in an existing session');
-  const team = mode === 'custom' ? undefined : await resolveTeam(root, mode, { library, templates });
+  const team = mode === 'custom' ? undefined : applyProfile(await resolveTeam(root, mode, { library, templates }), settings.profile?.[mode]);
   const maxPeers = restored?.maxPeers ?? settings.workflow?.maxPeers ?? team?.maxPeers ?? 2;
   if (!Number.isSafeInteger(maxPeers) || maxPeers < 1) throw new Error('workflow.maxPeers must be a positive integer');
   // A custom delegation graph has no main to supervise; settings can turn a team's supervisor off.

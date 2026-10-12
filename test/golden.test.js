@@ -42,7 +42,7 @@ test('alp log of a tree whose agents are slow, crash mid-turn and hit a usage li
   const finished = id => until(async () => (await runLog()).some(entry => entry.event === 'assignment.finished' && entry.assignmentId === id), `${id} to finish`);
 
   // A writer that pins a decision, fills its context until it is compacted, and is slow to hand off.
-  const writer = await main.call('alp_delegate', { agent: 'peer', task: 'Write the parser', wait: false });
+  const writer = await main.call('alp_delegate', { agent: 'peer', task: 'Write the parser', model: 'codex:gpt-5.6-sol', wait: false });
   await until(() => agents[1]?.started.length === 1);
   await agents[1].call('alp_pin', { kind: 'decision', body: 'Parse with a state machine' });
   agents[1].usage(85_000);
@@ -54,7 +54,7 @@ test('alp log of a tree whose agents are slow, crash mid-turn and hit a usage li
   await main.call('alp_wait', {});
 
   // A reviewer with a failing verdict.
-  const review = await main.call('alp_delegate', { agent: 'reviewer', task: 'Review the parser', wait: false });
+  const review = await main.call('alp_delegate', { agent: 'reviewer', task: 'Review the parser', model: 'codex:gpt-5.6-sol', wait: false });
   await until(() => agents[2]?.started.length === 1);
   await agents[2].call('alp_handoff', { outcome: 'complete', summary: 'One blocker', verdict: { result: 'fail', criteria: [{ criterion: 'Rejects bad input', result: 'fail', evidence: 'parser.ts:12 accepts ""' }] } });
   agents[2].finish('Reviewed');
@@ -62,7 +62,7 @@ test('alp log of a tree whose agents are slow, crash mid-turn and hit a usage li
   await main.call('alp_wait', {});
 
   // A fixer whose process dies mid-turn; ALP restarts it and it finishes.
-  const fix = await main.call('alp_delegate', { agent: 'peer', task: 'Fix empty input', wait: false });
+  const fix = await main.call('alp_delegate', { agent: 'peer', task: 'Fix empty input', model: 'codex:gpt-5.6-sol', wait: false });
   await until(() => agents[3]?.started.length === 1);
   agents[3].crash();
   await until(() => agents[4]?.started.length === 1, 'the restarted process');

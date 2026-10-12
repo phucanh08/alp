@@ -1,5 +1,15 @@
+export interface AgentModelConfig { provider?: 'codex' | 'claude'; model?: string; effort?: string }
+export type AutoCompact = 'auto' | number;
+export type AgentProfilesConfig = {
+  /** "provider:model", "provider:*" for any model of that provider, or the earlier object form. */
+  profiles?: Array<string | AgentModelConfig>;
+  autocompact?: AutoCompact;
+  claude?: AgentModelConfig;
+  codex?: AgentModelConfig;
+} & AgentModelConfig;
 /** Disk configuration; no provider SDK types. */
 export interface RawSettings {
+  profile?: Record<string, Record<string, AgentProfilesConfig>>;
   defaultAgent?: string;
   workflow?: { mode?: 'pho' | 'cafe' | 'smart' | 'supervised'; maxPeers?: number; supervisor?: boolean };
   delegation?: Record<string, string[]>;
@@ -34,4 +44,5 @@ export interface ResolvedAgent {
   description?: string;
   /** The context window it works in before its runtime compacts, in tokens; absent: the model's (ALPD §57). */
   context?: number;
+  autocompact?: AutoCompact;
 }

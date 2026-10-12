@@ -14,7 +14,7 @@ and starts a supervisor that reviews the process after each of main's turns.
 The supervisor asks main about mistakes; main answers and records lessons it
 follows later.
 
-Oracle provides read-only advice on Fable or Astra; reviewer independently
+Oracle provides read-only advice through the configured model lenses; reviewer independently
 reviews one diff. Both return once only to the requesting coordinator. They do
 not spawn agents. Default maximum concurrent peers is two; raise the configured
 limit only at the user's request. Other model and effort choices belong to the
