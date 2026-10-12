@@ -157,8 +157,8 @@ they reach. On Codex, read-only and workspace-write sessions ask before a comman
 leaves the sandbox; a full-access session with Bash `ask` rules asks before
 every command it covers.
 
-**The sandbox floor.** A Claude session with a read-only or workspace-write
-profile runs Bash in Claude Code's OS sandbox: Seatbelt on macOS, bubblewrap and
+**The sandbox floor.** Every read-only Claude assignment, including lead and
+peer, and a Claude session with a workspace-write profile, runs Bash in Claude Code's OS sandbox: Seatbelt on macOS, bubblewrap and
 socat on Linux.
 - A read-only floor writes nothing but temporary files. A workspace-write floor
   writes only the workspace and temporary files. Neither has network.
@@ -170,6 +170,8 @@ socat on Linux.
   (`beyondMode: "ask"`) or refuses.
 - Without the sandbox (another OS, or Linux without bubblewrap), sessions behave
   as before, and `ALP_CLAUDE_SANDBOX=0` turns it off.
+
+Read-only Claude assignments retain Read, Glob and Grep. Bash inspection (including git history) runs inside the read-only OS sandbox. If the platform lacks sandbox support, or `ALP_CLAUDE_SANDBOX=0` disables it, Bash remains unavailable unless the permission profile permits it; the coordinator must arrange shell inspection before delegating.
 
 Codex always runs in its own sandbox.
 
@@ -213,6 +215,24 @@ calls `alp_merge` to apply the change to its own checkout, uncommitted, or
 each file is merged three ways against the requester's current file and conflicts
 are left as markers, with the branch kept. A deleted or binary file that conflicts
 keeps the requester's version. An assignment without changes leaves nothing behind.
+
+A shared writer can declare `writeRoot`, an existing directory, absolute or relative
+to the ALP project root. For example:
+
+```json
+{ "agent": "peer", "task": "Implement package B only in core", "mode": "workspace-write", "writeRoot": "../core", "wait": false }
+```
+
+The child works in that directory while keeping the original project's team,
+tasks and board. ALP locks the repository containing that directory, so shared
+writers in separate repositories can run together without creating worktrees.
+Directories and symlink aliases in the same checkout still share one lock.
+`writeRoot` declares exclusive write scope and uses the existing permission mode;
+it is for shared writers, and cannot be combined with worktree or review-copy
+isolation. A scoped writer can claim paths under that root on `alp_pin`, using
+absolute paths or paths relative to the original project. External claims are
+shown as absolute paths. Automatic verification uses that write root's settings,
+rather than running the original project's commands in another repository.
 
 Writers in the shared checkout (the default, `isolation: "shared"`) hold the
 checkout's write lease: alpd allows one at a time per checkout across all sessions,
@@ -362,6 +382,7 @@ alp resume [codex|claude]      # lift a pause; parked assignments continue where
 ```
 
 While a runtime is paused:
+- A lead can return `alp_handoff` with `outcome: "partial"` while its children are parked. This stops those parked assignments, preserves checkout changes and worktree branches, and returns unfinished work to its requester. Active children still need to finish or be canceled.
 - `alp_delegate` to an agent on it is refused. The refusal says why, when a
   limit resets, and which other runtime still takes work, for example "pass a
   model of claude:".
@@ -1141,7 +1162,7 @@ local evidence, and archive the test agents. They make real model calls.
 
 Claude read-only uses an explicit read-tool allowlist rather than Plan mode, so
 advisors can read and delegate without asking to exit a plan or writing plan files.
-Shell and edit tools are denied at the permission gate in these sessions: supply a diff in the review brief
-or as a readable artifact when reviewing a Git change. Claude executables are
+Edit tools are denied; Bash is available inside the read-only OS sandbox. Without
+sandbox support, supply a diff or arrange shell inspection with the requester. Claude executables are
 resolved from PATH (or `ALP_CLAUDE_BIN`) and passed explicitly to the SDK to avoid
 trying to execute bundled binaries inside Paseo Desktop's Electron archive.
