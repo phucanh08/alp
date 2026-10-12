@@ -40,7 +40,8 @@ async function setup(t) {
   const later = test => new Promise(resolve => waiting.push({ test, resolve }));
   const send = frame => ws.send(JSON.stringify(frame));
   send({ type: 'hello', clientId: 'cid-providers', clientType: 'browser', protocolVersion: 1, capabilities: { helloRejection: true }, auth: { kind: 'password', password: info.token } });
-  await next(frame => frame.message?.payload?.status === 'server_info');
+  const hello = await next(frame => frame.message?.payload?.status === 'server_info');
+  assert.equal(hello.message.payload.features.providerRemoval, true, 'the app offers Remove on providers');
   let sequence = 0;
   const ask = async message => {
     const requestId = `r${++sequence}`;

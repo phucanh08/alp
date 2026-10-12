@@ -168,8 +168,8 @@ defines one:
     supports.
 - **In the web app:** Settings → Providers lists ALP, its teams as models, then your
   providers with the models and modes each agent reports (ALP starts it once to ask).
-  - Add one from Paseo's catalog or as a custom command; ALP writes
-    `providers/<id>.json`.
+  - Add one from Paseo's catalog, or as a Custom ACP agent (a name, its command line
+    and `KEY=value` environment lines); ALP writes `providers/<id>.json`.
   - Turn one off (`"enabled": false`), add models it does not report
     (`additionalModels`), refresh it, diagnose it, or remove it.
   - Providers are for team members' models: the app's new-agent picker offers ALP only.
