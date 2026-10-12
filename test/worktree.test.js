@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '../src/core/init.js';
+import { createTask, getTask } from '../src/core/tasks.js';
 import { createAlpRuntime, reclaimWorktrees } from '../dist/runtime/index.js';
 
 async function until(check) {
@@ -211,4 +212,71 @@ test('worktree isolation outside git fails clearly', async t => {
   await runtime.prompt('root', { clientMessageId: 'm', delivery: 'auto', content: [{ type: 'text', text: 'Go' }] });
   const result = await runtimes[0].call('alp_delegate', isolated('Write'), 'd1');
   assert.match(result.error, /needs a git repository/);
+});
+
+
+test('shared writers in different repositories run together, with external board claims and per-repo leases', async t => {
+  const { directory, project, runtime, runtimes, open, worktreeDir } = await setup(t);
+  const core = path.join(directory, 'core');
+  await mkdir(core);
+  git(core, 'init', '--quiet', '-b', 'main');
+  await mkdir(path.join(core, 'src'));
+  await writeFile(path.join(core, 'src/a.txt'), 'core');
+  git(core, 'add', '-A');
+  git(core, '-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'init');
+  await symlink(core, path.join(directory, 'core-link'));
+  const main = await open('root');
+  const other = await open('other');
+  const first = await main.call('alp_delegate', { agent: 'peer', task: 'Write in project', mode: 'workspace-write' }, 'a');
+  const coreTask = await createTask(project, { title: 'Implement core' }, 'user');
+  const second = await main.call('alp_delegate', { agent: 'peer', task: 'Write only in core', taskId: coreTask.id, mode: 'workspace-write', writeRoot: '../core' }, 'b');
+  assert.equal(first.status, 'running');
+  assert.equal(second.status, 'running', JSON.stringify(second));
+  const corePeer = runtimes.at(-1);
+  assert.equal(corePeer.cwd, core);
+  assert.deepEqual(corePeer.calls.find(c => c.method === 'turn/start').params.sandboxPolicy.writableRoots, [core]);
+  assert.match(corePeer.calls.find(c => c.method === 'thread/start').params.developerInstructions, /Write scope:/);
+  assert.equal(existsSync(worktreeDir), false, 'no unused project worktree');
+  const projectPeer = runtimes[runtimes.length - 2];
+  assert.ok((await projectPeer.call('alp_pin', { kind: 'claim', body: 'Project', paths: ['.'] }, 'pin-a')).pinned);
+  assert.match((await corePeer.call('alp_pin', { kind: 'claim', body: 'Wrong repository', paths: ['.'] }, 'pin-project')).error, /outside/);
+  const pin = await corePeer.call('alp_pin', { kind: 'claim', body: 'Core', paths: ['../core/src'] }, 'pin-b');
+  assert.deepEqual(pin.paths, [path.join(core, 'src')]);
+  assert.equal((await main.call('alp_board', {}, 'board')).claims.length, 2);
+  assert.match((await corePeer.call('alp_pin', { kind: 'claim', body: 'Outside scope', paths: ['../unrelated'] }, 'pin-bad')).error, /outside/);
+  const same = await main.call('alp_delegate', { agent: 'peer', task: 'Write core again', mode: 'workspace-write', writeRoot: '../core/src' }, 'same');
+  assert.match(same.error, /already running/);
+  const alias = await other.call('alp_delegate', { agent: 'peer', task: 'Write core alias', mode: 'workspace-write', writeRoot: '../core-link' }, 'alias');
+  assert.match(alias.error, /another session is writing/);
+  // The original project's verification command must never run in the external repository.
+  const settings = path.join(project, '.alp/settings.json');
+  await writeFile(settings, JSON.stringify({ ...JSON.parse(await readFile(settings, 'utf8')), verify: { test: 'touch wrong-project-check' } }));
+  await mkdir(path.join(core, '.alp'));
+  await writeFile(path.join(core, '.alp/settings.json'), JSON.stringify({ verify: { test: 'touch core-check' } }));
+  await writeFile(path.join(core, 'src/a.txt'), 'changed');
+  corePeer.finish();
+  const [done] = await results(main, 1);
+  assert.equal(done.verification.passed, true);
+  await until(async () => (await getTask(project, coreTask.id)).verified?.passed === true);
+  assert.equal(existsSync(path.join(core, 'wrong-project-check')), false);
+  assert.equal(existsSync(path.join(core, 'core-check')), true);
+  const takeover = await other.call('alp_delegate', { agent: 'peer', task: 'Write core now', mode: 'workspace-write', writeRoot: core }, 'takeover');
+  assert.equal(takeover.status, 'running', JSON.stringify(takeover));
+  assert.ok(runtime.status('root').assignments.some(assignment => assignment.id === first.assignmentId));
+});
+
+test('writeRoot is validated and cannot be combined with worktrees or read-only assignments', async t => {
+  const { project, open } = await setup(t);
+  const main = await open('root');
+  for (const [extra, error] of [
+    [{ writeRoot: '' }, /writeRoot/],
+    [{ writeRoot: 3 }, /writeRoot/],
+    [{ writeRoot: '../missing' }, /writeRoot/],
+    [{ writeRoot: 'shared.txt' }, /writeRoot/],
+    [{ writeRoot: project, mode: 'read-only' }, /writing/],
+    [{ writeRoot: project, isolation: 'worktree' }, /shared/],
+  ]) {
+    const result = await main.call('alp_delegate', { agent: 'peer', task: 'Write', mode: 'workspace-write', ...extra }, JSON.stringify(extra));
+    assert.match(result.error, error, JSON.stringify(result));
+  }
 });

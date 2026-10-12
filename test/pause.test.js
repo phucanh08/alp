@@ -46,11 +46,11 @@ async function until(check) {
   assert.fail('Expected condition did not arrive');
 }
 
-async function setup(t, options = {}) {
+async function setup(t, options = {}, workflow = 'pho') {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-pause-'));
   const root = path.join(directory, 'project');
   await initProject(root);
-  await writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify({ defaultAgent: 'main', workflow: { mode: 'pho', maxPeers: 2, supervisor: false } }));
+  await writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify({ defaultAgent: 'main', workflow: { mode: workflow, maxPeers: 2, supervisor: false } }));
   const runtimes = [];
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: path.join(directory, 'runs'), boardDir: path.join(directory, 'boards'), ...options(directory) });
   t.after(async () => { await runtime.shutdown(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
@@ -246,4 +246,33 @@ test('a requester stops a parked assignment with alp_cancel and hands the rest t
   assert.equal(runtime.pauses().parked.length, 0);
   const takeover = await main.call('alp_delegate', { agent: 'peer', task: 'Finish the restyle', taskId: task.id, mode: 'workspace-write', model: 'claude:claude-opus-5-5' });
   assert.equal(takeover.status, 'running', JSON.stringify(takeover));
+});
+
+
+test('Cafe main and lead can inspect beside a parked peer, and lead can return a partial handoff', async t => {
+  const { runtime, runtimes, main } = await setup(t, none, 'cafe');
+  const leadAssignment = await main.call('alp_delegate', { agent: 'lead', task: 'Implement and review', mode: 'workspace-write', model: 'claude:claude-sonnet-4-6' });
+  await until(() => runtimes[1]?.started.length === 1);
+  const lead = runtimes[1];
+  const peerAssignment = await lead.call('alp_delegate', { agent: 'peer', task: 'Implement', mode: 'workspace-write', model: 'codex:gpt-6-astra' });
+  await until(() => runtimes[2]?.started.length === 1);
+  runtimes[2].limit();
+  await until(() => runtime.pauses().parked.length === 1);
+  for (const requester of [main, lead]) {
+    for (const agent of ['reviewer', 'oracle']) {
+      const advice = await requester.call('alp_delegate', { agent, task: 'Inspect finished work', mode: 'read-only', model: 'claude:claude-fable-5-1' });
+      assert.equal(advice.status, 'running', JSON.stringify(advice));
+      const advisor = runtimes.at(-1);
+      await until(() => advisor.started.length === 1);
+      await requester.call('alp_cancel', { assignmentId: advice.assignmentId });
+    }
+  }
+  const handoff = await lead.call('alp_handoff', { outcome: 'partial', summary: 'Implementation preserved; peer hit quota before handing off' });
+  assert.deepEqual(handoff.stoppedParked, [peerAssignment.assignmentId]);
+  lead.finish('Partial work ready for main');
+  const result = await main.call('alp_wait', { assignments: [leadAssignment.assignmentId], timeoutMs: 1000 });
+  assert.equal(result.events[0]?.result?.handoff?.outcome, 'partial', JSON.stringify(result));
+  assert.equal(runtimes[2].closed, true);
+  assert.equal(runtime.pauses().parked.length, 0);
+  assert.equal(runtime.status('root').assignments.length, 0);
 });

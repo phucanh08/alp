@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '../src/core/init.js';
@@ -271,4 +271,40 @@ test('alpd reopens a tree by itself after a restart and its assignment continues
   // The store records the close after the root goes.
   await until(async () => (await second.store.list()).find(record => record.id === delegated.assignmentId)?.status === 'closed', 'the assignment record to close');
   assert.ok((await stat(options.liveFile)).isFile());
+});
+
+
+test('an external shared writer recovers its write root, inspection scope and repository lease', async t => {
+  const { directory, root, options } = await workspace(t);
+  const core = path.join(directory, 'core');
+  await mkdir(core);
+  git(core, 'init', '-q', '-b', 'main');
+  await writeFile(path.join(core, 'a.txt'), 'initial');
+  git(core, 'add', '-A');
+  git(core, 'commit', '-qm', 'init');
+  const canonicalCore = await realpath(core);
+  const runtimes = [];
+  const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
+  t.after(() => first.shutdown());
+  await first.open('root', { cwd: root, persist: true });
+  await first.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Work in core' }] });
+  const delegated = await runtimes[0].call('alp_delegate', { agent: 'peer', task: 'Write only core', mode: 'workspace-write', writeRoot: '../core' });
+  assert.equal(delegated.status, 'running', JSON.stringify(delegated));
+  const snapshot = first.snapshot('root');
+  await first.shutdown();
+  const live = JSON.parse(await readFile(options.liveFile, 'utf8'));
+  assert.deepEqual([live[0].spec.writeRoot, live[0].spec.workdir, live[0].lease], [canonicalCore, canonicalCore, canonicalCore]);
+  const second = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
+  t.after(() => second.shutdown());
+  await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot.threadId, runtime: snapshot.runtime, model: snapshot.model, workflow: snapshot.workflow } });
+  assert.equal((await second.recover('root', { continueRoot: true }))[0].outcome, 'resumed');
+  const main = runtimes[2];
+  const peer = runtimes[3];
+  assert.equal(peer.cwd, canonicalCore);
+  await until(() => peer.started.length && main.started.length);
+  assert.ok((await peer.call('alp_pin', { kind: 'claim', body: 'Core', paths: ['../core/a.txt'] })).pinned);
+  const blocked = await main.call('alp_delegate', { agent: 'peer', task: 'Core again', mode: 'workspace-write', writeRoot: '../core' });
+  assert.match(blocked.error, /already running/);
+  const beside = await main.call('alp_delegate', { agent: 'peer', task: 'Project instead', mode: 'workspace-write' });
+  assert.equal(beside.status, 'running', JSON.stringify(beside));
 });

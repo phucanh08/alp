@@ -316,6 +316,8 @@ type Assignment = {
   escapes?: string[];
   /** The checkout this assignment holds the write lease of. */
   lease?: string;
+  /** Repository/check-out this writer changes, including when an ancestor holds its lease. */
+  writeCheckout?: string;
   /** The task this assignment took with alp_delegate { taskId }. */
   taskId?: string;
   /** For a writer in the shared checkout: checkoutFingerprint when it started, to tell whether it changed anything. */
@@ -398,7 +400,7 @@ const handoffList = (description: string) => ({ type: 'array', items: { type: 's
 const HANDOFF_TOOL = {
   type: 'function',
   name: 'alp_handoff',
-  description: 'File the structured handoff for your current assignment. The requesting agent receives it when your turn ends.',
+  description: 'File the structured handoff for your current assignment. The requesting agent receives it when your turn ends. A partial handoff stops your parked children, preserves their changes, and returns unfinished work to your requester.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -916,6 +918,7 @@ const nativeMode = (mapping: Pick<ResolvedSession, 'mode' | 'copy'>) => mapping.
 function claudeFloor(mapping: Pick<ResolvedSession, 'mode' | 'copy' | 'permissions' | 'runtimeKind'>): 'read-only' | 'workspace-write' | undefined {
   if (mapping.runtimeKind !== 'claude' || !claudeSandboxAvailable()) return undefined;
   if (mapping.copy) return 'workspace-write';
+  if (mapping.mode === 'read-only') return 'read-only';
   const base = mapping.permissions?.base;
   return base === 'read-only' || base === 'workspace-write' ? base : undefined;
 }
@@ -1136,6 +1139,7 @@ function nativeSessionConfig(
                   description: 'Never more than your own mode.',
                 },
                 isolation: { type: 'string', enum: ['shared', 'worktree'], description: 'Default shared: your checkout. worktree: a writing peer works in its own git worktree, so it can run beside other peers; apply its change with alp_merge.' },
+                writeRoot: { type: 'string', description: 'For a shared writer: existing directory it will write exclusively, absolute or relative to the project root. The child works there; writers in different repositories can run together. Omit to write in your checkout. This declares scope, not extra permissions.' },
                 continueFrom: { type: 'string', description: 'A finished worktree assignment you have not merged or discarded: the new assignment works in a worktree that starts from its change, for example to fix what verification found. Implies isolation worktree.' },
                 wait: { type: 'boolean', description: 'Default false: start it in the background and return its assignmentId at once; the result comes as mail. true: wait for the result or the first question, only when your next step cannot go on without it.' },
                 etaMinutes: { type: 'integer', minimum: 1, maximum: 1440, description: 'Minutes you expect it to take. When it runs past them, ALP sends you a check-in.' },
@@ -2589,6 +2593,18 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (args.labels !== undefined && (args.action !== 'create' || !Array.isArray(args.labels) || args.labels.length > 10 || !args.labels.every((label: unknown) => text(label, 50)))) {
       return toolResult(false, { error: 'labels are up to 10 existing label names, for create' });
     }
+    // Resolve labels before approval, so a draft with an unknown label never
+    // consumes the user's approval and then fails during issue creation.
+    if (args.action === 'create' && args.labels?.length) {
+      try {
+        const labels = JSON.parse(await github(['label', 'list', '-R', repo, '--limit', '1000', '--json', 'name'], { cwd: project }));
+        const names = new Set(labels.map((label: { name: string }) => label.name.toLowerCase()));
+        const missingLabels = args.labels.filter((label: string) => !names.has(label.toLowerCase()));
+        if (missingLabels.length) return toolResult(false, { repo, error: `Unknown repository labels: ${missingLabels.join(', ')}`, missingLabels, next: 'Remove these labels or use existing labels, then submit the draft for approval.' });
+      } catch (error) {
+        return toolResult(false, { repo, error: `Could not validate issue labels: ${errorData(error).message}` });
+      }
+    }
     const where = `${repo}${args.target === 'alp' ? ' (ALP itself)' : ''}`;
     const say = wordsFor(session);
     const decision = await confirm(sessionId, session,
@@ -3102,14 +3118,14 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
     // A writer in the shared checkout left its change there: check it while still holding the lease, so no other writer changes the tree meanwhile.
     if (state === 'completed' && assignment.isolation === 'shared' && !assignment.copy && writes(assignment.mode) && child) {
-      const project = child.mapping.agent.projectRoot;
+      const project = child.spec.writeRoot ?? child.mapping.agent.projectRoot;
       const config = await verifyConfig(project).catch(() => undefined);
       const checkout = await checkoutKey(child.mapping.workdir);
       const changed = !assignment.fingerprint || assignment.fingerprint !== await checkoutFingerprint(checkout).catch(() => undefined);
       if (config && changed) {
         const verification = await inCheckout(checkout, () => verifyIn(project, child.mapping.workdir, config));
         result.verification = verificationResult(verification);
-        noteVerification(rootOf(parentId), project, assignment.taskId, assignment.id, 'checkout', verification);
+        noteVerification(rootOf(parentId), child.mapping.agent.projectRoot, assignment.taskId, assignment.id, 'checkout', verification);
       }
     }
     if (assignment.lease && leases.get(assignment.lease)?.assignment === assignment.id) leases.delete(assignment.lease);
@@ -3213,14 +3229,14 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   /** A blocking handoff hook can refuse the handoff, for example until the tests pass. */
   async function hookedHandoff(sessionId: string, session: Session, args: unknown) {
     const checked = session.parentAgent ? parseHandoff(args) : undefined;
-    if (!session.mapping.hooks.some(hook => hook.event === 'handoff') || !checked || typeof checked === 'string') return recordHandoff(session, args);
+    if (!session.mapping.hooks.some(hook => hook.event === 'handoff') || !checked || typeof checked === 'string') return recordHandoff(sessionId, session, args);
     const taskId = session.parent ? sessions.get(session.parent)?.assignments.get(sessionId)?.taskId : undefined;
     const refused = await runHooks(sessionId, session, 'handoff', { assignment: sessionId, handoff: checked }, taskId);
     if (refused) return toolResult(false, { error: `A handoff hook refused it:\n${refused}`, next: 'Fix what it reports, then call alp_handoff again.' });
-    return recordHandoff(session, args);
+    return recordHandoff(sessionId, session, args);
   }
 
-  function recordHandoff(session: Session, args: unknown) {
+  async function recordHandoff(sessionId: string, session: Session, args: unknown) {
     if (!session.parentAgent) {
       return toolResult(false, { error: 'Only assignment sessions can file a handoff' });
     }
@@ -3229,8 +3245,17 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (session.mapping.agent.name === 'reviewer' && handoff.outcome === 'complete' && !handoff.verdict) {
       return toolResult(false, { error: 'A complete review needs a verdict: each criterion with pass, fail or not_checked and its evidence, the findings by severity, and the result they lead to' });
     }
+    // A partial handoff explicitly returns unfinished work to the requester. Parked
+    // children cannot finish it now; stop them so they cannot hold this handoff open
+    // or resume later after ownership has moved back to the requester.
+    const parked = handoff.outcome === 'partial'
+      ? [...session.assignments.values()].filter(assignment => sessions.get(assignment.id)?.parked)
+      : [];
+    for (const assignment of parked) {
+      await finishAssignment(sessionId, session, assignment, 'canceled', new Error('Requester filed a partial handoff'), true);
+    }
     session.handoff = handoff;
-    return toolResult(true, { recorded: true, to: session.parentAgent, next: 'End your turn with a one-line final message.' });
+    return toolResult(true, { recorded: true, to: session.parentAgent, ...(parked.length ? { stoppedParked: parked.map(assignment => assignment.id), preservedChanges: 'Their changes stay in the checkout or on their worktree branch for your requester to continue.' } : {}), next: 'End your turn with a one-line final message.' });
   }
 
   const plainObject = (value: unknown, keys: string[]): value is Record<string, any> =>
@@ -3445,7 +3470,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const project = session.mapping.agent.projectRoot;
     let paths: string[] | undefined;
     if (args.paths !== undefined || args.kind === 'claim') {
-      const normalized = normalizePaths(args.paths, project);
+      const normalized = normalizePaths(args.paths, project, session.spec.writeRoot ? [session.spec.writeRoot] : undefined);
       if (typeof normalized === 'string') return toolResult(false, { error: normalized });
       paths = normalized;
     }
@@ -3565,8 +3590,6 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     params: any,
   ): Promise<unknown> {
     const args = params.arguments;
-    // Resolved first: every check below runs without yielding, so parallel calls cannot race.
-    const checkout = await checkoutKey(session.mapping.workdir);
 
     const targets = Object.hasOwn(
       session.graph,
@@ -3580,7 +3603,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       typeof args !== 'object' ||
       Array.isArray(args) ||
       Object.keys(args).some(
-        (key) => !['agent', 'task', 'mode', 'model', 'thinking', 'modelReason', 'wait', 'isolation', 'taskId', 'continueFrom', 'etaMinutes'].includes(key),
+        (key) => !['agent', 'task', 'mode', 'model', 'thinking', 'modelReason', 'wait', 'isolation', 'taskId', 'continueFrom', 'etaMinutes', 'writeRoot'].includes(key),
       ) ||
       !targets.includes(args.agent) ||
       typeof args.task !== 'string' ||
@@ -3627,6 +3650,18 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const isolation: Assignment['isolation'] = args.isolation ?? (args.continueFrom !== undefined ? 'worktree' : 'shared');
     if (isolation === 'worktree' && !writes(childMode)) return toolResult(false, { error: 'Worktree isolation is for writing assignments (mode workspace-write or full-access)' });
     const project = session.mapping.agent.projectRoot;
+    if (args.writeRoot !== undefined && (typeof args.writeRoot !== 'string' || !args.writeRoot.trim())) return toolResult(false, { error: 'writeRoot must name an existing directory' });
+    if (args.writeRoot !== undefined && (!writes(childMode) || isolation !== 'shared' || childProfile?.workdir === 'copy')) return toolResult(false, { error: 'writeRoot is for shared writing assignments, without worktree or copy isolation' });
+    let writeRoot: string | undefined;
+    try {
+      if (args.writeRoot !== undefined) {
+        writeRoot = await realpath(path.resolve(project, args.writeRoot));
+        if (!(await stat(writeRoot)).isDirectory()) throw new Error('not a directory');
+      }
+    } catch {
+      return toolResult(false, { error: 'writeRoot must name an existing directory' });
+    }
+    const checkout = await checkoutKey(writeRoot ?? session.mapping.workdir);
     let task: Task | undefined;
     if (args.taskId !== undefined) {
       if (session.parent || session.mapping.agent.name !== mainOf(session.mapping)) return toolResult(false, { error: 'Only main gives tasks to assignments' });
@@ -3643,19 +3678,22 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         return toolResult(false, { error: errorData(error).message });
       }
       if (task.paths.length && writes(childMode)) {
+        if (writeRoot && typeof normalizePaths(task.paths, project, [writeRoot]) === 'string') return toolResult(false, { error: 'Task paths are outside writeRoot; use a task scoped to this repository' });
         const conflicts = claimConflicts(sessionId, await boardOf(project), task.paths);
         if (conflicts.length) return toolResult(false, { error: `Another agent has claimed paths of ${task.id}; wait for it, or ask the user`, conflicts });
       }
     }
     // From here every check runs without yielding again, so parallel calls cannot race.
     const parallel = (mode: string, kind: Assignment['isolation']) => mode === 'read-only' || kind === 'worktree';
+    const sameCheckout = (other: string) => overlapping([checkout], [other]).length > 0;
     // Read-only peers and advisors (reviewer, oracle) never change files, so they run beside anything;
-    // writers run beside each other only when each has its own worktree. A parked writer still counts.
+    // Writers of the same repository need separate worktrees. Different repositories
+    // are independent; a parked writer still owns its repository.
     const writers = [...session.assignments.values()].filter(assignment => writes(assignment.mode));
-    if (session.assignments.size && (!['peer', 'advisor', 'reviewer'].includes(roleOf(session.mapping, args.agent) ?? '') || (writes(childMode) && writers.some(assignment => !parallel(assignment.mode, assignment.isolation) || !parallel(childMode, isolation))))) {
+    if (session.assignments.size && (!['peer', 'advisor', 'reviewer'].includes(roleOf(session.mapping, args.agent) ?? '') || (writes(childMode) && writers.some(assignment => (!parallel(assignment.mode, assignment.isolation) || !parallel(childMode, isolation)) && (!assignment.writeCheckout || sameCheckout(assignment.writeCheckout)))))) {
       const parkedOnes = [...session.assignments.values()].filter(assignment => sessions.get(assignment.id)?.parked);
       return toolResult(false, {
-        error: 'A child assignment is already running; wait for its handoff. Only read-only peers and advisors (reviewer, oracle), and peers in their own worktree, run beside it',
+        error: 'A child assignment is already running; wait for its handoff. Only read-only peers and advisors (reviewer, oracle), and writers in different repositories or their own worktrees, run beside it',
         ...(parkedOnes.length ? { next: `${parkedOnes.map(assignment => `${assignment.agent} ${assignment.id}`).join(', ')} is parked; to go on without it, stop it with alp_cancel and delegate the rest, on another runtime if its runtime is limited` } : {}),
       });
     }
@@ -3690,7 +3728,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const peer = roleOf(session.mapping, args.agent) === 'peer';
     if (peer && root.peerCount >= session.mapping.workflow.maxPeers) return toolResult(false, { error: 'Concurrent peer limit reached; wait or ask the user to increase workflow.maxPeers for a new session' });
     const sharedWriter = writes(childMode) && isolation === 'shared';
-    const holder = sharedWriter ? leases.get(checkout) : undefined;
+    const holder = sharedWriter ? [...leases].find(([key]) => sameCheckout(key))?.[1] : undefined;
     if (holder && !lineage(sessionId).includes(holder.assignment)) {
       return toolResult(false, { error: `${holder.agent} in another session is writing ${checkout}; wait for it, or use isolation "worktree"` });
     }
@@ -3703,7 +3741,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     const childId = `alp-child-${randomUUID()}`;
     const startedAt = Date.now();
-    const assignment: Assignment = { id: childId, agent: args.agent, mode: childMode, isolation, rootId, startedAt, warned: false, finished: false, ...(args.etaMinutes ? { eta: startedAt + args.etaMinutes * 60_000 } : {}) };
+    const assignment: Assignment = { id: childId, agent: args.agent, mode: childMode, isolation, rootId, startedAt, warned: false, finished: false, ...(writes(childMode) ? { writeCheckout: checkout } : {}), ...(args.etaMinutes ? { eta: startedAt + args.etaMinutes * 60_000 } : {}) };
     if (sharedWriter && !holder) {
       assignment.lease = checkout;
       leases.set(checkout, { assignment: childId, agent: args.agent });
@@ -3735,6 +3773,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       project: session.mapping.agent.projectRoot,
       mode: childMode,
       isolation,
+      ...(writeRoot ? { writeRoot } : {}),
       model,
       thinking: thinking ?? null,
       ...(args.modelReason ? { modelReason: args.modelReason } : {}),
@@ -3774,7 +3813,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       const { restore: _restore, ...inherited } = session.spec;
       const childSpec: SessionSpec = {
         ...inherited,
-        ...(assignment.worktree ? { workdir: assignment.worktree.workdir } : assignment.copy ? { workdir: assignment.copy.workdir, copy: true, copyOf: session.mapping.workdir } : {}),
+        writeRoot: isolation === 'shared' && !assignment.copy ? writeRoot ?? session.spec.writeRoot : undefined,
+        ...(assignment.worktree ? { workdir: assignment.worktree.workdir } : assignment.copy ? { workdir: assignment.copy.workdir, copy: true, copyOf: session.mapping.workdir } : writeRoot ? { workdir: writeRoot } : {}),
         persist: false,
         keepThread: true,
         workflow: session.mapping.workflow.mode === 'custom' ? undefined : session.mapping.workflow.mode,
@@ -3851,7 +3891,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     // Background by default: only an explicit wait: true holds the requester's turn.
     if (args.wait !== true) {
-      return toolResult(true, { assignmentId: childId, agent: args.agent, status: 'running', ...capped });
+      return toolResult(true, { assignmentId: childId, agent: args.agent, status: 'running', ...(writeRoot ? { writeRoot } : {}), ...capped });
     }
 
     // Waiting returns the result, or the child's first question so it can be answered.
@@ -4140,7 +4180,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   async function configOf(session: Session) {
     const { mapping } = session;
     const targets = Object.hasOwn(session.graph, mapping.agent.name) ? session.graph[mapping.agent.name] : [];
-    return nativeSessionConfig(
+    const config = nativeSessionConfig(
       session.runtimeKind,
       mapping,
       targets,
@@ -4150,6 +4190,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       lessonFiles(mapping),
       Object.fromEntries(await Promise.all(targets.map(async target => [target, await profileFor(mapping.agent.projectRoot, options.libraryDir, target).catch(() => null)] as const))),
     );
+    if (session.spec.writeRoot && session.runtimeKind === 'claude' && mapping.mode === 'workspace-write' && claudeSandboxAvailable()) Object.assign(config, { floor: 'workspace-write' });
+    if (session.spec.writeRoot) config.developerInstructions += `\nWrite scope: change files only under ${session.spec.writeRoot}. Your working directory is there; the ALP project, tasks and board remain ${mapping.agent.projectRoot}. Board paths are project-relative or absolute; use absolute paths for this write root. This scope does not grant permission to write outside your mode.`;
+    return config;
   }
 
   /**
@@ -4225,6 +4268,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       ...(entry.fingerprint ? { fingerprint: entry.fingerprint } : {}),
     };
     let spec = entry.spec;
+    if (writes(entry.mode)) assignment.writeCheckout = entry.worktree?.checkout ?? await checkoutKey(spec.workdir ?? parent.mapping.workdir);
     const undo = async () => {
       parent.children.delete(id);
       parent.assignments.delete(id);
@@ -4236,7 +4280,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     };
     try {
       if (entry.lease) {
-        const holder = leases.get(entry.lease);
+        const holder = [...leases].find(([key]) => overlapping([entry.lease!], [key]).length)?.[1];
         if (holder && !lineage(entry.parentId).includes(holder.assignment)) throw new Error(`${holder.agent} writes ${entry.lease} now`);
         if (!holder) { assignment.lease = entry.lease; leases.set(entry.lease, { assignment: id, agent: entry.agent }); }
       }

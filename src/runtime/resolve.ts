@@ -44,6 +44,8 @@ export type SessionSpec = {
   restore?: { agent: string; threadId: string; runtime?: string; model?: string; workflow?: { mode: string; maxPeers: number; supervisor?: boolean } };
   /** Where the native harness works, when not the project root: an assignment's git worktree. ALP files are still read from cwd. */
   workdir?: string;
+  /** Explicit shared-assignment write scope; workdir points here while ALP uses cwd for its project. */
+  writeRoot?: string;
   /** The workdir is a disposable copy the session may write, though its mode is read-only for the requester's tree. */
   copy?: boolean;
   /** The requester's directory the copy mirrors. */

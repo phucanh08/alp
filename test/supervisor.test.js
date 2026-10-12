@@ -281,3 +281,25 @@ test('the digest says when the user\'s message got no reply in main\'s turn', as
   await until(() => supervisor.started.length === 1);
   assert.match(supervisor.started[0].params.input.at(-1).text, /the user's message of \d\d:\d\d:\d\d got no reply in this turn/);
 });
+
+
+test('issue labels are validated before asking the user to approve a draft', async t => {
+  const calls = [];
+  const github = async (args) => { calls.push(args); return args[0] === 'label' ? JSON.stringify([{ name: 'bug' }]) : 'https://github.com/phucanh08/alp-paseo/issues/8'; };
+  const { root, runtime, runtimes, prompt } = await setup(t, undefined, { github });
+  await runtime.open('root', { cwd: root });
+  await prompt('m1', 'File a bug');
+  const main = runtimes[0];
+  const draft = { action: 'create', target: 'alp', title: 'Inspection fails', body: 'Steps', labels: ['runtime'] };
+  let invalid;
+  const pending = main.call('alp_issue', draft).then(result => { invalid = result; });
+  await until(() => invalid || runtime.questions().length);
+  assert.equal(runtime.questions().length, 0, 'unknown labels must not ask for approval');
+  await pending;
+  assert.deepEqual(invalid.missingLabels, ['runtime']);
+  assert.equal(runtime.questions().length, 0);
+  assert.equal(calls.length, 1);
+  const created = (await answered(runtime, main.call('alp_issue', { ...draft, labels: ['bug'] }), 'Approve')).result;
+  assert.equal(created.posted, true);
+  assert.deepEqual(calls.at(-1).slice(-2), ['--label', 'bug']);
+});

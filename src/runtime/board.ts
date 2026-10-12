@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { realpathSync } from 'node:fs';
 
 /**
  * The project board (plans/reference/ALPD.md §18): one group channel per project that every
@@ -17,7 +18,7 @@ export type Pin = {
   project: string;
   kind: PinKind;
   body: string;
-  /** Project-relative files or directories; required for claims. */
+  /** Project-relative files or directories, or absolute paths in an external write root; required for claims. */
   paths?: string[];
   agent: string;
   sessionId: string;
@@ -35,22 +36,34 @@ export const PIN_PATHS = 50;
 export const BOARD_KEEP = 200;
 const DIGEST_CHARS = 3000;
 
-/** Project-relative, normalized paths, or an error message. */
-export function normalizePaths(paths: unknown, project: string): string[] | string {
+/** Resolve symlinked parents even for a file an assignment has not created yet. */
+function canonicalPath(file: string): string {
+  try { return realpathSync(file); } catch {
+    const parent = path.dirname(file);
+    return parent === file ? file : path.join(canonicalPath(parent), path.basename(file));
+  }
+}
+const containsPath = (outer: string, inner: string) => {
+  const relative = path.relative(outer, inner);
+  return !relative || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+};
+
+/** Normalized project-relative paths, or absolute paths in a declared external write root. */
+export function normalizePaths(paths: unknown, project: string, roots: string[] = [project]): string[] | string {
   if (!Array.isArray(paths) || !paths.length || paths.length > PIN_PATHS) return `paths must list 1 to ${PIN_PATHS} files or directories`;
   const normalized: string[] = [];
   for (const entry of paths) {
     if (typeof entry !== 'string' || !entry.trim()) return 'paths must be nonempty strings';
-    const absolute = path.resolve(project, entry.trim());
-    const relative = path.relative(project, absolute).split(path.sep).join('/');
-    if (relative.startsWith('..') || path.isAbsolute(relative)) return `${entry} is outside the project`;
-    normalized.push(relative || '.');
+    const absolute = canonicalPath(path.resolve(project, entry.trim()));
+    if (!roots.some(root => containsPath(canonicalPath(root), absolute))) return `${entry} is outside the project or declared write root`;
+    const relative = path.relative(canonicalPath(project), absolute).split(path.sep).join('/');
+    normalized.push(relative === '' ? '.' : relative === '..' || relative.startsWith('../') || path.isAbsolute(relative) ? absolute.split(path.sep).join('/') : relative);
   }
   return [...new Set(normalized)];
 }
 
 /** Two paths overlap when one is the other or contains it; '.' is the whole project. */
-const contains = (outer: string, inner: string) => outer === '.' || inner === outer || inner.startsWith(`${outer}/`);
+const contains = (outer: string, inner: string) => path.isAbsolute(outer) === path.isAbsolute(inner) && (outer === '.' || inner === outer || inner.startsWith(outer.endsWith('/') ? outer : `${outer}/`));
 
 export function overlapping(a: string[], b: string[]) {
   return a.filter(left => b.some(right => contains(left, right) || contains(right, left)));

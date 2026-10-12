@@ -527,3 +527,34 @@ test('advisors on Claude run Bash in a read-only floor by default', async t => {
   assert.match(supervisor.config.developerInstructions, /Bash runs in an OS sandbox: it writes nothing but temporary files, and has no network\. Run any command you need for your work in it\./);
   assert.doesNotMatch(supervisor.config.developerInstructions, /dangerouslyDisableSandbox/);
 });
+
+
+test('read-only Claude lead and peers get the same inspection sandbox regardless of profile', async t => {
+  const { directory, root, home } = await project(t, { agents: { lead: 'workspace-write' } });
+  const previous = process.env.ALP_CLAUDE_SANDBOX;
+  process.env.ALP_CLAUDE_SANDBOX = '1';
+  t.after(() => { if (previous === undefined) delete process.env.ALP_CLAUDE_SANDBOX; else process.env.ALP_CLAUDE_SANDBOX = previous; });
+  await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ workflow: { mode: 'cafe', supervisor: false }, permissions: { agents: { lead: 'workspace-write' } } }));
+  const runtimes = [];
+  const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: home, runLogDir: path.join(directory, 'runs') });
+  t.after(() => runtime.shutdown());
+  await runtime.open('root', { cwd: root, model: 'claude:claude-sonnet-4-6' });
+  const main = runtimes[0];
+  await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Assess security' }] });
+  await main.call('alp_delegate', { agent: 'lead', task: 'Assess', mode: 'read-only' });
+  const lead = runtimes.at(-1);
+  await until(() => lead.started.length === 1);
+  await lead.call('alp_delegate', { agent: 'peer', task: 'Inspect history', mode: 'read-only' });
+  const peer = runtimes.at(-1);
+  await until(() => peer.started.length === 1);
+  for (const child of [lead, peer]) {
+    assert.equal(child.config.floor, 'read-only');
+    const permissions = claudePermissions('read-only', () => 'read-only', { allow: [], deny: [], ...child.config.permissions, floor: child.config.floor, floorRoot: root });
+    for (const [tool, input] of [['Glob', { pattern: '**/*' }], ['Grep', { pattern: 'secret' }], ['Bash', { command: 'git status --short && git log -1 && git ls-files' }]]) {
+      assert.equal((await permissions.canUseTool(tool, input)).behavior, 'allow');
+    }
+    assert.equal((await permissions.canUseTool('Write', { file_path: path.join(root, 'x'), content: 'x' })).behavior, 'deny');
+    assert.equal((await permissions.canUseTool('Bash', { command: 'touch x', dangerouslyDisableSandbox: true })).behavior, 'deny');
+  }
+  assert.ok(claudePermissions('read-only', undefined, { allow: [], deny: [], floor: 'read-only', floorRoot: root }).tools.includes('Bash'));
+});

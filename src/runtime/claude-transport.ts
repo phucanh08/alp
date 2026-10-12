@@ -37,6 +37,7 @@ export const toolShapes: Record<string, Record<string, z.ZodType>> = {
     modelReason: z.string().min(1).optional(),
     mode: z.enum(['read-only', 'workspace-write', 'full-access']).optional(),
     isolation: z.enum(['shared', 'worktree']).optional(),
+    writeRoot: z.string().min(1).optional(),
     wait: z.boolean().optional(),
     etaMinutes: z.number().int().min(1).max(1440).optional(),
     taskId: z.string().min(1).optional(),
@@ -276,7 +277,7 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
     permissionMode: claudePermissionMode(sandbox),
     // Lets a live session switch to full-access later; it bypasses nothing by itself.
     allowDangerouslySkipPermissions: true,
-    ...(readOnly && !currentSandbox ? { tools: readers } : {}),
+    ...(readOnly && !currentSandbox ? { tools: [...readers, ...(rules?.floor === 'read-only' ? ['Bash'] : [])] } : {}),
     // Allow rules run without asking, even in a read-only session; deny rules hold even with full access.
     ...(rules?.allow.length ? { allowedTools: rules.allow } : {}),
     disallowedTools: ['Agent', 'Task', 'TeamCreate', 'EnterPlanMode', 'ExitPlanMode', ...(rules?.deny ?? [])],
