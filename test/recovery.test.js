@@ -308,3 +308,67 @@ test('an external shared writer recovers its write root, inspection scope and re
   const beside = await main.call('alp_delegate', { agent: 'peer', task: 'Project instead', mode: 'workspace-write' });
   assert.equal(beside.status, 'running', JSON.stringify(beside));
 });
+
+test('recovery migrates an old thinking level and persists the resolved effort', async t => {
+  const { root, options } = await workspace(t);
+  const runtimes = [];
+  const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
+  t.after(() => first.shutdown());
+  await first.open('root', { cwd: root, persist: true });
+  await first.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Work' }] });
+  const main = runtimes[0];
+  const args = { agent: 'peer', task: 'Inspect', mode: 'read-only', model: 'codex:gpt-6-astra' };
+  assert.match((await main.call('alp_delegate', { ...args, thinking: 'high' })).error, /unsupported|takes effort/i);
+  const started = await main.call('alp_delegate', args);
+  assert.ok(started.assignmentId, JSON.stringify(started));
+  const peer = runtimes.at(-1);
+  await until(() => peer.started.length === 1);
+  const snapshot = first.snapshot('root');
+  await first.shutdown();
+  const live = JSON.parse(await readFile(options.liveFile, 'utf8'));
+  assert.equal(live[0].spec.thinking, 'low');
+  // Simulate an assignment accepted by the older catalog, before Astra became low-only.
+  live[0].spec.thinking = 'high';
+  await writeFile(options.liveFile, JSON.stringify(live));
+  const second = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
+  t.after(() => second.shutdown());
+  await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot.threadId, runtime: snapshot.runtime, model: snapshot.model, workflow: snapshot.workflow } });
+  assert.deepEqual(await second.recover('root'), [{ assignmentId: started.assignmentId, agent: 'peer', outcome: 'resumed' }]);
+  const resumed = runtimes.at(-1);
+  await until(() => resumed.started.length === 1);
+  assert.equal(resumed.calls.find(call => call.method === 'thread/resume').params.threadId, peer.threadId);
+  assert.equal(resumed.started[0].params.effort, 'low');
+  await second.shutdown();
+  assert.equal(JSON.parse(await readFile(options.liveFile, 'utf8'))[0].spec.thinking, 'low');
+});
+
+test('finished shared assignments remain continuable after a daemon restart', async t => {
+  const { root, options } = await workspace(t);
+  const runtimes = [];
+  const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
+  t.after(() => first.shutdown());
+  await first.open('root', { cwd: root, persist: true });
+  await first.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Work' }] });
+  const main = runtimes[0];
+  const started = await main.call('alp_delegate', { agent: 'peer', task: 'Read the code', mode: 'read-only' });
+  const peer = runtimes.at(-1);
+  await until(() => peer.started.length === 1);
+  assert.match((await main.call('alp_delegate', { agent: 'peer', task: 'Continue', mode: 'read-only', continueFrom: started.assignmentId })).error, /running or parked/);
+  await peer.call('alp_handoff', { outcome: 'complete', summary: 'Found the parser' });
+  peer.finish('Look in parser.js');
+  await main.call('alp_wait', { assignments: [started.assignmentId] });
+  const snapshot = first.snapshot('root');
+  await first.shutdown();
+  const second = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
+  t.after(() => second.shutdown());
+  await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot.threadId, runtime: snapshot.runtime, model: snapshot.model, workflow: snapshot.workflow } });
+  await second.prompt('root', { clientMessageId: 'm2', content: [{ type: 'text', text: 'Continue' }] });
+  const continued = await runtimes.at(-1).call('alp_delegate', { agent: 'peer', task: 'Explain the parser', mode: 'read-only', continueFrom: started.assignmentId });
+  assert.ok(continued.assignmentId, JSON.stringify(continued));
+  const next = runtimes.at(-1);
+  await until(() => next.started.length === 1);
+  assert.equal(next.cwd, root);
+  assert.match(next.lastText(), /Read the code/);
+  assert.match(next.lastText(), /Found the parser/);
+  assert.match(next.lastText(), /Look in parser.js/);
+});
