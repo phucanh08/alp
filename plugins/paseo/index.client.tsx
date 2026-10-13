@@ -2,6 +2,7 @@ import type { PluginClientContext } from '@getpaseo/plugin/client';
 import { TasksPanel, TasksScreen } from './client/tasks-panel';
 import { TASKS_SCREEN, addTaskPills, tasksScreen } from './client/task-pills';
 import { LibrarySettings, ProjectLibraryPanel } from './client/library';
+import { UsageScreen } from './client/usage';
 
 /**
  * ALP's client contributions: the Tasks panel of a workspace's project, the Tasks screen
@@ -38,6 +39,8 @@ export default function contribute(client: PluginClientContext) {
     onSubmit({ workspace, args, openScreen }) { openScreen(tasksScreen(workspace.id, workspace.directory || workspace.projectRootPath, args.trim() || undefined)); },
   });
   const removeSettings = client.addSettingsScreen({ id: 'alp-settings', title: 'ALP', icon: 'Bot', Component: LibrarySettings });
+  const removeUsage = client.addSettingsScreen({ id: 'alp-usage', title: 'Usage', icon: 'ChartNoAxesCombined', Component: UsageScreen });
+  const removeUsagePanel = client.addWorkspacePanel({ id: 'alp-usage', title: 'Usage', icon: 'ChartNoAxesCombined', context: 'workspace', Component: UsageScreen });
   const removeProject = client.addWorkspacePanel({ id: 'alp-project', title: 'ALP project', icon: 'Bot', context: 'workspace', Component: ProjectLibraryPanel });
-  return () => { removePanel(); removeScreen(); removePills(); removeCommand(); removeScreenCommand(); removeSlash(); removeSettings(); removeProject(); };
+  return () => { removePanel(); removeScreen(); removePills(); removeCommand(); removeScreenCommand(); removeSlash(); removeSettings(); removeProject(); removeUsage(); removeUsagePanel(); };
 }

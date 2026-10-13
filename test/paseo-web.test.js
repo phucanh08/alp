@@ -14,7 +14,7 @@ import { initProject } from '../src/core/init.js';
 import { fakeTransport, until } from './support/fake-agent.js';
 
 /** alpd in this process serving a stand-in for the built ALP web app (Paseo's app, ALPD §62). */
-async function setup(t) {
+async function setup(t, usage) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-paseo-web-'));
   const home = path.join(directory, 'home');
   const root = path.join(directory, 'project');
@@ -27,7 +27,8 @@ async function setup(t) {
   await writeFile(path.join(dir, '_expo/static/js/web/index-1.js'), bundle);
   await writeFile(path.join(dir, '_expo/static/js/web/index-1.js.br'), brotliCompressSync(bundle));
   await writeFile(path.join(directory, 'secret.txt'), 'no');
-  const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(agents), supervisor: false, libraryDir: home });
+  const factory = fakeTransport(agents);
+  const runtime = createAlpRuntime({ language: 'English', transport: (...args) => { const transport = factory(...args); if (usage) transport.orchestrationContext = async () => ({ usage: usage[args[2]] }); return transport; }, supervisor: false, libraryDir: home });
   const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test' });
   let web;
   const gateway = createPaseoBridge({ daemon, version: 'test', home, token: () => web.token, serverId: () => web.serverId });
@@ -373,6 +374,8 @@ test("ALP's plugin runs in the app from alpd: its script, catalog and RPCs", asy
   assert.deepEqual((await invoke('alp.tasks.list', { directory: root })).output.tasks.map(task => task.title), ['Write the docs']);
   assert.equal((await invoke('alp.tasks.change', { directory: root, id: added.id, action: 'close' })).output.status, 'closed');
   assert.ok((await invoke('alp.library.list', { directory: root, kind: 'teams' })).output.entries.length > 0);
+  const usage = (await invoke('alp.usage.get', {})).output;
+  assert.deepEqual(usage.providers.map(provider => [provider.runtime, provider.available, provider.windows]), [['codex', false, []], ['claude', false, []]]);
   // A bad call fails as Paseo's daemon fails it, and an unknown one says so.
   assert.equal((await invoke('alp.tasks.add', { directory: root, title: '' })).code, 'handler_error');
   assert.equal((await invoke('alp.nope', {})).code, 'method_not_found');
@@ -479,4 +482,30 @@ test("a checkout's branch, its changes as the Changes panel shows them, and its 
   assert.equal((await ask(client, { type: 'file_explorer_request', requestId: 'f8', cwd: repo, path: 'outside', mode: 'list' })).payload.error, 'Access outside of workspace is not allowed');
   // Committing is not in ALP yet.
   assert.equal((await ask(client, { type: 'checkout_commit_request', requestId: 'k1', cwd: repo, message: 'x', addAll: true })).payload.code, 'not_implemented');
+});
+
+
+test('the native Usage drawer and settings receive provider reports and respect report filters', async t => {
+  const readings = {
+    codex: { available: true, limits: [{ plan: 'pro', windows: [{ usedPercent: 83, windowMinutes: 300, resetsAt: 1800000000 }] }] },
+    claude: { available: false },
+  };
+  const { connected, ask } = await setup(t, readings);
+  const client = await connected();
+  const features = client.frames.find(frame => frame.message?.payload?.status === 'server_info').message.payload.features;
+  assert.equal(features.usageSources, true);
+  assert.equal(features.providerUsageList, true);
+  const legacy = (await ask(client, { type: 'provider.usage.list.request', requestId: 'usage-old' })).payload;
+  assert.equal(legacy.providers[0].windows[0].remainingPct, 17);
+  assert.equal(legacy.providers[0].windows[0].tone, 'warning');
+  assert.equal(legacy.providers[1].status, 'unavailable');
+  readings.codex.limits[0].windows[0].usedPercent = 25;
+  client.send({ type: 'session', message: { type: 'usage.list_reports.request', requestId: 'usage-new', reportIds: ['alp-codex'], forceRefresh: true } });
+  const done = (await client.next(frame => frame.message?.type === 'usage.list_reports.response' && frame.message.payload.requestId === 'usage-new')).message;
+  assert.equal(done.payload.error, null);
+  const reports = client.frames.filter(frame => frame.message?.type === 'usage.list_reports.update' && frame.message.payload.requestId === 'usage-new').map(frame => frame.message.payload.report);
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].sourceLabel, 'Codex');
+  assert.equal(reports[0].report.windows[0].usedPct, 25);
+  assert.deepEqual(reports[0].account, {});
 });

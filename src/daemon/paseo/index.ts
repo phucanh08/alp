@@ -8,6 +8,7 @@ import { quietHandlers } from './quiet.js';
 import { createCheckouts } from './checkout.js';
 import { directorySuggestions, fileExplorer } from './files.js';
 import { createPlugins } from './plugins.js';
+import { createUsage } from './usage.js';
 import { createWorkspaces } from './workspaces.js';
 import { createDaemonConfig, createRelay, type RelaySettings } from './relay.js';
 import { createProviders } from './providers.js';
@@ -64,13 +65,19 @@ export function createPaseoBridge({ daemon, version, token, serverId, home, rela
   const broadcast = (message: Parameters<typeof gateway.broadcast>[0]) => gateway.broadcast(message);
   const workspaces = createWorkspaces({ home, broadcast, agents: () => agents.view, inDevelopment, log });
   const agents = createAgents({ daemon, broadcast, directory: workspaces, log });
-  const plugins = createPlugins({ log });
+  const readUsage = async (refresh = false) => {
+    const connection = daemon.local();
+    try { return await connection.request('daemon.usage', { refresh }); }
+    finally { connection.close(); }
+  };
+  const plugins = createPlugins({ log, usage: readUsage });
+  const usage = createUsage(readUsage);
   const checkouts = createCheckouts({ broadcast, log });
   const relay = createRelay({ home, serverId, attach: socket => gateway.attach(socket), initial: relaySettings, log: message => log?.(message) });
   const providers = createProviders({ home, broadcast, alpEntry: cwd => agents.providerEntry(cwd), log: message => log?.(message) });
   const daemonConfig = createDaemonConfig({ relay, providers, serverId, broadcast, inDevelopment, version, listen, startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString() });
-  Object.assign(handlers, quietHandlers, daemonConfig.handlers, providers.handlers, agents.handlers, workspaces.handlers, plugins.handlers, checkouts.handlers, { directory_suggestions_request: directorySuggestions, file_explorer_request: fileExplorer });
-  Object.assign(features, ENTRY_POINTS, daemonConfig.features, providers.features, agents.features, workspaces.features, plugins.features, checkouts.features);
+  Object.assign(handlers, quietHandlers, daemonConfig.handlers, providers.handlers, agents.handlers, workspaces.handlers, plugins.handlers, usage.handlers, checkouts.handlers, { directory_suggestions_request: directorySuggestions, file_explorer_request: fileExplorer });
+  Object.assign(features, ENTRY_POINTS, daemonConfig.features, providers.features, agents.features, workspaces.features, plugins.features, usage.features, checkouts.features);
   return Object.assign(gateway, {
     relay,
     close: () => { agents.close(); checkouts.close(); void relay.stop(); return workspaces.close(); },

@@ -65,7 +65,7 @@ test('the app adds an ACP agent from its catalog; alpd keeps it in the library a
   const file = JSON.parse(await readFile(path.join(home, 'providers', 'fake.json'), 'utf8'));
   assert.deepEqual(file, { kind: 'acp', label: 'Fake', description: 'A scripted agent', command: process.execPath, args: [FAKE], env: { FAKE_ACP_MODELS: 'fast,deep' }, params: { supportsMcpServers: false } });
 
-  const snapshot = await ask({ type: 'get_providers_snapshot_request' });
+  const snapshot = await ask({ type: 'get_providers_snapshot_request', cwd: home });
   assert.deepEqual(snapshot.payload.entries.map(entry => [entry.provider, entry.source]), [['alp', 'builtin'], ['fake', 'custom']]);
   const fake = providerOf(await discovered, 'fake');
   assert.deepEqual(fake.models.map(model => [model.id, model.isDefault ?? false]), [['fast', true], ['deep', false]]);
@@ -90,7 +90,7 @@ test('the app adds an ACP agent from its catalog; alpd keeps it in the library a
   const removed = await ask({ type: 'set_daemon_config_request', config: { removeProviders: ['fake'] } });
   assert.deepEqual(removed.payload.config.providers, {});
   await assert.rejects(access(path.join(home, 'providers', 'fake.json')));
-  assert.deepEqual((await ask({ type: 'get_providers_snapshot_request' })).payload.entries.map(entry => entry.provider), ['alp']);
+  assert.deepEqual((await ask({ type: 'get_providers_snapshot_request', cwd: home })).payload.entries.map(entry => entry.provider), ['alp']);
 });
 
 test('ALP itself, other kinds of provider and ids Paseo would not make are refused', async t => {

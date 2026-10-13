@@ -108,6 +108,7 @@ test('the client entry bundles with only the modules Paseo supplies and register
   const cleanup = load(code).default(client);
   assert.equal(typeof cleanup, 'function');
   assert.deepEqual(host.panels.filter(panel => panel.id === 'alp-tasks').map(panel => [panel.id, panel.title, panel.icon, panel.context, typeof panel.Component]), [['alp-tasks', 'Tasks', 'ListTodo', 'workspace', 'function']]);
+  assert.equal(typeof host.panels.find(panel => panel.id === 'alp-usage')?.Component, 'function');
   assert.deepEqual(host.screens.map(screen => [screen.id, screen.title({}), screen.title({ taskId: 't-0003' }), typeof screen.Component]), [['alp-tasks', 'ALP tasks', 'ALP task t-0003', 'function']]);
 
   // The desktop opens the panel; the full-screen item and /alp-tasks open the screen, which phones reach.
@@ -288,7 +289,7 @@ test('the plugin server lists, adds, closes, reopens and approves tasks as the u
   const dispose = contribute({ registerProvider() {}, handle: (contract, handler) => handlers.set(contract.name, { contract, handler }) });
   if (supervise === undefined) delete process.env.ALP_SUPERVISE; else process.env.ALP_SUPERVISE = supervise;
   t.after(() => dispose());
-  assert.deepEqual([...handlers.keys()].sort(), ['alp.library.delete', 'alp.library.duplicate', 'alp.library.get', 'alp.library.list', 'alp.library.rename', 'alp.library.save', 'alp.library.skills', 'alp.library.test', 'alp.settings.language.get', 'alp.settings.language.set', 'alp.tasks.add', 'alp.tasks.change', 'alp.tasks.list']);
+  assert.deepEqual([...handlers.keys()].sort(), ['alp.library.delete', 'alp.library.duplicate', 'alp.library.get', 'alp.library.list', 'alp.library.rename', 'alp.library.save', 'alp.library.skills', 'alp.library.test', 'alp.settings.language.get', 'alp.settings.language.set', 'alp.tasks.add', 'alp.tasks.change', 'alp.tasks.list', 'alp.usage.get']);
   // Like the SDK's callPluginRpc: input and output are checked against the shared contract.
   const call = async (name, input) => {
     const { contract, handler } = handlers.get(name);
@@ -329,4 +330,20 @@ test('the plugin server lists, adds, closes, reopens and approves tasks as the u
   const outside = await call('alp.tasks.list', { directory });
   assert.deepEqual(outside, { projectRoot: null, tasks: [], unreadable: [] });
   await closeTask(root, id, {}, 'user');
+});
+
+test('Usage shows provider windows, paused work and unknown usage in wide and compact layouts', async () => {
+  const { UsageView } = load((await compileClient('client/usage.tsx')).code);
+  const data = { providers: [
+    { runtime: 'codex', available: true, plan: 'pro', limited: false, checkedAt: '2026-10-13T05:00:00Z', pause: null, parked: 0, windows: [{ name: '5 hour window', usedPercent: 42, resetsAt: '2026-10-13T08:00:00Z' }] },
+    { runtime: 'claude', available: false, plan: null, limited: false, checkedAt: '2026-10-13T05:00:00Z', pause: { reason: 'Usage limit reached' }, parked: 2, windows: [] },
+  ] };
+  for (const compact of [false, true]) {
+    const html = renderToStaticMarkup(createElement(UsageView, { theme, compact, data, loading: false, error: null, onRefresh() {}, now: Date.parse('2026-10-13T05:00:00Z') }));
+    for (const text of ['Codex', 'Claude', '42%', '58% remaining', 'Resets in 3h 0m', 'Paused', '2 assignments waiting', 'Usage is not available', 'Refresh usage']) assert.ok(html.includes(text), text);
+    assert.ok(!html.includes('0% remaining'));
+  }
+  const error = renderToStaticMarkup(createElement(UsageView, { theme, compact: true, data, loading: false, error: 'Disconnected', onRefresh() {} }));
+  assert.match(error, /Showing the last received data/);
+  assert.match(error, /Disconnected/);
 });

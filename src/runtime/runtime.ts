@@ -27,7 +27,8 @@ import { createRecallBook, recallPrompt, RECALL_KEEP_MS, RECALL_QUESTION_CHARS, 
 import { branchExists, checkoutFingerprint, checkoutKey, commitWorktree, createCopy, createWorktree, linkModules, mergeWorktree, reattachWorktree, removeCopy, removeWorktree, type Copy, type Worktree, type WorktreeChange } from './workspace.js';
 import { claudeSandboxAvailable, SKILL_PLUGIN } from './claude-transport.js';
 import { ALP_REPO, gh, projectRepo, type GitHubRunner } from './github.js';
-import { usageAllows } from './runtime-context.js';
+import { optionalRead, usageAllows } from './runtime-context.js';
+import { providerUsage, type ProviderUsage } from './usage.js';
 import { parse as toml } from 'smol-toml';
 import { findFormula, formulaDirs, listFormulas, pourFormula } from '../core/formulas.js';
 import { ADVISORS, addAllowRule, capMode, commandDecision, profileFor, unwrapShell, type PermissionProfile } from '../core/permissions.js';
@@ -169,6 +170,8 @@ export type AlpRuntime = {
   resume(input?: { runtime?: RuntimeKind }): PauseState;
   /** Current pauses and parked assignments. */
   pauses(): PauseState;
+  /** Read-only, cached account usage for the web and desktop viewers. */
+  usage(refresh?: boolean): Promise<{ providers: Array<ProviderUsage & { pause: Pause | null; parked: number }> }>;
   /** The user asks a finished assignment, or the last one on a task of the project, about its work. */
   recall(target: { assignmentId?: string; taskId?: string; projectRoot?: string }, question: string): Promise<RecallAnswer>;
   /** Assignments an earlier alpd left running, which recover() can continue once their root is open again. */
@@ -2226,20 +2229,37 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     return running;
   }
 
-  /** Whether the runtime says its usage limit lifted: from a session open on it, else from a short-lived process of it. */
-  async function limitLifted(kind: RuntimeKind): Promise<boolean | undefined> {
+  /** Reads usage from an open session, or a short-lived process without sending a prompt. */
+  async function readUsage(kind: RuntimeKind): Promise<unknown> {
     const open = [...sessions.values()].find(session => !session.closed && !session.pending && session.runtimeKind === kind);
-    if (open) return usageAllows(((await open.runtime.orchestrationContext?.().catch(() => undefined)) as any)?.usage);
+    if (open) return ((await optionalRead(() => open.runtime.orchestrationContext?.() ?? Promise.resolve(undefined), 20_000)) as any)?.usage;
     const transport = createTransport(options, kind, os.tmpdir(), nativeEnvironment(options));
     transport.onFailure(() => {});
     try {
-      await transport.initialize();
-      return usageAllows(((await transport.orchestrationContext?.().catch(() => undefined)) as any)?.usage);
+      return await optionalRead(async () => {
+        await transport.initialize();
+        return ((await transport.orchestrationContext?.()) as any)?.usage;
+      }, 20_000);
     } catch {
       return undefined;
     } finally {
       await transport.close().catch(() => {});
     }
+  }
+
+  async function limitLifted(kind: RuntimeKind): Promise<boolean | undefined> {
+    return usageAllows(await readUsage(kind));
+  }
+
+  const usageCache = new Map<'codex' | 'claude', { at: number; pending: boolean; value: Promise<ProviderUsage> }>();
+  function cachedUsage(kind: 'codex' | 'claude', refresh = false) {
+    const cached = usageCache.get(kind);
+    if (cached && (cached.pending || (!refresh && Date.now() - cached.at < 30_000))) return cached.value;
+    const value = readUsage(kind).then(usage => providerUsage(kind, usage), () => providerUsage(kind, undefined));
+    const entry = { at: Date.now(), pending: true, value };
+    usageCache.set(kind, entry);
+    void value.then(() => { entry.pending = false; entry.at = Date.now(); });
+    return value;
   }
 
   function pauseRuntime(scope: RuntimeKind | 'all', pause: Pause, now = false) {
@@ -4846,6 +4866,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     },
 
     pauses: () => pauseState(),
+    async usage(refresh = false) {
+      const providers = await Promise.all((['codex', 'claude'] as const).map(kind => cachedUsage(kind, refresh)));
+      const state = pauseState();
+      return { providers: providers.map(provider => ({ ...provider, pause: state.all ?? state.runtimes[provider.runtime] ?? null, parked: state.parked.filter(entry => entry.runtime === provider.runtime).length })) };
+    },
 
     async recall(target, question) {
       if (typeof question !== 'string' || !question.trim() || question.length > RECALL_QUESTION_CHARS) throw new Error(`The question must be text of at most ${RECALL_QUESTION_CHARS} characters`);

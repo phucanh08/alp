@@ -443,6 +443,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     'daemon.pauses'() {
       return runtime.pauses();
     },
+    'daemon.usage': (_connection, { refresh = false } = {}) => runtime.usage(refresh === true),
 
     /** Asks a finished assignment, or the last one on a task, about its work (ALPD §27). */
     async 'assignment.recall'(_connection, { assignmentId, taskId, projectRoot, question } = {}) {

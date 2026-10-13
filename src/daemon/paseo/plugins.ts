@@ -3,6 +3,7 @@ import type { SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/pr
 import plugin from 'alp:plugin-client';
 import { registerLibraryRpc } from '../../../plugins/paseo/server/library.js';
 import { registerTaskRpc } from '../../../plugins/paseo/server/tasks.js';
+import { registerUsageRpc } from '../../../plugins/paseo/server/usage.js';
 import type { PluginServerContext } from '../../../plugins/paseo/server/compat.js';
 import type { Handler } from './gateway.js';
 
@@ -24,11 +25,12 @@ const digest = createHash('sha256').update(plugin.factory).digest('hex').slice(0
 /** The script the page loads before the app: each plugin's factory by id. */
 export const pluginScript = `window.__ALP_PLUGINS__ = Object.assign(window.__ALP_PLUGINS__ || {}, { ${JSON.stringify(plugin.id)}: ${plugin.factory} });\n`;
 
-export function createPlugins({ log = () => {} }: { log?: (message: string) => void } = {}) {
+export function createPlugins({ log = () => {}, usage }: { log?: (message: string) => void; usage?: (refresh?: boolean) => Promise<any> } = {}) {
   const methods = new Map<string, { contract: Contract; run: (input: any) => Promise<unknown> }>();
   const server = { handle: (contract: Contract, run: (input: any) => Promise<unknown>) => { methods.set(contract.name, { contract, run }); } } as unknown as PluginServerContext;
   registerTaskRpc(server);
   registerLibraryRpc(server);
+  registerUsageRpc(server, usage);
 
   const handlers: Record<string, Handler> = {
     'plugin.catalog.get.request': (message: Inbound<'plugin.catalog.get.request'>) =>
