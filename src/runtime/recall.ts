@@ -24,6 +24,8 @@ export type RecallEntry = {
   taskId?: string;
   status: string;
   finishedAt: string;
+  /** Shared work remains in cwd; a new assignment can build on this brief and handoff. */
+  shared?: { brief: string; summary: string; writeRoot?: string };
 };
 
 export const RECALL_KEEP_MS = 14 * 24 * 60 * 60 * 1000;

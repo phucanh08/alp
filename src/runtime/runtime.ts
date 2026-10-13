@@ -1170,7 +1170,7 @@ function nativeSessionConfig(
                 },
                 isolation: { type: 'string', enum: ['shared', 'worktree'], description: 'Default shared: your checkout. worktree: a writing peer works in its own git worktree, so it can run beside other peers; apply its change with alp_merge.' },
                 writeRoot: { type: 'string', description: 'For a shared writer: existing directory it will write exclusively, absolute or relative to the project root. The child works there; writers in different repositories can run together. Omit to write in your checkout. This declares scope, not extra permissions.' },
-                continueFrom: { type: 'string', description: 'A finished worktree assignment you have not merged or discarded: the new assignment works in a worktree that starts from its change, for example to fix what verification found. Implies isolation worktree.' },
+                continueFrom: { type: 'string', description: 'A finished assignment of yours. For an unmerged worktree, starts a new worktree from its change. For a recorded Codex or Claude shared assignment, starts a new assignment in the same checkout with its previous brief and handoff; files remain as they are now. Does not resume the old conversation.' },
                 wait: { type: 'boolean', description: 'Default false: start it in the background and return its assignmentId at once; the result comes as mail. true: wait for the result or the first question, only when your next step cannot go on without it.' },
                 etaMinutes: { type: 'integer', minimum: 1, maximum: 1440, description: 'Minutes you expect it to take. When it runs past them, ALP sends you a check-in.' },
                 ...(!parentAgent && mapping.agent.name === mainOf(mapping)
@@ -3141,6 +3141,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         project: child.mapping.agent.projectRoot, runtime: child.runtimeKind, threadId: child.threadId, cwd: child.mapping.workdir,
         model: child.mapping.model, ...(child.mapping.thinking ? { thinking: child.mapping.thinking } : {}),
         ...(assignment.taskId ? { taskId: assignment.taskId } : {}), status: state, finishedAt: new Date().toISOString(),
+        ...(assignment.isolation === 'shared' && !assignment.copy ? { shared: {
+          brief: cut(child.brief ?? '', BRIEF_CHARS),
+          summary: cut(JSON.stringify({ handoff: child.handoff ?? null, output: result.output }), BRIEF_CHARS),
+          ...(child.spec.writeRoot ? { writeRoot: child.spec.writeRoot } : {}),
+        } } : {}),
       }).then(forgetExpired);
     }
     if (assignment.copy) {
@@ -3690,11 +3695,23 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       ...(childProfile && childMode !== (args.mode ?? session.mapping.mode) ? { mode: childMode, modeNote: `${args.agent} runs ${childMode}: its permission profile ${childProfile.name} caps it` } : {}),
       ...(childProfile?.workdir === 'copy' && isolationOf(args) === 'shared' ? { workdirNote: `${args.agent} works in a disposable copy of your tree; nothing it changes reaches yours` } : {}),
     };
+    let sharedContinuation: RecallEntry | undefined;
     if (args.continueFrom !== undefined) {
-      if (typeof args.continueFrom !== 'string' || !session.worktrees.has(args.continueFrom)) return toolResult(false, { error: 'continueFrom names a finished worktree assignment of yours that you have not merged or discarded' });
-      if (args.isolation === 'shared') return toolResult(false, { error: 'continueFrom works in a worktree; leave out isolation or pass "worktree"' });
+      if (typeof args.continueFrom !== 'string') return toolResult(false, { error: 'continueFrom must name a finished assignment of yours' });
+      if (session.assignments.has(args.continueFrom)) return toolResult(false, { error: 'That assignment is still running or parked; wait for its handoff, or use alp_cancel before delegating the remaining work' });
+      if (session.worktrees.has(args.continueFrom)) {
+        if (args.isolation === 'shared') return toolResult(false, { error: 'This assignment used a worktree; leave out isolation or pass "worktree"' });
+      } else {
+        const previous = await findRecall({ assignmentId: args.continueFrom });
+        if (!previous?.shared || previous.requesters[0] !== sessionId || !(await sameDirectory(previous.project, session.mapping.agent.projectRoot))) {
+          return toolResult(false, { error: 'continueFrom names a finished shared assignment of yours or an unmerged worktree assignment. If its record is unavailable, delegate again without continueFrom and include its handoff; shared changes already remain in the checkout and need no merge or discard' });
+        }
+        if (args.isolation === 'worktree') return toolResult(false, { error: 'This assignment used the shared checkout; leave out isolation or pass "shared"' });
+        if (childProfile?.workdir === 'copy') return toolResult(false, { error: 'A shared assignment must continue in its checkout, not a disposable copy' });
+        sharedContinuation = previous;
+      }
     }
-    const isolation: Assignment['isolation'] = args.isolation ?? (args.continueFrom !== undefined ? 'worktree' : 'shared');
+    const isolation: Assignment['isolation'] = args.isolation ?? (args.continueFrom !== undefined && !sharedContinuation ? 'worktree' : 'shared');
     if (isolation === 'worktree' && !writes(childMode)) return toolResult(false, { error: 'Worktree isolation is for writing assignments (mode workspace-write or full-access)' });
     const project = session.mapping.agent.projectRoot;
     if (args.writeRoot !== undefined && (typeof args.writeRoot !== 'string' || !args.writeRoot.trim())) return toolResult(false, { error: 'writeRoot must name an existing directory' });
@@ -3707,6 +3724,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       }
     } catch {
       return toolResult(false, { error: 'writeRoot must name an existing directory' });
+    }
+    if (sharedContinuation) {
+      writeRoot ??= sharedContinuation.shared?.writeRoot;
+      if (!(await sameDirectory(writeRoot ?? session.mapping.workdir, sharedContinuation.cwd))) return toolResult(false, { error: 'Continue a shared assignment in its original checkout; use the same writeRoot' });
     }
     const checkout = await checkoutKey(writeRoot ?? session.mapping.workdir);
     let task: Task | undefined;
@@ -3781,7 +3802,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
     // Taken now, so a second delegation or a merge cannot use the same change.
     const continued = args.continueFrom !== undefined ? session.worktrees.get(args.continueFrom) : undefined;
-    if (args.continueFrom !== undefined && !continued) return toolResult(false, { error: `${args.continueFrom} was merged or discarded meanwhile` });
+    if (args.continueFrom !== undefined && !continued && !sharedContinuation) return toolResult(false, { error: `${args.continueFrom} was merged or discarded meanwhile` });
     if (continued) session.worktrees.delete(args.continueFrom);
     root.calls++;
     if (peer) root.peerCount++;
@@ -3890,13 +3911,14 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       const brief =
         (task ? `${taskBrief(task, writes(childMode))}\n\n` : '') +
         (continued ? `${continuedBrief(args.continueFrom, continued)}\n\n` : '') +
+        (sharedContinuation ? `Continue ${sharedContinuation.agent}'s shared assignment ${args.continueFrom} in this checkout. Its files remain as they are now; inspect them before continuing. Ask your requester if you need more context from the previous conversation.\nPrevious brief:\n${sharedContinuation.shared!.brief}\nPrevious result:\n${sharedContinuation.shared!.summary}\n\n` : '') +
         args.task;
       child.brief = brief;
       // From here a restarted alpd can continue it: its thread exists.
       void inFlight.put({
         brief: cut(brief, BRIEF_CHARS),
         assignmentId: childId, rootId, parentId: sessionId, callId: params.callId, agent: args.agent, project, ancestry: [...session.ancestry, args.agent],
-        runtime: child.runtimeKind, model: child.mapping.model, threadId: child.threadId, spec: childSpec, delegation: session.delegation,
+        runtime: child.runtimeKind, model: child.mapping.model, threadId: child.threadId, spec: { ...childSpec, thinking: child.mapping.thinking }, delegation: session.delegation,
         mode: childMode, isolation, ...(assignment.taskId ? { taskId: assignment.taskId } : {}), ...(assignment.worktree ? { worktree: assignment.worktree } : {}),
         ...(assignment.copy ? { copyOf: session.mapping.workdir } : {}), ...(assignment.lease ? { lease: assignment.lease } : {}),
         ...(assignment.fingerprint ? { fingerprint: assignment.fingerprint } : {}), startedAt: assignment.startedAt, epoch,
@@ -4315,6 +4337,17 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       ...(entry.fingerprint ? { fingerprint: entry.fingerprint } : {}),
     };
     let spec = entry.spec;
+    // An older alpd may have accepted an effort removed from the catalog since.
+    // Migrate only persisted assignments; new explicit requests stay strictly validated.
+    if (entry.runtime !== 'acp' && spec.thinking) {
+      const available = thinkingOptionsFor(entry.runtime, entry.model);
+      if (available.length && !available.some(option => option.id === spec.thinking)) {
+        const thinking = models.find(model => model.id === `${entry.runtime}:${entry.model}`)?.defaultThinkingOptionId ?? available[0].id;
+        runLog(entry.rootId, { event: 'assignment.thinking_migrated', assignmentId: id, model: entry.model, from: spec.thinking, to: thinking });
+        post(entry.parentId, { kind: 'note', from: entry.agent, assignment: id, passive: true, body: `Resuming ${id} with thinking ${thinking}: the current ALP catalog no longer accepts its saved thinking ${spec.thinking} for ${entry.runtime}:${entry.model}.` });
+        spec = { ...spec, thinking };
+      }
+    }
     if (writes(entry.mode)) assignment.writeCheckout = entry.worktree?.checkout ?? await checkoutKey(spec.workdir ?? parent.mapping.workdir);
     const undo = async () => {
       parent.children.delete(id);
@@ -4360,7 +4393,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       await undo();
       throw error;
     }
-    void inFlight.put({ ...entry, epoch, ...(assignment.copy ? { spec } : {}) });
+    void inFlight.put({ ...entry, epoch, spec: { ...spec, thinking: sessions.get(id)!.mapping.thinking } });
     emit(entry.parentId, { type: 'assignment', assignment: assignmentSnapshot(assignment, 'running') });
     return assignment;
   }
