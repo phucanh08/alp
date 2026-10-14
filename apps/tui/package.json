@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp-tui",
-  "version": "0.9.5",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "description": "Reserved for a future TUI; no implementation"
