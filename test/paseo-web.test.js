@@ -26,7 +26,7 @@ async function setup(t, usage) {
     await writeFile(file, JSON.stringify({ ...config, command: `alp-test-missing-${id}` }));
   }
   const root = path.join(directory, 'project');
-  await initProject(root);
+  await initProject(root, { library: home });
   const agents = [];
   const dir = path.join(directory, 'web-app');
   await mkdir(path.join(dir, '_expo/static/js/web'), { recursive: true });
@@ -384,6 +384,11 @@ test("ALP's plugin runs in the app from alpd: its script, catalog and RPCs", asy
   assert.deepEqual((await invoke('alp.tasks.list', { directory: root })).output.tasks.map(task => task.title), ['Write the docs']);
   assert.equal((await invoke('alp.tasks.change', { directory: root, id: added.id, action: 'close' })).output.status, 'closed');
   assert.ok((await invoke('alp.library.list', { directory: root, kind: 'teams' })).output.entries.length > 0);
+  const modelChoices = (await invoke('alp.library.models', {})).output.models;
+  assert.ok(modelChoices.some(model => model.id === 'claude:claude-opus-5-5'));
+  assert.ok(modelChoices.some(model => model.id === 'codex:gpt-6.1-sol'));
+  assert.ok(modelChoices.some(model => model.id.startsWith('antigravity:')));
+  assert.equal(new Set(modelChoices.map(model => model.id)).size, modelChoices.length);
   const usage = (await invoke('alp.usage.get', {})).output;
   assert.deepEqual(usage.providers.map(provider => [provider.runtime, provider.available, provider.windows]), [['codex', false, []], ['claude', false, []]]);
   // A bad call fails as Paseo's daemon fails it, and an unknown one says so.
@@ -518,4 +523,58 @@ test('the native Usage drawer and settings receive provider reports and respect 
   assert.equal(reports[0].sourceLabel, 'Codex');
   assert.equal(reports[0].report.windows[0].usedPct, 25);
   assert.deepEqual(reports[0].account, {});
+});
+
+test('saving a Host template immediately refreshes registered project settings without init or a new session', async t => {
+  const { connected, ask, root } = await setup(t);
+  const client = await connected();
+  await ask(client, { type: 'project.add.request', requestId: 'register-save-sync', cwd: root });
+  const invoke = async (method, input) => (await ask(client, { type: 'plugin.rpc.invoke.request', requestId: `${method}-${Math.random()}`, pluginId: 'alp-provider', method, input })).payload;
+  const entry = (await invoke('alp.library.get', { kind: 'teams', name: 'pho' })).output;
+  entry.content.team.modelSetup = { mode: 'default', preset: 'codex' };
+  for (const [name, member] of Object.entries(entry.content.team.members)) if (name !== 'oracle') { member.model = 'codex:gpt-6.1-sol'; member.thinking = 'low'; }
+  entry.content.team.supervisor.model = 'codex:gpt-6.1-sol'; entry.content.team.supervisor.thinking = 'low';
+  entry.content.team.oracleModels = ['codex:gpt-6.1-sol']; entry.content.team.oracleThinking = { 'codex:gpt-6.1-sol': 'low' };
+  const saved = await invoke('alp.library.save', { kind: 'teams', name: 'pho', scope: 'library', content: entry.content });
+  assert.ok(saved.output, JSON.stringify(saved));
+  const settings = JSON.parse(await readFile(path.join(root, '.alp/settings.json'), 'utf8'));
+  assert.deepEqual(settings.team.pho.main.profiles, ['codex:gpt-6.1-sol:low']);
+  assert.deepEqual(settings.team.pho.oracle.profiles, ['codex:gpt-6.1-sol:low']);
+  assert.equal(saved.output.syncedProjects, 1);
+});
+
+test('Save limits project overrides to their project and reports partial global sync failures', async t => {
+  const { connected, ask, root, home } = await setup(t);
+  const client = await connected();
+  const parent = path.dirname(root);
+  const other = path.join(parent, 'other');
+  const broken = path.join(parent, 'broken');
+  const plain = path.join(parent, 'plain');
+  for (const directory of [other, broken]) await initProject(directory, { library: home });
+  await mkdir(plain);
+  for (const directory of [root, other, broken, plain]) await ask(client, { type: 'project.add.request', requestId: `add-${directory}`, cwd: directory });
+  const otherFile = path.join(other, '.alp/settings.json');
+  const otherSettings = JSON.parse(await readFile(otherFile, 'utf8'));
+  otherSettings.runtime = { provider: 'claude', model: 'claude-opus-5-5', reasoning: 'high' };
+  otherSettings.team.pho.peer = { profiles: ['claude:claude-sonnet-5:medium'], autocompact: 'auto' };
+  await writeFile(otherFile, JSON.stringify(otherSettings));
+  await writeFile(path.join(broken, '.alp/settings.json'), '{invalid');
+  const invoke = async (method, input) => (await ask(client, { type: 'plugin.rpc.invoke.request', requestId: `${method}-${Math.random()}`, pluginId: 'alp-provider', method, input })).payload;
+  const entry = (await invoke('alp.library.get', { directory: root, kind: 'teams', name: 'pho' })).output;
+  for (const [name, member] of Object.entries(entry.content.team.members)) if (name !== 'oracle') { member.model = 'codex:gpt-6.1-sol'; member.thinking = 'low'; }
+  const own = await invoke('alp.library.save', { directory: root, kind: 'teams', name: 'pho', scope: 'project', content: entry.content, revision: null });
+  assert.equal(own.output.syncedProjects, 1);
+  assert.deepEqual(own.output.syncErrors, []);
+  assert.equal(await readFile(otherFile, 'utf8'), JSON.stringify(otherSettings), 'project Save does not write the other project');
+  const global = await invoke('alp.library.save', { kind: 'teams', name: 'pho', scope: 'library', content: entry.content, revision: null });
+  assert.equal(global.output.syncedProjects, 1);
+  assert.equal(global.output.syncErrors.length, 1);
+  assert.ok(global.output.syncErrors[0].includes(broken));
+  const refreshed = JSON.parse(await readFile(otherFile, 'utf8'));
+  assert.deepEqual(refreshed.team.pho.main.profiles, ['codex:gpt-6.1-sol:low']);
+  assert.deepEqual(refreshed.team.pho.peer.profiles, ['codex:gpt-6.1-sol:low'], 'explicit Save replaces stale model overrides for the saved team');
+  assert.equal(refreshed.team.pho.peer.autocompact, otherSettings.team.pho.peer.autocompact);
+  assert.deepEqual(refreshed.runtime, otherSettings.runtime, 'Save leaves other project settings intact');
+  assert.equal(await readFile(path.join(broken, '.alp/settings.json'), 'utf8'), '{invalid');
+  await assert.rejects(readFile(path.join(plain, '.alp/settings.json')), { code: 'ENOENT' });
 });

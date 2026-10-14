@@ -1,0 +1,21 @@
+diff --git a/packages/app/src/components/model-browser.tsx b/packages/app/src/components/model-browser.tsx
+--- a/packages/app/src/components/model-browser.tsx
++++ b/packages/app/src/components/model-browser.tsx
+@@ -336,7 +336,7 @@
+     }
+     return {
+       title: view.providerLabel,
+-      leading: (
++      leading: view.providerId === "alp" ? undefined : (
+         <ModelProviderGlyph
+           provider={view.providerId}
+           serverId={serverId}
+@@ -345,7 +345,7 @@
+         />
+       ),
+       back: singleProviderView ? undefined : { onPress: showAll },
+-      actions: (
++      actions: view.providerId === "alp" ? undefined : (
+         <View style={styles.headerActionRow}>
+           <ProviderSettingsAction
+             serverId={serverId}
