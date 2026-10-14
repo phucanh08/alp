@@ -197,7 +197,7 @@ test('alpd tells a clean stop from a crash by the marker it keeps while running'
   await until(async () => !(await readLock(home)));
 });
 
-test('finds alpd through the ALP CLI on PATH', async t => {
+test('finds alpd through the ALP CLI on PATH', { skip: process.platform === 'win32' }, async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-path-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const root = path.join(directory, 'lib', 'alp');

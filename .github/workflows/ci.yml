@@ -39,7 +39,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       # The CLI discovery fixture creates a Unix symlink; all daemon lifecycle/session tests run.
-      - run: node --test --test-name-pattern="^(?!finds alpd through)" test/daemon-paths.test.js test/daemon.test.js
+      - run: node --test test/daemon-paths.test.js test/daemon.test.js
 
   # The ALP web app (ALPD §62): Paseo's app at the pinned commit with ALP's patches, built and opened in Chrome.
   web-app:
