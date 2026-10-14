@@ -2,6 +2,7 @@ import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } fro
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import type { Envelope, SessionSnapshot, SessionSpec } from '@anhlp/alp-runtime/index';
+import type { SessionError, SessionStatus } from '@anhlp/alp-protocol/session';
 
 /**
  * alpd's durable state (plans/reference/ALPD.md §5): one JSON record per session,
@@ -9,7 +10,9 @@ import type { Envelope, SessionSnapshot, SessionSpec } from '@anhlp/alp-runtime/
  * delivered prompt.
  */
 
-export type SessionStatus = 'initializing' | 'idle' | 'running' | 'error' | 'closed';
+// The session lifecycle and the error shape are neutral (ALPD §18): the protocol owns them so
+// viewers and integrations speak one language. Re-exported here to keep the daemon's API stable.
+export type { SessionError, SessionStatus } from '@anhlp/alp-protocol/session';
 
 export type SessionRecord = {
   version: 1;
@@ -20,7 +23,7 @@ export type SessionRecord = {
   delegation?: boolean;
   session?: SessionSnapshot;
   status: SessionStatus;
-  lastError?: { code?: string; message: string };
+  lastError?: SessionError;
   title?: string;
   /** Set aside by the user: closed, and listed only when asked (ALPD §61). */
   archived?: boolean;

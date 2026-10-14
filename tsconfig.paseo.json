@@ -18,7 +18,7 @@
   "include": [
     "packages/*/src/**/*.ts",
     "packages/*/src/**/*.js",
-    "packages/paseo/server/**/*.ts"
+    "integrations/paseo/server/**/*.ts"
   ],
   "exclude": [
     "node_modules",

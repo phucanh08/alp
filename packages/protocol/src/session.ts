@@ -1,4 +1,5 @@
 import type { RuntimeKind } from './dto.js';
+import type { SessionSnapshot } from './events.js';
 /** MCP servers a client adds to the agent's own; the agent's names win no collisions. */
 export type HostMcpServer =
   | { type: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
@@ -71,3 +72,23 @@ export type PauseState = {
 };
 
 export type RecallAnswer = { assignmentId: string; agent: string; taskId?: string; finishedAt: string; answer: string };
+
+/** A session's lifecycle as alpd records it; neutral, so viewers and integrations share one union. */
+export type SessionStatus = 'initializing' | 'idle' | 'running' | 'error' | 'closed';
+
+/** The last failure recorded for a session (daemon store `SessionRecord.lastError`). */
+export type SessionError = { code?: string; message: string };
+
+/**
+ * A session as clients list it: its last snapshot plus lifecycle (ALPD §18). This is the portable
+ * shape served by `session.list`; the daemon and every viewer agree on it, so it is the same type
+ * the daemon's store and server use rather than a lossy summary.
+ */
+export type SessionSummary = SessionSnapshot & {
+  status: SessionStatus;
+  title?: string;
+  archived?: boolean;
+  lastError?: SessionError;
+  createdAt?: string;
+  updatedAt?: string;
+};

@@ -126,8 +126,8 @@
   },
   "scripts": {
     "build": "node ../../scripts/build-workspace.mjs cli",
-    "test": "node ../../scripts/test-workspace.mjs cli",
-    "prepack": "node ../../scripts/check-web-app.mjs && npm run build"
+    "test": "node ../../scripts/test-package.mjs cli",
+    "prepack": "npm run build"
   },
   "publishConfig": {
     "access": "public",

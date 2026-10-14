@@ -40,198 +40,6 @@
       "types": "./dist/main.d.ts",
       "default": "./dist/main.js"
     },
-    "./panel/compat": {
-      "alp-source": {
-        "types": "./src/panel/compat.ts",
-        "default": "./src/panel/compat.ts"
-      },
-      "types": "./dist/panel/compat.d.ts",
-      "default": "./dist/panel/compat.js"
-    },
-    "./panel/library": {
-      "alp-source": {
-        "types": "./src/panel/library.ts",
-        "default": "./src/panel/library.ts"
-      },
-      "types": "./dist/panel/library.d.ts",
-      "default": "./dist/panel/library.js"
-    },
-    "./panel/mapping": {
-      "alp-source": {
-        "types": "./src/panel/mapping.ts",
-        "default": "./src/panel/mapping.ts"
-      },
-      "types": "./dist/panel/mapping.d.ts",
-      "default": "./dist/panel/mapping.js"
-    },
-    "./panel/session-tasks": {
-      "alp-source": {
-        "types": "./src/panel/session-tasks.ts",
-        "default": "./src/panel/session-tasks.ts"
-      },
-      "types": "./dist/panel/session-tasks.d.ts",
-      "default": "./dist/panel/session-tasks.js"
-    },
-    "./panel/tasks": {
-      "alp-source": {
-        "types": "./src/panel/tasks.ts",
-        "default": "./src/panel/tasks.ts"
-      },
-      "types": "./dist/panel/tasks.d.ts",
-      "default": "./dist/panel/tasks.js"
-    },
-    "./panel/usage": {
-      "alp-source": {
-        "types": "./src/panel/usage.ts",
-        "default": "./src/panel/usage.ts"
-      },
-      "types": "./dist/panel/usage.d.ts",
-      "default": "./dist/panel/usage.js"
-    },
-    "./paseo/agents": {
-      "alp-source": {
-        "types": "./src/paseo/agents.ts",
-        "default": "./src/paseo/agents.ts"
-      },
-      "types": "./dist/paseo/agents.d.ts",
-      "default": "./dist/paseo/agents.js"
-    },
-    "./paseo/alp-client": {
-      "alp-source": {
-        "types": "./src/paseo/alp-client.ts",
-        "default": "./src/paseo/alp-client.ts"
-      },
-      "types": "./dist/paseo/alp-client.d.ts",
-      "default": "./dist/paseo/alp-client.js"
-    },
-    "./paseo/chat-search": {
-      "alp-source": {
-        "types": "./src/paseo/chat-search.ts",
-        "default": "./src/paseo/chat-search.ts"
-      },
-      "types": "./dist/paseo/chat-search.d.ts",
-      "default": "./dist/paseo/chat-search.js"
-    },
-    "./paseo/checkout": {
-      "alp-source": {
-        "types": "./src/paseo/checkout.ts",
-        "default": "./src/paseo/checkout.ts"
-      },
-      "types": "./dist/paseo/checkout.d.ts",
-      "default": "./dist/paseo/checkout.js"
-    },
-    "./paseo/files": {
-      "alp-source": {
-        "types": "./src/paseo/files.ts",
-        "default": "./src/paseo/files.ts"
-      },
-      "types": "./dist/paseo/files.d.ts",
-      "default": "./dist/paseo/files.js"
-    },
-    "./paseo/gateway": {
-      "alp-source": {
-        "types": "./src/paseo/gateway.ts",
-        "default": "./src/paseo/gateway.ts"
-      },
-      "types": "./dist/paseo/gateway.d.ts",
-      "default": "./dist/paseo/gateway.js"
-    },
-    "./paseo/git": {
-      "alp-source": {
-        "types": "./src/paseo/git.ts",
-        "default": "./src/paseo/git.ts"
-      },
-      "types": "./dist/paseo/git.d.ts",
-      "default": "./dist/paseo/git.js"
-    },
-    "./paseo/index": {
-      "alp-source": {
-        "types": "./src/paseo/index.ts",
-        "default": "./src/paseo/index.ts"
-      },
-      "types": "./dist/paseo/index.d.ts",
-      "default": "./dist/paseo/index.js"
-    },
-    "./paseo/plugins": {
-      "alp-source": {
-        "types": "./src/paseo/plugins.ts",
-        "default": "./src/paseo/plugins.ts"
-      },
-      "types": "./dist/paseo/plugins.d.ts",
-      "default": "./dist/paseo/plugins.js"
-    },
-    "./paseo/providers": {
-      "alp-source": {
-        "types": "./src/paseo/providers.ts",
-        "default": "./src/paseo/providers.ts"
-      },
-      "types": "./dist/paseo/providers.d.ts",
-      "default": "./dist/paseo/providers.js"
-    },
-    "./paseo/quiet": {
-      "alp-source": {
-        "types": "./src/paseo/quiet.ts",
-        "default": "./src/paseo/quiet.ts"
-      },
-      "types": "./dist/paseo/quiet.d.ts",
-      "default": "./dist/paseo/quiet.js"
-    },
-    "./paseo/relay-transport": {
-      "alp-source": {
-        "types": "./src/paseo/relay-transport.ts",
-        "default": "./src/paseo/relay-transport.ts"
-      },
-      "types": "./dist/paseo/relay-transport.d.ts",
-      "default": "./dist/paseo/relay-transport.js"
-    },
-    "./paseo/relay": {
-      "alp-source": {
-        "types": "./src/paseo/relay.ts",
-        "default": "./src/paseo/relay.ts"
-      },
-      "types": "./dist/paseo/relay.d.ts",
-      "default": "./dist/paseo/relay.js"
-    },
-    "./paseo/timeline-items": {
-      "alp-source": {
-        "types": "./src/paseo/timeline-items.ts",
-        "default": "./src/paseo/timeline-items.ts"
-      },
-      "types": "./dist/paseo/timeline-items.d.ts",
-      "default": "./dist/paseo/timeline-items.js"
-    },
-    "./paseo/timeline-projection": {
-      "alp-source": {
-        "types": "./src/paseo/timeline-projection.ts",
-        "default": "./src/paseo/timeline-projection.ts"
-      },
-      "types": "./dist/paseo/timeline-projection.d.ts",
-      "default": "./dist/paseo/timeline-projection.js"
-    },
-    "./paseo/timeline-store": {
-      "alp-source": {
-        "types": "./src/paseo/timeline-store.ts",
-        "default": "./src/paseo/timeline-store.ts"
-      },
-      "types": "./dist/paseo/timeline-store.d.ts",
-      "default": "./dist/paseo/timeline-store.js"
-    },
-    "./paseo/usage": {
-      "alp-source": {
-        "types": "./src/paseo/usage.ts",
-        "default": "./src/paseo/usage.ts"
-      },
-      "types": "./dist/paseo/usage.d.ts",
-      "default": "./dist/paseo/usage.js"
-    },
-    "./paseo/workspaces": {
-      "alp-source": {
-        "types": "./src/paseo/workspaces.ts",
-        "default": "./src/paseo/workspaces.ts"
-      },
-      "types": "./dist/paseo/workspaces.d.ts",
-      "default": "./dist/paseo/workspaces.js"
-    },
     "./server": {
       "alp-source": {
         "types": "./src/server.ts",
@@ -240,38 +48,6 @@
       "types": "./dist/server.d.ts",
       "default": "./dist/server.js"
     },
-    "./shared/library": {
-      "alp-source": {
-        "types": "./src/shared/library.ts",
-        "default": "./src/shared/library.ts"
-      },
-      "types": "./dist/shared/library.d.ts",
-      "default": "./dist/shared/library.js"
-    },
-    "./shared/tasks": {
-      "alp-source": {
-        "types": "./src/shared/tasks.ts",
-        "default": "./src/shared/tasks.ts"
-      },
-      "types": "./dist/shared/tasks.d.ts",
-      "default": "./dist/shared/tasks.js"
-    },
-    "./shared/team-models": {
-      "alp-source": {
-        "types": "./src/shared/team-models.ts",
-        "default": "./src/shared/team-models.ts"
-      },
-      "types": "./dist/shared/team-models.d.ts",
-      "default": "./dist/shared/team-models.js"
-    },
-    "./shared/usage": {
-      "alp-source": {
-        "types": "./src/shared/usage.ts",
-        "default": "./src/shared/usage.ts"
-      },
-      "types": "./dist/shared/usage.d.ts",
-      "default": "./dist/shared/usage.js"
-    },
     "./store": {
       "alp-source": {
         "types": "./src/store.ts",
@@ -279,14 +55,6 @@
       },
       "types": "./dist/store.d.ts",
       "default": "./dist/store.js"
-    },
-    "./web": {
-      "alp-source": {
-        "types": "./src/web.ts",
-        "default": "./src/web.ts"
-      },
-      "types": "./dist/web.d.ts",
-      "default": "./dist/web.js"
     }
   },
   "engines": {
@@ -297,10 +65,6 @@
     "@anhlp/alp-runtime": "0.9.5",
     "@anhlp/alp-client": "0.9.5",
     "@anhlp/alp-protocol": "0.9.5",
-    "@getpaseo/client": "0.11.1",
-    "@getpaseo/protocol": "0.11.2",
-    "@getpaseo/relay": "0.11.1",
-    "@getpaseo/plugin": "0.11.1",
     "@anthropic-ai/sdk": "^0.131.0",
     "ws": "^8.22.0",
     "zod": "4.4.3",
@@ -308,8 +72,8 @@
   },
   "scripts": {
     "build": "node ../../scripts/build-workspace.mjs daemon",
-    "test": "node ../../scripts/test-workspace.mjs daemon",
-    "prepack": "node ../../scripts/check-web-app.mjs && npm run build"
+    "test": "node ../../scripts/test-package.mjs daemon",
+    "prepack": "npm run build"
   },
   "publishConfig": {
     "access": "public",

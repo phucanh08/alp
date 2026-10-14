@@ -1,6 +1,6 @@
 # ALP Paseo provider
 
-The server-only plugin in `packages/paseo` registers `alp` through the public `ProviderRegistration` API. All Paseo SDK imports are isolated in `server/compat.ts`; core, the runtime, and the daemon never import the SDK. No Paseo fork or ACP shim is used. Sessions run in `alpd`, the per-user ALP daemon (see [alpd](../../plans/reference/ALPD.md)): the plugin starts it when needed (`ALP_HOME`, default `~/.alp`), forwards Paseo inputs to it, and projects its events back to Paseo. Closing an agent in Paseo only stops watching it; running work finishes in alpd, which then closes the session. Use interrupt to stop work. To start alpd, the plugin uses `ALP_DAEMON_ENTRY`, the path recorded when it was built, the path alpd records in `$ALP_HOME/alpd.json` each time it starts, or the ALP CLI (`alp`) on `PATH`; if none is found, the provider reports that the CLI must be installed and started once with `alp daemon start`.
+The server-only plugin in `integrations/paseo` registers `alp` through the public `ProviderRegistration` API. All Paseo SDK imports are isolated in `server/compat.ts`; core, the runtime, and the daemon never import the SDK. No Paseo fork or ACP shim is used. Sessions run in `alpd`, the per-user ALP daemon (see [alpd](../../plans/reference/ALPD.md)): the plugin starts it when needed (`ALP_HOME`, default `~/.alp`), forwards Paseo inputs to it, and projects its events back to Paseo. Closing an agent in Paseo only stops watching it; running work finishes in alpd, which then closes the session. Use interrupt to stop work. To start alpd, the plugin uses `ALP_DAEMON_ENTRY`, the path recorded when it was built, the path alpd records in `$ALP_HOME/alpd.json` each time it starts, or the ALP CLI (`alp`) on `PATH`; if none is found, the provider reports that the CLI must be installed and started once with `alp daemon start`.
 
 ## Install
 
@@ -13,7 +13,7 @@ npm ci
 npm run check
 npm run build
 paseo daemon config set pluginsEnabled true
-paseo plugin install /absolute/path/to/alp-workspace/packages/paseo
+paseo plugin install /absolute/path/to/alp-workspace/integrations/paseo
 paseo provider models alp
 ```
 
@@ -194,7 +194,7 @@ After first-session initialization, ALP configuration files are read-only to the
 
 ## Repeat verification
 
-`npm test` uses fixture transports and real public SDK schemas. It makes no model calls. `node scripts/runtime-e2e.mjs` is an opt-in real Codex lifecycle check; set `ALP_CODEX_BIN` if necessary. `npm run test:e2e` invokes the real model through an already running isolated Paseo daemon with the plugin installed. It creates a new fixture project, runs main/custom/reload, archives test agents, and compares every fixture file byte-for-byte.
+`npm test` uses fixture transports and real public SDK schemas. It makes no model calls. `node test/e2e/runtime-e2e.mjs` is an opt-in real Codex lifecycle check; set `ALP_CODEX_BIN` if necessary. `npm run test:e2e:paseo` invokes the real model through an already running isolated Paseo daemon with the plugin installed. It creates a new fixture project, runs main/custom/reload, archives test agents, and compares every fixture file byte-for-byte.
 
 E2E variables:
 

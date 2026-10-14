@@ -7,4 +7,4 @@ dist/
 
 packages/*/dist/
 packages/core/templates/
-packages/paseo/server/dist/
+integrations/paseo/server/dist/

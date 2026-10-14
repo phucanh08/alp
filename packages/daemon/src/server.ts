@@ -6,6 +6,7 @@ import { AlpRpcError, MAX_FRAME, PROTOCOL_VERSION, ERROR, encodeFrame } from '@a
 export { ERROR } from '@anhlp/alp-protocol';
 import { DEFAULT_MODEL, models, modes, thinkingOptions, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '@anhlp/alp-runtime/index';
 import type { Receipt, SessionRecord, SessionStatus, Store } from './store.js';
+import type { SessionSummary } from '@anhlp/alp-protocol/session';
 
 /**
  * alpd's JSON-RPC surface over one shared runtime (plans/reference/ALPD.md §3, §6, §14).
@@ -34,6 +35,8 @@ type Connection = {
   helloed: boolean;
   roots: Set<string>;
   send(message: unknown): void;
+  nextId: number;
+  pending: Map<number, { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }>;
 };
 
 /** Retained events per live tree, for attach and replay. */
@@ -61,15 +64,9 @@ export type DaemonServer = {
   close(): Promise<void>;
 };
 
-/** A session as clients list it: its last snapshot plus lifecycle. */
-export type SessionSummary = SessionSnapshot & {
-  status: SessionStatus;
-  title?: string;
-  archived?: boolean;
-  lastError?: SessionRecord['lastError'];
-  createdAt?: string;
-  updatedAt?: string;
-};
+/** A session as clients list it: its last snapshot plus lifecycle (ALPD §18). The protocol owns the
+ * shape so every viewer agrees; re-exported here to keep `@anhlp/alp-daemon/server`'s API. */
+export type { SessionSummary };
 
 export function createDaemonServer({ runtime, socketPath, version, onShutdown, store, runLogDir, previousExit }: {
   runtime: AlpRuntime;
@@ -389,7 +386,35 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     }
   }
 
+  const extensionOwners = new Map<string, Connection>();
   const handlers: Record<string, (connection: Connection, params: any) => Promise<unknown> | unknown> = {
+    'extension.register': async (connection, params) => {
+      const method = params?.method;
+      if (typeof method !== 'string' || !/^[a-zA-Z][a-zA-Z0-9._-]*$/.test(method) || method === '__proto__' || method === 'constructor' || method === 'toString') throw new RpcError(ERROR.protocol, 'extension.register requires a safe method name');
+      if (typeof method !== 'string' || !method.trim()) throw new RpcError(ERROR.protocol, 'extension.register requires a method name');
+      if (originalMethods.has(method) || extensionOwners.has(method) || Object.hasOwn(handlers, method)) throw new RpcError(ERROR.conflict, `${method} is already registered`);
+      extensionOwners.set(method, connection);
+      if (!methodOwners.has(connection)) methodOwners.set(connection, new Set());
+      methodOwners.get(connection).add(method);
+      handlers[method] = async (_connection, invokeParams) => {
+        const owner = extensionOwners.get(method);
+        if (!owner || !connections.has(owner)) { delete handlers[method]; extensionOwners.delete(method); throw new RpcError(ERROR.notFound, `${method} is not available`); }
+        return invokeExtended(owner, method, invokeParams ?? {});
+      };
+      return { registered: method };
+    },
+    'extension.unregister': async (connection, params) => {
+      const method = params?.method;
+      if (typeof method !== 'string' || !method.trim()) throw new RpcError(ERROR.protocol, 'extension.unregister requires a method name');
+      const owner = extensionOwners.get(method);
+      if (!owner) throw new RpcError(ERROR.notFound, `${method} is not registered`);
+      if (owner !== connection) throw new RpcError(ERROR.conflict, `${method} is owned by another connection`);
+      delete handlers[method];
+      extensionOwners.delete(method);
+      const owned = methodOwners.get(connection);
+      owned?.delete(method);
+      return { unregistered: method };
+    },
     'daemon.status': () => ({ pid: process.pid, startedAt, version, protocolVersion: PROTOCOL_VERSION, sessions: runtime.list().length, questions: runtime.questions().length, ...(previousExit ? { previousExit } : {}) }),
 
     'session.status'(_connection, { sessionId }) {
@@ -582,12 +607,46 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       return { sessions };
     },
   };
+  Object.setPrototypeOf(handlers, null);
+  const originalMethods = new Set(Object.keys(handlers));
+  originalMethods.add('daemon.hello');
+
+  async function invokeExtended(owner: Connection, method: string, params: any) {
+    if (owner.pending.size >= 128) throw new RpcError(ERROR.conflict, 'too many pending extension calls');
+    const id = ++owner.nextId;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        owner.pending.delete(id);
+        reject(new RpcError(ERROR.failed, `${method} timed out`));
+      }, 30_000);
+      owner.pending.set(id, { resolve, reject, timer });
+      owner.send({ jsonrpc: '2.0', id, method: 'extension.invoke', params: { method, params } });
+    });
+  }
 
   async function dispatch(connection: Connection, message: any) {
     const { id, method, params } = message ?? {};
     const respond = (body: object) => { if (id !== undefined && id !== null) connection.send({ jsonrpc: '2.0', id, ...body }); };
     try {
-      if (message?.jsonrpc !== '2.0' || typeof method !== 'string') throw new RpcError(-32600, 'Invalid request');
+      // Validate the envelope before anything else: a frame that is not JSON-RPC 2.0 must never be
+      // correlated against (or consume) a pending extension call, however it is shaped.
+      if (!message || typeof message !== 'object' || Array.isArray(message) || message.jsonrpc !== '2.0') throw new RpcError(-32600, 'Invalid request');
+      // A frame with no `method` property is a response to an outgoing extension.invoke. It must carry
+      // exactly one of result/error and an id; a malformed or unknown one is dropped, leaving any
+      // pending invocation intact (never mis-correlated, never leaked).
+      if (!Object.prototype.hasOwnProperty.call(message, 'method')) {
+        const hasResult = Object.prototype.hasOwnProperty.call(message, 'result');
+        const hasError = Object.prototype.hasOwnProperty.call(message, 'error');
+        if (id === undefined || id === null || hasResult === hasError) return;
+        const waiter = connection.pending.get(id);
+        if (!waiter) return;
+        connection.pending.delete(id);
+        clearTimeout(waiter.timer);
+        if (hasError) waiter.reject(new RpcError(message.error?.code ?? ERROR.failed, message.error?.message ?? 'extension call failed', message.error?.data));
+        else waiter.resolve(message.result);
+        return;
+      }
+      if (typeof method !== 'string') throw new RpcError(-32600, 'Invalid request');
       if (method === 'daemon.hello') {
         if (params?.protocolVersion !== PROTOCOL_VERSION) throw new RpcError(ERROR.protocol, `ALP daemon speaks protocol ${PROTOCOL_VERSION}; restart it after upgrading (alp daemon restart)`);
         connection.helloed = true;
@@ -606,7 +665,13 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     }
   }
 
+  const methodOwners = new Map();
   function disconnect(connection: Connection) {
+    const owned = methodOwners.get(connection);
+    if (owned) for (const method of owned) { delete handlers[method]; extensionOwners.delete(method); }
+    methodOwners.delete(connection);
+    for (const [id, waiting] of connection.pending) { clearTimeout(waiting.timer); waiting.reject(new Error('ALP daemon connection closed')); }
+    connection.pending.clear();
     connections.delete(connection);
     for (const root of [...connection.roots]) {
       detach(connection, root);
@@ -621,6 +686,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       helloed: false,
       roots: new Set(),
       send(message) { if (!socket.destroyed) socket.write(encodeFrame(message)); },
+      nextId: 0,
+      pending: new Map(),
     };
     connections.add(connection);
     let buffer = '';
@@ -642,9 +709,23 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   });
 
   return {
-    extend(method, handler) {
-      if (Object.hasOwn(handlers, method)) throw new Error(`${method} is already a method`);
-      handlers[method] = (_connection, params) => handler(params);
+    extend(method, handler, owner = null) {
+      if (typeof method !== 'string' || !method.trim()) throw new Error('extend needs a method name');
+      if (originalMethods.has(method)) throw new Error(`${method} is a built-in method and cannot be overridden`);
+      if (Object.hasOwn(handlers, method)) throw new Error(`${method} is already registered`);
+      handlers[method] = async (_connection, params) => {
+        try {
+          const result = await handler(params ?? {});
+          return result === undefined ? {} : result;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new Error(message.length > 2000 ? `${message.slice(0, 2000)}...` : message);
+        }
+      };
+      if (owner) {
+        if (!methodOwners.has(owner)) methodOwners.set(owner, new Set());
+        methodOwners.get(owner).add(method);
+      }
     },
 
     async listen() {
@@ -659,12 +740,14 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     local() {
       const events = new Set<(envelope: Envelope) => void>();
       const closes = new Set<(error: Error) => void>();
-      const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+      const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
       let sequence = 0;
       let ended = false;
       const connection: Connection = {
         helloed: true,
         roots: new Set(),
+        nextId: 0,
+        pending: new Map(),
         send(message: any) {
           if (message.method === 'event') {
             for (const listener of events) listener(message.params);
@@ -693,12 +776,18 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
           if (ended) return;
           ended = true;
           disconnect(connection);
+          // Match the socket client's teardown: in-flight requests fail and close listeners fire.
+          const error = new Error('ALP daemon connection closed');
+          for (const waiter of pending.values()) waiter.reject(error);
+          pending.clear();
+          for (const listener of closes) listener(error);
+          closes.clear();
         },
       };
     },
 
     accept(send) {
-      const connection: Connection = { helloed: false, roots: new Set(), send };
+      const connection: Connection = { helloed: false, roots: new Set(), send, nextId: 0, pending: new Map() };
       connections.add(connection);
       let ended = false;
       return {

@@ -10,6 +10,10 @@
     "dist/alpd.js",
     "dist/acp.js",
     "dist/web-app",
+    "integrations/web.json",
+    "integrations/paseo/server/dist/main.js",
+    "integrations/paseo/server/dist/alpd.js",
+    "integrations/paseo/server/dist/web-app",
     "templates",
     "README.md",
     "docs/modular-monorepo.md"
@@ -18,29 +22,26 @@
     "alp": "packages/cli/dist/cli.js"
   },
   "scripts": {
-    "pretest": "node scripts/build-workspace.mjs runtime && node scripts/build-paseo.mjs && node scripts/build-workspace.mjs cli",
-    "test": "ALP_HOME=\"$(mktemp -d)\" node --test 'test/*.test.js'",
+    "test": "node scripts/test.mjs",
+    "test:unit": "node scripts/test.mjs unit",
+    "test:integration": "node scripts/test.mjs integration",
+    "test:e2e": "node scripts/test.mjs e2e",
+    "test:all": "node scripts/test.mjs all",
     "check": "tsc -p tsconfig.paseo.json && tsc -p tsconfig.client.json",
     "build": "node scripts/build-paseo.mjs",
-    "test:init": "node --test test/init.test.js",
-    "test:skills": "node scripts/build-paseo.mjs && node --test test/skills.test.js",
-    "test:core": "node --test test/init.test.js test/upgrade.test.js test/delegation.test.js test/resolver.test.js test/ir.test.js test/adapter.test.js",
-    "test:team": "node scripts/build-paseo.mjs && node --test test/team.test.js",
-    "test:runtime": "node scripts/build-paseo.mjs && node --test test/runtime.test.js",
-    "test:e2e:workflow": "node scripts/workflow-e2e.mjs pho && node scripts/workflow-e2e.mjs cafe",
-    "test:e2e:mailbox": "node scripts/mailbox-e2e.mjs ask && node scripts/mailbox-e2e.mjs wake && node scripts/mailbox-e2e.mjs steer",
-    "test:e2e:team": "node scripts/team-e2e.mjs",
-    "test:e2e:claude": "node scripts/claude-e2e.mjs",
-    "test:e2e:claude-runtime": "node scripts/claude-runtime-e2e.mjs",
-    "test:e2e": "node scripts/paseo-e2e.mjs",
-    "test:e2e:alpd": "node scripts/build-paseo.mjs && node scripts/alpd-e2e.mjs",
-    "test:e2e:detach": "node scripts/viewer-detach-e2e.mjs",
-    "test:e2e:persistence": "node scripts/build-paseo.mjs && node scripts/persistence-e2e.mjs",
-    "test:e2e:import": "node scripts/import-e2e.mjs",
-    "test:e2e:worktree": "node scripts/build-paseo.mjs && node scripts/worktree-e2e.mjs",
-    "test:e2e:human": "node scripts/human-e2e.mjs cli && node scripts/human-e2e.mjs paseo",
-    "test:e2e:board": "node scripts/build-paseo.mjs && node scripts/board-e2e.mjs",
-    "test:daemon": "node scripts/build-paseo.mjs && node --test test/daemon.test.js",
+    "test:e2e:workflow": "node test/e2e/workflow-e2e.mjs pho && node test/e2e/workflow-e2e.mjs cafe",
+    "test:e2e:mailbox": "node test/e2e/mailbox-e2e.mjs ask && node test/e2e/mailbox-e2e.mjs wake && node test/e2e/mailbox-e2e.mjs steer",
+    "test:e2e:team": "node test/e2e/team-e2e.mjs",
+    "test:e2e:claude": "node test/e2e/claude-e2e.mjs",
+    "test:e2e:claude-runtime": "node test/e2e/claude-runtime-e2e.mjs",
+    "test:e2e:paseo": "node test/e2e/paseo-e2e.mjs",
+    "test:e2e:alpd": "node scripts/build-core.mjs && node test/e2e/alpd-e2e.mjs",
+    "test:e2e:detach": "node test/e2e/viewer-detach-e2e.mjs",
+    "test:e2e:persistence": "node scripts/build-core.mjs && node test/e2e/persistence-e2e.mjs",
+    "test:e2e:import": "node test/e2e/import-e2e.mjs",
+    "test:e2e:worktree": "node scripts/build-core.mjs && node test/e2e/worktree-e2e.mjs",
+    "test:e2e:human": "node test/e2e/human-e2e.mjs cli && node test/e2e/human-e2e.mjs paseo",
+    "test:e2e:board": "node scripts/build-core.mjs && node test/e2e/board-e2e.mjs",
     "prepack": "node scripts/build-workspace.mjs cli && node scripts/build-paseo.mjs && node scripts/check-web-app.mjs",
     "build:web": "node scripts/build-paseo-web.mjs",
     "build:packages": "npm run build --workspaces --if-present",
@@ -49,6 +50,7 @@
     "release:check": "npm run check:boundaries && npm run check && npm test && npm run build:packages && npm run release:pack-check",
     "version:package": "node scripts/version-package.mjs",
     "release:pack-check": "node scripts/pack-check.mjs",
+    "release:tarball-check": "node scripts/tarball-consumer.mjs",
     "test:packages:smoke": "node scripts/package-smoke.mjs"
   },
   "engines": {
@@ -57,10 +59,6 @@
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.7.0",
     "@anthropic-ai/sdk": "^0.131.0",
-    "@getpaseo/client": "0.11.1",
-    "@getpaseo/plugin": "0.11.1",
-    "@getpaseo/protocol": "0.11.2",
-    "@getpaseo/relay": "0.11.1",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@types/node": "22.20.5",
     "@types/react": "19.1.17",
@@ -80,7 +78,8 @@
     "@anhlp/alp-core": "0.9.5",
     "@anhlp/alp-protocol": "0.9.5",
     "@anthropic-ai/claude-agent-sdk": "^0.3.292",
-    "smol-toml": "1.9.0"
+    "smol-toml": "1.9.0",
+    "@getpaseo/plugin": ">=0.11.1 <0.12.0"
   },
   "repository": {
     "type": "git",
@@ -98,7 +97,10 @@
     "packages/client",
     "packages/daemon",
     "packages/cli",
-    "packages/tui",
-    "packages/paseo"
+    "apps/tui",
+    "integrations/paseo"
+  ],
+  "bundledDependencies": [
+    "@getpaseo/plugin"
   ]
 }

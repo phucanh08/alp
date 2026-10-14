@@ -11,7 +11,7 @@ export class AlpRpcError extends Error {
 }
 
 export const ERROR = Object.freeze({ failed: 1000, notFound: 1001, conflict: 1004, protocol: 1006 });
-export const RPC_METHODS = Object.freeze(["assignment.recall", "board.list", "catalog.get", "daemon.hello", "daemon.pause", "daemon.pauses", "daemon.resume", "daemon.shutdown", "daemon.status", "daemon.usage", "question.answer", "question.list", "session.archive", "session.attach", "session.close", "session.configure", "session.create", "session.get", "session.interrupt", "session.list", "session.log", "session.message", "session.preview", "session.prompt", "session.release", "session.rename", "session.status"]);
+export const RPC_METHODS = Object.freeze(["assignment.recall", "board.list", "catalog.get", "daemon.hello", "daemon.pause", "daemon.pauses", "daemon.resume", "daemon.shutdown", "daemon.status", "daemon.usage", "extension.register", "extension.unregister", "question.answer", "question.list", "session.archive", "session.attach", "session.close", "session.configure", "session.create", "session.get", "session.interrupt", "session.list", "session.log", "session.message", "session.preview", "session.prompt", "session.release", "session.rename", "session.status"]);
 
 /** UTF-8 socket writers use one newline-terminated JSON value per frame. @param {unknown} value */
 export function encodeFrame(value) { return `${JSON.stringify(value)}\n`; }

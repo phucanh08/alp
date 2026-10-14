@@ -1508,6 +1508,34 @@
         ],
         "additionalProperties": true
       }
+    },
+    "extension.register": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "extension.unregister": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "additionalProperties": true
+      }
     }
   },
   "errors": {

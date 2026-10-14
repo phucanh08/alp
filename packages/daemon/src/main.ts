@@ -9,8 +9,6 @@ import { createAlpRuntime, reclaimCopies, reclaimWorktrees } from '@anhlp/alp-ru
 import { createDaemonServer } from './server.js';
 import { acquireLock, heartbeat, releaseLock, updateLock } from './lock.js';
 import { createStore } from './store.js';
-import { createWebServer } from './web.js';
-import { createPaseoBridge, webAppDir } from './paseo/index.js';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
 
 declare const __ALP_VERSION__: string;
@@ -124,13 +122,11 @@ async function run(home: string) {
   });
   const store = createStore(path.join(home, 'state'));
   let stopping: Promise<void> | undefined;
-  let web: ReturnType<typeof createWebServer> | undefined;
   const shutdown = (code = 0) => {
     stopping ??= (async () => {
       const force = setTimeout(() => process.exit(code), 10_000);
       force.unref();
       clearInterval(beat);
-      await web?.close().catch(() => {});
       await server.close().catch(() => {});
       await runtime.shutdown().catch(() => {});
       await store.flush();
@@ -158,25 +154,7 @@ async function run(home: string) {
     await releaseLock(home);
     throw error;
   }
-  // The local web app (ALPD §61); alpd works without it.
-  const webLog = (message: string) => console.log(`${new Date().toISOString()} web: ${message}`);
-  // The ALP web app (Paseo's app, ALPD §62), built beside alpd.
-  const appDir = webAppDir(fileURLToPath(import.meta.url));
-  if (!appDir) webLog('the web app is not built beside alpd; the page says how to build it');
-  let listening: string | null = null;
-  const gateway = appDir ? createPaseoBridge({ daemon: server, version: VERSION, home, token: () => web?.token ?? '', serverId: () => web?.serverId ?? '', relay: settings?.web?.relay, listen: () => listening, log: webLog }) : undefined;
-  web = settings?.web?.enabled === false ? undefined : createWebServer({ app: appDir && gateway ? { dir: appDir, gateway } : undefined, home, port: settings?.web?.port, log: webLog });
-  await web?.listen()
-    .then(info => { listening = `127.0.0.1:${info.port}`; console.log(`${new Date().toISOString()} web app on ${info.url}`); })
-    .catch(error => console.error(`${new Date().toISOString()} web app not started`, error));
-  // Paseo's relay, for its app on another device (ALPD §64): it needs the web app's token and server id.
-  const relay = web?.token && gateway ? gateway.relay : undefined;
-  await relay?.start().catch(error => webLog(`relay not started: ${error?.message ?? error}`));
-  server.extend('web.pairing', async ({ enable }: { enable?: boolean } = {}) => {
-    if (!relay) throw new Error('alpd serves no web app, so it has no relay; see ~/.alp/logs/alpd.log');
-    if (typeof enable === 'boolean') await relay.setEnabled(enable);
-    return { ...(await relay.offer()), connected: relay.connected, ...relay.config() };
-  });
+  // Web app and relay are owned by the optional Paseo integration process.
   await updateLock(home, { ...lock, ready: true });
   // Clients that cannot locate alpd themselves (the Paseo plugin) start it from here next time.
   const { install } = daemonPaths(home);

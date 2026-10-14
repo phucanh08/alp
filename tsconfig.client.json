@@ -16,9 +16,9 @@
     ]
   },
   "include": [
-    "packages/paseo/index.client.tsx",
-    "packages/paseo/client",
-    "packages/paseo/shared"
+    "integrations/paseo/index.client.tsx",
+    "integrations/paseo/client",
+    "integrations/paseo/shared"
   ],
   "exclude": [
     "node_modules",

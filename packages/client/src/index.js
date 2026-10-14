@@ -84,6 +84,7 @@ export class AlpClient {
   #pending = new Map();
   #events = new Set();
   #closes = new Set();
+  #requestHandlers = new Set();
   #closed = false;
 
   constructor(socket) {
@@ -108,6 +109,25 @@ export class AlpClient {
     try { message = JSON.parse(line); } catch { this.#socket.destroy(new Error('Invalid frame from ALP daemon')); return; }
     if (message.method === 'event') {
       for (const listener of this.#events) listener(message.params);
+      return;
+    }
+    if (message.method && (message.id !== undefined && message.id !== null) && !Object.prototype.hasOwnProperty.call(message, 'result') && !Object.prototype.hasOwnProperty.call(message, 'error')) {
+      const handler = [...this.#requestHandlers][0];
+      if (handler) {
+        Promise.resolve().then(async () => {
+          try {
+            const result = await handler(message.method, message.params ?? {});
+            this.#socket.write(encodeFrame({ jsonrpc: '2.0', id: message.id, result: result === undefined ? {} : result }));
+          } catch (error) {
+            const code = (error && typeof error.code === 'number') ? error.code : 1000;
+            const msg = error instanceof Error ? error.message : String(error);
+            const data = (error && error.data !== undefined) ? { data: error.data } : {};
+            this.#socket.write(encodeFrame({ jsonrpc: '2.0', id: message.id, error: { code, message: msg.length > 2000 ? msg.slice(0,2000)+'...' : msg, ...data } }));
+          }
+        });
+        return;
+      }
+      this.#socket.write(encodeFrame({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: `Unknown method '${message.method}'` } }));
       return;
     }
     const waiter = this.#pending.get(message.id);
@@ -139,6 +159,11 @@ export class AlpClient {
   onEvent(listener) {
     this.#events.add(listener);
     return () => this.#events.delete(listener);
+  }
+
+  onRequest(handler) {
+    this.#requestHandlers.add(handler);
+    return () => this.#requestHandlers.delete(handler);
   }
 
   onClose(listener) {
@@ -206,4 +231,178 @@ export async function ensureDaemon({ home = alpHome(), entry = /** @type {string
   }
   const log = await tail(daemonPaths(home).log);
   throw new Error(`ALP daemon did not become ready within ${timeoutMs} ms${log ? `\n${log}` : ''}`);
+}
+
+/** Registration descriptor field names, in priority order. */
+const INTEGRATION_DESCRIPTOR_FIELDS = ['main', 'entry', 'path', 'command'];
+
+async function readIntegrationDescriptor(file, baseDirs = []) {
+  try {
+    const raw = JSON.parse(await readFile(file, 'utf8'));
+    for (const field of INTEGRATION_DESCRIPTOR_FIELDS) {
+      const value = raw?.[field];
+      if (typeof value !== 'string' || !value.trim()) continue;
+      if (path.isAbsolute(value)) {
+        if (await isFile(value)) return value;
+      } else {
+        const bases = [path.dirname(file), ...baseDirs];
+        for (const base of bases) {
+          const resolved = path.resolve(base, value);
+          if (await isFile(resolved)) return resolved;
+        }
+      }
+    }
+  } catch {}
+  return undefined;
+}
+
+async function integrationCandidateFromHome(home, name) {
+  const descriptors = [
+    path.join(home, 'integrations', `${name}.json`),
+    path.join(home, 'integrations', name, 'integration.json'),
+  ];
+  for (const descriptor of descriptors) {
+    const entry = await readIntegrationDescriptor(descriptor, [home]);
+    if (entry) return entry;
+  }
+  // Legacy single-file registration.
+  const legacy = path.join(home, 'integrations', name, 'main.js');
+  return (await isFile(legacy)) ? legacy : undefined;
+}
+
+function integrationBinaryName(name) {
+  return name === 'web' ? 'alp-web-integration' : `alp-${name}-integration`;
+}
+
+/** Distribution roots that may carry a bundled integration descriptor. */
+async function distributionRoots() {
+  const roots = [];
+  const argv = process.argv[1] ? await realpath(process.argv[1]).catch(() => process.argv[1]) : undefined;
+  if (argv) {
+    // The CLI runs from <distribution>/packages/cli/dist, so the distribution root is a few levels
+    // up. Resolve the real path first so a symlinked global bin still finds its own root.
+    let directory = path.dirname(argv);
+    for (let depth = 0; depth < 4; depth += 1) { roots.push(path.resolve(directory, '..')); directory = path.resolve(directory, '..'); }
+    // Every package ancestor may carry a bundled descriptor (a full distribution, or the plugin
+    // package installed next to it).
+    for (let ancestor = path.dirname(argv); ; ancestor = path.dirname(ancestor)) {
+      if (await isFile(path.join(ancestor, 'package.json'))) roots.push(ancestor);
+      if (path.dirname(ancestor) === ancestor) break;
+    }
+  }
+  // Also consider the current working directory for full distributions.
+  roots.push(process.cwd());
+  return [...new Set(roots)];
+}
+
+export async function discoverIntegration(name = 'web', options = {}) {
+  // Explicit environment override always wins.
+  const envCandidates = [
+    process.env.ALP_WEB_INTEGRATION,
+    process.env.ALP_INTEGRATION_ENTRY,
+    name !== 'web' ? process.env[`ALP_${name.toUpperCase()}_INTEGRATION`] : undefined,
+  ].filter(Boolean);
+  for (const candidate of envCandidates) if (await isFile(candidate)) return candidate;
+
+  const home = options?.home ? path.resolve(options.home) : alpHome();
+  const fromHome = await integrationCandidateFromHome(home, name);
+  if (fromHome) return fromHome;
+
+  // A full distribution may describe a bundled integration relative to its own root.
+  for (const root of await distributionRoots()) {
+    for (const descriptorPath of [path.join(root, 'integrations', `${name}.json`), path.join(root, 'integrations', name, 'integration.json')]) {
+      const entry = await readIntegrationDescriptor(descriptorPath, [root]);
+      if (entry) return entry;
+    }
+  }
+
+  // Installed integration packages announce themselves on PATH.
+  const binary = integrationBinaryName(name);
+  for (const directory of [...(process.env.PATH ?? '').split(path.delimiter).filter(Boolean), ...BIN_DIRECTORIES]) {
+    const candidate = await realpath(path.join(directory, binary)).catch(() => undefined);
+    if (candidate && await isFile(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+function integrationAlive(lock) {
+  if (!lock || !Number.isSafeInteger(lock.pid)) return false;
+  try { process.kill(lock.pid, 0); } catch (error) {
+    return error?.code === 'EPERM';
+  }
+  if (typeof lock.bootTime === 'number' && Math.abs(lock.bootTime - bootTime()) > 30) return false;
+  return true;
+}
+
+export async function startIntegration(nameOrOptions = 'web') {
+  const options = typeof nameOrOptions === 'string' ? { name: nameOrOptions } : (nameOrOptions ?? {});
+  const name = options.name ?? 'web';
+  const fs = await import('node:fs/promises');
+  const pathMod = await import('node:path');
+  const home = options.home ? pathMod.resolve(options.home) : alpHome();
+  const lockPath = pathMod.join(home, 'integrations', `${name}.lock`);
+  const webPath = pathMod.join(home, `${name}.json`);
+
+  // Clear, actionable diagnostics for a disabled optional integration.
+  let settings = {};
+  try { settings = JSON.parse(await fs.readFile(pathMod.join(home, 'settings.json'), 'utf8')); } catch {}
+  if (settings?.web?.enabled === false) {
+    throw new Error('ALP web app is disabled by settings ("web.enabled": false).');
+  }
+
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const readLock = async () => {
+    try { return JSON.parse(await fs.readFile(lockPath, 'utf8')); } catch { return undefined; }
+  };
+  const readWeb = async () => {
+    try { return JSON.parse(await fs.readFile(webPath, 'utf8')); } catch { return undefined; }
+  };
+
+  // The authoritative check: the ready integration lock and live web.json must name the same pid.
+  // A loser of a concurrent start accepts the winning pid after its own contender has exited or
+  // the lock already names the winner.
+  async function waitForReady() {
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const lock = await readLock();
+      if (lock && integrationAlive(lock) && lock.ready) {
+        const info = await readWeb();
+        if (info && info.pid === lock.pid) return lock;
+      }
+      await sleep(100);
+    }
+    const lock = await readLock();
+    if (lock && !lock.ready) throw new Error('ALP web integration started but did not become ready; see ~/.alp/logs/integrations/paseo.log');
+    if (!lock) throw new Error('ALP web app is provided by an optional integration package. Install it (for example `npm install -g alp-paseo-plugin`) and run `alp web` again.');
+    throw new Error('ALP web integration did not publish a matching web.json lock');
+  }
+
+  const existing = await readLock();
+  if (existing && integrationAlive(existing)) {
+    return waitForReady();
+  }
+
+  const entry = await discoverIntegration(name, { home });
+  if (!entry) {
+    throw new Error('ALP web app is provided by an optional integration package. Install it (for example `npm install -g alp-paseo-plugin`) and run `alp web` again.');
+  }
+
+  const { spawn } = await import('node:child_process');
+  // The child is detached with its stdio ignored, so it cannot rely on the parent's console. `--service`
+  // is the generic contract: the entry writes its own log (the path its error messages advertise) and
+  // keeps the process alive as a service. `--register` still prints to stdout and is not passed here.
+  const child = spawn(process.execPath, [entry, '--service'], { stdio: 'ignore', detached: true, env: { ...process.env, ALP_HOME: home } });
+  let spawnError = null;
+  child.on('error', error => { spawnError = error; });
+  let exited = false;
+  child.on('exit', code => { if (code !== 0 && code !== null) exited = true; });
+  child.unref();
+
+  if (spawnError) throw spawnError;
+  // Give the process a moment to fail immediately on missing entry or bad permissions.
+  await sleep(150);
+  if (spawnError) throw spawnError;
+  if (exited) throw new Error('ALP web integration failed to start; see ~/.alp/logs/integrations/paseo.log');
+
+  return waitForReady();
 }
