@@ -9,6 +9,7 @@ export type AgentProfilesConfig = {
 } & AgentModelConfig;
 /** Disk configuration; no provider SDK types. */
 export interface RawSettings {
+  templateDefaults?: Record<string, Record<string, string>>;
   team?: Record<string, Record<string, AgentProfilesConfig>>;
   /** Legacy settings key; use team. */
   profile?: Record<string, Record<string, AgentProfilesConfig>>;

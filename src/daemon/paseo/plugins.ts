@@ -25,11 +25,13 @@ const digest = createHash('sha256').update(plugin.factory).digest('hex').slice(0
 /** The script the page loads before the app: each plugin's factory by id. */
 export const pluginScript = `window.__ALP_PLUGINS__ = Object.assign(window.__ALP_PLUGINS__ || {}, { ${JSON.stringify(plugin.id)}: ${plugin.factory} });\n`;
 
-export function createPlugins({ log = () => {}, usage }: { log?: (message: string) => void; usage?: (refresh?: boolean) => Promise<any> } = {}) {
+export function createPlugins({ log = () => {}, usage, home, projectDirectories }: {
+  home?: string;
+  projectDirectories?: () => Promise<string[]>; log?: (message: string) => void; usage?: (refresh?: boolean) => Promise<any> } = {}) {
   const methods = new Map<string, { contract: Contract; run: (input: any) => Promise<unknown> }>();
   const server = { handle: (contract: Contract, run: (input: any) => Promise<unknown>) => { methods.set(contract.name, { contract, run }); } } as unknown as PluginServerContext;
   registerTaskRpc(server);
-  registerLibraryRpc(server);
+  registerLibraryRpc(server, { home, projectDirectories });
   registerUsageRpc(server, usage);
 
   const handlers: Record<string, Handler> = {

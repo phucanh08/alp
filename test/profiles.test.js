@@ -197,7 +197,7 @@ test('a peer on codex:* runs on any Codex model the requester picks, at the effo
 
 test('profiles take "provider:model[:effort]" and "provider:*"; main and oracle name their models, main just one', () => {
   validateSettings({ team: { cafe: { peer: { profiles: ['codex:*', 'claude:claude-sonnet-5-5'] }, main: { profiles: ['claude:claude-opus-5-5'] } } } }, 'settings');
-  for (const profiles of [['gpt-6-sol'], ['codex:'], ['acp:x'], ['codex:a b']]) assert.throws(() => validateSettings({ team: { cafe: { peer: { profiles } } } }, 'settings'), /profiles\[0\]/);
+  for (const profiles of [['gpt-6-sol'], ['codex:'], ['acp:'], ['codex:a b']]) assert.throws(() => validateSettings({ team: { cafe: { peer: { profiles } } } }, 'settings'), /profiles\[0\]/);
   assert.throws(() => validateSettings({ team: { cafe: { oracle: { profiles: ['codex:*'] } } } }, 'settings'), /oracle runs on a named model/);
   validateSettings({ team: { cafe: { lead: { profiles: ['claude:claude-opus-5-5:high', 'codex:gpt-6-astra:low', 'codex:custom:xhigh'] } } } }, 'settings');
   for (const [profiles, error] of [
@@ -211,6 +211,7 @@ test('profiles take "provider:model[:effort]" and "provider:*"; main and oracle 
 });
 
 test('ACP model profiles are accepted and preserve nested OpenCode model IDs', () => {
+  validateSettings({ team: { pho: { main: { profiles: ['acp:opencode'] } } } }, 'settings');
   const model = 'acp:opencode/opencode/cat-jam-free';
   assert.doesNotThrow(() => validateSettings({ team: { pho: { main: { profiles: [model] }, oracle: { profiles: [model, 'acp:opencode/opencode/mimo-v2.6-flash-free'] } } } }, 'settings'));
 });

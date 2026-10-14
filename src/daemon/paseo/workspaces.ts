@@ -589,6 +589,13 @@ export function createWorkspaces({ home, broadcast, agents, inDevelopment, log =
 
   return {
     handlers,
+    async projectDirectories() {
+      await load();
+      return [...new Set([
+        ...registry.projects.filter(entry => !entry.removedAt).map(entry => entry.root),
+        ...registry.workspaces.filter(active).map(entry => entry.directory),
+      ])];
+    },
     features: {
       workspaceMultiplicity: true, projectList: true, projectAdd: true, stableProjectIdentity: true, projectRemove: true, projectCreateDirectory: true,
       workspacePinning: true, workspaceMarkUnread: true, workspaceLabels: true,

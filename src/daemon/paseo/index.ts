@@ -70,7 +70,7 @@ export function createPaseoBridge({ daemon, version, token, serverId, home, rela
     try { return await connection.request('daemon.usage', { refresh }); }
     finally { connection.close(); }
   };
-  const plugins = createPlugins({ log, usage: readUsage });
+  const plugins = createPlugins({ log, usage: readUsage, home, projectDirectories: workspaces.projectDirectories });
   const usage = createUsage(readUsage);
   const checkouts = createCheckouts({ broadcast, log });
   const relay = createRelay({ home, serverId, attach: socket => gateway.attach(socket), initial: relaySettings, log: message => log?.(message) });

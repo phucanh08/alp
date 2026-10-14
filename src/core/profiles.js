@@ -1,7 +1,8 @@
 import path from 'node:path';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import { MODELS } from './models.js';
-import { resolveTeam } from './teams.js';
+import { resolveTeam, teamSources } from './teams.js';
 
 export const userLibrary = () => process.env.ALP_HOME ?? path.join(os.homedir(), '.alp');
 /** Accept the original provider map as well as the model list.
@@ -61,15 +62,17 @@ export function normalizeAgentProfiles(config, name) {
 export const profileModel = config => config?.model ? config.model.includes(':') ? config.model : `${config.provider}:${config.model}` : undefined;
 
 const withEffort = (model, effort) => {
+  if (model.startsWith('acp:') || model.startsWith('antigravity:')) return model;
   const fitted = fitEffort(model, effort);
   return fitted ? `${model}:${fitted}` : model;
 };
 
 /** Snapshot current user team choices into editable project profiles. */
-export async function projectProfiles({ library = userLibrary(), templates, runtime } = {}) {
+export async function projectProfiles({ root, library = userLibrary(), templates, runtime, teamIds } = {}) {
   const profiles = {};
-  for (const id of ['pho', 'cafe']) {
-    const team = await resolveTeam(undefined, id, { library, ...(templates?.[`teams/${id}/team.json`] ? { templates } : {}) });
+  for (const id of (await teamSources(root, { library, templates })).keys()) {
+    if (teamIds && !teamIds.includes(id)) continue;
+    const team = await resolveTeam(root, id, { library, templates });
     const fallback = team.members[team.main].model ?? 'codex:gpt-6.1-sol';
     const profile = {};
     for (const [name, member] of Object.entries(team.members)) {
@@ -103,5 +106,34 @@ export function applyProfile(team, profile) {
       if (first?.effort) target.thinking = first.effort;
     }
   }
+  return next;
+}
+
+/** Fingerprints let generated defaults follow templates without replacing hand-edited project choices. */
+export const profileFingerprint = (config, name) => createHash('sha256').update(JSON.stringify(agentProfiles(config, name).map(profileString))).digest('hex');
+export const profileDefaults = profiles => Object.fromEntries(Object.entries(profiles).map(([team, agents]) => [team, Object.fromEntries(Object.entries(agents).map(([name, config]) => [name, profileFingerprint(config, name)]))]));
+
+/** Refresh only inherited profiles; older scaffolds are recognized by their shipped defaults. */
+export async function syncTemplateProfiles(settings, options = {}) {
+  const defaults = await projectProfiles({ ...options, runtime: options.replaceModels ? undefined : settings.runtime });
+  const legacy = settings.templateDefaults ? undefined : await projectProfiles({ templates: options.templates, library: '', runtime: settings.runtime });
+  const previous = settings.templateDefaults ?? profileDefaults(legacy);
+  const next = structuredClone(settings);
+  next.team = { ...(next.profile ?? {}), ...(next.team ?? {}) };
+  delete next.profile;
+  for (const id of new Set([...Object.keys(previous), ...Object.keys(defaults)])) {
+    if (options.teamIds && !options.teamIds.includes(id)) continue;
+    const desired = defaults[id] ?? {};
+    const current = next.team[id] ?? {};
+    for (const name of new Set([...Object.keys(previous[id] ?? {}), ...(options.replaceModels ? Object.keys(current) : []), ...Object.keys(desired)])) {
+      const config = current[name];
+      if (!options.replaceModels && config && profileFingerprint(config, name) !== previous[id]?.[name]) continue;
+      if (desired[name]) current[name] = { ...desired[name], autocompact: config?.autocompact ?? desired[name].autocompact };
+      else delete current[name];
+    }
+    if (Object.keys(current).length) next.team[id] = current;
+    else delete next.team[id];
+  }
+  next.templateDefaults = options.teamIds ? { ...previous, ...profileDefaults(defaults) } : profileDefaults(defaults);
   return next;
 }

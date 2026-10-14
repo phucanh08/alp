@@ -1,3 +1,4 @@
+import { TeamModelSettings } from './team-model-settings';
 import type { PluginTheme } from '@getpaseo/plugin';
 import { type PluginSurfaceProps, type PluginWorkspacePanelProps, useRpc, useWorkspace } from '@getpaseo/plugin/client';
 import { useToast } from '@getpaseo/plugin/client/react-native';
@@ -140,9 +141,15 @@ function LibraryManager({ theme, compact, scope, directory, embedded = false, in
     override: (kind, name) => run(() => duplicate({ ...base, kind, from: name, to: name, scope: 'project' }), `${name} is now overridden in this project`),
     useLibrary: (kind, name) => run(() => remove({ ...base, kind, name, scope: 'project' }), `${name} follows the library again`),
     save: async (kind, name, content, revision, creating) => {
-      const saved = await run(() => save({ ...base, kind, name, scope, content, revision }), `Saved ${name}`);
-      if (saved && creating) setSelection({ kind, name });
-      return saved;
+      try {
+        const result = await save({ ...base, kind, name, scope, content, revision });
+        const synced = result.syncedProjects ?? 0;
+        toast.show(`Saved ${name}${synced ? ` · Updated settings in ${synced} project${synced === 1 ? '' : 's'}` : ''}`, { variant: 'success' });
+        if (result.syncErrors?.length) toast.error(`Template saved, but some project settings could not be updated: ${result.syncErrors.join('; ')}`);
+        refresh();
+        if (creating) setSelection({ kind, name });
+        return true;
+      } catch (cause) { toast.error(message(cause)); return false; }
     },
     giveSkills: (agent, skills) => run(() => give({ agent, skills }), `Saved the skills of ${agent}`),
     setLanguage: next => run(() => writeLanguage({ language: next }), next ? `Agents now write to you in ${next}` : 'Agents write to you in the default language again'),
@@ -510,43 +517,8 @@ const EFFORTS = ['', 'none', 'low', 'medium', 'high', 'xhigh', 'max'];
 const effortOptions = EFFORTS.map(value => ({ label: value || 'Inherit', value }));
 
 /** Model choices where they take effect: the team's members, supervisor and oracle lenses. */
-export function TeamModels({ content, update }: FormProps) {
-  const team = content.team ?? {};
-  const oracleModels: string[] = team.oracleModels ?? ['claude:claude-fable-5-1', 'codex:gpt-6-astra'];
-  return <>
-    <SettingsSection title="Models & effort" info={<Text>Applies to new sessions in this team. Project and explicit session choices take precedence. Model access and supported effort depend on your provider.</Text>}>
-      <SettingsRow label="Model IDs" hint="Use codex:model or claude:model. Empty model/effort inherits existing agent defaults." />
-    </SettingsSection>
-    {Object.entries(team.members ?? {}).filter(([name]) => name !== 'oracle').map(([name, value]) => {
-      const member = value as Content;
-      return <SettingsSection key={name} title={name === team.main ? `${name} · main` : name}>
-        <SettingsInput label="Model" initialValue={member.model ?? ''} onChangeText={value => update(draft => { setOrDelete(draft.team.members[name], 'model', value.trim()); })} />
-        <SettingsSelect label="Effort" value={member.thinking ?? ''} options={effortOptions} onValueChange={value => update(draft => { setOrDelete(draft.team.members[name], 'thinking', value); })} />
-      </SettingsSection>;
-    })}
-    {team.members?.oracle ? ['claude', 'codex'].map(provider => {
-      const selected = oracleModels.find(model => model.startsWith(`${provider}:`));
-      return <SettingsSection key={provider} title={`Oracle · ${provider === 'claude' ? 'Claude' : 'Codex'}`}>
-        <SettingsSwitch label="Enable lens" hint={selected && oracleModels.length === 1 ? "Keep at least one oracle lens enabled" : undefined} disabled={!!selected && oracleModels.length === 1} value={!!selected} onValueChange={on => update(draft => {
-          draft.team.oracleModels = oracleModels.filter(model => !model.startsWith(`${provider}:`));
-          if (on) draft.team.oracleModels.push(provider === 'claude' ? 'claude:claude-fable-5-1' : 'codex:gpt-6-astra');
-        })} />
-        {selected ? <>
-          <SettingsInput label="Model" hint={`Use ${provider}:model. Dual-lens can consult both providers when needed.`} initialValue={selected} onChangeText={value => update(draft => {
-            draft.team.oracleModels = oracleModels.map(model => model.startsWith(`${provider}:`) ? value.trim() : model);
-          })} />
-          <SettingsSelect label="Effort" value={team.oracleThinking?.[provider] ?? ''} options={effortOptions.map(option => option.value ? option : { label: 'Default (high)', value: '' })} onValueChange={value => update(draft => {
-            draft.team.oracleThinking ??= {};
-            setOrDelete(draft.team.oracleThinking, provider, value);
-          })} />
-        </> : null}
-      </SettingsSection>;
-    }) : null}
-    {team.supervisor ? <SettingsSection title="Supervisor">
-      <SettingsInput label="Model" initialValue={team.supervisor.model ?? ''} onChangeText={value => update(draft => { setOrDelete(draft.team.supervisor, 'model', value.trim()); })} />
-      <SettingsSelect label="Effort" value={team.supervisor.thinking ?? ''} options={effortOptions} onValueChange={value => update(draft => { setOrDelete(draft.team.supervisor, 'thinking', value); })} />
-    </SettingsSection> : null}
-  </>;
+export function TeamModels({ content, update, theme }: FormProps) {
+  return <TeamModelSettings team={content.team ?? {}} theme={theme} onChange={next => update(draft => { draft.team = next; })} />;
 }
 
 /** A team, by tab: members and roles, who may delegate to whom, the supervisor and the house rules. Without a tab, all of it. */

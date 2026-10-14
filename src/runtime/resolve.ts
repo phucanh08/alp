@@ -4,7 +4,7 @@ import { resolveWorkflow } from '../core/workflow.js';
 import { initProject } from '../core/init.js';
 import { profileModel, agentProfiles, selectedProfile } from '../core/profiles.js';
 import { jsonObject, resolveAgent } from '../core/resolver.js';
-import { resolveTeam } from '../core/teams.js';
+import { resolveTeam, teamOf } from '../core/teams.js';
 import { loadHooks } from '../core/hooks.js';
 import { acpModel, loadProvider } from '../core/providers.js';
 import type { AcpProvider } from './acp-transport.js';
@@ -118,7 +118,15 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
   if (!path.isAbsolute(spec.cwd) || !(await stat(spec.cwd)).isDirectory()) throw new Error('Session cwd must be an existing absolute directory');
   if (spec.workdir !== undefined && (!path.isAbsolute(spec.workdir) || !(await stat(spec.workdir)).isDirectory())) throw new Error('Session workdir must be an existing absolute directory');
   const starter = options.templates ? { templates: options.templates } : {};
-  if (options.initialize !== false && (!(await exists(path.join(spec.cwd, 'ALP.md'))) || !(await exists(path.join(spec.cwd, '.alp', 'settings.json'))))) await initProject(spec.cwd, { ...starter, library: options.library });
+  if (options.initialize !== false) {
+    const settingsFile = path.join(spec.cwd, '.alp', 'settings.json');
+    const scaffoldMissing = !(await exists(path.join(spec.cwd, 'ALP.md'))) || !(await exists(settingsFile));
+    if (scaffoldMissing) await initProject(spec.cwd, { ...starter, library: options.library });
+    else if (!spec.restore) {
+      const settings = await jsonObject(settingsFile, 'INVALID_SETTINGS');
+      await initProject(spec.cwd, { ...starter, library: options.library, onlyManagedProfiles: true, teamIds: [teamOf(spec.workflow ?? settings.workflow?.mode ?? 'custom')] });
+    }
+  }
   if (options.library) await ensureLibrary(options.library, options.templates ? { templates: options.templates } : {});
   const restored = spec.restore;
   if (restored && spec.agent !== undefined && spec.agent !== restored.agent) throw new Error('Cannot resume a thread as a different ALP agent');

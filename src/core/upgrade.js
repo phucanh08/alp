@@ -1,4 +1,4 @@
-import { projectProfiles, normalizeAgentProfiles } from './profiles.js';
+import { projectProfiles, normalizeAgentProfiles, syncTemplateProfiles } from './profiles.js';
 import { readFile, writeFile, mkdir, mkdtemp, lstat, readdir, rename, rm, rmdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,7 +47,7 @@ async function skillFiles(directory) {
 }
 
 /** Explicit migration of the original scaffold; custom instructions remain owned by the user. */
-export async function upgradeProject(projectRoot) {
+export async function upgradeProject(projectRoot, { library, templates } = {}) {
   const root = path.resolve(projectRoot);
   // Validate before creating files or changing settings.
   let settingsText;
@@ -56,7 +56,7 @@ export async function upgradeProject(projectRoot) {
   const settings = settingsText === undefined ? undefined : JSON.parse(settingsText);
   if (settings !== undefined) validateSettings(settings, '.alp/settings.json');
   await resolveDelegation(root);
-  const result = { ...await initProject(root), updated: [], removed: [], customSkills: [], customInstructions: [], backup: undefined };
+  const result = { ...await initProject(root, { library, templates, syncProfiles: false }), updated: [], removed: [], customSkills: [], customInstructions: [], backup: undefined };
   async function backupPath(name) {
     if (!result.backup) {
       const backups = path.join(root, '.alp/backups');
@@ -87,18 +87,20 @@ export async function upgradeProject(projectRoot) {
   const oldGraph = settings?.delegation;
   const shippedGraph = oldGraph && Object.keys(oldGraph).length === 2 && JSON.stringify(oldGraph.main) === '["lead"]' && JSON.stringify(oldGraph.lead) === '["peer"]';
   if (settings !== undefined) {
-    const next = structuredClone(settings);
+    let next = structuredClone(settings);
     if (next.workflow === undefined && (oldGraph === undefined || shippedGraph)) {
       if (shippedGraph) delete next.delegation;
       next.workflow = { mode: shippedGraph ? 'cafe' : 'pho', maxPeers: 2 };
     } else if (Object.hasOwn(renamedProfiles, next.workflow?.mode)) next.workflow.mode = renamedProfiles[next.workflow.mode];
     next.team = next.team || next.profile
       ? { ...(next.profile ?? {}), ...(next.team ?? {}) }
-      : await projectProfiles({ runtime: next.runtime });
+      : await projectProfiles({ root, library, templates, runtime: next.runtime });
     delete next.profile;
     for (const profile of Object.values(next.team ?? {})) {
       for (const [name, config] of Object.entries(profile)) profile[name] = normalizeAgentProfiles(config, name);
     }
+    next = await syncTemplateProfiles(next, { root, library, templates });
+    validateSettings(next, '.alp/settings.json');
     if (JSON.stringify(next) !== JSON.stringify(settings)) await replace('.alp/settings.json', settingsText, JSON.stringify(next, null, 2) + '\n');
   }
   // Skills now come from the user's library; archive project copies that still match what ALP shipped.

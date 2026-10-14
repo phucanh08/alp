@@ -197,7 +197,7 @@ test('editors: an agent picks skills, MCP servers and hooks; a team its members,
   assert.deepEqual(entryTabs('teams', true).map(tab => tab.label), ['Models & effort', 'General', 'Members', 'Delegation', 'Supervisor', 'House rules']);
   assert.doesNotMatch(editor('teams', team, 'general'), /data-label="Main"/);
   const models = editor('teams', team);
-  assert.match(section(models, 'main · main'), /<field data-label="Model" data-value="claude:claude-opus-5-5">/);
+  assert.match(section(models, 'main · main'), /<select data-label="Model" data-value="claude:claude-opus-5-5">/);
   assert.match(section(models, 'main · main'), /data-label="Effort"/);
   const members = editor('teams', team, 'members');
   assert.doesNotMatch(members, /data-label="Model"/);
@@ -211,9 +211,9 @@ test('editors: an agent picks skills, MCP servers and hooks; a team its members,
   assert.match(editor('teams', team, 'supervisor'), /<select data-label="Supervisor agent" data-value="supervisor">/);
   const dual = { ...team, content: { ...team.content, team: { ...team.content.team, members: { ...team.content.team.members, oracle: { role: 'advisor' } }, oracleModels: ['claude:sonnet', 'codex:custom'], oracleThinking: { claude: 'medium', codex: 'high' } } } };
   const lenses = editor('teams', dual);
-  assert.match(section(lenses, 'Oracle · Claude'), /data-label="Model" data-value="claude:sonnet"/);
-  assert.match(section(lenses, 'Oracle · Claude'), /data-label="Effort" data-value="medium"/);
-  assert.match(section(lenses, 'Oracle · Codex'), /data-label="Model" data-value="codex:custom"/);
+  assert.match(section(lenses, 'Oracle 1'), /data-label="Model" data-value="claude:sonnet"/);
+  assert.match(section(lenses, 'Oracle 1'), /data-label="Effort" data-value="medium"/);
+  assert.match(section(lenses, 'Oracle 2'), /data-label="Model" data-value="codex:custom"/);
   assert.match(editor('teams', team, 'rules'), /data-label="House rules" data-value="Review every page.\n"/);
   assert.match(editor('teams', team), />Remove</);
   assert.equal(delegationCycle({ main: ['lead'], lead: ['peer'], peer: ['lead'] }), 'lead');
@@ -271,4 +271,41 @@ test('direct Host settings screens open their own library category', async () =>
     assert.doesNotMatch(html, /ALP library|Expand navigation|Collapse navigation|Open navigation|GENERAL|ORGANISATION/, `${component} uses Host navigation`);
     assert.ok(html.includes(`data-label="${createLabel}"`), `${component} exposes its editor actions`);
   }
+});
+
+test('template presets select only their provider and preserve the team graph, with saveable oracle models', async () => {
+  const { code } = await compileClient('shared/team-models.ts');
+  const { presetTeamModels, modelSetupFor, MODEL_PRESETS } = load(code);
+  const { validateTeam } = await import('../src/core/teams.js');
+  const models = [
+    { id: 'claude:claude-opus-5-5', label: 'Claude', efforts: ['medium'], effort: 'medium' },
+    { id: 'codex:gpt-6.1-sol', label: 'Codex', efforts: ['low'], effort: 'low' },
+    { id: 'acp:opencode', label: 'OpenCode default', efforts: [] },
+    { id: 'antigravity:gemini-3.8-flash-high', label: 'Antigravity', efforts: [] },
+  ];
+  const team = { label: 'Test', main: 'main', members: { main: {}, peer: { role: 'peer' }, oracle: { role: 'advisor' } }, delegation: { main: ['peer', 'oracle'] }, supervisor: { agent: 'supervisor', thinking: 'high' } };
+  for (const { value } of MODEL_PRESETS) {
+    const next = presetTeamModels(team, value, models);
+    assert.deepEqual(next.modelSetup, { mode: 'default', preset: value });
+    validateTeam(next, 'preset');
+    const legacy = { ...next }; delete legacy.modelSetup;
+    assert.deepEqual(modelSetupFor(legacy, models), { mode: 'default', preset: value });
+    assert.deepEqual(modelSetupFor({ ...next, modelSetup: { mode: 'custom' } }, models), { mode: 'custom' });
+    assert.deepEqual(next.delegation, team.delegation);
+    assert.equal(next.members.peer.role, 'peer');
+    assert.equal(next.supervisor.agent, 'supervisor');
+    if (value === 'mix') {
+      assert.match(next.members.main.model, /^claude:/);
+      assert.match(next.members.peer.model, /^codex:/);
+      assert.equal(next.oracleModels.length, 2);
+    } else {
+      const prefix = value === 'opencode' ? 'acp:opencode' : `${value}:`;
+      assert.ok(next.members.main.model.startsWith(prefix));
+      assert.ok(next.members.peer.model.startsWith(prefix));
+      assert.ok(next.supervisor.model.startsWith(prefix));
+      assert.deepEqual(next.oracleModels, [next.members.main.model]);
+    }
+  }
+  assert.deepEqual(team.members.main, {});
+  assert.throws(() => presetTeamModels(team, 'opencode', []), /Configure the provider/);
 });

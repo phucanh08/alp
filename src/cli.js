@@ -30,7 +30,7 @@ import { alpHome, connect, lockAlive, readLock } from './client/index.js';
 import { languageSetting, setLanguage } from './core/user-settings.js';
 
 const USAGE = `Usage:
-  alp <init|upgrade> [directory]
+  alp <init|upgrade|update> [directory]
   alp setup [directory] [--runtime codex|claude|mix] [--prefer claude|codex]
             [--claude-model M] [--codex-model M] [--claude-supervisor M] [--codex-supervisor M]
             [--claude-oracle M] [--codex-oracle M]   write Phở/Cafe's agent profiles to .alp/settings.json
@@ -97,11 +97,12 @@ class UsageError extends Error {}
 async function project(command, args) {
   if (args.length > 1) throw new UsageError();
   try {
-    const result = await (command === 'upgrade' ? upgradeProject : initProject)(args[0] ?? process.cwd());
+    const result = await (command === 'upgrade' ? upgradeProject : initProject)(args[0] ?? process.cwd(), { library: alpHome() });
     console.log(`ALP initialized: ${result.created.length} files created, ${result.preserved.length} existing files preserved.`);
     const library = await seedLibrary(alpHome());
     if (library.created.length || library.updated.length) console.log(`Skill library ${alpHome()}: ${library.created.length} files added, ${library.updated.length} unchanged files updated.`);
-    if ('updated' in result) {
+    if (command === 'init' && result.updated?.length) console.log(`Template model profiles refreshed: ${result.updated.join(', ')}`);
+    if (command === 'upgrade') {
       console.log(`ALP upgraded: ${result.updated.length} files updated.${result.backup ? ` Backup: ${result.backup}` : ''}`);
       if (result.customInstructions.length) console.log(`Custom instructions preserved; reconcile with templates if needed: ${result.customInstructions.join(', ')}`);
       const copies = result.removed.filter(name => /^\.alp\/agents\/[^/]+$/.test(name));
@@ -1238,7 +1239,7 @@ async function interrupt(args) {
   console.log('Interrupted');
 }
 
-const commands = { setup: args => setup(args, alpHome()), init: args => project('init', args), upgrade: args => project('upgrade', args), daemon, doctor, run, ps, top, attach, send, questions, answer, log, board, tasks: tasksCommand, task: taskCommand, formula: formulaCommand, permissions: permissionsCommand, agents: args => libraryCommand('agents', args), skills: args => libraryCommand('skills', args), mcp: args => ['add', 'rm', 'mv', 'cp', 'test', 'show', 'edit'].includes(args[0]) ? editCommand('mcp', args) : libraryCommand('mcp', args), hooks: args => libraryCommand('hooks', args), providers: args => libraryCommand('providers', args), provider: args => editCommand('providers', args), teams: teamsCommand, trust: trustCommand, agent: args => editCommand('agents', args), team: args => editCommand('teams', args), skill: args => editCommand('skills', args), hook: args => editCommand('hooks', args), verify, recall, pause, resume, language, interrupt, acp: acpCommand, web: webCommand };
+const commands = { setup: args => setup(args, alpHome()), init: args => project('init', args), upgrade: args => project('upgrade', args), update: args => project('upgrade', args), daemon, doctor, run, ps, top, attach, send, questions, answer, log, board, tasks: tasksCommand, task: taskCommand, formula: formulaCommand, permissions: permissionsCommand, agents: args => libraryCommand('agents', args), skills: args => libraryCommand('skills', args), mcp: args => ['add', 'rm', 'mv', 'cp', 'test', 'show', 'edit'].includes(args[0]) ? editCommand('mcp', args) : libraryCommand('mcp', args), hooks: args => libraryCommand('hooks', args), providers: args => libraryCommand('providers', args), provider: args => editCommand('providers', args), teams: teamsCommand, trust: trustCommand, agent: args => editCommand('agents', args), team: args => editCommand('teams', args), skill: args => editCommand('skills', args), hook: args => editCommand('hooks', args), verify, recall, pause, resume, language, interrupt, acp: acpCommand, web: webCommand };
 const [command, ...args] = process.argv.slice(2);
 try {
   if (!Object.hasOwn(commands, command)) throw new UsageError();

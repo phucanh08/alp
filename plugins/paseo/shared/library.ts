@@ -60,7 +60,7 @@ export const librarySave = defineRpc({
     /** null creates; a string replaces that revision; omitted overwrites. */
     revision: z.string().nullable().optional(),
   }),
-  output: z.object({ revision: z.string().nullable() }),
+  output: z.object({ revision: z.string().nullable(), syncedProjects: z.number().int().nonnegative().optional(), syncErrors: z.array(z.string()).optional() }),
 });
 
 export const libraryDelete = defineRpc({
@@ -121,4 +121,11 @@ export const languageSet = defineRpc({
   name: 'alp.settings.language.set',
   input: z.object({ language: z.string().trim().min(1).max(40).nullable() }),
   output: LanguageSettingSchema,
+});
+
+/** Models available to the template editor, including configured ACP providers. */
+export const libraryModels = defineRpc({
+  name: 'alp.library.models',
+  input: z.object({}),
+  output: z.object({ models: z.array(z.object({ id: z.string(), label: z.string(), efforts: z.array(z.string()), effort: z.string().optional() })) }),
 });

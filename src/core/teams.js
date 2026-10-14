@@ -12,7 +12,7 @@ import { settingsKeys, unknownMessage } from './validation.js';
  */
 
 export const BUILTIN_TEAMS = ['pho', 'cafe'];
-export const TEAM_SETTINGS = ['$schema', 'label', 'description', 'main', 'members', 'delegation', 'maxPeers', 'supervisor', 'oracleModels', 'oracleThinking'];
+export const TEAM_SETTINGS = ['$schema', 'label', 'description', 'main', 'members', 'delegation', 'maxPeers', 'supervisor', 'oracleModels', 'oracleThinking', 'modelSetup'];
 export const TEAM_ROLES = ['lead', 'peer', 'advisor', 'reviewer'];
 const MEMBER_SETTINGS = ['role', 'model', 'thinking'];
 const SUPERVISOR_SETTINGS = ['agent', 'model', 'thinking'];
@@ -36,6 +36,13 @@ export function validateTeam(config, source) {
   const check = (ok, message) => { if (!ok) throw new AlpError('INVALID_TEAM', `${source}: ${message}`); };
   check(object(config), 'expected an object');
   keys(config, TEAM_SETTINGS, check, '');
+  if (config.modelSetup !== undefined) {
+    const setup = config.modelSetup;
+    check(object(setup) && ['default', 'custom'].includes(setup.mode), 'modelSetup.mode must be default or custom');
+    keys(setup, ['mode', 'preset'], check, 'modelSetup: ');
+    if (setup.mode === 'default') check(['claude', 'codex', 'opencode', 'antigravity', 'mix'].includes(setup.preset), 'modelSetup.preset must name a preset');
+    else check(setup.preset === undefined, 'custom modelSetup has no preset');
+  }
   check(nonempty(config.label), 'label must be a nonempty string');
   if (config.description !== undefined) check(typeof config.description === 'string', 'description must be a string');
   check(validName(config.main), 'main must name an agent');
@@ -68,11 +75,11 @@ export function validateTeam(config, source) {
   for (const owner of Object.keys(config.delegation)) visit(owner);
   if (config.oracleModels !== undefined) {
     check(Array.isArray(config.oracleModels) && config.oracleModels.length > 0, 'oracleModels must list runtime-prefixed models');
-    check(config.oracleModels.every(model => typeof model === 'string' && /^(codex|claude):[^\s]+$/.test(model)) && new Set(config.oracleModels).size === config.oracleModels.length, 'oracleModels must list each model once');
+    check(config.oracleModels.every(model => typeof model === 'string' && /^(codex|claude|antigravity|acp):[^\s]+$/.test(model)) && new Set(config.oracleModels).size === config.oracleModels.length, 'oracleModels must list each model once');
   }
   if (config.oracleThinking !== undefined) {
     check(object(config.oracleThinking), 'oracleThinking must map providers to effort');
-    for (const [provider, effort] of Object.entries(config.oracleThinking)) check((['codex', 'claude'].includes(provider) || /^(codex|claude):[^\s]+$/.test(provider)) && ['none', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort), 'oracleThinking requires a provider or model ID and a supported effort');
+    for (const [provider, effort] of Object.entries(config.oracleThinking)) check((['codex', 'claude', 'antigravity', 'acp'].includes(provider) || /^(codex|claude|antigravity|acp):[^\s]+$/.test(provider)) && ['none', 'off', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode'].includes(effort), 'oracleThinking requires a provider or model ID and a supported effort');
   }
   if (config.maxPeers !== undefined) check(Number.isSafeInteger(config.maxPeers) && config.maxPeers >= 1, 'maxPeers must be a positive integer');
   if (config.supervisor !== undefined && config.supervisor !== false) {
@@ -137,6 +144,7 @@ export async function resolveTeam(root, id, { library, templates } = {}) {
     supervisor: config.supervisor ?? false,
     oracleModels: config.oracleModels,
     oracleThinking: config.oracleThinking,
+    ...(config.modelSetup ? { modelSetup: config.modelSetup } : {}),
     houseRules: houseRules.trim(),
   };
 }
