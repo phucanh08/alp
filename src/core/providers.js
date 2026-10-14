@@ -18,9 +18,9 @@ import { settingsKeys, unknownMessage } from './validation.js';
  * Paseo's catalog carries and ALP keeps without using.
  */
 
-export const PROVIDER_SETTINGS = ['$schema', 'kind', 'label', 'description', 'command', 'args', 'env', 'models', 'additionalModels', 'enabled', 'params'];
+export const PROVIDER_SETTINGS = ['$schema', 'kind', 'label', 'description', 'command', 'args', 'env', 'models', 'additionalModels', 'enabled', 'params', 'readOnlyMode'];
 /** Runtimes ALP has built in; no provider takes their names. */
-export const BUILTIN_RUNTIMES = ['codex', 'claude', 'acp'];
+export const BUILTIN_RUNTIMES = ['codex', 'claude', 'acp', 'antigravity'];
 /** Names no provider takes: the runtimes, and `alp`, which the web app lists ALP's teams under. */
 export const RESERVED_PROVIDERS = [...BUILTIN_RUNTIMES, 'alp'];
 
@@ -31,11 +31,13 @@ const validId = id => typeof id === 'string' && /^[\w.-]+$/.test(id) && id !== '
 /** Checks a provider definition. */
 export function validateProvider(config, source, id) {
   const check = (ok, message) => { if (!ok) throw new AlpError('INVALID_PROVIDER', `${source}: ${message}`); };
-  if (id !== undefined) check(validId(id) && !RESERVED_PROVIDERS.includes(id), `'${id}' cannot name a provider: ${RESERVED_PROVIDERS.join(', ')} are taken`);
+  if (id !== undefined) check(validId(id) && (!RESERVED_PROVIDERS.includes(id) || (id === 'antigravity' && config?.kind === 'antigravity')), `'${id}' cannot name a provider: ${RESERVED_PROVIDERS.join(', ')} are taken`);
   check(object(config), 'expected an object');
   const { unknown } = settingsKeys(config, PROVIDER_SETTINGS);
   check(!unknown.length, unknown.length ? unknownMessage(unknown[0], PROVIDER_SETTINGS) : '');
-  check(config.kind === 'acp', 'kind must be "acp"');
+  check(['acp', 'antigravity'].includes(config.kind), 'kind must be "acp" or "antigravity"');
+  if (config.kind === 'antigravity' && id !== undefined) check(id === 'antigravity', 'Antigravity must use provider ID antigravity');
+  if (config.readOnlyMode !== undefined) check(config.kind === 'antigravity' && ['instructions', 'reject'].includes(config.readOnlyMode), 'readOnlyMode is only for Antigravity and must be "instructions" or "reject"');
   for (const key of ['label', 'description']) if (config[key] !== undefined) check(typeof config[key] === 'string', `${key} must be a string`);
   check(nonempty(config.command), 'command must be a nonempty string');
   if (config.args !== undefined) check(Array.isArray(config.args) && config.args.every(arg => typeof arg === 'string'), 'args must be a list of strings');
@@ -54,10 +56,10 @@ export function validateProvider(config, source, id) {
 
 /**
  * A provider of the library, with its id; undefined when there is none.
- * @returns {Promise<{ id: string, kind: 'acp', label: string, description?: string, command: string, args: string[], env: Record<string, string>, models?: Array<{ id: string, label?: string, description?: string }>, additionalModels?: Array<{ id: string, label?: string, description?: string }>, enabled?: boolean, params?: Record<string, unknown> } | undefined>}
+ * @returns {Promise<{ id: string, kind: 'acp' | 'antigravity', label: string, description?: string, command: string, args: string[], env: Record<string, string>, models?: Array<{ id: string, label?: string, description?: string }>, additionalModels?: Array<{ id: string, label?: string, description?: string }>, enabled?: boolean, params?: Record<string, unknown>, readOnlyMode?: 'instructions' | 'reject' } | undefined>}
  */
 export async function loadProvider(library, id) {
-  if (!library || !validId(id) || RESERVED_PROVIDERS.includes(id)) return undefined;
+  if (!library || !validId(id) || (RESERVED_PROVIDERS.includes(id) && id !== 'antigravity')) return undefined;
   const file = path.join(library, 'providers', `${id}.json`);
   let text;
   try { text = await readFile(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }

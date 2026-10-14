@@ -19,7 +19,7 @@ export async function resolveWorkflow(root, selected, restored, { library, templ
   if (chosen === 'custom') throw new Error('Choose a team, such as pho (Phở) or cafe (Cafe)');
   const mode = chosen ?? teamOf(restored?.mode ?? settings.workflow?.mode ?? 'custom');
   if (restored && mode !== teamOf(restored.mode)) throw new Error('Cannot change team in an existing session');
-  const team = mode === 'custom' ? undefined : applyProfile(await resolveTeam(root, mode, { library, templates }), settings.profile?.[mode]);
+  const team = mode === 'custom' ? undefined : applyProfile(await resolveTeam(root, mode, { library, templates }), (settings.team ?? settings.profile)?.[mode]);
   const maxPeers = restored?.maxPeers ?? settings.workflow?.maxPeers ?? team?.maxPeers ?? 2;
   if (!Number.isSafeInteger(maxPeers) || maxPeers < 1) throw new Error('workflow.maxPeers must be a positive integer');
   // A custom delegation graph has no main to supervise; settings can turn a team's supervisor off.

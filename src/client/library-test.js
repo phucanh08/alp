@@ -5,6 +5,7 @@ import { runHook, samplePayload } from '../core/hook-run.js';
 import { normalizeMcp } from '../core/validation.js';
 import { probeMcp } from './mcp-probe.js';
 import { probeAcp } from './acp-probe.js';
+import { probeAntigravity } from './antigravity-probe.js';
 import { loadProvider } from '../core/providers.js';
 
 /**
@@ -31,7 +32,9 @@ export async function testEntry(kind, name, { root, library, templates, scope, t
   }
   if (kind === 'providers') {
     const provider = await loadProvider(library, name);
-    const result = await probeAcp(provider, { cwd: root ? path.resolve(root) : library, ...(timeoutMs ? { timeoutMs } : {}) });
+    const result = provider.kind === 'antigravity'
+      ? await probeAntigravity(provider, { cwd: root ? path.resolve(root) : library, ...(timeoutMs ? { timeoutMs } : {}) })
+      : await probeAcp(provider, { cwd: root ? path.resolve(root) : library, ...(timeoutMs ? { timeoutMs } : {}) });
     return { kind, name, source: entry.source, ok: true, ...result };
   }
   throw new AlpError('INVALID_KIND', `Only mcp servers, hooks and providers can be tested, not ${kind}`);

@@ -80,7 +80,7 @@ test('the client registers the ALP settings screen and the project panel, with o
   });
   assert.equal(typeof cleanup, 'function');
   cleanup();
-  assert.deepEqual(screens.map(screen => [screen.id, screen.title, screen.icon, typeof screen.Component]), [['alp-settings', 'ALP', 'Bot', 'function'], ['alp-usage', 'Usage', 'ChartNoAxesCombined', 'function']]);
+  assert.deepEqual(screens.map(screen => [screen.id, screen.title, screen.icon, typeof screen.Component]), [['alp-settings', 'ALP', 'Bot', 'function'], ...[['alp-templates', 'Templates', 'Users'], ['alp-agents', 'Agents', 'Bot'], ['alp-skills', 'Skills', 'BookOpen'], ['alp-hooks', 'Hooks', 'Webhook'], ['alp-mcp', 'MCP servers', 'Plug']].map(row => [...row, 'function']), ['alp-usage', 'Usage', 'ChartNoAxesCombined', 'function']]);
   assert.deepEqual(panels.map(panel => [panel.id, panel.title, panel.context]), [['alp-tasks', 'Tasks', 'workspace'], ['alp-usage', 'Usage', 'workspace'], ['alp-project', 'ALP project', 'workspace']]);
 });
 
@@ -168,6 +168,13 @@ test('editors: an agent picks skills, MCP servers and hooks; a team its members,
   assert.match(general, /<option value="gemini">gemini \(ACP\)<\/option>/);
   assert.match(general, /<text>Save as my own<\/text>/);
   assert.match(general, /No changes/);
+  for (const compact of [false, true]) {
+    const hostEditor = renderToStaticMarkup(createElement(EntryEditor, { theme, compact, scope: 'library', kind: 'agents', entry: main, lists, actions, layout: { ...layout, embedded: true } }));
+    assert.doesNotMatch(hostEditor, /ALP library|Open navigation|Collapse navigation|GENERAL|ORGANISATION/);
+    assert.match(hostEditor, /Save as my own/);
+    assert.match(hostEditor, /All agents/);
+  }
+
   assert.doesNotMatch(general, />Remove</);
   assert.doesNotMatch(general, /AGENT\.md/, 'one tab at a time');
   assert.match(editor('agents', main, 'instructions'), /data-label="AGENT.md" data-value="# Main\n"/);
@@ -248,4 +255,20 @@ test('changing a team keeps it valid: a new main takes the old main\'s place, an
   assert.deepEqual(withDelegation(team, 'lead', 'peer', false).delegation, { main: ['lead'] });
   // The input is never changed in place.
   assert.deepEqual(team.delegation, { main: ['lead'], lead: ['peer'] });
+});
+
+test('direct Host settings screens open their own library category', async () => {
+  const { code } = await compileClient('client/library.tsx');
+  const screens = load(code);
+  for (const [component, title, createLabel] of [
+    ['TeamsSettings', 'Teams', 'New team'],
+    ['AgentsSettings', 'Agents', 'New agent'],
+    ['SkillsSettings', 'Skills', 'New skill'],
+    ['HooksSettings', 'Hooks', 'New hook'],
+    ['McpSettings', 'MCP servers', 'New MCP server'],
+  ]) {
+    const html = renderToStaticMarkup(createElement(screens[component], { theme, layout: { compact: false } }));
+    assert.doesNotMatch(html, /ALP library|Expand navigation|Collapse navigation|Open navigation|GENERAL|ORGANISATION/, `${component} uses Host navigation`);
+    assert.ok(html.includes(`data-label="${createLabel}"`), `${component} exposes its editor actions`);
+  }
 });

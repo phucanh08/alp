@@ -40,7 +40,7 @@ test('upgrade preserves customized instructions and routing', async t => {
   const settings = JSON.parse(await readFile(path.join(root, '.alp/settings.json'), 'utf8'));
   assert.equal(settings.defaultAgent, 'custom');
   assert.deepEqual(settings.delegation, {});
-  assert.ok(settings.profile.cafe.main);
+  assert.ok(settings.team.cafe.main);
   assert.ok(result.backup);
 });
 test('malformed settings are rejected before migrating instructions', async t => {

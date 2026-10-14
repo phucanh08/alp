@@ -1,11 +1,16 @@
 import type { SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
+import templates from 'alp:templates';
+import { ensureLibrary } from '../../core/library.js';
 import { deleteEntry, getEntry, saveEntry } from '../../core/library-edit.js';
 import { listProviders, loadProvider, RESERVED_PROVIDERS } from '../../core/providers.js';
+import { MODELS } from '../../core/models.js';
+import { runCommand } from '../../client/command.js';
 import { probeAcp } from '../../client/acp-probe.js';
+import { probeAntigravity } from '../../client/antigravity-probe.js';
 import type { Handler, Outbound } from './gateway.js';
 
 /**
- * The web app's Providers settings over ALP's ACP providers (D32, ALPD §65). ALP is listed first,
+ * Provider snapshots contain an internal team entry for agent launchers, native runtimes, and ACP agents. Settings hides the internal entry; launchers show only it. ALP is carried first,
  * its teams as models; then each provider of the user's library (`providers/<id>.json`), with
  * the models and modes its agent offers, found by starting it once (initialize, session/new) and
  * kept until a refresh or a change. Paseo's app adds one from its catalog, turns it on or off,
@@ -18,7 +23,7 @@ type Inbound<T extends SessionInboundMessage['type']> = Extract<SessionInboundMe
 type Model = { id: string; label?: string; description?: string };
 type Found = { status: 'loading' | 'ready' | 'error' | 'unavailable'; models?: Model[]; currentModel?: string; modes?: Model[]; currentMode?: string; error?: string; at?: string };
 type Entry = Record<string, unknown>;
-type ProviderFile = { kind: 'acp'; label?: string; description?: string; command: string; args?: string[]; env?: Record<string, string>; models?: Model[]; additionalModels?: Model[]; enabled?: boolean; params?: Record<string, unknown> };
+type ProviderFile = { kind: 'acp' | 'antigravity'; label?: string; description?: string; command: string; args?: string[]; env?: Record<string, string>; models?: Model[]; additionalModels?: Model[]; enabled?: boolean; params?: Record<string, unknown>; readOnlyMode?: 'instructions' | 'reject' };
 
 /** Paseo's ids: the catalog's and the ones its app makes. */
 const PASEO_ID = /^[a-z][a-z0-9-]*$/;
@@ -35,9 +40,26 @@ export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
   const found = new Map<string, Found>();
   const discovering = new Map<string, Promise<void>>();
   const folders: Array<string | undefined> = [undefined];
+  const native = new Map<string, Promise<Entry>>();
+  const nativeIds = ['claude', 'codex'];
+  function nativeEntry(id: string) {
+    if (!native.has(id)) native.set(id, (async () => {
+      const command = process.env[id === 'claude' ? 'ALP_CLAUDE_BIN' : 'ALP_CODEX_BIN'] ?? id;
+      const version = await runCommand(command, ['--version'], { timeoutMs: 10_000 });
+      return {
+        provider: id, label: id === 'claude' ? 'Claude Code' : 'Codex', source: 'builtin', enabled: true,
+        status: version.code === 0 ? 'ready' : 'unavailable',
+        ...(version.code !== 0 ? { error: version.stderr.trim() || `${command} is unavailable` } : {}),
+        description: 'Native runtime · models from the ALP catalog',
+        models: MODELS.filter(model => model.runtime === id).map((model, index) => ({ provider: id, id: model.id, label: model.label, description: model.description, isDefault: index === 0 })),
+      };
+    })());
+    return native.get(id)!;
+  }
 
   async function files() {
     if (!home) return [];
+    await ensureLibrary(home, { templates });
     const rows: Array<{ id: string; config: ProviderFile }> = [];
     for (const provider of await listProviders(home)) {
       const entry = await getEntry('providers', provider.id, { library: home, scope: 'library' }).catch(() => undefined);
@@ -54,7 +76,9 @@ export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
       try {
         const provider = await loadProvider(home, id);
         if (!provider) { found.delete(id); return; }
-        const result = await probeAcp(provider, { cwd: home, discover: true, timeoutMs: 60_000 });
+        const result = provider.kind === 'antigravity'
+          ? await probeAntigravity(provider, { cwd: home, timeoutMs: 60_000 })
+          : await probeAcp(provider, { cwd: home, discover: true, timeoutMs: 60_000 });
         found.set(id, { status: 'ready', models: result.models, currentModel: result.currentModel, modes: result.modes, currentMode: result.currentMode, at: new Date().toISOString() });
       } catch (error: any) {
         const message = String(error?.message ?? error);
@@ -92,7 +116,7 @@ export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
   }
 
   async function entries(cwd?: string) {
-    return [await alpEntry(cwd), ...(await files()).map(({ id, config }) => entryOf(id, config))];
+    return [await alpEntry(cwd), ...await Promise.all(nativeIds.map(nativeEntry)), ...(await files()).map(({ id, config }) => entryOf(id, config))];
   }
 
   /** Every snapshot the app holds, again. */
@@ -111,7 +135,7 @@ export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
     const view: Record<string, Entry> = {};
     for (const { id, config } of await files()) {
       view[id] = {
-        extends: 'acp',
+        extends: config.kind === 'antigravity' ? 'antigravity' : 'acp',
         label: config.label ?? id,
         ...(config.description ? { description: config.description } : {}),
         command: [config.command, ...(config.args ?? [])],
@@ -128,16 +152,17 @@ export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
   /** Applies the providers part of a config change: each named provider merged into its file, then removals. */
   async function apply(patch: Record<string, Record<string, unknown>> = {}, remove: string[] = []) {
     if (!home) throw new Error('No ALP library to keep providers in');
+    await ensureLibrary(home, { templates });
     for (const [id, change] of Object.entries(patch)) {
-      if (RESERVED_PROVIDERS.includes(id)) throw new Error(`${id} is built into ALP; its models are ALP's teams`);
       const current = await getEntry('providers', id, { library: home, scope: 'library' }).catch(() => undefined);
-      if (change.extends !== undefined && change.extends !== 'acp') throw new Error(`ALP adds ACP agents only, not providers that extend ${String(change.extends)}`);
+      if (RESERVED_PROVIDERS.includes(id) && !(id === 'antigravity' && (change.extends === 'antigravity' || (current?.content.provider as ProviderFile | undefined)?.kind === 'antigravity'))) throw new Error(`${id} is built into ALP; its models are ALP's teams`);
+      if (change.extends !== undefined && change.extends !== 'acp' && change.extends !== 'antigravity') throw new Error(`ALP adds ACP agents only, not providers that extend ${String(change.extends)}`);
       if (!current) {
         if (!PASEO_ID.test(id)) throw new Error(`'${id}' cannot name a provider: use lowercase letters, digits and '-', starting with a letter`);
-        if (change.extends !== 'acp') throw new Error('A new provider must be an ACP agent ("extends": "acp")');
+        if (change.extends !== 'acp' && change.extends !== 'antigravity') throw new Error('A new provider must be an ACP agent ("extends": "acp")');
       }
-      const before = (current?.content.provider ?? { kind: 'acp' }) as ProviderFile;
-      const next: Record<string, unknown> = { ...before, kind: 'acp' };
+      const before = (current?.content.provider ?? { kind: (change.extends === 'antigravity' ? 'antigravity' : 'acp') }) as ProviderFile;
+      const next: Record<string, unknown> = { ...before, kind: change.extends === 'antigravity' ? 'antigravity' : (before.kind ?? 'acp') };
       if (change.command !== undefined) {
         if (!Array.isArray(change.command) || !change.command.length || !change.command.every(part => typeof part === 'string')) throw new Error('command must list the program and its arguments');
         next.command = change.command[0];
@@ -158,7 +183,7 @@ export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
       if (reprobe || !found.has(id)) found.delete(id);
     }
     for (const id of remove) {
-      if (RESERVED_PROVIDERS.includes(id)) throw new Error(`${id} is built into ALP and cannot be removed`);
+      if (RESERVED_PROVIDERS.includes(id) && id !== 'antigravity') throw new Error(`${id} is built into ALP and cannot be removed`);
       await deleteEntry('providers', id, { library: home, scope: 'library' });
       found.delete(id);
     }
@@ -167,18 +192,33 @@ export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
 
   /** The text the app shows when asked to diagnose a provider. */
   async function diagnostic(id: string) {
+    if (nativeIds.includes(id)) {
+      native.delete(id);
+      const entry = await nativeEntry(id);
+      return `${entry.label}: ${entry.status === 'ready' ? 'installed' : entry.error}. Models are from the ALP catalog; access depends on your account.`;
+    }
     if (id === 'alp') return 'ALP runs its teams of Codex and Claude Code agents. Check them with: alp doctor';
+    if (home) await ensureLibrary(home, { templates });
     const provider = home ? await loadProvider(home, id) : undefined;
-    if (!provider) return `No ACP provider '${id}' in ${home ?? 'the library'}/providers.`;
+    if (!provider) return `No provider '${id}' in ${home ?? 'the library'}/providers.`;
     const lines = [`Provider: ${provider.label} (${id})`, `Command: ${[provider.command, ...provider.args].join(' ')}`, `Enabled: ${provider.enabled === false ? 'no' : 'yes'}`];
     try {
-      const result = await probeAcp(provider, { cwd: home, discover: true, timeoutMs: 60_000 });
-      lines.push(`ACP: version ${result.protocolVersion}${result.agent ? `, ${[result.agent.title ?? result.agent.name, result.agent.version].filter(Boolean).join(' ')}` : ''}`);
-      lines.push(`Resumes sessions: ${result.loadSession ? 'yes' : 'no'}; MCP over HTTP: ${result.mcpHttp ? 'yes' : 'no'}`);
-      if (result.authMethods.length) lines.push(`Sign-in methods: ${result.authMethods.join(', ')}`);
-      lines.push(`Models: ${result.models?.length ? result.models.map((model: Model) => model.id).join(', ') : 'none reported'}`);
-      if (result.modes?.length) lines.push(`Modes: ${result.modes.map((mode: Model) => mode.id).join(', ')}`);
-      found.set(id, { status: 'ready', models: result.models, currentModel: result.currentModel, modes: result.modes, currentMode: result.currentMode, at: new Date().toISOString() });
+      if (provider.kind === 'antigravity') {
+        const result = await probeAntigravity(provider, { cwd: home, timeoutMs: 60_000 });
+        lines.push(`Antigravity: ${result.version || 'installed'}`);
+        if (provider.readOnlyMode === 'instructions') lines.push('Read-only: instructions only; agy runs with full access, without an OS sandbox.');
+        lines.push(`Models: ${result.models?.length ? result.models.map((model: Model) => model.id).join(', ') : 'none reported'}`);
+        if (result.modes?.length) lines.push(`Modes: ${result.modes.map((mode: Model) => mode.id).join(', ')}`);
+        found.set(id, { status: 'ready', models: result.models, currentModel: result.currentModel, modes: result.modes, currentMode: result.currentMode, at: new Date().toISOString() });
+      } else {
+        const result = await probeAcp(provider, { cwd: home, discover: true, timeoutMs: 60_000 });
+        lines.push(`ACP: version ${result.protocolVersion}${result.agent ? `, ${[result.agent.title ?? result.agent.name, result.agent.version].filter(Boolean).join(' ')}` : ''}`);
+        lines.push(`Resumes sessions: ${result.loadSession ? 'yes' : 'no'}; MCP over HTTP: ${result.mcpHttp ? 'yes' : 'no'}`);
+        if (result.authMethods.length) lines.push(`Sign-in methods: ${result.authMethods.join(', ')}`);
+        lines.push(`Models: ${result.models?.length ? result.models.map((model: Model) => model.id).join(', ') : 'none reported'}`);
+        if (result.modes?.length) lines.push(`Modes: ${result.modes.map((mode: Model) => mode.id).join(', ')}`);
+        found.set(id, { status: 'ready', models: result.models, currentModel: result.currentModel, modes: result.modes, currentMode: result.currentMode, at: new Date().toISOString() });
+      }
     } catch (error: any) {
       lines.push(`Error: ${error?.message ?? error}`);
     }
@@ -195,7 +235,11 @@ export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
 
     async refresh_providers_snapshot_request(message: Inbound<'refresh_providers_snapshot_request'>) {
       const ids = message.providers?.length ? message.providers : (await files()).map(row => row.id);
-      for (const id of ids) if (id !== 'alp') { found.delete(id); void discover(id); }
+      if (!message.providers?.length) native.clear();
+      for (const id of ids) {
+        if (nativeIds.includes(id)) native.delete(id);
+        else if (id !== 'alp') { found.delete(id); void discover(id); }
+      }
       void push();
       return { type: 'refresh_providers_snapshot_response', payload: { requestId: message.requestId, acknowledged: true } } satisfies SessionOutboundMessage;
     },

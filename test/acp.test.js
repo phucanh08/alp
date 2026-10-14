@@ -189,3 +189,13 @@ test('models, resuming, and what an ACP session cannot do', async t => {
   // A review copy needs a sandbox ALP cannot give an ACP agent.
   await assert.rejects(runtime.open('copy', { cwd: root, model: 'acp:fake', workdir: root, copy: true }), /A review copy cannot run on an ACP agent/);
 });
+
+ test('ACP configOptions discovers and selects OpenCode-style models', async t => {
+  const { root, runtime, received } = await setup(t, { env: { FAKE_ACP_CONFIG: '1' } });
+  const { probeAcp } = await import('../src/client/acp-probe.js');
+  const discovered = await probeAcp({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_CONFIG: '1' } }, { cwd: root, discover: true });
+  assert.deepEqual(discovered.models, [{ id: 'small', label: 'Small' }, { id: 'large', label: 'Large' }]);
+  assert.equal(discovered.currentModel, 'small');
+  await runtime.open('root', { cwd: root, model: 'acp:fake/large' });
+  assert.deepEqual((await received()).filter(m => m.method === 'session/set_config_option').map(m => m.params), [{ sessionId: 'fake-session-1001', configId: 'model', value: 'large' }]);
+ });

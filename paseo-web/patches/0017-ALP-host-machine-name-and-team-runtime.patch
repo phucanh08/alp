@@ -1,0 +1,50 @@
+--- a/packages/app/src/runtime/host-runtime.ts
++++ b/packages/app/src/runtime/host-runtime.ts
+@@ -1443,7 +1443,6 @@
+   return {
+     listen: location.host,
+     useTls: location.protocol === "https:",
+-    label: "ALP",
+     ...(token ? { password: token } : {}),
+   };
+ }
+@@ -1769,17 +1768,21 @@
+     // A new token from `alp web` replaces the one the registry kept; the same one changes
+     // nothing, and probing again would replace the live client and its timeline sync.
+     const known = this.hosts.find((host) => hostHasConnection(host, connectionWithHint));
+-    if (known && (!hint.password || known.password === hint.password)) {
++    const migrateAlpLabel = !hint.label && known?.label === "ALP";
++    if (known && !migrateAlpLabel && (!hint.password || known.password === hint.password)) {
+       return true;
+     }
+ 
+     try {
+-      await this.probeAndUpsertConnection({
++      const result = await this.probeAndUpsertConnection({
+         connection: connectionWithHint,
+         timeoutMs: DEFAULT_LOCALHOST_BOOTSTRAP_TIMEOUT_MS,
+         ...(hint.password ? { password: hint.password } : {}),
+         ...(hint.label ? { label: hint.label } : {}),
+       });
++      if (migrateAlpLabel && result.hostname?.trim()) {
++        await this.renameHost(result.serverId, result.hostname.trim());
++      }
+       return true;
+     } catch (error) {
+       console.warn("[HostRuntime] initial connection hint probe failed", {
+--- a/packages/app/src/screens/settings-screen.tsx
++++ b/packages/app/src/screens/settings-screen.tsx
+@@ -1016,11 +1016,11 @@
+             onAddHost={onAddHost}
+             enableBuiltInDaemonOption={enableBuiltInDaemonOption}
+           />
+-          {HOST_SECTION_ITEMS.flatMap((item) => [
++          {HOST_SECTION_ITEMS.filter((item) => !(alpScreens.length && item.id === "agents")).flatMap((item) => [
+             <SidebarHostSectionButton
+               key={item.id}
+               itemId={item.id}
+-              label={item.id === "agents" && alpScreens.length ? "Runtime agents" : t(item.labelKey)}
++              label={t(item.labelKey)}
+               icon={item.icon}
+               isSelected={selectedHostSection === item.id}
+               onSelect={onSelectHostSection}

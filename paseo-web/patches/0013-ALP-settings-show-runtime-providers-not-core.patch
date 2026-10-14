@@ -1,0 +1,77 @@
+diff --git a/packages/app/src/hooks/use-providers-snapshot.ts b/packages/app/src/hooks/use-providers-snapshot.ts
+--- a/packages/app/src/hooks/use-providers-snapshot.ts
++++ b/packages/app/src/hooks/use-providers-snapshot.ts
+@@ -1,3 +1,4 @@
++import { selectAlpProviderEntries } from "@/data/alp-provider-surfaces";
+ import { useCallback, useMemo } from "react";
+ import { useMutation, useQueryClient } from "@tanstack/react-query";
+ import { useTranslation } from "react-i18next";
+@@ -138,9 +139,7 @@
+   const allEntries = snapshotQuery.data?.entries;
+   const entries = useMemo(
+     () =>
+-      includeAcpAgents || !allEntries
+-        ? allEntries
+-        : allEntries.filter((entry) => entry.source !== "custom"),
++      selectAlpProviderEntries(allEntries, includeAcpAgents),
+     [allEntries, includeAcpAgents],
+   );
+ 
+diff --git a/packages/app/src/screens/settings/providers-section.tsx b/packages/app/src/screens/settings/providers-section.tsx
+--- a/packages/app/src/screens/settings/providers-section.tsx
++++ b/packages/app/src/screens/settings/providers-section.tsx
+@@ -247,7 +247,7 @@
+           </View>
+           <View style={styles.trailingControls}>
+             {/* ALP: its teams are always there; only the ACP agents turn off. */}
+-            {entry.provider !== "alp" ? (
++            {entry.source === "custom" ? (
+               <Switch
+                 value={enabled}
+                 onValueChange={handleToggleValueChange}
+diff --git a/packages/app/src/components/provider-diagnostic-sheet.tsx b/packages/app/src/components/provider-diagnostic-sheet.tsx
+--- a/packages/app/src/components/provider-diagnostic-sheet.tsx
++++ b/packages/app/src/components/provider-diagnostic-sheet.tsx
+@@ -700,7 +700,7 @@
+           isCompact,
+           modelsRefreshing,
+           t,
+-          onOpenAddSheet: provider === "alp" ? undefined : handleOpenAddSheet,
++          onOpenAddSheet: providerEntry?.source === "custom" ? handleOpenAddSheet : undefined,
+           onOpenDiagSheet: handleOpenDiagSheet,
+           onRefreshModels: handleRefreshModels,
+         })}
+diff --git a/packages/app/src/data/alp-provider-surfaces.ts b/packages/app/src/data/alp-provider-surfaces.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/app/src/data/alp-provider-surfaces.ts
+@@ -0,0 +1,7 @@
++import type { ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
++
++/** ALP is the team launcher; Settings lists the runtimes its teams use. */
++export function selectAlpProviderEntries(entries: ProviderSnapshotEntry[] | undefined, settings: boolean) {
++  if (!entries?.some((entry) => entry.provider === "alp")) return entries;
++  return entries.filter((entry) => settings ? entry.provider !== "alp" : entry.provider === "alp");
++}
+diff --git a/packages/app/src/data/alp-provider-surfaces.test.ts b/packages/app/src/data/alp-provider-surfaces.test.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/app/src/data/alp-provider-surfaces.test.ts
+@@ -0,0 +1,17 @@
++import { describe, expect, it } from "vitest";
++import type { ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
++import { selectAlpProviderEntries } from "./alp-provider-surfaces";
++
++describe("ALP provider surfaces", () => {
++  const entries = ["alp", "claude", "codex", "opencode", "gemini"].map(provider => ({ provider, status: "ready", models: [] })) as ProviderSnapshotEntry[];
++  it("Settings shows native and ACP providers, excluding the core", () => {
++    expect(selectAlpProviderEntries(entries, true)?.map(entry => entry.provider)).toEqual(["claude", "codex", "opencode", "gemini"]);
++  });
++  it("agent launchers keep the internal team entry", () => {
++    expect(selectAlpProviderEntries(entries, false)?.map(entry => entry.provider)).toEqual(["alp"]);
++  });
++  it("leaves regular Paseo hosts unchanged", () => {
++    const regular = entries.slice(1);
++    expect(selectAlpProviderEntries(regular, false)).toBe(regular);
++  });
++});

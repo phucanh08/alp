@@ -1,0 +1,36 @@
+diff --git a/packages/app/src/screens/settings/providers-section.tsx b/packages/app/src/screens/settings/providers-section.tsx
+--- a/packages/app/src/screens/settings/providers-section.tsx
++++ b/packages/app/src/screens/settings/providers-section.tsx
+@@ -246,15 +246,6 @@
+             </View>
+           </View>
+           <View style={styles.trailingControls}>
+-            {/* ALP: its teams are always there; only the ACP agents turn off. */}
+-            {entry.source === "custom" ? (
+-              <Switch
+-                value={enabled}
+-                onValueChange={handleToggleValueChange}
+-                disabled={isToggling || isRemoving}
+-                accessibilityLabel={t("settings.providers.enableProvider", { name: def.label })}
+-              />
+-            ) : null}
+             <View style={styles.menuSlot}>
+               {canRemove ? (
+                 <ProviderActionsMenu
+@@ -269,6 +260,16 @@
+                 />
+               ) : null}
+             </View>
++            {/* Library providers, including OpenCode and Antigravity, keep their switch last. */}
++            {entry.source === "custom" ? (
++              <Switch
++                value={enabled}
++                onValueChange={handleToggleValueChange}
++                disabled={isToggling || isRemoving}
++                accessibilityLabel={t("settings.providers.enableProvider", { name: def.label })}
++                testID={`provider-enabled-${def.id}`}
++              />
++            ) : null}
+           </View>
+         </>
+       )}

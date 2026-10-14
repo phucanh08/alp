@@ -34,6 +34,15 @@ as a full screen from the chat:
   lists the open tasks. Tapping one opens it; **All tasks** opens the board.
 - `/alp-tasks` opens the board, and `/alp-tasks <id>` opens that task.
 
+## Host settings on the ALP web app
+
+Settings → Host exposes **Templates**, **Agents**, **Skills**, **Hooks**, and
+**MCP servers** directly. Templates opens the Phở/Cafe team editor for models,
+members, delegation, supervisor, and house rules. Changes are saved in the selected
+host's ALP library; saving a built-in entry creates an override. The ALP plugin
+settings screen and the ALP project panel remain available for library management
+and project overrides.
+
 ## Install
 
 Requires Paseo 0.11.1 or a later 0.11 release, Node.js 20+, and an authenticated native Codex or

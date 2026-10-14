@@ -24,11 +24,16 @@ export async function probeAcp(provider, { cwd, timeoutMs = 20_000, discover = f
     const offered = discover ? await session.request('session/new', { cwd, mcpServers: [] }) : undefined;
     const choices = list => Array.isArray(list) ? list.filter(item => typeof (item?.modelId ?? item?.id) === 'string')
       .map(item => ({ id: item.modelId ?? item.id, label: typeof item.name === 'string' && item.name ? item.name : item.modelId ?? item.id, ...(typeof item.description === 'string' && item.description ? { description: item.description } : {}) })) : undefined;
-    const models = choices(offered?.models?.availableModels);
-    const modes = choices(offered?.modes?.availableModes);
+    const config = offered?.configOptions?.find(option => option.category === 'model' && option.type === 'select');
+    const modeConfig = offered?.configOptions?.find(option => option.category === 'mode' && option.type === 'select');
+    const flatten = options => options?.flatMap(option => option.options ?? [option]).map(option => ({ ...option, id: option.value }));
+    const modelState = offered?.models ?? (config ? { availableModels: flatten(config.options), currentModelId: config.currentValue } : undefined);
+    const modeState = offered?.modes ?? (modeConfig ? { availableModes: flatten(modeConfig.options), currentModeId: modeConfig.currentValue } : undefined);
+    const models = choices(modelState?.availableModels);
+    const modes = choices(modeState?.availableModes);
     return {
-      ...(models ? { models, ...(typeof offered.models.currentModelId === 'string' ? { currentModel: offered.models.currentModelId } : {}) } : {}),
-      ...(modes ? { modes, ...(typeof offered.modes.currentModeId === 'string' ? { currentMode: offered.modes.currentModeId } : {}) } : {}),
+      ...(models ? { models, ...(typeof modelState.currentModelId === 'string' ? { currentModel: modelState.currentModelId } : {}) } : {}),
+      ...(modes ? { modes, ...(typeof modeState.currentModeId === 'string' ? { currentMode: modeState.currentModeId } : {}) } : {}),
       protocolVersion: result.protocolVersion,
       ...(info ? { agent: { ...(info.name ? { name: info.name } : {}), ...(info.title ? { title: info.title } : {}), ...(info.version ? { version: info.version } : {}) } } : {}),
       loadSession: Boolean(result.agentCapabilities?.loadSession),

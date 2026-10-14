@@ -22,6 +22,7 @@ import { discoverAgents, libraryEntries } from './core/resolver.js';
 import { listTeams, resolveTeam } from './core/teams.js';
 import { deleteEntry, duplicateEntry, getEntry, renameEntry, saveEntry } from './core/library-edit.js';
 import { testEntry } from './client/library-test.js';
+import { probeAntigravity } from './client/antigravity-probe.js';
 import { isTrusted, revokeProject, trustProject, trustedProjects } from './core/trust.js';
 import { parse as toml } from 'smol-toml';
 import { addGate, blockersOf, checkGates, childrenOf, closeTask, compactTasks, createTask, describeGate, gateOpen, epicReport, gatesOf, getTask, isTaskId, linkTask, recordVerification, listTasks, loadTasks, readyTasks, reopenTask, resolveGate, summarize, TASKS_DIR, updateTask } from './core/tasks.js';
@@ -49,7 +50,7 @@ const USAGE = `Usage:
   alp log <session> [--json]
   alp board [--project DIR] [--json]
   alp <agents|skills|mcp|hooks> [--project DIR] [--json]   the library: built-in, ~/.alp and project entries
-  alp providers [--json]                    ACP agents in your library that agents may run on
+  alp providers [--json]                    ACP and Antigravity providers in your library
   alp teams [--project DIR] [--json]         teams sessions run in: members, delegation, house rules
   alp agent <new|edit> <name> [--project [DIR]] [--from A] [-d text] [--provider P] [--model M] [--thinking T] [--mode M]
             [--skills a,b] [--mcp a,b] [--hooks a,b] [--instructions FILE]
@@ -59,7 +60,8 @@ const USAGE = `Usage:
   alp skill new <name> [--project [DIR]] [--from S] [--file FILE]
   alp mcp add <name> [--project [DIR]] (--command C [--arg A]... [--env K=V]... [--cwd D] | --url U [--header K=V]...)
   alp hook add <name> [--project [DIR]] --event E --command C [--blocking] [--timeout SEC] [--match-agent A] [--match-label L]
-  alp provider add <id> --command C [--arg A]... [--env K=V]... [--label L] [-d text] [--models a,b]   an ACP agent; library only
+  alp provider add <id> --command C [--arg A]... [--env K=V]... [--label L] [-d text] [--models a,b]   an ACP agent; use id antigravity for native agy
+  alp provider edit antigravity --read-only-mode instructions|reject   opt into prompt-only read-only for advisory roles
   alp <agent|team|skill|mcp|hook|provider> <rm|show> <name> [--project [DIR]] | <cp|mv> <from> <to> [--project [DIR]]
   alp <mcp|hook|provider> test <name> [--project [DIR]]   list an MCP server's tools; run a hook once; initialize a provider
             without --project, changes go to your library in ~/.alp; built-in agents and teams are never changed
@@ -561,6 +563,7 @@ async function permissionsCommand(args) {
 async function libraryCommand(kind, args) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, json: { type: 'boolean' } } });
   if (positionals.length) throw new UsageError();
+  if (kind === 'providers') await seedLibrary(alpHome());
   // Outside a project only the built-ins and the library apply.
   const root = path.resolve(values.project ?? process.cwd());
   const rows = await libraryEntries(kind, root, { library: alpHome() });
@@ -606,6 +609,8 @@ const EDIT_OPTIONS = {
   url: { type: 'string' }, header: { type: 'string', multiple: true }, event: { type: 'string' }, blocking: { type: 'boolean' }, timeout: { type: 'string' },
   'match-agent': { type: 'string' }, 'match-label': { type: 'string' },
   // provider
+  kind: { type: 'string' },
+  'read-only-mode': { type: 'string' },
   models: { type: 'string' },
 };
 
@@ -683,10 +688,17 @@ async function edited(kind, name, current, values) {
     }
     content.hook = hook;
   } else if (kind === 'providers') {
-    const provider = content.provider ?? { kind: 'acp' };
+    const isAntigravity = name === 'antigravity' || values.kind === 'antigravity';
+    const provider = content.provider ?? { kind: isAntigravity ? 'antigravity' : 'acp' };
+    if (values.kind !== undefined) provider.kind = values.kind;
+    if (isAntigravity) {
+      if (provider.command === undefined && values.command === undefined) provider.command = 'agy';
+      if (provider.label === undefined && values.label === undefined) provider.label = 'Antigravity';
+    }
     set(provider, 'label', values.label);
     set(provider, 'description', values.description);
     set(provider, 'command', values.command);
+    set(provider, 'readOnlyMode', values['read-only-mode']);
     if (values.arg?.length) provider.args = values.arg;
     if (values.env?.length) provider.env = pairs(values.env, '--env');
     const models = names(values.models);
@@ -700,6 +712,7 @@ async function edited(kind, name, current, values) {
 async function editCommand(kind, args) {
   const { values, positionals } = parseArgs({ args: projectFlag(args), allowPositionals: true, options: EDIT_OPTIONS });
   const [action, name, target] = positionals;
+  if (kind === 'providers' && action !== 'add') await seedLibrary(alpHome());
   const creates = { agents: 'new', teams: 'new', skills: 'new', mcp: 'add', hooks: 'add', providers: 'add' }[kind];
   if (!name || positionals.length > (['cp', 'mv'].includes(action) ? 3 : 2) || (['cp', 'mv'].includes(action) && !target)) throw new UsageError();
   const scope = values.project !== undefined ? 'project' : 'library';
@@ -724,7 +737,13 @@ async function editCommand(kind, args) {
     if (!['mcp', 'hooks', 'providers'].includes(kind)) throw new UsageError();
     const result = await testEntry(kind, name, { root, library: alpHome(), ...(values.project !== undefined ? { scope } : {}) });
     if (values.json) console.log(JSON.stringify(result));
-    else if (kind === 'providers') console.log(`${name}: ${result.agent?.title ?? result.agent?.name ?? 'agent'} ${result.agent?.version ?? ''} speaks ACP ${result.protocolVersion}; ${result.loadSession ? 'resumes sessions' : 'cannot resume sessions'}${result.mcpHttp ? '; takes HTTP MCP servers' : ''}${result.authMethods.length ? `; signs in with ${result.authMethods.join(', ')}` : ''}`);
+    else if (kind === 'providers') {
+      if (result.agent?.name === 'antigravity') {
+        console.log(`${name}: ${result.agent?.title ?? 'Antigravity'} ${result.agent?.version ?? ''} (models: ${result.models?.length ?? 0}, mode: ${result.currentMode ?? 'full-access'})`);
+      } else {
+        console.log(`${name}: ${result.agent?.title ?? result.agent?.name ?? 'agent'} ${result.agent?.version ?? ''} speaks ACP ${result.protocolVersion}; ${result.loadSession ? 'resumes sessions' : 'cannot resume sessions'}${result.mcpHttp ? '; takes HTTP MCP servers' : ''}${result.authMethods?.length ? `; signs in with ${result.authMethods.join(', ')}` : ''}`);
+      }
+    }
     else if (kind === 'mcp') console.log(`${name}: ${result.server?.name ?? 'server'} ${result.server?.version ?? ''} offers ${result.tools.length} tools${result.tools.length ? `:\n${result.tools.map(tool => `  ${tool.name}${tool.description ? `  ${tool.description.split('\n')[0]}` : ''}`).join('\n')}` : ''}`);
     else console.log(`${name}: ${result.timedOut ? 'timed out' : `exit ${result.exitCode ?? result.signal}`} in ${result.durationMs} ms${result.wouldBlock ? '; as a blocking hook it would refuse the action' : ''}${result.stdout.trim() ? `\nstdout: ${result.stdout.trim()}` : ''}${result.stderr.trim() ? `\nstderr: ${result.stderr.trim()}` : ''}`);
     if (!result.ok) process.exitCode = 1;
@@ -1083,6 +1102,12 @@ async function language(args) {
 /** alp verify: run the project's verify commands here, in the project root. */
 async function verify(args) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, task: { type: 'string' }, json: { type: 'boolean' } } });
+  if (positionals[0] === 'antigravity') {
+    const result = await probeAntigravity({}, { cwd: process.cwd() });
+    if (values.json) console.log(JSON.stringify(result));
+    else console.log(`Antigravity ${result.version || 'installed'}: ok (${result.models.length} models)`);
+    return;
+  }
   if (positionals.length) throw new UsageError();
   const root = await taskProject(values.project);
   const config = await verifyConfig(root);

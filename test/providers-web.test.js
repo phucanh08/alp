@@ -9,6 +9,11 @@ import { validateWSOutboundMessage } from '@getpaseo/protocol/validation/ws-outb
 import { createAlpRuntime } from '../dist/runtime/index.js';
 import { createDaemonServer, createPaseoBridge, createWebServer } from '../dist/daemon/index.js';
 import { fakeTransport } from './support/fake-agent.js';
+import { seedLibrary } from '../src/core/library.js';
+import { saveEntry } from '../src/core/library-edit.js';
+import { loadProvider } from '../src/core/providers.js';
+import { initProject } from '../src/core/init.js';
+import { resolveSession } from '../dist/runtime/index.js';
 
 const FAKE = fileURLToPath(new URL('./support/fake-acp.js', import.meta.url));
 
@@ -16,6 +21,12 @@ const FAKE = fileURLToPath(new URL('./support/fake-acp.js', import.meta.url));
 async function setup(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-providers-'));
   const home = path.join(directory, 'home');
+  await seedLibrary(home);
+  // No installed CLIs or account access in the websocket tests.
+  for (const id of ['opencode', 'antigravity']) {
+    const file = JSON.parse(await readFile(path.join(home, 'providers', `${id}.json`), 'utf8'));
+    await saveEntry('providers', id, { provider: { ...file, command: `alp-test-missing-${id}` } }, { scope: 'library', library: home });
+  }
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false, libraryDir: home });
   const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test' });
   let web;
@@ -48,7 +59,7 @@ async function setup(t) {
     send({ type: 'session', message: { ...message, requestId } });
     return (await next(frame => frame.message?.payload?.requestId === requestId)).message;
   };
-  return { home, ask, later };
+  return { home, ask, later, runtime };
 }
 
 const providerOf = (frame, id) => frame.message.payload.entries.find(entry => entry.provider === id);
@@ -66,7 +77,7 @@ test('the app adds an ACP agent from its catalog; alpd keeps it in the library a
   assert.deepEqual(file, { kind: 'acp', label: 'Fake', description: 'A scripted agent', command: process.execPath, args: [FAKE], env: { FAKE_ACP_MODELS: 'fast,deep' }, params: { supportsMcpServers: false } });
 
   const snapshot = await ask({ type: 'get_providers_snapshot_request', cwd: home });
-  assert.deepEqual(snapshot.payload.entries.map(entry => [entry.provider, entry.source]), [['alp', 'builtin'], ['fake', 'custom']]);
+  assert.deepEqual(snapshot.payload.entries.map(entry => [entry.provider, entry.source]), [['alp', 'builtin'], ['claude', 'builtin'], ['codex', 'builtin'], ['antigravity', 'custom'], ['fake', 'custom'], ['opencode', 'custom']]);
   const fake = providerOf(await discovered, 'fake');
   assert.deepEqual(fake.models.map(model => [model.id, model.isDefault ?? false]), [['fast', true], ['deep', false]]);
   assert.equal(fake.label, 'Fake');
@@ -88,9 +99,9 @@ test('the app adds an ACP agent from its catalog; alpd keeps it in the library a
   await off;
 
   const removed = await ask({ type: 'set_daemon_config_request', config: { removeProviders: ['fake'] } });
-  assert.deepEqual(removed.payload.config.providers, {});
+  assert.deepEqual(Object.keys(removed.payload.config.providers), ['antigravity', 'opencode']);
   await assert.rejects(access(path.join(home, 'providers', 'fake.json')));
-  assert.deepEqual((await ask({ type: 'get_providers_snapshot_request', cwd: home })).payload.entries.map(entry => entry.provider), ['alp']);
+  assert.deepEqual((await ask({ type: 'get_providers_snapshot_request', cwd: home })).payload.entries.map(entry => entry.provider), ['alp', 'claude', 'codex', 'antigravity', 'opencode']);
 });
 
 test('ALP itself, other kinds of provider and ids Paseo would not make are refused', async t => {
@@ -108,4 +119,61 @@ test('ALP itself, other kinds of provider and ids Paseo would not make are refus
   }
   const diagnostic = await ask({ type: 'provider_diagnostic_request', provider: 'alp' });
   assert.match(diagnostic.payload.diagnostic, /alp doctor/);
+});
+
+test('host Settings lists providers without previewing a project in the home directory', async t => {
+  const { ask, runtime } = await setup(t);
+  runtime.preview = async () => { throw new Error('Host settings must not preview a project'); };
+  const snapshot = await ask({ type: 'get_providers_snapshot_request' });
+  assert.equal(snapshot.type, 'get_providers_snapshot_response');
+  assert.equal(snapshot.payload.entries[0].provider, 'alp');
+  assert.deepEqual(snapshot.payload.entries[0].models.map(model => model.id), ['pho', 'cafe']);
+});
+
+test('provider snapshots expose native runtimes and ACP agents alongside the internal team entry', async t => {
+  const { ask } = await setup(t);
+  const snapshot = await ask({ type: 'get_providers_snapshot_request' });
+  assert.deepEqual(snapshot.payload.entries.map(entry => entry.provider), ['alp', 'claude', 'codex', 'antigravity', 'opencode']);
+  for (const provider of ['claude', 'codex']) {
+    const entry = snapshot.payload.entries.find(entry => entry.provider === provider);
+    assert.equal(entry.source, 'builtin');
+    assert.ok(entry.models.length > 0);
+    assert.ok(entry.models.every(model => model.provider === provider));
+  }
+});
+
+test('default provider switches persist and disabled providers cannot open sessions', async t => {
+  const { home, ask } = await setup(t);
+  const root = path.join(home, 'project');
+  await initProject(root);
+  for (const [id, model, kind] of [
+    ['opencode', 'acp:opencode/opencode/cat-jam-free', 'acp'],
+    ['antigravity', 'antigravity:gemini-3.8-flash-high', 'antigravity'],
+  ]) {
+    const changed = await ask({ type: 'set_daemon_config_request', config: { providers: { [id]: { enabled: false } } } });
+    assert.equal(changed.type, 'set_daemon_config_response');
+    assert.equal(changed.payload.config.providers[id].enabled, false);
+    await seedLibrary(home);
+    assert.equal((await loadProvider(home, id)).enabled, false);
+    const snapshot = await ask({ type: 'get_providers_snapshot_request' });
+    const entry = snapshot.payload.entries.find(entry => entry.provider === id);
+    assert.equal(entry.enabled, false);
+    assert.equal(entry.source, 'custom', 'library providers have an enabled switch');
+    await assert.rejects(resolveSession({ cwd: root, model, mode: 'full-access' }, { library: home }), /turned off/);
+    await ask({ type: 'set_daemon_config_request', config: { providers: { [id]: { enabled: true } } } });
+    assert.equal((await resolveSession({ cwd: root, model, mode: 'full-access' }, { library: home })).runtimeKind, kind);
+  }
+});
+
+test('Antigravity supports partial provider edits and can be disabled', async t => {
+  const { home, ask } = await setup(t);
+  const added = await ask({ type: 'set_daemon_config_request', config: { providers: { antigravity: {
+    extends: 'antigravity', command: [process.execPath, path.resolve('test/support/fake-agy.js')],
+  } } } });
+  assert.equal(added.type, 'set_daemon_config_response');
+  const changed = await ask({ type: 'set_daemon_config_request', config: { providers: { antigravity: { enabled: false, label: 'AGY local' } } } });
+  assert.equal(changed.type, 'set_daemon_config_response');
+  const config = JSON.parse(await readFile(path.join(home, 'providers/antigravity.json'), 'utf8'));
+  assert.equal(config.enabled, false);
+  assert.equal(config.label, 'AGY local');
 });

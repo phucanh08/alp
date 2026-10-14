@@ -198,7 +198,7 @@ export class AcpTransport {
       } else {
         const result = await this.call('session/new', { cwd: params.cwd, mcpServers }, 120_000);
         this.sessionId = result.sessionId;
-        await this.chooseModel(result.models);
+        await this.chooseModel(result.models, result.configOptions);
       }
       return { thread: { id: this.sessionId, turns: [] }, cwd: params.cwd, model: params.model, reasoningEffort: params.thinking };
     }
@@ -235,9 +235,18 @@ export class AcpTransport {
   }
 
   /** Picks the session's model when ALP was given one and the agent offers a choice. */
-  private async chooseModel(models: any) {
+  private async chooseModel(models: any, configOptions?: any[]) {
     const wanted = this.config?.model?.includes('/') ? this.config.model.slice(this.config.model.indexOf('/') + 1) : undefined;
-    if (!wanted || models?.currentModelId === wanted) return;
+    if (!wanted) return;
+    const config = configOptions?.find(option => option.category === 'model' && option.type === 'select');
+    if (config) {
+      if (config.currentValue === wanted) return;
+      const options = (config.options ?? []).flatMap((option: any) => option.options ?? [option]);
+      if (!options.some((option: any) => option.value === wanted)) throw new Error(`${this.provider.label} has no model '${wanted}'`);
+      await this.call('session/set_config_option', { sessionId: this.sessionId, configId: config.id, value: wanted }, 30_000);
+      return;
+    }
+    if (models?.currentModelId === wanted) return;
     if (!Array.isArray(models?.availableModels)) throw new Error(`${this.provider.label} does not let ALP choose its model; use acp:${this.provider.id} alone`);
     if (!models.availableModels.some((model: any) => model?.modelId === wanted)) throw new Error(`${this.provider.label} has no model '${wanted}'`);
     await this.call('session/set_model', { sessionId: this.sessionId, modelId: wanted }, 30_000);

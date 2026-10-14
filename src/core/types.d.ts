@@ -1,4 +1,4 @@
-export interface AgentModelConfig { provider?: 'codex' | 'claude'; model?: string; effort?: string }
+export interface AgentModelConfig { provider?: 'codex' | 'claude' | 'acp' | 'antigravity'; model?: string; effort?: string }
 export type AutoCompact = 'auto' | number;
 export type AgentProfilesConfig = {
   /** "provider:model", "provider:*" for any model of that provider, or the earlier object form. */
@@ -9,6 +9,8 @@ export type AgentProfilesConfig = {
 } & AgentModelConfig;
 /** Disk configuration; no provider SDK types. */
 export interface RawSettings {
+  team?: Record<string, Record<string, AgentProfilesConfig>>;
+  /** Legacy settings key; use team. */
   profile?: Record<string, Record<string, AgentProfilesConfig>>;
   defaultAgent?: string;
   workflow?: { mode?: 'pho' | 'cafe' | 'smart' | 'supervised'; maxPeers?: number; supervisor?: boolean };

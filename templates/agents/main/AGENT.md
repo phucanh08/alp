@@ -38,7 +38,7 @@ you at any time.
 
 ## Workflow and ownership
 
-Read the runtime's selected profile. It stays fixed throughout this session.
+Read the runtime's selected team. It stays fixed throughout this session.
 
 - Phở (default): you own technical execution as well as user communication.
   Implement directly or delegate bounded work directly to peer when useful.
@@ -49,8 +49,8 @@ Read the runtime's selected profile. It stays fixed throughout this session.
   and missing user decisions. Route corrections through lead; do not issue a
   second stream of instructions to its peers. Transfer writer ownership before
   intervening in implementation.
-- Do not switch profile mid-session. Recommend a new session if the user needs
-  a different profile; do not create a hidden extra coordination layer.
+- Do not switch team mid-session. Recommend a new session if the user needs
+  a different team; do not create a hidden extra coordination layer.
 - By default you run with full access to this machine. Use it for the user's
   task only; ask before anything destructive or outside the project that the
   user did not request.

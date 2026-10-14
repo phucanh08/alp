@@ -98,7 +98,7 @@ test('doctor fails without any runtime and passes a clean setup', async t => {
   await mkdir(home, { mode: 0o700 });
   await chmod(home, 0o700);
   const none = await diagnose({ home, env: { PATH: path.join(directory, 'empty') } });
-  assert.deepEqual(none.filter(check => check.status !== 'ok').map(check => [check.id, check.status]), [['codex', 'fail'], ['claude', 'fail']]);
+  assert.deepEqual(none.filter(check => check.status !== 'ok').map(check => [check.id, check.status]), [['codex', 'fail'], ['claude', 'fail'], ['antigravity', 'fail']]);
 
   const bin = path.join(directory, 'bin');
   await mkdir(bin);
@@ -106,8 +106,8 @@ test('doctor fails without any runtime and passes a clean setup', async t => {
   const project = path.join(directory, 'project');
   await initProject(project);
   const checks = await diagnose({ home, project, env: { PATH: bin }, sandbox: true });
-  // Claude missing is fine while Codex works.
-  assert.deepEqual(checks.filter(check => check.status !== 'ok').map(check => [check.id, check.status]), [['claude', 'warn']]);
+  // Claude and Antigravity missing is fine while Codex works.
+  assert.deepEqual(checks.filter(check => check.status !== 'ok').map(check => [check.id, check.status]), [['claude', 'warn'], ['antigravity', 'warn']]);
   assert.match(checks.find(check => check.id === 'agents').summary, /agents resolve: .*main/);
 });
 
@@ -124,7 +124,7 @@ test('alp doctor --json prints the checks and exits 0 when nothing fails', async
   const project = path.join(directory, 'project');
   await initProject(project);
   const output = execFileSync(process.execPath, [path.resolve('src/cli.js'), 'doctor', '--json', '--project', project], {
-    env: { ...process.env, ALP_HOME: home, PATH: `${bin}${path.delimiter}${process.env.PATH}`, ALP_CODEX_BIN: '', ALP_CLAUDE_BIN: '' },
+    env: { ...process.env, ALP_HOME: home, PATH: `${bin}${path.delimiter}${process.env.PATH}`, ALP_CODEX_BIN: '', ALP_CLAUDE_BIN: '', ALP_ANTIGRAVITY_BIN: path.join(bin, 'codex') },
   }).toString();
   const report = JSON.parse(output);
   assert.equal(report.project, project);

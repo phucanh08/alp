@@ -97,7 +97,7 @@ export function applyProfile(team, profile) {
       if (efforts.length) next.oracleThinking = { ...next.oracleThinking, ...Object.fromEntries(efforts.map(lens => [profileModel(lens), lens.effort])) };
     } else {
       const target = next.members[name] ?? (next.supervisor && next.supervisor.agent === name ? next.supervisor : undefined);
-      if (!target) throw new Error(`profile.${team.id}.${name}: agent is not in this team`);
+      if (!target) throw new Error(`team.${team.id}.${name}: agent is not in this team`);
       const first = agentProfiles(config, name).find(profile => !anyModel(profile));
       if (first?.model) target.model = profileModel(first);
       if (first?.effort) target.thinking = first.effort;

@@ -14,7 +14,7 @@ function requireValue(condition, code, source, message) {
 /** Efforts a profile may name; a model ALP knows takes only its own (src/core/models.js). */
 const EFFORTS = ['none', 'off', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode'];
 /** Top-level keys of a project's .alp/settings.json. */
-export const PROJECT_SETTINGS = ['$schema', 'defaultAgent', 'workflow', 'runtime', 'permissions', 'verify', 'delegation', 'profile'];
+export const PROJECT_SETTINGS = ['$schema', 'defaultAgent', 'workflow', 'runtime', 'permissions', 'verify', 'delegation', 'team', 'profile'];
 /** Top-level keys of the user's $ALP_HOME/settings.json. */
 export const USER_SETTINGS = ['$schema', 'language', 'permissions', 'limits', 'recovery', 'web'];
 /**
@@ -76,23 +76,24 @@ export function validateSettings(settings, source) {
     if (settings.workflow.maxPeers !== undefined) check(Number.isSafeInteger(settings.workflow.maxPeers) && settings.workflow.maxPeers > 0, 'workflow.maxPeers must be a positive integer');
     if (settings.workflow.supervisor !== undefined) check(typeof settings.workflow.supervisor === 'boolean', 'workflow.supervisor must be true or false');
   }
-  if (settings.profile !== undefined) {
-    check(object(settings.profile), 'profile must map team names to agent configurations');
+  for (const key of ['team', 'profile']) {
+    if (settings[key] === undefined) continue;
+    check(object(settings[key]), `${key} must map team names to agent configurations`);
     const validateChoice = (config, where) => {
       check(object(config), `${where} must be an object`);
       check(Object.keys(config).every(key => ['provider', 'model', 'effort'].includes(key)), `${where}: use provider, model and effort`);
-      if (config.provider !== undefined) check(['codex', 'claude'].includes(config.provider), `${where}.provider must be codex or claude`);
+      if (config.provider !== undefined) check(['codex', 'claude', 'antigravity'].includes(config.provider), `${where}.provider must be codex, claude or antigravity`);
       if (config.model !== undefined) {
         check(nonempty(config.model) && !/\s/.test(config.model), `${where}.model must be a model ID`);
-        check(config.provider !== undefined || /^(codex|claude):.+$/.test(config.model), `${where}: model needs a provider`);
-        if (config.model.includes(':')) check(/^(codex|claude):.+$/.test(config.model) && (!config.provider || config.model.startsWith(`${config.provider}:`)), `${where}: model and provider disagree`);
+        check(config.provider !== undefined || /^(codex|claude|antigravity):.+$/.test(config.model), `${where}: model needs a provider`);
+        if (config.model.includes(':')) check(/^(codex|claude|antigravity):.+$/.test(config.model) && (!config.provider || config.model.startsWith(`${config.provider}:`)), `${where}: model and provider disagree`);
       }
       if (config.effort !== undefined) check(EFFORTS.includes(config.effort), `${where}.effort is unsupported`);
     };
-    for (const [team, agents] of Object.entries(settings.profile)) {
-      check(/^[\w.-]+$/.test(team) && object(agents), `profile.${team} must map agent names to configurations`);
+    for (const [team, agents] of Object.entries(settings[key])) {
+      check(/^[\w.-]+$/.test(team) && object(agents), `${key}.${team} must map agent names to configurations`);
       for (const [agent, config] of Object.entries(agents)) {
-        const where = `profile.${team}.${agent}`;
+        const where = `${key}.${team}.${agent}`;
         check(object(config), `${where} must be an object`);
         if (config.autocompact !== undefined) validateAutoCompact(config.autocompact, check, `${where}.autocompact`);
         if (Object.hasOwn(config, 'profiles')) {
@@ -102,7 +103,7 @@ export function validateSettings(settings, source) {
           for (const [index, entry] of config.profiles.entries()) {
             if (typeof entry === 'string') {
               const at = `${where}.profiles[${index}]`;
-              check(/^(codex|claude):(\*|[^\s:*]+(:[a-z]+)?)$/.test(entry), `${at} must be "provider:model", "provider:model:effort" (such as "claude:claude-opus-5-5:high"), or "codex:*" / "claude:*" for any model of that provider`);
+              check(/^(codex|claude|antigravity):(\*|[^\s:*]+(:[a-z]+)?)$/.test(entry) || /^acp:[\w.-]+\/[^\s:*]+$/.test(entry), `${at} must be "provider:model", "provider:model:effort" (such as "claude:claude-opus-5-5:high"), "acp:provider/model", or "codex:*" / "claude:*" for any model of that provider`);
               const [provider, model, effort] = entry.split(':');
               check(model !== '*' || (agent !== 'oracle' && agent !== 'main'), `${at}: ${agent} runs on a named model, not any model`);
               if (effort !== undefined) {
@@ -114,7 +115,7 @@ export function validateSettings(settings, source) {
               continue;
             }
             validateChoice(entry, `${where}.profiles[${index}]`);
-            check(['claude', 'codex'].includes(entry.provider) && nonempty(entry.model), `${where}.profiles[${index}]: specify provider and model`);
+            check(['claude', 'codex', 'antigravity'].includes(entry.provider) && nonempty(entry.model), `${where}.profiles[${index}]: specify provider and model`);
             models.push(entry.model.includes(':') ? entry.model : `${entry.provider}:${entry.model}`);
           }
           check(new Set(models).size === models.length, `${where}.profiles must not repeat the same model`);

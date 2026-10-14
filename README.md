@@ -22,7 +22,7 @@ alp setup --runtime mix                # both, Claude first
 alp setup --runtime mix --prefer codex --codex-model gpt-6-sol --claude-oracle claude-fable-5-1
 ```
 
-Setup writes `profile.pho` and `profile.cafe` into the project's `.alp/settings.json`
+Setup writes `team.pho` and `team.cafe` into the project's `.alp/settings.json`
 (running `alp init` first when there is none) and keeps the rest of the file. Main runs
 on one model, of the preferred provider. Lead and reviewer take `--claude-model` /
 `--codex-model`, the supervisor `--claude-supervisor` / `--codex-supervisor`, and the
@@ -50,7 +50,7 @@ Six [role skills](docs/alp/role-skills.md) cover intake, research, planning, del
 
 Repeated runs fill in missing files and preserve existing file contents, including custom settings. Conflicting filesystem entry types cause an error; files already created before an error remain available for a later retry. Run `npm run test:init` to verify initialization independently.
 
-For projects created with an earlier scaffold, run `node /path/to/alp/src/cli.js upgrade [directory]`. This backs up and updates recognized original instructions, adds profile settings, renames the old `smart`/`supervised` profiles to `pho`/`cafe`, and archives project copies of skills that still match the shipped ones, so the library applies. Copies of the built-in agents that are still as ALP shipped them are put away too, so the project uses the built-ins; a copy you edited, or added skills, MCP servers or hooks to, stays as the project's override. The old shipped graph migrates to Cafe; custom graphs and customized instructions/skills remain unchanged.
+For projects created with an earlier scaffold, run `node /path/to/alp/src/cli.js upgrade [directory]`. This backs up and updates recognized original instructions, adds team settings, renames the old `smart`/`supervised` profiles to `pho`/`cafe`, and archives project copies of skills that still match the shipped ones, so the library applies. Copies of the built-in agents that are still as ALP shipped them are put away too, so the project uses the built-ins; a copy you edited, or added skills, MCP servers or hooks to, stays as the project's override. The old shipped graph migrates to Cafe; custom graphs and customized instructions/skills remain unchanged.
 
 ## Development
 
@@ -86,9 +86,9 @@ your-project/
 
 `alp agents`, `alp skills`, `alp mcp` and `alp hooks` list what a project can use: ALP's built-ins, your library in `~/.alp`, and the project's own entries, with what each overrides and which agents use it. `alp agent|team|skill|mcp|hook new|edit|cp|mv|rm` change them, in your library or with `--project` in the project, and `alp mcp test` and `alp hook test` try one out ([editing](docs/alp/agent-library.md#editing)).
 
-`alp init` now writes editable `profile.pho` and `profile.cafe` choices into
+`alp init` now writes editable `team.pho` and `team.cafe` choices into
 `.alp/settings.json`, taking a snapshot of your current user team configuration.
-`alp upgrade` adds these profiles to older projects, backs up the settings it changes,
+`alp upgrade` migrates the old `profile` key to `team` and adds these team settings to older projects, backs up the settings it changes,
 and converts earlier single-model choices to lists without changing their values.
 Every agent (main, lead, peer, reviewer, supervisor, oracle, or a custom member) has
 `profiles`: a list of `"provider:model:effort"` (the effort may be left out), or
@@ -98,7 +98,7 @@ main runs on exactly one. Include both providers for dual-lens oracle advice:
 ```json
 {
   "workflow": { "mode": "cafe", "maxPeers": 2 },
-  "profile": {
+  "team": {
     "cafe": {
       "main": { "profiles": ["claude:claude-opus-5-5:high"], "autocompact": "auto" },
       "lead": { "profiles": ["claude:claude-opus-5-5:high", "codex:gpt-6.1-sol:high"] },
@@ -129,7 +129,7 @@ keeps the agent's existing native/context defaults. The same field is supported 
 not a shipped default. New and upgraded configurations use `"auto"`.
 
 Unspecified agents keep the team's choices. Explicit session/delegation model and
-effort win, then project profile choices, then the older `runtime` settings, then
+effort win, then project team choices, then the older `runtime` settings, then
 team and agent defaults. Run `alp setup` again to rewrite Phở and Cafe's profiles, or
 edit the file to change one agent. Only configured oracle lenses are available, and an
 unavailable lens is reported rather than substituted.
@@ -266,6 +266,29 @@ alp web pair          # the link again; --off turns the relay off
 ```
 
 Or in the web app: Settings → your host → Pair device → Enable relay, then scan the QR code with Paseo's app. Traffic between the device and alpd is end-to-end encrypted; the relay only passes it on. The link carries alpd's public key, not its token: when Paseo's app asks for a password, give it the token (the part after `#token=` in `alp web --print`). The relay stays off until you turn it on; `"web": { "relay": { "endpoint": "host:port" } }` points alpd at another relay. Paseo's app shows ALP's sessions and teams, and answers what ALP has not built yet as an error. Details: [ALPD §64](plans/reference/ALPD.md#64-paseos-relay-and-its-app-on-another-device-2026-10-12).
+
+## Antigravity CLI
+
+With `agy` installed and signed in:
+
+```sh
+alp provider test antigravity
+alp run --model antigravity:gemini-3.8-flash-high --mode full-access "Describe this project"
+```
+
+A main profile can select `antigravity:gemini-3.8-flash-high` too. By default this adapter supports full access only. To run oracle, reviewer and supervisor on Antigravity, explicitly enable instruction-based read-only behavior:
+
+```sh
+alp provider edit antigravity --read-only-mode instructions
+```
+
+This stores `"readOnlyMode": "instructions"` in your library's provider configuration. ALP keeps advisory sessions read-only for its own tools and tells the agent to avoid changing files or external state, while the native agy process still runs with full access. This is a prompt constraint, not an OS sandbox or filesystem protection. It applies to new sessions; ALP does not downgrade an existing full-access AGY process to read-only. Use `--read-only-mode reject` to restore the default rejection. Workspace-write, review copies and custom permission rules remain unsupported.
+
+MCP tools supplied by the project or editor are connected separately for each AGY session over stdio or streamable HTTP, then exposed through ALP's MCP bridge. The tool aliases and descriptions identify their original server. Commands, environment variables and HTTP authorization headers stay out of agy's global configuration. MCP resources and prompts are not forwarded through this tool bridge; configure a server directly in agy if you need those capabilities.
+
+OpenCode (`opencode acp`) and Antigravity (`agy`) are added to your library by default, including on upgrades. Settings → Providers shows a switch at the end of each row to enable or disable them. Install and sign in to the corresponding CLI to use it; an absent CLI is shown as not installed. Existing commands, model settings and disabled switches are preserved across upgrades. OpenCode models use `acp:opencode/<model>`. To change a default command, use `alp provider edit opencode --command /path/to/opencode --arg acp` or `alp provider edit antigravity --command /path/to/agy`.
+
+ALP installs one `alp` MCP launcher in `~/.gemini/config/mcp_config.json`, preserving other entries. Each agy process inherits its own socket and token; neither is saved in that file. The launcher remains available across sessions and exposes no ALP tools outside an ALP process. Invalid configuration and a conflicting user-owned `alp` entry cause an error without overwriting the file.
 
 ## Editors (ACP)
 

@@ -92,8 +92,11 @@ export async function upgradeProject(projectRoot) {
       if (shippedGraph) delete next.delegation;
       next.workflow = { mode: shippedGraph ? 'cafe' : 'pho', maxPeers: 2 };
     } else if (Object.hasOwn(renamedProfiles, next.workflow?.mode)) next.workflow.mode = renamedProfiles[next.workflow.mode];
-    if (next.profile === undefined) next.profile = await projectProfiles({ runtime: next.runtime });
-    for (const profile of Object.values(next.profile ?? {})) {
+    next.team = next.team || next.profile
+      ? { ...(next.profile ?? {}), ...(next.team ?? {}) }
+      : await projectProfiles({ runtime: next.runtime });
+    delete next.profile;
+    for (const profile of Object.values(next.team ?? {})) {
       for (const [name, config] of Object.entries(profile)) profile[name] = normalizeAgentProfiles(config, name);
     }
     if (JSON.stringify(next) !== JSON.stringify(settings)) await replace('.alp/settings.json', settingsText, JSON.stringify(next, null, 2) + '\n');

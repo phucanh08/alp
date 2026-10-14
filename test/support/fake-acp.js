@@ -97,8 +97,10 @@ createInterface({ input: process.stdin }).on('line', line => {
     // A loaded session replays its history first.
     if (method === 'session/load') say(sessionId, 'replayed history');
     const models = process.env.FAKE_ACP_MODELS ? { models: { currentModelId: process.env.FAKE_ACP_MODELS.split(',')[0], availableModels: process.env.FAKE_ACP_MODELS.split(',').map(modelId => ({ modelId, name: modelId })) } } : {};
-    send({ id, result: method === 'session/new' ? { sessionId, ...models } : {} });
-  } else if (method === 'session/set_model') send({ id, result: {} });
+    const configOptions = process.env.FAKE_ACP_CONFIG ? [{ id: 'model', category: 'model', type: 'select', currentValue: 'small', options: [{ value: 'small', name: 'Small' }, { value: 'large', name: 'Large' }] }] : undefined;
+    send({ id, result: method === 'session/new' ? { sessionId, ...(configOptions ? { configOptions } : models) } : {} });
+  } else if (method === 'session/set_config_option') send({ id, result: {} });
+  else if (method === 'session/set_model') send({ id, result: {} });
   else if (method === 'session/prompt') void prompt(id, params);
   else if (method === 'session/cancel') cancel?.();
   else if (id !== undefined) send({ id, error: { code: -32601, message: `no ${method}` } });

@@ -6,7 +6,7 @@ const claudeLegacy = ['off', 'low', 'medium', 'high', 'xhigh', 'max', 'ultracode
 const claude46 = ['off', 'low', 'medium', 'high', 'max'];
 
 /**
- * @type {Array<{ runtime: 'codex' | 'claude', id: string, label: string, description: string, efforts: string[], effort?: string }>}
+ * @type {Array<{ runtime: 'codex' | 'claude' | 'antigravity', id: string, label: string, description: string, efforts: string[], effort?: string }>}
  */
 export const MODELS = [
   ['codex', 'gpt-6.1-sol', 'GPT-6.1-Sol', 'Latest workhorse model for coding and everyday work.', codexFull, 'low'],
@@ -34,4 +34,12 @@ export const MODELS = [
   ['claude', 'claude-sonnet-4-6', 'Sonnet 4.6', 'Best for everyday tasks.', claude46, 'high'],
   ['claude', 'claude-haiku-4-5', 'Haiku 4.5', 'Fastest for quick answers.', [], undefined],
   ['claude', 'sonnet', 'sonnet', 'From Claude settings.json model.', [], undefined],
+  ['antigravity', 'gemini-3.8-flash-high', 'Gemini 3.8 Flash (High)', 'High reasoning effort workhorse for complex tasks.', [], undefined],
+  ['antigravity', 'gemini-3.8-flash-medium', 'Gemini 3.8 Flash (Medium)', 'Balanced speed and reasoning.', [], undefined],
+  ['antigravity', 'gemini-3.8-flash-low', 'Gemini 3.8 Flash (Low)', 'Fast and efficient for straightforward work.', [], undefined],
+  ['antigravity', 'gemini-2.5-pro', 'Gemini 2.5 Pro', 'Deep reasoning for coding and analysis.', [], undefined],
+  ['antigravity', 'gemini-2.5-flash', 'Gemini 2.5 Flash', 'Fast and versatile everyday model.', [], undefined],
+  ['antigravity', 'claude-sonnet-4-6', 'Claude Sonnet 4.6', 'Sonnet 4.6 via Antigravity.', [], undefined],
+  ['antigravity', 'claude-opus-4-6-thinking', 'Claude Opus 4.6 Thinking', 'Opus 4.6 with thinking via Antigravity.', [], undefined],
+  ['antigravity', 'gpt-oss-120b-medium', 'GPT-OSS 120B (Medium)', 'Open weights model via Antigravity.', [], undefined],
 ].map(([runtime, id, label, description, efforts, effort]) => ({ runtime, id, label, description, efforts, ...(effort ? { effort } : {}) }));

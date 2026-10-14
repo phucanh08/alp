@@ -36,9 +36,10 @@ export function createPlugins({ log = () => {}, usage }: { log?: (message: strin
     'plugin.catalog.get.request': (message: Inbound<'plugin.catalog.get.request'>) =>
       ({ type: 'plugin.catalog.get.response', payload: { requestId: message.requestId, plugins: [{ id: plugin.id, clientBundle: `alp-preloaded:${plugin.id}:${digest}`, requirements: plugin.requirements }] } }) satisfies Outbound,
 
-    // Settings → the host → Plugins lists it, and its menu opens the ALP settings screen.
+    // ALP is core. The catalog loads its built-in UI adapter; management lists only
+    // user plugins, so the adapter must not appear as an installed plugin.
     'plugin.list.request': (message: Inbound<'plugin.list.request'>) =>
-      ({ type: 'plugin.list.response', payload: { requestId: message.requestId, plugins: [{ id: plugin.id, name: 'ALP', description: 'ALP tasks, project and settings', path: 'alpd', enabled: true, status: 'running' }] } }) satisfies Outbound,
+      ({ type: 'plugin.list.response', payload: { requestId: message.requestId, plugins: [] } }) satisfies Outbound,
 
     /** A panel's call: checked against the plugin's contract going in and coming out, as Paseo's daemon checks it. */
     async 'plugin.rpc.invoke.request'(message: Inbound<'plugin.rpc.invoke.request'>) {

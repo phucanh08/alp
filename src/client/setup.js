@@ -74,7 +74,7 @@ export async function setup(args, home) {
     };
     console.log(`Profiles for Phở and Cafe in ${file}:`);
     show();
-    const replaced = ['pho', 'cafe'].filter(id => settings?.profile?.[id]);
+    const replaced = ['pho', 'cafe'].filter(id => (settings?.team ?? settings?.profile)?.[id]);
     if (replaced.length) console.log(`These replace the ${replaced.join(' and ')} profiles already in the file; a backup is kept in ${file}.bak.`);
     if (interactive) {
       for (;;) {
@@ -90,11 +90,13 @@ export async function setup(args, home) {
       }
     }
     const profile = await profiles(root, home, seats, peers, settings);
-    validateSettings({ ...(settings ?? {}), profile: { ...(settings?.profile ?? {}), ...profile } }, file);
+    validateSettings({ ...(settings ?? {}), team: { ...(settings?.profile ?? {}), ...(settings?.team ?? {}), ...profile } }, file);
     if (!settings) await initProject(root, { library: home });
     else if (replaced.length) await copyFile(file, `${file}.bak`);
     const written = settings ?? JSON.parse(await readFile(file, 'utf8'));
-    await writeFile(file, JSON.stringify({ ...written, profile: { ...(written.profile ?? {}), ...profile } }, null, 2) + '\n');
+    const next = { ...written, team: { ...(written.profile ?? {}), ...(written.team ?? {}), ...profile } };
+    delete next.profile;
+    await writeFile(file, JSON.stringify(next, null, 2) + '\n');
     console.log('Setup saved. New sessions in this project use these profiles; edit the file to change one agent. Run alp doctor to check that each CLI is installed and logged in.');
   } catch (error) {
     if (!(error instanceof Cancelled)) throw error;
@@ -128,7 +130,7 @@ async function profiles(root, home, seats, peers, settings) {
     const team = await resolveTeam(root, id, { library: home });
     const agents = {};
     const seat = (name, choices) => {
-      agents[name] = { profiles: choices.map(choice => typeof choice === 'string' ? choice : describe(choice)), autocompact: settings?.profile?.[id]?.[name]?.autocompact ?? 'auto' };
+      agents[name] = { profiles: choices.map(choice => typeof choice === 'string' ? choice : describe(choice)), autocompact: (settings?.team ?? settings?.profile)?.[id]?.[name]?.autocompact ?? 'auto' };
     };
     for (const [name, member] of Object.entries(team.members)) {
       if (name !== 'oracle') seat(name, name === team.main ? seats.main : member.role === 'peer' ? peers : seats.worker);

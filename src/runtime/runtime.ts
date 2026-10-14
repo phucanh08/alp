@@ -8,6 +8,7 @@ import { discoverAgents } from '../core/resolver.js';
 import { CodexTransport } from './transport.js';
 import { ClaudeTransport } from './claude-transport.js';
 import { AcpTransport, acpDecision, acpWhat, type AcpPermission, type AcpProvider } from './acp-transport.js';
+import { AntigravityTransport, type AntigravityProvider } from './antigravity-transport.js';
 import { models, modes, thinkingOptionsFor, withinMode, writes } from './catalog.js';
 import { runHook } from '../core/hook-run.js';
 import { hookMatches } from '../core/hooks.js';
@@ -47,11 +48,12 @@ export type RuntimeTransport = {
 export type RuntimeOptions = {
   codexCommand?: string;
   claudeCommand?: string;
+  antigravityCommand?: string;
   environment?: NodeJS.ProcessEnv;
 
   /**
    * Optional transport factory for tests/custom runtimes.
-   * When omitted, ALP creates CodexTransport or ClaudeTransport itself.
+   * When omitted, ALP creates CodexTransport, ClaudeTransport, or AntigravityTransport itself.
    */
   transport?: (
     cwd: string,
@@ -59,6 +61,8 @@ export type RuntimeOptions = {
     runtime?: RuntimeKind,
     /** The ACP provider, when runtime is acp. */
     acp?: AcpProvider,
+    /** The Antigravity provider, when runtime is antigravity. */
+    antigravity?: AntigravityProvider,
   ) => RuntimeTransport;
 
   /** An assignment with no activity this long is reported stalled; twice this long, it fails. */
@@ -880,9 +884,19 @@ function createTransport(
   cwd: string,
   environment: NodeJS.ProcessEnv,
   acp?: AcpProvider,
+  antigravity?: AntigravityProvider,
 ): RuntimeTransport {
   if (options.transport) {
-    return options.transport(cwd, environment, runtimeKind, acp);
+    return options.transport(cwd, environment, runtimeKind, acp, antigravity);
+  }
+
+  if (runtimeKind === 'antigravity') {
+    return new AntigravityTransport(
+      options.antigravityCommand ?? process.env.ALP_ANTIGRAVITY_BIN ?? antigravity?.command ?? 'agy',
+      cwd,
+      environment,
+      antigravity,
+    );
   }
 
   if (runtimeKind === 'acp') {
@@ -916,7 +930,9 @@ function createTransport(
 const isolationOf = (args: { isolation?: string }) => args.isolation ?? 'shared';
 
 /** The mode the native harness runs with: a session in a copy writes the copy, though ALP treats it as read-only. */
-const nativeMode = (mapping: Pick<ResolvedSession, 'mode' | 'copy'>) => mapping.copy ? 'workspace-write' : mapping.mode;
+const nativeMode = (mapping: Pick<ResolvedSession, 'mode' | 'copy'> & Partial<Pick<ResolvedSession, 'runtimeKind' | 'antigravity'>>) =>
+  mapping.runtimeKind === 'antigravity' && mapping.mode === 'read-only' && mapping.antigravity?.readOnlyMode === 'instructions'
+    ? 'full-access' : mapping.copy ? 'workspace-write' : mapping.mode;
 
 /** The OS sandbox ALP puts a Claude session's Bash in: its profile's base, or the copy it works in. */
 function claudeFloor(mapping: Pick<ResolvedSession, 'mode' | 'copy' | 'permissions' | 'runtimeKind'>): 'read-only' | 'workspace-write' | undefined {
@@ -941,12 +957,16 @@ function codexApproval(mapping: Pick<ResolvedSession, 'mode' | 'permissions'>) {
 }
 
 /** What the session's permission profile adds to its mode, for its instructions. */
-function permissionNote(mapping: Pick<ResolvedSession, 'mode' | 'permissions' | 'runtimeKind' | 'copy' | 'workdir' | 'copyOf'>) {
+function permissionNote(mapping: Pick<ResolvedSession, 'mode' | 'permissions' | 'runtimeKind' | 'copy' | 'workdir' | 'copyOf' | 'antigravity'>) {
   const profile = mapping.permissions;
   const floor = claudeFloor(mapping);
   const notes = [
     // ALPD §46: ALP has no sandbox around an ACP agent; it answers the agent's permission requests.
     ...(mapping.runtimeKind === 'acp' ? [`ALP's tools (alp_*) come from the MCP server named alp. ALP answers your permission requests by your ${mapping.mode} mode: ${mapping.mode === 'read-only' ? 'reading and searching only' : mapping.mode === 'workspace-write' ? `reading, running commands, and changing files inside ${mapping.workdir} only` : 'everything'}. Ask permission before every tool use that changes something, even where you would not need to.`] : []),
+    ...(mapping.runtimeKind === 'antigravity' ? ["ALP's tools (alp_*) come from the MCP server named alp. Antigravity runs natively with full access.",
+      'External MCP tools supplied by ALP also come from the MCP server named alp. Discover its tools: aliases beginning mcp__ and their descriptions identify the original server and tool. Use those aliases when calling the tools.',
+      ...(mapping.mode === 'read-only' ? ['Read-only is emulated by instructions, not enforced by an OS sandbox. Your role is to read, analyze, advise and report only. Do not edit, create, delete or rename files. Do not run commands, builds, tests or native tools that mutate files, repositories, configuration or external state. Report any work that requires changes to your requester. ALP still restricts its own tools according to your read-only role.'] : []),
+    ] : []),
     ...(mapping.copy ? [`You work in a disposable copy of your requester's tree at ${mapping.workdir}: the same files and git state, uncommitted changes included${mapping.copyOf ? `, mirroring ${mapping.copyOf}` : ''}. Write, build and test there; nothing you change reaches the requester, and the copy is removed when you finish. Where your brief names a path${mapping.copyOf ? ` under ${mapping.copyOf}` : ''}, use the same path in your copy. Never run a command in, or write to, the requester's tree.`] : []),
     ...(floor ? [`Bash runs in an OS sandbox: ${floor === 'read-only' ? 'it writes nothing but temporary files' : `it writes only ${mapping.workdir} and temporary files`}, and has no network. Run any command you need for your work in it.${profile?.allow.length || profile?.ask.length || profile?.beyondMode === 'ask' ? ' To run a command outside it (one your profile allows, or one for the user to approve), set dangerouslyDisableSandbox on that Bash call.' : ''}`] : []),
   ];
@@ -2146,9 +2166,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     return forgetting;
   }
 
-  const RUNTIMES: RuntimeKind[] = ['codex', 'claude'];
+  const RUNTIMES: RuntimeKind[] = ['codex', 'claude', 'antigravity'];
   const LIMIT_ERRORS = ['usageLimitExceeded', 'rateLimitExceeded'];
-  const label = (kind: RuntimeKind) => kind === 'claude' ? 'Claude' : kind === 'acp' ? 'ACP agent' : 'Codex';
+  const label = (kind: RuntimeKind) => kind === 'claude' ? 'Claude' : kind === 'acp' ? 'ACP agent' : kind === 'antigravity' ? 'Antigravity' : 'Codex';
   const pauseOf = (kind: RuntimeKind) => paused.all ?? paused.runtimes[kind];
   /** Whether a session may not start a turn by itself now: parked, or on a paused runtime. */
   const held = (session: Session) => !!session.parked || !!pauseOf(session.runtimeKind);
@@ -2756,6 +2776,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (event.deliveredTurn !== STEERING) continue;
       event.deliveredTurn = received ? turnId : undefined;
       if (!received && steered) event.redelivered = true;
+      // A rejected steer cannot succeed again in this turn. Keep the mail for
+      // its next prompt instead of starving the event loop with immediate retries.
+      if (!steered && session.active === turnId) event.defer = true;
     }
     if (!received) deliver(sessionId, session);
   }
@@ -3682,7 +3705,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     for (const key of ['model', 'thinking', 'modelReason']) {
       if (args[key] !== undefined && (typeof args[key] !== 'string' || !args[key].trim())) return toolResult(false, { error: `Invalid ${key}` });
     }
-    if (args.model !== undefined && !/^(codex|claude|acp):[^\s]+$/.test(args.model)) return toolResult(false, { error: 'Use a runtime-prefixed model ID' });
+    if (args.model !== undefined && !/^(codex|claude|acp|antigravity):[^\s]+$/.test(args.model)) return toolResult(false, { error: 'Use a runtime-prefixed model ID' });
     if (args.agent === 'oracle' && !session.mapping.oracleModels.includes(args.model)) return toolResult(false, { error: `Oracle runs on ${session.mapping.oracleModels.join(' or ')}; pass one as model. For two opinions, start one on each with wait: false` });
     const configuredModels = args.agent === 'oracle' ? [] : session.mapping.modelProfiles[args.agent] ?? [];
     const listed = configuredModels.map(profileModel).filter((id): id is string => Boolean(id));
@@ -4061,6 +4084,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       mapping.workdir,
       environment,
       mapping.acp,
+      mapping.antigravity,
     );
 
     const session: Session = {
@@ -4315,7 +4339,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const old = session.runtime;
     void old.close().catch(() => {});
     try {
-      const transport = createTransport(options, session.runtimeKind, session.mapping.workdir, nativeEnvironment(options, session.mapping.env), session.mapping.acp);
+      const transport = createTransport(options, session.runtimeKind, session.mapping.workdir, nativeEnvironment(options, session.mapping.env), session.mapping.acp, session.mapping.antigravity);
       session.runtime = transport;
       session.pending = true;
       wire(sessionId, session, transport);
@@ -4523,6 +4547,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
     const parent = session.parent ? sessions.get(session.parent) : undefined;
     if (parent && !withinMode(mode, parent.mapping.mode)) throw new Error('Child cannot exceed parent permissions');
+    if (session.runtimeKind === 'antigravity' && mode !== session.mapping.mode) throw new Error('Antigravity uses full-access natively; its permission instructions are fixed for the session. Open a new session to change mode');
     if (session.runtimeKind === 'claude') await session.runtime.request('session/configure', { sandbox: nativeMode({ mode, copy: session.mapping.copy }) });
     session.mapping.mode = mode;
     session.spec = { ...session.spec, mode };

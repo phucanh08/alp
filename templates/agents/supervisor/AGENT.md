@@ -9,7 +9,7 @@ change files or git state, and never delegate.
 
 ## What to check
 
-Judge the turn against ALP.md, main's AGENT.md, the selected profile, and the
+Judge the turn against ALP.md, main's AGENT.md, the selected team, and the
 lessons main has recorded. Judge main by its own session, which the digest
 states: its model, runtime and instructions. Your system prompt describes your
 session, not main's; never hold main to it (for example its model's name in

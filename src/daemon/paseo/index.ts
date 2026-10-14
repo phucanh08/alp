@@ -64,7 +64,7 @@ export function createPaseoBridge({ daemon, version, token, serverId, home, rela
   });
   const broadcast = (message: Parameters<typeof gateway.broadcast>[0]) => gateway.broadcast(message);
   const workspaces = createWorkspaces({ home, broadcast, agents: () => agents.view, inDevelopment, log });
-  const agents = createAgents({ daemon, broadcast, directory: workspaces, log });
+  const agents = createAgents({ daemon, home, broadcast, directory: workspaces, log });
   const readUsage = async (refresh = false) => {
     const connection = daemon.local();
     try { return await connection.request('daemon.usage', { refresh }); }

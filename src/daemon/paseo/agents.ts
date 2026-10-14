@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 import type { AgentPermissionRequest, AgentPermissionResponse } from '@getpaseo/protocol/agent-types';
 import type { AgentSnapshotPayload, SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
+import { listTeams } from '../../core/teams.js';
 import { modes } from '../../runtime/index.js';
 import type { Envelope, UserQuestion } from '../../runtime/index.js';
 import type { DaemonServer, SessionSummary } from '../server.js';
@@ -52,8 +52,9 @@ const availableModes = modes.map(mode => ({ id: mode.id, label: mode.label }));
 /** A team's id stands for the model Paseo shows; a custom root shows its own runtime and model. */
 const modelOf = (session: SessionSummary) => session.workflow.mode === 'custom' ? `${session.runtime}:${session.model}` : session.workflow.mode;
 
-export function createAgents({ daemon, broadcast, directory, log = () => {} }: {
+export function createAgents({ daemon, home, broadcast, directory, log = () => {} }: {
   daemon: DaemonServer;
+  home?: string;
   broadcast(message: Outbound): void;
   directory: Directory;
   log?: (message: string) => void;
@@ -331,7 +332,9 @@ export function createAgents({ daemon, broadcast, directory, log = () => {} }: {
   }
 
   async function teams(cwd?: string) {
-    const { preview } = await alp!.request<{ preview: { teams: Array<{ id: string; label: string; description?: string }>; team: string; mode: string } }>('session.preview', { spec: { cwd: cwd ?? os.homedir() } });
+    // Host settings have no project; the daemon library settings are not project settings.
+    if (!cwd) return { teams: (await listTeams(undefined, { library: home })).filter(team => !team.error).map(team => ({ id: team.id, label: team.label ?? team.id, ...(team.description ? { description: team.description } : {}) })), team: 'pho', mode: 'workspace-write' };
+    const { preview } = await alp!.request<{ preview: { teams: Array<{ id: string; label: string; description?: string }>; team: string; mode: string } }>('session.preview', { spec: { cwd } });
     return preview;
   }
 
@@ -641,7 +644,7 @@ export function createAgents({ daemon, broadcast, directory, log = () => {} }: {
         enabled: true,
         source: 'builtin' as const,
         label: 'ALP',
-        description: 'Teams of Codex and Claude Code agents',
+        description: 'Agent teams with Codex, Claude Code, and ACP providers',
         models: preview.teams.map(team => ({ provider: PROVIDER, id: team.id, label: team.label, ...(team.description ? { description: team.description } : {}), isDefault: team.id === preview.team })),
         modes: availableModes,
         defaultModeId: preview.mode,

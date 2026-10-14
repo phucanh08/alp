@@ -2,7 +2,7 @@
 
 ## Working relationship
 
-The user communicates with main. The profile is fixed for each session:
+The user communicates with main. The team is fixed for each session:
 
 - Phở (default): main owns delivery and technical execution; it implements
   directly or delegates bounded work to peer. There is no separate lead.

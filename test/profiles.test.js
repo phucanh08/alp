@@ -16,8 +16,8 @@ test('project profile resolves model/effort, supervisor and dual lenses; caller 
   const file = path.join(root, '.alp/settings.json');
   const settings = JSON.parse(await readFile(file, 'utf8'));
   settings.workflow.mode = 'cafe';
-  settings.profile.cafe.main = { profiles: ['codex:custom-main:low'], autocompact: 'auto' };
-  settings.profile.cafe.oracle = { profiles: ['claude:sonnet:medium', 'codex:custom-oracle:high', 'codex:another-oracle:low'], autocompact: 'auto' };
+  settings.team.cafe.main = { profiles: ['codex:custom-main:low'], autocompact: 'auto' };
+  settings.team.cafe.oracle = { profiles: ['claude:sonnet:medium', 'codex:custom-oracle:high', 'codex:another-oracle:low'], autocompact: 'auto' };
   await writeFile(file, JSON.stringify(settings));
   const main = await resolveSession({ cwd: root }, { library: root });
   assert.equal(main.runtimeKind, 'codex');
@@ -26,7 +26,7 @@ test('project profile resolves model/effort, supervisor and dual lenses; caller 
   assert.deepEqual(main.oracleModels, ['claude:sonnet', 'codex:custom-oracle', 'codex:another-oracle']);
   for (const model of main.oracleModels) {
     const lens = await resolveSession({ cwd: root, agent: 'oracle', model }, { library: root });
-    assert.equal(lens.thinking, settings.profile.cafe.oracle.profiles.find(config => config.startsWith(`${model}:`)).split(':')[2]);
+    assert.equal(lens.thinking, settings.team.cafe.oracle.profiles.find(config => config.startsWith(`${model}:`)).split(':')[2]);
   }
   const explicit = await resolveSession({ cwd: root, model: 'claude:sonnet', thinking: 'high' }, { library: root });
   assert.equal(explicit.runtimeKind, 'claude');
@@ -38,7 +38,7 @@ test('project profile resolves model/effort, supervisor and dual lenses; caller 
 
 test('invalid profile choices fail before launching', () => {
   for (const config of [{ provider: 'claude', model: 'codex:foo' }, { model: 'foo' }, { provider: 'codex', model: 'foo', effort: 'huge' }]) {
-    assert.throws(() => validateSettings({ profile: { cafe: { main: config } } }, 'settings'), /INVALID_SETTINGS|profile/);
+    assert.throws(() => validateSettings({ team: { cafe: { main: config } } }, 'settings'), /INVALID_SETTINGS|team\./);
   }
 });
 
@@ -50,14 +50,14 @@ test('legacy oracle provider map works and upgrade migrates it without changing 
   const file = path.join(root, '.alp/settings.json');
   const settings = JSON.parse(await readFile(file, 'utf8'));
   const lenses = [{ provider: 'claude', model: 'sonnet', effort: 'low' }, { provider: 'codex', model: 'custom-oracle', effort: 'medium' }];
-  settings.profile.pho.oracle = Object.fromEntries(lenses.map(lens => [lens.provider, lens]));
+  settings.team.pho.oracle = Object.fromEntries(lenses.map(lens => [lens.provider, lens]));
   await writeFile(file, JSON.stringify(settings));
   const before = await resolveSession({ cwd: root, agent: 'oracle', model: 'claude:sonnet' }, { library: root });
   assert.equal(before.thinking, 'low');
   const result = await upgradeProject(root);
   assert.ok(result.backup);
   const updated = JSON.parse(await readFile(file, 'utf8'));
-  assert.deepEqual(updated.profile.pho.oracle, { profiles: ['claude:sonnet:low', 'codex:custom-oracle:medium'], autocompact: 'auto' });
+  assert.deepEqual(updated.team.pho.oracle, { profiles: ['claude:sonnet:low', 'codex:custom-oracle:medium'], autocompact: 'auto' });
   const after = await resolveSession({ cwd: root, agent: 'oracle', model: 'codex:custom-oracle' }, { library: root });
   assert.equal(after.thinking, 'medium');
 });
@@ -65,7 +65,7 @@ test('legacy oracle provider map works and upgrade migrates it without changing 
 test('oracle profiles list rejects empty, repeated, mismatched and malformed choices', () => {
   const valid = { provider: 'codex', model: 'foo', effort: 'high' };
   for (const profiles of [[], [valid, valid], [{ provider: 'claude', model: 'codex:foo' }], [null], [{ model: 'foo' }], 'foo']) {
-    assert.throws(() => validateSettings({ profile: { cafe: { oracle: { profiles } } } }, 'settings'), /profile/);
+    assert.throws(() => validateSettings({ team: { cafe: { oracle: { profiles } } } }, 'settings'), /profile/);
   }
 });
 
@@ -78,7 +78,7 @@ test('every agent has model profiles; the requester picks a peer model and effor
   await initProject(root, { library: root });
   const file = path.join(root, '.alp/settings.json');
   const settings = JSON.parse(await readFile(file, 'utf8'));
-  const team = settings.profile.pho;
+  const team = settings.team.pho;
   team.main = { profiles: [{ provider: 'codex', model: 'main-custom', effort: 'high' }], autocompact: 300000 };
   team.peer = { profiles: [
     { provider: 'claude', model: 'sonnet', effort: 'medium' },
@@ -145,13 +145,13 @@ test('upgrade wraps old agent choices and preserves compaction and model order',
   const file = path.join(root, '.alp/settings.json');
   const settings = JSON.parse(await readFile(file, 'utf8'));
   const oldMain = { provider: 'codex', model: 'custom-main', effort: 'low' };
-  settings.profile.pho.main = { ...oldMain, autocompact: 200000 };
+  settings.team.pho.main = { ...oldMain, autocompact: 200000 };
   await writeFile(file, JSON.stringify(settings));
   const result = await upgradeProject(root);
   assert.ok(result.backup);
   const upgraded = JSON.parse(await readFile(file, 'utf8'));
-  assert.deepEqual(upgraded.profile.pho.main, { profiles: ['codex:custom-main:low'], autocompact: 200000 });
-  for (const config of Object.values(upgraded.profile.pho)) assert.ok(Array.isArray(config.profiles));
+  assert.deepEqual(upgraded.team.pho.main, { profiles: ['codex:custom-main:low'], autocompact: 200000 });
+  for (const config of Object.values(upgraded.team.pho)) assert.ok(Array.isArray(config.profiles));
   const again = await upgradeProject(root);
   assert.deepEqual(again.updated, []);
 });
@@ -159,12 +159,12 @@ test('upgrade wraps old agent choices and preserves compaction and model order',
 test('all agents validate profile lists and autocompact before launching', () => {
   const profiles = [{ provider: 'codex', model: 'peer-model', effort: 'low' }];
   for (const name of ['main', 'lead', 'peer', 'reviewer', 'supervisor', 'oracle']) {
-    for (const autocompact of [200000, 350000, 'auto']) validateSettings({ profile: { cafe: { [name]: { profiles, autocompact } } } }, 'settings');
+    for (const autocompact of [200000, 350000, 'auto']) validateSettings({ team: { cafe: { [name]: { profiles, autocompact } } } }, 'settings');
     for (const autocompact of [0, -1, 200000.5, '200k', null, false, 99999, 1000001]) {
-      assert.throws(() => validateSettings({ profile: { cafe: { [name]: { profiles, autocompact } } } }, 'settings'), /autocompact/);
+      assert.throws(() => validateSettings({ team: { cafe: { [name]: { profiles, autocompact } } } }, 'settings'), /autocompact/);
     }
     for (const invalid of [[], [null], [profiles[0], profiles[0]], 'foo']) {
-      assert.throws(() => validateSettings({ profile: { cafe: { [name]: { profiles: invalid } } } }, 'settings'), /profiles/);
+      assert.throws(() => validateSettings({ team: { cafe: { [name]: { profiles: invalid } } } }, 'settings'), /profiles/);
     }
   }
 });
@@ -177,8 +177,8 @@ test('a peer on codex:* runs on any Codex model the requester picks, at the effo
   await initProject(root, { library: root });
   const file = path.join(root, '.alp/settings.json');
   const settings = JSON.parse(await readFile(file, 'utf8'));
-  settings.profile.pho.main = { profiles: ['codex:gpt-6.1-sol'] };
-  settings.profile.pho.peer = { profiles: ['codex:*'] };
+  settings.team.pho.main = { profiles: ['codex:gpt-6.1-sol'] };
+  settings.team.pho.peer = { profiles: ['codex:*'] };
   await writeFile(file, JSON.stringify(settings));
   await runtime.open('root', { cwd: root });
   const main = agents[0];
@@ -196,16 +196,44 @@ test('a peer on codex:* runs on any Codex model the requester picks, at the effo
 });
 
 test('profiles take "provider:model[:effort]" and "provider:*"; main and oracle name their models, main just one', () => {
-  validateSettings({ profile: { cafe: { peer: { profiles: ['codex:*', 'claude:claude-sonnet-5-5'] }, main: { profiles: ['claude:claude-opus-5-5'] } } } }, 'settings');
-  for (const profiles of [['gpt-6-sol'], ['codex:'], ['acp:x'], ['codex:a b']]) assert.throws(() => validateSettings({ profile: { cafe: { peer: { profiles } } } }, 'settings'), /profiles\[0\]/);
-  assert.throws(() => validateSettings({ profile: { cafe: { oracle: { profiles: ['codex:*'] } } } }, 'settings'), /oracle runs on a named model/);
-  validateSettings({ profile: { cafe: { lead: { profiles: ['claude:claude-opus-5-5:high', 'codex:gpt-6-astra:low', 'codex:custom:xhigh'] } } } }, 'settings');
+  validateSettings({ team: { cafe: { peer: { profiles: ['codex:*', 'claude:claude-sonnet-5-5'] }, main: { profiles: ['claude:claude-opus-5-5'] } } } }, 'settings');
+  for (const profiles of [['gpt-6-sol'], ['codex:'], ['acp:x'], ['codex:a b']]) assert.throws(() => validateSettings({ team: { cafe: { peer: { profiles } } } }, 'settings'), /profiles\[0\]/);
+  assert.throws(() => validateSettings({ team: { cafe: { oracle: { profiles: ['codex:*'] } } } }, 'settings'), /oracle runs on a named model/);
+  validateSettings({ team: { cafe: { lead: { profiles: ['claude:claude-opus-5-5:high', 'codex:gpt-6-astra:low', 'codex:custom:xhigh'] } } } }, 'settings');
   for (const [profiles, error] of [
     [['codex:gpt-6-astra:high'], /codex:gpt-6-astra takes effort low/],
     [['claude:claude-opus-5-5:huge'], /effort huge is unsupported/],
     [['codex:*:high'], /must be "provider:model"/],
-  ]) assert.throws(() => validateSettings({ profile: { cafe: { lead: { profiles } } } }, 'settings'), error);
+  ]) assert.throws(() => validateSettings({ team: { cafe: { lead: { profiles } } } }, 'settings'), error);
   for (const profiles of [['claude:claude-opus-5-5:high', 'codex:gpt-6.1-sol:high'], ['codex:*']]) {
-    assert.throws(() => validateSettings({ profile: { cafe: { main: { profiles } } } }, 'settings'), /main runs on (exactly one|a named) model/);
+    assert.throws(() => validateSettings({ team: { cafe: { main: { profiles } } } }, 'settings'), /main runs on (exactly one|a named) model/);
   }
+});
+
+test('ACP model profiles are accepted and preserve nested OpenCode model IDs', () => {
+  const model = 'acp:opencode/opencode/cat-jam-free';
+  assert.doesNotThrow(() => validateSettings({ team: { pho: { main: { profiles: [model] }, oracle: { profiles: [model, 'acp:opencode/opencode/mimo-v2.6-flash-free'] } } } }, 'settings'));
+});
+
+
+test('legacy profile settings still resolve and upgrade to team without losing choices', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'alp-legacy-team-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await initProject(root, { library: root });
+  const file = path.join(root, '.alp/settings.json');
+  const settings = JSON.parse(await readFile(file, 'utf8'));
+  assert.equal(settings.profile, undefined);
+  settings.team.pho.main = { profiles: ['codex:legacy-main:low'], autocompact: 200000 };
+  settings.profile = settings.team;
+  delete settings.team;
+  await writeFile(file, JSON.stringify(settings));
+  const before = await resolveSession({ cwd: root }, { library: root });
+  assert.equal(before.model, 'legacy-main');
+  await upgradeProject(root);
+  const upgraded = JSON.parse(await readFile(file, 'utf8'));
+  assert.equal(upgraded.profile, undefined);
+  assert.deepEqual(upgraded.team, settings.profile);
+  const after = await resolveSession({ cwd: root }, { library: root });
+  assert.equal(after.model, before.model);
+  assert.equal(after.thinking, before.thinking);
 });

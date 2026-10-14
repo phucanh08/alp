@@ -39,12 +39,16 @@ const RUNTIMES = [
     kind: 'claude', variable: 'ALP_CLAUDE_BIN', login: ['auth', 'status'], hint: 'claude auth login',
     loggedIn: result => { try { return JSON.parse(result.stdout).loggedIn === true; } catch { return result.code === 0; } },
   },
+  {
+    kind: 'antigravity', command: 'agy', variable: 'ALP_ANTIGRAVITY_BIN', login: ['models'], hint: 'agy and sign in',
+    loggedIn: result => result.code === 0,
+  },
 ];
 
 async function runtimeChecks({ env, run }) {
   const checks = [];
   for (const runtime of RUNTIMES) {
-    const command = env[runtime.variable] || runtime.kind;
+    const command = env[runtime.variable] || runtime.command || runtime.kind;
     const found = await executable(command, env);
     if (!found) {
       checks.push({ id: runtime.kind, status: 'warn', summary: `${command} not found on PATH; ${runtime.kind} agents cannot run (set ${runtime.variable} to its path)` });

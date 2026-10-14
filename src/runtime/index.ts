@@ -9,6 +9,8 @@ export { CodexTransport } from './transport.js';
 export { usageAllows } from './runtime-context.js';
 export { AcpTransport, acpDecision, acpPermission } from './acp-transport.js';
 export type { AcpProvider } from './acp-transport.js';
+export { AntigravityTransport } from './antigravity-transport.js';
+export type { AntigravityProvider } from './antigravity-transport.js';
 export { ClaudeTransport, claudePermissions, claudeSandboxAvailable, skillPlugin, SKILL_PLUGIN, toolShapes as claudeToolShapes } from './claude-transport.js';
 export { MAIL_BATCH_CHARS, MAIL_BODY_CHARS, publicEvent, renderMail, takeBatch, USER } from './mailbox.js';
 export type { MailEvent, MailKind } from './mailbox.js';

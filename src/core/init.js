@@ -17,7 +17,7 @@ export async function initProject(projectRoot, { templateRoot, templates, librar
   // Load the complete starter before modifying the destination.
   const files = {
     'ALP.md': await template('ALP.md'),
-    '.alp/settings.json': JSON.stringify({ defaultAgent: 'main', workflow: { mode: 'pho' }, profile: await projectProfiles({ templates, library }) }, null, 2) + '\n',
+    '.alp/settings.json': JSON.stringify({ defaultAgent: 'main', workflow: { mode: 'pho' }, team: await projectProfiles({ templates, library }) }, null, 2) + '\n',
   };
   const directories = ['.alp'];
   const created = [];

@@ -1,0 +1,7 @@
+{
+  "kind": "acp",
+  "label": "OpenCode",
+  "command": "opencode",
+  "args": ["acp"],
+  "enabled": true
+}

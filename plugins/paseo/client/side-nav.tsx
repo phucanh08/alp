@@ -47,6 +47,8 @@ type Props = {
   children: ReactNode;
   /** Starts collapsed or expanded instead of following the width; tests set it. */
   initialCollapsed?: boolean;
+  /** The host owns navigation and scrolling; render only the category content. */
+  embedded?: boolean;
 };
 
 export function SideNavLayout(props: Props) {
@@ -63,12 +65,12 @@ export function SideNavLayout(props: Props) {
       collapsed={mode === 'fixed' && collapsed} onToggle={mode === 'fixed' ? () => setChoice(!collapsed) : () => setOpen(false)} overlay={mode === 'overlay'} />
   );
   return (
-    <View style={styles.root} onLayout={event => setWidth(event.nativeEvent.layout.width)}>
-      {!compact ? aside('fixed') : null}
-      <View style={styles.main}>
-        <View style={styles.header}>
+    <View style={props.embedded ? { width: '100%' } : styles.root} onLayout={event => setWidth(event.nativeEvent.layout.width)}>
+      {!props.embedded && !compact ? aside('fixed') : null}
+      <View style={props.embedded ? { minWidth: 0 } : styles.main}>
+        <View style={[styles.header, props.embedded ? { paddingHorizontal: 0, paddingTop: 0 } : null]}>
           <View style={styles.headerRow}>
-            {compact ? (
+            {compact && !props.embedded ? (
               <Pressable accessibilityRole="button" accessibilityLabel="Open navigation" onPress={() => setOpen(true)} style={styles.iconButton}>
                 <Icon name="Menu" size={18} color={theme.colors.foreground} />
               </Pressable>
@@ -95,10 +97,10 @@ export function SideNavLayout(props: Props) {
             </ScrollView>
           ) : null}
         </View>
-        <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>{props.children}</ScrollView>
-        {props.footer ? <View style={styles.footer}>{props.footer}</View> : null}
+        {props.embedded ? <View style={[styles.bodyContent, { paddingHorizontal: 0 }]}>{props.children}</View> : <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>{props.children}</ScrollView>}
+        {props.footer ? <View style={[styles.footer, props.embedded ? { paddingHorizontal: 0 } : null]}>{props.footer}</View> : null}
       </View>
-      {compact && open ? (
+      {!props.embedded && compact && open ? (
         <View style={styles.overlay}>
           {aside('overlay')}
           <Pressable accessibilityRole="button" accessibilityLabel="Close navigation" onPress={() => setOpen(false)} style={styles.scrim} />

@@ -62,7 +62,9 @@ test('runtime sources never import a viewer SDK or the plugin', async () => {
     const source = await readFile(new URL(file, directory), 'utf8');
     for (const match of source.matchAll(/(?:from\s+|import\s*\()['"]([^'"]+)['"]/g)) {
       const target = match[1];
-      assert.ok(target.startsWith('node:') || /^\.\/[^/]+$/.test(target) || /^\.\.\/core\/[^/]+$/.test(target) || target === 'zod' || target === 'smol-toml', `${file} imports ${target}`);
+      // MCP is a native runtime protocol, independent of any viewer or plugin.
+      const mcpClient = ['@modelcontextprotocol/sdk/client/index.js', '@modelcontextprotocol/sdk/client/stdio.js', '@modelcontextprotocol/sdk/client/streamableHttp.js'].includes(target);
+      assert.ok(target.startsWith('node:') || /^\.\/[^/]+$/.test(target) || /^\.\.\/core\/[^/]+$/.test(target) || target === 'zod' || target === 'smol-toml' || mcpClient, `${file} imports ${target}`);
     }
   }
 });
@@ -120,6 +122,29 @@ test('mail to an idle requester starts a wake turn', async t => {
   await until(() => of('root', 'turn.started').length === 2);
   assert.equal(of('root', 'turn.started')[1].origin, 'wake');
   assert.match(of('root', 'item').at(-1).item.text, /result from lead/);
+});
+
+test('rejected mail steering waits for the next turn without retrying or losing mail', async t => {
+  const { root, runtime, runtimes, of } = await setup(t);
+  await runtime.open('root', { cwd: root });
+  await runtime.prompt('root', prompt('first', 'Delegate'));
+  await runtimes[0].call('alp_delegate', { agent: 'lead', task: 'Work', wait: false });
+  await until(() => runtimes[1]?.calls.some(c => c.method === 'turn/start'));
+  const original = runtimes[0].request;
+  let attempts = 0;
+  runtimes[0].request = async function(method, params) {
+    if (method === 'turn/steer' && ++attempts === 1) throw new Error('Turn no longer accepts steering');
+    return original.call(this, method, params);
+  };
+  runtimes[1].finish('lead proof');
+  await until(() => attempts > 0);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(attempts, 1);
+  runtimes[0].turnId = 'turn-wake';
+  runtimes[0].notification('turn/completed', { threadId: runtimes[0].threadId, turn: { id: 'turn-0', status: 'completed' } });
+  await until(() => of('root', 'turn.started').length === 2);
+  assert.equal(of('root', 'turn.started')[1].origin, 'wake');
+  assert.ok(runtimes[0].calls.some(c => c.method === 'turn/start' && JSON.stringify(c.params).includes('lead proof')));
 });
 
 test('interrupt closes the subtree and a failed prompt is reported once', async t => {

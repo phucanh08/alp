@@ -62,6 +62,13 @@ export function LibrarySettings({ theme, layout }: PluginSurfaceProps) {
   return <LibraryManager theme={theme} compact={layout.compact} scope="library" />;
 }
 
+/** Direct Host settings entries reuse the library editor with the requested category selected. */
+export function TeamsSettings({ theme, layout }: PluginSurfaceProps) { return <LibraryManager theme={theme} compact={layout.compact} scope="library" initialKind="teams" embedded />; }
+export function AgentsSettings({ theme, layout }: PluginSurfaceProps) { return <LibraryManager theme={theme} compact={layout.compact} scope="library" initialKind="agents" embedded />; }
+export function SkillsSettings({ theme, layout }: PluginSurfaceProps) { return <LibraryManager theme={theme} compact={layout.compact} scope="library" initialKind="skills" embedded />; }
+export function HooksSettings({ theme, layout }: PluginSurfaceProps) { return <LibraryManager theme={theme} compact={layout.compact} scope="library" initialKind="hooks" embedded />; }
+export function McpSettings({ theme, layout }: PluginSurfaceProps) { return <LibraryManager theme={theme} compact={layout.compact} scope="library" initialKind="mcp" embedded />; }
+
 /** The workspace panel: the project's overrides of the library and built-ins. */
 export function ProjectLibraryPanel({ theme, layout, workspaceId }: PluginWorkspacePanelProps) {
   const directory = useWorkspace(workspaceId, workspace => workspace.directory || workspace.projectRootPath);
@@ -69,7 +76,7 @@ export function ProjectLibraryPanel({ theme, layout, workspaceId }: PluginWorksp
   return <LibraryManager theme={theme} compact={layout.compact} scope="project" directory={directory} />;
 }
 
-function LibraryManager({ theme, compact, scope, directory }: { theme: PluginTheme; compact: boolean; scope: Scope; directory?: string }) {
+function LibraryManager({ theme, compact, scope, directory, embedded = false, initialKind = 'teams' }: { theme: PluginTheme; compact: boolean; scope: Scope; directory?: string; embedded?: boolean; initialKind?: Kind }) {
   const list = useRpc(libraryList);
   const get = useRpc(libraryGet);
   const save = useRpc(librarySave);
@@ -84,7 +91,7 @@ function LibraryManager({ theme, compact, scope, directory }: { theme: PluginThe
   const [lists, setLists] = useState<Lists>({});
   const [where, setWhere] = useState<Where>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selection, setSelection] = useState<Selection>({ kind: 'teams' });
+  const [selection, setSelection] = useState<Selection>({ kind: initialKind });
   const [entry, setEntry] = useState<Entry | null>(null);
   const [tick, setTick] = useState(0);
   const refresh = useCallback(() => setTick(value => value + 1), []);
@@ -151,7 +158,7 @@ function LibraryManager({ theme, compact, scope, directory }: { theme: PluginThe
   };
   // An entry is shown once it is read; until then the kind's list stays.
   const shown = selection.name && !selection.creating && entry?.name !== selection.name ? { kind: selection.kind } : selection;
-  return <LibraryWorkspace theme={theme} compact={compact} scope={scope} where={where} lists={lists} error={error} selection={shown} entry={shown.name ? entry : null} actions={actions} language={language} />;
+  return <LibraryWorkspace theme={theme} compact={compact} scope={scope} where={where} lists={lists} error={error} selection={shown} entry={shown.name ? entry : null} actions={actions} language={language} embedded={embedded} />;
 }
 
 export type Actions = {
@@ -170,7 +177,7 @@ export type Actions = {
 
 type WorkspaceProps = {
   theme: PluginTheme; compact: boolean; scope: Scope; where: Where; lists: Lists; error: string | null;
-  selection: Selection; entry: Entry | null; actions: Actions; initialCollapsed?: boolean; language?: LanguageState | null;
+  selection: Selection; entry: Entry | null; actions: Actions; initialCollapsed?: boolean; language?: LanguageState | null; embedded?: boolean;
 };
 
 /** The aside's groups: General (the library only), Organisation, Capabilities and Runtimes, each kind with its entries. */
@@ -189,7 +196,7 @@ export function navGroups(scope: Scope, lists: Lists): NavGroup[] {
 }
 
 /** The whole screen from data alone: aside, header with the secondary menu, and the working area. */
-export function LibraryWorkspace({ theme, compact, scope, where, lists, error, selection, entry, actions, initialCollapsed, language }: WorkspaceProps) {
+export function LibraryWorkspace({ theme, compact, scope, where, lists, error, selection, entry, actions, initialCollapsed, language, embedded }: WorkspaceProps) {
   const styles = useMemo(() => makeStyles(theme, compact), [theme, compact]);
   const title = scope === 'library' ? 'ALP library' : 'ALP project';
   const subtitle = scope === 'library' ? where?.library : where?.projectRoot ?? undefined;
@@ -199,17 +206,17 @@ export function LibraryWorkspace({ theme, compact, scope, where, lists, error, s
     return <View style={styles.screen}><Text style={styles.muted}>This workspace is not an ALP project. Run alp init to start one.</Text></View>;
   }
   if (selection.kind === 'language') {
-    return <LanguageSettings theme={theme} compact={compact} language={language ?? null} error={error} actions={actions} layout={{ title, subtitle, groups, onSelect, initialCollapsed }} styles={styles} />;
+    return <LanguageSettings theme={theme} compact={compact} language={language ?? null} error={error} actions={actions} layout={{ title, subtitle, groups, onSelect, initialCollapsed, embedded }} styles={styles} />;
   }
   const kind = kindOf(selection.kind);
   if (selection.name || selection.creating) {
     return <EntryEditor key={`${selection.kind}/${selection.name ?? 'new'}/${entry?.revision ?? 'new'}/${(entry?.librarySkills ?? []).join(',')}`} theme={theme} compact={compact} scope={scope} kind={selection.kind} entry={selection.creating ? null : entry}
-      lists={lists} actions={actions} layout={{ title, subtitle, groups, onSelect, initialCollapsed }} />;
+      lists={lists} actions={actions} layout={{ title, subtitle, groups, onSelect, initialCollapsed, embedded }} />;
   }
-  return <KindOverview theme={theme} compact={compact} scope={scope} kind={kind.kind} rows={lists[kind.kind]} error={error} where={where} actions={actions} layout={{ title, subtitle, groups, onSelect, initialCollapsed }} styles={styles} />;
+  return <KindOverview theme={theme} compact={compact} scope={scope} kind={kind.kind} rows={lists[kind.kind]} error={error} where={where} actions={actions} layout={{ title, subtitle, groups, onSelect, initialCollapsed, embedded }} styles={styles} />;
 }
 
-type Frame = { title: string; subtitle?: string; groups: NavGroup[]; onSelect(item: string, child?: string): void; initialCollapsed?: boolean };
+type Frame = { title: string; subtitle?: string; groups: NavGroup[]; onSelect(item: string, child?: string): void; initialCollapsed?: boolean; embedded?: boolean };
 
 const OTHER = 'other';
 
@@ -224,7 +231,7 @@ export function LanguageSettings({ theme, compact, language, error, actions, lay
   const shown = choice ?? (language ? (named ? language.applies : OTHER) : '');
   const typedValid = typed.trim().length > 0 && typed.trim().length <= 40;
   return (
-    <SideNavLayout theme={theme} compact={compact} title={layout.title} subtitle={layout.subtitle} groups={layout.groups} active={{ item: 'language' }} onSelect={layout.onSelect} initialCollapsed={layout.initialCollapsed}
+    <SideNavLayout theme={theme} compact={compact} title={layout.title} subtitle={layout.subtitle} groups={layout.groups} active={{ item: 'language' }} onSelect={layout.onSelect} initialCollapsed={layout.initialCollapsed} embedded={layout.embedded}
       breadcrumb={['Library', 'Language']}>
       <Text style={styles.muted}>The language you read. Main writes its replies, questions, approval requests and task titles in it, other agents put their questions to you in it, and ALP asks for approvals and writes its notices in it. Agents may talk among themselves in any language.</Text>
       {error ? <Text style={styles.danger}>{error}</Text> : null}
@@ -266,8 +273,8 @@ export function KindOverview({ theme, compact, scope, kind, rows, error, where, 
     : scope === 'library' ? 'Every project uses your library. Built-ins follow ALP updates; saving one makes your own copy of that name.'
     : 'What this project overrides. Override an entry to change it here only; Use library drops the project\'s copy.';
   return (
-    <SideNavLayout theme={theme} compact={compact} title={layout.title} subtitle={layout.subtitle} groups={layout.groups} active={{ item: kind }} onSelect={layout.onSelect} initialCollapsed={layout.initialCollapsed}
-      breadcrumb={[scope === 'library' ? 'Library' : 'Project', title]} tabs={tabs} tab={filter} onTab={setFilter}
+    <SideNavLayout theme={theme} compact={compact} title={layout.title} subtitle={layout.subtitle} groups={layout.groups} active={{ item: kind }} onSelect={layout.onSelect} initialCollapsed={layout.initialCollapsed} embedded={layout.embedded}
+      breadcrumb={layout.embedded ? [] : [scope === 'library' ? 'Library' : 'Project', title]} tabs={tabs} tab={filter} onTab={setFilter}
       actions={<Button theme={theme} kind="primary" icon="Plus" label={`New ${one}`} onPress={() => actions.select({ kind, creating: true })} />}>
       <Text style={styles.muted}>{intro}</Text>
       {error ? <Text style={styles.danger}>{error}</Text> : null}
@@ -361,7 +368,7 @@ export function EntryEditor({ theme, compact, scope, kind, entry, lists, actions
     : null;
   const form: FormProps = { content, update, lists, styles, theme };
   return (
-    <SideNavLayout theme={theme} compact={compact} title={layout.title} subtitle={layout.subtitle} groups={layout.groups} active={{ item: kind, ...(entry ? { child: entry.name } : {}) }} onSelect={layout.onSelect} initialCollapsed={layout.initialCollapsed}
+    <SideNavLayout theme={theme} compact={compact} title={layout.title} subtitle={layout.subtitle} groups={layout.groups} active={{ item: kind, ...(entry ? { child: entry.name } : {}) }} onSelect={layout.onSelect} initialCollapsed={layout.initialCollapsed} embedded={layout.embedded}
       breadcrumb={[title, entry ? entry.name : `New ${one}`]}
       badges={entry ? <><Pill theme={theme} label={sourceLabel(entry.source)} tone={sourceTone(entry.source)} />{entry.overrides ? <Pill theme={theme} label={`overrides ${sourceLabel(entry.overrides)}`} /> : null}</> : null}
       actions={<Button theme={theme} icon="ArrowLeft" label={`All ${title.toLowerCase()}`} onPress={() => actions.select({ kind })} />}

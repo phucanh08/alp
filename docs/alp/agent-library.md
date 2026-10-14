@@ -114,6 +114,12 @@ ALP runs an agent's hooks itself, whatever runtime the agent is on (ALPD §45):
 
 ## ACP providers
 
+ALP adds OpenCode (`opencode acp`) and Antigravity (`agy`, using its native stream
+protocol) to the library by default. Install and sign in to their CLIs, then use
+Settings → Providers to enable or disable them with the switch at the end of the
+row. A missing CLI is shown as not installed. Upgrades preserve your command,
+models and enabled state. Use `alp provider edit` to customize these entries.
+
 An ACP provider is any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com)
 on stdio, such as Gemini CLI or opencode. `providers/<id>.json` in your library
 defines one:
@@ -166,8 +172,9 @@ defines one:
   - `alp providers` lists them, with the agents that use each;
   - `alp provider test <id>` starts the agent, runs `initialize`, and reports what it
     supports.
-- **In the web app:** Settings → Providers lists ALP, its teams as models, then your
-  providers with the models and modes each agent reports (ALP starts it once to ask).
+- **In the web app:** Settings → Providers lists Codex, Claude Code, OpenCode,
+  Antigravity and your additional providers, with their models and modes. ALP's
+  team entry appears in agent launchers instead of Settings.
   - Add one from Paseo's catalog, or as a Custom ACP agent (a name, its command line
     and `KEY=value` environment lines); ALP writes `providers/<id>.json`.
   - Turn one off (`"enabled": false`), add models it does not report

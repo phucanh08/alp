@@ -12,11 +12,19 @@ import { createAlpRuntime } from '../dist/runtime/index.js';
 import { createDaemonServer, createPaseoBridge, createWebServer } from '../dist/daemon/index.js';
 import { initProject } from '../src/core/init.js';
 import { fakeTransport, until } from './support/fake-agent.js';
+import { seedLibrary } from '../src/core/library.js';
 
 /** alpd in this process serving a stand-in for the built ALP web app (Paseo's app, ALPD §62). */
 async function setup(t, usage) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-paseo-web-'));
   const home = path.join(directory, 'home');
+  await seedLibrary(home);
+  // Provider discovery stays offline in these gateway tests.
+  for (const id of ['opencode', 'antigravity']) {
+    const file = path.join(home, 'providers', `${id}.json`);
+    const config = JSON.parse(await readFile(file, 'utf8'));
+    await writeFile(file, JSON.stringify({ ...config, command: `alp-test-missing-${id}` }));
+  }
   const root = path.join(directory, 'project');
   await initProject(root);
   const agents = [];
@@ -156,7 +164,8 @@ test('the app starts an ALP session as an agent, sees it stream, reads its timel
   const client = await connected();
   assert.deepEqual((await ask(client, { type: 'fetch_agents_request', requestId: 'f1' })).payload.entries, []);
   const providers = (await ask(client, { type: 'get_providers_snapshot_request', requestId: 'p1', cwd: root })).payload.entries;
-  assert.deepEqual(providers.map(entry => [entry.provider, entry.status]), [['alp', 'ready']]);
+  assert.deepEqual(providers.map(entry => entry.provider), ['alp', 'claude', 'codex', 'antigravity', 'opencode']);
+  assert.equal(providers[0].status, 'ready');
   assert.ok(providers[0].models.some(model => model.isDefault));
 
   const created = await ask(client, { type: 'create_agent_request', requestId: 'a1', config: { provider: 'alp', cwd: root, title: 'List the files' }, initialPrompt: 'List the files', clientMessageId: 'm1', labels: {} });
@@ -365,7 +374,8 @@ test("ALP's plugin runs in the app from alpd: its script, catalog and RPCs", asy
   assert.equal(entry.id, 'alp-provider');
   assert.match(entry.clientBundle, /^alp-preloaded:alp-provider:[0-9a-f]{16}$/);
   assert.ok(entry.requirements.paseo);
-  assert.equal((await ask(client, { type: 'plugin.list.request', requestId: 'l1' })).payload.plugins[0].status, 'running');
+  // The built-in core adapter still loads, but is not a user-managed plugin.
+  assert.deepEqual((await ask(client, { type: 'plugin.list.request', requestId: 'l1' })).payload.plugins, []);
 
   const invoke = async (method, input) => (await ask(client, { type: 'plugin.rpc.invoke.request', requestId: `${method}-${Math.random()}`, pluginId: 'alp-provider', method, input })).payload;
   assert.deepEqual((await invoke('alp.tasks.list', { directory: root })).output.tasks, []);

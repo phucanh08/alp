@@ -5,7 +5,7 @@ import path from 'node:path';
 import { AlpError } from './errors.js';
 
 /**
- * The user's skill library: skills and the skills each role gets, kept in
+ * The user's library: skills, role assignments and default providers, kept in
  * ALP_HOME and shared by every project. ALP seeds it from its templates once,
  * then updates only files the user has not changed; a file the user edited or
  * deleted stays that way across app updates.
@@ -24,9 +24,9 @@ async function optional(file) {
   catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
 }
 
-/** Shipped library files: role-skills.json and every file under skills/. */
+/** Shipped library files: role skills, skill resources and default providers. */
 async function shippedFiles({ templateRoot, templates }) {
-  if (templates) return Object.fromEntries(Object.entries(templates).filter(([name]) => name === 'role-skills.json' || name.startsWith('skills/')));
+  if (templates) return Object.fromEntries(Object.entries(templates).filter(([name]) => name === 'role-skills.json' || name.startsWith('skills/') || name.startsWith('providers/')));
   const root = templateRoot ?? new URL('../../templates/', import.meta.url);
   const files = { 'role-skills.json': await readFile(new URL('role-skills.json', root), 'utf8') };
   async function walk(relative) {
@@ -36,6 +36,7 @@ async function shippedFiles({ templateRoot, templates }) {
     }
   }
   await walk('skills');
+  await walk('providers');
   return files;
 }
 

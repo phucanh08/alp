@@ -8,6 +8,7 @@ import { resolveTeam } from '../core/teams.js';
 import { loadHooks } from '../core/hooks.js';
 import { acpModel, loadProvider } from '../core/providers.js';
 import type { AcpProvider } from './acp-transport.js';
+import type { AntigravityProvider } from './antigravity-transport.js';
 import { ensureLibrary } from '../core/library.js';
 import { compileAgent } from '../core/adapter.js';
 import { capMode, profileFor } from '../core/permissions.js';
@@ -15,10 +16,10 @@ import { userLanguage } from '../core/user-settings.js';
 import { claudeSandboxAvailable } from './claude-transport.js';
 import type { ResolvedAgent } from '../core/types.js';
 import type { AlpRuntimeAdapter } from '../core/adapter.js';
-import { DEFAULT_CLAUDE_MODEL, DEFAULT_MODEL, ORACLE_MODELS, ORACLE_THINKING, models, modes, thinkingOptions, thinkingOptionsFor } from './catalog.js';
+import { DEFAULT_ANTIGRAVITY_MODEL, DEFAULT_CLAUDE_MODEL, DEFAULT_MODEL, ORACLE_MODELS, ORACLE_THINKING, models, modes, thinkingOptions, thinkingOptionsFor } from './catalog.js';
 
 /** Codex and Claude Code, or an ACP agent the user's library defines (ALPD §46). */
-export type RuntimeKind = 'codex' | 'claude' | 'acp';
+export type RuntimeKind = 'codex' | 'claude' | 'acp' | 'antigravity';
 
 /** MCP servers a client adds to the agent's own; the agent's names win no collisions. */
 export type HostMcpServer =
@@ -126,8 +127,8 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
   const oracleModels = team?.oracleModels ?? ORACLE_MODELS;
   if (agent.name === 'oracle' && !restored && !oracleModels.includes(spec.model ?? '')) throw new Error(`Oracle runs on ${oracleModels.join(' or ')}; choose one`);
   const projectSettings: import('../core/types.js').RawSettings = await jsonObject(path.join(spec.cwd, '.alp/settings.json'), 'INVALID_SETTINGS');
-  const profile = projectSettings.profile?.[workflow.mode]?.[agent.name];
-  const modelProfiles: Record<string, import('../core/types.js').AgentModelConfig[]> = Object.fromEntries(Object.entries(projectSettings.profile?.[workflow.mode] ?? {}).map(([name, config]) => [name, agentProfiles(config, name)]));
+  const profile = (projectSettings.team ?? projectSettings.profile)?.[workflow.mode]?.[agent.name];
+  const modelProfiles: Record<string, import('../core/types.js').AgentModelConfig[]> = Object.fromEntries(Object.entries((projectSettings.team ?? projectSettings.profile)?.[workflow.mode] ?? {}).map(([name, config]) => [name, agentProfiles(config, name)]));
   const requestedModel = restored?.model ? `${restored.runtime ?? agent.runtime.provider ?? 'codex'}:${restored.model}` : spec.model;
   const profileChoice = selectedProfile(modelProfiles[agent.name] ?? [], requestedModel);
   const projectModel = profileModel(profileChoice);
@@ -146,9 +147,23 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
   if (model.startsWith('claude:')) { runtimeKind = 'claude'; model = model.slice('claude:'.length); }
   if (model.startsWith('codex/')) { runtimeKind = 'codex'; model = model.slice('codex/'.length); }
   if (model.startsWith('claude/')) { runtimeKind = 'claude'; model = model.slice('claude/'.length); }
-  if (model.startsWith('acp:')) { runtimeKind = 'acp'; model = model.slice('acp:'.length); }
-  // An agent.json provider other than codex or claude names an ACP provider of the library; its model is that provider's.
-  if (!['codex', 'claude', 'acp'].includes(runtimeKind)) { model = model === DEFAULT_MODEL && agent.runtime.model !== DEFAULT_MODEL ? runtimeKind : `${runtimeKind}/${model}`; runtimeKind = 'acp'; }
+  if (model.startsWith('antigravity:')) { runtimeKind = 'antigravity'; model = model.slice('antigravity:'.length); }
+  if (model.startsWith('antigravity/')) { runtimeKind = 'antigravity'; model = model.slice('antigravity/'.length); }
+  if (model.startsWith('acp:')) {
+    const raw = model.slice('acp:'.length);
+    if (raw.startsWith('antigravity/') || raw === 'antigravity') {
+      runtimeKind = 'antigravity';
+      model = raw.startsWith('antigravity/') ? raw.slice('antigravity/'.length) : '';
+    } else {
+      runtimeKind = 'acp';
+      model = raw;
+    }
+  }
+  if (runtimeKind === 'antigravity') {
+    if (!model.trim() || model === DEFAULT_MODEL) model = DEFAULT_ANTIGRAVITY_MODEL;
+  }
+  // An agent.json provider other than builtins names an ACP provider of the library; its model is that provider's.
+  if (!['codex', 'claude', 'acp', 'antigravity'].includes(runtimeKind)) { model = model === DEFAULT_MODEL && agent.runtime.model !== DEFAULT_MODEL ? runtimeKind : `${runtimeKind}/${model}`; runtimeKind = 'acp'; }
   if (restored?.runtime && runtimeKind !== restored.runtime) throw new Error('Cannot resume a thread with a different runtime provider');
   let acp: AcpProvider | undefined;
   if (runtimeKind === 'acp') {
@@ -160,13 +175,29 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
     if (native && acp.models && !listed.some(candidate => candidate.id === native)) throw new Error(`ACP provider '${id}' lists no model '${native}'`);
     if (spec.copy) throw new Error('A review copy cannot run on an ACP agent: ALP cannot keep its commands inside the copy');
   }
+  let antigravity: AntigravityProvider | undefined;
+  if (runtimeKind === 'antigravity') {
+    const provider = await loadProvider(options.library, 'antigravity');
+    if (provider && provider.kind === 'antigravity') {
+      antigravity = provider as unknown as AntigravityProvider;
+      if (antigravity.enabled === false) throw new Error("Antigravity provider 'antigravity' is turned off; turn it on in the web app's Providers settings or in providers/antigravity.json");
+    }
+  }
   // Main has full access unless the caller limits it; a permission profile caps the mode at its base.
+  // agy runs natively with full access; read-only instructions require an explicit opt-in.
   const permissions = await profileFor(agent.projectRoot, options.library, agent.name);
   const requested = spec.mode ?? agent.mode ?? (agent.name === main ? 'full-access' : 'read-only');
   const mode = permissions ? capMode(requested, permissions.base) : requested;
-  // An ACP agent chooses its own effort.
-  const availableThinking = runtimeKind === 'acp' ? [] : thinkingOptionsFor(runtimeKind as 'codex' | 'claude', model);
-  const preferred = runtimeKind === 'acp' ? 'none' : spec.thinking ?? profileChoice?.effort ?? agent.projectRuntime?.reasoning ?? (agent.name === 'oracle' ? team?.oracleThinking?.[`${runtimeKind}:${model}`] ?? team?.oracleThinking?.[runtimeKind] : undefined) ?? teamChoice?.thinking ?? agent.runtime.reasoning ??
+  if (runtimeKind === 'antigravity') {
+    if (mode !== 'full-access' && !(mode === 'read-only' && antigravity?.readOnlyMode === 'instructions')) throw new Error('Antigravity currently supports only full-access; read-only requires explicit readOnlyMode: "instructions" and is not sandboxed');
+    if (spec.copy || permissions?.workdir === 'copy') throw new Error('Antigravity cannot enforce isolation for a review copy');
+    if (permissions && (permissions.deny.length || permissions.ask.length || permissions.allow.length || permissions.beyondMode === 'ask')) {
+      throw new Error('Antigravity cannot enforce custom permission rules');
+    }
+  }
+  // An ACP or Antigravity agent chooses its own effort.
+  const availableThinking = ['acp', 'antigravity'].includes(runtimeKind) ? [] : thinkingOptionsFor(runtimeKind as 'codex' | 'claude' | 'antigravity', model);
+  const preferred = ['acp', 'antigravity'].includes(runtimeKind) ? 'none' : spec.thinking ?? profileChoice?.effort ?? agent.projectRuntime?.reasoning ?? (agent.name === 'oracle' ? team?.oracleThinking?.[`${runtimeKind}:${model}`] ?? team?.oracleThinking?.[runtimeKind] : undefined) ?? teamChoice?.thinking ?? agent.runtime.reasoning ??
     (agent.name === 'oracle' ? ORACLE_THINKING : availableThinking.length ? 'medium' : 'none');
   // A default the model does not take gives way to the model's own (GPT-6 Astra runs at low only); an explicit choice is checked below.
   const thinking = spec.thinking === undefined && availableThinking.length && !availableThinking.some(candidate => candidate.id === preferred)
@@ -205,7 +236,7 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
   const houseRules = base.houseRules;
   const hooks = await loadHooks(agent);
   return {
-    agent, workflow, team, oracleModels, modelProfiles, houseRules, hooks, runtimeKind: runtimeKind as RuntimeKind, model, ...(acp ? { acp } : {}), mode, permissions, thinking, threadId: restored?.threadId,
+    agent, workflow, team, oracleModels, modelProfiles, houseRules, hooks, runtimeKind: runtimeKind as RuntimeKind, model, ...(acp ? { acp } : {}), ...(antigravity ? { antigravity } : {}), mode, permissions, thinking, threadId: restored?.threadId,
     workdir: spec.workdir ?? agent.projectRoot,
     copy: Boolean(spec.copy && spec.workdir),
     ...(spec.copy && spec.copyOf ? { copyOf: spec.copyOf } : {}),

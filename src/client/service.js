@@ -13,7 +13,7 @@ import { runCommand } from './command.js';
  */
 
 /** Variables alpd reads, carried into the service when the installing shell sets them. */
-const CARRIED = ['ALP_RUN_LOG_DIR', 'ALP_CODEX_BIN', 'ALP_CLAUDE_BIN', 'ALP_GH_BIN'];
+const CARRIED = ['ALP_RUN_LOG_DIR', 'ALP_CODEX_BIN', 'ALP_CLAUDE_BIN', 'ALP_ANTIGRAVITY_BIN', 'ALP_GH_BIN'];
 
 const escapeXml = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const quoteUnit = value => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;

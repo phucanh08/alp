@@ -22,15 +22,15 @@ test('setup mix writes main on one model, the others with both providers and eff
   assert.equal(result.status, 0, result.stderr);
   const settings = await read(f.file);
   assert.equal(settings.workflow.mode, 'pho', 'a project without settings is initialized first');
-  assert.deepEqual(Object.keys(settings.profile.pho), ['main', 'peer', 'reviewer', 'supervisor', 'oracle']);
-  assert.deepEqual(Object.keys(settings.profile.cafe), ['main', 'lead', 'peer', 'reviewer', 'supervisor', 'oracle']);
+  assert.deepEqual(Object.keys(settings.team.pho), ['main', 'peer', 'reviewer', 'supervisor', 'oracle']);
+  assert.deepEqual(Object.keys(settings.team.cafe), ['main', 'lead', 'peer', 'reviewer', 'supervisor', 'oracle']);
   for (const id of ['pho', 'cafe']) {
-    assert.deepEqual(settings.profile[id].main.profiles, ['claude:claude-opus-5-5:high']);
-    for (const name of id === 'cafe' ? ['lead', 'reviewer'] : ['reviewer']) assert.deepEqual(settings.profile[id][name].profiles, ['claude:claude-opus-5-5:high', 'codex:gpt-6.1-sol:high']);
-    assert.deepEqual(settings.profile[id].peer.profiles, ['claude:*', 'codex:*']);
-    assert.deepEqual(settings.profile[id].supervisor.profiles, ['claude:claude-sonnet-5:medium', 'codex:gpt-6-luna:medium']);
-    assert.deepEqual(settings.profile[id].oracle.profiles, ['claude:claude-fable-5-1:high', 'codex:gpt-6-astra:low'], 'GPT-6 Astra takes low only');
-    for (const config of Object.values(settings.profile[id])) assert.equal(config.autocompact, 'auto');
+    assert.deepEqual(settings.team[id].main.profiles, ['claude:claude-opus-5-5:high']);
+    for (const name of id === 'cafe' ? ['lead', 'reviewer'] : ['reviewer']) assert.deepEqual(settings.team[id][name].profiles, ['claude:claude-opus-5-5:high', 'codex:gpt-6.1-sol:high']);
+    assert.deepEqual(settings.team[id].peer.profiles, ['claude:*', 'codex:*']);
+    assert.deepEqual(settings.team[id].supervisor.profiles, ['claude:claude-sonnet-5:medium', 'codex:gpt-6-luna:medium']);
+    assert.deepEqual(settings.team[id].oracle.profiles, ['claude:claude-fable-5-1:high', 'codex:gpt-6-astra:low'], 'GPT-6 Astra takes low only');
+    for (const config of Object.values(settings.team[id])) assert.equal(config.autocompact, 'auto');
   }
   const main = await resolveSession({ cwd: f.root }, { library: f.home });
   assert.equal(`${main.runtimeKind}:${main.model}`, 'claude:claude-opus-5-5');
@@ -45,7 +45,7 @@ test('setup mix takes chosen models, native or prefixed, and can prefer Codex', 
   const f = await fixture(t);
   const result = cli(f, '--runtime', 'mix', '--prefer', 'codex', '--codex-model', 'codex:gpt-6-sol', '--claude-model', 'claude-sonnet-5', '--codex-oracle', 'gpt-6-sol');
   assert.equal(result.status, 0, result.stderr);
-  const { profile } = await read(f.file);
+  const { team: profile } = await read(f.file);
   assert.deepEqual(profile.cafe.main.profiles, ['codex:gpt-6-sol:high']);
   assert.deepEqual(profile.cafe.lead.profiles, ['codex:gpt-6-sol:high', 'claude:claude-sonnet-5:high']);
   assert.deepEqual(profile.cafe.oracle.profiles, ['codex:gpt-6-sol:high', 'claude:claude-fable-5-1:high']);
@@ -59,8 +59,8 @@ for (const runtime of ['codex', 'claude']) test(`setup ${runtime} only keeps one
   assert.equal(cli(f, '--runtime', 'mix').status, 0);
   const settings = await read(f.file);
   settings.workflow.mode = 'cafe';
-  settings.profile.cafe.peer.autocompact = 200000;
-  settings.profile.mine = { main: { profiles: ['codex:gpt-5.5'] } };
+  settings.team.cafe.peer.autocompact = 200000;
+  settings.team.mine = { main: { profiles: ['codex:gpt-5.5'] } };
   await writeFile(f.file, JSON.stringify(settings));
   const result = cli(f, '--runtime', runtime);
   assert.equal(result.status, 0, result.stderr);
@@ -68,11 +68,11 @@ for (const runtime of ['codex', 'claude']) test(`setup ${runtime} only keeps one
   assert.deepEqual(await read(`${f.file}.bak`), settings, 'the replaced file is backed up');
   const after = await read(f.file);
   assert.equal(after.workflow.mode, 'cafe');
-  assert.deepEqual(after.profile.mine, settings.profile.mine);
-  assert.equal(after.profile.cafe.peer.autocompact, 200000);
+  assert.deepEqual(after.team.mine, settings.team.mine);
+  assert.equal(after.team.cafe.peer.autocompact, 200000);
   for (const id of ['pho', 'cafe']) {
-    for (const config of Object.values(after.profile[id])) assert.deepEqual(config.profiles.map(profile => profile.split(':')[0]), [runtime]);
-    assert.deepEqual(after.profile[id].peer.profiles, [`${runtime}:*`]);
+    for (const config of Object.values(after.team[id])) assert.deepEqual(config.profiles.map(profile => profile.split(':')[0]), [runtime]);
+    assert.deepEqual(after.team[id].peer.profiles, [`${runtime}:*`]);
   }
 });
 
