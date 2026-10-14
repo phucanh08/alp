@@ -4,10 +4,10 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initProject } from '../src/core/init.js';
-import { getEntry, listEntries, saveEntry } from '../src/core/library-edit.js';
-import { testEntry } from '../src/client/library-test.js';
-import { diagnose } from '../src/client/doctor.js';
+import { initProject } from '../packages/core/src/init.js';
+import { getEntry, listEntries, saveEntry } from '../packages/core/src/library-edit.js';
+import { testEntry } from '../packages/client/src/library-test.js';
+import { diagnose } from '../packages/client/src/doctor.js';
 import { acpDecision, acpPermission, createAlpRuntime } from '../dist/runtime/index.js';
 
 const FAKE = fileURLToPath(new URL('./support/fake-acp.js', import.meta.url));
@@ -192,7 +192,7 @@ test('models, resuming, and what an ACP session cannot do', async t => {
 
  test('ACP configOptions discovers and selects OpenCode-style models', async t => {
   const { root, runtime, received } = await setup(t, { env: { FAKE_ACP_CONFIG: '1' } });
-  const { probeAcp } = await import('../src/client/acp-probe.js');
+  const { probeAcp } = await import('../packages/client/src/acp-probe.js');
   const discovered = await probeAcp({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_CONFIG: '1' } }, { cwd: root, discover: true });
   assert.deepEqual(discovered.models, [{ id: 'small', label: 'Small' }, { id: 'large', label: 'Large' }]);
   assert.equal(discovered.currentModel, 'small');

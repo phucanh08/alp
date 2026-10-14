@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
-import { resolveAgent } from '../src/core/resolver.js';
-import { resolveTeam } from '../src/core/teams.js';
-import { deleteEntry, duplicateEntry, getEntry, listEntries, renameEntry, saveEntry, setGivenSkills } from '../src/core/library-edit.js';
+import { initProject } from '../packages/core/src/init.js';
+import { resolveAgent } from '../packages/core/src/resolver.js';
+import { resolveTeam } from '../packages/core/src/teams.js';
+import { deleteEntry, duplicateEntry, getEntry, listEntries, renameEntry, saveEntry, setGivenSkills } from '../packages/core/src/library-edit.js';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-edit-'));

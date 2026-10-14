@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
-import { validateAgentConfig } from '../src/core/validation.js';
+import { initProject } from '../packages/core/src/init.js';
+import { validateAgentConfig } from '../packages/core/src/validation.js';
 import { ClaudeTransport, createAlpRuntime } from '../dist/runtime/index.js';
 import { fakeTransport, until } from './support/fake-agent.js';
 

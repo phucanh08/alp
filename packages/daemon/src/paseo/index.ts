@@ -1,0 +1,86 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { userLanguage } from '@anhlp/alp-core/user-settings';
+import { words } from '@anhlp/alp-runtime/language';
+import { createAgents } from './agents.js';
+import { createPaseoGateway, type Handler } from './gateway.js';
+import { quietHandlers } from './quiet.js';
+import { createCheckouts } from './checkout.js';
+import { directorySuggestions, fileExplorer } from './files.js';
+import { createPlugins } from './plugins.js';
+import { createUsage } from './usage.js';
+import { createWorkspaces } from './workspaces.js';
+import { createDaemonConfig, createRelay, type RelaySettings } from './relay.js';
+import { createProviders } from './providers.js';
+import type { DaemonServer } from '../server.js';
+
+export { createPaseoGateway, NOT_IMPLEMENTED, PASEO_PROTOCOL_VERSION } from './gateway.js';
+export type { PaseoGateway } from './gateway.js';
+
+/** Where the built app sits: beside alpd.js (dist/web-app), unless settings or the environment say. */
+export function webAppDir(alpdFile: string, configured?: string) {
+  const dir = path.resolve(configured ?? process.env.ALP_WEB_APP ?? path.join(path.dirname(alpdFile), 'web-app'));
+  return existsSync(path.join(dir, 'index.html')) ? dir : undefined;
+}
+
+/**
+ * Features whose buttons the app shows only when the daemon says it has them, and which send a
+ * request only when the user uses them. ALP lights them up so the app looks like Paseo's, and
+ * answers their requests "in development" until it has them (ALPD §62 step 5). Flags that make
+ * the app ask for something by itself, or change the protocol, stay off.
+ */
+const ENTRY_POINTS = {
+  projectGithubClone: true, workspaceGithubRepositorySearch: true, agentDetach: true, agentForkContext: true, agentForkContextCursor: true,
+  providerRemoval: true, importSessionWorkspaceTarget: true, importSessionSearch: true, fsEntryOps: true, fsEntryDuplicate: true, workspaceSetupRun: true,
+};
+
+/**
+ * The daemon side of the ALP web app (ALPD §62): Paseo's protocol over alpd. The handlers and the
+ * features they light up grow step by step (D31); everything else answers "in development".
+ * ALP's state is read on the first client's hello, not at alpd's start.
+ */
+export function createPaseoBridge({ daemon, version, token, serverId, home, relay: relaySettings, listen = () => null, log }: {
+  daemon: DaemonServer;
+  /** The user's web.relay setting (ALPD §64). */
+  relay?: RelaySettings;
+  /** Where the web app listens, as daemon.get_status reports it. */
+  listen?: () => string | null;
+  /** ALP's home, whose settings name the user's language. */
+  home?: string;
+  version: string;
+  token: () => string;
+  serverId: () => string;
+  log?: (message: string) => void;
+}) {
+  const handlers: Record<string, Handler> = {};
+  const features: Record<string, boolean> = {};
+  const inDevelopment = async () => words(await userLanguage(home)).inDevelopment;
+  const gateway = createPaseoGateway({
+    token, serverId, version, handlers, features, log, inDevelopment,
+    onClient: client => {
+      void agents.start().then(() => workspaces.start()).catch(error => log?.(`agents failed to start: ${error?.message ?? error}`));
+      return () => checkouts.drop(client);
+    },
+  });
+  const broadcast = (message: Parameters<typeof gateway.broadcast>[0]) => gateway.broadcast(message);
+  const workspaces = createWorkspaces({ home, broadcast, agents: () => agents.view, inDevelopment, log });
+  const agents = createAgents({ daemon, home, broadcast, directory: workspaces, log });
+  const readUsage = async (refresh = false) => {
+    const connection = daemon.local();
+    try { return await connection.request('daemon.usage', { refresh }); }
+    finally { connection.close(); }
+  };
+  const plugins = createPlugins({ log, usage: readUsage, home, projectDirectories: workspaces.projectDirectories });
+  const usage = createUsage(readUsage);
+  const checkouts = createCheckouts({ broadcast, log });
+  const relay = createRelay({ home, serverId, attach: socket => gateway.attach(socket), initial: relaySettings, log: message => log?.(message) });
+  const providers = createProviders({ home, broadcast, alpEntry: cwd => agents.providerEntry(cwd), log: message => log?.(message) });
+  const daemonConfig = createDaemonConfig({ relay, providers, serverId, broadcast, inDevelopment, version, listen, startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString() });
+  Object.assign(handlers, quietHandlers, daemonConfig.handlers, providers.handlers, agents.handlers, workspaces.handlers, plugins.handlers, usage.handlers, checkouts.handlers, { directory_suggestions_request: directorySuggestions, file_explorer_request: fileExplorer });
+  Object.assign(features, ENTRY_POINTS, daemonConfig.features, providers.features, agents.features, workspaces.features, plugins.features, usage.features, checkouts.features);
+  return Object.assign(gateway, {
+    relay,
+    close: () => { agents.close(); checkouts.close(); void relay.stop(); return workspaces.close(); },
+    scripts: { '/alp-plugins.js': plugins.script },
+  });
+}

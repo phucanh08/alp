@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, writeFile, rm, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
-import { upgradeProject } from '../src/core/upgrade.js';
-import { resolveAgent } from '../src/core/resolver.js';
-import { seedLibrary } from '../src/core/library.js';
-import { PaseoAdapter } from '../plugins/paseo/server/dist/index.js';
+import { initProject } from '../packages/core/src/init.js';
+import { upgradeProject } from '../packages/core/src/upgrade.js';
+import { resolveAgent } from '../packages/core/src/resolver.js';
+import { seedLibrary } from '../packages/core/src/library.js';
+import { PaseoAdapter } from '../packages/paseo/server/dist/index.js';
 import { skillDescription } from '../dist/runtime/index.js';
 import { legacyProject } from './support/legacy.js';
 

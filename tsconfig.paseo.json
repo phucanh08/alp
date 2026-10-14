@@ -1,8 +1,27 @@
 {
   "compilerOptions": {
-    "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext",
-    "strict": true, "noEmit": true, "allowJs": true, "checkJs": false,
-    "skipLibCheck": true, "types": ["node"]
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": false,
+    "skipLibCheck": true,
+    "types": [
+      "node"
+    ],
+    "customConditions": [
+      "alp-source"
+    ]
   },
-  "include": ["plugins/paseo/server/**/*.ts", "src/**/*.ts", "src/**/*.js"]
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/*/src/**/*.js",
+    "packages/paseo/server/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "**/dist/**"
+  ]
 }

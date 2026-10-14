@@ -9,7 +9,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 const require = createRequire(import.meta.url);
-const plugin = fileURLToPath(new URL('../plugins/paseo/', import.meta.url));
+const plugin = fileURLToPath(new URL('../packages/paseo/', import.meta.url));
 // The modules Paseo 0.11.1 supplies to plugin client code; anything else fails to load.
 const HOST = ['@getpaseo/plugin', '@getpaseo/plugin/client', '@getpaseo/plugin/client/react-native', '@getpaseo/plugin/client/ui', '@tanstack/react-query', 'react', 'react/jsx-runtime', 'react-native', 'zod'];
 
@@ -276,7 +276,7 @@ test('direct Host settings screens open their own library category', async () =>
 test('template presets select only their provider and preserve the team graph, with saveable oracle models', async () => {
   const { code } = await compileClient('shared/team-models.ts');
   const { presetTeamModels, modelSetupFor, MODEL_PRESETS } = load(code);
-  const { validateTeam } = await import('../src/core/teams.js');
+  const { validateTeam } = await import('../packages/core/src/teams.js');
   const models = [
     { id: 'claude:claude-opus-5-5', label: 'Claude', efforts: ['medium'], effort: 'medium' },
     { id: 'codex:gpt-6.1-sol', label: 'Codex', efforts: ['low'], effort: 'low' },

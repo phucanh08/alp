@@ -4,11 +4,11 @@ import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
-import { createTask, getTask, loadTasks } from '../src/core/tasks.js';
+import { initProject } from '../packages/core/src/init.js';
+import { createTask, getTask, loadTasks } from '../packages/core/src/tasks.js';
 import { createAlpRuntime, reclaimWorktrees } from '../dist/runtime/index.js';
 import { createDaemonServer, createStore } from '../dist/daemon/index.js';
-import { connect } from '../src/client/index.js';
+import { connect } from '../packages/client/src/index.js';
 
 let calls = 0;
 /** A fake native harness; resuming a thread keeps its id, as Codex and Claude do. */

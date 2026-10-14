@@ -5,12 +5,12 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
+import { initProject } from '../packages/core/src/init.js';
 
 const model = process.env.ALP_TEST_MODEL ?? 'codex:gpt-5.6-sol';
 const home = process.env.ALP_HOME ?? await mkdtemp(path.join(tmpdir(), 'alp-e2e-'));
 const env = { ...process.env, ALP_HOME: home };
-const cli = (...args) => spawnSync(process.execPath, ['src/cli.js', ...args], { env, encoding: 'utf8' });
+const cli = (...args) => spawnSync(process.execPath, ['packages/cli/src/cli.js', ...args], { env, encoding: 'utf8' });
 
 const root = path.resolve('.alp-test', `alpd-${Date.now()}`);
 await initProject(root);
@@ -32,7 +32,7 @@ const prompt = 'Integration check: use alp_delegate exactly once to assign lead 
 try {
   assert.equal(cli('daemon', 'start').status, 0);
   const output = await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['src/cli.js', 'run', '--json', '--project', root, '--profile', 'cafe', '--model', model, '--thinking', 'low', prompt], { env });
+    const child = spawn(process.execPath, ['packages/cli/src/cli.js', 'run', '--json', '--project', root, '--profile', 'cafe', '--model', model, '--thinking', 'low', prompt], { env });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => { child.kill('SIGINT'); reject(new Error('alp run timed out')); }, 300_000);

@@ -13,7 +13,7 @@ const source = path.resolve(process.env.ALP_PASEO_SRC ?? path.join(root, '.cache
 const { chromium } = await import(pathToFileURL(path.join(source, 'node_modules/playwright/index.mjs')).href);
 const { createAlpRuntime } = await import(pathToFileURL(path.join(root, 'dist/runtime/index.js')).href);
 const { createDaemonServer, createPaseoBridge, createWebServer, webAppDir } = await import(pathToFileURL(path.join(root, 'dist/daemon/index.js')).href);
-const { initProject } = await import(pathToFileURL(path.join(root, 'src/core/init.js')).href);
+const { initProject } = await import(pathToFileURL(path.join(root, 'packages/core/src/init.js')).href);
 const { fakeTransport } = await import(pathToFileURL(path.join(root, 'test/support/fake-agent.js')).href);
 
 const dir = webAppDir(path.join(root, 'dist/alpd.js'));

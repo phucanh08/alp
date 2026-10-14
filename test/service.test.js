@@ -5,11 +5,11 @@ import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { installedProgram, serviceDefinition, serviceFor } from '../src/client/service.js';
-import { lockAlive, readLock } from '../src/client/index.js';
+import { installedProgram, serviceDefinition, serviceFor } from '../packages/client/src/service.js';
+import { lockAlive, readLock } from '../packages/client/src/index.js';
 
-const CLI = fileURLToPath(new URL('../src/cli.js', import.meta.url));
-const ENTRY = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../packages/cli/src/cli.js', import.meta.url));
+const ENTRY = fileURLToPath(new URL('../packages/cli/dist/alpd.js', import.meta.url));
 
 test('the service keeps alpd up after a crash but not after a clean stop, with the environment alpd needs', async () => {
   const home = '/tmp/a home & co';

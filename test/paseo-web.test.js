@@ -10,9 +10,9 @@ import WebSocket from 'ws';
 import { validateWSOutboundMessage } from '@getpaseo/protocol/validation/ws-outbound';
 import { createAlpRuntime } from '../dist/runtime/index.js';
 import { createDaemonServer, createPaseoBridge, createWebServer } from '../dist/daemon/index.js';
-import { initProject } from '../src/core/init.js';
+import { initProject } from '../packages/core/src/init.js';
 import { fakeTransport, until } from './support/fake-agent.js';
-import { seedLibrary } from '../src/core/library.js';
+import { seedLibrary } from '../packages/core/src/library.js';
 
 /** alpd in this process serving a stand-in for the built ALP web app (Paseo's app, ALPD §62). */
 async function setup(t, usage) {

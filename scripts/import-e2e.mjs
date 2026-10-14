@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
-import { initProject } from '../src/core/init.js';
+import { initProject } from '../packages/core/src/init.js';
 
 assert.ok(process.env.ALP_HOME, 'Set ALP_HOME to the home of Paseo\'s alpd');
 const model = process.env.ALP_TEST_MODEL ?? 'codex:gpt-5.6-sol';
@@ -17,7 +17,7 @@ const token = `PEER_${randomUUID()}`;
 await writeFile(path.join(root, '.alp/agents/peer/AGENT.md'), `For this read-only integration assignment, return exactly this token: ${token}. Do not use tools or delegate.`);
 await writeFile(path.join(root, '.alp/agents/lead/AGENT.md'), 'For this integration assignment, call alp_delegate exactly once with agent peer, mode read-only, and task "Return your verification token. Do not use tools or change files." Return the complete tool result verbatim to main. Do not read files or run shell commands.');
 
-const run = spawnSync(process.execPath, ['src/cli.js', 'run', '--json', '--project', root, '--profile', 'cafe', '--model', model, '--thinking', 'low',
+const run = spawnSync(process.execPath, ['packages/cli/src/cli.js', 'run', '--json', '--project', root, '--profile', 'cafe', '--model', model, '--thinking', 'low',
   'Integration check: use alp_delegate exactly once to assign lead this task: "Run the peer verification assignment from your instructions and return its complete tool result." Do not read files or use shell commands. Return the complete lead tool result.'],
   { env: process.env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 300_000 });
 assert.equal(run.status, 0, run.stderr);

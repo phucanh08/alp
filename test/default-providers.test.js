@@ -4,8 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { seedLibrary } from '../src/core/library.js';
-import { loadProvider } from '../src/core/providers.js';
+import { seedLibrary } from '../packages/core/src/library.js';
+import { loadProvider } from '../packages/core/src/providers.js';
 
 test('fresh and upgraded libraries include OpenCode and native Antigravity without overwriting switches or commands', async t => {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-default-providers-'));
@@ -35,7 +35,7 @@ test('fresh and upgraded libraries include OpenCode and native Antigravity witho
 test('alp providers seeds defaults without requiring project initialization', async t => {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-default-provider-cli-'));
   t.after(() => rm(home, { recursive: true, force: true }));
-  const rows = JSON.parse(execFileSync(process.execPath, ['src/cli.js', 'providers', '--json'], {
+  const rows = JSON.parse(execFileSync(process.execPath, ['packages/cli/src/cli.js', 'providers', '--json'], {
     env: { ...process.env, ALP_HOME: home }, encoding: 'utf8',
   }));
   assert.deepEqual(rows.map(row => row.name), ['antigravity', 'opencode']);

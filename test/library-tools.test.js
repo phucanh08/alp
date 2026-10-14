@@ -6,14 +6,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { initProject } from '../src/core/init.js';
-import { runHook } from '../src/core/hook-run.js';
-import { probeMcp } from '../src/client/mcp-probe.js';
-import { saveEntry } from '../src/core/library-edit.js';
-import contribute from '../plugins/paseo/server/dist/index.js';
+import { initProject } from '../packages/core/src/init.js';
+import { runHook } from '../packages/core/src/hook-run.js';
+import { probeMcp } from '../packages/client/src/mcp-probe.js';
+import { saveEntry } from '../packages/core/src/library-edit.js';
+import contribute from '../packages/paseo/server/dist/index.js';
 
 const fakeMcp = fileURLToPath(new URL('./support/fake-mcp.js', import.meta.url));
-const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+const cli = fileURLToPath(new URL('../packages/cli/src/cli.js', import.meta.url));
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-tools-'));

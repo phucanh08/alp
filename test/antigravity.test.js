@@ -5,12 +5,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
-import { initProject } from '../src/core/init.js';
-import { getEntry, listEntries, saveEntry } from '../src/core/library-edit.js';
-import { testEntry } from '../src/client/library-test.js';
-import { diagnose } from '../src/client/doctor.js';
-import { probeAntigravity } from '../src/client/antigravity-probe.js';
-import { validateProvider } from '../src/core/providers.js';
+import { initProject } from '../packages/core/src/init.js';
+import { getEntry, listEntries, saveEntry } from '../packages/core/src/library-edit.js';
+import { testEntry } from '../packages/client/src/library-test.js';
+import { diagnose } from '../packages/client/src/doctor.js';
+import { probeAntigravity } from '../packages/client/src/antigravity-probe.js';
+import { validateProvider } from '../packages/core/src/providers.js';
 import { createAlpRuntime, resolveSession, AntigravityTransport } from '../dist/runtime/index.js';
 
 const FAKE_AGY = fileURLToPath(new URL('./support/fake-agy.js', import.meta.url));

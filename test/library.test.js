@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { initProject } from '../src/core/init.js';
-import { upgradeProject } from '../src/core/upgrade.js';
-import { agentSources, libraryEntries, resolveAgent } from '../src/core/resolver.js';
+import { initProject } from '../packages/core/src/init.js';
+import { upgradeProject } from '../packages/core/src/upgrade.js';
+import { agentSources, libraryEntries, resolveAgent } from '../packages/core/src/resolver.js';
 import { legacyProject } from './support/legacy.js';
 
 async function fixture(t) {
@@ -122,7 +122,7 @@ test('alp agents, skills, mcp and hooks list each entry with its source', async 
   await initProject(root);
   await files(home, { 'mcp/docs.json': { url: 'https://example.test/mcp' } });
   await files(root, { '.alp/mcp/docs.json': { command: 'node' }, '.alp/agents/main/AGENT.md': 'Mine', '.alp/agents/main/agent.json': { mcp: ['docs'] } });
-  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const cli = fileURLToPath(new URL('../packages/cli/src/cli.js', import.meta.url));
   const run = (...args) => spawnSync(process.execPath, [cli, ...args, '--project', root], { encoding: 'utf8', env: { ...process.env, ALP_HOME: home } });
   const agents = run('agents');
   assert.equal(agents.status, 0, agents.stderr);

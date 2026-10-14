@@ -6,13 +6,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as toml } from 'smol-toml';
-import { initProject } from '../src/core/init.js';
-import { exportBeads, importBeads, parseJsonl } from '../src/core/beads.js';
-import { findFormula, listFormulas, pourFormula, validateFormula } from '../src/core/formulas.js';
-import { addGate, closeTask, createTask, getTask, linkTask, loadTasks, readyTasks, resolveGate, startTask, submitTask } from '../src/core/tasks.js';
+import { initProject } from '../packages/core/src/init.js';
+import { exportBeads, importBeads, parseJsonl } from '../packages/core/src/beads.js';
+import { findFormula, listFormulas, pourFormula, validateFormula } from '../packages/core/src/formulas.js';
+import { addGate, closeTask, createTask, getTask, linkTask, loadTasks, readyTasks, resolveGate, startTask, submitTask } from '../packages/core/src/tasks.js';
 import { createAlpRuntime } from '../dist/runtime/index.js';
 
-const CLI = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../packages/cli/src/cli.js', import.meta.url));
 
 async function project(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-beads-'));

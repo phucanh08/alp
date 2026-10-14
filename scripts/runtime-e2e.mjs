@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { createProvider } from '../plugins/paseo/server/dist/index.js';
+import { createProvider } from '../packages/paseo/server/dist/index.js';
 const cwd = path.resolve('.alp-test', `runtime-${Date.now()}`);
 await mkdir(path.join(cwd, '.alp', 'agents', 'main'), { recursive: true });
 await writeFile(path.join(cwd, '.alp', 'agents', 'main', 'AGENT.md'), 'You are testing lifecycle operations. Do not use tools or change files.');

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { validateSettings, normalizeMcp, validateResolvedAgent } from '../src/core/validation.js';
+import { validateSettings, normalizeMcp, validateResolvedAgent } from '../packages/core/src/validation.js';
 
 test('resolved IR serializes and is consumed by a provider-neutral fake', () => {
   const root = path.resolve('fixture');

@@ -4,11 +4,11 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
-import { createTask, getTask } from '../src/core/tasks.js';
-import { saveEntry } from '../src/core/library-edit.js';
-import { isTrusted, trustProject } from '../src/core/trust.js';
-import { renderLog } from '../src/client/render.js';
+import { initProject } from '../packages/core/src/init.js';
+import { createTask, getTask } from '../packages/core/src/tasks.js';
+import { saveEntry } from '../packages/core/src/library-edit.js';
+import { isTrusted, trustProject } from '../packages/core/src/trust.js';
+import { renderLog } from '../packages/client/src/render.js';
 import { createAlpRuntime } from '../dist/runtime/index.js';
 
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
@@ -124,7 +124,7 @@ test('a project hook asks the user once per workspace; after they agree it runs,
   assert.ok((await log()).some(entry => entry.event === 'hook.trust' && entry.trusted));
   // Later sessions, and hooks added or changed later, do not ask again.
   await saveEntry('hooks', 'started', recorder('session.start', 'started'), { ...scope, scope: 'project' });
-  const main = await import('../src/core/library-edit.js').then(edit => edit.getEntry('agents', 'main', { ...scope, scope: 'project' }));
+  const main = await import('../packages/core/src/library-edit.js').then(edit => edit.getEntry('agents', 'main', { ...scope, scope: 'project' }));
   await saveEntry('agents', 'main', { ...main.content, config: { hooks: ['ended', 'started'] } }, { ...scope, scope: 'project', revision: main.revision });
   await runtime.shutdown();
   runtime = start();

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
-const client = new URL('../src/client/index.js', import.meta.url).href;
+const client = new URL('../packages/client/src/index.js', import.meta.url).href;
 function paths(platform, homes) {
   return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `
     Object.defineProperty(process, 'platform', { value: ${JSON.stringify(platform)} });

@@ -4,7 +4,7 @@ import { lstat, mkdtemp, readFile, readlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { claudePermissions, skillPlugin, SKILL_PLUGIN } from '../dist/runtime/index.js';
-import { renderLog } from '../src/client/render.js';
+import { renderLog } from '../packages/client/src/render.js';
 import { tree, until } from './support/fake-agent.js';
 
 test('Claude gets the agent\'s skills to load as its own; Codex finds them in its instructions', async t => {

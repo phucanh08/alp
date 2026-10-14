@@ -5,11 +5,11 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initProject } from '../src/core/init.js';
-import { addAllowRule, commandDecision, parseRule, profileFor, simpleCommands, unwrapShell, validatePermissions } from '../src/core/permissions.js';
+import { initProject } from '../packages/core/src/init.js';
+import { addAllowRule, commandDecision, parseRule, profileFor, simpleCommands, unwrapShell, validatePermissions } from '../packages/core/src/permissions.js';
 import { claudePermissions, createAlpRuntime, createCopy, reclaimCopies, removeCopy, resolveSession } from '../dist/runtime/index.js';
 
-const CLI = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../packages/cli/src/cli.js', import.meta.url));
 
 async function project(t, permissions, userPermissions) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-permissions-'));

@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
+import { initProject } from '../packages/core/src/init.js';
 import { createAlpRuntime, claudeToolShapes } from '../dist/runtime/index.js';
 
 async function until(check) {

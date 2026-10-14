@@ -6,12 +6,12 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
+import { initProject } from '../packages/core/src/init.js';
 
 const model = process.env.ALP_TEST_MODEL ?? 'codex:gpt-5.6-sol';
 const home = await mkdtemp(path.join(tmpdir(), 'alp-worktree-e2e-'));
 const env = { ...process.env, ALP_HOME: home, ALP_RUN_LOG_DIR: path.join(home, 'runs') };
-const cli = (...args) => spawnSync(process.execPath, ['src/cli.js', ...args], { env, encoding: 'utf8' });
+const cli = (...args) => spawnSync(process.execPath, ['packages/cli/src/cli.js', ...args], { env, encoding: 'utf8' });
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 
 const root = path.resolve('.alp-test', `worktree-${Date.now()}`);
@@ -35,7 +35,7 @@ const prompt = [
 try {
   assert.equal(cli('daemon', 'start').status, 0);
   const output = await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['src/cli.js', 'run', '--json', '--project', root, '--mode', 'workspace-write', '--model', model, '--thinking', 'low', prompt], { env });
+    const child = spawn(process.execPath, ['packages/cli/src/cli.js', 'run', '--json', '--project', root, '--mode', 'workspace-write', '--model', model, '--thinking', 'low', prompt], { env });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => { child.kill('SIGINT'); reject(new Error('alp run timed out')); }, 600_000);

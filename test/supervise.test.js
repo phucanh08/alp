@@ -5,11 +5,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
-import { bootTime, connect, daemonPaths, lockAlive, readLock } from '../src/client/index.js';
-import { daemonHeld, holdDaemon, startDaemon, superviseDaemon } from '../src/client/supervise.js';
+import { bootTime, connect, daemonPaths, lockAlive, readLock } from '../packages/client/src/index.js';
+import { daemonHeld, holdDaemon, startDaemon, superviseDaemon } from '../packages/client/src/supervise.js';
 import { createAlpRuntime } from '../dist/runtime/index.js';
 import { createDaemonServer, createStore } from '../dist/daemon/index.js';
-import { createProvider } from '../plugins/paseo/server/dist/index.js';
+import { createProvider } from '../packages/paseo/server/dist/index.js';
 
 const ENTRY = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
 

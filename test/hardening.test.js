@@ -4,10 +4,10 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
-import { promptSafe } from '../src/core/promptsafe.js';
-import { describeVerification, runVerify, validateVerify } from '../src/core/verify.js';
-import { closeTask, createTask, getTask, recordVerification } from '../src/core/tasks.js';
+import { initProject } from '../packages/core/src/init.js';
+import { promptSafe } from '../packages/core/src/promptsafe.js';
+import { describeVerification, runVerify, validateVerify } from '../packages/core/src/verify.js';
+import { closeTask, createTask, getTask, recordVerification } from '../packages/core/src/tasks.js';
 import { createAlpRuntime, gitEnvironment, OWN_START, processStartedAt, sameProcessAlive } from '../dist/runtime/index.js';
 
 test('promptSafe strips system-reminder tags, nested ones too, and leaves other text alone', () => {

@@ -10,7 +10,7 @@ test('checkout polling hides every Git child console and preserves checkout fact
   const directory = await mkdtemp(path.join(os.tmpdir(), 'alp-git-test-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const outfile = path.join(directory, 'git.mjs');
-  await build({ entryPoints: [fileURLToPath(new URL('../src/daemon/paseo/git.ts', import.meta.url))], outfile, bundle: true, platform: 'node', format: 'esm' });
+  await build({ entryPoints: [fileURLToPath(new URL('../packages/daemon/src/paseo/git.ts', import.meta.url))], outfile, bundle: true, platform: 'node', format: 'esm' });
   // A separate process keeps the child_process boundary mock out of other daemon tests.
   execFileSync(process.execPath, ['--input-type=module', '-e', `
     import assert from 'node:assert/strict';

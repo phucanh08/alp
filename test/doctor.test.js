@@ -4,9 +4,9 @@ import { execFileSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
-import { diagnose, repair } from '../src/client/doctor.js';
-import { bootTime } from '../src/client/index.js';
+import { initProject } from '../packages/core/src/init.js';
+import { diagnose, repair } from '../packages/client/src/doctor.js';
+import { bootTime } from '../packages/client/src/index.js';
 
 async function fakeBin(directory, name, body) {
   const file = path.join(directory, name);
@@ -123,7 +123,7 @@ test('alp doctor --json prints the checks and exits 0 when nothing fails', async
   await fakeBin(bin, 'claude', 'case "$1" in --version) echo "1.0.0 (Claude Code)";; *) echo \'{"loggedIn": true}\';; esac');
   const project = path.join(directory, 'project');
   await initProject(project);
-  const output = execFileSync(process.execPath, [path.resolve('src/cli.js'), 'doctor', '--json', '--project', project], {
+  const output = execFileSync(process.execPath, [path.resolve('packages/cli/src/cli.js'), 'doctor', '--json', '--project', project], {
     env: { ...process.env, ALP_HOME: home, PATH: `${bin}${path.delimiter}${process.env.PATH}`, ALP_CODEX_BIN: '', ALP_CLAUDE_BIN: '', ALP_ANTIGRAVITY_BIN: path.join(bin, 'codex') },
   }).toString();
   const report = JSON.parse(output);

@@ -8,8 +8,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createPaseoApi } from '@getpaseo/client';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
-import { initProject } from '../src/core/init.js';
-import { alpHome, connect, readLock } from '../src/client/index.js';
+import { initProject } from '../packages/core/src/init.js';
+import { alpHome, connect, readLock } from '../packages/client/src/index.js';
 
 const paseoHome = process.env.ALP_TEST_PASEO_HOME;
 const runLogDir = process.env.ALP_RUN_LOG_DIR;

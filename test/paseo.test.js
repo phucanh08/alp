@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createProvider, mapSession, sessionTasks, default as contribute } from '../plugins/paseo/server/dist/index.js';
+import { createProvider, mapSession, sessionTasks, default as contribute } from '../packages/paseo/server/dist/index.js';
 import { ProviderEventSchema, PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
-import { connect, readLock } from '../src/client/index.js';
-import { createTask } from '../src/core/tasks.js';
+import { connect, readLock } from '../packages/client/src/index.js';
+import { createTask } from '../packages/core/src/tasks.js';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-paseo-'));
@@ -323,7 +323,7 @@ test('the plugin loads where import.meta.url is no URL, as when Paseo bundles it
   t.after(() => rm(directory, { recursive: true, force: true }));
   const outfile = path.join(directory, 'index.mjs');
   // Paseo re-bundles plugin code; there import.meta.url does not resolve. Nothing may need it while loading.
-  await build({ entryPoints: ['plugins/paseo/server/dist/index.js'], outfile, bundle: true, format: 'esm', platform: 'node', target: 'node20', external: ['@anthropic-ai/claude-agent-sdk'], define: { 'import.meta.url': 'undefined' }, logLevel: 'silent' });
+  await build({ entryPoints: ['packages/paseo/server/dist/index.js'], outfile, bundle: true, format: 'esm', platform: 'node', target: 'node20', external: ['@anthropic-ai/claude-agent-sdk'], define: { 'import.meta.url': 'undefined' }, logLevel: 'silent' });
   const plugin = await import(outfile);
   assert.equal(typeof plugin.default, 'function');
   assert.equal(typeof plugin.createProvider, 'function');

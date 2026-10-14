@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import WebSocket from 'ws';
-import { validateUserSettings } from '../src/core/validation.js';
+import { validateUserSettings } from '../packages/core/src/validation.js';
 import { createWebServer, webFile } from '../dist/daemon/index.js';
 
 const run = promisify(execFile);

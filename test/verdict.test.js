@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
-import { createTask, getTask, loadTasks, startTask, submitTask, taskDigest } from '../src/core/tasks.js';
+import { initProject } from '../packages/core/src/init.js';
+import { createTask, getTask, loadTasks, startTask, submitTask, taskDigest } from '../packages/core/src/tasks.js';
 import { createAlpRuntime } from '../dist/runtime/index.js';
 import { fakeTransport, until } from './support/fake-agent.js';
 

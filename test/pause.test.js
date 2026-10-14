@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
-import { createTask, getTask } from '../src/core/tasks.js';
+import { initProject } from '../packages/core/src/init.js';
+import { createTask, getTask } from '../packages/core/src/tasks.js';
 import { ClaudeTransport, createAlpRuntime } from '../dist/runtime/index.js';
 
 let calls = 0;

@@ -9,11 +9,11 @@ import { build } from 'esbuild';
 import * as sdk from '@getpaseo/plugin';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import contribute from '../plugins/paseo/server/dist/index.js';
-import { addGate, closeTask, createTask, getTask, startTask, submitTask } from '../src/core/tasks.js';
+import contribute from '../packages/paseo/server/dist/index.js';
+import { addGate, closeTask, createTask, getTask, startTask, submitTask } from '../packages/core/src/tasks.js';
 
 const require = createRequire(import.meta.url);
-const plugin = fileURLToPath(new URL('../plugins/paseo/', import.meta.url));
+const plugin = fileURLToPath(new URL('../packages/paseo/', import.meta.url));
 
 // The modules Paseo 0.11.1 supplies to plugin client code (server/plugins/compiler.js); anything else fails to load.
 const HOST = ['@getpaseo/plugin', '@getpaseo/plugin/client', '@getpaseo/plugin/client/react-native', '@getpaseo/plugin/client/ui', '@tanstack/react-query', 'react', 'react/jsx-runtime', 'react-native', 'zod'];

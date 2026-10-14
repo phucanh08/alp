@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { resolveAgent } from '../src/core/resolver.js';
-import { compileAgent } from '../src/core/adapter.js';
-import { FakeAdapter } from '../src/adapters/fake.js';
+import { resolveAgent } from '../packages/core/src/resolver.js';
+import { compileAgent } from '../packages/core/src/adapter.js';
+import { FakeAdapter } from './support/fake-adapter.js';
 
 test('fake compiles main and filesystem custom agent without provider dependencies', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-adapter-'));
@@ -27,7 +27,7 @@ test('fake compiles main and filesystem custom agent without provider dependenci
   }
 });
 test('core import graph contains only node builtins and core-relative modules', async () => {
-  const directory = new URL('../src/core/', import.meta.url);
+  const directory = new URL('../packages/core/src/', import.meta.url);
   for (const file of await readdir(directory)) {
     if (!/\.(js|ts)$/.test(file)) continue;
     const source = await readFile(new URL(file, directory), 'utf8');

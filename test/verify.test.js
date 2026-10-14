@@ -5,13 +5,13 @@ import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:f
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initProject } from '../src/core/init.js';
-import { closeTask, createTask, getTask, loadTasks, recordVerification, startTask, submitTask, summarize, taskDigest } from '../src/core/tasks.js';
-import { describeVerification, runVerify, validateVerify, verifyConfig } from '../src/core/verify.js';
-import { validateSettings } from '../src/core/validation.js';
+import { initProject } from '../packages/core/src/init.js';
+import { closeTask, createTask, getTask, loadTasks, recordVerification, startTask, submitTask, summarize, taskDigest } from '../packages/core/src/tasks.js';
+import { describeVerification, runVerify, validateVerify, verifyConfig } from '../packages/core/src/verify.js';
+import { validateSettings } from '../packages/core/src/validation.js';
 import { createAlpRuntime } from '../dist/runtime/index.js';
 
-const CLI = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../packages/cli/src/cli.js', import.meta.url));
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
 const exists = file => lstat(file).then(() => true, () => false);
 

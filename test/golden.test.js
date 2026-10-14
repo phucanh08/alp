@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { renderLog, renderPs } from '../src/client/render.js';
-import { epicReport } from '../src/core/tasks.js';
+import { renderLog, renderPs } from '../packages/client/src/render.js';
+import { epicReport } from '../packages/core/src/tasks.js';
 import { tree, until } from './support/fake-agent.js';
 
 /**

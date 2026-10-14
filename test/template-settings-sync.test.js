@@ -5,11 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { initProject } from '../src/core/init.js';
-import { getEntry, saveEntry } from '../src/core/library-edit.js';
-import { resolveWorkflow } from '../src/core/workflow.js';
+import { initProject } from '../packages/core/src/init.js';
+import { getEntry, saveEntry } from '../packages/core/src/library-edit.js';
+import { resolveWorkflow } from '../packages/core/src/workflow.js';
 
-const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+const cli = fileURLToPath(new URL('../packages/cli/src/cli.js', import.meta.url));
 async function fixture(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'alp-template-sync-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

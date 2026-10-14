@@ -1,0 +1,246 @@
+{
+  "name": "@anhlp/alp-runtime",
+  "version": "0.9.5",
+  "type": "module",
+  "description": "ALP runtime module",
+  "files": [
+    "src",
+    "dist"
+  ],
+  "exports": {
+    "./acp-transport": {
+      "alp-source": {
+        "types": "./src/acp-transport.ts",
+        "default": "./src/acp-transport.ts"
+      },
+      "types": "./dist/acp-transport.d.ts",
+      "default": "./dist/acp-transport.js"
+    },
+    "./antigravity-transport": {
+      "alp-source": {
+        "types": "./src/antigravity-transport.ts",
+        "default": "./src/antigravity-transport.ts"
+      },
+      "types": "./dist/antigravity-transport.d.ts",
+      "default": "./dist/antigravity-transport.js"
+    },
+    "./board": {
+      "alp-source": {
+        "types": "./src/board.ts",
+        "default": "./src/board.ts"
+      },
+      "types": "./dist/board.d.ts",
+      "default": "./dist/board.js"
+    },
+    "./catalog": {
+      "alp-source": {
+        "types": "./src/catalog.ts",
+        "default": "./src/catalog.ts"
+      },
+      "types": "./dist/catalog.d.ts",
+      "default": "./dist/catalog.js"
+    },
+    "./claude-transport": {
+      "alp-source": {
+        "types": "./src/claude-transport.ts",
+        "default": "./src/claude-transport.ts"
+      },
+      "types": "./dist/claude-transport.d.ts",
+      "default": "./dist/claude-transport.js"
+    },
+    "./contracts": {
+      "alp-source": {
+        "types": "./src/contracts.ts",
+        "default": "./src/contracts.ts"
+      },
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./events": {
+      "alp-source": {
+        "types": "./src/events.ts",
+        "default": "./src/events.ts"
+      },
+      "types": "./dist/events.d.ts",
+      "default": "./dist/events.js"
+    },
+    "./github": {
+      "alp-source": {
+        "types": "./src/github.ts",
+        "default": "./src/github.ts"
+      },
+      "types": "./dist/github.d.ts",
+      "default": "./dist/github.js"
+    },
+    "./handoff": {
+      "alp-source": {
+        "types": "./src/handoff.ts",
+        "default": "./src/handoff.ts"
+      },
+      "types": "./dist/handoff.d.ts",
+      "default": "./dist/handoff.js"
+    },
+    "./index": {
+      "alp-source": {
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
+      },
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    ".": {
+      "alp-source": {
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
+      },
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./language": {
+      "alp-source": {
+        "types": "./src/language.ts",
+        "default": "./src/language.ts"
+      },
+      "types": "./dist/language.d.ts",
+      "default": "./dist/language.js"
+    },
+    "./live": {
+      "alp-source": {
+        "types": "./src/live.ts",
+        "default": "./src/live.ts"
+      },
+      "types": "./dist/live.d.ts",
+      "default": "./dist/live.js"
+    },
+    "./mailbox": {
+      "alp-source": {
+        "types": "./src/mailbox.ts",
+        "default": "./src/mailbox.ts"
+      },
+      "types": "./dist/mailbox.d.ts",
+      "default": "./dist/mailbox.js"
+    },
+    "./mcp-tools": {
+      "alp-source": {
+        "types": "./src/mcp-tools.ts",
+        "default": "./src/mcp-tools.ts"
+      },
+      "types": "./dist/mcp-tools.d.ts",
+      "default": "./dist/mcp-tools.js"
+    },
+    "./process-info": {
+      "alp-source": {
+        "types": "./src/process-info.ts",
+        "default": "./src/process-info.ts"
+      },
+      "types": "./dist/process-info.d.ts",
+      "default": "./dist/process-info.js"
+    },
+    "./providers": {
+      "alp-source": {
+        "types": "./src/providers.ts",
+        "default": "./src/providers.ts"
+      },
+      "types": "./dist/providers.d.ts",
+      "default": "./dist/providers.js"
+    },
+    "./recall": {
+      "alp-source": {
+        "types": "./src/recall.ts",
+        "default": "./src/recall.ts"
+      },
+      "types": "./dist/recall.d.ts",
+      "default": "./dist/recall.js"
+    },
+    "./resolve": {
+      "alp-source": {
+        "types": "./src/resolve.ts",
+        "default": "./src/resolve.ts"
+      },
+      "types": "./dist/resolve.d.ts",
+      "default": "./dist/resolve.js"
+    },
+    "./runtime-context": {
+      "alp-source": {
+        "types": "./src/runtime-context.ts",
+        "default": "./src/runtime-context.ts"
+      },
+      "types": "./dist/runtime-context.d.ts",
+      "default": "./dist/runtime-context.js"
+    },
+    "./runtime": {
+      "alp-source": {
+        "types": "./src/runtime.ts",
+        "default": "./src/runtime.ts"
+      },
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
+    },
+    "./session-config": {
+      "alp-source": {
+        "types": "./src/session-config.ts",
+        "default": "./src/session-config.ts"
+      },
+      "types": "./dist/session-config.d.ts",
+      "default": "./dist/session-config.js"
+    },
+    "./tools": {
+      "alp-source": {
+        "types": "./src/tools.ts",
+        "default": "./src/tools.ts"
+      },
+      "types": "./dist/tools.d.ts",
+      "default": "./dist/tools.js"
+    },
+    "./transport": {
+      "alp-source": {
+        "types": "./src/transport.ts",
+        "default": "./src/transport.ts"
+      },
+      "types": "./dist/transport.d.ts",
+      "default": "./dist/transport.js"
+    },
+    "./usage": {
+      "alp-source": {
+        "types": "./src/usage.ts",
+        "default": "./src/usage.ts"
+      },
+      "types": "./dist/usage.d.ts",
+      "default": "./dist/usage.js"
+    },
+    "./workspace": {
+      "alp-source": {
+        "types": "./src/workspace.ts",
+        "default": "./src/workspace.ts"
+      },
+      "types": "./dist/workspace.d.ts",
+      "default": "./dist/workspace.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anhlp/alp-core": "0.9.5",
+    "@anhlp/alp-protocol": "0.9.5",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.292",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@agentclientprotocol/sdk": "1.7.0",
+    "smol-toml": "1.9.0",
+    "zod": "4.4.3"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build-workspace.mjs runtime",
+    "test": "node ../../scripts/test-workspace.mjs runtime",
+    "prepack": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phucanh08/alp-paseo.git",
+    "directory": "packages/runtime"
+  }
+}

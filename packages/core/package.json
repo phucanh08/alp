@@ -1,0 +1,262 @@
+{
+  "name": "@anhlp/alp-core",
+  "version": "0.9.5",
+  "type": "module",
+  "description": "ALP core module",
+  "files": [
+    "src",
+    "dist",
+    "templates"
+  ],
+  "exports": {
+    "./adapter": {
+      "alp-source": {
+        "types": "./src/adapter.js",
+        "default": "./src/adapter.js"
+      },
+      "types": "./dist/adapter.d.ts",
+      "default": "./src/adapter.js"
+    },
+    "./beads": {
+      "alp-source": {
+        "types": "./src/beads.js",
+        "default": "./src/beads.js"
+      },
+      "types": "./dist/beads.d.ts",
+      "default": "./src/beads.js"
+    },
+    "./delegation": {
+      "alp-source": {
+        "types": "./src/delegation.js",
+        "default": "./src/delegation.js"
+      },
+      "types": "./dist/delegation.d.ts",
+      "default": "./src/delegation.js"
+    },
+    "./errors": {
+      "alp-source": {
+        "types": "./src/errors.js",
+        "default": "./src/errors.js"
+      },
+      "types": "./dist/errors.d.ts",
+      "default": "./src/errors.js"
+    },
+    "./formulas": {
+      "alp-source": {
+        "types": "./src/formulas.js",
+        "default": "./src/formulas.js"
+      },
+      "types": "./dist/formulas.d.ts",
+      "default": "./src/formulas.js"
+    },
+    "./hook-run": {
+      "alp-source": {
+        "types": "./src/hook-run.js",
+        "default": "./src/hook-run.js"
+      },
+      "types": "./dist/hook-run.d.ts",
+      "default": "./src/hook-run.js"
+    },
+    "./hooks": {
+      "alp-source": {
+        "types": "./src/hooks.js",
+        "default": "./src/hooks.js"
+      },
+      "types": "./dist/hooks.d.ts",
+      "default": "./src/hooks.js"
+    },
+    "./index": {
+      "alp-source": {
+        "types": "./src/index.js",
+        "default": "./src/index.js"
+      },
+      "types": "./dist/index.d.ts",
+      "default": "./src/index.js"
+    },
+    ".": {
+      "alp-source": {
+        "types": "./src/index.js",
+        "default": "./src/index.js"
+      },
+      "types": "./dist/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./init": {
+      "alp-source": {
+        "types": "./src/init.js",
+        "default": "./src/init.js"
+      },
+      "types": "./dist/init.d.ts",
+      "default": "./src/init.js"
+    },
+    "./library-edit": {
+      "alp-source": {
+        "types": "./src/library-edit.js",
+        "default": "./src/library-edit.js"
+      },
+      "types": "./dist/library-edit.d.ts",
+      "default": "./src/library-edit.js"
+    },
+    "./library": {
+      "alp-source": {
+        "types": "./src/library.js",
+        "default": "./src/library.js"
+      },
+      "types": "./dist/library.d.ts",
+      "default": "./src/library.js"
+    },
+    "./models": {
+      "alp-source": {
+        "types": "./src/models.js",
+        "default": "./src/models.js"
+      },
+      "types": "./dist/models.d.ts",
+      "default": "./src/models.js"
+    },
+    "./permissions": {
+      "alp-source": {
+        "types": "./src/permissions.js",
+        "default": "./src/permissions.js"
+      },
+      "types": "./dist/permissions.d.ts",
+      "default": "./src/permissions.js"
+    },
+    "./profiles": {
+      "alp-source": {
+        "types": "./src/profiles.js",
+        "default": "./src/profiles.js"
+      },
+      "types": "./dist/profiles.d.ts",
+      "default": "./src/profiles.js"
+    },
+    "./promptsafe": {
+      "alp-source": {
+        "types": "./src/promptsafe.js",
+        "default": "./src/promptsafe.js"
+      },
+      "types": "./dist/promptsafe.d.ts",
+      "default": "./src/promptsafe.js"
+    },
+    "./providers": {
+      "alp-source": {
+        "types": "./src/providers.js",
+        "default": "./src/providers.js"
+      },
+      "types": "./dist/providers.d.ts",
+      "default": "./src/providers.js"
+    },
+    "./resolver": {
+      "alp-source": {
+        "types": "./src/resolver.js",
+        "default": "./src/resolver.js"
+      },
+      "types": "./dist/resolver.d.ts",
+      "default": "./src/resolver.js"
+    },
+    "./task-rows": {
+      "alp-source": {
+        "types": "./src/task-rows.js",
+        "default": "./src/task-rows.js"
+      },
+      "types": "./dist/task-rows.d.ts",
+      "default": "./src/task-rows.js"
+    },
+    "./tasks": {
+      "alp-source": {
+        "types": "./src/tasks.js",
+        "default": "./src/tasks.js"
+      },
+      "types": "./dist/tasks.d.ts",
+      "default": "./src/tasks.js"
+    },
+    "./teams": {
+      "alp-source": {
+        "types": "./src/teams.js",
+        "default": "./src/teams.js"
+      },
+      "types": "./dist/teams.d.ts",
+      "default": "./src/teams.js"
+    },
+    "./trust": {
+      "alp-source": {
+        "types": "./src/trust.js",
+        "default": "./src/trust.js"
+      },
+      "types": "./dist/trust.d.ts",
+      "default": "./src/trust.js"
+    },
+    "./upgrade": {
+      "alp-source": {
+        "types": "./src/upgrade.js",
+        "default": "./src/upgrade.js"
+      },
+      "types": "./dist/upgrade.d.ts",
+      "default": "./src/upgrade.js"
+    },
+    "./user-settings": {
+      "alp-source": {
+        "types": "./src/user-settings.js",
+        "default": "./src/user-settings.js"
+      },
+      "types": "./dist/user-settings.d.ts",
+      "default": "./src/user-settings.js"
+    },
+    "./validation": {
+      "alp-source": {
+        "types": "./src/validation.js",
+        "default": "./src/validation.js"
+      },
+      "types": "./dist/validation.d.ts",
+      "default": "./src/validation.js"
+    },
+    "./verify": {
+      "alp-source": {
+        "types": "./src/verify.js",
+        "default": "./src/verify.js"
+      },
+      "types": "./dist/verify.d.ts",
+      "default": "./src/verify.js"
+    },
+    "./workflow": {
+      "alp-source": {
+        "types": "./src/workflow.js",
+        "default": "./src/workflow.js"
+      },
+      "types": "./dist/workflow.d.ts",
+      "default": "./src/workflow.js"
+    },
+    "./types": {
+      "alp-source": {
+        "types": "./src/types.d.ts"
+      },
+      "types": "./dist/types.d.ts"
+    },
+    "./template-path": {
+      "alp-source": {
+        "types": "./src/template-path.js"
+      },
+      "types": "./dist/template-path.d.ts",
+      "default": "./src/template-path.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anhlp/alp-protocol": "0.9.5"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build-workspace.mjs core",
+    "test": "node ../../scripts/test-workspace.mjs core",
+    "prepack": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phucanh08/alp-paseo.git",
+    "directory": "packages/core"
+  }
+}

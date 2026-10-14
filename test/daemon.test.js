@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { realpath as realpathOf } from 'node:fs/promises';
-import { initProject } from '../src/core/init.js';
-import { connect, daemonPaths, ensureDaemon, findDaemonEntry, readLock, PROTOCOL_VERSION } from '../src/client/index.js';
+import { initProject } from '../packages/core/src/init.js';
+import { connect, daemonPaths, ensureDaemon, findDaemonEntry, readLock, PROTOCOL_VERSION } from '../packages/client/src/index.js';
 import { createAlpRuntime } from '../dist/runtime/index.js';
 import { createDaemonServer, createStore } from '../dist/daemon/index.js';
 
@@ -71,7 +71,7 @@ const text = body => [{ type: 'text', text: body }];
 
 test('handshake is required and versioned', async t => {
   const { socketPath } = await setup(t);
-  const { AlpClient } = await import('../src/client/index.js');
+  const { AlpClient } = await import('../packages/client/src/index.js');
   const net = await import('node:net');
   const raw = new AlpClient(net.createConnection(socketPath));
   t.after(() => raw.close());

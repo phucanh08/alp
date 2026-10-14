@@ -1,7 +1,27 @@
 {
   "compilerOptions": {
-    "target": "ES2022", "lib": ["ES2022"], "module": "ESNext", "moduleResolution": "Bundler",
-    "jsx": "react-jsx", "strict": true, "noEmit": true, "skipLibCheck": true, "types": []
+    "target": "ES2022",
+    "lib": [
+      "ES2022"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": [],
+    "customConditions": [
+      "alp-source"
+    ]
   },
-  "include": ["plugins/paseo/index.client.tsx", "plugins/paseo/client", "plugins/paseo/shared"]
+  "include": [
+    "packages/paseo/index.client.tsx",
+    "packages/paseo/client",
+    "packages/paseo/shared"
+  ],
+  "exclude": [
+    "node_modules",
+    "**/dist/**"
+  ]
 }

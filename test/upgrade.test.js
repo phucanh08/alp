@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { upgradeProject } from '../src/core/upgrade.js';
-import { resolveAgent } from '../src/core/resolver.js';
+import { upgradeProject } from '../packages/core/src/upgrade.js';
+import { resolveAgent } from '../packages/core/src/resolver.js';
 
 async function fixture(t, main = '# Main agent\n\nHelp with tasks in this project.\n') {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-upgrade-'));

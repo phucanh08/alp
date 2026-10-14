@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
-import { upgradeProject } from '../src/core/upgrade.js';
-import { validateSettings } from '../src/core/validation.js';
+import { initProject } from '../packages/core/src/init.js';
+import { upgradeProject } from '../packages/core/src/upgrade.js';
+import { validateSettings } from '../packages/core/src/validation.js';
 import { fakeTransport, until } from './support/fake-agent.js';
 import { createAlpRuntime, resolveSession } from '../dist/runtime/index.js';
 

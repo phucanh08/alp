@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
-import { connect } from '../src/client/index.js';
+import { initProject } from '../packages/core/src/init.js';
+import { connect } from '../packages/client/src/index.js';
 import { createAlpRuntime } from '../dist/runtime/index.js';
 import { createDaemonServer } from '../dist/daemon/index.js';
 

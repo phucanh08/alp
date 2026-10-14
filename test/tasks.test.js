@@ -5,11 +5,11 @@ import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initProject } from '../src/core/init.js';
-import { addGate, blockersOf, checkGates, gatesOf, closeTask, compactTasks, createTask, resolveGate, startRefusal, getTask, linkTask, listTasks, loadTasks, readyTasks, releaseTask, reopenTask, startTask, submitTask, taskDigest, updateTask } from '../src/core/tasks.js';
+import { initProject } from '../packages/core/src/init.js';
+import { addGate, blockersOf, checkGates, gatesOf, closeTask, compactTasks, createTask, resolveGate, startRefusal, getTask, linkTask, listTasks, loadTasks, readyTasks, releaseTask, reopenTask, startTask, submitTask, taskDigest, updateTask } from '../packages/core/src/tasks.js';
 import { createAlpRuntime, claudeToolShapes } from '../dist/runtime/index.js';
 
-const CLI = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../packages/cli/src/cli.js', import.meta.url));
 
 async function project(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-tasks-'));

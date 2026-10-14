@@ -9,10 +9,10 @@ import { validateWSOutboundMessage } from '@getpaseo/protocol/validation/ws-outb
 import { createAlpRuntime } from '../dist/runtime/index.js';
 import { createDaemonServer, createPaseoBridge, createWebServer } from '../dist/daemon/index.js';
 import { fakeTransport } from './support/fake-agent.js';
-import { seedLibrary } from '../src/core/library.js';
-import { saveEntry } from '../src/core/library-edit.js';
-import { loadProvider } from '../src/core/providers.js';
-import { initProject } from '../src/core/init.js';
+import { seedLibrary } from '../packages/core/src/library.js';
+import { saveEntry } from '../packages/core/src/library-edit.js';
+import { loadProvider } from '../packages/core/src/providers.js';
+import { initProject } from '../packages/core/src/init.js';
 import { resolveSession } from '../dist/runtime/index.js';
 
 const FAKE = fileURLToPath(new URL('./support/fake-acp.js', import.meta.url));

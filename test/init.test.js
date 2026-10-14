@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { initProject } from '../src/core/init.js';
-import { resolveAgent, discoverAgents } from '../src/core/resolver.js';
-import { seedLibrary } from '../src/core/library.js';
+import { initProject } from '../packages/core/src/init.js';
+import { resolveAgent, discoverAgents } from '../packages/core/src/resolver.js';
+import { seedLibrary } from '../packages/core/src/library.js';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-init-'));
@@ -89,7 +89,7 @@ test('directory at a scaffold file path fails safely', async t => {
 test('CLI supports cwd and explicit new directory, and rejects invalid usage', async t => {
   const root = await fixture(t);
   const home = await fixture(t);
-  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const cli = fileURLToPath(new URL('../packages/cli/src/cli.js', import.meta.url));
   const run = (...args) => spawnSync(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, ALP_HOME: home } });
   assert.match(run('init').stdout, /Skill library .*: \d+ files added/);
   assert.ok(JSON.parse(await readFile(path.join(home, 'role-skills.json'), 'utf8')).main.includes('xia'));

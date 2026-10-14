@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"daemon.hello","params":{"protocolVersion":1,"client":{"name":"fixture","version":"0.9.5"}}}
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}
+{"jsonrpc":"2.0","method":"event","params":{"sessionId":"ses_fixture","epoch":"fixture-epoch","seq":1,"ts":"2026-10-14T00:00:00.000Z","event":{"type":"session.ready"}}}
+{"jsonrpc":"2.0","id":2,"error":{"code":1001,"message":"No session ses_fixture"}}

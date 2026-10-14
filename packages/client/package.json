@@ -1,0 +1,137 @@
+{
+  "name": "@anhlp/alp-client",
+  "version": "0.9.5",
+  "type": "module",
+  "description": "ALP client module",
+  "files": [
+    "src",
+    "dist"
+  ],
+  "exports": {
+    "./acp-probe": {
+      "alp-source": {
+        "types": "./src/acp-probe.js",
+        "default": "./src/acp-probe.js"
+      },
+      "types": "./dist/acp-probe.d.ts",
+      "default": "./src/acp-probe.js"
+    },
+    "./antigravity-probe": {
+      "alp-source": {
+        "types": "./src/antigravity-probe.js",
+        "default": "./src/antigravity-probe.js"
+      },
+      "types": "./dist/antigravity-probe.d.ts",
+      "default": "./src/antigravity-probe.js"
+    },
+    "./command": {
+      "alp-source": {
+        "types": "./src/command.js",
+        "default": "./src/command.js"
+      },
+      "types": "./dist/command.d.ts",
+      "default": "./src/command.js"
+    },
+    "./doctor": {
+      "alp-source": {
+        "types": "./src/doctor.js",
+        "default": "./src/doctor.js"
+      },
+      "types": "./dist/doctor.d.ts",
+      "default": "./src/doctor.js"
+    },
+    "./index": {
+      "alp-source": {
+        "types": "./src/index.js",
+        "default": "./src/index.js"
+      },
+      "types": "./dist/index.d.ts",
+      "default": "./src/index.js"
+    },
+    ".": {
+      "alp-source": {
+        "types": "./src/index.js",
+        "default": "./src/index.js"
+      },
+      "types": "./dist/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./library-test": {
+      "alp-source": {
+        "types": "./src/library-test.js",
+        "default": "./src/library-test.js"
+      },
+      "types": "./dist/library-test.d.ts",
+      "default": "./src/library-test.js"
+    },
+    "./mcp-probe": {
+      "alp-source": {
+        "types": "./src/mcp-probe.js",
+        "default": "./src/mcp-probe.js"
+      },
+      "types": "./dist/mcp-probe.d.ts",
+      "default": "./src/mcp-probe.js"
+    },
+    "./prompt": {
+      "alp-source": {
+        "types": "./src/prompt.js",
+        "default": "./src/prompt.js"
+      },
+      "types": "./dist/prompt.d.ts",
+      "default": "./src/prompt.js"
+    },
+    "./render": {
+      "alp-source": {
+        "types": "./src/render.js",
+        "default": "./src/render.js"
+      },
+      "types": "./dist/render.d.ts",
+      "default": "./src/render.js"
+    },
+    "./service": {
+      "alp-source": {
+        "types": "./src/service.js",
+        "default": "./src/service.js"
+      },
+      "types": "./dist/service.d.ts",
+      "default": "./src/service.js"
+    },
+    "./setup": {
+      "alp-source": {
+        "types": "./src/setup.js",
+        "default": "./src/setup.js"
+      },
+      "types": "./dist/setup.d.ts",
+      "default": "./src/setup.js"
+    },
+    "./supervise": {
+      "alp-source": {
+        "types": "./src/supervise.js",
+        "default": "./src/supervise.js"
+      },
+      "types": "./dist/supervise.d.ts",
+      "default": "./src/supervise.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anhlp/alp-core": "0.9.5",
+    "@anhlp/alp-protocol": "0.9.5"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build-workspace.mjs client",
+    "test": "node ../../scripts/test-workspace.mjs client",
+    "prepack": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phucanh08/alp-paseo.git",
+    "directory": "packages/client"
+  }
+}

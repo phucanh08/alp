@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import * as acp from '@agentclientprotocol/sdk';
-import { initProject } from '../src/core/init.js';
+import { initProject } from '../packages/core/src/init.js';
 import { createAlpRuntime } from '../dist/runtime/index.js';
 import { createDaemonServer } from '../dist/daemon/index.js';
 import { createAcpAgent, hostServers, promptText } from '../dist/acp/agent.js';

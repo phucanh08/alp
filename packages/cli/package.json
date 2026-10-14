@@ -1,0 +1,144 @@
+{
+  "name": "@anhlp/alp-cli",
+  "version": "0.9.5",
+  "type": "module",
+  "description": "ALP cli module",
+  "files": [
+    "src",
+    "dist"
+  ],
+  "exports": {
+    "./acp/agent": {
+      "alp-source": {
+        "types": "./src/acp/agent.ts",
+        "default": "./src/acp/agent.ts"
+      },
+      "types": "./dist/acp/agent.d.ts",
+      "default": "./dist/acp/agent.js"
+    },
+    "./acp/main": {
+      "alp-source": {
+        "types": "./src/acp/main.ts",
+        "default": "./src/acp/main.ts"
+      },
+      "types": "./dist/acp/main.d.ts",
+      "default": "./dist/acp/main.js"
+    },
+    "./cli": {
+      "alp-source": {
+        "types": "./src/cli.js",
+        "default": "./src/cli.js"
+      },
+      "types": "./dist/cli.d.ts",
+      "default": "./dist/cli.js"
+    },
+    "./daemon": {
+      "alp-source": {
+        "types": "./src/daemon.js",
+        "default": "./src/daemon.js"
+      },
+      "types": "./dist/daemon.d.ts",
+      "default": "./dist/daemon.js"
+    },
+    "./index": {
+      "alp-source": {
+        "types": "./src/index.js",
+        "default": "./src/index.js"
+      },
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    ".": {
+      "alp-source": {
+        "types": "./src/index.js",
+        "default": "./src/index.js"
+      },
+      "types": "./dist/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./interfaces": {
+      "alp-source": {
+        "types": "./src/interfaces.js",
+        "default": "./src/interfaces.js"
+      },
+      "types": "./dist/interfaces.d.ts",
+      "default": "./dist/interfaces.js"
+    },
+    "./library": {
+      "alp-source": {
+        "types": "./src/library.js",
+        "default": "./src/library.js"
+      },
+      "types": "./dist/library.d.ts",
+      "default": "./dist/library.js"
+    },
+    "./paths": {
+      "alp-source": {
+        "types": "./src/paths.js",
+        "default": "./src/paths.js"
+      },
+      "types": "./dist/paths.d.ts",
+      "default": "./dist/paths.js"
+    },
+    "./projects": {
+      "alp-source": {
+        "types": "./src/projects.js",
+        "default": "./src/projects.js"
+      },
+      "types": "./dist/projects.d.ts",
+      "default": "./dist/projects.js"
+    },
+    "./sessions": {
+      "alp-source": {
+        "types": "./src/sessions.js",
+        "default": "./src/sessions.js"
+      },
+      "types": "./dist/sessions.d.ts",
+      "default": "./dist/sessions.js"
+    },
+    "./tasks": {
+      "alp-source": {
+        "types": "./src/tasks.js",
+        "default": "./src/tasks.js"
+      },
+      "types": "./dist/tasks.d.ts",
+      "default": "./dist/tasks.js"
+    },
+    "./usage": {
+      "alp-source": {
+        "types": "./src/usage.js",
+        "default": "./src/usage.js"
+      },
+      "types": "./dist/usage.d.ts",
+      "default": "./dist/usage.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anhlp/alp-core": "0.9.5",
+    "@anhlp/alp-client": "0.9.5",
+    "@anhlp/alp-protocol": "0.9.5",
+    "smol-toml": "1.9.0",
+    "@agentclientprotocol/sdk": "1.7.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.292"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build-workspace.mjs cli",
+    "test": "node ../../scripts/test-workspace.mjs cli",
+    "prepack": "node ../../scripts/check-web-app.mjs && npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phucanh08/alp-paseo.git",
+    "directory": "packages/cli"
+  },
+  "bin": {
+    "alp": "dist/cli.js"
+  }
+}

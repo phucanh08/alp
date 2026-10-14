@@ -4,10 +4,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { connect, daemonPaths, ensureDaemon, readLock } from '../src/client/index.js';
-import { initProject } from '../src/core/init.js';
-import { resolveAgent } from '../src/core/resolver.js';
-import { settingsKeys, settingsWarnings, validateSettings, validateUserSettings } from '../src/core/validation.js';
+import { connect, daemonPaths, ensureDaemon, readLock } from '../packages/client/src/index.js';
+import { initProject } from '../packages/core/src/init.js';
+import { resolveAgent } from '../packages/core/src/resolver.js';
+import { settingsKeys, settingsWarnings, validateSettings, validateUserSettings } from '../packages/core/src/validation.js';
 
 test('a mistyped setting fails with the key it was probably meant to be', () => {
   assert.throws(() => validateSettings({ verfy: { test: 'npm test' } }, '.alp/settings.json'), /\.alp\/settings\.json: unknown setting 'verfy'; did you mean 'verify'\?/);

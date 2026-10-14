@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { createPaseoApi } from '@getpaseo/client';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
-import { initProject } from '../src/core/init.js';
+import { initProject } from '../packages/core/src/init.js';
 
 const scenario = process.argv[2] ?? 'ask';
 const provider = process.env.ALP_TEST_PROVIDER ?? 'alp/pho';

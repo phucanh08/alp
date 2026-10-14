@@ -6,17 +6,17 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
-import { connect, readLock } from '../src/client/index.js';
+import { initProject } from '../packages/core/src/init.js';
+import { connect, readLock } from '../packages/client/src/index.js';
 
 const model = process.env.ALP_TEST_MODEL ?? 'codex:gpt-5.6-sol';
 const home = await mkdtemp(path.join(tmpdir(), 'alp-persist-'));
 const env = { ...process.env, ALP_HOME: home, ALP_RUN_LOG_DIR: path.join(home, 'runs') };
-const cli = (...args) => spawnSync(process.execPath, ['src/cli.js', ...args], { env, encoding: 'utf8' });
+const cli = (...args) => spawnSync(process.execPath, ['packages/cli/src/cli.js', ...args], { env, encoding: 'utf8' });
 
 /** Runs the CLI with --json; resolves its envelopes, or calls `onEnvelope` as they stream. */
 function stream(args, onEnvelope = () => {}) {
-  const child = spawn(process.execPath, ['src/cli.js', ...args, '--json'], { env });
+  const child = spawn(process.execPath, ['packages/cli/src/cli.js', ...args, '--json'], { env });
   const envelopes = [];
   let buffer = '';
   child.stdout.on('data', chunk => {

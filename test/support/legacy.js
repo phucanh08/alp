@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { initProject } from '../../src/core/init.js';
+import { initProject } from '../../packages/core/src/init.js';
 
 export const BUILTIN = ['main', 'lead', 'peer', 'oracle', 'reviewer', 'supervisor'];
 

@@ -4,20 +4,21 @@
   "description": "ALP command line and alpd, the per-user daemon that runs filesystem-defined Codex and Claude Code agent teams",
   "type": "module",
   "files": [
-    "src/cli.js",
-    "src/client",
-    "src/core",
+    "packages/cli/dist",
+    "packages/core/dist",
+    "packages/client/dist",
     "dist/alpd.js",
     "dist/acp.js",
     "dist/web-app",
     "templates",
-    "README.md"
+    "README.md",
+    "docs/modular-monorepo.md"
   ],
   "bin": {
-    "alp": "src/cli.js"
+    "alp": "packages/cli/dist/cli.js"
   },
   "scripts": {
-    "pretest": "node scripts/build-paseo.mjs",
+    "pretest": "node scripts/build-workspace.mjs runtime && node scripts/build-paseo.mjs && node scripts/build-workspace.mjs cli",
     "test": "ALP_HOME=\"$(mktemp -d)\" node --test 'test/*.test.js'",
     "check": "tsc -p tsconfig.paseo.json && tsc -p tsconfig.client.json",
     "build": "node scripts/build-paseo.mjs",
@@ -40,8 +41,15 @@
     "test:e2e:human": "node scripts/human-e2e.mjs cli && node scripts/human-e2e.mjs paseo",
     "test:e2e:board": "node scripts/build-paseo.mjs && node scripts/board-e2e.mjs",
     "test:daemon": "node scripts/build-paseo.mjs && node --test test/daemon.test.js",
-    "prepack": "node scripts/build-paseo.mjs && node scripts/check-web-app.mjs",
-    "build:web": "node scripts/build-paseo-web.mjs"
+    "prepack": "node scripts/build-workspace.mjs cli && node scripts/build-paseo.mjs && node scripts/check-web-app.mjs",
+    "build:web": "node scripts/build-paseo-web.mjs",
+    "build:packages": "npm run build --workspaces --if-present",
+    "test:packages": "npm run test --workspaces --if-present",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "release:check": "npm run check:boundaries && npm run check && npm test && npm run build:packages && npm run release:pack-check",
+    "version:package": "node scripts/version-package.mjs",
+    "release:pack-check": "node scripts/pack-check.mjs",
+    "test:packages:smoke": "node scripts/package-smoke.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -58,6 +66,7 @@
     "@types/react": "19.1.17",
     "@types/react-dom": "19.1",
     "@types/ws": "^8.18.2",
+    "ajv": "8.17.1",
     "esbuild": "0.25.12",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -67,6 +76,9 @@
     "zod": "4.4.3"
   },
   "dependencies": {
+    "@anhlp/alp-client": "0.9.5",
+    "@anhlp/alp-core": "0.9.5",
+    "@anhlp/alp-protocol": "0.9.5",
     "@anthropic-ai/claude-agent-sdk": "^0.3.292",
     "smol-toml": "1.9.0"
   },
@@ -78,5 +90,15 @@
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
-  }
+  },
+  "workspaces": [
+    "packages/protocol",
+    "packages/core",
+    "packages/runtime",
+    "packages/client",
+    "packages/daemon",
+    "packages/cli",
+    "packages/tui",
+    "packages/paseo"
+  ]
 }

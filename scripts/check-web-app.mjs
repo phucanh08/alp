@@ -9,7 +9,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const upstream = JSON.parse(await readFile(path.join(root, 'paseo-web/upstream.json'), 'utf8'));
 const patches = (await readdir(path.join(root, 'paseo-web/patches'))).filter(name => name.endsWith('.patch')).sort();
 const problems = [];
-for (const target of ['dist/web-app', 'plugins/paseo/server/dist/web-app']) {
+for (const target of ['dist/web-app', 'packages/paseo/server/dist/web-app']) {
   const built = await readFile(path.join(root, target, 'alp-web-app.json'), 'utf8').then(JSON.parse, () => undefined);
   if (!built) { problems.push(`${target} is missing`); continue; }
   if (built.paseoCommit !== upstream.commit) problems.push(`${target} is built from Paseo ${built.paseoCommit.slice(0, 7)}, not ${upstream.commit.slice(0, 7)}`);

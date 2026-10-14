@@ -1,0 +1,99 @@
+{
+  "name": "@anhlp/alp-protocol",
+  "version": "0.9.5",
+  "type": "module",
+  "description": "ALP protocol module",
+  "files": [
+    "src",
+    "dist",
+    "schema",
+    "fixtures"
+  ],
+  "exports": {
+    "./connection": {
+      "alp-source": {
+        "types": "./src/connection.ts",
+        "default": "./src/connection.ts"
+      },
+      "types": "./dist/connection.d.ts",
+      "default": "./dist/connection.js"
+    },
+    "./dto": {
+      "alp-source": {
+        "types": "./src/dto.ts",
+        "default": "./src/dto.ts"
+      },
+      "types": "./dist/dto.d.ts",
+      "default": "./dist/dto.js"
+    },
+    "./events": {
+      "alp-source": {
+        "types": "./src/events.ts",
+        "default": "./src/events.ts"
+      },
+      "types": "./dist/events.d.ts",
+      "default": "./dist/events.js"
+    },
+    "./index": {
+      "alp-source": {
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
+      },
+      "types": "./dist/index.d.ts",
+      "default": "./src/public.js"
+    },
+    ".": {
+      "alp-source": {
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
+      },
+      "types": "./dist/index.d.ts",
+      "default": "./src/public.js"
+    },
+    "./wire": {
+      "alp-source": {
+        "types": "./src/wire.js",
+        "default": "./src/wire.js"
+      },
+      "types": "./dist/wire.d.ts",
+      "default": "./src/wire.js"
+    },
+    "./schema": {
+      "default": "./schema/ipc-v1.json"
+    },
+    "./session": {
+      "alp-source": {
+        "types": "./src/session.ts",
+        "default": "./src/session.ts"
+      },
+      "types": "./dist/session.d.ts",
+      "default": "./dist/session.js"
+    },
+    "./rpc": {
+      "alp-source": {
+        "types": "./src/rpc.ts",
+        "default": "./src/rpc.ts"
+      },
+      "types": "./dist/rpc.d.ts",
+      "default": "./dist/rpc.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {},
+  "scripts": {
+    "build": "node ../../scripts/build-workspace.mjs protocol",
+    "test": "node ../../scripts/test-workspace.mjs protocol",
+    "prepack": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phucanh08/alp-paseo.git",
+    "directory": "packages/protocol"
+  }
+}

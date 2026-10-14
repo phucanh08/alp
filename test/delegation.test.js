@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { resolveDelegation } from '../src/core/delegation.js';
+import { resolveDelegation } from '../packages/core/src/delegation.js';
 
 async function fixture(t, delegation) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-delegation-'));

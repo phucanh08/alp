@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { createProvider } from '../plugins/paseo/server/dist/index.js';
+import { createProvider } from '../packages/paseo/server/dist/index.js';
 import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
 
 // Default to an ignored fixture: the provider installs ALP starter files into the project.

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
-import { createProvider } from '../plugins/paseo/server/dist/index.js';
+import { initProject } from '../packages/core/src/init.js';
+import { createProvider } from '../packages/paseo/server/dist/index.js';
 import { PROVIDER_CAPABILITIES, ProviderEventSchema } from '@getpaseo/plugin/server/provider';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));

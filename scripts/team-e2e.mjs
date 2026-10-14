@@ -5,7 +5,7 @@ import { readFile, writeFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createPaseoApi } from '@getpaseo/client';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
-import { initProject } from '../src/core/init.js';
+import { initProject } from '../packages/core/src/init.js';
 
 const root = path.resolve('.alp-test', `team-${Date.now()}`);
 await initProject(root);

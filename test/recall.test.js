@@ -4,8 +4,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
-import { createTask, getTask, loadTasks, releaseOrphans, startTask, taskDigest } from '../src/core/tasks.js';
+import { initProject } from '../packages/core/src/init.js';
+import { createTask, getTask, loadTasks, releaseOrphans, startTask, taskDigest } from '../packages/core/src/tasks.js';
 import { createAlpRuntime } from '../dist/runtime/index.js';
 
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();

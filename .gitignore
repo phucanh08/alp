@@ -2,7 +2,9 @@ node_modules
 node_modules/
 .tools/
 .alp-test/
-plugins/paseo/dist/
-plugins/paseo/server/dist/
 dist/
 .cache/
+
+packages/*/dist/
+packages/core/templates/
+packages/paseo/server/dist/

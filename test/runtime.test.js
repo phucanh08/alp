@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/core/init.js';
+import { initProject } from '../packages/core/src/init.js';
 import { claudeToolShapes, createAlpRuntime } from '../dist/runtime/index.js';
 
 async function until(check) {
@@ -56,7 +56,7 @@ const prompt = (clientMessageId, text) => ({ clientMessageId, delivery: 'auto', 
 const decode = result => JSON.parse(result.contentItems[0].text);
 
 test('runtime sources never import a viewer SDK or the plugin', async () => {
-  const directory = new URL('../src/runtime/', import.meta.url);
+  const directory = new URL('../packages/runtime/src/', import.meta.url);
   for (const file of await readdir(directory)) {
     if (!file.endsWith('.ts')) continue;
     const source = await readFile(new URL(file, directory), 'utf8');
@@ -64,7 +64,7 @@ test('runtime sources never import a viewer SDK or the plugin', async () => {
       const target = match[1];
       // MCP is a native runtime protocol, independent of any viewer or plugin.
       const mcpClient = ['@modelcontextprotocol/sdk/client/index.js', '@modelcontextprotocol/sdk/client/stdio.js', '@modelcontextprotocol/sdk/client/streamableHttp.js'].includes(target);
-      assert.ok(target.startsWith('node:') || /^\.\/[^/]+$/.test(target) || /^\.\.\/core\/[^/]+$/.test(target) || target === 'zod' || target === 'smol-toml' || mcpClient, `${file} imports ${target}`);
+      assert.ok(target.startsWith('node:') || /^\.\/[^/]+$/.test(target) || /^@anhlp\/alp-(?:core|protocol)(?:\/[^/]+)?$/.test(target) || target === 'zod' || target === 'smol-toml' || mcpClient, `${file} imports ${target}`);
     }
   }
 });
