@@ -1,6 +1,6 @@
 {
   "name": "alp-paseo-plugin",
-  "version": "0.9.2",
+  "version": "0.9.5",
   "type": "module",
   "files": [
     "paseo-plugin.json",
