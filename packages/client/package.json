@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp-client",
-  "version": "0.9.5",
+  "version": "0.10.0",
   "type": "module",
   "description": "ALP client module",
   "files": [
@@ -117,8 +117,8 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@anhlp/alp-core": "0.9.5",
-    "@anhlp/alp-protocol": "0.9.5"
+    "@anhlp/alp-core": "0.10.0",
+    "@anhlp/alp-protocol": "0.10.0"
   },
   "scripts": {
     "build": "node ../../scripts/build-workspace.mjs client",
