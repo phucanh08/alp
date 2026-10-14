@@ -12,7 +12,7 @@ const ENV = { ...process.env, GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' };
 
 export async function git(cwd: string, args: string[], { maxBuffer = 16 * 1024 * 1024, okCodes = [0] }: { maxBuffer?: number; okCodes?: number[] } = {}) {
   try {
-    return (await run('git', ['-C', cwd, ...args], { env: ENV, maxBuffer })).stdout;
+    return (await run('git', ['-C', cwd, ...args], { env: ENV, maxBuffer, windowsHide: true })).stdout;
   } catch (error: any) {
     if (typeof error?.code === 'number' && okCodes.includes(error.code) && typeof error.stdout === 'string') return error.stdout as string;
     throw error;
