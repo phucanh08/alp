@@ -13,10 +13,12 @@ export function alpHome(env = process.env) {
   return path.resolve(env.ALP_HOME || path.join(os.homedir(), '.alp'));
 }
 
-/** Unix socket paths are limited to about 104 bytes; long homes get a short socket in the temp directory. */
+/** Windows uses named pipes; long Unix homes get a short socket in the temp directory. */
 export function daemonPaths(home) {
   const preferred = path.join(home, 'alpd.sock');
-  const socket = Buffer.byteLength(preferred) < 100
+  const socket = process.platform === 'win32'
+    ? `\\\\.\\pipe\\alpd-${createHash('sha256').update(home).digest('hex').slice(0, 24)}`
+    : Buffer.byteLength(preferred) < 100
     ? preferred
     : path.join(os.tmpdir(), `alpd-${createHash('sha256').update(home).digest('hex').slice(0, 12)}.sock`);
   return { home, lock: path.join(home, 'alpd.lock'), socket, log: path.join(home, 'logs', 'alpd.log'), install: path.join(home, 'alpd.json') };

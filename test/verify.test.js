@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -176,7 +176,7 @@ test('alp_merge verifies a worktree change first; continueFrom fixes it in a wor
   await until(async () => (await getTask(root, task.id)).verified?.passed === false);
   assert.match((await main.call('alp_task', { action: 'close', id: task.id, summary: 'Looks done' })).error, /verification failed: test exited 1; fix it and verify again/);
 
-  assert.match((await main.call('alp_delegate', { agent: 'peer', task: 'Fix', mode: 'workspace-write', continueFrom: 'nope' })).error, /continueFrom names a finished worktree assignment/);
+  assert.match((await main.call('alp_delegate', { agent: 'peer', task: 'Fix', mode: 'workspace-write', continueFrom: 'nope' })).error, /continueFrom names a finished shared assignment/);
   const second = await delegate(runtimes, main, { continueFrom: first.id, taskId: task.id }, async cwd => {
     // The earlier change is there to build on.
     assert.equal(await readFile(path.join(cwd, 'feature.txt'), 'utf8'), 'v1\n');
@@ -271,4 +271,43 @@ test('alp verify runs the commands in the project and records them on a task', a
   result = run('task', 'show', task.id);
   assert.match(result.stdout, /✓ verified \(test\) in the checkout/);
   assert.equal((await loadTasks(root)).tasks[0].verified.by, 'user');
+});
+
+test('continueFrom carries a finished shared assignment forward in the same checkout', async t => {
+  const { root, runtimes, main } = await setup(t, null);
+  for (const mode of ['read-only', 'workspace-write']) {
+    const first = await delegate(runtimes, main, { mode }, async cwd => {
+      assert.equal(cwd, root);
+      if (mode === 'workspace-write') await writeFile(path.join(cwd, 'shared.txt'), 'unfinished\n');
+    });
+    const second = await delegate(runtimes, main, { mode, continueFrom: first.id }, async (cwd, peer) => {
+      assert.equal(cwd, root);
+      const brief = peer.started[0].params.input.map(entry => entry.text).join('\n');
+      assert.match(brief, new RegExp(first.id));
+      assert.match(brief, /Changed it/);
+      if (mode === 'workspace-write') assert.equal(await readFile(path.join(cwd, 'shared.txt'), 'utf8'), 'unfinished\n');
+    });
+    assert.notEqual(second.id, first.id);
+  }
+});
+
+test('shared continuation keeps writeRoot and rejects other requesters and isolation changes', async t => {
+  const { root, dir, runtime, runtimes, main } = await setup(t, null);
+  const other = path.join(dir, 'other-repo');
+  await mkdir(other);
+  const first = await delegate(runtimes, main, { writeRoot: other }, async cwd => {
+    assert.equal(cwd, await realpath(other));
+    await writeFile(path.join(cwd, 'partial.txt'), 'keep me');
+  });
+  const args = { agent: 'peer', task: 'Continue', mode: 'workspace-write', continueFrom: first.id };
+  assert.match((await main.call('alp_delegate', { ...args, isolation: 'worktree' })).error, /shared checkout/);
+  assert.match((await main.call('alp_delegate', { ...args, writeRoot: root })).error, /original checkout/);
+  await runtime.open('outsider', { cwd: root });
+  await runtime.prompt('outsider', { clientMessageId: 'other', content: [{ type: 'text', text: 'Work' }] });
+  const outsider = runtimes.at(-1);
+  assert.match((await outsider.call('alp_delegate', args)).error, /of yours/);
+  await delegate(runtimes, main, { continueFrom: first.id }, async cwd => {
+    assert.equal(cwd, await realpath(other));
+    assert.equal(await readFile(path.join(cwd, 'partial.txt'), 'utf8'), 'keep me');
+  });
 });
