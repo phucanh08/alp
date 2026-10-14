@@ -50,7 +50,7 @@ async function setup(t) {
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'] } }));
   const runtimes = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes) });
-  const socketPath = path.join(directory, 's.sock');
+  const socketPath = daemonPaths(directory).socket;
   const server = createDaemonServer({ runtime, socketPath, version: 'test' });
   await server.listen();
   t.after(async () => { await server.close(); await runtime.shutdown(); });
@@ -155,7 +155,7 @@ test('alpd starts detached, publishes its socket in the lock, and shuts down cle
   await client.request('daemon.shutdown');
   client.close();
   await until(async () => !(await readLock(home)));
-  await assert.rejects(access(socket));
+  await assert.rejects(connect(socket), 'a stopped daemon no longer accepts connections');
 
   // A client that cannot locate alpd (the Paseo plugin) starts it from the recorded location.
   const restarted = await ensureDaemon({ home, env: { ...process.env, PATH: '' } });
@@ -217,7 +217,9 @@ test('finds alpd through the ALP CLI on PATH', async t => {
 async function durable(t, directory, project, runtimes) {
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(directory, 'runs') });
   const store = createStore(path.join(directory, 'state'));
-  const socketPath = path.join(directory, `d${runtimes.length}.sock`);
+  const home = path.join(directory, `d${runtimes.length}`);
+  await mkdir(home, { recursive: true });
+  const socketPath = daemonPaths(home).socket;
   const server = createDaemonServer({ runtime, socketPath, version: 'test', store, runLogDir: path.join(directory, 'runs') });
   await server.listen();
   const client = await connect(socketPath);
