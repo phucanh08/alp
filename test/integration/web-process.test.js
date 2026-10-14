@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
@@ -19,6 +19,13 @@ const root = path.resolve(import.meta.dirname, '..', '..');
 const cli = path.join(root, 'packages', 'cli', 'dist', 'cli.js');
 const integrationDescriptor = path.join(root, 'integrations', 'web.json');
 const execFileAsync = promisify(execFile);
+
+// The integration serves a web app only when one is built beside it; these tests exercise the process
+// lifecycle, so a stand-in page keeps them independent of the large web build (ALP_WEB_APP is the override).
+const standInApp = await mkdtemp(path.join(tmpdir(), 'alp-web-app-'));
+await writeFile(path.join(standInApp, 'index.html'), '<!doctype html><title>ALP</title>');
+process.env.ALP_WEB_APP = standInApp;
+after(() => rm(standInApp, { recursive: true, force: true }));
 const { connect, readLock, lockAlive } = await import('../../packages/client/dist/index.js');
 
 /**
