@@ -653,12 +653,12 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     },
 
     async listen() {
-      await unlink(socketPath).catch(() => {});
+      if (process.platform !== 'win32') await unlink(socketPath).catch(() => {});
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject);
         server.listen(socketPath, () => { server.off('error', reject); resolve(); });
       });
-      await chmod(socketPath, 0o600);
+      if (process.platform !== 'win32') await chmod(socketPath, 0o600);
     },
 
     local() {
@@ -721,7 +721,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       const stopped = new Promise<void>(resolve => server.close(() => resolve()));
       for (const connection of connections) connection.socket?.destroy();
       await stopped;
-      await unlink(socketPath).catch(() => {});
+      if (process.platform !== 'win32') await unlink(socketPath).catch(() => {});
       await store?.flush();
     },
   };
