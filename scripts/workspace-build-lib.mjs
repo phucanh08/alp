@@ -17,12 +17,8 @@ export async function resources() {
     const file = path.join(entry.parentPath, entry.name);
     templates[path.relative(path.join(ROOT, 'packages/core/templates'), file).replaceAll('\\', '/')] = await readFile(file, 'utf8');
   }
-  const pluginClientBuild = await build({ absWorkingDir: ROOT, entryPoints: ['packages/paseo/index.client.tsx'], bundle: true, write: false, format: 'cjs', jsx: 'automatic', platform: 'neutral', target: 'es2020', mainFields: ['module', 'main'], supported: { 'async-await': false }, external: ['@getpaseo/plugin', '@getpaseo/plugin/*', 'react', 'react/jsx-runtime', 'react-native', '@tanstack/react-query', 'zod'], legalComments: 'none' });
-  const manifest = JSON.parse(await readFile(path.join(ROOT, 'packages/paseo/paseo-plugin.json'), 'utf8'));
-  const code = pluginClientBuild.outputFiles[0].text.replaceAll('get: () => from[key]', 'value: from[key]');
-  const client = { id: manifest.id, requirements: manifest.requirements, factory: `(function(require){const module={exports:{}};const exports=module.exports;${code}\nreturn module.exports;})` };
   return [{ name: 'alp-resources', setup(builder) {
-    builder.onResolve({ filter: /^alp:(templates|plugin-client)$/ }, args => ({ path: args.path, namespace: 'alp' }));
-    builder.onLoad({ filter: /.*/, namespace: 'alp' }, args => ({ contents: `export default ${JSON.stringify(args.path === 'alp:templates' ? templates : client)}`, loader: 'js' }));
+    builder.onResolve({ filter: /^alp:templates$/ }, () => ({ path: 'templates', namespace: 'alp' }));
+    builder.onLoad({ filter: /.*/, namespace: 'alp' }, () => ({ contents: `export default ${JSON.stringify(templates)}`, loader: 'js' }));
   } }];
 }

@@ -247,7 +247,7 @@
   },
   "scripts": {
     "build": "node ../../scripts/build-workspace.mjs core",
-    "test": "node ../../scripts/test-workspace.mjs core",
+    "test": "node ../../scripts/test-package.mjs core",
     "prepack": "npm run build"
   },
   "publishConfig": {

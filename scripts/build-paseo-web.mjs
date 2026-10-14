@@ -13,7 +13,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const upstream = JSON.parse(await readFile(path.join(root, 'paseo-web/upstream.json'), 'utf8'));
 const source = path.resolve(process.env.ALP_PASEO_SRC ?? path.join(root, '.cache/paseo-web'));
 const patchDir = path.join(root, 'paseo-web/patches');
-const targets = [path.join(root, 'dist/web-app'), path.join(root, 'packages/paseo/server/dist/web-app')];
+const targets = [path.join(root, 'dist/web-app'), path.join(root, 'integrations/paseo/server/dist/web-app')];
 
 function run(command, args, cwd = source, env = {}) {
   console.log(`$ ${command} ${args.join(' ')}`);

@@ -34,7 +34,7 @@ medium, Fable 5.1 at high / GPT-6 Astra at low (the only effort it takes). Setup
 not install CLIs, log in or call models: run `alp doctor` for that. New sessions use
 the profiles; running sessions keep theirs.
 
-The package provides the `alp` command and `alpd`, the per-user daemon that runs ALP sessions. To view and drive sessions in Paseo, also install the [Paseo plugin](packages/paseo/README.md).
+The package provides the `alp` command and `alpd`, the per-user daemon that runs ALP sessions. To view and drive sessions in Paseo, also install the [Paseo plugin](integrations/paseo/README.md).
 
 ## Initialize a project
 
@@ -62,13 +62,20 @@ npm run check
 npm test
 ```
 
-`npm test` builds the Paseo bundle and the runtime bundle (`dist/runtime`) before running tests. `npm run build` builds both. The runtime in `src/runtime` owns native harnesses, sessions, delegation, and mail without importing Paseo; `alpd` hosts it, and the plugin is a viewer over the daemon ([design](plans/reference/ALPD.md)). Core has no external dependencies and can be tested without installing Paseo:
+`npm test` builds every workspace and runs the hermetic suites (unit and integration together, each file once) in a throwaway `ALP_HOME`. `npm run build` builds the Paseo bundle and the runtime bundle (`dist/runtime`). The runtime in `src/runtime` owns native harnesses, sessions, delegation, and mail without importing Paseo; `alpd` hosts it, and the plugin is a viewer over the daemon ([design](plans/reference/ALPD.md)).
 
-```sh
-node --test test/init.test.js test/upgrade.test.js test/delegation.test.js test/resolver.test.js test/ir.test.js test/adapter.test.js
-```
+Tests are split by owner:
 
-Runtime tests drive scripted agents from `test/support/fake-agent.js` instead of Codex or Claude: they call ALP tools, report context fill, hand off slowly, crash mid-turn or hit a usage limit on cue. `test/golden.test.js` compares what `alp log`, `alp ps` and `alp task report` print with `test/golden/*.txt`; after checking an intended change, accept it with `ALP_UPDATE_GOLDEN=1 node --test test/golden.test.js`.
+| Group | Location | Run |
+| --- | --- | --- |
+| Unit and package-level contract | `packages/<name>/tests/` (plugin: `integrations/paseo/tests/`) | `npm test -w @anhlp/alp-core` (or `-runtime`, `-client`, `-daemon`, `-cli`, `-protocol`, `alp-paseo-plugin`); all at once: `npm run test:unit` |
+| Integration (several packages, CLI processes, repository checks) | `test/integration/` | `npm run test:integration` |
+| E2E (live providers, opt-in) | `test/e2e/` | `npm run test:e2e` or one of `test:e2e:*` |
+| Shared fixtures such as fake transports | `test/support/` | imported by package and integration tests |
+
+`npm test` runs unit and integration; `npm run test:all` adds E2E. A package test imports only its own package and the packages it declares as dependencies; `npm run check:boundaries` and `test/integration/layout.test.js` enforce that. The core packages (protocol, core, runtime, client, daemon, cli) test without installing Paseo.
+
+Runtime tests drive scripted agents from `test/support/fake-agent.js` instead of Codex or Claude: they call ALP tools, report context fill, hand off slowly, crash mid-turn or hit a usage limit on cue. `packages/client/tests/golden.test.js` compares what `alp log`, `alp ps` and `alp task report` print with `packages/client/tests/golden/*.txt`; after checking an intended change, accept it with `ALP_UPDATE_GOLDEN=1 npm test -w @anhlp/alp-client`.
 
 ## Project files
 
@@ -238,7 +245,7 @@ Finished assignments stay recallable for 14 days: main, or the agent that assign
 
 ## The web app
 
-alpd serves the ALP web app on your machine, so installing ALP is enough to work from a browser:
+The ALP Paseo plugin (the web integration alpd runs) serves the ALP web app on your machine, so installing ALP is enough to work from a browser:
 
 ```sh
 alp web            # opens http://127.0.0.1:7433 with its access token
@@ -254,18 +261,18 @@ The app is [Paseo](https://github.com/getpaseo/paseo)'s web app (Apache 2.0), bu
 - **Usage:** the sidebar Usage button and Settings → Usage show Codex and Claude account limits, plan names and reset windows. ALP's Usage workspace panel and plugin settings also show paused runtimes and parked assignment counts. Reads are cached for 30 seconds; Refresh requests fresh data. Missing provider data is shown as unavailable. These are account-wide provider limits, not ALP token costs.
 - What Paseo has and ALP not yet (terminals, committing and pushing, worktrees from the app, voice, …) says "Tính năng đang phát triển" (in your language) when used.
 
-alpd listens on 127.0.0.1 only. The page needs the token `alp web` puts in its address (kept in `~/.alp/web.json`), and alpd refuses requests for another host name and sockets from another site. `"web": { "port": 8000 }` in `~/.alp/settings.json` moves it, and `"web": { "enabled": false }` turns it off. In a checkout of this repository, build the app with `npm run build:web` (it clones Paseo into `.cache/paseo-web`). Details: [ALPD §62](plans/reference/ALPD.md#62-the-alp-web-app-on-paseos-app-2026-10-10).
+The web app listens on 127.0.0.1 only. The page needs the token `alp web` puts in its address (kept in `~/.alp/web.json`), and the integration refuses requests for another host name and sockets from another site. `"web": { "port": 8000 }` in `~/.alp/settings.json` moves it, and `"web": { "enabled": false }` turns it off. In a checkout of this repository, build the app with `npm run build:web` (it clones Paseo into `.cache/paseo-web`). Details: [ALPD §62](plans/reference/ALPD.md#62-the-alp-web-app-on-paseos-app-2026-10-10).
 
 ### Paseo's app on your phone
 
-alpd can also be reached by [Paseo](https://paseo.sh)'s own app on another device, through Paseo's relay (`relay.paseo.sh`):
+The integration can also reach alpd from [Paseo](https://paseo.sh)'s own app on another device, through Paseo's relay (`relay.paseo.sh`):
 
 ```sh
 alp web pair --on     # turns the relay on and prints the pairing link
 alp web pair          # the link again; --off turns the relay off
 ```
 
-Or in the web app: Settings → your host → Pair device → Enable relay, then scan the QR code with Paseo's app. Traffic between the device and alpd is end-to-end encrypted; the relay only passes it on. The link carries alpd's public key, not its token: when Paseo's app asks for a password, give it the token (the part after `#token=` in `alp web --print`). The relay stays off until you turn it on; `"web": { "relay": { "endpoint": "host:port" } }` points alpd at another relay. Paseo's app shows ALP's sessions and teams, and answers what ALP has not built yet as an error. Details: [ALPD §64](plans/reference/ALPD.md#64-paseos-relay-and-its-app-on-another-device-2026-10-12).
+Or in the web app: Settings → your host → Pair device → Enable relay, then scan the QR code with Paseo's app. Traffic between the device and alpd is end-to-end encrypted; the relay only passes it on. The link carries alpd's public key, not its token: when Paseo's app asks for a password, give it the token (the part after `#token=` in `alp web --print`). The relay stays off until you turn it on; `"web": { "relay": { "endpoint": "host:port" } }` points the integration at another relay. Paseo's app shows ALP's sessions and teams, and answers what ALP has not built yet as an error. Details: [ALPD §64](plans/reference/ALPD.md#64-paseos-relay-and-its-app-on-another-device-2026-10-12).
 
 ## Antigravity CLI
 
@@ -328,7 +335,7 @@ npm run check
 npm run build
 ```
 
-The build output is written to `packages/paseo/server/dist/index.js`. Paseo plugins are trusted, unsandboxed code, so enable plugins only on a daemon where you trust this repository. In Paseo, open **Settings → Plugins** and turn on **Enable plugins**.
+The build output is written to `integrations/paseo/server/dist/index.js`. Paseo plugins are trusted, unsandboxed code, so enable plugins only on a daemon where you trust this repository. In Paseo, open **Settings → Plugins** and turn on **Enable plugins**.
 
 For a headless daemon, run `paseo daemon status --json` to find its `home`, set the root `pluginsEnabled` field in `<home>/config.json` to `true`, preserve the rest of the file, then apply the change:
 
@@ -347,7 +354,7 @@ paseo plugin add (Resolve-Path .\plugins\paseo).Path
 macOS/Linux:
 
 ```sh
-paseo plugin add "$(pwd)/packages/paseo"
+paseo plugin add "$(pwd)/integrations/paseo"
 ```
 
 Confirm that `alp-provider` is running and that the `alp` provider is available:

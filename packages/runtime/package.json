@@ -231,7 +231,7 @@
   },
   "scripts": {
     "build": "node ../../scripts/build-workspace.mjs runtime",
-    "test": "node ../../scripts/test-workspace.mjs runtime",
+    "test": "node ../../scripts/test-package.mjs runtime",
     "prepack": "npm run build"
   },
   "publishConfig": {
@@ -242,5 +242,8 @@
     "type": "git",
     "url": "git+https://github.com/phucanh08/alp-paseo.git",
     "directory": "packages/runtime"
+  },
+  "devDependencies": {
+    "ajv": "8.17.1"
   }
 }

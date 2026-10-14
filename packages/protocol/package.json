@@ -84,7 +84,7 @@
   "dependencies": {},
   "scripts": {
     "build": "node ../../scripts/build-workspace.mjs protocol",
-    "test": "node ../../scripts/test-workspace.mjs protocol",
+    "test": "node ../../scripts/test-package.mjs protocol",
     "prepack": "npm run build"
   },
   "publishConfig": {
@@ -95,5 +95,8 @@
     "type": "git",
     "url": "git+https://github.com/phucanh08/alp-paseo.git",
     "directory": "packages/protocol"
+  },
+  "devDependencies": {
+    "ajv": "8.17.1"
   }
 }

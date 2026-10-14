@@ -1167,7 +1167,7 @@ port 6767):
 
 ```sh
 npm run test:e2e:workflow
-node scripts/workflow-e2e.mjs pho
+node test/e2e/workflow-e2e.mjs pho
 ```
 
 They create isolated fixture directories under ignored `.alp-test/`, inspect actual

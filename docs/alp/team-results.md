@@ -21,8 +21,8 @@ execution through the Paseo provider's Codex adapter.
 - `node scripts/build-paseo.mjs`
 - `node --test` — 51/51 passed.
 - `node node_modules/typescript/bin/tsc -p tsconfig.paseo.json` — passed.
-- Node 24: `node scripts/team-e2e.mjs` — passed on isolated Paseo at 127.0.0.1:16767.
-- Node 24: `node scripts/team-e2e.mjs --write` — passed on the same daemon.
+- Node 24: `node test/e2e/team-e2e.mjs` — passed on isolated Paseo at 127.0.0.1:16767.
+- Node 24: `node test/e2e/team-e2e.mjs --write` — passed on the same daemon.
 
 Local artifacts (not credentials): `.alp-test/team-e2e.json` and
 `.alp-test/team-write-e2e.json`. Each records the root agent, child records, final

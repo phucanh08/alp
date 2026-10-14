@@ -1,6 +1,6 @@
 import type { Envelope } from './events.js';
 export type DaemonConnection = {
-  request(method: string, params?: unknown): Promise<any>;
+  request<T = any>(method: string, params?: unknown): Promise<T>;
   onEvent(listener: (envelope: Envelope) => void): () => void;
   onClose(listener: (error: Error) => void): () => void;
   close(): void;
