@@ -34,11 +34,11 @@ medium, Fable 5.1 at high / GPT-6 Astra at low (the only effort it takes). Setup
 not install CLIs, log in or call models: run `alp doctor` for that. New sessions use
 the profiles; running sessions keep theirs.
 
-The package provides the `alp` command and `alpd`, the per-user daemon that runs ALP sessions. To view and drive sessions in Paseo, also install the [Paseo plugin](plugins/paseo/README.md).
+The package provides the `alp` command and `alpd`, the per-user daemon that runs ALP sessions. To view and drive sessions in Paseo, also install the [Paseo plugin](packages/paseo/README.md).
 
 ## Initialize a project
 
-Run `node /path/to/alp/src/cli.js init [directory]` (or `alp init [directory]` when the package command is installed). The directory defaults to the current working directory.
+Run `alp init [directory]` (or `node /path/to/alp/packages/cli/dist/cli.js init [directory]` when running a source checkout after `npm run build`). The directory defaults to the current working directory.
 
 When the Paseo plugin opens an ALP session in a repository that lacks `ALP.md` or `.alp/settings.json`, it performs this initialization automatically. Initialization fills missing scaffold files and never replaces existing files, so partial and customized ALP setups are preserved.
 
@@ -50,7 +50,7 @@ Six [role skills](docs/alp/role-skills.md) cover intake, research, planning, del
 
 Repeated runs fill in missing files and preserve existing file contents, including custom settings. Conflicting filesystem entry types cause an error; files already created before an error remain available for a later retry. Run `npm run test:init` to verify initialization independently.
 
-For projects created with an earlier scaffold, run `node /path/to/alp/src/cli.js upgrade [directory]`. This backs up and updates recognized original instructions, adds team settings, renames the old `smart`/`supervised` profiles to `pho`/`cafe`, and archives project copies of skills that still match the shipped ones, so the library applies. Copies of the built-in agents that are still as ALP shipped them are put away too, so the project uses the built-ins; a copy you edited, or added skills, MCP servers or hooks to, stays as the project's override. The old shipped graph migrates to Cafe; custom graphs and customized instructions/skills remain unchanged.
+For projects created with an earlier scaffold, run `alp upgrade [directory]` (or the built CLI above). This backs up and updates recognized original instructions, adds team settings, renames the old `smart`/`supervised` profiles to `pho`/`cafe`, and archives project copies of skills that still match the shipped ones, so the library applies. Copies of the built-in agents that are still as ALP shipped them are put away too, so the project uses the built-ins; a copy you edited, or added skills, MCP servers or hooks to, stays as the project's override. The old shipped graph migrates to Cafe; custom graphs and customized instructions/skills remain unchanged.
 
 ## Development
 
@@ -176,25 +176,25 @@ Use `resolveAgent(projectRoot, { agent: 'your-agent' })` from `src/core/resolver
 `alpd` hosts ALP sessions for all projects of a user. After `npm run build`:
 
 ```sh
-node src/cli.js daemon start          # or: status | stop | restart | install | uninstall
-node src/cli.js doctor [--fix]        # what ALP needs here, and what earlier runs left behind
-node src/cli.js run --profile cafe "Your task"   # streams the agent tree; Ctrl-C interrupts
-node src/cli.js ps [--all]            # live sessions as a tree; --all adds closed ones
-node src/cli.js top [session]         # live dashboard: who runs, who waits, questions, worktrees, leases
-node src/cli.js attach <session>      # follow a running tree, or print a closed one
-node src/cli.js send <session> "More context"   # resumes a closed root first; to an agent, mail from you
-node src/cli.js questions             # questions agents asked you
-node src/cli.js answer <question> "Your answer"   # or: --dismiss [--reason R]
-node src/cli.js log <session>         # delegations, mail, handoffs, worktrees, pins and questions of a tree
-node src/cli.js board [--project DIR] # the project board: claims, decisions and findings
-node src/cli.js tasks [ready]         # the project's tasks; ready: what nothing blocks
-node src/cli.js task add "Title" -p 1 --after t-91c2   # also: show | edit | close | reopen | dep
-node src/cli.js formula pour release --var version=0.4.0   # also: list | show; tasks export | import for beads
-node src/cli.js verify [--task t-77e0]   # run the project's verify commands; --task records the result
-node src/cli.js recall <assignment|task> "Why did you…?"   # ask a finished assignment about its work
-node src/cli.js pause [codex|claude] [--now]   # hold delegation; --now parks running assignments
-node src/cli.js resume [codex|claude]          # parked assignments continue
-node src/cli.js interrupt <session>
+alp daemon start          # or: status | stop | restart | install | uninstall
+alp doctor [--fix]        # what ALP needs here, and what earlier runs left behind
+alp run --profile cafe "Your task"   # streams the agent tree; Ctrl-C interrupts
+alp ps [--all]            # live sessions as a tree; --all adds closed ones
+alp top [session]         # live dashboard: who runs, who waits, questions, worktrees, leases
+alp attach <session>      # follow a running tree, or print a closed one
+alp send <session> "More context"   # resumes a closed root first; to an agent, mail from you
+alp questions             # questions agents asked you
+alp answer <question> "Your answer"   # or: --dismiss [--reason R]
+alp log <session>         # delegations, mail, handoffs, worktrees, pins and questions of a tree
+alp board [--project DIR] # the project board: claims, decisions and findings
+alp tasks [ready]         # the project's tasks; ready: what nothing blocks
+alp task add "Title" -p 1 --after t-91c2   # also: show | edit | close | reopen | dep
+alp formula pour release --var version=0.4.0   # also: list | show; tasks export | import for beads
+alp verify [--task t-77e0]   # run the project's verify commands; --task records the result
+alp recall <assignment|task> "Why did you…?"   # ask a finished assignment about its work
+alp pause [codex|claude] [--now]   # hold delegation; --now parks running assignments
+alp resume [codex|claude]          # parked assignments continue
+alp interrupt <session>
 ```
 
 You talk with main. Main can ask you a question with `alp_ask` without ending its turn; `run`, `attach` and `send` show it and, in a terminal, read the answer, and `alp answer` answers from anywhere by question id or a unique prefix. In Paseo the question appears as a question prompt. Other agents do not talk to you unless you write to them first with `alp send <agent session>`; ALP then tells the agent that assigned them, and they may ask you questions too.
@@ -328,7 +328,7 @@ npm run check
 npm run build
 ```
 
-The build output is written to `plugins/paseo/server/dist/index.js`. Paseo plugins are trusted, unsandboxed code, so enable plugins only on a daemon where you trust this repository. In Paseo, open **Settings → Plugins** and turn on **Enable plugins**.
+The build output is written to `packages/paseo/server/dist/index.js`. Paseo plugins are trusted, unsandboxed code, so enable plugins only on a daemon where you trust this repository. In Paseo, open **Settings → Plugins** and turn on **Enable plugins**.
 
 For a headless daemon, run `paseo daemon status --json` to find its `home`, set the root `pluginsEnabled` field in `<home>/config.json` to `true`, preserve the rest of the file, then apply the change:
 
@@ -347,7 +347,7 @@ paseo plugin add (Resolve-Path .\plugins\paseo).Path
 macOS/Linux:
 
 ```sh
-paseo plugin add "$(pwd)/plugins/paseo"
+paseo plugin add "$(pwd)/packages/paseo"
 ```
 
 Confirm that `alp-provider` is running and that the `alp` provider is available:
@@ -386,3 +386,7 @@ git worktrees (`isolation: "worktree"`) and are merged with `alp_merge`. Oracle 
 on Fable (`claude:claude-fable-5-1`) or Astra (`codex:gpt-6-astra`); main may ask
 both in parallel for two opinions. Runtime catalog and available plan/usage snapshots
 inform coordination. See [team configuration and migration](docs/alp/team-workflow.md).
+
+## Modular monorepo development
+
+ALP is organized into npm workspaces for protocol, core, runtime, daemon, client, CLI, a reserved TUI, and the Paseo integration. See [package boundaries, build/test/release commands and the Rust migration seam](docs/modular-monorepo.md). Existing commands and checkout entry points remain compatible.

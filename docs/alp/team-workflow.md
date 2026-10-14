@@ -1129,8 +1129,8 @@ Claude's experimental usage API may be unavailable for some versions/accounts.
 ## Initialize and migrate
 
 ```sh
-node src/cli.js init /absolute/project
-node src/cli.js upgrade /absolute/existing-project
+alp init /absolute/project
+alp upgrade /absolute/existing-project
 npm run build
 paseo plugin reload alp-provider
 ```
