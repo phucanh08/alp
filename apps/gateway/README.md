@@ -13,7 +13,10 @@ alp-gateway serve                                                           # 12
   `/v1/ws` with the subprotocols `alp.v1` and `alp.ticket.<ticket>`. No secret goes in a URL.
 - Default deny: only the methods in `src/policy.js` marked `exposed` are forwarded, each after a
   permission check and a workspace/session scope check; results and events are filtered too.
-  Daemon shutdown, extension registration and host administration are never remote.
+  Daemon shutdown, extension registration and host administration are never remote. Library
+  entry content (MCP servers, hooks, providers) never leaves: list rows carry names only.
+- `credential create --mode read-only` limits a credential to driving (prompt, message, answer)
+  trees that run in the given modes, checked up to the root on every request.
 - Loopback by default. Put a TLS reverse proxy in front for remote clients (`deploy/Caddyfile`,
   `deploy/nginx.conf`), or give `--tls-cert`/`--tls-key`.
 - The gateway never starts alpd, never reads ALP state and never resends a request.
