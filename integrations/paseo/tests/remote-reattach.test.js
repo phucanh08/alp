@@ -202,3 +202,26 @@ test('a refused credential fails the sessions once and stops reconnecting', asyn
   assert.match(result.result.error.message, /refused this credential/);
   await connection.close();
 });
+
+test('a root alpd closed while nobody watched stays open in Paseo and is reopened by the next prompt', async () => {
+  const first = fakeConnection('first');
+  // alpd closed the idle root when its last viewer left; the replay after reconnecting carries it.
+  const second = fakeConnection('second', (method, params, connection) => {
+    if (method === 'session.get') return { session: { id: params.sessionId, status: 'closed', projectRoot: '/w' } };
+    if (method === 'session.attach') { connection.emit(envelope('p1', 3, { type: 'session.closed' })); return { cursor: 3 }; }
+    return healthy(method, params);
+  });
+  const { connection, events } = await provider([first, second]);
+  first.emit(started('p1', 1, 't1'));
+  first.emit(ended('p1', 2, 't1'));
+  first.drop();
+  await until(() => events.some(event => event.type === 'timeline.item' && /reconnected/.test(event.item.message ?? '')), 'reconnected');
+  assert.ok(!events.some(event => event.type === 'session.closed' || event.type === 'session.runtime_failed'), 'Paseo keeps the session');
+  await connection.send(prompt('p1', 'm1'));
+  const sent = second.requests.map(request => request.method).filter(method => method === 'session.create' || method === 'session.prompt');
+  assert.deepEqual(sent, ['session.create', 'session.prompt'], 'the prompt reopens the root first');
+  assert.equal(second.sent('session.create')[0].params.resume, true);
+  // A close that happens while watched still reaches Paseo.
+  second.emit(envelope('p1', 4, { type: 'session.closed' }));
+  assert.ok(events.some(event => event.type === 'session.closed' && event.sessionId === 'p1'));
+});

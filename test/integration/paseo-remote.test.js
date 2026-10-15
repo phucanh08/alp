@@ -234,10 +234,24 @@ test('Paseo remote mode through the gateway to a real alpd: create, stream, ques
   await sleep(300);
   assert.equal(turnsEnded(paseo.events, 'p1').length, before + 1, 'and only once');
 
+  // The gateway restarts while the session is idle: alpd closes the root nobody watches, and the
+  // replay after reconnecting carries that close. Paseo keeps the session; the next prompt reopens it.
+  await w.stopGateway();
+  const host = new AlpRpcClient(await connectSocket(await w.socket()));
+  await hello(host);
+  await until(async () => (await host.request('session.get', { sessionId: root.id })).session.status === 'closed', 'alpd closed the idle root nobody watches');
+  host.close();
+  await w.startGateway();
+  await until(() => paseo.events.filter(event => event.type === 'timeline.item' && /reconnected/.test(event.item.message ?? '')).length >= 2, 'the client reconnected after an idle restart');
+  assert.ok(!paseo.events.some(event => (event.type === 'session.closed' || event.type === 'session.runtime_failed') && event.sessionId === 'p1'), 'Paseo keeps the session');
+  const idle = turnsEnded(paseo.events, 'p1').length;
+  await paseo.call('send', { input: prompt('p1', 'idle', 'after idle restart') });
+  await until(() => turnsEnded(paseo.events, 'p1').length > idle, 'a turn after the idle restart');
+
   // alpd restarts: the client reconnects, and the next prompt reopens the session.
   await w.stopDaemon();
   await w.startDaemon();
-  await until(() => paseo.events.filter(event => event.type === 'timeline.item' && /reconnected/.test(event.item.message ?? '')).length >= 2, 'the client reconnected after alpd restarted', 40_000);
+  await until(() => paseo.events.filter(event => event.type === 'timeline.item' && /reconnected/.test(event.item.message ?? '')).length >= 3, 'the client reconnected after alpd restarted', 40_000);
   const ended = turnsEnded(paseo.events, 'p1').length;
   await paseo.call('send', { input: prompt('p1', 'after', 'after restart') });
   await until(() => turnsEnded(paseo.events, 'p1').length > ended, 'a turn after alpd restarted');
@@ -246,7 +260,7 @@ test('Paseo remote mode through the gateway to a real alpd: create, stream, ques
   const items = paseo.events.filter(event => event.type === 'timeline.item' && event.item.type !== 'notification').map(event => `${event.sessionId}:${event.item.id}`);
   assert.equal(new Set(items).size, items.length, 'no timeline item repeated');
   const starts = await w.turnStarts();
-  for (const text of ['first', 'need input 2', 'need input 3', 'long [hold]', 'longer [hold]', 'after restart']) assert.equal(starts.filter(entry => entry.text?.includes(text)).length, 1, text);
+  for (const text of ['first', 'need input 2', 'need input 3', 'long [hold]', 'longer [hold]', 'after idle restart', 'after restart']) assert.equal(starts.filter(entry => entry.text?.includes(text)).length, 1, text);
 
   // No credential in what the client printed or the gateway logged.
   const secret = w.tokens.owner.split('.').at(-1);
