@@ -480,7 +480,7 @@ export class ClientConnection {
     }
     const workspace = this.#workspace(spec.cwd);
     // Names, not paths: alpd checks them too; the gateway refuses anything that could be a path.
-    for (const field of ['agent', 'mode', 'thinking']) {
+    for (const field of ['agent', 'mode', 'thinking', 'workflow']) {
       const value = spec[field];
       if (value !== undefined && (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$/.test(value) || value.includes('..'))) throw forbidden(`spec.${field} must be a plain name`, GATEWAY_REASON.specField, { field });
     }

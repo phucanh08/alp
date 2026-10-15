@@ -47,7 +47,8 @@ export const GATEWAY_REASON = Object.freeze({
 });
 
 /** session.create / session.preview spec fields a remote client may set; anything else is refused. */
-export const SPEC_FIELDS = Object.freeze(['cwd', 'agent', 'model', 'mode', 'thinking', 'persist']);
+/** `workflow` names a team the daemon host defines (built-in, library or project), as Paseo picks one. */
+export const SPEC_FIELDS = Object.freeze(['cwd', 'agent', 'model', 'mode', 'thinking', 'persist', 'workflow']);
 
 /** Prompt content parts a remote client may send. The runtime reads text only. */
 export const CONTENT_TYPES = Object.freeze(['text']);

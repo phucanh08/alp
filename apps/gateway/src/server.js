@@ -161,6 +161,9 @@ export function createGateway({ config, store, openTransport, logger, version, m
         label: grant.label,
         permissions: [...grant.permissions],
         workspaces: grant.workspaces.map(workspace => workspace.path),
+        // The same workspaces with the path alpd names them by (realpath on the host), as session
+        // summaries carry it in projectRoot.
+        workspaceRoots: grant.workspaces.map(workspace => ({ path: workspace.path, canonical: workspace.canonical })),
         ...(grant.modes ? { modes: [...grant.modes] } : {}),
       },
     }, cors(origin));
