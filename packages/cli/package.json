@@ -24,6 +24,14 @@
       "types": "./dist/acp/main.d.ts",
       "default": "./dist/acp/main.js"
     },
+    "./backup": {
+      "alp-source": {
+        "types": "./src/backup.js",
+        "default": "./src/backup.js"
+      },
+      "types": "./dist/backup.d.ts",
+      "default": "./dist/backup.js"
+    },
     "./cli": {
       "alp-source": {
         "types": "./src/cli.js",

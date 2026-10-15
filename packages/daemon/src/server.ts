@@ -62,6 +62,8 @@ const TREE_LOG_LIMIT = 20_000;
 const SESSION_ID = /^[\w.:-]{1,128}$/;
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** How often a running alpd applies retention, besides at start (ALPD §68). */
+const RETENTION_SWEEP_MS = 6 * 60 * 60 * 1000;
 const LIVE: SessionStatus[] = ['initializing', 'idle', 'running'];
 
 /** What clients need from a daemon connection; AlpClient implements it over the socket. */
@@ -86,7 +88,7 @@ export type DaemonServer = {
  * shape so every viewer agrees; re-exported here to keep `@anhlp/alp-daemon/server`'s API. */
 export type { SessionSummary };
 
-export function createDaemonServer({ runtime, socketPath, version, onShutdown, store, runLogDir, previousExit }: {
+export function createDaemonServer({ runtime, socketPath, version, onShutdown, store, runLogDir, previousExit, retentionSweepMs = RETENTION_SWEEP_MS }: {
   runtime: AlpRuntime;
   socketPath: string;
   version: string;
@@ -97,6 +99,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   runLogDir?: string;
   /** How the previous alpd ended, for daemon.status. */
   previousExit?: { kind: 'clean' | 'crash'; at?: string };
+  /** How often retention runs while alpd runs (ALPD §68); tests shorten it. */
+  retentionSweepMs?: number;
 }): DaemonServer {
   const connections = new Set<Connection>();
   /** Root of every live session. */
@@ -194,7 +198,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
    * are reopened afterwards (ALPD §31).
    */
   async function restore() {
-    await store!.pruneReceipts(RECEIPT_RETENTION_MS);
+    await store!.pruneReceipts(RECEIPT_RETENTION_MS, { temporaries: true });
     const loaded = await store!.list();
     await reconcileReceipts(loaded);
     const now = Date.now();
@@ -202,14 +206,11 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     const epoch = `restart-${startedAt}`;
     const continuing = new Set(runtime.recoverable().map(entry => entry.assignmentId));
     const reopen: Array<{ record: SessionRecord; working: boolean }> = [];
-    const byRoot = new Map<string, SessionRecord[]>();
-    for (const record of loaded) byRoot.set(record.rootId, [...(byRoot.get(record.rootId) ?? []), record]);
+    const byRoot = trees(loaded);
+    const removed = await expire(byRoot, now);
     for (const [root, tree] of byRoot) {
       const head = tree.find(record => record.id === root);
-      if (head && !LIVE.includes(head.status) && now - Date.parse(head.updatedAt) > RETENTION_MS) {
-        await store!.remove(root, tree.map(record => record.id));
-        continue;
-      }
+      if (removed.has(root)) continue;
       if (head && resumable(head) && (head.status === 'running' || tree.some(record => continuing.has(record.id)))) reopen.push({ record: head, working: head.status === 'running' });
       if (tree.some(record => LIVE.includes(record.status))) seen(root, await store!.timeline(root));
       for (const record of tree as Array<SessionRecord & { activeTurnId?: string }>) {
@@ -241,6 +242,64 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     }
     for (const { record, working } of reopen) recovering.set(record.id, recoverTree(record, working));
   }
+
+  function trees(list: Iterable<SessionRecord>) {
+    const byRoot = new Map<string, SessionRecord[]>();
+    for (const record of list) byRoot.set(record.rootId, [...(byRoot.get(record.rootId) ?? []), record]);
+    return byRoot;
+  }
+
+  /**
+   * Retention (ALPD §68): deletes trees nobody needs any more, with their records, timeline and
+   * run log. A tree stays while any of its sessions is live or was written in the last 30 days,
+   * while a receipt of one of its sessions is still honoured (7 days from its last write, so a
+   * retried prompt is answered from it), while the runtime can continue one of its assignments,
+   * and while it is open, attached or being recovered. Timelines are never trimmed while their
+   * tree stays, so every cursor a client holds for it replays.
+   */
+  async function expire(byRoot: Map<string, SessionRecord[]>, now = Date.now()) {
+    const removed = new Set<string>();
+    const receiptWritten = new Map<string, number>();
+    // Receipts age as the store prunes them: by when their file was written, and by what they say.
+    for (const { receipt, writtenAt } of await store!.receipts()) {
+      const at = Date.parse(receipt.updatedAt);
+      receiptWritten.set(receipt.sessionId, Math.max(receiptWritten.get(receipt.sessionId) ?? 0, Number.isNaN(at) ? now : at, writtenAt));
+    }
+    const continuing = new Set(runtime.recoverable().map(entry => entry.rootId));
+    for (const [root, tree] of byRoot) {
+      if (!tree.some(record => record.id === root)) continue;
+      if (tree.some(record => LIVE.includes(record.status))) continue;
+      if (now - Math.max(...tree.map(record => Date.parse(record.updatedAt) || now)) <= RETENTION_MS) continue;
+      if (tree.some(record => now - (receiptWritten.get(record.id) ?? 0) <= RECEIPT_RETENTION_MS)) continue;
+      if (continuing.has(root) || rootOf.has(root) || attached.get(root)?.size || recovering.has(root)) continue;
+      const ids = tree.map(record => record.id);
+      // A tree restored from a backup counts from its restore: its files were written then.
+      if (now - await store!.writtenAt(ids) <= RETENTION_MS) continue;
+      if (rootOf.has(root) || attached.get(root)?.size || recovering.has(root)) continue;
+      // Forgotten before the files go, so a resume arriving meanwhile finds nothing to reopen.
+      for (const id of ids) records.delete(id);
+      cursors.delete(root);
+      await store!.remove(root, ids);
+      if (runLogDir) await unlink(path.join(runLogDir, `${root.replace(/[^\w.-]/g, '_')}.jsonl`)).catch(() => {});
+      removed.add(root);
+    }
+    if (removed.size) recoveryLog.info(`retention removed ${removed.size} session tree${removed.size > 1 ? 's' : ''} unused for ${RETENTION_MS / 86_400_000} days`, { code: 'ALP_RETENTION_REMOVED', trees: removed.size });
+    return removed;
+  }
+
+  /** Retention while alpd runs: receipts past their window, then expired trees; temporary files stay, as writes may be under way. */
+  async function sweep() {
+    if (closing || !store) return;
+    try {
+      await restored;
+      await store.pruneReceipts(RECEIPT_RETENTION_MS, { temporaries: false });
+      await expire(trees(records.values()));
+    } catch (error) {
+      recoveryLog.warn('retention sweep failed', { code: 'ALP_RETENTION_FAILED', error });
+    }
+  }
+  const sweeper = store ? setInterval(() => void sweep(), retentionSweepMs) : undefined;
+  sweeper?.unref();
 
   /**
    * Completes receipts a crash left pending when the tree's timeline shows how the runtime
@@ -1021,6 +1080,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
 
     async close() {
       closing = true;
+      if (sweeper) clearInterval(sweeper);
       const stopped = new Promise<void>(resolve => server.close(() => resolve()));
       for (const connection of connections) connection.socket?.destroy();
       await stopped;

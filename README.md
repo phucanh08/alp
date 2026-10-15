@@ -185,6 +185,8 @@ Use `resolveAgent(projectRoot, { agent: 'your-agent' })` from `src/core/resolver
 ```sh
 alp daemon start          # or: status [--json] | stop | restart | install | uninstall
 alp doctor [--fix]        # what ALP needs here, what earlier runs left behind, and what alpd's log and readiness say; only --fix repairs
+alp backup --stop         # sessions, settings, library and the projects' tasks in one file; also: verify | list
+alp restore FILE --stop   # checks the whole backup first, keeps what it replaces; --dry-run changes nothing
 alp run --profile cafe "Your task"   # streams the agent tree; Ctrl-C interrupts
 alp ps [--all]            # live sessions as a tree; --all adds closed ones
 alp top [session]         # live dashboard: who runs, who waits, questions, worktrees, leases
@@ -236,6 +238,8 @@ When recovering an assignment saved by an older ALP version, an effort no longer
 Text one agent wrote reaches another without `<system-reminder>` tags, so a peer cannot pose as the harness.
 
 Work survives alpd: after a crash, `alp daemon stop` or `alp daemon restart`, the next alpd reopens trees that were working, by itself, and their assignments continue with their thread, worktree and task. When a Codex or Claude process dies under a session, ALP restarts it and the session continues; three restarts in a row with no progress end it. `alp daemon install` runs alpd as a login service (launchd on macOS, systemd on Linux) that starts it again after a crash. Details: [Crashes and restarts](docs/alp/team-workflow.md#crashes-and-restarts).
+
+`alp backup` writes your sessions, timelines, receipts, settings, library and the projects' tasks to one checked file, and `alp restore` puts them back only after checking all of it, keeping what it replaced so the restore can be undone; an interrupted restore is rolled back. alpd migrates an older state when an upgrade needs it, after saving a backup, and an older ALP refuses state a newer one wrote instead of changing it. Session trees unused for 30 days are deleted, but never while one of them is live or a prompt receipt of theirs (7 days) is still honoured. Codex and Claude keep their own threads, which a backup does not hold. Details: [Backups, restores, upgrades and recovery](docs/alp/data-recovery.md).
 
 When a runtime hits its usage limit, ALP pauses it by itself. Assignments the limit stopped are parked instead of failed, and every open session shows a notice saying when the limit resets. Agents on the other runtime keep working. alpd asks the paused runtime every minute, and at once when an agent delegates to it. It resumes the runtime as soon as the runtime says the limit lifted, and the parked assignments continue. With `"limits": { "autoResume": false }` in `$ALP_HOME/settings.json`, ALP only tells you, and `alp resume codex` continues. Details: [Pause and usage limits](docs/alp/team-workflow.md#pause-and-usage-limits).
 

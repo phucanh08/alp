@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFile, realpath, stat, lstat, mkdir, readlink } from 'node:fs/promises';
+import { open, readFile, realpath, stat, lstat, mkdir, readlink, unlink } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -130,6 +130,40 @@ export function lockAlive(lock) {
   } catch (error) {
     return error?.code === 'EPERM';
   }
+}
+
+/**
+ * Takes alpd's single-instance lock for `home`: exclusive create; a lock whose pid or boot is
+ * gone is stale and replaced. alpd takes it to run; `alp backup` and `alp restore` take it with
+ * `maintenance` set, so no alpd starts on data they read or replace (ALPD §68).
+ * @param {string} home
+ * @param {{ version: string, protocolVersion: number, socket: string, maintenance?: string }} contents
+ */
+export async function acquireDaemonLock(home, contents) {
+  const file = daemonPaths(home).lock;
+  const lock = { pid: process.pid, startedAt: new Date().toISOString(), bootTime: bootTime(), uid: process.getuid?.() ?? -1, ready: false, ...contents };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const handle = await open(file, 'wx', 0o600);
+      await handle.writeFile(JSON.stringify(lock));
+      await handle.close();
+      return lock;
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      const current = await readLock(home);
+      if (lockAlive(current)) throw new Error(current.maintenance ? `ALP is busy: alp ${current.maintenance} runs (pid ${current.pid}); try again when it finishes` : `ALP daemon already running (pid ${current.pid})`);
+      // Remove the stale lock only if nobody replaced it meanwhile.
+      const again = await readFile(file, 'utf8').catch(() => undefined);
+      if (again === undefined || JSON.stringify(current) === again || !lockAlive(JSON.parse(again))) await unlink(file).catch(() => {});
+    }
+  }
+  throw new Error('Could not acquire the ALP daemon lock');
+}
+
+/** Lets go of alpd's lock if this process holds it. */
+export async function releaseDaemonLock(home) {
+  const current = await readLock(home);
+  if (current?.pid === process.pid) await unlink(daemonPaths(home).lock).catch(() => {});
 }
 
 /** One JSON-RPC 2.0 connection to alpd; events arrive as `event` notifications. */
@@ -279,7 +313,9 @@ export async function ensureDaemon({ home = alpHome(), entry = /** @type {string
   };
   const live = await ready();
   if (live) return live;
-  if (!lockAlive(await readLock(home))) {
+  const held = await readLock(home);
+  if (lockAlive(held) && held.maintenance) throw new Error(`ALP is busy: alp ${held.maintenance} runs (pid ${held.pid}); alpd starts again when it finishes`);
+  if (!lockAlive(held)) {
     entry ??= await findDaemonEntry({ home, env });
     if (!entry) throw new Error('ALP daemon is not running and alpd.js was not found. Install the ALP CLI and run `alp daemon start`, or set ALP_DAEMON_ENTRY to alpd.js');
     await new Promise((resolve, reject) => {

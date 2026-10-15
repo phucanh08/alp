@@ -101,9 +101,11 @@ async function daemon([action, ...rest]) {
     // Exit codes: 0 ready, 3 not running, 4 alive but not ready (or not answering).
     const json = rest[0] === '--json';
     const lock = await readLock(alpHome());
-    if (!lockAlive(lock)) {
-      if (json) console.log(JSON.stringify({ running: false, live: false, ready: false }));
-      else console.log('alpd is not running');
+    if (!lockAlive(lock) || lock.maintenance) {
+      // A backup or a restore holds alpd's lock while alpd is stopped (ALPD §68).
+      const busy = lockAlive(lock) ? { maintenance: lock.maintenance, pid: lock.pid } : {};
+      if (json) console.log(JSON.stringify({ running: false, live: false, ready: false, ...busy }));
+      else console.log(busy.maintenance ? `alpd is not running: alp ${busy.maintenance} runs (pid ${busy.pid})` : 'alpd is not running');
       process.exitCode = 3;
       return;
     }

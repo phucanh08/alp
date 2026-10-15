@@ -10,6 +10,8 @@ import { createDaemonServer } from './server.js';
 import { acquireLock, heartbeat, releaseLock, updateLock } from './lock.js';
 import { createStore } from './store.js';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
+import { clearRestoredMarker, readRestoredMarker, recoverInterruptedRestore } from '@anhlp/alp-core/backup';
+import { migrateState } from '@anhlp/alp-core/migrations';
 import { createLogger } from '@anhlp/alp-core/log';
 
 declare const __ALP_VERSION__: string;
@@ -115,8 +117,25 @@ async function stopLeftovers(previous: { pid?: number; groupLeader?: boolean } |
 }
 
 /** Where start-up stands, so a failure says which step it stopped at. */
-let phase: 'home' | 'lock' | 'recovery' | 'listen' | 'ready' = 'home';
-const STARTUP_CODES = { home: 'ALP_HOME_UNUSABLE', lock: 'ALP_LOCK_FAILED', recovery: 'ALP_STARTUP_FAILED', listen: 'ALP_IPC_LISTEN_FAILED', ready: 'ALP_STARTUP_FAILED' } as const;
+type Phase = 'home' | 'lock' | 'state' | 'recovery' | 'listen' | 'ready';
+let phase: Phase = 'home';
+const STARTUP_CODES = { home: 'ALP_HOME_UNUSABLE', lock: 'ALP_LOCK_FAILED', state: 'ALP_STATE_UNUSABLE', recovery: 'ALP_STARTUP_FAILED', listen: 'ALP_IPC_LISTEN_FAILED', ready: 'ALP_STARTUP_FAILED' } as const;
+
+/**
+ * Before anything reads or writes the state (ALPD §68): a restore cut short is settled, a
+ * state of a newer schema is refused untouched, an older one is migrated forward, and a
+ * restore's marker says to continue no work by itself this time; it is cleared once alpd is
+ * ready, so a start that fails keeps it for the next.
+ */
+async function openState(home: string) {
+  const settled = await recoverInterruptedRestore(home);
+  if (settled) log.warn(`a restore from ${settled.file} was cut short and has been ${settled.outcome}`, { code: 'ALP_RESTORE_SETTLED', outcome: settled.outcome });
+  const migrated = await migrateState(home, { by: `alpd ${VERSION}`, log });
+  for (const step of migrated.steps) log.info(`state migrated from schema ${step.from} to ${step.to} (${step.name}); the state before it is in ${step.backup}`, { code: 'ALP_STATE_MIGRATED', from: step.from, to: step.to, migration: step.name });
+  const restored = await readRestoredMarker(home);
+  if (restored) log.info(`state restored${restored.from ? ` from ${restored.from}` : ''}; sessions that were working wait for the user`, { code: 'ALP_STATE_RESTORED' });
+  return { restored: !!restored };
+}
 
 async function run(home: string) {
   await assertPrivateDirectory(home, { create: true });
@@ -127,10 +146,18 @@ async function run(home: string) {
     lock = await acquireLock(home, { version: VERSION, protocolVersion: PROTOCOL_VERSION, socket });
   } catch (error: any) {
     // Under a service manager, another alpd serving this home is no failure to retry.
-    if (process.argv.includes('--service') && /already running/.test(error?.message ?? '')) {
+    if (process.argv.includes('--service') && /already running|ALP is busy/.test(error?.message ?? '')) {
       log.info(`${error.message}; this one exits`, { code: 'ALP_LOCK_HELD' });
       process.exit(0);
     }
+    throw error;
+  }
+  phase = 'state';
+  let opened;
+  try {
+    opened = await openState(home);
+  } catch (error) {
+    await releaseLock(home);
     throw error;
   }
   phase = 'recovery';
@@ -156,7 +183,7 @@ async function run(home: string) {
   const runtime = createAlpRuntime({
     templates, runLogDir, worktreeDir, copyDir, boardDir: path.join(home, 'boards'), libraryDir: home,
     recallFile: path.join(home, 'state', 'recall.json'), pauseFile: path.join(home, 'state', 'pause.json'), liveFile: path.join(home, 'state', 'live.json'),
-    autoResume: settings?.limits?.autoResume !== false, recoveryResume: settings?.recovery?.autoResume !== false, previousExit: exit,
+    autoResume: settings?.limits?.autoResume !== false, recoveryResume: settings?.recovery?.autoResume !== false && !opened.restored, previousExit: exit,
   });
   const store = createStore(path.join(home, 'state'));
   let stopping: Promise<void> | undefined;
@@ -201,6 +228,7 @@ async function run(home: string) {
   await writeFile(`${install}.tmp`, JSON.stringify({ entry: fileURLToPath(import.meta.url), version: VERSION }), { mode: 0o600 })
     .then(() => rename(`${install}.tmp`, install))
     .catch(error => log.warn('could not record alpd\'s location', { code: 'ALP_INSTALL_RECORD_FAILED', error }));
+  if (opened.restored) await clearRestoredMarker(home).catch(error => log.warn('could not clear the restore marker', { code: 'ALP_STATE_RESTORED', error }));
   log.info(`alpd ${VERSION} ready on ${socket} (pid ${process.pid})`, { event: 'ready', version: VERSION, pid: process.pid });
 }
 
@@ -213,7 +241,10 @@ try {
   }
 } catch (error: any) {
   // The log says where start-up stopped; alp doctor reads it from there.
-  const code = /already running/.test(error?.message ?? '') ? 'ALP_LOCK_HELD' : STARTUP_CODES[phase];
-  log.error(`alpd failed to start while ${{ home: 'preparing its home', lock: 'taking its lock', recovery: 'recovering earlier work', listen: 'opening its IPC endpoint', ready: 'finishing start-up' }[phase]}`, { code, phase, error });
+  const stoppedIn = phase as Phase;
+  // Opening the state fails with the state's own code (a newer schema, a failed migration).
+  const code = /already running|ALP is busy/.test(error?.message ?? '') ? 'ALP_LOCK_HELD'
+    : stoppedIn === 'state' && typeof error?.code === 'string' && /^[A-Z_]+$/.test(error.code) ? `ALP_${error.code}` : STARTUP_CODES[stoppedIn];
+  log.error(`alpd failed to start while ${{ home: 'preparing its home', lock: 'taking its lock', state: 'opening its state', recovery: 'recovering earlier work', listen: 'opening its IPC endpoint', ready: 'finishing start-up' }[stoppedIn]}${stoppedIn === 'state' ? `: ${error?.message ?? error}` : ''}`, { code, phase: stoppedIn, error });
   process.exit(1);
 }

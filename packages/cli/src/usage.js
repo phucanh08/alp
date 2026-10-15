@@ -13,6 +13,10 @@ const USAGE = `Usage:
   alp web [--print]                      open the local web app alpd serves; --print only prints its address
   alp web pair [--on|--off]              the link that pairs Paseo's app on another device through the relay; --on or --off turns the relay on or off
   alp doctor [--project DIR] [--fix] [--json]   check this machine and project; --fix repairs what is safe to
+  alp backup [-o FILE] [--project DIR]... [--no-projects] [--stop] [--json]   sessions, settings, library and tasks in one file
+  alp backup verify <file> [--json] | alp backup list [--json]
+  alp restore <file> [--home-only] [--dry-run] [--stop] [--replace-newer] [--json]   checks the whole backup first; keeps what it replaces
+            alpd must be stopped for both; --stop stops it and starts it again after
   alp run [--agent A] [--team pho|cafe|ID] [--model M] [--mode read-only|workspace-write|full-access] [--thinking T] [--project DIR] [--json] <prompt>
   alp ps [--all]
   alp top [session] [--once]
