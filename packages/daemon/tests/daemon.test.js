@@ -382,7 +382,7 @@ test('a clientMessageId is delivered once; reuse with other content conflicts', 
   const { session } = await daemon.client.request('session.create', { spec: { cwd: project, persist: true } });
   const prompt = content => daemon.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content });
   const [first, again] = await Promise.all([prompt(text('Hello')), prompt(text('Hello'))]);
-  assert.deepEqual([first, again], [{}, { duplicate: true }]);
+  assert.deepEqual([first, again], [{ outcome: 'accepted', durable: true }, { outcome: 'accepted', duplicate: true, durable: true }]);
   assert.equal(runtimes[0].calls.filter(c => c.method === 'turn/start').length, 1);
   await assert.rejects(prompt(text('Other')), error => error.code === 1004 && error.data?.reason === 'key_conflict');
 });

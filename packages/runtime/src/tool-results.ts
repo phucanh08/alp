@@ -2,6 +2,8 @@ import { promptSafe } from '@anhlp/alp-core/promptsafe';
 
 export const errorData = (error: unknown) => ({
   message: error instanceof Error ? error.message : String(error),
+  // A transport marks a request the provider may have received before it failed (ALPD §66).
+  ...((error as { outcomeUnknown?: boolean } | null)?.outcomeUnknown ? { code: 'outcome_unknown' } : {}),
 });
 
 export const toolResult = (

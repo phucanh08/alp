@@ -88,6 +88,30 @@ async function previousExit(marker: string): Promise<{ kind: 'clean' | 'crash'; 
   return info ? { kind: 'crash', at: info.mtime.toISOString() } : { kind: 'clean' };
 }
 
+/** Whether a process group `id` exists; on POSIX a pid is never reused while its group lives. */
+function groupAlive(id: number) {
+  try { process.kill(-id, 0); return true; } catch (error: any) { return error?.code === 'EPERM'; }
+}
+
+/** alpd leads its own process group when started detached or by a service manager. */
+const leadsGroup = () => process.platform !== 'win32' && groupAlive(process.pid);
+
+/**
+ * Stops what a crashed alpd left running (ALPD §66): its provider processes normally exit
+ * when their stdin closes, but a stuck one, or a command an agent started, can outlive it.
+ * They stay in the crashed alpd's process group, so alpd ends that group when the crashed
+ * one led its group and this one leads its own (so it is not a member). Not on Windows.
+ */
+async function stopLeftovers(previous: { pid?: number; groupLeader?: boolean } | undefined) {
+  const pid = previous?.pid;
+  if (!previous?.groupLeader || !Number.isSafeInteger(pid) || pid === process.pid || !leadsGroup() || !groupAlive(pid!)) return;
+  console.log(`${new Date().toISOString()} stopping processes the previous alpd (pid ${pid}) left running`);
+  const signal = (name: NodeJS.Signals) => { try { process.kill(-pid!, name); } catch {} };
+  signal('SIGTERM');
+  for (let waited = 0; waited < 3000 && groupAlive(pid!); waited += 50) await new Promise(resolve => setTimeout(resolve, 50));
+  if (groupAlive(pid!)) signal('SIGKILL');
+}
+
 async function run(home: string) {
   await assertPrivateDirectory(home, { create: true });
   const { socket } = daemonPaths(home);
@@ -102,6 +126,15 @@ async function run(home: string) {
     }
     throw error;
   }
+  // First: nothing a crashed alpd left running may still write while this one recovers.
+  const marker = path.join(home, 'state', 'alpd.running');
+  const exit = await previousExit(marker);
+  if (exit.kind === 'crash') {
+    console.log(`${new Date().toISOString()} the previous alpd stopped unexpectedly around ${exit.at}`);
+    await stopLeftovers(await readFile(marker, 'utf8').then(JSON.parse).catch(() => undefined));
+  }
+  await mkdir(path.dirname(marker), { recursive: true, mode: 0o700 });
+  await writeFile(marker, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), groupLeader: leadsGroup() }), { mode: 0o600 });
   const runLogDir = process.env.ALP_RUN_LOG_DIR || path.join(home, 'runs');
   const worktreeDir = path.join(home, 'worktrees');
   // Worktrees of assignments a crash interrupted: their work goes to their branches.
@@ -111,11 +144,6 @@ async function run(home: string) {
   await reclaimCopies(copyDir).catch(() => 0);
   // A hold (ALPD §40) only means something while alpd is stopped.
   await unlink(path.join(home, 'state', 'alpd.held')).catch(() => {});
-  const marker = path.join(home, 'state', 'alpd.running');
-  const exit = await previousExit(marker);
-  if (exit.kind === 'crash') console.log(`${new Date().toISOString()} the previous alpd stopped unexpectedly around ${exit.at}`);
-  await mkdir(path.dirname(marker), { recursive: true, mode: 0o700 });
-  await writeFile(marker, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }), { mode: 0o600 });
   const settings = await userSettings(home);
   const runtime = createAlpRuntime({
     templates, runLogDir, worktreeDir, copyDir, boardDir: path.join(home, 'boards'), libraryDir: home,

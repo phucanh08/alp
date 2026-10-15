@@ -6,7 +6,7 @@ import path from 'node:path';
 import { AlpRpcError, MAX_FRAME, PROTOCOL_VERSION, ERROR, encodeFrame } from '@anhlp/alp-protocol';
 export { ERROR } from '@anhlp/alp-protocol';
 import { DEFAULT_MODEL, models, modes, thinkingOptions, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '@anhlp/alp-runtime/index';
-import type { Receipt, SessionRecord, SessionStatus, Store } from './store.js';
+import type { Receipt, SessionRecord, SessionStatus, Store, UnreadableReceipt } from './store.js';
 import type { SessionSummary } from '@anhlp/alp-protocol/session';
 
 /**
@@ -22,6 +22,19 @@ import type { SessionSummary } from '@anhlp/alp-protocol/session';
 class RpcError extends Error {
   constructor(public code: number, message: string, public data?: unknown) { super(message); }
 }
+
+/**
+ * Crash points for the crash-recovery tests (ALPD §66): with ALP_TEST_CRASH_AT naming one,
+ * alpd kills itself there as a crash would. Unset, they do nothing.
+ */
+function crashPoint(name: string) {
+  if (process.env.ALP_TEST_CRASH_AT !== name) return;
+  console.error(`${new Date().toISOString()} ALP_TEST_CRASH_AT=${name}: killing alpd`);
+  process.kill(process.pid, 'SIGKILL');
+}
+
+const persistenceFailed = (what: string, error: unknown) =>
+  new RpcError(ERROR.failed, `alpd could not record ${what}: ${error instanceof Error ? error.message : String(error)}`, { reason: 'persistence_failed' });
 
 /** A stable hash of JSON data, independent of key order (as Paseo's receipts). */
 function digest(value: unknown) {
@@ -89,19 +102,39 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   const records = new Map<string, SessionRecord & { activeTurnId?: string }>();
   /** Prompt deliveries in flight, so a repeated clientMessageId waits for the first. */
   const delivering = new Map<string, Promise<object>>();
+  /** Completed deliveries whose receipt could not be written; this process still answers them. */
+  const unsaved = new Map<string, Receipt>();
+  /** The last timeline cursor of each tree (ALPD §66). */
+  const cursors = new Map<string, number>();
   let closing = false;
   let socketIdentity: { dev: number; ino: number } | undefined;
   /** Roots alpd reopens after a restart; they stay open until their recovery has started. */
-  const recovering = new Set<string>();
+  const recovering = new Map<string, Promise<void>>();
   const startedAt = new Date().toISOString();
   const restored = store ? restore() : Promise.resolve();
 
   const deliver = (connection: Connection, envelope: Envelope) => connection.send({ jsonrpc: '2.0', method: 'event', params: envelope });
 
+  /** Records a change; the write is queued, and a failure is logged and counted in daemon.status. */
   function save(record: SessionRecord & { activeTurnId?: string }, changes: Partial<SessionRecord & { activeTurnId?: string }> = {}) {
     Object.assign(record, changes, { updatedAt: new Date().toISOString() });
     records.set(record.id, record);
-    void store?.put(record);
+    return store?.put(record).catch(() => {}) ?? Promise.resolve();
+  }
+
+  /** Gives an envelope of a tree its next cursor and queues it for the tree's timeline. */
+  function keep(root: string, envelope: Envelope): Envelope {
+    const cursor = (cursors.get(root) ?? 0) + 1;
+    cursors.set(root, cursor);
+    const kept = { ...envelope, cursor };
+    void store?.append(root, kept).catch(() => {});
+    return kept;
+  }
+
+  /** Continues a tree's cursors after what its stored timeline already holds. */
+  function seen(root: string, log: Envelope[]) {
+    const last = log.at(-1)?.cursor ?? 0;
+    if (last > (cursors.get(root) ?? 0)) cursors.set(root, last);
   }
 
   /** Lifecycle bookkeeping for one event; returns true when the record changed. */
@@ -125,9 +158,10 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     }
   }
 
-  runtime.onEvent(envelope => {
+  runtime.onEvent(original => {
     // While alpd stops, records keep what was running, so the next alpd continues it (ALPD §31).
     if (closing) return;
+    let envelope = original;
     const { sessionId, event } = envelope;
     if (event.type === 'session.opened') {
       const parent = event.session.parentId;
@@ -135,11 +169,11 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     }
     const root = rootOf.get(sessionId) ?? sessionId;
     if (rootOf.has(sessionId)) {
+      envelope = keep(root, envelope);
       const log = logs.get(root) ?? [];
       log.push(envelope);
       if (log.length > TREE_LOG_LIMIT) log.splice(0, log.length - TREE_LOG_LIMIT);
       logs.set(root, log);
-      void store?.append(root, envelope);
       track(sessionId, root, event);
     }
     for (const connection of attached.get(root) ?? []) deliver(connection, envelope);
@@ -158,6 +192,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   async function restore() {
     await store!.pruneReceipts(RECEIPT_RETENTION_MS);
     const loaded = await store!.list();
+    await reconcileReceipts(loaded);
     const now = Date.now();
     const ended = { code: 'daemon_restarted', message: 'alpd stopped while this session was working' };
     const epoch = `restart-${startedAt}`;
@@ -172,11 +207,13 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         continue;
       }
       if (head && resumable(head) && (head.status === 'running' || tree.some(record => continuing.has(record.id)))) reopen.push({ record: head, working: head.status === 'running' });
+      if (tree.some(record => LIVE.includes(record.status))) seen(root, await store!.timeline(root));
       for (const record of tree as Array<SessionRecord & { activeTurnId?: string }>) {
         records.set(record.id, record);
         if (!LIVE.includes(record.status)) continue;
         const envelope = (event: AlpEvent): Envelope => ({ sessionId: record.id, epoch, seq: 0, ts: new Date().toISOString(), event });
-        if (record.activeTurnId) void store!.append(root, envelope({ type: 'turn.ended', turnId: record.activeTurnId, state: 'failed', error: { message: ended.message } }));
+        // The turn a crash or a stop cut off is reported interrupted, never continued as if nothing happened.
+        if (record.activeTurnId) keep(root, envelope({ type: 'turn.ended', turnId: record.activeTurnId, state: 'failed', error: { message: ended.message, code: ended.code } }));
         if (record.id === root) {
           save(record, record.status === 'idle' ? { status: 'closed', activeTurnId: undefined } : { status: 'error', lastError: ended, activeTurnId: undefined });
         } else if (continuing.has(record.id) && reopen.some(entry => entry.record.id === root)) {
@@ -184,7 +221,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
           save(record, { status: 'closed', activeTurnId: undefined });
         } else {
           // Children never survive their runtime; their requester learns the assignment failed.
-          void store!.append(root, envelope({ type: 'session.closed' }));
+          keep(root, envelope({ type: 'session.closed' }));
           save(record, { status: 'closed', lastError: ended, activeTurnId: undefined });
           if (runLogDir && !continuing.has(record.id)) {
             const line = JSON.stringify({ ts: new Date().toISOString(), rootSessionId: root, event: 'assignment.finished', assignmentId: record.id, agent: record.session?.agent, sessionId: record.id, status: 'failed', error: ended.message, reconciled: true }) + '\n';
@@ -198,8 +235,30 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     for (const rootId of new Set(runtime.recoverable().map(entry => entry.rootId))) {
       if (!reopened.has(rootId)) await runtime.abandon(rootId, 'its root session cannot be reopened').catch(() => {});
     }
-    for (const { record } of reopen) recovering.add(record.id);
-    void Promise.all(reopen.map(({ record, working }) => recoverTree(record, working)));
+    for (const { record, working } of reopen) recovering.set(record.id, recoverTree(record, working));
+  }
+
+  /**
+   * Completes receipts a crash left pending when the tree's timeline shows how the runtime
+   * answered; the rest stay pending, so their prompt answers outcome_unknown and is never
+   * sent again by itself.
+   */
+  async function reconcileReceipts(loaded: SessionRecord[]) {
+    const rootOfRecord = new Map(loaded.map(record => [record.id, record.rootId]));
+    const timelines = new Map<string, Envelope[]>();
+    for (const { key, receipt } of await store!.receipts()) {
+      if (receipt.state !== 'pending') continue;
+      const root = rootOfRecord.get(receipt.sessionId);
+      if (!root) continue;
+      if (!timelines.has(root)) timelines.set(root, await store!.timeline(root).catch(() => []));
+      const answer = timelines.get(root)!.find(({ sessionId, event }) => sessionId === receipt.sessionId
+        && (event.type === 'prompt.accepted' || event.type === 'prompt.failed') && event.clientMessageId === receipt.clientMessageId);
+      if (!answer) continue;
+      const event = answer.event as Extract<AlpEvent, { type: 'prompt.accepted' | 'prompt.failed' }>;
+      const outcome = event.type === 'prompt.accepted' ? 'accepted' : event.error.code === 'outcome_unknown' ? 'unknown' : 'failed';
+      await store!.putReceipt(key, { ...receipt, state: 'completed', outcome, ...(event.type === 'prompt.failed' ? { error: event.error } : {}), reconciled: true, updatedAt: new Date().toISOString() })
+        .catch(() => {});
+    }
   }
 
   function resumable(record: SessionRecord) {
@@ -210,7 +269,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   async function recoverTree(record: SessionRecord, working: boolean) {
     const session = record.session!;
     try {
-      logs.set(record.id, [...await treeLog(record.id)]);
+      const stored = await treeLog(record.id);
+      seen(record.id, stored);
+      logs.set(record.id, [...stored]);
       await runtime.open(record.id, {
         ...record.spec!,
         persist: true,
@@ -228,25 +289,64 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /**
-   * Sends a prompt at most once per (session, clientMessageId), as Paseo's MessageReceipts:
-   * a repeat with the same content is a no-op, with other content a conflict, and a
-   * receipt left pending by a crash means the outcome is unknown.
+   * Sends a prompt at most once per (session, clientMessageId), as Paseo's MessageReceipts
+   * (ALPD §15, §66). The answer comes only after the receipt holds the runtime's outcome
+   * and the tree's timeline holds its events. A repeat with the same content answers what
+   * the first delivery did, with other content a conflict; a receipt left pending by a
+   * crash, or a delivery the provider may or may not have received, is outcome_unknown.
    */
   function deliverOnce(sessionId: string, clientMessageId: string, fingerprint: string, send: () => Promise<void>) {
     const key = digest(['prompt', sessionId, clientMessageId]);
+    const unknown = () => new RpcError(ERROR.conflict, `alpd cannot tell whether message ${clientMessageId} reached the agent; check the session, then send it again with a new id`, { reason: 'outcome_unknown' });
+    const answer = (receipt: Receipt, extra: object = {}) => ({ outcome: receipt.outcome ?? 'accepted', ...(receipt.error ? { error: receipt.error } : {}), ...extra });
     const attempt = async () => {
-      const existing = await store!.receipt(key);
-      if (existing) {
-        if (existing.fingerprint !== fingerprint) throw new RpcError(ERROR.conflict, `Message ${clientMessageId} was already sent with different content`, { reason: 'key_conflict' });
-        if (existing.state === 'completed') return { duplicate: true };
-        throw new RpcError(ERROR.conflict, `alpd stopped while delivering message ${clientMessageId}; check the session, then send it again with a new id`, { reason: 'outcome_unknown' });
+      let existing: Receipt | UnreadableReceipt | undefined = unsaved.get(key);
+      if (!existing) {
+        try { existing = await store!.receipt(key); }
+        catch (error) { throw persistenceFailed(`message ${clientMessageId}`, error); }
       }
-      const receipt = (state: Receipt['state']): Receipt => ({ version: 1, sessionId, clientMessageId, fingerprint, state, updatedAt: new Date().toISOString() });
+      if (existing) {
+        if (existing.state === 'unreadable') throw unknown();
+        if (existing.fingerprint !== fingerprint) throw new RpcError(ERROR.conflict, `Message ${clientMessageId} was already sent with different content`, { reason: 'key_conflict' });
+        if (existing.state === 'pending' || existing.outcome === 'unknown') throw unknown();
+        return answer(existing, { duplicate: true, durable: !unsaved.has(key) });
+      }
+      const receipt = (state: Receipt['state'], changes: Partial<Receipt> = {}): Receipt => ({ version: 1, sessionId, clientMessageId, fingerprint, state, ...changes, updatedAt: new Date().toISOString() });
       live(sessionId);
-      await store!.putReceipt(key, receipt('pending'));
-      await send();
-      await store!.putReceipt(key, receipt('completed'));
-      return {};
+      crashPoint('prompt.before-receipt');
+      // Nothing is sent unless the pending receipt is on disk: a crash from here on answers outcome_unknown.
+      try { await store!.putReceipt(key, receipt('pending')); }
+      catch (error) { throw persistenceFailed(`message ${clientMessageId}; it was not sent`, error); }
+      crashPoint('prompt.after-receipt');
+      // The runtime reports how the provider answered as an event, before prompt() resolves.
+      let reply: { outcome: 'accepted' | 'failed' | 'unknown'; error?: { message: string; code?: string } } = { outcome: 'accepted' };
+      const stop = runtime.onEvent(({ sessionId: from, event }) => {
+        if (from !== sessionId) return;
+        if (event.type === 'prompt.accepted' && event.clientMessageId === clientMessageId) reply = { outcome: 'accepted' };
+        if (event.type === 'prompt.failed' && event.clientMessageId === clientMessageId) reply = { outcome: event.error.code === 'outcome_unknown' ? 'unknown' : 'failed', error: event.error };
+      });
+      try {
+        await send();
+      } catch (error) {
+        // The runtime refused it before reaching the provider (the session closed meanwhile): not sent.
+        await store!.removeReceipt(key).catch(() => {});
+        throw error;
+      } finally {
+        stop();
+      }
+      const root = rootOf.get(sessionId) ?? sessionId;
+      const lost = await store!.drain({ records: [sessionId], timelines: [root] });
+      crashPoint('prompt.after-send');
+      const done = receipt('completed', reply);
+      let durable = lost.length === 0;
+      try { await store!.putReceipt(key, done); }
+      catch {
+        unsaved.set(key, done);
+        durable = false;
+      }
+      crashPoint('prompt.after-completed');
+      if (reply.outcome === 'unknown') throw unknown();
+      return answer(done, { durable });
     };
     const previous = delivering.get(key) ?? Promise.resolve();
     const result = previous.catch(() => {}).then(attempt);
@@ -370,6 +470,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     const agent = spec.agent ?? spec.restore?.agent;
     if (agent !== undefined && agent !== session.agent) throw new RpcError(ERROR.failed, 'Cannot resume a session as a different ALP agent');
     const stored = await treeLog(record.id);
+    seen(record.id, stored);
     logs.set(record.id, [...stored]);
     attach(connection, record.id);
     try {
@@ -418,7 +519,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       owned?.delete(method);
       return { unregistered: method };
     },
-    'daemon.status': () => ({ pid: process.pid, startedAt, version, protocolVersion: PROTOCOL_VERSION, sessions: runtime.list().length, questions: runtime.questions().length, ...(previousExit ? { previousExit } : {}) }),
+    'daemon.status': () => ({ pid: process.pid, startedAt, version, protocolVersion: PROTOCOL_VERSION, sessions: runtime.list().length, questions: runtime.questions().length, ...(previousExit ? { previousExit } : {}), ...(store ? { persistence: store.health() } : {}) }),
 
     'session.status'(_connection, { sessionId }) {
       if (typeof sessionId !== 'string') throw new RpcError(-32602, 'sessionId is required');
@@ -500,6 +601,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       if (sessionId !== undefined && (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId))) throw new RpcError(-32602, 'Invalid session id');
       if (history !== 'replay' && history !== 'skip') throw new RpcError(-32602, 'history must be replay or skip');
       const id = sessionId ?? `ses_${randomBytes(8).toString('hex')}`;
+      // A root alpd is reopening after a restart: attach once it is open, rather than open it twice.
+      await recovering.get(id);
       const existing = runtime.snapshot(id);
       if (existing) {
         // Reopening a root that kept working after its viewer left: attach to it.
@@ -514,7 +617,14 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       if (record) return { session: await resume(connection, record, spec, history, delegation), attached: false, resumed: true };
       const { restore: _restore, ...kept } = spec;
       const now = new Date().toISOString();
-      save({ version: 1, id, rootId: id, spec: kept, delegation, status: 'initializing', createdAt: now, updatedAt: now });
+      const created: SessionRecord = { version: 1, id, rootId: id, spec: kept, delegation, status: 'initializing', createdAt: now, updatedAt: now };
+      records.set(id, created);
+      // A root is resumable only once its record is on disk; without it the create fails and nothing starts.
+      try { await store?.put(created); }
+      catch (error) {
+        if (records.get(id) === created) records.delete(id);
+        throw persistenceFailed(`session ${id}; it was not started`, error);
+      }
       attach(connection, id);
       try {
         return { session: await runtime.open(id, spec, { history, delegation }), attached: false };
@@ -532,13 +642,35 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       return { preview: await runtime.preview(spec) };
     },
 
-    async 'session.attach'(connection, { sessionId, replay = true }) {
+    /**
+     * Watches a tree. With `after`, the cursor of the last event a client has, only later
+     * events are replayed (ALPD §66); a cursor this tree never reached answers `reset: true`
+     * with the whole timeline. The replay and the live events that follow are in cursor order.
+     */
+    async 'session.attach'(connection, { sessionId, replay = true, after }) {
+      if (after !== undefined && (!Number.isSafeInteger(after) || after < 0)) throw new RpcError(-32602, 'after must be a cursor');
       const found = known(sessionId);
       const root = rootOf.get(sessionId) ?? records.get(sessionId)?.rootId ?? sessionId;
+      let stored: Envelope[] = [];
+      if (replay) {
+        // The in-memory log keeps a live tree's latest events only; older ones come from the store.
+        const memory = logs.get(root);
+        const covered = !!memory?.length && (memory[0].cursor ?? 1) <= (after ?? 0) + 1;
+        if (!covered) stored = store ? await store.timeline(root) : memory ?? [];
+      }
+      // From here to the return nothing awaits, so no live event slips between replay and attach.
+      const live = logs.get(root) ?? [];
+      const tip = Math.max(cursors.get(root) ?? 0, stored.at(-1)?.cursor ?? 0, live.at(-1)?.cursor ?? 0);
+      const reset = after !== undefined && after > tip;
+      const from = reset ? 0 : after ?? 0;
       attach(connection, root);
-      if (replay) for (const envelope of await treeLog(root)) if (current(envelope)) deliver(connection, envelope);
+      if (replay) {
+        let last = from;
+        for (const envelope of stored) if ((envelope.cursor ?? 0) > last) { if (current(envelope)) deliver(connection, envelope); last = envelope.cursor ?? last; }
+        for (const envelope of live) if ((envelope.cursor ?? 0) > last) { if (current(envelope)) deliver(connection, envelope); last = envelope.cursor ?? last; }
+      }
       announceQuestions(connection, root);
-      return { session: root === found.id ? found : summary(root) };
+      return { session: root === found.id ? found : summary(root), cursor: tip, ...(reset ? { reset: true } : {}) };
     },
 
     async 'session.release'(connection, { sessionId }) {
@@ -577,12 +709,14 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     },
 
     /** The user's name for a root, in place of its first prompt (ALPD §61). */
-    'session.rename'(_connection, { sessionId, title }) {
+    async 'session.rename'(_connection, { sessionId, title }) {
       if (typeof title !== 'string' || !title.trim() || title.length > 200) throw new RpcError(-32602, 'title must be 1 to 200 characters');
       const record = rootRecord(sessionId);
       // A name is not activity: the record keeps its time.
+      const before = record.title;
       Object.assign(record, { title: title.replace(/\s+/g, ' ').trim() });
-      void store?.put(record);
+      try { await store?.put(record); }
+      catch (error) { record.title = before; throw persistenceFailed(`the name of ${record.id}`, error); }
       return { session: summary(record.id) };
     },
 
@@ -590,8 +724,10 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     async 'session.archive'(_connection, { sessionId, archived = true }) {
       const record = rootRecord(sessionId);
       if (archived && runtime.snapshot(record.id)) await runtime.close(record.id);
+      const before = record.archived;
       Object.assign(record, { archived: archived === true ? true : undefined });
-      void store?.put(record);
+      try { await store?.put(record); }
+      catch (error) { record.archived = before; throw persistenceFailed(`the archive state of ${record.id}`, error); }
       return { session: summary(record.id) };
     },
 
