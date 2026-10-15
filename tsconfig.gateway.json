@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": false,
+    "skipLibCheck": true,
+    "types": [
+      "node"
+    ],
+    "customConditions": [
+      "alp-source"
+    ]
+  },
+  "include": [
+    "apps/gateway/src/**/*.js"
+  ],
+  "exclude": [
+    "node_modules",
+    "**/dist/**"
+  ]
+}

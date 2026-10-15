@@ -19,6 +19,7 @@ function tests(files) {
 if (scope === 'all' || scope === 'core') {
   node('scripts/check-boundaries.mjs');
   node('node_modules/typescript/bin/tsc', '-p', 'tsconfig.core.json');
+  node('node_modules/typescript/bin/tsc', '-p', 'tsconfig.gateway.json');
   buildWorkspace('daemon');
   buildWorkspace('cli');
   node('scripts/build-core.mjs');
@@ -42,4 +43,5 @@ if (scope === 'all' || scope === 'packages') {
   node('scripts/pack-check.mjs', '--ignore-scripts');
   node('scripts/tarball-consumer.mjs');
   node('scripts/package-smoke.mjs');
+  node('scripts/gateway-smoke.mjs');
 }
