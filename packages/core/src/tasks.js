@@ -2,6 +2,7 @@ import { mkdir, readFile, readdir, rename, rmdir, stat, writeFile } from 'node:f
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { AlpError } from './errors.js';
+import { assertNoSymlinks } from './safe-path.js';
 import { describeVerification } from './verify.js';
 
 /**
@@ -38,12 +39,23 @@ const taskFile = (projectRoot, id) => path.join(tasksDir(projectRoot), `${id}.js
 const now = () => new Date().toISOString();
 const fail = (code, message) => { throw new AlpError(code, message); };
 
-/** Reads every task. A file that does not parse is reported and skipped, never fatal. */
+/** Validate all repository-controlled task paths before reads or lock creation. */
+async function taskNames(projectRoot) {
+  const scope = path.join(path.resolve(projectRoot), '.alp');
+  await assertNoSymlinks(scope, 'tasks');
+  let names;
+  try { names = await readdir(tasksDir(projectRoot)); }
+  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  for (const name of [...names.filter(name => name.endsWith('.json')), LOCK, '.gitignore']) {
+    await assertNoSymlinks(scope, path.join('tasks', name));
+  }
+  return names;
+}
+
+/** Reads every task. Invalid JSON is reported and skipped; unsafe paths are fatal. */
 export async function loadTasks(projectRoot) {
   const dir = tasksDir(projectRoot);
-  let names;
-  try { names = await readdir(dir); }
-  catch (error) { if (error.code === 'ENOENT') return { tasks: [], errors: [] }; throw error; }
+  const names = await taskNames(projectRoot);
   const tasks = [];
   const errors = [];
   for (const name of names.filter(name => name.endsWith('.json')).sort()) {
@@ -232,6 +244,7 @@ async function locked(projectRoot, work) {
   const dir = tasksDir(projectRoot);
   const previous = queues.get(dir) ?? Promise.resolve();
   const run = previous.catch(() => {}).then(async () => {
+    await taskNames(projectRoot);
     await prepare(dir);
     const lock = path.join(dir, LOCK);
     const deadline = Date.now() + LOCK_WAIT_MS;
@@ -260,6 +273,7 @@ async function prepare(dir) {
 
 async function save(projectRoot, task) {
   const file = taskFile(projectRoot, task.id);
+  await assertNoSymlinks(path.join(path.resolve(projectRoot), ".alp"), path.join("tasks", `${task.id}.json`));
   const temporary = `${file}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(temporary, JSON.stringify(task, null, 2) + '\n');
   await rename(temporary, file);

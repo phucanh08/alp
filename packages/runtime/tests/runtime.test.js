@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile, stat, mkdir, chmod, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
@@ -38,13 +38,13 @@ function fakeTransport(runtimes) {
   };
 }
 
-async function setup(t) {
+async function setup(t, options = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-runtime-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await initProject(root);
   await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'], lead: ['peer'] } }));
   const runtimes = [];
-  const runtime = createAlpRuntime({ silentForMs: 2000, transport: fakeTransport(runtimes) });
+  const runtime = createAlpRuntime({ silentForMs: 2000, transport: fakeTransport(runtimes), ...options });
   t.after(() => runtime.shutdown());
   const envelopes = [];
   runtime.onEvent(envelope => envelopes.push(envelope));
@@ -184,3 +184,38 @@ test('every ALP tool the runtime offers has a Claude tool schema with the same p
     else assert.deepEqual(shape, properties, `${name} properties differ for Claude`);
   }
 });
+
+test('security: invalid child permissions fail before assignment side effects', async t => {
+  const { root, runtime, runtimes, of } = await setup(t);
+  await runtime.open('root', { cwd: root, mode: 'full-access' });
+  await runtime.prompt('root', prompt('security', 'work'));
+  await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'] }, permissions: { agents: { lead: 'missing' } } }));
+  const result = await runtimes[0].call('alp_delegate', { agent: 'lead', task: 'work', wait: false });
+  assert.equal(result.success, false);
+  assert.match(decode(result).error, /profile 'missing'/);
+  assert.deepEqual(of('root', 'assignment'), []);
+  assert.equal(runtimes.length, 1);
+});
+
+for (const existing of ['new', 'public', 'symlink']) {
+  test(`security: run log ${existing} does not expose session data to other users`, { skip: process.platform === 'win32' }, async t => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'alp-log-security-'));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const logs = path.join(directory, 'logs');
+    const file = path.join(logs, 'root.jsonl');
+    const external = path.join(directory, 'external');
+    if (existing !== 'new') {
+      await mkdir(logs);
+      await writeFile(existing === 'symlink' ? external : file, 'original');
+      if (existing === 'symlink') await symlink(external, file);
+      else await chmod(file, 0o644);
+    }
+    const { root, runtime } = await setup(t, { runLogDir: logs });
+    await runtime.open('root', { cwd: root });
+    await runtime.shutdown();
+    if (existing === 'new') {
+      assert.equal((await stat(file)).mode & 0o077, 0);
+      assert.match(await readFile(file, 'utf8'), /session/);
+    } else assert.equal(await readFile(existing === 'symlink' ? external : file, 'utf8'), 'original');
+  });
+}

@@ -32,6 +32,8 @@ const RULE = /^([A-Za-z][\w-]*)(?:\((.*)\))?$/s;
 /** Tools a rule may name; a misspelt one would silently match nothing. MCP tools are mcp__<server>__<tool>. */
 export const TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Skill'];
 
+const own = (value, key) => Object.hasOwn(value, key) ? value[key] : undefined;
+const setOwn = (value, key, entry) => Object.defineProperty(value, key, { value: entry, enumerable: true, writable: true, configurable: true });
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const fail = (source, message) => { throw new AlpError('INVALID_SETTINGS', `${source}: ${message}`); };
 
@@ -70,7 +72,7 @@ export function validatePermissions(value, source) {
         for (const rule of list) parseRule(rule, `${source}: ${where}.${kind}`);
         rules[kind] = list.map(rule => rule.trim());
       }
-      profiles[name] = { ...(profile.base ? { base: profile.base } : {}), ...(profile.beyondMode ? { beyondMode: profile.beyondMode } : {}), ...(profile.workdir ? { workdir: profile.workdir } : {}), ...rules };
+      setOwn(profiles, name, { ...(profile.base ? { base: profile.base } : {}), ...(profile.beyondMode ? { beyondMode: profile.beyondMode } : {}), ...(profile.workdir ? { workdir: profile.workdir } : {}), ...rules });
     }
   }
   const agents = {};
@@ -78,7 +80,7 @@ export function validatePermissions(value, source) {
     if (!object(value.agents)) fail(source, 'permissions.agents must be an object');
     for (const [agent, profile] of Object.entries(value.agents)) {
       if (typeof profile !== 'string' || !NAME.test(profile)) fail(source, `permissions.agents.${agent} must name a profile`);
-      agents[agent] = profile;
+      setOwn(agents, agent, profile);
     }
   }
   return { profiles, agents };
@@ -103,10 +105,10 @@ async function settingsPermissions(file) {
 export async function profileFor(projectRoot, home, agent) {
   const project = await settingsPermissions(path.join(projectRoot, '.alp', 'settings.json'));
   const user = home ? await settingsPermissions(path.join(home, 'settings.json')) : { profiles: {}, agents: {} };
-  const name = project.agents[agent] ?? user.agents[agent];
+  const name = own(project.agents, agent) ?? own(user.agents, agent);
   const advisor = ADVISORS.includes(agent);
   if (!name) return advisor ? { name: 'read-only', base: 'read-only', allow: [], ask: [], deny: [], beyondMode: 'refuse' } : null;
-  const defined = [project.profiles[name], user.profiles[name]].filter(Boolean);
+  const defined = [own(project.profiles, name), own(user.profiles, name)].filter(Boolean);
   if (!defined.length && !BASES.includes(name)) {
     throw new AlpError('INVALID_SETTINGS', `permissions.agents.${agent} names profile '${name}', which no settings file defines`);
   }

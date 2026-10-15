@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { appendFile, chmod, mkdir, readFile, unlink } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, readFile, unlink, lstat, rename } from 'node:fs/promises';
 import net from 'node:net';
+import { assertPrivateDirectory, assertPrivateSocket } from '@anhlp/alp-client/index';
 import path from 'node:path';
 import { AlpRpcError, MAX_FRAME, PROTOCOL_VERSION, ERROR, encodeFrame } from '@anhlp/alp-protocol';
 export { ERROR } from '@anhlp/alp-protocol';
@@ -36,7 +37,7 @@ type Connection = {
   roots: Set<string>;
   send(message: unknown): void;
   nextId: number;
-  pending: Map<number, { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }>;
+  pending: Map<number, { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout; caller: Connection }>;
 };
 
 /** Retained events per live tree, for attach and replay. */
@@ -89,6 +90,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   /** Prompt deliveries in flight, so a repeated clientMessageId waits for the first. */
   const delivering = new Map<string, Promise<object>>();
   let closing = false;
+  let socketIdentity: { dev: number; ino: number } | undefined;
   /** Roots alpd reopens after a restart; they stay open until their recovery has started. */
   const recovering = new Set<string>();
   const startedAt = new Date().toISOString();
@@ -391,15 +393,16 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     'extension.register': async (connection, params) => {
       const method = params?.method;
       if (typeof method !== 'string' || !/^[a-zA-Z][a-zA-Z0-9._-]*$/.test(method) || method === '__proto__' || method === 'constructor' || method === 'toString') throw new RpcError(ERROR.protocol, 'extension.register requires a safe method name');
-      if (typeof method !== 'string' || !method.trim()) throw new RpcError(ERROR.protocol, 'extension.register requires a method name');
+      if (method.length > 128 || (reservedNamespaces.has(method.split('.')[0]) && !originalMethods.has(method))) throw new RpcError(ERROR.protocol, 'extension.register requires an extension namespace and a name of at most 128 characters');
       if (originalMethods.has(method) || extensionOwners.has(method) || Object.hasOwn(handlers, method)) throw new RpcError(ERROR.conflict, `${method} is already registered`);
+      if ((methodOwners.get(connection)?.size ?? 0) >= 128 || extensionOwners.size >= 1024) throw new RpcError(ERROR.conflict, 'too many registered extension methods');
       extensionOwners.set(method, connection);
       if (!methodOwners.has(connection)) methodOwners.set(connection, new Set());
       methodOwners.get(connection).add(method);
       handlers[method] = async (_connection, invokeParams) => {
         const owner = extensionOwners.get(method);
         if (!owner || !connections.has(owner)) { delete handlers[method]; extensionOwners.delete(method); throw new RpcError(ERROR.notFound, `${method} is not available`); }
-        return invokeExtended(owner, method, invokeParams ?? {});
+        return invokeExtended(owner, _connection, method, invokeParams ?? {});
       };
       return { registered: method };
     },
@@ -610,17 +613,21 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   Object.setPrototypeOf(handlers, null);
   const originalMethods = new Set(Object.keys(handlers));
   originalMethods.add('daemon.hello');
+  const reservedNamespaces = new Set([...originalMethods].map(method => method.split('.')[0]));
 
-  async function invokeExtended(owner: Connection, method: string, params: any) {
+  async function invokeExtended(owner: Connection, caller: Connection, method: string, params: any) {
     if (owner.pending.size >= 128) throw new RpcError(ERROR.conflict, 'too many pending extension calls');
     const id = ++owner.nextId;
+    const invocation = { jsonrpc: '2.0', id, method: 'extension.invoke', params: { method, params } };
+    if (Buffer.byteLength(encodeFrame(invocation), 'utf8') > MAX_FRAME) throw new RpcError(-32600, 'ALP daemon frame exceeds size limit');
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         owner.pending.delete(id);
         reject(new RpcError(ERROR.failed, `${method} timed out`));
       }, 30_000);
-      owner.pending.set(id, { resolve, reject, timer });
-      owner.send({ jsonrpc: '2.0', id, method: 'extension.invoke', params: { method, params } });
+      owner.pending.set(id, { resolve, reject, timer, caller });
+      try { owner.send(invocation); }
+      catch (error) { clearTimeout(timer); owner.pending.delete(id); reject(error); }
     });
   }
 
@@ -631,6 +638,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       // Validate the envelope before anything else: a frame that is not JSON-RPC 2.0 must never be
       // correlated against (or consume) a pending extension call, however it is shaped.
       if (!message || typeof message !== 'object' || Array.isArray(message) || message.jsonrpc !== '2.0') throw new RpcError(-32600, 'Invalid request');
+      const oversized = Buffer.byteLength(encodeFrame(message), 'utf8') > MAX_FRAME;
       // A frame with no `method` property is a response to an outgoing extension.invoke. It must carry
       // exactly one of result/error and an id; a malformed or unknown one is dropped, leaving any
       // pending invocation intact (never mis-correlated, never leaked).
@@ -642,10 +650,12 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         if (!waiter) return;
         connection.pending.delete(id);
         clearTimeout(waiter.timer);
+        if (oversized) { waiter.reject(new RpcError(-32600, 'ALP daemon frame exceeds size limit')); return; }
         if (hasError) waiter.reject(new RpcError(message.error?.code ?? ERROR.failed, message.error?.message ?? 'extension call failed', message.error?.data));
         else waiter.resolve(message.result);
         return;
       }
+      if (oversized) throw new RpcError(-32600, 'ALP daemon frame exceeds size limit');
       if (typeof method !== 'string') throw new RpcError(-32600, 'Invalid request');
       if (method === 'daemon.hello') {
         if (params?.protocolVersion !== PROTOCOL_VERSION) throw new RpcError(ERROR.protocol, `ALP daemon speaks protocol ${PROTOCOL_VERSION}; restart it after upgrading (alp daemon restart)`);
@@ -655,6 +665,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       }
       if (!connection.helloed) throw new RpcError(ERROR.protocol, 'daemon.hello is required first');
       await restored;
+      if (!connections.has(connection)) return;
       const handler = Object.hasOwn(handlers, method) ? handlers[method] : undefined;
       if (!handler) throw new RpcError(-32601, `Unknown method '${method}'`);
       respond({ result: await handler(connection, params ?? {}) });
@@ -672,6 +683,12 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     methodOwners.delete(connection);
     for (const [id, waiting] of connection.pending) { clearTimeout(waiting.timer); waiting.reject(new Error('ALP daemon connection closed')); }
     connection.pending.clear();
+    for (const owner of connections) for (const [id, waiting] of owner.pending) {
+      if (waiting.caller !== connection) continue;
+      clearTimeout(waiting.timer);
+      owner.pending.delete(id);
+      waiting.reject(new Error('ALP daemon caller connection closed'));
+    }
     connections.delete(connection);
     for (const root of [...connection.roots]) {
       detach(connection, root);
@@ -694,7 +711,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     socket.setEncoding('utf8');
     socket.on('data', chunk => {
       buffer += chunk;
-      if (buffer.length > MAX_FRAME) { socket.destroy(); return; }
+      if (Buffer.byteLength(buffer, 'utf8') > MAX_FRAME) { socket.destroy(); return; }
       for (let index = buffer.indexOf('\n'); index >= 0; index = buffer.indexOf('\n')) {
         const line = buffer.slice(0, index);
         buffer = buffer.slice(index + 1);
@@ -729,12 +746,40 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     },
 
     async listen() {
-      if (process.platform !== 'win32') await unlink(socketPath).catch(() => {});
+      if (process.platform !== 'win32') {
+        await assertPrivateDirectory(path.dirname(socketPath), { create: true });
+        const existing = await lstat(socketPath).catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
+        if (existing) {
+          await assertPrivateSocket(socketPath);
+          // Never unlink a live daemon; only ECONNREFUSED proves a stale Unix socket.
+          const active = await new Promise<boolean>((resolve, reject) => {
+            const probe = net.createConnection(socketPath);
+            probe.once('connect', () => { probe.destroy(); resolve(true); });
+            probe.once('error', error => { probe.destroy(); if ((error as NodeJS.ErrnoException).code === 'ECONNREFUSED') resolve(false); else reject(error); });
+            probe.setTimeout(1000, () => { probe.destroy(); reject(new Error('IPC endpoint probe timed out')); });
+          });
+          if (active) throw new Error('IPC endpoint already in use by a running daemon');
+          const current = await assertPrivateSocket(socketPath);
+          if (!current || current.dev !== existing.dev || current.ino !== existing.ino) throw new Error('IPC endpoint changed during validation');
+          await unlink(socketPath);
+        }
+      }
+      // libuv unlinks its bind path on close without checking inode identity. Bind at an
+      // unpublished sibling, then publish; cleanup of the public endpoint is ours alone.
+      const bindPath = process.platform === 'win32' ? socketPath : path.join(path.dirname(socketPath), `.s${randomBytes(3).toString('hex')}`);
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject);
-        server.listen(socketPath, () => { server.off('error', reject); resolve(); });
+        server.listen(bindPath, () => { server.off('error', reject); resolve(); });
       });
-      if (process.platform !== 'win32') await chmod(socketPath, 0o600);
+      if (process.platform !== 'win32') {
+        try {
+          await chmod(bindPath, 0o600);
+          const info = await lstat(bindPath);
+          await rename(bindPath, socketPath);
+          socketIdentity = { dev: info.dev, ino: info.ino };
+        }
+        catch (error) { await new Promise<void>(resolve => server.close(() => resolve())); throw error; }
+      }
     },
 
     local() {
@@ -805,7 +850,11 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       const stopped = new Promise<void>(resolve => server.close(() => resolve()));
       for (const connection of connections) connection.socket?.destroy();
       await stopped;
-      if (process.platform !== 'win32') await unlink(socketPath).catch(() => {});
+      if (socketIdentity) {
+        const current = await lstat(socketPath).catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
+        if (current?.isSocket() && current.dev === socketIdentity.dev && current.ino === socketIdentity.ino) await unlink(socketPath);
+        socketIdentity = undefined;
+      }
       await store?.flush();
     },
   };

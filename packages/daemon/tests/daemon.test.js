@@ -241,7 +241,7 @@ async function durable(t, directory, project, runtimes) {
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(directory, 'runs') });
   const store = createStore(path.join(directory, 'state'));
   const home = path.join(directory, `d${runtimes.length}`);
-  await mkdir(home, { recursive: true });
+  await mkdir(home, { recursive: true, mode: 0o700 });
   const socketPath = daemonPaths(home).socket;
   const server = createDaemonServer({ runtime, socketPath, version: 'test', store, runLogDir: path.join(directory, 'runs') });
   await server.listen();

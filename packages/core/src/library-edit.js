@@ -2,6 +2,7 @@ import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { AlpError } from './errors.js';
+import { assertNoSymlinks } from './safe-path.js';
 import { agentSources, builtinText, jsonObject, libraryEntries, optionalText } from './resolver.js';
 import { teamSources, validateTeam } from './teams.js';
 import { normalizeMcp, validateAgentConfig, validateHook } from './validation.js';
@@ -58,8 +59,17 @@ function base(scope, { root, library }, kind) {
 }
 const revisionOf = content => content === undefined ? null : createHash('sha256').update(JSON.stringify(content)).digest('hex').slice(0, 16);
 
+/** Reject repository-controlled links before any entry read or mutation. This is
+ * a preflight for static repository input, not a sandbox against same-user races. */
+async function safeEntryPaths(directory, kind, name) {
+  for (const [file] of FILES[kind](name)) {
+    await assertNoSymlinks(directory, path.join(kind, file));
+  }
+}
+
 /** An entry's content as one layer holds it, or undefined when that layer has none. */
 async function readLayer(kind, name, directory) {
+  await safeEntryPaths(directory, kind, name);
   const content = {};
   let found = false;
   for (const [file, key, type] of FILES[kind](name)) {
@@ -266,11 +276,13 @@ const exists = target => stat(target).then(() => true, () => false);
 export async function saveEntry(kind, name, content, { scope, root, library, templates, revision } = {}) {
   kindOf(kind); nameOf(name);
   const directory = base(scope, { root, library }, kind);
+  await safeEntryPaths(directory, kind, name);
   await check(kind, name, content, { scope, root, library, templates });
   const current = await readLayer(kind, name, directory);
   if (revision !== undefined && revision !== revisionOf(current)) {
     fail('REVISION_CONFLICT', current === undefined ? `${kind} '${name}' was removed from the ${scope} since you opened it` : revision === null ? `${kind} '${name}' already exists in the ${scope}` : `${kind} '${name}' changed in the ${scope} since you opened it; reload it and apply your change again`);
   }
+  if (scope === 'library') await mkdir(directory, { recursive: true, mode: 0o700 });
   for (const [file, key, type] of FILES[kind](name)) {
     const target = path.join(directory, kind, file);
     const value = content[key];

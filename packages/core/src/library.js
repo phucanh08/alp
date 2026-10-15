@@ -49,6 +49,7 @@ async function shippedFiles({ templateRoot, templates }) {
  */
 export async function seedLibrary(home, options = {}) {
   const shipped = await shippedFiles(options);
+  await mkdir(home, { recursive: true, mode: 0o700 });
   const manifestPath = path.join(home, MANIFEST);
   const manifestText = await optional(manifestPath);
   const manifest = manifestText ? JSON.parse(manifestText) : { files: {} };
