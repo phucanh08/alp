@@ -9,7 +9,7 @@ packages/       ALP libraries and executables, published as @anhlp/alp-*
   protocol  core  runtime  client  daemon  cli
 integrations/   optional adapters to external hosts, each a separate package
   paseo/        alp-paseo-plugin (Paseo plugin, web app, relay)
-  web.json      descriptor the CLI reads to find the bundled web integration
+  web.json      development-only descriptor; not shipped in core
 apps/           standalone applications
   tui/          @anhlp/alp-tui (reserved, private)
 ```
@@ -39,6 +39,10 @@ The root `templates/` remains the editable source of truth. Build scripts copy i
 
 ## Build and test
 
+`npm run validate` is the shared local/CI baseline. Run `validate:core`,
+`validate:paseo`, or `validate:packages` separately to isolate failures. See
+[CI baseline](ci-baseline.md) for build ordering, requirements and recorded results.
+
 ```sh
 npm ci
 npm run check:boundaries
@@ -49,7 +53,7 @@ npm run build --workspace=@anhlp/alp-runtime
 npm run test --workspace=@anhlp/alp-runtime
 ```
 
-Root `npm run build` retains the legacy bundle paths. Workspace builds compile the selected package and its dependencies, preserving individual module imports and emitting declarations. The `alp-source` export condition is only for repository builds/typechecking; published consumers use ordinary JavaScript and declaration exports.
+Root `npm run build` retains the neutral legacy bundle paths and builds the CLI without Paseo. `npm run build:paseo` builds the optional plugin. Workspace builds compile the selected package and its dependencies, preserving individual module imports and emitting declarations. The `alp-source` export condition is only for repository builds/typechecking; published consumers use ordinary JavaScript and declaration exports.
 
 ## Test layout
 
@@ -79,7 +83,7 @@ npm test -w @anhlp/alp-core # one package, independently
 
 Every run uses an isolated `ALP_HOME`. `npm run test:packages` runs each package's own `npm test` in turn; it overlaps with `test:unit` and is meant for checking that a package tests on its own. Live `test:e2e:*` scripts require authenticated providers (and sometimes a running Paseo host). `test/integration/layout.test.js` fails when a test file sits outside these directories, is selected twice, or names a package its own package does not depend on.
 
-Every core workspace — protocol, core, runtime, client, daemon and CLI — compiles and tests without a web build; `scripts/build-core.mjs` emits the neutral core bundles and the six core packages' tests never build the plugin. Building the plugin and the compatibility root requires the pinned web app:
+Every core workspace — protocol, core, runtime, client, daemon and CLI — compiles and tests without a web build; `scripts/build-core.mjs` emits the neutral core bundles and the six core packages' tests never build the plugin. Packing the optional plugin requires the pinned web app; packing `@anhlp/alp` does not:
 
 ```sh
 npm run build:web
@@ -88,7 +92,7 @@ npm run release:pack-check
 npm run test:packages:smoke
 ```
 
-Prepack verifies the web artifact's pinned Paseo commit and patch inventory. The daemon and CLI distributions carry `alpd.js` (CLI also `acp.js`) but no web app; the plugin ships the web app and the integration entry (`server/dist/main.js`), and the compatibility root ships the plugin's build under `integrations/paseo/server/dist` with the descriptor `integrations/web.json`. The existing Claude SDK external dependency remains declared in the executable distributions.
+Plugin prepack verifies its web artifact's pinned Paseo commit and patch inventory; core prepack runs only the core build. The daemon and CLI distributions carry `alpd.js` (CLI also `acp.js`) but no web app; the plugin ships the web app and the integration entry (`server/dist/main.js`), and the root `@anhlp/alp` distribution ships only core artifacts. The existing Claude SDK external dependency remains declared in the executable distributions.
 
 ### Breaking migration: the daemon no longer serves the web app
 
@@ -98,7 +102,7 @@ The web/Paseo surface moved out of the neutral daemon into the optional plugin. 
 | --- | --- |
 | `@anhlp/alp-daemon/web` (`createWebServer`, `createPaseoBridge`, `webAppDir`, `webFile`, `DEFAULT_WEB_PORT`) | `alp-paseo-plugin/web` (same named exports) |
 
-`@anhlp/alp-daemon` keeps only its `index`, `lock`, `main`, `server` and `store` subpaths; the `web` export and `src/web.ts` are gone, so an `alp-daemon/web` import now fails at resolution. The daemon's neutral core bundles (`dist/runtime/index.js`, `dist/daemon/index.js`, `dist/alpd.js`, `dist/acp.js`, `dist/acp/agent.js`) never include the plugin or `@getpaseo`; `npm run check:boundaries` reads `dist/build-manifest.json` to prove it. The plugin's own subpaths (`alp-paseo-plugin`, `/main`, `/web`, `/paseo/*`, `/panel/*`) replace the old in-daemon copies, and Paseo's integration descriptor moves to the compatibility root's `integrations/web.json`.
+`@anhlp/alp-daemon` keeps only its `index`, `lock`, `main`, `server` and `store` subpaths; the `web` export and `src/web.ts` are gone, so an `alp-daemon/web` import now fails at resolution. The daemon's neutral core bundles (`dist/runtime/index.js`, `dist/daemon/index.js`, `dist/alpd.js`, `dist/acp.js`, `dist/acp/agent.js`) never include the plugin or `@getpaseo`; `npm run check:boundaries` reads `dist/build-manifest.json` to prove it. The plugin's own subpaths (`alp-paseo-plugin`, `/main`, `/web`, `/paseo/*`, `/panel/*`) replace the old in-daemon copies, and Paseo's installed integration can register its descriptor at `$ALP_HOME/integrations/web.json` using `alp-web-integration --register`.
 
 Migrate an in-repo consumer in two steps:
 
@@ -120,7 +124,7 @@ The six core workspaces depend only on `@anhlp/*` packages and their own declare
 | `@anhlp/alp-protocol` … `@anhlp/alp-cli` | no | the neutral core |
 | `alp-paseo-plugin` | peers `@getpaseo/plugin`, `@getpaseo/client`, `@getpaseo/protocol`, `@getpaseo/relay` (and React) | the Paseo host adapter, the web app and the panels |
 
-`npm run release:pack-check` packs each public workspace and verifies its public exports; `npm run release:tarball-check` then installs the tarballs in isolation — the core set with no `@getpaseo`, plugin or React package must import and typecheck, and the plugin must install with its declared peers.
+`npm run release:pack-check` packs the main distribution and each public workspace, rejects Paseo paths in core tarballs and verifies public exports; `npm run release:tarball-check` then installs the tarballs in isolation — the core set with no `@getpaseo`, plugin or React package must import and typecheck, and the plugin must install with its declared peers.
 
 #### Neutral extensions and the plugin's process data
 
@@ -179,3 +183,23 @@ The Paseo plugin workspace lives in `integrations/paseo` and retains the npm nam
 ## Paseo isolation
 
 The ALP core six workspaces (`protocol`, `core`, `runtime`, `client`, `daemon`, `cli`) now contain no `@getpaseo/*` imports or dependencies. Paseo-specific protocol handling, panel RPC implementations, shared RPC mapping, and the `createPaseoBridge` web/relay gateway moved to `integrations/paseo`; daemon artifacts expose them no longer. The Paseo integration remains an optional consumer of ALP daemon IPC and may be shipped separately or bundled as an optional executable/app. `check-boundaries` additionally validates packed `dist` artifacts for leaked Paseo dependencies.
+
+### Main distribution and standalone proof
+
+`@anhlp/alp` has no required, optional, peer or bundled `@getpaseo/*` dependency,
+and ships neither the web app nor integration descriptors/server artifacts.
+The root build/prepack and all six workspace builds are core-only. Declaration
+emission uses `packages/daemon/src/alp-templates.d.ts`, with no Paseo source input.
+
+`npm run test:core:standalone` copies only the six core sources, templates and
+build scripts into a temporary source tree, installs build dependencies there,
+and runs actual npm prepack lifecycles without `integrations/paseo` or a web
+build. It installs the resulting six tarballs in one consumer and `@anhlp/alp`
+with only its declared ALP dependencies in another. Both run CLI/daemon/IPC and
+ACP stdio handshake, prompt and streamed response with a fake provider. Installed
+artifacts and the complete npm dependency tree are checked for Paseo leakage.
+The existing runtime/reconnect test also runs against the six installed packages.
+
+To retain the web UI after upgrading core, install `alp-paseo-plugin` separately
+and run `alp-web-integration --register` in the intended `ALP_HOME` (global PATH
+discovery also works). See the [plugin installation and compatibility notes](../integrations/paseo/README.md#optional-web-installation).

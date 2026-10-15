@@ -11,7 +11,7 @@ From this repository:
 ```sh
 npm ci
 npm run check
-npm run build
+npm run build:paseo
 paseo daemon config set pluginsEnabled true
 paseo plugin install /absolute/path/to/alp-workspace/integrations/paseo
 paseo provider models alp

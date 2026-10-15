@@ -9,11 +9,6 @@
     "packages/client/dist",
     "dist/alpd.js",
     "dist/acp.js",
-    "dist/web-app",
-    "integrations/web.json",
-    "integrations/paseo/server/dist/main.js",
-    "integrations/paseo/server/dist/alpd.js",
-    "integrations/paseo/server/dist/web-app",
     "templates",
     "README.md",
     "docs/modular-monorepo.md"
@@ -28,7 +23,7 @@
     "test:e2e": "node scripts/test.mjs e2e",
     "test:all": "node scripts/test.mjs all",
     "check": "tsc -p tsconfig.paseo.json && tsc -p tsconfig.client.json",
-    "build": "node scripts/build-paseo.mjs",
+    "build": "node scripts/build-workspace.mjs cli && node scripts/build-core.mjs",
     "test:e2e:workflow": "node test/e2e/workflow-e2e.mjs pho && node test/e2e/workflow-e2e.mjs cafe",
     "test:e2e:mailbox": "node test/e2e/mailbox-e2e.mjs ask && node test/e2e/mailbox-e2e.mjs wake && node test/e2e/mailbox-e2e.mjs steer",
     "test:e2e:team": "node test/e2e/team-e2e.mjs",
@@ -42,7 +37,7 @@
     "test:e2e:worktree": "node scripts/build-core.mjs && node test/e2e/worktree-e2e.mjs",
     "test:e2e:human": "node test/e2e/human-e2e.mjs cli && node test/e2e/human-e2e.mjs paseo",
     "test:e2e:board": "node scripts/build-core.mjs && node test/e2e/board-e2e.mjs",
-    "prepack": "node scripts/build-workspace.mjs cli && node scripts/build-paseo.mjs && node scripts/check-web-app.mjs",
+    "prepack": "npm run build",
     "build:web": "node scripts/build-paseo-web.mjs",
     "build:packages": "npm run build --workspaces --if-present",
     "test:packages": "npm run test --workspaces --if-present",
@@ -51,7 +46,14 @@
     "version:package": "node scripts/version-package.mjs",
     "release:pack-check": "node scripts/pack-check.mjs",
     "release:tarball-check": "node scripts/tarball-consumer.mjs",
-    "test:packages:smoke": "node scripts/package-smoke.mjs"
+    "test:packages:smoke": "node scripts/package-smoke.mjs",
+    "validate": "node scripts/validate.mjs",
+    "validate:core": "node scripts/validate.mjs core",
+    "validate:paseo": "node scripts/validate.mjs paseo",
+    "validate:packages": "node scripts/validate.mjs packages",
+    "check:core": "tsc -p tsconfig.core.json",
+    "test:core:standalone": "node scripts/core-standalone-smoke.mjs",
+    "build:paseo": "node scripts/build-workspace.mjs paseo"
   },
   "engines": {
     "node": ">=20"
@@ -78,8 +80,7 @@
     "@anhlp/alp-core": "0.10.0",
     "@anhlp/alp-protocol": "0.10.0",
     "@anthropic-ai/claude-agent-sdk": "^0.3.292",
-    "smol-toml": "1.9.0",
-    "@getpaseo/plugin": ">=0.11.1 <0.12.0"
+    "smol-toml": "1.9.0"
   },
   "repository": {
     "type": "git",
@@ -99,8 +100,5 @@
     "packages/cli",
     "apps/tui",
     "integrations/paseo"
-  ],
-  "bundledDependencies": [
-    "@getpaseo/plugin"
   ]
 }

@@ -62,7 +62,7 @@ npm run check
 npm test
 ```
 
-`npm test` builds every workspace and runs the hermetic suites (unit and integration together, each file once) in a throwaway `ALP_HOME`. `npm run build` builds the Paseo bundle and the runtime bundle (`dist/runtime`). The runtime in `src/runtime` owns native harnesses, sessions, delegation, and mail without importing Paseo; `alpd` hosts it, and the plugin is a viewer over the daemon ([design](plans/reference/ALPD.md)).
+`npm test` builds every workspace and runs the hermetic suites (unit and integration together, each file once) in a throwaway `ALP_HOME`. `npm run build` builds only the core CLI, daemon, ACP and runtime bundles; `npm run build:paseo` builds the optional plugin. The runtime in `packages/runtime/src` owns native harnesses, sessions, delegation, and mail without importing Paseo; `alpd` hosts it, and the plugin is a viewer over the daemon ([design](plans/reference/ALPD.md)).
 
 Tests are split by owner:
 
@@ -245,9 +245,11 @@ Finished assignments stay recallable for 14 days: main, or the agent that assign
 
 ## The web app
 
-The ALP Paseo plugin (the web integration alpd runs) serves the ALP web app on your machine, so installing ALP is enough to work from a browser:
+The optional `alp-paseo-plugin` package serves the ALP web app as a separate process. The core `@anhlp/alp` distribution includes no Paseo SDK or web app. Install the plugin once to keep using the existing web commands:
 
 ```sh
+npm install -g alp-paseo-plugin
+alp-web-integration --register  # register in the selected ALP_HOME (also discoverable on PATH)
 alp web            # opens http://127.0.0.1:7433 with its access token
 alp web --print    # prints the address instead
 ```
@@ -332,7 +334,7 @@ Install dependencies, type-check the plugin, and build its server bundle:
 ```sh
 npm ci
 npm run check
-npm run build
+npm run build:paseo
 ```
 
 The build output is written to `integrations/paseo/server/dist/index.js`. Paseo plugins are trusted, unsandboxed code, so enable plugins only on a daemon where you trust this repository. In Paseo, open **Settings → Plugins** and turn on **Enable plugins**.
@@ -348,7 +350,7 @@ Paseo requires an absolute path when adding a local plugin. From the repository 
 PowerShell:
 
 ```powershell
-paseo plugin add (Resolve-Path .\plugins\paseo).Path
+paseo plugin add (Resolve-Path .\integrations\paseo).Path
 ```
 
 macOS/Linux:
@@ -368,7 +370,7 @@ After changing the plugin source, rebuild and reload the installed plugin:
 
 ```sh
 npm run check
-npm run build
+npm run build:paseo
 paseo plugin reload alp-provider
 ```
 

@@ -6,7 +6,6 @@ import { ROOT } from './workspace-build-lib.mjs';
 /** Emit only this package's declarations, while resolving dependency types from workspace sources. */
 export async function emitDeclarations(directory, files) {
   const roots = files.filter(file => /\.(ts|js)$/.test(file)).map(file => path.join(directory, 'src', file));
-  roots.push(path.join(ROOT, 'integrations/paseo/server/alp-templates.d.ts'));
   const output = path.join(ROOT, '.cache/workspace-declarations');
   const options = {
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext,

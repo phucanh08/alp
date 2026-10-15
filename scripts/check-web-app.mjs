@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Before packing: the ALP web app is built beside alpd, from the pinned Paseo commit with every patch
-// in paseo-web/patches (ALPD §62 step 9). The npm package and the Paseo plugin carry it, so a stale or
-// missing build would ship an app that does not match alpd. Build it with scripts/build-paseo-web.mjs.
+// Before packing the optional plugin: verify its web app against the pinned Paseo commit and
+// paseo-web/patches. Core packages do not carry or require this artifact.
+// Build it with scripts/build-paseo-web.mjs.
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -9,7 +9,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const upstream = JSON.parse(await readFile(path.join(root, 'paseo-web/upstream.json'), 'utf8'));
 const patches = (await readdir(path.join(root, 'paseo-web/patches'))).filter(name => name.endsWith('.patch')).sort();
 const problems = [];
-for (const target of ['dist/web-app', 'integrations/paseo/server/dist/web-app']) {
+for (const target of ['integrations/paseo/server/dist/web-app']) {
   const built = await readFile(path.join(root, target, 'alp-web-app.json'), 'utf8').then(JSON.parse, () => undefined);
   if (!built) { problems.push(`${target} is missing`); continue; }
   if (built.paseoCommit !== upstream.commit) problems.push(`${target} is built from Paseo ${built.paseoCommit.slice(0, 7)}, not ${upstream.commit.slice(0, 7)}`);

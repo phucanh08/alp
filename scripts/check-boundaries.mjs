@@ -2,6 +2,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import ts from 'typescript';
+import { corePackageProblems } from './core-package-boundary.mjs';
 import { builtinModules } from 'node:module';
 import { coreManifestPaths, validateBuildManifest } from './build-manifest.mjs';
 
@@ -21,7 +22,7 @@ const allowed = {
   '@anhlp/alp-tui': [],
   'alp-paseo-plugin': ['@anhlp/alp-daemon', '@anhlp/alp-runtime', '@anhlp/alp-client', '@anhlp/alp-core', '@anhlp/alp-protocol'],
 };
-const failures = [];
+const failures = corePackageProblems(manifest);
 const supportDirectory = path.join(root, 'test', 'support');
 
 /** Names bound to createRequire(...) so an aliased require('...') is caught like a bare one. */
@@ -52,7 +53,8 @@ for (const location of manifest.workspaces ?? []) {
 for (const location of manifest.workspaces ?? []) {
   const directory = path.join(root, location);
   const pkg = JSON.parse(await readFile(path.join(directory, 'package.json'), 'utf8'));
-  const declared = { ...pkg.dependencies, ...pkg.peerDependencies, ...pkg.devDependencies };
+  if (pkg.name !== 'alp-paseo-plugin') failures.push(...corePackageProblems(pkg));
+  const declared = { ...pkg.dependencies, ...pkg.peerDependencies, ...pkg.devDependencies, ...pkg.optionalDependencies };
   const edges = Object.keys(declared).filter(name => name.startsWith('@anhlp/alp-'));
   graph.set(pkg.name, edges);
   for (const dep of edges) if (!(allowed[pkg.name] ?? []).includes(dep)) failures.push(`${pkg.name}: forbidden package dependency ${dep}`);
@@ -108,25 +110,25 @@ for (const name of artifactPackages) {
   const directory = path.join(root, 'packages', name, 'dist');
   try {
     const files = await readdir(directory, { recursive: true });
-    for (const relative of files.filter(file => /\.js$/.test(file))) {
+    for (const relative of files.filter(file => /\.(?:[cm]?js|ts|json)$/.test(file))) {
       const text = await readFile(path.join(directory, relative), 'utf8');
       if (text.includes('@getpaseo')) failures.push(`packages/${name}/dist/${relative}: packed artifact contains @getpaseo`);
     }
-  } catch {}
+  } catch (error) { if (process.argv.includes('--require-artifacts')) failures.push(`Missing or unreadable build artifact: ${error.message}`); }
 }
 // Root bundles carrying alpd/acp must not embed Paseo.
 for (const file of ['dist/alpd.js', 'dist/acp.js', 'dist/acp/agent.js', 'dist/runtime/index.js', 'dist/daemon/index.js', 'packages/cli/dist/alpd.js', 'packages/cli/dist/acp.js']) {
   try {
     const text = await readFile(path.join(root, file), 'utf8');
     if (text.includes('@getpaseo')) failures.push(`${file}: packed artifact contains @getpaseo`);
-  } catch {}
+  } catch (error) { if (process.argv.includes('--require-artifacts')) failures.push(`Missing or unreadable build artifact: ${error.message}`); }
 }
 // Every core build writes a manifest of each canonical bundle's inputs and externals (root
 // runtime/daemon/alpd/acp, plus the workspace daemon and CLI alpd/acp outputs); validate them all.
 for (const manifestFile of coreManifestPaths(root)) {
   try {
     failures.push(...validateBuildManifest(JSON.parse(await readFile(manifestFile, 'utf8'))));
-  } catch {}
+  } catch (error) { if (process.argv.includes('--require-artifacts')) failures.push(`Missing or unreadable build artifact: ${error.message}`); }
 }
 
 if (failures.length) { console.error(failures.join('\n')); process.exitCode = 1; }

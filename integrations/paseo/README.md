@@ -116,4 +116,42 @@ npm run test -w alp-paseo-plugin
 npm pack -w alp-paseo-plugin
 ```
 
-`integrations/paseo` owns the plugin client, server, shared types and manifest. The build writes the self-contained server bundles (including the integration entry `server/dist/main.js` and `server/dist/alpd.js`) and the web app to `server/dist`; the compatibility root ships them from there. The npm package name and Paseo plugin ID remain unchanged.
+`integrations/paseo` owns the plugin client, server, shared types and manifest. The build writes the self-contained server bundles (including the integration entry `server/dist/main.js` and `server/dist/alpd.js`) and the web app to `server/dist`; only the plugin package ships these Paseo artifacts. The npm package name and Paseo plugin ID remain unchanged.
+
+## Optional web installation
+
+`@anhlp/alp` and the six core packages install without Paseo. To use the web UI:
+
+```sh
+npm install -g @anhlp/alp alp-paseo-plugin
+alp-web-integration --register
+alp web --print
+alp web pair --off
+```
+
+Normal npm installs resolve the plugin's declared Paseo/React peers; do not use
+`--legacy-peer-deps` for a standalone installation unless you supply those peers
+explicitly. The binary is also discoverable on PATH, so registration is optional
+for a global install. For a local install, run
+`./node_modules/.bin/alp-web-integration --register` with the intended `ALP_HOME`.
+The existing `paseo plugin add npm:alp-paseo-plugin` route for a Paseo host remains
+available independently of this standalone web process.
+
+Core upgrades no longer update a bundled plugin: upgrade `alp-paseo-plugin`
+separately, and re-register if its installation location changes. Keep existing
+`web` settings, `web.json` token/server identity and ALP session storage.
+`alp web`, `alp web --print`, `alp web pair --on/--off`, `ALP_WEB_INTEGRATION`,
+`ALP_INTEGRATION_ENTRY`, `ALP_DAEMON_ENTRY`, `ALP_SUPERVISE` and `ALP_HOME` retain
+their meanings. Without the plugin, web commands explain how to install it;
+CLI, daemon, IPC and ACP remain usable.
+
+The public provider (`alp`), plugin ID (`alp-provider`), exports (`.`, `/main`,
+`/web`, `/paseo/*`, `/panel/*`), Phở/Cafe sessions, streaming/cancel, delegation,
+human questions, Tasks/settings panels, web authentication, relay pairing and
+daemon supervision/reconnection are unchanged. `release:tarball-check` runs the
+existing provider, team, human, web, relay and transport regressions against a
+separately installed plugin and real SDK peers.
+
+For source builds, `npm run build:paseo` builds the server; `npm run build:web`
+builds the pinned web app. Plugin prepack verifies its own web artifact. Neither
+step is required by core build/prepack.

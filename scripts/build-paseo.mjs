@@ -9,7 +9,7 @@ import { assertCoreInputs } from './build-manifest.mjs';
 process.chdir(path.resolve(import.meta.dirname, '..'));
 
 // The optional plugin ships beside the neutral core; build the core bundles first so a full
-// `npm run build` still produces everything the tests import from dist/.
+// `npm run build:paseo` also produces the neutral bundles tests import from dist/.
 await buildCore({ log: message => console.log(message) });
 
 // The plugin's client side as the ALP web app runs it (ALPD §62 step 7): compiled as Paseo's daemon

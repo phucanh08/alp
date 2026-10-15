@@ -138,7 +138,7 @@ export const sameType = (summary: DaemonSessionSummary): SessionSummary => summa
   const peerSpecs = Object.entries(plugin.peerDependencies ?? {})
     .filter(([name]) => !plugin.peerDependenciesMeta?.[name]?.optional)
     .map(([name, range]) => `${name}@${installedVersion(name) ?? range}`);
-  installProject(pluginDir, [tarballs.get('alp-paseo-plugin'), ...coreTarballs, ...peerSpecs, TYPES_NODE]);
+  installProject(pluginDir, [tarballs.get('alp-paseo-plugin'), ...coreTarballs, ...peerSpecs, TYPES_NODE, `esbuild@${installedVersion('esbuild')}`]);
   const sdkPeers = peerSpecs.filter(spec => spec.startsWith('@getpaseo/'));
   if (sdkPeers.length < 4) throw new Error(`expected the Paseo SDK peers in the plugin install, got: ${sdkPeers.join(', ')}`);
 
@@ -165,6 +165,26 @@ export const gateway = (value: PaseoGateway) => value;
   writeFileSync(path.join(pluginDir, 'bad-wildcard.ts'), `import { nope } from 'alp-paseo-plugin/paseo/does-not-exist';\nexport { nope };\n`);
   typecheck(pluginDir, strictConsumerTsconfig(['bad-wildcard.ts']), { expectFailure: true, mustMention: 'alp-paseo-plugin/paseo/does-not-exist' });
   console.log('plugin consumer ok (isolated, real SDK)');
+
+  // Run the existing behavioral regressions against installed public APIs, not workspace links.
+  const tests = ['paseo', 'team', 'human', 'web', 'relay', 'paseo-web', 'workflow', 'transport'];
+  const suite = path.join(pluginDir, 'integrations/paseo/tests');
+  mkdirSync(suite, { recursive: true });
+  mkdirSync(path.join(pluginDir, 'test/support'), { recursive: true });
+  const support = readFileSync(path.join(root, 'test/support/fake-agent.js'), 'utf8')
+    .replace('../../packages/core/src/init.js', '@anhlp/alp-core/init')
+    .replace('../../dist/runtime/index.js', '@anhlp/alp-runtime');
+  writeFileSync(path.join(pluginDir, 'test/support/fake-agent.js'), support);
+  for (const name of tests) {
+    const source = readFileSync(path.join(root, 'integrations/paseo/tests', `${name}.test.js`), 'utf8')
+      .replace("new URL('../server/dist/index.js', import.meta.url)", "import.meta.resolve('alp-paseo-plugin')");
+    writeFileSync(path.join(suite, `${name}.test.js`), source);
+  }
+  const regression = spawnSync(process.execPath, ['--test', ...tests.map(name => path.join(suite, `${name}.test.js`))], {
+    cwd: pluginDir, stdio: 'inherit', timeout: 180_000,
+    env: { ...process.env, ALP_HOME: path.join(pluginDir, 'home'), NODE_PATH: '' },
+  });
+  if (regression.status !== 0) throw new Error(`installed plugin regressions failed: ${regression.status}`);
 
   console.log('Tarball consumer check passed');
 } finally {
