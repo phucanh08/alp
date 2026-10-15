@@ -34,11 +34,25 @@ export async function acquireLock(home: string, contents: Omit<LockContents, 'pi
   throw new Error('Could not acquire the ALP daemon lock');
 }
 
+/**
+ * Moves `temporary` over `file`. On Windows the move fails with EPERM, EACCES or EBUSY while
+ * another process has `file` open, such as a client reading the lock; it is tried again then.
+ */
+export async function replaceFile(temporary: string, file: string) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await rename(temporary, file); }
+    catch (error: any) {
+      if (process.platform !== 'win32' || attempt >= 20 || !['EPERM', 'EACCES', 'EBUSY'].includes(error?.code)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 10 + attempt * 10));
+    }
+  }
+}
+
 export async function updateLock(home: string, lock: LockContents) {
   const file = daemonPaths(home).lock;
   const temporary = `${file}.${process.pid}.tmp`;
   await writeFile(temporary, JSON.stringify(lock), { mode: 0o600 });
-  await rename(temporary, file);
+  await replaceFile(temporary, file);
 }
 
 /** True while this process still owns the lock; refreshes its mtime as a heartbeat. */

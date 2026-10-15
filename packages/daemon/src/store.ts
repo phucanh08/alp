@@ -1,4 +1,5 @@
-import { appendFile, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, open, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { replaceFile } from './lock.js';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import type { Envelope, SessionSnapshot, SessionSpec } from '@anhlp/alp-runtime/index';
@@ -84,7 +85,7 @@ export function createStore(root: string) {
     const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
     try {
       await writeFile(temporary, body, { mode: 0o600 });
-      await rename(temporary, file);
+      await replaceFile(temporary, file);
     } catch (error) {
       await rm(temporary, { force: true }).catch(() => {});
       throw error;
