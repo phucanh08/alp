@@ -138,6 +138,45 @@ P('session.log', { sessionId: 'ses_fixture' }); R('session.log', { rootId: 'ses_
 P('extension.register', { method: 'web.pairing' }); R('extension.register', { registered: 'web.pairing' });
 P('extension.unregister', { method: 'web.pairing' }); R('extension.unregister', { unregistered: 'web.pairing' });
 
+// project, task, library and settings methods (capabilities team, task, library, settings.language)
+const row = { id: 't-a3f8', title: 'Viết test 😀', type: 'task', priority: 2, status: 'open', rev: 3, ready: true, approvals: [{ gate: 'g1', note: 'Duyệt?' }], labels: ['rpc'], createdAt: ts, updatedAt: ts };
+P('team.list', { projectRoot: '/work/project' }); P('team.list', {}, true, 'without a project');
+P('team.list', { projectRoot: '' }, false, 'with an empty projectRoot');
+R('team.list', { projectRoot: '/work/project', teams: [{ id: 'pho', label: 'Phở', source: 'builtin' }, { id: 'mine', source: 'library', error: 'agent x is missing' }] });
+P('task.list', { projectRoot: '/work/project' }); P('task.list', {}, false, 'without projectRoot');
+R('task.list', { projectRoot: '/work/project', tasks: [row, { ...row, id: 't-a3f8.1', status: 'closed', rev: 0, ready: false, closed: { reason: 'done', at: ts }, progress: { done: 1, total: 2 } }], unreadable: [{ file: '.alp/tasks/t-bad.json', error: 'not JSON' }], revision: 'abc' });
+R('task.list', { projectRoot: '/work/project', tasks: [{ ...row, status: 'blocked' }], unreadable: [], revision: 'x' }, false, 'result with an unknown status');
+P('task.create', { projectRoot: '/work/project', title: 'Sửa lỗi', priority: 0, requestId: 'req-1' });
+P('task.create', { projectRoot: '/work/project', title: ' ' }, false, 'with a blank title');
+P('task.create', { projectRoot: '/work/project', title: 'x', priority: 5 }, false, 'with priority 5');
+R('task.create', { id: 't-a3f8' }); R('task.create', { id: 't-a3f8', duplicate: true }, true, 'result of a repeat');
+P('task.update', { projectRoot: '/work/project', id: 't-a3f8', action: 'close', note: 'Xong', ifRev: 3 });
+P('task.update', { projectRoot: '/work/project', id: 't-a3f8', action: 'approve' }, false, 'with action approve (that is task.gate.resolve)');
+P('task.update', { projectRoot: '/work/project', id: 'bd-1', action: 'close' }, false, 'with an id that is not a task id');
+R('task.update', { id: 't-a3f8', status: 'closed', rev: 4, landed: 'Epic t-a3f8 landed' });
+P('task.gate.resolve', { projectRoot: '/work/project', id: 't-a3f8', gate: 'g1', note: 'OK' });
+R('task.gate.resolve', { id: 't-a3f8', status: 'open', rev: 5 });
+P('library.list', { kind: 'agents', projectRoot: '/work/project' }); P('library.list', { kind: 'plugins' }, false, 'with an unknown kind');
+R('library.list', { projectRoot: null, entries: [{ name: 'main', source: 'builtin' }, { name: 'reviewer', source: 'project', overrides: 'library', description: 'Đọc lại', usedBy: ['team pho'] }] });
+P('library.get', { kind: 'mcp', name: 'docs', projectRoot: '/work/project', scope: 'project' });
+P('library.get', { kind: 'mcp', name: '..' }, false, 'with the name ..');
+P('library.get', { kind: 'mcp', name: 'a/b' }, false, 'with a slash in the name');
+R('library.get', { kind: 'mcp', name: 'docs', source: 'library', content: { server: { url: 'https://example.invalid/mcp', headers: { Authorization: { $secret: 'keep' } } } }, revision: 'r-1', usedBy: ['agent main'], secrets: ['/server/headers/Authorization'] });
+R('library.get', { kind: 'agents', name: 'main', source: 'builtin', content: { instructions: '…' }, revision: null, usedBy: [], librarySkills: ['tdd'] }, true, 'result of a built-in agent');
+P('library.save', { kind: 'providers', name: 'gemini', scope: 'library', content: { provider: { kind: 'acp', command: 'gemini', env: { GEMINI_API_KEY: { $secret: 'keep' } } } }, revision: 'r-1' });
+P('library.save', { kind: 'teams', name: 'mine', scope: 'project', projectRoot: '/work/project', content: { team: {} }, revision: null, sync: 'known-projects' }, true, 'creating a team with sync');
+P('library.save', { kind: 'skills', name: 'tdd', scope: 'everywhere', content: {} }, false, 'with an unknown scope');
+R('library.save', { revision: 'r-2', syncedProjects: 2, syncErrors: [] });
+P('library.delete', { kind: 'skills', name: 'tdd', scope: 'library', revision: 'r-2' }); R('library.delete', { removed: true, now: 'builtin' });
+P('library.duplicate', { kind: 'agents', from: 'main', to: 'main-2', scope: 'library' }); R('library.duplicate', { revision: 'r-3' });
+P('library.rename', { kind: 'agents', from: 'main-2', to: 'helper', scope: 'project', projectRoot: '/work/project' }); R('library.rename', { revision: 'r-4' });
+P('library.skills.set', { agent: 'main', skills: ['tdd'] }); R('library.skills.set', { skills: ['tdd'] });
+P('library.models', {}); R('library.models', { models: [{ id: 'codex:gpt-6.1-sol', label: 'codex · GPT-6.1-Sol', efforts: ['low', 'high'], effort: 'low' }, { id: 'acp:gemini', label: 'Gemini · Provider default', efforts: [] }] });
+P('settings.language.get', {}); R('settings.language.get', { language: null, applies: 'Vietnamese', default: 'Vietnamese' });
+P('settings.language.set', { language: 'English' }); P('settings.language.set', { language: null }, true, 'clearing the language');
+P('settings.language.set', {}, false, 'without language');
+R('settings.language.set', { language: 'English', applies: 'English', default: 'Vietnamese' });
+
 P('daemon.hello', { protocolVersion: '1' }, false, 'with a string protocolVersion');
 P('session.list', { includeClosed: 'yes' }, false, 'with a string flag');
 P('extension.register', {}, false, 'without method');

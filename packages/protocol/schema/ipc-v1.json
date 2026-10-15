@@ -1702,6 +1702,306 @@
         "checks"
       ],
       "additionalProperties": true
+    },
+    "projectRoot": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "description": "An absolute, normalized path on the daemon host to a directory holding .alp/. Compared as is: the daemon never walks up to a parent."
+    },
+    "taskId": {
+      "type": "string",
+      "pattern": "^t-[0-9a-f]{4,12}(?:\\.\\d+)*$"
+    },
+    "taskRow": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/taskId"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "open",
+            "in_progress",
+            "review",
+            "closed"
+          ]
+        },
+        "rev": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parent": {
+          "type": "string"
+        },
+        "assignee": {
+          "type": "string"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "blockedBy": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "waits": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "approvals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "gate": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "gate",
+              "note"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "handoff": {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "agent": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome",
+            "summary"
+          ],
+          "additionalProperties": true
+        },
+        "closed": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "at"
+          ],
+          "additionalProperties": true
+        },
+        "description": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "progress": {
+          "type": "object",
+          "properties": {
+            "done": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "done",
+            "total"
+          ],
+          "additionalProperties": true
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "type",
+        "priority",
+        "status",
+        "rev",
+        "ready",
+        "updatedAt"
+      ],
+      "additionalProperties": true
+    },
+    "libraryKind": {
+      "enum": [
+        "agents",
+        "skills",
+        "mcp",
+        "hooks",
+        "teams",
+        "providers"
+      ]
+    },
+    "libraryScope": {
+      "enum": [
+        "library",
+        "project"
+      ]
+    },
+    "librarySource": {
+      "enum": [
+        "builtin",
+        "library",
+        "project"
+      ]
+    },
+    "entryName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9_.-]+$",
+      "not": {
+        "enum": [
+          ".",
+          ".."
+        ]
+      }
+    },
+    "libraryRevision": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "libraryEntryRow": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/librarySource"
+        },
+        "overrides": {
+          "$ref": "#/$defs/librarySource"
+        },
+        "description": {
+          "type": "string"
+        },
+        "usedBy": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "source"
+      ],
+      "additionalProperties": true
+    },
+    "secretMarker": {
+      "type": "object",
+      "properties": {
+        "$secret": {
+          "const": "keep"
+        }
+      },
+      "required": [
+        "$secret"
+      ],
+      "additionalProperties": false,
+      "description": "Stands for a stored secret value: read results carry it in place of the value; a save that sends it back keeps the stored value."
+    },
+    "languageSetting": {
+      "type": "object",
+      "properties": {
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "applies": {
+          "type": "string"
+        },
+        "default": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "language",
+        "applies",
+        "default"
+      ],
+      "additionalProperties": true
+    },
+    "teamRow": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/librarySource"
+        },
+        "overrides": {
+          "$ref": "#/$defs/librarySource"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source"
+      ],
+      "additionalProperties": true
     }
   }
 }
