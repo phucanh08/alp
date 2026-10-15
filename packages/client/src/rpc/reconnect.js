@@ -5,7 +5,9 @@ import { AlpClientError } from './errors.js';
 /**
  * Keeps an ALP connection up: connects, runs the caller's `onConnect` (handshake, reattach and
  * replay as the protocol defines them), and after a disconnect connects again with exponential
- * backoff until stopped. It never resends a request: requests in flight when the connection drops
+ * backoff until stopped. A connection counts as up only once it has stayed open `stableMs`; one
+ * that drops sooner (a gateway closing right after the handshake) counts as a failed attempt, so
+ * backoff and `maxAttempts` still apply. It never resends a request: requests in flight when the connection drops
  * reject as `disconnected`, and requests made while it is down reject at once. Whether and how to
  * retry belongs to the caller, who knows which methods are safe to repeat.
  */
@@ -23,6 +25,7 @@ import { AlpClientError } from './errors.js';
  *   onDisconnect?(error: Error, context: { reconnect: boolean }): void,
  *   backoff?: Backoff,
  *   maxAttempts?: number,
+ *   stableMs?: number,
  *   shouldRetry?(error: Error): boolean,
  *   client?: AlpRpcClientOptions,
  *   random?: () => number,
@@ -55,8 +58,12 @@ export function retryable(error) {
   return !(error instanceof AlpRpcError && error.code === ERROR.protocol);
 }
 
-/** A minimal AbortController; React Native and browsers have one, but nothing here depends on it. */
+/** The platform's AbortController, whose signal fetch and AbortSignal.any accept; a minimal one where there is none. */
 function controller() {
+  if (typeof globalThis.AbortController === 'function') {
+    const native = new globalThis.AbortController();
+    return { signal: /** @type {AbortSignalLike} */ (native.signal), /** @param {unknown} reason */ abort: reason => native.abort(reason) };
+  }
   /** @type {Set<() => void>} */
   const listeners = new Set();
   const signal = {
@@ -84,7 +91,7 @@ function controller() {
  * @param {ReconnectOptions} options
  * @returns {ReconnectingClient}
  */
-export function createReconnectingClient({ connect, onConnect, onDisconnect, backoff = {}, maxAttempts = Infinity, shouldRetry = retryable, client: clientOptions, random = Math.random }) {
+export function createReconnectingClient({ connect, onConnect, onDisconnect, backoff = {}, maxAttempts = Infinity, stableMs = 5_000, shouldRetry = retryable, client: clientOptions, random = Math.random }) {
   if (typeof connect !== 'function') throw new TypeError('createReconnectingClient needs connect()');
   /** @type {ReconnectState} */
   let state = 'connecting';
@@ -94,7 +101,8 @@ export function createReconnectingClient({ connect, onConnect, onDisconnect, bac
   let connectedBefore = false;
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let timer;
-  let run = controller();
+  // One run for the client's whole life: stop() is final and aborts it.
+  const run = controller();
   /** @type {Set<(envelope: any) => void>} */
   const events = new Set();
   /** @type {Set<(method: string, params: any) => void>} */
@@ -111,7 +119,11 @@ export function createReconnectingClient({ connect, onConnect, onDisconnect, bac
   /** @param {ReconnectState} next @param {Error} [error] */
   const enter = (next, error) => {
     state = next;
-    for (const listener of [...states]) { try { listener(next, error); } catch {} }
+    for (const listener of [...states]) {
+      dispatch(listener, next, error);
+      // A listener that called stop() has moved the state on; later ones must not hear a stale one.
+      if (state !== next) return;
+    }
     if (next === 'open' && current) for (const waiter of [...waiters]) { waiters.delete(waiter); waiter.resolve(current); }
     if (next === 'stopped') for (const waiter of [...waiters]) { waiters.delete(waiter); waiter.reject(error ?? new AlpClientError('ALP connection stopped', { reason: 'closed' })); }
   };
@@ -121,6 +133,7 @@ export function createReconnectingClient({ connect, onConnect, onDisconnect, bac
     if (state === 'stopped') return;
     if (attempt >= maxAttempts || !shouldRetry(error)) return enter('stopped', error);
     enter('waiting', error);
+    if (state !== 'waiting') return;
     timer = setTimeout(() => { timer = undefined; void open(); }, backoffDelay(attempt, backoff, random));
   };
 
@@ -129,8 +142,13 @@ export function createReconnectingClient({ connect, onConnect, onDisconnect, bac
     attempt++;
     enter('connecting');
     const { signal } = run;
+    if (state !== 'connecting' || signal.aborted) return;
     /** @type {AlpRpcClient | undefined} */
     let candidate;
+    // stop() during the handshake closes the connection being set up: its pending requests reject
+    // and nothing more is sent on it.
+    const closeCandidate = () => candidate?.close();
+    signal.addEventListener('abort', closeCandidate, { once: true });
     try {
       const transport = await connect({ attempt, signal });
       if (signal.aborted) { try { transport.close(); } catch {} return; }
@@ -146,16 +164,20 @@ export function createReconnectingClient({ connect, onConnect, onDisconnect, bac
       candidate?.close();
       if (signal.aborted) return;
       return retry(error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      signal.removeEventListener('abort', closeCandidate);
     }
     const connected = /** @type {AlpRpcClient} */ (candidate);
     current = connected;
     const reconnect = connectedBefore;
     connectedBefore = true;
-    attempt = 0;
+    const openedAt = Date.now();
     connected.onClose(error => {
       if (current !== connected) return;
       current = undefined;
-      try { onDisconnect?.(error, { reconnect }); } catch {}
+      // Only a connection that stayed up starts the next one from a fresh backoff.
+      if (Date.now() - openedAt >= stableMs) attempt = 0;
+      dispatch(() => onDisconnect?.(error, { reconnect }));
       retry(error);
     });
     enter('open');
@@ -192,7 +214,6 @@ export function createReconnectingClient({ connect, onConnect, onDisconnect, bac
       if (state === 'stopped') return;
       if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
       run.abort(new AlpClientError('ALP connection stopped', { reason: 'closed' }));
-      run = controller();
       const last = current;
       current = undefined;
       enter('stopped');

@@ -37,3 +37,21 @@ export function fakeTransport({ failSend } = {}) {
 }
 
 export const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+
+/**
+ * Tracks the timers code under test sets and has not cleared or run yet, so a test can assert that
+ * nothing is left behind (node --test does not fail on a leftover timer by itself).
+ */
+export function liveTimers(t) {
+  const live = new Set();
+  const set = globalThis.setTimeout;
+  const clear = globalThis.clearTimeout;
+  globalThis.setTimeout = (fn, ms, ...args) => {
+    const id = set((...values) => { live.delete(id); fn(...values); }, ms, ...args);
+    live.add(id);
+    return id;
+  };
+  globalThis.clearTimeout = id => { live.delete(id); clear(id); };
+  t.after(() => { for (const id of live) clear(id); globalThis.setTimeout = set; globalThis.clearTimeout = clear; });
+  return live;
+}

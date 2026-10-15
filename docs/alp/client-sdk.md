@@ -13,10 +13,10 @@ không đổi handshake, lỗi, envelope, cursor hay tên method. Các điểm p
 
 | Entry | Môi trường | Nội dung |
 |---|---|---|
-| `@anhlp/alp-client/portable` | Node, browser, React Native | `AlpRpcClient`, `AlpClientError`, `CLIENT_ERROR`, `isAlpClientError`, `hello`, `createReconnectingClient`, `backoffDelay`, `retryable`, `createLineDecoder`, `utf8Length`, `DEFAULT_MAX_PENDING`; hằng số protocol `PROTOCOL_VERSION`, `MAX_FRAME`, `AlpRpcError`, `ERROR`; type `AlpTransport`, `TransportClose`, `RequestOptions`, `ReconnectOptions`, ... |
-| `@anhlp/alp-client/websocket` | Node, browser, React Native | `connectWebSocket`, `createWebSocketTransport`, `redactUrl` |
+| `@anhlp/alp-client/portable` | Node, browser, React Native | `AlpRpcClient`, `AlpClientError`, `CLIENT_ERROR`, `isAlpClientError`, `hello`, `createReconnectingClient`, `backoffDelay`, `retryable`, `createLineDecoder`, `utf8Length`, `DEFAULT_MAX_PENDING`, `MAX_TIMER_MS`, `timerDelay`; hằng số protocol `PROTOCOL_VERSION`, `MAX_FRAME`, `AlpRpcError`, `ERROR`; type `AlpTransport`, `TransportClose`, `RequestOptions`, `ReconnectOptions`, ... |
+| `@anhlp/alp-client/websocket` | Node, browser, React Native | `connectWebSocket`, `createWebSocketTransport`, `redactUrl`, `CLOSE_CODE` |
 | `@anhlp/alp-client/ipc` | Node | `createSocketTransport` (Unix socket, Windows named pipe, NDJSON) |
-| `@anhlp/alp-client` (`.`, `./index`) | Node | Mọi API cũ (`connect`, `AlpClient`, `ensureDaemon`, `daemonPaths`, kiểm tra IPC, lock, discovery, integration) cộng toàn bộ API portable, `connectSocket`, `createSocketTransport` |
+| `@anhlp/alp-client` (`.`, `./index`) | Node | Mọi API cũ (`connect`, `AlpClient`, `ensureDaemon`, `daemonPaths`, kiểm tra IPC, lock, discovery, integration) cộng toàn bộ API portable và WebSocket, `connectSocket`, `createSocketTransport` |
 | `./doctor`, `./service`, `./setup`, `./supervise`, `./render`, ... | Node | Không đổi |
 
 Hai entry portable chỉ import `./rpc/*.js` và `@anhlp/alp-protocol` (`src/public.js` →
@@ -67,7 +67,7 @@ client.close();
   `protocol`. Response có id nhưng thiếu cả `result` lẫn `error` thì chỉ request đó bị reject
   (`protocol`), connection vẫn mở.
 - **Giới hạn:** tối đa `maxPending` (mặc định 4096) request chờ cùng lúc; vượt thì
-  `overloaded` và không gửi. Request lớn hơn `maxFrame` bị từ chối trước khi gửi.
+  `overloaded` và không gửi. Request tính cả newline lớn hơn `maxFrame` bị từ chối trước khi gửi.
 - **Listener ném lỗi** không chặn listener khác; lỗi đi tới `onListenerError` (mặc định ném lại
   ở tick sau như lỗi chưa bắt).
 - **Kết thúc:** mọi request chờ bị reject một lần, timer và abort listener được gỡ, listener của
@@ -97,6 +97,7 @@ thể chứa hai bản).
   Integration test và browser smoke chứng minh: prompt bị abort vẫn được alpd nhận
   (`prompt.accepted`). Muốn dừng phía server thì caller gọi method của protocol (ví dụ
   `session.interrupt`).
+- `timeoutMs` phải là số không âm; `Infinity` hoặc lớn hơn 2^31−1 ms nghĩa là không đặt timer.
 - **Disconnect** reject mọi request chờ với `disconnected`; request mới reject ngay.
 - **Không tự retry.** Engine và reconnect helper không bao giờ gửi lại request, kể cả sau
   reconnect. Idempotency (`clientMessageId` của `session.prompt`, receipt của alpd) là việc
@@ -108,8 +109,8 @@ thể chứa hai bản).
     listener;
   - backoff mũ có jitter (`initialMs` 250, `factor` 2, `maxMs` 10 000, `jitter` 0.2),
     `maxAttempts`, `shouldRetry` (mặc định dừng khi alpd từ chối handshake với
-    `ERROR.protocol`);
-  - `stop()` hủy timer, hủy connect đang chạy (transport đến muộn bị đóng), đóng connection,
+    `ERROR.protocol`); bộ đếm chỉ reset khi connection đã sống ít nhất `stableMs` (mặc định 5 giây);
+  - `stop()` hủy timer, hủy connect đang chạy (transport đến muộn bị đóng), đóng connection kể cả khi đang handshake,
     reject `ready()` đang chờ;
   - `ready({ signal })`, `request`, `onEvent`, `onNotification`, `onState`
     (`connecting | open | waiting | stopped`).
@@ -150,8 +151,8 @@ alp.onEvent(envelope => { if (envelope.cursor !== undefined) cursor = envelope.c
   Không có thì `TypeError` rõ ràng. Không import `ws`.
 - Socket kiểu `addEventListener` (browser, `ws`) và kiểu `on<type>` (một số implementation)
   đều dùng được; listener được gỡ khi kết thúc.
-- Một message có thể chứa nhiều dòng NDJSON. Message binary bị đóng với 1003, quá `maxFrame`
-  đóng với 1009.
+- Một message có thể chứa nhiều dòng NDJSON. Message binary bị đóng với 4003, quá `maxFrame`
+  đóng với 4009.
 - Lỗi chỉ ghi URL đã bỏ credentials, query và fragment (`redactUrl`), vì token có thể nằm ở đó.
 - **Xác thực không thiết kế ở đây (Task 08).** `url` và `protocols` đi qua nguyên vẹn. SDK
   không giả định browser đặt được header tùy ý. Node có thể dùng `createSocket` để tạo `ws`

@@ -10,8 +10,9 @@ import { createSocketTransport } from './ipc.js';
 import { AlpRpcClient } from './rpc/client.js';
 import { hello } from './rpc/handshake.js';
 export { PROTOCOL_VERSION, MAX_FRAME, AlpRpcError, encodeFrame } from '@anhlp/alp-protocol';
-// The Node entry carries the whole portable API too, so Node callers need one import.
+// The Node entry carries the whole portable API and the WebSocket transport too, so Node callers need one import.
 export * from './portable.js';
+export { connectWebSocket, createWebSocketTransport, redactUrl, CLOSE_CODE } from './websocket.js';
 export { createSocketTransport } from './ipc.js';
 
 export function alpHome(env = process.env) {

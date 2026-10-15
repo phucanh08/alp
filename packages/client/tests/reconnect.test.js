@@ -162,3 +162,80 @@ test('a caller listener that throws does not stop the others', async () => {
   assert.deepEqual(reported, ['boom']);
   client.stop();
 });
+
+test('stop() from an onState listener stays stopped, whatever state it heard', async () => {
+  for (const at of ['connecting', 'waiting']) {
+    const side = daemon();
+    const client = createReconnectingClient({ connect: side.connect, onConnect: rpc => hello(rpc), backoff: { initialMs: 1, jitter: 0 } });
+    await client.ready();
+    let giveUp = true;
+    const heard = [];
+    client.onState(state => { heard.push(state); if (state === at && giveUp) { giveUp = false; client.stop(); } });
+    side.transports[0].drop({});
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(client.state, 'stopped', at);
+    assert.equal(client.client, undefined, at);
+    assert.equal(side.transports.length, 1, `${at}: no connection after stop()`);
+    assert.deepEqual(heard.slice(heard.indexOf(at)), [at, 'stopped'], `${at}: only stopped after the state that stopped it`);
+  }
+});
+
+test('stop() during onConnect closes the connection being set up and sends nothing more on it', async () => {
+  const transports = [];
+  const client = createReconnectingClient({
+    connect: async () => { const transport = fakeTransport(); transports.push(transport); return transport; },
+    onConnect: async rpc => {
+      await hello(rpc); // never answered
+      await rpc.request('session.attach', {});
+    },
+  });
+  await until(() => transports[0]?.sent.length === 1);
+  const waiting = client.ready();
+  client.stop();
+  await assert.rejects(waiting, error => isAlpClientError(error, 'closed'));
+  await tick();
+  assert.equal(transports[0].state, 'closed', 'the handshaking transport is closed');
+  assert.deepEqual(transports[0].sent.map(frame => frame.method), ['daemon.hello'], 'session.attach was never sent');
+  assert.equal(transports.length, 1, 'no retry after stop()');
+});
+
+test('a connection that drops right after the handshake counts as a failed attempt', async () => {
+  const side = daemon();
+  const states = [];
+  const client = createReconnectingClient({
+    connect: side.connect,
+    onConnect: async rpc => { await hello(rpc); setTimeout(() => side.transports.at(-1).drop({ code: 4000 }), 1); },
+    backoff: { initialMs: 1, jitter: 0 },
+    maxAttempts: 3,
+    stableMs: 1_000,
+  });
+  client.onState(state => states.push(state));
+  await until(() => client.state === 'stopped');
+  assert.equal(side.transports.length, 3, 'three flapping connections, then it gave up');
+  assert.equal(states.filter(state => state === 'open').length, 3);
+});
+
+test('a connection that stayed up starts the next one from a fresh backoff', async () => {
+  const side = daemon();
+  const client = createReconnectingClient({ connect: side.connect, onConnect: rpc => hello(rpc), backoff: { initialMs: 1, jitter: 0 }, maxAttempts: 2, stableMs: 20 });
+  for (let round = 0; round < 3; round++) {
+    await until(() => client.state === 'open' && side.transports.length === round + 1);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    side.transports.at(-1).drop({});
+  }
+  await until(() => client.state === 'open' && side.transports.length === 4);
+  assert.equal(client.state, 'open', 'maxAttempts counts consecutive failures, not lifetime reconnects');
+  client.stop();
+});
+
+test('connect and onConnect get a real AbortSignal where the platform has one', async () => {
+  const side = daemon();
+  const seen = [];
+  const client = createReconnectingClient({
+    connect: async ({ signal }) => { seen.push(signal instanceof AbortSignal); return side.connect(); },
+    onConnect: async (rpc, { signal }) => { seen.push(signal instanceof AbortSignal); AbortSignal.any([signal]); await hello(rpc); },
+  });
+  await client.ready();
+  assert.deepEqual(seen, [true, true]);
+  client.stop();
+});

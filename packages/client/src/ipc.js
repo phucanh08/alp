@@ -59,10 +59,15 @@ export function createSocketTransport(socket, { maxFrame = MAX_FRAME, maxBuffere
   socket.on('error', error => end({ error }));
   socket.on('close', () => end({}));
   if (socket.destroyed) end({});
+  // A socket alpd has half-closed (Node ends our side at once) or destroyed is gone, even before
+  // Node emits 'close' a tick later.
+  const gone = () => socket.destroyed || socket.writableEnded;
   return {
-    get state() { return ended || socket.destroyed ? 'closed' : 'open'; },
+    get state() { return ended || gone() ? 'closed' : 'open'; },
     send(frame) {
-      if (ended || socket.destroyed || socket.writableEnded) throw new AlpClientError('ALP daemon connection closed', { reason: 'send_failed' });
+      // Report the close now rather than on 'close', so the client is closed when the send fails.
+      if (!ended && gone()) end({});
+      if (ended) throw new AlpClientError('ALP daemon connection closed', { reason: 'send_failed' });
       if (socket.writableLength + frame.length > maxBufferedBytes) throw new AlpClientError(`ALP socket write buffer is over ${maxBufferedBytes} bytes`, { reason: 'send_failed' });
       socket.write(`${frame}\n`);
     },
@@ -77,9 +82,10 @@ export function createSocketTransport(socket, { maxFrame = MAX_FRAME, maxBuffere
       return () => closes.delete(listener);
     },
     close() {
-      if (ended) return;
-      // end() lets frames already written reach the daemon, as the client always did.
-      socket.end();
+      // end() lets frames already written reach the daemon, as the client always did; once they
+      // have, the socket is destroyed, so a peer that never closes its side cannot hold it open.
+      // A side already ended (by this, or by Node after alpd's FIN) is destroyed by Node itself.
+      if (!socket.writableEnded) socket.end(() => socket.destroy());
       end({});
     },
   };

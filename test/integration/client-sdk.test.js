@@ -183,7 +183,7 @@ test('reconnecting over WebSocket resends nothing and reattaches after the last 
 });
 
 test('the portable entries bundle for browsers and React Native with no Node built-in or global', async () => {
-  const allowed = /^packages\/(client\/src\/(portable|websocket|rpc\/(client|errors|framing|handshake|reconnect))|protocol\/src\/(public|wire))\.js$/;
+  const allowed = /^packages\/(client\/src\/(portable|websocket|rpc\/(client|errors|framing|handshake|reconnect|timers))|protocol\/src\/(public|wire))\.js$/;
   for (const [platform, conditions] of [['browser', []], ['neutral', ['react-native', 'import']]]) {
     const result = await build({
       absWorkingDir: root, bundle: true, write: false, metafile: true, format: 'esm', platform, conditions, mainFields: ['react-native', 'browser', 'module', 'main'],
@@ -198,4 +198,27 @@ test('the portable entries bundle for browsers and React Native with no Node bui
   }
   // The Node entry stays Node-only: bundling it for a browser fails on its built-ins.
   await assert.rejects(build({ absWorkingDir: root, bundle: true, write: false, platform: 'browser', stdin: { contents: "export * from '@anhlp/alp-client';", resolveDir: root }, logLevel: 'silent' }));
+});
+
+test('real ws timeout and abort reject without an unhandled socket error', async t => {
+  const net = await import('node:net');
+  const peers = new Set();
+  const server = net.createServer(socket => {
+    peers.add(socket);
+    socket.on('close', () => peers.delete(socket));
+    socket.on('error', () => {});
+    socket.resume(); // Accept TCP but never answer the WebSocket upgrade.
+  });
+  t.after(async () => {
+    for (const peer of peers) peer.destroy();
+    await new Promise(resolve => server.close(resolve));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `ws://127.0.0.1:${server.address().port}`;
+  await assert.rejects(connectWebSocket(url, { WebSocket, timeoutMs: 20 }), error => isAlpClientError(error, 'timeout'));
+  const abort = new AbortController();
+  const pending = connectWebSocket(url, { WebSocket, signal: abort.signal });
+  abort.abort();
+  await assert.rejects(pending, error => isAlpClientError(error, 'aborted'));
+  await new Promise(resolve => setTimeout(resolve, 30));
 });
