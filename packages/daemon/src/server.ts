@@ -355,6 +355,15 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     return result;
   }
 
+  /**
+   * Waits for an opened root's record and timeline (its native thread) to be written, so a
+   * crash after the answer can still resume it (ALPD §66); `durable: false` when they were not.
+   */
+  async function persisted(root: string) {
+    if (!store) return {};
+    return { durable: (await store.drain({ records: [root], timelines: [root] })).length === 0 };
+  }
+
   function forget(root: string) {
     if (runtime.snapshot(root)) return;
     for (const [id, candidate] of rootOf) if (candidate === root) rootOf.delete(id);
@@ -614,7 +623,10 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       }
       const record = records.get(id);
       if (!record && resuming) throw new RpcError(ERROR.notFound, `ALP session ${id} no longer exists in alpd`);
-      if (record) return { session: await resume(connection, record, spec, history, delegation), attached: false, resumed: true };
+      if (record) {
+        const session = await resume(connection, record, spec, history, delegation);
+        return { session, attached: false, resumed: true, ...await persisted(id) };
+      }
       const { restore: _restore, ...kept } = spec;
       const now = new Date().toISOString();
       const created: SessionRecord = { version: 1, id, rootId: id, spec: kept, delegation, status: 'initializing', createdAt: now, updatedAt: now };
@@ -627,7 +639,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       }
       attach(connection, id);
       try {
-        return { session: await runtime.open(id, spec, { history, delegation }), attached: false };
+        const session = await runtime.open(id, spec, { history, delegation });
+        return { session, attached: false, ...await persisted(id) };
       } catch (error) {
         detach(connection, id);
         records.delete(id);
