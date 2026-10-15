@@ -1,5 +1,5 @@
-import { open, readFile, unlink, utimes, writeFile, rename } from 'node:fs/promises';
-import { bootTime, daemonPaths, lockAlive, readLock } from '@anhlp/alp-client/index';
+import { unlink, utimes, writeFile, rename } from 'node:fs/promises';
+import { acquireDaemonLock, daemonPaths, readLock } from '@anhlp/alp-client/index';
 
 export type LockContents = {
   pid: number;
@@ -13,25 +13,8 @@ export type LockContents = {
 };
 
 /** Single-instance lock (Paseo acquirePidLock, simplified): exclusive create, stale when its pid or boot is gone. */
-export async function acquireLock(home: string, contents: Omit<LockContents, 'pid' | 'startedAt' | 'bootTime' | 'uid' | 'ready'>) {
-  const file = daemonPaths(home).lock;
-  const lock: LockContents = { pid: process.pid, startedAt: new Date().toISOString(), bootTime: bootTime(), uid: process.getuid?.() ?? -1, ready: false, ...contents };
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const handle = await open(file, 'wx', 0o600);
-      await handle.writeFile(JSON.stringify(lock));
-      await handle.close();
-      return lock;
-    } catch (error: any) {
-      if (error?.code !== 'EEXIST') throw error;
-      const current = await readLock(home);
-      if (lockAlive(current)) throw new Error(`ALP daemon already running (pid ${current.pid})`);
-      // Remove the stale lock only if nobody replaced it meanwhile.
-      const again = await readFile(file, 'utf8').catch(() => undefined);
-      if (again === undefined || JSON.stringify(current) === again || !lockAlive(JSON.parse(again))) await unlink(file).catch(() => {});
-    }
-  }
-  throw new Error('Could not acquire the ALP daemon lock');
+export async function acquireLock(home: string, contents: Omit<LockContents, 'pid' | 'startedAt' | 'bootTime' | 'uid' | 'ready'>): Promise<LockContents> {
+  return acquireDaemonLock(home, contents) as Promise<LockContents>;
 }
 
 /**

@@ -1,0 +1,27 @@
+export const BACKUP_FORMAT: number;
+export const BACKUP_EXTENSION: string;
+export const STATE_UNITS: string[];
+export const CLEARED_UNITS: string[];
+export const HOME_UNITS: string[];
+export const PROJECT_UNITS: string[];
+export function backupsDir(home: string): string;
+export function knownProjects(home: string): Promise<string[]>;
+export type BackupSummary = { file: string; files: number; bytes: number; projects: string[]; stateSchema: number | null; sessions: number; tasks: number };
+export function createBackup(options: { home: string; out: string; units?: string[]; projects?: string[]; by?: string; kind?: string }): Promise<BackupSummary>;
+export function automaticBackup(home: string, kind: string, options?: { units?: string[]; projects?: string[]; by?: string }): Promise<string>;
+export type BackupContents = { file: string; kind: string; by?: string; createdAt: string; home: string; stateSchema: number | null; units: string[]; projects: string[]; sessions: number; tasks: number; files: number; bytes: number; external: number };
+export function verifyBackup(file: string): Promise<BackupContents>;
+export function recoverInterruptedRestore(home: string): Promise<{ outcome: 'rolled back' | 'completed'; file?: string; safety?: string } | undefined>;
+export type RestoreResult = {
+  file: string;
+  safety?: string;
+  stateSchema: number | null;
+  interrupted?: { outcome: 'rolled back' | 'completed'; file?: string; safety?: string };
+  units: Array<{ area: string; unit: string; present: boolean }>;
+  projects: string[];
+  skipped: Array<{ root: string; reason: string }>;
+  warnings: string[];
+};
+export function restoreBackup(options: { home: string; file: string; projects?: boolean; safety?: boolean; clearLive?: boolean; replaceNewer?: boolean; by?: string; beforeSwap?: (index: number, total: number) => Promise<void> | void }): Promise<RestoreResult>;
+export function readRestoredMarker(home: string): Promise<{ at?: string; from?: string; by?: string } | undefined>;
+export function clearRestoredMarker(home: string): Promise<void>;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -337,6 +337,8 @@ test('closed trees older than 30 days are pruned at startup', async t => {
   await store.put({ version: 1, id: 'recent', rootId: 'recent', status: 'closed', createdAt: old, updatedAt: new Date().toISOString() });
   await store.append('old-root', { sessionId: 'old-root', epoch: 'e', seq: 1, ts: old, event: { type: 'session.ready' } });
   await store.flush();
+  // Its file was written when its record says; a file written now would be a restored tree (ALPD §68).
+  await utimes(path.join(directory, 'state', 'sessions', 'old-root.json'), new Date(old), new Date(old));
   const runtimes = [];
   const daemon = await durable(t, directory, project, runtimes);
   const { sessions } = await daemon.client.request('session.list', { includeClosed: true });

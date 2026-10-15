@@ -15,6 +15,8 @@ import { UsageError } from './usage.js';
 import { taskProject } from './tasks.js';
 import { DAEMON_ENTRY } from './paths.js';
 
+const DOCTOR_MARK = { ok: '✓', info: '·', warn: '!', fail: '✗' };
+
 async function project(command, args) {
   if (args.length > 1) throw new UsageError();
   try {

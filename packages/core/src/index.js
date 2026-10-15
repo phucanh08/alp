@@ -1,5 +1,7 @@
 // Stable module namespaces avoid collisions between domain exports.
 export * as adapter from './adapter.js';
+export * as atomic from './atomic.js';
+export * as backup from './backup.js';
 export * as beads from './beads.js';
 export * as delegation from './delegation.js';
 export * as errors from './errors.js';
@@ -10,12 +12,14 @@ export * as init from './init.js';
 export * as library_edit from './library-edit.js';
 export * as library from './library.js';
 export * as log from './log.js';
+export * as migrations from './migrations.js';
 export * as models from './models.js';
 export * as permissions from './permissions.js';
 export * as profiles from './profiles.js';
 export * as promptsafe from './promptsafe.js';
 export * as providers from './providers.js';
 export * as resolver from './resolver.js';
+export * as state_schema from './state-schema.js';
 export * as task_rows from './task-rows.js';
 export * as tasks from './tasks.js';
 export * as teams from './teams.js';

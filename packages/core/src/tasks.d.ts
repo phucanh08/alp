@@ -125,3 +125,4 @@ export type TaskVerification = { at: string; by: string; passed: boolean; where?
 export type EpicReport = { id: string; title: string; status: TaskStatus; tasks: number; closed: number; durationMs: number; reworked: number; verification: { passed: number; failed: number; skipped: number; none: number }; unverified: string[]; lines: string[]; text: string };
 export function epicReport(id: string, tasks: Task[]): EpicReport;
 export function landedParents(tasks: Task[]): Array<{ task: Task; children: number }>;
+export function withTaskLock<T>(projectRoot: string, work: () => Promise<T>): Promise<T>;

@@ -17,6 +17,22 @@
       "types": "./dist/adapter.d.ts",
       "default": "./src/adapter.js"
     },
+    "./atomic": {
+      "alp-source": {
+        "types": "./src/atomic.js",
+        "default": "./src/atomic.js"
+      },
+      "types": "./dist/atomic.d.ts",
+      "default": "./src/atomic.js"
+    },
+    "./backup": {
+      "alp-source": {
+        "types": "./src/backup.js",
+        "default": "./src/backup.js"
+      },
+      "types": "./dist/backup.d.ts",
+      "default": "./src/backup.js"
+    },
     "./beads": {
       "alp-source": {
         "types": "./src/beads.js",
@@ -113,6 +129,14 @@
       "types": "./dist/log.d.ts",
       "default": "./src/log.js"
     },
+    "./migrations": {
+      "alp-source": {
+        "types": "./src/migrations.js",
+        "default": "./src/migrations.js"
+      },
+      "types": "./dist/migrations.d.ts",
+      "default": "./src/migrations.js"
+    },
     "./models": {
       "alp-source": {
         "types": "./src/models.js",
@@ -160,6 +184,14 @@
       },
       "types": "./dist/resolver.d.ts",
       "default": "./src/resolver.js"
+    },
+    "./state-schema": {
+      "alp-source": {
+        "types": "./src/state-schema.js",
+        "default": "./src/state-schema.js"
+      },
+      "types": "./dist/state-schema.d.ts",
+      "default": "./src/state-schema.js"
     },
     "./task-rows": {
       "alp-source": {

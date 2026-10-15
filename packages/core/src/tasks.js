@@ -265,6 +265,9 @@ async function locked(projectRoot, work) {
   return run;
 }
 
+/** Runs `work` holding the project's task lock, as every task writer does; backups and restores use it (ALPD §68). */
+export const withTaskLock = (projectRoot, work) => locked(projectRoot, work);
+
 /** Creates the directory and its .gitignore on first use, so tasks are ready to commit. */
 async function prepare(dir) {
   await mkdir(dir, { recursive: true });

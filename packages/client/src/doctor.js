@@ -9,6 +9,7 @@ import { isTrusted } from '@anhlp/alp-core/trust';
 import { listProviders } from '@anhlp/alp-core/providers';
 import { settingsWarnings, validateSettings, validateUserSettings } from '@anhlp/alp-core/validation';
 import { readLogTail, scrubText } from '@anhlp/alp-core/log';
+import { STATE_SCHEMA, migrationFile, readStateSchema } from '@anhlp/alp-core/state-schema';
 
 /**
  * `alp doctor` (ALPD §36): checks what ALP needs from this machine and project, and
@@ -123,7 +124,7 @@ async function askDaemon(lock, timeoutMs) {
  * which is more than alive: it accepts connections and its state is readable and writable now.
  */
 async function daemonHealthChecks(lock, timeoutMs) {
-  if (!lockAlive(lock)) return [];
+  if (!lockAlive(lock) || lock.maintenance) return [];
   const { status, error } = await askDaemon(lock, timeoutMs);
   if (error) {
     const code = ipcFailure(error);
@@ -240,6 +241,7 @@ async function daemonCheck(home) {
   const paths = daemonPaths(home);
   const lock = await readLock(home);
   const exists = file => lstat(file).then(() => true, () => false);
+  if (lockAlive(lock) && lock.maintenance) return { id: 'alpd', status: 'info', summary: `not running while alp ${lock.maintenance} runs (pid ${lock.pid})` };
   if (lockAlive(lock)) return { id: 'alpd', status: 'ok', summary: `running (pid ${lock.pid}, ${lock.version})${lock.ready ? '' : ', starting'}` };
   const stale = [];
   if (await exists(paths.lock)) stale.push(paths.lock);
@@ -501,6 +503,19 @@ function scrubCheck(check) {
  */
 export { runCommand };
 
+/** The state's schema (ALPD §68), and a migration or a restore cut short. Reads only. */
+async function schemaChecks(home) {
+  let info;
+  try { info = await readStateSchema(home); }
+  catch (error) { return [{ id: 'schema', status: 'fail', summary: `${error.message} (ALP_${error.code ?? 'STATE_UNUSABLE'})` }]; }
+  const checks = [info.schema > STATE_SCHEMA
+    ? { id: 'schema', status: 'fail', summary: `state schema ${info.schema}${info.by ? ` from ${info.by}` : ''} is newer than this ALP knows (${STATE_SCHEMA}): alpd refuses to start and changes nothing in it (ALP_STATE_SCHEMA_TOO_NEW)`, hint: 'run the ALP that wrote it, or a newer one; docs/alp/data-recovery.md says more' }
+    : { id: 'schema', status: info.schema < STATE_SCHEMA ? 'info' : 'ok', summary: info.fresh ? `no state yet; alpd starts it at schema ${STATE_SCHEMA}` : info.schema < STATE_SCHEMA ? `state schema ${info.schema}: alpd migrates it to ${STATE_SCHEMA} at its next start, after saving a backup in ${path.join(home, 'backups')}` : `state schema ${info.schema}` }];
+  if (await lstat(migrationFile(home)).then(() => true, () => false)) checks.push({ id: 'migration', status: 'warn', summary: 'a state migration was cut short; alpd continues it at its next start, or puts the state back if it fails' });
+  if (await lstat(path.join(home, 'restore-journal.json')).then(() => true, () => false)) checks.push({ id: 'restore', status: 'warn', summary: 'a restore was cut short; alpd or the next alp restore moves the earlier data back first' });
+  return checks;
+}
+
 export async function diagnose({ home, project, env = process.env, run = runCommand, sandbox, daemonEntry, timeoutMs = 3000 } = {}) {
   const checks = [];
   if (daemonEntry) {
@@ -514,6 +529,10 @@ export async function diagnose({ home, project, env = process.env, run = runComm
   const running = daemon.status === 'ok' && daemon.summary.startsWith('running');
   checks.push(...await daemonHealthChecks(await readLock(home), timeoutMs));
   checks.push(await stateCheck(home));
+  const schema = await schemaChecks(home);
+  checks.push(...schema);
+  // State an ALP cannot read is left alone, by --fix too.
+  const unreadable = schema.some(check => check.id === 'schema' && check.status === 'fail');
   checks.push(...await logChecks(home, running));
   const failedSessions = await failedSessionsCheck(home);
   if (failedSessions) checks.push(failedSessions);
@@ -527,6 +546,7 @@ export async function diagnose({ home, project, env = process.env, run = runComm
   const providers = await providersCheck(home, env);
   if (providers) checks.push(providers);
   const live = await liveCheck(home, running);
+  if (live && unreadable) delete live.fix;
   if (live) checks.push(live);
   if (project) {
     checks.push(...await projectChecks(project, home));

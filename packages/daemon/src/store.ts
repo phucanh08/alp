@@ -200,29 +200,40 @@ export function createStore(root: string) {
       return queue(writes, `receipt:${key}`, `receipt removal ${key}`, () => rm(receiptFile(key), { force: true }));
     },
 
-    /** Every readable receipt with its key. */
-    async receipts(): Promise<Array<{ key: string; receipt: Receipt }>> {
+    /** Every readable receipt with its key and when its file was last written. */
+    async receipts(): Promise<Array<{ key: string; receipt: Receipt; writtenAt: number }>> {
       await prepare();
-      const found: Array<{ key: string; receipt: Receipt }> = [];
+      const found: Array<{ key: string; receipt: Receipt; writtenAt: number }> = [];
       for (const name of await readdir(receiptsDir)) {
         if (!name.endsWith('.json')) continue;
         const key = name.slice(0, -'.json'.length);
         try {
-          const receipt = JSON.parse(await readFile(path.join(receiptsDir, name), 'utf8'));
-          if (receipt?.version === 1 && typeof receipt.sessionId === 'string') found.push({ key, receipt });
+          const file = path.join(receiptsDir, name);
+          const receipt = JSON.parse(await readFile(file, 'utf8'));
+          if (receipt?.version === 1 && typeof receipt.sessionId === 'string') found.push({ key, receipt, writtenAt: (await stat(file)).mtimeMs });
         } catch {}
       }
       return found;
     },
 
-    /** Deletes receipts not written for `maxAgeMs`, and temporary files a crash left behind. */
-    async pruneReceipts(maxAgeMs: number) {
+    /** When the newest of these records' files was written (a restore writes them anew); 0 when none is there. */
+    async writtenAt(ids: string[]) {
+      let newest = 0;
+      for (const id of ids) newest = Math.max(newest, await stat(path.join(sessionsDir, `${fileName(id)}.json`)).then(info => info.mtimeMs, () => 0));
+      return newest;
+    },
+
+    /**
+     * Deletes receipts not written for `maxAgeMs` and, with `temporaries` (only at start, when no
+     * write can be under way), temporary files a crash left behind.
+     */
+    async pruneReceipts(maxAgeMs: number, { temporaries = true } = {}) {
       await prepare();
       const now = Date.now();
       for (const directory of [sessionsDir, receiptsDir]) {
         for (const name of await readdir(directory)) {
           const file = path.join(directory, name);
-          if (name.endsWith('.tmp')) { await rm(file, { force: true }); continue; }
+          if (name.endsWith('.tmp')) { if (temporaries) await rm(file, { force: true }); continue; }
           if (directory !== receiptsDir) continue;
           const info = await stat(file).catch(() => undefined);
           if (info && now - info.mtimeMs > maxAgeMs) await rm(file, { force: true });
