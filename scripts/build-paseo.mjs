@@ -4,7 +4,7 @@ const build = options => esbuild({ absWorkingDir: path.resolve(import.meta.dirna
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { requireShim } from './workspace-build-lib.mjs';
-import { assertCoreInputs } from './build-manifest.mjs';
+import { assertCoreInputs, assertRemoteInputs } from './build-manifest.mjs';
 
 process.chdir(path.resolve(import.meta.dirname, '..'));
 
@@ -59,4 +59,9 @@ const serverFiles = (await readdir(path.join('integrations/paseo/server'), { rec
 for (const file of serverFiles) {
   await build({ entryPoints: [`integrations/paseo/server/${file}`], outfile: `integrations/paseo/server/dist/${file.replace(/\.ts$/, '.js')}`, bundle: true, format: 'esm', platform: 'node', target: 'node20', banner: requireShim, external: pluginExternal, plugins: pluginPlugins, define: pluginDefine });
 }
+// The remote entry (docs/alp/paseo-remote.md) reaches alpd only through the gateway: its whole
+// bundle, transitively, must hold no core, runtime or daemon code and no module that reads files or
+// starts processes on the client's machine.
+const remoteBuild = await build({ entryPoints: ['integrations/paseo/server/remote/index.ts'], outfile: 'integrations/paseo/server/dist/remote/index.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', banner: requireShim, external: pluginExternal, metafile: true });
+assertRemoteInputs(remoteBuild.metafile, 'integrations/paseo/server/dist/remote/index.js');
 console.log(`Built ${pluginManifest.name ?? 'alp-paseo-plugin'}`);

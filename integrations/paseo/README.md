@@ -106,6 +106,17 @@ overwrite what you changed.
 See [workflow and migration documentation](https://github.com/phucanh08/alp-paseo/blob/main/docs/alp/team-workflow.md)
 for existing projects, model selection, permissions, and runtime limitations.
 
+## Remote mode (beta)
+
+To use ALP running on another machine, start the daemon process that loads this plugin with
+`ALP_GATEWAY_URL` (the ALP host's gateway, `https://…`; `http://` only for a loopback host) and
+`ALP_GATEWAY_TOKEN` (printed once by `alp-gateway credential create` on the ALP host). The
+plugin then reaches alpd only through the gateway: it starts nothing on this machine and reads
+no ALP files here. Open a workspace whose folder is exactly a path the credential grants.
+Sessions, questions, tasks, teams and the library list work; library content and edits,
+tests, usage, git and files are shown as unavailable. See
+[Paseo remote mode](https://github.com/phucanh08/alp-paseo/blob/main/docs/alp/paseo-remote.md).
+
 ## Workspace development
 
 From the repository root:

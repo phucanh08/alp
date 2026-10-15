@@ -32,6 +32,26 @@ export function assertCoreInputs(metafile, label) {
   if (offenders.size) throw new Error(`${label}: core bundle reached the optional Paseo integration:\n  ${[...offenders].join('\n  ')}`);
 }
 
+/**
+ * The Paseo remote entry (docs/alp/paseo-remote.md) talks to alpd through the gateway only: no
+ * core, runtime or daemon source, none of the client SDK's Node-only modules (lock files, socket
+ * discovery, daemon supervision, library probes), and no import of a module that reads files or
+ * starts processes on the client's machine.
+ */
+const REMOTE_FORBIDDEN_INPUTS = [/^packages\/(core|runtime|daemon|cli)\//, /^packages\/client\/src\/(?!portable\.js$|websocket\.js$|rpc\/)/, /^integrations\/paseo\/server\/(provider|mapping|index|main|web|tasks|library|usage)\.ts$/, /^integrations\/paseo\/server\/(panel\/(?!session-tasks\.ts$|compat\.ts$)|paseo\/)/];
+const REMOTE_FORBIDDEN_IMPORTS = /^(node:)?(fs|fs\/promises|child_process|worker_threads|cluster|module|vm)$/;
+export function assertRemoteInputs(metafile, label) {
+  const offenders = new Set();
+  for (const input of Object.keys(metafile?.inputs ?? {})) {
+    const file = normalize(input);
+    if (REMOTE_FORBIDDEN_INPUTS.some(pattern => pattern.test(file))) offenders.add(file);
+  }
+  for (const output of Object.values(metafile?.outputs ?? {})) {
+    for (const entry of output.imports ?? []) if (entry.external && REMOTE_FORBIDDEN_IMPORTS.test(entry.path)) offenders.add(`external:${entry.path}`);
+  }
+  if (offenders.size) throw new Error(`${label}: the remote entry reached local-only code:\n  ${[...offenders].join('\n  ')}`);
+}
+
 /** Workspace inputs (packages/*) and external imports of one bundle, small and deterministic. */
 export function summarize(metafile, outfile) {
   const output = metafile.outputs[outfile] ?? Object.values(metafile.outputs ?? {})[0];
