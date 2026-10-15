@@ -97,10 +97,13 @@ Client                                    Gateway                              a
 { "ticket": "alpgwt.…", "expiresAt": "…Z", "websocket": "/v1/ws",
   "subprotocols": ["alp.v1", "alp.ticket.alpgwt.…"],
   "principal": { "id": "…", "label": "phone", "permissions": ["session.read", "session.write", "project.read", "project.write"],
-                 "workspaces": ["/home/me/project"], "modes": ["read-only"] } }
+                 "workspaces": ["/home/me/project"], "modes": ["read-only"],
+                 "workspaceRoots": [{ "path": "/home/me/project", "canonical": "/home/me/project" }] } }
 ```
 
-`principal.workspaces` cho client biết đường dẫn dùng làm `spec.cwd`. Đây là API HTTP của
+`principal.workspaces` cho client biết đường dẫn dùng làm `spec.cwd`. `workspaceRoots` thêm đường
+dẫn canonical (`realpath` trên host) của mỗi workspace, để client nhận ra session alpd báo bằng
+đường dẫn canonical (Paseo remote, [paseo-remote.md](paseo-remote.md) §3.2). Đây là API HTTP của
 gateway, không phải trường mới của Protocol v1.
 
 ### 4.2 Credential: cấp, xoay, thu hồi
@@ -213,10 +216,11 @@ chuyển nguyên vẹn.
 
 ### 5.3 `session.create` / `session.preview`
 
-- Trường `spec` được phép: `cwd`, `agent`, `model`, `mode`, `thinking`, `persist`. Mọi trường khác
-  (`env`, `mcpServers`, `workdir`, `writeRoot`, `copy`, `copyOf`, `restore`, `systemPrompt`,
-  `keepThread`, `workflow`, …) → `1003 spec_field`. Một số trường trong đó chạy lệnh trên daemon
-  host hoặc chọn đường dẫn.
+- Trường `spec` được phép: `cwd`, `agent`, `model`, `mode`, `thinking`, `persist`, `workflow`. Mọi
+  trường khác (`env`, `mcpServers`, `workdir`, `writeRoot`, `copy`, `copyOf`, `restore`,
+  `systemPrompt`, `keepThread`, …) → `1003 spec_field`. Một số trường trong đó chạy lệnh trên daemon
+  host hoặc chọn đường dẫn. `workflow` (team: `pho`, `cafe`, team của library/project) theo quy tắc
+  tên như `agent`; alpd chỉ chọn team đã có, không đọc đường dẫn.
 - Không có `sessionId`: **gateway tự đặt** `ses_<16 hex>`, nên event tạo root (có thể tới trước
   response) được biết là trong scope.
 - Có `sessionId`:
@@ -514,7 +518,7 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
   RN: WebSocket và fetch có sẵn.
 - Lưu token ở keychain/secure storage, không lưu trong URL hay localStorage chung.
 - Tạo session: `spec.cwd` là một trong `principal.workspaces`. Chỉ đặt `cwd`, `agent`, `model`,
-  `mode`, `thinking`, `persist`. `model` lấy từ `library.models` hoặc `catalog.get`.
+  `mode`, `thinking`, `persist`, `workflow`. `model` lấy từ `library.models` hoặc `catalog.get`.
 - `principal.modes` có giá trị: chỉ hiện nút prompt/message/answer cho tree mà mọi session trong
   đó chạy các mode này; gateway từ chối phần còn lại với `1003 mode`.
 - Prompt: luôn có `clientMessageId` duy nhất. Gặp `1000 gateway_timeout`/`daemon_disconnected`
@@ -574,6 +578,8 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
   nhân với tối đa 8 connection.
 
 ## 11. Checklist tích hợp cho 09B-2 (Paseo thin client)
+
+09B-2 đã làm theo checklist này: [paseo-remote.md](paseo-remote.md) (ma trận hoàn thành, giới hạn).
 
 1. Đã merge: `feat/remote-gateway` (PR #95, `3b472a3`). Bản sửa sau review
    (`fix/gateway-review-findings`): mode drive/stop, chặn `library.get`, allowlist field của dòng,
