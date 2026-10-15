@@ -234,9 +234,15 @@ Trên **máy chạy Paseo**, một Paseo daemon riêng (không đụng `~/.paseo
 ```sh
 export ALP_GATEWAY_URL=http://127.0.0.1:7434        # hoặc https://alp.example.com
 export ALP_GATEWAY_TOKEN='alpgw1.…'                 # chỉ trong env, không ghi vào file dùng chung
-paseo daemon run --home ~/.paseo-alp-remote         # terminal riêng; cấu hình listen/port trong config.json của home này
+paseo daemon config set daemon.listen 127.0.0.1:6868 --string --home ~/.paseo-alp-remote   # khác 6767 của Paseo đang dùng
+paseo daemon config set pluginsEnabled true --home ~/.paseo-alp-remote
+paseo daemon run --home ~/.paseo-alp-remote         # terminal riêng, giữ env ở trên
 paseo plugin install /đường/dẫn/alp-paseo-plugin --home ~/.paseo-alp-remote
 ```
+
+Trong Paseo app, thêm host `127.0.0.1:6868` để xem daemon này. `/đường/dẫn/alp-paseo-plugin` là
+thư mục `integrations/paseo` đã build (`npm run build`), hoặc `node_modules/alp-paseo-plugin` của
+một project đã `npm install` tarball plugin.
 
 Rồi mở workspace có thư mục **đúng bằng** đường dẫn đã cấp, chọn ALP → Phở/Cafe. Thử nhanh không
 cần UI: `npm run test:e2e:paseo-remote` (tự dựng mọi thứ trong thư mục tạm).
