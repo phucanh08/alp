@@ -707,7 +707,7 @@ export function addGate(projectRoot, id, { kind, note, until, ref } = {}, by) {
 }
 
 /** Clears a gate by hand, or removes it with `remove`. Only the user clears a human gate; the caller enforces who `by` is. */
-export function resolveGate(projectRoot, id, gateId, { by, note, remove = false } = {}) {
+export function resolveGate(projectRoot, id, gateId, { by, note, remove = false, ifRev } = {}) {
   return mutate(projectRoot, id, task => {
     const gate = (task.gates ?? []).find(entry => entry.id === gateId) ?? fail('INVALID_TASK', `${id} has no gate ${gateId}`);
     if (remove) {
@@ -727,7 +727,7 @@ export function resolveGate(projectRoot, id, gateId, { by, note, remove = false 
       task.closed = { at: now(), by, reason: 'done', summary };
       addLog(task, by, 'closed', { reason: 'done', summary });
     }
-  });
+  }, { ifRev });
 }
 
 /**

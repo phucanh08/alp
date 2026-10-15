@@ -108,7 +108,7 @@ export function gateOpen(gate: TaskGate, now?: number): boolean;
 export function describeGate(gate: TaskGate): string;
 export function gatesOf(task: Task, tasks: Task[]): string[];
 export function addGate(projectRoot: string, id: string, gate: { kind: GateKind; note?: string; until?: string; ref?: string | number }, by: string): Promise<Task>;
-export function resolveGate(projectRoot: string, id: string, gateId: string, resolve: { by: string; note?: string; remove?: boolean }): Promise<Task>;
+export function resolveGate(projectRoot: string, id: string, gateId: string, resolve: { by: string; note?: string; remove?: boolean; ifRev?: number }): Promise<Task>;
 export function checkGates(projectRoot: string, gh: (args: string[], options: { cwd: string }) => Promise<string>): Promise<{ cleared: Array<{ task: string; gate: string; detail: string }>; pending: Array<{ task: string; gate: string; detail: string }>; errors: Array<{ task: string; gate: string; error: string }> }>;
 export function compactTasks(projectRoot: string, options: { days?: number; dryRun?: boolean }, by: string): Promise<Array<{ id: string; before: number; after: number }>>;
 export type TaskBatch = {
