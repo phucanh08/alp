@@ -16,6 +16,15 @@ import { initProject } from '@anhlp/alp-core/init';
 import { saveEntry } from '@anhlp/alp-core/library-edit';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { ensureDaemon, connect, readLock } from '@anhlp/alp-client';
+import { validateParams } from '@anhlp/alp-protocol/contract';
+import { runConformance, PROFILES, CASES } from '@anhlp/alp-protocol/conformance';
+
+// Exercise public protocol exports from the packed, clean-source install.
+assert.deepEqual(validateParams('daemon.status', {}), []);
+assert.equal(typeof runConformance, 'function');
+assert.ok(PROFILES.includes('wire') && CASES.length > 0);
+const protocolFixtures = JSON.parse(await readFile(new URL(import.meta.resolve('@anhlp/alp-protocol/fixtures/v1/cases.json')), 'utf8'));
+assert.ok(protocolFixtures.cases.some(entry => entry.valid));
 
 const FAKE = path.join(import.meta.dirname, 'fake-acp.js');
 const ALPD_ENTRY = path.join(import.meta.dirname, 'node_modules/@anhlp/alp-daemon/dist/alpd.js');

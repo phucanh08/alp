@@ -61,7 +61,7 @@ try {
     copyFileSync(path.join(root, location, 'package.json'), path.join(source, location, 'package.json'));
     cpSync(path.join(root, location, 'src'), path.join(source, location, 'src'), { recursive: true });
   }
-  for (const location of ['scripts', 'templates', 'packages/protocol/schema', 'packages/protocol/fixtures']) cpSync(path.join(root, location), path.join(source, location), { recursive: true });
+  for (const location of ['scripts', 'templates', 'packages/protocol/schema', 'packages/protocol/fixtures', 'packages/protocol/conformance']) cpSync(path.join(root, location), path.join(source, location), { recursive: true });
   mkdirSync(path.join(source, 'docs'));
   copyFileSync(path.join(root, 'docs/modular-monorepo.md'), path.join(source, 'docs/modular-monorepo.md'));
   for (const file of ['README.md', 'tsconfig.core.json']) copyFileSync(path.join(root, file), path.join(source, file));
