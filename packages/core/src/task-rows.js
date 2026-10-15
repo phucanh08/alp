@@ -23,7 +23,7 @@ export async function taskRows(projectRoot) {
     const approvals = task.status === 'closed' ? [] : task.gates.filter(gate => gate.kind === 'human' && !gate.resolved).map(gate => ({ gate: gate.id, note: gate.note ?? '' }));
     const waits = task.status === 'closed' ? [] : gatesOf(task, tasks);
     return {
-      id: task.id, title: task.title, type: task.type, priority: task.priority, status: task.status,
+      id: task.id, title: task.title, type: task.type, priority: task.priority, status: task.status, rev: task.rev,
       ...(task.parent ? { parent: task.parent } : {}),
       ...(task.assignee ? { assignee: task.assignee.agent } : {}),
       ready: ready.has(task.id),
