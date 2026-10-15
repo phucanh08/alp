@@ -470,8 +470,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (parent?.supervisor === sessionId) parent.supervisor = undefined;
     }
 
+    // Kept: a session resumed in this runtime goes on from its last seq, so (epoch, seq) never repeats.
     emit(sessionId, { type: 'session.closed' });
-    sequences.delete(sessionId);
   }
 
   let runLogWrites = Promise.resolve();

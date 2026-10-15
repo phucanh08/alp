@@ -2,7 +2,8 @@ import type { RuntimeKind, MailEvent, Pin } from './dto.js';
 
 /** Provider-neutral session events (plans/reference/ALPD.md §4). Viewers project them; the runtime never imports a viewer. */
 
-export type AlpError = { message: string };
+/** `code: 'outcome_unknown'` when the provider may or may not have received the request (ALPD §66). */
+export type AlpError = { message: string; code?: string };
 
 export type TimelineItem =
   | { kind: 'user_message'; id: string; text: string; clientMessageId?: string }
@@ -115,6 +116,12 @@ export type Envelope = {
   epoch: string;
   /** Strictly increasing per session. */
   seq: number;
+  /**
+   * Position in its tree's stored timeline, set by alpd on the events it keeps: strictly
+   * increasing per root across restarts, so `session.attach { after }` replays only what
+   * a reconnecting client missed (ALPD §66).
+   */
+  cursor?: number;
   ts: string;
   event: AlpEvent;
 };

@@ -2,6 +2,14 @@ import { optionalRead, codexUsage } from './runtime-context.js';
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
+/**
+ * A request that was written but never answered: the process died, timed out or closed, so
+ * it may or may not have acted on it (ALPD §66). A request never written is not marked.
+ */
+function unanswered(error: Error) {
+  return Object.assign(new Error(error.message), { outcomeUnknown: true });
+}
+
 /** Small stdio JSON-RPC transport for the selected runtime; never a shell command. */
 export class CodexTransport {
   private child: ChildProcessWithoutNullStreams;
@@ -57,7 +65,7 @@ export class CodexTransport {
   }
   private fail(error: Error) {
     if (this.closed) return;
-    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(error); }
+    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(unanswered(error)); }
     this.pending.clear();
     for (const listener of this.failures) listener(error);
     void this.close();
@@ -66,7 +74,7 @@ export class CodexTransport {
     if (this.closed) return Promise.reject(new Error('Runtime is closed'));
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { const error = new Error(`Runtime request timed out: ${method}`); if (fatalTimeout) this.fail(error); else { this.pending.delete(id); reject(error); } }, timeout);
+      const timer = setTimeout(() => { const error = new Error(`Runtime request timed out: ${method}`); if (fatalTimeout) this.fail(error); else { this.pending.delete(id); reject(unanswered(error)); } }, timeout);
       this.pending.set(id, { resolve, reject, timer });
       try { this.write({ id, method, params }); }
       catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
@@ -92,7 +100,7 @@ export class CodexTransport {
   async close() {
     if (this.closed) return this.exit;
     this.closed = true;
-    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error('Runtime closed')); }
+    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(unanswered(new Error('Runtime closed'))); }
     this.pending.clear(); this.listeners.clear(); this.failures.clear();
     this.child.stdin.end();
     const timer = setTimeout(() => {
