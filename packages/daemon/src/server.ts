@@ -4,7 +4,8 @@ import net from 'node:net';
 import { assertPrivateDirectory, assertPrivateSocket } from '@anhlp/alp-client/index';
 import path from 'node:path';
 import { createLogger } from '@anhlp/alp-core/log';
-import { AlpRpcError, MAX_FRAME, PROTOCOL_VERSION, ERROR, encodeFrame } from '@anhlp/alp-protocol';
+import { AlpRpcError, CAPABILITY, MAX_FRAME, PROTOCOL_VERSION, ERROR, RPC_ERROR, encodeFrame } from '@anhlp/alp-protocol';
+import { validateParams } from '@anhlp/alp-protocol/contract';
 export { ERROR } from '@anhlp/alp-protocol';
 import { DEFAULT_MODEL, models, modes, thinkingOptions, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '@anhlp/alp-runtime/index';
 import type { Receipt, SessionRecord, SessionStatus, Store, UnreadableReceipt } from './store.js';
@@ -26,6 +27,20 @@ const recoveryLog = createLogger({ component: 'alpd.recovery' });
 class RpcError extends Error {
   constructor(public code: number, message: string, public data?: unknown) { super(message); }
 }
+
+/** A request id v1 accepts: a string of at most 128 characters or a safe integer (docs/protocol/alp-json-rpc-v1.md §3). */
+function validId(id: unknown): id is string | number {
+  if (typeof id !== 'string') return Number.isSafeInteger(id);
+  let length = 0;
+  for (const _point of id) if (++length > 128) return false;
+  return true;
+}
+
+/** The bytes a frame takes on a newline-delimited stream, its newline included. */
+const frameBytes = (message: unknown) => Buffer.byteLength(encodeFrame(message), 'utf8');
+
+const invalidParams = (issues: Array<{ path: string; message: string }>) =>
+  new RpcError(RPC_ERROR.invalidParams, `Invalid params: ${issues.map(issue => `${issue.path || 'params'} ${issue.message}`).join('; ')}`, { reason: 'invalid_params', issues });
 
 /**
  * Crash points for the crash-recovery tests (ALPD §66): with ALP_TEST_CRASH_AT naming one,
@@ -728,7 +743,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       const found = known(sessionId);
       const root = rootOf.get(sessionId) ?? records.get(sessionId)?.rootId ?? sessionId;
       let stored: Envelope[] = [];
-      if (replay) {
+      if (replay || (store && !cursors.has(root))) {
         // The in-memory log keeps a live tree's latest events only; older ones come from the store.
         const memory = logs.get(root);
         const covered = !!memory?.length && (memory[0].cursor ?? 1) <= (after ?? 0) + 1;
@@ -737,7 +752,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       // From here to the return nothing awaits, so no live event slips between replay and attach.
       const live = logs.get(root) ?? [];
       const tip = Math.max(cursors.get(root) ?? 0, stored.at(-1)?.cursor ?? 0, live.at(-1)?.cursor ?? 0);
-      const reset = after !== undefined && after > tip;
+      // Without a store the in-memory log keeps only the latest events: a cursor before them cannot continue either.
+      const first = replay ? [...stored, ...live].find(envelope => envelope.cursor !== undefined)?.cursor : undefined;
+      const reset = after !== undefined && (after > tip || (replay && after < tip && (first === undefined || first > after + 1)));
       const from = reset ? 0 : after ?? 0;
       attach(connection, root);
       if (replay) {
@@ -786,7 +803,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
 
     /** The user's name for a root, in place of its first prompt (ALPD §61). */
     async 'session.rename'(_connection, { sessionId, title }) {
-      if (typeof title !== 'string' || !title.trim() || title.length > 200) throw new RpcError(-32602, 'title must be 1 to 200 characters');
+      if (typeof title !== 'string' || !title.trim() || [...title].length > 200) throw new RpcError(-32602, 'title must be 1 to 200 characters');
       const record = rootRecord(sessionId);
       // A name is not activity: the record keeps its time.
       const before = record.title;
@@ -860,14 +877,31 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     return { live: true, ready: checks.every(check => check.ok), checks };
   }
 
-  async function dispatch(connection: Connection, message: any) {
-    const { id, method, params } = message ?? {};
-    const respond = (body: object) => { if (id !== undefined && id !== null) connection.send({ jsonrpc: '2.0', id, ...body }); };
+  /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, ...(store ? [CAPABILITY.promptReceipts] : [])];
+
+  /** A response too large for the wire becomes an error the client can read. */
+  function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {
+    if (frameBytes(response) <= MAX_FRAME) return response;
+    log.warn('a response exceeded the frame size limit', { code: 'ALP_IPC_RESPONSE_TOO_LARGE', requestId: String(response.id) });
+    return { jsonrpc: '2.0', id: response.id, error: { code: ERROR.failed, message: 'The response exceeds the ALP frame size limit', data: { reason: 'response_too_large' } } };
+  }
+
+  /**
+   * One incoming message, in the order docs/protocol/alp-json-rpc-v1.md §5 fixes: a message that is
+   * not a single JSON-RPC 2.0 object, a frame over the limit, a notification, an invalid id or params,
+   * the handshake, an unknown method, then the method's own params. Nothing runs before all of them pass.
+   */
+  async function dispatch(connection: Connection, message: any, receivedBytes?: number) {
+    const single = !!message && typeof message === 'object' && !Array.isArray(message);
+    const { id, method, params } = single ? message : {} as any;
+    const respond = (body: object) => connection.send(fits({ jsonrpc: '2.0', id: validId(id) ? id : null, ...body }));
     try {
+      if (Array.isArray(message)) throw new RpcError(RPC_ERROR.invalidRequest, 'Batch requests are not supported', { reason: 'batch_unsupported' });
       // Validate the envelope before anything else: a frame that is not JSON-RPC 2.0 must never be
       // correlated against (or consume) a pending extension call, however it is shaped.
-      if (!message || typeof message !== 'object' || Array.isArray(message) || message.jsonrpc !== '2.0') throw new RpcError(-32600, 'Invalid request');
-      const oversized = Buffer.byteLength(encodeFrame(message), 'utf8') > MAX_FRAME;
+      if (!single || message.jsonrpc !== '2.0') throw new RpcError(RPC_ERROR.invalidRequest, 'Invalid request');
+      const oversized = (receivedBytes ?? frameBytes(message)) > MAX_FRAME;
       // A frame with no `method` property is a response to an outgoing extension.invoke. It must carry
       // exactly one of result/error and an id; a malformed or unknown one is dropped, leaving any
       // pending invocation intact (never mis-correlated, never leaked).
@@ -879,24 +913,33 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         if (!waiter) return;
         connection.pending.delete(id);
         clearTimeout(waiter.timer);
-        if (oversized) { waiter.reject(new RpcError(-32600, 'ALP daemon frame exceeds size limit')); return; }
+        if (oversized) { waiter.reject(new RpcError(RPC_ERROR.invalidRequest, 'ALP daemon frame exceeds size limit')); return; }
         if (hasError) waiter.reject(new RpcError(message.error?.code ?? ERROR.failed, message.error?.message ?? 'extension call failed', message.error?.data));
         else waiter.resolve(message.result);
         return;
       }
-      if (oversized) throw new RpcError(-32600, 'ALP daemon frame exceeds size limit');
-      if (typeof method !== 'string') throw new RpcError(-32600, 'Invalid request');
+      if (oversized) throw new RpcError(RPC_ERROR.invalidRequest, 'ALP daemon frame exceeds size limit', { reason: 'frame_too_large' });
+      if (typeof method !== 'string') throw new RpcError(RPC_ERROR.invalidRequest, 'Invalid request');
+      // v1 defines no notifications to the daemon: one is dropped unrun, and JSON-RPC forbids answering it.
+      if (id === undefined) { log.debug('ignored a notification', { code: 'ALP_IPC_NOTIFICATION_IGNORED', method }); return; }
+      if (!validId(id)) throw new RpcError(RPC_ERROR.invalidRequest, 'A request id must be a string of at most 128 characters or a safe integer', { reason: 'invalid_id' });
+      if (params !== undefined && (params === null || typeof params !== 'object' || Array.isArray(params))) throw new RpcError(RPC_ERROR.invalidParams, 'params must be an object', { reason: 'invalid_params' });
       if (method === 'daemon.hello') {
-        if (params?.protocolVersion !== PROTOCOL_VERSION) throw new RpcError(ERROR.protocol, `ALP daemon speaks protocol ${PROTOCOL_VERSION}; restart it after upgrading (alp daemon restart)`);
+        if (params?.protocolVersion !== PROTOCOL_VERSION) throw new RpcError(ERROR.protocol, `ALP daemon speaks protocol ${PROTOCOL_VERSION}; restart it after upgrading (alp daemon restart)`, { reason: 'protocol_version', supported: [PROTOCOL_VERSION] });
+        const issues = validateParams(method, params)!;
+        if (issues.length) throw invalidParams(issues);
         connection.helloed = true;
-        respond({ result: { protocolVersion: PROTOCOL_VERSION, daemonVersion: version, pid: process.pid } });
+        respond({ result: { protocolVersion: PROTOCOL_VERSION, daemonVersion: version, pid: process.pid, capabilities } });
         return;
       }
-      if (!connection.helloed) throw new RpcError(ERROR.protocol, 'daemon.hello is required first');
+      if (!connection.helloed) throw new RpcError(ERROR.protocol, 'daemon.hello is required first', { reason: 'hello_required' });
       await restored;
       if (!connections.has(connection)) return;
       const handler = Object.hasOwn(handlers, method) ? handlers[method] : undefined;
-      if (!handler) throw new RpcError(-32601, `Unknown method '${method}'`);
+      if (!handler) throw new RpcError(RPC_ERROR.methodNotFound, `Unknown method '${method}'`);
+      // Built-in methods are checked against the v1 schema; extension methods own their params.
+      const issues = validateParams(method, params);
+      if (issues?.length) throw invalidParams(issues);
       respond({ result: await handler(connection, params ?? {}) });
     } catch (error) {
       const code = error instanceof RpcError ? error.code : /is not open/.test(String((error as Error)?.message)) ? ERROR.notFound : ERROR.failed;
@@ -940,18 +983,33 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     };
     connections.add(connection);
     let buffer = '';
+    /** UTF-8 bytes of `buffer`, kept as chunks arrive so a large frame costs linear time. */
+    let bytes = 0;
     socket.setEncoding('utf8');
-    socket.on('data', chunk => {
+    // A frame over MAX_FRAME bytes, its newline included, ends the connection: nothing after it can be trusted to align.
+    const tooLarge = () => { log.warn('closed a connection that sent a frame over the size limit', { code: 'ALP_IPC_FRAME_TOO_LARGE' }); buffer = ''; bytes = 0; socket.destroy(); };
+    socket.on('data', (chunk: string) => {
       buffer += chunk;
-      if (Buffer.byteLength(buffer, 'utf8') > MAX_FRAME) { log.warn('closed a connection that sent a frame over the size limit', { code: 'ALP_IPC_FRAME_TOO_LARGE' }); socket.destroy(); return; }
-      for (let index = buffer.indexOf('\n'); index >= 0; index = buffer.indexOf('\n')) {
-        const line = buffer.slice(0, index);
-        buffer = buffer.slice(index + 1);
+      bytes += Buffer.byteLength(chunk, 'utf8');
+      // Only the new chunk can hold a newline: the buffer before it had none.
+      if (!chunk.includes('\n')) {
+        if (bytes >= MAX_FRAME) tooLarge();
+        return;
+      }
+      let start = 0;
+      for (let index = buffer.indexOf('\n', buffer.length - chunk.length); index >= 0; index = buffer.indexOf('\n', start)) {
+        const line = buffer.slice(start, index);
+        start = index + 1;
+        if (Buffer.byteLength(line, 'utf8') + 1 > MAX_FRAME) { tooLarge(); return; }
         if (!line.trim()) continue;
         let message;
-        try { message = JSON.parse(line); } catch { log.warn('a client sent a line that is not JSON', { code: 'ALP_IPC_PARSE_ERROR', bytes: line.length }); connection.send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); continue; }
-        void dispatch(connection, message);
+        try { message = JSON.parse(line); } catch { log.warn('a client sent a line that is not JSON', { code: 'ALP_IPC_PARSE_ERROR', bytes: line.length }); connection.send({ jsonrpc: '2.0', id: null, error: { code: RPC_ERROR.parseError, message: 'Parse error' } }); continue; }
+        void dispatch(connection, message, Buffer.byteLength(line, 'utf8') + 1);
       }
+      // What is left has no newline yet; with one it would already be over the limit.
+      buffer = buffer.slice(start);
+      bytes = Buffer.byteLength(buffer, 'utf8');
+      if (bytes >= MAX_FRAME) tooLarge();
     });
     // A client that goes away mid-write resets its connection; that alone is no trouble.
     socket.on('error', (error: NodeJS.ErrnoException) => log[error.code === 'ECONNRESET' || error.code === 'EPIPE' ? 'debug' : 'warn']('a client connection failed', { code: 'ALP_IPC_SOCKET_ERROR', error }));

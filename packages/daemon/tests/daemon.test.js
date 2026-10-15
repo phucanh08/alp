@@ -421,7 +421,7 @@ test('a root is renamed and archived, and archived ones are listed only when ask
   const { session } = await client.request('session.create', { spec: { cwd: project, persist: true } });
   const listed = async params => (await client.request('session.list', { rootsOnly: true, includeClosed: true, ...params })).sessions.map(row => [row.id, row.title, !!row.archived]);
   assert.equal((await client.request('session.rename', { sessionId: session.id, title: '  Fix   the login  ' })).session.title, 'Fix the login');
-  await assert.rejects(client.request('session.rename', { sessionId: session.id, title: ' ' }), /1 to 200 characters/);
+  await assert.rejects(client.request('session.rename', { sessionId: session.id, title: ' ' }), { code: -32602 });
   await assert.rejects(client.request('session.rename', { sessionId: 'missing', title: 'x' }), /No session missing/);
   const archived = (await client.request('session.archive', { sessionId: session.id })).session;
   assert.deepEqual([archived.archived, archived.status], [true, 'closed']);
