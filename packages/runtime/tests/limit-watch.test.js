@@ -72,7 +72,7 @@ test('with autoResume off, alpd tells the user once that the limit lifted and le
 
 test('a limit pause an earlier alpd left is checked at start, by a runtime process of its own when no session is open', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-limit-file-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const file = path.join(directory, 'pause.json');
   const future = new Date(Date.now() + 3_600_000).toISOString();
   await writeFile(file, JSON.stringify({ runtimes: { codex: { since: new Date().toISOString(), by: 'alpd', reason: 'Codex usage limit reached', resetsAt: future } } }));
@@ -99,4 +99,6 @@ test('a limit pause an earlier alpd left is checked at start, by a runtime proce
   await new Promise(resolve => setTimeout(resolve, 50));
   assert.equal(probes.length, before);
   assert.ok(lifted.pauses().runtimes.claude);
+  // Stop pause-file writes before the directory is removed.
+  await lifted.shutdown();
 });

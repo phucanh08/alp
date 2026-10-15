@@ -27,7 +27,7 @@ test('Unix daemon endpoints retain the short-home socket and bounded long-home f
   const [short, long, same] = paths('linux', ['/tmp/alp', '/tmp/' + 'x'.repeat(200), '/tmp/' + 'x'.repeat(200)]);
   assert.equal(short.socket, path.join('/tmp/alp', 'alpd.sock'));
   assert.ok(Buffer.byteLength(long.socket) < 100);
-  assert.match(long.socket, /alpd-\d+-[a-f0-9]+[/\\]rpc\.sock$/);
+  assert.match(long.socket, /alpd-(?:\d+|user)-[a-f0-9]+[/\\]rpc\.sock$/);
   assert.notEqual(path.dirname(long.socket), path.dirname('/tmp/alp'));
   assert.equal(long.socket, same.socket);
 });

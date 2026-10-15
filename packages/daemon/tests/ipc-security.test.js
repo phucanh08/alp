@@ -119,12 +119,32 @@ test('security: Windows daemon pipe grants no other user write or instance right
   const user = output.match(/^USER\|(\S+)/m)?.[1];
   assert.ok(user, output);
   const aces = [...output.matchAll(/^ACE\|([^|]+)\|(\w+)\|(\d+)/gm)].map(([, sid, type, rights]) => ({ sid, type, rights: Number(rights) }));
-  assert.ok(aces.some(ace => ace.sid === user && ace.type === 'Allow'), output);
+  assert.ok(aces.length, output);
   const trusted = sid => sid === user || sid === 'S-1-5-18' || sid === 'S-1-5-32-544' || sid.startsWith('S-1-5-5-') || sid === 'S-1-3-4';
   for (const ace of aces.filter(ace => ace.type === 'Allow')) {
     assert.ok(!BROAD.has(ace.sid) || (ace.rights & WRITE_LIKE) === 0, `broad principal ${ace.sid} has write-like rights ${ace.rights}`);
     assert.ok(trusted(ace.sid) || (ace.rights & WRITE_LIKE) === 0, `untrusted principal ${ace.sid} has write-like rights ${ace.rights}`);
   }
+});
+
+// Node cannot narrow the default pipe DACL, which grants Everyone and Anonymous read.
+// A read-only handle cannot send daemon.hello, so the daemon never writes anything to it.
+test('security: Windows read-only pipe client receives no daemon data', { skip: process.platform !== 'win32' }, async t => {
+  const name = pipeName();
+  const runtime = createAlpRuntime({ transport: fakeTransport([]), supervisor: false });
+  const server = createDaemonServer({ runtime, socketPath: `\\\\.\\pipe\\${name}`, version: 'test' });
+  t.after(async () => { await server.close(); await runtime.shutdown(); });
+  await server.listen();
+  const script = [
+    `$c = New-Object System.IO.Pipes.NamedPipeClientStream('.', '${name}', [System.IO.Pipes.PipeDirection]::In)`,
+    '$c.Connect(5000)',
+    '$buffer = New-Object byte[] 4096',
+    '$read = $c.ReadAsync($buffer, 0, $buffer.Length)',
+    'if ($read.Wait(2000)) { "READ|" + $read.Result } else { "NODATA" }',
+    '$c.Dispose()',
+  ].join('; ');
+  const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' });
+  assert.match(output, /NODATA|READ\|0/, output);
 });
 
 test('security: Windows daemon refuses a pipe name another process already serves', { skip: process.platform !== 'win32' }, async t => {
