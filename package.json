@@ -30,6 +30,7 @@
     "test:e2e:claude": "node test/e2e/claude-e2e.mjs",
     "test:e2e:claude-runtime": "node test/e2e/claude-runtime-e2e.mjs",
     "test:e2e:paseo": "node test/e2e/paseo-e2e.mjs",
+    "test:e2e:paseo-remote": "node test/e2e/paseo-remote-e2e.mjs",
     "test:e2e:alpd": "node scripts/build-core.mjs && node test/e2e/alpd-e2e.mjs",
     "test:e2e:detach": "node test/e2e/viewer-detach-e2e.mjs",
     "test:e2e:persistence": "node scripts/build-core.mjs && node test/e2e/persistence-e2e.mjs",
