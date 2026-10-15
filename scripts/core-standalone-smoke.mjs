@@ -28,7 +28,7 @@ function run(command, args, options = {}) {
     timeout: options.timeout,
   });
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
-  if (options.allowFailure) return { status: result.status, output };
+  if (options.allowFailure) return { status: result.status, output, stdout: result.stdout ?? '' };
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} exited ${result.status}${output ? `\n${output}` : ''}`);
   return result.stdout ?? '';
 }
@@ -112,7 +112,15 @@ try {
   writeFileSync(path.join(distribution, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
   run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', path.join(packs, packedRoot.filename), ...Object.keys(manifest.dependencies).filter(name => byName.has(name)).map(name => byName.get(name))], { cwd: distribution, timeout: 420_000 });
   for (const [directory, cli] of [[core, 'node_modules/@anhlp/alp-cli/dist/cli.js'], [distribution, 'node_modules/@anhlp/alp/packages/cli/dist/cli.js']]) {
-    const tree = run('npm', ['ls', '--all', '--json'], { cwd: directory, capture: true });
+    // Installs use --legacy-peer-deps, so only missing peers of an installed package are expected.
+    const { stdout: tree } = run('npm', ['ls', '--all', '--json'], { cwd: directory, capture: true, allowFailure: true });
+    const unexpected = (JSON.parse(tree).problems ?? []).filter(problem => {
+      const missing = /^missing: ((?:@[^/@]+\/)?[^@]+)@[^,]+, required by ((?:@[^/@]+\/)?[^@]+)@/.exec(problem);
+      if (!missing) return true;
+      const requirer = JSON.parse(readFileSync(path.join(directory, 'node_modules', missing[2], 'package.json'), 'utf8'));
+      return !Object.hasOwn(requirer.peerDependencies ?? {}, missing[1]);
+    });
+    if (unexpected.length) throw new Error(`installed dependency graph has problems:\n${unexpected.join('\n')}`);
     if (/@getpaseo\/|alp-paseo-plugin/.test(tree)) throw new Error('Paseo found in installed dependency graph');
     // Inspect actual installed source, declarations, JSON and JS including nested dependencies.
     const modules = path.join(directory, 'node_modules');
