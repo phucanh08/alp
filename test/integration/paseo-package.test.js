@@ -34,12 +34,12 @@ test('canonical Paseo plugin and root compatibility distribution remain buildabl
   }
   assert.ok(existsSync(path.join(root, 'packages/cli/dist/cli.js')), 'missing root CLI build');
 
-  // The root distribution ships the integration descriptor and the files it points at.
+  // The repository descriptor is a development convenience; only the plugin ships its server/web.
   const descriptor = JSON.parse(await readFile(path.join(root, 'integrations/web.json'), 'utf8'));
-  const main = path.resolve(root, 'integrations', descriptor.main);
-  assert.equal(main, path.join(root, 'integrations/paseo/server/dist/main.js'), 'the descriptor must point at the built integration entry');
-  assert.ok(existsSync(main), 'the descriptor entry must exist');
-  for (const entry of ['integrations/web.json', 'integrations/paseo/server/dist/main.js', 'integrations/paseo/server/dist/alpd.js', 'integrations/paseo/server/dist/web-app']) {
-    assert.ok(manifest.files.includes(entry), `the root distribution must ship ${entry}`);
-  }
+  assert.ok(existsSync(path.resolve(root, 'integrations', descriptor.main)));
+  assert.ok(pkg.files.includes('server/dist'));
+  assert.equal(pkg.bin['alp-web-integration'], 'server/dist/main.js');
+  assert.ok(!manifest.files.some(entry => /integrations|web-app/.test(entry)));
+  assert.ok(!manifest.dependencies['@getpaseo/plugin']);
+  assert.ok(!manifest.bundledDependencies?.includes('@getpaseo/plugin'));
 });

@@ -7,8 +7,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  core:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -20,10 +21,24 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      - run: npm run check
-      # Package-owned tests, then the cross-package suites; fake transports, no model calls.
-      - run: npm run test:unit
-      - run: npm run test:integration
+      - run: npm run validate:core
+
+  paseo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      # Plugin-owned and all cross-package tests use fake providers.
+      - run: npm run validate:paseo
 
   windows-daemon:
     runs-on: windows-latest
@@ -40,12 +55,12 @@ jobs:
       - run: npm ci
       - run: node scripts/build-workspace.mjs paseo
       # The CLI discovery fixture creates a Unix symlink; all daemon lifecycle/session tests run.
-      - run: node --test packages/client/tests/daemon-paths.test.js packages/daemon/tests/daemon.test.js integrations/paseo/tests/daemon-git.test.js
+      - run: node --test packages/client/tests/daemon-paths.test.js packages/daemon/tests/daemon.test.js packages/daemon/tests/ipc-security.test.js integrations/paseo/tests/daemon-git.test.js
 
   # The ALP web app (ALPD §62): Paseo's app at the pinned commit with ALP's patches, built and opened in Chrome.
-  web-app:
+  packages-and-web:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -58,12 +73,12 @@ jobs:
           key: npm-web-app-${{ hashFiles('package-lock.json', 'paseo-web/upstream.json') }}
           restore-keys: npm-web-app-
       - run: npm ci
-      - run: node scripts/build-paseo-web.mjs
-      - run: node scripts/build-paseo.mjs
-      - run: node scripts/check-web-app.mjs
+      # Builds the pinned web app and all packages before inspecting/installing tarballs.
+      - run: npm run validate:packages
       - run: node scripts/web-app-smoke.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: alp-web-app
           path: dist/web-app
           retention-days: 14
+          if-no-files-found: error

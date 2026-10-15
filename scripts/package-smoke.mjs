@@ -26,16 +26,14 @@ try {
   }
   const legacy = JSON.parse(run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', directory], { cwd: root }))[0];
   dependencies[manifest.name] = `file:${path.join(directory, legacy.filename)}`;
-  // The root distribution is the self-contained install: it ships the CLI/core/client bundles, the
-  // bundled Paseo SDK, and the descriptor whose entry actually exists in the tarball.
+  // Core distribution stays neutral even in a checkout with built plugin/web artifacts.
   const shipped = new Set(legacy.files.map(file => file.path));
-  for (const file of ['integrations/web.json', 'packages/cli/dist/cli.js', 'packages/core/dist/index.js', 'packages/client/dist/index.js', 'dist/alpd.js', 'integrations/paseo/server/dist/main.js', 'node_modules/@getpaseo/plugin/package.json']) {
+  for (const file of ['packages/cli/dist/cli.js', 'packages/core/dist/index.js', 'packages/client/dist/index.js', 'dist/alpd.js']) {
     if (!shipped.has(file)) throw new Error(`the root distribution must ship ${file}`);
   }
-  if (![...shipped].some(file => file.startsWith('integrations/paseo/server/dist/web-app/'))) throw new Error('the root distribution must ship the plugin web app');
-  const descriptor = JSON.parse(await readFile(path.join(root, 'integrations/web.json'), 'utf8'));
-  const entry = path.relative(root, path.resolve(root, 'integrations', descriptor.main)).split(path.sep).join('/');
-  if (!descriptor.main || !shipped.has(entry)) throw new Error(`the web descriptor entry ${descriptor.main} is not shipped in the root tarball`);
+  for (const file of shipped) {
+    if (/integrations\/|web-app\/|@getpaseo\//.test(file)) throw new Error(`core tarball leaks ${file}`);
+  }
   // The plugin package's server entry needs its host SDK peers; pin the versions this repository
   // resolved. The React client-host peers stay out of this server-only smoke.
   const plugin = JSON.parse(await readFile(path.join(root, 'integrations/paseo/package.json'), 'utf8'));
@@ -77,8 +75,9 @@ void frame; void observe;
   alp('daemon', 'stop');
   const legacyCli = path.join(directory, 'node_modules/@anhlp/alp/packages/cli/dist/cli.js');
   for (const args of [['init', path.join(directory, 'legacy-project')], ['upgrade', path.join(directory, 'legacy-project')], ['language'], ['daemon', 'start'], ['daemon', 'status'], ['daemon', 'stop']]) run(process.execPath, [legacyCli, ...args], { env });
-  // The bundled Paseo integration must start as its own process — from an unrelated directory,
-  // invoked through a symlink, with no user home and no separately installed peer.
+  // Explicitly register the separately installed plugin, using its existing public command.
+  run(process.execPath, [path.join(directory, 'node_modules/alp-paseo-plugin/server/dist/main.js'), '--register'], { env });
+  // The optional integration starts as a separate process from an unrelated directory through a symlink.
   const bin = path.join(directory, 'bin');
   const elsewhere = path.join(directory, 'elsewhere');
   await mkdir(bin, { recursive: true });
@@ -97,7 +96,7 @@ void frame; void observe;
   if (served.status >= 400) throw new Error(`the web app did not serve over HTTP: ${served.status}`);
   const paired = fromElsewhere('web', 'pair', '--off');
   if (!/relay is off/i.test(paired)) throw new Error(`alp web pair --off did not report the relay off: ${paired}`);
-  console.log(`Standalone installation verified: ${imports.length} module APIs, Paseo server, ACP, CLI and daemon lifecycle, plus the legacy @anhlp/alp distribution and its bundled web integration.`);
+  console.log(`Standalone installation verified: ${imports.length} module APIs, Paseo server, ACP, CLI and daemon lifecycle, plus the legacy @anhlp/alp distribution and the separately installed web integration.`);
 } finally {
   if (cli) spawnSync(process.execPath, [cli, 'daemon', 'stop'], { cwd: directory, env, stdio: 'ignore', timeout: 20_000 });
   // The web integration is a separate process; stop it before removing its temporary home.

@@ -53,3 +53,36 @@ test('the boundary checker rejects Paseo deps, imports, createRequire aliases an
   assert.match(output, /@anhlp\/alp-daemon: depends on @anhlp\/alp-tui, which lives in apps\/tui/);
   assert.match(output, /packages\/daemon\/src\/escape\.ts: relative import escapes package: \.\.\/\.\.\/outside\.js/);
 });
+
+// Source-only checks remain useful before building; CI must reject absent build evidence.
+test('strict boundary checks fail when build artifacts are missing', async t => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), 'alp-missing-artifacts-'));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  await writeFile(path.join(fixture, 'package.json'), JSON.stringify({ workspaces: [] }));
+  const check = (...args) => spawnSync(process.execPath, ['scripts/check-boundaries.mjs', '--root', fixture, ...args], { cwd: root, encoding: 'utf8' });
+  assert.equal(check().status, 0);
+  const strict = check('--require-artifacts');
+  assert.equal(strict.status, 1, strict.stdout + strict.stderr);
+  assert.match(strict.stderr, /Missing or unreadable build artifact/);
+  assert.match(strict.stderr, /build-manifest\.json/);
+  assert.match(strict.stderr, /alpd\.js/);
+});
+
+test('root distribution boundary rejects direct/optional/peer/dev/bundled SDK and web artifacts', async t => {
+  const { corePackageProblems } = await import('../../scripts/core-package-boundary.mjs');
+  for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies', 'devDependencies']) {
+    assert.match(corePackageProblems({ name: '@anhlp/alp', [field]: { '@getpaseo/plugin': '*' } }).join('\n'), /forbidden Paseo dependency/);
+  }
+  for (const field of ['bundledDependencies', 'bundleDependencies']) {
+    assert.match(corePackageProblems({ name: '@anhlp/alp', [field]: ['@getpaseo/plugin'] }).join('\n'), /forbidden Paseo bundle/);
+  }
+  for (const file of ['integrations/web.json', 'integrations/paseo/server/dist/main.js', 'dist/web-app/index.html', 'node_modules/@getpaseo/plugin/package.json']) {
+    assert.match(corePackageProblems({ name: '@anhlp/alp' }, [file]).join('\n'), /forbidden core artifact/);
+  }
+  const fixture = await mkdtemp(path.join(os.tmpdir(), 'alp-root-boundary-'));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  await writeFile(path.join(fixture, 'package.json'), JSON.stringify({ name: '@anhlp/alp', workspaces: [], dependencies: { '@getpaseo/plugin': '*' } }));
+  const result = spawnSync(process.execPath, ['scripts/check-boundaries.mjs', '--root', fixture], { encoding: 'utf8', cwd: root });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /@anhlp\/alp: forbidden Paseo dependency/);
+});

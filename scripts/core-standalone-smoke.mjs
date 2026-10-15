@@ -8,9 +8,10 @@
 // with a reconnect that replays the retained session, and an alpd start that succeeds while the
 // optional web integration is absent.
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { corePackageProblems } from './core-package-boundary.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -29,7 +30,7 @@ function run(command, args, options = {}) {
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
   if (options.allowFailure) return { status: result.status, output };
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} exited ${result.status}${output ? `\n${output}` : ''}`);
-  return output;
+  return result.stdout ?? '';
 }
 
 function installedPackages(directory) {
@@ -49,12 +50,34 @@ const core = path.join(work, 'core');
 mkdirSync(packs, { recursive: true });
 
 try {
-  // Pack only the neutral core workspaces.
+  // A clean source copy has neither integrations/paseo nor Paseo web/node_modules. Real npm
+  // prepack lifecycles here prove builds do not silently depend on an existing plugin checkout.
+  const source = path.join(work, 'source');
+  mkdirSync(source);
+  const sourceManifest = { ...manifest, workspaces: manifest.workspaces.filter(location => location.startsWith('packages/')) };
+  writeFileSync(path.join(source, 'package.json'), JSON.stringify(sourceManifest));
+  for (const location of sourceManifest.workspaces) {
+    mkdirSync(path.join(source, location), { recursive: true });
+    copyFileSync(path.join(root, location, 'package.json'), path.join(source, location, 'package.json'));
+    cpSync(path.join(root, location, 'src'), path.join(source, location, 'src'), { recursive: true });
+  }
+  for (const location of ['scripts', 'templates', 'packages/protocol/schema', 'packages/protocol/fixtures']) cpSync(path.join(root, location), path.join(source, location), { recursive: true });
+  mkdirSync(path.join(source, 'docs'));
+  copyFileSync(path.join(root, 'docs/modular-monorepo.md'), path.join(source, 'docs/modular-monorepo.md'));
+  for (const file of ['README.md', 'tsconfig.core.json']) copyFileSync(path.join(root, file), path.join(source, file));
+  run('npm', ['install', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund'], { cwd: source, capture: true, timeout: 420_000 });
+  if (installedPackages(source).some(name => name.startsWith('@getpaseo/'))) throw new Error('core build source installed Paseo');
+  run(process.execPath, ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.core.json'], { cwd: source });
   const tarballs = [];
+  const byName = new Map();
   for (const name of CORE_NAMES) {
-    const output = run('npm', ['pack', '--workspace', name, '--pack-destination', packs, '--ignore-scripts', '--json'], { capture: true });
-    const [{ filename }] = JSON.parse(output.slice(output.indexOf('[')));
-    tarballs.push(path.join(packs, filename));
+    const output = run('npm', ['pack', '--workspace', name, '--pack-destination', packs, '--json'], { cwd: source, capture: true });
+    const [packed] = JSON.parse(output.slice(output.indexOf('[')));
+    const pkg = JSON.parse(readFileSync(path.join(root, 'packages', name.replace('@anhlp/alp-', ''), 'package.json')));
+    const problems = corePackageProblems(pkg, packed.files.map(file => file.path));
+    if (problems.length) throw new Error(problems.join('\n'));
+    tarballs.push(path.join(packs, packed.filename));
+    byName.set(name, path.join(packs, packed.filename));
   }
 
   // Install them into their own project, alone.
@@ -79,7 +102,30 @@ try {
   if (status !== 0 || !output.includes('STANDALONE_CORE_SMOKE_PASSED')) {
     throw new Error(`standalone core driver exited ${status} without passing\n${output}`);
   }
-  console.log('Standalone core smoke passed');
+  // Exercise the actual CLI/ACP executable in both distributions. Root gets only its three
+  // declared ALP dependencies, not the CLI/daemon/runtime workspaces that could mask omissions.
+  const [packedRoot] = JSON.parse(run('npm', ['pack', '--json', '--pack-destination', packs], { cwd: source, capture: true }).replace(/^[\s\S]*?(?=\[\n)/, ''));
+  const problems = corePackageProblems(manifest, packedRoot.files.map(file => file.path));
+  if (problems.length) throw new Error(problems.join('\n'));
+  const distribution = path.join(work, 'distribution');
+  mkdirSync(distribution);
+  writeFileSync(path.join(distribution, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
+  run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', path.join(packs, packedRoot.filename), ...Object.keys(manifest.dependencies).filter(name => byName.has(name)).map(name => byName.get(name))], { cwd: distribution, timeout: 420_000 });
+  for (const [directory, cli] of [[core, 'node_modules/@anhlp/alp-cli/dist/cli.js'], [distribution, 'node_modules/@anhlp/alp/packages/cli/dist/cli.js']]) {
+    const tree = run('npm', ['ls', '--all', '--json'], { cwd: directory, capture: true });
+    if (/@getpaseo\/|alp-paseo-plugin/.test(tree)) throw new Error('Paseo found in installed dependency graph');
+    // Inspect actual installed source, declarations, JSON and JS including nested dependencies.
+    const modules = path.join(directory, 'node_modules');
+    for (const file of readdirSync(modules, { recursive: true, withFileTypes: true })) {
+      if (!file.isFile() || !/\.(?:[cm]?js|ts|json)$/.test(file.name)) continue;
+      const absolute = path.join(file.parentPath ?? file.path, file.name);
+      if (readFileSync(absolute, 'utf8').includes('@getpaseo/')) throw new Error(`installed artifact contains Paseo: ${absolute}`);
+    }
+    copyFileSync(path.join(root, 'test/support/fake-acp.js'), path.join(directory, 'fake-acp.js'));
+    copyFileSync(path.join(root, 'scripts/cli-standalone-driver.mjs'), path.join(directory, 'cli-driver.mjs'));
+    run(process.execPath, ['cli-driver.mjs', cli], { cwd: directory, timeout: 180_000, env: { HOME: noHome, USERPROFILE: noHome, ALP_HOME: path.join(directory, 'cli-home'), ALP_WEB_INTEGRATION: '', ALP_INTEGRATION_ENTRY: '', PATH: path.dirname(process.execPath), NODE_PATH: '' } });
+  }
+  console.log('Standalone core and main distribution smoke passed');
 } finally {
   rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 }
