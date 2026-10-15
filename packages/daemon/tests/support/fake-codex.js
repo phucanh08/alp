@@ -7,6 +7,7 @@
 //   [die]          record it, then exit before answering: the provider dies mid-request
 //   [hold]         answer, but never finish the turn
 //   [slow]         answer after 200 ms
+//   [ask]          answer, then ask the user with the alp_ask tool; the turn ends once it is answered
 // FAKE_CODEX_IGNORE_EOF=1 keeps it running after alpd goes away, as a stuck provider would.
 import { appendFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
@@ -17,6 +18,8 @@ const send = message => process.stdout.write(`${JSON.stringify(message)}\n`);
 let threads = 0;
 let turns = 0;
 const active = new Map();
+/** alp_ask calls waiting for alpd's answer: request id → the turn that asked. */
+const asking = new Map();
 
 record({ method: 'spawn', ppid: process.ppid });
 if (process.env.FAKE_CODEX_IGNORE_EOF === '1') setInterval(() => {}, 1 << 30);
@@ -34,6 +37,15 @@ const lines = createInterface({ input: process.stdin });
 lines.on('line', line => {
   const message = JSON.parse(line);
   if (message.id === undefined) return;
+  // alpd's answer to a tool call this provider made.
+  if (message.method === undefined) {
+    const turn = asking.get(message.id);
+    if (!turn) return;
+    asking.delete(message.id);
+    record({ method: 'tool/answered', threadId: turn.threadId, text: JSON.stringify(message.result ?? message.error ?? null) });
+    finish(turn.threadId, turn.turnId, 'asked and answered');
+    return;
+  }
   const { id, method, params } = message;
   const text = textOf(params);
   record({ method, ...(params?.threadId ? { threadId: params.threadId } : {}), ...(text ? { text } : {}) });
@@ -49,7 +61,11 @@ lines.on('line', line => {
       const start = () => {
         reply({ turn: { id: turnId } });
         active.set(params.threadId, turnId);
-        if (!text.includes('[hold]')) setTimeout(() => finish(params.threadId, turnId, `ok ${turns}`), 20);
+        if (text.includes('[ask]')) {
+          const call = `ask-${turnId}`;
+          asking.set(call, { threadId: params.threadId, turnId });
+          setTimeout(() => send({ id: call, method: 'item/tool/call', params: { threadId: params.threadId, turnId, callId: `call-${turnId}`, namespace: null, tool: 'alp_ask', arguments: { question: 'Go on?', to: 'user' } } }), 20);
+        } else if (!text.includes('[hold]')) setTimeout(() => finish(params.threadId, turnId, `ok ${turns}`), 20);
       };
       if (text.includes('[slow]')) setTimeout(start, 200); else start();
       return;

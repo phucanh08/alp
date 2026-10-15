@@ -28,8 +28,6 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
     links: /** @type {Set<any>} */ (new Set()),
     /** Tasks per projectRoot. */
     tasks: /** @type {Map<string, any[]>} */ (new Map()),
-    /** What library.get answers as its source; a test sets it to check the gateway refuses other layers. */
-    librarySource: /** @type {string | undefined} */ (undefined),
     opened: 0,
     refuse: false,
   };
@@ -126,7 +124,8 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
     'task.gate.resolve': ({ id }) => ({ id, status: 'open', rev: 2 }),
     'team.list': ({ projectRoot = null }) => ({ projectRoot, teams: [{ id: 'pho', source: 'builtin' }, { id: 'mine', source: 'library' }] }),
     'library.list': ({ projectRoot = null }) => ({ projectRoot, entries: [{ name: 'main', source: 'builtin' }] }),
-    'library.get': ({ kind, name, scope }) => ({ kind, name, source: state.librarySource ?? scope ?? 'library', content: {}, revision: 'rev1', usedBy: [], librarySkills: ['host-skill'] }),
+    // An entry as alpd answers it: env redacted, a token in the URL and a secret in args not.
+    'library.get': ({ kind, name, scope }) => ({ kind, name, source: scope ?? 'project', content: { url: 'https://me:SENTINEL-url@mcp.example/x?key=SENTINEL-query', args: ['--token', 'SENTINEL-arg'], env: { KEY: { $alp: 'keep' } } }, revision: 'rev1', usedBy: [], secrets: ['/env/KEY'] }),
     'library.models': () => ({ models: [{ id: 'codex:gpt', label: 'GPT', efforts: [] }] }),
     'settings.language.get': () => ({ language: null, applies: 'English', default: 'English' }),
     'session.interrupt': () => ({}),

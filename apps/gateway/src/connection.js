@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { ERROR, PROTOCOL_VERSION, RPC_ERROR } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 import { isAlpClientError } from '@anhlp/alp-client/portable';
-import { CONTENT_TYPES, FORWARDED_CAPABILITIES, GATEWAY_ERROR, GATEWAY_REASON, SPEC_FIELDS, exposureOf, workspaceOf } from './policy.js';
+import { CONTENT_TYPES, FORWARDED_CAPABILITIES, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, isModelId, workspaceOf } from './policy.js';
 
 /**
  * One remote client of the gateway (docs/alp/remote-gateway.md §3, §6): its WebSocket, its own
@@ -387,12 +387,23 @@ export class ClientConnection {
   async #resolve(sessionId, { fresh = false } = {}) {
     const cached = this.#sessions.get(sessionId);
     if (cached && !fresh) return cached;
+    return (await this.#walk(sessionId, { trustAncestors: true })).scoped;
+  }
+
+  /**
+   * Looks `sessionId` up in alpd and walks to its root, checking each session's workspace. With
+   * `trustAncestors`, an ancestor already in scope ends the walk; without it every session up to
+   * the root is asked for afresh, as mode checks need.
+   * @param {string} sessionId @param {{ trustAncestors: boolean }} options
+   * @returns {Promise<{ scoped: Scoped, chain: Array<{ id: string, projectRoot: string, mode?: string }> }>}
+   */
+  async #walk(sessionId, { trustAncestors }) {
     /** @type {Array<{ id: string, projectRoot: string, mode?: string }>} */
     const chain = [];
     let id = sessionId;
     let root;
     for (let depth = 0; depth < MAX_DEPTH; depth++) {
-      const known = depth > 0 ? this.#sessions.get(id) : undefined;
+      const known = depth > 0 && trustAncestors ? this.#sessions.get(id) : undefined;
       if (known) { root = known.root; break; }
       let summary;
       try {
@@ -408,7 +419,31 @@ export class ClientConnection {
     }
     if (root === undefined) throw new NotInScope(sessionId, 'outside');
     for (const entry of chain) this.#remember(entry.id, { root, projectRoot: entry.projectRoot, mode: entry.mode });
-    return /** @type {Scoped} */ (this.#sessions.get(sessionId) ?? { root, projectRoot: chain[0].projectRoot, mode: chain[0].mode });
+    return { scoped: /** @type {Scoped} */ (this.#sessions.get(sessionId) ?? { root, projectRoot: chain[0].projectRoot, mode: chain[0].mode }), chain };
+  }
+
+  /**
+   * A session this client may drive (docs/alp/remote-gateway.md §5.5): in scope, and for a grant
+   * with `modes`, every session from it up to its root runs in one of them, looked up afresh. A
+   * prompt, a message or an answer starts or continues work in the session, and whatever reaches
+   * an assignment is passed on to its requester, which may then go on in its own mode; the runtime
+   * keeps an assignment's mode within its requester's, so the root's is the widest of the tree.
+   * With `stop`, the session itself may run in any mode: stopping it starts nothing there, but its
+   * requesters are told, so they must be within the grant. A root may always be stopped.
+   * @param {string} sessionId @param {{ stop?: boolean }} [options]
+   * @returns {Promise<Scoped>}
+   */
+  async #drive(sessionId, { stop = false } = {}) {
+    if (!this.#grant.modes) return this.#resolve(sessionId);
+    const { scoped, chain } = await this.#walk(sessionId, { trustAncestors: false });
+    for (const entry of stop ? chain.slice(1) : chain) this.#checkMode(entry.mode, entry.id);
+    return scoped;
+  }
+
+  /** A whole-tree answer that is not the tree the scope check covered. @param {string} sessionId @param {string} method */
+  #outOfTree(sessionId, method) {
+    this.#log.error(`${method} answered a tree beyond the session checked; refused it`, { code: 'ALP_GATEWAY_TREE_OUT_OF_SCOPE' });
+    return new NotInScope(sessionId, 'outside');
   }
 
   /** A projectRoot param must name a granted workspace exactly. @param {unknown} projectRoot */
@@ -424,11 +459,12 @@ export class ClientConnection {
     return this.#workspace(projectRoot);
   }
 
-  /** @param {unknown} mode */
-  #checkMode(mode) {
+  /** @param {unknown} mode @param {string} [sessionId] the session that runs in it, when the refusal is about one */
+  #checkMode(mode, sessionId) {
     const modes = this.#grant.modes;
     if (!modes || (typeof mode === 'string' && modes.has(mode))) return;
-    throw forbidden(`This credential may use the modes ${[...modes].join(', ')}`, GATEWAY_REASON.mode, { modes: [...modes] });
+    const runs = sessionId === undefined ? '' : `Session ${sessionId} runs ${typeof mode === 'string' ? mode : 'in an unknown mode'}; `;
+    throw forbidden(`${runs}this credential may use the modes ${[...modes].join(', ')}`, GATEWAY_REASON.mode, { modes: [...modes], ...(sessionId === undefined ? {} : { sessionId }) });
   }
 
   /**
@@ -444,10 +480,12 @@ export class ClientConnection {
     }
     const workspace = this.#workspace(spec.cwd);
     // Names, not paths: alpd checks them too; the gateway refuses anything that could be a path.
-    for (const field of ['agent', 'model', 'mode', 'thinking']) {
+    for (const field of ['agent', 'mode', 'thinking']) {
       const value = spec[field];
       if (value !== undefined && (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$/.test(value) || value.includes('..'))) throw forbidden(`spec.${field} must be a plain name`, GATEWAY_REASON.specField, { field });
     }
+    // A model id has its own grammar: an ACP model is acp:<provider>/<model>.
+    if (spec.model !== undefined && !isModelId(spec.model)) throw forbidden('spec.model must be a model id such as codex:<model> or acp:<provider>/<model>, as library.models lists them', GATEWAY_REASON.specField, { field: 'model' });
     if (this.#grant.modes) {
       if (spec.mode === undefined) throw forbidden('This credential must choose spec.mode', GATEWAY_REASON.mode, { modes: [...this.#grant.modes] });
       this.#checkMode(spec.mode);
@@ -515,8 +553,23 @@ export class ClientConnection {
     },
 
     'session.get': async params => { await this.#resolve(params.sessionId); return this.#call('session.get', params); },
-    'session.status': async params => { await this.#resolve(params.sessionId); return this.#call('session.status', params); },
-    'session.log': async params => { await this.#resolve(params.sessionId); return this.#call('session.log', params); },
+    // A tree has one workspace: alpd opens assignments and the supervisor with their requester's
+    // projectRoot. A whole-tree answer is checked against it anyway, and refused if it spans more.
+    'session.status': async params => {
+      const scoped = await this.#resolve(params.sessionId);
+      const result = await this.#call('session.status', params);
+      const status = result?.status;
+      const sessions = Array.isArray(status?.sessions) ? status.sessions : [];
+      if (status?.rootId !== scoped.root || sessions.some((/** @type {any} */ session) => !workspaceOf(this.#grant, session?.projectRoot))) throw this.#outOfTree(params.sessionId, 'session.status');
+      return result;
+    },
+    // The run log of the session's root: entries name no workspace, so the root is the check.
+    'session.log': async params => {
+      const scoped = await this.#resolve(params.sessionId);
+      const result = await this.#call('session.log', params);
+      if (result?.rootId !== scoped.root) throw this.#outOfTree(params.sessionId, 'session.log');
+      return result;
+    },
     'session.release': async params => { await this.#resolve(params.sessionId); return this.#call('session.release', params); },
 
     'session.attach': async params => {
@@ -565,11 +618,10 @@ export class ClientConnection {
     },
 
     'session.prompt': async params => {
-      const scoped = await this.#resolve(params.sessionId, { fresh: !!this.#grant.modes });
+      await this.#drive(params.sessionId);
       for (const part of params.content) {
         if (!CONTENT_TYPES.includes(part?.type)) throw forbidden(`Prompt content of type ${JSON.stringify(part?.type)} cannot be sent through the gateway`, GATEWAY_REASON.contentType, { allowed: [...CONTENT_TYPES] });
       }
-      if (this.#grant.modes) this.#checkMode(scoped.mode);
       return this.#call('session.prompt', params);
     },
 
@@ -582,11 +634,12 @@ export class ClientConnection {
       return result;
     },
 
-    'session.interrupt': async params => { await this.#resolve(params.sessionId); return this.#call('session.interrupt', params); },
-    'session.close': async params => { await this.#resolve(params.sessionId); return this.#call('session.close', params); },
+    'session.interrupt': async params => { await this.#drive(params.sessionId, { stop: true }); return this.#call('session.interrupt', params); },
+    'session.close': async params => { await this.#drive(params.sessionId, { stop: true }); return this.#call('session.close', params); },
     'session.rename': async params => { await this.#resolve(params.sessionId); return this.#call('session.rename', params); },
     'session.archive': async params => { await this.#resolve(params.sessionId); return this.#call('session.archive', params); },
-    'session.message': async params => { await this.#resolve(params.sessionId); return this.#call('session.message', params); },
+    // Mail from the user wakes or steers the session, and an assignment's is passed to its requester.
+    'session.message': async params => { await this.#drive(params.sessionId); return this.#call('session.message', params); },
 
     'question.list': async params => {
       const only = params.projectRoot === undefined ? undefined : this.#workspace(params.projectRoot);
@@ -607,6 +660,8 @@ export class ClientConnection {
       const missing = new GatewayError(ERROR.notFound, `No question ${params.questionId} waits for an answer`);
       if (!question) throw missing;
       await this.#resolve(question.sessionId).catch(() => { throw missing; });
+      // An answer, or a dismissal, lets the asking turn go on.
+      await this.#drive(question.sessionId);
       return this.#call('question.answer', { ...params, questionId: question.id });
     },
 
@@ -623,21 +678,27 @@ export class ClientConnection {
     'task.update': async params => { this.#workspace(params.projectRoot); return this.#call('task.update', params); },
     'task.gate.resolve': async params => { this.#workspace(params.projectRoot); return this.#call('task.gate.resolve', params); },
     // Without projectRoot alpd answers the host library alone: the gateway asks for a project.
-    'team.list': async params => { this.#project(params.projectRoot, 'team.list'); return this.#call('team.list', params); },
-    'library.list': async params => { this.#project(params.projectRoot, 'library.list'); return this.#call('library.list', params); },
-
-    'library.get': async params => {
-      this.#project(params.projectRoot, 'library.get');
-      // Library and built-in entries are the host's configuration: only the project's own layer is granted.
-      if (params.scope !== 'project') throw forbidden('library.get through the gateway reads the project layer only: send scope "project"', GATEWAY_REASON.hostScope);
-      const result = await this.#call('library.get', params);
-      if (result?.source !== 'project') throw forbidden('library.get answered an entry outside the project layer', GATEWAY_REASON.hostScope);
-      // librarySkills comes from the host's role-skills.json, not the project layer.
-      const { librarySkills: _host, ...project } = result;
-      return project;
+    // Rows name entries; their listed fields only. A team that cannot be read says so without the
+    // file and parse error alpd reports, which name host paths and quote the file.
+    'team.list': async params => {
+      this.#project(params.projectRoot, 'team.list');
+      const result = await this.#call('team.list', params);
+      const teams = (Array.isArray(result?.teams) ? result.teams : []).map((/** @type {any} */ team) => {
+        const row = pick(team, TEAM_ROW_FIELDS);
+        if (row.error !== undefined) row.error = 'This team cannot be read on the daemon host';
+        return row;
+      });
+      return { ...result, teams };
     },
-
-    'library.models': () => this.#call('library.models', {}),
+    'library.list': async params => {
+      this.#project(params.projectRoot, 'library.list');
+      const result = await this.#call('library.list', params);
+      return { ...result, entries: (Array.isArray(result?.entries) ? result.entries : []).map((/** @type {any} */ entry) => pick(entry, LIBRARY_ROW_FIELDS)) };
+    },
+    'library.models': async () => {
+      const result = await this.#call('library.models', {});
+      return { ...result, models: (Array.isArray(result?.models) ? result.models : []).map((/** @type {any} */ model) => pick(model, MODEL_ROW_FIELDS)) };
+    },
     'settings.language.get': () => this.#call('settings.language.get', {}),
   };
 
