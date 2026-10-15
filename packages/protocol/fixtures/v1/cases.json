@@ -2125,6 +2125,647 @@
    }
   },
   {
+   "name": "team.list params",
+   "check": "params",
+   "method": "team.list",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project"
+   }
+  },
+  {
+   "name": "team.list without a project",
+   "check": "params",
+   "method": "team.list",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "team.list with an empty projectRoot",
+   "check": "params",
+   "method": "team.list",
+   "valid": false,
+   "value": {
+    "projectRoot": ""
+   }
+  },
+  {
+   "name": "team.list result",
+   "check": "result",
+   "method": "team.list",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "teams": [
+     {
+      "id": "pho",
+      "label": "Phở",
+      "source": "builtin"
+     },
+     {
+      "id": "mine",
+      "source": "library",
+      "error": "agent x is missing"
+     }
+    ]
+   }
+  },
+  {
+   "name": "task.list params",
+   "check": "params",
+   "method": "task.list",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project"
+   }
+  },
+  {
+   "name": "task.list without projectRoot",
+   "check": "params",
+   "method": "task.list",
+   "valid": false,
+   "value": {}
+  },
+  {
+   "name": "task.list result",
+   "check": "result",
+   "method": "task.list",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "tasks": [
+     {
+      "id": "t-a3f8",
+      "title": "Viết test 😀",
+      "type": "task",
+      "priority": 2,
+      "status": "open",
+      "rev": 3,
+      "ready": true,
+      "approvals": [
+       {
+        "gate": "g1",
+        "note": "Duyệt?"
+       }
+      ],
+      "labels": [
+       "rpc"
+      ],
+      "createdAt": "2026-10-15T00:00:00.000Z",
+      "updatedAt": "2026-10-15T00:00:00.000Z"
+     },
+     {
+      "id": "t-a3f8.1",
+      "title": "Viết test 😀",
+      "type": "task",
+      "priority": 2,
+      "status": "closed",
+      "rev": 0,
+      "ready": false,
+      "approvals": [
+       {
+        "gate": "g1",
+        "note": "Duyệt?"
+       }
+      ],
+      "labels": [
+       "rpc"
+      ],
+      "createdAt": "2026-10-15T00:00:00.000Z",
+      "updatedAt": "2026-10-15T00:00:00.000Z",
+      "closed": {
+       "reason": "done",
+       "at": "2026-10-15T00:00:00.000Z"
+      },
+      "progress": {
+       "done": 1,
+       "total": 2
+      }
+     }
+    ],
+    "unreadable": [
+     {
+      "file": ".alp/tasks/t-bad.json",
+      "error": "not JSON"
+     }
+    ],
+    "revision": "abc"
+   }
+  },
+  {
+   "name": "task.list result with an unknown status",
+   "check": "result",
+   "method": "task.list",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "tasks": [
+     {
+      "id": "t-a3f8",
+      "title": "Viết test 😀",
+      "type": "task",
+      "priority": 2,
+      "status": "blocked",
+      "rev": 3,
+      "ready": true,
+      "approvals": [
+       {
+        "gate": "g1",
+        "note": "Duyệt?"
+       }
+      ],
+      "labels": [
+       "rpc"
+      ],
+      "createdAt": "2026-10-15T00:00:00.000Z",
+      "updatedAt": "2026-10-15T00:00:00.000Z"
+     }
+    ],
+    "unreadable": [],
+    "revision": "x"
+   }
+  },
+  {
+   "name": "task.create params",
+   "check": "params",
+   "method": "task.create",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "title": "Sửa lỗi",
+    "priority": 0,
+    "requestId": "req-1"
+   }
+  },
+  {
+   "name": "task.create with a blank title",
+   "check": "params",
+   "method": "task.create",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "title": " "
+   }
+  },
+  {
+   "name": "task.create with priority 5",
+   "check": "params",
+   "method": "task.create",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "title": "x",
+    "priority": 5
+   }
+  },
+  {
+   "name": "task.create result",
+   "check": "result",
+   "method": "task.create",
+   "valid": true,
+   "value": {
+    "id": "t-a3f8"
+   }
+  },
+  {
+   "name": "task.create result of a repeat",
+   "check": "result",
+   "method": "task.create",
+   "valid": true,
+   "value": {
+    "id": "t-a3f8",
+    "duplicate": true
+   }
+  },
+  {
+   "name": "task.update params",
+   "check": "params",
+   "method": "task.update",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "id": "t-a3f8",
+    "action": "close",
+    "note": "Xong",
+    "ifRev": 3
+   }
+  },
+  {
+   "name": "task.update with action approve (that is task.gate.resolve)",
+   "check": "params",
+   "method": "task.update",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "id": "t-a3f8",
+    "action": "approve"
+   }
+  },
+  {
+   "name": "task.update with an id that is not a task id",
+   "check": "params",
+   "method": "task.update",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "id": "bd-1",
+    "action": "close"
+   }
+  },
+  {
+   "name": "task.update result",
+   "check": "result",
+   "method": "task.update",
+   "valid": true,
+   "value": {
+    "id": "t-a3f8",
+    "status": "closed",
+    "rev": 4,
+    "landed": "Epic t-a3f8 landed"
+   }
+  },
+  {
+   "name": "task.gate.resolve params",
+   "check": "params",
+   "method": "task.gate.resolve",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "id": "t-a3f8",
+    "gate": "g1",
+    "note": "OK"
+   }
+  },
+  {
+   "name": "task.gate.resolve result",
+   "check": "result",
+   "method": "task.gate.resolve",
+   "valid": true,
+   "value": {
+    "id": "t-a3f8",
+    "status": "open",
+    "rev": 5
+   }
+  },
+  {
+   "name": "library.list params",
+   "check": "params",
+   "method": "library.list",
+   "valid": true,
+   "value": {
+    "kind": "agents",
+    "projectRoot": "/work/project"
+   }
+  },
+  {
+   "name": "library.list with an unknown kind",
+   "check": "params",
+   "method": "library.list",
+   "valid": false,
+   "value": {
+    "kind": "plugins"
+   }
+  },
+  {
+   "name": "library.list result",
+   "check": "result",
+   "method": "library.list",
+   "valid": true,
+   "value": {
+    "projectRoot": null,
+    "entries": [
+     {
+      "name": "main",
+      "source": "builtin"
+     },
+     {
+      "name": "reviewer",
+      "source": "project",
+      "overrides": "library",
+      "description": "Đọc lại",
+      "usedBy": [
+       "team pho"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "library.get params",
+   "check": "params",
+   "method": "library.get",
+   "valid": true,
+   "value": {
+    "kind": "mcp",
+    "name": "docs",
+    "projectRoot": "/work/project",
+    "scope": "project"
+   }
+  },
+  {
+   "name": "library.get with the name ..",
+   "check": "params",
+   "method": "library.get",
+   "valid": false,
+   "value": {
+    "kind": "mcp",
+    "name": ".."
+   }
+  },
+  {
+   "name": "library.get with a slash in the name",
+   "check": "params",
+   "method": "library.get",
+   "valid": false,
+   "value": {
+    "kind": "mcp",
+    "name": "a/b"
+   }
+  },
+  {
+   "name": "library.get result",
+   "check": "result",
+   "method": "library.get",
+   "valid": true,
+   "value": {
+    "kind": "mcp",
+    "name": "docs",
+    "source": "library",
+    "content": {
+     "server": {
+      "url": "https://example.invalid/mcp",
+      "headers": {
+       "Authorization": {
+        "$secret": "keep"
+       }
+      }
+     }
+    },
+    "revision": "r-1",
+    "usedBy": [
+     "agent main"
+    ],
+    "secrets": [
+     "/server/headers/Authorization"
+    ]
+   }
+  },
+  {
+   "name": "library.get result of a built-in agent",
+   "check": "result",
+   "method": "library.get",
+   "valid": true,
+   "value": {
+    "kind": "agents",
+    "name": "main",
+    "source": "builtin",
+    "content": {
+     "instructions": "…"
+    },
+    "revision": null,
+    "usedBy": [],
+    "librarySkills": [
+     "tdd"
+    ]
+   }
+  },
+  {
+   "name": "library.save params",
+   "check": "params",
+   "method": "library.save",
+   "valid": true,
+   "value": {
+    "kind": "providers",
+    "name": "gemini",
+    "scope": "library",
+    "content": {
+     "provider": {
+      "kind": "acp",
+      "command": "gemini",
+      "env": {
+       "GEMINI_API_KEY": {
+        "$secret": "keep"
+       }
+      }
+     }
+    },
+    "revision": "r-1"
+   }
+  },
+  {
+   "name": "library.save creating a team with sync",
+   "check": "params",
+   "method": "library.save",
+   "valid": true,
+   "value": {
+    "kind": "teams",
+    "name": "mine",
+    "scope": "project",
+    "projectRoot": "/work/project",
+    "content": {
+     "team": {}
+    },
+    "revision": null,
+    "sync": "known-projects"
+   }
+  },
+  {
+   "name": "library.save with an unknown scope",
+   "check": "params",
+   "method": "library.save",
+   "valid": false,
+   "value": {
+    "kind": "skills",
+    "name": "tdd",
+    "scope": "everywhere",
+    "content": {}
+   }
+  },
+  {
+   "name": "library.save result",
+   "check": "result",
+   "method": "library.save",
+   "valid": true,
+   "value": {
+    "revision": "r-2",
+    "syncedProjects": 2,
+    "syncErrors": []
+   }
+  },
+  {
+   "name": "library.delete params",
+   "check": "params",
+   "method": "library.delete",
+   "valid": true,
+   "value": {
+    "kind": "skills",
+    "name": "tdd",
+    "scope": "library",
+    "revision": "r-2"
+   }
+  },
+  {
+   "name": "library.delete result",
+   "check": "result",
+   "method": "library.delete",
+   "valid": true,
+   "value": {
+    "removed": true,
+    "now": "builtin"
+   }
+  },
+  {
+   "name": "library.duplicate params",
+   "check": "params",
+   "method": "library.duplicate",
+   "valid": true,
+   "value": {
+    "kind": "agents",
+    "from": "main",
+    "to": "main-2",
+    "scope": "library"
+   }
+  },
+  {
+   "name": "library.duplicate result",
+   "check": "result",
+   "method": "library.duplicate",
+   "valid": true,
+   "value": {
+    "revision": "r-3"
+   }
+  },
+  {
+   "name": "library.rename params",
+   "check": "params",
+   "method": "library.rename",
+   "valid": true,
+   "value": {
+    "kind": "agents",
+    "from": "main-2",
+    "to": "helper",
+    "scope": "project",
+    "projectRoot": "/work/project"
+   }
+  },
+  {
+   "name": "library.rename result",
+   "check": "result",
+   "method": "library.rename",
+   "valid": true,
+   "value": {
+    "revision": "r-4"
+   }
+  },
+  {
+   "name": "library.skills.set params",
+   "check": "params",
+   "method": "library.skills.set",
+   "valid": true,
+   "value": {
+    "agent": "main",
+    "skills": [
+     "tdd"
+    ]
+   }
+  },
+  {
+   "name": "library.skills.set result",
+   "check": "result",
+   "method": "library.skills.set",
+   "valid": true,
+   "value": {
+    "skills": [
+     "tdd"
+    ]
+   }
+  },
+  {
+   "name": "library.models params",
+   "check": "params",
+   "method": "library.models",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "library.models result",
+   "check": "result",
+   "method": "library.models",
+   "valid": true,
+   "value": {
+    "models": [
+     {
+      "id": "codex:gpt-6.1-sol",
+      "label": "codex · GPT-6.1-Sol",
+      "efforts": [
+       "low",
+       "high"
+      ],
+      "effort": "low"
+     },
+     {
+      "id": "acp:gemini",
+      "label": "Gemini · Provider default",
+      "efforts": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "settings.language.get params",
+   "check": "params",
+   "method": "settings.language.get",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "settings.language.get result",
+   "check": "result",
+   "method": "settings.language.get",
+   "valid": true,
+   "value": {
+    "language": null,
+    "applies": "Vietnamese",
+    "default": "Vietnamese"
+   }
+  },
+  {
+   "name": "settings.language.set params",
+   "check": "params",
+   "method": "settings.language.set",
+   "valid": true,
+   "value": {
+    "language": "English"
+   }
+  },
+  {
+   "name": "settings.language.set clearing the language",
+   "check": "params",
+   "method": "settings.language.set",
+   "valid": true,
+   "value": {
+    "language": null
+   }
+  },
+  {
+   "name": "settings.language.set without language",
+   "check": "params",
+   "method": "settings.language.set",
+   "valid": false,
+   "value": {}
+  },
+  {
+   "name": "settings.language.set result",
+   "check": "result",
+   "method": "settings.language.set",
+   "valid": true,
+   "value": {
+    "language": "English",
+    "applies": "English",
+    "default": "Vietnamese"
+   }
+  },
+  {
    "name": "daemon.hello with a string protocolVersion",
    "check": "params",
    "method": "daemon.hello",

@@ -23,7 +23,7 @@ test('the method inventory, errors and capabilities agree across schema, constan
   assert.equal(PROTOCOL_VERSION, 1);
   assert.equal(methods.protocolVersion, PROTOCOL_VERSION);
   assert.equal(MAX_FRAME, 16 * 1024 * 1024);
-  assert.deepEqual(ERROR, { failed: 1000, notFound: 1001, conflict: 1004, protocol: 1006 });
+  assert.deepEqual(ERROR, { failed: 1000, notFound: 1001, forbidden: 1003, conflict: 1004, unavailable: 1005, protocol: 1006 });
   assert.deepEqual(methods.errors, { ...RPC_ERROR, ...ERROR });
   assert.deepEqual(Object.keys(methods.methods).sort(), [...RPC_METHODS].sort());
   for (const method of RPC_METHODS) assert.ok(methods.methods[method].params && methods.methods[method].result, method);
@@ -110,4 +110,24 @@ test('every valid golden value type-checks against the TypeScript projection', {
   await writeFile(path.join(directory, 'projection.ts'), `${lines.join('\n')}\n`);
   const result = spawnSync(process.execPath, [path.join(here, '../../../node_modules/typescript/bin/tsc'), '--noEmit', '--allowJs', '--strict', '--skipLibCheck', '--exactOptionalPropertyTypes', '--target', 'es2022', '--module', 'nodenext', '--moduleResolution', 'nodenext', path.join(directory, 'projection.ts')], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
+test('every method carries x-alp: its effect, the resource scope a gateway authorizes and, when gated, a declared capability', () => {
+  const kinds = new Set(['connection', 'host', 'project', 'library-or-project', 'session', 'question']);
+  for (const [name, method] of Object.entries(methods.methods)) {
+    const annotation = method['x-alp'];
+    assert.ok(annotation, `${name} has no x-alp`);
+    assert.ok(['query', 'mutation'].includes(annotation.effect), `${name} effect`);
+    assert.ok(kinds.has(annotation.scope?.kind), `${name} scope kind ${annotation.scope?.kind}`);
+    if (annotation.scope.param) {
+      // The param a scope names is one the method takes (a dotted path into an object param).
+      const [head] = annotation.scope.param.split('.');
+      assert.ok(Object.hasOwn(method.params.properties ?? {}, head), `${name} scope param ${annotation.scope.param}`);
+    }
+    if (annotation.capability !== undefined) assert.ok(CAPABILITIES.includes(annotation.capability), `${name} capability ${annotation.capability}`);
+  }
+  // The methods a capability gates are exactly those its annotation names.
+  for (const capability of ['team', 'task', 'library', 'settings.language']) {
+    assert.ok(Object.values(methods.methods).some(method => method['x-alp'].capability === capability), capability);
+  }
 });

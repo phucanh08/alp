@@ -562,7 +562,7 @@
     {
       "id": "errors.unknown-method",
       "profile": "errors",
-      "description": "A method nobody serves fails with -32601.",
+      "description": "A method nobody serves fails with -32601, as does a proposed method (docs/protocol/alp-json-rpc-v1.md §14) the daemon does not serve.",
       "hello": true,
       "steps": [
         {
@@ -582,7 +582,7 @@
           "send": {
             "jsonrpc": "2.0",
             "id": 2,
-            "method": "team.list"
+            "method": "workspace.list"
           },
           "expect": {
             "id": 2,

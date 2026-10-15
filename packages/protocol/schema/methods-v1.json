@@ -9,16 +9,38 @@
     "invalidParams": -32602,
     "failed": 1000,
     "notFound": 1001,
+    "forbidden": 1003,
     "conflict": 1004,
+    "unavailable": 1005,
     "protocol": 1006
   },
   "capabilities": {
     "attach.after": "session.attach accepts `after` and answers `cursor`/`reset`; envelopes kept in a tree timeline carry `cursor`.",
     "prompt.receipts": "session.prompt is answered at most once per (sessionId, clientMessageId) from a durable receipt; repeats answer the first outcome or outcome_unknown.",
-    "extension.methods": "extension.register/unregister, and the daemon sends extension.invoke requests to the owning connection."
+    "extension.methods": "extension.register/unregister, and the daemon sends extension.invoke requests to the owning connection.",
+    "team": "team.list: the teams a project can use, from the daemon host's built-ins, library and project.",
+    "task": "task.list, task.create, task.update and task.gate.resolve on a project's .alp/tasks, written by the daemon under the task lock.",
+    "library": "library.list/get/save/delete/duplicate/rename, library.skills.set and library.models on the daemon user's library and a project's .alp overrides; secrets are redacted on read.",
+    "settings.language": "settings.language.get/set: the language the daemon user reads, in the daemon's ALP_HOME/settings.json."
   },
   "methods": {
     "assignment.recall": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": false,
+          "alternatives": [
+            "assignmentId",
+            "taskId"
+          ]
+        },
+        "idempotent": false,
+        "risks": [
+          "model call"
+        ]
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -69,6 +91,15 @@
       }
     },
     "board.list": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": true
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -98,6 +129,13 @@
       }
     },
     "catalog.get": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "host"
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {},
@@ -133,6 +171,13 @@
       }
     },
     "daemon.hello": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "connection"
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -193,6 +238,16 @@
       }
     },
     "daemon.pause": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "host"
+        },
+        "idempotent": true,
+        "risks": [
+          "admin"
+        ]
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -219,6 +274,13 @@
       }
     },
     "daemon.pauses": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "host"
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {},
@@ -230,6 +292,16 @@
       }
     },
     "daemon.resume": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "host"
+        },
+        "idempotent": true,
+        "risks": [
+          "admin"
+        ]
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -250,6 +322,16 @@
       }
     },
     "daemon.shutdown": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "host"
+        },
+        "idempotent": true,
+        "risks": [
+          "admin"
+        ]
+      },
       "params": {
         "type": "object",
         "properties": {},
@@ -264,6 +346,13 @@
       }
     },
     "daemon.status": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "host"
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {},
@@ -329,6 +418,16 @@
       }
     },
     "daemon.usage": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "host"
+        },
+        "idempotent": true,
+        "risks": [
+          "refresh asks every provider (spawns on the daemon host)"
+        ]
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -355,7 +454,578 @@
         "additionalProperties": true
       }
     },
+    "extension.register": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "connection"
+        },
+        "idempotent": false,
+        "risks": [
+          "admin"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "registered": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "registered"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "extension.unregister": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "connection"
+        },
+        "idempotent": false,
+        "risks": [
+          "admin"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "unregistered": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "unregistered"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "library.delete": {
+      "x-alp": {
+        "effect": "mutation",
+        "capability": "library",
+        "scope": {
+          "kind": "library-or-project",
+          "param": "projectRoot",
+          "selector": "scope"
+        },
+        "idempotent": false
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/$defs/libraryKind"
+          },
+          "name": {
+            "$ref": "#/$defs/entryName"
+          },
+          "scope": {
+            "$ref": "#/$defs/libraryScope"
+          },
+          "projectRoot": {
+            "$ref": "#/$defs/projectRoot"
+          },
+          "revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "scope"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "removed": {
+            "const": true
+          },
+          "now": {
+            "enum": [
+              "builtin",
+              "library"
+            ]
+          }
+        },
+        "required": [
+          "removed"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "library.duplicate": {
+      "x-alp": {
+        "effect": "mutation",
+        "capability": "library",
+        "scope": {
+          "kind": "library-or-project",
+          "param": "projectRoot",
+          "selector": "scope",
+          "reads": [
+            "builtin",
+            "library"
+          ]
+        },
+        "idempotent": false,
+        "risks": [
+          "exec-config when kind is mcp, hooks or providers"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/$defs/libraryKind"
+          },
+          "from": {
+            "$ref": "#/$defs/entryName"
+          },
+          "to": {
+            "$ref": "#/$defs/entryName"
+          },
+          "scope": {
+            "$ref": "#/$defs/libraryScope"
+          },
+          "projectRoot": {
+            "$ref": "#/$defs/projectRoot"
+          }
+        },
+        "required": [
+          "kind",
+          "from",
+          "to",
+          "scope"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "$ref": "#/$defs/libraryRevision"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "library.get": {
+      "x-alp": {
+        "effect": "query",
+        "capability": "library",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": false,
+          "reads": [
+            "builtin",
+            "library"
+          ]
+        },
+        "idempotent": true,
+        "redacts": [
+          "mcp /server/env/*",
+          "mcp /server/headers/*",
+          "providers /provider/env/*"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/$defs/libraryKind"
+          },
+          "name": {
+            "$ref": "#/$defs/entryName"
+          },
+          "projectRoot": {
+            "$ref": "#/$defs/projectRoot"
+          },
+          "scope": {
+            "$ref": "#/$defs/libraryScope"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/$defs/libraryKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/$defs/librarySource"
+          },
+          "overrides": {
+            "$ref": "#/$defs/librarySource"
+          },
+          "content": {
+            "type": "object"
+          },
+          "revision": {
+            "$ref": "#/$defs/libraryRevision"
+          },
+          "usedBy": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "librarySkills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "secrets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "source",
+          "content",
+          "revision",
+          "usedBy"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "library.list": {
+      "x-alp": {
+        "effect": "query",
+        "capability": "library",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": false,
+          "reads": [
+            "builtin",
+            "library"
+          ]
+        },
+        "idempotent": true
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/$defs/libraryKind"
+          },
+          "projectRoot": {
+            "$ref": "#/$defs/projectRoot"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/libraryEntryRow"
+            }
+          }
+        },
+        "required": [
+          "projectRoot",
+          "entries"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "library.models": {
+      "x-alp": {
+        "effect": "query",
+        "capability": "library",
+        "scope": {
+          "kind": "host"
+        },
+        "idempotent": true
+      },
+      "params": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "efforts": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "effort": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "efforts"
+              ],
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "models"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "library.rename": {
+      "x-alp": {
+        "effect": "mutation",
+        "capability": "library",
+        "scope": {
+          "kind": "library-or-project",
+          "param": "projectRoot",
+          "selector": "scope"
+        },
+        "idempotent": false,
+        "risks": [
+          "exec-config when kind is mcp, hooks or providers"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/$defs/libraryKind"
+          },
+          "from": {
+            "$ref": "#/$defs/entryName"
+          },
+          "to": {
+            "$ref": "#/$defs/entryName"
+          },
+          "scope": {
+            "$ref": "#/$defs/libraryScope"
+          },
+          "projectRoot": {
+            "$ref": "#/$defs/projectRoot"
+          }
+        },
+        "required": [
+          "kind",
+          "from",
+          "to",
+          "scope"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "$ref": "#/$defs/libraryRevision"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "library.save": {
+      "x-alp": {
+        "effect": "mutation",
+        "capability": "library",
+        "scope": {
+          "kind": "library-or-project",
+          "param": "projectRoot",
+          "selector": "scope"
+        },
+        "idempotent": "with revision (a repeat fails revision_conflict)",
+        "risks": [
+          "exec-config when kind is mcp, hooks or providers, or agents naming mcp/hooks/provider",
+          "writes every known project's .alp/settings.json when kind is teams and sync is known-projects"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/$defs/libraryKind"
+          },
+          "name": {
+            "$ref": "#/$defs/entryName"
+          },
+          "scope": {
+            "$ref": "#/$defs/libraryScope"
+          },
+          "projectRoot": {
+            "$ref": "#/$defs/projectRoot"
+          },
+          "content": {
+            "type": "object"
+          },
+          "revision": {
+            "$ref": "#/$defs/libraryRevision"
+          },
+          "sync": {
+            "enum": [
+              "none",
+              "known-projects"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "scope",
+          "content"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "$ref": "#/$defs/libraryRevision"
+          },
+          "syncedProjects": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "syncErrors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "library.skills.set": {
+      "x-alp": {
+        "effect": "mutation",
+        "capability": "library",
+        "scope": {
+          "kind": "host"
+        },
+        "writes": [
+          "ALP_HOME/role-skills.json"
+        ],
+        "idempotent": true
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "$ref": "#/$defs/entryName"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/entryName"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "agent",
+          "skills"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "skills"
+        ],
+        "additionalProperties": true
+      }
+    },
     "question.answer": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "question",
+          "param": "questionId",
+          "prefix": true
+        },
+        "idempotent": false
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -391,6 +1061,15 @@
       }
     },
     "question.list": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": false
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -418,6 +1097,14 @@
       }
     },
     "session.archive": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -447,6 +1134,14 @@
       }
     },
     "session.attach": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -490,6 +1185,14 @@
       }
     },
     "session.close": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "idempotent": false
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -510,6 +1213,14 @@
       }
     },
     "session.configure": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -539,6 +1250,18 @@
       }
     },
     "session.create": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "project",
+          "param": "spec.cwd"
+        },
+        "idempotent": false,
+        "risks": [
+          "exec: spec.env and stdio spec.mcpServers run on the daemon host",
+          "spec.workdir/writeRoot/copy*/restore/keepThread are internal"
+        ]
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -591,6 +1314,14 @@
       }
     },
     "session.get": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -617,6 +1348,14 @@
       }
     },
     "session.interrupt": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -637,6 +1376,15 @@
       }
     },
     "session.list": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": false
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -673,6 +1421,14 @@
       }
     },
     "session.log": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -706,6 +1462,14 @@
       }
     },
     "session.message": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "idempotent": false
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -730,6 +1494,14 @@
       }
     },
     "session.preview": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project",
+          "param": "spec.cwd"
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -756,6 +1528,14 @@
       }
     },
     "session.prompt": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "idempotent": "with prompt.receipts"
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -821,6 +1601,14 @@
       }
     },
     "session.release": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -847,6 +1635,14 @@
       }
     },
     "session.rename": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -880,6 +1676,14 @@
       }
     },
     "session.status": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {
@@ -905,54 +1709,369 @@
         "additionalProperties": true
       }
     },
-    "extension.register": {
+    "settings.language.get": {
+      "x-alp": {
+        "effect": "query",
+        "capability": "settings.language",
+        "scope": {
+          "kind": "host"
+        },
+        "idempotent": true
+      },
+      "params": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": true
+      },
+      "result": {
+        "$ref": "#/$defs/languageSetting"
+      }
+    },
+    "settings.language.set": {
+      "x-alp": {
+        "effect": "mutation",
+        "capability": "settings.language",
+        "scope": {
+          "kind": "host"
+        },
+        "writes": [
+          "ALP_HOME/settings.json"
+        ],
+        "idempotent": true
+      },
       "params": {
         "type": "object",
         "properties": {
-          "method": {
-            "type": "string"
+          "language": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40,
+                "pattern": "\\S"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
-          "method"
+          "language"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "$ref": "#/$defs/languageSetting"
+      }
+    },
+    "task.create": {
+      "x-alp": {
+        "effect": "mutation",
+        "capability": "task",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": true
+        },
+        "writes": [
+          "<projectRoot>/.alp/tasks"
+        ],
+        "idempotent": "per requestId within one alpd process (10 minutes)"
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "$ref": "#/$defs/projectRoot"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "\\S"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "projectRoot",
+          "title"
         ],
         "additionalProperties": true
       },
       "result": {
         "type": "object",
         "properties": {
-          "registered": {
-            "type": "string"
+          "id": {
+            "$ref": "#/$defs/taskId"
+          },
+          "duplicate": {
+            "const": true
           }
         },
         "required": [
-          "registered"
+          "id"
         ],
         "additionalProperties": true
       }
     },
-    "extension.unregister": {
+    "task.gate.resolve": {
+      "x-alp": {
+        "effect": "mutation",
+        "capability": "task",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": true
+        },
+        "writes": [
+          "<projectRoot>/.alp/tasks"
+        ],
+        "idempotent": false
+      },
       "params": {
         "type": "object",
         "properties": {
-          "method": {
-            "type": "string"
+          "projectRoot": {
+            "$ref": "#/$defs/projectRoot"
+          },
+          "id": {
+            "$ref": "#/$defs/taskId"
+          },
+          "gate": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "ifRev": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "required": [
-          "method"
+          "projectRoot",
+          "id",
+          "gate"
         ],
         "additionalProperties": true
       },
       "result": {
         "type": "object",
         "properties": {
-          "unregistered": {
+          "id": {
+            "$ref": "#/$defs/taskId"
+          },
+          "status": {
+            "type": "string"
+          },
+          "rev": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "rev"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "task.list": {
+      "x-alp": {
+        "effect": "query",
+        "capability": "task",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": true
+        },
+        "idempotent": true
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "$ref": "#/$defs/projectRoot"
+          }
+        },
+        "required": [
+          "projectRoot"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": "string"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/taskRow"
+            }
+          },
+          "unreadable": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "error": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "file",
+                "error"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "revision": {
             "type": "string"
           }
         },
         "required": [
-          "unregistered"
+          "projectRoot",
+          "tasks",
+          "unreadable",
+          "revision"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "task.update": {
+      "x-alp": {
+        "effect": "mutation",
+        "capability": "task",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": true
+        },
+        "writes": [
+          "<projectRoot>/.alp/tasks"
+        ],
+        "idempotent": false
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "$ref": "#/$defs/projectRoot"
+          },
+          "id": {
+            "$ref": "#/$defs/taskId"
+          },
+          "action": {
+            "enum": [
+              "close",
+              "reopen"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "ifRev": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "projectRoot",
+          "id",
+          "action"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/taskId"
+          },
+          "status": {
+            "type": "string"
+          },
+          "rev": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "landed": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "rev"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "team.list": {
+      "x-alp": {
+        "effect": "query",
+        "capability": "team",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": false,
+          "reads": [
+            "builtin",
+            "library"
+          ]
+        },
+        "idempotent": true
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "$ref": "#/$defs/projectRoot"
+          }
+        },
+        "required": [],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "teams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/teamRow"
+            }
+          }
+        },
+        "required": [
+          "projectRoot",
+          "teams"
         ],
         "additionalProperties": true
       }
@@ -2644,6 +3763,306 @@
         "live",
         "ready",
         "checks"
+      ],
+      "additionalProperties": true
+    },
+    "projectRoot": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "description": "An absolute, normalized path on the daemon host to a directory holding .alp/. Compared as is: the daemon never walks up to a parent."
+    },
+    "taskId": {
+      "type": "string",
+      "pattern": "^t-[0-9a-f]{4,12}(?:\\.\\d+)*$"
+    },
+    "taskRow": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/taskId"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "open",
+            "in_progress",
+            "review",
+            "closed"
+          ]
+        },
+        "rev": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parent": {
+          "type": "string"
+        },
+        "assignee": {
+          "type": "string"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "blockedBy": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "waits": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "approvals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "gate": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "gate",
+              "note"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "handoff": {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "agent": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome",
+            "summary"
+          ],
+          "additionalProperties": true
+        },
+        "closed": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "at"
+          ],
+          "additionalProperties": true
+        },
+        "description": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "progress": {
+          "type": "object",
+          "properties": {
+            "done": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "done",
+            "total"
+          ],
+          "additionalProperties": true
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "type",
+        "priority",
+        "status",
+        "rev",
+        "ready",
+        "updatedAt"
+      ],
+      "additionalProperties": true
+    },
+    "libraryKind": {
+      "enum": [
+        "agents",
+        "skills",
+        "mcp",
+        "hooks",
+        "teams",
+        "providers"
+      ]
+    },
+    "libraryScope": {
+      "enum": [
+        "library",
+        "project"
+      ]
+    },
+    "librarySource": {
+      "enum": [
+        "builtin",
+        "library",
+        "project"
+      ]
+    },
+    "entryName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9_.-]+$",
+      "not": {
+        "enum": [
+          ".",
+          ".."
+        ]
+      }
+    },
+    "libraryRevision": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "libraryEntryRow": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/librarySource"
+        },
+        "overrides": {
+          "$ref": "#/$defs/librarySource"
+        },
+        "description": {
+          "type": "string"
+        },
+        "usedBy": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "source"
+      ],
+      "additionalProperties": true
+    },
+    "secretMarker": {
+      "type": "object",
+      "properties": {
+        "$secret": {
+          "const": "keep"
+        }
+      },
+      "required": [
+        "$secret"
+      ],
+      "additionalProperties": false,
+      "description": "Stands for a stored secret value: read results carry it in place of the value; a save that sends it back keeps the stored value."
+    },
+    "languageSetting": {
+      "type": "object",
+      "properties": {
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "applies": {
+          "type": "string"
+        },
+        "default": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "language",
+        "applies",
+        "default"
+      ],
+      "additionalProperties": true
+    },
+    "teamRow": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/librarySource"
+        },
+        "overrides": {
+          "$ref": "#/$defs/librarySource"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source"
       ],
       "additionalProperties": true
     }

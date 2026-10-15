@@ -99,11 +99,14 @@ unique; a receiver's behaviour on duplicates is undefined.
 | -32601 | methodNotFound | No such method (built-in or registered extension). |
 | -32602 | invalidParams | `params` not an object, or not matching the method's schema; also handler refusals of bad input. |
 | 1000 | failed | The method could not do its work (runtime refusals, persistence failures, timeouts). |
-| 1001 | notFound | No such session, question or registered method. |
-| 1004 | conflict | A conflict with existing state: duplicate registration, prompt `key_conflict` or `outcome_unknown`. |
+| 1001 | notFound | No such session, question, registered method, project, task or library entry. |
+| 1003 | forbidden | The daemon refuses to touch a resource: a symlink out of a project's `.alp` (`unsafe_path`). A gateway uses it for its own refusals (`grant`, `outside_workspace`, `spec_field`, ...). |
+| 1004 | conflict | A conflict with existing state: duplicate registration, prompt `key_conflict` or `outcome_unknown`, a stale `revision`, a task state that refuses the change. |
+| 1005 | unavailable | Try again later: a lock another writer holds (`busy`). |
 | 1006 | protocol | Handshake problems: `hello_required`, `protocol_version`; also unsafe extension names. |
 
-`1002`, `1003` and `1005` are reserved (proposed `1003 forbidden` and `1005 unavailable`, §14).
+`1002` is reserved. `1003` and `1005` came with the project, task and library methods (§15); an older client
+that does not know them treats them as `failed`.
 Clients treat any unknown code as `failed`. `error.message` is for people: never match on it.
 
 ### 5.2 Order of checks
@@ -140,7 +143,20 @@ runs before all of them pass**:
 | `response_too_large` | 1000 | a result over the frame limit |
 | `persistence_failed` | 1000 | `session.create`, `session.prompt`, `session.rename`, `session.archive` when the store cannot write |
 | `outcome_unknown` | 1004 | `session.prompt`: the daemon cannot tell whether the provider received the prompt (§10) |
-| `key_conflict` | 1004 | `session.prompt`: the `clientMessageId` was used with other content |
+| `key_conflict` | 1004 | `session.prompt`: the `clientMessageId` was used with other content; `task.create`: the `requestId` was used for another task |
+| `invalid_path` | -32602 | `projectRoot` is not an absolute, normalized path (§15.1) |
+| `invalid_scope` | -32602 | a library `scope` the entry cannot live in: `project` without `projectRoot`, providers outside the library |
+| `invalid_entry` | -32602 | library content core refuses: unknown fields, a bad MCP server, hook, provider or team, a name it refers to that does not exist |
+| `secret_marker` | -32602 | `library.save`: a `{ "$secret": "keep" }` marker with no stored value to keep, or outside a secret map (§15.3) |
+| `not_alp_project` | 1001 | `projectRoot` is not a directory holding `.alp/` |
+| `unknown_task` | 1001 | no task of that id in the project |
+| `not_found` | 1001 | no library entry of that kind and name (in that scope) |
+| `unsafe_path` | 1003 | a symlink where a project's `.alp`, its tasks or a library entry would be read or written |
+| `revision_conflict` | 1004 | a library `revision` or task `ifRev` that is no longer current; an entry that already exists where a new one was asked |
+| `task_state` | 1004 | the task's state refuses the change: already closed or open, open children, a closed parent, a gate already clear or missing |
+| `in_use` | 1004 | a library entry others refer to cannot be renamed or removed |
+| `busy` | 1005 | the project's task lock stayed held by another writer for 5 s (an `alp` command, a backup) |
+| `unreadable` | 1000 | the daemon user's `settings.json` or `role-skills.json` is not valid |
 
 Errors thrown by an extension's owner travel unchanged (`code`, `message`, `data`). Errors inside
 events (`session.failed`, `prompt.failed`, `turn.ended`) are `AlpError { message, code? }` with string
@@ -174,8 +190,13 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 | `attach.after` | `session.attach` accepts `after` and answers `cursor` and `reset`; kept envelopes carry `cursor` (§8). |
 | `prompt.receipts` | `session.prompt` is answered from durable receipts (§10). Listed only when alpd has a store. |
 | `extension.methods` | `extension.register` / `extension.unregister` and `extension.invoke` (§3). |
+| `task` | `task.list`, `task.create`, `task.update`, `task.gate.resolve` (§15.2). Every alpd lists it. |
+| `team` | `team.list` (§15.4). Listed when alpd serves its user's home (alpd always does; an embedded server only when given `home`). |
+| `library` | `library.list/get/save/delete/duplicate/rename`, `library.skills.set`, `library.models` (§15.3). Same condition as `team`. |
+| `settings.language` | `settings.language.get/set` (§15.5). Same condition as `team`. |
 
-alpd before this revision already had all three without listing them. A client that must work with
+alpd before this revision already had the first three without listing them; the last four are new. A method whose
+capability a daemon does not list answers `-32601`. A client that must work with
 both may probe (e.g. send `session.attach` with `after` and look for `cursor` in the result), but should
 prefer capabilities and treat their absence as "not available".
 
@@ -328,6 +349,11 @@ Clients also consult session summaries. Closed roots stay attachable while their
     exactly-once for tools or other external side effects of a turn.
 - Without `prompt.receipts` (alpd without a store) `session.prompt` answers `{}` and is not
   idempotent.
+- **`task.create` with `requestId`** is answered once per `(projectRoot, requestId)` for 10 minutes **within one alpd
+  process**: a repeat with the same title and priority answers the first `{ id }` with `duplicate: true`, concurrent repeats
+  wait for the first, other content fails `1004 key_conflict`, and a create that failed may be tried again. Nothing is
+  kept on disk: after an alpd restart, or a `1000`, read `task.list` before creating again.
+- **Library saves** are guarded by `revision` (§15.3): a repeat of a save that succeeded fails `revision_conflict`.
 - **Other methods are not idempotent** unless the table in §12 says so; a client that retries after a
   lost response must first read state (`session.get`, `session.list`).
 
@@ -354,7 +380,7 @@ node packages/protocol/conformance/run.mjs --socket S --profiles handshake,wire,
   keeps its turn running until interrupted. alpd's tests use `packages/daemon/tests/support/fake-codex.js`
   via `ALP_CODEX_BIN`; `packages/daemon/tests/conformance.test.js` runs every profile against a real
   alpd process this way.
-- **Golden fixtures** `fixtures/v1/cases.json` (136 values): an implementation's own unit tests should
+- **Golden fixtures** `fixtures/v1/cases.json` (183 values): an implementation's own unit tests should
   load them and check that its decoder accepts every valid value and its validation rejects every
   invalid one. `projection: false` marks values the closed TypeScript unions leave out on purpose.
 
@@ -398,10 +424,24 @@ connection on the local socket acts as the owner.
 | `session.message` | posts user mail to a session | no | 1000, 1001 | session.write |
 | `session.log` | read | yes | — | session.read |
 | `extension.register` / `extension.unregister` | per-connection method table | no (second → 1004/1001) | 1004, 1006, 1001 | host.admin |
+| `team.list` | read: built-in, library and project teams | yes | -32602, 1001, 1003 | project read (+ host library) |
+| `task.list` | read `<projectRoot>/.alp/tasks` | yes | -32602, 1001, 1003 | project read |
+| `task.create` | writes a task under the task lock | with `requestId`, per alpd process (§10) | -32602, 1001, 1003, 1004 `key_conflict`, 1005 | project write |
+| `task.update` | closes or reopens a task | no (second → 1004 `task_state`); `ifRev` guards | 1001, 1003, 1004, 1005 | project write |
+| `task.gate.resolve` | approves a gate (a human step closes its task) | no (second → 1004 `task_state`); `ifRev` guards | 1001, 1003, 1004, 1005 | project write |
+| `library.list` / `library.get` | read, secrets redacted | yes | -32602, 1001, 1003 | project read + host library read |
+| `library.save` | writes an entry; `sync` writes projects' settings | with `revision` | -32602, 1001, 1003, 1004 | host library or project write; **code-execution config** for mcp, hooks, providers |
+| `library.delete` / `duplicate` / `rename` | writes | no | -32602, 1001, 1003, 1004 | as `library.save` |
+| `library.skills.set` | writes `role-skills.json` | yes (same list) | -32602 | host library write |
+| `library.models` | read | yes | — | host read |
+| `settings.language.get` / `set` | read / writes `settings.json` | yes | -32602, 1000 | host read / host write |
 
 ## 13. Compatibility notes for this revision
 
 **Additive** (old clients unaffected):
+- The project, task, library and settings methods of §15 with their capabilities; error codes `1003` and `1005`;
+  the `x-alp` annotation of every method in `methods-v1.json` (effect, resource scope, capability, risks), which
+  validators ignore.
 - `daemon.hello` result `capabilities`; `daemon.hello` params `capabilities` (reserved).
 - `error.data.reason` on handshake, validation, id, batch and size errors; `data.supported`, `data.issues`.
 - Result schemas for every method; `Envelope.cursor` and `session.attach.after` in the schema (alpd
@@ -426,6 +466,7 @@ that existing clients send (checked against every call site in `packages/cli`, `
 | A result over 16 MiB was sent and made the client drop the connection | `1000 response_too_large` | |
 | No-store daemon: a cursor older than the in-memory log replayed with a silent gap | `reset: true` | Replay never skips silently |
 | `session.rename` limit counted UTF-16 units | Code points | Same limit in every language |
+| An extension could register under `task.`, `team.`, `library.` or `settings.` | Refused (`1006`), as for every namespace a v1 method uses, served by that daemon or not | No extension shadows a method a newer daemon serves |
 
 **Schema corrections** (the schema was wrong, alpd unchanged): `session.configure.mode` is optional
 (alpd keeps the current mode; Paseo sends it without `mode`); `session.create.sessionId` has its
@@ -448,15 +489,82 @@ answers `-32601`. Each needs its own capability when implemented.
 | Proposed | Priority | Notes for the contract |
 |---|---|---|
 | Principal on connections; `accept(send, { principal })` | P0 | Authentication stays outside `daemon.hello` (gateway). Hello result would add `principal { kind, grants }`. |
-| Error codes `1003 forbidden` (`grant`, `outside_workspace`, `spec_field`, `local_only`), `1005 unavailable` (`feature_disabled`, `maintenance`, `restoring`) | P0 | Reserved now (§5.1). |
+| Gateway reasons of `1003 forbidden` (`grant`, `outside_workspace`, `spec_field`, `local_only`); `1005 unavailable` reasons `feature_disabled`, `maintenance`, `restoring` | P0 | The codes exist (§5.1, §15); a gateway adds its reasons. |
 | `session.create` spec allow-list for remote principals | P0 | Refuse `env`, stdio `mcpServers`, `workdir`, `writeRoot`, `copy*`, `restore`, `keepThread`. |
-| `team.list` | P0 | Read-only; data already computed by `session.preview`. |
-| `task.list/create/update`, `task.gate.resolve` | P0 | `1005 maintenance` during restore; `task.create` idempotent only with a generalised receipt (`requestId`). |
-| `library.*`, `settings.language.get/set` | P0 | Optimistic `revision`; `1004 revision_conflict`. |
 | `project.*`, `workspace.*` registry; `session.create.workspaceId` | P0 (web) | Same file and format as `state/web-workspaces.json`; `idempotencyKey`. |
 | `workspace.git.status/diff`, `workspace.files.list/read/search` | P1 | Read-only; results must fit `MAX_FRAME` (cap or chunk). |
-| `provider.list/refresh/diagnose/save/remove`, `library.test` | P1 | Probes spawn processes: separate `exec.probe` grant; timeouts. |
+| `provider.list/refresh/diagnose/save/remove`, `library.test` | P1 | Probes spawn processes: separate `exec.probe` grant; timeouts; cancellation when the caller's connection closes needs the probes in `@anhlp/alp-client` to take an abort signal. |
 | `subscribe` / `unsubscribe` and notification `notify` | P1 | Old clients ignore unknown notifications (`AlpClient` handles only `event`). |
 | `host.directories.suggest`, `project.create_directory`, shared attention | P2 | Product decisions pending. |
 
-Open decisions carried from 09A: tombstones for expired trees; generalising receipts beyond prompts.
+Open decisions carried from 09A: tombstones for expired trees; generalising durable receipts beyond prompts (`task.create`
+dedupes only within one alpd process, §10).
+
+## 15. Project, task, library and settings methods
+
+What a client needs besides sessions, so that a client on another machine (through a gateway) never reads the daemon
+user's `ALP_HOME` or a project, nor runs ALP core itself. alpd answers from its own host with core's logic; it resolves
+the project, serializes its own writes, maps core's refusals to the codes of §5 and keeps secrets out of what it
+answers. Shapes are in `methods-v1.json`; each method's `x-alp` annotation gives its effect, the resource a gateway
+authorizes (`scope.kind`, and `scope.param`, the param naming it), its capability and its risks.
+
+### 15.1 `projectRoot`
+
+- An absolute path on the daemon host, already normalized (`path.resolve(p) === p`: no `..`, `.`, trailing separator
+  or duplicate separator), else `-32602 invalid_path`.
+- It must be a directory holding a real `.alp/` directory: missing → `1001 not_alp_project`; `.alp` a symlink →
+  `1003 unsafe_path`. Core also refuses symlinks inside `.alp` on the paths it reads or writes (`1003 unsafe_path`).
+- alpd **never walks up** to a parent: the project is exactly the path given, so a gateway authorizes by comparing the
+  string with the projects it granted, never by prefix. A directory inside a project is not that project.
+- Results echo the `projectRoot` given. No other path of the daemon host appears in these results except in
+  `syncErrors` (§15.3) and `unreadable[].file` (relative to the project).
+
+### 15.2 Tasks (capability `task`)
+
+- `task.list` answers the rows the Paseo Tasks panel shows (`taskRow`), files it could not read, and `revision`, a
+  hash of the answer that changes when any task does (cheap change detection for polling).
+- Writes go through core under the project's task lock (in alpd, then across processes), as `alp task` and agents'
+  `alp_task` do. A lock held for 5 s (another `alp` process, a backup) answers `1005 busy`; retry later.
+- `taskRow.rev` changes with every write. `task.update` and `task.gate.resolve` take it back as `ifRev`; a task changed
+  since fails `1004 revision_conflict` and changes nothing. A change its state refuses fails `1004 task_state`.
+- `task.update` closes (`reason: done`, `note` as summary) or reopens; closing the last open child of an epic answers
+  `landed`, the first line of its report. `task.gate.resolve` approves a gate; when it was a formula's human step, the
+  task closes too. Writes are recorded as the user's (`by: "user"`); identity claims in params are not accepted.
+- Events: none in v1. Clients poll `task.list` (the Paseo panel polls every 5 s) and compare `revision`; a subscription
+  is proposed (§14).
+
+### 15.3 Library (capability `library`)
+
+- Kinds: `agents`, `skills`, `mcp`, `hooks`, `teams`, `providers`; scopes: `library` (the daemon user's `ALP_HOME`, a
+  host resource) and `project` (`<projectRoot>/.alp`). Providers live only in the library. Without `scope`,
+  `library.get` answers the version that applies (project, else library, else built-in). Reads with a `projectRoot`
+  still read the host library and built-ins.
+- **Secrets**: `library.get` replaces every string value of an MCP server's `env` and `headers` and of a provider's
+  `env` by `{ "$secret": "keep" }` and lists their JSON Pointers in `secrets`. In `library.save` a marker keeps the value
+  stored at that place in the entry the save replaces (or, when the scope has none yet, in the entry that applies), a
+  string replaces it and a missing key removes it. A marker with nothing stored to keep, or anywhere else in the
+  content, fails `-32602 secret_marker`: a placeholder is never written. `command`, `args`, `url` and hook commands
+  are not secrets and are answered as they are.
+- **Revisions**: `revision` is opaque and keyed per alpd process (an HMAC of core's content hash), so it never reveals
+  a hash of secret content. A revision read before an alpd restart no longer matches: the save fails
+  `revision_conflict` and the client reads the entry again. `revision: null` creates, a string replaces exactly that
+  version, an omitted revision overwrites. alpd checks and writes one library change at a time; core checks the
+  revision again as it writes, so a writer outside alpd (the `alp` CLI) is caught too, except in the instant between.
+- **Code execution**: an MCP server's `command`, a hook's `command` and a provider's `command`/`env` run on the daemon
+  host when used. Saving, duplicating or renaming those kinds, or an agent that names them, is administrative.
+- `sync: "known-projects"` on a team save rewrites the team profiles of `.alp/settings.json` in `projectRoot` and, for
+  the library scope, in every project root alpd's session records name. It answers how many changed and one
+  `"<projectRoot>: <message>"` per project that failed. Default `none`.
+- `library.models` lists ALP's models and those of enabled ACP providers (ids and labels only).
+- `library.skills.set` sets the skills the library gives an agent (`role-skills.json`); each must be in the library.
+
+### 15.4 `team.list` (capability `team`)
+
+The teams a project (or, without `projectRoot`, the library) can use: built-ins, then the library, then the project,
+each with its `source`, what it overrides, and `error` when it does not load. `session.preview` answers which team a new
+session would run with.
+
+### 15.5 `settings.language` (capability `settings.language`)
+
+The language the daemon user reads (ALPD §54): `language` null means unset, so `default` applies. `set` keeps every
+other key of `settings.json`; a broken file fails `1000 unreadable`.
