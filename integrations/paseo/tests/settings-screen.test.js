@@ -309,3 +309,33 @@ test('template presets select only their provider and preserve the team graph, w
   assert.deepEqual(team.members.main, {});
   assert.throws(() => presetTeamModels(team, 'opencode', []), /Configure the provider/);
 });
+
+test('in ALP remote mode the library is listed read-only: no New, Duplicate or overrides, rows do not open, the reason shows', async () => {
+  const { code } = await compileClient('client/library.tsx');
+  const { LibraryWorkspace, navGroups } = load(code);
+  const readOnly = { reason: 'ALP remote mode: the library of the ALP host is listed here but not opened or changed.' };
+  const remote = { projectRoot: '/w', library: 'the ALP host', readOnly };
+  const render = (scope, where, extra = {}) => renderToStaticMarkup(createElement(LibraryWorkspace, { theme, compact: false, scope, where, lists, error: null, selection: { kind: 'agents' }, entry: null, actions, ...extra }));
+  for (const scope of ['library', 'project']) {
+    const html = render(scope, remote);
+    assert.match(html, /listed here but not opened or changed/);
+    assert.doesNotMatch(html, /New agent|Duplicate agent|Override in this project|Use library|data-label="Open agent/);
+    assert.doesNotMatch(html, /Loading…/);
+  }
+  assert.ok(navGroups('library', lists, true).every(group => group.items.every(item => !item.children?.length)), 'the aside does not offer entries to open');
+  // No granted workspace open: why nothing is listed, never Loading or "not an ALP project".
+  const unlisted = { projectRoot: null, library: 'the ALP host', readOnly: { ...readOnly, unlisted: 'Open a workspace your ALP credential grants to list the host library here.' } };
+  const empty = render('library', unlisted, { lists: { teams: [], agents: [], skills: [], mcp: [], hooks: [], providers: [] } });
+  assert.match(empty, /Open a workspace your ALP credential grants/);
+  assert.doesNotMatch(empty, /Loading…|No agents yet|New agent/);
+  assert.match(render('project', unlisted, { lists: {} }), /Open a workspace your ALP credential grants/);
+  // A failed list ends Loading: the error shows alone.
+  const failed = render('library', null, { lists: {}, error: 'Request failed' });
+  assert.match(failed, /Request failed/);
+  assert.doesNotMatch(failed, /Loading…/);
+  // The language is shown, not offered to change.
+  const language = render('library', remote, { selection: { kind: 'language' }, language: { language: null, applies: 'Vietnamese', default: 'Vietnamese', readOnly: 'Unavailable in ALP remote mode: changing the language.' } });
+  assert.match(language, /Vietnamese \(default\)/);
+  assert.match(language, /Unavailable in ALP remote mode: changing the language/);
+  assert.doesNotMatch(language, /<select|Reset|Use this language/);
+});

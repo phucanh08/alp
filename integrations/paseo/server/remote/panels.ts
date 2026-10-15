@@ -24,6 +24,9 @@ export class RemoteUnavailableError extends Error {
 
 const ON_HOST = 'Do this on the ALP host (the alp CLI or the ALP web app there).';
 
+/** What the settings screens show instead of their edit actions in remote mode. */
+const READ_ONLY = `ALP remote mode: the library of the ALP host is listed here but not opened or changed (entries can hold MCP tokens, hook commands and provider arguments). ${ON_HOST}`;
+
 /**
  * One connection to alpd for the panels, opened when first needed and again after it closed. A
  * request that failed is not sent again: the panel shows the error and the user tries again.
@@ -91,10 +94,11 @@ export function registerRemoteLibraryRpc(server: PluginServerContext, link: Remo
   });
   server.handle(libraryList, async ({ directory, kind }) => {
     const projectRoot = await project(link, directory);
-    if (!projectRoot) throw new RemoteUnavailableError('the library without a project', 'Open a workspace your ALP credential grants; the host library is listed with it.');
+    // Without a granted workspace there is nothing alpd may list for this credential: say so, with no entries.
+    if (!projectRoot) return { projectRoot: null, library: 'the ALP host', entries: [], readOnly: { reason: READ_ONLY, unlisted: 'Open a workspace your ALP credential grants to list the host library here.' } };
     const { entries } = await link.request('library.list', { kind, projectRoot });
     // Rows name entries only (the gateway keeps their content and host paths in).
-    return { projectRoot, library: 'the ALP host', entries };
+    return { projectRoot, library: 'the ALP host', entries, readOnly: { reason: READ_ONLY } };
   });
   server.handle(libraryGet, async () => { throw new RemoteUnavailableError('reading a library entry\'s content (it can hold MCP tokens, hook commands and provider arguments)', ON_HOST); });
   for (const contract of [librarySave, libraryDelete, libraryDuplicate, libraryRename]) {
@@ -102,7 +106,7 @@ export function registerRemoteLibraryRpc(server: PluginServerContext, link: Remo
   }
   server.handle(librarySkills, async () => { throw new RemoteUnavailableError('giving skills to roles', ON_HOST); });
   server.handle(libraryTest, async () => { throw new RemoteUnavailableError('testing MCP servers, hooks and providers (they would run on the ALP host)', ON_HOST); });
-  server.handle(languageGet, async () => link.request('settings.language.get'));
+  server.handle(languageGet, async () => ({ ...(await link.request('settings.language.get')), readOnly: `${UNAVAILABLE}: changing the language. ${ON_HOST}` }));
   server.handle(languageSet, async () => { throw new RemoteUnavailableError('changing the language', ON_HOST); });
 }
 

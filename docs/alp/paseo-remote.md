@@ -78,6 +78,9 @@ Paseo UI ─▶ Paseo daemon ─▶ plugin (remote) ─▶ @anhlp/alp-client/por
   canonical). Sai → lỗi `… is not a workspace your ALP credential grants. Open one of: …`.
   Đường dẫn là của ALP host: muốn mở trong Paseo thì workspace Paseo phải trỏ cùng đường dẫn
   (vd. cùng cấu trúc thư mục, hoặc mount).
+- Catalog không có thư mục (danh sách provider toàn cục của Paseo): trả hai team có sẵn của ALP (Phở,
+  Cafe), không hỏi alpd và không tự chọn workspace. Có thư mục thì liệt kê team của workspace đó;
+  thư mục ngoài grant vẫn bị từ chối.
 - Team chọn bằng model id Paseo (`pho`, `cafe`, team của library/project trên host) → `workflow`.
   Gateway nhận `workflow` theo quy tắc tên (PR này thêm vào `SPEC_FIELDS`).
 - MCP servers, biến môi trường và system prompt của Paseo **không gửi** sang host; session nhận
@@ -89,6 +92,14 @@ Paseo UI ─▶ Paseo daemon ─▶ plugin (remote) ─▶ @anhlp/alp-client/por
 - Provider giữ cursor cuối của mỗi root. Sau khi kết nối lại (ticket mới): `session.attach
   { sessionId, after }`; envelope có cursor ≤ cursor đã thấy bị bỏ. `reset: true` (cursor đã bị
   retention xóa) → đặt cursor về tip và hiện cảnh báo trong timeline.
+- Một lần kết nối lại chỉ được dùng khi link mới **vẫn sống sau khi mọi root đã attach lại**. Link
+  đứt trong lúc `session.get`/`session.attach`, hoặc lỗi tạm thời (gateway `1000
+  daemon_disconnected`/`gateway_timeout`, timeout), làm lần đó thất bại: link bị đóng (gỡ listener),
+  thử link khác sau backoff (250 ms → 5 s); root, cursor và ánh xạ id giữ nguyên. Chỉ lỗi có code
+  phán quyết mới làm root thất bại: `1001` (session không còn), `1003` (credential không còn được
+  thấy nó), `-32601`/`-32602`. Gateway từ chối credential (`401` khi xin ticket) → mọi session báo
+  lỗi một lần, ngừng kết nối lại. Đóng provider dừng backoff, không mở link mới. Lúc attach lại chỉ
+  gửi lệnh đọc. Test: `integrations/paseo/tests/remote-reattach.test.js`.
 - **Không gửi lại** prompt/message/answer/interrupt mà kết quả chưa rõ (`repeatAfterRelink: false`).
   Người dùng thấy lỗi và tự gửi lại. Local mode giữ hành vi cũ (gửi lại một lần sau relink, vì cùng
   máy).
@@ -102,9 +113,9 @@ Paseo UI ─▶ Paseo daemon ─▶ plugin (remote) ─▶ @anhlp/alp-client/por
 |---|---|
 | Tasks: list/add/close/reopen/accept, duyệt human gate | ✅ `task.list`, `task.create`, `task.update`, `task.gate.resolve` |
 | Tasks pill của session | ✅ (từ item todo, như local) |
-| Settings ALP: danh sách entry | ✅ `library.list` (chỉ tên/mô tả, gateway lọc field), cần mở một workspace |
+| Settings ALP: danh sách entry | ✅ `library.list` (chỉ tên/mô tả, gateway lọc field). Màn hình ở chế độ chỉ xem: ẩn New/Duplicate/Override/Use library, dòng không mở được, hiện lý do. Không mở workspace nào → không có entry và nói cần mở workspace được cấp (không còn "Loading…" treo) |
 | Settings ALP: danh sách model | ✅ `library.models` |
-| Ngôn ngữ (đọc) | ✅ `settings.language.get` |
+| Ngôn ngữ (đọc) | ✅ `settings.language.get`; hiện giá trị và lý do, không có ô chọn |
 | Xem nội dung entry (`library.get`) | ❌ Unavailable: gateway chặn vì nội dung có thể chứa token MCP, lệnh hook, args provider |
 | Lưu/xóa/nhân bản/đổi tên entry, gán skills, đổi ngôn ngữ | ❌ Unavailable: làm trên ALP host |
 | Nút Test (MCP/hook/provider) | ❌ Unavailable: sẽ chạy lệnh trên host |

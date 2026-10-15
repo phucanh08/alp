@@ -47,7 +47,7 @@ type Content = Record<string, any>;
 /** What the working area shows: a kind's entries, one entry, a new entry, or the user's language. */
 export type Selection = { kind: Kind; name?: string; creating?: boolean } | { kind: 'language'; name?: undefined; creating?: undefined };
 /** The language the user reads (ALPD §54): language null means unset, so the default applies. */
-export type LanguageState = { language: string | null; applies: string; default: string };
+export type LanguageState = { language: string | null; applies: string; default: string; readOnly?: string };
 /** Languages offered by name; any other is typed in. The value is what agents are told. */
 export const LANGUAGES = [
   { label: 'Tiếng Việt', value: 'Vietnamese' }, { label: 'English', value: 'English' }, { label: '日本語', value: 'Japanese' },
@@ -56,7 +56,8 @@ export const LANGUAGES = [
 ];
 /** librarySkills: for agents, the skills the library gives it by name (role-skills.json). */
 type Entry = { kind: Kind; name: string; source: string; overrides?: string; content: Content; revision: string | null; usedBy: string[]; librarySkills?: string[] };
-type Where = { projectRoot: string | null; library: string } | null;
+/** `readOnly`: the library can only be looked at from here (ALP remote mode), and why. */
+type Where = { projectRoot: string | null; library: string; readOnly?: { reason: string; unlisted?: string } } | null;
 
 /** The settings screen: the library, with the built-ins it starts from. */
 export function LibrarySettings({ theme, layout }: PluginSurfaceProps) {
@@ -104,7 +105,7 @@ function LibraryManager({ theme, compact, scope, directory, embedded = false, in
       .then(results => {
         if (!live) return;
         setLists(Object.fromEntries(results.map(([kind, result]) => [kind, result.entries])));
-        setWhere({ projectRoot: results[0][1].projectRoot, library: results[0][1].library });
+        setWhere({ projectRoot: results[0][1].projectRoot, library: results[0][1].library, ...(results[0][1].readOnly ? { readOnly: results[0][1].readOnly } : {}) });
         setError(null);
       })
       .catch(cause => { if (live) setError(message(cause)); });
@@ -188,7 +189,7 @@ type WorkspaceProps = {
 };
 
 /** The aside's groups: General (the library only), Organisation, Capabilities and Runtimes, each kind with its entries. */
-export function navGroups(scope: Scope, lists: Lists): NavGroup[] {
+export function navGroups(scope: Scope, lists: Lists, readOnly = false): NavGroup[] {
   const groups: NavGroup[] = scope === 'library' ? [{ key: 'General', label: 'General', items: [{ key: 'language', label: 'Language', icon: 'Languages' }] }] : [];
   for (const item of shownIn(scope)) {
     let group = groups.find(candidate => candidate.label === item.group);
@@ -196,7 +197,8 @@ export function navGroups(scope: Scope, lists: Lists): NavGroup[] {
     const rows = lists[item.kind];
     group.items.push({
       key: item.kind, label: item.title, icon: item.icon, ...(rows ? { count: rows.length } : {}),
-      children: (rows ?? []).map(row => ({ key: row.name, label: row.name, tone: sourceTone(row.source) })),
+      // A read-only library's entries cannot be opened, so the aside lists kinds only.
+      children: readOnly ? [] : (rows ?? []).map(row => ({ key: row.name, label: row.name, tone: sourceTone(row.source) })),
     });
   }
   return groups;
@@ -207,8 +209,11 @@ export function LibraryWorkspace({ theme, compact, scope, where, lists, error, s
   const styles = useMemo(() => makeStyles(theme, compact), [theme, compact]);
   const title = scope === 'library' ? 'ALP library' : 'ALP project';
   const subtitle = scope === 'library' ? where?.library : where?.projectRoot ?? undefined;
-  const groups = navGroups(scope, lists);
+  const groups = navGroups(scope, lists, !!where?.readOnly);
   const onSelect = (kind: string, name?: string) => actions.select(kind === 'language' ? { kind } : { kind: kind as Kind, ...(name ? { name } : {}) });
+  if (scope === 'project' && where?.readOnly?.unlisted) {
+    return <View style={styles.screen}><Text style={styles.muted}>{where.readOnly.unlisted}</Text></View>;
+  }
   if (scope === 'project' && where && !where.projectRoot) {
     return <View style={styles.screen}><Text style={styles.muted}>This workspace is not an ALP project. Run alp init to start one.</Text></View>;
   }
@@ -242,7 +247,13 @@ export function LanguageSettings({ theme, compact, language, error, actions, lay
       breadcrumb={['Library', 'Language']}>
       <Text style={styles.muted}>The language you read. Main writes its replies, questions, approval requests and task titles in it, other agents put their questions to you in it, and ALP asks for approvals and writes its notices in it. Agents may talk among themselves in any language.</Text>
       {error ? <Text style={styles.danger}>{error}</Text> : null}
-      {!language ? <Text style={styles.muted}>Loading…</Text> : (
+      {!language && !error ? <Text style={styles.muted}>Loading…</Text> : null}
+      {language?.readOnly ? (
+        <SettingsSection title="Language">
+          <Text style={styles.name}>{language.applies}{language.language ? '' : ' (default)'}</Text>
+          <Text style={styles.muted}>{language.readOnly}</Text>
+        </SettingsSection>
+      ) : !language ? null : (
         <SettingsSection title="Language">
           <SettingsSelect label="Language" hint={language.language ? `Set in your settings.json` : `Not set: ${language.default} applies`} value={shown}
             options={[...LANGUAGES, { label: named || !language.language ? 'Other…' : `${language.applies} (other)`, value: OTHER }]}
@@ -276,22 +287,26 @@ export function KindOverview({ theme, compact, scope, kind, rows, error, where, 
   const tabs: Tab[] = SOURCES.map(source => ({ ...source, count: (rows ?? []).filter(row => source.key === 'all' || row.source === source.key).length }))
     .filter(tab => tab.key === 'all' || tab.count);
   const shown = (rows ?? []).filter(row => filter === 'all' || row.source === filter);
-  const intro = kind === 'providers' ? 'Agents that speak the Agent Client Protocol. They live in your library only.'
+  const readOnly = where?.readOnly;
+  const intro = readOnly ? `The ${title.toLowerCase()} ${scope === 'project' ? 'this project uses on the ALP host' : 'of the ALP host'}, by name.`
+    : kind === 'providers' ? 'Agents that speak the Agent Client Protocol. They live in your library only.'
     : scope === 'library' ? 'Every project uses your library. Built-ins follow ALP updates; saving one makes your own copy of that name.'
     : 'What this project overrides. Override an entry to change it here only; Use library drops the project\'s copy.';
   return (
     <SideNavLayout theme={theme} compact={compact} title={layout.title} subtitle={layout.subtitle} groups={layout.groups} active={{ item: kind }} onSelect={layout.onSelect} initialCollapsed={layout.initialCollapsed} embedded={layout.embedded}
       breadcrumb={layout.embedded ? [] : [scope === 'library' ? 'Library' : 'Project', title]} tabs={tabs} tab={filter} onTab={setFilter}
-      actions={<Button theme={theme} kind="primary" icon="Plus" label={`New ${one}`} onPress={() => actions.select({ kind, creating: true })} />}>
+      actions={readOnly ? null : <Button theme={theme} kind="primary" icon="Plus" label={`New ${one}`} onPress={() => actions.select({ kind, creating: true })} />}>
       <Text style={styles.muted}>{intro}</Text>
+      {readOnly ? <Text style={styles.muted}>{readOnly.reason}</Text> : null}
       {error ? <Text style={styles.danger}>{error}</Text> : null}
-      {!rows ? <Text style={styles.muted}>Loading…</Text> : null}
-      {rows && !shown.length ? <View style={styles.empty}><Text style={styles.muted}>No {title.toLowerCase()} {filter === 'all' ? 'yet' : `from the ${sourceLabel(filter)}`}.</Text></View> : null}
+      {!rows && !error ? <Text style={styles.muted}>Loading…</Text> : null}
+      {readOnly?.unlisted ? <View style={styles.empty}><Text style={styles.muted}>{readOnly.unlisted}</Text></View>
+        : rows && !shown.length ? <View style={styles.empty}><Text style={styles.muted}>No {title.toLowerCase()} {filter === 'all' ? 'yet' : `from the ${sourceLabel(filter)}`}.</Text></View> : null}
       {shown.length ? (
         <View style={styles.table}>
           {shown.map((row, index) => (
             <View key={row.name} style={[styles.tableRow, index ? styles.tableRowRule : null]}>
-              <Pressable accessibilityRole="button" accessibilityLabel={`Open ${one} ${row.name}`} onPress={() => actions.select({ kind, name: row.name })} style={styles.rowMain}>
+              <Pressable accessibilityRole={readOnly ? undefined : 'button'} accessibilityLabel={`${readOnly ? '' : 'Open '}${one} ${row.name}`} disabled={!!readOnly} onPress={() => actions.select({ kind, name: row.name })} style={styles.rowMain}>
                 <View style={styles.rowTitle}>
                   <Text style={styles.name}>{row.name}</Text>
                   <Pill theme={theme} label={sourceLabel(row.source)} tone={sourceTone(row.source)} />
@@ -300,11 +315,11 @@ export function KindOverview({ theme, compact, scope, kind, rows, error, where, 
                 {row.description ? <Text style={styles.muted} numberOfLines={2}>{row.description}</Text> : null}
                 {row.usedBy?.length ? <Text style={styles.small} numberOfLines={1}>Used by {row.usedBy.join(', ')}</Text> : null}
               </Pressable>
-              <View style={[styles.rowActions, compact ? styles.rowActionsCompact : null]}>
+              {readOnly ? null : <View style={[styles.rowActions, compact ? styles.rowActionsCompact : null]}>
                 {scope === 'project' && row.source === 'project' && row.overrides ? <Button theme={theme} label="Use library" onPress={() => actions.useLibrary(kind, row.name)} /> : null}
                 {scope === 'project' && row.source !== 'project' ? <Button theme={theme} label="Override in this project" onPress={() => actions.override(kind, row.name)} /> : null}
                 <Button theme={theme} icon="Copy" label="Duplicate" accessibilityLabel={`Duplicate ${one} ${row.name}`} onPress={() => { setCopying(row.name); setCopyName(`${row.name}-copy`); }} />
-              </View>
+              </View>}
               {copying === row.name ? (
                 <View style={styles.copyRow}>
                   <TextInput style={styles.input} value={copyName} onChangeText={setCopyName} accessibilityLabel="Name of the copy" placeholder="Name of the copy" placeholderTextColor={theme.colors.foregroundMuted} />
