@@ -4,12 +4,14 @@ import net from 'node:net';
 import { assertPrivateDirectory, assertPrivateSocket } from '@anhlp/alp-client/index';
 import path from 'node:path';
 import { createLogger } from '@anhlp/alp-core/log';
-import { AlpRpcError, CAPABILITY, MAX_FRAME, PROTOCOL_VERSION, ERROR, RPC_ERROR, encodeFrame } from '@anhlp/alp-protocol';
+import { AlpRpcError, CAPABILITY, MAX_FRAME, PROTOCOL_VERSION, ERROR, RPC_ERROR, RPC_METHODS, encodeFrame } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 export { ERROR } from '@anhlp/alp-protocol';
 import { DEFAULT_MODEL, models, modes, thinkingOptions, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '@anhlp/alp-runtime/index';
 import type { Receipt, SessionRecord, SessionStatus, Store, UnreadableReceipt } from './store.js';
 import type { SessionSummary } from '@anhlp/alp-protocol/session';
+import { RpcError } from './rpc-error.js';
+import { createOperations, type OperationsOptions } from './operations.js';
 
 /**
  * alpd's JSON-RPC surface over one shared runtime (plans/reference/ALPD.md §3, §6, §14).
@@ -24,9 +26,6 @@ import type { SessionSummary } from '@anhlp/alp-protocol/session';
 const log = createLogger({ component: 'alpd.ipc' });
 const recoveryLog = createLogger({ component: 'alpd.recovery' });
 
-class RpcError extends Error {
-  constructor(public code: number, message: string, public data?: unknown) { super(message); }
-}
 
 /** A request id v1 accepts: a string of at most 128 characters or a safe integer (docs/protocol/alp-json-rpc-v1.md §3). */
 function validId(id: unknown): id is string | number {
@@ -103,7 +102,7 @@ export type DaemonServer = {
  * shape so every viewer agrees; re-exported here to keep `@anhlp/alp-daemon/server`'s API. */
 export type { SessionSummary };
 
-export function createDaemonServer({ runtime, socketPath, version, onShutdown, store, runLogDir, previousExit, retentionSweepMs = RETENTION_SWEEP_MS }: {
+export function createDaemonServer({ runtime, socketPath, version, onShutdown, store, runLogDir, previousExit, retentionSweepMs = RETENTION_SWEEP_MS, home, templates }: {
   runtime: AlpRuntime;
   socketPath: string;
   version: string;
@@ -116,6 +115,10 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   previousExit?: { kind: 'clean' | 'crash'; at?: string };
   /** How often retention runs while alpd runs (ALPD §68); tests shorten it. */
   retentionSweepMs?: number;
+  /** The daemon user's ALP_HOME, for the library, team and settings methods; without it alpd does not serve them. */
+  home?: OperationsOptions['home'];
+  /** ALP's built-in agents and teams, for the library and team methods. */
+  templates?: OperationsOptions['templates'];
 }): DaemonServer {
   const connections = new Set<Connection>();
   /** Root of every live session. */
@@ -576,6 +579,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     }
   }
 
+  /** Projects, tasks, library and settings (docs/protocol/alp-json-rpc-v1.md §15); a team save syncs the projects sessions ran in. */
+  const operations = createOperations({ home, templates, knownProjects: () => new Set([...records.values()].flatMap(record => record.session?.projectRoot ? [record.session.projectRoot] : [])) });
   const extensionOwners = new Map<string, Connection>();
   const handlers: Record<string, (connection: Connection, params: any) => Promise<unknown> | unknown> = {
     'extension.register': async (connection, params) => {
@@ -839,9 +844,10 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       return { sessions };
     },
   };
+  for (const [method, handler] of Object.entries(operations.handlers)) handlers[method] = (_connection, params) => handler(params);
   Object.setPrototypeOf(handlers, null);
-  const originalMethods = new Set(Object.keys(handlers));
-  originalMethods.add('daemon.hello');
+  // Every v1 method name stays the daemon's, served here or not, so no extension takes one.
+  const originalMethods = new Set([...Object.keys(handlers), ...RPC_METHODS]);
   const reservedNamespaces = new Set([...originalMethods].map(method => method.split('.')[0]));
 
   async function invokeExtended(owner: Connection, caller: Connection, method: string, params: any) {
@@ -878,7 +884,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, ...(store ? [CAPABILITY.promptReceipts] : [])];
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, ...(store ? [CAPABILITY.promptReceipts] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {

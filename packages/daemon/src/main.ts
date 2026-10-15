@@ -203,7 +203,7 @@ async function run(home: string) {
     })();
     return stopping;
   };
-  const server = createDaemonServer({ runtime, socketPath: socket, version: VERSION, store, runLogDir, previousExit: exit, onShutdown: () => void shutdown() });
+  const server = createDaemonServer({ runtime, socketPath: socket, version: VERSION, store, runLogDir, previousExit: exit, home, templates, onShutdown: () => void shutdown() });
   const beat = setInterval(() => {
     void heartbeat(home).then(owned => { if (!owned) void shutdown(1); });
     const now = new Date();
