@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AlpClientError, AlpRpcClient, AlpRpcError, hello, isAlpClientError, PROTOCOL_VERSION } from '@anhlp/alp-client/portable';
-import { fakeTransport, tick } from './fake-transport.js';
+import { fakeTransport, liveTimers, tick } from './fake-transport.js';
 
 const reason = expected => error => isAlpClientError(error, expected);
 
@@ -121,6 +121,17 @@ test('a request larger than the frame limit is refused before it is sent', async
   assert.equal(transport.sent.length, 0);
 });
 
+test('the frame limit counts the newline a stream transport adds, as alpd does', async () => {
+  const frameOf = text => JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'm', params: { text } });
+  const limit = frameOf('x'.repeat(20)).length;
+  const exact = new AlpRpcClient(fakeTransport(), { maxFrame: limit });
+  await assert.rejects(exact.request('m', { text: 'x'.repeat(20) }), reason('send_failed'), 'frame + newline is one byte over');
+  const transport = fakeTransport();
+  const under = new AlpRpcClient(transport, { maxFrame: limit + 1 });
+  under.request('m', { text: 'x'.repeat(20) }).catch(() => {});
+  assert.equal(transport.sent.length, 1);
+});
+
 test('too many requests waiting fail as overloaded without being sent', async () => {
   const transport = fakeTransport();
   const client = new AlpRpcClient(transport, { maxPending: 2 });
@@ -147,6 +158,21 @@ test('a timeout ends only the local wait: nothing is sent to the daemon and a la
   assert.equal(client.closed, false);
 });
 
+test('a timeout longer than a timer can wait means none, instead of an instant timeout', async t => {
+  const timers = liveTimers(t);
+  const transport = fakeTransport();
+  const client = new AlpRpcClient(transport, { timeoutMs: Number.MAX_SAFE_INTEGER });
+  const waiting = client.request('session.create', {}, { timeoutMs: 2 ** 31 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(client.pendingCount, 1, 'still waiting');
+  assert.equal(timers.size, 0, 'no timer armed');
+  transport.reply('made');
+  assert.equal(await waiting, 'made');
+  await assert.rejects(client.request('a', {}, { timeoutMs: -5 }), TypeError);
+  await assert.rejects(client.request('a', {}, { timeoutMs: Number.NaN }), TypeError);
+  assert.throws(() => new AlpRpcClient(fakeTransport(), { timeoutMs: '10' }), TypeError);
+});
+
 test('a default timeout applies unless the request overrides it', async () => {
   const transport = fakeTransport();
   const client = new AlpRpcClient(transport, { timeoutMs: 5 });
@@ -170,17 +196,40 @@ test('an abort ends only the local wait and removes its listener', async () => {
   assert.equal(transport.sent.length, 1, 'an already aborted signal sends nothing');
 });
 
-test('an answered request leaves no abort listener or timer behind', async () => {
+test('an answered, aborted or disconnected request leaves no abort listener or timer behind', async t => {
+  const timers = liveTimers(t);
   const transport = fakeTransport();
   const client = new AlpRpcClient(transport);
   let listeners = 0;
   const signal = { aborted: false, addEventListener() { listeners++; }, removeEventListener() { listeners--; } };
   const waiting = client.request('a', {}, { signal, timeoutMs: 60_000 });
   assert.equal(listeners, 1);
+  assert.equal(timers.size, 1);
   transport.reply('ok');
   assert.equal(await waiting, 'ok');
   assert.equal(listeners, 0);
-  // A leftover 60 s timer would keep this test process alive; node --test would report it.
+  assert.equal(timers.size, 0, 'the answer cleared the timeout');
+  const controller = new AbortController();
+  const aborted = client.request('b', {}, { signal: controller.signal, timeoutMs: 60_000 });
+  controller.abort();
+  await assert.rejects(aborted, reason('aborted'));
+  assert.equal(timers.size, 0, 'the abort cleared the timeout');
+  const dropped = client.request('c', {}, { timeoutMs: 60_000 });
+  transport.drop({});
+  await assert.rejects(dropped, reason('disconnected'));
+  assert.equal(timers.size, 0, 'the disconnect cleared the timeout');
+});
+
+test('a send on a transport that is already gone closes the client before the request rejects', async () => {
+  const transport = fakeTransport();
+  const client = new AlpRpcClient(transport);
+  // The transport is gone but has not reported its close yet, as a socket alpd just half-closed.
+  Object.defineProperty(transport, 'state', { get: () => 'closed' });
+  transport.send = () => { throw new Error('socket ended'); };
+  const closes = [];
+  client.onClose(error => closes.push(error));
+  await assert.rejects(client.request('session.prompt'), error => isAlpClientError(error, 'disconnected') && client.closed);
+  assert.equal(closes.length, 1);
 });
 
 test('a disconnect rejects every waiting request as disconnected, once, and clears listeners', async () => {
@@ -251,6 +300,27 @@ test('requests from the daemon are answered by the first handler, with its error
   ]);
 });
 
+test('every request from the daemon gets an answer, even one whose result cannot be serialized or sent whole', async () => {
+  const transport = fakeTransport();
+  const client = new AlpRpcClient(transport, { maxFrame: 512 });
+  client.onRequest((method, params) => {
+    if (params.kind === 'bigint') return { count: 10n };
+    if (params.kind === 'huge') return { text: 'x'.repeat(1000) };
+    if (params.kind === 'bad-data') throw Object.assign(new Error('nope'), { code: 1004, data: { n: 1n } });
+    if (params.kind === 'huge-message') throw new Error('y'.repeat(1500));
+    return 'fine';
+  });
+  for (const [id, kind] of [['b', 'bigint'], ['h', 'huge'], ['d', 'bad-data'], ['m', 'huge-message'], ['f', 'fine']]) transport.deliver({ jsonrpc: '2.0', id, method: 'extension.call', params: { kind } });
+  await tick();
+  const answers = Object.fromEntries(transport.sent.map(frame => [frame.id, frame]));
+  assert.equal(answers.b.error.code, 1000);
+  assert.match(answers.b.error.message, /cannot be serialized/);
+  assert.equal(answers.h.error.code, 1000);
+  assert.deepEqual(answers.d.error, { code: 1004, message: 'nope' }, 'the error goes without the data that cannot');
+  assert.equal(answers.m.error.code, -32603, 'an error that cannot fit any frame still answers');
+  assert.equal(answers.f.result, 'fine');
+});
+
 test('client errors are recognised across copies of the module by their brand', () => {
   const error = new AlpClientError('x', { reason: 'timeout' });
   assert.equal(isAlpClientError(error), true);
@@ -258,4 +328,17 @@ test('client errors are recognised across copies of the module by their brand', 
   assert.equal(isAlpClientError(error, 'closed'), false);
   assert.equal(isAlpClientError(new Error('x')), false);
   assert.equal(error.name, 'AlpClientError');
+});
+
+test('an undeliverable daemon reply closes the connection instead of leaving the caller waiting', async () => {
+  for (const options of [{ maxFrame: 64 }, {}]) {
+    const transport = fakeTransport(options.maxFrame ? {} : { failSend: new Error('write refused') });
+    const client = new AlpRpcClient(transport, options);
+    client.onRequest(() => ({ n: 1n }));
+    transport.deliver({ jsonrpc: '2.0', id: 1, method: 'x' });
+    await tick();
+    assert.equal(client.closed, true);
+    assert.equal(transport.sent.length, 0);
+    assert.equal(transport.closeCalls, 1);
+  }
 });

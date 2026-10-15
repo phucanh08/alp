@@ -56,6 +56,7 @@ async function fakeDaemon(t) {
             break;
           case 'test.huge': socket.write(`${'x'.repeat(4096)}`); break;
           case 'test.kill': socket.destroy(); break;
+          case 'test.end': reply({ ending: true }); queue = queue.then(() => socket.end()); break;
           default: break; // test.never: no answer
         }
       }
@@ -155,4 +156,44 @@ test('connectSocket and connect refuse a socket other users can reach, before an
   await assert.rejects(connectSocket(daemon.socketPath), /private permissions \(0700\)/);
   await chmod(daemon.directory, 0o700);
   assert.equal(daemon.received.length, 0, 'nothing reached the daemon');
+});
+
+test('a request made after alpd ends the connection, before Node reports the close, finds the client closed', async t => {
+  const daemon = await fakeDaemon(t);
+  for (let round = 0; round < 5; round++) {
+    const client = await connect(daemon.socketPath);
+    const outcome = await new Promise(resolve => {
+      // The Paseo provider retries after a relink only when the client is closed at rejection.
+      client.request('test.end').then(() => setImmediate(() => client.request('daemon.status').then(
+        () => resolve({ resolved: true }),
+        error => resolve({ reason: error.reason, closed: client.closed }),
+      )));
+    });
+    assert.deepEqual(outcome, { reason: 'disconnected', closed: true }, `round ${round}`);
+  }
+});
+
+test('close() releases the socket even when the peer keeps its side open', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-ipc-'));
+  const socketPath = daemonPaths(directory).socket;
+  const peers = [];
+  const server = net.createServer({ allowHalfOpen: true }, peer => { peers.push(peer); peer.on('error', () => {}); });
+  await new Promise(resolve => server.listen(socketPath, resolve));
+  if (!windows) await chmod(socketPath, 0o600);
+  t.after(async () => { for (const peer of peers) peer.destroy(); await new Promise(resolve => server.close(resolve)); await rm(directory, { recursive: true, force: true }); });
+  const transport = await connectSocket(socketPath);
+  transport.send('{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{}}');
+  transport.close();
+  await new Promise(resolve => { const wait = () => (peers.length ? resolve() : setTimeout(wait, 5)); wait(); });
+  const peer = peers[0];
+  peer.resume();
+  await new Promise(resolve => (peer.readableEnded ? resolve() : peer.once('end', resolve)));
+  // The peer never ends its side and keeps writing. A client that only half-closed would keep
+  // reading forever; one that released its socket makes these writes fail and the peer close.
+  const released = await new Promise(resolve => {
+    const timer = setTimeout(() => { clearInterval(writer); resolve(false); }, 2_000);
+    const writer = setInterval(() => { if (!peer.destroyed) peer.write('still talking\n'); }, 5);
+    peer.once('close', () => { clearTimeout(timer); clearInterval(writer); resolve(true); });
+  });
+  assert.equal(released, true);
 });

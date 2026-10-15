@@ -22,5 +22,6 @@ export { PROTOCOL_VERSION, MAX_FRAME, AlpRpcError, ERROR } from '@anhlp/alp-prot
 export { AlpRpcClient, DEFAULT_MAX_PENDING } from './rpc/client.js';
 export { AlpClientError, CLIENT_ERROR, isAlpClientError } from './rpc/errors.js';
 export { createLineDecoder, utf8Length } from './rpc/framing.js';
+export { MAX_TIMER_MS, timerDelay } from './rpc/timers.js';
 export { hello } from './rpc/handshake.js';
 export { backoffDelay, createReconnectingClient, retryable } from './rpc/reconnect.js';

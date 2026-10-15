@@ -116,9 +116,10 @@ async function browser() {
   const alpd = await alpdWithBridge();
   alpd.routes.set('/', { type: 'text/html; charset=utf-8', text: '<!doctype html><meta charset="utf-8"><title>ALP SDK smoke</title><script type="module" src="/app.js"></script>' });
   alpd.routes.set('/app.js', { type: 'text/javascript; charset=utf-8', text: bundle.outputFiles[0].text });
-  const instance = await chromium.launch({ headless: true, channel: process.env.ALP_SMOKE_BROWSER ?? 'chrome' });
+  let instance;
   const errors = [];
   try {
+    instance = await chromium.launch({ headless: true, channel: process.env.ALP_SMOKE_BROWSER ?? 'chrome' });
     const page = await instance.newPage();
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(alpd.origin);
@@ -146,8 +147,7 @@ async function browser() {
     if (errors.length) throw new Error(`page errors: ${errors.join('; ')}`);
     log('browser smoke passed');
   } finally {
-    await instance.close();
-    await alpd.close();
+    try { await instance?.close(); } finally { await alpd.close(); }
   }
 }
 

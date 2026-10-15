@@ -1,6 +1,7 @@
 import { AlpRpcError, MAX_FRAME } from '@anhlp/alp-protocol';
 import { AlpClientError } from './errors.js';
 import { utf8Length } from './framing.js';
+import { timerDelay } from './timers.js';
 
 /**
  * The transport-independent JSON-RPC 2.0 engine of an ALP client (plans/reference/ALPD.md §3):
@@ -34,7 +35,8 @@ import { utf8Length } from './framing.js';
  *   removeEventListener(type: 'abort', listener: () => void): void,
  * }} AbortSignalLike
  * @typedef {{ signal?: AbortSignalLike, timeoutMs?: number }} RequestOptions
- *   Both end only this client's wait; neither tells the daemon to stop.
+ *   Both end only this client's wait; neither tells the daemon to stop. A timeout of Infinity, or
+ *   longer than a timer can wait (2^31-1 ms), means none.
  * @typedef {{
  *   maxPending?: number,
  *   maxFrame?: number,
@@ -88,6 +90,7 @@ export class AlpRpcClient {
     this.#transport = transport;
     this.#maxPending = maxPending;
     this.#maxFrame = maxFrame;
+    timerDelay(timeoutMs);
     this.#timeoutMs = timeoutMs;
     this.#onListenerError = onListenerError;
     this.#detach.push(transport.onMessage(frame => this.#receive(frame)));
@@ -114,10 +117,14 @@ export class AlpRpcClient {
     if (this.#closeError) return Promise.reject(new AlpClientError(CLOSED, { reason: this.#closeError.reason === 'closed' ? 'closed' : 'disconnected', cause: this.#closeError }));
     if (signal?.aborted) return Promise.reject(abortError(signal));
     if (this.#pending.size >= this.#maxPending) return Promise.reject(new AlpClientError(`Too many ALP requests waiting for an answer (${this.#maxPending})`, { reason: 'overloaded' }));
+    /** @type {number | undefined} */
+    let delay;
+    try { delay = timerDelay(timeoutMs); } catch (error) { return Promise.reject(error); }
     const id = ++this.#sequence;
     let frame;
     try { frame = JSON.stringify({ jsonrpc: '2.0', id, method, params }); } catch (error) { return Promise.reject(error); }
-    if (utf8Length(frame) > this.#maxFrame) return Promise.reject(new AlpClientError(`ALP request ${method} exceeds the ${this.#maxFrame}-byte frame limit`, { reason: 'send_failed' }));
+    // The limit counts the newline a stream transport adds, as alpd counts it.
+    if (utf8Length(frame) >= this.#maxFrame) return Promise.reject(new AlpClientError(`ALP request ${method} exceeds the ${this.#maxFrame}-byte frame limit`, { reason: 'send_failed' }));
     return new Promise((resolve, reject) => {
       /** @type {ReturnType<typeof setTimeout> | undefined} */
       let timer;
@@ -127,18 +134,22 @@ export class AlpRpcClient {
         signal?.removeEventListener('abort', onAbort);
       };
       this.#pending.set(id, { resolve, reject, cleanup });
-      if (timeoutMs !== undefined && timeoutMs !== Infinity) {
+      if (delay !== undefined) {
         timer = setTimeout(() => {
           if (!this.#pending.delete(id)) return;
           cleanup();
           reject(new AlpClientError(`ALP request ${method} timed out after ${timeoutMs} ms`, { reason: 'timeout' }));
-        }, timeoutMs);
+        }, delay);
       }
       signal?.addEventListener('abort', onAbort, { once: true });
       try {
         this.#transport.send(frame);
       } catch (error) {
-        if (this.#pending.delete(id)) {
+        // A transport that is already gone (a socket half-closed by alpd, a WebSocket closing) ends
+        // the connection now, so `closed` is true when this request rejects, as it was before the
+        // transport reported its close. A transport still open refused only this frame.
+        if (this.#transport.state === 'closed') this.#finish(new AlpClientError(CLOSED, { reason: 'disconnected', cause: error }));
+        else if (this.#pending.delete(id)) {
           cleanup();
           reject(new AlpClientError(`Could not send ALP request ${method}: ${error instanceof Error ? error.message : String(error)}`, { reason: 'send_failed', cause: error }));
         }
@@ -222,23 +233,46 @@ export class AlpRpcClient {
     else waiter.reject(new AlpClientError('Malformed response from ALP daemon', { reason: 'protocol', data: { id: message.id } }));
   }
 
-  /** @param {unknown} id @param {string} method @param {unknown} params */
+  /**
+   * Answers a request from alpd. Every request gets exactly one answer: a result that cannot be
+   * serialized or does not fit a frame becomes an error, and an error whose data cannot go either
+   * goes without it, so alpd's caller never waits for a reply that was silently dropped.
+   * @param {unknown} id @param {string} method @param {unknown} params
+   */
   #answer(id, method, params) {
-    const reply = (/** @type {object} */ body) => {
+    /** The frame for `body`, or undefined if it cannot be serialized or is over the limit. @param {object} body */
+    const frameOf = body => {
+      try {
+        const frame = JSON.stringify({ jsonrpc: '2.0', id, ...body });
+        return utf8Length(frame) < this.#maxFrame ? frame : undefined;
+      } catch { return undefined; }
+    };
+    /** @param {string | undefined} frame */
+    const send = frame => {
       if (this.#closeError) return;
-      try { this.#transport.send(JSON.stringify({ jsonrpc: '2.0', id, ...body })); } catch {}
+      if (frame === undefined) return this.#finish(new AlpClientError('ALP reply exceeds the frame limit', { reason: 'protocol' }));
+      try { this.#transport.send(frame); } catch (cause) {
+        this.#finish(new AlpClientError('Could not send ALP reply', { reason: 'send_failed', cause }));
+      }
+    };
+    /** @param {unknown} error */
+    const failure = error => {
+      const code = (error && typeof (/** @type {any} */ (error)).code === 'number') ? /** @type {any} */ (error).code : 1000;
+      const text = error instanceof Error ? error.message : String(error);
+      const message = text.length > 2000 ? `${text.slice(0, 2000)}...` : text;
+      const data = (error && /** @type {any} */ (error).data !== undefined) ? { data: /** @type {any} */ (error).data } : {};
+      return frameOf({ error: { code, message, ...data } }) ?? frameOf({ error: { code, message } })
+        ?? frameOf({ error: { code: -32603, message: 'The reply could not be sent' } });
     };
     const [handler] = this.#requestHandlers;
-    if (!handler) return reply({ error: { code: -32601, message: `Unknown method '${method}'` } });
+    if (!handler) return send(failure(Object.assign(new Error(`Unknown method '${method}'`), { code: -32601 })));
     Promise.resolve().then(async () => {
       try {
         const result = await handler(method, params);
-        reply({ result: result === undefined ? {} : result });
+        const frame = frameOf({ result: result === undefined ? {} : result });
+        send(frame ?? failure(new Error(`The result of ${method} cannot be serialized or exceeds the ${this.#maxFrame}-byte frame limit`)));
       } catch (error) {
-        const code = (error && typeof (/** @type {any} */ (error)).code === 'number') ? /** @type {any} */ (error).code : 1000;
-        const text = error instanceof Error ? error.message : String(error);
-        const data = (error && /** @type {any} */ (error).data !== undefined) ? { data: /** @type {any} */ (error).data } : {};
-        reply({ error: { code, message: text.length > 2000 ? `${text.slice(0, 2000)}...` : text, ...data } });
+        send(failure(error));
       }
     });
   }
