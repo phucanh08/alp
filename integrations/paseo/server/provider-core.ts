@@ -190,7 +190,11 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
         for (const listener of listeners) listener(checked);
       };
 
-      function project(envelope: Envelope) {
+      /**
+       * One alpd envelope to Paseo. `replayed`: it arrived while reattaching, so it happened while this
+       * view was away (§8.3).
+       */
+      function project(envelope: Envelope, replayed = false) {
         const { event } = envelope;
         if (event.type === 'session.opened' && !rootOf.has(envelope.sessionId)) rootOf.set(envelope.sessionId, event.session.parentId ?? envelope.sessionId);
         if (strategy.cursors && typeof envelope.cursor === 'number') {
@@ -234,6 +238,9 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
             return;
           }
           case 'session.closed':
+            // alpd closes an idle root nobody watches, as it did while this view was away: Paseo
+            // keeps the session, and the next prompt reopens it (wake). Live closes still reach Paseo.
+            if (replayed && roots.has(sessionId)) { dormant.add(sessionId); return; }
             emit({ type: 'session.closed', sessionId });
             return;
           case 'session.failed':
@@ -341,7 +348,7 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
             if (closed) { next.close(); return; }
             let dropped: unknown;
             // Replay arrives before each attach answer, so events are projected from the start.
-            stops.push(next.onEvent(project));
+            stops.push(next.onEvent(envelope => project(envelope, true)));
             stops.push(next.onClose(error => { dropped ??= error ?? new Error('ALP daemon connection closed'); }));
             for (const sessionId of [...roots]) {
               if (closed) break;

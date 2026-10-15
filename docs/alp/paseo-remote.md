@@ -100,6 +100,10 @@ Paseo UI ─▶ Paseo daemon ─▶ plugin (remote) ─▶ @anhlp/alp-client/por
   thấy nó), `-32601`/`-32602`. Gateway từ chối credential (`401` khi xin ticket) → mọi session báo
   lỗi một lần, ngừng kết nối lại. Đóng provider dừng backoff, không mở link mới. Lúc attach lại chỉ
   gửi lệnh đọc. Test: `integrations/paseo/tests/remote-reattach.test.js`.
+- alpd đóng root rảnh khi không còn ai xem (vd. gateway restart lúc session rảnh). `session.closed`
+  đó tới bằng replay khi kết nối lại; provider **không** chuyển cho Paseo mà đánh dấu root dormant,
+  prompt kế tiếp mở lại bằng `session.create { resume: true }`. `session.closed` tới lúc đang xem
+  vẫn được chuyển. Test: integration "gateway restart lúc rảnh" + E2E thật "gateway restart hai lần".
 - **Không gửi lại** prompt/message/answer/interrupt mà kết quả chưa rõ (`repeatAfterRelink: false`).
   Người dùng thấy lỗi và tự gửi lại. Local mode giữ hành vi cũ (gửi lại một lần sau relink, vì cùng
   máy).
