@@ -4,9 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 export const ROOT = path.resolve(import.meta.dirname, '..');
-export const packages = ['protocol', 'core', 'runtime', 'client', 'daemon', 'cli', 'paseo'];
+export const packages = ['protocol', 'core', 'runtime', 'client', 'daemon', 'cli', 'gateway', 'paseo'];
 /** Where each workspace lives: libraries under packages/, external integrations under integrations/, apps under apps/. */
-export const locations = { paseo: 'integrations/paseo', tui: 'apps/tui' };
+export const locations = { paseo: 'integrations/paseo', tui: 'apps/tui', gateway: 'apps/gateway' };
 export const workspaceDirectory = name => locations[name] ?? `packages/${name}`;
 
 /** Every `*.test.js` under `directory`, relative to the repository root; none if it does not exist. */
@@ -35,6 +35,7 @@ export function buildWorkspace(name) { step('scripts/build-workspace.mjs', name)
 export function buildAll() {
   buildWorkspace('paseo');
   buildWorkspace('cli');
+  buildWorkspace('gateway');
 }
 
 /** Runs the files with `node --test` against a throwaway ALP_HOME, so no run touches the user's ~/.alp. */

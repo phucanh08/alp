@@ -1,0 +1,129 @@
+#!/usr/bin/env node
+// @ts-check
+import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { parseArgs } from 'node:util';
+import { alpHome, connectSocket, daemonPaths } from '@anhlp/alp-client';
+import { resolveConfig } from './config.js';
+import { CredentialStore, createCredential, gatewayHome, listCredentials, revokeCredential, rotateCredential } from './credentials.js';
+import { createGatewayLogger } from './log.js';
+import { PERMISSIONS } from './policy.js';
+import { createGateway } from './server.js';
+
+const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+
+const USAGE = `alp-gateway ${VERSION}: authenticated WebSocket access to this user's alpd (docs/alp/remote-gateway.md)
+
+Usage:
+  alp-gateway serve [--config FILE] [--host ADDR] [--port N] [--origin URL]... [--public-host HOST]...
+                    [--trust-proxy ADDR]... [--tls-cert FILE --tls-key FILE] [--allow-insecure] [--socket PATH]
+  alp-gateway credential create --label TEXT --workspace DIR [--workspace DIR]... [--permission P]...
+                                [--mode MODE]... [--expires-in-days N] [--json]
+  alp-gateway credential list [--json]
+  alp-gateway credential rotate ID [--json]
+  alp-gateway credential revoke ID
+
+Permissions: ${PERMISSIONS.join(', ')} (default: both). A token is printed once; only its hash is kept.
+Files live in $ALP_GATEWAY_HOME, else $ALP_HOME/gateway. The gateway never starts alpd.`;
+
+const fail = (/** @type {string} */ message) => { console.error(message); process.exit(2); };
+
+async function serve(/** @type {string[]} */ args) {
+  const { values } = parseArgs({
+    args,
+    options: {
+      config: { type: 'string' }, host: { type: 'string' }, port: { type: 'string' },
+      origin: { type: 'string', multiple: true }, 'public-host': { type: 'string', multiple: true },
+      'trust-proxy': { type: 'string', multiple: true }, 'tls-cert': { type: 'string' }, 'tls-key': { type: 'string' },
+      'allow-insecure': { type: 'boolean' }, socket: { type: 'string' },
+    },
+  });
+  /** @type {import('./config.js').GatewayConfigInput} */
+  const file = values.config ? JSON.parse(await readFile(values.config, 'utf8')) : {};
+  const input = {
+    ...file,
+    ...(values.host ? { host: values.host } : {}),
+    ...(values.port ? { port: Number(values.port) } : {}),
+    ...(values.origin ? { origins: values.origin } : {}),
+    ...(values['public-host'] ? { hosts: values['public-host'] } : {}),
+    ...(values['trust-proxy'] ? { trustProxy: values['trust-proxy'] } : {}),
+    ...(values['tls-cert'] || values['tls-key'] ? { tls: { cert: values['tls-cert'] ?? '', key: values['tls-key'] ?? '' } } : {}),
+    ...(values['allow-insecure'] ? { allowInsecure: true } : {}),
+    ...(values.socket ? { socketPath: values.socket } : {}),
+  };
+  const config = resolveConfig(input);
+  const logger = createGatewayLogger();
+  const socketPath = config.socketPath ?? daemonPaths(alpHome()).socket;
+  const store = new CredentialStore({ home: gatewayHome(), logger });
+  const gateway = createGateway({ config, store, logger, version: VERSION, openTransport: () => connectSocket(socketPath) });
+  const address = await gateway.listen();
+  console.log(JSON.stringify({ listening: address.url, websocket: `${address.url.replace(/^http/, 'ws')}/v1/ws` }));
+  let stopping = false;
+  const stop = async () => {
+    if (stopping) return;
+    stopping = true;
+    await gateway.close();
+    store.close();
+    process.exit(0);
+  };
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+  process.on('SIGHUP', () => void store.reload());
+}
+
+async function credential(/** @type {string[]} */ args) {
+  const [action, ...rest] = args;
+  const home = gatewayHome();
+  if (action === 'create') {
+    const { values } = parseArgs({ args: rest, options: { label: { type: 'string' }, workspace: { type: 'string', multiple: true }, permission: { type: 'string', multiple: true }, mode: { type: 'string', multiple: true }, 'expires-in-days': { type: 'string' }, json: { type: 'boolean' } } });
+    if (!values.label || !values.workspace?.length) fail('credential create needs --label and at least one --workspace');
+    const days = values['expires-in-days'] === undefined ? undefined : Number(values['expires-in-days']);
+    if (days !== undefined && !(days > 0)) fail('--expires-in-days must be a positive number');
+    const permissions = (values.permission ?? [...PERMISSIONS]).flatMap(entry => entry.split(',')).map(entry => entry.trim()).filter(Boolean);
+    const { credential: created, token } = await createCredential(home, {
+      label: /** @type {string} */ (values.label), workspaces: /** @type {string[]} */ (values.workspace), permissions,
+      ...(values.mode ? { modes: values.mode } : {}),
+      ...(days ? { expiresAt: new Date(Date.now() + days * 86_400_000).toISOString() } : {}),
+    });
+    if (values.json) console.log(JSON.stringify({ credential: created, token }));
+    else console.log(`Created credential ${created.id} (${created.label}).\nToken, shown once; keep it in the client's secure storage:\n\n  ${token}\n`);
+    return;
+  }
+  if (action === 'list') {
+    const { values } = parseArgs({ args: rest, options: { json: { type: 'boolean' } } });
+    const list = await listCredentials(home);
+    if (values.json) { console.log(JSON.stringify(list)); return; }
+    if (!list.length) { console.log('No credentials.'); return; }
+    for (const entry of list) {
+      const state = entry.revokedAt ? `revoked ${entry.revokedAt}` : entry.expiresAt && Date.parse(entry.expiresAt) <= Date.now() ? `expired ${entry.expiresAt}` : 'active';
+      console.log(`${entry.id}  ${entry.label}  ${state}  ${entry.permissions.join(',')}  ${entry.workspaces.map(workspace => workspace.path).join(', ')}${entry.modes ? `  modes ${entry.modes.join(',')}` : ''}`);
+    }
+    return;
+  }
+  if (action === 'rotate') {
+    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { json: { type: 'boolean' } } });
+    if (positionals.length !== 1) fail('credential rotate needs one credential id');
+    const { credential: rotated, token } = await rotateCredential(home, positionals[0]);
+    if (values.json) console.log(JSON.stringify({ credential: rotated, token }));
+    else console.log(`Rotated ${rotated.id}; the old token no longer works and its connections close.\nNew token, shown once:\n\n  ${token}\n`);
+    return;
+  }
+  if (action === 'revoke') {
+    const { positionals } = parseArgs({ args: rest, allowPositionals: true, options: {} });
+    if (positionals.length !== 1) fail('credential revoke needs one credential id');
+    const revoked = await revokeCredential(home, positionals[0]);
+    console.log(`Revoked ${revoked.id}; a running gateway closes its connections within a few seconds.`);
+    return;
+  }
+  fail(USAGE);
+}
+
+const [command, ...args] = process.argv.slice(2);
+try {
+  if (command === 'serve') await serve(args);
+  else if (command === 'credential') await credential(args);
+  else if (command === '--version') console.log(VERSION);
+  else { console.log(USAGE); if (command !== '--help' && command !== 'help') process.exitCode = 2; }
+} catch (error) {
+  fail(`alp-gateway: ${error instanceof Error ? error.message : String(error)}`);
+}

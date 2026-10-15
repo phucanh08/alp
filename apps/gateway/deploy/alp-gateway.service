@@ -1,0 +1,21 @@
+# systemd user unit (docs/alp/remote-gateway.md §7). Install as the same OS user that runs alpd:
+#   cp alp-gateway.service ~/.config/systemd/user/ && systemctl --user daemon-reload
+#   systemctl --user enable --now alp-gateway
+# The gateway never starts alpd; run alpd as you do today (alp daemon start, or its own service).
+[Unit]
+Description=ALP remote gateway (WebSocket front for this user's alpd)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/env alp-gateway serve --config %h/.alp/gateway/gateway.json
+Restart=on-failure
+RestartSec=2
+# Credential changes are picked up by themselves; SIGHUP reloads them at once.
+ExecReload=/bin/kill -HUP $MAINPID
+NoNewPrivileges=yes
+# alpd's socket may live in the temp directory when ALP_HOME is a long path: share it.
+PrivateTmp=no
+UMask=0077
+
+[Install]
+WantedBy=default.target

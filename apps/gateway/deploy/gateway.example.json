@@ -1,0 +1,14 @@
+{
+  "host": "127.0.0.1",
+  "port": 7434,
+  "hosts": ["alp.example.com"],
+  "origins": ["https://app.example.com"],
+  "trustProxy": ["127.0.0.1", "::1"],
+  "limits": {
+    "maxConnections": 64,
+    "maxConnectionsPerCredential": 8,
+    "maxFrame": 4194304,
+    "maxPending": 32,
+    "requestTimeoutMs": 120000
+  }
+}
