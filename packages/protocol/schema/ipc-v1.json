@@ -2,13 +2,16 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://alp.dev/schemas/ipc-v1.json",
   "title": "ALP JSON-RPC v1 IPC",
-  "description": "UTF-8 newline delimited JSON. Additive properties are accepted for forward compatibility.",
+  "description": "Messages of ALP JSON-RPC protocol v1 (docs/protocol/alp-json-rpc-v1.md). One JSON value per frame; unknown properties, event types and item kinds are accepted for forward compatibility.",
   "oneOf": [
     {
       "$ref": "#/$defs/request"
     },
     {
       "$ref": "#/$defs/response"
+    },
+    {
+      "$ref": "#/$defs/notification"
     }
   ],
   "$defs": {
@@ -335,6 +338,541 @@
       "additionalProperties": true
     },
     "item": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/knownItem"
+        },
+        {
+          "$ref": "#/$defs/unknownItem"
+        }
+      ]
+    },
+    "event": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/knownEvent"
+        },
+        {
+          "$ref": "#/$defs/unknownEvent"
+        }
+      ]
+    },
+    "envelope": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "epoch": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "event": {
+          "$ref": "#/$defs/event"
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "sessionId",
+        "epoch",
+        "seq",
+        "ts",
+        "event"
+      ],
+      "additionalProperties": true
+    },
+    "request": {
+      "type": "object",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 128
+            },
+            {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          ]
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "id"
+      ],
+      "additionalProperties": true
+    },
+    "response": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "result": {}
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "error": {
+              "$ref": "#/$defs/error"
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "error"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "notification": {
+      "type": "object",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "method": {
+          "const": "event"
+        },
+        "params": {
+          "$ref": "#/$defs/envelope"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "additionalProperties": true
+    },
+    "knownEvent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "session.opened"
+            },
+            "session": {
+              "$ref": "#/$defs/session"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "effective": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string"
+                },
+                "thinking": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "model",
+                "thinking"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "type",
+            "session",
+            "cwd",
+            "effective"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "session.ready"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "session.updated"
+            },
+            "session": {
+              "$ref": "#/$defs/session"
+            }
+          },
+          "required": [
+            "type",
+            "session"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "session.closed"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "session.failed"
+            },
+            "error": {
+              "$ref": "#/$defs/alpError"
+            }
+          },
+          "required": [
+            "type",
+            "error"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "prompt.accepted"
+            },
+            "clientMessageId": {
+              "type": "string"
+            },
+            "result": {
+              "enum": [
+                "turn",
+                "steer"
+              ]
+            },
+            "turnId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "clientMessageId",
+            "result",
+            "turnId"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "prompt.failed"
+            },
+            "clientMessageId": {
+              "type": "string"
+            },
+            "error": {
+              "$ref": "#/$defs/alpError"
+            }
+          },
+          "required": [
+            "type",
+            "clientMessageId",
+            "error"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "turn.started"
+            },
+            "turnId": {
+              "type": "string"
+            },
+            "origin": {
+              "enum": [
+                "user",
+                "wake",
+                "assignment",
+                "runtime"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "turnId",
+            "origin"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "turn.ended"
+            },
+            "turnId": {
+              "type": "string"
+            },
+            "state": {
+              "enum": [
+                "completed",
+                "failed",
+                "canceled"
+              ]
+            },
+            "error": {
+              "$ref": "#/$defs/alpError"
+            }
+          },
+          "required": [
+            "type",
+            "turnId",
+            "state"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "item"
+            },
+            "item": {
+              "$ref": "#/$defs/item"
+            }
+          },
+          "required": [
+            "type",
+            "item"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "mail"
+            },
+            "mail": {
+              "$ref": "#/$defs/mail"
+            }
+          },
+          "required": [
+            "type",
+            "mail"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "assignment"
+            },
+            "assignment": {
+              "$ref": "#/$defs/assignment"
+            }
+          },
+          "required": [
+            "type",
+            "assignment"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "question"
+            },
+            "question": {
+              "$ref": "#/$defs/question"
+            }
+          },
+          "required": [
+            "type",
+            "question"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "question.resolved"
+            },
+            "questionId": {
+              "type": "string"
+            },
+            "outcome": {
+              "enum": [
+                "answered",
+                "dismissed",
+                "timeout",
+                "canceled"
+              ]
+            },
+            "answer": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "questionId",
+            "outcome"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "pin"
+            },
+            "pin": {
+              "$ref": "#/$defs/pin"
+            }
+          },
+          "required": [
+            "type",
+            "pin"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "unpin"
+            },
+            "pinId": {
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "unpinned",
+                "session_ended"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "pinId",
+            "reason"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "unknownEvent": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "not": {
+            "enum": [
+              "session.opened",
+              "session.ready",
+              "session.updated",
+              "session.closed",
+              "session.failed",
+              "prompt.accepted",
+              "prompt.failed",
+              "turn.started",
+              "turn.ended",
+              "item",
+              "mail",
+              "assignment",
+              "question",
+              "question.resolved",
+              "pin",
+              "unpin"
+            ]
+          }
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": true
+    },
+    "knownItem": {
       "oneOf": [
         {
           "type": "object",
@@ -571,482 +1109,597 @@
         }
       ]
     },
-    "event": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "session.opened"
-            },
-            "session": {
-              "$ref": "#/$defs/session"
-            },
-            "cwd": {
-              "type": "string"
-            },
-            "effective": {
-              "type": "object",
-              "properties": {
-                "model": {
-                  "type": "string"
-                },
-                "thinking": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "model",
-                "thinking"
-              ],
-              "additionalProperties": true
-            }
-          },
-          "required": [
-            "type",
-            "session",
-            "cwd",
-            "effective"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "session.ready"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "session.updated"
-            },
-            "session": {
-              "$ref": "#/$defs/session"
-            }
-          },
-          "required": [
-            "type",
-            "session"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "session.closed"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "session.failed"
-            },
-            "error": {
-              "type": "object",
-              "properties": {
-                "message": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "message"
-              ],
-              "additionalProperties": true
-            }
-          },
-          "required": [
-            "type",
-            "error"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "prompt.accepted"
-            },
-            "clientMessageId": {
-              "type": "string"
-            },
-            "result": {
-              "enum": [
-                "turn",
-                "steer"
-              ]
-            },
-            "turnId": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "clientMessageId",
-            "result",
-            "turnId"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "prompt.failed"
-            },
-            "clientMessageId": {
-              "type": "string"
-            },
-            "error": {
-              "type": "object",
-              "properties": {
-                "message": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "message"
-              ],
-              "additionalProperties": true
-            }
-          },
-          "required": [
-            "type",
-            "clientMessageId",
-            "error"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "turn.started"
-            },
-            "turnId": {
-              "type": "string"
-            },
-            "origin": {
-              "enum": [
-                "user",
-                "wake",
-                "assignment",
-                "runtime"
-              ]
-            }
-          },
-          "required": [
-            "type",
-            "turnId",
-            "origin"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "turn.ended"
-            },
-            "turnId": {
-              "type": "string"
-            },
-            "state": {
-              "enum": [
-                "completed",
-                "failed",
-                "canceled"
-              ]
-            },
-            "error": {
-              "type": "object",
-              "properties": {
-                "message": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "message"
-              ],
-              "additionalProperties": true
-            }
-          },
-          "required": [
-            "type",
-            "turnId",
-            "state"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "item"
-            },
-            "item": {
-              "$ref": "#/$defs/item"
-            }
-          },
-          "required": [
-            "type",
-            "item"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "mail"
-            },
-            "mail": {
-              "$ref": "#/$defs/mail"
-            }
-          },
-          "required": [
-            "type",
-            "mail"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "assignment"
-            },
-            "assignment": {
-              "$ref": "#/$defs/assignment"
-            }
-          },
-          "required": [
-            "type",
-            "assignment"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "question"
-            },
-            "question": {
-              "$ref": "#/$defs/question"
-            }
-          },
-          "required": [
-            "type",
-            "question"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "question.resolved"
-            },
-            "questionId": {
-              "type": "string"
-            },
-            "outcome": {
-              "enum": [
-                "answered",
-                "dismissed",
-                "timeout",
-                "canceled"
-              ]
-            },
-            "answer": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "questionId",
-            "outcome"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "pin"
-            },
-            "pin": {
-              "$ref": "#/$defs/pin"
-            }
-          },
-          "required": [
-            "type",
-            "pin"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "unpin"
-            },
-            "pinId": {
-              "type": "string"
-            },
-            "reason": {
-              "enum": [
-                "unpinned",
-                "session_ended"
-              ]
-            }
-          },
-          "required": [
-            "type",
-            "pinId",
-            "reason"
-          ],
-          "additionalProperties": true
-        }
-      ]
-    },
-    "envelope": {
+    "unknownItem": {
       "type": "object",
       "properties": {
-        "sessionId": {
-          "type": "string"
-        },
-        "epoch": {
-          "type": "string"
-        },
-        "seq": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "ts": {
-          "type": "string"
-        },
-        "event": {
-          "$ref": "#/$defs/event"
-        }
-      },
-      "required": [
-        "sessionId",
-        "epoch",
-        "seq",
-        "ts",
-        "event"
-      ],
-      "additionalProperties": true
-    },
-    "request": {
-      "type": "object",
-      "properties": {
-        "jsonrpc": {
-          "const": "2.0"
+        "kind": {
+          "type": "string",
+          "not": {
+            "enum": [
+              "user_message",
+              "assistant_message",
+              "notice",
+              "compaction",
+              "todo",
+              "tool_call"
+            ]
+          }
         },
         "id": {
-          "type": [
-            "string",
-            "integer",
-            "null"
-          ]
-        },
-        "method": {
           "type": "string"
-        },
-        "params": {
-          "type": "object"
         }
       },
       "required": [
-        "jsonrpc",
-        "method"
+        "kind",
+        "id"
       ],
       "additionalProperties": true
     },
-    "response": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "jsonrpc": {
-              "const": "2.0"
-            },
-            "id": {
-              "type": [
-                "string",
-                "integer",
-                "null"
-              ]
-            },
-            "result": {}
-          },
-          "required": [
-            "jsonrpc",
-            "id",
-            "result"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "jsonrpc": {
-              "const": "2.0"
-            },
-            "id": {
-              "type": [
-                "string",
-                "integer",
-                "null"
-              ]
-            },
-            "error": {
-              "$ref": "#/$defs/error"
-            }
-          },
-          "required": [
-            "jsonrpc",
-            "id",
-            "error"
-          ],
-          "additionalProperties": true
-        }
-      ]
-    },
-    "notification": {
+    "alpError": {
       "type": "object",
       "properties": {
-        "jsonrpc": {
-          "const": "2.0"
+        "message": {
+          "type": "string"
         },
-        "method": {
-          "const": "event"
-        },
-        "params": {
-          "$ref": "#/$defs/envelope"
+        "code": {
+          "type": "string"
         }
       },
       "required": [
-        "jsonrpc",
-        "method",
-        "params"
+        "message"
+      ],
+      "additionalProperties": true
+    },
+    "sessionSummary": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "projectRoot": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "runtime": {
+          "enum": [
+            "claude",
+            "codex",
+            "acp",
+            "antigravity"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "thinking": {
+          "type": "string"
+        },
+        "workflow": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string"
+            },
+            "maxPeers": {
+              "type": "integer"
+            },
+            "supervisor": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode",
+            "maxPeers",
+            "supervisor"
+          ],
+          "additionalProperties": true
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "persistent": {
+          "type": "boolean"
+        },
+        "busy": {
+          "type": "boolean"
+        },
+        "parentId": {
+          "type": "string"
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "activeTurnId": {
+          "type": "string"
+        },
+        "parked": {
+          "type": "string"
+        },
+        "instructionsSha": {
+          "type": "string"
+        },
+        "teamLabel": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "initializing",
+            "idle",
+            "running",
+            "error",
+            "closed"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "archived": {
+          "type": "boolean"
+        },
+        "lastError": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "message"
+          ],
+          "additionalProperties": true
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "projectRoot",
+        "agent",
+        "runtime",
+        "model",
+        "mode",
+        "thinking",
+        "workflow",
+        "threadId",
+        "persistent",
+        "busy",
+        "status"
+      ],
+      "additionalProperties": true
+    },
+    "pause": {
+      "type": "object",
+      "properties": {
+        "since": {
+          "type": "string"
+        },
+        "by": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "resetsAt": {
+          "type": "string"
+        },
+        "checkedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "since",
+        "by",
+        "reason"
+      ],
+      "additionalProperties": true
+    },
+    "pauseState": {
+      "type": "object",
+      "properties": {
+        "all": {
+          "$ref": "#/$defs/pause"
+        },
+        "runtimes": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/pause"
+          }
+        },
+        "parked": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "assignmentId": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": "string"
+              },
+              "rootId": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "since": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "assignmentId",
+              "agent",
+              "runtime",
+              "rootId",
+              "reason",
+              "since"
+            ],
+            "additionalProperties": true
+          }
+        }
+      },
+      "required": [
+        "runtimes",
+        "parked"
+      ],
+      "additionalProperties": true
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "teams": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "label"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "team": {
+          "type": "string"
+        },
+        "teamLabel": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "runtime": {
+          "enum": [
+            "claude",
+            "codex",
+            "acp",
+            "antigravity"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "thinking": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "teams",
+        "team",
+        "agent",
+        "runtime",
+        "model",
+        "mode",
+        "thinking"
+      ],
+      "additionalProperties": true
+    },
+    "treeStatus": {
+      "type": "object",
+      "properties": {
+        "rootId": {
+          "type": "string"
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "projectRoot": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "runtime": {
+                "enum": [
+                  "claude",
+                  "codex",
+                  "acp",
+                  "antigravity"
+                ]
+              },
+              "model": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string"
+              },
+              "thinking": {
+                "type": "string"
+              },
+              "workflow": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string"
+                  },
+                  "maxPeers": {
+                    "type": "integer"
+                  },
+                  "supervisor": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "maxPeers",
+                  "supervisor"
+                ],
+                "additionalProperties": true
+              },
+              "threadId": {
+                "type": "string"
+              },
+              "persistent": {
+                "type": "boolean"
+              },
+              "busy": {
+                "type": "boolean"
+              },
+              "parentId": {
+                "type": "string"
+              },
+              "toolCallId": {
+                "type": "string"
+              },
+              "activeTurnId": {
+                "type": "string"
+              },
+              "parked": {
+                "type": "string"
+              },
+              "instructionsSha": {
+                "type": "string"
+              },
+              "teamLabel": {
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "running",
+                  "waiting",
+                  "waiting_parent",
+                  "waiting_user",
+                  "idle"
+                ]
+              },
+              "idleMs": {
+                "type": "number"
+              },
+              "workdir": {
+                "type": "string"
+              },
+              "unreadMail": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "id",
+              "projectRoot",
+              "agent",
+              "runtime",
+              "model",
+              "mode",
+              "thinking",
+              "workflow",
+              "threadId",
+              "persistent",
+              "busy",
+              "state",
+              "idleMs",
+              "workdir",
+              "unreadMail"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "assignments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "requester": {
+                "type": "string"
+              },
+              "isolation": {
+                "enum": [
+                  "shared",
+                  "worktree"
+                ]
+              },
+              "idleMs": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "requester",
+              "isolation",
+              "idleMs"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/question"
+          }
+        },
+        "worktrees": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "assignmentId": {
+                "type": "string"
+              },
+              "requester": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "branch": {
+                "type": "string"
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "stat": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "assignmentId",
+              "requester",
+              "agent",
+              "branch",
+              "files",
+              "stat"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "leases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "checkout": {
+                "type": "string"
+              },
+              "assignmentId": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "checkout",
+              "assignmentId",
+              "agent"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/pin"
+          }
+        }
+      },
+      "required": [
+        "rootId",
+        "sessions",
+        "assignments",
+        "questions",
+        "worktrees",
+        "leases",
+        "claims"
+      ],
+      "additionalProperties": true
+    },
+    "health": {
+      "type": "object",
+      "properties": {
+        "live": {
+          "type": "boolean"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "ok": {
+                "type": "boolean"
+              },
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "ok"
+            ],
+            "additionalProperties": true
+          }
+        }
+      },
+      "required": [
+        "live",
+        "ready",
+        "checks"
       ],
       "additionalProperties": true
     }

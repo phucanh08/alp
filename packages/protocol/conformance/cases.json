@@ -1,0 +1,951 @@
+{
+  "$comment": "Declarative wire cases of ALP JSON-RPC v1 (docs/protocol/alp-json-rpc-v1.md §11). Each case runs on a fresh connection. `hello: true` performs daemon.hello first. A step sends `send` (a JSON value, one frame) or `sendRaw` (text written as is), then expects: `expect` (the response with the sent id, or the next non-event frame when the id is unusable; matched as a subset, {\"$type\": t} matches a JSON type, {\"$absent\": true} an absent property), `expectNone` (no response within that many ms) or `expectClose` (the daemon closes the connection). `probe` names the extension method a step registers again to prove an earlier frame ran nothing.",
+  "cases": [
+    {
+      "id": "handshake.required",
+      "profile": "handshake",
+      "description": "A request before daemon.hello fails with 1006 hello_required and runs nothing.",
+      "hello": false,
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "extension.register",
+            "params": {
+              "method": "conformance.early"
+            }
+          },
+          "expect": {
+            "id": 1,
+            "error": {
+              "code": 1006,
+              "data": {
+                "reason": "hello_required"
+              }
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "daemon.hello",
+            "params": {
+              "protocolVersion": 1
+            }
+          },
+          "expect": {
+            "id": 2,
+            "result": {}
+          }
+        },
+        {
+          "probe": "conformance.early"
+        }
+      ]
+    },
+    {
+      "id": "handshake.version-mismatch",
+      "profile": "handshake",
+      "description": "An unsupported protocolVersion fails with 1006 protocol_version listing the supported versions; the connection stays open for another hello.",
+      "hello": false,
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "daemon.hello",
+            "params": {
+              "protocolVersion": 2,
+              "client": {
+                "name": "conformance",
+                "version": "0"
+              }
+            }
+          },
+          "expect": {
+            "id": 1,
+            "error": {
+              "code": 1006,
+              "data": {
+                "reason": "protocol_version",
+                "supported": [
+                  1
+                ]
+              }
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "daemon.hello",
+            "params": {
+              "client": {
+                "name": "conformance",
+                "version": "0"
+              }
+            }
+          },
+          "expect": {
+            "id": 2,
+            "error": {
+              "code": 1006,
+              "data": {
+                "reason": "protocol_version"
+              }
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "daemon.hello",
+            "params": {
+              "protocolVersion": 1,
+              "client": {
+                "name": "conformance",
+                "version": "0"
+              }
+            }
+          },
+          "expect": {
+            "id": 3,
+            "result": {
+              "protocolVersion": 1,
+              "capabilities": {
+                "$type": "array"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "handshake.repeat",
+      "profile": "handshake",
+      "description": "daemon.hello may be repeated and answers the same way.",
+      "hello": true,
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": "again",
+            "method": "daemon.hello",
+            "params": {
+              "protocolVersion": 1
+            }
+          },
+          "expect": {
+            "id": "again",
+            "result": {
+              "protocolVersion": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "handshake.invalid-client",
+      "profile": "handshake",
+      "description": "A malformed client description fails with -32602 and leaves the connection without a handshake.",
+      "hello": false,
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "daemon.hello",
+            "params": {
+              "protocolVersion": 1,
+              "client": "conformance"
+            }
+          },
+          "expect": {
+            "id": 1,
+            "error": {
+              "code": -32602,
+              "data": {
+                "reason": "invalid_params"
+              }
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "catalog.get"
+          },
+          "expect": {
+            "id": 2,
+            "error": {
+              "code": 1006
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "wire.parse-error",
+      "profile": "wire",
+      "description": "A frame that is not JSON answers -32700 with id null; the connection stays usable.",
+      "hello": true,
+      "steps": [
+        {
+          "sendRaw": "{\"jsonrpc\":\"2.0\",\"id\":5,\n",
+          "expect": {
+            "id": null,
+            "error": {
+              "code": -32700
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "catalog.get"
+          },
+          "expect": {
+            "id": 6,
+            "result": {
+              "defaultModel": {
+                "$type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "wire.blank-lines",
+      "profile": "wire",
+      "description": "Empty and whitespace-only lines between frames are ignored.",
+      "hello": true,
+      "steps": [
+        {
+          "sendRaw": "\n  \n\r\n",
+          "expectNone": 200
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "catalog.get"
+          },
+          "expect": {
+            "id": 1,
+            "result": {}
+          }
+        }
+      ]
+    },
+    {
+      "id": "wire.not-an-object",
+      "profile": "wire",
+      "description": "A JSON value that is not an object or array is an invalid request answered with id null.",
+      "hello": true,
+      "steps": [
+        {
+          "sendRaw": "42\n",
+          "expect": {
+            "id": null,
+            "error": {
+              "code": -32600
+            }
+          }
+        },
+        {
+          "sendRaw": "\"daemon.status\"\n",
+          "expect": {
+            "id": null,
+            "error": {
+              "code": -32600
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "wire.batch-unsupported",
+      "profile": "wire",
+      "description": "A batch answers one -32600 batch_unsupported with id null and runs none of its requests.",
+      "hello": true,
+      "steps": [
+        {
+          "send": [
+            {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "method": "extension.register",
+              "params": {
+                "method": "conformance.batch"
+              }
+            }
+          ],
+          "expect": {
+            "id": null,
+            "error": {
+              "code": -32600,
+              "data": {
+                "reason": "batch_unsupported"
+              }
+            }
+          }
+        },
+        {
+          "send": [],
+          "expect": {
+            "id": null,
+            "error": {
+              "code": -32600
+            }
+          }
+        },
+        {
+          "probe": "conformance.batch"
+        }
+      ]
+    },
+    {
+      "id": "wire.jsonrpc-version",
+      "profile": "wire",
+      "description": "A request without jsonrpc \"2.0\" fails with -32600, answered with its id when the id is valid.",
+      "hello": true,
+      "steps": [
+        {
+          "send": {
+            "id": 1,
+            "method": "extension.register",
+            "params": {
+              "method": "conformance.version"
+            }
+          },
+          "expect": {
+            "id": 1,
+            "error": {
+              "code": -32600
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "1.0",
+            "id": 2,
+            "method": "extension.register",
+            "params": {
+              "method": "conformance.version"
+            }
+          },
+          "expect": {
+            "id": 2,
+            "error": {
+              "code": -32600
+            }
+          }
+        },
+        {
+          "probe": "conformance.version"
+        }
+      ]
+    },
+    {
+      "id": "wire.notification-ignored",
+      "profile": "wire",
+      "description": "A request without id is a notification: v1 defines none to the daemon, so it is not run and not answered.",
+      "hello": true,
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "method": "extension.register",
+            "params": {
+              "method": "conformance.notification"
+            }
+          },
+          "expectNone": 300
+        },
+        {
+          "probe": "conformance.notification"
+        }
+      ]
+    },
+    {
+      "id": "wire.invalid-ids",
+      "profile": "wire",
+      "description": "An id that is null, fractional, boolean, an object or a string over 128 characters fails with -32600 answered with id null, and nothing runs.",
+      "hello": true,
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": null,
+            "method": "extension.register",
+            "params": {
+              "method": "conformance.ids"
+            }
+          },
+          "expect": {
+            "id": null,
+            "error": {
+              "code": -32600
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1.5,
+            "method": "extension.register",
+            "params": {
+              "method": "conformance.ids"
+            }
+          },
+          "expect": {
+            "id": null,
+            "error": {
+              "code": -32600,
+              "data": {
+                "reason": "invalid_id"
+              }
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": true,
+            "method": "extension.register",
+            "params": {
+              "method": "conformance.ids"
+            }
+          },
+          "expect": {
+            "id": null,
+            "error": {
+              "code": -32600
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": {
+              "n": 1
+            },
+            "method": "extension.register",
+            "params": {
+              "method": "conformance.ids"
+            }
+          },
+          "expect": {
+            "id": null,
+            "error": {
+              "code": -32600
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "method": "extension.register",
+            "params": {
+              "method": "conformance.ids"
+            }
+          },
+          "expect": {
+            "id": null,
+            "error": {
+              "code": -32600
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 9007199254740992,
+            "method": "extension.register",
+            "params": {
+              "method": "conformance.ids"
+            }
+          },
+          "expect": {
+            "id": null,
+            "error": {
+              "code": -32600
+            }
+          }
+        },
+        {
+          "probe": "conformance.ids"
+        }
+      ]
+    },
+    {
+      "id": "wire.valid-ids",
+      "profile": "wire",
+      "description": "String ids, including Unicode, negative and zero integer ids are echoed exactly.",
+      "hello": true,
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": "req-é-😀",
+            "method": "catalog.get"
+          },
+          "expect": {
+            "id": "req-é-😀",
+            "result": {}
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": -7,
+            "method": "catalog.get"
+          },
+          "expect": {
+            "id": -7,
+            "result": {}
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 0,
+            "method": "catalog.get"
+          },
+          "expect": {
+            "id": 0,
+            "result": {}
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 9007199254740991,
+            "method": "catalog.get"
+          },
+          "expect": {
+            "id": 9007199254740991,
+            "result": {}
+          }
+        }
+      ]
+    },
+    {
+      "id": "wire.pipelined",
+      "profile": "wire",
+      "description": "Requests written together are each answered once with their own id; the order of answers is not part of the contract.",
+      "hello": true,
+      "steps": [
+        {
+          "sendRaw": "{\"jsonrpc\":\"2.0\",\"id\":\"a\",\"method\":\"catalog.get\"}\n{\"jsonrpc\":\"2.0\",\"id\":\"b\",\"method\":\"session.get\",\"params\":{\"sessionId\":\"conformance-missing\"}}\n",
+          "expectIds": {
+            "a": {
+              "result": {}
+            },
+            "b": {
+              "error": {
+                "code": 1001
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "errors.unknown-method",
+      "profile": "errors",
+      "description": "A method nobody serves fails with -32601.",
+      "hello": true,
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "conformance.nothing"
+          },
+          "expect": {
+            "id": 1,
+            "error": {
+              "code": -32601
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "team.list"
+          },
+          "expect": {
+            "id": 2,
+            "error": {
+              "code": -32601
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "errors.method-not-string",
+      "profile": "errors",
+      "description": "A method that is not a string is an invalid request.",
+      "hello": true,
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": 7
+          },
+          "expect": {
+            "id": 1,
+            "error": {
+              "code": -32600
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "errors.params-shape",
+      "profile": "errors",
+      "description": "params that are not an object (an array, null or a scalar) fail with -32602 and run nothing.",
+      "hello": true,
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "extension.register",
+            "params": [
+              "conformance.shape"
+            ]
+          },
+          "expect": {
+            "id": 1,
+            "error": {
+              "code": -32602
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "extension.register",
+            "params": null
+          },
+          "expect": {
+            "id": 2,
+            "error": {
+              "code": -32602
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "catalog.get",
+            "params": "x"
+          },
+          "expect": {
+            "id": 3,
+            "error": {
+              "code": -32602
+            }
+          }
+        },
+        {
+          "probe": "conformance.shape"
+        }
+      ]
+    },
+    {
+      "id": "errors.invalid-params",
+      "profile": "errors",
+      "description": "Params against a method's schema fail with -32602 invalid_params naming the issues; null is not the same as absent.",
+      "hello": true,
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session.get",
+            "params": {
+              "sessionId": 5
+            }
+          },
+          "expect": {
+            "id": 1,
+            "error": {
+              "code": -32602,
+              "data": {
+                "reason": "invalid_params",
+                "issues": {
+                  "$type": "array"
+                }
+              }
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session.get",
+            "params": {}
+          },
+          "expect": {
+            "id": 2,
+            "error": {
+              "code": -32602
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session.list",
+            "params": {
+              "projectRoot": null
+            }
+          },
+          "expect": {
+            "id": 3,
+            "error": {
+              "code": -32602
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "session.attach",
+            "params": {
+              "sessionId": "x",
+              "after": -1
+            }
+          },
+          "expect": {
+            "id": 4,
+            "error": {
+              "code": -32602
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "session.attach",
+            "params": {
+              "sessionId": "x",
+              "after": 1.5
+            }
+          },
+          "expect": {
+            "id": 5,
+            "error": {
+              "code": -32602
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "session.create",
+            "params": {
+              "sessionId": "has space",
+              "spec": {
+                "cwd": "/nonexistent"
+              }
+            }
+          },
+          "expect": {
+            "id": 6,
+            "error": {
+              "code": -32602
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "session.prompt",
+            "params": {
+              "sessionId": "x",
+              "clientMessageId": "m",
+              "content": "text"
+            }
+          },
+          "expect": {
+            "id": 7,
+            "error": {
+              "code": -32602
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "extension.register",
+            "params": {}
+          },
+          "expect": {
+            "id": 8,
+            "error": {
+              "code": -32602
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "errors.unknown-fields",
+      "profile": "errors",
+      "description": "Unknown params properties are ignored, for forward compatibility.",
+      "hello": true,
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session.list",
+            "params": {
+              "rootsOnly": true,
+              "conformanceFuture": {
+                "x": [
+                  1,
+                  null
+                ]
+              }
+            }
+          },
+          "expect": {
+            "id": 1,
+            "result": {
+              "sessions": {
+                "$type": "array"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "errors.not-found",
+      "profile": "errors",
+      "description": "A session the daemon does not know fails with 1001.",
+      "hello": true,
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session.get",
+            "params": {
+              "sessionId": "conformance-missing"
+            }
+          },
+          "expect": {
+            "id": 1,
+            "error": {
+              "code": 1001
+            }
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session.attach",
+            "params": {
+              "sessionId": "conformance-missing",
+              "after": 3
+            }
+          },
+          "expect": {
+            "id": 2,
+            "error": {
+              "code": 1001
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "limits.oversized-frame",
+      "profile": "limits",
+      "description": "A frame over 16 MiB (its newline included) closes the connection without an answer.",
+      "hello": true,
+      "steps": [
+        {
+          "sendOversized": 16777216,
+          "expectClose": true
+        }
+      ]
+    },
+    {
+      "id": "limits.exact-frame",
+      "profile": "limits",
+      "description": "A frame exactly 16 MiB including its newline and a following small frame are accepted.",
+      "hello": true,
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "catalog.get"
+          },
+          "sendBytes": 16777216,
+          "expect": {
+            "id": 1,
+            "result": {}
+          }
+        },
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "catalog.get"
+          },
+          "expect": {
+            "id": 2,
+            "result": {}
+          }
+        }
+      ]
+    },
+    {
+      "id": "limits.terminated-oversized-frame",
+      "profile": "limits",
+      "description": "A terminated frame one byte over the limit closes the connection.",
+      "hello": true,
+      "steps": [
+        {
+          "send": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "catalog.get"
+          },
+          "sendBytes": 16777217,
+          "expectClose": true
+        }
+      ]
+    }
+  ]
+}

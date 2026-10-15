@@ -7,7 +7,8 @@
     "src",
     "dist",
     "schema",
-    "fixtures"
+    "fixtures",
+    "conformance"
   ],
   "exports": {
     "./connection": {
@@ -58,8 +59,23 @@
       "types": "./dist/wire.d.ts",
       "default": "./src/wire.js"
     },
+    "./contract": {
+      "alp-source": {
+        "types": "./src/contract.js",
+        "default": "./src/contract.js"
+      },
+      "types": "./dist/contract.d.ts",
+      "default": "./src/contract.js"
+    },
     "./schema": {
       "default": "./schema/ipc-v1.json"
+    },
+    "./schema/methods": {
+      "default": "./schema/methods-v1.json"
+    },
+    "./conformance": {
+      "types": "./conformance/run.d.mts",
+      "default": "./conformance/run.mjs"
     },
     "./session": {
       "alp-source": {
@@ -76,6 +92,9 @@
       },
       "types": "./dist/rpc.d.ts",
       "default": "./dist/rpc.js"
+    },
+    "./fixtures/v1/cases.json": {
+      "default": "./fixtures/v1/cases.json"
     }
   },
   "engines": {
@@ -85,7 +104,8 @@
   "scripts": {
     "build": "node ../../scripts/build-workspace.mjs protocol",
     "test": "node ../../scripts/test-package.mjs protocol",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "generate": "node scripts/generate.mjs"
   },
   "publishConfig": {
     "access": "public",

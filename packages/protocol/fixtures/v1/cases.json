@@ -1,0 +1,2186 @@
+{
+ "$comment": "Golden v1 values (docs/protocol/alp-json-rpc-v1.md §11). check: message (one frame), envelope, params or result of `method`. Every valid case must pass schema/methods-v1.json and the TypeScript projection in src/; every invalid one must fail the schema; `projection: false` marks values the closed TypeScript unions deliberately leave out. Implementations in any language can load this file.",
+ "cases": [
+  {
+   "name": "request",
+   "check": "message",
+   "valid": true,
+   "value": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "daemon.hello",
+    "params": {
+     "protocolVersion": 1,
+     "client": {
+      "name": "fixture",
+      "version": "0.9.5"
+     }
+    }
+   }
+  },
+  {
+   "name": "request with a string id",
+   "check": "message",
+   "valid": true,
+   "value": {
+    "jsonrpc": "2.0",
+    "id": "req-é",
+    "method": "session.list"
+   }
+  },
+  {
+   "name": "success response",
+   "check": "message",
+   "valid": true,
+   "value": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+     "protocolVersion": 1,
+     "daemonVersion": "0.10.0",
+     "pid": 42,
+     "capabilities": [
+      "attach.after",
+      "extension.methods"
+     ]
+    }
+   }
+  },
+  {
+   "name": "error response",
+   "check": "message",
+   "valid": true,
+   "value": {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "error": {
+     "code": 1001,
+     "message": "No session ses_fixture"
+    }
+   }
+  },
+  {
+   "name": "error response with id null",
+   "check": "message",
+   "valid": true,
+   "value": {
+    "jsonrpc": "2.0",
+    "id": null,
+    "error": {
+     "code": -32700,
+     "message": "Parse error"
+    }
+   }
+  },
+  {
+   "name": "event notification",
+   "check": "message",
+   "valid": true,
+   "value": {
+    "jsonrpc": "2.0",
+    "method": "event",
+    "params": {
+     "sessionId": "ses_fixture",
+     "epoch": "epoch-1",
+     "seq": 3,
+     "cursor": 12,
+     "ts": "2026-10-15T00:00:00.000Z",
+     "event": {
+      "type": "session.ready"
+     }
+    }
+   }
+  },
+  {
+   "name": "extension.invoke request to an owner",
+   "check": "message",
+   "valid": true,
+   "value": {
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "extension.invoke",
+    "params": {
+     "method": "web.pairing",
+     "params": {}
+    }
+   }
+  },
+  {
+   "name": "request without jsonrpc",
+   "check": "message",
+   "valid": false,
+   "value": {
+    "id": 1,
+    "method": "daemon.status"
+   }
+  },
+  {
+   "name": "request with a fractional id",
+   "check": "message",
+   "valid": false,
+   "value": {
+    "jsonrpc": "2.0",
+    "id": 1.5,
+    "method": "daemon.status"
+   }
+  },
+  {
+   "name": "request with an id beyond 2^53-1",
+   "check": "message",
+   "valid": false,
+   "value": {
+    "jsonrpc": "2.0",
+    "id": 9007199254740992,
+    "method": "daemon.status"
+   }
+  },
+  {
+   "name": "request with array params",
+   "check": "message",
+   "valid": false,
+   "value": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "session.get",
+    "params": [
+     "ses_fixture"
+    ]
+   }
+  },
+  {
+   "name": "response with result and error",
+   "check": "message",
+   "valid": false,
+   "value": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {},
+    "error": {
+     "code": 1000,
+     "message": "x"
+    }
+   }
+  },
+  {
+   "name": "error without message",
+   "check": "message",
+   "valid": false,
+   "value": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+     "code": 1000
+    }
+   }
+  },
+  {
+   "name": "batch",
+   "check": "message",
+   "valid": false,
+   "value": [
+    {
+     "jsonrpc": "2.0",
+     "id": 1,
+     "method": "daemon.status"
+    }
+   ]
+  },
+  {
+   "name": "event session.opened",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "session.opened",
+     "session": {
+      "id": "ses_fixture",
+      "projectRoot": "/work/project",
+      "agent": "main",
+      "runtime": "codex",
+      "model": "gpt-6.1-sol",
+      "mode": "workspace-write",
+      "thinking": "low",
+      "workflow": {
+       "mode": "pho",
+       "maxPeers": 2,
+       "supervisor": false
+      },
+      "teamLabel": "Phở",
+      "threadId": "thread-1",
+      "persistent": true,
+      "busy": false
+     },
+     "cwd": "/work/project",
+     "effective": {
+      "model": "gpt-6.1-sol",
+      "thinking": "low"
+     }
+    }
+   }
+  },
+  {
+   "name": "event session.ready",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "session.ready"
+    }
+   }
+  },
+  {
+   "name": "event session.updated",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "session.updated",
+     "session": {
+      "id": "ses_fixture",
+      "projectRoot": "/work/project",
+      "agent": "main",
+      "runtime": "codex",
+      "model": "gpt-6.1-sol",
+      "mode": "workspace-write",
+      "thinking": "low",
+      "workflow": {
+       "mode": "pho",
+       "maxPeers": 2,
+       "supervisor": false
+      },
+      "teamLabel": "Phở",
+      "threadId": "thread-1",
+      "persistent": true,
+      "busy": true,
+      "activeTurnId": "turn-1"
+     }
+    }
+   }
+  },
+  {
+   "name": "event session.closed",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "session.closed"
+    }
+   }
+  },
+  {
+   "name": "event session.failed",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "session.failed",
+     "error": {
+      "message": "provider exited",
+      "code": "provider_exit"
+     }
+    }
+   }
+  },
+  {
+   "name": "event prompt.accepted",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "prompt.accepted",
+     "clientMessageId": "m-1",
+     "result": "turn",
+     "turnId": "turn-1"
+    }
+   }
+  },
+  {
+   "name": "event prompt.failed",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "prompt.failed",
+     "clientMessageId": "m-2",
+     "error": {
+      "message": "unknown",
+      "code": "outcome_unknown"
+     }
+    }
+   }
+  },
+  {
+   "name": "event turn.started",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "turn.started",
+     "turnId": "turn-1",
+     "origin": "user"
+    }
+   }
+  },
+  {
+   "name": "event turn.ended canceled",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "turn.ended",
+     "turnId": "turn-1",
+     "state": "canceled"
+    }
+   }
+  },
+  {
+   "name": "event turn.ended failed",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "turn.ended",
+     "turnId": "turn-2",
+     "state": "failed",
+     "error": {
+      "message": "alpd stopped while this session was working",
+      "code": "daemon_restarted"
+     }
+    }
+   }
+  },
+  {
+   "name": "event mail",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "mail",
+     "mail": {
+      "id": "mail-1",
+      "kind": "note",
+      "from": "user",
+      "assignment": "ses_child",
+      "body": "xin chào"
+     }
+    }
+   }
+  },
+  {
+   "name": "event assignment",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "assignment",
+     "assignment": {
+      "id": "ses_child",
+      "agent": "peer",
+      "mode": "workspace-write",
+      "status": "running",
+      "startedAt": "2026-10-15T00:00:00.000Z",
+      "worktree": {
+       "branch": "alp/peer",
+       "path": "/work/wt"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "event question",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "question",
+     "question": {
+      "id": "q_1",
+      "sessionId": "ses_fixture",
+      "rootId": "ses_fixture",
+      "agent": "main",
+      "body": "Tiếp tục?",
+      "options": [
+       "có",
+       "không"
+      ],
+      "askedAt": "2026-10-15T00:00:00.000Z"
+     }
+    }
+   }
+  },
+  {
+   "name": "event question.resolved",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "question.resolved",
+     "questionId": "q_1",
+     "outcome": "answered",
+     "answer": "có"
+    }
+   }
+  },
+  {
+   "name": "event pin",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "pin",
+     "pin": {
+      "id": "pin_1",
+      "project": "/work/project",
+      "kind": "claim",
+      "body": "Đang sửa server",
+      "paths": [
+       "src/server.ts"
+      ],
+      "agent": "peer",
+      "sessionId": "ses_child",
+      "rootId": "ses_fixture",
+      "at": "2026-10-15T00:00:00.000Z"
+     }
+    }
+   }
+  },
+  {
+   "name": "event unpin",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "unpin",
+     "pinId": "pin_1",
+     "reason": "session_ended"
+    }
+   }
+  },
+  {
+   "name": "item user_message",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "user_message",
+      "id": "user:m-1",
+      "text": "Chào 👋",
+      "clientMessageId": "m-1"
+     }
+    }
+   }
+  },
+  {
+   "name": "item assistant_message",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "assistant_message",
+      "id": "msg-1",
+      "text": "Đã xong."
+     }
+    }
+   }
+  },
+  {
+   "name": "item notice",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "notice",
+      "id": "n-1",
+      "level": "warning",
+      "text": "Claude is paused"
+     }
+    }
+   }
+  },
+  {
+   "name": "item compaction",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "compaction",
+      "id": "c-1",
+      "status": "completed",
+      "trigger": "auto",
+      "preTokens": 180000,
+      "postTokens": 40000
+     }
+    }
+   }
+  },
+  {
+   "name": "item todo",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "todo",
+      "id": "t-1",
+      "items": [
+       {
+        "id": "bd-1",
+        "text": "Viết test",
+        "status": "in_progress"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "item tool_call shell",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "tool_call",
+      "id": "tc-1",
+      "callId": "call-1",
+      "name": "shell",
+      "status": "completed",
+      "detail": {
+       "type": "shell",
+       "command": "npm test",
+       "cwd": "/work/project",
+       "output": "ok",
+       "exitCode": 0
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "item tool_call unknown",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "tool_call",
+      "id": "tc-2",
+      "callId": "call-2",
+      "name": "alp_ask",
+      "status": "failed",
+      "error": "denied",
+      "detail": {
+       "type": "unknown",
+       "input": {
+        "to": "user"
+       },
+       "output": null
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "announcement without a cursor",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "announce-2026",
+    "seq": 0,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "question",
+     "question": {
+      "id": "q_1",
+      "sessionId": "ses_fixture",
+      "rootId": "ses_fixture",
+      "agent": "main",
+      "body": "Tiếp tục?",
+      "options": [
+       "có",
+       "không"
+      ],
+      "askedAt": "2026-10-15T00:00:00.000Z"
+     }
+    }
+   }
+  },
+  {
+   "name": "a future event type (receivers ignore it)",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "tree.renamed",
+     "title": "x"
+    }
+   },
+   "projection": false
+  },
+  {
+   "name": "a future item kind (receivers ignore it)",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "image",
+      "id": "img-1",
+      "url": "x"
+     }
+    }
+   },
+   "projection": false
+  },
+  {
+   "name": "unknown envelope properties",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "session.ready"
+    },
+    "trace": {
+     "span": "abc"
+    }
+   },
+   "projection": false
+  },
+  {
+   "name": "negative seq",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": -1,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "session.ready"
+    }
+   }
+  },
+  {
+   "name": "cursor 0",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 0,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "session.ready"
+    }
+   }
+  },
+  {
+   "name": "item event without its item",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item"
+    }
+   }
+  },
+  {
+   "name": "known item kind missing fields",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "notice",
+      "id": "n"
+     }
+    }
+   }
+  },
+  {
+   "name": "known event with a wrong enum",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "turn.ended",
+     "turnId": "t",
+     "state": "stopped"
+    }
+   }
+  },
+  {
+   "name": "missing epoch",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "session.ready"
+    }
+   }
+  },
+  {
+   "name": "daemon.hello params",
+   "check": "params",
+   "method": "daemon.hello",
+   "valid": true,
+   "value": {
+    "protocolVersion": 1,
+    "client": {
+     "name": "paseo",
+     "version": "0.10.0"
+    }
+   }
+  },
+  {
+   "name": "daemon.hello without client",
+   "check": "params",
+   "method": "daemon.hello",
+   "valid": true,
+   "value": {
+    "protocolVersion": 1
+   }
+  },
+  {
+   "name": "daemon.hello with a string client",
+   "check": "params",
+   "method": "daemon.hello",
+   "valid": false,
+   "value": {
+    "protocolVersion": 1,
+    "client": "paseo"
+   }
+  },
+  {
+   "name": "daemon.hello result",
+   "check": "result",
+   "method": "daemon.hello",
+   "valid": true,
+   "value": {
+    "protocolVersion": 1,
+    "daemonVersion": "0.10.0",
+    "pid": 42,
+    "capabilities": [
+     "attach.after",
+     "prompt.receipts",
+     "extension.methods"
+    ]
+   }
+  },
+  {
+   "name": "daemon.hello from a daemon before capabilities",
+   "check": "result",
+   "method": "daemon.hello",
+   "valid": true,
+   "value": {
+    "protocolVersion": 1,
+    "daemonVersion": "0.9.5",
+    "pid": 42
+   }
+  },
+  {
+   "name": "daemon.status params",
+   "check": "params",
+   "method": "daemon.status",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "daemon.status result",
+   "check": "result",
+   "method": "daemon.status",
+   "valid": true,
+   "value": {
+    "pid": 42,
+    "startedAt": "2026-10-15T00:00:00.000Z",
+    "version": "0.10.0",
+    "protocolVersion": 1,
+    "sessions": 1,
+    "questions": 0,
+    "previousExit": {
+     "kind": "clean"
+    },
+    "persistence": {
+     "failing": 0
+    },
+    "health": {
+     "live": true,
+     "ready": true,
+     "checks": [
+      {
+       "id": "accepting",
+       "ok": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "daemon.status result without health",
+   "check": "result",
+   "method": "daemon.status",
+   "valid": false,
+   "value": {
+    "pid": 42,
+    "startedAt": "2026-10-15T00:00:00.000Z",
+    "version": "0.10.0",
+    "protocolVersion": 1,
+    "sessions": 1,
+    "questions": 0
+   }
+  },
+  {
+   "name": "daemon.shutdown params",
+   "check": "params",
+   "method": "daemon.shutdown",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "daemon.shutdown result",
+   "check": "result",
+   "method": "daemon.shutdown",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "daemon.pause params",
+   "check": "params",
+   "method": "daemon.pause",
+   "valid": true,
+   "value": {
+    "runtime": "claude",
+    "now": true,
+    "reason": "tối nay"
+   }
+  },
+  {
+   "name": "daemon.pause with an unknown runtime",
+   "check": "params",
+   "method": "daemon.pause",
+   "valid": false,
+   "value": {
+    "runtime": "gemini"
+   }
+  },
+  {
+   "name": "daemon.pause result",
+   "check": "result",
+   "method": "daemon.pause",
+   "valid": true,
+   "value": {
+    "runtimes": {
+     "claude": {
+      "since": "2026-10-15T00:00:00.000Z",
+      "by": "the user",
+      "reason": "limit",
+      "resetsAt": "2026-10-15T00:00:00.000Z"
+     }
+    },
+    "parked": [
+     {
+      "assignmentId": "a_1",
+      "agent": "peer",
+      "runtime": "claude",
+      "rootId": "ses_fixture",
+      "reason": "limit",
+      "since": "2026-10-15T00:00:00.000Z"
+     }
+    ]
+   }
+  },
+  {
+   "name": "daemon.resume params",
+   "check": "params",
+   "method": "daemon.resume",
+   "valid": true,
+   "value": {
+    "runtime": "codex"
+   }
+  },
+  {
+   "name": "daemon.resume result",
+   "check": "result",
+   "method": "daemon.resume",
+   "valid": true,
+   "value": {
+    "runtimes": {},
+    "parked": []
+   }
+  },
+  {
+   "name": "daemon.pauses params",
+   "check": "params",
+   "method": "daemon.pauses",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "daemon.pauses result",
+   "check": "result",
+   "method": "daemon.pauses",
+   "valid": true,
+   "value": {
+    "all": {
+     "since": "2026-10-15T00:00:00.000Z",
+     "by": "the user",
+     "reason": "paused by the user"
+    },
+    "runtimes": {},
+    "parked": []
+   }
+  },
+  {
+   "name": "daemon.usage params",
+   "check": "params",
+   "method": "daemon.usage",
+   "valid": true,
+   "value": {
+    "refresh": true
+   }
+  },
+  {
+   "name": "daemon.usage result",
+   "check": "result",
+   "method": "daemon.usage",
+   "valid": true,
+   "value": {
+    "providers": [
+     {
+      "runtime": "codex",
+      "pause": null,
+      "parked": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "catalog.get params",
+   "check": "params",
+   "method": "catalog.get",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "catalog.get result",
+   "check": "result",
+   "method": "catalog.get",
+   "valid": true,
+   "value": {
+    "models": [
+     {
+      "id": "codex:gpt-6.1-sol",
+      "label": "Codex · GPT-6.1-Sol"
+     }
+    ],
+    "modes": [
+     {
+      "id": "read-only",
+      "label": "Read only"
+     }
+    ],
+    "thinkingOptions": [
+     {
+      "id": "low",
+      "label": "low"
+     }
+    ],
+    "defaultModel": "codex:gpt-6.1-sol"
+   }
+  },
+  {
+   "name": "assignment.recall params",
+   "check": "params",
+   "method": "assignment.recall",
+   "valid": true,
+   "value": {
+    "assignmentId": "a_1",
+    "question": "Bạn đã sửa gì?"
+   }
+  },
+  {
+   "name": "assignment.recall without a question",
+   "check": "params",
+   "method": "assignment.recall",
+   "valid": false,
+   "value": {
+    "assignmentId": "a_1"
+   }
+  },
+  {
+   "name": "assignment.recall result",
+   "check": "result",
+   "method": "assignment.recall",
+   "valid": true,
+   "value": {
+    "assignmentId": "a_1",
+    "agent": "peer",
+    "taskId": "bd-1",
+    "finishedAt": "2026-10-15T00:00:00.000Z",
+    "answer": "Đã sửa server.ts"
+   }
+  },
+  {
+   "name": "board.list params",
+   "check": "params",
+   "method": "board.list",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project"
+   }
+  },
+  {
+   "name": "board.list without projectRoot",
+   "check": "params",
+   "method": "board.list",
+   "valid": false,
+   "value": {}
+  },
+  {
+   "name": "board.list result",
+   "check": "result",
+   "method": "board.list",
+   "valid": true,
+   "value": {
+    "pins": [
+     {
+      "id": "pin_1",
+      "project": "/work/project",
+      "kind": "claim",
+      "body": "Đang sửa server",
+      "paths": [
+       "src/server.ts"
+      ],
+      "agent": "peer",
+      "sessionId": "ses_child",
+      "rootId": "ses_fixture",
+      "at": "2026-10-15T00:00:00.000Z"
+     }
+    ]
+   }
+  },
+  {
+   "name": "question.list params",
+   "check": "params",
+   "method": "question.list",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project"
+   }
+  },
+  {
+   "name": "question.list result",
+   "check": "result",
+   "method": "question.list",
+   "valid": true,
+   "value": {
+    "questions": [
+     {
+      "id": "q_1",
+      "sessionId": "ses_fixture",
+      "rootId": "ses_fixture",
+      "agent": "main",
+      "body": "Tiếp tục?",
+      "options": [
+       "có",
+       "không"
+      ],
+      "askedAt": "2026-10-15T00:00:00.000Z"
+     }
+    ]
+   }
+  },
+  {
+   "name": "question.answer params",
+   "check": "params",
+   "method": "question.answer",
+   "valid": true,
+   "value": {
+    "questionId": "q_1",
+    "text": "có"
+   }
+  },
+  {
+   "name": "question.answer dismissal",
+   "check": "params",
+   "method": "question.answer",
+   "valid": true,
+   "value": {
+    "questionId": "q_1",
+    "dismiss": true,
+    "reason": "không cần"
+   }
+  },
+  {
+   "name": "question.answer result",
+   "check": "result",
+   "method": "question.answer",
+   "valid": true,
+   "value": {
+    "questionId": "q_1"
+   }
+  },
+  {
+   "name": "session.create params",
+   "check": "params",
+   "method": "session.create",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "spec": {
+     "cwd": "/work/project",
+     "model": "codex:gpt-6.1-sol",
+     "persist": true,
+     "mcpServers": {
+      "docs": {
+       "type": "http",
+       "url": "https://example.invalid/mcp"
+      }
+     }
+    },
+    "history": "replay",
+    "delegation": false
+   }
+  },
+  {
+   "name": "session.create with an invalid session id",
+   "check": "params",
+   "method": "session.create",
+   "valid": false,
+   "value": {
+    "sessionId": "has space",
+    "spec": {
+     "cwd": "/work/project"
+    }
+   }
+  },
+  {
+   "name": "session.create without spec.cwd",
+   "check": "params",
+   "method": "session.create",
+   "valid": false,
+   "value": {
+    "spec": {}
+   }
+  },
+  {
+   "name": "session.create result",
+   "check": "result",
+   "method": "session.create",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_fixture",
+     "projectRoot": "/work/project",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "low",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "teamLabel": "Phở",
+     "threadId": "thread-1",
+     "persistent": true,
+     "busy": false
+    },
+    "attached": false,
+    "durable": true
+   }
+  },
+  {
+   "name": "session.create result of a resume",
+   "check": "result",
+   "method": "session.create",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_fixture",
+     "projectRoot": "/work/project",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "low",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "teamLabel": "Phở",
+     "threadId": "thread-1",
+     "persistent": true,
+     "busy": false
+    },
+    "attached": false,
+    "resumed": true,
+    "durable": true
+   }
+  },
+  {
+   "name": "session.preview params",
+   "check": "params",
+   "method": "session.preview",
+   "valid": true,
+   "value": {
+    "spec": {
+     "cwd": "/work/project",
+     "workflow": "cafe"
+    }
+   }
+  },
+  {
+   "name": "session.preview result",
+   "check": "result",
+   "method": "session.preview",
+   "valid": true,
+   "value": {
+    "preview": {
+     "teams": [
+      {
+       "id": "pho",
+       "label": "Phở"
+      },
+      {
+       "id": "cafe",
+       "label": "Cafe",
+       "description": "Hai agent"
+      }
+     ],
+     "team": "cafe",
+     "teamLabel": "Cafe",
+     "agent": "main",
+     "runtime": "claude",
+     "model": "claude-opus-5-5",
+     "mode": "full-access",
+     "thinking": "high"
+    }
+   }
+  },
+  {
+   "name": "session.attach params",
+   "check": "params",
+   "method": "session.attach",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "after": 12
+   }
+  },
+  {
+   "name": "session.attach with a negative cursor",
+   "check": "params",
+   "method": "session.attach",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "after": -1
+   }
+  },
+  {
+   "name": "session.attach result",
+   "check": "result",
+   "method": "session.attach",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_fixture",
+     "projectRoot": "/work/project",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "low",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "teamLabel": "Phở",
+     "threadId": "thread-1",
+     "persistent": true,
+     "busy": false,
+     "status": "idle",
+     "title": "Sửa lỗi 😀",
+     "createdAt": "2026-10-15T00:00:00.000Z",
+     "updatedAt": "2026-10-15T00:00:00.000Z"
+    },
+    "cursor": 40
+   }
+  },
+  {
+   "name": "session.attach result of a reset",
+   "check": "result",
+   "method": "session.attach",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_fixture",
+     "projectRoot": "/work/project",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "low",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "teamLabel": "Phở",
+     "threadId": "thread-1",
+     "persistent": true,
+     "busy": false,
+     "status": "idle",
+     "title": "Sửa lỗi 😀",
+     "createdAt": "2026-10-15T00:00:00.000Z",
+     "updatedAt": "2026-10-15T00:00:00.000Z"
+    },
+    "cursor": 40,
+    "reset": true
+   }
+  },
+  {
+   "name": "session.attach result with reset false",
+   "check": "result",
+   "method": "session.attach",
+   "valid": false,
+   "value": {
+    "session": {
+     "id": "ses_fixture",
+     "projectRoot": "/work/project",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "low",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "teamLabel": "Phở",
+     "threadId": "thread-1",
+     "persistent": true,
+     "busy": false,
+     "status": "idle",
+     "title": "Sửa lỗi 😀",
+     "createdAt": "2026-10-15T00:00:00.000Z",
+     "updatedAt": "2026-10-15T00:00:00.000Z"
+    },
+    "cursor": 40,
+    "reset": false
+   }
+  },
+  {
+   "name": "session.release params",
+   "check": "params",
+   "method": "session.release",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture"
+   }
+  },
+  {
+   "name": "session.release result",
+   "check": "result",
+   "method": "session.release",
+   "valid": true,
+   "value": {
+    "closed": true
+   }
+  },
+  {
+   "name": "session.prompt params",
+   "check": "params",
+   "method": "session.prompt",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "clientMessageId": "m-1",
+    "delivery": "steer",
+    "content": [
+     {
+      "type": "text",
+      "text": "Dừng lại 🛑"
+     }
+    ]
+   }
+  },
+  {
+   "name": "session.prompt with string content",
+   "check": "params",
+   "method": "session.prompt",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "clientMessageId": "m-1",
+    "content": "text"
+   }
+  },
+  {
+   "name": "session.prompt with an unknown delivery",
+   "check": "params",
+   "method": "session.prompt",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "clientMessageId": "m-1",
+    "delivery": "later",
+    "content": []
+   }
+  },
+  {
+   "name": "session.prompt result",
+   "check": "result",
+   "method": "session.prompt",
+   "valid": true,
+   "value": {
+    "outcome": "accepted",
+    "durable": true
+   }
+  },
+  {
+   "name": "session.prompt result of a repeat",
+   "check": "result",
+   "method": "session.prompt",
+   "valid": true,
+   "value": {
+    "outcome": "accepted",
+    "duplicate": true,
+    "durable": true
+   }
+  },
+  {
+   "name": "session.prompt result of a refused prompt",
+   "check": "result",
+   "method": "session.prompt",
+   "valid": true,
+   "value": {
+    "outcome": "failed",
+    "error": {
+     "message": "Session is busy"
+    },
+    "durable": true
+   }
+  },
+  {
+   "name": "session.prompt result without receipts",
+   "check": "result",
+   "method": "session.prompt",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "session.interrupt params",
+   "check": "params",
+   "method": "session.interrupt",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture"
+   }
+  },
+  {
+   "name": "session.interrupt result",
+   "check": "result",
+   "method": "session.interrupt",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "session.configure params",
+   "check": "params",
+   "method": "session.configure",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "mode": "read-only"
+   }
+  },
+  {
+   "name": "session.configure without mode",
+   "check": "params",
+   "method": "session.configure",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture"
+   }
+  },
+  {
+   "name": "session.configure result",
+   "check": "result",
+   "method": "session.configure",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_fixture",
+     "projectRoot": "/work/project",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "low",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "teamLabel": "Phở",
+     "threadId": "thread-1",
+     "persistent": true,
+     "busy": false
+    }
+   }
+  },
+  {
+   "name": "session.close params",
+   "check": "params",
+   "method": "session.close",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture"
+   }
+  },
+  {
+   "name": "session.close result",
+   "check": "result",
+   "method": "session.close",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "session.rename with 200 astral characters",
+   "check": "params",
+   "method": "session.rename",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "title": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+   }
+  },
+  {
+   "name": "session.rename with 201 characters",
+   "check": "params",
+   "method": "session.rename",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "title": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+   }
+  },
+  {
+   "name": "session.rename with a blank title",
+   "check": "params",
+   "method": "session.rename",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "title": "   "
+   }
+  },
+  {
+   "name": "session.rename result",
+   "check": "result",
+   "method": "session.rename",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_fixture",
+     "projectRoot": "/work/project",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "low",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "teamLabel": "Phở",
+     "threadId": "thread-1",
+     "persistent": true,
+     "busy": false,
+     "status": "idle",
+     "title": "Sửa lỗi 😀",
+     "createdAt": "2026-10-15T00:00:00.000Z",
+     "updatedAt": "2026-10-15T00:00:00.000Z"
+    }
+   }
+  },
+  {
+   "name": "session.archive params",
+   "check": "params",
+   "method": "session.archive",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "archived": false
+   }
+  },
+  {
+   "name": "session.archive result",
+   "check": "result",
+   "method": "session.archive",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_fixture",
+     "projectRoot": "/work/project",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "low",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "teamLabel": "Phở",
+     "threadId": "thread-1",
+     "persistent": true,
+     "busy": false,
+     "status": "closed",
+     "title": "Sửa lỗi 😀",
+     "createdAt": "2026-10-15T00:00:00.000Z",
+     "updatedAt": "2026-10-15T00:00:00.000Z",
+     "archived": true
+    }
+   }
+  },
+  {
+   "name": "session.get params",
+   "check": "params",
+   "method": "session.get",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture"
+   }
+  },
+  {
+   "name": "session.get with a null session id",
+   "check": "params",
+   "method": "session.get",
+   "valid": false,
+   "value": {
+    "sessionId": null
+   }
+  },
+  {
+   "name": "session.get result",
+   "check": "result",
+   "method": "session.get",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_fixture",
+     "projectRoot": "/work/project",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "low",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "teamLabel": "Phở",
+     "threadId": "thread-1",
+     "persistent": true,
+     "busy": false,
+     "status": "error",
+     "title": "Sửa lỗi 😀",
+     "createdAt": "2026-10-15T00:00:00.000Z",
+     "updatedAt": "2026-10-15T00:00:00.000Z",
+     "lastError": {
+      "code": "daemon_restarted",
+      "message": "alpd stopped"
+     }
+    }
+   }
+  },
+  {
+   "name": "session.get result with an unknown status",
+   "check": "result",
+   "method": "session.get",
+   "valid": false,
+   "value": {
+    "session": {
+     "id": "ses_fixture",
+     "projectRoot": "/work/project",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "low",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "teamLabel": "Phở",
+     "threadId": "thread-1",
+     "persistent": true,
+     "busy": false,
+     "status": "paused",
+     "title": "Sửa lỗi 😀",
+     "createdAt": "2026-10-15T00:00:00.000Z",
+     "updatedAt": "2026-10-15T00:00:00.000Z"
+    }
+   }
+  },
+  {
+   "name": "session.list params",
+   "check": "params",
+   "method": "session.list",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "rootsOnly": true,
+    "includeClosed": true,
+    "includeArchived": false
+   }
+  },
+  {
+   "name": "session.list with a null projectRoot",
+   "check": "params",
+   "method": "session.list",
+   "valid": false,
+   "value": {
+    "projectRoot": null
+   }
+  },
+  {
+   "name": "session.list result",
+   "check": "result",
+   "method": "session.list",
+   "valid": true,
+   "value": {
+    "sessions": [
+     {
+      "id": "ses_fixture",
+      "projectRoot": "/work/project",
+      "agent": "main",
+      "runtime": "codex",
+      "model": "gpt-6.1-sol",
+      "mode": "workspace-write",
+      "thinking": "low",
+      "workflow": {
+       "mode": "pho",
+       "maxPeers": 2,
+       "supervisor": false
+      },
+      "teamLabel": "Phở",
+      "threadId": "thread-1",
+      "persistent": true,
+      "busy": false,
+      "status": "idle",
+      "title": "Sửa lỗi 😀",
+      "createdAt": "2026-10-15T00:00:00.000Z",
+      "updatedAt": "2026-10-15T00:00:00.000Z"
+     }
+    ]
+   }
+  },
+  {
+   "name": "session.status params",
+   "check": "params",
+   "method": "session.status",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture"
+   }
+  },
+  {
+   "name": "session.status result",
+   "check": "result",
+   "method": "session.status",
+   "valid": true,
+   "value": {
+    "status": {
+     "rootId": "ses_fixture",
+     "sessions": [
+      {
+       "id": "ses_fixture",
+       "projectRoot": "/work/project",
+       "agent": "main",
+       "runtime": "codex",
+       "model": "gpt-6.1-sol",
+       "mode": "workspace-write",
+       "thinking": "low",
+       "workflow": {
+        "mode": "pho",
+        "maxPeers": 2,
+        "supervisor": false
+       },
+       "teamLabel": "Phở",
+       "threadId": "thread-1",
+       "persistent": true,
+       "busy": false,
+       "state": "waiting_user",
+       "idleMs": 1200,
+       "workdir": "/work/project",
+       "unreadMail": 0
+      }
+     ],
+     "assignments": [
+      {
+       "id": "ses_child",
+       "agent": "peer",
+       "mode": "workspace-write",
+       "status": "running",
+       "startedAt": "2026-10-15T00:00:00.000Z",
+       "requester": "ses_fixture",
+       "isolation": "shared",
+       "idleMs": 5
+      }
+     ],
+     "questions": [
+      {
+       "id": "q_1",
+       "sessionId": "ses_fixture",
+       "rootId": "ses_fixture",
+       "agent": "main",
+       "body": "Tiếp tục?",
+       "options": [
+        "có",
+        "không"
+       ],
+       "askedAt": "2026-10-15T00:00:00.000Z"
+      }
+     ],
+     "worktrees": [],
+     "leases": [
+      {
+       "checkout": "/work/project",
+       "assignmentId": "ses_child",
+       "agent": "peer"
+      }
+     ],
+     "claims": [
+      {
+       "id": "pin_1",
+       "project": "/work/project",
+       "kind": "claim",
+       "body": "Đang sửa server",
+       "paths": [
+        "src/server.ts"
+       ],
+       "agent": "peer",
+       "sessionId": "ses_child",
+       "rootId": "ses_fixture",
+       "at": "2026-10-15T00:00:00.000Z"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "session.message params",
+   "check": "params",
+   "method": "session.message",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "text": "Ghi chú"
+   }
+  },
+  {
+   "name": "session.message result",
+   "check": "result",
+   "method": "session.message",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "session.log params",
+   "check": "params",
+   "method": "session.log",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture"
+   }
+  },
+  {
+   "name": "session.log result",
+   "check": "result",
+   "method": "session.log",
+   "valid": true,
+   "value": {
+    "rootId": "ses_fixture",
+    "entries": [
+     {
+      "ts": "2026-10-15T00:00:00.000Z",
+      "event": "assignment.finished",
+      "assignmentId": "a_1"
+     }
+    ]
+   }
+  },
+  {
+   "name": "extension.register params",
+   "check": "params",
+   "method": "extension.register",
+   "valid": true,
+   "value": {
+    "method": "web.pairing"
+   }
+  },
+  {
+   "name": "extension.register result",
+   "check": "result",
+   "method": "extension.register",
+   "valid": true,
+   "value": {
+    "registered": "web.pairing"
+   }
+  },
+  {
+   "name": "extension.unregister params",
+   "check": "params",
+   "method": "extension.unregister",
+   "valid": true,
+   "value": {
+    "method": "web.pairing"
+   }
+  },
+  {
+   "name": "extension.unregister result",
+   "check": "result",
+   "method": "extension.unregister",
+   "valid": true,
+   "value": {
+    "unregistered": "web.pairing"
+   }
+  },
+  {
+   "name": "daemon.hello with a string protocolVersion",
+   "check": "params",
+   "method": "daemon.hello",
+   "valid": false,
+   "value": {
+    "protocolVersion": "1"
+   }
+  },
+  {
+   "name": "session.list with a string flag",
+   "check": "params",
+   "method": "session.list",
+   "valid": false,
+   "value": {
+    "includeClosed": "yes"
+   }
+  },
+  {
+   "name": "extension.register without method",
+   "check": "params",
+   "method": "extension.register",
+   "valid": false,
+   "value": {}
+  },
+  {
+   "name": "question.answer without questionId",
+   "check": "params",
+   "method": "question.answer",
+   "valid": false,
+   "value": {
+    "text": "có"
+   }
+  },
+  {
+   "name": "session.prompt result with outcome unknown (that is an error, never a result)",
+   "check": "result",
+   "method": "session.prompt",
+   "valid": false,
+   "value": {
+    "outcome": "unknown"
+   }
+  },
+  {
+   "name": "fractional cursor",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 1.5,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "session.ready"
+    }
+   }
+  }
+ ]
+}
