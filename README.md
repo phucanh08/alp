@@ -183,8 +183,8 @@ Use `resolveAgent(projectRoot, { agent: 'your-agent' })` from `src/core/resolver
 `alpd` hosts ALP sessions for all projects of a user. After `npm run build`:
 
 ```sh
-alp daemon start          # or: status | stop | restart | install | uninstall
-alp doctor [--fix]        # what ALP needs here, and what earlier runs left behind
+alp daemon start          # or: status [--json] | stop | restart | install | uninstall
+alp doctor [--fix]        # what ALP needs here, what earlier runs left behind, and what alpd's log and readiness say; only --fix repairs
 alp run --profile cafe "Your task"   # streams the agent tree; Ctrl-C interrupts
 alp ps [--all]            # live sessions as a tree; --all adds closed ones
 alp top [session]         # live dashboard: who runs, who waits, questions, worktrees, leases

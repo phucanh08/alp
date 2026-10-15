@@ -1,7 +1,9 @@
 import { promptSafe } from '@anhlp/alp-core/promptsafe';
+import { scrubText } from '@anhlp/alp-core/log';
 
 export const errorData = (error: unknown) => ({
-  message: error instanceof Error ? error.message : String(error),
+  // It reaches timelines, run logs and clients: a provider's complaint may quote a credential.
+  message: scrubText(error instanceof Error ? error.message : String(error)),
   // A transport marks a request the provider may have received before it failed (ALPD §66).
   ...((error as { outcomeUnknown?: boolean } | null)?.outcomeUnknown ? { code: 'outcome_unknown' } : {}),
 });

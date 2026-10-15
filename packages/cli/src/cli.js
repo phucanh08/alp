@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { setup } from '@anhlp/alp-client/setup';
 import { alpHome } from '@anhlp/alp-client/index';
+import { scrubText } from '@anhlp/alp-core/log';
 import { USAGE, UsageError } from './usage.js';
 import { project, permissionsCommand, trustCommand, language, verify, doctor } from './projects.js';
 import { daemon } from './daemon.js';
@@ -16,6 +17,6 @@ try {
   await commands[command](args);
 } catch (error) {
   if (error instanceof UsageError || error?.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') console.error(USAGE);
-  else console.error(`alp: ${error.message}`);
+  else console.error(`alp: ${scrubText(error?.message ?? error)}`);
   process.exitCode = 1;
 }

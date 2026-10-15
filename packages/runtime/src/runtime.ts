@@ -1,6 +1,7 @@
 import { constants as fsConstants } from 'node:fs';
 import type { Session, Assignment, Waiter } from './session-state.js';
 import { errorData, plainObject, toolResult } from './tool-results.js';
+import { createLogger } from '@anhlp/alp-core/log';
 import { createBoardDomain } from './board-domain.js';
 import { createWorktreeDomain } from './worktree-domain.js';
 import { DEFAULT_TEAM, type RuntimeTransport, type RuntimeOptions, type OpenOptions, type PromptContent, type PromptInput, type AlpRuntime, type SessionPreview, type RecoveryOutcome, type Pause, type PauseState, type RecallAnswer } from './contracts.js';
@@ -110,6 +111,8 @@ const clip = (text: string, limit = JOURNAL_LINE_CHARS) => {
  * preserve the full native harness underneath.
  */
 const isolationOf = (args: { isolation?: string }) => args.isolation ?? 'shared';
+
+const log = createLogger({ component: 'runtime' });
 
 export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   const sessions = new Map<string, Session>();
@@ -2772,6 +2775,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       void runHooks(sessionId, session, 'session.start', { resumed: !!spec.restore });
       return snapshot(sessionId, session);
     } catch (error) {
+      log.error(`${session.mapping.agent.name} could not start its ${session.runtimeKind} session`, { code: 'ALP_PROVIDER_START_FAILED', sessionId, rootId: rootOf(sessionId), agent: session.mapping.agent.name, provider: session.runtimeKind, error });
       session.closed = true;
       sessions.delete(
         sessionId,
@@ -2798,7 +2802,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       try {
         notification(sessionId, session, method, params);
       } catch (error: any) {
-        console.error(`${new Date().toISOString()} ${session.mapping.agent.name} ${sessionId}: handling ${method} failed: ${error?.stack ?? error}`);
+        log.error(`handling ${method} failed`, { code: 'ALP_RUNTIME_SLIP', sessionId, agent: session.mapping.agent.name, method, error });
         try { runLog(rootOf(sessionId), { event: 'runtime.slip', sessionId, agent: session.mapping.agent.name, method, error: String(error?.message ?? error).slice(0, 500) }); } catch {}
       }
     });
@@ -2811,6 +2815,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   }
 
   function failSession(sessionId: string, session: Session, error: unknown) {
+    log.error(`${session.mapping.agent.name}'s ${session.runtimeKind} session failed`, { code: 'ALP_PROVIDER_FAILED', sessionId, rootId: rootOf(sessionId), agent: session.mapping.agent.name, provider: session.runtimeKind, error });
     terminal(sessionId, session, 'failed', error);
     session.settle?.('failed', error);
     void closeSession(sessionId);
@@ -2873,6 +2878,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   async function revive(sessionId: string, session: Session, error: unknown) {
     session.restarts = [...fruitlessRestarts(session), Date.now()];
     const harness = label(session.runtimeKind);
+    log.warn(`${harness} process of ${session.mapping.agent.name} stopped; restarting it`, { code: 'ALP_PROVIDER_RESTARTED', sessionId, rootId: rootOf(sessionId), agent: session.mapping.agent.name, provider: session.runtimeKind, error });
     runLog(rootOf(sessionId), { event: 'session.restarted', sessionId, agent: session.mapping.agent.name, error: errorData(error).message, restarts: session.restarts.length });
     if (session.active) {
       session.parkReason = `its ${harness} process stopped`;

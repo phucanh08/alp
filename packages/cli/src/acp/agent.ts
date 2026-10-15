@@ -17,7 +17,7 @@ export type AcpAgentOptions = {
   connect(): Promise<DaemonConnection>;
   version: string;
   /** Where diagnostics go; stdout belongs to the protocol. */
-  log?: (message: string) => void;
+  log?: (message: string, fields?: { code?: string; error?: unknown }) => void;
 };
 
 type Team = SessionPreview['teams'][number];
@@ -134,7 +134,7 @@ export function createAcpAgent(options: AcpAgentOptions) {
       connection.onEvent(project);
       connection.onClose(error => {
         if (leaving) return;
-        log(`alp acp: lost alpd (${error.message})`);
+        log('lost the connection to alpd', { code: 'ALP_IPC_LOST', error });
         alpd = undefined;
         for (const session of sessions.values()) {
           session.opened = false;
@@ -142,7 +142,7 @@ export function createAcpAgent(options: AcpAgentOptions) {
         }
       });
       return connection;
-    }, error => { alpd = undefined; throw error; });
+    }, error => { alpd = undefined; log('could not reach alpd', { code: 'ALP_IPC_CONNECT_FAILED', error }); throw error; });
     return alpd;
   }
 
@@ -151,7 +151,7 @@ export function createAcpAgent(options: AcpAgentOptions) {
   function send(session: Session, update: acp.SessionUpdate) {
     const client = editor;
     if (!client) return;
-    session.queue = session.queue.then(() => client.notify('session/update', { sessionId: session.id, update })).catch(error => log(`alp acp: update failed: ${error?.message ?? error}`));
+    session.queue = session.queue.then(() => client.notify('session/update', { sessionId: session.id, update })).catch(error => log('could not send an update to the editor', { code: 'ALP_ACP_UPDATE_FAILED', error }));
   }
 
   const say = (session: Session, text: string) => send(session, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } });
@@ -386,7 +386,7 @@ export function createAcpAgent(options: AcpAgentOptions) {
     .onNotification('session/cancel', async ({ params }) => {
       const session = sessions.get(params.sessionId);
       if (!session?.opened) return;
-      await request('session.interrupt', { sessionId: session.id }).catch(error => log(`alp acp: interrupt failed: ${error?.message ?? error}`));
+      await request('session.interrupt', { sessionId: session.id }).catch(error => log('session.interrupt failed', { code: 'ALP_ACP_INTERRUPT_FAILED', error }));
     })
     .onRequest('session/set_mode', async ({ params }) => {
       await setMode(known(params.sessionId), params.modeId);

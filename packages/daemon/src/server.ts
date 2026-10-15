@@ -3,6 +3,7 @@ import { appendFile, chmod, mkdir, readFile, unlink, lstat, rename } from 'node:
 import net from 'node:net';
 import { assertPrivateDirectory, assertPrivateSocket } from '@anhlp/alp-client/index';
 import path from 'node:path';
+import { createLogger } from '@anhlp/alp-core/log';
 import { AlpRpcError, MAX_FRAME, PROTOCOL_VERSION, ERROR, encodeFrame } from '@anhlp/alp-protocol';
 export { ERROR } from '@anhlp/alp-protocol';
 import { DEFAULT_MODEL, models, modes, thinkingOptions, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '@anhlp/alp-runtime/index';
@@ -19,6 +20,9 @@ import type { SessionSummary } from '@anhlp/alp-protocol/session';
 
 
 
+const log = createLogger({ component: 'alpd.ipc' });
+const recoveryLog = createLogger({ component: 'alpd.recovery' });
+
 class RpcError extends Error {
   constructor(public code: number, message: string, public data?: unknown) { super(message); }
 }
@@ -29,7 +33,7 @@ class RpcError extends Error {
  */
 function crashPoint(name: string) {
   if (process.env.ALP_TEST_CRASH_AT !== name) return;
-  console.error(`${new Date().toISOString()} ALP_TEST_CRASH_AT=${name}: killing alpd`);
+  createLogger({ component: 'alpd' }).error(`ALP_TEST_CRASH_AT=${name}: killing alpd`, { code: 'ALP_TEST_CRASH' });
   process.kill(process.pid, 'SIGKILL');
 }
 
@@ -278,9 +282,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         restore: { agent: session.agent, threadId: session.threadId, runtime: session.runtime, model: session.model, workflow: session.workflow },
       }, { history: 'skip', delegation: record.delegation ?? true });
       const outcomes = await runtime.recover(record.id, { continueRoot: working });
-      console.log(`${new Date().toISOString()} recovered ${record.id}: ${outcomes.map(outcome => `${outcome.agent} ${outcome.outcome}`).join(', ') || 'root'}`);
+      recoveryLog.info(`recovered ${record.id}: ${outcomes.map(outcome => `${outcome.agent} ${outcome.outcome}`).join(', ') || 'root'}`, { event: 'recovered', sessionId: record.id, rootId: record.rootId });
     } catch (error: any) {
-      console.error(`${new Date().toISOString()} could not recover ${record.id}`, error);
+      recoveryLog.error(`could not recover ${record.id}`, { code: 'ALP_RECOVERY_FAILED', sessionId: record.id, rootId: record.rootId, error });
       await runtime.abandon(record.id, error?.message ?? String(error)).catch(() => {});
     } finally {
       recovering.delete(record.id);
@@ -528,7 +532,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       owned?.delete(method);
       return { unregistered: method };
     },
-    'daemon.status': () => ({ pid: process.pid, startedAt, version, protocolVersion: PROTOCOL_VERSION, sessions: runtime.list().length, questions: runtime.questions().length, ...(previousExit ? { previousExit } : {}), ...(store ? { persistence: store.health() } : {}) }),
+    'daemon.status': async () => ({ pid: process.pid, startedAt, version, protocolVersion: PROTOCOL_VERSION, sessions: runtime.list().length, questions: runtime.questions().length, ...(previousExit ? { previousExit } : {}), ...(store ? { persistence: store.health() } : {}), health: await health() }),
 
     'session.status'(_connection, { sessionId }) {
       if (typeof sessionId !== 'string') throw new RpcError(-32602, 'sessionId is required');
@@ -780,6 +784,23 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     });
   }
 
+  /**
+   * Liveness is that alpd answers at all. Readiness is that it can do its work: it accepts
+   * connections, and its state directory can be read and written now with no write failing.
+   * Not ready is a state to fix, not a reason to stop: the checks say what and the codes
+   * match alpd's log.
+   */
+  async function health() {
+    const checks: Array<{ id: string; ok: boolean; code?: string; message?: string }> = [{ id: 'accepting', ok: !closing, ...(closing ? { code: 'ALP_SHUTTING_DOWN', message: 'alpd is shutting down' } : {}) }];
+    if (store) {
+      const probe = await store.probe();
+      checks.push({ id: 'state', ...probe });
+      const failing = store.failing();
+      checks.push({ id: 'persistence', ok: failing === 0, ...(failing ? { code: 'ALP_PERSISTENCE_FAILING', message: `${failing} write${failing > 1 ? 's' : ''} of sessions or timelines failed and have not been written since` } : {}) });
+    }
+    return { live: true, ready: checks.every(check => check.ok), checks };
+  }
+
   async function dispatch(connection: Connection, message: any) {
     const { id, method, params } = message ?? {};
     const respond = (body: object) => { if (id !== undefined && id !== null) connection.send({ jsonrpc: '2.0', id, ...body }); };
@@ -821,6 +842,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     } catch (error) {
       const code = error instanceof RpcError ? error.code : /is not open/.test(String((error as Error)?.message)) ? ERROR.notFound : ERROR.failed;
       const data = error instanceof RpcError && error.data !== undefined ? { data: error.data } : {};
+      // Plain errors are mostly refusals of bad input; logged so an unexpected one can be traced by its request.
+      if (!(error instanceof RpcError) && code === ERROR.failed) log.warn(`${method} failed`, { code: 'ALP_RPC_FAILED', requestId: id, sessionId: params?.sessionId, method, error });
+      else if (error instanceof RpcError && (error.data as { reason?: string } | undefined)?.reason === 'persistence_failed') log.warn(`${method} failed`, { code: 'ALP_PERSISTENCE_FAILED', requestId: id, sessionId: params?.sessionId, method, error });
       respond({ error: { code, message: error instanceof Error ? error.message : String(error), ...data } });
     }
   }
@@ -860,17 +884,18 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     socket.setEncoding('utf8');
     socket.on('data', chunk => {
       buffer += chunk;
-      if (Buffer.byteLength(buffer, 'utf8') > MAX_FRAME) { socket.destroy(); return; }
+      if (Buffer.byteLength(buffer, 'utf8') > MAX_FRAME) { log.warn('closed a connection that sent a frame over the size limit', { code: 'ALP_IPC_FRAME_TOO_LARGE' }); socket.destroy(); return; }
       for (let index = buffer.indexOf('\n'); index >= 0; index = buffer.indexOf('\n')) {
         const line = buffer.slice(0, index);
         buffer = buffer.slice(index + 1);
         if (!line.trim()) continue;
         let message;
-        try { message = JSON.parse(line); } catch { connection.send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); continue; }
+        try { message = JSON.parse(line); } catch { log.warn('a client sent a line that is not JSON', { code: 'ALP_IPC_PARSE_ERROR', bytes: line.length }); connection.send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); continue; }
         void dispatch(connection, message);
       }
     });
-    socket.on('error', () => {});
+    // A client that goes away mid-write resets its connection; that alone is no trouble.
+    socket.on('error', (error: NodeJS.ErrnoException) => log[error.code === 'ECONNRESET' || error.code === 'EPIPE' ? 'debug' : 'warn']('a client connection failed', { code: 'ALP_IPC_SOCKET_ERROR', error }));
     socket.on('close', () => disconnect(connection));
   });
 

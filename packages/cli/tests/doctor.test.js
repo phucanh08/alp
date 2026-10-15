@@ -2,7 +2,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
@@ -132,4 +132,122 @@ test('alp doctor --json prints the checks and exits 0 when nothing fails', async
   assert.deepEqual(report.fixed, []);
   assert.ok(report.checks.some(check => check.id === 'agents' && check.status === 'ok'));
   assert.ok(report.checks.every(check => check.status !== 'fail'), JSON.stringify(report.checks));
+});
+
+const SECRET = 'sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
+const jsonLine = record => JSON.stringify({ time: '2026-10-15T01:00:00.000Z', component: 'alpd', ...record });
+
+async function privateHome(t) {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-doctor-'));
+  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  const home = path.join(directory, 'home');
+  await mkdir(path.join(home, 'state', 'sessions'), { recursive: true, mode: 0o700 });
+  await mkdir(path.join(home, 'logs'), { mode: 0o700 });
+  await chmod(home, 0o700);
+  return { directory, home };
+}
+
+test('doctor diagnoses a failed start, persistence, IPC and provider trouble from the log, and quotes no secret', async t => {
+  const { home, directory } = await privateHome(t);
+  await writeFile(path.join(home, 'logs', 'alpd.log'), [
+    `2026-10-09T00:00:00.000Z fatal Error: ANTHROPIC_API_KEY=${SECRET}`,
+    jsonLine({ level: 'info', msg: 'alpd 0.10.0 ready', event: 'ready' }),
+    jsonLine({ level: 'error', code: 'ALP_PERSISTENCE_WRITE_FAILED', msg: `record s1 failed: token=${SECRET}`, sessionId: 's1' }),
+    jsonLine({ level: 'warn', code: 'ALP_IPC_PARSE_ERROR', component: 'alpd.ipc', msg: 'a client sent a line that is not JSON' }),
+    jsonLine({ level: 'error', code: 'ALP_PROVIDER_FAILED', component: 'runtime', msg: `peer's codex session failed ${SECRET}`, sessionId: 's2', agent: 'peer' }),
+    jsonLine({ level: 'error', code: 'ALP_IPC_LISTEN_FAILED', msg: 'alpd failed to start while opening its IPC endpoint', error: { name: 'Error', code: 'EADDRINUSE', message: `listen EADDRINUSE Bearer ${SECRET}` } }),
+    '',
+  ].join('\n'), { mode: 0o600 });
+  await writeFile(path.join(home, 'state', 'sessions', 'bad.json'), '{"version": 1, "id": ', { mode: 0o600 });
+  await writeFile(path.join(home, 'state', 'sessions', 's2.json'), JSON.stringify({
+    version: 1, id: 's2', rootId: 's2', status: 'failed', updatedAt: new Date().toISOString(), session: { agent: 'peer', runtime: 'codex' },
+    lastError: { code: 'login_required', message: `codex says: token ${SECRET}` },
+  }), { mode: 0o600 });
+
+  const checks = await diagnose({ home, env: { PATH: path.join(directory, 'empty') }, timeoutMs: 200 });
+  const find = id => checks.find(check => check.id === id);
+  assert.equal(find('startup').status, 'fail');
+  assert.match(find('startup').summary, /ALP_IPC_LISTEN_FAILED/);
+  assert.match(find('startup').details[0], /EADDRINUSE/);
+  assert.equal(find('persistence log').status, 'warn');
+  assert.match(find('persistence log').summary, /ALP_PERSISTENCE_WRITE_FAILED x1/);
+  assert.match(find('persistence log').details[0], /s1/);
+  assert.match(find('ipc log').summary, /ALP_IPC_PARSE_ERROR x1/);
+  assert.match(find('provider log').summary, /ALP_PROVIDER_FAILED x1/);
+  assert.match(find('provider log').details[0], /session s2/);
+  assert.equal(find('state').status, 'warn');
+  assert.deepEqual(find('state').details.slice(0, 1), ['bad.json']);
+  assert.equal(find('failed sessions').status, 'warn');
+  assert.match(find('failed sessions').details[0], /peer s2 \(codex\) login_required/);
+  assert.ok(!JSON.stringify(checks).includes(SECRET), 'a secret reached the doctor output');
+  // A start that failed is not what a running alpd is doing.
+  assert.ok(!checks.some(check => check.id === 'ipc' || check.id === 'readiness'));
+});
+
+test('doctor says an alpd that runs but cannot be reached is an IPC failure, with the code', async t => {
+  const { home, directory } = await privateHome(t);
+  const socket = path.join(directory, 'nowhere.sock');
+  await writeFile(path.join(home, 'alpd.lock'), JSON.stringify({ pid: process.pid, startedAt: new Date(Date.now() - 600_000).toISOString(), bootTime: bootTime(), socket, ready: true, version: '9.9.9' }), { mode: 0o600 });
+  const checks = await diagnose({ home, env: { PATH: path.join(directory, 'empty') }, timeoutMs: 200 });
+  assert.equal(byId(checks, 'alpd')[0].status, 'ok');
+  const ipc = byId(checks, 'ipc')[0];
+  assert.equal(ipc.status, 'fail');
+  assert.match(ipc.summary, /running but cannot be reached.*ALP_IPC_SOCKET_MISSING/);
+  assert.equal(byId(checks, 'readiness').length, 0);
+});
+
+test('doctor only diagnoses: nothing is changed without --fix, and --fix keeps sessions, tasks, timelines and what it drops', async t => {
+  const { home, directory } = await privateHome(t);
+  const project = path.join(directory, 'project');
+  await initProject(project);
+  const keep = {
+    [path.join(home, 'state', 'sessions', 's1.json')]: JSON.stringify({ version: 1, id: 's1', rootId: 's1', status: 'idle' }),
+    [path.join(home, 'state', 'timeline', 's1.jsonl')]: '{"cursor":1}\n{"cursor":2',
+    [path.join(home, 'state', 'receipts', 'r1.json')]: '{"version":1}',
+    [path.join(home, 'state', 'live.json')]: JSON.stringify([{ assignmentId: 'a-gone', agent: 'peer', project: path.join(directory, 'nowhere') }]),
+    [path.join(project, '.alp', 'tasks', 't1.json')]: '{"id":"t1"}',
+  };
+  for (const [file, body] of Object.entries(keep)) {
+    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+    await writeFile(file, body, { mode: 0o600 });
+  }
+  const lockFile = path.join(home, 'alpd.lock');
+  await writeFile(lockFile, JSON.stringify({ pid: 2 ** 22 + 12345, bootTime: bootTime(), socket: path.join(home, 'alpd.sock') }), { mode: 0o600 });
+  const unchanged = async () => { for (const [file, body] of Object.entries(keep)) assert.equal(await readFile(file, 'utf8'), body, file); };
+
+  const run = args => JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('../src/cli.js', import.meta.url)), 'doctor', '--json', '--project', project, ...args], {
+    env: { ...process.env, ALP_HOME: home, PATH: path.join(directory, 'empty') }, stdio: ['ignore', 'pipe', 'ignore'],
+  }).toString());
+  // Not even the dead alpd's lock goes without --fix; the exit code 1 is the missing runtimes.
+  const plain = (() => { try { return run([]); } catch (error) { return JSON.parse(error.stdout.toString()); } })();
+  assert.deepEqual(plain.fixed, []);
+  assert.ok(plain.checks.some(check => check.fix), 'the repairs are offered');
+  assert.equal(await readFile(lockFile, 'utf8').then(() => true, () => false), true);
+  await unchanged();
+
+  const checks = await diagnose({ home, project, env: { PATH: path.join(directory, 'empty') } });
+  const fixed = await repair(checks);
+  assert.ok(fixed.some(item => item.id === 'live work'));
+  // The stale lock goes; everything that holds work stays, and the dropped assignment is kept beside live.json.
+  assert.equal(await readFile(lockFile, 'utf8').then(() => true, () => false), false);
+  for (const file of Object.keys(keep).filter(file => !file.endsWith('live.json'))) assert.equal(await readFile(file, 'utf8'), keep[file]);
+  const dropped = (await readdir(path.join(home, 'state'))).filter(name => /^live\.json\.dropped-\d+\.json$/.test(name));
+  assert.equal(dropped.length, 1);
+  assert.deepEqual(JSON.parse(await readFile(path.join(home, 'state', dropped[0]), 'utf8')).map(entry => entry.assignmentId), ['a-gone']);
+  assert.deepEqual(JSON.parse(await readFile(path.join(home, 'state', 'live.json'), 'utf8')), []);
+});
+
+test('doctor --json and error output stay machine readable and scrubbed', async t => {
+  const { home, directory } = await privateHome(t);
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const env = { ...process.env, ALP_HOME: home, PATH: path.join(directory, 'empty'), ANTHROPIC_API_KEY: SECRET };
+  let result;
+  try { result = { stdout: execFileSync(process.execPath, [cli, 'doctor', '--json'], { env, stdio: ['ignore', 'pipe', 'pipe'] }).toString(), stderr: '' }; }
+  catch (error) { result = { stdout: error.stdout.toString(), stderr: error.stderr.toString() }; }
+  // Stdout is one JSON document and nothing else.
+  assert.doesNotThrow(() => JSON.parse(result.stdout));
+  assert.ok(!result.stdout.includes(SECRET));
+  // A failing command prints its error scrubbed, on stderr.
+  const failing = (() => { try { execFileSync(process.execPath, [cli, 'task', 'show', `Bearer-${SECRET}`], { env, stdio: ['ignore', 'pipe', 'pipe'] }); return { stderr: '', stdout: '' }; } catch (error) { return { stderr: error.stderr.toString(), stdout: error.stdout.toString() }; } })();
+  assert.ok(!failing.stderr.includes(SECRET) && !failing.stdout.includes(SECRET));
 });

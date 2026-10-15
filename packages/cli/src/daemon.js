@@ -3,6 +3,7 @@ import path from 'node:path';
 import { installedProgram, installService, serviceFor, uninstallService } from '@anhlp/alp-client/service';
 import { holdDaemon, startDaemon } from '@anhlp/alp-client/supervise';
 import { alpHome, connect, lockAlive, readLock } from '@anhlp/alp-client/index';
+import { scrubText } from '@anhlp/alp-core/log';
 import { UsageError } from './usage.js';
 import { DAEMON_ENTRY } from './paths.js';
 
@@ -59,7 +60,7 @@ async function stop() {
 }
 
 async function daemon([action, ...rest]) {
-  if (rest.length) throw new UsageError();
+  if (rest.length && !(action === 'status' && rest.length === 1 && rest[0] === '--json')) throw new UsageError();
   if (action === 'start') {
     const socket = await start();
     const lock = await readLock(alpHome());
@@ -97,18 +98,33 @@ async function daemon([action, ...rest]) {
     for (let i = 0; i < 150 && lockAlive(await readLock(alpHome())); i++) await new Promise(resolve => setTimeout(resolve, 100));
     console.log(`alpd service ${service.name} removed and alpd stopped; alp daemon start runs it without a service`);
   } else if (action === 'status') {
+    // Exit codes: 0 ready, 3 not running, 4 alive but not ready (or not answering).
+    const json = rest[0] === '--json';
     const lock = await readLock(alpHome());
     if (!lockAlive(lock)) {
-      console.log('alpd is not running');
+      if (json) console.log(JSON.stringify({ running: false, live: false, ready: false }));
+      else console.log('alpd is not running');
       process.exitCode = 3;
       return;
     }
-    const client = await connect(lock.socket, { name: 'alp-cli', version: '1' });
+    const client = await connect(lock.socket, { name: 'alp-cli', version: '1' }).catch(error => {
+      if (json) console.log(JSON.stringify({ running: true, live: true, ready: false, pid: lock.pid, checks: [{ id: 'ipc', ok: false, code: 'ALP_IPC_FAILED', message: scrubText(error.message) }] }));
+      else console.log(`alpd (pid ${lock.pid}) is running but not answering on ${lock.socket}: ${scrubText(error.message)}; alp doctor says more`);
+      process.exitCode = 4;
+    });
+    if (!client) return;
     const status = await client.request('daemon.status').finally(() => client.close());
-    console.log(`alpd ${status.version} running (pid ${status.pid}) since ${status.startedAt}; ${status.sessions} live sessions; socket ${lock.socket}`);
-    if (status.previousExit?.kind === 'crash') console.log(`the alpd before it stopped unexpectedly${status.previousExit.at ? ` around ${status.previousExit.at}` : ''}`);
-    const service = await installed();
-    if (service) console.log(`managed by ${service.kind} as ${service.name}`);
+    const health = status.health ?? { live: true, ready: lock.ready === true, checks: [] };
+    if (json) {
+      console.log(JSON.stringify({ running: true, ...status, health }));
+    } else {
+      console.log(`alpd ${status.version} running (pid ${status.pid}) since ${status.startedAt}; ${status.sessions} live sessions; socket ${lock.socket}`);
+      console.log(health.ready ? 'ready' : `not ready: ${health.checks.filter(check => !check.ok).map(check => `${check.code ?? check.id} (${scrubText(check.message ?? 'failed')})`).join(', ') || 'starting'}`);
+      if (status.previousExit?.kind === 'crash') console.log(`the alpd before it stopped unexpectedly${status.previousExit.at ? ` around ${status.previousExit.at}` : ''}`);
+      const service = await installed();
+      if (service) console.log(`managed by ${service.kind} as ${service.name}`);
+    }
+    if (!health.ready) process.exitCode = 4;
   } else {
     throw new UsageError();
   }

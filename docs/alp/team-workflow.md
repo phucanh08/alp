@@ -369,6 +369,15 @@ project value takes precedence.
 or with `--project DIR`, in that project:
 - Codex and Claude: found, `--version` works, logged in. One is enough.
 - alpd: built, and whether it runs; a lock or socket left by a dead alpd.
+- alpd as a client sees it: `ipc` (whether its socket answers, or the code why
+  not: `ALP_IPC_SOCKET_MISSING`, `ALP_IPC_REFUSED`, `ALP_IPC_DENIED`,
+  `ALP_IPC_TIMEOUT`, ...) and `readiness` (alive is not ready: alpd is ready when
+  it accepts connections and its state directory can be read and written now
+  with no write failing).
+- `state`: `$ALP_HOME/state` is readable and writable, and its session records
+  parse. `startup`, `persistence log`, `ipc log` and `provider log`: what alpd's
+  log says since it was last ready, grouped by error code. `failed sessions`:
+  sessions that ended in failure, with their codes.
 - The Bash sandbox for Claude sessions.
 - `$ALP_HOME`: entries others can read, `settings.json`, skills that
   `role-skills.json` lists but the library lacks, and interrupted work in
@@ -376,13 +385,35 @@ or with `--project DIR`, in that project:
 - The project: `.alp/settings.json` and every agent's resolution, worktrees git
   lists but that are gone, and `alp/*` branches.
 
+Doctor only diagnoses. It changes nothing unless `--fix` is given, and every line
+it prints is scrubbed of credentials, whatever a log, a runtime or a file quoted.
+`alp daemon status [--json]` answers liveness and readiness for scripts: exit 0
+ready, 3 not running, 4 running but not ready or not answering.
+
 `alp doctor --fix` repairs only what nothing uses: it removes a dead alpd's lock
 and socket, takes group and other access away under `$ALP_HOME`, drops live
-entries of vanished projects (with alpd stopped), runs `git worktree prune`, and
+entries of vanished projects (with alpd stopped, a copy kept beside `live.json`), runs `git worktree prune`, and
 deletes `alp/*` branches already merged into HEAD with `git branch -d`. It leaves
 alone a branch checked out in a worktree or held by work alpd will continue.
 Unmerged `alp/*` branches hold kept work and are listed for you to merge or
 delete. `--json` prints the checks; the exit code is 1 when any check failed.
+Sessions, tasks, timelines and receipts are never touched by a repair.
+
+### Logs
+
+alpd, the runtime, the store, `alp acp` and the Paseo integration write one JSON
+object per line to stderr (for alpd, `$ALP_HOME/logs/alpd.log`): `time`, `level`
+(`debug`, `info`, `warn`, `error`; `ALP_LOG_LEVEL` sets the floor, default `info`),
+`component`, `msg`, an error `code` when something failed (`ALP_STARTUP_FAILED`,
+`ALP_IPC_LISTEN_FAILED`, `ALP_PERSISTENCE_WRITE_FAILED`, `ALP_PROVIDER_FAILED`,
+...), correlation ids (`sessionId`, `rootId`, `assignmentId`, `clientMessageId`,
+`requestId`, `agent`) and, for an error, its name, code, message and the top of its
+stack. stdout is never used for logs: it belongs to command output, `--json` and
+the ACP stream. Prompts, instructions, environments, headers and credentials are
+not logged; keys named like secrets are replaced, secret-looking values and the
+values of secret-named environment variables are scrubbed from every string, and
+long strings are cut. Nothing is sent anywhere: logs and reports stay on this
+machine.
 
 ## Pause and usage limits
 
