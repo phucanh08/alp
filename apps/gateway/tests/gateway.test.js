@@ -163,7 +163,8 @@ test('rate and pending limits answer errors, and a client that keeps flooding is
 });
 
 test('a client that does not read is closed as a slow consumer without holding up another', async t => {
-  const { daemon, rawSession, sdk, a } = await setup(t, { sessions: [['s1', 'a']], config: { limits: { maxBufferedBytes: 2 * 1024 * 1024, rate: 100_000, burst: 100_000 } } });
+  // A grace period longer than the test, so the close frame waits for the reader instead of a terminate.
+  const { daemon, rawSession, sdk, a, lines } = await setup(t, { sessions: [['s1', 'a']], config: { limits: { maxBufferedBytes: 2 * 1024 * 1024, rate: 100_000, burst: 100_000, closeGraceMs: 120_000 } } });
   const slow = await rawSession('alice');
   slow.socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'h', method: 'daemon.hello', params: { protocolVersion: 1 } }));
   slow.socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'a', method: 'session.attach', params: { sessionId: 's1', replay: false } }));
@@ -185,6 +186,7 @@ test('a client that does not read is closed as a slow consumer without holding u
     await until(() => seen.length === emitted || ended, 'the reading client caught up', 10_000);
   }
   assert.ok(fast.client.closed === false, 'the reading client is still connected');
+  assert.ok(lines.some(line => line.includes('ALP_GATEWAY_SLOW_CONSUMER')), 'the gateway gave up on the reader');
   slow.socket._socket.resume();
   assert.equal((await slow.closed).code, 4431);
   await until(() => seen.length === emitted, 'the other client got every event');
