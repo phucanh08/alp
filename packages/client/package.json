@@ -2,7 +2,7 @@
   "name": "@anhlp/alp-client",
   "version": "0.10.0",
   "type": "module",
-  "description": "ALP client module",
+  "description": "ALP client: portable JSON-RPC SDK, WebSocket and Node IPC transports, daemon discovery and setup",
   "files": [
     "src",
     "dist"
@@ -56,6 +56,14 @@
       "types": "./dist/index.d.ts",
       "default": "./src/index.js"
     },
+    "./ipc": {
+      "alp-source": {
+        "types": "./src/ipc.js",
+        "default": "./src/ipc.js"
+      },
+      "types": "./dist/ipc.d.ts",
+      "default": "./src/ipc.js"
+    },
     "./library-test": {
       "alp-source": {
         "types": "./src/library-test.js",
@@ -71,6 +79,14 @@
       },
       "types": "./dist/mcp-probe.d.ts",
       "default": "./src/mcp-probe.js"
+    },
+    "./portable": {
+      "alp-source": {
+        "types": "./src/portable.js",
+        "default": "./src/portable.js"
+      },
+      "types": "./dist/portable.d.ts",
+      "default": "./src/portable.js"
     },
     "./prompt": {
       "alp-source": {
@@ -111,6 +127,14 @@
       },
       "types": "./dist/supervise.d.ts",
       "default": "./src/supervise.js"
+    },
+    "./websocket": {
+      "alp-source": {
+        "types": "./src/websocket.js",
+        "default": "./src/websocket.js"
+      },
+      "types": "./dist/websocket.d.ts",
+      "default": "./src/websocket.js"
     }
   },
   "engines": {
