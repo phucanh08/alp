@@ -221,16 +221,19 @@ test('session.create: spec fields are allow-listed, cwd is sent as the canonical
   const { client } = await sdk('alice');
   const events = [];
   client.onEvent(envelope => events.push(envelope));
-  for (const field of ['env', 'mcpServers', 'workdir', 'writeRoot', 'copy', 'copyOf', 'restore', 'systemPrompt', 'keepThread', 'workflow']) {
+  for (const field of ['env', 'mcpServers', 'workdir', 'writeRoot', 'copy', 'copyOf', 'restore', 'systemPrompt', 'keepThread']) {
     await assert.rejects(client.request('session.create', { spec: { cwd: a, [field]: field === 'env' || field === 'restore' ? { X: '1' } : 'x' } }), error => error.code === 1003 && error.data?.reason === 'spec_field' && error.data.field === field, field);
     await assert.rejects(client.request('session.preview', { spec: { cwd: a, [field]: field === 'restore' ? {} : 'x' } }), error => error.code === 1003 && error.data?.reason === 'spec_field', field);
   }
   for (const agent of ['../x', 'a/b', '..', '']) {
     await assert.rejects(client.request('session.create', { spec: { cwd: a, agent } }), error => error.code === 1003 && error.data?.field === 'agent', agent);
+    // A team is named the same way: a plain name the daemon host resolves.
+    await assert.rejects(client.request('session.create', { spec: { cwd: a, workflow: agent } }), error => error.code === 1003 && error.data?.field === 'workflow', `workflow ${agent}`);
   }
   assert.deepEqual(daemon.calls('session.create'), []);
-  const { session } = await client.request('session.create', { spec: { cwd: a, model: 'codex:gpt' } });
+  const { session } = await client.request('session.create', { spec: { cwd: a, model: 'codex:gpt', workflow: 'cafe' } });
   const sent = daemon.calls('session.create')[0].params;
+  assert.equal(sent.spec.workflow, 'cafe', 'the team Paseo picked reaches alpd');
   assert.match(sent.sessionId, /^ses_[a-f0-9]{16}$/);
   assert.equal(sent.spec.cwd, canonicalA);
   assert.equal(session.id, sent.sessionId);

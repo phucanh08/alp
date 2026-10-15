@@ -4,7 +4,7 @@
 // and losing alpd. Nothing here starts alpd; test/integration/gateway.test.js does.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { revokeCredential, rotateCredential, resolveConfig } from '../src/index.js';
@@ -49,6 +49,8 @@ test('a ticket needs a valid bearer credential and an allowed Origin, and opens 
   assert.equal(headers.get('cache-control'), 'no-store');
   assert.deepEqual(body.principal.permissions, ['session.read', 'session.write', 'project.read', 'project.write']);
   assert.equal(body.principal.workspaces.length, 1);
+  // The same workspace with alpd's name for it, so a client can match projectRoot in session summaries.
+  assert.deepEqual(body.principal.workspaceRoots, [{ path: body.principal.workspaces[0], canonical: await realpath(body.principal.workspaces[0]) }]);
   // Without alp.v1, without the ticket, from another origin, or twice: refused before the upgrade.
   assert.equal((await raw([body.subprotocols[1]])).refused, 400);
   assert.equal((await raw(['alp.v1'])).refused, 401);
