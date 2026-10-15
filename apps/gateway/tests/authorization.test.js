@@ -309,7 +309,8 @@ test('project resources: tasks and teams of a granted workspace, identity params
   const { id } = await client.request('task.create', { projectRoot: a, title: 'ship it', by: 'mallory', requestId: 'r1' });
   assert.deepEqual(daemon.calls('task.create').at(-1).params, { projectRoot: a, title: 'ship it', requestId: 'r1' }, 'no identity reaches alpd');
   assert.deepEqual((await client.request('task.list', { projectRoot: a })).tasks.map(task => task.id), [id]);
-  assert.deepEqual((await client.request('task.list', { projectRoot: canonicalA })).tasks, [], 'the canonical name is another project string to alpd');
+  // Only where the temp directory sits behind a symlink (macOS /tmp → /private/tmp) are they two names.
+  if (canonicalA !== a) assert.deepEqual((await client.request('task.list', { projectRoot: canonicalA })).tasks, [], 'the canonical name is another project string to alpd');
   assert.equal((await client.request('task.update', { projectRoot: a, id, action: 'close' })).status, 'closed');
   assert.ok((await client.request('team.list', { projectRoot: a })).teams.length);
   assert.ok((await client.request('library.list', { kind: 'agents', projectRoot: a })).entries.length);
