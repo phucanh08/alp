@@ -2,6 +2,7 @@ import { appendFile, mkdir, open, readdir, readFile, rm, stat, writeFile } from 
 import { replaceFile } from './lock.js';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
+import { createLogger } from '@anhlp/alp-core/log';
 import type { Envelope, SessionSnapshot, SessionSpec } from '@anhlp/alp-runtime/index';
 import type { SessionError, SessionStatus } from '@anhlp/alp-protocol/session';
 
@@ -57,6 +58,8 @@ export type UnreadableReceipt = { version: 1; state: 'unreadable' };
 /** Failed writes since alpd started; `ok` until the first one (ALPD §66). */
 export type StoreHealth = { ok: boolean; failures: number; lastError?: { at: string; operation: string; message: string } };
 
+const log = createLogger({ component: 'store' });
+
 const SAFE = /[^\w.:-]/g;
 const fileName = (id: string) => id.replace(SAFE, '_');
 const TAIL_CHUNK = 64 * 1024;
@@ -96,7 +99,7 @@ export function createStore(root: string) {
    * Serializes work per key so a later write never lands before an earlier one. The
    * returned promise rejects when the write fails; the queue itself goes on.
    */
-  function queue(map: Map<string, Promise<void>>, key: string, operation: string, work: () => Promise<void>, sticky = false) {
+  function queue(map: Map<string, Promise<void>>, key: string, operation: string, work: () => Promise<void>, sticky = false, ids: { sessionId?: string; rootId?: string; clientMessageId?: string } = {}) {
     const next = (map.get(key) ?? Promise.resolve()).then(prepare).then(work);
     const failure = map === appends ? `timeline:${key}` : key;
     const settled = next.then(
@@ -106,7 +109,7 @@ export function createStore(root: string) {
         health.ok = false;
         health.failures++;
         health.lastError = { at: new Date().toISOString(), operation, message: error?.message ?? String(error) };
-        console.error(`${new Date().toISOString()} store: ${operation} failed`, error);
+        log.error(`${operation} failed`, { code: 'ALP_PERSISTENCE_WRITE_FAILED', operation, error, ...ids });
       });
     map.set(key, settled);
     void settled.then(() => { if (map.get(key) === settled) map.delete(key); });
@@ -141,7 +144,7 @@ export function createStore(root: string) {
       try { JSON.parse(tail.toString('utf8')); whole = true; } catch {}
       if (whole) await handle.write('\n', size);
       else await handle.truncate(start);
-      console.error(`${new Date().toISOString()} store: ${whole ? 'completed' : 'removed'} a timeline line cut short in ${path.basename(file)} (${tail.length} bytes)`);
+      log.warn(`${whole ? 'completed' : 'removed'} a timeline line cut short in ${path.basename(file)} (${tail.length} bytes)`, { code: 'ALP_TIMELINE_REPAIRED', file: path.basename(file), bytes: tail.length });
     } finally {
       await handle.close();
     }
@@ -159,7 +162,7 @@ export function createStore(root: string) {
       cursor = typeof envelope.cursor === 'number' && envelope.cursor > cursor ? envelope.cursor : cursor + 1;
       envelopes.push({ ...envelope, cursor });
     }
-    if (skipped) console.error(`${new Date().toISOString()} store: skipped ${skipped} unreadable timeline lines in ${name}`);
+    if (skipped) log.warn(`skipped ${skipped} unreadable timeline lines in ${name}`, { code: 'ALP_TIMELINE_UNREADABLE', file: name, skipped });
     return envelopes;
   }
 
@@ -169,7 +172,7 @@ export function createStore(root: string) {
     put(record: SessionRecord) {
       const file = path.join(sessionsDir, `${fileName(record.id)}.json`);
       const body = JSON.stringify(record);
-      return queue(writes, record.id, `record ${record.id}`, () => writeAtomic(file, body));
+      return queue(writes, record.id, `record ${record.id}`, () => writeAtomic(file, body), false, { sessionId: record.id, rootId: record.rootId });
     },
 
     async receipt(key: string): Promise<Receipt | UnreadableReceipt | undefined> {
@@ -190,7 +193,7 @@ export function createStore(root: string) {
 
     putReceipt(key: string, receipt: Receipt) {
       const body = JSON.stringify(receipt);
-      return queue(writes, `receipt:${key}`, `receipt ${receipt.clientMessageId}`, () => writeAtomic(receiptFile(key), body));
+      return queue(writes, `receipt:${key}`, `receipt ${receipt.clientMessageId}`, () => writeAtomic(receiptFile(key), body), false, { sessionId: receipt.sessionId, clientMessageId: receipt.clientMessageId });
     },
 
     removeReceipt(key: string) {
@@ -235,9 +238,9 @@ export function createStore(root: string) {
         try {
           const record = JSON.parse(await readFile(path.join(sessionsDir, name), 'utf8'));
           if (record?.version === 1 && typeof record.id === 'string') records.push(record);
-          else console.error(`${new Date().toISOString()} store: skipped invalid record ${name}`);
+          else log.warn(`skipped invalid record ${name}`, { code: 'ALP_RECORD_UNREADABLE', file: name });
         } catch {
-          console.error(`${new Date().toISOString()} store: skipped unreadable record ${name}`);
+          log.warn(`skipped unreadable record ${name}`, { code: 'ALP_RECORD_UNREADABLE', file: name });
         }
       }
       return records;
@@ -250,7 +253,7 @@ export function createStore(root: string) {
       return queue(appends, rootId, `timeline ${rootId}`, async () => {
         if (!repaired.has(rootId)) { await repairTail(file); repaired.add(rootId); }
         await appendFile(file, line, { mode: 0o600 });
-      }, true);
+      }, true, { rootId });
     },
 
     async timeline(rootId: string): Promise<Envelope[]> {
@@ -271,6 +274,32 @@ export function createStore(root: string) {
     async drain({ records = [] as string[], timelines = [] as string[] }) {
       await Promise.all([...records.map(id => writes.get(id)), ...timelines.map(id => appends.get(id))]);
       return [...records.filter(id => failed.has(id)), ...timelines.filter(id => failed.has(`timeline:${id}`))];
+    },
+
+    /**
+     * Whether the state directory can be read and written right now: a small file is written,
+     * read back and removed. `StoreHealth` only says what failed since alpd started.
+     */
+    async probe(): Promise<{ ok: boolean; code?: string; message?: string }> {
+      const file = path.join(root, `.probe-${process.pid}-${randomBytes(3).toString('hex')}.tmp`);
+      const token = randomBytes(8).toString('hex');
+      let step: 'write' | 'read' = 'write';
+      try {
+        await prepare();
+        await writeFile(file, token, { mode: 0o600 });
+        step = 'read';
+        if (await readFile(file, 'utf8') !== token) throw new Error('what was written is not what was read back');
+        return { ok: true };
+      } catch (error: any) {
+        return { ok: false, code: step === 'write' ? 'ALP_STATE_NOT_WRITABLE' : 'ALP_STATE_NOT_READABLE', message: `${error?.code ? `${error.code}: ` : ''}${error?.message ?? error}` };
+      } finally {
+        await rm(file, { force: true }).catch(() => {});
+      }
+    },
+
+    /** How many records, receipts and timelines are failed now: a later successful write clears a record, a lost timeline line never clears. */
+    failing() {
+      return failed.size;
     },
 
     health(): StoreHealth {

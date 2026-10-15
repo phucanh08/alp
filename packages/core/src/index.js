@@ -9,6 +9,7 @@ export * as hooks from './hooks.js';
 export * as init from './init.js';
 export * as library_edit from './library-edit.js';
 export * as library from './library.js';
+export * as log from './log.js';
 export * as models from './models.js';
 export * as permissions from './permissions.js';
 export * as profiles from './profiles.js';

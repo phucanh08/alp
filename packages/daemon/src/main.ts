@@ -10,11 +10,13 @@ import { createDaemonServer } from './server.js';
 import { acquireLock, heartbeat, releaseLock, updateLock } from './lock.js';
 import { createStore } from './store.js';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
+import { createLogger } from '@anhlp/alp-core/log';
 
 declare const __ALP_VERSION__: string;
 const VERSION = typeof __ALP_VERSION__ === 'string' ? __ALP_VERSION__ : '0.0.0-dev';
 const LOG_BYTES = 10 * 1024 * 1024;
 const LOG_FILES = 3;
+const log = createLogger({ component: 'alpd' });
 
 async function rotate(log: string) {
   const size = await stat(log).then(info => info.size, () => 0);
@@ -73,7 +75,7 @@ async function userSettings(home: string): Promise<any> {
   try { text = await readFile(file, 'utf8'); } catch { return {}; }
   try { return validateUserSettings(JSON.parse(text), file); }
   catch (error: any) {
-    console.error(`${new Date().toISOString()} ignoring ${file}: ${error?.message ?? error}`);
+    log.warn(`ignoring ${file}: ${error?.message ?? error}`, { code: 'ALP_SETTINGS_INVALID' });
     return {};
   }
 }
@@ -105,15 +107,20 @@ const leadsGroup = () => process.platform !== 'win32' && groupAlive(process.pid)
 async function stopLeftovers(previous: { pid?: number; groupLeader?: boolean } | undefined) {
   const pid = previous?.pid;
   if (!previous?.groupLeader || !Number.isSafeInteger(pid) || pid === process.pid || !leadsGroup() || !groupAlive(pid!)) return;
-  console.log(`${new Date().toISOString()} stopping processes the previous alpd (pid ${pid}) left running`);
+  log.warn(`stopping processes the previous alpd (pid ${pid}) left running`, { code: 'ALP_LEFTOVER_PROCESSES', previousPid: pid });
   const signal = (name: NodeJS.Signals) => { try { process.kill(-pid!, name); } catch {} };
   signal('SIGTERM');
   for (let waited = 0; waited < 3000 && groupAlive(pid!); waited += 50) await new Promise(resolve => setTimeout(resolve, 50));
   if (groupAlive(pid!)) signal('SIGKILL');
 }
 
+/** Where start-up stands, so a failure says which step it stopped at. */
+let phase: 'home' | 'lock' | 'recovery' | 'listen' | 'ready' = 'home';
+const STARTUP_CODES = { home: 'ALP_HOME_UNUSABLE', lock: 'ALP_LOCK_FAILED', recovery: 'ALP_STARTUP_FAILED', listen: 'ALP_IPC_LISTEN_FAILED', ready: 'ALP_STARTUP_FAILED' } as const;
+
 async function run(home: string) {
   await assertPrivateDirectory(home, { create: true });
+  phase = 'lock';
   const { socket } = daemonPaths(home);
   let lock;
   try {
@@ -121,16 +128,17 @@ async function run(home: string) {
   } catch (error: any) {
     // Under a service manager, another alpd serving this home is no failure to retry.
     if (process.argv.includes('--service') && /already running/.test(error?.message ?? '')) {
-      console.log(`${new Date().toISOString()} ${error.message}; this one exits`);
+      log.info(`${error.message}; this one exits`, { code: 'ALP_LOCK_HELD' });
       process.exit(0);
     }
     throw error;
   }
+  phase = 'recovery';
   // First: nothing a crashed alpd left running may still write while this one recovers.
   const marker = path.join(home, 'state', 'alpd.running');
   const exit = await previousExit(marker);
   if (exit.kind === 'crash') {
-    console.log(`${new Date().toISOString()} the previous alpd stopped unexpectedly around ${exit.at}`);
+    log.warn(`the previous alpd stopped unexpectedly around ${exit.at}`, { code: 'ALP_PREVIOUS_CRASH', at: exit.at });
     await stopLeftovers(await readFile(marker, 'utf8').then(JSON.parse).catch(() => undefined));
   }
   await mkdir(path.dirname(marker), { recursive: true, mode: 0o700 });
@@ -138,7 +146,7 @@ async function run(home: string) {
   const runLogDir = process.env.ALP_RUN_LOG_DIR || path.join(home, 'runs');
   const worktreeDir = path.join(home, 'worktrees');
   // Worktrees of assignments a crash interrupted: their work goes to their branches.
-  for (const branch of await reclaimWorktrees(worktreeDir).catch(() => [] as string[])) console.log(`${new Date().toISOString()} kept interrupted work on branch ${branch}`);
+  for (const branch of await reclaimWorktrees(worktreeDir).catch(() => [] as string[])) log.info(`kept interrupted work on branch ${branch}`, { event: 'worktree.kept', branch });
   // Review copies of interrupted assignments hold nothing to keep.
   const copyDir = path.join(home, 'copies');
   await reclaimCopies(copyDir).catch(() => 0);
@@ -163,7 +171,7 @@ async function run(home: string) {
       // Last: what remains is a clean stop.
       await unlink(marker).catch(() => {});
       await releaseLock(home);
-      console.log(`${new Date().toISOString()} alpd stopped`);
+      log.info('alpd stopped', { event: 'stopped', exitCode: code });
       process.exit(code);
     })();
     return stopping;
@@ -176,27 +184,36 @@ async function run(home: string) {
   }, 30_000);
   beat.unref();
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => void shutdown());
-  process.on('uncaughtException', error => { console.error(`${new Date().toISOString()} fatal`, error); void shutdown(1); });
-  process.on('unhandledRejection', error => { console.error(`${new Date().toISOString()} fatal`, error); void shutdown(1); });
+  process.on('uncaughtException', error => { log.error('uncaught exception; alpd stops', { code: 'ALP_FATAL', error }); void shutdown(1); });
+  process.on('unhandledRejection', error => { log.error('unhandled rejection; alpd stops', { code: 'ALP_FATAL', error }); void shutdown(1); });
+  phase = 'listen';
   try {
     await server.listen();
   } catch (error) {
     await releaseLock(home);
     throw error;
   }
+  phase = 'ready';
   // Web app and relay are owned by the optional Paseo integration process.
   await updateLock(home, { ...lock, ready: true });
   // Clients that cannot locate alpd themselves (the Paseo plugin) start it from here next time.
   const { install } = daemonPaths(home);
   await writeFile(`${install}.tmp`, JSON.stringify({ entry: fileURLToPath(import.meta.url), version: VERSION }), { mode: 0o600 })
     .then(() => rename(`${install}.tmp`, install))
-    .catch(error => console.error(`${new Date().toISOString()} could not record alpd's location`, error));
-  console.log(`${new Date().toISOString()} alpd ${VERSION} ready on ${socket} (pid ${process.pid})`);
+    .catch(error => log.warn('could not record alpd\'s location', { code: 'ALP_INSTALL_RECORD_FAILED', error }));
+  log.info(`alpd ${VERSION} ready on ${socket} (pid ${process.pid})`, { event: 'ready', version: VERSION, pid: process.pid });
 }
 
 const home = alpHome();
-if (process.argv.includes('--detach')) await detach(home);
-else {
-  if (process.argv.includes('--service')) await serviceLog(home);
-  await run(home);
+try {
+  if (process.argv.includes('--detach')) await detach(home);
+  else {
+    if (process.argv.includes('--service')) await serviceLog(home);
+    await run(home);
+  }
+} catch (error: any) {
+  // The log says where start-up stopped; alp doctor reads it from there.
+  const code = /already running/.test(error?.message ?? '') ? 'ALP_LOCK_HELD' : STARTUP_CODES[phase];
+  log.error(`alpd failed to start while ${{ home: 'preparing its home', lock: 'taking its lock', recovery: 'recovering earlier work', listen: 'opening its IPC endpoint', ready: 'finishing start-up' }[phase]}`, { code, phase, error });
+  process.exit(1);
 }

@@ -105,6 +105,14 @@
       "types": "./dist/library.d.ts",
       "default": "./src/library.js"
     },
+    "./log": {
+      "alp-source": {
+        "types": "./src/log.js",
+        "default": "./src/log.js"
+      },
+      "types": "./dist/log.d.ts",
+      "default": "./src/log.js"
+    },
     "./models": {
       "alp-source": {
         "types": "./src/models.js",

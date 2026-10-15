@@ -8,8 +8,11 @@ import { spawn } from 'node:child_process';
 import { alpHome, readLock, lockAlive, bootTime } from '@anhlp/alp-client/index';
 import { superviseDaemon } from '@anhlp/alp-client/supervise';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
+import { createLogger } from '@anhlp/alp-core/log';
 import { createWebServer } from './web.js';
 import { createPaseoBridge, webAppDir } from './paseo/index.js';
+
+const log = createLogger({ component: 'alp-integration' });
 
 declare const __ALP_DAEMON_ENTRY__: string | undefined;
 
@@ -32,7 +35,7 @@ async function userSettings(home: string): Promise<any> {
   try { text = await readFile(file, 'utf8'); } catch { return {}; }
   try { return validateUserSettings(JSON.parse(text), file); }
   catch (error: any) {
-    console.error(`${new Date().toISOString()} ignoring ${file}: ${error?.message ?? error}`);
+    log.warn(`ignoring ${file}: ${error?.message ?? error}`, { code: 'ALP_SETTINGS_INVALID' });
     return {};
   }
 }
@@ -145,17 +148,17 @@ async function run(home: string) {
   await mkdir(home, { recursive: true, mode: 0o700 });
   const settings = await userSettings(home);
   if (settings?.web?.enabled === false) {
-    console.log(`${new Date().toISOString()} web app disabled by settings`);
+    log.info('web app disabled by settings', { event: 'web.disabled' });
     process.exit(0);
   }
 
   const { acquired, lock } = await acquireIntegrationLock(home);
   if (!acquired) {
-    console.log(`${new Date().toISOString()} integration already running (pid ${lock.pid})`);
+    log.info(`integration already running (pid ${lock.pid})`, { code: 'ALP_LOCK_HELD' });
     process.exit(0);
   }
 
-  const webLog = (message: string) => console.log(`${new Date().toISOString()} web: ${message}`);
+  const webLog = (message: string) => log.info(`web: ${message}`);
   const appDir = webAppDir(fileURLToPath(import.meta.url));
   if (!appDir) webLog('the web app is not built beside the integration; the page says how to build it');
   let listening: string | null = null;
@@ -163,15 +166,15 @@ async function run(home: string) {
   const web = createWebServer({ app: appDir && gateway ? { dir: appDir, gateway } : undefined, home, port: settings?.web?.port, log: webLog });
   // Ready is published only after web.pairing is registered (below), so a caller that waits for the
   // ready lock can rely on the RPC being served; marking ready here would race callers of web.pairing.
-  await web.listen().then(info => { listening = `127.0.0.1:${info.port}`; console.log(`${new Date().toISOString()} web app on ${info.url}`); })
-    .catch(async error => { console.error(`${new Date().toISOString()} web app not started`, error); await releaseIntegrationLock(home); process.exit(1); });
+  await web.listen().then(info => { listening = `127.0.0.1:${info.port}`; log.info(`web app on ${info.url}`, { event: 'web.listening' }); })
+    .catch(async error => { log.error('web app not started', { code: 'ALP_WEB_START_FAILED', error }); await releaseIntegrationLock(home); process.exit(1); });
   const relay = web.token && gateway ? gateway.relay : undefined;
   await relay?.start().catch(error => webLog(`relay not started: ${error?.message ?? error}`));
 
   // Keep daemon available.
   const stopDaemon = process.env.ALP_SUPERVISE === '0'
     ? async () => {}
-    : superviseDaemon({ home, entry: () => process.env.ALP_DAEMON_ENTRY ?? fileURLToPath(new URL('./alpd.js', import.meta.url)), log: message => console.error(`alp: ${message}`) });
+    : superviseDaemon({ home, entry: () => process.env.ALP_DAEMON_ENTRY ?? fileURLToPath(new URL('./alpd.js', import.meta.url)), log: message => log.warn(message, { code: 'ALP_DAEMON_SUPERVISION' }) });
 
   let shuttingDown = false;
   let extensionClient: any = null;
@@ -253,7 +256,7 @@ async function run(home: string) {
     process.exit(code);
   };
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => void shutdown());
-  process.on('uncaughtException', error => { console.error(`${new Date().toISOString()} fatal`, error); void shutdown(1); });
+  process.on('uncaughtException', error => { log.error('uncaught exception; the integration stops', { code: 'ALP_FATAL', error }); void shutdown(1); });
 
   const beat = setInterval(() => {}, 60_000);
   beat.unref();

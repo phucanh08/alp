@@ -6,7 +6,8 @@ const USAGE = `Usage:
   alp setup [directory] [--runtime codex|claude|mix] [--prefer claude|codex]
             [--claude-model M] [--codex-model M] [--claude-supervisor M] [--codex-supervisor M]
             [--claude-oracle M] [--codex-oracle M]   write Phở/Cafe's agent profiles to .alp/settings.json
-  alp daemon <start|stop|status|restart>
+  alp daemon <start|stop|restart>
+  alp daemon status [--json]             liveness and readiness; exit 0 ready, 3 not running, 4 not ready
   alp daemon <install|uninstall>         run alpd as a login service that restarts after a crash
   alp acp                                serve ALP to an editor (Zed, JetBrains) over the Agent Client Protocol on stdio
   alp web [--print]                      open the local web app alpd serves; --print only prints its address

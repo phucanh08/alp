@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { PROTOCOL_VERSION, MAX_FRAME, AlpRpcError, encodeFrame } from '@anhlp/alp-protocol';
+import { scrubText } from '@anhlp/alp-core/log';
 export { PROTOCOL_VERSION, MAX_FRAME, AlpRpcError, encodeFrame } from '@anhlp/alp-protocol';
 
 export function alpHome(env = process.env) {
@@ -249,8 +250,21 @@ export async function connect(socketPath, client = { name: 'alp', version: '0' }
   return connection;
 }
 
+/** Why a launcher failed, from the last structured log line it wrote to stderr: code and message, scrubbed. */
+function launcherReason(text) {
+  const line = text.trim().split('\n').filter(Boolean).at(-1);
+  if (!line) return '';
+  let reason = line;
+  try {
+    const record = JSON.parse(line);
+    reason = `${record.code ? `${record.code}, ` : ''}${record.msg}${record.error?.message ? `: ${record.error.message}` : ''}`;
+  } catch {}
+  return `: ${scrubText(reason, { max: 600 })}`;
+}
+
 async function tail(file, lines = 30) {
-  try { return (await readFile(file, 'utf8')).split('\n').slice(-lines).join('\n'); } catch { return ''; }
+  // The tail goes into an error message, so it is scrubbed like every other log output.
+  try { return scrubText((await readFile(file, 'utf8')).split('\n').slice(-lines).join('\n'), { max: 8000 }); } catch { return ''; }
 }
 
 /**
@@ -271,11 +285,14 @@ export async function ensureDaemon({ home = alpHome(), entry = /** @type {string
     await new Promise((resolve, reject) => {
       const launcher = spawn(execPath, [entry, '--detach'], {
         env: { ...env, ALP_HOME: home, ELECTRON_RUN_AS_NODE: '1' },
-        stdio: 'ignore',
+        stdio: ['ignore', 'ignore', 'pipe'],
         windowsHide: true,
       });
+      // The launcher writes only when it fails, and before alpd has a log to write to.
+      let failure = '';
+      launcher.stderr.on('data', chunk => { if (failure.length < 8000) failure += chunk; });
       launcher.once('error', reject);
-      launcher.once('exit', code => code === 0 ? resolve() : reject(new Error(`ALP daemon launcher exited (${code})`)));
+      launcher.once('close', code => code === 0 ? resolve() : reject(new Error(`ALP daemon launcher exited (${code})${launcherReason(failure)}`)));
     });
   }
   const deadline = Date.now() + timeoutMs;

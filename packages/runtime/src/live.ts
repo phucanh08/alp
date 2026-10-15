@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
+import { createLogger } from '@anhlp/alp-core/log';
 import type { RuntimeKind, SessionSpec } from './resolve.js';
 import type { Worktree } from './workspace.js';
 
@@ -63,7 +64,7 @@ export function createLiveBook(file?: string) {
       const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
       await writeFile(temporary, body, { mode: 0o600 });
       await rename(temporary, file);
-    }).catch(error => console.error(`${new Date().toISOString()} live assignments`, error));
+    }).catch(error => createLogger({ component: 'runtime' }).error('could not save the live assignments', { code: 'ALP_PERSISTENCE_WRITE_FAILED', operation: 'live assignments', error }));
     return writes;
   };
   return {
