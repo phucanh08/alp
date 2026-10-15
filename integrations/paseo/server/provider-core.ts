@@ -72,7 +72,27 @@ export type ProviderStrategy = {
    * own restart is the cause; remotely the outcome of a request in flight is unknown, so never.
    */
   repeatAfterRelink: boolean;
+  /**
+   * Whether a failure to open a new connection is final, so trying again cannot help (remotely: the
+   * gateway refused the credential). The sessions then fail with it instead of waiting forever.
+   */
+  finalLinkError?(error: unknown): boolean;
 };
+
+/** JSON-RPC codes that settle a root's fate on reattach: gone (1001), refused (1003), malformed. */
+const SESSION_GONE = 1001;
+const FORBIDDEN = 1003;
+const INVALID = new Set([-32601, -32602]);
+
+/**
+ * Whether a reattach error is a verdict on the session (it no longer exists, or this credential may
+ * no longer see it), by its JSON-RPC code. Anything else (the connection dropped, the gateway lost
+ * alpd, a timeout) says nothing about the session: the root is kept and attached again.
+ */
+export function endsRoot(error: unknown) {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === SESSION_GONE || code === FORBIDDEN || (typeof code === 'number' && INVALID.has(code));
+}
 
 /** How long a request waits for alpd to come back before it fails. */
 const RELINK_WAIT_MS = 20_000;
@@ -152,6 +172,10 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
       let relinking: Promise<void> | undefined;
       let demanded = false;
       let lastError: unknown;
+      /** Set when reconnecting cannot help (finalLinkError): requests fail with it. */
+      let dead: unknown;
+      /** Cuts a backoff short when the provider closes. */
+      let wakeBackoff: (() => void) | undefined;
       /** Each alpd session's root, and the last replay cursor seen of each root's timeline. */
       const rootOf = new Map<string, string>();
       const cursors = new Map<string, number>();
@@ -279,55 +303,101 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
 
       /** alpd went away. In-process backends end their sessions; alpd is started again and its sessions picked up. */
       function lost(error: unknown) {
-        if (closed) return;
+        if (closed || dead) return;
         if (!backend.relink) {
           for (const sessionId of roots) emit({ type: 'session.runtime_failed', sessionId, error: errorData(error) });
           roots.clear();
           return;
         }
+        // A reconnection in progress replaces this connection; it checks the new one is alive before it is used.
         if (relinking) return;
         for (const sessionId of roots) notify(sessionId, 'warning', `ALP lost its connection to alpd (${errorData(error).message}); reconnecting. Work that was running continues once alpd is back.`);
-        relinking = relink().finally(() => { relinking = undefined; });
+        relinking = relink().finally(() => {
+          relinking = undefined;
+          // The connection just adopted may have closed while this one wound down: go again.
+          if (!closed && !dead && client.closed) lost(lastError ?? new Error('ALP daemon connection closed'));
+        });
       }
 
+      const backoff = (attempt: number) => new Promise<void>(resolve => {
+        const timer = setTimeout(done, Math.min(250 * 2 ** attempt, 5_000));
+        function done() { clearTimeout(timer); wakeBackoff = undefined; resolve(); }
+        wakeBackoff = done;
+      });
+
+      /**
+       * Opens connections until one stays up while every root is attached again. A connection that
+       * drops meanwhile, or a root that fails for a reason other than its own end (endsRoot), makes
+       * the attempt fail: that connection is closed and a new one tried after a backoff, with roots,
+       * cursors and ids kept. Only reads are sent here (session.get, session.attach, both safe to
+       * repeat); a request the user made is never sent again.
+       */
       async function relink() {
         for (let attempt = 0; !closed; attempt++) {
+          let next: DaemonConnection | undefined;
+          const stops: Array<() => void> = [];
           try {
-            const next = await backend.relink!(demanded);
+            next = await backend.relink!(demanded);
             if (closed) { next.close(); return; }
+            let dropped: unknown;
+            // Replay arrives before each attach answer, so events are projected from the start.
+            stops.push(next.onEvent(project));
+            stops.push(next.onClose(error => { dropped ??= error ?? new Error('ALP daemon connection closed'); }));
+            for (const sessionId of [...roots]) {
+              if (closed) break;
+              if (dropped !== undefined || next.closed) throw dropped ?? new Error('ALP daemon connection closed');
+              await reattach(next, sessionId);
+            }
+            if (closed) { next.close(); return; }
+            if (dropped !== undefined || next.closed) throw dropped ?? new Error('ALP daemon connection closed');
+            for (const stop of stops) stop();
             client = next;
             wire(next);
-            for (const sessionId of [...roots]) await reattach(sessionId);
             demanded = false;
+            lastError = undefined;
             for (const sessionId of roots) notify(sessionId, 'info', 'ALP reconnected to alpd.');
             return;
           } catch (error) {
             lastError = error;
-            await new Promise(resolve => setTimeout(resolve, Math.min(250 * 2 ** attempt, 5_000)));
+            for (const stop of stops) stop();
+            if (next && next !== client) { try { next.close(); } catch {} }
+            if (strategy.finalLinkError?.(error)) {
+              dead = error;
+              for (const sessionId of roots) emit({ type: 'session.runtime_failed', sessionId, error: errorData(error) });
+              roots.clear();
+              return;
+            }
+            if (closed) return;
+            await backoff(attempt);
           }
         }
       }
 
-      /** Follows a root again in the new alpd; one alpd did not reopen waits for its next prompt. */
-      async function reattach(sessionId: string) {
+      /**
+       * Follows a root again on `connection`; one alpd did not reopen waits for its next prompt. Only
+       * an error that ends the root (endsRoot) fails it; any other is thrown so the attempt retries.
+       */
+      async function reattach(connection: DaemonConnection, sessionId: string) {
         const alpdId = toAlpd(sessionId);
         try {
-          const { session } = await client.request('session.get', { sessionId: alpdId });
+          const { session } = await connection.request('session.get', { sessionId: alpdId });
           if (strategy.cursors) {
             // What happened while away is replayed before the answer, in cursor order (§8.3).
-            const answer = await client.request('session.attach', { sessionId: alpdId, after: cursors.get(alpdId) ?? 0 });
+            const answer = await connection.request('session.attach', { sessionId: alpdId, after: cursors.get(alpdId) ?? 0 });
             if (answer?.reset) {
               // alpd's timeline restarted below what this view had: its replay was dropped as seen.
               if (typeof answer.cursor === 'number') cursors.set(alpdId, answer.cursor);
               notify(sessionId, 'warning', 'ALP could not continue this session\'s history from where this view left it; reopen the session to see it whole.');
             }
           } else {
-            await client.request('session.attach', { sessionId: alpdId, replay: false });
+            await connection.request('session.attach', { sessionId: alpdId, replay: false });
           }
           if (session.status === 'idle' || session.status === 'running') dormant.delete(sessionId);
           else dormant.add(sessionId);
         } catch (error) {
+          if (!endsRoot(error)) throw error;
           roots.delete(sessionId);
+          dormant.delete(sessionId);
           emit({ type: 'session.runtime_failed', sessionId, error: errorData(error) });
         }
       }
@@ -346,6 +416,7 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
 
       /** Waits for alpd when it is coming back; asking makes it start even after a deliberate stop. */
       async function linked() {
+        if (dead) throw dead;
         if (!relinking) return;
         demanded = true;
         let timer: NodeJS.Timeout | undefined;
@@ -531,6 +602,7 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
 
         async close() {
           closed = true;
+          wakeBackoff?.();
           await Promise.all([...roots].map(sessionId => client.request('session.release', { sessionId: toAlpd(sessionId) }).catch(() => {})));
           roots.clear();
           await backend.shutdown(client);
