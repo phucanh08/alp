@@ -2,7 +2,7 @@ import type { DaemonConnection } from '@anhlp/alp-protocol';
 import type { ProviderRegistration } from '../compat.js';
 import { MODES, teamName } from '../mapping-wire.js';
 import { createAlpProvider, type TeamModel } from '../provider-core.js';
-import { openGateway, sameWorkspace, workspaceFor, type GatewayConfig, type GatewayLink, type Principal } from './link.js';
+import { GatewayAuthError, openGateway, sameWorkspace, workspaceFor, type GatewayConfig, type GatewayLink, type Principal } from './link.js';
 
 /**
  * The ALP provider for Paseo in remote mode (docs/alp/paseo-remote.md): the same translation of
@@ -94,5 +94,7 @@ export function createRemoteProvider(config: GatewayConfig, { version = '0', sta
     },
     cursors: true,
     repeatAfterRelink: false,
+    // A refused credential stays refused: the sessions say so instead of reconnecting forever.
+    finalLinkError: error => error instanceof GatewayAuthError,
   });
 }
