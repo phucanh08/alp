@@ -5,9 +5,14 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
-import { PROTOCOL_VERSION, MAX_FRAME, AlpRpcError, encodeFrame } from '@anhlp/alp-protocol';
 import { scrubText } from '@anhlp/alp-core/log';
+import { createSocketTransport } from './ipc.js';
+import { AlpRpcClient } from './rpc/client.js';
+import { hello } from './rpc/handshake.js';
 export { PROTOCOL_VERSION, MAX_FRAME, AlpRpcError, encodeFrame } from '@anhlp/alp-protocol';
+// The Node entry carries the whole portable API too, so Node callers need one import.
+export * from './portable.js';
+export { createSocketTransport } from './ipc.js';
 
 export function alpHome(env = process.env) {
   return path.resolve(env.ALP_HOME || path.join(os.homedir(), '.alp'));
@@ -166,117 +171,52 @@ export async function releaseDaemonLock(home) {
   if (current?.pid === process.pid) await unlink(daemonPaths(home).lock).catch(() => {});
 }
 
-/** One JSON-RPC 2.0 connection to alpd; events arrive as `event` notifications. */
-export class AlpClient {
-  #socket;
-  #sequence = 0;
-  #pending = new Map();
-  #events = new Set();
-  #closes = new Set();
-  #requestHandlers = new Set();
-  #closed = false;
-
-  constructor(socket) {
-    this.#socket = socket;
-    let buffer = '';
-    socket.setEncoding('utf8');
-    socket.on('data', chunk => {
-      buffer += chunk;
-      if (Buffer.byteLength(buffer, 'utf8') > MAX_FRAME) { socket.destroy(new Error('ALP daemon frame exceeds size limit')); return; }
-      for (let index = buffer.indexOf('\n'); index >= 0; index = buffer.indexOf('\n')) {
-        const line = buffer.slice(0, index);
-        buffer = buffer.slice(index + 1);
-        if (line.trim()) this.#receive(line);
-      }
-    });
-    socket.on('close', () => this.#finish(new Error('ALP daemon connection closed')));
-    socket.on('error', error => this.#finish(error));
-  }
-
-  #receive(line) {
-    let message;
-    try { message = JSON.parse(line); } catch { this.#socket.destroy(new Error('Invalid frame from ALP daemon')); return; }
-    if (message.method === 'event') {
-      for (const listener of this.#events) listener(message.params);
-      return;
-    }
-    if (message.method && (message.id !== undefined && message.id !== null) && !Object.prototype.hasOwnProperty.call(message, 'result') && !Object.prototype.hasOwnProperty.call(message, 'error')) {
-      const handler = [...this.#requestHandlers][0];
-      if (handler) {
-        Promise.resolve().then(async () => {
-          try {
-            const result = await handler(message.method, message.params ?? {});
-            this.#socket.write(encodeFrame({ jsonrpc: '2.0', id: message.id, result: result === undefined ? {} : result }));
-          } catch (error) {
-            const code = (error && typeof error.code === 'number') ? error.code : 1000;
-            const msg = error instanceof Error ? error.message : String(error);
-            const data = (error && error.data !== undefined) ? { data: error.data } : {};
-            this.#socket.write(encodeFrame({ jsonrpc: '2.0', id: message.id, error: { code, message: msg.length > 2000 ? msg.slice(0,2000)+'...' : msg, ...data } }));
-          }
-        });
-        return;
-      }
-      this.#socket.write(encodeFrame({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: `Unknown method '${message.method}'` } }));
-      return;
-    }
-    const waiter = this.#pending.get(message.id);
-    if (!waiter) return;
-    this.#pending.delete(message.id);
-    if (message.error) waiter.reject(new AlpRpcError(message.error));
-    else waiter.resolve(message.result);
-  }
-
-  #finish(error) {
-    if (this.#closed) return;
-    this.#closed = true;
-    for (const waiter of this.#pending.values()) waiter.reject(error);
-    this.#pending.clear();
-    for (const listener of this.#closes) listener(error);
-  }
-
-  get closed() { return this.#closed; }
-
-  request(method, params = {}) {
-    if (this.#closed) return Promise.reject(new Error('ALP daemon connection closed'));
-    const id = ++this.#sequence;
-    return new Promise((resolve, reject) => {
-      this.#pending.set(id, { resolve, reject });
-      this.#socket.write(encodeFrame({ jsonrpc: '2.0', id, method, params }));
-    });
-  }
-
-  onEvent(listener) {
-    this.#events.add(listener);
-    return () => this.#events.delete(listener);
-  }
-
-  onRequest(handler) {
-    this.#requestHandlers.add(handler);
-    return () => this.#requestHandlers.delete(handler);
-  }
-
-  onClose(listener) {
-    this.#closes.add(listener);
-    return () => this.#closes.delete(listener);
-  }
-
-  close() {
-    this.#socket.end();
-    this.#finish(new Error('ALP daemon connection closed'));
+/**
+ * One JSON-RPC 2.0 connection to alpd over a Unix socket or named pipe; events arrive as `event`
+ * notifications. The engine is the portable AlpRpcClient; this keeps the socket constructor the
+ * CLI, alpd's tests and the Paseo plugin use.
+ */
+export class AlpClient extends AlpRpcClient {
+  /**
+   * @param {import('node:net').Socket} socket a connected or connecting socket; the client owns it
+   * @param {import('./rpc/client.js').AlpRpcClientOptions & import('./ipc.js').SocketTransportOptions} [options]
+   */
+  constructor(socket, { maxFrame, maxBufferedBytes, ...options } = {}) {
+    super(createSocketTransport(socket, { maxFrame, maxBufferedBytes }), { maxFrame, ...options });
   }
 }
 
-/** Connects and performs the version handshake. */
-export async function connect(socketPath, client = { name: 'alp', version: '0' }) {
+/** A socket to alpd, once it is checked to be private to this user (the IPC checks above). @param {string} socketPath */
+async function openSocket(socketPath) {
   await assertPrivateSocket(socketPath);
-  const socket = await new Promise((resolve, reject) => {
+  return /** @type {Promise<import('node:net').Socket>} */ (new Promise((resolve, reject) => {
     const candidate = net.createConnection(socketPath);
     candidate.once('connect', () => { candidate.off('error', reject); resolve(candidate); });
     candidate.once('error', reject);
-  });
-  const connection = new AlpClient(socket);
+  }));
+}
+
+/**
+ * The transport to alpd's socket without the handshake, for an AlpRpcClient or a reconnecting
+ * client whose onConnect runs `hello`. `connect` is this plus `hello`.
+ * @param {string} socketPath
+ * @param {import('./ipc.js').SocketTransportOptions} [options]
+ */
+export async function connectSocket(socketPath, options) {
+  return createSocketTransport(await openSocket(socketPath), options);
+}
+
+/**
+ * Connects and performs the version handshake.
+ * @param {string} socketPath
+ * @param {{ name: string, version: string }} [client]
+ * @param {import('./rpc/client.js').AlpRpcClientOptions & import('./ipc.js').SocketTransportOptions} [options]
+ * @returns {Promise<AlpClient>}
+ */
+export async function connect(socketPath, client = { name: 'alp', version: '0' }, options = {}) {
+  const connection = new AlpClient(await openSocket(socketPath), options);
   try {
-    await connection.request('daemon.hello', { protocolVersion: PROTOCOL_VERSION, client });
+    await hello(connection, client);
   } catch (error) {
     connection.close();
     throw error;
