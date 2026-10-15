@@ -97,7 +97,9 @@ const outcomeUnknown = error => error?.code === 1004 && error.data?.reason === '
 test('killed before the pending receipt: nothing was recorded or sent, and the same id sends once after restart', { skip }, async t => {
   const h = await harness(t);
   const first = await h.start({ crashAt: 'prompt.before-receipt' });
-  const { session } = await h.create(first);
+  const { session, durable } = await h.create(first);
+  // The answer came once the record holding its native thread was on disk, so the crash cannot lose it.
+  assert.equal(durable, true);
   await assert.rejects(first.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('alpha') }));
   await first.crashed();
   assert.deepEqual(await h.received('alpha'), []);
