@@ -28,7 +28,14 @@ export type EntryRow = z.infer<typeof EntryRowSchema>;
 export const libraryList = defineRpc({
   name: 'alp.library.list',
   input: z.object({ directory: Directory, kind: KindSchema }),
-  output: z.object({ projectRoot: z.string().nullable(), library: z.string(), entries: z.array(EntryRowSchema) }),
+  output: z.object({
+    projectRoot: z.string().nullable(), library: z.string(), entries: z.array(EntryRowSchema),
+    /**
+     * Set when the library can only be looked at from here (ALP remote mode): why, and where to
+     * change it. `unlisted` says why there are no entries at all (no granted workspace open).
+     */
+    readOnly: z.object({ reason: z.string(), unlisted: z.string().optional() }).optional(),
+  }),
 });
 
 export const libraryGet = defineRpc({
@@ -108,7 +115,11 @@ export const libraryTest = defineRpc({
 });
 
 /** The language the user reads (ALPD §54): language null means unset, so the default applies. */
-const LanguageSettingSchema = z.object({ language: z.string().nullable(), applies: z.string(), default: z.string() });
+const LanguageSettingSchema = z.object({
+  language: z.string().nullable(), applies: z.string(), default: z.string(),
+  /** Why it cannot be changed from here (ALP remote mode). */
+  readOnly: z.string().optional(),
+});
 
 export const languageGet = defineRpc({
   name: 'alp.settings.language.get',

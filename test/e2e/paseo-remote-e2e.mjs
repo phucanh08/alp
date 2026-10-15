@@ -181,6 +181,18 @@ try {
   const texts = (timeline.entries ?? []).map(entry => JSON.stringify(entry.item ?? entry)).filter(text => text.includes(marker) && /assistant/.test(text));
   record('gateway.restart.mid-turn+replay', texts.length <= 1 ? 'pass' : 'fail', { agentStatus: resumed.status, markerMessages: texts.length, entriesBefore: before, entriesAfter: timeline.entries?.length });
 
+  // 7b. The gateway goes down again right after it came back, while the plugin is attaching its
+  // sessions again: it must keep them and reconnect once more.
+  await stop(gateway);
+  await startGateway();
+  await sleep(150);
+  await stop(gateway);
+  await sleep(1500);
+  await startGateway();
+  const twice = await agent.run('Reply with only TWICE_OK.', { timeoutMs: 240_000 });
+  assert.match(twice.lastMessage ?? '', /TWICE_OK/, JSON.stringify(twice));
+  record('gateway.restart.twice', 'pass', { agentStatus: twice.status });
+
   // 8. alpd restarts: the session resumes on the next prompt.
   alp('daemon', 'stop');
   alp('daemon', 'start');

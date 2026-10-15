@@ -192,9 +192,15 @@ test('Paseo remote mode through the gateway to a real alpd: create, stream, ques
   assert.deepEqual((await paseo.call('panel', { name: 'alp.tasks.list', input: { directory: w.project } })).tasks.map(row => row.status), ['closed']);
 
   // Library: names and models come from alpd; content, edits, tests and usage are refused clearly.
-  assert.ok((await paseo.call('panel', { name: 'alp.library.list', input: { directory: w.project, kind: 'agents' } })).entries.length > 0);
+  const libraryRows = await paseo.call('panel', { name: 'alp.library.list', input: { directory: w.project, kind: 'agents' } });
+  assert.ok(libraryRows.entries.length > 0);
+  assert.match(libraryRows.readOnly.reason, /not opened or changed/, 'the screen knows it is read-only');
+  // The settings screen opened with no workspace: no entries, why, and nothing asked of alpd.
+  assert.match((await paseo.call('panel', { name: 'alp.library.list', input: { kind: 'agents' } })).readOnly.unlisted, /Open a workspace/);
   assert.ok((await paseo.call('panel', { name: 'alp.library.models', input: {} })).models.length > 0);
-  assert.equal(typeof (await paseo.call('panel', { name: 'alp.settings.language.get', input: {} })).applies, 'string');
+  const language = await paseo.call('panel', { name: 'alp.settings.language.get', input: {} });
+  assert.equal(typeof language.applies, 'string');
+  assert.match(language.readOnly, /Unavailable in ALP remote mode/);
   for (const [name, input] of [
     ['alp.library.get', { directory: w.project, kind: 'mcp', name: 'x' }],
     ['alp.library.save', { directory: w.project, kind: 'skills', name: 'x', scope: 'project', content: {} }],

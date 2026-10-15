@@ -28,6 +28,12 @@ function exactWorkspace(principal: Principal, cwd: string) {
 
 const granted = (principal: Principal) => principal.workspaces.join(', ');
 
+/** The teams ALP itself ships (its templates), as offered before a workspace is open. */
+const BUILT_IN_TEAMS: TeamModel[] = [
+  { id: 'pho', label: 'Phở', description: 'Built-in ALP team. Open a workspace your ALP credential grants to see its teams.', thinkingOptions: [] },
+  { id: 'cafe', label: 'Cafe', description: 'Built-in ALP team. Open a workspace your ALP credential grants to see its teams.', thinkingOptions: [] },
+];
+
 export function createRemoteProvider(config: GatewayConfig, { version = '0', state = remoteState(), open = openGateway }: { version?: string; state?: RemoteState; open?: typeof openGateway } = {}): ProviderRegistration {
   const info = { name: 'alp-paseo-remote', version };
   const principal = () => {
@@ -52,6 +58,10 @@ export function createRemoteProvider(config: GatewayConfig, { version = '0', sta
       return { client: await connect(), async shutdown(client) { client.close(); }, relink: () => connect() };
     },
     async teams(cwd, client) {
+      // Paseo also asks with no folder (its provider list): the built-in teams every ALP host has,
+      // named only. Nothing is read from alpd and no workspace is chosen; opening a session still
+      // needs a granted workspace (spec below), and a folder lists that workspace's teams.
+      if (cwd === undefined) return BUILT_IN_TEAMS;
       const workspace = workspaceFor(principal(), cwd);
       if (!workspace) throw new Error(`${cwd ?? 'This folder'} is not a workspace your ALP credential grants (${granted(principal())})`);
       const { teams } = await client.request('team.list', { projectRoot: workspace.path });
