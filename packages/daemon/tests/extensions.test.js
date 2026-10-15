@@ -270,3 +270,55 @@ test('raw hello, jsonrpc and malformed request handling on a real socket', async
   const status = await raw.request(4, 'daemon.status');
   assert.equal(status.result.protocolVersion, PROTOCOL_VERSION);
 });
+
+test('security: closed callers release extension capacity and cannot register after disconnect', async t => {
+  const { daemon } = await start(t);
+  const frames = [];
+  const owner = daemon.accept(frame => frames.push(frame));
+  t.after(() => owner.close());
+  owner.receive({ jsonrpc: '2.0', id: 1, method: 'daemon.hello', params: { protocolVersion: PROTOCOL_VERSION } });
+  owner.receive({ jsonrpc: '2.0', id: 2, method: 'extension.register', params: { method: 'ext.cleanup' } });
+  await untilFrame(frames, frame => frame.id === 2 && frame.result, 'registration');
+  const caller = daemon.local();
+  for (let i = 0; i < 128; i++) void caller.request('ext.cleanup').catch(() => {});
+  await untilFrame(frames, () => frames.filter(frame => frame.method === 'extension.invoke').length === 128, 'full quota');
+  caller.close();
+  const fresh = daemon.local();
+  t.after(() => fresh.close());
+  const pending = fresh.request('ext.cleanup').catch(error => ({ unexpectedError: error.message }));
+  await sleep(20);
+  const invokes = frames.filter(frame => frame.method === 'extension.invoke');
+  assert.equal(invokes.length, 129, 'disconnected calls must release owner quota');
+  owner.receive({ jsonrpc: '2.0', id: invokes.at(-1).id, result: { ok: true } });
+  assert.deepEqual(await pending, { ok: true });
+
+  const gone = daemon.local();
+  const registration = gone.request('extension.register', { method: 'ext.orphan' }).catch(() => {});
+  gone.close();
+  await registration;
+  assert.deepEqual(await fresh.request('extension.register', { method: 'ext.orphan' }), { registered: 'ext.orphan' });
+});
+
+test('security: extension namespaces, names and registrations are bounded', async t => {
+  const { daemon } = await start(t);
+  const owner = daemon.local();
+  t.after(() => owner.close());
+  for (const method of ['daemon.attacker', 'session.attacker', 'extension.attacker', 'x'.repeat(129)]) {
+    await assert.rejects(owner.request('extension.register', { method }), { code: ERROR.protocol });
+  }
+  for (let i = 0; i < 128; i++) await owner.request('extension.register', { method: `ext.limit${i}` });
+  await assert.rejects(owner.request('extension.register', { method: 'ext.overflow' }), { code: ERROR.conflict });
+  await owner.request('extension.unregister', { method: 'ext.limit0' });
+  await owner.request('extension.register', { method: 'web.pairing' });
+});
+
+test('security: oversized UTF-8 extension payload is rejected before invoking handler', async t => {
+  const { daemon } = await start(t);
+  let invoked = false;
+  daemon.extend('ext.payload', () => { invoked = true; return {}; });
+  const caller = daemon.local();
+  t.after(() => caller.close());
+  // Below 16 Mi characters, above the 16 MiB wire limit.
+  await assert.rejects(caller.request('ext.payload', { text: '界'.repeat(6 * 1024 * 1024) }), /size limit/);
+  assert.equal(invoked, false);
+});

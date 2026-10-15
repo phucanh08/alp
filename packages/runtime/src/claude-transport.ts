@@ -1,3 +1,4 @@
+import { writablePath } from './permission-path.js';
 import { accessSync, constants, existsSync, mkdirSync, realpathSync, rmdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -215,7 +216,6 @@ export function claudeSandboxAvailable() {
 }
 
 const WRITERS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
-const inside = (file: string, root: string) => { const relative = path.relative(root, file); return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative)); };
 /** What ALP asks the user for a permission Claude would otherwise not have. */
 export type PermissionRequest = { tool: string; input: Record<string, unknown>; reason: 'rule' | 'mode'; rule?: string };
 export type PermissionAnswer = { allow: boolean; always?: boolean; message?: string };
@@ -293,7 +293,7 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
       const sandboxed = rules?.floor === 'read-only' && name === 'Bash' && !leaving;
       const beyond = (mode === 'read-only' && !readers.includes(name) && !name.startsWith('mcp__alp__') && !sandboxed) ||
         // With a floor, file tools write only the workspace and temp files, like Bash.
-        (Boolean(rules?.floor && rules.floorRoot) && WRITERS.includes(name) && typeof input.file_path === 'string' && !inside(path.resolve(rules!.floorRoot!, input.file_path), rules!.floorRoot!) && !inside(path.resolve(input.file_path), os.tmpdir())) ||
+        (Boolean(rules?.floor && rules.floorRoot) && WRITERS.includes(name) && !writablePath(name === 'NotebookEdit' ? input.notebook_path : input.file_path, rules!.floorRoot!)) ||
         (leaving && mode !== 'full-access');
       if (leaving && typeof input.command === 'string' && rules) {
         const decision = commandDecision(rules, input.command);

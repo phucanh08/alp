@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { readFile, realpath, stat, lstat, mkdir, readlink } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,8 +19,62 @@ export function daemonPaths(home) {
     ? `\\\\.\\pipe\\alpd-${createHash('sha256').update(home).digest('hex').slice(0, 24)}`
     : Buffer.byteLength(preferred) < 100
     ? preferred
-    : path.join(os.tmpdir(), `alpd-${createHash('sha256').update(home).digest('hex').slice(0, 12)}.sock`);
+    : path.join(os.tmpdir(), `alpd-${process.getuid?.() ?? 'user'}-${createHash('sha256').update(home).digest('hex').slice(0, 12)}`, 'rpc.sock');
   return { home, lock: path.join(home, 'alpd.lock'), socket, log: path.join(home, 'logs', 'alpd.log'), install: path.join(home, 'alpd.json') };
+}
+
+/** IPC trusts the OS user, not every local process. Existing unsafe directories fail closed.
+ * Windows mode bits do not describe named-pipe ACLs; those remain an OS deployment assumption. */
+async function assertSafeAncestors(directory) {
+  if (process.platform === 'win32') return;
+  const absolute = path.isAbsolute(directory) ? directory : `${process.cwd()}/${directory}`;
+  let current = path.parse(absolute).root;
+  const pending = absolute.slice(current.length).split('/');
+  let links = 0;
+  // Follow every link expansion, including intermediate targets that realpath hides.
+  // Check a directory before entering it; never create beneath an unsafe parent.
+  while (pending.length) {
+    const part = pending.shift();
+    if (!part || part === '.') continue;
+    if (part === '..') { current = path.dirname(current); continue; }
+    const candidate = path.join(current, part);
+    const info = await lstat(candidate).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    if (!info) { current = candidate; continue; }
+    const trustedOwner = info.uid === 0 || info.uid === process.getuid?.();
+    if (!trustedOwner) throw new Error('IPC requires ancestors owned by the current user or root');
+    if (info.isSymbolicLink()) {
+      if (++links > 40) throw new Error('IPC ancestor symlink loop');
+      const target = await readlink(candidate);
+      if (path.isAbsolute(target)) current = path.parse(target).root;
+      pending.unshift(...target.slice(path.isAbsolute(target) ? path.parse(target).root.length : 0).split('/'));
+      continue;
+    }
+    // Sticky shared temp directories prevent users replacing each other's entries.
+    if (!info.isDirectory() || ((info.mode & 0o022) && !(info.mode & 0o1000))) {
+      throw new Error('IPC requires trusted ancestors without shared write permissions');
+    }
+    current = candidate;
+  }
+}
+
+export async function assertPrivateDirectory(directory, { create = false } = {}) {
+  await assertSafeAncestors(directory);
+  if (create) await mkdir(directory, { recursive: true, mode: 0o700 });
+  const info = await lstat(directory);
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('IPC requires a private directory, not a symlink');
+  if (process.platform !== 'win32' && (info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0)) {
+    throw new Error('IPC directory must be owned by the current user with private permissions (0700)');
+  }
+}
+
+export async function assertPrivateSocket(socketPath) {
+  if (process.platform === 'win32') return;
+  await assertPrivateDirectory(path.dirname(socketPath));
+  const info = await lstat(socketPath);
+  if (!info.isSocket() || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0) {
+    throw new Error('IPC socket must be owned by the current user with private permissions (0600)');
+  }
+  return info;
 }
 
 const isFile = file => stat(file).then(info => info.isFile(), () => false);
@@ -93,7 +147,7 @@ export class AlpClient {
     socket.setEncoding('utf8');
     socket.on('data', chunk => {
       buffer += chunk;
-      if (buffer.length > MAX_FRAME) { socket.destroy(new Error('ALP daemon frame exceeds size limit')); return; }
+      if (Buffer.byteLength(buffer, 'utf8') > MAX_FRAME) { socket.destroy(new Error('ALP daemon frame exceeds size limit')); return; }
       for (let index = buffer.indexOf('\n'); index >= 0; index = buffer.indexOf('\n')) {
         const line = buffer.slice(0, index);
         buffer = buffer.slice(index + 1);
@@ -179,6 +233,7 @@ export class AlpClient {
 
 /** Connects and performs the version handshake. */
 export async function connect(socketPath, client = { name: 'alp', version: '0' }) {
+  await assertPrivateSocket(socketPath);
   const socket = await new Promise((resolve, reject) => {
     const candidate = net.createConnection(socketPath);
     candidate.once('connect', () => { candidate.off('error', reject); resolve(candidate); });

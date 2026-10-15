@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile, mkdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '../src/init.js';
@@ -104,3 +104,30 @@ test('the library gives an agent skills by name, so a built-in agent changes its
   await setGivenSkills('peer', [], { library });
   assert.deepEqual(JSON.parse(await readFile(path.join(library, 'role-skills.json'), 'utf8')), { main: ['xia', 'bug-loop'] });
 });
+
+for (const placement of ['scope', 'kind', 'entry', 'file']) {
+  test(`library editor rejects ${placement} symlink before reading or mutating outside its scope`, async t => {
+    const root = await fixture(t);
+    const outside = await fixture(t);
+    const scope = path.join(root, '.alp');
+    const target = path.join(scope, 'skills', 'escape', 'SKILL.md');
+    const linked = { scope, kind: path.join(scope, 'skills'), entry: path.dirname(target), file: target }[placement];
+    const suffix = path.relative(linked, target);
+    const external = suffix ? path.join(outside, suffix) : path.join(outside, 'secret');
+    await mkdir(path.dirname(external), { recursive: true });
+    await writeFile(external, 'private original');
+    await mkdir(path.dirname(linked), { recursive: true });
+    await symlink(placement === 'file' ? external : outside, linked);
+    const options = { root, scope: 'project' };
+    for (const operation of [
+      () => getEntry('skills', 'escape', options),
+      () => saveEntry('skills', 'escape', { body: 'overwrite' }, options),
+      () => deleteEntry('skills', 'escape', options),
+      () => renameEntry('skills', 'escape', 'moved', options),
+      () => duplicateEntry('skills', 'escape', 'copied', options),
+    ]) {
+      await assert.rejects(operation(), { code: 'UNSAFE_PATH' });
+      assert.equal(await readFile(external, 'utf8'), 'private original');
+    }
+  });
+}

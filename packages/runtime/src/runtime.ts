@@ -1,3 +1,4 @@
+import { constants as fsConstants } from 'node:fs';
 import type { Session, Assignment, Waiter } from './session-state.js';
 import { errorData, plainObject, toolResult } from './tool-results.js';
 import { createBoardDomain } from './board-domain.js';
@@ -11,7 +12,7 @@ import { nativeEnvironment, createTransport } from './providers.js';
 import { nativeMode, codexApproval, profileEfforts, nativeSessionConfig } from './session-config.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
-import { appendFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveDelegation } from '@anhlp/alp-core/delegation';
@@ -561,8 +562,15 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const file = path.join(directory, `${rootId.replace(/[^\w.-]/g, '_')}.jsonl`);
     const line = JSON.stringify({ ts: new Date().toISOString(), rootSessionId: rootId, ...entry }) + '\n';
     runLogWrites = runLogWrites
-      .then(() => mkdir(directory, { recursive: true }))
-      .then(() => appendFile(file, line))
+      .then(() => mkdir(directory, { recursive: true, mode: 0o700 }))
+      .then(async () => {
+        const handle = await open(file, fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT | (fsConstants.O_NOFOLLOW ?? 0), 0o600);
+        try {
+          const info = await handle.stat();
+          if (!info.isFile() || (process.platform !== 'win32' && (info.uid !== process.getuid?.() || (info.mode & 0o077)))) return;
+          await handle.appendFile(line);
+        } finally { await handle.close(); }
+      })
       .catch(() => {});
   }
 
@@ -2265,7 +2273,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       return toolResult(false, { error: describePause(hold, paused.all ? undefined : childRuntime), next });
     }
     // The child's permission profile caps its mode, as resolving its session will.
-    const childProfile = await profileFor(session.mapping.agent.projectRoot, options.libraryDir, args.agent).catch(() => null);
+    let childProfile;
+    try { childProfile = await profileFor(session.mapping.agent.projectRoot, options.libraryDir, args.agent); }
+    catch (error) { return toolResult(false, { error: errorData(error).message }); }
     const childMode = childProfile ? capMode(args.mode ?? session.mapping.mode, childProfile.base) : args.mode ?? session.mapping.mode;
     const capped = {
       ...(childProfile && childMode !== (args.mode ?? session.mapping.mode) ? { mode: childMode, modeNote: `${args.agent} runs ${childMode}: its permission profile ${childProfile.name} caps it` } : {}),

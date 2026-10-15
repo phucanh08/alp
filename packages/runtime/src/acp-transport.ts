@@ -1,3 +1,4 @@
+import { writablePath } from './permission-path.js';
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
@@ -72,7 +73,6 @@ process.stdin.on('end', () => process.exit(0));
 `;
 
 const READERS = ['read', 'search', 'think', 'fetch'];
-const inside = (file: string, root: string) => { const relative = path.relative(root, file); return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative)); };
 
 /** What an ACP permission request asks for: its tool kind, the command it runs, and the paths it touches. */
 export function acpPermission(toolCall: any, tools: string[]): AcpPermission {
@@ -104,7 +104,8 @@ export function acpDecision(request: AcpPermission, mode: string, profile: Permi
   if (rule === 'ask') return 'rule';
   if (mode === 'full-access' || READERS.includes(request.kind)) return 'allow';
   if (mode === 'workspace-write') {
-    const outside = request.paths.some(file => !inside(path.resolve(workdir, file), workdir) && !inside(path.resolve(file), os.tmpdir()));
+    if (['edit', 'delete', 'move'].includes(request.kind) && !request.paths.length) return 'mode';
+    const outside = request.paths.some(file => !writablePath(file, workdir));
     if (!outside) return 'allow';
   }
   return 'mode';

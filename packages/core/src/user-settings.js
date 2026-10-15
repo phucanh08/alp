@@ -51,7 +51,7 @@ export async function setLanguage(home, language) {
   const next = { ...settings };
   if (language === null) delete next.language; else next.language = language.trim();
   validateUserSettings(next, file);
-  await mkdir(home, { recursive: true });
+  await mkdir(home, { recursive: true, mode: 0o700 });
   const temporary = `${file}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(temporary, JSON.stringify(next, null, 2) + '\n');
   await rename(temporary, file);
@@ -67,7 +67,7 @@ export async function setWebRelay(home, patch) {
   const { file, settings } = await readSettings(home);
   const next = { ...settings, web: { ...settings.web, relay: { ...settings.web?.relay, ...patch } } };
   validateUserSettings(next, file);
-  await mkdir(home, { recursive: true });
+  await mkdir(home, { recursive: true, mode: 0o700 });
   const temporary = `${file}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(temporary, JSON.stringify(next, null, 2) + '\n');
   await rename(temporary, file);

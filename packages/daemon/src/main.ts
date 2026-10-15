@@ -4,7 +4,7 @@ import { mkdir, open, readFile, rename, stat, unlink, utimes, writeFile } from '
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import templates from 'alp:templates';
-import { alpHome, daemonPaths, PROTOCOL_VERSION } from '@anhlp/alp-client/index';
+import { alpHome, daemonPaths, assertPrivateDirectory, PROTOCOL_VERSION } from '@anhlp/alp-client/index';
 import { createAlpRuntime, reclaimCopies, reclaimWorktrees } from '@anhlp/alp-runtime/index';
 import { createDaemonServer } from './server.js';
 import { acquireLock, heartbeat, releaseLock, updateLock } from './lock.js';
@@ -26,8 +26,9 @@ async function rotate(log: string) {
 
 /** Starts the daemon in a new session and returns at once, so it is not part of the caller's process tree. */
 async function detach(home: string) {
+  await assertPrivateDirectory(home, { create: true });
   const { log } = daemonPaths(home);
-  await mkdir(path.dirname(log), { recursive: true, mode: 0o700 });
+  await assertPrivateDirectory(path.dirname(log), { create: true });
   await rotate(log);
   const output = await open(log, 'a', 0o600);
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url)], {
@@ -46,8 +47,9 @@ async function detach(home: string) {
  * manager's own file keeps only what Node prints when it dies.
  */
 async function serviceLog(home: string) {
+  await assertPrivateDirectory(home, { create: true });
   const { log } = daemonPaths(home);
-  await mkdir(path.dirname(log), { recursive: true, mode: 0o700 });
+  await assertPrivateDirectory(path.dirname(log), { create: true });
   await rotate(log);
   const fd = openSync(log, 'a', 0o600);
   for (const stream of [process.stdout, process.stderr]) {
@@ -87,7 +89,7 @@ async function previousExit(marker: string): Promise<{ kind: 'clean' | 'crash'; 
 }
 
 async function run(home: string) {
-  await mkdir(home, { recursive: true, mode: 0o700 });
+  await assertPrivateDirectory(home, { create: true });
   const { socket } = daemonPaths(home);
   let lock;
   try {

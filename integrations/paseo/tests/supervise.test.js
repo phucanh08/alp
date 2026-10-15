@@ -89,7 +89,7 @@ test('a Paseo connection survives alpd going away: it reconnects, and the next p
   const root = path.join(directory, 'project');
   await mkdir(path.join(root, '.alp', 'agents', 'main'), { recursive: true });
   await writeFile(path.join(root, '.alp', 'agents', 'main', 'AGENT.md'), 'Agent main');
-  await mkdir(home, { recursive: true });
+  await mkdir(home, { recursive: true, mode: 0o700 });
   const runtimes = [];
   const daemons = [];
   const { socket } = daemonPaths(home);
