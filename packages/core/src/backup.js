@@ -283,6 +283,7 @@ async function readBackup(file, { onHeader, visit }) {
 
   let buffered = '';
   const decoder = new StringDecoder('utf8');
+  let refused;
   try {
     await pipeline(createReadStream(file), createGunzip(), async function (source) {
       for await (const chunk of source) {
@@ -291,12 +292,14 @@ async function readBackup(file, { onHeader, visit }) {
         while ((newline = buffered.indexOf('\n')) >= 0) {
           const text = buffered.slice(0, newline);
           buffered = buffered.slice(newline + 1);
-          if (text) await take(text);
+          if (text) await take(text).catch(error => { refused ??= error; throw error; });
         }
       }
     });
   } catch (error) {
     await pending?.abort?.();
+    // Some Node versions report the stream's own close in place of what the check threw.
+    if (refused) throw refused;
     if (error instanceof AlpError) throw error;
     throw invalid(`it cannot be read (${error?.code ?? error?.message ?? error})`, { cause: error });
   }
