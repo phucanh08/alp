@@ -72,6 +72,9 @@ async function world(t) {
   const all = ['session.read', 'session.write', 'project.read', 'project.write'];
   const alice = await createCredential(gatewayHome, { label: 'alice', workspaces: [projects.a], permissions: all });
   const bob = await createCredential(gatewayHome, { label: 'bob', workspaces: [projects.b], permissions: all });
+  // May drive read-only trees of a only; may read a's project resources only.
+  const viewer = await createCredential(gatewayHome, { label: 'viewer', workspaces: [projects.a], permissions: all, modes: ['read-only'] });
+  const reader = await createCredential(gatewayHome, { label: 'reader', workspaces: [projects.a], permissions: ['session.read', 'project.read'] });
   const lines = [];
   const logger = createGatewayLogger({ write: line => lines.push(line) });
   const store = new CredentialStore({ home: gatewayHome, logger, pollMs: 50 });
@@ -102,7 +105,7 @@ async function world(t) {
   const turnStarts = async () => (await readFile(journal, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.method === 'turn/start');
 
   return {
-    projects, tokens: { alice: alice.token, bob: bob.token }, ids: { alice: alice.credential.id }, gatewayHome, lines, open, turnStarts,
+    projects, home, tokens: { alice: alice.token, bob: bob.token, viewer: viewer.token, reader: reader.token }, ids: { alice: alice.credential.id }, gatewayHome, lines, open, turnStarts, journal: () => readFile(journal, 'utf8').catch(() => ''),
     get base() { return base; }, get gateway() { return gateway; }, get socket() { return socket; },
     startDaemon, stopDaemon, startGateway,
     async stopGateway() { await gateway?.close(); gateway = undefined; },
@@ -242,7 +245,7 @@ test('another credential cannot see, attach, prompt or receive the session or to
   assert.equal((await owner.request('task.update', { projectRoot: w.projects.a, id: task, action: 'close' })).status, 'closed');
   assert.ok((await owner.request('team.list', { projectRoot: w.projects.a })).teams.length > 0);
   assert.equal(typeof (await owner.request('settings.language.get')).applies, 'string');
-  await assert.rejects(owner.request('library.get', { kind: 'agents', name: 'main', projectRoot: w.projects.a, scope: 'library' }), error => error.code === 1003 && error.data?.reason === 'host_scope');
+  await assert.rejects(owner.request('library.get', { kind: 'agents', name: 'main', projectRoot: w.projects.a, scope: 'project' }), error => error.code === -32601 && error.data?.reason === 'not_exposed');
   await assert.rejects(owner.request('library.save', { kind: 'mcp', name: 'x', scope: 'library', content: { command: 'sh' } }), error => error.code === -32601);
   await assert.rejects(other.request('task.list', { projectRoot: w.projects.a }), error => error.code === 1003);
   await assert.rejects(other.request('task.create', { projectRoot: w.projects.a, title: 'intruder' }), error => error.code === 1003);
@@ -257,4 +260,112 @@ test('another credential cannot see, attach, prompt or receive the session or to
   assert.ok(isAlpClientError(error, 'disconnected'));
   assert.equal(/** @type {any} */ (error).data?.code, 4401);
   await assert.rejects(w.open(w.tokens.alice), /401/);
+});
+
+// docs/alp/remote-gateway.md §5.5: a grant with modes drives only trees within them. Against the
+// real runtime: a message wakes an idle session and steers a running one, an answer lets the asking
+// turn go on, so each is refused for a full-access tree before alpd sees it, and works for a
+// read-only tree the same credential opened.
+test('a read-only grant cannot wake, steer or answer a full-access session on a real alpd, and can drive its own read-only one', { skip, timeout: 60_000 }, async t => {
+  const w = await world(t);
+  const local = new AlpRpcClient(await connectSocket(w.socket));
+  t.after(() => local.close());
+  await hello(local);
+  const { session: full } = await local.request('session.create', { spec: { cwd: w.projects.a, persist: true, model: MODEL, mode: 'full-access' }, history: 'skip' });
+  const events = [];
+  local.onEvent(envelope => events.push(envelope));
+  const ends = () => events.filter(envelope => envelope.sessionId === full.id && envelope.event.type === 'turn.ended').length;
+
+  const viewer = new AlpRpcClient(await w.open(w.tokens.viewer));
+  t.after(() => viewer.close());
+  await hello(viewer);
+  const refusedMode = error => error.code === 1003 && error.data?.reason === 'mode';
+  const reachedProvider = async marker => (await w.journal()).includes(marker);
+
+  // Idle: a message would wake it into a full-access turn.
+  await assert.rejects(viewer.request('session.message', { sessionId: full.id, text: 'wake-marker please go on' }), refusedMode);
+  // Running: a message would steer the full-access turn.
+  await local.request('session.prompt', { sessionId: full.id, clientMessageId: 'hold', content: text('long work [hold]') });
+  await until(async () => (await local.request('session.get', { sessionId: full.id })).session.status === 'running', 'the held turn runs');
+  await assert.rejects(viewer.request('session.message', { sessionId: full.id, text: 'steer-marker change course' }), refusedMode);
+  await assert.rejects(viewer.request('session.prompt', { sessionId: full.id, clientMessageId: 'v1', content: text('prompt-marker') }), refusedMode);
+  await local.request('session.interrupt', { sessionId: full.id });
+  await until(() => ends() >= 1, 'the held turn ended');
+  // Asking: an answer would let the full-access turn go on.
+  await local.request('session.prompt', { sessionId: full.id, clientMessageId: 'ask', content: text('need input [ask]') });
+  await until(async () => (await local.request('question.list', {})).questions.some(question => question.sessionId === full.id), 'the question to the user');
+  const [question] = (await viewer.request('question.list', {})).questions;
+  assert.equal(question.sessionId, full.id, 'the viewer sees the question: it is in its workspace');
+  await assert.rejects(viewer.request('question.answer', { questionId: question.id, text: 'answer-marker yes' }), refusedMode);
+  await assert.rejects(viewer.request('question.answer', { questionId: question.id, dismiss: true }), refusedMode);
+  await sleep(300);
+  assert.equal((await local.request('question.list', {})).questions.length, 1, 'the question still waits');
+  for (const marker of ['wake-marker', 'steer-marker', 'prompt-marker', 'answer-marker']) assert.equal(await reachedProvider(marker), false, `${marker} reached the provider`);
+  assert.equal(ends(), 1, 'no turn ran for the viewer');
+  // The owner answers locally; the turn goes on and ends.
+  await local.request('question.answer', { questionId: question.id, text: 'local yes' });
+  await until(() => ends() >= 2, 'the asking turn ended after the local answer');
+  // Stopping the full-access root is still allowed.
+  assert.deepEqual(await viewer.request('session.interrupt', { sessionId: full.id }), {});
+
+  // The viewer's own read-only tree: a message wakes it, an answer lets it go on.
+  const own = [];
+  viewer.onEvent(envelope => own.push(envelope));
+  const { session: mine } = await viewer.request('session.create', { spec: { cwd: w.projects.a, persist: true, model: MODEL, mode: 'read-only' }, history: 'skip' });
+  const mineEnded = () => own.filter(envelope => envelope.sessionId === mine.id && envelope.event.type === 'turn.ended').length;
+  assert.deepEqual(await viewer.request('session.message', { sessionId: mine.id, text: 'own-wake-marker' }), {});
+  await until(() => reachedProvider('own-wake-marker'), 'the message woke the read-only session');
+  await until(() => mineEnded() >= 1, 'its turn ended');
+  await viewer.request('session.prompt', { sessionId: mine.id, clientMessageId: 'own-ask', content: text('own [ask]') });
+  await until(async () => (await viewer.request('question.list', {})).questions.some(row => row.sessionId === mine.id), 'its question');
+  const asked = (await viewer.request('question.list', {})).questions.find(row => row.sessionId === mine.id);
+  assert.equal((await viewer.request('question.answer', { questionId: asked.id, text: 'own-answer' })).questionId, asked.id);
+  await until(() => mineEnded() >= 2, 'its asking turn ended after the answer');
+});
+
+// docs/alp/remote-gateway.md §5.4: entry content never leaves through the gateway; rows carry names.
+test('project.read gets no MCP, hook or provider secret from a real alpd: library.get is refused and rows carry names only', { skip, timeout: 60_000 }, async t => {
+  const w = await world(t);
+  const SENTINELS = ['SENTINEL-userinfo', 'SENTINEL-query', 'SENTINEL-header', 'SENTINEL-arg', 'SENTINEL-env', 'SENTINEL-hook', 'SENTINEL-provider-arg', 'SENTINEL-provider-env'];
+  const a = w.projects.a;
+  await mkdir(path.join(a, '.alp/mcp'), { recursive: true });
+  await mkdir(path.join(a, '.alp/hooks'), { recursive: true });
+  await mkdir(path.join(w.home, 'providers'), { recursive: true });
+  await writeFile(path.join(a, '.alp/mcp/remote.json'), JSON.stringify({ url: 'https://alice:SENTINEL-userinfo@mcp.example.test/sse?token=SENTINEL-query', headers: { Authorization: 'Bearer SENTINEL-header' } }));
+  await writeFile(path.join(a, '.alp/mcp/local.json'), JSON.stringify({ command: 'npx', args: ['server', '--api-key', 'SENTINEL-arg'], env: { API_KEY: 'SENTINEL-env' } }));
+  await writeFile(path.join(a, '.alp/hooks/notify.json'), JSON.stringify({ event: 'turn.end', command: "curl -H 'Authorization: SENTINEL-hook' https://hooks.example.test" }));
+  await writeFile(path.join(w.home, 'providers/custom.json'), JSON.stringify({ kind: 'acp', label: 'Custom', command: 'custom-agent', args: ['--key', 'SENTINEL-provider-arg'], env: { KEY: 'SENTINEL-provider-env' }, models: [{ id: 'vendor-model' }] }));
+
+  // What alpd answers a local client: the fixture holds secrets alpd itself does not redact.
+  const local = new AlpRpcClient(await connectSocket(w.socket));
+  t.after(() => local.close());
+  await hello(local);
+  const direct = JSON.stringify([
+    await local.request('library.get', { kind: 'mcp', name: 'remote', projectRoot: a, scope: 'project' }),
+    await local.request('library.get', { kind: 'mcp', name: 'local', projectRoot: a, scope: 'project' }),
+    await local.request('library.get', { kind: 'hooks', name: 'notify', projectRoot: a, scope: 'project' }),
+  ]);
+  for (const sentinel of ['SENTINEL-userinfo', 'SENTINEL-query', 'SENTINEL-arg', 'SENTINEL-hook']) assert.ok(direct.includes(sentinel), `alpd answers ${sentinel} locally`);
+
+  const reader = new AlpRpcClient(await w.open(w.tokens.reader));
+  t.after(() => reader.close());
+  await hello(reader);
+  for (const params of [{ kind: 'mcp', name: 'remote', projectRoot: a, scope: 'project' }, { kind: 'mcp', name: 'local', projectRoot: a, scope: 'project' }, { kind: 'hooks', name: 'notify', projectRoot: a, scope: 'project' }, { kind: 'mcp', name: 'remote', projectRoot: a }]) {
+    await assert.rejects(reader.request('library.get', params), error => error.code === -32601 && error.data?.reason === 'not_exposed', JSON.stringify(params));
+  }
+  const answers = [];
+  for (const kind of ['mcp', 'hooks', 'agents', 'skills', 'providers']) answers.push(await reader.request('library.list', { kind, projectRoot: a }));
+  answers.push(await reader.request('team.list', { projectRoot: a }), await reader.request('library.models'));
+  const seen = JSON.stringify(answers);
+  for (const sentinel of SENTINELS) assert.ok(!seen.includes(sentinel), `${sentinel} reached the remote client`);
+  assert.ok(answers[0].entries.some(entry => entry.name === 'remote') && answers[1].entries.some(entry => entry.name === 'notify'), 'rows still name the entries');
+  assert.ok(!seen.includes(w.home), 'no host library path');
+  // The ACP model library.models lists is one a session may use.
+  const acp = answers.at(-1).models.find(model => model.id === 'acp:custom/vendor-model');
+  assert.ok(acp, 'library.models lists the provider\'s model');
+  const owner = new AlpRpcClient(await w.open(w.tokens.alice));
+  t.after(() => owner.close());
+  await hello(owner);
+  const { preview } = await owner.request('session.preview', { spec: { cwd: a, model: acp.id } });
+  assert.equal(typeof preview, 'object');
 });

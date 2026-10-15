@@ -53,6 +53,31 @@ export const SPEC_FIELDS = Object.freeze(['cwd', 'agent', 'model', 'mode', 'thin
 export const CONTENT_TYPES = Object.freeze(['text']);
 
 /**
+ * Fields of list rows passed on; anything else alpd adds later is dropped until reviewed. Rows name
+ * entries, they never carry their content (commands, args, URLs, env) or host paths.
+ */
+export const LIBRARY_ROW_FIELDS = Object.freeze(['name', 'source', 'overrides', 'description', 'usedBy']);
+export const TEAM_ROW_FIELDS = Object.freeze(['id', 'label', 'description', 'source', 'overrides', 'error']);
+export const MODEL_ROW_FIELDS = Object.freeze(['id', 'label', 'efforts', 'effort']);
+
+/** Visible characters: no whitespace, no control characters. */
+const VISIBLE = '[^\\s\\u0000-\\u001f\\u007f-\\u009f]';
+const MODEL_ID = new RegExp(`^(?:(?:codex|claude|antigravity):${VISIBLE}+|acp:(?!\\.\\.?(?:/|$))[\\w.-]+(?:/${VISIBLE}+)?|[A-Za-z0-9][\\w.@\\[\\]-]*)$`, 'u');
+
+/**
+ * A model id as alpd reads spec.model (packages/runtime/src/resolve.ts) and library.models lists
+ * them: `<runtime>:<model>` for codex, claude and antigravity (catalogue ids such as
+ * `claude:claude-opus-4-8[1m]`), `acp:<provider>` or `acp:<provider>/<model>`, where a provider id
+ * is a library file name ([\w.-], packages/core/src/providers.js) and its model any id without
+ * whitespace the provider lists, or a bare catalogue id. At most 256 characters. A model id is
+ * never a path to the gateway or alpd: it chooses a provider by name and is passed to it.
+ * @param {unknown} value
+ */
+export function isModelId(value) {
+  return typeof value === 'string' && value.length <= 256 && MODEL_ID.test(value);
+}
+
+/**
  * @typedef {'gateway' | 'exposed' | 'denied' | 'prohibited'} ExposureStatus
  *   gateway: answered by the gateway itself; exposed: forwarded after the checks; denied: not
  *   exposed until a contract or policy makes its scope checkable; prohibited: never remote in v1.
@@ -74,8 +99,8 @@ export const EXPOSURE = Object.freeze({
   'catalog.get': { status: 'exposed', permission: 'session.read', scope: 'none: the static model and mode catalogue', params: [], tests: ['permission'] },
   'session.list': { status: 'exposed', permission: 'session.read', scope: 'result: sessions whose tree lies in a granted workspace; projectRoot must name one', params: ['projectRoot', 'rootsOnly', 'includeClosed', 'includeArchived'], tests: ['permission', 'workspace-param', 'result-filter'] },
   'session.get': { status: 'exposed', permission: 'session.read', scope: 'session: its tree\'s root and itself in a granted workspace', params: ['sessionId'], tests: ['permission', 'session-scope'] },
-  'session.status': { status: 'exposed', permission: 'session.read', scope: 'session', params: ['sessionId'], tests: ['permission', 'session-scope'] },
-  'session.log': { status: 'exposed', permission: 'session.read', scope: 'session', params: ['sessionId'], tests: ['permission', 'session-scope'] },
+  'session.status': { status: 'exposed', permission: 'session.read', scope: 'session; the answer must be the checked root\'s tree with every session in a granted workspace. Rows carry host paths of that tree (workdir, lease checkouts)', params: ['sessionId'], tests: ['permission', 'session-scope', 'tree-scope'] },
+  'session.log': { status: 'exposed', permission: 'session.read', scope: 'session; the answer must be the checked root\'s run log, whose entries may name host paths of that tree', params: ['sessionId'], tests: ['permission', 'session-scope', 'tree-scope'] },
   'session.attach': { status: 'exposed', permission: 'session.read', scope: 'session; events and replay are then filtered per envelope', capability: CAPABILITY.attachAfter, params: ['sessionId', 'replay', 'after'], tests: ['permission', 'session-scope', 'event-filter'] },
   'session.release': { status: 'exposed', permission: 'session.read', scope: 'session', params: ['sessionId'], tests: ['permission', 'session-scope'] },
   'session.preview': { status: 'exposed', permission: 'session.read', scope: 'workspace: spec.cwd names a granted workspace; spec fields allow-listed', params: ['spec'], tests: ['permission', 'spec-scope'] },
@@ -83,25 +108,25 @@ export const EXPOSURE = Object.freeze({
   'board.list': { status: 'exposed', permission: 'session.read', scope: 'workspace: projectRoot names a granted workspace', params: ['projectRoot'], tests: ['permission', 'workspace-param'] },
 
   'session.create': { status: 'exposed', permission: 'session.write', scope: 'workspace: spec.cwd names a granted workspace and is replaced by its canonical path; an existing sessionId must be in scope; the created root is checked again', params: ['sessionId', 'spec', 'history', 'delegation', 'resume'], tests: ['permission', 'spec-scope', 'session-scope'] },
-  'session.prompt': { status: 'exposed', permission: 'session.write', scope: 'session; text content only; the session\'s mode within the grant\'s modes', capability: CAPABILITY.promptReceipts, params: ['sessionId', 'clientMessageId', 'delivery', 'content'], tests: ['permission', 'session-scope', 'content'] },
-  'session.interrupt': { status: 'exposed', permission: 'session.write', scope: 'session', params: ['sessionId'], tests: ['permission', 'session-scope'] },
+  'session.prompt': { status: 'exposed', permission: 'session.write', scope: 'session; text content only; drives: the modes of the session and every ancestor, looked up afresh, within the grant\'s modes', capability: CAPABILITY.promptReceipts, params: ['sessionId', 'clientMessageId', 'delivery', 'content'], tests: ['permission', 'session-scope', 'content', 'mode'] },
+  'session.interrupt': { status: 'exposed', permission: 'session.write', scope: 'session; stops: a root always, an assignment when its requesters\' modes are within the grant\'s', params: ['sessionId'], tests: ['permission', 'session-scope', 'mode'] },
   'session.configure': { status: 'exposed', permission: 'session.write', scope: 'session; mode within the grant\'s modes', params: ['sessionId', 'mode'], tests: ['permission', 'session-scope', 'mode'] },
-  'session.close': { status: 'exposed', permission: 'session.write', scope: 'session', params: ['sessionId'], tests: ['permission', 'session-scope'] },
+  'session.close': { status: 'exposed', permission: 'session.write', scope: 'session; stops, as session.interrupt', params: ['sessionId'], tests: ['permission', 'session-scope', 'mode'] },
   'session.rename': { status: 'exposed', permission: 'session.write', scope: 'session', params: ['sessionId', 'title'], tests: ['permission', 'session-scope'] },
   'session.archive': { status: 'exposed', permission: 'session.write', scope: 'session', params: ['sessionId', 'archived'], tests: ['permission', 'session-scope'] },
-  'session.message': { status: 'exposed', permission: 'session.write', scope: 'session', params: ['sessionId', 'text'], tests: ['permission', 'session-scope'] },
-  'question.answer': { status: 'exposed', permission: 'session.write', scope: 'question: an exact id (no prefix) whose tree lies in a granted workspace', params: ['questionId', 'text', 'dismiss', 'reason'], tests: ['permission', 'question-scope'] },
+  'session.message': { status: 'exposed', permission: 'session.write', scope: 'session; drives (wakes or steers it, and an assignment\'s requester is told), as session.prompt', params: ['sessionId', 'text'], tests: ['permission', 'session-scope', 'mode'] },
+  'question.answer': { status: 'exposed', permission: 'session.write', scope: 'question: an exact id (no prefix) whose tree lies in a granted workspace; drives the asking session, as session.prompt', params: ['questionId', 'text', 'dismiss', 'reason'], tests: ['permission', 'question-scope', 'mode'] },
 
-  'team.list': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot names a granted workspace (required by the gateway); rows also come from the library and built-in layers, as session.preview shows them', capability: CAPABILITY.team, params: ['projectRoot'], tests: ['permission', 'workspace-param'] },
+  'team.list': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot names a granted workspace (required by the gateway); rows also come from the library and built-in layers, as session.preview shows them; TEAM_ROW_FIELDS only, a read error replaced by a fixed text', capability: CAPABILITY.team, params: ['projectRoot'], tests: ['permission', 'workspace-param', 'row-fields'] },
   'task.list': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot', capability: CAPABILITY.task, params: ['projectRoot'], tests: ['permission', 'workspace-param'] },
   'task.create': { status: 'exposed', permission: 'project.write', scope: 'workspace: projectRoot; requestId dedupes within one alpd process for 10 minutes only, so read task.list before retrying after 1000 or a restart', capability: CAPABILITY.task, params: ['projectRoot', 'title', 'priority', 'requestId'], tests: ['permission', 'workspace-param'] },
   'task.update': { status: 'exposed', permission: 'project.write', scope: 'workspace: projectRoot', capability: CAPABILITY.task, params: ['projectRoot', 'id', 'action', 'note', 'ifRev'], tests: ['permission', 'workspace-param'] },
   'task.gate.resolve': { status: 'exposed', permission: 'project.write', scope: 'workspace: projectRoot', capability: CAPABILITY.task, params: ['projectRoot', 'id', 'gate', 'note', 'ifRev'], tests: ['permission', 'workspace-param'] },
-  'library.list': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot (required by the gateway); rows (names, descriptions, sources) also come from the library and built-in layers', capability: CAPABILITY.library, params: ['kind', 'projectRoot'], tests: ['permission', 'workspace-param'] },
-  'library.get': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot with scope "project" only; the answer must come from the project layer. Library entries are host configuration', capability: CAPABILITY.library, params: ['kind', 'name', 'projectRoot', 'scope'], tests: ['permission', 'workspace-param', 'host-scope'] },
-  'library.models': { status: 'exposed', permission: 'session.read', scope: 'none: model ids and labels, as catalog.get', capability: CAPABILITY.library, params: [], tests: ['permission'] },
+  'library.list': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot (required by the gateway); rows (names, descriptions, sources, users) also come from the library and built-in layers; LIBRARY_ROW_FIELDS only, never content', capability: CAPABILITY.library, params: ['kind', 'projectRoot'], tests: ['permission', 'workspace-param', 'row-fields'] },
+  'library.models': { status: 'exposed', permission: 'session.read', scope: 'none: model ids and labels, as catalog.get; MODEL_ROW_FIELDS only', capability: CAPABILITY.library, params: [], tests: ['permission', 'row-fields'] },
   'settings.language.get': { status: 'exposed', permission: 'session.read', scope: 'none: the language the user reads', capability: CAPABILITY.settingsLanguage, params: [], tests: ['permission'] },
 
+  'library.get': { status: 'denied', scope: 'library-or-project', reason: 'Answers an entry\'s whole content: MCP servers (URLs that may hold tokens in userinfo or query, args, command), hooks (commands), providers, agents. alpd redacts only env and header values, so no layer is passed on until a redaction contract covers every field that can hold a secret.' },
   'library.save': { status: 'denied', scope: 'library-or-project', reason: 'Configures commands alpd runs on the daemon host (mcp, hooks, providers, agents naming them) and, with sync, writes every known project; not exposed until a policy tells project-scope, non-executable changes apart.' },
   'library.delete': { status: 'denied', scope: 'library-or-project', reason: 'Writes ALP configuration; with library.save.' },
   'library.duplicate': { status: 'denied', scope: 'library-or-project', reason: 'Copies executable configuration, secrets included; with library.save.' },

@@ -75,7 +75,6 @@ const OUT_OF_SCOPE = {
   'task.update': ({ b }) => [{ projectRoot: b, id: 't-a000', action: 'close' }, 1003, 'outside_workspace'],
   'task.gate.resolve': ({ b }) => [{ projectRoot: b, id: 't-a000', gate: 'review' }, 1003, 'outside_workspace'],
   'library.list': ({ b }) => [{ kind: 'mcp', projectRoot: b }, 1003, 'outside_workspace'],
-  'library.get': ({ b }) => [{ kind: 'mcp', name: 'x', projectRoot: b, scope: 'project' }, 1003, 'outside_workspace'],
   'library.models': null, // model ids and labels, as catalog.get
   'settings.language.get': null, // the language the user reads
 };
@@ -92,7 +91,7 @@ const IN_SCOPE = ({ a }) => ({
   'question.answer': { questionId: 'q-a-111', text: 'x' },
   'team.list': { projectRoot: a }, 'task.list': { projectRoot: a }, 'task.create': { projectRoot: a, title: 't' },
   'task.update': { projectRoot: a, id: 't-a000', action: 'close' }, 'task.gate.resolve': { projectRoot: a, id: 't-a000', gate: 'review' },
-  'library.list': { kind: 'agents', projectRoot: a }, 'library.get': { kind: 'agents', name: 'main', projectRoot: a, scope: 'project' },
+  'library.list': { kind: 'agents', projectRoot: a },
 });
 
 const LOOKUPS = new Set(['session.get', 'question.list', 'session.list']);
@@ -314,17 +313,12 @@ test('project resources: tasks and teams of a granted workspace, identity params
   assert.equal((await client.request('task.update', { projectRoot: a, id, action: 'close' })).status, 'closed');
   assert.ok((await client.request('team.list', { projectRoot: a })).teams.length);
   assert.ok((await client.request('library.list', { kind: 'agents', projectRoot: a })).entries.length);
-  const entry = await client.request('library.get', { kind: 'agents', name: 'main', projectRoot: a, scope: 'project' });
-  assert.equal(entry.source, 'project');
-  assert.equal(entry.librarySkills, undefined, 'host role-skills are not passed on');
   assert.equal((await client.request('settings.language.get')).applies, 'English');
   assert.ok((await client.request('library.models')).models.length);
   // Host-level data and paths the grant does not list exactly are refused before alpd.
   const mark = daemon.calls().length;
   for (const [method, params] of [
     ['team.list', {}], ['library.list', { kind: 'mcp' }],
-    ['library.get', { kind: 'mcp', name: 'x', projectRoot: a }], ['library.get', { kind: 'mcp', name: 'x', projectRoot: a, scope: 'library' }],
-    ['library.get', { kind: 'mcp', name: 'x', scope: 'project' }],
   ]) {
     await assert.rejects(client.request(method, params), error => error.code === 1003 && error.data?.reason === 'host_scope', `${method} ${JSON.stringify(params)}`);
   }
@@ -332,7 +326,74 @@ test('project resources: tasks and teams of a granted workspace, identity params
     await assert.rejects(client.request('task.create', { projectRoot, title: 'x' }), error => error.code === 1003 && error.data?.reason === 'outside_workspace', projectRoot);
   }
   assert.deepEqual(daemon.calls().slice(mark), []);
-  // An answer from another layer than the one asked for is not passed on.
-  daemon.state.librarySource = 'library';
-  await assert.rejects(client.request('library.get', { kind: 'agents', name: 'main', projectRoot: a, scope: 'project' }), error => error.data?.reason === 'host_scope');
+});
+
+// Library entries are configuration of commands alpd runs on the daemon host: MCP servers (with
+// URLs that may hold a token, args, env), hooks (commands), providers. alpd redacts only env and
+// header values on read, so the gateway does not pass entry content on at all until a redaction
+// contract covers every field (docs/alp/remote-gateway.md §5.4, §10).
+test('library.get is not exposed: no entry content reaches a remote client, from any layer', async t => {
+  const { daemon, sdk, a } = await world(t);
+  const { client } = await sdk('alice');
+  for (const params of [
+    { kind: 'mcp', name: 'x', projectRoot: a, scope: 'project' }, { kind: 'hooks', name: 'x', projectRoot: a, scope: 'project' },
+    { kind: 'agents', name: 'main', projectRoot: a, scope: 'project' }, { kind: 'teams', name: 'pho', projectRoot: a },
+  ]) {
+    await assert.rejects(client.request('library.get', params), error => error.code === -32601 && error.data?.reason === 'not_exposed', JSON.stringify(params));
+  }
+  assert.deepEqual(daemon.calls('library.get'), []);
+});
+
+test('library and team rows carry only their listed fields, and a team error names no host path', async t => {
+  const { daemon, sdk, a } = await world(t);
+  const secret = 'SENTINEL-row-secret';
+  daemon.state.handlers['library.list'] = ({ projectRoot }) => ({ projectRoot, entries: [
+    { name: 'x', source: 'project', description: 'search', usedBy: ['agent main'], overrides: 'library', path: `/home/me/.alp/mcp/x.json?${secret}`, content: { url: `https://u:${secret}@example.test/mcp` } },
+  ] });
+  daemon.state.handlers['team.list'] = ({ projectRoot }) => ({ projectRoot, teams: [
+    { id: 'pho', source: 'builtin', label: 'Phở', description: 'default' },
+    { id: 'broken', source: 'library', error: `/home/me/.alp/teams/broken/team.json: unexpected token near "${secret}"`, path: '/home/me/.alp/teams/broken' },
+  ] });
+  daemon.state.handlers['library.models'] = () => ({ models: [{ id: 'acp:custom/vendor-model', label: 'Custom · vendor', efforts: [], command: secret }] });
+  const { client } = await sdk('alice');
+  const listed = await client.request('library.list', { kind: 'mcp', projectRoot: a });
+  assert.deepEqual(listed.entries, [{ name: 'x', source: 'project', description: 'search', usedBy: ['agent main'], overrides: 'library' }]);
+  const { teams } = await client.request('team.list', { projectRoot: a });
+  assert.deepEqual(teams.map(team => Object.keys(team).sort()), [['description', 'id', 'label', 'source'], ['error', 'id', 'source']]);
+  assert.ok(!teams[1].error.includes('/home/me') && !teams[1].error.includes(secret), teams[1].error);
+  const { models } = await client.request('library.models');
+  assert.deepEqual(models, [{ id: 'acp:custom/vendor-model', label: 'Custom · vendor', efforts: [] }]);
+});
+
+// Model ids follow alpd's grammar (runtime:model, acp:<provider>[/<model>], or a bare catalogue id),
+// not the plain-name rule of agents: an ACP model has a slash, and its own id may hold more.
+test('spec.model takes the ids library.models lists, ACP ones included, and refuses others', async t => {
+  const { daemon, sdk, a } = await world(t);
+  const { client } = await sdk('alice');
+  for (const model of ['acp:custom/vendor-model', 'acp:custom', 'acp:open-router/meta/llama-3.1:8b', 'codex:gpt-5.6-sol', 'claude:claude-opus-5-5', 'claude:claude-opus-4-8[1m]', 'claude-sonnet-5[1m]', 'antigravity:gemini-3-pro', 'gpt-5.6-sol']) {
+    assert.ok((await client.request('session.preview', { spec: { cwd: a, model } })).preview, model);
+  }
+  assert.equal((await client.request('session.create', { spec: { cwd: a, model: 'acp:custom/vendor-model' } })).session.projectRoot, daemon.calls('session.create')[0].params.spec.cwd);
+  assert.equal(daemon.calls('session.create')[0].params.spec.model, 'acp:custom/vendor-model');
+  const mark = daemon.calls().length;
+  for (const model of ['', ' ', 'acp:', 'acp:/x', 'acp:../x', 'acp:a b/c', 'acp:x/ y', 'acp:x/', 'codex:', 'codex: x', '/etc/passwd', '../x', 'x\u0000y', 'x\ny', 'mcp:x', `acp:p/${'m'.repeat(300)}`]) {
+    await assert.rejects(client.request('session.preview', { spec: { cwd: a, model } }), error => error.code === 1003 && error.data?.reason === 'spec_field' && error.data.field === 'model', JSON.stringify(model));
+  }
+  assert.deepEqual(daemon.calls().slice(mark), []);
+});
+
+// A tree has one workspace (docs/alp/remote-gateway.md §5.6): alpd opens every assignment and the
+// supervisor with the requester's cwd. The gateway checks the session asked about and its
+// ancestors, and for a whole-tree answer every session in it, so a tree that ever spans workspaces
+// is refused rather than shown.
+test('session.status answers only a tree wholly inside the grant', async t => {
+  const { daemon, sdk, canonicalA, b } = await world(t);
+  const tree = (...sessions) => () => ({ status: { rootId: 'sa', sessions: sessions.map(([id, projectRoot]) => ({ id, projectRoot })), assignments: [], questions: [], worktrees: [], leases: [], claims: [] } });
+  const { client } = await sdk('alice');
+  daemon.state.handlers['session.status'] = tree(['sa', canonicalA], ['sa-c', canonicalA]);
+  assert.equal((await client.request('session.status', { sessionId: 'sa-c' })).status.sessions.length, 2);
+  daemon.state.handlers['session.status'] = tree(['sa', canonicalA], ['elsewhere', b]);
+  await assert.rejects(client.request('session.status', { sessionId: 'sa' }), error => error.code === 1001);
+  daemon.state.handlers['session.status'] = () => ({ status: { rootId: 'sb', sessions: [], assignments: [], questions: [], worktrees: [], leases: [], claims: [] } });
+  await assert.rejects(client.request('session.status', { sessionId: 'sa' }), error => error.code === 1001, 'another root than the one checked');
 });
