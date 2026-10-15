@@ -47,6 +47,7 @@
     "release:pack-check": "node scripts/pack-check.mjs",
     "release:tarball-check": "node scripts/tarball-consumer.mjs",
     "test:packages:smoke": "node scripts/package-smoke.mjs",
+    "test:gateway:smoke": "node scripts/gateway-smoke.mjs",
     "validate": "node scripts/validate.mjs",
     "validate:core": "node scripts/validate.mjs core",
     "validate:paseo": "node scripts/validate.mjs paseo",
