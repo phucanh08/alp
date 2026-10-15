@@ -81,6 +81,16 @@ for (const location of manifest.workspaces ?? []) {
       ts.forEachChild(node, inspect);
     }
     inspect(source);
+    // The Paseo remote entry (docs/alp/paseo-remote.md) reaches alpd only through the gateway; the
+    // build checks its whole bundle (assertRemoteInputs), this its direct imports.
+    if (pkg.name === 'alp-paseo-plugin' && relative.startsWith(`server${path.sep}remote${path.sep}`)) {
+      for (const specifier of specifiers) {
+        const local = specifier.startsWith('.') ? path.relative(directory, path.resolve(directory, path.dirname(relative), specifier)).replaceAll(path.sep, '/') : undefined;
+        if (/^@anhlp\/alp-(core|runtime|daemon|cli)(\/|$)/.test(specifier) || /^@anhlp\/alp-client(\/(index|supervise|library-test|mcp-probe).*)?$/.test(specifier)
+          || /^(node:)?(fs|fs\/promises|child_process|worker_threads|cluster|vm)$/.test(specifier)
+          || (local && /^server\/(provider|mapping|index|main|web|tasks|library|usage)\.js$|^server\/(panel|paseo)\//.test(local))) failures.push(`${location}/${relative}: the remote entry imports local-only ${specifier}`);
+      }
+    }
     for (const specifier of specifiers) {
       if ((pkg.name !== 'alp-paseo-plugin') && specifier.startsWith('@getpaseo')) failures.push(`${location}/${relative}: forbidden @getpaseo dependency in core package: ${specifier}`);
       if (specifier.startsWith('.')) {

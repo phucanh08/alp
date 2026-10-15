@@ -5,6 +5,9 @@ import type { HostMcpServer, SessionSpec } from '@anhlp/alp-protocol/session';
 import { listTeams, teamOf } from '@anhlp/alp-core/teams';
 import { alpHome } from '@anhlp/alp-client/index';
 import type { ProviderSessionConfig, ProviderPersistence } from './compat.js';
+import { alpdSessionOf, configModels as wireConfigModels, DEFAULT_TEAM } from './mapping-wire.js';
+
+export { alpdSessionOf, DEFAULT_TEAM, handleFor, type AlpdHandle } from './mapping-wire.js';
 
 export { DEFAULT_MODEL, DEFAULT_CLAUDE_MODEL, models, modes, thinkingOptions, thinkingOptionsFor, InstructionsAdapter as PaseoAdapter } from '@anhlp/alp-runtime/index';
 
@@ -19,39 +22,12 @@ export async function teamModels(cwd?: string) {
   const teams = await listTeams(cwd, { library: alpHome(), templates });
   return teams.filter(team => !team.error).map(team => ({ id: team.id, label: team.label ?? team.id, ...(team.description ? { description: team.description } : {}), thinkingOptions: [] }));
 }
-export const DEFAULT_TEAM = 'pho';
 
 /** The team a Paseo model selection names: an id without a runtime prefix, accepting Phở and Cafe's old names. */
 export const teamFor = (model: string | null | undefined) => model && !model.includes(':') && !model.includes('/') ? teamOf(model) : undefined;
 
 /** The model list a session's config shows: its team for a root, its own model for a child or a custom root. */
-export function configModels(session: { parentId?: string; runtime: string; model: string; workflow: { mode: string }; teamLabel?: string }) {
-  if (!session.parentId && session.workflow.mode !== 'custom') return { model: session.workflow.mode, models: [{ id: session.workflow.mode, label: session.teamLabel ?? session.workflow.mode, thinkingOptions: [] }] };
-  const id = `${session.runtime}:${session.model}`;
-  const known = runtimeModels.find(model => model.id === id);
-  return { model: id, models: [{ id, label: known?.label ?? id, ...(known ? { description: known.description } : {}), thinkingOptions: [] }] };
-}
-
-/**
- * Version 2 names a session in alpd, which keeps its native thread and history.
- * Version 1 (plugin 0.2) carried the native thread itself; alpd adopts it on open.
- */
-export type AlpdHandle = { alpdSessionId: string; agent: string; cwd: string };
-
-export const handleFor = (session: { id: string; agent: string; projectRoot: string }): ProviderPersistence => ({
-  version: 2,
-  data: { alpdSessionId: session.id, agent: session.agent, cwd: session.projectRoot },
-});
-
-/** The alpd session a version 2 handle names, after checking it belongs to this project. */
-export function alpdSessionOf(config: ProviderSessionConfig, persistence?: ProviderPersistence) {
-  if (persistence?.version !== 2) return undefined;
-  const data = persistence.data as Partial<AlpdHandle> | undefined;
-  if (!data || typeof data.alpdSessionId !== 'string' || typeof data.agent !== 'string' || data.cwd !== path.resolve(config.cwd)) throw new Error('Invalid ALP persistence or project mismatch');
-  const agent = config.providerOptions?.agent;
-  if (agent !== undefined && agent !== data.agent) throw new Error('Cannot resume a thread as a different ALP agent');
-  return data.alpdSessionId;
-}
+export const configModels = (session: Parameters<typeof wireConfigModels>[0]) => wireConfigModels(session, id => runtimeModels.find(model => model.id === id));
 
 /** Validates Paseo's session config and persistence and translates them to a runtime spec. */
 export function toSessionSpec(config: ProviderSessionConfig, persistence?: ProviderPersistence): SessionSpec {
