@@ -20,6 +20,7 @@ const allowed = {
   '@anhlp/alp-daemon': ['@anhlp/alp-runtime', '@anhlp/alp-core', '@anhlp/alp-client', '@anhlp/alp-protocol'],
   '@anhlp/alp-cli': ['@anhlp/alp-client', '@anhlp/alp-core', '@anhlp/alp-protocol'],
   '@anhlp/alp-tui': [],
+  '@anhlp/alp-gateway': ['@anhlp/alp-client', '@anhlp/alp-core', '@anhlp/alp-protocol'],
   'alp-paseo-plugin': ['@anhlp/alp-daemon', '@anhlp/alp-runtime', '@anhlp/alp-client', '@anhlp/alp-core', '@anhlp/alp-protocol'],
 };
 const failures = corePackageProblems(manifest);

@@ -1,0 +1,64 @@
+{
+  "name": "@anhlp/alp-gateway",
+  "version": "0.10.0",
+  "type": "module",
+  "description": "ALP remote gateway: authenticated WebSocket access to one user's alpd over Protocol v1, through the client SDK",
+  "files": [
+    "src",
+    "dist",
+    "deploy",
+    "README.md"
+  ],
+  "bin": {
+    "alp-gateway": "src/cli.js"
+  },
+  "exports": {
+    ".": {
+      "alp-source": {
+        "types": "./src/index.js",
+        "default": "./src/index.js"
+      },
+      "types": "./dist/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./policy": {
+      "alp-source": {
+        "types": "./src/policy.js",
+        "default": "./src/policy.js"
+      },
+      "types": "./dist/policy.d.ts",
+      "default": "./src/policy.js"
+    },
+    "./credentials": {
+      "alp-source": {
+        "types": "./src/credentials.js",
+        "default": "./src/credentials.js"
+      },
+      "types": "./dist/credentials.d.ts",
+      "default": "./src/credentials.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anhlp/alp-client": "0.10.0",
+    "@anhlp/alp-core": "0.10.0",
+    "@anhlp/alp-protocol": "0.10.0",
+    "ws": "^8.22.0"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build-workspace.mjs gateway",
+    "test": "node ../../scripts/test-package.mjs gateway",
+    "prepack": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phucanh08/alp-paseo.git",
+    "directory": "apps/gateway"
+  }
+}

@@ -99,6 +99,7 @@
     "packages/daemon",
     "packages/cli",
     "apps/tui",
+    "apps/gateway",
     "integrations/paseo"
   ]
 }

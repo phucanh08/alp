@@ -7,7 +7,7 @@ import { ROOT, resources, requireShim, sourceConditions, syncCoreTemplates } fro
 import { assertCoreInputs, recordBundle, writeBuildManifest } from './build-manifest.mjs';
 
 const selected = process.argv[2] === 'paseo-plugin' ? 'paseo' : process.argv[2];
-const locations = { paseo: 'integrations/paseo', tui: 'apps/tui' };
+const locations = { paseo: 'integrations/paseo', tui: 'apps/tui', gateway: 'apps/gateway' };
 const visited = new Set();
 await syncCoreTemplates();
 let embeddedResources;
@@ -67,7 +67,7 @@ async function compile(name) {
   if (Object.keys(entries).length) await writeBuildManifest(path.join(directory, 'dist/build-manifest.json'), { version: manifest.version, entries });
   console.log(`Built ${manifest.name}@${manifest.version}`);
 }
-if (!selected) throw new Error('Usage: build-workspace.mjs <protocol|core|runtime|client|daemon|cli|paseo>');
+if (!selected) throw new Error('Usage: build-workspace.mjs <protocol|core|runtime|client|daemon|cli|gateway|paseo>');
 // Build scripts may be invoked by npm from any workspace directory.
 process.chdir(ROOT);
 await compile(selected);
