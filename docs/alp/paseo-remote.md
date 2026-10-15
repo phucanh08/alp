@@ -208,11 +208,21 @@ macOS (Darwin 27, Apple silicon), Node 26.3, Paseo 0.11.1, Codex CLI 0.162.1 đ�
 | Tasks add/list/close | pass | không chạy (không cần model; fake đủ) |
 | Cancel | pass (`canceled`) | pass (~0.7 s) |
 | Gateway restart giữa turn, replay không trùng | pass | pass (message cuối đúng 1 lần) |
+| Gateway restart lúc rảnh (alpd đóng root không ai xem) | pass (root được mở lại) | pass (`gateway.restart.twice`: restart hai lần liên tiếp, prompt sau đó chạy) |
+| Link đứt / lỗi tạm thời trong lúc reattach, nhiều root, đóng khi đang retry, credential bị từ chối | pass (`remote-reattach.test.js`, link giả) | — |
 | alpd restart, resume | pass | pass |
 | Credential mode `read-only` | pass | không chạy |
 | Client không đọc host / không spawn | pass (permission model) | `ALP_HOME` client rỗng |
 | Token không trong log | pass | pass (log gateway + Paseo) |
-| Embedded/local regression | lane paseo: 126 test package Paseo pass | — |
+| Embedded/local regression | lane paseo: 136 test package Paseo pass | — |
+
+**UI smoke** (web app Paseo 0.11.1 có sẵn trong `Paseo.app/Contents/Resources/app-dist`, phục vụ trên
+127.0.0.1, thao tác bằng Playwright; Paseo daemon cô lập + plugin remote + gateway + alpd tạm + codex
+thật; không phải cửa sổ Electron desktop): mở workspace, chọn ALP → Phở, prompt có tool call và
+stream, question allow/deny, Tasks panel thêm/đóng task, Stop agent (turn `canceled` trên host),
+gateway restart hai lần lúc rảnh rồi prompt (`ALP reconnected to alpd.`), Settings ALP chỉ xem (không
+"Loading…" treo, không New, có lý do), Language chỉ xem, trang Providers: "ALP · Available · 2
+models".
 
 ## 9. Không hỗ trợ / giới hạn còn lại
 
