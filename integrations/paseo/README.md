@@ -7,7 +7,7 @@ offers two profiles, and nothing else:
 - **Cafe**: main supervises lead, which implements or delegates to peer.
 
 In both, main runs on Opus 5.5 with high effort and full access, and starts a
-supervisor on Sonnet 4.6, shown as a child session, that reviews main's process
+supervisor on Sonnet 5, shown as a child session, that reviews main's process
 after each turn and asks main about mistakes; main records lessons it follows in
 later sessions. Both profiles support read-only reviewer and oracle agents; oracle
 runs on Fable or Astra, and main may ask both for two opinions. New projects default
@@ -45,28 +45,38 @@ and project overrides.
 
 ## Install
 
-Requires Paseo 0.11.1 or a later 0.11 release, Node.js 20+, and an authenticated native Codex or
-Claude Code executable on PATH.
+This is the beta `0.0.0-beta.1` (not published yet); name it when you install (`@beta`, or
+exactly `@0.0.0-beta.1`). See the
+[release notes](https://github.com/phucanh08/alp/blob/main/docs/alp/beta-release-notes.md) and
+[install, upgrade and removal steps](https://github.com/phucanh08/alp/blob/main/docs/alp/beta-install.md).
+
+Requires Paseo `>=0.11.1 <0.12.0`, Node.js 22 (22.12 or later) or 24 on Linux or macOS
+(Windows and Node.js 26 are experimental), and an authenticated native Codex or Claude Code
+executable on PATH.
 
 ALP sessions run in `alpd`, a per-user daemon from the `@anhlp/alp` package; Paseo
 only views them. Install the CLI and start the daemon once, so it records where
 it is installed:
 
 ```sh
-npm install -g @anhlp/alp
+npm install -g @anhlp/alp@beta
 alp daemon start
 ```
+
+Coming from 0.10.0 or earlier, where this plugin was `alp-paseo-plugin`: remove it with
+`paseo plugin remove alp-provider` before adding this one; `paseo plugin update` would fetch
+the old name.
 
 Then enable plugins in Paseo Settings → Plugins and add the provider:
 
 ```sh
-paseo plugin add npm:alp-paseo-plugin
+paseo plugin add npm:@anhlp/alp-paseo@beta
 paseo provider models alp
 ```
 
 From then on the plugin keeps alpd running while Paseo runs. It starts alpd when
 Paseo starts, checks every 5 seconds, and starts it again when alpd is down; with
-`alp daemon install`, it starts alpd through that service. Sessions open in Paseo
+`alp daemon install` (experimental), it starts alpd through that service. Sessions open in Paseo
 stay open across the restart: the plugin reconnects, shows that it lost and
 regained alpd, and a session alpd did not reopen resumes from its thread at the
 next prompt. After `alp daemon stop` the plugin leaves alpd stopped until you
@@ -103,10 +113,13 @@ Skills and the skills each role gets live in your library in `ALP_HOME`
 overwrite what you changed.
 `ALP_CODEX_BIN` and `ALP_CLAUDE_BIN` can select absolute native executables.
 
-See [workflow and migration documentation](https://github.com/phucanh08/alp-paseo/blob/main/docs/alp/team-workflow.md)
+See [workflow and migration documentation](https://github.com/phucanh08/alp/blob/main/docs/alp/team-workflow.md)
 for existing projects, model selection, permissions, and runtime limitations.
 
-## Remote mode (beta)
+## Remote mode (deferred, not in the beta)
+
+Remote mode is **not part of `0.0.0-beta.1`**: it needs `@anhlp/alp-gateway`, which is not
+published. The text below describes the code in this repository for development only.
 
 To use ALP running on another machine, start the daemon process that loads this plugin with
 `ALP_GATEWAY_URL` (the ALP host's gateway, `https://…`; `http://` only for a loopback host) and
@@ -115,40 +128,41 @@ plugin then reaches alpd only through the gateway: it starts nothing on this mac
 no ALP files here. Open a workspace whose folder is exactly a path the credential grants.
 Sessions, questions, tasks, teams and the library list work; library content and edits,
 tests, usage, git and files are shown as unavailable. See
-[Paseo remote mode](https://github.com/phucanh08/alp-paseo/blob/main/docs/alp/paseo-remote.md).
+[Paseo remote mode](https://github.com/phucanh08/alp/blob/main/docs/alp/paseo-remote.md).
 
 ## Workspace development
 
 From the repository root:
 
 ```sh
-npm run build -w alp-paseo-plugin
-npm run test -w alp-paseo-plugin
-npm pack -w alp-paseo-plugin
+npm run build -w @anhlp/alp-paseo
+npm run test -w @anhlp/alp-paseo
+npm pack -w @anhlp/alp-paseo
 ```
 
-`integrations/paseo` owns the plugin client, server, shared types and manifest. The build writes the self-contained server bundles (including the integration entry `server/dist/main.js` and `server/dist/alpd.js`) and the web app to `server/dist`; only the plugin package ships these Paseo artifacts. The npm package name and Paseo plugin ID remain unchanged.
+`integrations/paseo` owns the plugin client, server, shared types and manifest. The build writes the self-contained server bundles (including the integration entry `server/dist/main.js` and `server/dist/alpd.js`) and the web app to `server/dist`; only the plugin package ships these Paseo artifacts. The npm package is `@anhlp/alp-paseo` (`alp-paseo-plugin` up to 0.10.0); the Paseo plugin ID remains `alp-provider`.
 
 ## Optional web installation
 
 `@anhlp/alp` and the six core packages install without Paseo. To use the web UI:
 
 ```sh
-npm install -g @anhlp/alp alp-paseo-plugin
+npm install -g @anhlp/alp@beta @anhlp/alp-paseo@beta
 alp-web-integration --register
 alp web --print
 alp web pair --off
 ```
 
-Normal npm installs resolve the plugin's declared Paseo/React peers; do not use
-`--legacy-peer-deps` for a standalone installation unless you supply those peers
-explicitly. The binary is also discoverable on PATH, so registration is optional
+Normal npm installs resolve the plugin's required peers (`@getpaseo/*`, `ws`); React and
+React Native are optional peers that the Paseo app provides, so npm does not install them.
+Do not use `--legacy-peer-deps` for a standalone installation unless you supply the required
+peers explicitly. The binary is also discoverable on PATH, so registration is optional
 for a global install. For a local install, run
 `./node_modules/.bin/alp-web-integration --register` with the intended `ALP_HOME`.
-The existing `paseo plugin add npm:alp-paseo-plugin` route for a Paseo host remains
+The existing `paseo plugin add npm:@anhlp/alp-paseo@beta` route for a Paseo host remains
 available independently of this standalone web process.
 
-Core upgrades no longer update a bundled plugin: upgrade `alp-paseo-plugin`
+Core upgrades no longer update a bundled plugin: upgrade `@anhlp/alp-paseo`
 separately, and re-register if its installation location changes. Keep existing
 `web` settings, `web.json` token/server identity and ALP session storage.
 `alp web`, `alp web --print`, `alp web pair --on/--off`, `ALP_WEB_INTEGRATION`,

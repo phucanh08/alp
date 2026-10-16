@@ -1,11 +1,12 @@
 {
   "name": "@anhlp/alp-daemon",
-  "version": "0.10.0",
+  "version": "0.0.0-beta.1",
   "type": "module",
   "description": "ALP daemon module",
   "files": [
     "src",
-    "dist"
+    "dist",
+    "NOTICE"
   ],
   "exports": {
     "./index": {
@@ -58,13 +59,13 @@
     }
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   },
   "dependencies": {
-    "@anhlp/alp-core": "0.10.0",
-    "@anhlp/alp-runtime": "0.10.0",
-    "@anhlp/alp-client": "0.10.0",
-    "@anhlp/alp-protocol": "0.10.0",
+    "@anhlp/alp-core": "0.0.0-beta.1",
+    "@anhlp/alp-runtime": "0.0.0-beta.1",
+    "@anhlp/alp-client": "0.0.0-beta.1",
+    "@anhlp/alp-protocol": "0.0.0-beta.1",
     "@anthropic-ai/sdk": "^0.131.0",
     "ws": "^8.22.0",
     "zod": "4.4.3",
@@ -77,11 +78,17 @@
   },
   "publishConfig": {
     "access": "public",
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://registry.npmjs.org/",
+    "tag": "beta"
   },
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/phucanh08/alp-paseo.git",
+    "url": "git+https://github.com/phucanh08/alp.git",
     "directory": "packages/daemon"
+  },
+  "homepage": "https://github.com/phucanh08/alp/tree/main/packages/daemon#readme",
+  "bugs": {
+    "url": "https://github.com/phucanh08/alp/issues"
   }
 }

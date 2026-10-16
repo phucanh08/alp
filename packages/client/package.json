@@ -1,11 +1,12 @@
 {
   "name": "@anhlp/alp-client",
-  "version": "0.10.0",
+  "version": "0.0.0-beta.1",
   "type": "module",
   "description": "ALP client: portable JSON-RPC SDK, WebSocket and Node IPC transports, daemon discovery and setup",
   "files": [
     "src",
-    "dist"
+    "dist",
+    "NOTICE"
   ],
   "exports": {
     "./acp-probe": {
@@ -138,11 +139,11 @@
     }
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   },
   "dependencies": {
-    "@anhlp/alp-core": "0.10.0",
-    "@anhlp/alp-protocol": "0.10.0"
+    "@anhlp/alp-core": "0.0.0-beta.1",
+    "@anhlp/alp-protocol": "0.0.0-beta.1"
   },
   "scripts": {
     "build": "node ../../scripts/build-workspace.mjs client",
@@ -151,11 +152,17 @@
   },
   "publishConfig": {
     "access": "public",
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://registry.npmjs.org/",
+    "tag": "beta"
   },
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/phucanh08/alp-paseo.git",
+    "url": "git+https://github.com/phucanh08/alp.git",
     "directory": "packages/client"
+  },
+  "homepage": "https://github.com/phucanh08/alp/tree/main/packages/client#readme",
+  "bugs": {
+    "url": "https://github.com/phucanh08/alp/issues"
   }
 }

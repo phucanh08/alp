@@ -1,5 +1,11 @@
 # ALP client SDK: portable client, transports và tương thích Node
 
+> **Trạng thái beta `0.0.0-beta.1`:** `@anhlp/alp-client` phát hành trong beta. Entry
+> `@anhlp/alp-client/portable` và `/websocket` (browser, React Native) là **experimental**: không
+> nằm trong acceptance gate, smoke browser/Metro/tarball chưa vào CI. React Native trên Hermes hoặc
+> thiết bị thật: deferred. Kết quả ở §7 là bằng chứng lịch sử (2026-10-15, Node 26.3), không chạy
+> trên bản beta. Phạm vi: [beta-scope.md](beta-scope.md) §4, §5.
+
 Task 07 (Cross-platform Client SDK). Tách RPC client của alpd khỏi Node để Browser, React
 Native và Node dùng chung một engine qua transport interface. CLI, alpd và plugin Paseo vẫn
 dùng API Node cũ, không phải sửa consumer.

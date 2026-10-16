@@ -16,7 +16,7 @@ const ALLOWED_ALP = [
 ];
 
 /** Packages from npm the bundle must never hold. */
-const FORBIDDEN_PACKAGES = /(^|\/)node_modules\/(@getpaseo\/|alp-paseo-plugin\/|ws\/|@anhlp\/alp-(core|runtime|daemon|cli|gateway)\/)/;
+const FORBIDDEN_PACKAGES = /(^|\/)node_modules\/(@getpaseo\/|@anhlp\/alp-paseo\/|ws\/|@anhlp\/alp-(core|runtime|daemon|cli|gateway)\/)/;
 
 /**
  * Why a module may not be in the browser bundle, or undefined when it may.

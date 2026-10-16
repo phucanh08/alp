@@ -1,10 +1,17 @@
 import { buildCore } from './build-core.mjs';
 import { build as esbuild } from 'esbuild';
-const build = options => esbuild({ absWorkingDir: path.resolve(import.meta.dirname, '..'), conditions: ['alp-source'], ...options });
+// Every plugin bundle's metafile is kept: the third-party packages they inline ship their licences.
+const metafiles = [];
+const build = async options => {
+  const result = await esbuild({ absWorkingDir: path.resolve(import.meta.dirname, '..'), conditions: ['alp-source'], metafile: true, ...options });
+  metafiles.push(result.metafile);
+  return result;
+};
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { requireShim } from './workspace-build-lib.mjs';
 import { assertCoreInputs, assertRemoteInputs } from './build-manifest.mjs';
+import { THIRD_PARTY_NOTICES, writeThirdPartyNotices } from './third-party-notices.mjs';
 
 process.chdir(path.resolve(import.meta.dirname, '..'));
 
@@ -64,4 +71,5 @@ for (const file of serverFiles) {
 // starts processes on the client's machine.
 const remoteBuild = await build({ entryPoints: ['integrations/paseo/server/remote/index.ts'], outfile: 'integrations/paseo/server/dist/remote/index.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', banner: requireShim, external: pluginExternal, metafile: true });
 assertRemoteInputs(remoteBuild.metafile, 'integrations/paseo/server/dist/remote/index.js');
-console.log(`Built ${pluginManifest.name ?? 'alp-paseo-plugin'}`);
+await writeThirdPartyNotices(path.join('integrations/paseo/server/dist', THIRD_PARTY_NOTICES), metafiles, pluginManifest.name ?? '@anhlp/alp-paseo');
+console.log(`Built ${pluginManifest.name ?? '@anhlp/alp-paseo'}`);

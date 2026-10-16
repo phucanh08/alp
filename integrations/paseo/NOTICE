@@ -1,0 +1,34 @@
+ALP
+Copyright 2026 Lê Phúc Anh
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Where a package's bundled files include third-party code, its
+THIRD-PARTY-NOTICES.txt names each package and reproduces its licence.
+
+---
+
+This package includes software from Paseo (https://github.com/getpaseo/paseo),
+Copyright (c) 2025-present Mohamed Boudra, licensed under the Apache License,
+Version 2.0. Third-party components incorporated into Paseo remain licensed
+under the licenses provided by their respective copyright holders.
+
+All of it is taken from Paseo at commit
+b63a325be3d3ae444fbd38815658cca01ab1288f (0.11.2) and changed for ALP:
+
+* server/dist/web-app: Paseo's web app (packages/app), built with the patches
+  in ALP's paseo-web/patches. Its NOTICE.txt says what they change,
+  LICENSE.paseo.txt is Paseo's licence as Paseo ships it, and
+  THIRD-PARTY-NOTICES.txt reproduces the licences of the third-party
+  packages bundled into the app.
+* server/dist: code from Paseo's daemon (packages/server/src/server), each
+  source file in ALP's integrations/paseo/server/paseo saying what changed:
+  - agent/chat-search/index.ts (chat-search.ts)
+  - agent/timeline-projection.ts (timeline-projection.ts)
+  - agent/agent-timeline-store.ts and agent-timeline-store-types.ts
+    (timeline-store.ts)
+  - relay-transport.ts and websocket/encrypted-relay-socket.ts
+    (relay-transport.ts)
+  - utils/diff-highlighter.ts, its unified-diff parser (checkout.ts)
+* server/dist also bundles Paseo's @getpaseo/protocol and @getpaseo/relay;
+  see server/dist/THIRD-PARTY-NOTICES.txt.

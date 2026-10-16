@@ -11,11 +11,12 @@ follows:
 
 ## 1. Install
 
-You need Node.js 20+ and the Codex CLI, logged in (`codex login`). Claude Code is not
-needed.
+You need Node.js 22 (22.12 or later) or 24 and the Codex CLI, logged in (`codex login`).
+Claude Code is not needed. Install the beta by name; a plain `npm install -g @anhlp/alp`
+installs the older `0.10.0` ([beta-install.md](beta-install.md)).
 
 ```sh
-npm install -g @anhlp/alp
+npm install -g @anhlp/alp@beta
 alp doctor
 ```
 
@@ -72,10 +73,11 @@ In Cafe, the lead that main starts shows `codex:gpt-6.1-sol` too.
 
 ## 4. Paseo and the web app
 
-- **Paseo:** `paseo plugin add npm:alp-paseo-plugin`. Phở and Cafe in the model picker
+- **Paseo:** `paseo plugin add npm:@anhlp/alp-paseo@beta`. Phở and Cafe in the model picker
   use your overrides.
-- **Web app:** `alp web` opens it. It is part of `@anhlp/alp`; there is nothing else to
-  install.
+- **Web app:** it ships in `@anhlp/alp-paseo`, not in `@anhlp/alp`:
+  `npm install -g @anhlp/alp-paseo@beta`, `alp-web-integration --register`, then `alp web`
+  ([beta-install.md](beta-install.md#alp-web-on-this-machine)).
 
 ## What changes with one runtime
 

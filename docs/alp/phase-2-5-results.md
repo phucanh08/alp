@@ -1,5 +1,9 @@
 # Kết quả Giai đoạn 2 → 5
 
+> **Báo cáo lịch sử** (2026-10-06), giữ nguyên làm bằng chứng. Không phải hướng dẫn hiện hành và
+> không phải kết quả của bản beta `0.0.0-beta.1`; xem [beta-install.md](beta-install.md) và
+> [beta-scope.md](beta-scope.md).
+
 Ngày: 2026-10-06. Thực hiện tuần tự; không đọc Giai đoạn 6 trở đi. Workspace đầu vào chưa có triển khai Giai đoạn 1, chỉ có kế hoạch và báo cáo Giai đoạn 0. Đã thêm package JavaScript tối thiểu và tests để thực hiện Giai đoạn 2; không đọc kế hoạch Giai đoạn 1 hoặc tự triển khai `alp init`.
 
 ## Giai đoạn 2 — Config, discovery, resolution

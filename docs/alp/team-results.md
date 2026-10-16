@@ -1,5 +1,8 @@
 # Team workflow verification — 2026-10-07
 
+> **Historical record**, kept as evidence. Not current guidance and not a result of the beta
+> `0.0.0-beta.1`; see [beta-install.md](beta-install.md) and [beta-scope.md](beta-scope.md).
+
 Implemented scope: editable main/lead/peer templates, initializer and explicit legacy
 upgrade, provider-neutral delegation graph validation, and actual nested child
 execution through the Paseo provider's Codex adapter.

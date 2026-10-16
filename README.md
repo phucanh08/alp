@@ -4,10 +4,17 @@ Provider-neutral filesystem agent resolution with a server-side Paseo provider. 
 
 ## Install
 
-Requires Node.js 20+ and an authenticated Codex or Claude Code executable on PATH.
+The current release is the beta `0.0.0-beta.1` (not published yet): see the
+[release notes](docs/alp/beta-release-notes.md) for what it includes and its known issues, and
+[installing, upgrading and removing the beta](docs/alp/beta-install.md) for every step. Name the
+beta when you install (`@beta`, or exactly `@0.0.0-beta.1`); a plain `npm install -g @anhlp/alp`
+installs the older `0.10.0`.
+
+Supported: Linux or macOS, Node.js 22 (22.12 or later) or 24, and a signed-in Codex CLI or
+Claude Code on PATH. Windows and Node.js 26 are experimental; Node.js 20 is not supported.
 
 ```sh
-npm install -g @anhlp/alp
+npm install -g @anhlp/alp@beta
 alp doctor          # checks Codex and Claude, settings, and leftovers; --fix repairs the safe ones
 alp daemon start
 ```
@@ -54,7 +61,7 @@ For projects created with an earlier scaffold, run `alp upgrade [directory]` (or
 
 ## Development
 
-Use Node 20+ and an npm version compatible with your Node installation:
+Use Node 22 (22.12 or later) or 24 and an npm version compatible with your Node installation:
 
 ```sh
 npm ci
@@ -68,7 +75,7 @@ Tests are split by owner:
 
 | Group | Location | Run |
 | --- | --- | --- |
-| Unit and package-level contract | `packages/<name>/tests/` (plugin: `integrations/paseo/tests/`) | `npm test -w @anhlp/alp-core` (or `-runtime`, `-client`, `-daemon`, `-cli`, `-protocol`, `alp-paseo-plugin`); all at once: `npm run test:unit` |
+| Unit and package-level contract | `packages/<name>/tests/` (plugin: `integrations/paseo/tests/`) | `npm test -w @anhlp/alp-core` (or `-runtime`, `-client`, `-daemon`, `-cli`, `-protocol`, `@anhlp/alp-paseo`); all at once: `npm run test:unit` |
 | Integration (several packages, CLI processes, repository checks) | `test/integration/` | `npm run test:integration` |
 | E2E (live providers, opt-in) | `test/e2e/` | `npm run test:e2e` or one of `test:e2e:*` |
 | Shared fixtures such as fake transports | `test/support/` | imported by package and integration tests |
@@ -151,7 +158,7 @@ Example `.alp/settings.json`:
 }
 ```
 
-`workflow.mode` names a team: `pho`, `cafe` or your own (`smart` and `supervised`, Phở and Cafe's names before 0.4, are still accepted); `workflow.supervisor: false` turns the supervisor off. `runtime.provider` selects `codex` or `claude` behind the ALP Paseo plugin; the Paseo provider ID itself is `alp`. Without `runtime.provider` and `runtime.model`, main runs on `claude:claude-opus-5-5` with `high` effort; setting either replaces that default. `runtime.model` is passed through to the selected native harness, so it accepts any model name supported by that installed Codex or Claude Code version. Core treats these strings as provider-neutral data. An agent's `agent.json` can pick its own provider, model, thinking and mode, and name the skills, MCP servers and hooks it uses ([agent library](docs/alp/agent-library.md)). ALP runs hooks itself at its own events, the same for Codex and Claude; a project's hooks run after you trust the workspace once ([hooks](docs/alp/agent-library.md#hooks)). Besides Codex and Claude, an agent can run on any agent that speaks the Agent Client Protocol, such as Gemini CLI or opencode, added to your library with `alp provider add` or in the web app's Providers settings ([ACP providers](docs/alp/agent-library.md#acp-providers)).
+`workflow.mode` names a team: `pho`, `cafe` or your own (`smart` and `supervised`, Phở and Cafe's names before 0.4, are still accepted); `workflow.supervisor: false` turns the supervisor off. `runtime.provider` selects `codex` or `claude` behind the ALP Paseo plugin; the Paseo provider ID itself is `alp`. Without `runtime.provider` and `runtime.model`, main runs on `claude:claude-opus-5-5` with `high` effort; setting either replaces that default. `runtime.model` is passed through to the selected native harness, so it accepts any model name supported by that installed Codex or Claude Code version. Core treats these strings as provider-neutral data. An agent's `agent.json` can pick its own provider, model, thinking and mode, and name the skills, MCP servers and hooks it uses ([agent library](docs/alp/agent-library.md)). ALP runs hooks itself at its own events, the same for Codex and Claude; a project's hooks run after you trust the workspace once ([hooks](docs/alp/agent-library.md#hooks)). Besides Codex and Claude, an agent can run on any agent that speaks the Agent Client Protocol, such as Gemini CLI or opencode (experimental in the beta), added to your library with `alp provider add` or in the web app's Providers settings ([ACP providers](docs/alp/agent-library.md#acp-providers)).
 
 For example, select Claude Code and one of its model aliases in `.alp/settings.json`:
 
@@ -183,11 +190,11 @@ Use `resolveAgent(projectRoot, { agent: 'your-agent' })` from `src/core/resolver
 `alpd` hosts ALP sessions for all projects of a user. After `npm run build`:
 
 ```sh
-alp daemon start          # or: status [--json] | stop | restart | install | uninstall
+alp daemon start          # or: status [--json] | stop | restart | install | uninstall (install: experimental)
 alp doctor [--fix]        # what ALP needs here, what earlier runs left behind, and what alpd's log and readiness say; only --fix repairs
 alp backup --stop         # sessions, settings, library and the projects' tasks in one file; also: verify | list
 alp restore FILE --stop   # checks the whole backup first, keeps what it replaces; --dry-run changes nothing
-alp run --profile cafe "Your task"   # streams the agent tree; Ctrl-C interrupts
+alp run --team cafe "Your task"      # streams the agent tree; Ctrl-C interrupts
 alp ps [--all]            # live sessions as a tree; --all adds closed ones
 alp top [session]         # live dashboard: who runs, who waits, questions, worktrees, leases
 alp attach <session>      # follow a running tree, or print a closed one
@@ -237,7 +244,7 @@ When recovering an assignment saved by an older ALP version, an effort no longer
 
 Text one agent wrote reaches another without `<system-reminder>` tags, so a peer cannot pose as the harness.
 
-Work survives alpd: after a crash, `alp daemon stop` or `alp daemon restart`, the next alpd reopens trees that were working, by itself, and their assignments continue with their thread, worktree and task. When a Codex or Claude process dies under a session, ALP restarts it and the session continues; three restarts in a row with no progress end it. `alp daemon install` runs alpd as a login service (launchd on macOS, systemd on Linux) that starts it again after a crash. Details: [Crashes and restarts](docs/alp/team-workflow.md#crashes-and-restarts).
+Work survives alpd: after a crash, `alp daemon stop` or `alp daemon restart`, the next alpd reopens trees that were working, by itself, and their assignments continue with their thread, worktree and task. When a Codex or Claude process dies under a session, ALP restarts it and the session continues; three restarts in a row with no progress end it. `alp daemon install` (experimental in the beta) runs alpd as a login service (launchd on macOS, systemd on Linux) that starts it again after a crash. Details: [Crashes and restarts](docs/alp/team-workflow.md#crashes-and-restarts).
 
 `alp backup` writes your sessions, timelines, receipts, settings, library and the projects' tasks to one checked file, and `alp restore` puts them back only after checking all of it, keeping what it replaced so the restore can be undone; an interrupted restore is rolled back. alpd migrates an older state when an upgrade needs it, after saving a backup, and an older ALP refuses state a newer one wrote instead of changing it. Session trees unused for 30 days are deleted, but never while one of them is live or a prompt receipt of theirs (7 days) is still honoured. Codex and Claude keep their own threads, which a backup does not hold. Details: [Backups, restores, upgrades and recovery](docs/alp/data-recovery.md).
 
@@ -249,10 +256,10 @@ Finished assignments stay recallable for 14 days: main, or the agent that assign
 
 ## The web app
 
-The optional `alp-paseo-plugin` package serves the ALP web app as a separate process. The core `@anhlp/alp` distribution includes no Paseo SDK or web app. Install the plugin once to keep using the existing web commands:
+The optional `@anhlp/alp-paseo` package serves the ALP web app as a separate process, on this machine only (loopback). The core `@anhlp/alp` distribution includes no Paseo SDK or web app; ALP 0.10.0 and earlier bundled it. This is not the standalone app in `apps/web`, which is deferred and not published. Install the plugin once to keep using the existing web commands:
 
 ```sh
-npm install -g alp-paseo-plugin
+npm install -g @anhlp/alp-paseo@beta
 alp-web-integration --register  # register in the selected ALP_HOME (also discoverable on PATH)
 alp web            # opens http://127.0.0.1:7433 with its access token
 alp web --print    # prints the address instead
@@ -269,9 +276,9 @@ The app is [Paseo](https://github.com/getpaseo/paseo)'s web app (Apache 2.0), bu
 
 The web app listens on 127.0.0.1 only. The page needs the token `alp web` puts in its address (kept in `~/.alp/web.json`), and the integration refuses requests for another host name and sockets from another site. `"web": { "port": 8000 }` in `~/.alp/settings.json` moves it, and `"web": { "enabled": false }` turns it off. In a checkout of this repository, build the app with `npm run build:web` (it clones Paseo into `.cache/paseo-web`). Details: [ALPD §62](plans/reference/ALPD.md#62-the-alp-web-app-on-paseos-app-2026-10-10).
 
-### Paseo's app on your phone
+### Paseo's app on your phone (experimental)
 
-The integration can also reach alpd from [Paseo](https://paseo.sh)'s own app on another device, through Paseo's relay (`relay.paseo.sh`):
+Relay pairing is experimental in the beta and off by default. The integration can also reach alpd from [Paseo](https://paseo.sh)'s own app on another device, through Paseo's relay (`relay.paseo.sh`):
 
 ```sh
 alp web pair --on     # turns the relay on and prints the pairing link
@@ -280,9 +287,9 @@ alp web pair          # the link again; --off turns the relay off
 
 Or in the web app: Settings → your host → Pair device → Enable relay, then scan the QR code with Paseo's app. Traffic between the device and alpd is end-to-end encrypted; the relay only passes it on. The link carries alpd's public key, not its token: when Paseo's app asks for a password, give it the token (the part after `#token=` in `alp web --print`). The relay stays off until you turn it on; `"web": { "relay": { "endpoint": "host:port" } }` points the integration at another relay. Paseo's app shows ALP's sessions and teams, and answers what ALP has not built yet as an error. Details: [ALPD §64](plans/reference/ALPD.md#64-paseos-relay-and-its-app-on-another-device-2026-10-12).
 
-## Antigravity CLI
+## Antigravity CLI (experimental)
 
-With `agy` installed and signed in:
+The Antigravity and ACP providers (OpenCode, Gemini CLI) are experimental in the beta. With `agy` installed and signed in:
 
 ```sh
 alp provider test antigravity
@@ -303,9 +310,9 @@ OpenCode (`opencode acp`) and Antigravity (`agy`) are added to your library by d
 
 ALP installs one `alp` MCP launcher in `~/.gemini/config/mcp_config.json`, preserving other entries. Each agy process inherits its own socket and token; neither is saved in that file. The launcher remains available across sessions and exposes no ALP tools outside an ALP process. Invalid configuration and a conflicting user-owned `alp` entry cause an error without overwriting the file.
 
-## Editors (ACP)
+## Editors (ACP, experimental)
 
-`alp acp` serves ALP over the [Agent Client Protocol](https://agentclientprotocol.com) on stdio, so an editor such as Zed or a JetBrains IDE can use ALP as its agent. In Zed's `settings.json`:
+`alp acp` is experimental in the beta. It serves ALP over the [Agent Client Protocol](https://agentclientprotocol.com) on stdio, so an editor such as Zed or a JetBrains IDE can use ALP as its agent. In Zed's `settings.json`:
 
 ```json
 {
@@ -325,13 +332,13 @@ Details: [ALPD §60](plans/reference/ALPD.md#60-alp-as-an-acp-agent-2026-10-10).
 
 ## Paseo
 
-See [installation and runtime behavior](docs/alp/paseo-plugin.md) and [phase acceptance evidence](docs/alp/phase-2-5-results.md). The plugin is verified with Paseo 0.11.1 and live Codex and Claude Code permission changes.
+To use the published plugin, follow [the plugin's README](integrations/paseo/README.md) or [beta-install.md](docs/alp/beta-install.md#paseo-plugin): `paseo plugin add npm:@anhlp/alp-paseo@beta`. The beta supports Paseo `>=0.11.1 <0.12.0`. See [installation and runtime behavior](docs/alp/paseo-plugin.md) and the historical [phase acceptance evidence](docs/alp/phase-2-5-results.md). The plugin was verified with Paseo 0.11.1 and live Codex and Claude Code permission changes before the beta; the beta's own runs are in [beta-scope.md](docs/alp/beta-scope.md) §6.
 
 **Settings → ALP** manages your library of teams, agents, skills, MCP servers, hooks and ACP providers, and the **ALP project** workspace panel manages a project's overrides ([settings screen](docs/alp/paseo-plugin.md#alp-settings-and-the-project-panel)).
 
 ### Build and add the plugin to Paseo
 
-Prerequisites: Node.js 20+, Paseo 0.11.1 or a later 0.11 release (the Tasks panel needs its plugin client API), and a logged-in Codex CLI and/or Claude Code installation. Set `ALP_CODEX_BIN` or `ALP_CLAUDE_BIN` to an absolute native executable path when it is not available on `PATH`.
+This section builds the plugin from a checkout of this repository. Prerequisites: Node.js 22 (22.12 or later) or 24, Paseo 0.11.1 or a later 0.11 release (the Tasks panel needs its plugin client API), and a logged-in Codex CLI and/or Claude Code installation. Set `ALP_CODEX_BIN` or `ALP_CLAUDE_BIN` to an absolute native executable path when it is not available on `PATH`.
 
 Install dependencies, type-check the plugin, and build its server bundle:
 
@@ -403,3 +410,7 @@ inform coordination. See [team configuration and migration](docs/alp/team-workfl
 ## Modular monorepo development
 
 ALP is organized into npm workspaces for protocol, core, runtime, daemon, client, CLI, a reserved TUI, and the Paseo integration. See [package boundaries, build/test/release commands and the Rust migration seam](docs/modular-monorepo.md). Existing commands and checkout entry points remain compatible.
+
+## License
+
+ALP is licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE). Packages that bundle third-party code ship a `THIRD-PARTY-NOTICES.txt`. The `alp web` app in `@anhlp/alp-paseo` is Paseo's web app (Apache-2.0, © Mohamed Boudra) with ALP's patches; see that package's `NOTICE`. The web app's third-party licences are in `server/dist/web-app/THIRD-PARTY-NOTICES.txt`.

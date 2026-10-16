@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp-protocol",
-  "version": "0.10.0",
+  "version": "0.0.0-beta.1",
   "type": "module",
   "description": "ALP protocol module",
   "files": [
@@ -8,7 +8,8 @@
     "dist",
     "schema",
     "fixtures",
-    "conformance"
+    "conformance",
+    "NOTICE"
   ],
   "exports": {
     "./connection": {
@@ -98,7 +99,7 @@
     }
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   },
   "dependencies": {},
   "scripts": {
@@ -109,14 +110,20 @@
   },
   "publishConfig": {
     "access": "public",
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://registry.npmjs.org/",
+    "tag": "beta"
   },
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/phucanh08/alp-paseo.git",
+    "url": "git+https://github.com/phucanh08/alp.git",
     "directory": "packages/protocol"
   },
+  "homepage": "https://github.com/phucanh08/alp/tree/main/packages/protocol#readme",
+  "bugs": {
+    "url": "https://github.com/phucanh08/alp/issues"
+  },
   "devDependencies": {
-    "ajv": "8.17.1"
+    "ajv": "8.20.0"
   }
 }

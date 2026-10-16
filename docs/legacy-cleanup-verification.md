@@ -1,5 +1,8 @@
 # Legacy source-directory cleanup verification
 
+> **Historical record**, kept as evidence. Paths below are of the machine and workspace at the
+> time; not current guidance.
+
 Date: 2026-10-14
 Workspace: `/Users/anhlp/StudioProjects/alp-paseo`
 

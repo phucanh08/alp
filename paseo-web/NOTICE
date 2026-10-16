@@ -13,3 +13,6 @@ repository instead of Paseo's GitHub, sponsor page and Discord. It shows
 alpd's "in development" answer as a toast and leaves out "What's new", which
 listed Paseo's release notes, and runs alpd's own plugin from a same-origin
 script instead of evaluating code.
+
+THIRD-PARTY-NOTICES.txt beside the app names each third-party package bundled
+into it and reproduces its licence.

@@ -1,13 +1,15 @@
 {
   "name": "@anhlp/alp-gateway",
-  "version": "0.10.0",
+  "version": "0.0.0-beta.1",
+  "private": true,
   "type": "module",
   "description": "ALP remote gateway: authenticated WebSocket access to one user's alpd over Protocol v1, through the client SDK",
   "files": [
     "src",
     "dist",
     "deploy",
-    "README.md"
+    "README.md",
+    "NOTICE"
   ],
   "bin": {
     "alp-gateway": "src/cli.js"
@@ -42,9 +44,9 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@anhlp/alp-client": "0.10.0",
-    "@anhlp/alp-core": "0.10.0",
-    "@anhlp/alp-protocol": "0.10.0",
+    "@anhlp/alp-client": "0.0.0-beta.1",
+    "@anhlp/alp-core": "0.0.0-beta.1",
+    "@anhlp/alp-protocol": "0.0.0-beta.1",
     "ws": "^8.22.0"
   },
   "scripts": {
@@ -54,11 +56,17 @@
   },
   "publishConfig": {
     "access": "public",
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://registry.npmjs.org/",
+    "tag": "beta"
   },
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/phucanh08/alp-paseo.git",
+    "url": "git+https://github.com/phucanh08/alp.git",
     "directory": "apps/gateway"
+  },
+  "homepage": "https://github.com/phucanh08/alp/tree/main/apps/gateway#readme",
+  "bugs": {
+    "url": "https://github.com/phucanh08/alp/issues"
   }
 }

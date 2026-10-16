@@ -11,8 +11,8 @@ import { parseConnectionOfferFromUrl } from '@getpaseo/protocol/connection-offer
 import { validateWSOutboundMessage } from '@getpaseo/protocol/validation/ws-outbound';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
-import { createWebServer } from 'alp-paseo-plugin';
-import { createPaseoBridge } from 'alp-paseo-plugin';
+import { createWebServer } from '@anhlp/alp-paseo';
+import { createPaseoBridge } from '@anhlp/alp-paseo';
 import { fakeTransport, until } from '../../../test/support/fake-agent.js';
 
 /**
