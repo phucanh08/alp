@@ -1,5 +1,6 @@
 import { shippedTemplateRoot } from './template-path.js';
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { moveFile } from './atomic.js';
 import { createHash, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
@@ -77,7 +78,7 @@ export async function seedLibrary(home, options = {}) {
     await mkdir(home, { recursive: true });
     const temporary = `${manifestPath}.${randomUUID().slice(0, 8)}.tmp`;
     await writeFile(temporary, JSON.stringify(manifest, null, 2) + '\n');
-    await rename(temporary, manifestPath);
+    await moveFile(temporary, manifestPath);
   }
   return { created, updated };
 }
