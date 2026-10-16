@@ -73,11 +73,12 @@ test('security: writable non-sticky ancestor is refused before creating socket d
 test('security: a link cannot hide an attacker-writable lexical ancestor', { skip: process.platform === 'win32' }, async t => {
   const { directory, runtime } = await fixture(t);
   const other = await mkdtemp(path.join(tmpdir(), 'alp-ipc-link-'));
-  t.after(() => rm(other, { recursive: true, force: true }));
   await symlink(directory, path.join(other, 'link'));
   await chmod(other, 0o777);
   const server = createDaemonServer({ runtime, socketPath: path.join(other, 'link', 'rpc.sock'), version: 'test' });
   t.after(() => server.close());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(other, { recursive: true, force: true }));
   await assert.rejects(server.listen(), /IPC|permission/i);
   await assert.rejects(lstat(path.join(directory, 'rpc.sock')), { code: 'ENOENT' });
 });
@@ -85,12 +86,13 @@ test('security: a link cannot hide an attacker-writable lexical ancestor', { ski
 test('security: every intermediate symlink target parent must be trusted', { skip: process.platform === 'win32' }, async t => {
   const { directory, runtime } = await fixture(t);
   const unsafe = await mkdtemp(path.join(tmpdir(), 'alp-ipc-chain-'));
-  t.after(() => rm(unsafe, { recursive: true, force: true }));
   await symlink(directory, path.join(unsafe, 'second'));
   await symlink(path.join(unsafe, 'second'), path.join(directory, 'first'));
   await chmod(unsafe, 0o777);
   const server = createDaemonServer({ runtime, socketPath: path.join(directory, 'first', 'new', 'rpc.sock'), version: 'test' });
   t.after(() => server.close());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(unsafe, { recursive: true, force: true }));
   await assert.rejects(server.listen(), /IPC|permission/i);
   await assert.rejects(lstat(path.join(directory, 'new')), { code: 'ENOENT' });
 });

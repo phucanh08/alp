@@ -32,7 +32,6 @@ test('CLI follows symlinks and importing from a same-named wrapper has no CLI ef
 
 test('malformed JSON values and duplicate responses fail cases without crashing the host', { timeout: 15000 }, async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'conf-wire-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
   const socket = process.platform === 'win32' ? `\\\\.\\pipe\\conf-${process.pid}-${Date.now()}` : path.join(dir, 's');
   let malformed = false;
   const server = net.createServer(connection => {
@@ -51,6 +50,8 @@ test('malformed JSON values and duplicate responses fail cases without crashing 
   });
   await new Promise(resolve => server.listen(socket, resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(dir, { recursive: true, force: true }));
   for (const badValues of [false, true]) {
     malformed = badValues;
     const results = await runConformance({ socket, profiles: ['handshake'] });

@@ -20,13 +20,14 @@ function fakeTransport(runtimes) {
 
 test('each session records a digest of its instructions, and of ALP.md and AGENT.md, so a change shows in the run log', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-instructions-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
   const root = path.join(directory, 'project');
   await initProject(root);
   const runs = path.join(directory, 'runs');
   const runtimes = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: runs });
   t.after(() => runtime.shutdown());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(directory, { recursive: true, force: true }));
   // The run log is written in the background: wait for the entry.
   const log = async id => {
     for (let i = 0; i < 400; i++) {

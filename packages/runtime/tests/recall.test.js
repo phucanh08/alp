@@ -199,13 +199,14 @@ test('a recall that runs into a failed fork reports the error', async t => {
 
 test('threads past their recall time are deleted when the runtime starts', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-recall-expire-'));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const file = path.join(directory, 'recall.json');
   const entry = (id, days, runtime = 'codex') => ({ assignmentId: id, rootId: 'r', requesters: ['r'], agent: 'peer', project: directory, runtime, threadId: `thread-${id}`, cwd: directory, model: 'm', status: 'completed', finishedAt: new Date(Date.now() - days * 86_400_000).toISOString() });
   await writeFile(file, JSON.stringify([entry('old', 20), entry('older', 30, 'claude'), entry('new', 1), { broken: true }]));
   const runtimes = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, recallFile: file });
   t.after(() => runtime.shutdown());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   await until(() => runtimes.length === 2 && runtimes.every(harness => harness.closed));
   assert.deepEqual(runtimes.map(harness => [harness.kind, harness.calls.map(call => `${call.method} ${call.params.threadId}`)]).sort(), [['claude', ['thread/delete thread-older']], ['codex', ['thread/delete thread-old']]]);
   await until(async () => JSON.parse(await readFile(file, 'utf8')).length === 1);

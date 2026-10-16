@@ -14,13 +14,14 @@ const validateEnvelope = ajv.compile({ $ref: `${schema.$id}#/$defs/envelope` });
 
 test('runtime emits schema-compatible v1 events through the existing provider injection seam', async t => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'alp-contract-'));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
   const emitted = [];
   const runtime = createAlpRuntime({ transport: () => ({
     initialize: async () => {}, onNotification() {}, onFailure() {}, onRequest() {}, close: async () => {},
     request: async method => method.startsWith('thread/') ? { thread: { id: 'native' } } : {},
   }) });
   t.after(() => runtime.shutdown());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(cwd, { recursive: true, force: true }));
   runtime.onEvent(envelope => emitted.push(envelope));
   await runtime.open('contract', { cwd, persist: true, mode: 'read-only' });
   await runtime.close('contract');

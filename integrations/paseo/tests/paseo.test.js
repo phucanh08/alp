@@ -266,10 +266,11 @@ test('Paseo lists alpd roots for import and reopens one under its own id', async
 
 test('a team session shows its team, and main starts its supervisor as a child on Sonnet 5', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-paseo-profile-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
   const runtimes = [];
   const conn = await createProvider({ transport: () => { const r = fakeRuntime(); r.onRequest = fn => { r.serverRequest = fn; }; runtimes.push(r); return r; } }).connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
   t.after(() => conn.close());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(root, { recursive: true, force: true }));
   const events = []; conn.onEvent(e => { ProviderEventSchema.parse(e); events.push(e); });
   await conn.send({ type: 'session.open', requestId: 'open', sessionId: 's', config: { ...config(root), model: 'cafe' }, history: 'skip' });
   assert.ok(events.some(e => e.type === 'session.ready' && e.sessionId === 's'), JSON.stringify(events));
