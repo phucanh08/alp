@@ -79,5 +79,6 @@ test('retention keeps live trees and trees with receipts in their window, remove
   await until(async () => !(await listed()).includes('later'), 'the sweep to remove the expired tree');
   assert.deepEqual(await listed(), ['receipted', 'recent', 'restored', 'working']);
   assert.deepEqual((await readdir(path.join(state, 'receipts'))).sort(), ['r-receipted.json']);
-  assert.ok(!(await readdir(runs)).includes('later.jsonl'));
+  // Its files go after the row: the sweep may still be removing them.
+  await until(async () => !(await readdir(runs)).includes('later.jsonl'), 'the sweep to remove the expired run log');
 });
