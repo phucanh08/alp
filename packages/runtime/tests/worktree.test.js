@@ -52,6 +52,7 @@ async function setup(t) {
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['peer'] }, workflow: { maxPeers: 3 } }));
   await writeFile(path.join(project, 'shared.txt'), 'one\ntwo\nthree\n');
   git(project, 'init', '--quiet', '-b', 'main');
+  git(project, 'config', 'core.autocrlf', 'false'); // the host's global setting must not turn the files' LF into CRLF
   git(project, 'add', '-A');
   git(project, '-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'init');
   const runtimes = [];
@@ -220,6 +221,7 @@ test('shared writers in different repositories run together, with external board
   const core = path.join(directory, 'core');
   await mkdir(core);
   git(core, 'init', '--quiet', '-b', 'main');
+  git(core, 'config', 'core.autocrlf', 'false'); // the host's global setting must not turn the files' LF into CRLF
   await mkdir(path.join(core, 'src'));
   await writeFile(path.join(core, 'src/a.txt'), 'core');
   git(core, 'add', '-A');
@@ -241,7 +243,7 @@ test('shared writers in different repositories run together, with external board
   assert.ok((await projectPeer.call('alp_pin', { kind: 'claim', body: 'Project', paths: ['.'] }, 'pin-a')).pinned);
   assert.match((await corePeer.call('alp_pin', { kind: 'claim', body: 'Wrong repository', paths: ['.'] }, 'pin-project')).error, /outside/);
   const pin = await corePeer.call('alp_pin', { kind: 'claim', body: 'Core', paths: ['../core/src'] }, 'pin-b');
-  assert.deepEqual(pin.paths, [path.join(core, 'src')]);
+  assert.deepEqual(pin.paths, [path.join(core, 'src').split(path.sep).join('/')]); // claim paths are stored with forward slashes
   assert.equal((await main.call('alp_board', {}, 'board')).claims.length, 2);
   assert.match((await corePeer.call('alp_pin', { kind: 'claim', body: 'Outside scope', paths: ['../unrelated'] }, 'pin-bad')).error, /outside/);
   const same = await main.call('alp_delegate', { agent: 'peer', task: 'Write core again', mode: 'workspace-write', writeRoot: '../core/src' }, 'same');

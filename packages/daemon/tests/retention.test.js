@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { connect } from '@anhlp/alp-client';
+import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 
@@ -62,10 +62,10 @@ test('retention keeps live trees and trees with receipts in their window, remove
   await receipt('r-gone', 'nobody', 8);
 
   const runtime = createAlpRuntime({ runLogDir: runs });
-  const server = createDaemonServer({ runtime, socketPath: path.join(directory, 'd.sock'), version: 'test', store: createStore(state), runLogDir: runs, retentionSweepMs: 50 });
+  const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', store: createStore(state), runLogDir: runs, retentionSweepMs: 50 });
   await server.listen();
   t.after(() => server.close());
-  const client = await connect(path.join(directory, 'd.sock'), { name: 'test', version: '0' });
+  const client = await connect(daemonPaths(directory).socket, { name: 'test', version: '0' });
   t.after(() => client.close());
   const listed = async () => (await client.request('session.list', { includeClosed: true, includeArchived: true, rootsOnly: true })).sessions.map(row => row.id).sort();
 

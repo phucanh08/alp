@@ -11,9 +11,9 @@ test('Claude gets the agent\'s skills to load as its own; Codex finds them in it
   const claude = await tree(t, { prefix: 'alp-skill-', open: { model: 'claude:claude-opus-5-5' } });
   const config = claude.main.config;
   assert.deepEqual(config.skills.map(skill => skill.name), ['bug-loop', 'goal-griller', 'prompt-leverage', 'sequence-execution-plan', 'smart-commits', 'xia']);
-  assert.ok(config.skills.every(skill => skill.path.endsWith(`/skills/${skill.name}/SKILL.md`)));
+  assert.ok(config.skills.every(skill => skill.path.endsWith(path.join('/skills', skill.name, 'SKILL.md'))));
   assert.match(config.developerInstructions, /Your skills are also Claude Code skills named alp:<name>: run one with the Skill tool/);
-  assert.match(config.developerInstructions, /- xia \([^)]+\/skills\/xia\/SKILL\.md\): Research an unfamiliar implementation/);
+  assert.match(config.developerInstructions, /- xia \([^)]+[\\/]skills[\\/]xia[\\/]SKILL\.md\): Research an unfamiliar implementation/);
 
   const codex = await tree(t, { prefix: 'alp-skill-', open: { model: 'codex:gpt-5.6-sol' } });
   assert.equal(codex.main.config.skills, undefined);
@@ -45,8 +45,8 @@ test('the skill plugin links each skill\'s own directory under the plugin name a
   const plugin = path.join(directory, 'plugin');
   skillPlugin(plugin, [{ name: 'xia', path: '/library/skills/xia/SKILL.md' }, { name: 'bug-loop', path: '/project/.alp/skills/bug-loop/SKILL.md' }]);
   assert.deepEqual(JSON.parse(await readFile(path.join(plugin, '.claude-plugin', 'plugin.json'), 'utf8')).name, 'alp');
-  assert.equal(await readlink(path.join(plugin, 'skills', 'xia')), '/library/skills/xia');
-  assert.equal(await readlink(path.join(plugin, 'skills', 'bug-loop')), '/project/.alp/skills/bug-loop');
+  assert.equal(await readlink(path.join(plugin, 'skills', 'xia')), path.resolve('/library/skills/xia'));
+  assert.equal(await readlink(path.join(plugin, 'skills', 'bug-loop')), path.resolve('/project/.alp/skills/bug-loop'));
   // Made again on a restart, from scratch.
   skillPlugin(plugin, [{ name: 'xia', path: '/library/skills/xia/SKILL.md' }]);
   await assert.rejects(lstat(path.join(plugin, 'skills', 'bug-loop')));

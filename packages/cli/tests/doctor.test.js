@@ -9,11 +9,17 @@ import { initProject } from '@anhlp/alp-core/init';
 import { diagnose, repair } from '@anhlp/alp-client/doctor';
 import { bootTime } from '@anhlp/alp-client';
 
+const windows = process.platform === 'win32';
+
+// A fake runtime. Windows cannot exec a shebang script, so there it is a .js file the doctor runs under Node,
+// which `via` hands to the doctor by its variable, as a PATH lookup would not find it.
 async function fakeBin(directory, name, body) {
-  const file = path.join(directory, name);
-  await writeFile(file, `#!/bin/sh\n${body}\n`);
+  const file = path.join(directory, windows ? `${name}.js` : name);
+  await writeFile(file, `#!${process.execPath}\n${body}\n`);
   await chmod(file, 0o755);
+  return file;
 }
+const via = (variable, file) => windows ? { [variable]: file } : {};
 
 const byId = (checks, id) => checks.filter(check => check.id === id);
 
@@ -25,9 +31,9 @@ test('doctor reports runtimes, settings, agents and leftovers, and --fix repairs
   await mkdir(path.join(home, 'state'), { recursive: true, mode: 0o700 });
   await chmod(home, 0o700);
   await mkdir(bin);
-  await fakeBin(bin, 'codex', 'case "$1" in --version) echo "codex-cli 9.9.9";; login) echo "Not logged in"; exit 1;; esac');
-  await fakeBin(bin, 'claude', 'case "$1" in --version) echo "9.9.9 (Claude Code)";; auth) echo \'{"loggedIn": true}\';; esac');
-  const env = { PATH: bin };
+  const codex = await fakeBin(bin, 'codex', "const [command] = process.argv.slice(2); if (command === '--version') console.log('codex-cli 9.9.9'); else if (command === 'login') { console.log('Not logged in'); process.exit(1); }");
+  const claude = await fakeBin(bin, 'claude', "const [command] = process.argv.slice(2); if (command === '--version') console.log('9.9.9 (Claude Code)'); else if (command === 'auth') console.log('{\"loggedIn\": true}');");
+  const env = { PATH: bin, ...via('ALP_CODEX_BIN', codex), ...via('ALP_CLAUDE_BIN', claude) };
 
   // A project with a typo in its settings, a merged branch, an unmerged one, and one in use.
   const project = path.join(directory, 'project');
@@ -67,8 +73,9 @@ test('doctor reports runtimes, settings, agents and leftovers, and --fix repairs
   assert.deepEqual(status('claude'), ['ok']);
   assert.deepEqual(status('alpd'), ['warn']);
   assert.deepEqual(status('sandbox'), ['warn']);
-  assert.deepEqual(status('permissions'), ['warn']);
-  assert.deepEqual(byId(checks, 'permissions')[0].details, [`0644 ${path.join(home, 'state', 'recall.json')}`]);
+  // Windows has no mode bits to report or tighten; the check is ok there.
+  assert.deepEqual(status('permissions'), [windows ? 'ok' : 'warn']);
+  if (!windows) assert.deepEqual(byId(checks, 'permissions')[0].details, [`0644 ${path.join(home, 'state', 'recall.json')}`]);
   assert.deepEqual(status('user settings'), ['fail']);
   assert.match(byId(checks, 'user settings')[0].summary, /limits\.autoResume must be true or false/);
   assert.deepEqual(status('skills'), ['warn']);
@@ -80,8 +87,8 @@ test('doctor reports runtimes, settings, agents and leftovers, and --fix repairs
   assert.deepEqual(byId(checks, 'branches').map(check => [check.status, check.details]), [['warn', ['alp/merged']], ['info', ['alp/kept']]]);
 
   const fixed = await repair(checks);
-  assert.deepEqual(fixed.map(item => item.id), ['alpd', 'permissions', 'live work', 'worktrees', 'branches']);
-  assert.equal((await stat(path.join(home, 'state', 'recall.json'))).mode & 0o777, 0o600);
+  assert.deepEqual(fixed.map(item => item.id), windows ? ['alpd', 'live work', 'worktrees', 'branches'] : ['alpd', 'permissions', 'live work', 'worktrees', 'branches']);
+  if (!windows) assert.equal((await stat(path.join(home, 'state', 'recall.json'))).mode & 0o777, 0o600);
   assert.deepEqual(JSON.parse(await readFile(path.join(home, 'state', 'live.json'), 'utf8')).map(entry => entry.assignmentId), ['a-here']);
   assert.equal(git('for-each-ref', '--format=%(refname:short)', 'refs/heads/alp/').trim().split('\n').sort().join(' '), 'alp/kept alp/tree alp/waiting');
   assert.doesNotMatch(git('worktree', 'list'), /gone-tree/);
@@ -103,10 +110,10 @@ test('doctor fails without any runtime and passes a clean setup', async t => {
 
   const bin = path.join(directory, 'bin');
   await mkdir(bin);
-  await fakeBin(bin, 'codex', 'echo "codex-cli 1.0.0"');
+  const codex = await fakeBin(bin, 'codex', "console.log('codex-cli 1.0.0')");
   const project = path.join(directory, 'project');
   await initProject(project);
-  const checks = await diagnose({ home, project, env: { PATH: bin }, sandbox: true });
+  const checks = await diagnose({ home, project, env: { PATH: bin, ...via('ALP_CODEX_BIN', codex) }, sandbox: true });
   // Claude and Antigravity missing is fine while Codex works.
   assert.deepEqual(checks.filter(check => check.status !== 'ok').map(check => [check.id, check.status]), [['claude', 'warn'], ['antigravity', 'warn']]);
   assert.match(checks.find(check => check.id === 'agents').summary, /agents resolve: .*main/);
@@ -120,12 +127,12 @@ test('alp doctor --json prints the checks and exits 0 when nothing fails', async
   await chmod(home, 0o700);
   const bin = path.join(directory, 'bin');
   await mkdir(bin);
-  await fakeBin(bin, 'codex', 'echo "codex-cli 1.0.0"');
-  await fakeBin(bin, 'claude', 'case "$1" in --version) echo "1.0.0 (Claude Code)";; *) echo \'{"loggedIn": true}\';; esac');
+  const codex = await fakeBin(bin, 'codex', "console.log('codex-cli 1.0.0')");
+  const claude = await fakeBin(bin, 'claude', "if (process.argv[2] === '--version') console.log('1.0.0 (Claude Code)'); else console.log('{\"loggedIn\": true}');");
   const project = path.join(directory, 'project');
   await initProject(project);
   const output = execFileSync(process.execPath, [fileURLToPath(new URL('../src/cli.js', import.meta.url)), 'doctor', '--json', '--project', project], {
-    env: { ...process.env, ALP_HOME: home, PATH: `${bin}${path.delimiter}${process.env.PATH}`, ALP_CODEX_BIN: '', ALP_CLAUDE_BIN: '', ALP_ANTIGRAVITY_BIN: path.join(bin, 'codex') },
+    env: { ...process.env, ALP_HOME: home, PATH: `${bin}${path.delimiter}${process.env.PATH}`, ALP_CODEX_BIN: windows ? codex : '', ALP_CLAUDE_BIN: windows ? claude : '', ALP_ANTIGRAVITY_BIN: codex },
   }).toString();
   const report = JSON.parse(output);
   assert.equal(report.project, project);

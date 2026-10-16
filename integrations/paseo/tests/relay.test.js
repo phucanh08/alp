@@ -122,7 +122,8 @@ test('the pairing link is a Paseo offer with alpd\'s server id, its kept public 
   assert.deepEqual(offer.relay, { endpoint: relay.endpoint, useTls: false });
   const kept = JSON.parse(await readFile(path.join(home, 'relay-keypair.json'), 'utf8'));
   assert.equal(kept.publicKeyB64, offer.daemonPublicKeyB64);
-  assert.equal((await stat(path.join(home, 'relay-keypair.json'))).mode & 0o777, 0o600);
+  // Windows files carry no POSIX mode bits.
+  if (process.platform !== 'win32') assert.equal((await stat(path.join(home, 'relay-keypair.json'))).mode & 0o777, 0o600);
   assert.equal(parseConnectionOfferFromUrl((await gateway.relay.offer()).url).daemonPublicKeyB64, offer.daemonPublicKeyB64, 'the key is kept');
   assert.equal(url.includes(info.token), false, 'the link carries no token');
 });

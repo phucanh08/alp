@@ -13,6 +13,7 @@ const ENTRY = fileURLToPath(new URL('../../packages/cli/dist/alpd.js', import.me
 
 test('the service keeps alpd up after a crash but not after a clean stop, with the environment alpd needs', async () => {
   const home = '/tmp/a home & co';
+  const resolved = path.resolve(home); // the definitions hold it resolved, which on Windows adds a drive
   const env = { PATH: '/opt/bin:/usr/bin', ALP_CODEX_BIN: '/opt/codex', ALP_SERVICE_DIR: '/tmp/agents', UNRELATED: 'x' };
   const mac = serviceFor({ home, env, platform: 'darwin', uid: 501 });
   assert.match(mac.name, /^com\.alp\.alpd\.[0-9a-f]{8}$/, 'a custom ALP_HOME gets its own service');
@@ -22,7 +23,7 @@ test('the service keeps alpd up after a crash but not after a clean stop, with t
   const plist = serviceDefinition(mac, { home, entry: '/opt/alp/dist/alpd.js', execPath: '/opt/node', env });
   assert.match(plist, /<key>KeepAlive<\/key>\s*<dict>\s*<key>Crashed<\/key>\s*<true\/>\s*<key>SuccessfulExit<\/key>\s*<false\/>/);
   assert.match(plist, /<key>RunAtLoad<\/key>\s*<true\/>/);
-  assert.match(plist, /<key>ALP_HOME<\/key>\s*<string>\/tmp\/a home &amp; co<\/string>/);
+  assert.match(plist, new RegExp(`<key>ALP_HOME</key>\\s*<string>${RegExp.escape(resolved.replace('&', '&amp;'))}</string>`));
   assert.match(plist, /<key>PATH<\/key>\s*<string>\/opt\/bin:\/usr\/bin<\/string>/);
   assert.match(plist, /<key>ALP_CODEX_BIN<\/key>/);
   assert.doesNotMatch(plist, /UNRELATED/);
@@ -32,7 +33,7 @@ test('the service keeps alpd up after a crash but not after a clean stop, with t
   const unit = serviceDefinition(linux, { home, entry: '/opt/a "b"/alpd.js', execPath: '/opt/node', env });
   assert.match(unit, /^ExecStart="\/opt\/node" "\/opt\/a \\"b\\"\/alpd\.js" "--service"$/m);
   assert.match(unit, /^Restart=on-failure$/m);
-  assert.match(unit, /^Environment="ALP_HOME=\/tmp\/a home & co"$/m);
+  assert.match(unit, new RegExp(`^Environment="ALP_HOME=${RegExp.escape(resolved.replaceAll('\\', '\\\\'))}"$`, 'm')); // systemd quoting doubles backslashes
   assert.equal(serviceFor({ home, env, platform: 'win32' }), undefined);
 
   // What is installed reads back as the program it runs.
@@ -48,7 +49,7 @@ test('the service keeps alpd up after a crash but not after a clean stop, with t
   }
 });
 
-test('alp daemon install runs alpd under its service until uninstall', async t => {
+test('alp daemon install runs alpd under its service until uninstall', { skip: process.platform === 'win32' && 'Windows has no service manager here (serviceFor is undefined) and the stand-in manager is an sh script' }, async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-svc-'));
   const home = path.join(directory, 'home');
   const calls = path.join(directory, 'calls');

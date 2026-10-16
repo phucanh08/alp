@@ -7,7 +7,7 @@ import { chmod, mkdtemp, readFile, rename, rm, writeFile, readdir } from 'node:f
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
-import { connect } from '@anhlp/alp-client';
+import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 
@@ -59,7 +59,7 @@ async function setup(t) {
   async function start() {
     const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(directory, 'runs') });
     const store = createStore(state);
-    const socketPath = path.join(directory, `d${count++}.sock`);
+    const socketPath = daemonPaths(path.join(directory, `d${count++}`)).socket;
     const server = createDaemonServer({ runtime, socketPath, version: 'test', store });
     await server.listen();
     const clients = [];
@@ -76,7 +76,10 @@ async function setup(t) {
     stops.push(stop);
     /** As a crash leaves things: the server is gone, a held delivery never finishes in this alpd. */
     const crash = async () => { clients.forEach(client => client.close()); await store.flush().catch(() => {}); await server.close().catch(() => {}); };
-    return { runtime, store, server, open, stop, crash, ...(await open()) };
+    const first = await open();
+    // A request waits for the startup restore; Windows cannot move a directory it is still reading.
+    await first.request('daemon.status');
+    return { runtime, store, server, open, stop, crash, ...first };
   }
   /** Makes one of the store's directories unwritable by putting a file where it was; returns the undo. */
   async function breakDir(name) {
@@ -98,7 +101,7 @@ test('store writes report their failures, keep their order, and recover once the
   const receipt = state => ({ version: 1, sessionId: 's', clientMessageId: 'm', fingerprint: 'f', state, updatedAt: new Date().toISOString() });
   await store.putReceipt('k', receipt('pending'));
   const undo = await breakDir('receipts');
-  await assert.rejects(store.putReceipt('k', receipt('completed')), /ENOTDIR|EEXIST|not a directory/i);
+  await assert.rejects(store.putReceipt('k', receipt('completed')), process.platform === 'win32' ? /ENOENT/ : /ENOTDIR|EEXIST|not a directory/i);
   assert.equal(store.health().ok, false);
   assert.equal(store.health().failures, 1);
   assert.match(store.health().lastError.operation, /receipt m/);

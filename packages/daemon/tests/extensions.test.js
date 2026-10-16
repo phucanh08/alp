@@ -9,7 +9,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { PROTOCOL_VERSION, ERROR, encodeFrame } from '@anhlp/alp-protocol';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
-import { connect } from '@anhlp/alp-client';
+import { connect, daemonPaths } from '@anhlp/alp-client';
 import { fakeTransport } from '../../../test/support/fake-agent.js';
 
 /**
@@ -21,7 +21,7 @@ import { fakeTransport } from '../../../test/support/fake-agent.js';
 
 async function start(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-extensions-'));
-  const socketPath = path.join(directory, 'alpd.sock');
+  const socketPath = daemonPaths(directory).socket;
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false, libraryDir: directory });
   const daemon = createDaemonServer({ runtime, socketPath, version: 'test' });
   await daemon.listen();

@@ -4,7 +4,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
-import { connect } from '@anhlp/alp-client';
+import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 
@@ -177,10 +177,10 @@ test('a board outlives the daemon: decisions and findings stay, claims end with 
 
 test('alpd serves the board by project, and status shows a tree\'s claims', async t => {
   const { directory, root, runtime, start } = await setup(t);
-  const server = createDaemonServer({ runtime, socketPath: path.join(directory, 'd.sock'), version: 'test' });
+  const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test' });
   await server.listen();
   t.after(() => server.close());
-  const client = await connect(path.join(directory, 'd.sock'));
+  const client = await connect(daemonPaths(directory).socket);
   t.after(() => client.close());
   const main = await start('root');
   const claim = await main.call('alp_pin', { kind: 'claim', body: 'API', paths: ['src/api'] });

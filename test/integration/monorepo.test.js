@@ -44,7 +44,7 @@ test('the boundary checker rejects Paseo deps, imports, createRequire aliases an
   await write('packages/daemon/src/escape.ts', "import '../../outside.js';\nexport {};\n");
 
   const result = spawnSync(process.execPath, ['scripts/check-boundaries.mjs', '--root', fixture], { cwd: root, encoding: 'utf8' });
-  const output = result.stdout + result.stderr;
+  const output = (result.stdout + result.stderr).replaceAll('\\', '/'); // the checker prints file paths with the OS separator
   assert.equal(result.status, 1, output);
   assert.match(output, /@anhlp\/alp-core: forbidden Paseo dependency @getpaseo\/plugin/);
   assert.match(output, /packages\/core\/src\/index\.ts: forbidden @getpaseo dependency in core package/);

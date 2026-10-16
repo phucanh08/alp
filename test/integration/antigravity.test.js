@@ -221,6 +221,12 @@ test('antigravity keeps separate assistant messages within a turn', async t => {
 });
 
 
+/**
+ * Removes `dir` after the test's other cleanups, which stop the child processes using it: hooks run in the
+ * order registered, and Windows cannot remove a directory a process still holds (nor at once after it ends).
+ */
+const removeLast = (t, dir) => t.after(() => { t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })); });
+
 async function transportFixture(t, directory, tools, mcpServers = {}) {
   const configFile = path.join(directory, 'mcp_config.json');
   const transport = new AntigravityTransport(process.execPath, directory,
@@ -240,7 +246,7 @@ async function transportFixture(t, directory, tools, mcpServers = {}) {
 
 test('MCP routes concurrent sessions separately without persisting session credentials', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-isolation-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  removeLast(t, dir);
   const existing = { mcpServers: { unrelated: { command: 'unchanged' } }, custom: true };
   await writeFile(path.join(dir, 'mcp_config.json'), JSON.stringify(existing));
   const a = await transportFixture(t, dir, ['only_a']);
@@ -259,7 +265,7 @@ test('MCP routes concurrent sessions separately without persisting session crede
 
 test('Antigravity bridges session MCP tools without persisting external server credentials', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-external-mcp-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  removeLast(t, dir);
   const server = label => ({ command: process.execPath, args: [path.resolve('test/support/fake-mcp.js')], env: { FAKE_MCP_LABEL: label } });
   const a = await transportFixture(t, dir, ['alp_test'], { docs: server('session-a') });
   const b = await transportFixture(t, dir, [], { docs: server('session-b') });
@@ -280,7 +286,7 @@ test('Antigravity bridges session MCP tools without persisting external server c
 
 test('Antigravity forwards HTTP MCP authentication and preserves rich tool results', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-http-mcp-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  removeLast(t, dir);
   const server = http.createServer(async (req, res) => {
     if (req.method !== 'POST') { res.writeHead(405).end(); return; }
     assert.equal(req.headers.authorization, 'Bearer session-private-token');
@@ -308,7 +314,7 @@ test('Antigravity forwards HTTP MCP authentication and preserves rich tool resul
 
 test('failed external MCP startup closes servers already opened and names do not collide', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-mcp-failure-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  removeLast(t, dir);
   const pidFile = path.join(dir, 'mcp.pid');
   const server = { command: process.execPath, args: [path.resolve('test/support/fake-mcp.js')], env: { FAKE_MCP_PID_FILE: pidFile } };
   await assert.rejects(transportFixture(t, dir, [], { docs: server, broken: { command: 'alp-test-missing-mcp-command' } }), /External MCP server 'broken'/);
@@ -322,7 +328,7 @@ test('failed external MCP startup closes servers already opened and names do not
 
 test('closing while the MCP config is locked cannot launch a late AGY process', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-mcp-startup-close-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  removeLast(t, dir);
   const configFile = path.join(dir, 'mcp_config.json');
   const logFile = path.join(dir, 'agy.jsonl');
   const pidFile = path.join(dir, 'mcp.pid');
@@ -345,7 +351,7 @@ test('closing while the MCP config is locked cannot launch a late AGY process', 
 
 test('closing during a stalled external MCP handshake aborts and cleans its process promptly', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-mcp-abort-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  removeLast(t, dir);
   const pidFile = path.join(dir, 'mcp.pid');
   const transport = new AntigravityTransport(process.execPath, dir, process.env, { id: 'antigravity', label: 'fake', command: process.execPath, args: [FAKE_AGY] });
   t.after(() => transport.close());
@@ -361,7 +367,7 @@ test('closing during a stalled external MCP handshake aborts and cleans its proc
 
 test('invalid MCP configuration is preserved and prevents launch', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-invalid-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  removeLast(t, dir);
   const file = path.join(dir, 'mcp_config.json');
   await writeFile(file, '{invalid');
   await assert.rejects(transportFixture(t, dir, ['test']), /JSON|property|Invalid/);
@@ -370,7 +376,7 @@ test('invalid MCP configuration is preserved and prevents launch', async t => {
 
 test('interrupt ends one turn and the next prompt resumes the conversation', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-interrupt-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  removeLast(t, dir);
   const { transport, turn, events } = await transportFixture(t, dir, []);
   const threadId = transport.conversationId;
   await transport.request('turn/start', { input: [{ text: 'hang' }] });
