@@ -32,7 +32,7 @@ Read `beta-scope.md` first (especially decisions D1–D5 and sections 6–8).
 
 ## Continue on Mac
 
-1. Fetch/pull main into a clean checkout. Check Node/npm/Paseo versions; use Node24 or supported Node22. Ensure TLS verification is enabled (Windows environment had NODE_TLS_REJECT_UNAUTHORIZED=0; do not copy it).
+1. Fetch origin and check out `release/beta-1-preparation` (tracking `origin/release/beta-1-preparation`) in a clean checkout. Direct push to main was rejected by branch protection; the preparation is on this PR branch. After the PR merges, use main and select the final release SHA there. Check Node/npm/Paseo versions; use Node24 or supported Node22. Ensure TLS verification is enabled (Windows environment had NODE_TLS_REJECT_UNAUTHORIZED=0; do not copy it).
 2. Read beta-scope.md sections 6–8 and beta-install.md. Run npm ci, npm run check, validate:core and validate:paseo; record H2 on macOS. Build web and run validate:packages. Inspect any real failures.
 3. A rehearsal before final SHA/tag is allowed, but must be labeled rehearsal. Fixes require a new commit and rerun affected checks. Do not invent pass evidence.
 4. Follow scope P0–P5: finalize SHA and local tag, clean clone, build and pack once to an external/new directory using release:pack. Keep the 8 tarballs, SHA256SUMS and release-manifest.json. Test/install those exact artifacts. Do not reuse Windows rehearsal artifacts as release evidence.
