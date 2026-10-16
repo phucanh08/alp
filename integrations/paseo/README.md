@@ -70,9 +70,14 @@ the old name.
 Then enable plugins in Paseo Settings → Plugins and add the provider:
 
 ```sh
-paseo plugin add npm:@anhlp/alp-paseo@beta
+npm install -g @anhlp/alp-paseo@beta
+paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"
 paseo provider models alp
 ```
+
+In `0.0.0-beta.1`, `paseo plugin add npm:@anhlp/alp-paseo@beta` fails: Paseo installs an `npm:`
+source without peers and cannot resolve the `@getpaseo/*` types the plugin's declarations import
+([#111](https://github.com/phucanh08/alp/issues/111)). Add it by path as above.
 
 From then on the plugin keeps alpd running while Paseo runs. It starts alpd when
 Paseo starts, checks every 5 seconds, and starts it again when alpd is down; with
@@ -159,7 +164,7 @@ Do not use `--legacy-peer-deps` for a standalone installation unless you supply 
 peers explicitly. The binary is also discoverable on PATH, so registration is optional
 for a global install. For a local install, run
 `./node_modules/.bin/alp-web-integration --register` with the intended `ALP_HOME`.
-The existing `paseo plugin add npm:@anhlp/alp-paseo@beta` route for a Paseo host remains
+Adding the plugin to a Paseo host (by path in beta.1, see above) remains
 available independently of this standalone web process.
 
 Core upgrades no longer update a bundled plugin: upgrade `@anhlp/alp-paseo`
