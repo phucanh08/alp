@@ -1,0 +1,3 @@
+# The repository is LF; checkouts with core.autocrlf=true (the Windows default) keep it, so
+# patches apply, golden files and generated sources compare, and scripts run the same on every OS.
+* text=auto eol=lf
