@@ -92,13 +92,18 @@ test('verify stops a command with SIGTERM first, stops a silent one, and counts 
   assert.deepEqual(validateVerify({ test: 'x', idleSec: 2 }, 's'), { test: 'x', timeoutSec: 600, idleSec: 2 });
   assert.throws(() => validateVerify({ test: 'x', idleSec: 0 }, 's'), /idleSec must be 1 to 7200 seconds/);
 
+  // Windows has no SIGTERM and runs commands through cmd.exe: there ALP ends the whole process tree at once.
+  const windows = process.platform === 'win32';
+  await writeFile(path.join(root, 'idle.js'), "console.log('start'); setTimeout(() => {}, 30000);");
+  const idleCommand = windows ? 'node idle.js' : 'echo start; sleep 30';
   // The command's own cleanup runs when ALP stops it.
-  const timedOut = await runVerify(root, { test: "trap 'echo cleaned > cleaned.txt; exit 1' TERM; sleep 30 & wait", timeoutSec: 1 });
+  const timedOut = await runVerify(root, { test: windows ? idleCommand : "trap 'echo cleaned > cleaned.txt; exit 1' TERM; sleep 30 & wait", timeoutSec: 1 });
   assert.equal(timedOut.passed, false);
   assert.equal(timedOut.commands[0].timedOut, true);
-  assert.equal(await readFile(path.join(root, 'cleaned.txt'), 'utf8'), 'cleaned\n');
+  if (windows) assert.ok(timedOut.commands[0].ms < 10_000);
+  else assert.equal(await readFile(path.join(root, 'cleaned.txt'), 'utf8'), 'cleaned\n');
 
-  const silent = await runVerify(root, { test: 'echo start; sleep 30', timeoutSec: 60, idleSec: 1 });
+  const silent = await runVerify(root, { test: idleCommand, timeoutSec: 60, idleSec: 1 });
   assert.equal(silent.commands[0].idle, true);
   assert.ok(silent.commands[0].ms < 10_000);
   assert.equal(describeVerification(silent), 'verification failed: test printed nothing for too long');
@@ -115,7 +120,7 @@ test('verify stops a command with SIGTERM first, stops a silent one, and counts 
 
 test('a live pid counts as an earlier process only when its start time matches', async t => {
   assert.ok(Math.abs(processStartedAt(process.pid) - OWN_START) < 2000);
-  const child = spawn('sleep', ['30']);
+  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)']);
   t.after(() => child.kill('SIGKILL'));
   await until(() => processStartedAt(child.pid) !== undefined, 'ps to see the child');
   const started = processStartedAt(child.pid);

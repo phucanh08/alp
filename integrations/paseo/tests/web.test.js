@@ -1,15 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { get } from 'node:http';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import WebSocket from 'ws';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { webFile, createWebServer } from 'alp-paseo-plugin';
-
-const run = promisify(execFile);
 
 /** alpd's web server built without the ALP web app (ALPD §62 step 9; the app itself: paseo-web.test.js). */
 async function setup(t) {
@@ -34,8 +31,9 @@ test('without the built app, alpd says how to build it at every address, on 127.
     assert.equal(page.headers.get('x-frame-options'), 'DENY');
   }
   // DNS rebinding: a name that resolves here is still refused.
-  const { stdout } = await run('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', '-H', 'Host: attacker.example', `${origin}/`]);
-  assert.equal(stdout, '403');
+  // fetch cannot set Host, so this goes through node:http.
+  const status = await new Promise((resolve, reject) => get(`${origin}/`, { headers: { Host: 'attacker.example' } }, response => { response.resume(); resolve(response.statusCode); }).on('error', reject));
+  assert.equal(status, 403);
   // No app, no socket.
   const refused = await new Promise(resolve => {
     const ws = new WebSocket(`ws://127.0.0.1:${info.port}/ws`, { headers: { Origin: origin } });

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rename, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { connect } from '@anhlp/alp-client';
+import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 
@@ -15,10 +15,12 @@ async function setup(t) {
   const state = path.join(directory, 'state');
   const runtime = createAlpRuntime({ runLogDir: path.join(directory, 'runs') });
   const store = createStore(state);
-  const socketPath = path.join(directory, 'd.sock');
+  const socketPath = daemonPaths(directory).socket;
   const server = createDaemonServer({ runtime, socketPath, version: 'test', store });
   await server.listen();
   const client = await connect(socketPath, { name: 'test', version: '0' });
+  // A request waits for the startup restore; the tests move the state aside only after it has read it.
+  await client.request('daemon.status');
   t.after(async () => { client.close(); await server.close().catch(() => {}); await runtime.shutdown(); await rm(directory, { recursive: true, force: true }); });
   /** Replaces the state directory with a file, as a broken mount or a full disk would stop it being used; returns the undo. */
   const breakState = async () => {
@@ -86,7 +88,7 @@ test('a daemon without a store is ready when it accepts connections', async t =>
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-health-'));
   await mkdir(directory, { recursive: true });
   const runtime = createAlpRuntime({ runLogDir: path.join(directory, 'runs') });
-  const socketPath = path.join(directory, 'd.sock');
+  const socketPath = daemonPaths(directory).socket;
   const server = createDaemonServer({ runtime, socketPath, version: 'test' });
   await server.listen();
   const client = await connect(socketPath, { name: 'test', version: '0' });

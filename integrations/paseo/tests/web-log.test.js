@@ -76,7 +76,9 @@ test('a normal detached launch writes the advertised integration log', async t =
 
   // Shut the entry down through the pid its own metadata names; no other process is touched.
   process.kill(info.pid, 'SIGTERM');
-  assert.equal(await exit, 0);
+  // Windows has no SIGTERM to handle: it terminates the process outright, so only a POSIX stop exits cleanly.
+  const code = await exit;
+  if (process.platform !== 'win32') assert.equal(code, 0);
 });
 
 test('an injected startup failure is captured in the advertised log', async t => {

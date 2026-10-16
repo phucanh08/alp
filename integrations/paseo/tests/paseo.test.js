@@ -1,5 +1,5 @@
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -327,7 +327,7 @@ test('the plugin loads where import.meta.url is no URL, as when Paseo bundles it
   const outfile = path.join(directory, 'index.mjs');
   // Paseo re-bundles plugin code; there import.meta.url does not resolve. Nothing may need it while loading.
   await build({ entryPoints: [fileURLToPath(new URL('../server/dist/index.js', import.meta.url))], outfile, bundle: true, format: 'esm', platform: 'node', target: 'node20', external: ['@anthropic-ai/claude-agent-sdk'], define: { 'import.meta.url': 'undefined' }, logLevel: 'silent' });
-  const plugin = await import(outfile);
+  const plugin = await import(pathToFileURL(outfile).href);
   assert.equal(typeof plugin.default, 'function');
   assert.equal(typeof plugin.createProvider, 'function');
 });

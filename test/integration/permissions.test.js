@@ -423,7 +423,7 @@ test('a review copy has the requester\'s state, links node_modules, and leaves t
   await mkdir(path.join(checkout, 'node_modules', 'dep'), { recursive: true });
   await writeFile(path.join(checkout, '.gitignore'), 'node_modules\ndist\n');
   await writeFile(path.join(checkout, 'src', 'a.js'), 'one\n');
-  git(checkout, 'init', '-q'); git(checkout, 'add', '-A'); git(checkout, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
+  git(checkout, 'init', '-q'); git(checkout, 'config', 'core.autocrlf', 'false'); git(checkout, 'add', '-A'); git(checkout, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
   await writeFile(path.join(checkout, 'src', 'a.js'), 'two\n');
   await writeFile(path.join(checkout, 'src', 'new.js'), 'new\n');
   await mkdir(path.join(checkout, 'dist'));
@@ -457,7 +457,7 @@ test('a review copy has the requester\'s state, links node_modules, and leaves t
 
 test('an assignment with workdir copy writes, builds and tests in its copy, which goes when it ends', async t => {
   const { directory, root, home } = await project(t, { profiles: { review: { base: 'read-only', workdir: 'copy', allow: ['Bash(npm test *)'] } }, agents: { reviewer: 'review' } });
-  git(root, 'init', '-q'); git(root, 'add', '-A'); git(root, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
+  git(root, 'init', '-q'); git(root, 'config', 'core.autocrlf', 'false'); git(root, 'add', '-A'); git(root, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
   const previous = process.env.ALP_CLAUDE_SANDBOX;
   process.env.ALP_CLAUDE_SANDBOX = '1';
   t.after(() => { if (previous === undefined) delete process.env.ALP_CLAUDE_SANDBOX; else process.env.ALP_CLAUDE_SANDBOX = previous; });
@@ -488,7 +488,7 @@ test('an assignment with workdir copy writes, builds and tests in its copy, whic
   codex.call('alp_handoff', { outcome: 'complete', summary: 'Tests pass in the copy' });
   codex.finish('Done');
   const waited = await main.call('alp_wait', {});
-  assert.match(JSON.stringify(waited), /reviewer ran commands in your tree, not its copy; they may have changed files there: npm test \(in [^)]*\/project\)"/);
+  assert.match(JSON.stringify(waited), /reviewer ran commands in your tree, not its copy; they may have changed files there: npm test \(in [^)]*[\\/]project\)"/);
   await assert.rejects(readdir(copy));
 
   // Claude: Bash sandboxed to the copy.

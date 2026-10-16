@@ -8,7 +8,7 @@ import { initProject } from '@anhlp/alp-core/init';
 import { createTask, getTask, loadTasks } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime, reclaimWorktrees } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
-import { connect } from '@anhlp/alp-client';
+import { connect, daemonPaths } from '@anhlp/alp-client';
 
 let calls = 0;
 /** A fake native harness; resuming a thread keeps its id, as Codex and Claude do. */
@@ -63,6 +63,7 @@ async function workspace(t) {
   const root = path.join(directory, 'project');
   await initProject(root);
   git(root, 'init', '-q', '-b', 'main');
+  git(root, 'config', 'core.autocrlf', 'false'); // the host's global setting must not turn the files' LF into CRLF
   git(root, 'add', '-A');
   git(root, 'commit', '-qm', 'init');
   const options = {
@@ -234,7 +235,7 @@ test('alpd reopens a tree by itself after a restart and its assignment continues
   const daemon = async () => {
     const runtime = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
     const store = createStore(path.join(directory, 'state'));
-    const socketPath = path.join(directory, `d${runtimes.length}.sock`);
+    const socketPath = daemonPaths(path.join(directory, `d${runtimes.length}`)).socket;
     const server = createDaemonServer({ runtime, socketPath, version: 'test', store, runLogDir: options.runLogDir });
     await server.listen();
     const stop = async () => { await server.close(); await runtime.shutdown(); await store.flush(); };
@@ -279,6 +280,7 @@ test('an external shared writer recovers its write root, inspection scope and re
   const core = path.join(directory, 'core');
   await mkdir(core);
   git(core, 'init', '-q', '-b', 'main');
+  git(core, 'config', 'core.autocrlf', 'false'); // the host's global setting must not turn the files' LF into CRLF
   await writeFile(path.join(core, 'a.txt'), 'initial');
   git(core, 'add', '-A');
   git(core, 'commit', '-qm', 'init');

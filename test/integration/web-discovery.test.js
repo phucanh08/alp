@@ -101,12 +101,16 @@ test('startIntegration keeps every artifact in the selected home and passes it t
   const ambient = path.join(directory, 'ambient-home');
   await mkdir(selected, { recursive: true });
   await mkdir(ambient, { recursive: true });
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  let pid;
+  // The child ends first: Windows cannot remove a directory it still holds, and takes a moment to let go.
+  t.after(async () => {
+    try { process.kill(pid, 'SIGTERM'); } catch {}
+    await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  });
 
   const { lock } = await probe({ cli, cwd: directory, home: selected, ambientHome: ambient, mode: 'start' });
-  const pid = lock?.pid;
+  pid = lock?.pid;
   assert.ok(Number.isSafeInteger(pid), 'a real integration process was started');
-  t.after(() => { try { process.kill(pid, 'SIGTERM'); } catch {} });
 
   // The lock and web.json are in the selected home, never the ambient one.
   const web = JSON.parse(await readFile(path.join(selected, 'web.json'), 'utf8'));

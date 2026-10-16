@@ -9,15 +9,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { fileURLToPath } from 'node:url';
 import { createBackup, knownProjects, recoverInterruptedRestore, restoreBackup, verifyBackup, readRestoredMarker, clearRestoredMarker } from '../src/backup.js';
 import { MIGRATIONS, migrateState } from '../src/migrations.js';
 import { STATE_SCHEMA, readStateSchema } from '../src/state-schema.js';
 import { createTask, loadTasks } from '../src/tasks.js';
 
 const run = promisify(execFile);
-const BACKUP_MODULE = fileURLToPath(new URL('../src/backup.js', import.meta.url));
-const MIGRATIONS_MODULE = fileURLToPath(new URL('../src/migrations.js', import.meta.url));
+const BACKUP_MODULE = new URL('../src/backup.js', import.meta.url).href;
+const MIGRATIONS_MODULE = new URL('../src/migrations.js', import.meta.url).href;
 const posix = process.platform !== 'win32';
 
 /** Every file, directory and link under `root` by relative path; `backups/` is left out. */

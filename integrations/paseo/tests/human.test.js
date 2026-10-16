@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
-import { connect } from '@anhlp/alp-client';
+import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { createProvider } from 'alp-paseo-plugin';
@@ -159,10 +159,10 @@ test('alpd lists and answers questions by id prefix, reports tree status and the
   const { directory, root } = await project(t);
   const runtimes = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(directory, 'runs') });
-  const server = createDaemonServer({ runtime, socketPath: path.join(directory, 'd.sock'), version: 'test', runLogDir: path.join(directory, 'runs') });
+  const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', runLogDir: path.join(directory, 'runs') });
   await server.listen();
   t.after(async () => { await server.close(); await runtime.shutdown(); });
-  const client = await connect(path.join(directory, 'd.sock'));
+  const client = await connect(daemonPaths(directory).socket);
   t.after(() => client.close());
   await client.request('session.create', { sessionId: 'root', spec: { cwd: root, mode: 'workspace-write' } });
   await client.request('session.prompt', { sessionId: 'root', clientMessageId: 'm1', content: [{ type: 'text', text: 'Go' }] });
@@ -176,7 +176,7 @@ test('alpd lists and answers questions by id prefix, reports tree status and the
   assert.equal(status.sessions[0].state, 'waiting_user');
 
   // A second viewer attaching to the tree learns about the open question.
-  const viewer = await connect(path.join(directory, 'd.sock'));
+  const viewer = await connect(daemonPaths(directory).socket);
   t.after(() => viewer.close());
   const seen = [];
   viewer.onEvent(envelope => seen.push(envelope.event));
