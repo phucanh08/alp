@@ -237,7 +237,15 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
 
 ## 9. Bằng chứng
 
-- Commit kiểm thử: xem PR (SHA của commit implementation, ghi trong mô tả PR).
+Commit implementation `739ebc0` (nhánh `feat/alp-web`), macOS, Node 26 cục bộ:
+
+| Lệnh | Kết quả |
+|---|---|
+| `npm run validate:web` | tsc sạch; unit 43/43; build web (boundary chỉ gồm SDK portable/websocket, rpc/*, protocol public/wire); Playwright 9/9 |
+| `npm run validate:core` | xanh (gate cũ không đổi) |
+| `node scripts/check-boundaries.mjs` | 10 workspace boundary, không có cycle |
+
+- Mọi E2E dùng fake Codex. Chưa chạy smoke với provider thật (§8).
 - Ảnh desktop và mobile: đính kèm PR.
   - chat;
   - tab task;
