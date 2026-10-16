@@ -41,6 +41,22 @@ Read `beta-scope.md` first (especially decisions D1–D5 and sections 6–8).
 7. Complete the evidence JSON and release:gate --phase publish. Only then follow manual publishing and Q checks; latest and announcement have their own gates. Registry cleanup, actual publishing and announcements remain separate explicit owner actions per scope.
 8. Update draft release notes/checksums and stale task statuses after evidence exists. A few scope/report status snapshots predate final preparation; current manifests and this handoff clarify implementation, not acceptance.
 
+## Progress on Mac (2026-10-16)
+
+Orientation only: everything below ran at `c47dfdc`, before the release SHA (D3). None of it is gate evidence.
+
+- Environment: macOS, Node 24.19.0, npm 11.17.0, Paseo 0.11.2, TLS verification on.
+- H2 (orientation): `npm ci`, `npm run check` pass. `validate:core` 399 pass, 0 fail, 4 skipped (Windows-only). `validate:paseo` 325 pass, 0 fail, 1 skipped (cmd.exe only). `validate:packages` pass (rehearsal pack, consumer, package-smoke, gateway-smoke).
+- Harness fix (`8f3384b`): the acceptance harness made its throwaway `ALP_HOME` 0755. alpd refuses that on POSIX, so the CLI rehearsal failed from C2 on; Windows skips the mode check. A rehearsal also exited 0 with failing steps. After the fix, a macOS `--fake` rehearsal on rehearsal tarballs gave CLI 8 pass (C6/C7 skipped; Ctrl-C in C5 passes) and web W6 pass.
+- This Mac now runs the local rehearsal beta.1 globally instead of 0.10.0: the old `alp-paseo-plugin` was removed and the 8 rehearsal tarballs were installed with `npm install -g`. `paseo plugin add` points at `/opt/homebrew/lib/node_modules/@anhlp/alp-paseo`. The pre-upgrade copy of `~/.alp` is in `~/alp-home-before-beta`; `pre-migrate-v1-v2-*` and a first beta backup are in `~/.alp/backups`. Before R5, reinstall from the final release tarballs.
+- Observation, not fixed: a stale `$ALP_HOME/alpd.json` left by a dev checkout wins over the installed plugin's own alpd. Paseo kept starting `integrations/paseo/server/dist/alpd.js` from the repo until the file was removed while alpd was stopped. Upgrades from 0.10.0 are unaffected, because the old entry path is replaced in place.
+
+Open, for the owner:
+- Merge the PR from `release/beta-1-preparation`, then choose the release SHA on `main` (P0) and continue with P1–P3.
+- Live macOS rows R1, R2, R5 and R7 (paid providers; models still to pick). Planned for the evening of 2026-10-16.
+- Linux, not started: R3, R4, R6 and R7 on Linux, plus `release:consumer` on Linux, on the saved release tarballs. Before the live rows, run the harness `--fake` rehearsal there too. The macOS home-mode failure would have shown up there as well. Record the environment (for example "Linux (WSL2 Ubuntu 24.04)").
+- Optional: `alp doctor --fix` on this Mac (it tightens group/other access on old run and board files in `~/.alp`).
+
 ## Repository hygiene
 
 Unrelated local .alp/, .claude/, ALP.md and hello.txt were left untracked and must not be committed. Build outputs, node_modules, .cache and raw audit data are intentionally absent from Git. Rebuild on macOS. Existing agent reports are in plans/reports/. Audit helper copies are in docs/alp/beta-audit/tools/ and may write only their requested output files.
