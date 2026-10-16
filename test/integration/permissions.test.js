@@ -502,6 +502,7 @@ test('an assignment with workdir copy writes, builds and tests in its copy, whic
   const claude = runtimes[3];
   assert.deepEqual([claude.config.sandbox, claude.config.floor], ['workspace-write', 'workspace-write']);
   assert.match(claude.config.developerInstructions, /Bash runs in an OS sandbox: it writes only .*copies.* and temporary files, and has no network\. Run any command you need for your work in it\. To run a command outside it .* set dangerouslyDisableSandbox/);
+  assert.match(claude.config.developerInstructions, /A sandbox error \(Operation not permitted, no network\) is not a refusal by the user: run that same command again with dangerouslyDisableSandbox/);
   claude.call('alp_handoff', { outcome: 'complete', summary: 'Done' });
   claude.finish('Done');
   await main.call('alp_wait', {});
