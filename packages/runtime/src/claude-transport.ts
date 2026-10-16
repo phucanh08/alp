@@ -307,7 +307,9 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
         const answer = await ask({ tool: name, input, reason, ...(rule ? { rule } : {}) });
         if (!answer.allow) return { behavior: 'deny', message: answer.message ?? 'The user did not allow it' };
         const [, toolName, ruleContent] = /^([^(]+)(?:\((.*)\))?$/s.exec(rule ?? '') ?? [];
-        return { behavior: 'allow', updatedInput: input, ...(answer.always && toolName ? { updatedPermissions: [{ type: 'addRules', rules: [{ toolName, ...(ruleContent ? { ruleContent } : {}) }], behavior: 'allow', destination: 'session' }] } : {}) };
+        // The read-only floor would refuse the very write the user just allowed: run that command outside it.
+        const approved = sandboxed && reason === 'rule' ? { ...input, dangerouslyDisableSandbox: true } : input;
+        return { behavior: 'allow', updatedInput: approved, ...(answer.always && toolName ? { updatedPermissions: [{ type: 'addRules', rules: [{ toolName, ...(ruleContent ? { ruleContent } : {}) }], behavior: 'allow', destination: 'session' }] } : {}) };
       }
       if (leaving && beyond) return { behavior: 'deny', message: 'Bash runs inside the sandbox; leaving it needs an allow rule in your permission profile' };
       if (beyond) return { behavior: 'deny', message: mode === 'read-only' ? 'ALP session is read-only' : 'Outside your workspace' };
