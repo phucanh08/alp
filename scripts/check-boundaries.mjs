@@ -21,6 +21,8 @@ const allowed = {
   '@anhlp/alp-cli': ['@anhlp/alp-client', '@anhlp/alp-core', '@anhlp/alp-protocol'],
   '@anhlp/alp-tui': [],
   '@anhlp/alp-gateway': ['@anhlp/alp-client', '@anhlp/alp-core', '@anhlp/alp-protocol'],
+  // The browser app: the portable SDK and protocol only (its build checks the bundled graph too).
+  '@anhlp/alp-web': ['@anhlp/alp-client', '@anhlp/alp-protocol'],
   'alp-paseo-plugin': ['@anhlp/alp-daemon', '@anhlp/alp-runtime', '@anhlp/alp-client', '@anhlp/alp-core', '@anhlp/alp-protocol'],
 };
 const failures = corePackageProblems(manifest);

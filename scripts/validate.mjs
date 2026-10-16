@@ -4,12 +4,17 @@ import { spawnSync } from 'node:child_process';
 import { ROOT, buildAll, buildWorkspace, integrationTests, packageTests, packages, runNodeTests } from './test-lib.mjs';
 
 const scope = process.argv[2] ?? 'all';
-if (!['all', 'core', 'paseo', 'packages'].includes(scope) || process.argv.length > 3) {
-  throw new Error('Usage: validate.mjs [all|core|paseo|packages]');
+if (!['all', 'core', 'paseo', 'packages', 'web'].includes(scope) || process.argv.length > 3) {
+  throw new Error('Usage: validate.mjs [all|core|paseo|packages|web]');
 }
 function node(script, ...args) {
   console.log(`\n[validate:${scope}] ${script} ${args.join(' ')}`);
   const result = spawnSync(process.execPath, [script, ...args], { cwd: ROOT, stdio: 'inherit' });
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}
+function npm(...args) {
+  console.log(`\n[validate:${scope}] npm ${args.join(' ')}`);
+  const result = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, { cwd: ROOT, stdio: 'inherit' });
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 function tests(files) {
@@ -44,4 +49,14 @@ if (scope === 'all' || scope === 'packages') {
   node('scripts/tarball-consumer.mjs');
   node('scripts/package-smoke.mjs');
   node('scripts/gateway-smoke.mjs');
+}
+if (scope === 'all' || scope === 'web') {
+  // The browser app (docs/alp/web.md): types, unit tests and its bundle boundary, then the UI end
+  // to end against a real alpd and gateway with a fake provider, in Chromium.
+  node('node_modules/typescript/bin/tsc', '-p', 'apps/web/tsconfig.json');
+  tests(['apps/web/tests/timeline.test.js', 'apps/web/tests/controller.test.js', 'apps/web/tests/gateway.test.js', 'apps/web/tests/boundary.test.js']);
+  buildWorkspace('cli');
+  buildWorkspace('daemon');
+  npm('run', 'build', '--workspace', '@anhlp/alp-web');
+  npm('run', 'test:e2e', '--workspace', '@anhlp/alp-web');
 }
