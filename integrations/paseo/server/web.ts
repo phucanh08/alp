@@ -97,7 +97,7 @@ export function createWebServer({ app, home, port = DEFAULT_WEB_PORT, log = () =
     response.writeHead(200, {
       ...headers(type),
       // Expo names its bundles by content; everything else may change with the next build.
-      'cache-control': relative.startsWith('_expo/static/') ? 'public, max-age=31536000, immutable' : 'no-cache',
+      'cache-control': relative.split(path.sep).join('/').startsWith('_expo/static/') ? 'public, max-age=31536000, immutable' : 'no-cache',
       'content-length': String(size),
       vary: 'accept-encoding',
       ...(encoding ? { 'content-encoding': encoding } : {}),

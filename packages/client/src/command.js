@@ -4,7 +4,9 @@ import { spawn } from 'node:child_process';
 export function runCommand(command, args, { cwd, env = process.env, timeoutMs = 15_000 } = {}) {
   return new Promise(resolve => {
     let child;
-    try { child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] }); }
+    // Windows cannot exec a script by its shebang; a JavaScript command runs under this Node, as the Codex transport does.
+    const script = process.platform === 'win32' && /\.[cm]?js$/i.test(command);
+    try { child = spawn(script ? process.execPath : command, script ? [command, ...args] : args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] }); }
     catch (error) { resolve({ code: -1, stdout: '', stderr: error.message }); return; }
     let stdout = '', stderr = '';
     child.stdout.on('data', chunk => { stdout += chunk; });

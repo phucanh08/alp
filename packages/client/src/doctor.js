@@ -28,9 +28,10 @@ import { STATE_SCHEMA, migrationFile, readStateSchema } from '@anhlp/alp-core/st
 
 const firstLine = text => text.trim().split('\n')[0] ?? '';
 
-/** The executable `command` names, as a spawn without a shell would find it. */
+/** The executable `command` names, as a spawn without a shell would find it (on Windows that adds .exe and .com). */
 async function executable(command, env) {
-  const candidates = path.isAbsolute(command) ? [command] : (env.PATH ?? '').split(path.delimiter).filter(Boolean).map(directory => path.join(directory, command));
+  const names = process.platform === 'win32' ? [command, `${command}.exe`, `${command}.com`] : [command];
+  const candidates = path.isAbsolute(command) ? names : (env.PATH ?? '').split(path.delimiter).filter(Boolean).flatMap(directory => names.map(name => path.join(directory, name)));
   for (const candidate of candidates) {
     try { await access(candidate, constants.X_OK); if ((await lstat(candidate)).isDirectory()) continue; return candidate; } catch {}
   }
@@ -277,6 +278,8 @@ async function privateEntries(home) {
 }
 
 async function permissionsCheck(home) {
+  // Windows files have no group/other mode bits to read or tighten; the profile's ACL keeps the home private.
+  if (process.platform === 'win32') return { id: 'permissions', status: 'ok', summary: `${home} follows your Windows profile access rules` };
   const open = [];
   for (const entry of await privateEntries(home)) {
     const info = await lstat(entry).catch(() => undefined);

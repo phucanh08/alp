@@ -9,13 +9,17 @@ import { execFileSync } from 'node:child_process';
 /** When this process started, in milliseconds since the epoch. */
 export const OWN_START = Math.round(Date.now() - process.uptime() * 1000);
 
-/** ps reports start times to the second. */
+/** ps reports start times to the second; PowerShell's are exact. */
 const START_TOLERANCE_MS = 2000;
 
-/** When process `pid` started, from ps; undefined where ps cannot tell. */
+/** When process `pid` started, from ps (PowerShell on Windows); undefined where they cannot tell. */
 export function processStartedAt(pid: number): number | undefined {
-  if (process.platform === 'win32') return undefined;
   try {
+    if (process.platform === 'win32') {
+      // No ps: ask PowerShell (about 200 ms). A process of another user hides its start time, which reads as unknown.
+      const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `[DateTimeOffset]::new((Get-Process -Id ${Math.trunc(pid)}).StartTime).ToUnixTimeMilliseconds()`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000, windowsHide: true }).trim();
+      return /^\d+$/.test(out) ? Number(out) : undefined;
+    }
     const started = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000, env: { ...process.env, LC_ALL: 'C' } }).trim();
     const at = Date.parse(started);
     return Number.isNaN(at) ? undefined : at;
