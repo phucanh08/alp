@@ -408,6 +408,8 @@ npm run release:gate -- "$OUT" --init release-evidence.json
 | R2 | `2230aa5` | khớp | như R1, Claude Code 2.1.300, `claude-opus-5-5` | pass 10/10 | `--unattended` |
 | R5 | `2230aa5` | khớp | như R1, Paseo 0.11.4 | pass: W1–W6 (Codex, Claude); W5, W6 anh xác nhận; W3 Claude không stream: known issue #107 anh chấp nhận | harness web, W3/W4 qua API Paseo |
 | R7 | `2230aa5` | — (mã nguồn) | như R1 | pass (Codex, Claude) | `beta-acceptance-r7.mjs` |
+| P4 | `2230aa5` | `SHA256SUMS` = `523cf5cc…b81c` (`shasum -c` OK) | macOS arm64, Node 24.22.0, npm 11.19.1 | pass | `release:gate --phase publish` exit 0; `npm whoami` = `anhlp`; cả 8 package E404 ở `0.0.0-beta.1`; không tên nào bị unpublish |
+| P5 | `2230aa5` | asset tải lại: `shasum -c` OK, giống từng byte | như P4 | **go**, anh quyết định 2026-10-16 | tag `v0.0.0-beta.1` (annotated) đã push, trỏ `2230aa5`; GitHub prerelease ở dạng draft, 8 tarball + `SHA256SUMS` + `release-manifest.json`; T7 hoãn (§10) |
 | Ghi chú | `6765826`, `dc2621c` | — | — | bị thay | live trên hai SHA này tìm ra lỗi, sửa ở PR #105, #106; bộ tarball cũ không dùng |
 
 ## 7. Checklist publish tay
@@ -592,7 +594,7 @@ Trạng thái ngày 2026-10-16, ở release SHA `2230aa5`.
 | T4 | LICENSE, trường `license`, `repository`/`homepage` trỏ `phucanh08/alp`; LICENSE/NOTICE của Paseo trong tarball plugin | Có | xong (PR #101); L1 pass |
 | T5 | Docs: mọi lệnh cài ghi `@beta` (`integrations/paseo/README.md:56`, `docs/alp/codex-only.md:18`); sửa model supervisor không khớp (`integrations/paseo/README.md:10` ghi Sonnet 4.6, `README.md` ghi Sonnet 5); chuyển "Remote mode (beta)" và `paseo-remote.md` sang deferred; gắn nhãn experimental như §4; link tới tài liệu này | Có | xong (PR #101) |
 | T6 | Phân loại `npm audit` (S1) | Có | xong: F1, F2 đã sửa; chạy lại trên `RELEASE_SHA` và 8 tarball, S1 pass; F3 chấp nhận (D5) |
-| T7 | Dọn npm: unpublish nếu đủ điều kiện, không thì deprecate (§1.1), gồm cả tên plugin cũ `alp-paseo-plugin` | anh làm | chưa làm |
+| T7 | Dọn npm: unpublish nếu đủ điều kiện, không thì deprecate (§1.1), gồm cả tên plugin cũ `alp-paseo-plugin` | anh làm | hoãn tới sau publish (§10, P5) |
 | T8 | Chạy §6 và §7, ghi kết quả vào §6.4 | anh (macOS, D7; H2 trên CI theo D8) | gate `publish` pass ở `2230aa5` (2026-10-16); còn P5, publish, Q1–Q5 (anh) |
 | T9 | Đưa client SDK smoke vào CI; workflow publish; ~~thêm macOS vào lane `core`/`paseo`~~ (đã làm theo D8) | Không (sau beta) | deferred; phần acceptance Linux kéo lên trước theo D6 (T12) |
 | T12 | Workflow `release-acceptance` (D6, D7): pack một lần trên CI + `release:consumer` + rehearsal fake (Codex, Claude, W6) trên macOS, Ubuntu, Windows | Có (pack là bộ tarball của release) | xong (PR #102); bộ tarball release: [release-acceptance 38901108957](https://github.com/phucanh08/alp/actions/runs/38901108957) |
@@ -695,5 +697,15 @@ provider thật.
   của R1 anh xác nhận pass.
 - Lưu ý harness: W1 dùng lại alpd đang chạy cho `~/.alp` dù là bản build khác (cùng version
   string); dừng alpd trước mỗi lượt R5.
+
+**P5 ngày 2026-10-16 (anh quyết định):**
+- **Go** cho `0.0.0-beta.1` ở `2230aa5` (§6.4). Tag đã push; GitHub release giữ ở draft tới khi
+  `--phase announce` exit 0 (§7.6).
+- **T7 hoãn tới sau publish.** Thông điệp deprecate ở §1.1 chỉ người dùng tới `@anhlp/alp@beta` và
+  `@anhlp/alp-paseo@beta`. Hai tag đó chỉ có sau §7.4, nên deprecate trước thì cảnh báo chỉ tới
+  một bản cài chưa có. Spec đã kiểm với npm 11.19.1 (`includePrerelease: true`):
+  `>=0.3.0 <=0.10.0` chỉ khớp 15 bản `0.3.0` … `0.10.0` của `@anhlp/alp`.
+- Release notes bỏ câu "evidence chỉ từ e2e cũ trên mã nguồn". R1, R2, R5, R7 đã chạy provider thật
+  trên chính bộ tarball này (macOS).
 
 Không còn quyết định nào mở trong scope này.
