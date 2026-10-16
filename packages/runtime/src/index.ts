@@ -7,7 +7,7 @@ export type { SessionSpec, HostMcpServer, ResolvedSession, RuntimeKind } from '.
 export { DEFAULT_MODEL, DEFAULT_CLAUDE_MODEL, models, modes, thinkingOptions, thinkingOptionsFor } from './catalog.js';
 export { CodexTransport } from './transport.js';
 export { usageAllows } from './runtime-context.js';
-export { AcpTransport, acpDecision, acpPermission } from './acp-transport.js';
+export { AcpTransport, acpDecision, acpEnv, acpPermission } from './acp-transport.js';
 export type { AcpProvider } from './acp-transport.js';
 export { AntigravityTransport } from './antigravity-transport.js';
 export type { AntigravityProvider } from './antigravity-transport.js';

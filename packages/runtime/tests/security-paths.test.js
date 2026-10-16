@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { acpDecision, claudePermissions } from '@anhlp/alp-runtime';
+import { acpDecision, acpEnv, claudePermissions } from '@anhlp/alp-runtime';
 
 test('security: permission gates resolve symlinks and refuse malformed writer paths', { skip: process.platform === 'win32' }, async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-gate-'));
@@ -30,4 +30,15 @@ test('security: permission gates resolve symlinks and refuse malformed writer pa
     assert.equal(acpDecision({ kind: 'edit', title: 'edit', paths: [file], alpTool: false }, 'workspace-write', null, root), 'allow');
     assert.equal((await gate.canUseTool('Write', { file_path: file, content: 'x' })).behavior, 'allow');
   }
+});
+
+test('OpenCode is told to ask before it edits, runs or fetches, over the config the user passed; other agents start as they are', () => {
+  const user = JSON.stringify({ model: 'x/y', permission: { edit: 'allow', read: 'allow' } });
+  for (const command of ['opencode', '/usr/local/bin/opencode', 'C:\\tools\\OpenCode.exe']) {
+    const env = acpEnv({ command, env: { OPENCODE_CONFIG_CONTENT: user } }, { PATH: '/bin' });
+    assert.equal(env.PATH, '/bin');
+    assert.deepEqual(JSON.parse(env.OPENCODE_CONFIG_CONTENT), { model: 'x/y', permission: { edit: 'ask', read: 'allow', bash: 'ask', webfetch: 'ask' } });
+  }
+  assert.deepEqual(JSON.parse(acpEnv({ command: 'opencode', env: {} }, { OPENCODE_CONFIG_CONTENT: 'not json' }).OPENCODE_CONFIG_CONTENT), { permission: { edit: 'ask', bash: 'ask', webfetch: 'ask' } });
+  assert.deepEqual(acpEnv({ command: 'gemini', env: { A: '1' } }, { PATH: '/bin' }), { PATH: '/bin', A: '1' });
 });

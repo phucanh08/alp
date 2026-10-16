@@ -161,7 +161,9 @@ defines one:
 - **Limits** (`alp doctor` warns about them):
   - ALP has no sandbox around an ACP agent. It holds the mode only by answering the
     permission requests the agent sends, so a command the agent runs without asking
-    runs unchecked.
+    runs unchecked. OpenCode edits, runs commands and fetches without asking by
+    default, so ALP starts it with `edit`, `bash` and `webfetch` set to `ask` in
+    `OPENCODE_CONFIG_CONTENT`, over the rest of the config you pass there.
   - Mail waits for the turn to end, since ACP cannot steer a running turn.
   - A session resumes only when the agent supports `session/load`.
   - `alp_recall` cannot ask a finished ACP assignment, and review copies cannot run on
