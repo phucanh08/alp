@@ -15,7 +15,9 @@ export async function emitDeclarations(directory, files) {
   const program = ts.createProgram(roots, options);
   const writes = [];
   const prefix = path.join(output, path.relative(ROOT, directory), 'src') + path.sep;
-  const result = program.emit(undefined, (file, content) => {
+  const result = program.emit(undefined, (emitted, content) => {
+    // TypeScript names files with `/`; on Windows the prefix has `\`.
+    const file = path.normalize(emitted);
     if (!file.startsWith(prefix)) return;
     const destination = path.join(directory, 'dist', file.slice(prefix.length));
     writes.push((async () => { await mkdir(path.dirname(destination), { recursive: true }); await writeFile(destination, content); })());
@@ -70,7 +72,8 @@ export async function emitPluginDeclarations() {
     const body = /["']alp:/.test(fixed) ? `/// <reference path="${reference}" />\n${fixed}` : fixed;
     writes.push((async () => { await mkdir(path.dirname(destination), { recursive: true }); await writeFile(destination, body); })());
   };
-  const result = program.emit(undefined, (file, content) => {
+  const result = program.emit(undefined, (emitted, content) => {
+    const file = path.normalize(emitted);
     if (file.startsWith(serverPrefix)) return emit(content, file.slice(serverPrefix.length));
     if (file.startsWith(sharedPrefix)) return emit(content, path.join('shared', file.slice(sharedPrefix.length)));
   });

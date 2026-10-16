@@ -8,6 +8,7 @@
 // with a reconnect that replays the retained session, and an alpd start that succeeds while the
 // optional web integration is absent.
 import { spawnSync } from 'node:child_process';
+import { spawnCommand } from './spawn-command.mjs';
 import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,7 +20,7 @@ const TYPES_NODE = '@types/node@22.20.5';
 const CORE_NAMES = ['@anhlp/alp-protocol', '@anhlp/alp-core', '@anhlp/alp-runtime', '@anhlp/alp-client', '@anhlp/alp-daemon', '@anhlp/alp-cli'];
 
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {
+  const result = spawnSync(...spawnCommand(command, args), {
     cwd: options.cwd ?? root,
     encoding: 'utf8',
     stdio: options.capture ? 'pipe' : 'inherit',

@@ -3,6 +3,7 @@
 // The checkout lives in .cache/paseo-web (or $ALP_PASEO_SRC); the export lands in dist/web-app and beside
 // the Paseo plugin's alpd, each file with .br and .gz copies for alpd to send.
 import { spawnSync } from 'node:child_process';
+import { spawnCommand } from './spawn-command.mjs';
 import { createHash } from 'node:crypto';
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -17,10 +18,10 @@ const targets = [path.join(root, 'dist/web-app'), path.join(root, 'integrations/
 
 function run(command, args, cwd = source, env = {}) {
   console.log(`$ ${command} ${args.join(' ')}`);
-  const result = spawnSync(command, args, { cwd, stdio: 'inherit', env: { ...process.env, ...env } });
+  const result = spawnSync(...spawnCommand(command, args), { cwd, stdio: 'inherit', env: { ...process.env, ...env } });
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed (${result.status ?? result.signal})`);
 }
-const quiet = (command, args, cwd = source) => spawnSync(command, args, { cwd, encoding: 'utf8' }).stdout?.trim() ?? '';
+const quiet = (command, args, cwd = source) => spawnSync(...spawnCommand(command, args), { cwd, encoding: 'utf8' }).stdout?.trim() ?? '';
 
 // 1. The checkout at the pinned commit, clean of earlier patches; node_modules and builds are kept.
 if (!existsSync(path.join(source, '.git'))) {

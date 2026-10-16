@@ -10,6 +10,7 @@
 // The only addition is `@types/node` (a consumer always needs Node's types); no `paths`, no
 // `typeRoots`, and no hand-written SDK stubs point anywhere near this repository.
 import { spawnSync } from 'node:child_process';
+import { spawnCommand } from './spawn-command.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,7 +21,7 @@ const TYPES_NODE = '@types/node@22.20.5';
 const typescript = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
 
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { cwd: options.cwd ?? root, encoding: 'utf8', stdio: options.capture ? 'pipe' : 'inherit', maxBuffer: 128 * 1024 * 1024 });
+  const result = spawnSync(...spawnCommand(command, args), { cwd: options.cwd ?? root, encoding: 'utf8', stdio: options.capture ? 'pipe' : 'inherit', maxBuffer: 128 * 1024 * 1024 });
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
   if (options.allowFailure) return { status: result.status, output };
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} exited ${result.status}${output ? `\n${output}` : ''}`);
