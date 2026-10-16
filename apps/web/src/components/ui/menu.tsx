@@ -9,7 +9,7 @@ export function Menu({ label, trigger, triggerClassName, items, align = 'end', o
   label: string;
   trigger: React.ReactNode;
   triggerClassName?: string;
-  items: Array<{ label: string; icon?: React.ReactNode; onSelect: () => void; destructive?: boolean; disabled?: boolean }>;
+  items: Array<{ label: string; icon?: React.ReactNode; onSelect: () => void; destructive?: boolean; disabled?: boolean; /** Starts a new group: a divider above it. */ group?: boolean }>;
   align?: 'start' | 'end';
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -76,12 +76,15 @@ export function Menu({ label, trigger, triggerClassName, items, align = 'end', o
         <div ref={list} id={id} role="menu" aria-label={label} onKeyDown={onKey} style={place}
           className="fixed z-50 min-w-40 rounded-lg border border-border bg-popover p-1 shadow-xl shadow-black/40">
           {items.map(item => (
-            <button key={item.label} type="button" role="menuitem" disabled={item.disabled}
+            <React.Fragment key={item.label}>
+            {item.group ? <div role="separator" className="-mx-1 my-1 h-px bg-border" /> : null}
+            <button type="button" role="menuitem" disabled={item.disabled}
               onClick={event => { event.stopPropagation(); close(); item.onSelect(); }}
               className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent focus-visible:bg-accent disabled:opacity-45 [&_svg]:size-3.5',
                 item.destructive ? 'text-destructive' : 'text-foreground')}>
               {item.icon}{item.label}
             </button>
+            </React.Fragment>
           ))}
         </div>
       ) : null}

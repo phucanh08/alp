@@ -1,11 +1,12 @@
 import * as React from 'react';
 import {
-  ArrowLeft, Ban, Blocks, BookOpen, Bot, Boxes, ChevronRight, CircleCheck, FolderGit2, Gauge, Info, Network,
-  Palette, Plug, Server, Settings as SettingsIcon, Smartphone, Sparkles, SquareTerminal, Users, Webhook,
+  ArrowLeft, Ban, Blocks, BookOpen, Bot, Boxes, ChevronRight, CircleCheck, Code, FolderGit2, Gauge, Info, MessageSquare, Network,
+  PanelLeft, Palette, Plug, Server, Settings as SettingsIcon, Smartphone, Sparkles, SquareTerminal, Stethoscope, Users, Webhook,
 } from 'lucide-react';
 import { can } from '../lib/gateway.js';
 import { describe } from '../lib/errors.js';
 import { Button } from '../components/ui/button';
+import { NativeSelect } from '../components/ui/input';
 import { Spinner } from '../components/ui/spinner';
 import { baseName, modeLabel } from '../lib/format';
 import { cn } from '../lib/utils';
@@ -13,20 +14,25 @@ import { useAppState, useController } from './store';
 
 /*
  * Settings as the old ALP web (the Paseo fork) lays them out: a full screen with its own sidebar
- * ("Back to workspace", then the App and Host groups, the host's ALP screens among them) and the
+ * ("Back", then the App and Host groups, the host's ALP screens among them) and the
  * chosen page on the right, in cards. What the gateway does not offer is a page that says so; no
  * page falls back to the old app.
  */
 
 type Icon = typeof Server;
 type Page =
-  | 'general' | 'appearance' | 'about'
+  | 'general' | 'appearance' | 'sidebar' | 'chat' | 'terminal' | 'editor' | 'diagnostics' | 'about'
   | 'host' | 'projects' | 'connections' | 'pair-device' | 'alp-templates' | 'alp-agents' | 'alp-skills' | 'alp-hooks' | 'alp-mcp'
   | 'metadata' | 'workspaces' | 'providers' | 'usage' | 'terminals' | 'plugins';
 
 const APP_PAGES: Array<{ id: Page; label: string; icon: Icon }> = [
   { id: 'general', label: 'General', icon: SettingsIcon },
   { id: 'appearance', label: 'Appearance', icon: Palette },
+  { id: 'sidebar', label: 'Sidebar', icon: PanelLeft },
+  { id: 'chat', label: 'Chat', icon: MessageSquare },
+  { id: 'terminal', label: 'Terminal', icon: SquareTerminal },
+  { id: 'editor', label: 'Editor', icon: Code },
+  { id: 'diagnostics', label: 'Diagnostics', icon: Stethoscope },
   { id: 'about', label: 'About', icon: Info },
 ];
 
@@ -94,16 +100,13 @@ function Unavailable({ what, why }: { what: string; why: string }) {
   );
 }
 
-function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: Array<{ value: T; label: string }>; onChange: (value: T) => void }) {
+/** Paseo's settings dropdown: a small pill with the value and a chevron, right of the row. */
+function Select<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: Array<{ value: T; label: string }>; onChange?: (value: T) => void }) {
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex rounded-lg border border-border bg-background p-0.5">
-      {options.map(option => (
-        <button key={option.value} type="button" role="radio" aria-checked={value === option.value} onClick={() => onChange(option.value)}
-          className={cn('rounded-md px-3 py-1 text-xs', focusRing, value === option.value ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground')}>
-          {option.label}
-        </button>
-      ))}
-    </div>
+    <NativeSelect aria-label={label} value={value} onChange={event => onChange?.(event.target.value as T)} disabled={!onChange}
+      className="h-8 w-auto rounded-lg border-border bg-transparent pl-3 text-sm text-foreground disabled:cursor-default disabled:opacity-100">
+      {options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+    </NativeSelect>
   );
 }
 
@@ -114,17 +117,18 @@ function General() {
   const { preferences } = useAppState();
   return (
     <>
-      <Section title="Sending">
-        <Row first title="When the agent is working, Enter" hint={preferences.sendBehavior === 'steer'
-          ? 'Sends the message into the running turn. Cmd/Ctrl+Enter queues it until the agent is idle.'
-          : 'Queues the message until the agent is idle. Cmd/Ctrl+Enter sends it into the running turn.'}>
-          <Segmented label="When the agent is working, Enter" value={preferences.sendBehavior} onChange={value => controller.setSendBehavior(value)}
-            options={[{ value: 'steer', label: 'Steers' }, { value: 'queue', label: 'Queues' }]} />
+      <Section title="General">
+        <Row first title="Language" hint="App language. This beta speaks English; the agents' language is a host setting (Host › Overview).">
+          <Select label="Language" value="system" options={[{ value: 'system', label: 'System' }]} />
         </Row>
-        <Row title="Kept for this tab" hint="Settings of this app live in this tab's memory: reloading starts from the defaults." />
       </Section>
-      <Section title="Language">
-        <Row first title="App language" hint="This beta speaks English. The agents' language is a host setting (Host › Overview).">English</Row>
+      <Section title="Sending">
+        <Row first title="Default send" hint={`${preferences.sendBehavior === 'steer'
+          ? 'When the agent is running, Enter steers the active turn. Command/Ctrl+Enter queues.'
+          : 'When the agent is running, Enter queues. Command/Ctrl+Enter steers the active turn.'} Kept in this tab's memory: reloading starts from the default.`}>
+          <Select label="Default send" value={preferences.sendBehavior} onChange={value => controller.setSendBehavior(value)}
+            options={[{ value: 'steer', label: 'Steer' }, { value: 'queue', label: 'Queue' }]} />
+        </Row>
       </Section>
     </>
   );
@@ -132,21 +136,29 @@ function General() {
 
 function Appearance() {
   return (
-    <Section title="Theme">
-      <Row first title="Theme" hint="Paseo's dark theme. Other themes are not available in this beta.">Dark</Row>
-    </Section>
+    <>
+      <Section title="Theme">
+        <Row first title="Theme" hint="Paseo's dark theme; other themes are not available in this beta.">
+          <Select label="Theme" value="dark" options={[{ value: 'dark', label: 'Dark' }]} />
+        </Row>
+      </Section>
+      <Unavailable what="Changing fonts, sizes and content width" why="This beta keeps Paseo's defaults." />
+    </>
   );
 }
 
 function About() {
   const { connection } = useAppState();
+  const host = connection.gateway.replace(/^https?:\/\//, '');
   return (
-    <Section title="ALP web">
-      <Row first title="Version">{__ALP_WEB_VERSION__} · beta</Row>
-      <Row title="Host ALP">{connection.daemonVersion ?? 'unknown'}</Row>
-      <Row title="Protocol" hint="Talks to alpd only through the ALP gateway, with the ALP client SDK.">ALP JSON-RPC v1</Row>
-      <Row title="Design" hint="Layout and theme follow Paseo's app (AGPL-3.0), whose ALP fork is the older ALP web." />
-    </Section>
+    <>
+      <Section title="About">
+        <Row first title="App version" hint="This device, ALP web beta">v{__ALP_WEB_VERSION__}</Row>
+      </Section>
+      <Section title="Connected hosts">
+        <Row first title={host} hint="ALP on the host, through the gateway (ALP JSON-RPC v1)">{connection.daemonVersion ? `v${connection.daemonVersion.replace(/^v/, '')}` : 'unknown'}</Row>
+      </Section>
+    </>
   );
 }
 
@@ -272,6 +284,11 @@ function PageContent({ page }: { page: Page }) {
   switch (page) {
     case 'general': return <General />;
     case 'appearance': return <Appearance />;
+    case 'sidebar': return <Unavailable what="Arranging the sidebar" why="This beta's sidebar has a fixed layout: New session, then the workspaces and their sessions." />;
+    case 'chat': return <Unavailable what="Chat display settings" why="Reasoning, tool calls and the chat outline show as Paseo's defaults; tool calls expand on click." />;
+    case 'terminal': return <Unavailable what="Terminal" why="The gateway does not run terminals." />;
+    case 'editor': return <Unavailable what="Editor" why="The gateway has no file access, so this app has no editor." />;
+    case 'diagnostics': return <Unavailable what="App diagnostics" why="Collecting host, provider and log details runs on the host: use alp doctor there. Connection details are under Host › Connections." />;
     case 'about': return <About />;
     case 'host': return <Overview />;
     case 'projects': return <Projects />;
@@ -345,8 +362,8 @@ export function SettingsScreen({ onClose, mobile }: { onClose: () => void; mobil
   );
   const detail = page ? (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-[720px] p-4 pt-6">
-        <h2 className="mb-6 ml-1 text-[26px] font-medium text-foreground" data-testid="settings-detail-header-title">{LABEL[page]}</h2>
+      <div className="mx-auto w-full max-w-[720px] p-4 pt-14">
+        <h2 className="mb-6 ml-1 text-[26px] font-semibold text-foreground" data-testid="settings-detail-header-title">{LABEL[page]}</h2>
         <PageContent page={page} />
       </div>
     </div>
@@ -355,7 +372,7 @@ export function SettingsScreen({ onClose, mobile }: { onClose: () => void; mobil
   if (mobile) {
     return (
       <div role="region" aria-label="Settings" className="flex h-dvh flex-col bg-background">
-        {page ? back('Settings', () => setPage(null)) : back('Back to workspace', onClose)}
+        {page ? back('Settings', () => setPage(null)) : back('Back', onClose)}
         {page ? detail : (
           <nav aria-label="Settings" className="min-h-0 flex-1 overflow-y-auto"><SettingsNav page={null} onSelect={setPage} mobile /></nav>
         )}
@@ -365,7 +382,7 @@ export function SettingsScreen({ onClose, mobile }: { onClose: () => void; mobil
   return (
     <div role="region" aria-label="Settings" className="flex h-dvh overflow-hidden bg-background">
       <nav aria-label="Settings" className="flex w-[320px] shrink-0 flex-col border-r border-border bg-sidebar" data-testid="settings-sidebar">
-        {back('Back to workspace', onClose)}
+        {back('Back', onClose)}
         <div className="min-h-0 flex-1 overflow-y-auto"><SettingsNav page={page} onSelect={setPage} mobile={false} /></div>
       </nav>
       <main className="flex min-w-0 flex-1 flex-col" data-testid="settings-detail-pane">{detail}</main>

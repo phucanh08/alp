@@ -3,7 +3,7 @@
 // a revoked token, and a page origin the gateway does not allow.
 import { expect, test } from '@playwright/test';
 import { freePort, serveStatic, startWorld, WEB } from './support/world.js';
-import { connect, newSession, send } from './support/app.js';
+import { connect, newSession, openTasks, send } from './support/app.js';
 import path from 'node:path';
 
 /** @type {Awaited<ReturnType<typeof startWorld>>} */
@@ -35,7 +35,7 @@ test('grants: read-only token, mode-limited token and another workspace', async 
   await expect(viewer.getByTestId('assistant-message').last()).toContainText('Echo: hello from the owner');
   await expect(viewer.getByText('Your access token can view sessions but not send messages.')).toBeVisible();
   await expect(viewer.getByLabel('Message', { exact: true })).toBeDisabled();
-  await viewer.getByRole('tab', { name: /Tasks/ }).click();
+  await openTasks(viewer);
   await expect(viewer.getByText('Your access token can read tasks but not change them.')).toBeVisible();
 
   // Modes [read-only]: cannot drive the owner's full-access session; may start a read-only one.

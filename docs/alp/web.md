@@ -18,12 +18,12 @@ Số mục (§) có thể được code và test tham chiếu; giữ ổn địn
 | Sessions | Liệt kê, tạo (team, permissions, model, title), mở, đổi tên, archive. Mỗi agent của cây (main và assignment) là một tab. |
 | Chat | Prompt + stream, tool call, todo, notice; trả lời hoặc từ chối câu hỏi; interrupt; steer khi agent đang chạy; hàng đợi (§4.3). |
 | Tasks | Liệt kê (poll), tạo, mở chi tiết trong tab lớn, đóng, mở lại, duyệt human gate. Mọi thay đổi gửi `ifRev`. |
-| Settings | Bố cục như `alp web` cũ: App (General, Appearance, About) và Host (Overview, Projects, Connections, Templates, Agents, Skills, Hooks, MCP servers, Providers…). Library chỉ hiện tên, nguồn, mô tả. Mục chưa hỗ trợ ghi rõ "not available in this beta". |
+| Settings | Bố cục như `alp web` cũ: App (General, Appearance, Sidebar, Chat, Terminal, Editor, Diagnostics, About) và Host (Overview, Projects, Connections, Templates, Agents, Skills, Hooks, MCP servers, Providers…). Library chỉ hiện tên, nguồn, mô tả. Mục chưa hỗ trợ ghi rõ "not available in this beta". |
 | Phục hồi | Reconnect có backoff, resume theo cursor, reload trang, gateway hoặc alpd khởi động lại (§5). |
 
 Không có trong beta (app ghi rõ, không fallback sang Paseo hay app nhúng): CRUD workspace, git và
-file (tab Changes/Files), xem/sửa nội dung library, thêm/kiểm tra provider, usage, đổi ngôn ngữ
-agent, terminal, plugin, pair device.
+file (tab Changes, Diff, Files chỉ có giao diện), xem/sửa nội dung library, thêm/kiểm tra provider,
+usage, đổi ngôn ngữ agent, terminal (tab Terminal chỉ có giao diện), plugin, pair device.
 
 ## 2. Cài đặt, chạy, build
 
@@ -104,20 +104,20 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
 - Disconnect, `pagehide` hoặc lỗi xác thực:
   - dừng reconnect và mọi timer;
   - xóa token, cây session, hàng đợi và state về ban đầu.
-- Settings của app (General › Sending) chỉ sống trong bộ nhớ của tab.
+- Settings của app (General › Sending › Default send) chỉ sống trong bộ nhớ của tab.
 
 ### 4.3 Chat theo logic của Paseo
 
 - Bố cục giữa:
   - header: nút sidebar, tên session + project, menu ⋯ (Rename, Copy session ID, Archive), nút
     bật/tắt explorer;
-  - hàng tab: agent tab và task tab;
+  - hàng tab: agent tab, task tab, panel tab, rồi + (menu New tab);
   - nội dung của tab đang mở.
 - Enter gửi tin.
   - Khi agent đang chạy, mặc định Enter **steer**: `delivery: 'steer'`, tin nhập vào turn đang
     chạy.
   - Cmd/Ctrl+Enter đưa tin vào **hàng đợi**.
-  - Settings › General › Sending đảo hai phím này.
+  - Settings › General › Default send (Steer/Queue) đảo hai phím này.
 - Hàng đợi hiện trên ô chat. Mỗi tin có Edit (đưa lại vào ô) và Send now (steer ngay).
 - Hàng đợi tự gửi tin kế tiếp khi đủ các điều kiện sau:
   - root đã idle;
@@ -151,7 +151,16 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
 
 ### 4.5 Tasks
 
-- Panel Tasks bên phải (như explorer dock của Paseo) liệt kê task và có form tạo task.
+- Dock bên phải theo explorer dock của Paseo bản mới:
+  - các panel mở thành tab đóng được; mặc định là Changes và Files;
+  - nút **+** mở tab "New tab" với danh sách Changes, Terminal, Diff, Files, Agents, Tasks. Chọn
+    một mục thì tab New tab thành panel đó; panel đã mở thì được đưa lên trước;
+  - tab của dock giữ nguyên khi ẩn/hiện dock, mất khi reload.
+- Nút **+** của hàng tab giữa là menu New tab như Paseo: Agent (tạo session), Terminal, Diff, rồi
+  Tasks, Agents. Panel mở thành tab ở cột giữa, theo workspace như task tab.
+- Changes, Terminal, Diff, Files mới có giao diện: panel ghi "not available in this beta" vì
+  gateway chưa có git, file, terminal. Backend là việc riêng.
+- Panel Tasks liệt kê task và có form tạo task.
 - Bấm một task mở **tab chi tiết** ở cột giữa, gồm:
   - mô tả, handoff, closed;
   - assignee, progress, parent, blocked by, labels, paths;

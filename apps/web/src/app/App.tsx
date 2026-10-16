@@ -6,7 +6,7 @@ import { cn } from '../lib/utils';
 import { ConnectScreen } from './ConnectScreen';
 import { ArchiveDialog, NewSessionDialog, RenameDialog } from './Dialogs';
 import { SettingsScreen } from './Settings';
-import { SidePanel, type PanelTab } from './SidePanel';
+import { SidePanel, useDock } from './SidePanel';
 import { Sidebar } from './Sidebar';
 import { useAppState, useController } from './store';
 import { TabsProvider } from './tabs';
@@ -58,7 +58,7 @@ function Shell() {
   const medium = useMedia('(min-width: 768px)');
   const [navOpen, setNavOpen] = React.useState(false);
   const [panelOpen, setPanelOpen] = React.useState(false);
-  const [panelTab, setPanelTab] = React.useState<PanelTab>('agents');
+  const dock = useDock();
   const [creating, setCreating] = React.useState(false);
   const [settings, setSettings] = React.useState(false);
   const [renaming, setRenaming] = React.useState<SessionSummary | null>(null);
@@ -102,7 +102,7 @@ function Shell() {
         <>
           {!wide ? <div className="fixed inset-0 z-30 bg-black/60" aria-hidden onClick={() => setPanelOpen(false)} /> : null}
           <div className={cn('shrink-0 border-l border-border bg-sidebar', wide ? 'relative w-[320px]' : 'fixed inset-y-0 right-0 z-40 w-[min(100vw,24rem)] shadow-2xl')}>
-            <SidePanel tab={panelTab} onTab={setPanelTab} onClose={wide ? undefined : () => setPanelOpen(false)} />
+            <SidePanel dock={dock} onClose={wide ? undefined : () => setPanelOpen(false)} />
           </div>
         </>
       ) : null}

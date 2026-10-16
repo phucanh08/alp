@@ -1,11 +1,13 @@
-import { Bot, CircleDot, Copy, Ellipsis, ListTodo, PanelLeft, PanelRight, Pencil, Plus, ShieldAlert, Archive, X } from 'lucide-react';
+import { Bot, CircleDot, Copy, Ellipsis, ListTodo, PanelLeft, PanelRight, Pencil, Plus, ShieldAlert, SquarePen, Archive } from 'lucide-react';
 import type { SessionSummary } from '../lib/controller.js';
 import { can } from '../lib/gateway.js';
 import { Menu } from '../components/ui/menu';
 import { baseName, sessionName } from '../lib/format';
 import { cn } from '../lib/utils';
+import { PANELS, PanelView, type PanelKind } from './panels';
 import { ChatPanel, Empty } from './SessionView';
 import { StatusRing } from './status';
+import { TabChip } from './TabChip';
 import { TaskDetail } from './TaskDetail';
 import { useAppState } from './store';
 import { tabKey, useTabs, type Tab } from './tabs';
@@ -57,7 +59,6 @@ export function WorkspaceHeader({ navOpen, onToggleNav, explorerOpen, onToggleEx
         <span className="sr-only" aria-live="polite">{connection.phase !== 'open' ? 'Reconnecting' : !root ? '' : running ? 'Agent is working' : closed ? 'Session closed' : 'Agent is idle'}</span>
       </div>
       <div className="flex shrink-0 items-center gap-1 md:gap-2">
-        {root ? <span className={cn('hidden text-xs sm:inline', running ? 'text-dot-running' : 'text-muted-foreground')}>{running ? 'working' : closed ? 'closed' : 'idle'}</span> : null}
         <button type="button" aria-label="Agents and tasks" aria-expanded={explorerOpen} title="Toggle explorer" onClick={onToggleExplorer} className={cn(headerButton, 'md:-mr-1.5')} data-testid="workspace-explorer-toggle">
           <PanelRight aria-hidden strokeWidth={1.5} />
         </button>
@@ -80,6 +81,10 @@ function useTabPresentation(tab: Tab) {
       title: root ? 'Main agent' : `${session?.agent ?? 'Agent'} · assignment`,
     };
   }
+  if (tab.kind === 'panel') {
+    const panel = PANELS[tab.id];
+    return { label: panel.label, icon: <panel.icon aria-hidden className="size-3.5" />, title: panel.label };
+  }
   const row = tasks.rows.find(entry => entry.id === tab.id);
   return {
     label: row?.title ?? tab.id,
@@ -88,42 +93,39 @@ function useTabPresentation(tab: Tab) {
   };
 }
 
-function TabChip({ tab, active, onSelect, onClose }: { tab: Tab; active: boolean; onSelect: () => void; onClose: () => void }) {
+function WorkspaceTabChip({ tab, active, onSelect, onClose }: { tab: Tab; active: boolean; onSelect: () => void; onClose: () => void }) {
   const view = useTabPresentation(tab);
-  return (
-    <div role="presentation" className={cn('group relative mx-0.5 flex h-7 max-w-[220px] shrink-0 items-center rounded-md', active ? 'bg-secondary' : 'hover:bg-card')}>
-      <button type="button" role="tab" aria-selected={active} onClick={onSelect} title={view.title} data-testid="workspace-tab" data-tab={tabKey(tab)}
-        onKeyDown={event => { if ((event.key === 'Delete' || event.key === 'Backspace') && !event.repeat) { event.preventDefault(); onClose(); } }}
-        className={cn('flex h-7 min-w-0 items-center gap-1 rounded-md pl-2 pr-7 text-sm', focusRing, active ? 'text-foreground' : 'text-muted-foreground')}>
-        <span className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground">{view.icon}</span>
-        <span className="truncate">{view.label}</span>
-      </button>
-      <button type="button" aria-label={`Close ${view.label}`} title="Close tab" onClick={onClose}
-        className={cn('absolute right-1 flex size-[18px] items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:opacity-100', focusRing, active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}>
-        <X aria-hidden className="size-3" />
-      </button>
-    </div>
-  );
+  return <TabChip label={view.label} icon={view.icon} title={view.title} active={active} onSelect={onSelect} onClose={onClose} testId="workspace-tab" data-tab={tabKey(tab)} />;
 }
 
-/** Paseo's tab row under the header: the open tabs, then + for a new session. */
+/** What the center + menu opens after Agent, as Paseo's: its own panels, then ALP's. */
+const PRIMARY_PANELS: PanelKind[] = ['terminal', 'diff'];
+const ALP_PANELS: PanelKind[] = ['tasks', 'agents'];
+
+/** Paseo's tab row under the header: the open tabs, then + with the New tab menu (Agent starts a session). */
 export function TabsRow({ onNewSession }: { onNewSession: () => void }) {
-  const { tabs, active, activate, close } = useTabs();
+  const { tabs, active, activate, close, openPanel } = useTabs();
   const { workspace, principal, connection } = useAppState();
   const canWrite = can(principal ?? undefined, 'session.write');
-  if (!tabs.length) return null;
+  if (!workspace) return null;
+  const item = (kind: PanelKind, group = false) => {
+    const panel = PANELS[kind];
+    return { label: panel.label, icon: <panel.icon aria-hidden />, onSelect: () => openPanel(kind), group };
+  };
   return (
     <div className="flex h-9 shrink-0 items-center border-b border-border bg-background">
       <div role="tablist" aria-label="Open tabs" className="flex min-w-0 flex-1 items-center overflow-x-auto px-1 [scrollbar-width:none]">
         {tabs.map(tab => (
-          <TabChip key={tabKey(tab)} tab={tab} active={!!active && tabKey(active) === tabKey(tab)} onSelect={() => activate(tab)} onClose={() => close(tab)} />
+          <WorkspaceTabChip key={tabKey(tab)} tab={tab} active={!!active && tabKey(active) === tabKey(tab)} onSelect={() => activate(tab)} onClose={() => close(tab)} />
         ))}
-        {workspace && canWrite ? (
-          <button type="button" aria-label="New session tab" title="New session" onClick={onNewSession} disabled={connection.phase !== 'open'}
-            className={cn('mx-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-card hover:text-foreground disabled:opacity-45', focusRing)}>
-            <Plus aria-hidden className="size-4" />
-          </button>
-        ) : null}
+        <Menu label="New tab" align="start"
+          trigger={<Plus aria-hidden className="size-4" />}
+          triggerClassName={cn('mx-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-card hover:text-foreground', focusRing)}
+          items={[
+            { label: 'Agent', icon: <SquarePen aria-hidden />, onSelect: onNewSession, disabled: !canWrite || connection.phase !== 'open' },
+            ...PRIMARY_PANELS.map(kind => item(kind)),
+            ...ALP_PANELS.map((kind, index) => item(kind, index === 0)),
+          ]} />
       </div>
     </div>
   );
@@ -134,6 +136,7 @@ export function TabContent({ onNewSession }: { onNewSession: () => void }) {
   const { active } = useTabs();
   const { tree } = useAppState();
   if (active?.kind === 'task') return <TaskDetail id={active.id} />;
+  if (active?.kind === 'panel') return <div className="min-h-0 flex-1 overflow-y-auto"><PanelView kind={active.id} /></div>;
   if (active?.kind === 'agent' && tree) return <ChatPanel key={active.id} sessionId={active.id} />;
   return <Empty onNewSession={onNewSession} />;
 }
