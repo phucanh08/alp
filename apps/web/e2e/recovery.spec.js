@@ -3,7 +3,7 @@
 // its sessions, shows each message once, and never sends a message again by itself.
 import { expect, test } from '@playwright/test';
 import { startWorld } from './support/world.js';
-import { assistant, connect, newSession, send, users } from './support/app.js';
+import { assistant, connect, idle, newSession, send, users } from './support/app.js';
 
 /** @type {Awaited<ReturnType<typeof startWorld>>} */
 let world;
@@ -38,6 +38,9 @@ test('gateway restart mid-turn, twice while idle, then alpd restart and a reload
   await send(page, 'Still there?');
   await expect(assistant(page).last()).toContainText('Echo: Still there?');
   await expect(users(page)).toHaveCount(2);
+  // The turn must be over on the host first: alpd stopped mid-turn reopens the session and asks
+  // the agent to continue, which adds a message of its own (a host behaviour, not this app's).
+  await idle(page);
 
   // alpd restarts (the gateway follows it): the session resumes from its record.
   await world.restartDaemon();

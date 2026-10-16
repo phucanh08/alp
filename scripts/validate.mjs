@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Shared local/CI baseline. Every child failure stops this lane with a nonzero exit code.
 import { spawnSync } from 'node:child_process';
-import { ROOT, buildAll, buildWorkspace, integrationTests, packageTests, packages, runNodeTests } from './test-lib.mjs';
+import { ROOT, buildAll, buildWorkspace, integrationTests, packageTests, packages, runNodeTests, webTests } from './test-lib.mjs';
 
 const scope = process.argv[2] ?? 'all';
 if (!['all', 'core', 'paseo', 'packages', 'web'].includes(scope) || process.argv.length > 3) {
@@ -54,7 +54,7 @@ if (scope === 'all' || scope === 'web') {
   // The browser app (docs/alp/web.md): types, unit tests and its bundle boundary, then the UI end
   // to end against a real alpd and gateway with a fake provider, in Chromium.
   node('node_modules/typescript/bin/tsc', '-p', 'apps/web/tsconfig.json');
-  tests(['apps/web/tests/timeline.test.js', 'apps/web/tests/controller.test.js', 'apps/web/tests/gateway.test.js', 'apps/web/tests/boundary.test.js']);
+  tests(webTests());
   buildWorkspace('cli');
   buildWorkspace('daemon');
   npm('run', 'build', '--workspace', '@anhlp/alp-web');

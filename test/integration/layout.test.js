@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
-import { integrationTests, packageTests, packages, testFiles, workspaceDirectory } from '../../scripts/test-lib.mjs';
+import { integrationTests, packageTests, packages, testFiles, webTests, workspaceDirectory } from '../../scripts/test-lib.mjs';
 import { paseoImportSpecifiers, referencedPackages } from '../support/layout.js';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
@@ -42,7 +42,7 @@ test('test files live only in a package tests directory or test/integration', ()
 });
 
 test('the root runner selects every test file exactly once', () => {
-  const selected = [...packages.flatMap(name => packageTests(name)), ...integrationTests()];
+  const selected = [...packages.flatMap(name => packageTests(name)), ...webTests(), ...integrationTests()];
   assert.equal(new Set(selected).size, selected.length);
   const present = [...testFiles('packages'), ...testFiles('integrations'), ...testFiles('apps')].filter(file => file.includes('/tests/')).concat(testFiles('test')).filter(file => !file.includes('/node_modules/'));
   assert.deepEqual([...selected].sort(), [...new Set(present)].sort());
