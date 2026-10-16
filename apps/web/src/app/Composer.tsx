@@ -67,28 +67,30 @@ export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSend
 
   const round = 'inline-flex size-7 shrink-0 items-center justify-center rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4';
   return (
-    <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-4 sm:pb-4">
-      <div className="mx-auto w-full max-w-[820px]">
+    <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-4 md:pb-4">
+      <div className="mx-auto flex w-full max-w-[820px] flex-col gap-3">
         {queued.length ? (
-          <ul aria-label="Queued messages" className="mb-2 space-y-1.5">
+          <ul aria-label="Queued messages" className="flex flex-col gap-2">
             {queued.map(item => (
-              <li key={item.id} data-testid="queued-message" className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
-                <span className="line-clamp-2 min-w-0 flex-1 whitespace-pre-wrap text-sm text-foreground/90 [overflow-wrap:anywhere]">{item.text}</span>
-                <button type="button" aria-label="Edit queued message" title="Edit" onClick={() => edit(item.id)}
-                  className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-                  <Pencil aria-hidden className="size-3.5" />
-                </button>
-                <button type="button" aria-label="Send queued message now" title="Send now" disabled={!!reason} onClick={() => onSendQueued(item.id)}
-                  className={cn(round, 'bg-primary text-primary-foreground hover:bg-primary/85 [&_svg]:size-3.5')}>
-                  <ArrowUp aria-hidden />
-                </button>
+              <li key={item.id} data-testid="queued-message" className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2">
+                <span className="line-clamp-2 min-w-0 flex-1 whitespace-pre-wrap text-sm text-foreground [overflow-wrap:anywhere]">{item.text}</span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <button type="button" aria-label="Edit queued message" title="Edit" onClick={() => edit(item.id)}
+                    className="flex size-8 items-center justify-center rounded-full bg-muted text-foreground outline-none hover:bg-bubble focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-3.5">
+                    <Pencil aria-hidden />
+                  </button>
+                  <button type="button" aria-label="Send queued message now" title="Send now" disabled={!!reason} onClick={() => onSendQueued(item.id)}
+                    className="flex size-8 items-center justify-center rounded-full bg-primary text-primary-foreground outline-none hover:bg-primary/85 focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-3.5">
+                    <ArrowUp aria-hidden />
+                  </button>
+                </span>
               </li>
             ))}
           </ul>
         ) : null}
-        {blocked ? <p className="mb-2 px-1 text-xs text-warning" role="note">{blocked}</p> : null}
-        {error ? <p className="mb-2 px-1 text-xs text-destructive" role="alert">{error}</p> : null}
-        <div className={cn('flex flex-col gap-3 rounded-2xl border border-input bg-card px-3 pb-2 pt-2 transition-colors focus-within:border-[#3d4544] md:px-4 md:pb-3 md:pt-4', reason && 'border-dotted')}>
+        {blocked ? <p className="px-1 text-sm text-warning" role="note">{blocked}</p> : null}
+        {error ? <p className="px-1 text-sm text-[#ef4444]" role="alert">{error}</p> : null}
+        <div className={cn('flex flex-col gap-3 rounded-2xl border border-input bg-card px-3 py-2 transition-colors duration-200 focus-within:border-[#3d4544] md:px-4 md:pb-3 md:pt-4', reason && 'border-dotted')}>
           <label htmlFor="composer" className="sr-only">Message</label>
           <textarea
             id="composer"
@@ -105,22 +107,22 @@ export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSend
               if (running && (sendBehavior === 'queue') !== alternate) queue();
               else void send();
             }}
-            className="max-h-[280px] min-h-6 w-full resize-none bg-transparent text-[15px] leading-[1.4] text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+            className="max-h-[280px] min-h-[21px] w-full resize-none bg-transparent text-[15px] leading-[21px] text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
           />
-          <div className="-mx-1.5 flex min-h-7 items-end justify-between gap-2">
-            <div className="flex min-w-0 flex-1 items-center gap-1 text-xs text-muted-foreground">{controls}</div>
+          <div className="-mx-1.5 flex min-h-7 shrink-0 items-end justify-between">
+            <div className="flex min-w-0 flex-1 items-end">{controls}</div>
             <div className="flex shrink-0 items-center gap-1">
               {hasText ? (
                 <button type="button" aria-label={!running ? 'Send' : queues ? 'Queue message' : 'Send and steer'}
                   title={!running ? 'Send' : queues ? 'Queue (⌘/Ctrl+Enter sends and steers)' : 'Send and steer (⌘/Ctrl+Enter queues)'}
                   onClick={() => queues ? queue() : void send()} disabled={!!reason}
-                  className={cn(round, 'bg-primary text-primary-foreground hover:bg-primary/85')}>
+                  className={cn(round, 'ml-1 bg-primary text-primary-foreground hover:bg-primary/85')}>
                   <ArrowUp aria-hidden />
                 </button>
               ) : running ? (
                 <button type="button" aria-label="Interrupt agent" title="Interrupt agent" onClick={onStop} disabled={stopping || !!blocked}
-                  className={cn(round, 'bg-stop text-white hover:bg-stop/85')}>
-                  <Square aria-hidden className="!size-3 fill-current" />
+                  className={cn(round, 'ml-1 bg-[#dc2626] text-white hover:bg-[#dc2626]/85')}>
+                  <Square aria-hidden className="fill-current" />
                 </button>
               ) : null}
             </div>
