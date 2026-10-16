@@ -3,7 +3,7 @@
 // announced afresh, a closed root that stays known.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyAttach, deliveredPrompts, emptyProjection, entriesOf, members, project } from '../src/lib/timeline.js';
+import { applyAttach, deliveredPrompts, emptyProjection, entriesOf, members, project, promptTurnOver } from '../src/lib/timeline.js';
 
 const env = (cursor, event, sessionId = 'r') => ({ sessionId, epoch: 'e', seq: cursor ?? 0, ts: '2026-10-16T00:00:00.000Z', event, ...(cursor === undefined ? {} : { cursor }) });
 const item = (cursor, id, text, sessionId = 'r') => env(cursor, { type: 'item', item: { kind: 'assistant_message', id, text } }, sessionId);
@@ -107,4 +107,27 @@ test('turn ends that failed or were canceled show in the timeline; prompt outcom
   assert.equal(state.prompts.c2.state, 'failed');
   assert.equal(state.entries.at(-1).item.kind, 'turn_end');
   assert.deepEqual(state.running, {});
+});
+
+test('a message\'s turn is over only once it started and ended; accepted before turn.started is not', () => {
+  let state = project(emptyProjection('r'), opened(1, 'r'));
+  assert.equal(promptTurnOver(state, 'm1'), false, 'nothing known yet');
+  state = project(state, env(2, { type: 'item', item: { kind: 'user_message', id: 'u1', text: 'one', clientMessageId: 'm1' } }));
+  assert.equal(promptTurnOver(state, 'm1'), false, 'a user message alone says nothing of the turn');
+  state = project(state, env(3, { type: 'prompt.accepted', clientMessageId: 'm1', result: 'turn', turnId: 't1' }));
+  assert.equal(promptTurnOver(state, 'm1'), false, 'accepted, turn not started yet');
+  state = project(state, env(4, { type: 'turn.started', turnId: 't1', origin: 'user' }));
+  assert.equal(promptTurnOver(state, 'm1'), false, 'running');
+  state = project(state, env(5, { type: 'prompt.accepted', clientMessageId: 'm2', result: 'steer', turnId: 't1' }));
+  assert.equal(promptTurnOver(state, 'm2'), false, 'a steer waits for the running turn');
+  state = project(state, env(6, { type: 'turn.ended', turnId: 't1', state: 'completed' }));
+  assert.equal(promptTurnOver(state, 'm1'), true);
+  assert.equal(promptTurnOver(state, 'm2'), true);
+  state = project(state, env(7, { type: 'prompt.failed', clientMessageId: 'm3', error: { code: 'busy', message: 'no' } }));
+  assert.equal(promptTurnOver(state, 'm3'), true, 'a refused message starts no turn');
+
+  // A turn seen running that the host's summary later ends without turn.ended (a crash) is over.
+  let crashed = project(project(emptyProjection('r'), env(1, { type: 'prompt.accepted', clientMessageId: 'm4', result: 'turn', turnId: 't9' })), env(2, { type: 'turn.started', turnId: 't9', origin: 'user' }));
+  crashed = applyAttach(crashed, { session: { id: 'r', status: 'idle', busy: false } }, []);
+  assert.equal(promptTurnOver(crashed, 'm4'), true);
 });

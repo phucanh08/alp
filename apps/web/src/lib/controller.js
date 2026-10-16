@@ -3,7 +3,7 @@ import { createReconnectingClient, hello } from '@anhlp/alp-client/portable';
 import { AuthenticationError, ConfigurationError, describe, endsRoot } from './errors.js';
 import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
 import { newMessageId, newRequestId, newSessionId } from './ids.js';
-import { applyAttach, deliveredPrompts, emptyProjection, members, project } from './timeline.js';
+import { applyAttach, deliveredPrompts, emptyProjection, members, project, promptTurnOver } from './timeline.js';
 
 /**
  * Everything the web app knows and does, without React: one connection to alpd through the
@@ -126,7 +126,7 @@ export class Controller {
   #run = null;
   /** The access token, in this object's memory only, for the life of one connection. */
   #token = '';
-  /** Trees seen during this connection: projection and cursor survive reconnects and switches. @type {Map<string, { projection: Projection, attaching: { buffer: any[] } | null, gone: Failure | null }>} */
+  /** Trees seen during this connection: projection and cursor survive reconnects and switches. @type {Map<string, { projection: Projection, attaching: { buffer: any[] } | null, gone: Failure | null, failed: Failure | null }>} */
   #trees = new Map();
   /** Session id → its root, for routing envelopes. @type {Map<string, string>} */
   #membership = new Map();
@@ -259,6 +259,7 @@ export class Controller {
     this.#stopTimers();
     this.#trees.clear();
     this.#membership.clear();
+    this.#turnWaits.clear();
     this.#watching = null;
     this.#attached = null;
     this.#context = {};
@@ -317,6 +318,7 @@ export class Controller {
     this.#watching = null;
     const root = this.#state.selected;
     if (root && root !== this.#creating && !this.#trees.get(root)?.gone) {
+      this.#ensureTree(root).failed = null;
       try {
         await this.#attachTree(client, root, signal);
         this.#attached = { client, root };
@@ -376,7 +378,7 @@ export class Controller {
   #ensureTree(root) {
     let tree = this.#trees.get(root);
     if (!tree) {
-      tree = { projection: emptyProjection(root), attaching: null, gone: null };
+      tree = { projection: emptyProjection(root), attaching: null, gone: null, failed: null };
       this.#trees.set(root, tree);
       this.#membership.set(root, root);
     }
@@ -426,9 +428,13 @@ export class Controller {
       if (tree.attaching !== operation) return;
       tree.attaching = null;
       tree.gone = null;
+      tree.failed = null;
       this.#finishAttach(root, tree, response, operation.buffer);
     } catch (error) {
       if (tree.attaching === operation) tree.attaching = null;
+      // Its events stop here: applied without the replay they could skip a gap. The next attach
+      // replays from the cursor.
+      if (this.#watching === root) this.#watching = null;
       throw error;
     }
   }
@@ -522,19 +528,33 @@ export class Controller {
       this.#set({ tree: { rootId: want, status: 'gone', error: tree.gone, projection: tree.projection } });
       return false;
     }
+    // A failed attach waits for Retry, a reconnect or the user coming back to it: no loop.
+    if (tree.failed) {
+      this.#set({ tree: { rootId: want, status: 'error', error: tree.failed, projection: tree.projection } });
+      return false;
+    }
     try {
       await this.#attachTree(client, want);
       this.#attached = { client, root: want };
       return this.#state.selected !== want;
     } catch (error) {
-      if (endsRoot(error)) this.#markGone(want, error);
-      else if (this.#state.selected === want && client === this.#run?.alp?.client) {
-        // The connection is still up but the attach failed (a timeout, a gateway refusal): show
-        // it; a retry or the next reconnect attaches again from the same cursor.
-        this.#set({ tree: { rootId: want, status: 'error', error: describe(error), projection: tree.projection } });
-      }
+      this.#attachFailed(client, want, error);
       return false;
     }
+  }
+
+  /**
+   * An attach that failed: a terminal answer gives the root up; otherwise, with the connection
+   * still up (a timeout, a gateway refusal), the failure is shown with Retry, and a retry or the
+   * next reconnect attaches again from the same cursor.
+   * @param {AlpRpcClient} client @param {string} root @param {unknown} error
+   */
+  #attachFailed(client, root, error) {
+    if (endsRoot(error)) { this.#markGone(root, error); return; }
+    if (client !== this.#run?.alp?.client) return;
+    const tree = this.#ensureTree(root);
+    tree.failed = describe(error);
+    if (this.#state.selected === root) this.#set({ tree: { rootId: root, status: 'error', error: tree.failed, projection: tree.projection } });
   }
 
   /** Attaches the selected root again after an attach error. */
@@ -542,7 +562,7 @@ export class Controller {
     const root = this.#state.selected;
     if (!root) return;
     const tree = this.#trees.get(root);
-    if (tree) tree.gone = null;
+    if (tree) { tree.gone = null; tree.failed = null; }
     this.#attached = null;
     this.#sync();
   }
@@ -628,6 +648,7 @@ export class Controller {
   selectSession(root) {
     if (root === this.#state.selected) return;
     const tree = root ? this.#ensureTree(root) : undefined;
+    if (tree) tree.failed = null;
     this.#set({
       selected: root,
       focus: root,
@@ -691,17 +712,21 @@ export class Controller {
         void this.refreshSessions();
         return id;
       }
-      this.#attached = { client, root: id };
       try {
         const response = await client.request('session.attach', { sessionId: id }, { timeoutMs: this.#options.requestTimeoutMs });
         if (tree.attaching === operation) {
           tree.attaching = null;
+          tree.failed = null;
           this.#finishAttach(id, tree, response, operation.buffer);
+          // Attached only once the answer is in: before it, #sync must still see work to do.
+          if (client === this.#run?.alp?.client) this.#attached = { client, root: id };
         }
       } catch (error) {
         if (tree.attaching === operation) tree.attaching = null;
-        if (endsRoot(error)) this.#markGone(id, error);
-        // Otherwise the connection dropped: reconnecting attaches the selected root again.
+        if (this.#watching === id) this.#watching = null;
+        // Never session.create again: the session exists. A drop reattaches on reconnect; a
+        // timeout or refusal on a live connection is shown with Retry (an attach is a read).
+        this.#attachFailed(client, id, error);
       }
       if (title?.trim()) await this.renameSession(id, title.trim()).catch(() => {});
       void this.refreshSessions({ quiet: true });
@@ -797,6 +822,7 @@ export class Controller {
     /** @type {PendingPrompt} */
     const prompt = { id: newMessageId(), rootId: root, text: body, delivery: running ? 'steer' : 'auto', status: 'sending', retrySameId: true, at: Date.now() };
     this.#set(state => ({ prompts: [...state.prompts, prompt] }));
+    this.#awaitTurn(prompt);
     await this.#deliver(prompt);
   }
 
@@ -851,11 +877,48 @@ export class Controller {
       ? { ...prompt, status: 'sending', error: undefined, accepted: false }
       : { ...prompt, id: newMessageId(), delivery: running ? 'steer' : 'auto', status: 'sending', error: undefined, retrySameId: true, accepted: false };
     this.#set(state => ({ prompts: state.prompts.map(entry => entry.id === id ? next : entry) }));
+    if (next.id !== prompt.id) { this.#turnWaits.get(prompt.rootId)?.delete(prompt.id); this.#awaitTurn(next); }
     await this.#deliver(next);
   }
 
-  /** @param {string} id */
-  discardPrompt(id) { this.#dropPrompt(id); }
+  /** Drops a message the user gave up on; the queue no longer waits for its turn. @param {string} id */
+  discardPrompt(id) {
+    const prompt = this.#state.prompts.find(entry => entry.id === id);
+    if (prompt) this.#turnWaits.get(prompt.rootId)?.delete(id);
+    this.#dropPrompt(id);
+  }
+
+  /**
+   * Messages of ours whose turn is not known to be over, per root, with the tree's reset count
+   * when sent. The pending entry of a message goes as soon as its user message shows, before its
+   * turn starts (events and answers arrive in separate tasks, in any order, §8.2), so the queue
+   * waits on these instead: on prompt.accepted's turn ending, or on prompt.failed.
+   * @type {Map<string, Map<string, number>>}
+   */
+  #turnWaits = new Map();
+
+  /** @param {PendingPrompt} prompt */
+  #awaitTurn(prompt) {
+    let waits = this.#turnWaits.get(prompt.rootId);
+    if (!waits) this.#turnWaits.set(prompt.rootId, waits = new Map());
+    waits.set(prompt.id, this.#trees.get(prompt.rootId)?.projection.reset ?? 0);
+  }
+
+  /**
+   * Whether a queued message may start now: no message of ours on this root still has a turn
+   * running or yet to start. After a reset that left no history, a message sent before it cannot
+   * be traced; an idle root is then the last word.
+   * @param {string} root @param {Projection} projection
+   */
+  #turnsSettled(root, projection) {
+    const waits = this.#turnWaits.get(root);
+    if (!waits) return true;
+    for (const [id, reset] of waits) {
+      const untraceable = projection.historyUnavailable && projection.reset > reset && Object.keys(projection.running).length === 0;
+      if (promptTurnOver(projection, id) || untraceable) waits.delete(id);
+    }
+    return waits.size === 0;
+  }
 
   // ---- the queue (Paseo's: Cmd/Ctrl+Enter while the agent works) ---------------------------
 
@@ -902,6 +965,7 @@ export class Controller {
     const { selected: root, tree, connection, prompts, queued } = this.#state;
     if (!root || connection.phase !== 'open' || !tree || tree.rootId !== root || tree.status !== 'attached') return;
     if (root in tree.projection.running || prompts.some(prompt => prompt.rootId === root)) return;
+    if (!this.#turnsSettled(root, tree.projection)) return;
     if (this.driveBlock()) return;
     const next = queued.find(item => item.rootId === root);
     if (next) this.sendQueuedNow(next.id).catch(() => {});

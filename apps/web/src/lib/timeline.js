@@ -29,7 +29,8 @@
  *   running: Record<string, string>,
  *   closed: Record<string, boolean>,
  *   questions: Record<string, UserQuestion>,
- *   prompts: Record<string, { state: 'accepted' | 'failed', error?: string }>,
+ *   prompts: Record<string, { state: 'accepted' | 'failed', error?: string, turnId?: string }>,
+ *   turns: Record<string, 'running' | 'ended'>,
  *   historyUnavailable: boolean,
  *   reset: number,
  * }} Projection
@@ -37,7 +38,7 @@
 
 /** @param {string} rootId @returns {Projection} */
 export function emptyProjection(rootId) {
-  return { rootId, cursor: 0, entries: [], positions: {}, sessions: {}, order: [], running: {}, closed: {}, questions: {}, prompts: {}, historyUnavailable: false, reset: 0 };
+  return { rootId, cursor: 0, entries: [], positions: {}, sessions: {}, order: [], running: {}, closed: {}, questions: {}, prompts: {}, turns: {}, historyUnavailable: false, reset: 0 };
 }
 
 /** @param {Projection} state @param {Entry} entry @returns {Projection} */
@@ -99,16 +100,17 @@ export function project(state, envelope) {
     case 'session.failed':
       return upsert(next, { key: mark(), sessionId: id, ts, item: { kind: 'session_event', id: mark(), level: 'error', text: event.error?.message ? `The session failed: ${event.error.message}` : 'The session failed.' } });
     case 'prompt.accepted':
-      return typeof event.clientMessageId === 'string' ? { ...next, prompts: { ...next.prompts, [event.clientMessageId]: { state: 'accepted' } } } : next;
+      return typeof event.clientMessageId === 'string' ? { ...next, prompts: { ...next.prompts, [event.clientMessageId]: { state: 'accepted', ...(typeof event.turnId === 'string' ? { turnId: event.turnId } : {}) } } } : next;
     case 'prompt.failed':
       return typeof event.clientMessageId === 'string' ? { ...next, prompts: { ...next.prompts, [event.clientMessageId]: { state: 'failed', ...(event.error?.message ? { error: event.error.message } : {}) } } } : next;
     case 'turn.started': {
       const previous = next.sessions[id];
-      return { ...next, running: { ...next.running, [id]: String(event.turnId) }, ...(previous ? { sessions: { ...next.sessions, [id]: { ...previous, status: 'running', busy: true } } } : {}) };
+      const turns = next.turns[event.turnId] === 'ended' ? next.turns : { ...next.turns, [String(event.turnId)]: /** @type {const} */ ('running') };
+      return { ...next, turns, running: { ...next.running, [id]: String(event.turnId) }, ...(previous ? { sessions: { ...next.sessions, [id]: { ...previous, status: 'running', busy: true } } } : {}) };
     }
     case 'turn.ended': {
       const previous = next.sessions[id];
-      next = { ...next, running: without(next.running, id), ...(previous && previous.status !== 'closed' ? { sessions: { ...next.sessions, [id]: { ...previous, status: 'idle' } } } : {}) };
+      next = { ...next, running: without(next.running, id), turns: { ...next.turns, [String(event.turnId)]: 'ended' }, ...(previous && previous.status !== 'closed' ? { sessions: { ...next.sessions, [id]: { ...previous, status: 'idle' } } } : {}) };
       if (event.state === 'failed' || event.state === 'canceled') {
         next = upsert(next, { key: mark(), sessionId: id, ts, item: { kind: 'turn_end', id: mark(), state: event.state, ...(event.error?.message ? { error: event.error.message } : {}) } });
       }
@@ -177,6 +179,23 @@ export function entriesOf(state, sessionId) {
 /** Whether the tree has work going on: a running turn or a busy snapshot. @param {Projection} state */
 export function treeBusy(state) {
   return Object.keys(state.running).length > 0;
+}
+
+/**
+ * Whether the turn a message of ours went into is over, so the next queued message may start a
+ * turn of its own. Unknown (no prompt.accepted yet, or accepted before its turn.started) is not
+ * over; a turn seen running that is no longer running is (a crash can end one without turn.ended).
+ * Accepted by a host that names no turn: over once the tree runs nothing.
+ * @param {Projection} state @param {string} clientMessageId
+ */
+export function promptTurnOver(state, clientMessageId) {
+  const outcome = state.prompts[clientMessageId];
+  if (!outcome) return false;
+  if (outcome.state === 'failed') return true;
+  const running = Object.values(state.running);
+  if (!outcome.turnId) return running.length === 0;
+  const turn = state.turns[outcome.turnId];
+  return turn === 'ended' || (turn === 'running' && !running.includes(outcome.turnId));
 }
 
 /** Client message ids already in the timeline as user messages. @param {Projection} state */

@@ -122,7 +122,12 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
 - Hàng đợi tự gửi tin kế tiếp khi đủ các điều kiện sau:
   - root đã idle;
   - kết nối đang mở;
-  - root không còn tin nào đang gửi hoặc chưa rõ kết quả.
+  - root không còn tin nào đang gửi hoặc chưa rõ kết quả;
+  - **turn của mọi tin mình đã gửi đã xong** (barrier theo root). Tin rời khỏi danh sách pending ngay
+    khi `user_message` hiện ra, trước `turn.started`; event và response tới ở các task riêng, theo
+    thứ tự bất kỳ (§8.2). Vì vậy hàng đợi chờ `prompt.accepted.turnId` rồi `turn.ended` của turn
+    đó (hoặc `prompt.failed`). Một turn đã thấy chạy mà summary báo đã dừng (crash) cũng tính là
+    xong. Sau một reset không còn history, tin gửi trước reset được coi là xong khi root idle.
 - Cách gửi tin từ hàng đợi:
   - mỗi lần một tin, mỗi tin một `clientMessageId` mới, gửi đúng một lần;
   - tin gửi lỗi nằm lại trong timeline với Retry, và hàng đợi chờ người dùng xử lý.
@@ -170,6 +175,10 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
   - rồi `session.attach` với `after` để lấy toàn bộ timeline.
 - Root đóng (idle mà không ai xem): prompt kế tiếp chạy `session.create resume:true` và attach sau
   cursor.
+- Attach đầu tiên của session mới: root chỉ được đánh dấu attached khi có response.
+  - Timeout hoặc lỗi không terminal trên kết nối còn sống → hiện lỗi kèm nút Try again. Không tự
+    lặp, không gửi lại `session.create`.
+  - Event của root ngừng được áp dụng cho tới lần attach sau (replay từ cursor), để không tạo gap.
 - Lỗi:
   - Chỉ mã terminal làm root "gone": `1001`, `1003` grant/mode/outside_workspace, `-32601`,
     `-32602`.
@@ -197,11 +206,12 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
 
 ## 7. Kiểm thử
 
-- Unit (`apps/web/tests`, 43 test):
+- Unit (`apps/web/tests`, 49 test):
   - timeline projection;
   - controller, chạy với host JSON-RPC trong bộ nhớ: reconnect, resume, terminal, idle-close,
     stale answers, outcome unknown, task ifRev, create, children/questions, cancel, mode limit,
-    reset, hàng đợi;
+    reset, hàng đợi (kể cả event tách task, response trước/giữa/sau event, rớt kết nối giữa
+    `user_message` và `turn.started`), attach đầu tiên timeout;
   - gateway (URL, ticket, lỗi HTTP);
   - boundary.
 - E2E (`apps/web/e2e`, Playwright, 9 test):
