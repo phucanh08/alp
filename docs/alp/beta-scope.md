@@ -395,9 +395,12 @@ npm run release:gate -- "$OUT" --init release-evidence.json
 
 | # | SHA | Tarball SHA-256 khớp | Máy, OS, Node | Kết quả | Bằng chứng (link CI, log, session id) |
 |---|---|---|---|---|---|
-| H1–H5 | | — | | | |
-| A5 | | | | | |
-| R1–R7 | | | | | |
+| H1–H4 | `6765826` | — | CI: Ubuntu Node 22/24 (H1, H3), macOS Node 24 (H2, `core-paseo-macos`), Windows Node 22/24 (H4) | pass | [CI 38886448726](https://github.com/phucanh08/alp/actions/runs/38886448726) |
+| H5 | `6765826` | — | CI: Ubuntu, macOS | pass (không chặn) | [CI 38886448726](https://github.com/phucanh08/alp/actions/runs/38886448726) |
+| L1 | `6765826` | — | macOS, clone sạch ở release SHA | pass | `release:check-version`; manifest 8 package Apache-2.0, repo `phucanh08/alp`; LICENSE/NOTICE trong tarball do A5 kiểm |
+| S1 | `6765826` | khớp (audit consumer trên 8 tarball) | macOS arm64, Node 26.3.0 (gốc) và 24.22.0 (web, consumer), bật kiểm TLS | pass; F3 chấp nhận theo D5 | `--omit=dev` 0; consumer 0/0 (146/131 package); ajv 8.20.0 inline; Paseo web 84 high/15 critical như report (F3, F4) |
+| A5 | `6765826` | `SHA256SUMS` = `56e6e001…fdd67` | pack: [release-acceptance 38888426980](https://github.com/phucanh08/alp/actions/runs/38888426980), Ubuntu Node 22.23.3; verify lại: macOS Node 24.22.0 | pass | `release:pack` + `release:verify` trên runner; `release:verify --record` trên Mac |
+| R1–R7 | | | | rehearsal fake trên tarball xanh (macOS, Ubuntu, Windows); live chưa chạy | [release-acceptance 38888426980](https://github.com/phucanh08/alp/actions/runs/38888426980) (fake, không phải evidence) |
 
 ## 7. Checklist publish tay
 
@@ -571,22 +574,21 @@ gh release create v0.0.0-beta.1 --verify-tag --prerelease --draft --title "ALP 0
 
 ## 8. Việc phải làm trước khi publish (mỗi việc một task riêng)
 
-Trạng thái [Local] lúc cập nhật tài liệu: T1–T3 **chưa triển khai**. Manifest vẫn `0.0.0-beta`,
-`engines` vẫn `>=20`, `apps/gateway` chưa `private`. Tài liệu này không sửa code hay manifest.
+Trạng thái ngày 2026-10-16, ở release SHA `6765826`.
 
 | # | Việc | Chặn | Trạng thái |
 |---|---|---|---|
-| T1 | Đổi `0.0.0-beta` → `0.0.0-beta.1` trong manifest, lockfile, dependency nội bộ | Có | chưa làm |
-| T2 | `apps/gateway`: `"private": true` (gateway không vào `npm publish --workspaces`; `gateway-smoke` vẫn pack được) | Có | chưa làm |
-| T3 | `engines.node` `>=22.12` cho các package phát hành; docs ghi "Node.js 20+" đổi theo (`README.md`, `integrations/paseo/README.md`) | Có | chưa làm |
-| T4 | LICENSE, trường `license`, `repository`/`homepage` trỏ `phucanh08/alp`; LICENSE/NOTICE của Paseo trong tarball plugin | Có | một bạn Opus khác đang làm |
-| T5 | Docs: mọi lệnh cài ghi `@beta` (`integrations/paseo/README.md:56`, `docs/alp/codex-only.md:18`); sửa model supervisor không khớp (`integrations/paseo/README.md:10` ghi Sonnet 4.6, `README.md` ghi Sonnet 5); chuyển "Remote mode (beta)" và `paseo-remote.md` sang deferred; gắn nhãn experimental như §4; link tới tài liệu này | Có | chưa làm |
-| T6 | Phân loại `npm audit` (S1) | Có | đã phân loại local (§5). S1 chặn tới khi: F1 đã sửa (bạn license) hoặc anh chấp nhận trước P5; chạy lại trên `RELEASE_SHA`. F3 đã được anh chấp nhận (D5) |
+| T1 | Đổi `0.0.0-beta` → `0.0.0-beta.1` trong manifest, lockfile, dependency nội bộ | Có | xong (PR #101) |
+| T2 | `apps/gateway`: `"private": true` (gateway không vào `npm publish --workspaces`; `gateway-smoke` vẫn pack được) | Có | xong (PR #101) |
+| T3 | `engines.node` `>=22.12` cho các package phát hành; docs ghi "Node.js 20+" đổi theo (`README.md`, `integrations/paseo/README.md`) | Có | xong (PR #101) |
+| T4 | LICENSE, trường `license`, `repository`/`homepage` trỏ `phucanh08/alp`; LICENSE/NOTICE của Paseo trong tarball plugin | Có | xong (PR #101); L1 pass |
+| T5 | Docs: mọi lệnh cài ghi `@beta` (`integrations/paseo/README.md:56`, `docs/alp/codex-only.md:18`); sửa model supervisor không khớp (`integrations/paseo/README.md:10` ghi Sonnet 4.6, `README.md` ghi Sonnet 5); chuyển "Remote mode (beta)" và `paseo-remote.md` sang deferred; gắn nhãn experimental như §4; link tới tài liệu này | Có | xong (PR #101) |
+| T6 | Phân loại `npm audit` (S1) | Có | xong: F1, F2 đã sửa; chạy lại trên `RELEASE_SHA` và 8 tarball, S1 pass; F3 chấp nhận (D5) |
 | T7 | Dọn npm: unpublish nếu đủ điều kiện, không thì deprecate (§1.1), gồm cả tên plugin cũ `alp-paseo-plugin` | anh làm | chưa làm |
-| T8 | Chạy §6 và §7, ghi kết quả vào §6.4 | anh (macOS, H2 tối 2026-10-16; Linux, lần đầu tối 2026-10-16, D1) | chưa làm |
+| T8 | Chạy §6 và §7, ghi kết quả vào §6.4 | anh (macOS, D7; H2 trên CI theo D8) | đang làm: H1–H5, L1, S1, A5 pass; còn R1, R2, R5, R7 live trên macOS |
 | T9 | Đưa client SDK smoke vào CI; workflow publish; ~~thêm macOS vào lane `core`/`paseo`~~ (đã làm theo D8) | Không (sau beta) | deferred; phần acceptance Linux kéo lên trước theo D6 (T12) |
-| T12 | Workflow `release-acceptance` (D6, D7): pack một lần trên CI + `release:consumer` + rehearsal fake (Codex, Claude, W6) trên macOS, Ubuntu, Windows | Có (pack là bộ tarball của release) | đã viết, chưa chạy trên `main` |
-| T10 | Test fake-provider cho câu hỏi quyền trong Paseo (§6.2, hàng duyệt quyền, ý 1) | Có | có test (chưa commit), pass local 17/17; chưa pass trên release SHA |
+| T12 | Workflow `release-acceptance` (D6, D7): pack một lần trên CI + `release:consumer` + rehearsal fake (Codex, Claude, W6) trên macOS, Ubuntu, Windows | Có (pack là bộ tarball của release) | xong (PR #102); bộ tarball release: [release-acceptance 38888426980](https://github.com/phucanh08/alp/actions/runs/38888426980) |
+| T10 | Test fake-provider cho câu hỏi quyền trong Paseo (§6.2, hàng duyệt quyền, ý 1) | Có | xong: test đã merge, pass trong `validate:paseo` ở release SHA (H1, H2) |
 | T11 | Sửa F3 (`linkify-it@2.2.0` trong `alp web`); owner anh | Không chặn beta.1; chặn beta.2, hạn 2026-11-15 | chưa làm |
 
 ## 9. Không thuộc tài liệu này

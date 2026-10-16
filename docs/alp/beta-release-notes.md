@@ -96,8 +96,10 @@ All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned t
 - Windows: no login service; tests that use a fake Codex or POSIX processes are skipped there
   (for example backup and restore through alpd); no CI lane runs the whole suite.
 - Client SDK smoke tests (browser, Metro, tarball) are not in CI.
-- `npm audit` reported 21 existing vulnerabilities (react-native/jest chain, ajv); they have
-  not been triaged again yet.
+- `npm audit --omit=dev` on the repository and `npm audit` on a fresh install of the eight
+  tarballs report 0 vulnerabilities at the release commit. The repository's own dev tree still
+  has a react-native/jest chain that no package ships. `npm audit` cannot see code that
+  `@anthropic-ai/claude-agent-sdk` bundles inside its own package.
 - A backup does not hold Codex or Claude threads, which those tools keep; a restore on another
   machine does not bring their native context.
 - `alp web` is Paseo's web app at a pinned commit with ALP's patches. What Paseo has and ALP
@@ -105,8 +107,8 @@ All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned t
   in development.
 - `alp web`: a very long agent message with many email addresses or `mailto:` links can hang the
   browser tab (linkify-it 2.2.0 in Paseo's web app; GHSA-22p9-wv53-3rq4, GHSA-v245-v573-v5vm).
-  It affects only the page on this machine; upstream Paseo has not fixed it yet.
-  <!-- Keep only if T6/S1 accepts this risk for the beta; if it is fixed, remove this item. -->
+  It affects only the page on this machine; upstream Paseo has not fixed it yet. Planned fix:
+  before `0.0.0-beta.2` or 2026-11-15, whichever comes first.
 - `npm install -g @anhlp/alp` without a tag installs `0.10.0` until `latest` moves to the beta.
   The old plugin name `alp-paseo-plugin` stays at `0.10.0`.
 
@@ -116,7 +118,19 @@ The release attaches the eight `*-0.0.0-beta.1.tgz` tarballs, `SHA256SUMS` and
 `release-manifest.json`. Check a download with `shasum -a 256 -c SHA256SUMS` (macOS) or
 `sha256sum -c SHA256SUMS` (Linux).
 
-<!-- Paste SHA256SUMS here when the tarballs are built (beta-scope §7.2). -->
+Release commit `6765826afcf9aac8204a13214589063bba9b165f`. `SHA256SUMS` (its own SHA-256 is
+`56e6e0019d57da9c75dab426ac9e1b5a4a4e64f820fec30baaab0881400fdd67`):
+
+```text
+df17061b5122db56f0e27c78772e18bd5517f769af0985fee6bf9e7e0b2cd68e  anhlp-alp-0.0.0-beta.1.tgz
+85a9df6342f3ab9d6faeeb38e22cba6638e1e2ba89aa926916fd43f6bac62d63  anhlp-alp-cli-0.0.0-beta.1.tgz
+b0b7808f0429442d25de8b4975daff100242c8461a52fa898a75ecb3d370c10f  anhlp-alp-client-0.0.0-beta.1.tgz
+8cb8413d66aa6931762ca0a0517acfb877891bdbce1d0d361a236d5902308dd4  anhlp-alp-core-0.0.0-beta.1.tgz
+7613860a102e63b7293322f8075c684e11a7a426724771147b1c4cea436e0b55  anhlp-alp-daemon-0.0.0-beta.1.tgz
+1155434bc7411078c2c307fc7e895032f742d2aac340637b86eb93925fff1aae  anhlp-alp-paseo-0.0.0-beta.1.tgz
+57eb63ee488f2d33eb841ce941bea6e3aceed3f35fe259673594b8738d1b8f4c  anhlp-alp-protocol-0.0.0-beta.1.tgz
+8260435dc904110cdb174c73e032d0938d9caeef7309d4236c4cc3279f9be2ec  anhlp-alp-runtime-0.0.0-beta.1.tgz
+```
 
 ## More
 
@@ -131,20 +145,19 @@ The release attaches the eight `*-0.0.0-beta.1.tgz` tarballs, `SHA256SUMS` and
 
 ## Editor's checklist (remove before publishing)
 
-State on 2026-10-16, read from the working tree; each item belongs to another task. "In the
-working tree" means changed but not committed or released.
+State on 2026-10-16 at the release commit `6765826`; each item belongs to another task.
 
 | Item | State | Needed for these notes |
 |---|---|---|
-| T1 version `0.0.0-beta.1` in manifests and lockfile | in the working tree: the 8 packages say `0.0.0-beta.1` | install commands resolve |
-| T2 `apps/gateway` `"private": true` | in the working tree | "not published" row is true |
-| T3 `engines.node` `>=22.12` | in the working tree for the 8 packages (gateway keeps `>=20`) | Support table matches npm |
-| T6 / S1 `npm audit` triage | local triage complete; F1/F2 fixed; F3 accepted under scope D5 | rerun on the release SHA; retain the F3 known issue |
-| Plugin's React and React Native peers optional (`peerDependenciesMeta`) | in the working tree; docs updated | re-check if it is reverted |
-| Gate H1–H5, A5, R1–R7 on the release SHA (beta-scope §6) | not run; harness `scripts/beta-acceptance-{cli,web,r7}.mjs` in the working tree (T10), referenced in beta-scope §6.3 | add accepted R1–R7 issues to Known issues |
+| T1 version `0.0.0-beta.1` in manifests and lockfile | merged; `release:check-version` passes | install commands resolve |
+| T2 `apps/gateway` `"private": true` | merged; A5 checks no gateway tarball | "not published" row is true |
+| T3 `engines.node` `>=22.12` | merged for the 8 packages (gateway keeps `>=20`) | Support table matches npm |
+| T6 / S1 `npm audit` triage | rerun on the release SHA and the release tarballs: pass; F3 accepted under scope D5 | done; F3 known issue kept |
+| Plugin's React and React Native peers optional (`peerDependenciesMeta`) | merged; consumer audit 0 | re-check if it is reverted |
+| Gate H1–H5, A5, R1–R7 on the release SHA (beta-scope §6) | H1–H5, L1, S1, A5 pass; fake rehearsal on the tarballs passes (`release-acceptance` run 38888426980); live R1, R2, R5, R7 not run yet | add accepted R1–R7 issues to Known issues |
 | Q1–Q5 after publishing (beta-scope §7.5) | not run | drop or keep the `latest` known issue (D2) |
 | `paseo plugin add npm:<scoped name>@beta`, `paseo provider models alp` | not tried with a published package; Q3/W2 try them | install commands |
-| Checksums | tarballs not built | paste `SHA256SUMS` |
+| Checksums | pasted from `release-acceptance` run 38888426980 | done |
 
 Links here are relative to `docs/alp/`; on GitHub's release page, make them absolute
 (`https://github.com/phucanh08/alp/blob/<tag>/docs/alp/…`).
