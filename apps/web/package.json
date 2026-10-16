@@ -1,0 +1,38 @@
+{
+  "name": "@anhlp/alp-web",
+  "version": "0.10.0",
+  "private": true,
+  "type": "module",
+  "description": "ALP web: a browser client for alpd through the ALP remote gateway, on the portable client SDK",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test tests/*.test.js",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@anhlp/alp-client": "0.10.0",
+    "@anhlp/alp-protocol": "0.10.0",
+    "@radix-ui/react-slot": "1.5.0",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "lucide-react": "0.468.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "tailwind-merge": "3.7.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.1.17",
+    "@types/react-dom": "19.1.11",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vite": "7.3.7"
+  }
+}

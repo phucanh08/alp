@@ -1,0 +1,167 @@
+// The main flow through the real UI, a real gateway and a real alpd (fake Codex): connect, create a
+// session, stream a reply with a tool call, answer and decline questions, stop a running turn,
+// tasks with a human gate, rename; the token never lands in storage, the URL or the gateway log.
+import { expect, test } from '@playwright/test';
+import { startWorld } from './support/world.js';
+import { assistant, connect, idle, newSession, send, users } from './support/app.js';
+
+/** @type {Awaited<ReturnType<typeof startWorld>>} */
+let world;
+test.beforeAll(async () => { world = await startWorld(); });
+test.afterAll(async () => { await world?.close(); });
+
+test('create, stream, tool call, questions, stop, rename', async ({ page }) => {
+  await connect(page, world);
+  const project = page.getByTestId('project-row');
+  await expect(project).toHaveAttribute('data-workspace', world.projects.main);
+  await expect(project).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByText('This workspace has no sessions yet.')).toBeVisible();
+
+  await newSession(page, 'Release prep');
+  await send(page, 'What is in src? [tool]');
+  const tool = page.getByTestId('tool-call');
+  await expect(tool).toContainText('ls -1 src');
+  await expect(tool).toContainText('exit 0');
+  await expect(assistant(page).last()).toContainText('The src folder has three files');
+  await tool.getByRole('button').click();
+  await expect(tool).toContainText('util.ts');
+  await idle(page);
+
+  // A question: answered with an option button.
+  await send(page, 'Ship it? [ask]');
+  const question = page.getByTestId('question');
+  await expect(question).toContainText('Deploy to staging now?');
+  await expect(page.getByTestId('working')).toBeVisible();
+  await question.getByRole('button', { name: 'yes' }).click();
+  await expect(question).toBeHidden();
+  await expect(assistant(page).last()).toContainText('you said "yes"');
+  await idle(page);
+
+  // Declined.
+  await send(page, 'Again? [ask]');
+  await expect(question).toBeVisible();
+  await question.getByRole('button', { name: 'Decline' }).click();
+  await expect(question).toBeHidden();
+  await expect(assistant(page).last()).toContainText('you declined');
+  await idle(page);
+
+  // A message while a turn runs steers it.
+  await send(page, 'Long job [hold]');
+  await expect(page.getByRole('button', { name: 'Interrupt agent' })).toBeVisible();
+  await page.getByLabel('Message', { exact: true }).fill('Also check the tests [finish]');
+  await expect(page.getByRole('button', { name: 'Send and steer' })).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(assistant(page).last()).toContainText('Steered: Also check the tests');
+  await idle(page);
+
+  // Stop a turn that never ends by itself.
+  await send(page, 'Another long job [hold]');
+  await expect(page.getByRole('button', { name: 'Interrupt agent' })).toBeVisible();
+  await page.getByRole('button', { name: 'Interrupt agent' }).click();
+  await expect(page.getByText('Stopped.')).toBeVisible();
+  await idle(page);
+
+  // Cmd/Ctrl+Enter while the agent works queues; the queue sends itself once the agent is idle.
+  await send(page, 'Third long job [hold]');
+  await expect(page.getByTestId('working')).toBeVisible();
+  await page.getByLabel('Message', { exact: true }).fill('Queued note');
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await expect(page.getByTestId('queued-message')).toContainText('Queued note');
+  await page.getByRole('button', { name: 'Interrupt agent' }).click();
+  await expect(page.getByTestId('queued-message')).toBeHidden();
+  await expect(assistant(page).last()).toContainText('Echo: Queued note');
+  await idle(page);
+
+  // Each message reached the provider exactly once.
+  const prompts = (await world.turnStarts()).map(entry => entry.text);
+  for (const text of ['What is in src? [tool]', 'Ship it? [ask]', 'Again? [ask]', 'Long job [hold]', 'Another long job [hold]', 'Third long job [hold]', 'Queued note']) {
+    expect(prompts.filter(prompt => prompt.includes(text)), text).toHaveLength(1);
+  }
+  await expect(users(page)).toHaveCount(8);
+
+  // Rename from the row's menu in the list.
+  await page.getByRole('button', { name: 'Actions for Release prep' }).click();
+  await page.getByRole('menuitem', { name: 'Rename' }).click();
+  const rename = page.getByRole('dialog', { name: 'Rename session' });
+  await rename.getByLabel('Title').fill('Release 1.0');
+  await rename.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Release 1.0' })).toBeVisible();
+  await expect(page.getByTestId('session-row')).toContainText('Release 1.0');
+
+  // The agents panel lists main.
+  await expect(page.getByTestId('agent-row').first()).toContainText('main');
+
+  // The token is in no storage, URL or gateway log line.
+  const stored = await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage }, url: location.href, cookies: document.cookie }));
+  expect(stored).not.toContain(world.tokens.owner);
+  expect(stored).not.toContain(world.tokens.owner.split('.')[2]);
+  expect(await world.gatewayLog()).not.toContain(world.tokens.owner.split('.')[2]);
+
+  // Disconnect forgets it.
+  await page.getByRole('button', { name: 'Disconnect' }).click();
+  await expect(page.getByLabel('Access token')).toHaveValue('');
+});
+
+test('tasks: add, approve a human gate, close and reopen', async ({ page }) => {
+  await connect(page, world);
+  await page.getByRole('tab', { name: /Tasks/ }).click();
+  await page.getByPlaceholder('New task…').fill('Write release notes');
+  await page.getByRole('button', { name: 'Add task' }).click();
+  await expect(page.getByText(/Created task/)).toBeVisible();
+  const row = page.getByTestId('task-row').filter({ hasText: 'Write release notes' });
+  await expect(row).toBeVisible();
+  const id = (await row.locator('.font-mono').innerText()).trim();
+
+  // Picking it opens the task in a tab of its own.
+  await row.click();
+  const detail = page.getByTestId('task-detail');
+  await expect(detail.getByRole('heading', { name: 'Write release notes' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Write release notes' })).toHaveAttribute('aria-selected', 'true');
+
+  // The host owner puts a human gate on it; polling shows it in the list and the tab.
+  await world.alp('task', 'gate', 'add', id, '--human', 'Legal sign-off');
+  await expect(row).toContainText('needs approval', { timeout: 15_000 });
+  await expect(detail).toContainText('Needs your approval: Legal sign-off');
+  await detail.getByRole('button', { name: 'Approve' }).click();
+  await expect(detail).not.toContainText('Needs your approval');
+
+  await detail.getByRole('button', { name: 'Close task' }).click();
+  await expect(row).toBeHidden();
+  await expect(detail).toContainText('Closed');
+  await page.getByLabel(/Show closed/).check();
+  await expect(row).toContainText('closed');
+  await detail.getByRole('button', { name: 'Reopen' }).click();
+  await expect(row).toContainText('open');
+  await expect(detail.getByRole('button', { name: 'Close task' })).toBeVisible();
+  const listed = JSON.parse(await world.alp('task', 'show', id, '--json'));
+  expect(listed.status).toBe('open');
+  expect(listed.gates.every(gate => gate.resolved)).toBe(true);
+});
+
+test('settings: the old app\'s layout, what the token allows, names from the library, what this beta cannot do', async ({ page }) => {
+  await connect(page, world);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const settings = page.getByRole('region', { name: 'Settings' });
+  await expect(settings.getByTestId('settings-detail-header-title')).toHaveText('General');
+
+  // General: what Enter does while the agent works.
+  await settings.getByRole('radio', { name: 'Queues' }).click();
+  await expect(settings.getByRole('radio', { name: 'Queues' })).toHaveAttribute('aria-checked', 'true');
+  await settings.getByRole('radio', { name: 'Steers' }).click();
+
+  await settings.getByTestId('settings-host').click();
+  await expect(settings).toContainText('web-e2e');
+  await expect(settings).toContainText('session.write');
+  await expect(settings).toContainText('Vietnamese');
+
+  await settings.getByTestId('settings-alp-agents').click();
+  await expect(settings).toContainText('main');
+  await expect(settings).toContainText('Viewing or editing agents\' content is not available in this beta');
+
+  await settings.getByTestId('settings-usage').click();
+  await expect(settings).toContainText('Usage and limits is not available in this beta');
+
+  await settings.getByRole('button', { name: 'Back to workspace' }).click();
+  await expect(settings).toBeHidden();
+  await expect(page.getByRole('navigation', { name: 'Workspaces and sessions' })).toBeVisible();
+});

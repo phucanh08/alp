@@ -55,7 +55,13 @@
     "validate:packages": "node scripts/validate.mjs packages",
     "check:core": "tsc -p tsconfig.core.json",
     "test:core:standalone": "node scripts/core-standalone-smoke.mjs",
-    "build:paseo": "node scripts/build-workspace.mjs paseo"
+    "build:paseo": "node scripts/build-workspace.mjs paseo",
+    "dev:alp-web": "npm run dev --workspace @anhlp/alp-web",
+    "build:alp-web": "npm run build --workspace @anhlp/alp-web",
+    "typecheck:alp-web": "npm run typecheck --workspace @anhlp/alp-web",
+    "test:alp-web": "npm test --workspace @anhlp/alp-web",
+    "test:alp-web:e2e": "node scripts/build-workspace.mjs cli && node scripts/build-workspace.mjs daemon && npm run build --workspace @anhlp/alp-web && npm run test:e2e --workspace @anhlp/alp-web",
+    "validate:web": "node scripts/validate.mjs web"
   },
   "engines": {
     "node": ">=20"
@@ -102,6 +108,7 @@
     "packages/cli",
     "apps/tui",
     "apps/gateway",
-    "integrations/paseo"
+    "integrations/paseo",
+    "apps/web"
   ]
 }

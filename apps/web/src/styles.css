@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+/*
+ * ALP web theme: charcoal surfaces with a green accent, in shadcn/ui's token names so its
+ * components read them unchanged. One dark theme; contrast checked for text on every surface.
+ */
+:root {
+  /* Paseo's dark palette (teal-green tint): the same surfaces, borders and accent. */
+  color-scheme: dark;
+  --background: #181b1a;
+  --foreground: #e8ebea;
+  --sidebar: #141716;
+  --sidebar-hover: #1e2120;
+  --sidebar-selected: #272a29;
+  --extra-muted: #717574;
+  /* Paseo's status-dot band: louder than the status text so a 6px dot still reads. */
+  --dot-running: #5caaf6;
+  --dot-warning: #db932e;
+  --dot-danger: #f7796d;
+  --dot-success: #35c264;
+  --card: #1e2120;
+  --card-foreground: #e8ebea;
+  --popover: #1e2120;
+  --popover-foreground: #e8ebea;
+  --primary: #20744a;
+  --primary-foreground: #ffffff;
+  --highlight: #7ccba0;
+  --secondary: #272a29;
+  --secondary-foreground: #e8ebea;
+  --muted: #272a29;
+  --muted-foreground: #a1a5a4;
+  --accent: #272a29;
+  --accent-foreground: #f2f4f3;
+  --bubble: #434645;
+  --destructive: #e0675b;
+  --destructive-foreground: #1b0b0b;
+  --stop: #c64f43;
+  --warning: #e3bd67;
+  --info: #7fb8e0;
+  --border: #252b2a;
+  --input: #2f3534;
+  --ring: #7ccba0;
+  --radius: 0.625rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-highlight: var(--highlight);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-hover: var(--sidebar-hover);
+  --color-sidebar-selected: var(--sidebar-selected);
+  --color-extra-muted: var(--extra-muted);
+  --color-dot-running: var(--dot-running);
+  --color-dot-warning: var(--dot-warning);
+  --color-dot-danger: var(--dot-danger);
+  --color-dot-success: var(--dot-success);
+  --color-bubble: var(--bubble);
+  --color-stop: var(--stop);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@layer base {
+  * { border-color: var(--border); }
+  html, body, #root { height: 100%; }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    letter-spacing: -0.003em;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection { background: color-mix(in oklab, var(--primary) 35%, transparent); }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  * { scrollbar-width: thin; scrollbar-color: #2f3a34 transparent; }
+  dialog::backdrop { background: rgb(5 8 6 / 0.7); backdrop-filter: blur(2px); }
+}
+
+@layer utilities {
+  .scroll-fade { mask-image: linear-gradient(to bottom, transparent, black 12px, black calc(100% - 12px), transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
