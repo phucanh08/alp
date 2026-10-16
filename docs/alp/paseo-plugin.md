@@ -4,7 +4,7 @@ The server-only plugin in `integrations/paseo` registers `alp` through the publi
 
 ## Install
 
-To install the published beta instead of building it, see [beta-install.md](beta-install.md#paseo-plugin) (`paseo plugin add npm:@anhlp/alp-paseo@beta`).
+To install the published beta instead of building it, see [beta-install.md](beta-install.md#paseo-plugin) (`npm install -g @anhlp/alp-paseo@beta`, then `paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"`; in beta.1 the `npm:` source fails, [#111](https://github.com/phucanh08/alp/issues/111)).
 
 Prerequisites: Paseo `>=0.11.1 <0.12.0`, Node.js 22 (22.12 or later) or 24, and at least one authenticated runtime: Codex or Claude Code. Development dependencies are pinned to Paseo SDK 0.11.1 and Claude Agent SDK 0.3.292. `ALP_CODEX_BIN` and `ALP_CLAUDE_BIN` may select absolute native executables; shell launchers (`.cmd`, `.bat`, `.ps1`) are rejected.
 
