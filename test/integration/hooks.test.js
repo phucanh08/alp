@@ -8,9 +8,13 @@ import { initProject } from '../../packages/core/src/init.js';
 import { createTask, getTask } from '../../packages/core/src/tasks.js';
 import { saveEntry } from '../../packages/core/src/library-edit.js';
 import { isTrusted, trustProject } from '../../packages/core/src/trust.js';
+import { fileURLToPath } from 'node:url';
 import { renderLog } from '../../packages/client/src/render.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 
+// Hook commands are sh; Windows runs them under cmd.exe, where these node scripts do the same.
+const windows = process.platform === 'win32';
+const support = name => fileURLToPath(new URL(`../support/${name}.js`, import.meta.url));
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
 let calls = 0;
 
@@ -60,6 +64,7 @@ async function setup(t, { git: repository = false } = {}) {
   if (repository) {
     await writeFile(path.join(root, '.gitignore'), 'out/\n');
     git(root, 'init', '--quiet', '-b', 'main');
+    git(root, 'config', 'core.autocrlf', 'false'); // the host's global setting must not turn the files' LF into CRLF
     git(root, 'add', '-A');
     git(root, '-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'init');
   }
@@ -78,7 +83,7 @@ async function setup(t, { git: repository = false } = {}) {
   return { dir, root, home, runtimes, start, log, scope: { root, library: home } };
 }
 // A hook that records its event, agent and payload in out/<name>.jsonl.
-const recorder = (event, name, extra = {}) => ({ hook: { event, command: `mkdir -p "$ALP_PROJECT/out" && { printf '%s %s %s ' "$ALP_EVENT" "$ALP_AGENT" "$ALP_TASK"; cat; } >> "$ALP_PROJECT/out/${name}.log"`, ...extra } });
+const recorder = (event, name, extra = {}) => ({ hook: { event, command: windows ? `node "${support('hook-record')}" ${name}` : `mkdir -p "$ALP_PROJECT/out" && { printf '%s %s %s ' "$ALP_EVENT" "$ALP_AGENT" "$ALP_TASK"; cat; } >> "$ALP_PROJECT/out/${name}.log"`, ...extra } });
 
 test('library hooks run at session.start and turn.end with the event on stdin and ALP variables', async t => {
   const { root, home, runtimes, start, log, scope } = await setup(t);
@@ -115,7 +120,7 @@ test('a project hook asks the user once per workspace; after they agree it runs,
   runtimes[0].finish('Done');
   await until(() => runtime.questions().length === 1, 'the trust question');
   const [question] = runtime.questions();
-  assert.match(question.body, /This project's hooks run shell commands from .* on your machine: ended \(turn\.end: mkdir/);
+  assert.match(question.body, /This project's hooks run shell commands from .* on your machine: ended \(turn\.end: (mkdir|node)/);
   assert.deepEqual(question.options, ['Trust this workspace', 'Not now']);
   assert.equal(await exists(path.join(root, 'out/ended.log')), false);
   runtime.answer(question.id, { text: 'Trust this workspace' });
@@ -156,7 +161,7 @@ test('blocking hooks refuse a handoff, a task close and a merge, with their outp
   const { root, home, runtimes, start, log, scope } = await setup(t, { git: true });
   await trustProject(home, root, 'test');
   // Each passes once out/ok-<event> exists.
-  const gate = (event, name) => ({ hook: { event, command: `test -f "$ALP_PROJECT/out/ok-${name}" || { echo "${name}: tests failed" >&2; exit 1; }`, blocking: true, timeoutSec: 30 } });
+  const gate = (event, name) => ({ hook: { event, command: windows ? `node "${support('hook-gate')}" ${name}` : `test -f "$ALP_PROJECT/out/ok-${name}" || { echo "${name}: tests failed" >&2; exit 1; }`, blocking: true, timeoutSec: 30 } });
   await saveEntry('hooks', 'handoff-gate', gate('handoff', 'handoff'), { ...scope, scope: 'project' });
   await saveEntry('hooks', 'close-gate', gate('task.close', 'close'), { ...scope, scope: 'project' });
   await saveEntry('hooks', 'merge-gate', gate('merge', 'merge'), { ...scope, scope: 'project' });

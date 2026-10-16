@@ -21,7 +21,9 @@ async function fixture(t) {
   return root;
 }
 
-test('a hook gets the event on stdin and ALP variables, and is stopped at its timeout', async t => {
+const windows = process.platform === 'win32';
+
+test('a hook gets the event on stdin and ALP variables, and is stopped at its timeout', { skip: windows && 'POSIX sh syntax and SIGTERM; the Windows test below covers cmd.exe' }, async t => {
   const cwd = await fixture(t);
   const ran = await runHook({ command: 'cat > event.json; echo "$ALP_EVENT $ALP_AGENT $PWD"; echo warn >&2; exit 2' }, { event: 'handoff', n: 1 }, { cwd, env: { ALP_EVENT: 'handoff', ALP_AGENT: 'peer' } });
   assert.deepEqual([ran.exitCode, ran.timedOut, ran.stderr], [2, false, 'warn\n']);
@@ -36,6 +38,18 @@ test('a hook gets the event on stdin and ALP variables, and is stopped at its ti
   const spawned = await runHook({ command: 'sleep 5 & echo started' }, {}, { cwd });
   assert.deepEqual([spawned.exitCode, spawned.stdout], [0, 'started\n']);
   assert.ok(spawned.durationMs < 3000, `took ${spawned.durationMs} ms`);
+});
+
+test('a hook runs under cmd.exe on Windows: quoted arguments, stdin, variables, exit code, and its whole tree is stopped at the timeout', { skip: !windows && 'cmd.exe only' }, async t => {
+  const cwd = await fixture(t);
+  await writeFile(path.join(cwd, 'hook.js'), "let body = ''; process.stdin.on('data', chunk => { body += chunk; }).on('end', () => { console.log(process.env.ALP_EVENT, process.argv[2], JSON.parse(body).n); console.error('warn'); process.exit(2); });");
+  const ran = await runHook({ command: 'node hook.js "two words"' }, { event: 'handoff', n: 1 }, { cwd, env: { ALP_EVENT: 'handoff' } });
+  assert.deepEqual([ran.exitCode, ran.timedOut, ran.stdout.trim(), ran.stderr.trim()], [2, false, 'handoff two words 1', 'warn']);
+  // cmd.exe's child outlives it unless the tree is ended; it would hold the output open for 30 s.
+  await writeFile(path.join(cwd, 'slow.js'), 'setTimeout(() => {}, 30000);');
+  const slow = await runHook({ command: 'node slow.js' }, {}, { cwd, timeoutMs: 100 });
+  assert.equal(slow.timedOut, true);
+  assert.ok(slow.durationMs < 5000, `took ${slow.durationMs} ms`);
 });
 
 test('an MCP server is started, asked for its tools over stdio or HTTP, and stopped', async t => {
@@ -101,9 +115,9 @@ test('the settings screen edits the library and the project through alp.library 
   await call('rename', { kind: 'agents', from: 'architect', to: 'planner', scope: 'library' });
   assert.equal((await call('get', { kind: 'agents', name: 'planner' })).revision, saved.revision);
   // Testing a hook and an MCP server.
-  await saveEntry('hooks', 'check', { hook: { event: 'handoff', command: 'echo "$ALP_EVENT"; exit 1', blocking: true } }, { library: home, scope: 'library' });
+  await saveEntry('hooks', 'check', { hook: { event: 'handoff', command: windows ? 'echo %ALP_EVENT%&exit 1' : 'echo "$ALP_EVENT"; exit 1', blocking: true } }, { library: home, scope: 'library' });
   const hook = await call('test', { directory: root, kind: 'hooks', name: 'check' });
-  assert.deepEqual([hook.ok, hook.exitCode, hook.wouldBlock, hook.stdout], [false, 1, true, 'handoff\n']);
+  assert.deepEqual([hook.ok, hook.exitCode, hook.wouldBlock, hook.stdout.replaceAll('\r\n', '\n')], [false, 1, true, 'handoff\n']); // cmd.exe ends its lines with CRLF
   await saveEntry('mcp', 'fake', { server: { command: process.execPath, args: [fakeMcp] } }, { library: home, scope: 'library' });
   const mcp = await call('test', { kind: 'mcp', name: 'fake' });
   assert.deepEqual([mcp.ok, mcp.tools.map(tool => tool.name)], [true, ['search', 'fetch']]);
