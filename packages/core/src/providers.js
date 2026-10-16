@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { AlpError } from './errors.js';
@@ -91,4 +92,31 @@ export async function listProviders(library) {
 export function acpModel(model) {
   const slash = model.indexOf('/');
   return slash < 0 ? { provider: model, model: undefined } : { provider: model.slice(0, slash), model: model.slice(slash + 1) || undefined };
+}
+
+/**
+ * How to start a command without a shell. On Windows a bare name installed with npm is a
+ * `<name>.cmd` shim, which spawn refuses to run without one; its target runs instead: the
+ * native executable it calls, or the Node script, under this Node. A bare name with an .exe or
+ * .com on PATH, any other command, and every command elsewhere are returned as they are.
+ * @param {string} command @param {string[]} [args] @param {Record<string, string | undefined>} [env]
+ * @returns {{ command: string, args: string[] }}
+ */
+export function launchCommand(command, args = [], env = process.env) {
+  if (process.platform !== 'win32' || /[\\/]/.test(command) || path.extname(command)) return { command, args };
+  const key = Object.keys(env).find(name => name.toUpperCase() === 'PATH');
+  for (const directory of (key ? env[key] ?? '' : '').split(';').filter(Boolean)) {
+    if (['.exe', '.com'].some(extension => existsSync(path.join(directory, command + extension)))) break;
+    const shim = path.join(directory, `${command}.cmd`);
+    if (!existsSync(shim)) continue;
+    // npm's cmd-shim ends with `"%dp0%\<target>" %*`, or `"%_prog%" [node flags] "%dp0%\<script>" %*`
+    // for a Node script. Anything else (a hand-written batch file) stays refused by spawn, as before.
+    const text = readFileSync(shim, 'utf8');
+    const script = /"%_prog%"((?:\s+[^\s"]+)*)\s+"%~?dp0%\\?([^"]+)"\s+%\*/i.exec(text);
+    if (script) return { command: process.execPath, args: [...script[1].split(/\s+/).filter(Boolean), path.join(directory, script[2]), ...args] };
+    const native = /^\s*"%~?dp0%\\?([^"]+\.(?:exe|com))"\s+%\*/im.exec(text);
+    if (native) return { command: path.join(directory, native[1]), args };
+    break;
+  }
+  return { command, args };
 }
