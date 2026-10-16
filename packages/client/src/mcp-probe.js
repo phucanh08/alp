@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { launchCommand } from '@anhlp/alp-core/providers';
 
 const PROTOCOL = '2025-06-18';
 const client = { name: 'alp', version: '1' };
@@ -32,7 +33,9 @@ export async function probeMcp(server, { cwd, timeoutMs = 15_000 } = {}) {
 /** A JSON-RPC session with a process over stdio; ACP providers are probed with it too. */
 export function stdioSession(server, cwd, timeoutMs) {
   // Its own process group, so a launcher such as npx is stopped with what it started.
-  const child = spawn(server.command, server.args ?? [], { cwd: server.cwd ?? cwd, env: { ...process.env, ...(server.env ?? {}) }, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+  const env = { ...process.env, ...(server.env ?? {}) };
+  const launch = launchCommand(server.command, server.args ?? [], env);
+  const child = spawn(launch.command, launch.args, { cwd: server.cwd ?? cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
   const signal = name => { try { process.kill(-child.pid, name); } catch { child.kill(name); } };
   let stderr = '';
   child.stderr.setEncoding('utf8');
