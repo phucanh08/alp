@@ -10,9 +10,9 @@ import {
 const USAGE = `Usage: node scripts/beta-acceptance-cli.mjs --packs <dir> (--fake | --live --provider codex|claude) [options]
 
   --packs DIR       the saved release: 8 tarballs, SHA256SUMS, release-manifest.json (§7.2); never repacked
-  --fake            hermetic rehearsal with the repository's fake Codex; no model calls; not gate evidence
+  --fake            hermetic rehearsal with the repository's fake Codex or fake Claude; no model calls; not gate evidence
   --live            the real provider (opt-in, costs money); macOS fills R1/R2, Linux R3/R4
-  --provider P      codex or claude (live only; fake is always codex)
+  --provider P      codex or claude (fake: default codex, runs that provider's fake)
   --model M         model for alp setup (--codex-model / --claude-model); default: setup's own
   --work DIR        where the consumer, ALP_HOME, project, logs and results go (default: $TMPDIR/alp-beta)
   --rehearsal       accept a rehearsal pack (dirty checkout, no tag); its results are never gate evidence
@@ -24,8 +24,8 @@ const USAGE = `Usage: node scripts/beta-acceptance-cli.mjs --packs <dir> (--fake
 Every run gets a fresh ALP_HOME under --work; ~/.alp is never read or written.`;
 
 const opts = options(USAGE, { provider: { type: 'string' }, model: { type: 'string' } });
-const provider = opts.fake ? 'codex' : opts.provider;
-if (!['codex', 'claude'].includes(provider)) { console.error(`--live needs --provider codex|claude\n\n${USAGE}`); process.exit(2); }
+const provider = opts.provider ?? (opts.fake ? 'codex' : undefined);
+if (!['codex', 'claude'].includes(provider)) { console.error(`--provider must be codex or claude (required with --live)\n\n${USAGE}`); process.exit(2); }
 if (opts.live && !['darwin', 'linux'].includes(process.platform)) { console.error('Live acceptance runs on macOS or Linux (beta-scope §6.1); use --fake elsewhere.'); process.exit(2); }
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -61,11 +61,11 @@ try {
     const result = cli('C1', ['doctor', '--json']);
     const { checks } = json(result, 'alp doctor --json');
     const runtime = checks.find(check => check.id === provider);
-    // The fake Codex answers neither --version nor login: its own check says nothing about the install.
+    // The fakes stand in for the provider: their own check says nothing about the install.
     const failed = checks.filter(check => check.status === 'fail' && (live || !['codex', 'claude'].includes(check.id)));
     if (live && runtime?.status !== 'ok') throw new Error(`${provider}: ${runtime?.status ?? 'not checked'} — ${runtime?.summary ?? ''}`);
     if (failed.length) throw new Error(`blocking: ${failed.map(check => `${check.id} (${check.summary})`).join('; ')}`);
-    run.record('C1', 'pass', live ? `${provider} ok: ${runtime.summary}; no failing check` : 'no failing check outside the provider checks (fake Codex)', { checks: checks.map(({ id, status, summary }) => ({ id, status, summary })) });
+    run.record('C1', 'pass', live ? `${provider} ok: ${runtime.summary}; no failing check` : `no failing check outside the provider checks (fake ${provider})`, { checks: checks.map(({ id, status, summary }) => ({ id, status, summary })) });
   });
 
   await run.step('C2', 'alp daemon start && alp daemon status --json', async () => {
@@ -86,7 +86,7 @@ try {
     const added = cli('C3', ['task', 'add', 'C9 restore marker']);
     if (added.status !== 0) throw new Error('alp task add failed');
     marker = json(cli('C3', ['tasks', '--json']), 'alp tasks --json').find(task => task.title === 'C9 restore marker')?.id;
-    // The fake Codex holds any turn whose prompt says [hold], and main's prompt reaches the supervisor's
+    // The fakes hold any turn whose prompt says [hold], and main's prompt reaches the supervisor's
     // review: with a supervisor C5 would never go idle. A live run keeps Phở's supervisor.
     if (opts.fake) writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(readFileSync(settingsFile, 'utf8')), workflow: { ...JSON.parse(readFileSync(settingsFile, 'utf8')).workflow, supervisor: false } }, null, 2));
     git('add', '-A');
@@ -109,7 +109,7 @@ try {
   });
 
   await run.step('C5', 'alp interrupt, then Ctrl-C, then alp send', async () => {
-    // The fake Codex holds a turn open on [hold]; a real one counts slowly.
+    // A fake holds a turn open on [hold]; a real model counts slowly.
     const prompt = `Đếm chậm từ 1 tới 200, mỗi số một dòng.${opts.fake ? ' [hold]' : ''}`;
     const first = start('C5-interrupt', prompt);
     await first.next(envelope => envelope.sessionId === first.rootId && envelope.event?.type === 'turn.started', 'the root turn');
@@ -144,7 +144,7 @@ try {
 
   await run.step('C6', 'permission questions through alp questions / alp answer', async () => {
     if (opts.fake) {
-      run.record('C6', 'skip', 'the fake Codex asks no permission; covered hermetically by integrations/paseo/tests/permissions.test.js and test/integration/permissions.test.js');
+      run.record('C6', 'skip', `the fake ${provider} asks no permission; covered hermetically by integrations/paseo/tests/permissions.test.js and test/integration/permissions.test.js`);
       return;
     }
     const original = readFileSync(settingsFile, 'utf8');
