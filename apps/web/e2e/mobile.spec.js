@@ -1,7 +1,7 @@
 // The same app on a phone-sized screen: the session list is a drawer, agents and tasks a sheet.
 import { expect, test } from '@playwright/test';
 import { startWorld } from './support/world.js';
-import { assistant, connect, newSession, send } from './support/app.js';
+import { assistant, connect, newSession, openTasks, send } from './support/app.js';
 
 /** @type {Awaited<ReturnType<typeof startWorld>>} */
 let world;
@@ -22,7 +22,7 @@ test('drawer, new session, prompt and tasks sheet on a phone', async ({ page }) 
   await page.keyboard.press('Escape');
 
   await page.getByRole('button', { name: 'Agents and tasks' }).click();
-  await page.getByRole('tab', { name: /Tasks/ }).click();
+  await openTasks(page);
   await page.getByPlaceholder('New task…').fill('Check on mobile');
   await page.getByRole('button', { name: 'Add task' }).click();
   await expect(page.getByTestId('task-row').filter({ hasText: 'Check on mobile' })).toBeVisible();

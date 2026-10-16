@@ -13,8 +13,9 @@ export function Textarea({ className, ...props }: React.ComponentProps<'textarea
 
 export function NativeSelect({ className, children, ...props }: React.ComponentProps<'select'>) {
   return (
-    <select data-slot="select" className={cn(field, 'h-9 appearance-none bg-[length:16px] bg-[right_0.6rem_center] bg-no-repeat pr-8', className)}
-      style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2395a39a' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")" }} {...props}>
+    <select data-slot="select" className={cn(field, 'h-9 appearance-none pr-8', className)}
+      // The chevron is styled inline: a bg-* class from the caller (a background color) would make cn() drop arbitrary bg-[…] classes.
+      style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2395a39a' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")", backgroundPosition: 'right 0.6rem center', backgroundSize: '16px', backgroundRepeat: 'no-repeat' }} {...props}>
       {children}
     </select>
   );

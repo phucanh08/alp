@@ -3,7 +3,7 @@
 // tasks with a human gate, rename; the token never lands in storage, the URL or the gateway log.
 import { expect, test } from '@playwright/test';
 import { startWorld } from './support/world.js';
-import { assistant, connect, idle, newSession, send, users } from './support/app.js';
+import { assistant, connect, idle, newSession, openDockPanel, openTasks, send, users } from './support/app.js';
 
 /** @type {Awaited<ReturnType<typeof startWorld>>} */
 let world;
@@ -88,8 +88,20 @@ test('create, stream, tool call, questions, stop, rename', async ({ page }) => {
   await expect(page.getByRole('heading', { level: 1, name: 'Release 1.0' })).toBeVisible();
   await expect(page.getByTestId('session-row')).toContainText('Release 1.0');
 
-  // The agents panel lists main.
+  // The dock opens on Paseo's Changes and Files (unavailable in this beta); + adds Agents, which lists main.
+  const dock = page.getByRole('complementary', { name: 'Explorer' });
+  await expect(dock.getByRole('tab')).toHaveText(['Changes', 'Files']);
+  await expect(dock.getByTestId('panel-unavailable-changes')).toBeVisible();
+  await openDockPanel(page, 'agents', 'Agents');
   await expect(page.getByTestId('agent-row').first()).toContainText('main');
+
+  // The center + menu: Agent, Paseo's Terminal and Diff, then ALP's panels; Terminal opens a tab.
+  await page.getByRole('button', { name: 'New tab' }).click();
+  await expect(page.getByRole('menuitem')).toHaveText(['Agent', 'Terminal', 'Diff', 'Tasks', 'Agents']);
+  await page.getByRole('menuitem', { name: 'Terminal' }).click();
+  await expect(page.getByRole('tab', { name: 'Terminal' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('main').getByTestId('panel-unavailable-terminal')).toBeVisible();
+  await page.getByRole('tab', { name: 'Terminal' }).press('Delete');
 
   // The token is in no storage, URL or gateway log line.
   const stored = await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage }, url: location.href, cookies: document.cookie }));
@@ -104,7 +116,7 @@ test('create, stream, tool call, questions, stop, rename', async ({ page }) => {
 
 test('tasks: add, approve a human gate, close and reopen', async ({ page }) => {
   await connect(page, world);
-  await page.getByRole('tab', { name: /Tasks/ }).click();
+  await openTasks(page);
   await page.getByPlaceholder('New task…').fill('Write release notes');
   await page.getByRole('button', { name: 'Add task' }).click();
   await expect(page.getByText(/Created task/)).toBeVisible();
@@ -144,10 +156,15 @@ test('settings: the old app\'s layout, what the token allows, names from the lib
   const settings = page.getByRole('region', { name: 'Settings' });
   await expect(settings.getByTestId('settings-detail-header-title')).toHaveText('General');
 
+  // The old app's App pages, in its order.
+  for (const name of ['General', 'Appearance', 'Sidebar', 'Chat', 'Terminal', 'Editor', 'Diagnostics', 'About']) await expect(settings.getByRole('button', { name, exact: true })).toBeVisible();
+
   // General: what Enter does while the agent works.
-  await settings.getByRole('radio', { name: 'Queues' }).click();
-  await expect(settings.getByRole('radio', { name: 'Queues' })).toHaveAttribute('aria-checked', 'true');
-  await settings.getByRole('radio', { name: 'Steers' }).click();
+  await settings.getByLabel('Default send').selectOption('queue');
+  await expect(settings.getByLabel('Default send')).toHaveValue('queue');
+  await expect(settings).toContainText('Enter queues. Command/Ctrl+Enter steers');
+  await settings.getByLabel('Default send').selectOption('steer');
+  await expect(settings.getByLabel('Default send')).toHaveValue('steer');
 
   await settings.getByTestId('settings-host').click();
   await expect(settings).toContainText('web-e2e');
@@ -161,7 +178,7 @@ test('settings: the old app\'s layout, what the token allows, names from the lib
   await settings.getByTestId('settings-usage').click();
   await expect(settings).toContainText('Usage and limits is not available in this beta');
 
-  await settings.getByRole('button', { name: 'Back to workspace' }).click();
+  await settings.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(settings).toBeHidden();
   await expect(page.getByRole('navigation', { name: 'Workspaces and sessions' })).toBeVisible();
 });
