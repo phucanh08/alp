@@ -2,15 +2,22 @@ import { access } from 'node:fs/promises';
 import path from 'node:path';
 import { closeTask, createTask, epicReport, loadTasks, reopenTask, resolveGate } from '@anhlp/alp-core/tasks';
 import { taskRows } from '@anhlp/alp-core/task-rows';
+import { alpHome } from '@anhlp/alp-client/index';
 import type { PluginServerContext } from './compat.js';
 import { tasksAdd, tasksChange, tasksList, type TaskRow } from '../../shared/tasks.js';
 import { sessionTasks } from './session-tasks.js';
 
-/** The nearest directory at or above `directory` that holds an ALP project. */
+/**
+ * The nearest directory at or above `directory` that holds an ALP project. The user's library,
+ * `~/.alp` by default, is not one: otherwise every folder under the home would be a project.
+ */
 export async function projectOf(directory: string) {
+  // Windows paths compare without case.
+  const key = (file: string) => process.platform === 'win32' ? file.toLowerCase() : file;
+  const library = key(alpHome());
   for (let current = path.resolve(directory); ; current = path.dirname(current)) {
-    try { await access(path.join(current, '.alp')); return current; }
-    catch {}
+    const alp = path.join(current, '.alp');
+    if (key(alp) !== library) try { await access(alp); return current; } catch {}
     if (path.dirname(current) === current) return null;
   }
 }

@@ -329,6 +329,14 @@ test('the plugin server lists, adds, closes, reopens and approves tasks as the u
 
   const outside = await call('alp.tasks.list', { directory });
   assert.deepEqual(outside, { projectRoot: null, tasks: [], unreadable: [] });
+  // The user's library is no project, so a folder under the home is not in one.
+  const home = path.join(directory, 'home');
+  await mkdir(path.join(home, '.alp'), { recursive: true });
+  await mkdir(path.join(home, 'work'));
+  const libraryHome = process.env.ALP_HOME;
+  process.env.ALP_HOME = path.join(home, '.alp');
+  try { assert.deepEqual(await call('alp.tasks.list', { directory: path.join(home, 'work') }), { projectRoot: null, tasks: [], unreadable: [] }); }
+  finally { if (libraryHome === undefined) delete process.env.ALP_HOME; else process.env.ALP_HOME = libraryHome; }
   await closeTask(root, id, {}, 'user');
 });
 
