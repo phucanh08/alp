@@ -1,6 +1,7 @@
 import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { moveFile } from './atomic.js';
 import { AlpError } from './errors.js';
 import { assertNoSymlinks } from './safe-path.js';
 import { agentSources, builtinText, jsonObject, libraryEntries, optionalText } from './resolver.js';
@@ -263,7 +264,7 @@ async function writeAtomic(file, text) {
   await mkdir(path.dirname(file), { recursive: true });
   const temporary = `${file}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(temporary, text);
-  await rename(temporary, file);
+  await moveFile(temporary, file); // retried on Windows while a reader has the target open
 }
 
 const exists = target => stat(target).then(() => true, () => false);

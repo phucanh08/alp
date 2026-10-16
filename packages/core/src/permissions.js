@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import { moveFile } from './atomic.js';
 import { AlpError } from './errors.js';
 
 /**
@@ -142,7 +143,7 @@ export async function addAllowRule(projectRoot, home, profileName, rule) {
     validatePermissions(settings.permissions, file);
     const temporary = `${file}.${randomUUID().slice(0, 8)}.tmp`;
     await writeFile(temporary, `${JSON.stringify(settings, null, 2)}\n`);
-    await rename(temporary, file);
+    await moveFile(temporary, file);
     return file;
   }
   throw new AlpError('INVALID_SETTINGS', `No settings file defines profile ${profileName}`);

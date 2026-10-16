@@ -13,7 +13,8 @@ import { nativeEnvironment, createTransport } from './providers.js';
 import { nativeMode, codexApproval, profileEfforts, nativeSessionConfig } from './session-config.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
-import { appendFile, mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, open, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { moveFile } from '@anhlp/alp-core/atomic';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveDelegation } from '@anhlp/alp-core/delegation';
@@ -1078,7 +1079,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
       const temporary = `${file}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
       await writeFile(temporary, body, { mode: 0o600 });
-      await rename(temporary, file);
+      await moveFile(temporary, file);
     }).catch(() => {});
   }
 

@@ -1,4 +1,5 @@
-import { mkdir, readFile, readdir, rename, rmdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rmdir, stat, writeFile } from 'node:fs/promises';
+import { moveFile } from './atomic.js';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { AlpError } from './errors.js';
@@ -13,7 +14,8 @@ import { describeVerification } from './verify.js';
  * module: it holds a lock directory while it reads, checks and writes a task.
  */
 
-export const TASKS_DIR = path.join('.alp', 'tasks');
+/** Relative to the project, written with slashes on every platform: it appears in messages and in what agents read. */
+export const TASKS_DIR = '.alp/tasks';
 export const TASK_TYPES = ['task', 'bug', 'feature', 'chore', 'epic'];
 export const TASK_STATUSES = ['open', 'in_progress', 'review', 'closed'];
 export const CLOSE_REASONS = ['done', 'wontfix', 'duplicate', 'superseded'];
@@ -279,7 +281,7 @@ async function save(projectRoot, task) {
   await assertNoSymlinks(path.join(path.resolve(projectRoot), ".alp"), path.join("tasks", `${task.id}.json`));
   const temporary = `${file}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(temporary, JSON.stringify(task, null, 2) + '\n');
-  await rename(temporary, file);
+  await moveFile(temporary, file);
   return task;
 }
 

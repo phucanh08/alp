@@ -59,7 +59,10 @@ async function tasksCommand(args) {
 /** The GitHub CLI, for gh:pr and gh:run gates. */
 
 const gh = (args, { cwd }) => new Promise((resolve, reject) => {
-  const child = spawn(process.env.ALP_GH_BIN ?? 'gh', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+  const bin = process.env.ALP_GH_BIN ?? 'gh';
+  // Windows cannot exec a script by its shebang (the tests' stand-in for gh); a JavaScript one runs under this Node.
+  const script = process.platform === 'win32' && /\.[cm]?js$/i.test(bin);
+  const child = spawn(script ? process.execPath : bin, script ? [bin, ...args] : args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', chunk => { stdout += chunk; });
@@ -240,7 +243,7 @@ async function taskCommand([action, ...args]) {
   }
   if (values.json) { console.log(JSON.stringify(task)); return; }
   const { tasks } = await loadTasks(root);
-  console.log(`${{ add: 'Created', close: 'Closed', reopen: 'Reopened' }[action] ?? 'Updated'} ${path.join(TASKS_DIR, `${task.id}.json`)}`);
+  console.log(`${{ add: 'Created', close: 'Closed', reopen: 'Reopened' }[action] ?? 'Updated'} ${TASKS_DIR}/${task.id}.json`);
   if (action === 'gate') for (const gate of task.gates.filter(entry => gateOpen(entry))) console.log(`  ⏸ ${describeGate(gate)}`);
   console.log(taskRow(task, tasks));
   if (action === 'close' && tasks.some(entry => entry.parent === task.id)) console.log(`\n${epicReport(task.id, tasks).text}`);

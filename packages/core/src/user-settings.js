@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { moveFile } from './atomic.js';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { AlpError } from './errors.js';
@@ -54,7 +55,7 @@ export async function setLanguage(home, language) {
   await mkdir(home, { recursive: true, mode: 0o700 });
   const temporary = `${file}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(temporary, JSON.stringify(next, null, 2) + '\n');
-  await rename(temporary, file);
+  await moveFile(temporary, file);
   return languageSetting(home);
 }
 
@@ -70,6 +71,6 @@ export async function setWebRelay(home, patch) {
   await mkdir(home, { recursive: true, mode: 0o700 });
   const temporary = `${file}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(temporary, JSON.stringify(next, null, 2) + '\n');
-  await rename(temporary, file);
+  await moveFile(temporary, file);
   return next.web.relay;
 }

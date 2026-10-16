@@ -1,4 +1,5 @@
-import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { moveFile } from './atomic.js';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
@@ -27,7 +28,7 @@ async function store(home, value) {
   await mkdir(path.dirname(file(home)), { recursive: true });
   const temporary = `${file(home)}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(temporary, JSON.stringify(value, null, 2) + '\n');
-  await rename(temporary, file(home));
+  await moveFile(temporary, file(home));
 }
 
 /** Whether the user trusts this project's hooks. */

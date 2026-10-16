@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { moveFile } from '@anhlp/alp-core/atomic';
 import path from 'node:path';
 import { deriveAgentStateBucket, getWorkspaceStateBucketPriority } from '@getpaseo/protocol/agent-state-bucket';
 import { normalizeWorkspaceLabelName, workspaceLabelKey, type WorkspaceLabelDefinition } from '@getpaseo/protocol/workspace-labels';
@@ -101,7 +102,7 @@ export function createWorkspaces({ home, broadcast, agents, inDevelopment, log =
       await mkdir(path.dirname(file), { recursive: true });
       const temporary = `${file}.${process.pid}.tmp`;
       await writeFile(temporary, text);
-      await rename(temporary, file);
+      await moveFile(temporary, file);
     }).catch(error => log(`web workspaces not saved: ${error?.message ?? error}`));
     return saving;
   }

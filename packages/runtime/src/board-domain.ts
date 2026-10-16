@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { moveFile } from '@anhlp/alp-core/atomic';
 import path from 'node:path';
 import { BOARD_KEEP, live, normalizePaths, overlapping, PIN_BODY_CHARS, PIN_KINDS, renderPin, type Pin, type PinKind } from './board.js';
 import { plainObject, toolResult } from './tool-results.js';
@@ -55,7 +56,7 @@ export function createBoardDomain({ options, sessions, boards, loadedBoards, roo
           await mkdir(options.boardDir!, { recursive: true });
           const temporary = `${boardFile(project)}.${randomUUID().slice(0, 8)}.tmp`;
           await writeFile(temporary, kept.map(pin => JSON.stringify({ pin })).join('\n') + (kept.length ? '\n' : ''));
-          await rename(temporary, boardFile(project));
+          await moveFile(temporary, boardFile(project));
         }).catch(() => {});
         loadedBoards.set(project, kept);
         return kept;
