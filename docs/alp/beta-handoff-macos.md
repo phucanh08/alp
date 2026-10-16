@@ -55,6 +55,7 @@ Open, for the owner:
 - PR #101 is merged. Choose the release SHA on `main` after the workflow lands (P0); the workflow's `pack` job does P1–P3 on CI.
 - Live macOS rows R1, R2, R5 and R7 (paid providers; models still to pick). Planned for the evening of 2026-10-16.
 - D6/D7 in beta-scope.md: CI packs the release once (`release-acceptance`, artifact `alp-release`) and runs only fake Codex/Claude rehearsals on macOS, Ubuntu and Windows (macOS decides the run). Only macOS is the primary test platform: R1, R2, R5 and the macOS part of R7 block. The Linux rows (R3, R4, R6, Linux R7) and Windows run when possible and do not block.
+- H2 runs on CI (`core-paseo-macos`, D8 in beta-scope.md). On this Mac `validate:core` fails in `core-standalone-smoke` because `@anhlp/alp-paseo` is installed globally in `/opt/homebrew/bin`, so do not use a local run as H2 evidence.
 - Optional: `alp doctor --fix` on this Mac (it tightens group/other access on old run and board files in `~/.alp`).
 
 ## Repository hygiene

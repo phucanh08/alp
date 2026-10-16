@@ -40,6 +40,22 @@ jobs:
       # Plugin-owned and all cross-package tests use fake providers.
       - run: npm run validate:paseo
 
+  # H2 (docs/alp/beta-scope.md §6.1, D7): macOS is the primary test platform, so the core and paseo
+  # lanes run there too, on a runner with no global ALP install. A new job name: the required checks
+  # core (22/24) and paseo (22/24) keep theirs.
+  core-paseo-macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run validate:core
+      - run: npm run validate:paseo
+
   windows-daemon:
     runs-on: windows-latest
     strategy:
