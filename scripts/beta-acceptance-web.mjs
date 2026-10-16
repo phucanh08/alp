@@ -12,7 +12,7 @@ import { CHOICES, Run, alpCommand, environment, gateRow, install, manual, option
 const USAGE = `Usage: node scripts/beta-acceptance-web.mjs --packs <dir> (--fake | --live --provider codex|claude) [options]
 
   --packs DIR          the saved release (§7.2); never repacked
-  --fake               W6's token gate only, on a throwaway ALP_HOME with the fake Codex; not gate evidence
+  --fake               W6's token gate only, on a throwaway ALP_HOME with the fakes; not gate evidence
   --live               W1–W6 with the Paseo 0.11.x on this machine (R5 on macOS, R6 on Linux); W3–W5 need you
   --provider P         codex or claude: the runtime alp setup gives the project's teams
   --use-default-home   allow ALP_HOME to be ~/.alp (Paseo's default). Back it up first (alp daemon stop, copy it),
@@ -21,8 +21,8 @@ const USAGE = `Usage: node scripts/beta-acceptance-web.mjs --packs <dir> (--fake
 
 const opts = options(USAGE, { provider: { type: 'string' }, 'use-default-home': { type: 'boolean' } });
 if (opts.unattended) { console.error('--unattended is not available for W1–W6 yet: W3–W5 and the browser half of W6 need a person.'); process.exit(2); }
-const provider = opts.fake ? 'codex' : opts.provider;
-if (!['codex', 'claude'].includes(provider)) { console.error(`--live needs --provider codex|claude\n\n${USAGE}`); process.exit(2); }
+const provider = opts.provider ?? (opts.fake ? 'codex' : undefined);
+if (!['codex', 'claude'].includes(provider)) { console.error(`--provider must be codex or claude (required with --live)\n\n${USAGE}`); process.exit(2); }
 if (opts.live && !['darwin', 'linux'].includes(process.platform)) { console.error('Live acceptance runs on macOS or Linux (beta-scope §6.1).'); process.exit(2); }
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');

@@ -5,8 +5,9 @@
 // row fragment (release-lib.mjs `rows` shape) the person running it pastes into the evidence file.
 //
 // Two modes, never mixed:
-//   --fake  hermetic: the repository's fake Codex (no model calls, no cost). Checks the harness and
-//           the install; it is never gate evidence and records status "rehearsal".
+//   --fake  hermetic: the repository's fake Codex and fake Claude (no model calls, no cost). Checks
+//           the harness and the install; it is never gate evidence and records status "rehearsal".
+//           CI runs it on Linux, macOS and Windows (release-acceptance.yml, D7).
 //   --live  opt-in: the real provider of --provider, at the user's cost. Only this can pass a row.
 //
 // A live run asks a person to confirm what a script cannot see for itself. With --unattended (CI,
@@ -25,6 +26,7 @@ import { spawnCommand } from './spawn-command.mjs';
 export const ROOT = path.resolve(import.meta.dirname, '..');
 export const VERSION = '0.0.0-beta.1';
 export const FAKE_CODEX = path.join(ROOT, 'packages/daemon/tests/support/fake-codex.js');
+export const FAKE_CLAUDE = path.join(ROOT, 'packages/daemon/tests/support/fake-claude.js');
 /** The choices of a permission question, in either language alpd may ask in (ALPD §54). */
 export const CHOICES = {
   once: ['Allow once', 'Cho phép lần này'],
@@ -158,12 +160,13 @@ export function install(run, { packs, rehearsal }) {
   return { manifest, consumer, bin: path.join(consumer, 'node_modules', '.bin') };
 }
 
-/** The environment the steps run in: the consumer's bins first, a throwaway ALP_HOME, the fake Codex if asked. */
+/** The environment the steps run in: the consumer's bins first, a throwaway ALP_HOME, both fakes if asked. */
 export function environment({ bin, home, fake }) {
   // alpd refuses an ALP_HOME others can read (0700, POSIX); an existing home keeps its mode.
   mkdirSync(home, { recursive: true, mode: 0o700 });
   const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, ALP_HOME: home };
-  if (fake) Object.assign(env, { ALP_CODEX_BIN: FAKE_CODEX });
+  // Both fakes, whichever runtime the project uses: a fake run can never reach a real provider.
+  if (fake) Object.assign(env, { ALP_CODEX_BIN: FAKE_CODEX, ALP_CLAUDE_BIN: FAKE_CLAUDE });
   return env;
 }
 
