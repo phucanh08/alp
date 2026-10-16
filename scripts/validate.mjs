@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Shared local/CI baseline. Every child failure stops this lane with a nonzero exit code.
 import { spawnSync } from 'node:child_process';
+import { spawnCommand } from './spawn-command.mjs';
 import { ROOT, buildAll, buildWorkspace, integrationTests, packageTests, packages, runNodeTests, webTests } from './test-lib.mjs';
 
 const scope = process.argv[2] ?? 'all';
@@ -14,7 +15,7 @@ function node(script, ...args) {
 }
 function npm(...args) {
   console.log(`\n[validate:${scope}] npm ${args.join(' ')}`);
-  const result = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, { cwd: ROOT, stdio: 'inherit' });
+  const result = spawnSync(...spawnCommand('npm', args), { cwd: ROOT, stdio: 'inherit' });
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 function tests(files) {

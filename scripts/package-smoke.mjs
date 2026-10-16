@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // Verify packed modules without repository source, workspace links, or a provider login.
 import { spawnSync } from 'node:child_process';
+import { spawnCommand } from './spawn-command.mjs';
 import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 const root = path.resolve(import.meta.dirname, '..');
 const directory = await mkdtemp(path.join(os.tmpdir(), 'alp-package-smoke-'));
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { cwd: directory, encoding: 'utf8', timeout: 180_000, maxBuffer: 32 * 1024 * 1024, ...options });
+  const result = spawnSync(...spawnCommand(command, args), { cwd: directory, encoding: 'utf8', timeout: 180_000, maxBuffer: 32 * 1024 * 1024, ...options });
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed:\n${result.stdout}${result.stderr}${result.error ?? ''}`);
   return result.stdout;
 }

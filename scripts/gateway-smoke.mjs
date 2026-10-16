@@ -7,11 +7,13 @@
 // only; nothing reads or writes ~/.alp. Needs the builds (node scripts/build-workspace.mjs gateway
 // and daemon).
 import { spawn, spawnSync } from 'node:child_process';
+import { spawnCommand } from './spawn-command.mjs';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import { pathToFileURL } from 'node:url';
 
 const root = path.resolve(import.meta.dirname, '..');
 const work = await mkdtemp(path.join(tmpdir(), 'alp-gateway-smoke-'));
@@ -19,7 +21,7 @@ const log = message => console.log(`[gateway-smoke] ${message}`);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { encoding: 'utf8', timeout: 180_000, maxBuffer: 32 * 1024 * 1024, ...options });
+  const result = spawnSync(...spawnCommand(command, args), { encoding: 'utf8', timeout: 180_000, maxBuffer: 32 * 1024 * 1024, ...options });
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed:\n${result.stdout}${result.stderr}${result.error ?? ''}`);
   return result.stdout;
 }
@@ -46,13 +48,13 @@ try {
   await mkdir(home, { mode: 0o700 });
   await writeFile(path.join(home, 'settings.json'), '{}');
   const project = path.join(work, 'project');
-  const { initProject } = await import(path.join(root, 'packages/core/src/init.js'));
+  const { initProject } = await import(pathToFileURL(path.join(root, 'packages/core/src/init.js')).href);
   await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
   const env = { ...process.env, ALP_HOME: home, ALP_GATEWAY_HOME: path.join(work, 'gateway'), ALP_CODEX_BIN: path.join(root, 'packages/daemon/tests/support/fake-codex.js') };
   const alpd = spawn(process.execPath, [path.join(root, 'packages/daemon/dist/alpd.js')], { env, stdio: 'ignore', detached: true });
   children.push(alpd);
-  const { readLock } = await import(path.join(consumer, 'node_modules/@anhlp/alp-client/src/index.js'));
+  const { readLock } = await import(pathToFileURL(path.join(consumer, 'node_modules/@anhlp/alp-client/src/index.js')).href);
   for (let i = 0; ; i++) {
     const lock = await readLock(home);
     if (lock?.ready && lock.pid === alpd.pid) break;
@@ -61,9 +63,10 @@ try {
   }
 
   // The installed CLI: a credential, then the server.
-  const bin = path.join(consumer, 'node_modules/.bin/alp-gateway');
-  const { token } = JSON.parse(run(bin, ['credential', 'create', '--label', 'smoke', '--workspace', project, '--json'], { env, cwd: consumer }));
-  const server = spawn(bin, ['serve', '--port', '0'], { env, cwd: consumer, stdio: ['ignore', 'pipe', 'pipe'] });
+  // The installed bin script under this Node: on Windows .bin holds shell shims spawn cannot run.
+  const cli = path.join(consumer, 'node_modules/@anhlp/alp-gateway/src/cli.js');
+  const { token } = JSON.parse(run(process.execPath, [cli, 'credential', 'create', '--label', 'smoke', '--workspace', project, '--json'], { env, cwd: consumer }));
+  const server = spawn(process.execPath, [cli, 'serve', '--port', '0'], { env, cwd: consumer, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(server);
   const stderr = [];
   server.stderr.on('data', chunk => stderr.push(String(chunk)));

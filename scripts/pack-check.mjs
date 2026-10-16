@@ -2,6 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { spawnCommand } from './spawn-command.mjs';
 import { corePackageProblems } from './core-package-boundary.mjs';
 const root = path.resolve(import.meta.dirname, '..');
 const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
@@ -23,7 +24,7 @@ function capture(pattern, file) {
 for (const location of ['.', ...manifest.workspaces]) {
   const pkg = JSON.parse(await readFile(path.join(root, location, 'package.json'), 'utf8'));
   if (pkg.private) continue;
-  const result = spawnSync('npm', ['pack', ...(location === '.' ? [] : ['--workspace', pkg.name]), '--dry-run', '--json', ...(process.argv.includes('--ignore-scripts') ? ['--ignore-scripts'] : [])], { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  const result = spawnSync(...spawnCommand('npm', ['pack', ...(location === '.' ? [] : ['--workspace', pkg.name]), '--dry-run', '--json', ...(process.argv.includes('--ignore-scripts') ? ['--ignore-scripts'] : [])]), { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   if (result.status !== 0) { console.error(result.stdout + result.stderr); process.exit(result.status ?? 1); }
   // npm lifecycle progress appears before the JSON array on some npm versions.
   const start = result.stdout.indexOf('[\n');
