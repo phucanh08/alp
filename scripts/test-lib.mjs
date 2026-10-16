@@ -22,6 +22,8 @@ export function testFiles(directory) {
 
 export const packageTests = name => testFiles(`${workspaceDirectory(name)}/tests`);
 export const integrationTests = () => testFiles('test/integration');
+/** The browser app's unit tests (apps/web): not a library workspace, run as a group of their own. */
+export const webTests = () => testFiles('apps/web/tests');
 
 function step(script, ...args) {
   const result = spawnSync(process.execPath, [path.join(ROOT, script), ...args], { cwd: ROOT, stdio: 'inherit' });

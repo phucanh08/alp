@@ -3,7 +3,7 @@
 // (test/e2e, live providers, opt-in) or `all`. Without an argument it runs the hermetic suites,
 // unit and integration together in one `node --test` run, so no file executes twice.
 import { spawnSync } from 'node:child_process';
-import { ROOT, buildAll, buildWorkspace, integrationTests, packageTests, packages, runNodeTests } from './test-lib.mjs';
+import { ROOT, buildAll, buildWorkspace, integrationTests, packageTests, packages, runNodeTests, webTests } from './test-lib.mjs';
 
 const scope = process.argv[2] ?? 'hermetic';
 const usage = 'Usage: test.mjs [unit|integration|e2e|hermetic|all]';
@@ -17,7 +17,7 @@ const e2e = [
   ['test/e2e/paseo-e2e.mjs'], ['test/e2e/alpd-e2e.mjs'], ['test/e2e/viewer-detach-e2e.mjs'], ['test/e2e/persistence-e2e.mjs'],
   ['test/e2e/import-e2e.mjs'], ['test/e2e/worktree-e2e.mjs'], ['test/e2e/human-e2e.mjs', 'cli'], ['test/e2e/human-e2e.mjs', 'paseo'], ['test/e2e/board-e2e.mjs'],
 ];
-const unit = () => packages.flatMap(name => packageTests(name));
+const unit = () => [...packages.flatMap(name => packageTests(name)), ...webTests()];
 
 let status = 0;
 if (scope !== 'e2e') {
