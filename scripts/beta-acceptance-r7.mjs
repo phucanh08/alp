@@ -7,14 +7,16 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { ROOT, Run, capture } from './beta-acceptance-lib.mjs';
 
-const USAGE = `Usage: node scripts/beta-acceptance-r7.mjs --live --model codex:<model> [--model claude:<model>] [--sha <release SHA>] [--work DIR] [--runner NAME]
+const USAGE = `Usage: node scripts/beta-acceptance-r7.mjs --live --model codex:<model> [--model claude:<model>] [--sha <release SHA>] [--work DIR] [--runner NAME] [--evidence URL]
 
 Runs test/e2e/worktree-e2e.mjs in this checkout once per --model (ALP_TEST_MODEL), after
 npm ci && npm run build at the release SHA. Real model calls; there is no --fake for R7.
---sha checks that HEAD is the release SHA; without it HEAD is recorded as is.`;
+--sha checks that HEAD is the release SHA; without it HEAD is recorded as is.
+--evidence names where the row's evidence lives (e.g. the CI run); default the results file.
+Exit 3: the row is not complete yet (e.g. one provider only); R7 needs both, on macOS and Linux.`;
 
 let values;
-try { ({ values } = parseArgs({ args: process.argv.slice(2), options: { live: { type: 'boolean' }, model: { type: 'string', multiple: true }, sha: { type: 'string' }, work: { type: 'string' }, runner: { type: 'string' }, help: { type: 'boolean', short: 'h' } } })); }
+try { ({ values } = parseArgs({ args: process.argv.slice(2), options: { live: { type: 'boolean' }, model: { type: 'string', multiple: true }, sha: { type: 'string' }, work: { type: 'string' }, runner: { type: 'string' }, evidence: { type: 'string' }, help: { type: 'boolean', short: 'h' } } })); }
 catch (error) { console.error(`${error.message}\n\n${USAGE}`); process.exit(2); }
 if (values.help) { console.log(USAGE); process.exit(0); }
 const models = values.model ?? [];
@@ -24,7 +26,7 @@ if (!['darwin', 'linux'].includes(process.platform)) { console.error('R7 runs on
 const head = capture('git', ['rev-parse', 'HEAD'], { cwd: ROOT }).trim();
 const dirty = capture('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: ROOT }).trim();
 const work = path.resolve(values.work ?? path.join(os.tmpdir(), 'alp-beta'));
-const run = new Run({ work, name: `r7-${process.platform}-${new Date().toISOString().replace(/[:.]/g, '-')}`, row: 'R7', mode: 'live', runner: values.runner });
+const run = new Run({ work, name: `r7-${process.platform}-${new Date().toISOString().replace(/[:.]/g, '-')}`, row: 'R7', mode: 'live', runner: values.runner, evidence: values.evidence });
 run.sha = head;
 
 await run.step('R7-source', 'checkout at the release SHA, built', async () => {

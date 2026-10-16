@@ -20,13 +20,14 @@ const USAGE = `Usage: node scripts/beta-acceptance-web.mjs --packs <dir> (--fake
   --work DIR, --rehearsal, --runner NAME   as for beta-acceptance-cli.mjs`;
 
 const opts = options(USAGE, { provider: { type: 'string' }, 'use-default-home': { type: 'boolean' } });
+if (opts.unattended) { console.error('--unattended is not available for W1–W6 yet: W3–W5 and the browser half of W6 need a person.'); process.exit(2); }
 const provider = opts.fake ? 'codex' : opts.provider;
 if (!['codex', 'claude'].includes(provider)) { console.error(`--live needs --provider codex|claude\n\n${USAGE}`); process.exit(2); }
 if (opts.live && !['darwin', 'linux'].includes(process.platform)) { console.error('Live acceptance runs on macOS or Linux (beta-scope §6.1).'); process.exit(2); }
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const name = `web-${provider}-${opts.live ? 'live' : 'fake'}-${stamp}`;
-const run = new Run({ work: opts.work, name, row: gateRow('web'), mode: opts.live ? 'live' : 'fake', runner: opts.runner });
+const run = new Run({ work: opts.work, name, row: gateRow('web'), mode: opts.live ? 'live' : 'fake', runner: opts.runner, evidence: opts.evidence });
 const base = path.join(opts.work, name);
 const project = path.join(base, 'project');
 // Paseo starts alpd with its own environment: live runs use the ALP_HOME Paseo uses, never a silent default.
