@@ -410,7 +410,32 @@ npm run release:gate -- "$OUT" --init release-evidence.json
 | R7 | `2230aa5` | — (mã nguồn) | như R1 | pass (Codex, Claude) | `beta-acceptance-r7.mjs` |
 | P4 | `2230aa5` | `SHA256SUMS` = `523cf5cc…b81c` (`shasum -c` OK) | macOS arm64, Node 24.22.0, npm 11.19.1 | pass | `release:gate --phase publish` exit 0; `npm whoami` = `anhlp`; cả 8 package E404 ở `0.0.0-beta.1`; không tên nào bị unpublish |
 | P5 | `2230aa5` | asset tải lại: `shasum -c` OK, giống từng byte | như P4 | **go**, anh quyết định 2026-10-16 | tag `v0.0.0-beta.1` (annotated) đã push, trỏ `2230aa5`; GitHub prerelease ở dạng draft, 8 tarball + `SHA256SUMS` + `release-manifest.json`; T7 hoãn (§10) |
+| Publish (§7.4) | `2230aa5` | `shasum -c` OK trước và sau; dry-run: tên, version, tag `beta`, số file khớp manifest, không có bước build | như P4, không cần OTP | pass 8/8, 2026-10-16 | `npm publish ./<file>.tgz --tag beta --access public`, từng package một; `dist.integrity` trên registry khớp manifest cho cả 8 (bảng dưới) |
 | Ghi chú | `6765826`, `dc2621c` | — | — | bị thay | live trên hai SHA này tìm ra lỗi, sửa ở PR #105, #106; bộ tarball cũ không dùng |
+
+Publish `0.0.0-beta.1` ngày 2026-10-16 (giờ UTC). "Registry" là `time["0.0.0-beta.1"]` trong
+packument. Dist-tags đọc lúc 14:26:53Z, sau package cuối; `latest` chỉ ghi lại, không sửa (D2, Q4).
+
+| # | Package | Lệnh publish xong | Registry | `dist.integrity` | `beta` | `latest` |
+|---|---|---|---|---|---|---|
+| 1 | `@anhlp/alp-protocol` | 14:02:07Z | 14:03:03Z | khớp | `0.0.0-beta.1` | `0.10.0` |
+| 2 | `@anhlp/alp-core` | 14:05:49Z | 14:06:44Z | khớp | `0.0.0-beta.1` | `0.10.0` |
+| 3 | `@anhlp/alp-runtime` | 14:07:12Z | 14:08:07Z | khớp | `0.0.0-beta.1` | `0.10.0` |
+| 4 | `@anhlp/alp-client` | 14:08:34Z | 14:10:11Z | khớp | `0.0.0-beta.1` | `0.10.0` |
+| 5 | `@anhlp/alp-daemon` | 14:10:28Z | 14:11:25Z | khớp | `0.0.0-beta.1` | `0.10.0` |
+| 6 | `@anhlp/alp-cli` | 14:11:52Z | 14:12:47Z | khớp | `0.0.0-beta.1` | `0.10.0` |
+| 7 | `@anhlp/alp-paseo` | 14:13:19Z | 14:24:35Z | khớp | `0.0.0-beta.1` | `0.0.0-beta.1` |
+| 8 | `@anhlp/alp` | 14:25:17Z | 14:26:33Z | khớp | `0.0.0-beta.1` | `0.10.0` |
+
+[Registry] `@anhlp/alp-paseo` là tên mới:
+- lúc publish (14:13:18Z), registry tạo một bản placeholder `0.0.0-stage` ("Temporary package
+  placeholder for staged publishing", 2 file) và đặt `latest` vào đó;
+- `npm stage list @anhlp/alp-paseo` rỗng, tức là bản beta không bị đưa vào hàng chờ duyệt;
+- `0.0.0-beta.1` hiện ra sau khoảng 11 phút, chậm hơn các package khác (khoảng 1–2 phút). Khi đó
+  registry tự chuyển `latest` sang `0.0.0-beta.1`, dù publish có `--tag beta`.
+
+Các tên cũ cũng có một bản `0.0.0-stage` từ lần publish đầu: `@anhlp/alp`, `alp-paseo-plugin` và
+`@anhlp/alp-protocol`. Q1 xác nhận lại `latest` và trả lời câu "chưa rõ" ở §1.2.
 
 ## 7. Checklist publish tay
 
