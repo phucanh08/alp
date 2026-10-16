@@ -39,8 +39,9 @@ function rank(candidate: string, query: string) {
 /** A path typed by the user: the folders in its parent that start with what follows the last slash. */
 async function pathCompletions(query: string, limit: number): Promise<Entry[]> {
   const typed = expand(query.trim());
-  const parent = typed.endsWith('/') ? typed : path.dirname(typed);
-  const prefix = typed.endsWith('/') ? '' : path.basename(typed).toLowerCase();
+  const folder = typed.endsWith('/') || typed.endsWith(path.sep);
+  const parent = folder ? typed : path.dirname(typed);
+  const prefix = folder ? '' : path.basename(typed).toLowerCase();
   return (await children(parent))
     .filter(entry => entry.isDirectory() && entry.name.toLowerCase().startsWith(prefix) && (!entry.name.startsWith('.') || prefix.startsWith('.')))
     .map(entry => entry.name)
@@ -128,7 +129,7 @@ export async function directorySuggestions(message: Inbound<'directory_suggestio
     const query = message.query.trim();
     const entries = cwd ? await workspaceSearch(message, path.resolve(expand(cwd)), limit)
       : !query ? []
-      : query.startsWith('/') || query.startsWith('~') ? await pathCompletions(query, limit)
+      : path.isAbsolute(query) || query.startsWith('~') ? await pathCompletions(query, limit)
       : await homeSearch(query, limit);
     return { type: 'directory_suggestions_response', payload: { requestId: message.requestId, directories: entries.filter(entry => entry.kind === 'directory').map(entry => entry.path), entries, error: null } };
   } catch (error: any) {
