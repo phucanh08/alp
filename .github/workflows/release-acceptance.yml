@@ -1,11 +1,10 @@
-# Release acceptance on Linux (docs/alp/beta-scope.md §6–§7, decision D6): CI is the build machine.
-# One run packs the release once at the given SHA (P2–P3, tag created on the runner only, never
+# Release acceptance (docs/alp/beta-scope.md §6–§7, decisions D6 and D7). CI is the build machine:
+# one run packs the release once at the given SHA (P2–P3, tag created on the runner only, never
 # pushed) and keeps the eight tarballs as the artifact every acceptance row uses, macOS included.
-# Then, on those exact files: release-consumer (§6.3), R3 (Codex, C1–C9) and the Linux Codex half
-# of R7. R4 (Claude) and R6 (plugin + alp web) are not here yet.
-#
-# live=false is a rehearsal with the fake Codex: no secrets, no cost, never gate evidence.
-# live=true calls the real Codex with the OPENAI_API_KEY secret, at the owner's cost.
+# Then, on those exact files and with the repository's fake Codex and fake Claude only (no secrets,
+# no cost): release-consumer, CLI C1–C9 per provider, and W6's token gate, on Linux, macOS and
+# Windows. Fake runs are rehearsals, never gate evidence: the gate's real-provider rows run on
+# macOS by hand (D7). macOS decides this run's result; Linux and Windows are reported, not blocking.
 # packs_run reuses the release artifact of an earlier run: never pack the same release twice.
 name: Release acceptance
 
@@ -15,16 +14,6 @@ on:
       sha:
         description: Release SHA (a commit on main)
         required: true
-      live:
-        description: Call the real Codex (costs money); off = rehearsal with the fake Codex
-        type: boolean
-        default: false
-      codex_model:
-        description: Codex model for R3 and R7 when live (alp setup --codex-model; R7 codex:<model>)
-        required: false
-      codex_version:
-        description: npm version of @openai/codex to install
-        default: latest
       packs_run:
         description: Run id whose alp-release artifact to reuse instead of packing again
         required: false
@@ -39,7 +28,6 @@ concurrency:
 
 env:
   RELEASE_SHA: ${{ inputs.sha }}
-  RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
 jobs:
   pack:
@@ -86,11 +74,20 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
-  consumer:
+  acceptance:
     needs: pack
     if: ${{ !cancelled() && (needs.pack.result == 'success' || needs.pack.result == 'skipped') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # D7: macOS is the primary test platform; Linux and Windows are tested when possible.
+    continue-on-error: ${{ matrix.os != 'macos-latest' }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
@@ -105,119 +102,26 @@ jobs:
           path: ${{ runner.temp }}/release
           run-id: ${{ inputs.packs_run || github.run_id }}
           github-token: ${{ github.token }}
-      - name: Checksums
-        run: cd "$RUNNER_TEMP"/release/v* && sha256sum -c SHA256SUMS
+      # The harness and release-consumer check SHA256SUMS and the manifest before using the tarballs.
+      - name: Locate the release
+        run: echo "PACKS=$RUNNER_TEMP/release/v$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
       - run: npm ci
-      - run: npm run release:consumer -- "$(echo "$RUNNER_TEMP"/release/v*)"
-
-  r3-codex:
-    needs: pack
-    if: ${{ !cancelled() && (needs.pack.result == 'success' || needs.pack.result == 'skipped') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.sha }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - uses: actions/download-artifact@v4
-        with:
-          name: alp-release
-          path: ${{ runner.temp }}/release
-          run-id: ${{ inputs.packs_run || github.run_id }}
-          github-token: ${{ github.token }}
-      # The harness needs only Node built-ins and this checkout's scripts; the fake Codex needs the repository.
-      - run: npm ci
-      - name: Codex
-        if: inputs.live
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          CODEX_MODEL: ${{ inputs.codex_model }}
-        run: |
-          test -n "$CODEX_MODEL" || { echo "live needs inputs.codex_model"; exit 1; }
-          test -n "$OPENAI_API_KEY" || { echo "live needs the OPENAI_API_KEY secret"; exit 1; }
-          npm install -g "@openai/codex@${{ inputs.codex_version }}"
-          codex --version
-          printenv OPENAI_API_KEY | codex login --with-api-key
-          codex login status
-          # Codex's Linux sandbox; Ubuntu 24.04 restricts the user namespaces it uses.
-          sudo apt-get update -q && sudo apt-get install -y -q bubblewrap
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-      - name: C1–C9
-        env:
-          CODEX_MODEL: ${{ inputs.codex_model }}
-        run: |
-          packs="$(echo "$RUNNER_TEMP"/release/v*)"
-          if [ "${{ inputs.live }}" = true ]; then
-            mode=(--live --unattended --provider codex --model "$CODEX_MODEL" --evidence "$RUN_URL")
-          else
-            mode=(--fake)
-          fi
-          node scripts/beta-acceptance-cli.mjs --packs "$packs" "${mode[@]}" --work "$RUNNER_TEMP/alp-beta" --runner "github-actions ${{ github.actor }}"
+      - run: npm run release:consumer -- "$PACKS"
+      - name: CLI C1–C9, fake Codex
+        if: ${{ !cancelled() }}
+        run: node scripts/beta-acceptance-cli.mjs --packs "$PACKS" --fake --provider codex --work "$RUNNER_TEMP/alp-beta" --runner "github-actions ${{ github.actor }}"
+      - name: CLI C1–C9, fake Claude
+        if: ${{ !cancelled() }}
+        run: node scripts/beta-acceptance-cli.mjs --packs "$PACKS" --fake --provider claude --work "$RUNNER_TEMP/alp-beta" --runner "github-actions ${{ github.actor }}"
+      - name: alp web W6 token gate
+        if: ${{ !cancelled() }}
+        run: node scripts/beta-acceptance-web.mjs --packs "$PACKS" --fake --work "$RUNNER_TEMP/alp-beta" --runner "github-actions ${{ github.actor }}"
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
-          name: acceptance-r3-codex
+          name: acceptance-fake-${{ matrix.os }}
           path: |
             ${{ runner.temp }}/alp-beta/results-*.json
             ${{ runner.temp }}/alp-beta/logs/
-            ${{ runner.temp }}/alp-beta/cli-*/home/logs/
-          retention-days: 90
-
-  r7-codex:
-    if: inputs.live
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.sha }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - name: Codex
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          CODEX_MODEL: ${{ inputs.codex_model }}
-        run: |
-          test -n "$CODEX_MODEL" || { echo "live needs inputs.codex_model"; exit 1; }
-          test -n "$OPENAI_API_KEY" || { echo "live needs the OPENAI_API_KEY secret"; exit 1; }
-          npm install -g "@openai/codex@${{ inputs.codex_version }}"
-          printenv OPENAI_API_KEY | codex login --with-api-key
-          sudo apt-get update -q && sudo apt-get install -y -q bubblewrap
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-          git config --global user.name "ALP beta"
-          git config --global user.email alp-beta@localhost
-      # R7 needs Codex and Claude on macOS and Linux: this run is the Linux Codex part, so the row
-      # stays pending (exit 3) by design. Anything else not passing fails the job.
-      - name: worktree-e2e (Linux, Codex)
-        env:
-          CODEX_MODEL: ${{ inputs.codex_model }}
-        run: |
-          set +e
-          node scripts/beta-acceptance-r7.mjs --live --sha "$RELEASE_SHA" --model "codex:$CODEX_MODEL" \
-            --work "$RUNNER_TEMP/alp-beta" --runner "github-actions ${{ github.actor }}" --evidence "$RUN_URL"
-          code=$?
-          [ "$code" = 3 ] || exit "$code"
-          # The single-quoted script is JavaScript: its ${} is not the shell's.
-          # shellcheck disable=SC2016
-          node -e '
-            const [file] = require("node:fs").readdirSync(process.argv[1]).filter(name => /^results-r7-.*\.json$/.test(name));
-            const { steps } = require(require("node:path").join(process.argv[1], file));
-            const open = [...new Map(steps.map(step => [step.id, step])).values()].filter(step => step.status !== "pass").map(step => step.id);
-            if (open.join() !== "R7-providers") { console.error(`R7 steps not passed: ${open.join(", ")}`); process.exit(1); }
-          ' "$RUNNER_TEMP/alp-beta"
-      - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
-        with:
-          name: acceptance-r7-linux-codex
-          path: |
-            ${{ runner.temp }}/alp-beta/results-*.json
-            ${{ runner.temp }}/alp-beta/logs/
-          retention-days: 90
+            ${{ runner.temp }}/alp-beta/*/home/logs/
+          retention-days: 30
