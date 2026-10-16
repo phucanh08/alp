@@ -111,7 +111,8 @@ export class Run {
     console.log(`\n${this.row} (${this.mode}): ${count('pass')} pass, ${count('fail')} fail, ${count('check')} to check, ${count('skip')} skipped, ${count('pending')} pending → row status "${this.verdict()}"`);
     console.log(`results: ${this.file}\nlogs:    ${this.logs}`);
     if (this.mode !== 'live') console.log('A --fake run checks the harness and the install only; it is not gate evidence.');
-    return this.verdict() === 'fail' ? 1 : 0;
+    // A rehearsal never passes the gate, but a failing step still fails the command.
+    return this.latest().some(step => step.status === 'fail') ? 1 : 0;
   }
 }
 
@@ -150,7 +151,8 @@ export function install(run, { packs, rehearsal }) {
 
 /** The environment the steps run in: the consumer's bins first, a throwaway ALP_HOME, the fake Codex if asked. */
 export function environment({ bin, home, fake }) {
-  mkdirSync(home, { recursive: true });
+  // alpd refuses an ALP_HOME others can read (0700, POSIX); an existing home keeps its mode.
+  mkdirSync(home, { recursive: true, mode: 0o700 });
   const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, ALP_HOME: home };
   if (fake) Object.assign(env, { ALP_CODEX_BIN: FAKE_CODEX });
   return env;

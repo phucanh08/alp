@@ -196,7 +196,7 @@ try {
     if (dry.status !== 0) throw new Error('alp restore --dry-run failed');
     if (JSON.stringify([sha256(settingsFile), readdirSync(home).sort().join(',')]) !== JSON.stringify(before)) throw new Error('the dry run changed the project settings or ALP_HOME');
     // The same backup restored into an empty home: a fresh machine, same project paths.
-    mkdirSync(restoredHome, { recursive: true });
+    mkdirSync(restoredHome, { recursive: true, mode: 0o700 });
     const restore = run.exec('C9', process.execPath, [alp, 'restore', file, '--stop', '--json'], { env: restoredEnv, cwd: project });
     if (restore.status !== 0) throw new Error(`alp restore into ${restoredHome} failed`);
     if (run.exec('C9', process.execPath, [alp, 'daemon', 'start'], { env: restoredEnv, cwd: project }).status !== 0) throw new Error('alpd did not start on the restored home');
