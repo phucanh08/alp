@@ -118,6 +118,22 @@ export function acpWhat(request: AcpPermission) {
   return `${request.kind === 'other' ? 'use' : request.kind} ${request.title ? `\`${request.title.slice(0, 300)}\`` : 'a tool'}${request.paths.length ? ` (${request.paths.slice(0, 5).join(', ')})` : ''}`;
 }
 
+/**
+ * The environment an ACP agent starts with. ALP holds the session's mode only by answering
+ * permission requests, and OpenCode edits, runs commands and fetches without asking unless its
+ * config says `ask`; so for OpenCode those three are set to `ask` over whatever config the
+ * user passed in OPENCODE_CONFIG_CONTENT, and ALP answers each by the mode.
+ */
+export function acpEnv(provider: Pick<AcpProvider, 'command' | 'env'>, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env = { ...base, ...provider.env };
+  if (provider.command.split(/[\\/]/).pop()!.replace(/\.exe$/i, '').toLowerCase() !== 'opencode') return env;
+  let config: any = {};
+  try { config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}') ?? {}; } catch {}
+  if (typeof config !== 'object' || Array.isArray(config)) config = {};
+  const permission = typeof config.permission === 'object' && config.permission && !Array.isArray(config.permission) ? config.permission : {};
+  return { ...env, OPENCODE_CONFIG_CONTENT: JSON.stringify({ ...config, permission: { ...permission, edit: 'ask', bash: 'ask', webfetch: 'ask' } }) };
+}
+
 /** ACP's MCP server list: stdio servers with env as name and value pairs, HTTP when the agent takes it. */
 function acpServers(servers: Record<string, any>, http: boolean) {
   return Object.entries(servers).map(([name, server]) => {
@@ -161,7 +177,7 @@ export class AcpTransport {
 
   async initialize() {
     if (/\.(cmd|bat|ps1)$/i.test(this.provider.command)) throw new Error(`${this.provider.label}: the command must be a native executable, not a shell launcher`);
-    const env = { ...this.env, ...this.provider.env };
+    const env = acpEnv(this.provider, this.env);
     const launch = launchCommand(this.provider.command, this.provider.args, env);
     const child = spawn(launch.command, launch.args, { cwd: this.cwd, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.child = child;
