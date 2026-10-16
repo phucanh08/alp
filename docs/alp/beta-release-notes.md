@@ -1,9 +1,8 @@
-# ALP 0.0.0-beta.1 — release notes (DRAFT)
+# ALP 0.0.0-beta.1 — release notes
 
-> **DRAFT — not released.** Nothing in this file says the beta is published or that its gate
-> passed. Source of truth for scope and gate: [beta-scope.md](beta-scope.md). Before this text
-> becomes the GitHub prerelease notes (`--notes-file`, beta-scope §7.6), work through the
-> editor's checklist at the end and remove it.
+> Published on 2026-10-16 as the GitHub prerelease
+> [v0.0.0-beta.1](https://github.com/phucanh08/alp/releases/tag/v0.0.0-beta.1); there the links are
+> absolute, at the tag. Scope, gate and post-publish results: [beta-scope.md](beta-scope.md) §6.4.
 
 ALP's first beta: the `alp` CLI and its per-user daemon `alpd`, which run filesystem-defined
 agent teams on Codex CLI and Claude Code, and an optional plugin that shows them in Paseo and
@@ -14,18 +13,20 @@ serves `alp web` on this machine.
 ```sh
 npm install -g @anhlp/alp@beta                 # CLI and alpd
 npm install -g @anhlp/alp-paseo@beta           # optional: alp web and the Paseo plugin
-paseo plugin add npm:@anhlp/alp-paseo@beta     # optional: in Paseo
+paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"   # optional: in Paseo
 ```
 
-Always name the beta (`@beta`, or exactly `@0.0.0-beta.1`): a plain `npm install -g @anhlp/alp`
-installs the older `0.10.0` while that is still `latest`. Step by step, including signing in
+In this beta, add the plugin to Paseo by its installed path as above: `paseo plugin add
+npm:@anhlp/alp-paseo@beta` fails ([#111](https://github.com/phucanh08/alp/issues/111)).
+The npm tags `beta` and `latest` both point at `0.0.0-beta.1`, so a plain
+`npm install -g @anhlp/alp` installs the beta too. Step by step, including signing in
 to a provider, the daemon and `alp web`: [beta-install.md](beta-install.md).
 
 **Coming from 0.10.0?** 0.10.0 has no `alp backup`. Stop alpd (`alp daemon stop`) and copy
 `$ALP_HOME` (default `~/.alp`) before you upgrade. `alp web` moved out of `@anhlp/alp` into
 `@anhlp/alp-paseo`, and the Paseo plugin's npm name changed from `alp-paseo-plugin` to
-`@anhlp/alp-paseo`: `paseo plugin remove alp-provider`, then
-`paseo plugin add npm:@anhlp/alp-paseo@beta`. On its first start the beta migrates alpd's state
+`@anhlp/alp-paseo` (the old name is deprecated): `paseo plugin remove alp-provider`, then
+install and add the new one as above. On its first start the beta migrates alpd's state
 and saves a `pre-migrate-v1-v2-*` backup first. Full steps:
 [upgrading from 0.10.0](beta-install.md#upgrading-from-0100-or-earlier).
 
@@ -85,7 +86,9 @@ All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned t
 ## Known issues
 
 - Real Codex and Claude runs were made on these exact release tarballs, on macOS only
-  (beta-scope §6.4). The copies installed from npm are checked after publishing.
+  (beta-scope §6.4). After publishing, the packages installed from npm were checked again on
+  macOS: integrity against the release manifest, a clean install with and without a tag, and a
+  short smoke run with Codex, the Paseo plugin (added by path, see below) and `alp web`.
 - macOS is the primary test platform (beta-scope D7). Runs with real Codex and Claude on the
   release tarballs are a release condition on macOS only. On Linux, the hermetic CI suites and
   fake-provider rehearsals on the same tarballs pass; real-provider runs there are done when
@@ -111,8 +114,13 @@ All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned t
 - In Paseo and `alp web`, a session on Claude shows the assistant's text only once each message
   is complete; Codex sessions stream as they go. Stop still works. To be fixed in a later beta
   ([#107](https://github.com/phucanh08/alp/issues/107)).
-- `npm install -g @anhlp/alp` without a tag installs `0.10.0` until `latest` moves to the beta.
-  The old plugin name `alp-paseo-plugin` stays at `0.10.0`.
+- `paseo plugin add npm:@anhlp/alp-paseo@beta` fails with `Could not resolve type dependency
+  "@getpaseo/relay/e2ee"`: Paseo checks the type declarations the plugin ships, and they import
+  Paseo packages that are only peer dependencies. Install the plugin with npm and add it by path
+  (see Install). To be fixed in `0.0.0-beta.2`
+  ([#111](https://github.com/phucanh08/alp/issues/111)).
+- Older versions (`@anhlp/alp` 0.3.0–0.10.0, the other `@anhlp/alp-*` 0.10.0) and the old
+  plugin name `alp-paseo-plugin` are deprecated on npm; they still install, with a warning.
 
 ## Checksums
 
@@ -142,24 +150,3 @@ ed9bb789596c05bf9cb7957b9793d0c514846219f5ece67857347778531eb634  anhlp-alp-pase
 - [Phở and Cafe teams](team-workflow.md) · [agent library](agent-library.md) ·
   [Codex only](codex-only.md)
 - [Beta scope, gate and release checklist](beta-scope.md) (Vietnamese)
-
----
-
-## Editor's checklist (remove before publishing)
-
-State on 2026-10-16 at the release commit `2230aa5`; each item belongs to another task.
-
-| Item | State | Needed for these notes |
-|---|---|---|
-| T1 version `0.0.0-beta.1` in manifests and lockfile | merged; `release:check-version` passes | install commands resolve |
-| T2 `apps/gateway` `"private": true` | merged; A5 checks no gateway tarball | "not published" row is true |
-| T3 `engines.node` `>=22.12` | merged for the 8 packages (gateway keeps `>=20`) | Support table matches npm |
-| T6 / S1 `npm audit` triage | rerun on the release SHA and the release tarballs: pass; F3 accepted under scope D5 | done; F3 known issue kept |
-| Plugin's React and React Native peers optional (`peerDependenciesMeta`) | merged; consumer audit 0 | re-check if it is reverted |
-| Gate H1–H5, A5, R1–R7 on the release SHA (beta-scope §6) | `release:gate --phase publish` passes: H1–H5, L1, S1, A5, R1, R2, R5, R7; R5 W3 on Claude does not stream (accepted, #107) | Claude streaming known issue added |
-| Q1–Q5 after publishing (beta-scope §7.5) | not run | drop or keep the `latest` known issue (D2) |
-| `paseo plugin add npm:<scoped name>@beta`, `paseo provider models alp` | not tried with a published package; Q3/W2 try them | install commands |
-| Checksums | pasted from `release-acceptance` run 38901108957 | done |
-
-Links here are relative to `docs/alp/`; on GitHub's release page, make them absolute
-(`https://github.com/phucanh08/alp/blob/<tag>/docs/alp/…`).

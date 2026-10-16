@@ -54,17 +54,23 @@ Nhãn bằng chứng:
 - Nếu unpublish trọn một tên, phải chờ 24 giờ trước khi publish `0.0.0-beta.1` cho tên đó (P4).
 - Docs trang unpublish không nói dist-tag (`latest`) thay đổi thế nào sau unpublish.
 
-Phương án deprecate cho các bản cũ không xóa được (anh tự chạy; `latest` chuyển sang beta theo D2,
-§1.2):
+Phương án deprecate cho các bản cũ không xóa được (`latest` chuyển sang beta theo D2, §1.2).
+**Đã chạy (T7) ngày 2026-10-16, sau Q4**, đúng các lệnh dưới (16 lệnh, exit 0; kết quả §6.4):
 
 ```sh
 # [Docs npm] Range có gồm cả prerelease (1.x gồm 1.0.0-beta.0), nên KHÔNG dùng range kiểu "<=0.10.0"
 # vì nó có thể gồm 0.0.0-beta.1. Liệt kê rõ các bản cũ:
-npm deprecate "@anhlp/alp@>=0.3.0 <=0.10.0" "Bản cũ. Cài bản beta: npm install -g @anhlp/alp@beta"
-npm deprecate "@anhlp/alp@0.0.0-stage"      "Bản cũ. Cài bản beta: npm install -g @anhlp/alp@beta"
-# 6 package core: lấy danh sách bằng `npm view <pkg> versions --json`, rồi deprecate từng version cụ thể.
-# Tên plugin cũ không có bản beta nào, nên deprecate cả package (bị bỏ khỏi kết quả tìm kiếm):
-npm deprecate alp-paseo-plugin "Đổi tên: paseo plugin remove alp-provider && paseo plugin add npm:@anhlp/alp-paseo@beta"
+M="Bản cũ. Cài bản beta: npm install -g @anhlp/alp@beta"
+npm deprecate "@anhlp/alp@>=0.3.0 <=0.10.0" "$M"
+npm deprecate "@anhlp/alp@0.0.0-stage"      "$M"
+# 6 package core (protocol, core, runtime, client, daemon, cli): đúng hai bản cũ mỗi package
+npm deprecate "@anhlp/alp-<pkg>@0.0.0-stage" "$M"
+npm deprecate "@anhlp/alp-<pkg>@0.10.0"      "$M"
+# Bản giữ chỗ registry tạo khi publish tên mới (§6.4); anh duyệt thêm lúc chạy T7:
+npm deprecate "@anhlp/alp-paseo@0.0.0-stage" "Bản giữ chỗ. Cài: npm install -g @anhlp/alp-paseo@beta"
+# Tên plugin cũ không có bản beta nào, nên deprecate cả package (bị bỏ khỏi kết quả tìm kiếm).
+# Thông điệp dùng cách cài theo đường dẫn vì `paseo plugin add npm:` hỏng ở beta.1 (#111):
+npm deprecate alp-paseo-plugin 'Đổi tên thành @anhlp/alp-paseo. Cài: paseo plugin remove alp-provider; npm install -g @anhlp/alp-paseo@beta; paseo plugin add "$(npm root -g)/@anhlp/alp-paseo" (xem github.com/phucanh08/alp/issues/111)'
 ```
 
 [Registry] `alp-paseo-plugin` có 1870 lượt tải tuần trước, nên theo docs cũng không tự unpublish
@@ -86,9 +92,12 @@ khớp các bản cũ, không khớp `0.0.0-beta.1`. Bỏ deprecate nhầm: `npm
 - **Đã chốt (D2):** chuyển `latest` của cả 8 package sang `0.0.0-beta.1`, để lệnh cài không tag cũng
   ra bản beta. Chỉ làm sau khi Q1–Q3 (§7.5) pass, bằng bước Q4. Nếu registry đã tự gán `latest`
   cho bản beta, bước đó chỉ là kiểm lại.
-- **Chưa rõ** (docs không nói): khi một tên chưa có `latest` (tên mới như `@anhlp/alp-paseo`, hoặc
-  tên vừa unpublish hết) mà publish lần đầu chỉ với `--tag beta`, registry có tự gán `latest` hay
-  không. Xác nhận ở Q1 (§7.5) và ghi kết quả vào đây.
+- **Đã rõ ở Q1** (docs không nói): khi một tên chưa có `latest` (tên mới như `@anhlp/alp-paseo`)
+  mà publish lần đầu chỉ với `--tag beta`, registry **có** tự gán `latest`. [Registry]
+  `@anhlp/alp-paseo` có `latest` = `beta` = `0.0.0-beta.1` ngay sau publish, kèm một bản giữ chỗ
+  `0.0.0-stage` (§6.4). Các tên đã có `latest` thì giữ nguyên (`0.10.0`) cho tới Q4. Trường hợp tên
+  vừa unpublish hết không được thử.
+- **Q4 đã chạy** ngày 2026-10-16: `latest` = `beta` = `0.0.0-beta.1` cho cả 8 package.
 
 ### 1.3 Nguồn
 
@@ -411,6 +420,13 @@ npm run release:gate -- "$OUT" --init release-evidence.json
 | P4 | `2230aa5` | `SHA256SUMS` = `523cf5cc…b81c` (`shasum -c` OK) | macOS arm64, Node 24.22.0, npm 11.19.1 | pass | `release:gate --phase publish` exit 0; `npm whoami` = `anhlp`; cả 8 package E404 ở `0.0.0-beta.1`; không tên nào bị unpublish |
 | P5 | `2230aa5` | asset tải lại: `shasum -c` OK, giống từng byte | như P4 | **go**, anh quyết định 2026-10-16 | tag `v0.0.0-beta.1` (annotated) đã push, trỏ `2230aa5`; GitHub prerelease ở dạng draft, 8 tarball + `SHA256SUMS` + `release-manifest.json`; T7 hoãn (§10) |
 | Publish (§7.4) | `2230aa5` | `shasum -c` OK trước và sau; dry-run: tên, version, tag `beta`, số file khớp manifest, không có bước build | như P4, không cần OTP | pass 8/8, 2026-10-16 | `npm publish ./<file>.tgz --tag beta --access public`, từng package một; `dist.integrity` trên registry khớp manifest cho cả 8 (bảng dưới) |
+| Q1 | `2230aa5` | `SHA256SUMS` = `523cf5cc…b81c`; `dist.integrity` khớp manifest 8/8 | macOS arm64, Node 24.22.0, npm 11.19.1 | pass, 2026-10-16 14:58Z | `beta` = `0.0.0-beta.1` cả 8; `latest` trước Q4: `0.10.0` ở 7 package, `0.0.0-beta.1` ở `@anhlp/alp-paseo` (registry tự gán, §1.2) |
+| Q2 | `2230aa5` | lockfile consumer: `integrity` khớp manifest 8/8, `resolved` là `registry.npmjs.org` | như Q1; HOME mới (cache rỗng), prefix `/tmp/alp-q2`; Linux không chạy (D7, máy không có Docker) | pass (macOS) | `npm install -g --prefix … @anhlp/alp@beta @anhlp/alp-paseo@beta`: 10 bản `@anhlp/*` trong cây đều `0.0.0-beta.1`; root không phụ thuộc `alp-cli` (CLI nằm trong root), nên consumer cài cả 8 tên để so lockfile |
+| Q3 | `2230aa5` | bản cài của Q2 | như Q1, Codex CLI 0.162.1, Paseo 0.11.4 | pass, với known issue [#111](https://github.com/phucanh08/alp/issues/111) anh chấp nhận | C1, C2, C4 (Codex, `ALP_HOME` tạm 0700) pass. **`paseo plugin add npm:@anhlp/alp-paseo@beta` lỗi** `Could not resolve type dependency "@getpaseo/relay/e2ee"`: Paseo cài nguồn `npm:` với `--legacy-peer-deps` rồi kiểm cả import type trong `.d.ts`; `@getpaseo/*` chỉ là peer. Cách tạm `paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"` (bản cài từ registry): plugin chạy, W2 có Phở và Cafe; W6: cổng token đúng (không token / sai token bị từ chối), web mở thấy project. R5 không bắt được vì W1 thêm plugin từ consumer có sẵn peer |
+| Q4 | `2230aa5` | — | như Q1 | pass, 15:24Z (anh go) | `npm dist-tag add @anhlp/<pkg>@0.0.0-beta.1 latest` cho 7 package (exit 0, không cần OTP); `latest` = `beta` = `0.0.0-beta.1` cả 8 |
+| Q5 | `2230aa5` | — | như Q1; HOME mới, prefix `/tmp/alp-q5` | pass | `npm install -g @anhlp/alp @anhlp/alp-paseo` không tag: mọi `@anhlp/*` là `0.0.0-beta.1` |
+| T7 | — | — | như Q1 | xong, 15:27Z (anh go) | 16 lệnh §1.1, exit 0; kiểm packument: 52/52 version đúng (mọi bản cũ có `deprecated`, `0.0.0-beta.1` của cả 8 không có). Thông điệp của `alp-paseo-plugin` hiện ra sau khoảng 30 giây (cache registry) |
+| Announce | `2230aa5` | asset không đổi (10 file) | — | pass | `release:gate --phase latest` và `--phase announce` exit 0; notes cập nhật (cài plugin theo đường dẫn, #111, bỏ known issue `0.10.0`); [prerelease](https://github.com/phucanh08/alp/releases/tag/v0.0.0-beta.1) bỏ draft 2026-10-16 15:30Z (anh go) |
 | Ghi chú | `6765826`, `dc2621c` | — | — | bị thay | live trên hai SHA này tìm ra lỗi, sửa ở PR #105, #106; bộ tarball cũ không dùng |
 
 Publish `0.0.0-beta.1` ngày 2026-10-16 (giờ UTC). "Registry" là `time["0.0.0-beta.1"]` trong
@@ -435,7 +451,11 @@ packument. Dist-tags đọc lúc 14:26:53Z, sau package cuối; `latest` chỉ g
   registry tự chuyển `latest` sang `0.0.0-beta.1`, dù publish có `--tag beta`.
 
 Các tên cũ cũng có một bản `0.0.0-stage` từ lần publish đầu: `@anhlp/alp`, `alp-paseo-plugin` và
-`@anhlp/alp-protocol`. Q1 xác nhận lại `latest` và trả lời câu "chưa rõ" ở §1.2.
+`@anhlp/alp-protocol`. Q1 xác nhận lại `latest` và trả lời câu "chưa rõ" ở §1.2. Mọi bản
+`0.0.0-stage` đã được deprecate ở T7.
+
+Evidence của Q1–Q5 và T7 (output lệnh, lockfile, ảnh web) nằm ngoài repo, trên máy anh:
+`~/alp-release/evidence/q-2230aa5/`; các dòng đã ghi vào `release-evidence-2230aa5.json`.
 
 ## 7. Checklist publish tay
 
@@ -566,7 +586,9 @@ gh release create v0.0.0-beta.1 --verify-tag --prerelease --draft --title "ALP 0
     - trước khi nâng: `alp daemon stop`, rồi chép nguyên `$ALP_HOME` (mặc định `~/.alp`) ra chỗ khác;
     - sau khi cài beta: alpd tự lưu một backup `pre-migrate-v1-v2-*` khi migrate schema 1 → 2
       (`packages/core/src/migrations.js:88`), và có thể chạy `alp backup --stop` ngay;
-    - plugin cũ: `paseo plugin remove alp-provider`, rồi `paseo plugin add npm:@anhlp/alp-paseo@beta`;
+    - plugin cũ: `paseo plugin remove alp-provider`, rồi `paseo plugin add npm:@anhlp/alp-paseo@beta`
+      (beta.1: lệnh này lỗi, [#111](https://github.com/phucanh08/alp/issues/111); notes dùng
+      `npm install -g @anhlp/alp-paseo@beta` rồi `paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"`);
   - link tới tài liệu này.
 - Sau Q1–Q5, khi `release:gate … --phase announce` exit 0: `gh release edit v0.0.0-beta.1 --draft=false`. Nếu Q1–Q5 phát hiện lỗi, sửa known
   issues trước khi công bố, hoặc xử lý theo §7.8.
@@ -619,13 +641,14 @@ Trạng thái ngày 2026-10-16, ở release SHA `2230aa5`.
 | T4 | LICENSE, trường `license`, `repository`/`homepage` trỏ `phucanh08/alp`; LICENSE/NOTICE của Paseo trong tarball plugin | Có | xong (PR #101); L1 pass |
 | T5 | Docs: mọi lệnh cài ghi `@beta` (`integrations/paseo/README.md:56`, `docs/alp/codex-only.md:18`); sửa model supervisor không khớp (`integrations/paseo/README.md:10` ghi Sonnet 4.6, `README.md` ghi Sonnet 5); chuyển "Remote mode (beta)" và `paseo-remote.md` sang deferred; gắn nhãn experimental như §4; link tới tài liệu này | Có | xong (PR #101) |
 | T6 | Phân loại `npm audit` (S1) | Có | xong: F1, F2 đã sửa; chạy lại trên `RELEASE_SHA` và 8 tarball, S1 pass; F3 chấp nhận (D5) |
-| T7 | Dọn npm: unpublish nếu đủ điều kiện, không thì deprecate (§1.1), gồm cả tên plugin cũ `alp-paseo-plugin` | anh làm | hoãn tới sau publish (§10, P5) |
-| T8 | Chạy §6 và §7, ghi kết quả vào §6.4 | anh (macOS, D7; H2 trên CI theo D8) | gate `publish` pass ở `2230aa5` (2026-10-16); còn P5, publish, Q1–Q5 (anh) |
+| T7 | Dọn npm: unpublish nếu đủ điều kiện, không thì deprecate (§1.1), gồm cả tên plugin cũ `alp-paseo-plugin` | anh làm | xong 2026-10-16 sau Q4: deprecate (§1.1, §6.4), không unpublish |
+| T8 | Chạy §6 và §7, ghi kết quả vào §6.4 | anh (macOS, D7; H2 trên CI theo D8) | xong 2026-10-16: gate `publish`, `latest`, `announce` pass ở `2230aa5`; prerelease đã công bố |
 | T9 | Đưa client SDK smoke vào CI; workflow publish; ~~thêm macOS vào lane `core`/`paseo`~~ (đã làm theo D8) | Không (sau beta) | deferred; phần acceptance Linux kéo lên trước theo D6 (T12) |
 | T12 | Workflow `release-acceptance` (D6, D7): pack một lần trên CI + `release:consumer` + rehearsal fake (Codex, Claude, W6) trên macOS, Ubuntu, Windows | Có (pack là bộ tarball của release) | xong (PR #102); bộ tarball release: [release-acceptance 38901108957](https://github.com/phucanh08/alp/actions/runs/38901108957) |
 | T10 | Test fake-provider cho câu hỏi quyền trong Paseo (§6.2, hàng duyệt quyền, ý 1) | Có | xong: test đã merge, pass trong `validate:paseo` ở release SHA (H1, H2) |
 | T11 | Sửa F3 (`linkify-it@2.2.0` trong `alp web`); owner anh | Không chặn beta.1; chặn beta.2, hạn 2026-11-15 | chưa làm |
 | T13 | Claude stream text vào Paseo/`alp web` (`includePartialMessages`, map `stream_event`) | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16) | chưa làm; [#107](https://github.com/phucanh08/alp/issues/107) |
+| T14 | `paseo plugin add npm:@anhlp/alp-paseo@beta` cài được: không ship `.d.ts` import type từ peer `@getpaseo/*` (hoặc bỏ hẳn `.d.ts` của plugin); thêm kiểm CI cài plugin như Paseo cài nguồn `npm:` (`--legacy-peer-deps`); rồi bỏ cách tạm khỏi docs | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16); chặn beta.2 | chưa làm; [#111](https://github.com/phucanh08/alp/issues/111) |
 
 ## 9. Không thuộc tài liệu này
 
@@ -732,5 +755,15 @@ provider thật.
   `>=0.3.0 <=0.10.0` chỉ khớp 15 bản `0.3.0` … `0.10.0` của `@anhlp/alp`.
 - Release notes bỏ câu "evidence chỉ từ e2e cũ trên mã nguồn". R1, R2, R5, R7 đã chạy provider thật
   trên chính bộ tarball này (macOS).
+
+**Phần D ngày 2026-10-16 (anh quyết định, Claude Code chạy):**
+- Q3 tìm ra lỗi: `paseo plugin add npm:@anhlp/alp-paseo@beta` không cài được (§6.4, #111). Anh
+  quyết định vẫn phát hành beta.1, ghi lỗi thành known issue có cách tạm, sửa ở beta.2 (T14).
+  Không rollback theo §7.8.
+- Bài học cho gate: W1 của R5 thêm plugin bằng đường dẫn trong consumer, nơi npm đã cài peer, nên
+  không thử đúng đường Paseo cài nguồn `npm:`. T14 thêm kiểm này vào CI trước beta.2.
+- Q4, T7 và bỏ draft chạy sau khi anh go từng bước. T7 thêm `@anhlp/alp-paseo@0.0.0-stage` và đổi
+  thông điệp của `alp-paseo-plugin` sang cách cài theo đường dẫn (§1.1).
+- Ghi nhận nhỏ: `alp --version` in usage thay vì version.
 
 Không còn quyết định nào mở trong scope này.
