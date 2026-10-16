@@ -11,9 +11,9 @@ import { AuthenticationError } from '../src/lib/errors.js';
 import { entriesOf } from '../src/lib/timeline.js';
 import { FakeHost, until } from './support/fake-host.js';
 
-function setup(t, hostOptions) {
+function setup(t, hostOptions, controllerOptions = {}) {
   const host = new FakeHost(hostOptions);
-  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500 });
+  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500, ...controllerOptions });
   t.after(() => controller.disconnect());
   const state = () => controller.getState();
   return { host, controller, state };
@@ -325,6 +325,28 @@ test('create session: own id, history skip, then attach; events before the answe
   assert.equal(w.host.root(id).summary.title, 'Fresh');
 });
 
+test('a new session whose first attach times out is not left attaching: it shows Retry, and nothing is created twice', async t => {
+  const w = setup(t, undefined, { requestTimeoutMs: 30 });
+  await connected(w);
+  // The host never answers session.attach (a timeout, not a terminal refusal); the connection stays open.
+  w.host.intercept.set('session.attach', () => 'handled');
+  const id = await w.controller.createSession({ title: 'Slow attach' });
+  await until(() => w.state().tree?.status === 'error', 'the attach failure is shown');
+  assert.equal(w.state().connection.phase, 'open');
+  assert.equal(w.state().tree.rootId, id);
+  const attaches = w.host.count('session.attach');
+  await new Promise(resolve => setTimeout(resolve, 150));
+  assert.equal(w.host.count('session.attach'), attaches, 'no endless attach loop');
+  assert.equal(w.host.count('session.create'), 1, 'session.create is never sent again');
+
+  // Retry attaches the same session from its cursor; still one create.
+  w.host.intercept.delete('session.attach');
+  w.controller.retryAttach();
+  await until(() => attached(w.state) && w.state().tree.rootId === id, 'attached after Retry');
+  assert.equal(w.host.count('session.create'), 1);
+  assert.equal(w.host.count('session.rename'), 1, 'the title is set once');
+});
+
 test('children and questions: answer and dismiss reach the host', async t => {
   const w = setup(t);
   w.host.seed('ses_a');
@@ -378,6 +400,53 @@ test('a queued message waits for the turn, then goes once by itself; edit takes 
   await until(() => texts(w.state, 'ses_a').includes('echo: first after'), 'the queued message went by itself');
   assert.equal(w.state().queued.length, 0);
   assert.equal(w.host.count('session.prompt'), 2, 'sent once');
+});
+
+for (const answer of ['before', 'middle', 'after']) {
+  test(`the queue waits for the turn its message started, not just for the user message (answer ${answer} the events, each event its own task)`, async t => {
+    const w = setup(t, { separateTasks: true, promptTiming: { gapMs: 50, answer } });
+    w.host.seed('ses_a');
+    await connected(w);
+    w.controller.selectSession('ses_a');
+    await until(() => attached(w.state), 'attached');
+    const sending = w.controller.sendPrompt('one [hold]');
+    w.controller.queuePrompt('two');
+    // The user message is in, its turn has not started yet: the queue must not go.
+    await until(() => texts(w.state, 'ses_a').includes('one [hold]'), 'user message');
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(w.host.count('session.prompt'), 1, 'nothing sent between the user message and turn.started');
+    await until(() => 'ses_a' in w.state().tree.projection.running, 'turn started');
+    await sending;
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(w.host.count('session.prompt'), 1, 'nothing sent while the turn runs');
+    assert.equal(w.state().queued.length, 1);
+    w.host.finishTurn('ses_a', 'done');
+    await until(() => w.host.count('session.prompt') === 2, 'the queued message went after the turn');
+    const sent = w.host.calls.filter(call => call.method === 'session.prompt');
+    assert.deepEqual(sent.map(call => call.params.delivery), ['auto', 'auto']);
+    await new Promise(resolve => setTimeout(resolve, 80));
+    assert.equal(w.host.count('session.prompt'), 2, 'sent once');
+  });
+}
+
+test('a drop between the user message and turn.started keeps the queue waiting; the replay settles it', async t => {
+  const w = setup(t, { separateTasks: true, promptTiming: { gapMs: 50, answer: 'middle' } });
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  const sending = w.controller.sendPrompt('one [hold]');
+  w.controller.queuePrompt('two');
+  await until(() => texts(w.state, 'ses_a').includes('one [hold]'), 'user message');
+  w.host.drop();
+  await sending;
+  await until(() => w.state().connection.phase === 'open' && attached(w.state) && 'ses_a' in w.state().tree.projection.running, 'reattached with the turn running', 4000);
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(w.host.count('session.prompt'), 1, 'still one message on the host');
+  w.host.finishTurn('ses_a', 'done');
+  await until(() => w.host.count('session.prompt') === 2, 'the queued message went after the turn');
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(w.host.count('session.prompt'), 2);
 });
 
 test('send now steers a queued message into the running turn', async t => {

@@ -4,7 +4,16 @@
 // connections and fail requests at chosen points to prove the recovery rules.
 
 export class FakeHost {
-  constructor({ principal } = {}) {
+  /**
+   * @param {{ principal?: any, separateTasks?: boolean, promptTiming?: { gapMs: number, answer: 'before' | 'middle' | 'after' } }} [options]
+   *   separateTasks: each frame reaches the client in a task of its own, as a browser WebSocket
+   *   delivers messages (no microtask run of several events in a row).
+   *   promptTiming: a prompt's user message, then `gapMs` later prompt.accepted and turn.started,
+   *   with its answer before, between or after those events.
+   */
+  constructor({ principal, separateTasks = false, promptTiming } = {}) {
+    this.separateTasks = separateTasks;
+    this.promptTiming = promptTiming;
     this.principal = principal ?? { id: 'p1', label: 'tests', permissions: ['session.read', 'session.write', 'project.read', 'project.write'], workspaces: ['/w/a', '/w/b'], workspaceRoots: [{ path: '/w/a', canonical: '/w/a' }, { path: '/w/b', canonical: '/w/b' }] };
     this.capabilities = ['attach.after', 'prompt.receipts', 'task', 'team', 'library', 'settings.language'];
     /** @type {Map<string, any>} */
@@ -47,7 +56,11 @@ export class FakeHost {
       // alpd detaches a connection that went away: an idle root nobody watches is closed.
       for (const root of connection.attached) this.#reap(root);
     };
-    connection.deliver = frame => { if (!ended) queueMicrotask(() => { for (const listener of [...messages]) listener(frame); }); };
+    connection.deliver = frame => {
+      if (ended) return;
+      const run = () => { if (!ended) for (const listener of [...messages]) listener(frame); };
+      if (this.separateTasks) setTimeout(run, 0); else queueMicrotask(run);
+    };
     connection.end = end;
     connection.transport = {
       get state() { return ended ? 'closed' : 'open'; },
@@ -79,7 +92,7 @@ export class FakeHost {
       if (verdict === 'handled') return;
     }
     try {
-      const result = await this.#run(connection, method, params);
+      const result = await this.#run(connection, method, params, id);
       if (result === undefined) return;
       answer(result);
     } catch (error) {
@@ -168,7 +181,7 @@ export class FakeHost {
     this.#emit(root, rootId, { type: 'turn.ended', turnId, state: 'completed' });
   }
 
-  async #run(connection, method, params) {
+  async #run(connection, method, params, requestId) {
     switch (method) {
       case 'daemon.hello': return { protocolVersion: 1, daemonVersion: '0.10.0', capabilities: this.capabilities };
       case 'catalog.get': return { models: [], modes: [{ id: 'read-only' }, { id: 'workspace-write' }, { id: 'full-access' }], defaultModel: 'm' };
@@ -228,16 +241,27 @@ export class FakeHost {
         if (params.delivery !== 'steer' && root.running) { const outcome = { outcome: 'failed', error: { message: 'Turn already active; use steering or interrupt first' }, durable: true }; this.receipts.set(key, outcome); return outcome; }
         const outcome = { outcome: 'accepted', durable: true };
         this.receipts.set(key, outcome);
-        this.#emit(root, root.id, { type: 'item', item: { kind: 'user_message', id: `u-${params.clientMessageId}`, text, clientMessageId: params.clientMessageId } });
-        if (params.delivery !== 'steer') {
-          const turnId = `turn-${++root.turns}`;
-          root.running = turnId;
-          root.summary.busy = true;
-          this.#emit(root, root.id, { type: 'prompt.accepted', clientMessageId: params.clientMessageId, result: 'turn', turnId });
+        const steer = params.delivery === 'steer';
+        const turnId = steer ? root.running : `turn-${++root.turns}`;
+        if (!steer) { root.running = turnId; root.summary.busy = true; }
+        const userMessage = () => this.#emit(root, root.id, { type: 'item', item: { kind: 'user_message', id: `u-${params.clientMessageId}`, text, clientMessageId: params.clientMessageId } });
+        const accepted = () => {
+          this.#emit(root, root.id, { type: 'prompt.accepted', clientMessageId: params.clientMessageId, result: steer ? 'steer' : 'turn', turnId });
+          if (steer) return;
           this.#emit(root, root.id, { type: 'turn.started', turnId, origin: 'user' });
           if (!text.includes('[hold]')) queueMicrotask(() => this.finishTurn(root.id, `echo: ${text}`));
-        }
-        return outcome;
+        };
+        const timing = this.promptTiming;
+        if (!timing) { userMessage(); accepted(); return outcome; }
+        const gap = () => new Promise(resolve => setTimeout(resolve, timing.gapMs));
+        const reply = () => this.#send(connection, { id: requestId, result: outcome });
+        if (timing.answer === 'before') reply();
+        userMessage();
+        if (timing.answer === 'middle') reply();
+        await gap();
+        accepted();
+        if (timing.answer === 'after') reply();
+        return undefined;
       }
       case 'session.interrupt': {
         const root = this.roots.get(params.sessionId);
