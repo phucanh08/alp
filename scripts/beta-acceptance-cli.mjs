@@ -85,7 +85,7 @@ try {
     // A task to find again after the restore of C9; the worktrees of C7 need a committed checkout.
     const added = cli('C3', ['task', 'add', 'C9 restore marker']);
     if (added.status !== 0) throw new Error('alp task add failed');
-    marker = json(cli('C3', ['tasks', '--json']), 'alp tasks --json').find(task => task.title === 'C9 restore marker')?.id;
+    marker = json(cli('C3', ['tasks', '--all', '--json']), 'alp tasks --all --json').find(task => task.title === 'C9 restore marker')?.id;
     // The fakes hold any turn whose prompt says [hold], and main's prompt reaches the supervisor's
     // review: with a supervisor C5 would never go idle. A live run keeps Phở's supervisor.
     if (opts.fake) writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(readFileSync(settingsFile, 'utf8')), workflow: { ...JSON.parse(readFileSync(settingsFile, 'utf8')).workflow, supervisor: false } }, null, 2));
@@ -219,7 +219,8 @@ try {
     if (restore.status !== 0) throw new Error(`alp restore into ${restoredHome} failed`);
     if (run.exec('C9', process.execPath, [alp, 'daemon', 'start'], { env: restoredEnv, cwd: project }).status !== 0) throw new Error('alpd did not start on the restored home');
     const ps = run.exec('C9', process.execPath, [alp, 'ps', '--all'], { env: restoredEnv, cwd: project }).stdout;
-    const tasks = json(run.exec('C9', process.execPath, [alp, 'tasks', '--json'], { env: restoredEnv, cwd: project }), 'alp tasks --json');
+    // --all: main may pick the marker up and close it during C7.
+    const tasks = json(run.exec('C9', process.execPath, [alp, 'tasks', '--all', '--json'], { env: restoredEnv, cwd: project }), 'alp tasks --all --json');
     const problems = [];
     if (c4Root && !ps.includes(c4Root.slice(0, 12))) problems.push(`the restored alpd does not list ${c4Root}`);
     if (marker && !tasks.some(task => task.id === marker)) problems.push(`task ${marker} is missing after the restore`);
