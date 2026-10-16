@@ -46,7 +46,6 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
 
 async function setup(t) {
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-worktree-')));
-  t.after(() => rm(directory, { recursive: true, force: true }));
   const project = path.join(directory, 'project');
   await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['peer'] }, workflow: { maxPeers: 3 } }));
@@ -59,6 +58,8 @@ async function setup(t) {
   const worktreeDir = path.join(directory, 'worktrees');
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), worktreeDir, runLogDir: path.join(directory, 'runs') });
   t.after(() => runtime.shutdown());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(directory, { recursive: true, force: true }));
   const open = async (id) => {
     await runtime.open(id, { cwd: project, mode: 'workspace-write', persist: true });
     const harness = runtimes.at(-1);
@@ -203,12 +204,13 @@ test('unmerged work stays on its branch when the requester closes, and after a c
 
 test('worktree isolation outside git fails clearly', async t => {
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-nogit-')));
-  t.after(() => rm(directory, { recursive: true, force: true }));
   await initProject(directory);
   await writeFile(path.join(directory, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['peer'] } }));
   const runtimes = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), worktreeDir: path.join(directory, '.wt') });
   t.after(() => runtime.shutdown());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(directory, { recursive: true, force: true }));
   await runtime.open('root', { cwd: directory, mode: 'workspace-write' });
   await runtime.prompt('root', { clientMessageId: 'm', delivery: 'auto', content: [{ type: 'text', text: 'Go' }] });
   const result = await runtimes[0].call('alp_delegate', isolated('Write'), 'd1');

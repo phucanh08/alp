@@ -12,13 +12,14 @@ const criterion = (result, text = 'Retries stop after three attempts') => ({ cri
 
 test('a reviewer files a verdict whose result follows from its criteria and findings', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-verdict-'));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(directory, 'project');
   await initProject(root);
   const runs = path.join(directory, 'runs');
   const runtimes = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: runs });
   t.after(() => runtime.shutdown());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   await runtime.open('root', { cwd: root });
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Go' }] });
   const main = runtimes[0];

@@ -19,7 +19,6 @@ async function until(check, what) {
 
 test('retention keeps live trees and trees with receipts in their window, removes the rest, and sweeps while running', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-retention-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
   const state = path.join(directory, 'state');
   const runs = path.join(directory, 'runs');
   for (const name of ['sessions', 'timeline', 'receipts']) await mkdir(path.join(state, name), { recursive: true });
@@ -65,6 +64,8 @@ test('retention keeps live trees and trees with receipts in their window, remove
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', store: createStore(state), runLogDir: runs, retentionSweepMs: 50 });
   await server.listen();
   t.after(() => server.close());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(directory, { recursive: true, force: true }));
   const client = await connect(daemonPaths(directory).socket, { name: 'test', version: '0' });
   t.after(() => client.close());
   const listed = async () => (await client.request('session.list', { includeClosed: true, includeArchived: true, rootsOnly: true })).sessions.map(row => row.id).sort();

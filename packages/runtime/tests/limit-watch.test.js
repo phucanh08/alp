@@ -72,7 +72,6 @@ test('with autoResume off, alpd tells the user once that the limit lifted and le
 
 test('a limit pause an earlier alpd left is checked at start, by a runtime process of its own when no session is open', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-limit-file-'));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const file = path.join(directory, 'pause.json');
   const future = new Date(Date.now() + 3_600_000).toISOString();
   await writeFile(file, JSON.stringify({ runtimes: { codex: { since: new Date().toISOString(), by: 'alpd', reason: 'Codex usage limit reached', resetsAt: future } } }));
@@ -90,6 +89,8 @@ test('a limit pause an earlier alpd left is checked at start, by a runtime proce
   const factory = fakeTransport(probes);
   const lifted = createAlpRuntime({ language: 'English', transport: (...args) => Object.assign(factory(...args), { limits: codex(0) }), supervisor: false, pauseFile: file });
   t.after(() => lifted.shutdown());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   await until(() => !lifted.pauses().runtimes.codex, 'the resume at start');
   await until(async () => JSON.parse(await readFile(file, 'utf8')).runtimes.codex === undefined, 'the pause file');
 

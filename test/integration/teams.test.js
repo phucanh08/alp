@@ -16,7 +16,6 @@ const BEFORE_TEAMS = mode => `Profile: ${mode}; fixed for this session. In Phở
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-teams-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }
 async function files(root, entries) {
@@ -54,6 +53,8 @@ async function session(t, root, spec, options = {}) {
   const runtimes = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(root, '.runs'), ...options });
   t.after(() => runtime.shutdown());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(root, { recursive: true, force: true }));
   await runtime.open('root', { cwd: root, ...spec });
   return { runtime, runtimes };
 }

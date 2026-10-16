@@ -44,7 +44,6 @@ function fakeTransport(runtimes) {
 
 async function setup(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
   const project = path.join(directory, 'project');
   await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'] } }));
@@ -54,6 +53,8 @@ async function setup(t) {
   const server = createDaemonServer({ runtime, socketPath, version: 'test' });
   await server.listen();
   t.after(async () => { await server.close(); await runtime.shutdown(); });
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(directory, { recursive: true, force: true }));
   const clients = [];
   const open = async () => {
     const client = await connect(socketPath, { name: 'test', version: '0' });

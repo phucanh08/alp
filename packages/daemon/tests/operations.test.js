@@ -24,7 +24,6 @@ function fakeTransport() {
 
 async function setup(t, { home: withHome = true } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-ops-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
   const project = path.join(directory, 'project');
@@ -33,6 +32,8 @@ async function setup(t, { home: withHome = true } = {}) {
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', ...(withHome ? { home } : {}) });
   await server.listen();
   t.after(async () => { await server.close(); await runtime.shutdown(); });
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(directory, { recursive: true, force: true }));
   const client = await connect(daemonPaths(directory).socket, { name: 'operations-test', version: '0' });
   t.after(() => client.close());
   /** A request whose result must match the method's v1 result schema. */

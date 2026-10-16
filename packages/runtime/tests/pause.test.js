@@ -206,7 +206,6 @@ test('usage warnings reach the user once per window', async t => {
 
 test('a limit pause survives a restart, and autoResume lifts it after the reset', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-pause-file-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
   const file = path.join(directory, 'pause.json');
   const past = new Date(Date.now() - 120_000).toISOString();
   await writeFile(file, JSON.stringify({ runtimes: { codex: { since: past, by: 'alpd', reason: 'Codex usage limit reached', resetsAt: past } } }));
@@ -215,6 +214,8 @@ test('a limit pause survives a restart, and autoResume lifts it after the reset'
   await kept.shutdown();
   const lifted = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false, pauseFile: file, autoResume: true });
   t.after(() => lifted.shutdown());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(directory, { recursive: true, force: true }));
   await until(() => !lifted.pauses().runtimes.codex);
   await until(async () => JSON.parse(await readFile(file, 'utf8')).runtimes.codex === undefined);
 });

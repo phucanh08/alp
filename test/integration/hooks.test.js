@@ -56,7 +56,6 @@ const written = file => readFile(file, 'utf8').then(text => text.endsWith('\n'),
 
 async function setup(t, { git: repository = false } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-hooks-'));
-  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(dir, 'project');
   const home = path.join(dir, 'home');
   await initProject(root);
@@ -73,6 +72,8 @@ async function setup(t, { git: repository = false } = {}) {
   const start = () => {
     const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), supervisor: false, worktreeDir: path.join(dir, 'worktrees'), libraryDir: home, runLogDir, boardDir: path.join(dir, 'boards') });
     t.after(() => runtime.shutdown());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
     return runtime;
   };
   const log = async () => {

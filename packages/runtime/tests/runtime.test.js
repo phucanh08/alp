@@ -40,12 +40,13 @@ function fakeTransport(runtimes) {
 
 async function setup(t, options = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-runtime-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
   await initProject(root);
   await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'], lead: ['peer'] } }));
   const runtimes = [];
   const runtime = createAlpRuntime({ silentForMs: 2000, transport: fakeTransport(runtimes), ...options });
   t.after(() => runtime.shutdown());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(root, { recursive: true, force: true }));
   const envelopes = [];
   runtime.onEvent(envelope => envelopes.push(envelope));
   const of = (sessionId, type) => envelopes.filter(e => e.sessionId === sessionId && (!type || e.event.type === type)).map(e => e.event);

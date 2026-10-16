@@ -17,7 +17,6 @@ async function setup(t, options = {}) {
   const alive = setInterval(() => {}, 1000);
   t.after(() => clearInterval(alive));
   const root = await mkdtemp(path.join(tmpdir(), 'alp-team-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
   await initProject(root);
   await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify(options.workflow ? { workflow: { mode: options.workflow, maxPeers: options.maxPeers ?? 2, supervisor: options.supervisor ?? false } } : { delegation: options.delegation ?? { main: ['lead'], lead: ['peer'] } }));
   const runtimes = [];
@@ -56,6 +55,8 @@ async function setup(t, options = {}) {
   } });
   const connection = await provider.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
   t.after(() => connection.close());
+  // After hooks run in the order they are added: remove the files only once that has stopped.
+  t.after(() => rm(root, { recursive: true, force: true }));
   const events = [];
   connection.onEvent(event => { ProviderEventSchema.parse(event); events.push(event); });
   const config = { cwd: root, env: {}, mcpServers: {}, settings: {}, persist: true, mode: options.mode ?? 'read-only' };
