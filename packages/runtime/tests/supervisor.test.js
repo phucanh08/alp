@@ -49,14 +49,16 @@ function fakeTransport(runtimes) {
 
 async function setup(t, settings, options = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-supervisor-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  let runtime;
+  // After hooks run in the order they are added: stop the runtime, which may still be writing its
+  // run logs, before removing them (rm raced it: ENOTEMPTY on runs/ in CI).
+  t.after(async () => { await runtime?.shutdown(); await rm(directory, { recursive: true, force: true }); });
   const root = path.join(directory, 'project');
   const library = path.join(directory, 'home');
   await initProject(root);
   if (settings) await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify(settings));
   const runtimes = [];
-  const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: library, runLogDir: path.join(directory, 'runs'), ...options });
-  t.after(() => runtime.shutdown());
+  runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: library, runLogDir: path.join(directory, 'runs'), ...options });
   const prompt = (id, text, session = 'root') => runtime.prompt(session, { clientMessageId: id, delivery: 'auto', content: [{ type: 'text', text }] });
   return { root, library, runtime, runtimes, prompt };
 }
