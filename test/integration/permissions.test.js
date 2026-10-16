@@ -403,6 +403,11 @@ test('a floor puts Claude Bash in the OS sandbox and keeps file tools in the wor
   const left = await asking.canUseTool('Bash', { command: 'npm ci', dangerouslyDisableSandbox: true }, {});
   assert.deepEqual([left.behavior, asked.map(request => [request.reason, request.rule])], ['allow', [['mode', 'Bash(npm ci)']]]);
 
+  // An ask rule the user allows runs that command outside the read-only floor, which would refuse its write.
+  const ruled = claudePermissions('read-only', () => 'read-only', { allow: [], ask: ['Bash(touch *)'], deny: [], beyondMode: 'ask', floor: 'read-only', floorRoot: root }, async request => { asked.push(request); return { allow: true }; });
+  assert.deepEqual(await ruled.canUseTool('Bash', { command: 'touch once.txt' }, { decisionReasonType: 'rule' }), { behavior: 'allow', updatedInput: { command: 'touch once.txt', dangerouslyDisableSandbox: true } });
+  assert.deepEqual(asked.at(-1), { tool: 'Bash', input: { command: 'touch once.txt' }, reason: 'rule' });
+
   // A workspace floor: the workspace and temp files, nothing else, for Bash and file tools alike.
   const workspace = claudePermissions('workspace-write', () => 'workspace-write', { allow: [], ask: [], deny: [], beyondMode: 'refuse', floor: 'workspace-write', floorRoot: root });
   assert.deepEqual(workspace.sandbox, { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: true });
