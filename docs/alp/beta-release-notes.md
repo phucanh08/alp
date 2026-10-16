@@ -84,9 +84,8 @@ All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned t
 
 ## Known issues
 
-- Evidence with real providers so far comes from older opt-in end-to-end runs on the source
-  tree, not on the published packages. The beta's gate adds real-provider runs on the release
-  tarballs (beta-scope §6.1).
+- Real Codex and Claude runs were made on these exact release tarballs, on macOS only
+  (beta-scope §6.4). The copies installed from npm are checked after publishing.
 - macOS is the primary test platform (beta-scope D7). Runs with real Codex and Claude on the
   release tarballs are a release condition on macOS only. On Linux, the hermetic CI suites and
   fake-provider rehearsals on the same tarballs pass; real-provider runs there are done when
