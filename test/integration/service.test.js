@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { installedProgram, serviceDefinition, serviceFor } from '../../packages/client/src/service.js';
 import { lockAlive, readLock } from '../../packages/client/src/index.js';
 
+/** RegExp.escape, which Node 22 lacks. */
+const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
 const ENTRY = fileURLToPath(new URL('../../packages/cli/dist/alpd.js', import.meta.url));
 
@@ -23,7 +26,7 @@ test('the service keeps alpd up after a crash but not after a clean stop, with t
   const plist = serviceDefinition(mac, { home, entry: '/opt/alp/dist/alpd.js', execPath: '/opt/node', env });
   assert.match(plist, /<key>KeepAlive<\/key>\s*<dict>\s*<key>Crashed<\/key>\s*<true\/>\s*<key>SuccessfulExit<\/key>\s*<false\/>/);
   assert.match(plist, /<key>RunAtLoad<\/key>\s*<true\/>/);
-  assert.match(plist, new RegExp(`<key>ALP_HOME</key>\\s*<string>${RegExp.escape(resolved.replace('&', '&amp;'))}</string>`));
+  assert.match(plist, new RegExp(`<key>ALP_HOME</key>\\s*<string>${escape(resolved.replace('&', '&amp;'))}</string>`));
   assert.match(plist, /<key>PATH<\/key>\s*<string>\/opt\/bin:\/usr\/bin<\/string>/);
   assert.match(plist, /<key>ALP_CODEX_BIN<\/key>/);
   assert.doesNotMatch(plist, /UNRELATED/);
@@ -33,7 +36,7 @@ test('the service keeps alpd up after a crash but not after a clean stop, with t
   const unit = serviceDefinition(linux, { home, entry: '/opt/a "b"/alpd.js', execPath: '/opt/node', env });
   assert.match(unit, /^ExecStart="\/opt\/node" "\/opt\/a \\"b\\"\/alpd\.js" "--service"$/m);
   assert.match(unit, /^Restart=on-failure$/m);
-  assert.match(unit, new RegExp(`^Environment="ALP_HOME=${RegExp.escape(resolved.replaceAll('\\', '\\\\'))}"$`, 'm')); // systemd quoting doubles backslashes
+  assert.match(unit, new RegExp(`^Environment="ALP_HOME=${escape(resolved.replaceAll('\\', '\\\\'))}"$`, 'm')); // systemd quoting doubles backslashes
   assert.equal(serviceFor({ home, env, platform: 'win32' }), undefined);
 
   // What is installed reads back as the program it runs.
