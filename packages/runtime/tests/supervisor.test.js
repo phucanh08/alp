@@ -162,6 +162,24 @@ test('a supervisor note waits for main\'s running turn, and a turn that ends dur
   assert.doesNotMatch(supervisor.started[1].params.input.at(-1).text, /First task/);
 });
 
+test('a turn the user stops is not reviewed, and the tree goes idle', async t => {
+  const { root, runtime, runtimes, prompt } = await setup(t);
+  await runtime.open('root', { cwd: root });
+  await until(() => runtimes.length === 2);
+  const [main, supervisor] = runtimes;
+  await prompt('m1', 'Count slowly to 200');
+  await runtime.interrupt('root');
+  await settle();
+  // A review would ask main why it stopped and leave mail an interrupted root never wakes for.
+  assert.equal(supervisor.started.length, 0);
+  assert.equal(runtime.snapshot('root').busy, false);
+  // The next turn the user asks for is reviewed as before.
+  await prompt('m2', 'Where did you stop?');
+  main.finish('At 4');
+  await until(() => supervisor.started.length === 1);
+  assert.match(supervisor.started[0].params.input.at(-1).text, /user asked main: Where did you stop\?[\s\S]*main final message: At 4/);
+});
+
 test('a project without agent copies runs the built-in supervisor and gets no copies', async t => {
   const { root, runtime, runtimes } = await setup(t);
   await runtime.open('root', { cwd: root });

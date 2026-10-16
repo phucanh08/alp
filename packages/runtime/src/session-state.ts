@@ -84,6 +84,8 @@ export type Session = {
   userWaiting?: number;
   /** The turn answers only the supervisor's questions; it is not reviewed again. */
   supervisorWake?: boolean;
+  /** The user stopped the current turn: there is nothing of main's to review. */
+  userStopped?: boolean;
   /** A digest waits for the supervisor: queued, or behind its current review. */
   reviewPending?: boolean;
   /** A review start is queued behind client operations. */
