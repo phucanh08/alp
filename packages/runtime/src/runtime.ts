@@ -243,10 +243,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (final) session.journal.push(stamp(`${session.mapping.agent.name} final message: ${clip(final, 1500)}`));
       if (session.userWaiting !== undefined && !final) session.journal.push(stamp(`the user's message of ${clock(session.userWaiting)} got no reply in this turn`));
       session.journal.push(stamp(`turn ended: ${state}${error ? ` (${clip(errorData(error).message, 200)})` : ''}`));
-      // Answering the supervisor is not reviewed again, or the two would loop.
-      if (session.supervisorWake) session.journal.length = 0;
+      // Answering the supervisor is not reviewed again, or the two would loop. A turn the user
+      // stopped is the user's choice, not main's mistake: a review would only send mail that an
+      // interrupted root never wakes for, and its tree would stay busy.
+      if (session.supervisorWake || (session.userStopped && state === 'canceled')) session.journal.length = 0;
       else review(sessionId);
     }
+    session.userStopped = false;
     if (session.role === 'supervisor' && session.parent && sessions.get(session.parent)?.reviewPending) review(session.parent);
     if (!session.parent) void showTasks(sessionId, session);
 
@@ -3112,6 +3115,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       session.active;
 
     session.wakeBlocked = true;
+    session.userStopped = true;
 
     terminal(
       sessionId,
@@ -3212,6 +3216,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         session.handoff = undefined;
         session.wakes = 0;
         session.wakeBlocked = false;
+        session.userStopped = false;
 
         if (!session.parent) {
           session.calls = 0;
