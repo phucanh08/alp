@@ -49,7 +49,10 @@ test('grants: read-only token, mode-limited token and another workspace', async 
   await expect(dialog.getByLabel('Permissions').locator('option')).toHaveText(['Read only']);
   await dialog.getByLabel('Title (optional)').fill('Read-only work');
   await dialog.getByRole('button', { name: 'Start session' }).click();
+  // As newSession waits: a message typed before main's composer is ready is lost (seen on Ubuntu CI).
+  await expect(dialog).toBeHidden();
   await expect(limited.getByRole('heading', { level: 1, name: 'Read-only work' })).toBeVisible();
+  await expect(limited.getByPlaceholder(/^Message main/)).toBeEnabled();
   await send(limited, 'read only hello');
   await expect(limited.getByTestId('assistant-message').last()).toContainText('Echo: read only hello');
 
