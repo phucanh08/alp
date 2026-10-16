@@ -238,8 +238,9 @@ test('release-verify and release-gate run on a saved release; the gate stays ope
   const gate = run('scripts/release-gate.mjs', directory, evidence);
   assert.equal(gate.status, 1);
   assert.match(gate.stdout, /PASS  A5/);
-  assert.match(gate.stdout, /OPEN  R3 .*status pending/);
-  assert.match(gate.stdout, /Gate "publish" NOT passed: 13 blocking row\(s\) open\./);
+  assert.match(gate.stdout, /OPEN  R1 .*status pending/);
+  assert.match(gate.stdout, /info  R3  \(not blocking\)/);
+  assert.match(gate.stdout, /Gate "publish" NOT passed: 10 blocking row\(s\) open\./);
   assert.match(run('scripts/release-gate.mjs', directory, '--init', evidence).stderr, /exists; the gate template never overwrites/);
 
   const file = path.join(directory, tarballFilename('@anhlp/alp-runtime', VERSION));
@@ -259,19 +260,21 @@ test('the gate counts a row only for the release SHA, and artifact rows only for
 
   evidence.rows.H5 = { status: 'fail' };
   assert.equal(evaluateGate(evidence, manifest).passed, true, 'H5 (alp-web, unreleased app) does not block');
+  for (const id of ['R3', 'R4', 'R6']) evidence.rows[id] = { status: 'pending' };
+  assert.equal(evaluateGate(evidence, manifest).passed, true, 'D7: the Linux rows are run when possible and do not block');
   evidence.rows.H2 = { ...pass('H2'), sha: 'b'.repeat(40) };
-  evidence.rows.R3 = { ...pass('R3'), artifacts: 'e'.repeat(64) };
-  evidence.rows.R4 = { ...pass('R4'), evidence: null };
-  evidence.rows.R6 = { status: 'pending' };
+  evidence.rows.R1 = { ...pass('R1'), artifacts: 'e'.repeat(64) };
+  evidence.rows.R2 = { ...pass('R2'), evidence: null };
+  evidence.rows.R5 = { status: 'pending' };
   const open = evaluateGate(evidence, manifest);
   assert.equal(open.passed, false);
   assert.deepEqual(open.blocking.map(row => [row.id, row.reasons]), [
     ['H2', [`ran on ${'b'.repeat(40)}, not the release SHA ${SHA}`]],
-    ['R3', [`used artifacts ${'e'.repeat(64)}, not this release's SHA256SUMS ${'f'.repeat(64)}`]],
-    ['R4', ['no evidence (CI link, log or session ids)']],
-    ['R6', ['status pending']],
+    ['R1', [`used artifacts ${'e'.repeat(64)}, not this release's SHA256SUMS ${'f'.repeat(64)}`]],
+    ['R2', ['no evidence (CI link, log or session ids)']],
+    ['R5', ['status pending']],
   ]);
-  for (const id of ['H2', 'R3', 'R4', 'R6']) evidence.rows[id] = pass(id);
+  for (const id of ['H2', 'R1', 'R2', 'R5']) evidence.rows[id] = pass(id);
 
   // D2: `latest` moves only after Q1–Q3; Q4 and Q5 come after it.
   assert.deepEqual(evaluateGate(evidence, manifest, 'latest').blocking.map(row => row.id), ['Q1', 'Q2', 'Q3']);
