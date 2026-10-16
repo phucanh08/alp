@@ -1,10 +1,10 @@
-import { spawn } from 'node:child_process';
+import { signalShell, spawnShell } from './shell.js';
 
 const OUTPUT_LIMIT = 64 * 1024;
 const GRACE_MS = 2000;
 
 /**
- * Runs a hook's command once (ALPD §43): through /bin/sh in `cwd`, with the event as JSON
+ * Runs a hook's command once (ALPD §43): through /bin/sh (cmd.exe on Windows) in `cwd`, with the event as JSON
  * on stdin and `env` added to ALP's environment. It runs in its own process group, so
  * past its timeout the whole group gets SIGTERM, then SIGKILL two seconds later; a
  * shell's children do not outlive it. Output beyond 64 KiB per stream is cut.
@@ -17,8 +17,8 @@ export function runHook(hook, payload, { cwd, env = {}, timeoutMs } = {}) {
   const limit = timeoutMs ?? (hook.timeoutSec ?? 60) * 1000;
   const started = Date.now();
   return new Promise((resolve, reject) => {
-    const child = spawn('/bin/sh', ['-c', hook.command], { cwd, env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
-    const signal = name => { try { process.kill(-child.pid, name); } catch { child.kill(name); } };
+    const child = spawnShell(hook.command, { cwd, env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const signal = name => signalShell(child, name);
     const output = { stdout: '', stderr: '' };
     for (const stream of ['stdout', 'stderr']) {
       child[stream].setEncoding('utf8');

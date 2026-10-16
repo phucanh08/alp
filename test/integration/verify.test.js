@@ -11,6 +11,9 @@ import { describeVerification, runVerify, validateVerify, verifyConfig } from '.
 import { validateSettings } from '../../packages/core/src/validation.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 
+// Verify commands are sh; Windows runs them under cmd.exe, whose echo ends its lines with CRLF and which has no sleep.
+const windows = process.platform === 'win32';
+const lf = text => text.replaceAll('\r\n', '\n');
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
 const exists = file => lstat(file).then(() => true, () => false);
@@ -31,18 +34,18 @@ test('verify settings are checked, and the steps run in order until one fails', 
   assert.throws(() => validateSettings({ verify: [] }, '.alp/settings.json'), /\.alp\/settings\.json: verify must be an object/);
 
   const dir = await directory(t, 'alp-verify-run-');
-  const passing = await runVerify(dir, { setup: 'echo setting up > setup.txt', test: 'echo ok', timeoutSec: 30 });
+  const passing = await runVerify(dir, { setup: windows ? 'echo setting up> setup.txt' : 'echo setting up > setup.txt', test: 'echo ok', timeoutSec: 30 });
   assert.equal(passing.passed, true);
   assert.deepEqual(passing.commands.map(command => [command.step, command.exitCode]), [['setup', 0], ['test', 0]]);
-  assert.equal(await readFile(path.join(dir, 'setup.txt'), 'utf8'), 'setting up\n');
+  assert.equal(lf(await readFile(path.join(dir, 'setup.txt'), 'utf8')), 'setting up\n');
   assert.equal(describeVerification(passing), 'verified (setup, test)');
 
-  const failing = await runVerify(dir, { typecheck: 'echo type error >&2; exit 3', test: 'echo never > never.txt', timeoutSec: 30 });
-  assert.deepEqual([failing.passed, failing.commands.length, failing.commands[0].exitCode, failing.commands[0].output], [false, 1, 3, 'type error\n']);
+  const failing = await runVerify(dir, { typecheck: windows ? 'echo type error>&2& exit 3' : 'echo type error >&2; exit 3', test: 'echo never > never.txt', timeoutSec: 30 });
+  assert.deepEqual([failing.passed, failing.commands.length, failing.commands[0].exitCode, lf(failing.commands[0].output)], [false, 1, 3, 'type error\n']);
   assert.equal(await exists(path.join(dir, 'never.txt')), false);
   assert.equal(describeVerification(failing), 'verification failed: typecheck exited 3');
 
-  const slow = await runVerify(dir, { test: 'sleep 5', timeoutSec: 1 });
+  const slow = await runVerify(dir, { test: windows ? 'ping -n 6 127.0.0.1>nul' : 'sleep 5', timeoutSec: 1 });
   assert.deepEqual([slow.passed, slow.commands[0].exitCode, slow.commands[0].timedOut], [false, 124, true]);
   assert.equal(describeVerification(slow), 'verification failed: test timed out');
   assert.ok(slow.commands[0].ms < 4000);
@@ -130,6 +133,7 @@ async function setup(t, verify = { test: 'node check.js' }) {
   await mkdir(path.join(root, 'node_modules', 'dep'), { recursive: true });
   await writeFile(path.join(root, 'node_modules', 'dep', 'index.js'), 'module.exports = 1;\n');
   git(root, 'init', '--quiet', '-b', 'main');
+  git(root, 'config', 'core.autocrlf', 'false'); // the host's global setting must not turn the files' LF into CRLF
   git(root, 'add', '-A');
   git(root, '-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'init');
   const runtimes = [];

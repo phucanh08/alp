@@ -1,7 +1,7 @@
-import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { AlpError } from './errors.js';
+import { signalShell, spawnShell } from './shell.js';
 
 /**
  * The project's verification gate (plans/reference/ALPD.md §28): commands from
@@ -59,14 +59,11 @@ export async function verifyConfig(projectRoot) {
 function runCommand(command, cwd, { timeoutMs, idleMs }, env) {
   return new Promise(resolve => {
     const started = Date.now();
-    const windows = process.platform === 'win32';
-    const child = spawn(windows ? process.env.ComSpec ?? 'cmd.exe' : '/bin/sh', windows ? ['/d', '/s', '/c', command] : ['-c', command], {
-      cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: !windows, windowsHide: true,
-    });
+    const child = spawnShell(command, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     let stopped;
     let idle;
-    const signal = name => { try { windows ? child.kill() : process.kill(-child.pid, name); } catch {} };
+    const signal = name => signalShell(child, name);
     const stop = reason => {
       if (stopped) return;
       stopped = reason;
