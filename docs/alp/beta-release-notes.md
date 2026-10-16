@@ -87,6 +87,10 @@ All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned t
 - Evidence with real providers so far comes from older opt-in end-to-end runs on the source
   tree, not on the published packages. The beta's gate adds real-provider runs on the release
   tarballs (beta-scope §6.1).
+- macOS is the primary test platform (beta-scope D7). Runs with real Codex and Claude on the
+  release tarballs are a release condition on macOS only. On Linux, the hermetic CI suites and
+  fake-provider rehearsals on the same tarballs pass; real-provider runs there are done when
+  possible. Windows stays experimental.
 - CI runs the full hermetic suites (`core`, `paseo`) on Ubuntu only; on macOS they are run by
   hand for the release.
 - Windows: no login service; tests that use a fake Codex or POSIX processes are skipped there
