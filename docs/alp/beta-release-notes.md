@@ -91,8 +91,8 @@ All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned t
   release tarballs are a release condition on macOS only. On Linux, the hermetic CI suites and
   fake-provider rehearsals on the same tarballs pass; real-provider runs there are done when
   possible. Windows stays experimental.
-- CI runs the full hermetic suites (`core`, `paseo`) on Ubuntu only; on macOS they are run by
-  hand for the release.
+- CI runs the full hermetic suites (`core`, `paseo`) on Ubuntu (Node 22 and 24) and on macOS
+  (Node 24).
 - Windows: no login service; tests that use a fake Codex or POSIX processes are skipped there
   (for example backup and restore through alpd); no CI lane runs the whole suite.
 - Client SDK smoke tests (browser, Metro, tarball) are not in CI.

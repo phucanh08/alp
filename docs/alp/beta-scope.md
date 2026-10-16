@@ -151,8 +151,9 @@ Thứ tự publish: protocol → core → runtime → client → daemon → cli 
 
 - Bằng chứng với provider thật hiện chỉ có từ các E2E opt-in cũ, chạy trên mã nguồn trong repo chứ
   không trên tarball; gate beta dựa vào ma trận §6.1.
-- [Local] Lane CI `core` và `paseo` (toàn bộ test hermetic) chỉ chạy trên Ubuntu. macOS chỉ có lane
-  `alp-web` (app không phát hành). Vì vậy H2 (§6.1) chạy tay trên macOS.
+- [Local] Lane CI `core` và `paseo` (toàn bộ test hermetic) chạy trên Ubuntu (Node 22, 24), và từ
+  D8 cả trên macOS (job `core-paseo-macos`, Node 24) cho H2. Job macOS chưa là required check của
+  `main`.
 - Windows: không có service; test dùng fake Codex hoặc process POSIX bị bỏ qua (ví dụ
   `test/integration/backup-restore.test.js` bỏ qua trên win32); chưa có lane chạy toàn bộ suite.
   [Local] Hai test hỏng vì môi trường Windows, không phải vì artifact:
@@ -196,7 +197,7 @@ Mọi dòng chạy trên **cùng release SHA** và, với các dòng cài đặt
 | # | Kiểm tra | Môi trường | Người chạy | Chặn |
 |---|---|---|---|---|
 | H1 | CI `core` và `paseo` (`validate:core`, `validate:paseo`) | Ubuntu, Node 22 và 24 | CI | Có |
-| H2 | `npm run validate:core` và `npm run validate:paseo` tại release SHA | macOS, Node 22.12+ hoặc 24 | anh (D3: lần đầu tối 2026-10-16) | Có; lần chạy trước khi chốt SHA chỉ để định hướng, gate cần chạy lại trên release SHA |
+| H2 | `npm run validate:core` và `npm run validate:paseo` tại release SHA | macOS, Node 24 (CI `core-paseo-macos`, D8) | CI | Có; evidence là link run CI ở release SHA |
 | H3 | CI `packages-and-web` (`validate:packages`, `web-app-smoke`) | Ubuntu, Node 22 | CI | Có |
 | H4 | CI `windows-daemon` | Windows, Node 22 và 24 | CI | Có (giữ lane xanh) |
 | H5 | CI `alp-web` | Ubuntu, macOS | CI | Không (app chưa phát hành) |
@@ -583,7 +584,7 @@ Trạng thái [Local] lúc cập nhật tài liệu: T1–T3 **chưa triển kha
 | T6 | Phân loại `npm audit` (S1) | Có | đã phân loại local (§5). S1 chặn tới khi: F1 đã sửa (bạn license) hoặc anh chấp nhận trước P5; chạy lại trên `RELEASE_SHA`. F3 đã được anh chấp nhận (D5) |
 | T7 | Dọn npm: unpublish nếu đủ điều kiện, không thì deprecate (§1.1), gồm cả tên plugin cũ `alp-paseo-plugin` | anh làm | chưa làm |
 | T8 | Chạy §6 và §7, ghi kết quả vào §6.4 | anh (macOS, H2 tối 2026-10-16; Linux, lần đầu tối 2026-10-16, D1) | chưa làm |
-| T9 | Đưa client SDK smoke vào CI; workflow publish; thêm macOS vào lane `core`/`paseo` (tùy chọn, thay H2 chạy tay) | Không (sau beta) | deferred; phần acceptance Linux kéo lên trước theo D6 (T12) |
+| T9 | Đưa client SDK smoke vào CI; workflow publish; ~~thêm macOS vào lane `core`/`paseo`~~ (đã làm theo D8) | Không (sau beta) | deferred; phần acceptance Linux kéo lên trước theo D6 (T12) |
 | T12 | Workflow `release-acceptance` (D6, D7): pack một lần trên CI + `release:consumer` + rehearsal fake (Codex, Claude, W6) trên macOS, Ubuntu, Windows | Có (pack là bộ tarball của release) | đã viết, chưa chạy trên `main` |
 | T10 | Test fake-provider cho câu hỏi quyền trong Paseo (§6.2, hàng duyệt quyền, ý 1) | Có | có test (chưa commit), pass local 17/17; chưa pass trên release SHA |
 | T11 | Sửa F3 (`linkify-it@2.2.0` trong `alp web`); owner anh | Không chặn beta.1; chặn beta.2, hạn 2026-11-15 | chưa làm |
@@ -667,5 +668,11 @@ provider thật.
     động, và là required check của nhánh `main`.
   - Release notes ghi rõ: provider thật mới được nghiệm thu trên macOS; Linux có CI hermetic và
     rehearsal fake trên tarball; Windows vẫn experimental.
+- **D8.** H2 chạy trên CI: job `core-paseo-macos` (macOS, Node 24, `validate:core` và
+  `validate:paseo`) trong `ci.yml`, thay việc chạy tay (D3). Lý do: máy anh có `@anhlp/alp-paseo`
+  cài global, mà ALP luôn tìm `alp-web-integration` trong `/opt/homebrew/bin`, nên
+  `core-standalone-smoke` trong `validate:core` không chạy sạch được trên máy đó. Runner CI không có
+  bản cài global. Tên job mới để không đổi các required check hiện có; nên thêm job này vào
+  required check của `main` sau khi nó xanh ổn định.
 
 Không còn quyết định nào mở trong scope này.

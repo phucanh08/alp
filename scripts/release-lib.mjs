@@ -280,7 +280,7 @@ export function installedProblems(lock, manifest) {
  */
 export const GATE_ROWS = [
   { id: 'H1', title: 'CI core + paseo (validate:core, validate:paseo), Ubuntu, Node 22 and 24', blocking: true, binds: 'sha' },
-  { id: 'H2', title: 'validate:core + validate:paseo on macOS, Node 22.12+ or 24', blocking: true, binds: 'sha' },
+  { id: 'H2', title: 'validate:core + validate:paseo on macOS (CI core-paseo-macos, Node 24)', blocking: true, binds: 'sha' },
   { id: 'H3', title: 'CI packages-and-web (validate:packages, web-app-smoke), Ubuntu, Node 22', blocking: true, binds: 'sha' },
   { id: 'H4', title: 'CI windows-daemon, Node 22 and 24', blocking: true, binds: 'sha' },
   { id: 'H5', title: 'CI alp-web, Ubuntu and macOS', blocking: false, binds: 'sha' },
