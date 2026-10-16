@@ -109,6 +109,9 @@ All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned t
   browser tab (linkify-it 2.2.0 in Paseo's web app; GHSA-22p9-wv53-3rq4, GHSA-v245-v573-v5vm).
   It affects only the page on this machine; upstream Paseo has not fixed it yet. Planned fix:
   before `0.0.0-beta.2` or 2026-11-15, whichever comes first.
+- In Paseo and `alp web`, a session on Claude shows the assistant's text only once each message
+  is complete; Codex sessions stream as they go. Stop still works. To be fixed in a later beta
+  ([#107](https://github.com/phucanh08/alp/issues/107)).
 - `npm install -g @anhlp/alp` without a tag installs `0.10.0` until `latest` moves to the beta.
   The old plugin name `alp-paseo-plugin` stays at `0.10.0`.
 
@@ -118,18 +121,18 @@ The release attaches the eight `*-0.0.0-beta.1.tgz` tarballs, `SHA256SUMS` and
 `release-manifest.json`. Check a download with `shasum -a 256 -c SHA256SUMS` (macOS) or
 `sha256sum -c SHA256SUMS` (Linux).
 
-Release commit `6765826afcf9aac8204a13214589063bba9b165f`. `SHA256SUMS` (its own SHA-256 is
-`56e6e0019d57da9c75dab426ac9e1b5a4a4e64f820fec30baaab0881400fdd67`):
+Release commit `2230aa5876485cec36b2ec118d32612f454564a7`. `SHA256SUMS` (its own SHA-256 is
+`523cf5cc35c67b4ff6833ecff6828339239c38c5c67835c6dba958c84819b81c`):
 
 ```text
-df17061b5122db56f0e27c78772e18bd5517f769af0985fee6bf9e7e0b2cd68e  anhlp-alp-0.0.0-beta.1.tgz
-85a9df6342f3ab9d6faeeb38e22cba6638e1e2ba89aa926916fd43f6bac62d63  anhlp-alp-cli-0.0.0-beta.1.tgz
+d9ef470693790929f90989f9224b5a35bc12cc2966f22d38e29820aa3b39118a  anhlp-alp-0.0.0-beta.1.tgz
+7a3eaad19a17874a129645b061534f46898f3d727df12a042c19774b8b55bd6e  anhlp-alp-cli-0.0.0-beta.1.tgz
 b0b7808f0429442d25de8b4975daff100242c8461a52fa898a75ecb3d370c10f  anhlp-alp-client-0.0.0-beta.1.tgz
 8cb8413d66aa6931762ca0a0517acfb877891bdbce1d0d361a236d5902308dd4  anhlp-alp-core-0.0.0-beta.1.tgz
-7613860a102e63b7293322f8075c684e11a7a426724771147b1c4cea436e0b55  anhlp-alp-daemon-0.0.0-beta.1.tgz
-1155434bc7411078c2c307fc7e895032f742d2aac340637b86eb93925fff1aae  anhlp-alp-paseo-0.0.0-beta.1.tgz
+1cfc08c45fd3129d495d08dbd1684b0b91be8fe23395de71b644f3be1fd93fac  anhlp-alp-daemon-0.0.0-beta.1.tgz
+ed9bb789596c05bf9cb7957b9793d0c514846219f5ece67857347778531eb634  anhlp-alp-paseo-0.0.0-beta.1.tgz
 57eb63ee488f2d33eb841ce941bea6e3aceed3f35fe259673594b8738d1b8f4c  anhlp-alp-protocol-0.0.0-beta.1.tgz
-8260435dc904110cdb174c73e032d0938d9caeef7309d4236c4cc3279f9be2ec  anhlp-alp-runtime-0.0.0-beta.1.tgz
+36155728dc360bd0037478283c1d9053bd74360ca6e0e5f0e1f4a513bd3442ea  anhlp-alp-runtime-0.0.0-beta.1.tgz
 ```
 
 ## More
@@ -145,7 +148,7 @@ b0b7808f0429442d25de8b4975daff100242c8461a52fa898a75ecb3d370c10f  anhlp-alp-clie
 
 ## Editor's checklist (remove before publishing)
 
-State on 2026-10-16 at the release commit `6765826`; each item belongs to another task.
+State on 2026-10-16 at the release commit `2230aa5`; each item belongs to another task.
 
 | Item | State | Needed for these notes |
 |---|---|---|
@@ -154,10 +157,10 @@ State on 2026-10-16 at the release commit `6765826`; each item belongs to anothe
 | T3 `engines.node` `>=22.12` | merged for the 8 packages (gateway keeps `>=20`) | Support table matches npm |
 | T6 / S1 `npm audit` triage | rerun on the release SHA and the release tarballs: pass; F3 accepted under scope D5 | done; F3 known issue kept |
 | Plugin's React and React Native peers optional (`peerDependenciesMeta`) | merged; consumer audit 0 | re-check if it is reverted |
-| Gate H1–H5, A5, R1–R7 on the release SHA (beta-scope §6) | H1–H5, L1, S1, A5 pass; fake rehearsal on the tarballs passes (`release-acceptance` run 38888426980); live R1, R2, R5, R7 not run yet | add accepted R1–R7 issues to Known issues |
+| Gate H1–H5, A5, R1–R7 on the release SHA (beta-scope §6) | `release:gate --phase publish` passes: H1–H5, L1, S1, A5, R1, R2, R5, R7; R5 W3 on Claude does not stream (accepted, #107) | Claude streaming known issue added |
 | Q1–Q5 after publishing (beta-scope §7.5) | not run | drop or keep the `latest` known issue (D2) |
 | `paseo plugin add npm:<scoped name>@beta`, `paseo provider models alp` | not tried with a published package; Q3/W2 try them | install commands |
-| Checksums | pasted from `release-acceptance` run 38888426980 | done |
+| Checksums | pasted from `release-acceptance` run 38901108957 | done |
 
 Links here are relative to `docs/alp/`; on GitHub's release page, make them absolute
 (`https://github.com/phucanh08/alp/blob/<tag>/docs/alp/…`).

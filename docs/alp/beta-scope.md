@@ -182,6 +182,10 @@ Thứ tự publish: protocol → core → runtime → client → daemon → cli 
   mang được ngữ cảnh native.
 - `alp web` là web của Paseo tại commit đã pin, cộng các patch của ALP; phần Paseo có mà ALP chưa
   làm (terminal, commit/push, worktree từ app, voice…) báo "đang phát triển".
+- Session chạy Claude không stream text vào Paseo hay `alp web`: mỗi message chỉ hiện khi đã xong
+  (`claude-transport.ts` đặt `includePartialMessages: false`). Codex stream bình thường; Stop vẫn
+  chạy. Tìm ra ở R5 W3; anh chấp nhận là known issue cho beta.1 (2026-10-16), sửa ở bản sau
+  ([#107](https://github.com/phucanh08/alp/issues/107), T13).
 - [Local] Một số E2E opt-in mặc định model `codex:gpt-5.6-sol` (`test/e2e/worktree-e2e.mjs:11`); khi
   chạy cho gate, đặt `ALP_TEST_MODEL` rõ ràng theo catalog hiện tại.
 
@@ -395,12 +399,16 @@ npm run release:gate -- "$OUT" --init release-evidence.json
 
 | # | SHA | Tarball SHA-256 khớp | Máy, OS, Node | Kết quả | Bằng chứng (link CI, log, session id) |
 |---|---|---|---|---|---|
-| H1–H4 | `6765826` | — | CI: Ubuntu Node 22/24 (H1, H3), macOS Node 24 (H2, `core-paseo-macos`), Windows Node 22/24 (H4) | pass | [CI 38886448726](https://github.com/phucanh08/alp/actions/runs/38886448726) |
-| H5 | `6765826` | — | CI: Ubuntu, macOS | pass (không chặn) | [CI 38886448726](https://github.com/phucanh08/alp/actions/runs/38886448726) |
-| L1 | `6765826` | — | macOS, clone sạch ở release SHA | pass | `release:check-version`; manifest 8 package Apache-2.0, repo `phucanh08/alp`; LICENSE/NOTICE trong tarball do A5 kiểm |
-| S1 | `6765826` | khớp (audit consumer trên 8 tarball) | macOS arm64, Node 26.3.0 (gốc) và 24.22.0 (web, consumer), bật kiểm TLS | pass; F3 chấp nhận theo D5 | `--omit=dev` 0; consumer 0/0 (146/131 package); ajv 8.20.0 inline; Paseo web 84 high/15 critical như report (F3, F4) |
-| A5 | `6765826` | `SHA256SUMS` = `56e6e001…fdd67` | pack: [release-acceptance 38888426980](https://github.com/phucanh08/alp/actions/runs/38888426980), Ubuntu Node 22.23.3; verify lại: macOS Node 24.22.0 | pass | `release:pack` + `release:verify` trên runner; `release:verify --record` trên Mac |
-| R1–R7 | | | | rehearsal fake trên tarball xanh (macOS, Ubuntu, Windows); live chưa chạy | [release-acceptance 38888426980](https://github.com/phucanh08/alp/actions/runs/38888426980) (fake, không phải evidence) |
+| H1–H4 | `2230aa5` | — | CI: Ubuntu Node 22/24 (H1, H3), macOS Node 24 (H2, `core-paseo-macos`), Windows Node 22/24 (H4) | pass | [CI 38901104491](https://github.com/phucanh08/alp/actions/runs/38901104491) |
+| H5 | `2230aa5` | — | CI: Ubuntu, macOS | pass (không chặn) | [CI 38901104491](https://github.com/phucanh08/alp/actions/runs/38901104491) |
+| L1 | `2230aa5` | — | macOS | pass | manifest và license không đổi từ `6765826`; `release:check-version`; LICENSE/NOTICE trong tarball do A5 kiểm |
+| S1 | `2230aa5` | khớp (audit consumer trên 8 tarball) | macOS arm64, Node 24.22.0, bật kiểm TLS | pass; F3 chấp nhận theo D5 | lockfile không đổi; `--omit=dev` 0; consumer 0/0 (146/131 package); ajv 8.20.0 inline |
+| A5 | `2230aa5` | `SHA256SUMS` = `523cf5cc…b81c` | pack: [release-acceptance 38901108957](https://github.com/phucanh08/alp/actions/runs/38901108957), Ubuntu Node 22; verify lại: macOS Node 24.22.0 | pass | `release:pack` + `release:verify` trên runner; `release:verify --record` và `release:consumer` trên Mac |
+| R1 | `2230aa5` | khớp | macOS 27 arm64, Node 24.22.0, Codex CLI 0.162.1, `gpt-6.1-sol` | pass (C5 anh xác nhận) | `--unattended`; C5: bị ngắt trước khi có output, câu trả lời đúng |
+| R2 | `2230aa5` | khớp | như R1, Claude Code 2.1.300, `claude-opus-5-5` | pass 10/10 | `--unattended` |
+| R5 | `2230aa5` | khớp | như R1, Paseo 0.11.4 | pass: W1–W6 (Codex, Claude); W5, W6 anh xác nhận; W3 Claude không stream: known issue #107 anh chấp nhận | harness web, W3/W4 qua API Paseo |
+| R7 | `2230aa5` | — (mã nguồn) | như R1 | pass (Codex, Claude) | `beta-acceptance-r7.mjs` |
+| Ghi chú | `6765826`, `dc2621c` | — | — | bị thay | live trên hai SHA này tìm ra lỗi, sửa ở PR #105, #106; bộ tarball cũ không dùng |
 
 ## 7. Checklist publish tay
 
@@ -574,7 +582,7 @@ gh release create v0.0.0-beta.1 --verify-tag --prerelease --draft --title "ALP 0
 
 ## 8. Việc phải làm trước khi publish (mỗi việc một task riêng)
 
-Trạng thái ngày 2026-10-16, ở release SHA `6765826`.
+Trạng thái ngày 2026-10-16, ở release SHA `2230aa5`.
 
 | # | Việc | Chặn | Trạng thái |
 |---|---|---|---|
@@ -585,11 +593,12 @@ Trạng thái ngày 2026-10-16, ở release SHA `6765826`.
 | T5 | Docs: mọi lệnh cài ghi `@beta` (`integrations/paseo/README.md:56`, `docs/alp/codex-only.md:18`); sửa model supervisor không khớp (`integrations/paseo/README.md:10` ghi Sonnet 4.6, `README.md` ghi Sonnet 5); chuyển "Remote mode (beta)" và `paseo-remote.md` sang deferred; gắn nhãn experimental như §4; link tới tài liệu này | Có | xong (PR #101) |
 | T6 | Phân loại `npm audit` (S1) | Có | xong: F1, F2 đã sửa; chạy lại trên `RELEASE_SHA` và 8 tarball, S1 pass; F3 chấp nhận (D5) |
 | T7 | Dọn npm: unpublish nếu đủ điều kiện, không thì deprecate (§1.1), gồm cả tên plugin cũ `alp-paseo-plugin` | anh làm | chưa làm |
-| T8 | Chạy §6 và §7, ghi kết quả vào §6.4 | anh (macOS, D7; H2 trên CI theo D8) | đang làm: H1–H5, L1, S1, A5 pass; còn R1, R2, R5, R7 live trên macOS |
+| T8 | Chạy §6 và §7, ghi kết quả vào §6.4 | anh (macOS, D7; H2 trên CI theo D8) | gate `publish` pass ở `2230aa5` (2026-10-16); còn P5, publish, Q1–Q5 (anh) |
 | T9 | Đưa client SDK smoke vào CI; workflow publish; ~~thêm macOS vào lane `core`/`paseo`~~ (đã làm theo D8) | Không (sau beta) | deferred; phần acceptance Linux kéo lên trước theo D6 (T12) |
-| T12 | Workflow `release-acceptance` (D6, D7): pack một lần trên CI + `release:consumer` + rehearsal fake (Codex, Claude, W6) trên macOS, Ubuntu, Windows | Có (pack là bộ tarball của release) | xong (PR #102); bộ tarball release: [release-acceptance 38888426980](https://github.com/phucanh08/alp/actions/runs/38888426980) |
+| T12 | Workflow `release-acceptance` (D6, D7): pack một lần trên CI + `release:consumer` + rehearsal fake (Codex, Claude, W6) trên macOS, Ubuntu, Windows | Có (pack là bộ tarball của release) | xong (PR #102); bộ tarball release: [release-acceptance 38901108957](https://github.com/phucanh08/alp/actions/runs/38901108957) |
 | T10 | Test fake-provider cho câu hỏi quyền trong Paseo (§6.2, hàng duyệt quyền, ý 1) | Có | xong: test đã merge, pass trong `validate:paseo` ở release SHA (H1, H2) |
 | T11 | Sửa F3 (`linkify-it@2.2.0` trong `alp web`); owner anh | Không chặn beta.1; chặn beta.2, hạn 2026-11-15 | chưa làm |
+| T13 | Claude stream text vào Paseo/`alp web` (`includePartialMessages`, map `stream_event`) | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16) | chưa làm; [#107](https://github.com/phucanh08/alp/issues/107) |
 
 ## 9. Không thuộc tài liệu này
 
@@ -676,5 +685,15 @@ provider thật.
   `core-standalone-smoke` trong `validate:core` không chạy sạch được trên máy đó. Runner CI không có
   bản cài global. Tên job mới để không đổi các required check hiện có; nên thêm job này vào
   required check của `main` sau khi nó xanh ổn định.
+
+**Live trên macOS ngày 2026-10-16 (anh giao Claude Code chạy):**
+- `6765826`: R2 C6 (Claude được Allow once vẫn bị sandbox chặn), R1 C5 (supervisor review turn bị
+  ngắt và gửi mail, `alp run` treo), R7 (test e2e thiếu thư mục), C9 harness. Sửa ở PR #105 → `dc2621c`.
+- `dc2621c`: Codex không nhớ output của turn bị ngắt; Claude không hỏi khi lệnh cần ra khỏi sandbox
+  read-only. Anh yêu cầu sửa cả hai; PR #106 → release SHA `2230aa5`.
+- `2230aa5`: Claude không stream vào Paseo (R5 W3). Anh chấp nhận là known issue (T13, #107). C5
+  của R1 anh xác nhận pass.
+- Lưu ý harness: W1 dùng lại alpd đang chạy cho `~/.alp` dù là bản build khác (cùng version
+  string); dừng alpd trước mỗi lượt R5.
 
 Không còn quyết định nào mở trong scope này.
