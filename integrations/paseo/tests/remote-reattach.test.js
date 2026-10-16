@@ -4,7 +4,7 @@
 // reattach used to fail the root for good and leave the provider on a closed link.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRemoteProvider, GatewayAuthError } from 'alp-paseo-plugin/remote';
+import { createRemoteProvider, GatewayAuthError } from '@anhlp/alp-paseo/remote';
 import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
 
 const principal = { id: 'c1', permissions: ['session.read', 'session.write'], workspaces: ['/w'], workspaceRoots: [{ path: '/w', canonical: '/w' }] };

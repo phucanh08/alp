@@ -1,5 +1,5 @@
 // Shared by source checks and actual npm tarball inspection.
-export const isPaseo = name => /^@getpaseo(?:\/|$)|^alp-paseo-plugin(?:\/|$)/.test(name);
+export const isPaseo = name => /^@getpaseo(?:\/|$)|^@anhlp\/alp-paseo(?:\/|$)/.test(name);
 export function corePackageProblems(pkg, files = []) {
   const problems = [];
   for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
@@ -10,7 +10,7 @@ export function corePackageProblems(pkg, files = []) {
     for (const name of names) if (isPaseo(name)) problems.push(`${pkg.name}: forbidden Paseo bundle ${name}`);
   }
   for (const file of [...(pkg.files ?? []), ...files]) {
-    if (/(^|\/)(?:integrations|web-app)(?:\/|$)|@getpaseo\/|alp-paseo-plugin/.test(file)) problems.push(`${pkg.name}: forbidden core artifact ${file}`);
+    if (/(^|\/)(?:integrations|web-app)(?:\/|$)|@getpaseo\/|@anhlp\/alp-paseo/.test(file)) problems.push(`${pkg.name}: forbidden core artifact ${file}`);
   }
   return problems;
 }

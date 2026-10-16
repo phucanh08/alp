@@ -40,7 +40,7 @@ index 04fdbd2..2a6fe71 100644
  const ThemedSettings = withUnistyles(Settings2);
  const ThemedArrowUpRight = withUnistyles(ArrowUpRight);
 -const SKILLS_DOCS_URL = "https://paseo.sh/docs/skills";
-+const SKILLS_DOCS_URL = "https://github.com/phucanh08/alp-paseo#readme";
++const SKILLS_DOCS_URL = "https://github.com/phucanh08/alp#readme";
  const foregroundMapping = (theme: Theme) => ({ color: theme.colors.foreground });
  const mutedMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
  
@@ -53,7 +53,7 @@ index 04afdca..62c1643 100644
  } from "./parse-changelog";
  
 -const WEBSITE_CHANGELOG_URL = "https://paseo.sh/changelog";
-+const WEBSITE_CHANGELOG_URL = "https://github.com/phucanh08/alp-paseo#readme";
++const WEBSITE_CHANGELOG_URL = "https://github.com/phucanh08/alp#readme";
  
  const ThemedGift = withUnistyles(Gift);
  const ThemedExternalLink = withUnistyles(ExternalLink);
@@ -66,7 +66,7 @@ index bb5c153..4777349 100644
  }
  
 -const ADVANCED_DAEMON_SETTINGS_URL = "https://paseo.sh/docs/configuration";
-+const ADVANCED_DAEMON_SETTINGS_URL = "https://github.com/phucanh08/alp-paseo#readme";
++const ADVANCED_DAEMON_SETTINGS_URL = "https://github.com/phucanh08/alp#readme";
  
  const styles = StyleSheet.create((theme) => ({
    actionGroup: {
@@ -79,7 +79,7 @@ index 609aa9a..d44b885 100644
  import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
  
 -const CLI_DOCS_URL = "https://paseo.sh/docs/cli";
-+const CLI_DOCS_URL = "https://github.com/phucanh08/alp-paseo#readme";
++const CLI_DOCS_URL = "https://github.com/phucanh08/alp#readme";
  
  export function IntegrationsSection() {
    const { t } = useTranslation();
@@ -92,7 +92,7 @@ index 9209f6f..64b3792 100644
  } from "@/components/ui/text-input";
  
 -const RELAY_DOCS_URL = "https://paseo.sh/docs/security";
-+const RELAY_DOCS_URL = "https://github.com/phucanh08/alp-paseo#readme";
++const RELAY_DOCS_URL = "https://github.com/phucanh08/alp#readme";
  const FLEX_ONE_STYLE = { flex: 1 } as const;
  const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
  const ThemedShieldCheck = withUnistyles(ShieldCheck);
@@ -105,7 +105,7 @@ index 43b2a46..26d330e 100644
  import { openExternalUrl } from "@/utils/open-external-url";
  
 -const FALLBACK_DOWNLOAD_URL = "https://paseo.sh/download";
-+const FALLBACK_DOWNLOAD_URL = "https://github.com/phucanh08/alp-paseo#readme";
++const FALLBACK_DOWNLOAD_URL = "https://github.com/phucanh08/alp#readme";
  
  function RosettaCalloutDescription({ t }: { t: ReturnType<typeof useTranslation>["t"] }) {
    return (
@@ -532,7 +532,7 @@ index 50c81a0..e8da26a 100644
  };
  
 -const WORKTREE_DOCS_URL = "https://paseo.sh/docs/worktrees";
-+const WORKTREE_DOCS_URL = "https://github.com/phucanh08/alp-paseo#readme";
++const WORKTREE_DOCS_URL = "https://github.com/phucanh08/alp#readme";
  
  type ReadProjectConfigData = Awaited<ReturnType<DaemonClient["readProjectConfig"]>>;
  
@@ -545,7 +545,7 @@ index ce2f8b9..126ba3f 100644
          <Text style={styles.emptyTitle}>No active schedules</Text>
          <Text style={styles.emptyDescription}>Schedules run agents on a cadence.</Text>
 -        <ExternalLink href="https://paseo.sh/docs/schedules" label="See docs" />
-+        <ExternalLink href="https://github.com/phucanh08/alp-paseo#readme" label="See docs" />
++        <ExternalLink href="https://github.com/phucanh08/alp#readme" label="See docs" />
        </View>
        <Button variant="outline" leftIcon={Plus} onPress={onCreate} testID="schedules-empty-new">
          New schedule
@@ -571,7 +571,7 @@ index be13772..f587071 100644
  import { settingsStyles } from "@/styles/settings";
  
 -const METADATA_GENERATION_DOCS_URL = "https://paseo.sh/docs/metadata-generation";
-+const METADATA_GENERATION_DOCS_URL = "https://github.com/phucanh08/alp-paseo#readme";
++const METADATA_GENERATION_DOCS_URL = "https://github.com/phucanh08/alp#readme";
  type SelectionMode = "automatic" | "preferred";
  
  export function MetadataGenerationPage({ serverId }: { serverId: string }) {
@@ -584,7 +584,7 @@ index f3bdab3..44a072e 100644
  
  const pluginQueryKey = (serverId: string) => ["plugins", serverId] as const;
 -const PLUGIN_SOURCE_DOCS_URL = "https://paseo.sh/docs/plugins/reference#plugin-sources";
-+const PLUGIN_SOURCE_DOCS_URL = "https://github.com/phucanh08/alp-paseo#readme";
++const PLUGIN_SOURCE_DOCS_URL = "https://github.com/phucanh08/alp#readme";
  type PluginRowAction = "reload" | "enable" | "disable" | "remove";
  
  function errorMessage(error: unknown): string {

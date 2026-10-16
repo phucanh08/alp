@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createProvider, mapSession, sessionTasks, default as contribute } from 'alp-paseo-plugin';
+import { createProvider, mapSession, sessionTasks, default as contribute } from '@anhlp/alp-paseo';
 import { ProviderEventSchema, PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
 import { connect, readLock } from '@anhlp/alp-client';
 import { createTask } from '@anhlp/alp-core/tasks';

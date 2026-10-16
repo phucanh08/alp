@@ -9,14 +9,20 @@
 //
 // The only addition is `@types/node` (a consumer always needs Node's types); no `paths`, no
 // `typeRoots`, and no hand-written SDK stubs point anywhere near this repository.
+//
+// `--packs <release directory>` (scripts/release-pack.mjs) installs that release's saved tarballs,
+// after checking them against its SHA256SUMS, instead of packing the workspaces.
 import { spawnSync } from 'node:child_process';
 import { spawnCommand } from './spawn-command.mjs';
+import { releaseArtifacts } from './release-lib.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
 const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+const packsAt = process.argv.indexOf('--packs');
+const savedPacks = packsAt >= 0 ? path.resolve(process.argv[packsAt + 1] ?? '') : undefined;
 const TYPES_NODE = '@types/node@22.20.5';
 const typescript = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
 
@@ -74,10 +80,16 @@ const work = mkdtempSync(path.join(os.tmpdir(), 'alp-tarball-consumer-'));
 const packs = path.join(work, 'packs');
 mkdirSync(packs, { recursive: true });
 try {
-  // Pack every public workspace once, and remember the tarball for each package name.
+  // Pack every public workspace once, and remember the tarball for each package name. With
+  // `--packs <release directory>`, use that release's saved tarballs as they are instead.
   const tarballs = new Map();
   const publicPackages = [];
-  for (const location of manifest.workspaces) {
+  for (const artifact of savedPacks ? releaseArtifacts(savedPacks) : []) {
+    if (artifact.name === '@anhlp/alp') continue;
+    publicPackages.push(artifact.manifest);
+    tarballs.set(artifact.name, artifact.file);
+  }
+  for (const location of savedPacks ? [] : manifest.workspaces) {
     const pkg = JSON.parse(readFileSync(path.join(root, location, 'package.json'), 'utf8'));
     if (pkg.private) continue;
     publicPackages.push(pkg);
@@ -85,15 +97,15 @@ try {
     const [{ filename }] = JSON.parse(output.slice(output.indexOf('[')));
     tarballs.set(pkg.name, path.join(packs, filename));
   }
-  const plugin = publicPackages.find(pkg => pkg.name === 'alp-paseo-plugin');
-  const corePackages = publicPackages.filter(pkg => pkg.name !== 'alp-paseo-plugin');
+  const plugin = publicPackages.find(pkg => pkg.name === '@anhlp/alp-paseo');
+  const corePackages = publicPackages.filter(pkg => pkg.name !== '@anhlp/alp-paseo');
   const coreTarballs = corePackages.map(pkg => tarballs.get(pkg.name));
 
   // 1. The neutral core installs alone: no Paseo SDK, no plugin, no React.
   const core = path.join(work, 'core');
   installProject(core, [...coreTarballs, TYPES_NODE]);
   const leaked = installedPackages(core).filter(name =>
-    name.startsWith('@getpaseo/') || name === 'alp-paseo-plugin' || ['react', 'react-dom', 'react-native', 'react-is'].includes(name) || name.startsWith('@types/react'));
+    name.startsWith('@getpaseo/') || name === '@anhlp/alp-paseo' || ['react', 'react-dom', 'react-native', 'react-is'].includes(name) || name.startsWith('@types/react'));
   if (leaked.length) throw new Error(`the core install must not carry Paseo SDK or React packages, found: ${leaked.join(', ')}`);
 
   writeFileSync(path.join(core, 'import.mjs'), `
@@ -139,14 +151,14 @@ export const sameType = (summary: DaemonSessionSummary): SessionSummary => summa
   const peerSpecs = Object.entries(plugin.peerDependencies ?? {})
     .filter(([name]) => !plugin.peerDependenciesMeta?.[name]?.optional)
     .map(([name, range]) => `${name}@${installedVersion(name) ?? range}`);
-  installProject(pluginDir, [tarballs.get('alp-paseo-plugin'), ...coreTarballs, ...peerSpecs, TYPES_NODE, `esbuild@${installedVersion('esbuild')}`]);
+  installProject(pluginDir, [tarballs.get('@anhlp/alp-paseo'), ...coreTarballs, ...peerSpecs, TYPES_NODE, `esbuild@${installedVersion('esbuild')}`]);
   const sdkPeers = peerSpecs.filter(spec => spec.startsWith('@getpaseo/'));
   if (sdkPeers.length < 4) throw new Error(`expected the Paseo SDK peers in the plugin install, got: ${sdkPeers.join(', ')}`);
 
   writeFileSync(path.join(pluginDir, 'import.mjs'), `
 import assert from 'node:assert/strict';
-const plugin = await import('alp-paseo-plugin');
-const quiet = await import('alp-paseo-plugin/paseo/quiet');
+const plugin = await import('@anhlp/alp-paseo');
+const quiet = await import('@anhlp/alp-paseo/paseo/quiet');
 assert.equal(typeof plugin.default, 'function');
 assert.equal(typeof plugin.createProvider, 'function');
 assert.equal(typeof plugin.createWebServer, 'function');
@@ -156,15 +168,15 @@ console.log('plugin runtime imports ok');
   run(process.execPath, [path.join(pluginDir, 'import.mjs')], { cwd: pluginDir });
 
   writeFileSync(path.join(pluginDir, 'consumer.ts'), `
-import contribute, { createProvider, createPaseoBridge, createWebServer, mapSession, sessionTasks, type PaseoGateway } from 'alp-paseo-plugin';
-import { quietHandlers } from 'alp-paseo-plugin/paseo/quiet';
+import contribute, { createProvider, createPaseoBridge, createWebServer, mapSession, sessionTasks, type PaseoGateway } from '@anhlp/alp-paseo';
+import { quietHandlers } from '@anhlp/alp-paseo/paseo/quiet';
 import type { SessionSummary, SessionStatus } from '@anhlp/alp-protocol/session';
 export const use = (session: SessionSummary, status: SessionStatus) => [contribute, createProvider, createPaseoBridge, createWebServer, mapSession, sessionTasks, quietHandlers, session, status] as const;
 export const gateway = (value: PaseoGateway) => value;
 `);
   typecheck(pluginDir, strictConsumerTsconfig(['consumer.ts']));
-  writeFileSync(path.join(pluginDir, 'bad-wildcard.ts'), `import { nope } from 'alp-paseo-plugin/paseo/does-not-exist';\nexport { nope };\n`);
-  typecheck(pluginDir, strictConsumerTsconfig(['bad-wildcard.ts']), { expectFailure: true, mustMention: 'alp-paseo-plugin/paseo/does-not-exist' });
+  writeFileSync(path.join(pluginDir, 'bad-wildcard.ts'), `import { nope } from '@anhlp/alp-paseo/paseo/does-not-exist';\nexport { nope };\n`);
+  typecheck(pluginDir, strictConsumerTsconfig(['bad-wildcard.ts']), { expectFailure: true, mustMention: '@anhlp/alp-paseo/paseo/does-not-exist' });
   console.log('plugin consumer ok (isolated, real SDK)');
 
   // Run the existing behavioral regressions against installed public APIs, not workspace links.
@@ -178,7 +190,7 @@ export const gateway = (value: PaseoGateway) => value;
   writeFileSync(path.join(pluginDir, 'test/support/fake-agent.js'), support);
   for (const name of tests) {
     const source = readFileSync(path.join(root, 'integrations/paseo/tests', `${name}.test.js`), 'utf8')
-      .replace("new URL('../server/dist/index.js', import.meta.url)", "import.meta.resolve('alp-paseo-plugin')");
+      .replace("new URL('../server/dist/index.js', import.meta.url)", "import.meta.resolve('@anhlp/alp-paseo')");
     writeFileSync(path.join(suite, `${name}.test.js`), source);
   }
   const regression = spawnSync(process.execPath, ['--test', ...tests.map(name => path.join(suite, `${name}.test.js`))], {

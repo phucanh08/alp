@@ -38,7 +38,7 @@ try {
   run('npm', ['install', '--no-audit', '--no-fund', '--offline', '--ignore-scripts', ...(await readdir(packs)).map(file => path.join(packs, file))], { cwd: consumer });
   const installed = (await readdir(path.join(consumer, 'node_modules'))).flatMap(name => name.startsWith('@') ? [] : [name]);
   const scoped = await readdir(path.join(consumer, 'node_modules/@anhlp'));
-  const leaked = [...installed.filter(name => ['alp-paseo-plugin', 'react', 'react-native', 'react-dom'].includes(name)), ...(await readdir(path.join(consumer, 'node_modules')).then(names => names.filter(name => name === '@getpaseo')))];
+  const leaked = [...installed.filter(name => ['@anhlp/alp-paseo', 'react', 'react-native', 'react-dom'].includes(name)), ...(await readdir(path.join(consumer, 'node_modules')).then(names => names.filter(name => name === '@getpaseo')))];
   if (leaked.length) throw new Error(`the gateway install must not carry Paseo or React: ${leaked.join(', ')}`);
   if (scoped.some(name => !['alp-protocol', 'alp-core', 'alp-client', 'alp-gateway'].includes(name))) throw new Error(`unexpected ALP packages: ${scoped.join(', ')}`);
   log(`installed without Paseo: @anhlp/${scoped.join(', @anhlp/')}`);

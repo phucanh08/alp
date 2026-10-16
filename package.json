@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp",
-  "version": "0.10.0",
+  "version": "0.0.0-beta.1",
   "description": "ALP command line and alpd, the per-user daemon that runs filesystem-defined Codex and Claude Code agent teams",
   "type": "module",
   "files": [
@@ -11,7 +11,9 @@
     "dist/acp.js",
     "templates",
     "README.md",
-    "docs/modular-monorepo.md"
+    "docs/modular-monorepo.md",
+    "/NOTICE",
+    "dist/THIRD-PARTY-NOTICES.txt"
   ],
   "bin": {
     "alp": "packages/cli/dist/cli.js"
@@ -47,6 +49,11 @@
     "version:package": "node scripts/version-package.mjs",
     "release:pack-check": "node scripts/pack-check.mjs",
     "release:tarball-check": "node scripts/tarball-consumer.mjs",
+    "release:check-version": "node scripts/release-check.mjs",
+    "release:pack": "node scripts/release-pack.mjs",
+    "release:verify": "node scripts/release-verify.mjs",
+    "release:consumer": "node scripts/release-consumer.mjs",
+    "release:gate": "node scripts/release-gate.mjs",
     "test:packages:smoke": "node scripts/package-smoke.mjs",
     "test:gateway:smoke": "node scripts/gateway-smoke.mjs",
     "validate": "node scripts/validate.mjs",
@@ -64,7 +71,7 @@
     "validate:web": "node scripts/validate.mjs web"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.7.0",
@@ -74,7 +81,7 @@
     "@types/react": "19.1.17",
     "@types/react-dom": "19.1",
     "@types/ws": "^8.18.2",
-    "ajv": "8.17.1",
+    "ajv": "8.20.0",
     "esbuild": "0.25.12",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -84,20 +91,25 @@
     "zod": "4.4.3"
   },
   "dependencies": {
-    "@anhlp/alp-client": "0.10.0",
-    "@anhlp/alp-core": "0.10.0",
-    "@anhlp/alp-protocol": "0.10.0",
+    "@anhlp/alp-client": "0.0.0-beta.1",
+    "@anhlp/alp-core": "0.0.0-beta.1",
+    "@anhlp/alp-protocol": "0.0.0-beta.1",
     "@anthropic-ai/claude-agent-sdk": "^0.3.292",
     "smol-toml": "1.9.0"
   },
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/phucanh08/alp-paseo.git"
+    "url": "git+https://github.com/phucanh08/alp.git"
   },
-  "homepage": "https://github.com/phucanh08/alp-paseo#readme",
+  "homepage": "https://github.com/phucanh08/alp#readme",
+  "bugs": {
+    "url": "https://github.com/phucanh08/alp/issues"
+  },
   "publishConfig": {
     "access": "public",
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://registry.npmjs.org/",
+    "tag": "beta"
   },
   "workspaces": [
     "packages/protocol",

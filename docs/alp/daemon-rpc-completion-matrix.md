@@ -1,5 +1,9 @@
 # Daemon RPC cho Paseo remote: completion và security matrix
 
+> **Báo cáo phát triển, lịch sử.** Phục vụ chế độ remote và gateway, cả hai deferred trong beta
+> `0.0.0-beta.1` ([beta-scope.md](beta-scope.md) §4). Trạng thái và kết quả dưới đây là của nhánh
+> `feat/daemon-remote-rpc` lúc viết, không phải của bản beta.
+
 Task 09 phần backend (09B-1). Dành cho agent Gateway (Task 08) và Task 09B-2 (Paseo thin client).
 Contract chuẩn nằm ở `docs/protocol/alp-json-rpc-v1.md` §15 và `packages/protocol/schema/methods-v1.json`
 (mỗi method có annotation `x-alp`). Tài liệu này là bản đồ: cái gì đã có, ở đâu, kiểm thử ra sao, còn thiếu gì.

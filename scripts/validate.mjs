@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // Shared local/CI baseline. Every child failure stops this lane with a nonzero exit code.
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { spawnCommand } from './spawn-command.mjs';
 import { ROOT, buildAll, buildWorkspace, integrationTests, packageTests, packages, runNodeTests, webTests } from './test-lib.mjs';
 
@@ -47,8 +50,14 @@ if (scope === 'all' || scope === 'packages') {
   node('scripts/check-boundaries.mjs', '--require-artifacts');
   // Inspect the artifacts just built; lifecycle rebuilds could conceal missing outputs.
   node('scripts/pack-check.mjs', '--ignore-scripts');
-  node('scripts/tarball-consumer.mjs');
-  node('scripts/package-smoke.mjs');
+  // The release path (docs/alp/beta-scope.md §7.2): pack the eight tarballs once into a new
+  // directory with SHA256SUMS and a manifest, then run A5 and every consumer check (installed
+  // integrity, tarball-consumer, package-smoke) on those saved files. A rehearsal: CI is untagged.
+  const release = mkdtempSync(path.join(os.tmpdir(), 'alp-release-'));
+  node('scripts/release-check.mjs');
+  node('scripts/release-pack.mjs', '--out', release, '--rehearsal', '--ignore-scripts');
+  node('scripts/release-consumer.mjs', release, '--rehearsal');
+  rmSync(release, { recursive: true, force: true });
   node('scripts/gateway-smoke.mjs');
 }
 if (scope === 'all' || scope === 'web') {

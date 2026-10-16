@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { gitEnvironment } from './workspace.js';
 
 /** Where agents send feedback about ALP itself: its process, tools and agent instructions. */
-export const ALP_REPO = 'phucanh08/alp-paseo';
+export const ALP_REPO = 'phucanh08/alp';
 
 /** Runs the GitHub CLI with optional standard input and returns its standard output. Tests replace it. */
 export type GitHubRunner = (args: string[], options: { cwd: string; input?: string }) => Promise<string>;

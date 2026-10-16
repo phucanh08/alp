@@ -9,6 +9,7 @@ import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promi
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
+import { THIRD_PARTY_NOTICES, packageDirectory, writeNoticesFor } from './third-party-notices.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const upstream = JSON.parse(await readFile(path.join(root, 'paseo-web/upstream.json'), 'utf8'));
@@ -47,13 +48,43 @@ run('npm', ['run', 'postinstall']);
 run('npm', ['run', 'build:app-deps']);
 const app = path.join(source, 'packages/app');
 await rm(path.join(app, 'dist'), { recursive: true, force: true });
-run('npx', ['expo', 'export', '--platform', 'web', '--output-dir', 'dist'], app, { APP_VARIANT: 'production', NODE_ENV: 'production' });
+run('npx', ['expo', 'export', '--platform', 'web', '--output-dir', 'dist', '--source-maps'], app, { APP_VARIANT: 'production', NODE_ENV: 'production' });
 
-// 4. Copy out with the licence, compressed copies beside each text file.
+// 4. The licences of the third-party packages in the export (Apache-2.0 §4 and theirs): the source maps
+// name every module Metro bundled, and asset paths name the packages their files came from. The maps
+// are read and then dropped, so the app ships as before, with THIRD-PARTY-NOTICES.txt beside it.
 const exported = path.join(app, 'dist');
 const files = [];
 const walk = async dir => { for (const entry of await readdir(dir, { withFileTypes: true })) { const full = path.join(dir, entry.name); if (entry.isDirectory()) await walk(full); else files.push(full); } };
 await walk(exported);
+const installed = new Set();
+// Metro names sources from the checkout's root ("/node_modules/…", "/packages/app/node_modules/…");
+// sources outside node_modules are Paseo's own code, under LICENSE.paseo.txt.
+const locate = reference => {
+  const directory = packageDirectory(reference);
+  if (!directory) return;
+  const found = [path.join(source, directory), path.join(app, directory)].find(candidate => existsSync(path.join(candidate, 'package.json')));
+  if (!found) throw new Error(`web app: no installed package for ${reference}`);
+  installed.add(found);
+};
+for (const map of files.filter(file => file.endsWith('.map'))) {
+  const { sources = [], sourceRoot = '' } = JSON.parse(await readFile(map, 'utf8'));
+  for (const entry of sources) locate(path.posix.join(sourceRoot, entry));
+  await rm(map);
+  const bundle = map.slice(0, -'.map'.length);
+  if (existsSync(bundle)) await writeFile(bundle, (await readFile(bundle, 'utf8')).replace(/^\/\/# sourceMappingURL=.*$\n?/gm, ''));
+}
+for (const file of files) {
+  const asset = /assets\/__node_modules\/(.+)$/.exec(path.relative(exported, file).replaceAll('\\', '/'));
+  if (asset) locate(`node_modules/${asset[1]}`);
+}
+if (!installed.size) throw new Error('web app: the source maps named no third-party package');
+const notices = await writeNoticesFor(path.join(exported, THIRD_PARTY_NOTICES), [...installed], `the ALP web app (Paseo ${upstream.version})`);
+console.log(`ALP web app: ${notices.headings.length} third-party packages in ${THIRD_PARTY_NOTICES}${notices.missingText.length ? `; without a licence file: ${notices.missingText.join(', ')}` : ''}`);
+files.splice(0, files.length);
+await walk(exported);
+
+// 5. Copy out with the licence, compressed copies beside each text file.
 for (const file of files.filter(file => /\.(html|js|css|json|svg|map|txt|ico|ttf|wasm)$/.test(file))) {
   const body = await readFile(file);
   if (body.length < 1024) continue;

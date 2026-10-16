@@ -28,7 +28,7 @@ index 3d2a257..ccbedb1 100644
 -import { openChangelog } from "@/changelog";
  import { openExternalUrl } from "@/utils/open-external-url";
  
- const GITHUB_ISSUE_URL = "https://github.com/phucanh08/alp-paseo/issues/new";
+ const GITHUB_ISSUE_URL = "https://github.com/phucanh08/alp/issues/new";
  const ThemedActivity = withUnistyles(Activity);
  const ThemedCircleHelp = withUnistyles(CircleHelp);
 -const ThemedGift = withUnistyles(Gift);

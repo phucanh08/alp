@@ -13,9 +13,9 @@ const normalize = file => file.replaceAll('\\', '/');
 const FORBIDDEN = [
   /integrations\/paseo\//,
   /(^|\/)node_modules\/@getpaseo\//,
-  /(^|\/)node_modules\/alp-paseo-plugin\//,
+  /(^|\/)node_modules\/@anhlp\/alp-paseo\//,
   /^@getpaseo(\/|$)/,
-  /^alp-paseo-plugin(\/|$)/,
+  /^@anhlp\/alp-paseo(\/|$)/,
 ];
 
 export function assertCoreInputs(metafile, label) {

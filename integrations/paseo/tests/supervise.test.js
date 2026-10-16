@@ -9,7 +9,7 @@ import { bootTime, connect, daemonPaths, lockAlive, readLock } from '@anhlp/alp-
 import { daemonHeld, holdDaemon, startDaemon, superviseDaemon } from '@anhlp/alp-client/supervise';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
-import { createProvider } from 'alp-paseo-plugin';
+import { createProvider } from '@anhlp/alp-paseo';
 
 const ENTRY = fileURLToPath(new URL('../../../packages/daemon/dist/alpd.js', import.meta.url));
 

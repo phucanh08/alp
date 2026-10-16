@@ -8,7 +8,7 @@ import { initProject } from '@anhlp/alp-core/init';
 import { upgradeProject } from '@anhlp/alp-core/upgrade';
 import { resolveAgent } from '@anhlp/alp-core/resolver';
 import { seedLibrary } from '@anhlp/alp-core/library';
-import { PaseoAdapter } from 'alp-paseo-plugin';
+import { PaseoAdapter } from '@anhlp/alp-paseo';
 import { skillDescription } from '@anhlp/alp-runtime';
 import { legacyProject } from '../../../test/support/legacy.js';
 

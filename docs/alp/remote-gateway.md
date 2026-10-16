@@ -1,5 +1,9 @@
 # ALP remote gateway (Task 08)
 
+> **Trạng thái beta `0.0.0-beta.1`: deferred.** `@anhlp/alp-gateway` không phát hành trong beta
+> (private), và chế độ remote của plugin cũng deferred. Tài liệu này mô tả mã trong repo cho phát
+> triển, không phải hướng dẫn cài đặt. Phạm vi: [beta-scope.md](beta-scope.md) §2, §4.
+
 Gateway WebSocket độc lập để client ở xa (Paseo trên máy khác, browser, React Native, Node) dùng
 alpd của **một OS user** qua Protocol v1. Package `@anhlp/alp-gateway`, mã ở `apps/gateway`.
 
@@ -514,7 +518,7 @@ const alp = createReconnectingClient({
 alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nhật cursor của root */ });
 ```
 
-- Node: dùng `ws` (`connectWebSocket(url, { WebSocket, protocols })`) và `fetch` của Node 20 trở lên.
+- Node: dùng `ws` (`connectWebSocket(url, { WebSocket, protocols })`) và `fetch` của Node (Node 22.12+ hoặc 24 với các package beta).
   RN: WebSocket và fetch có sẵn.
 - Lưu token ở keychain/secure storage, không lưu trong URL hay localStorage chung.
 - Tạo session: `spec.cwd` là một trong `principal.workspaces`. Chỉ đặt `cwd`, `agent`, `model`,

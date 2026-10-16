@@ -9,7 +9,7 @@ import { build } from 'esbuild';
 import * as sdk from '@getpaseo/plugin';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import contribute from 'alp-paseo-plugin';
+import contribute from '@anhlp/alp-paseo';
 import { addGate, closeTask, createTask, getTask, startTask, submitTask } from '@anhlp/alp-core/tasks';
 
 const require = createRequire(import.meta.url);

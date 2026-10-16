@@ -250,12 +250,12 @@ test('main searches, then opens or comments on GitHub issues only with the user\
 
   const draft = { action: 'create', target: 'alp', title: 'Supervisor misses lead routing', body: 'Steps: ...' };
   const declined = await answered(runtime, main.call('alp_issue', draft), 'Reject');
-  assert.match(declined.question.body, /open an issue in phucanh08\/alp-paseo \(ALP itself\)[\s\S]*Title: Supervisor misses lead routing\n\nSteps: \.\.\./);
+  assert.match(declined.question.body, /open an issue in phucanh08\/alp \(ALP itself\)[\s\S]*Title: Supervisor misses lead routing\n\nSteps: \.\.\./);
   assert.equal(declined.result.approved, false);
   assert.equal(calls.length, 1);
   const created = (await answered(runtime, main.call('alp_issue', draft), 'Approve')).result;
-  assert.deepEqual([created.posted, created.url], [true, 'https://github.com/phucanh08/alp-paseo/issues/8']);
-  assert.deepEqual(calls[1].args, ['issue', 'create', '-R', 'phucanh08/alp-paseo', '--title', 'Supervisor misses lead routing', '--body-file', '-']);
+  assert.deepEqual([created.posted, created.url], [true, 'https://github.com/phucanh08/alp/issues/8']);
+  assert.deepEqual(calls[1].args, ['issue', 'create', '-R', 'phucanh08/alp', '--title', 'Supervisor misses lead routing', '--body-file', '-']);
   assert.match(calls[1].input, /^Steps: \.\.\.\n\n---\n_Drafted by an ALP agent and posted with the user's approval\._$/);
   const commented = (await answered(runtime, main.call('alp_issue', { action: 'comment', target: 'project', issue: 7, body: 'Also fails on Safari.' }), 'đồng ý')).result;
   assert.equal(commented.url, 'https://github.com/acme/widgets/issues/7');
@@ -285,7 +285,7 @@ test('the digest says when the user\'s message got no reply in main\'s turn', as
 
 test('issue labels are validated before asking the user to approve a draft', async t => {
   const calls = [];
-  const github = async (args) => { calls.push(args); return args[0] === 'label' ? JSON.stringify([{ name: 'bug' }]) : 'https://github.com/phucanh08/alp-paseo/issues/8'; };
+  const github = async (args) => { calls.push(args); return args[0] === 'label' ? JSON.stringify([{ name: 'bug' }]) : 'https://github.com/phucanh08/alp/issues/8'; };
   const { root, runtime, runtimes, prompt } = await setup(t, undefined, { github });
   await runtime.open('root', { cwd: root });
   await prompt('m1', 'File a bug');

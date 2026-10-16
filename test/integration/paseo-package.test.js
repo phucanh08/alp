@@ -18,8 +18,8 @@ test('canonical Paseo plugin and root compatibility distribution remain buildabl
   assert.ok(!manifest.workspaces.includes('integrations/paseo-plugin'));
   assert.equal(manifest.bin.alp, 'packages/cli/dist/cli.js');
   const pkg = JSON.parse(await readFile(path.join(root, 'integrations/paseo/package.json'), 'utf8'));
-  assert.equal(pkg.name, 'alp-paseo-plugin');
-  assert.equal(pkg.version, '0.10.0');
+  assert.equal(pkg.name, '@anhlp/alp-paseo');
+  assert.equal(pkg.version, manifest.version);
   const pluginManifest = await readFile(path.join(root, 'integrations/paseo/paseo-plugin.json'), 'utf8');
   assert.match(pluginManifest, /"id":/);
   for (const legacy of ['src', 'plugins/paseo', 'integrations/paseo-plugin']) {

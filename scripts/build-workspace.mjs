@@ -5,6 +5,7 @@ import { cp, mkdir, readdir, readFile, access, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { ROOT, resources, requireShim, sourceConditions, syncCoreTemplates } from './workspace-build-lib.mjs';
 import { assertCoreInputs, recordBundle, writeBuildManifest } from './build-manifest.mjs';
+import { THIRD_PARTY_NOTICES, writeThirdPartyNotices } from './third-party-notices.mjs';
 
 const selected = process.argv[2] === 'paseo-plugin' ? 'paseo' : process.argv[2];
 const locations = { paseo: 'integrations/paseo', tui: 'apps/tui', gateway: 'apps/gateway' };
@@ -26,7 +27,8 @@ async function compile(name) {
   }
   const plugins = ['daemon', 'cli'].includes(name) ? await embedded() : [];
   const entries = {};
-  const record = (file, result) => recordBundle(entries, path.relative(ROOT, file), result);
+  const metafiles = [];
+  const record = (file, result) => { metafiles.push(result.metafile); return recordBundle(entries, path.relative(ROOT, file), result); };
   const files = await readdir(path.join(directory, 'src'), { recursive: true });
   for (const file of files.filter(file => /\.(ts|js)$/.test(file) && !file.endsWith('.d.ts'))) {
     const outfile = path.join(directory, 'dist', file.replace(/\.ts$/, '.js'));
@@ -44,6 +46,8 @@ async function compile(name) {
   if (name === 'cli') {
     record(path.join(directory, 'dist/acp.js'), await build({ absWorkingDir: ROOT, entryPoints: ['packages/cli/src/acp/main.ts'], outfile: path.join(directory, 'dist/acp.js'), bundle: true, format: 'esm', platform: 'node', target: 'node20', conditions: sourceConditions, define: { __ALP_VERSION__: JSON.stringify(manifest.version) }, metafile: true }));
   }
+  // The executable bundles inline third-party packages; their licences ship beside them.
+  if (metafiles.length) await writeThirdPartyNotices(path.join(directory, 'dist', THIRD_PARTY_NOTICES), metafiles, manifest.name);
   // A removed module must not keep shipping: drop any generated file whose source is gone, so the
   // published package never carries an unexported leftover from an earlier build (for example the old
   // daemon `web.js` after the web surface moved to the plugin).
@@ -55,7 +59,7 @@ async function compile(name) {
     expected.add(file.replace(/\.ts$/, '.js'));
     expected.add(file.replace(/\.(ts|js)$/, '.d.ts'));
   }
-  if (name === 'daemon' || name === 'cli') expected.add('alpd.js');
+  if (name === 'daemon' || name === 'cli') expected.add('alpd.js').add(THIRD_PARTY_NOTICES);
   if (name === 'cli') expected.add('acp.js');
   const dist = path.join(directory, 'dist');
   for (const entry of await readdir(dist, { recursive: true, withFileTypes: true }).catch(() => [])) {

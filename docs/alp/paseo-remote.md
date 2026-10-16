@@ -1,5 +1,10 @@
 # ALP Paseo remote mode (Task 09B-2)
 
+> **Trạng thái beta `0.0.0-beta.1`: deferred.** Chế độ remote (`ALP_GATEWAY_URL`) cần
+> `@anhlp/alp-gateway`, package này không phát hành trong beta. Beta chỉ hỗ trợ chế độ
+> local/embedded. Tài liệu này mô tả mã trong repo; kết quả ở §7 là bằng chứng lịch sử của nhánh
+> phát triển (tarball 0.10.0), không phải của bản beta. Phạm vi: [beta-scope.md](beta-scope.md) §4.
+
 Plugin Paseo của ALP (`integrations/paseo`) có hai chế độ:
 
 - **local/embedded** (như trước): plugin tìm hoặc khởi động alpd trên máy này, đọc library trong
@@ -55,7 +60,7 @@ Paseo UI ─▶ Paseo daemon ─▶ plugin (remote) ─▶ @anhlp/alp-client/por
 | `server/remote/link.ts` | `gatewayConfig`, ticket → WebSocket → `daemon.hello`, kiểm tra capability (`attach.after`, `prompt.receipts`), map thư mục ↔ workspace |
 | `server/remote/provider.ts` | Chiến lược **remote**: teams từ `team.list`, spec chỉ gồm `cwd`/`agent`/`workflow`/`mode`/`persist`, mode theo `principal.modes`, cursor theo root, không gửi lại request sau relink |
 | `server/remote/panels.ts` | RPC của Tasks panel, Settings ALP, Usage qua gateway; phần không có thì trả `Unavailable in ALP remote mode: …` |
-| `server/remote/index.ts` | `contributeRemote`; export `alp-paseo-plugin/remote` |
+| `server/remote/index.ts` | `contributeRemote`; export `@anhlp/alp-paseo/remote` |
 | `server/index.ts` | `contribute()`: có `ALP_GATEWAY_URL` → `contributeRemote`, return; không giám sát alpd local |
 
 ### 3.1 Ranh giới import (gate build)
@@ -234,7 +239,7 @@ models".
 - Không có `subscribe`: Tasks panel poll.
 - `task.create` chỉ dedup trong một process alpd; library revision đổi sau restart.
 - Request chưa rõ kết quả khi mất kết nối không được gửi lại; người dùng gửi lại.
-- Entry plugin chung vẫn bundle code local (§3.1); chỉ entry `alp-paseo-plugin/remote` là bundle
+- Entry plugin chung vẫn bundle code local (§3.1); chỉ entry `@anhlp/alp-paseo/remote` là bundle
   không có core/runtime.
 - Windows: test integration dùng fake Codex là script Node nên bị bỏ qua trên Windows; E2E thật chỉ
   chạy trên macOS.
@@ -262,11 +267,11 @@ export ALP_GATEWAY_TOKEN='alpgw1.…'                 # chỉ trong env, không 
 paseo daemon config set daemon.listen 127.0.0.1:6868 --string --home ~/.paseo-alp-remote   # khác 6767 của Paseo đang dùng
 paseo daemon config set pluginsEnabled true --home ~/.paseo-alp-remote
 paseo daemon run --home ~/.paseo-alp-remote         # terminal riêng, giữ env ở trên
-paseo plugin install /đường/dẫn/alp-paseo-plugin --home ~/.paseo-alp-remote
+paseo plugin install /đường/dẫn/@anhlp/alp-paseo --home ~/.paseo-alp-remote
 ```
 
-Trong Paseo app, thêm host `127.0.0.1:6868` để xem daemon này. `/đường/dẫn/alp-paseo-plugin` là
-thư mục `integrations/paseo` đã build (`npm run build`), hoặc `node_modules/alp-paseo-plugin` của
+Trong Paseo app, thêm host `127.0.0.1:6868` để xem daemon này. `/đường/dẫn/@anhlp/alp-paseo` là
+thư mục `integrations/paseo` đã build (`npm run build`), hoặc `node_modules/@anhlp/alp-paseo` của
 một project đã `npm install` tarball plugin.
 
 Rồi mở workspace có thư mục **đúng bằng** đường dẫn đã cấp, chọn ALP → Phở/Cafe. Thử nhanh không

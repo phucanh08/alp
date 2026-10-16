@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, requireShim, resources } from './workspace-build-lib.mjs';
 import { recordBundle, writeBuildManifest } from './build-manifest.mjs';
+import { THIRD_PARTY_NOTICES, writeThirdPartyNotices } from './third-party-notices.mjs';
 
 const root = ROOT;
 
@@ -26,7 +27,8 @@ export async function buildCore({ log = console.log } = {}) {
   await esbuild({ absWorkingDir: root, entryPoints: protocolFiles.map(file => `packages/protocol/src/${file}`), outdir: 'packages/protocol/dist', bundle: false, format: 'esm', platform: 'node', target: 'node20' });
 
   const entries = {};
-  const record = (outfile, result) => recordBundle(entries, outfile, result);
+  const metafiles = [];
+  const record = (outfile, result) => { metafiles.push(result.metafile); return recordBundle(entries, outfile, result); };
 
   record('dist/runtime/index.js', await build({ entryPoints: ['packages/runtime/src/index.ts'], outfile: 'dist/runtime/index.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', banner: requireShim, external: ['@anthropic-ai/claude-agent-sdk'] }));
   record('dist/daemon/index.js', await build({ entryPoints: ['packages/daemon/src/index.ts'], outfile: 'dist/daemon/index.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', banner: requireShim, external: ['@anthropic-ai/claude-agent-sdk'] }));
@@ -35,6 +37,8 @@ export async function buildCore({ log = console.log } = {}) {
   record('dist/alpd.js', await build({ entryPoints: ['packages/daemon/src/main.ts'], outfile: 'dist/alpd.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', external: ['@anthropic-ai/claude-agent-sdk'], define: { __ALP_VERSION__: JSON.stringify(version) }, banner: requireShim }));
 
   await writeBuildManifest(path.join(root, 'dist/build-manifest.json'), { version, entries });
+  // The root package ships dist/alpd.js and dist/acp.js, which inline third-party packages.
+  await writeThirdPartyNotices(path.join(root, 'dist', THIRD_PARTY_NOTICES), metafiles, '@anhlp/alp');
   log('Built ALP core bundles (runtime, daemon, alpd, acp) without the Paseo integration');
 }
 

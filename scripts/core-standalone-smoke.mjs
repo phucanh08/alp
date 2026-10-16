@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Standalone core smoke: the six neutral core tarballs are packed and installed into their own
-// project (no repository node_modules, no `@getpaseo/*`, no `alp-paseo-plugin`, no React), then the
+// project (no repository node_modules, no `@getpaseo/*`, no `@anhlp/alp-paseo`, no React), then the
 // installed CLI's daemon and runtime are exercised end to end with a deterministic fake ACP agent
 // acting as a temporary provider — no real credentials, no user home.
 //
@@ -87,7 +87,7 @@ try {
   run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--legacy-peer-deps', '--save-exact', ...tarballs, TYPES_NODE], { cwd: core, timeout: 420_000 });
 
   const leaked = installedPackages(core).filter(name =>
-    name.startsWith('@getpaseo/') || name === 'alp-paseo-plugin' ||
+    name.startsWith('@getpaseo/') || name === '@anhlp/alp-paseo' ||
     ['react', 'react-dom', 'react-native', 'react-is'].includes(name) || name.startsWith('@types/react'));
   if (leaked.length) throw new Error(`the core-only install must not carry the Paseo plugin or React, found: ${leaked.join(', ')}`);
   console.log(`core-only install ok (${installedPackages(core).length} packages, no plugin/SDK/React)`);
@@ -122,7 +122,7 @@ try {
       return !Object.hasOwn(requirer.peerDependencies ?? {}, missing[1]);
     });
     if (unexpected.length) throw new Error(`installed dependency graph has problems:\n${unexpected.join('\n')}`);
-    if (/@getpaseo\/|alp-paseo-plugin/.test(tree)) throw new Error('Paseo found in installed dependency graph');
+    if (/@getpaseo\/|@anhlp\/alp-paseo/.test(tree)) throw new Error('Paseo found in installed dependency graph');
     // Inspect actual installed source, declarations, JSON and JS including nested dependencies.
     const modules = path.join(directory, 'node_modules');
     for (const file of readdirSync(modules, { recursive: true, withFileTypes: true })) {

@@ -50,7 +50,7 @@ index bbecedc..cceb46d 100644
 -
 -  const handleOpenDiscord = useCallback(() => {
 -    void openExternalUrl("https://discord.gg/jz8T2uahpH");
-+    void openExternalUrl("https://github.com/phucanh08/alp-paseo");
++    void openExternalUrl("https://github.com/phucanh08/alp");
    }, []);
  
    return (
@@ -97,7 +97,7 @@ index 5f60339..3d2a257 100644
  
 -const DISCORD_URL = "https://discord.gg/jz8T2uahpH";
 -const GITHUB_ISSUE_URL = "https://github.com/getpaseo/paseo/issues/new";
-+const GITHUB_ISSUE_URL = "https://github.com/phucanh08/alp-paseo/issues/new";
++const GITHUB_ISSUE_URL = "https://github.com/phucanh08/alp/issues/new";
  const ThemedActivity = withUnistyles(Activity);
  const ThemedCircleHelp = withUnistyles(CircleHelp);
  const ThemedGift = withUnistyles(Gift);
@@ -2709,8 +2709,8 @@ index 1f12d90..f97f918 100644
  
 -const GITHUB_ISSUE_URL = "https://github.com/getpaseo/paseo/issues/new";
 -const DOCS_URL = "https://paseo.sh/docs";
-+const GITHUB_ISSUE_URL = "https://github.com/phucanh08/alp-paseo/issues/new";
-+const DOCS_URL = "https://github.com/phucanh08/alp-paseo#readme";
++const GITHUB_ISSUE_URL = "https://github.com/phucanh08/alp/issues/new";
++const DOCS_URL = "https://github.com/phucanh08/alp#readme";
  
  const LOGO_SIZE = 96;
  const SHIMMER_PEAK_WIDTH = 120;

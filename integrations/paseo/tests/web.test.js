@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import WebSocket from 'ws';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
-import { webFile, createWebServer } from 'alp-paseo-plugin';
+import { webFile, createWebServer } from '@anhlp/alp-paseo';
 
 /** alpd's web server built without the ALP web app (ALPD §62 step 9; the app itself: paseo-web.test.js). */
 async function setup(t) {

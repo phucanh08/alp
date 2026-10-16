@@ -538,7 +538,7 @@ say "alpd stopped unexpectedly" instead of "alpd restarted". `alp log` shows
 `⏹` interrupted, `↻` reopened or restarted, and `▶` running again.
 
 **Restart after a crash.** Recovery needs an alpd to run. `alp daemon install`
-makes alpd a login service: a LaunchAgent on macOS
+(experimental in the beta `0.0.0-beta.1`; not on Windows) makes alpd a login service: a LaunchAgent on macOS
 (`~/Library/LaunchAgents/com.alp.alpd.plist`), a systemd user unit on Linux
 (`~/.config/systemd/user/alpd.service`). The service starts alpd at login, and
 again about ten seconds after it crashes or is killed. A clean stop stays
@@ -968,7 +968,7 @@ user library.
 
 Root main gets `alp_issue` for GitHub issues of the project (`target: "project"`,
 the repository its `origin` remote points to) or of ALP itself (`target: "alp"`,
-`phucanh08/alp-paseo`), for problems outside the task worth tracking. `search`
+`phucanh08/alp`), for problems outside the task worth tracking. `search`
 lists up to 10 matching issues, open or closed, without asking. `create` (title,
 body, optional existing labels) and `comment` (issue number, body) first show the
 user the repository, the action and the whole draft, and post only on an approving

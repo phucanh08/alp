@@ -422,7 +422,7 @@ export async function startIntegration(nameOrOptions = 'web') {
     }
     const lock = await readLock();
     if (lock && !lock.ready) throw new Error('ALP web integration started but did not become ready; see ~/.alp/logs/integrations/paseo.log');
-    if (!lock) throw new Error('ALP web app is provided by an optional integration package. Install it (for example `npm install -g alp-paseo-plugin`) and run `alp web` again.');
+    if (!lock) throw new Error('ALP web app is provided by an optional integration package. Install it (for example `npm install -g @anhlp/alp-paseo@beta`) and run `alp web` again.');
     throw new Error('ALP web integration did not publish a matching web.json lock');
   }
 
@@ -433,7 +433,7 @@ export async function startIntegration(nameOrOptions = 'web') {
 
   const entry = await discoverIntegration(name, { home });
   if (!entry) {
-    throw new Error('ALP web app is provided by an optional integration package. Install it (for example `npm install -g alp-paseo-plugin`) and run `alp web` again.');
+    throw new Error('ALP web app is provided by an optional integration package. Install it (for example `npm install -g @anhlp/alp-paseo@beta`) and run `alp web` again.');
   }
 
   const { spawn } = await import('node:child_process');

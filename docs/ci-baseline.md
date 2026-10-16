@@ -36,6 +36,9 @@ there may still originate in core.
 
 ## Recorded local baseline
 
+> Historical record from `0.10.0`. It is not evidence for the beta `0.0.0-beta.1`, whose gate
+> runs on the release SHA ([beta-scope.md](alp/beta-scope.md) §6).
+
 Base revision: `31e0ad1` (`0.10.0`). Environment: macOS, Node `26.3.0`, npm
 `11.16.0`; these local results do not substitute for the Ubuntu/Windows CI runs.
 

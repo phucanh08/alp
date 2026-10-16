@@ -2,7 +2,7 @@
 // the provider's catalog without a folder, and the read-only library list and language.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRemoteProvider, registerRemoteLibraryRpc } from 'alp-paseo-plugin/remote';
+import { createRemoteProvider, registerRemoteLibraryRpc } from '@anhlp/alp-paseo/remote';
 import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
 
 const principal = { id: 'c1', permissions: ['session.read', 'session.write', 'project.read'], workspaces: ['/w'], workspaceRoots: [{ path: '/w', canonical: '/w' }] };

@@ -1,5 +1,11 @@
 # ALP web (Task 10A, beta)
 
+> **Trạng thái beta `0.0.0-beta.1`: deferred.** App `apps/web` (`@anhlp/alp-web`, private) không
+> phát hành trong beta, và gateway nó cần cũng không. "Beta" trong tài liệu này là giai đoạn
+> riêng của app, không phải bản phát hành `0.0.0-beta.1`. Web có trong beta là `alp web` cục bộ
+> (loopback, port 7433) của `@anhlp/alp-paseo`: xem [beta-install.md](beta-install.md#alp-web-on-this-machine).
+> Kết quả ở cuối tài liệu là bằng chứng lịch sử của nhánh phát triển. Phạm vi: [beta-scope.md](beta-scope.md) §4.
+
 App trình duyệt độc lập (`apps/web`, package `@anhlp/alp-web`, private). App nói chuyện với alpd
 **chỉ qua** ALP remote gateway ([remote-gateway.md](remote-gateway.md)) và client SDK
 ([client-sdk.md](client-sdk.md)). Lâu dài app này thay Paseo web. Trong giai đoạn chuyển, Paseo và
@@ -85,7 +91,7 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
 - Plugin Vite `build/browser-boundary.js` (`enforce: 'pre'`) dừng build ngay ở module đầu tiên vượt
   ranh giới, kể cả qua import bắc cầu. Module bị chặn:
   - `node:*`, module Vite thay bằng `__vite-browser-external`;
-  - `ws`, `@anhlp/alp-{core,runtime,daemon,cli,gateway}`, Paseo, `alp-paseo-plugin`;
+  - `ws`, `@anhlp/alp-{core,runtime,daemon,cli,gateway}`, Paseo, `@anhlp/alp-paseo`;
   - mọi file khác trong `packages/`, `integrations/`, `apps/`.
 - Mỗi lần build ghi `dist/alp-boundary.json`, liệt kê các module ALP có trong bundle.
 - `tests/boundary.test.js` chứng minh hai điều:

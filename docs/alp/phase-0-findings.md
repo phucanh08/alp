@@ -1,5 +1,9 @@
 # Giai đoạn 0 — Khảo sát repository và baseline
 
+> **Báo cáo lịch sử** (2026-10-06), giữ nguyên làm bằng chứng. Không phải hướng dẫn hiện hành và
+> không phải kết quả của bản beta `0.0.0-beta.1`; xem [beta-install.md](beta-install.md) và
+> [beta-scope.md](beta-scope.md).
+
 Ngày khảo sát: 2026-10-06. Phạm vi: `D:\Projects\alp-workspace`.
 
 ## Kết quả chính

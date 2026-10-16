@@ -10,8 +10,8 @@ import WebSocket from 'ws';
 import { validateWSOutboundMessage } from '@getpaseo/protocol/validation/ws-outbound';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
-import { createWebServer } from 'alp-paseo-plugin';
-import { createPaseoBridge } from 'alp-paseo-plugin';
+import { createWebServer } from '@anhlp/alp-paseo';
+import { createPaseoBridge } from '@anhlp/alp-paseo';
 import { initProject } from '@anhlp/alp-core/init';
 import { fakeTransport, until } from '../../../test/support/fake-agent.js';
 import { seedLibrary } from '@anhlp/alp-core/library';
@@ -262,6 +262,36 @@ test('what an agent asks the user is a question card on its root, answered from 
   session(client, { type: 'agent_permission_response', agentId, requestId: second.request.id, response: { behavior: 'deny', message: 'Dismissed by user' } });
   assert.equal((await dismissed).status, 'dismissed');
   await client.next(frame => frame.message?.type === 'agent_permission_resolved' && frame.message.payload.requestId === second.request.id);
+});
+
+test('a permission question is a question card in the app; Always allow writes the rule, closing the card refuses (beta-scope T10)', async t => {
+  const { connected, ask, session, root, agents } = await setup(t);
+  const settings = path.join(root, '.alp', 'settings.json');
+  await writeFile(settings, JSON.stringify({ ...JSON.parse(await readFile(settings, 'utf8')), permissions: { profiles: { review: { base: 'read-only', ask: ['Bash(git push *)'], beyondMode: 'ask' } }, agents: { main: 'review' } } }));
+  const client = await connected();
+  const agentId = (await ask(client, { type: 'create_agent_request', requestId: 'a1', config: { provider: 'alp', cwd: root }, initialPrompt: 'Install it', labels: {} })).payload.agentId;
+  await until(() => agents[0]?.started.length === 1, 'the first turn');
+  const codex = (command, extra = {}) => agents[0].serverRequest('item/commandExecution/requestApproval', { kind: 'command', threadId: agents[0].threadId, command, ...extra });
+  const card = id => client.next(frame => frame.message?.type === 'agent_permission_request' && frame.message.payload.request.id !== id).then(frame => frame.message.payload);
+
+  const install = codex("/bin/zsh -lc 'npm install --no-audit'", { proposedExecpolicyAmendment: ['npm', 'install'] });
+  const first = await card();
+  assert.equal(first.agentId, agentId);
+  const [question] = first.request.input.questions;
+  assert.match(question.question, /Always allow adds Bash\(npm install \*\) to profile review\.$/);
+  assert.deepEqual(question.options, [{ label: 'Allow once' }, { label: 'Always allow' }, { label: 'Deny' }]);
+  session(client, { type: 'agent_permission_response', agentId, requestId: first.request.id, response: { behavior: 'allow', updatedInput: { ...first.request.input, answers: { [question.header]: 'Always allow' } } } });
+  assert.deepEqual(await install, { decision: 'accept' });
+  await client.next(frame => frame.message?.type === 'agent_permission_resolved' && frame.message.payload.requestId === first.request.id);
+  assert.deepEqual(JSON.parse(await readFile(settings, 'utf8')).permissions.profiles.review.allow, ['Bash(npm install *)']);
+
+  const push = codex("/bin/zsh -lc 'git push origin main'");
+  const second = await card(first.request.id);
+  assert.deepEqual(second.request.input.questions[0].options, [{ label: 'Allow once' }, { label: 'Deny' }]);
+  session(client, { type: 'agent_permission_response', agentId, requestId: second.request.id, response: { behavior: 'deny', message: 'Dismissed by user' } });
+  assert.deepEqual(await push, { decision: 'decline' });
+  await client.next(frame => frame.message?.type === 'agent_permission_resolved' && frame.message.payload.requestId === second.request.id);
+  assert.deepEqual((await ask(client, { type: 'fetch_agent_request', requestId: 'g1', agentId })).payload.agent.pendingPermissions, []);
 });
 
 test('projects and workspaces are kept by alpd: add, create with an agent, title, pin, labels, unread, archive, remove', async t => {

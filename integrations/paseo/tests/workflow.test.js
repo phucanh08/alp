@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { upgradeProject } from '@anhlp/alp-core/upgrade';
-import { mapSession, CodexTransport } from 'alp-paseo-plugin';
+import { mapSession, CodexTransport } from '@anhlp/alp-paseo';
 
 async function setup(t) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-workflow-'));
@@ -78,7 +78,7 @@ test('Codex usage snapshot strips account data, preserves reset windows, and han
 });
 
 test('Claude usage context exposes only plan/windows and tolerates unsupported experimental API', async () => {
-  const { ClaudeTransport } = await import('alp-paseo-plugin');
+  const { ClaudeTransport } = await import('@anhlp/alp-paseo');
   const context = await ClaudeTransport.prototype.orchestrationContext.call({ query: {
     supportedModels: async () => [{ value: 'premium', displayName: 'Premium', description: 'Highest capability', supportedEffortLevels: ['high'] }],
     usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => ({
@@ -94,7 +94,7 @@ test('Claude usage context exposes only plan/windows and tolerates unsupported e
 });
 
 test('Claude resolves PATH to an explicit executable instead of SDK binaries inside Electron archives', async () => {
-  const { ClaudeTransport } = await import('alp-paseo-plugin');
+  const { ClaudeTransport } = await import('@anhlp/alp-paseo');
   const { realpathSync } = await import('node:fs');
   const runtime = new ClaudeTransport(path.basename(process.execPath), process.cwd(), { PATH: path.dirname(process.execPath) });
   assert.equal(runtime.command, realpathSync(process.execPath));
@@ -102,7 +102,7 @@ test('Claude resolves PATH to an explicit executable instead of SDK binaries ins
 });
 
 test('Claude read-only sessions can delegate without plan approval and cannot write plan files', async () => {
-  const { claudePermissions } = await import('alp-paseo-plugin');
+  const { claudePermissions } = await import('@anhlp/alp-paseo');
   const policy = claudePermissions('read-only');
   assert.equal(policy.permissionMode, 'default');
   assert.ok(!policy.tools.includes('Write'));
@@ -116,7 +116,7 @@ test('Claude read-only sessions can delegate without plan approval and cannot wr
 });
 
 test('Claude live permission gate follows upgrades and downgrades', async () => {
-  const { claudePermissions } = await import('alp-paseo-plugin');
+  const { claudePermissions } = await import('@anhlp/alp-paseo');
   let sandbox = 'read-only';
   const policy = claudePermissions(sandbox, () => sandbox);
   assert.equal((await policy.canUseTool('Write', {})).behavior, 'deny');
@@ -127,7 +127,7 @@ test('Claude live permission gate follows upgrades and downgrades', async () => 
 });
 
 test('Claude full access skips permission checks', async () => {
-  const { claudePermissions } = await import('alp-paseo-plugin');
+  const { claudePermissions } = await import('@anhlp/alp-paseo');
   const policy = claudePermissions('full-access');
   assert.equal(policy.permissionMode, 'bypassPermissions');
   assert.equal(policy.allowDangerouslySkipPermissions, true);

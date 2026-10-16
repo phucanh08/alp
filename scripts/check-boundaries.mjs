@@ -23,7 +23,7 @@ const allowed = {
   '@anhlp/alp-gateway': ['@anhlp/alp-client', '@anhlp/alp-core', '@anhlp/alp-protocol'],
   // The browser app: the portable SDK and protocol only (its build checks the bundled graph too).
   '@anhlp/alp-web': ['@anhlp/alp-client', '@anhlp/alp-protocol'],
-  'alp-paseo-plugin': ['@anhlp/alp-daemon', '@anhlp/alp-runtime', '@anhlp/alp-client', '@anhlp/alp-core', '@anhlp/alp-protocol'],
+  '@anhlp/alp-paseo': ['@anhlp/alp-daemon', '@anhlp/alp-runtime', '@anhlp/alp-client', '@anhlp/alp-core', '@anhlp/alp-protocol'],
 };
 const failures = corePackageProblems(manifest);
 const supportDirectory = path.join(root, 'test', 'support');
@@ -56,7 +56,7 @@ for (const location of manifest.workspaces ?? []) {
 for (const location of manifest.workspaces ?? []) {
   const directory = path.join(root, location);
   const pkg = JSON.parse(await readFile(path.join(directory, 'package.json'), 'utf8'));
-  if (pkg.name !== 'alp-paseo-plugin') failures.push(...corePackageProblems(pkg));
+  if (pkg.name !== '@anhlp/alp-paseo') failures.push(...corePackageProblems(pkg));
   const declared = { ...pkg.dependencies, ...pkg.peerDependencies, ...pkg.devDependencies, ...pkg.optionalDependencies };
   const edges = Object.keys(declared).filter(name => name.startsWith('@anhlp/alp-'));
   graph.set(pkg.name, edges);
@@ -65,9 +65,9 @@ for (const location of manifest.workspaces ?? []) {
     const target = locationOf.get(name);
     if (target && /^(integrations|apps)\//.test(target)) failures.push(`${pkg.name}: depends on ${name}, which lives in ${target} (integrations and apps are leaves)`);
   }
-  if (pkg.name !== 'alp-paseo-plugin') {
+  if (pkg.name !== '@anhlp/alp-paseo') {
     for (const dep of Object.keys({ ...pkg.dependencies, ...pkg.peerDependencies, ...pkg.devDependencies, ...pkg.optionalDependencies })) {
-      if (dep.startsWith('@getpaseo') || dep === 'alp-paseo-plugin') failures.push(`${pkg.name}: forbidden Paseo dependency ${dep}`);
+      if (dep.startsWith('@getpaseo') || dep === '@anhlp/alp-paseo') failures.push(`${pkg.name}: forbidden Paseo dependency ${dep}`);
     }
   }
   const files = await readdir(directory, { recursive: true });
@@ -85,7 +85,7 @@ for (const location of manifest.workspaces ?? []) {
     inspect(source);
     // The Paseo remote entry (docs/alp/paseo-remote.md) reaches alpd only through the gateway; the
     // build checks its whole bundle (assertRemoteInputs), this its direct imports.
-    if (pkg.name === 'alp-paseo-plugin' && relative.startsWith(`server${path.sep}remote${path.sep}`)) {
+    if (pkg.name === '@anhlp/alp-paseo' && relative.startsWith(`server${path.sep}remote${path.sep}`)) {
       for (const specifier of specifiers) {
         const local = specifier.startsWith('.') ? path.relative(directory, path.resolve(directory, path.dirname(relative), specifier)).replaceAll(path.sep, '/') : undefined;
         if (/^@anhlp\/alp-(core|runtime|daemon|cli)(\/|$)/.test(specifier) || /^@anhlp\/alp-client(\/(index|supervise|library-test|mcp-probe).*)?$/.test(specifier)
@@ -94,7 +94,7 @@ for (const location of manifest.workspaces ?? []) {
       }
     }
     for (const specifier of specifiers) {
-      if ((pkg.name !== 'alp-paseo-plugin') && specifier.startsWith('@getpaseo')) failures.push(`${location}/${relative}: forbidden @getpaseo dependency in core package: ${specifier}`);
+      if ((pkg.name !== '@anhlp/alp-paseo') && specifier.startsWith('@getpaseo')) failures.push(`${location}/${relative}: forbidden @getpaseo dependency in core package: ${specifier}`);
       if (specifier.startsWith('.')) {
         const target = path.resolve(directory, path.dirname(relative), specifier);
         // A package's own tests may share the repository's fixture transports in test/support, and nothing else outside the package.

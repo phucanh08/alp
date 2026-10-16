@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CodexTransport } from 'alp-paseo-plugin';
+import { CodexTransport } from '@anhlp/alp-paseo';
 
 test('transport closes pending requests if child exits', async t => {
   const transport = new CodexTransport(process.execPath, process.cwd(), {}, ['-e', 'setTimeout(() => process.exit(7), 20)']);
