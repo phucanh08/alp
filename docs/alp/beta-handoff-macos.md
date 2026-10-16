@@ -52,9 +52,9 @@ Orientation only: everything below ran at `c47dfdc`, before the release SHA (D3)
 - Observation, not fixed: a stale `$ALP_HOME/alpd.json` left by a dev checkout wins over the installed plugin's own alpd. Paseo kept starting `integrations/paseo/server/dist/alpd.js` from the repo until the file was removed while alpd was stopped. Upgrades from 0.10.0 are unaffected, because the old entry path is replaced in place.
 
 Open, for the owner:
-- Merge the PR from `release/beta-1-preparation`, then choose the release SHA on `main` (P0) and continue with P1–P3.
+- PR #101 is merged. Choose the release SHA on `main` after the workflow lands (P0); the workflow's `pack` job does P1–P3 on CI.
 - Live macOS rows R1, R2, R5 and R7 (paid providers; models still to pick). Planned for the evening of 2026-10-16.
-- Linux, not started: R3, R4, R6 and R7 on Linux, plus `release:consumer` on Linux, on the saved release tarballs. Before the live rows, run the harness `--fake` rehearsal there too. The macOS home-mode failure would have shown up there as well. Record the environment (for example "Linux (WSL2 Ubuntu 24.04)").
+- Linux (D6 in beta-scope.md): the `release-acceptance` workflow packs the release once on CI and runs `release:consumer`, R3 and the Linux Codex part of R7. Run it with `live=false` first. It needs the `OPENAI_API_KEY` secret and a `codex_model` for `live=true`. R4 (Linux, Claude) and the Linux Claude part of R7 stay manual for the owner. R6 waits for the second batch of the workflow.
 - Optional: `alp doctor --fix` on this Mac (it tightens group/other access on old run and board files in `~/.alp`).
 
 ## Repository hygiene
