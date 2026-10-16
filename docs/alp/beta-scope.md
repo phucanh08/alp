@@ -216,11 +216,11 @@ macOS Node 24, Linux Node 22.12+.
 |---|---|---|---|---|---|
 | R1 | macOS | Codex | CLI/alpd: C1–C9 | anh | Có |
 | R2 | macOS | Claude Code | CLI/alpd: C1–C9 | anh | Có |
-| R3 | Linux | Codex | CLI/alpd: C1–C9 | anh (D1) | Có |
+| R3 | Linux | Codex | CLI/alpd: C1–C9 | CI `release-acceptance` (D6) | Có |
 | R4 | Linux | Claude Code | CLI/alpd: C1–C9 | anh (D1) | Có |
 | R5 | macOS | Codex và Claude (mỗi provider một session) | plugin trong Paseo 0.11.x, `alp web` loopback: W1–W6 | anh | Có |
-| R6 | Linux | Codex hoặc Claude | plugin trên Paseo 0.11.x, `alp web` loopback: W1–W6 (D4: anh đã xác nhận Paseo chạy được trên Linux) | anh (D1) | Có |
-| R7 | macOS và Linux | Codex và Claude | worktree/merge thật: `test/e2e/worktree-e2e.mjs` tại release SHA (mã nguồn, không phải tarball) | anh (macOS và Linux, D1) | Có |
+| R6 | Linux | Codex hoặc Claude | plugin trên Paseo 0.11.x, `alp web` loopback: W1–W6 (D4: anh đã xác nhận Paseo chạy được trên Linux) | CI, đợt 2 (D6); chưa có job | Có |
+| R7 | macOS và Linux | Codex và Claude | worktree/merge thật: `test/e2e/worktree-e2e.mjs` tại release SHA (mã nguồn, không phải tarball) | anh (macOS; Linux Claude); CI (Linux Codex, D6) | Có |
 
 ### 6.2 Coverage của các tính năng Included được review
 
@@ -270,6 +270,7 @@ macOS Node 24, Linux Node 22.12+.
 | R5 (macOS), R6 (Linux) | `ALP_HOME=<home mà Paseo dùng> node scripts/beta-acceptance-web.mjs --packs "$PACKS" --live --provider codex` (chạy lại với `claude` cho R5) |
 | R7 | `node scripts/beta-acceptance-r7.mjs --live --sha "$RELEASE_SHA" --model codex:<m> --model claude:<m>`, sau `npm ci && npm run build` ở release SHA |
 | Rehearsal, không phải evidence | thay `--live --provider …` bằng `--fake` (fake Codex của repo); row luôn có status `rehearsal` |
+| CI (D6): pack, `release:consumer`, R3, R7 phần Linux Codex | workflow `release-acceptance` (`workflow_dispatch`: `sha`, `live`, `codex_model`, `packs_run`); xem dưới |
 
 - Tùy chọn:
   - `--work DIR` (mặc định `$TMPDIR/alp-beta`);
@@ -289,6 +290,23 @@ macOS Node 24, Linux Node 22.12+.
 - [Local] Rehearsal `--fake` trên artifact rehearsal (`5c474f8`, checkout bẩn), Windows, Node 26.8.1:
   - CLI: 8 pass; C6, C7 skip vì cần model thật; Ctrl-C không thử trên Windows;
   - web: W6 pass.
+- `--unattended` (chỉ với `--live`, dùng trên CI): C5, C6, C8 được chấm bằng quy tắc ghi kèm trong
+  kết quả (C5: câu trả lời có số và `alp ps` không còn dòng `running`; C6: câu trả lời sau Deny nói bị
+  từ chối; C8: nhắc lại ít nhất một tên file mà C4 đã nêu). Bước không thỏa quy tắc vẫn là `check`,
+  dòng R vẫn `pending` cho tới khi người đọc kết quả. `--evidence URL` ghi link run CI vào row.
+- Exit code: 0 xong (live: pass), 1 có bước fail, 3 live nhưng dòng còn `pending`.
+- Workflow `release-acceptance` (D6):
+  - job `pack`: clone ở `sha` (phải nằm trên `main`), tạo tag `v0.0.0-beta.1` **chỉ trên runner**
+    (không push; anh push tag ở P5), `npm ci`, `build:web`, `build:packages`, `release:pack`,
+    `release:verify --sha`; upload artifact `alp-release` (90 ngày). Đây là bộ tarball duy nhất của
+    release; R1, R2, R5 trên macOS tải đúng artifact này (`gh run download <run> -n alp-release`).
+  - `packs_run`: dùng lại artifact của một run trước, không pack lại.
+  - job `consumer`: `sha256sum -c`, `release:consumer` trên Linux.
+  - job `r3-codex`: `live=false` chạy `--fake` (miễn phí, không phải evidence); `live=true` cài
+    `@openai/codex`, đăng nhập bằng secret `OPENAI_API_KEY`, chạy `--live --unattended`.
+  - job `r7-codex` (chỉ live): `npm ci && npm run build`, rồi R7 với `codex:<model>`; dòng R7 cố ý
+    còn `pending` (exit 3) vì cần thêm Claude và macOS.
+  - Kết quả và log là artifact `acceptance-*`; anh chép fragment `rows` vào file evidence.
 - Harness thay việc gõ tay nhưng không thay tiêu chí: một dòng R chỉ pass khi mọi bước pass, kể cả
   các bước `CHECK` đã được người chạy xác nhận.
 
@@ -565,7 +583,8 @@ Trạng thái [Local] lúc cập nhật tài liệu: T1–T3 **chưa triển kha
 | T6 | Phân loại `npm audit` (S1) | Có | đã phân loại local (§5). S1 chặn tới khi: F1 đã sửa (bạn license) hoặc anh chấp nhận trước P5; chạy lại trên `RELEASE_SHA`. F3 đã được anh chấp nhận (D5) |
 | T7 | Dọn npm: unpublish nếu đủ điều kiện, không thì deprecate (§1.1), gồm cả tên plugin cũ `alp-paseo-plugin` | anh làm | chưa làm |
 | T8 | Chạy §6 và §7, ghi kết quả vào §6.4 | anh (macOS, H2 tối 2026-10-16; Linux, lần đầu tối 2026-10-16, D1) | chưa làm |
-| T9 | Đưa client SDK smoke vào CI; workflow publish; thêm macOS vào lane `core`/`paseo` (tùy chọn, thay H2 chạy tay) | Không (sau beta) | deferred |
+| T9 | Đưa client SDK smoke vào CI; workflow publish; thêm macOS vào lane `core`/`paseo` (tùy chọn, thay H2 chạy tay) | Không (sau beta) | deferred; phần acceptance Linux kéo lên trước theo D6 (T12) |
+| T12 | Workflow `release-acceptance` (D6): đợt 1 pack + `release:consumer` + R3 + R7 Linux Codex; đợt 2 R6 (Paseo headless + Playwright cho W3–W6) | Có (R3, R6) | đợt 1 đã viết, chưa chạy trên `main`; đợt 2 chưa làm |
 | T10 | Test fake-provider cho câu hỏi quyền trong Paseo (§6.2, hàng duyệt quyền, ý 1) | Có | có test (chưa commit), pass local 17/17; chưa pass trên release SHA |
 | T11 | Sửa F3 (`linkify-it@2.2.0` trong `alp web`); owner anh | Không chặn beta.1; chặn beta.2, hạn 2026-11-15 | chưa làm |
 
@@ -632,5 +651,17 @@ provider thật.
     `0.0.0-beta.1`, `release:pack` chỉ chạy được với `--rehearsal`), nên chỉ để định hướng. Gate
     cần chạy lại trên release SHA với đúng 8 tarball đã lưu.
   - GitHub Actions tự động hóa C1–C9, W1/W2, W6: sau beta, gộp vào T9.
+
+**Quyết định của anh ngày 2026-10-16 (bổ sung):**
+- **D6.** Phần Linux chuyển sang GitHub Actions, thay D1 cho các dòng tương ứng:
+  - CI là máy build: một run `release-acceptance` pack đúng một lần; mọi dòng R, kể cả macOS, dùng
+    artifact đó. §7.2 chạy trên runner thay cho clone sạch trên máy anh; P1 (tag) chỉ tạo trên
+    runner, anh tạo tag cục bộ ở cùng SHA và push ở P5.
+  - CI chỉ gọi Codex (secret `OPENAI_API_KEY`, tính tiền theo token): R3 và phần Linux Codex của R7.
+  - R4 (Linux, Claude) và phần Linux Claude của R7: anh chạy tay sau. Lý do: ALP xóa mọi biến
+    `CLAUDE_CODE_*` trước khi chạy Claude, nên token OAuth subscription không tới được Claude trên CI.
+  - R6 làm ở đợt 2 trên CI; tới lúc đó R6 vẫn chặn gate.
+  - OpenCode (ACP, experimental) không thay được Codex/Claude cho R3/R4: nó đi đường code khác và
+    ALP không có sandbox quanh agent ACP.
 
 Không còn quyết định nào mở trong scope này.
