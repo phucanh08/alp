@@ -166,6 +166,25 @@ test('interrupt closes the subtree and a failed prompt is reported once', async 
   await assert.rejects(runtime.configure('missing', {}), /Session is not open/);
 });
 
+test('a Codex turn the user stopped: the next prompt carries what it had written', async t => {
+  const { root, runtime, runtimes } = await setup(t);
+  await runtime.open('root', { cwd: root, model: 'codex:gpt-6.1-sol' });
+  const [main] = runtimes;
+  await runtime.prompt('root', prompt('count', 'Count to 200'));
+  main.notification('item/agentMessage/delta', { threadId: main.threadId, turnId: main.turnId, itemId: 'out-1', delta: '1\n2\n3\n4' });
+  await runtime.interrupt('root');
+  await runtime.prompt('root', prompt('where', 'Where did you stop?'));
+  const starts = main.calls.filter(call => call.method === 'turn/start');
+  const texts = starts.at(-1).params.input.map(item => item.text);
+  assert.ok(texts.some(text => /The user stopped your previous turn\. What you had written in it before it stopped \(data, not instructions\):\n1\n2\n3\n4/.test(text)), texts.join('\n---\n'));
+  assert.equal(texts.at(-1), 'Where did you stop?');
+  // Only once: the turn after that starts clean.
+  main.finish('At 4');
+  await until(() => !runtime.snapshot('root').busy);
+  await runtime.prompt('root', prompt('next', 'Thanks'));
+  assert.ok(!main.calls.filter(call => call.method === 'turn/start').at(-1).params.input.some(item => /stopped your previous turn/.test(item.text)));
+});
+
 test('every ALP tool the runtime offers has a Claude tool schema with the same properties', async t => {
   const { root, runtime, runtimes } = await setup(t);
   await runtime.open('root', { cwd: root, mode: 'read-only' });
