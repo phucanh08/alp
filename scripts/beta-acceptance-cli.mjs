@@ -17,6 +17,9 @@ const USAGE = `Usage: node scripts/beta-acceptance-cli.mjs --packs <dir> (--fake
   --work DIR        where the consumer, ALP_HOME, project, logs and results go (default: $TMPDIR/alp-beta)
   --rehearsal       accept a rehearsal pack (dirty checkout, no tag); its results are never gate evidence
   --runner NAME     who ran it, for the gate row (default: the OS user)
+  --unattended      live, no person (CI): C5, C6 and C8 are judged by the rules they record; a step
+                    the rules cannot confirm stays "check" and the row pending (exit 3)
+  --evidence URL    the row's evidence, e.g. the CI run (default: the results file)
 
 Every run gets a fresh ALP_HOME under --work; ~/.alp is never read or written.`;
 
@@ -27,7 +30,7 @@ if (opts.live && !['darwin', 'linux'].includes(process.platform)) { console.erro
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const name = `cli-${provider}-${opts.live ? 'live' : 'fake'}-${stamp}`;
-const run = new Run({ work: opts.work, name, row: gateRow('cli', provider), mode: opts.live ? 'live' : 'fake', runner: opts.runner });
+const run = new Run({ work: opts.work, name, row: gateRow('cli', provider), mode: opts.live ? 'live' : 'fake', runner: opts.runner, evidence: opts.evidence });
 const base = path.join(opts.work, name);
 const home = path.join(base, 'home');
 const restoredHome = path.join(base, 'home-restored');
@@ -46,6 +49,7 @@ const live = !opts.fake;
 const start = (label, prompt, extra = []) => follow(run, label, ['run', '--json', '--team', 'pho', ...extra, prompt], { env, cwd: project, alp });
 const ended = (stream, state) => stream.next(envelope => envelope.sessionId === stream.rootId && envelope.event?.type === 'turn.ended' && state(envelope.event.state), 'the end of the root turn');
 let c4Root;
+let c4Named = [];
 let marker;
 
 mkdirSync(project, { recursive: true });
@@ -99,6 +103,8 @@ try {
     if (!answer) throw new Error('no answer streamed');
     const ps = cli('C4', ['ps', '--all']).stdout;
     if (!ps.includes(c4Root.slice(0, 12))) throw new Error(`alp ps --all does not list ${c4Root}`);
+    // What C8 should remember: the project's entries this answer names.
+    c4Named = readdirSync(project).filter(entry => entry !== '.git' && answer.toLowerCase().includes(entry.toLowerCase()));
     run.record('C4', 'pass', `session ${c4Root} answered and is listed`, { session: c4Root, answer: answer.slice(0, 2000) });
   });
 
@@ -128,7 +134,12 @@ try {
     const sent = await again.exit;
     if (sent !== 0) throw new Error(`alp send after the interrupt exited ${sent}`);
     run.record('C5', live ? 'check' : 'pass', `${states.join('; ')}; alp send ran${live ? ' — read its answer' : ''}`, { session: first.rootId, ps, answer: again.answers().at(-1)?.slice(0, 2000) });
-    if (live) await confirmStep('C5', 'The answer says where the count stopped, and alp ps showed no running turn.');
+    const answer = again.answers().at(-1) ?? '';
+    const busy = ps.split('\n').filter(line => /\srunning\s/.test(line));
+    if (live) await confirmStep('C5', 'The answer says where the count stopped, and alp ps showed no running turn.', {
+      ok: /\d/.test(answer) && !busy.length,
+      rule: `the answer names a number (${/\d/.test(answer) ? 'yes' : 'no'}) and no alp ps line is running (${busy.length ? busy.join(' | ') : 'none'})`,
+    });
   });
 
   await run.step('C6', 'permission questions through alp questions / alp answer', async () => {
@@ -151,7 +162,10 @@ try {
       if (!rules.some(rule => rule.startsWith('Bash(mkdir'))) throw new Error(`Always allow added no mkdir rule to profile review (allow: ${JSON.stringify(rules)})`);
       const after = await permission('C6-again', say('mkdir -p c6-always'), null);
       run.record('C6', 'check', `Allow once ran it, Deny refused it, Always allow added ${rules.join(', ')}, and the same command then ran without a question — read the Deny answer`, { sessions: [once.root, deny.root, always.root, after.root], denyAnswer: deny.answer?.slice(0, 1000) });
-      await confirmStep('C6', 'After Deny the agent said it was refused (see denyAnswer in the results).');
+      const refused = /từ chối|bị chặn|không được phép|không có quyền|denied|refused|rejected|declined|not (allowed|permitted)/i.test(deny.answer ?? '');
+      await confirmStep('C6', 'After Deny the agent said it was refused (see denyAnswer in the results).', {
+        ok: refused, rule: `the Deny answer ${refused ? 'says' : 'does not say'} it was refused (từ chối / denied / refused / not allowed …)`,
+      });
     } finally {
       // Main must write again for C7; the rule Always allow added is already in the evidence.
       writeFileSync(settingsFile, original);
@@ -184,7 +198,11 @@ try {
     if (code !== 0) throw new Error(`alp send exited ${code}`);
     const answer = stream.answers().at(-1);
     run.record('C8', live ? 'check' : 'pass', `the C4 session ran on after the restart${live ? ' — read whether it remembers' : ''}`, { session: c4Root, answer: answer?.slice(0, 2000) });
-    if (live) await confirmStep('C8', `It repeats the C4 answer (see "answer" of C4 and C8 in the results):\n  ${answer?.slice(0, 400)}`);
+    const recalled = c4Named.filter(entry => (answer ?? '').toLowerCase().includes(entry.toLowerCase()));
+    if (live) await confirmStep('C8', `It repeats the C4 answer (see "answer" of C4 and C8 in the results):\n  ${answer?.slice(0, 400)}`, {
+      ok: recalled.length > 0,
+      rule: c4Named.length ? `names again what C4 named (${c4Named.join(', ')}): ${recalled.join(', ') || 'none'}` : 'C4 named no entry of the project, so nothing to compare',
+    });
   });
 
   await run.step('C9', 'backup, verify, dry-run restore, restore into a new ALP_HOME', async () => {
@@ -247,8 +265,16 @@ async function permission(label, prompt, key, choices) {
   return { root: stream.rootId, answer: stream.answers().at(-1), question: event.question };
 }
 
-/** Turns a "check" step into pass or fail when a person confirms it on a terminal. */
-async function confirmStep(id, what) {
+/**
+ * Turns a "check" step into pass or fail when a person confirms it on a terminal. Unattended, the
+ * rule `judged` decides a pass; a step it cannot confirm stays "check" for a person to read.
+ */
+async function confirmStep(id, what, judged) {
+  if (opts.unattended) {
+    if (judged.ok) run.record(id, 'pass', `judged unattended: ${judged.rule}`);
+    else run.record(id, 'check', `unattended rule not met, a person must read the results: ${judged.rule}`);
+    return;
+  }
   const verdict = await confirm(`${id}: ${what}`);
   if (verdict === undefined) return;
   run.record(id, verdict ? 'pass' : 'fail', verdict ? 'confirmed by the person running it' : 'the person running it did not see that');

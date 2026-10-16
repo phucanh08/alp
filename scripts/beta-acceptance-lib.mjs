@@ -8,6 +8,10 @@
 //   --fake  hermetic: the repository's fake Codex (no model calls, no cost). Checks the harness and
 //           the install; it is never gate evidence and records status "rehearsal".
 //   --live  opt-in: the real provider of --provider, at the user's cost. Only this can pass a row.
+//
+// A live run asks a person to confirm what a script cannot see for itself. With --unattended (CI,
+// .github/workflows/release-acceptance.yml) a step a script can judge is judged by the rule it
+// records; one it cannot judge stays "check", so the row stays pending until a person reads it.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -34,18 +38,20 @@ export function options(usage, extra = {}) {
   try {
     parsed = parseArgs({ args: process.argv.slice(2), options: {
       packs: { type: 'string' }, work: { type: 'string' }, fake: { type: 'boolean' }, live: { type: 'boolean' },
-      rehearsal: { type: 'boolean' }, runner: { type: 'string' }, help: { type: 'boolean', short: 'h' }, ...extra,
+      rehearsal: { type: 'boolean' }, runner: { type: 'string' }, unattended: { type: 'boolean' }, evidence: { type: 'string' },
+      help: { type: 'boolean', short: 'h' }, ...extra,
     } }).values;
   } catch (error) { console.error(`${error.message}\n\n${usage}`); process.exit(2); }
   if (parsed.help) { console.log(usage); process.exit(0); }
   if (!!parsed.fake === !!parsed.live) { console.error(`Choose exactly one of --fake (hermetic) or --live (real provider, costs money).\n\n${usage}`); process.exit(2); }
+  if (parsed.unattended && !parsed.live) { console.error(`--unattended judges live steps; a --fake run has none to judge.\n\n${usage}`); process.exit(2); }
   parsed.work = path.resolve(parsed.work ?? path.join(os.tmpdir(), 'alp-beta'));
   return parsed;
 }
 
 /** One acceptance run: its steps, logs and the row fragment for the gate evidence. */
 export class Run {
-  constructor({ work, name, row, mode, manifest, runner }) {
+  constructor({ work, name, row, mode, manifest, runner, evidence }) {
     this.work = work;
     this.logs = path.join(work, 'logs', name);
     mkdirSync(this.logs, { recursive: true });
@@ -56,6 +62,8 @@ export class Run {
     this.steps = [];
     this.environment = `${os.type()} ${os.release()} ${os.arch()}, node ${process.version}, npm ${capture('npm', ['-v']).trim() || '?'}`;
     this.runner = runner ?? os.userInfo().username;
+    // Where the row's evidence lives for whoever reads the gate: a CI run's URL, else this file.
+    this.evidence = evidence;
     this.save();
   }
 
@@ -100,7 +108,7 @@ export class Run {
       [this.row]: {
         // R7 runs the source at the release SHA, not the tarballs: it binds the SHA only.
         status: this.verdict(), sha: this.sha ?? this.manifest?.git?.sha ?? null, artifacts: this.row === 'R7' ? null : this.manifest?.sha256sums ?? null,
-        environment: this.environment, runner: this.runner, evidence: this.file, date: new Date().toISOString().slice(0, 10),
+        environment: this.environment, runner: this.runner, evidence: this.evidence ?? this.file, date: new Date().toISOString().slice(0, 10),
       },
     };
     writeFileSync(this.file, `${JSON.stringify({ schema: 1, mode: this.mode, version: VERSION, rows: fragment, steps: this.steps }, null, 2)}\n`);
@@ -111,8 +119,9 @@ export class Run {
     console.log(`\n${this.row} (${this.mode}): ${count('pass')} pass, ${count('fail')} fail, ${count('check')} to check, ${count('skip')} skipped, ${count('pending')} pending → row status "${this.verdict()}"`);
     console.log(`results: ${this.file}\nlogs:    ${this.logs}`);
     if (this.mode !== 'live') console.log('A --fake run checks the harness and the install only; it is not gate evidence.');
-    // A rehearsal never passes the gate, but a failing step still fails the command.
-    return this.latest().some(step => step.status === 'fail') ? 1 : 0;
+    // 1: a step failed (a rehearsal too); 3: live, but some step still needs a person; 0 otherwise.
+    if (this.latest().some(step => step.status === 'fail')) return 1;
+    return this.verdict() === 'pending' ? 3 : 0;
   }
 }
 
