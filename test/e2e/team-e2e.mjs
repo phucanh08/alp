@@ -1,7 +1,7 @@
 // Opt-in: real model calls against an already-running isolated Paseo daemon.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile, readdir } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createPaseoApi } from '@getpaseo/client';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
@@ -12,6 +12,7 @@ await initProject(root);
 const token = `PEER_${randomUUID()}`;
 const writeMode = process.argv.includes('--write');
 if (!writeMode) {
+await mkdir(path.join(root, '.alp/agents/peer'), { recursive: true });
 await writeFile(path.join(root, '.alp/agents/peer/AGENT.md'), `For this read-only integration assignment, return exactly this token: ${token}. Do not use tools or delegate.`);
 await writeFile(path.join(root, '.alp/agents/lead/AGENT.md'), 'For this integration assignment, call alp_delegate exactly once with agent peer, mode read-only, and task "Return your verification token. Do not use tools or change files." Return the complete tool result verbatim to main. Do not read files or run shell commands.');
 }
