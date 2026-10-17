@@ -4,7 +4,8 @@
 // the character (Alt+1 types "¡" on a Mac), so the same keys work on any layout and platform.
 //
 // Left out, as ALP has no such thing: open project (Cmd+O), search files (Cmd+P), pin, browser
-// tabs, split panes, focus mode, themes, voice and dictation.
+// tabs, focus mode, themes, voice and dictation. The split pane keys are Paseo's, on a Mac only
+// (as Paseo binds them).
 
 /** @typedef {'general' | 'workspaces' | 'tabs-panes' | 'layout' | 'agent-input'} SectionId */
 /**
@@ -18,11 +19,13 @@
  *   scope?: 'other',
  *   handledElsewhere?: boolean,
  *   note?: string,
+ *   mac?: boolean,
  * }} Binding
  *   section and label: the row of the shortcuts dialog (a binding without them is an alias).
  *   display: the keys the dialog shows when the combo cannot say it (the 1-9 wildcard).
  *   scope 'other': only when no text field has focus.
  *   handledElsewhere: listed in the dialog; its own component handles it (the composer's keys).
+ *   mac: on a Mac only (Paseo's pane keys).
  */
 
 /** @type {Array<{ id: SectionId, title: string }>} */
@@ -55,6 +58,17 @@ export const BINDINGS = [
   { action: 'tab.index', combo: 'Alt+Shift+Digit', section: 'tabs-panes', label: 'Jump to tab', display: ['alt', 'shift', '1-9'] },
   { action: 'tab.relative', combo: 'Alt+Shift+[', delta: -1, section: 'tabs-panes', label: 'Previous tab' },
   { action: 'tab.relative', combo: 'Alt+Shift+]', delta: 1, section: 'tabs-panes', label: 'Next tab' },
+  { action: 'pane.split.right', combo: 'Cmd+\\', section: 'tabs-panes', label: 'Split pane right', mac: true },
+  { action: 'pane.split.down', combo: 'Cmd+Shift+\\', section: 'tabs-panes', label: 'Split pane down', mac: true },
+  { action: 'pane.focus.left', combo: 'Cmd+Shift+ArrowLeft', section: 'tabs-panes', label: 'Focus pane left', mac: true, scope: 'other' },
+  { action: 'pane.focus.right', combo: 'Cmd+Shift+ArrowRight', section: 'tabs-panes', label: 'Focus pane right', mac: true, scope: 'other' },
+  { action: 'pane.focus.up', combo: 'Cmd+Shift+ArrowUp', section: 'tabs-panes', label: 'Focus pane up', mac: true, scope: 'other' },
+  { action: 'pane.focus.down', combo: 'Cmd+Shift+ArrowDown', section: 'tabs-panes', label: 'Focus pane down', mac: true, scope: 'other' },
+  { action: 'pane.move.left', combo: 'Cmd+Alt+Shift+ArrowLeft', section: 'tabs-panes', label: 'Move tab left', mac: true },
+  { action: 'pane.move.right', combo: 'Cmd+Alt+Shift+ArrowRight', section: 'tabs-panes', label: 'Move tab right', mac: true },
+  { action: 'pane.move.up', combo: 'Cmd+Alt+Shift+ArrowUp', section: 'tabs-panes', label: 'Move tab up', mac: true },
+  { action: 'pane.move.down', combo: 'Cmd+Alt+Shift+ArrowDown', section: 'tabs-panes', label: 'Move tab down', mac: true },
+  { action: 'pane.close', combo: 'Cmd+Shift+W', section: 'tabs-panes', label: 'Close pane', mac: true, note: 'Some browsers keep this key to close the window.' },
 
   { action: 'sidebar.left', combo: 'Mod+B', section: 'layout', label: 'Toggle left sidebar' },
   { action: 'sidebar.right', combo: 'Mod+E', section: 'layout', label: 'Toggle Explorer sidebar' },
@@ -93,7 +107,7 @@ function parse(combo, mac) {
  */
 export function matchShortcut(event, { mac, editable = false, bindings = BINDINGS }) {
   for (const binding of bindings) {
-    if (binding.handledElsewhere) continue;
+    if (binding.handledElsewhere || (binding.mac && !mac)) continue;
     if (binding.scope === 'other' && editable) continue;
     const { key, mods } = parse(binding.combo, mac);
     if (event.metaKey !== mods.meta || event.ctrlKey !== mods.ctrl || event.altKey !== mods.alt || event.shiftKey !== mods.shift) continue;
@@ -120,7 +134,7 @@ export function shortcutKeys(binding, mac) {
   return keys;
 }
 
-const KEY_DISPLAY = /** @type {Record<string, string>} */ ({ Backspace: '⌫', Enter: '⏎', Escape: 'Esc', Space: '␣' });
+const KEY_DISPLAY = /** @type {Record<string, string>} */ ({ Backspace: '⌫', Enter: '⏎', Escape: 'Esc', Space: '␣', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓' });
 
 /** Paseo's formatShortcut: ⌃⌥⇧⌘ then the key on a Mac, Ctrl+Shift+N elsewhere. @param {string[]} keys @param {boolean} mac */
 export function formatShortcut(keys, mac) {
@@ -136,7 +150,7 @@ export function formatShortcut(keys, mac) {
 
 /** The first binding of an action, formatted, for hints beside the controls it drives. @param {string} action @param {boolean} mac */
 export function shortcutLabel(action, mac) {
-  const binding = BINDINGS.find(entry => entry.action === action && entry.label);
+  const binding = BINDINGS.find(entry => entry.action === action && entry.label && (!entry.mac || mac));
   return binding ? formatShortcut(shortcutKeys(binding, mac), mac) : '';
 }
 
@@ -148,7 +162,7 @@ export function helpSections(mac, query = '') {
   const needle = query.trim().toLowerCase();
   return SECTIONS.map(section => ({
     ...section,
-    rows: BINDINGS.filter(binding => binding.section === section.id && binding.label)
+    rows: BINDINGS.filter(binding => binding.section === section.id && binding.label && (!binding.mac || mac))
       .map(binding => ({ id: `${binding.action}:${binding.combo}`, label: /** @type {string} */ (binding.label), keys: formatShortcut(shortcutKeys(binding, mac), mac), ...(binding.note ? { note: binding.note } : {}) }))
       .filter(row => !needle || row.label.toLowerCase().includes(needle) || row.keys.toLowerCase().includes(needle)),
   })).filter(section => section.rows.length);
