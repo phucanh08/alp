@@ -1,6 +1,6 @@
 # ALP remote gateway (Task 08)
 
-> **Trạng thái beta `0.0.0-beta.1`: deferred.** `@anhlp/alp-gateway` không phát hành trong beta
+> **Trạng thái beta `0.0.0-beta.2`: deferred.** `@anhlp/alp-gateway` không phát hành trong beta
 > (private), và chế độ remote của plugin cũng deferred. Tài liệu này mô tả mã trong repo cho phát
 > triển, không phải hướng dẫn cài đặt. Phạm vi: [beta-scope.md](beta-scope.md) §2, §4.
 

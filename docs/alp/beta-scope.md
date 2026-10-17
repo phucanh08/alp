@@ -1,4 +1,8 @@
-# Phạm vi beta đầu tiên (`0.0.0-beta.1`)
+# Phạm vi beta (`0.0.0-beta.1`, `0.0.0-beta.2`)
+
+> **Beta.2 (`0.0.0-beta.2`):** phạm vi, gate, kế hoạch publish và acceptance ở **§11**. §1–§10 là
+> quy trình và kết quả của beta.1, giữ nguyên làm lịch sử; §11 dùng lại quy trình đó với version
+> mới và ghi chỗ khác.
 
 Đã chốt với anh ngày 2026-10-16; bổ sung các điểm review cùng ngày (§10). Tài liệu này chốt phạm vi,
 gate và quy trình phát hành tay. Nó không thay cho kiểm thử trên release SHA: bằng chứng cũ (CI,
@@ -648,7 +652,7 @@ Trạng thái ngày 2026-10-16, ở release SHA `2230aa5`.
 | T9 | Đưa client SDK smoke vào CI; workflow publish; ~~thêm macOS vào lane `core`/`paseo`~~ (đã làm theo D8) | Không (sau beta) | deferred; phần acceptance Linux kéo lên trước theo D6 (T12) |
 | T12 | Workflow `release-acceptance` (D6, D7): pack một lần trên CI + `release:consumer` + rehearsal fake (Codex, Claude, W6) trên macOS, Ubuntu, Windows | Có (pack là bộ tarball của release) | xong (PR #102); bộ tarball release: [release-acceptance 38901108957](https://github.com/phucanh08/alp/actions/runs/38901108957) |
 | T10 | Test fake-provider cho câu hỏi quyền trong Paseo (§6.2, hàng duyệt quyền, ý 1) | Có | xong: test đã merge, pass trong `validate:paseo` ở release SHA (H1, H2) |
-| T11 | Sửa F3 (`linkify-it@2.2.0` trong `alp web`); owner anh | Không chặn beta.1; chặn beta.2, hạn 2026-11-15 | chưa làm |
+| T11 | Sửa F3 (`linkify-it@2.2.0` trong `alp web`); owner anh | Không chặn beta.1; chặn beta.2, hạn 2026-11-15 | chưa làm ở `99a8d15`; chờ anh quyết định D9 (§11.5) |
 | T13 | Claude stream text vào Paseo/`alp web` (`includePartialMessages`, map `stream_event`) | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16) | chưa làm; [#107](https://github.com/phucanh08/alp/issues/107) |
 | T14 | `paseo plugin add npm:@anhlp/alp-paseo@beta` cài được: không ship `.d.ts` import type từ peer `@getpaseo/*` (hoặc bỏ hẳn `.d.ts` của plugin); thêm kiểm CI cài plugin như Paseo cài nguồn `npm:` (`--legacy-peer-deps`); rồi bỏ cách tạm khỏi docs | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16); chặn beta.2 | đã sửa, chờ publish beta.2 (plugin không ship `.d.ts`; `scripts/paseo-source-check.mjs` trong `release:tarball-check`/`validate:packages`; docs dùng `npm:`, cách tạm chỉ còn cho beta.1); [#111](https://github.com/phucanh08/alp/issues/111) |
 
@@ -769,3 +773,111 @@ provider thật.
 - Ghi nhận nhỏ: `alp --version` in usage thay vì version.
 
 Không còn quyết định nào mở trong scope này.
+
+## 11. Beta.2 (`0.0.0-beta.2`)
+
+Soạn ngày 2026-10-17 (task t-4393.2), trên nhánh `release/beta.2` từ `origin/main` `99a8d15`.
+Chưa có release SHA: SHA chốt là commit merge của PR release vào `main` (§11.3). Chưa publish,
+deprecate hay tag gì.
+
+### 11.1 Phạm vi
+
+- Cùng 8 package, cùng dist-tag `beta`, cùng nền tảng và mức hỗ trợ như §2–§4. Mọi manifest (8
+  package phát hành và 3 workspace private) ở `0.0.0-beta.2`; dependency nội bộ pin đúng version
+  (`npm run version:package` cho 7 workspace phát hành, root và 3 workspace private sửa tay như
+  T1, rồi `npm install --package-lock-only`). `scripts/beta-acceptance-lib.mjs` `VERSION` đổi theo.
+- Thay đổi so với beta.1: PR #113, #123, #124 (danh sách: `beta-release-notes.md`, mục "What
+  changed since 0.0.0-beta.1"). Phần vào package phát hành: plugin cài được từ `npm:` (#111,
+  T14), bridge Paseo không stream lại cả message, chi tiết tool có kiểu trong Paseo, các RPC
+  additive của alpd (tên session, `session.list` phân trang và tìm, `question.watch`, theo dõi
+  turn end, `daemon.hello` có hostname, ảnh inline trong `session.prompt`, usage, `files.read`,
+  tool details), sửa preview team, team custom trong `alp acp`, git của workspace. `apps/web` và
+  `@anhlp/alp-gateway` có nhiều thay đổi nhưng vẫn deferred, không phát hành.
+- State schema không đổi (`STATE_SCHEMA` = 2 như beta.1): từ beta.1 lên beta.2 không có migrate.
+- Known issues: như beta.1, bỏ #111 (đã sửa, chờ Q3 xác nhận trên registry), giữ #107 (T13) và
+  F3 (T11, chờ D9).
+
+### 11.2 Pre-publish gate
+
+Như §6.1, §6.4 và §7.1–§7.3, với `0.0.0-beta.2` thay cho `0.0.0-beta.1`. Mọi dòng chạy trên
+**release SHA mới** và **bộ 8 tarball mới** pack một lần ở SHA đó; không dòng nào của beta.1
+được tính lại.
+
+| # | Ở beta.2 | Chặn |
+|---|---|---|
+| H1–H4 | CI ở release SHA (job `core`, `paseo`, `core-paseo-macos`, `packages-and-web`, `windows-daemon`). `packages-and-web` có thêm `paseo-source-check` (#111): cài plugin như Paseo cài nguồn `npm:` và chạy compiler plugin của Paseo | Có |
+| H5 | CI `alp-web` | Không |
+| L1 | `release:check-version`; manifest và license | Có |
+| S1 | `npm audit --omit=dev` trên repo và `npm audit` trên consumer cài 8 tarball, bật kiểm TLS. Lockfile đổi so với beta.1, nên phải chạy lại | Có |
+| A5 | `release:pack` + `release:verify --sha` trên bộ tarball mới | Có |
+| R1, R2 | macOS, Codex và Claude, CLI C1–C9 trên tarball mới | Có |
+| R5 | macOS, plugin và `alp web`, W1–W6, như beta.1. W1 thêm plugin bằng đường dẫn trong consumer (đã có peer), nên không thử đường `npm:` của Paseo; đường đó do H3 (`paseo-source-check`) kiểm trên tarball và Q3 kiểm trên registry | Có |
+| R3, R4, R6 | Linux, khi có thể (D7) | Không |
+| R7 | `beta-acceptance-r7.mjs` ở release SHA, Codex và Claude, macOS | Có (phần macOS) |
+| T11/F3 | sửa xong, hoặc anh ghi D9 chấp nhận lại (§11.5) | Có, theo §8 |
+
+Lệnh gate local đã chạy trên nhánh release (chưa phải release SHA; chỉ để định hướng): §11.6.
+
+### 11.3 Kế hoạch publish
+
+1. **P0.** PR `chore(release): 0.0.0-beta.2` xanh CI và merge vào `main` theo branch protection.
+   `RELEASE_SHA` = commit đó trên `main`; `git status` sạch.
+2. **P1–P3 (D6).** Chạy workflow `release-acceptance` ở `sha=$RELEASE_SHA`: job `pack` tạo tag
+   `v0.0.0-beta.2` chỉ trên runner, `npm ci`, `build:web`, `build:packages`, `release:pack`,
+   `release:verify --sha`, upload artifact `alp-release`. Tải về đúng artifact này:
+   `gh run download <run> -n alp-release -D /tmp/alp-release` (artifact đã chứa thư mục
+   `v0.0.0-beta.2/`), rồi `OUT=/tmp/alp-release/v0.0.0-beta.2`; trong `$OUT` kiểm
+   `shasum -a 256 -c SHA256SUMS`, `release-manifest.json` có `version` `0.0.0-beta.2`,
+   `git.sha` = `RELEASE_SHA`, `git.dirty` false, `pack.rehearsal` false; khóa thư mục
+   (`chmod -R a-w`) và lưu một bản sao.
+3. **P4.** `npm run release:gate -- "$OUT" --init release-evidence-beta2.json` (file **ngoài**
+   `$OUT`); A5 (`release:verify -- "$OUT" --sha "$RELEASE_SHA" --record …`), `release:consumer`,
+   R1, R2, R5, R7 (harness §6.3, `PACKS=$OUT`), H1–H5 (link CI), L1, S1 vào evidence;
+   `npm run release:gate -- "$OUT" release-evidence-beta2.json --phase publish` exit 0.
+   Kiểm registry: `npm whoami` = `anhlp`; cả 8 package E404 ở `0.0.0-beta.2`.
+4. **P5.** Anh go/no-go. `git tag -a v0.0.0-beta.2 "$RELEASE_SHA" -m "ALP 0.0.0-beta.2"`,
+   `git push origin v0.0.0-beta.2`; draft prerelease (§7.6, đổi version), notes từ
+   `beta-release-notes.md` phần beta.2 với checksum đã điền.
+5. **Publish (§7.4)**, đúng thứ tự protocol → core → runtime → client → daemon → cli → paseo →
+   root, `--dry-run` trước, rồi từng package một:
+   `npm publish ./anhlp-alp-<pkg>-0.0.0-beta.2.tgz --tag beta --access public`, ngay sau mỗi
+   package `npm view @anhlp/alp-<pkg>@0.0.0-beta.2 dist.integrity` phải bằng manifest. Publish dở
+   dang: §7.7 (sửa mã thì lên `0.0.0-beta.3`).
+
+### 11.4 Post-publish acceptance và dọn npm
+
+Như §7.5 với `0.0.0-beta.2`:
+
+| # | Ở beta.2 |
+|---|---|
+| Q1 | `beta` = `0.0.0-beta.2` cả 8; integrity khớp manifest. Ghi `latest` trước Q4: dự kiến vẫn `0.0.0-beta.1` cả 8 (tên đã có `latest`, §1.2) |
+| Q2 | Cài sạch `@anhlp/alp@beta @anhlp/alp-paseo@beta` ở HOME và prefix mới: mọi `@anhlp/*` là `0.0.0-beta.2`; lockfile consumer khớp manifest |
+| Q3 | C1, C2, C4 với một provider; **`paseo plugin add npm:@anhlp/alp-paseo@beta` phải thành công** (dòng hỏng ở beta.1, #111), W2, W6. Pass thì đóng #111 |
+| Q4 | Sau Q1–Q3 và `release:gate … --phase latest` exit 0: `npm dist-tag add @anhlp/<pkg>@0.0.0-beta.2 latest` cho cả 8 |
+| Q5 | Cài không tag: mọi `@anhlp/*` là `0.0.0-beta.2` |
+
+Dọn npm sau Q3 (anh go): chạy lại `npm deprecate` cho tên plugin cũ với thông điệp đã chuẩn bị
+ở §1.1, vì cách cài `npm:` giờ đã chạy:
+
+```sh
+npm deprecate alp-paseo-plugin 'Đổi tên thành @anhlp/alp-paseo. Cài: paseo plugin remove alp-provider; paseo plugin add npm:@anhlp/alp-paseo@beta'
+npm view alp-paseo-plugin@0.10.0 deprecated   # thông điệp mới; có thể chậm khoảng 30 giây (cache)
+```
+
+Không deprecate `0.0.0-beta.1` (bản tốt, chỉ có known issue #111 đã có cách tạm). Không đổi các
+deprecate khác của T7. Cuối cùng `release:gate … --phase announce` exit 0 rồi bỏ draft.
+
+### 11.5 Quyết định còn mở
+
+- **D9 (anh).** F3/T11 ghi "chặn beta.2", hạn "trước beta.2 hoặc 2026-11-15" (D5), và chưa sửa
+  ở `99a8d15`. Trước P4, anh chọn: (a) sửa F3 trước beta.2 (theo audit: patch ALP trong
+  `paseo-web/patches` tắt linkify cho tin nhắn dài, build lại web app; chạy lại A5, R5), hoặc
+  (b) chấp nhận lại cho beta.2, giữ known issue và đặt hạn mới. Notes beta.2 đang ghi "Decision
+  pending (D9)"; phải sửa theo quyết định trước khi tạo draft release.
+
+### 11.6 Kết quả (điền khi chạy)
+
+| # | SHA | Tarball | Máy, OS, Node | Kết quả | Bằng chứng |
+|---|---|---|---|---|---|
+| Gate local, nhánh release | `99a8d15` + diff release (trước merge) | rehearsal, không phải evidence | macOS arm64, Node 26.3.0 (experimental), npm 11.16.0 | pass | `release:check-version`; `release:check` (999 test: 994 pass, 0 fail, 5 skip; pack-check 8 package); `validate:core` 467/471 (4 skip); `validate:paseo` 144/144 và 197/198 (1 skip); `validate:packages` (A5, `release-consumer`, `paseo-source-check` với compiler Paseo); `validate:web` 186/186 unit, 40/40 e2e; `release:pack --rehearsal` + `release:verify` + `release:gate --init`/`--phase publish` (11 dòng chặn còn mở, đúng dự kiến). Lần chạy `release:check` đầu có 1 fail `test/integration/service.test.js:55` (alpd.log rỗng ngay sau ready); chạy lại riêng 3/3 pass và pass trong `validate:paseo` |
+| H1–H5, L1, S1, A5, R1, R2, R5, R7, P4, P5, Publish, Q1–Q5 | — | — | — | chưa chạy | — |

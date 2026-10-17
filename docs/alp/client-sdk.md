@@ -1,6 +1,6 @@
 # ALP client SDK: portable client, transports và tương thích Node
 
-> **Trạng thái beta `0.0.0-beta.1`:** `@anhlp/alp-client` phát hành trong beta. Entry
+> **Trạng thái beta `0.0.0-beta.2`:** `@anhlp/alp-client` phát hành trong beta. Entry
 > `@anhlp/alp-client/portable` và `/websocket` (browser, React Native) là **experimental**: không
 > nằm trong acceptance gate, smoke browser/Metro/tarball chưa vào CI. React Native trên Hermes hoặc
 > thiết bị thật: deferred. Kết quả ở §7 là bằng chứng lịch sử (2026-10-15, Node 26.3), không chạy
