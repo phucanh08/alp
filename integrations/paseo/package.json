@@ -69,27 +69,21 @@
   },
   "exports": {
     ".": {
-      "types": "./server/dist/index.d.ts",
       "default": "./server/dist/index.js"
     },
     "./main": {
-      "types": "./server/dist/main.d.ts",
       "default": "./server/dist/main.js"
     },
     "./web": {
-      "types": "./server/dist/web.d.ts",
       "default": "./server/dist/web.js"
     },
     "./remote": {
-      "types": "./server/dist/remote/index.d.ts",
       "default": "./server/dist/remote/index.js"
     },
     "./paseo/*": {
-      "types": "./server/dist/paseo/*.d.ts",
       "default": "./server/dist/paseo/*.js"
     },
     "./panel/*": {
-      "types": "./server/dist/panel/*.d.ts",
       "default": "./server/dist/panel/*.js"
     }
   },
