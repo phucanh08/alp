@@ -2,7 +2,7 @@ import * as React from 'react';
 import { ArrowLeft, ListTodo, PanelLeft, X } from 'lucide-react';
 import { baseName } from '../lib/format';
 import { cn } from '../lib/utils';
-import { Tasks } from './panels';
+import { Tasks } from './TaskBoard';
 import { TaskDetail } from './TaskDetail';
 import { useAppState } from './store';
 import { isEditable } from '../lib/shortcuts.js';
@@ -13,10 +13,11 @@ const headerButton = cn('flex size-8 shrink-0 items-center justify-center rounde
 /**
  * ALP's Tasks screen, as the alp-provider plugin opens it in paseo-web with "Open ALP tasks full
  * screen" (integrations/paseo, docs/alp/paseo-plugin.md): the project's task board in place of the
- * workspace (the sidebar stays, as on paseo-web; on a phone that is the whole screen). Its
- * header's close button (or Escape) goes back to the workspace. A task picked from the list shows
- * beside it when the screen is 820 px wide or more, in place of it otherwise, where the detail's
- * back arrow shows the list again.
+ * workspace (the sidebar stays, as on paseo-web; on a phone that is the whole screen), with its
+ * List, Board and Epics views, filters and search (TaskBoard.tsx). Its header's close button (or
+ * Escape) goes back to the workspace. A task picked from the board shows beside it when the
+ * screen is 820 px wide or more, in place of it otherwise, where the detail's back arrow shows
+ * the board again.
  */
 export function TasksScreen({ navOpen, onToggleNav, onClose }: { navOpen: boolean; onToggleNav: () => void; onClose: () => void }) {
   const { workspace } = useAppState();
@@ -60,8 +61,9 @@ export function TasksScreen({ navOpen, onToggleNav, onClose }: { navOpen: boolea
         </button>
       </header>
       <div className="@container flex min-h-0 flex-1">
-        <div className={cn('min-h-0 overflow-y-auto @[820px]:w-[400px] @[820px]:shrink-0 @[820px]:border-r @[820px]:border-border', task ? 'hidden @[820px]:block' : 'flex-1 @[820px]:flex-none')}>
-          <div className="mx-auto w-full max-w-[820px]"><Tasks onOpen={setTask} current={task} /></div>
+        {/* The board takes the whole width; a picked task takes three fifths of it from 820 px, as the plugin's. */}
+        <div className={cn('min-h-0 min-w-0 overflow-y-auto', task ? 'hidden @[820px]:block @[820px]:w-2/5 @[820px]:shrink-0 @[820px]:border-r @[820px]:border-border' : 'flex-1')}>
+          <Tasks onOpen={setTask} current={task} />
         </div>
         {task ? (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -72,9 +74,7 @@ export function TasksScreen({ navOpen, onToggleNav, onClose }: { navOpen: boolea
             </div>
             <TaskDetail key={task} id={task} onOpenTask={setTask} />
           </div>
-        ) : (
-          <div className="hidden flex-1 items-center justify-center text-sm text-muted-foreground @[820px]:flex">Pick a task to see it here.</div>
-        )}
+        ) : null}
       </div>
     </section>
   );

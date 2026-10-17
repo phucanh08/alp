@@ -4,14 +4,15 @@
 // the same disposable host (e2e/support/world.js: alpd with the fake Codex in a temporary home):
 // apps/web through alp-gateway, paseo-web through ALP's Paseo bridge on that alpd.
 //
-//   node apps/web/scripts/compare-paseo.mjs [outDir] [--only chat|workspace|new-session|workspace-p1|panes]
+//   node apps/web/scripts/compare-paseo.mjs [outDir] [--only chat|workspace|new-session|workspace-p1|panes|tasks]
 //
 // Scenes: chat (t-7679.1: the conversation, the composer), workspace (t-7679.2: attention in
 // the sidebar, the session title on its tab, the Shortcuts dialog, History, an archived session)
 // and new-session (t-7679.3: the New session / new agent tab with its pickers and effort, ALP's
 // preview, Settings General and Appearance, the light theme) and workspace-p1 (t-7679.5: the tab
 // context menu, the command center, a resized sidebar) and panes (t-7679.9: the pane menu, the
-// center split right, ALP's full-screen tasks board).
+// center split right, ALP's full-screen tasks board) and tasks (t-7679.17: the tasks board's List,
+// Board and Epics views over seeded tasks).
 //
 // Needs: apps/web/dist (npm run build:alp-web), packages/{cli,daemon}/dist, dist/web-app
 // (node scripts/build-paseo-web.mjs) and integrations/paseo/server/dist. Nothing touches ~/.alp.
@@ -340,12 +341,65 @@ async function panesScenes() {
   await context.close();
 }
 
+/**
+ * t-7679.17: ALP's tasks board with the plugin's List, Board and Epics views, on both apps'
+ * full-screen Tasks screen, over the same seeded tasks (an epic with two tasks, one blocked, a
+ * labelled task, one waiting for the user's approval).
+ */
+async function tasksScenes() {
+  const add = async (...words) => {
+    const out = await world.alp('task', 'add', ...words);
+    const id = /tasks\/(t-[\w.]+)\.json/.exec(out)?.[1];
+    if (!id) throw new Error(`no task id in: ${out}`);
+    return id;
+  };
+  const epic = await add('Ship v2', '-t', 'epic');
+  const login = await add('Fix login', '-t', 'bug', '-p', '0', '--parent', epic);
+  await add('Deploy', '--parent', epic, '--after', login, '-l', 'release');
+  await add('Write docs', '-l', 'docs', '-p', '3');
+  const legal = await add('Legal check', '-p', '1');
+  await world.alp('task', 'gate', 'add', legal, '--human', 'Sign the contract');
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
+  const web = await context.newPage();
+  await connect(web, world);
+  // A session, so paseo-web lists the workspace.
+  await newSession(web, 'Task board');
+  await web.locator('body').click({ position: { x: 700, y: 300 } });
+  await web.keyboard.press('ControlOrMeta+K');
+  const center = web.getByRole('dialog', { name: 'Command center' });
+  await center.getByRole('combobox').fill('full screen');
+  await center.getByTestId('command-center-action-alp-open-tasks-screen').click();
+  const board = web.getByTestId('task-board');
+  await board.getByTestId('task-row').first().waitFor();
+  await shot(web, 'tasks-list-apps-web.png');
+  for (const name of ['Board', 'Epics']) {
+    await board.getByRole('group', { name: 'Task view' }).getByRole('button', { name }).click();
+    await shot(web, `tasks-${name.toLowerCase()}-apps-web.png`);
+  }
+
+  const app = await openPaseo(context);
+  await tryStep(async () => {
+    await app.locator('body').click({ position: { x: 700, y: 120 } });
+    await app.keyboard.press('ControlOrMeta+K');
+    await app.getByTestId('command-center-panel').waitFor({ timeout: 10_000 });
+    await app.getByText('Open ALP tasks full screen').click({ timeout: 10_000 });
+    await app.getByText('Fix login').first().waitFor({ timeout: 30_000 });
+    await shot(app, 'tasks-list-paseo-web.png');
+    for (const name of ['Board', 'Epics']) {
+      await app.getByLabel(name, { exact: true }).click({ timeout: 10_000 });
+      await shot(app, `tasks-${name.toLowerCase()}-paseo-web.png`);
+    }
+  });
+  await context.close();
+}
+
 try {
   if (!only || only === 'chat') await chatScenes();
   if (!only || only === 'workspace') await workspaceScenes();
   if (!only || only === 'new-session') await newSessionScenes();
   if (!only || only === 'workspace-p1') await workspaceP1Scenes();
   if (!only || only === 'panes') await panesScenes();
+  if (!only || only === 'tasks') await tasksScenes();
 } finally {
   await browser.close();
   await paseo.close();

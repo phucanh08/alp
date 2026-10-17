@@ -142,7 +142,8 @@ test('tasks: add, approve a human gate, close and reopen', async ({ page }) => {
   await detail.getByRole('button', { name: 'Close task' }).click();
   await expect(row).toBeHidden();
   await expect(detail).toContainText('Closed');
-  await page.getByLabel(/Show closed/).check();
+  // The All filter (the board's Open / Ready / Closed / All) shows it again.
+  await page.getByTestId('tasks-filter-all').click();
   await expect(row).toContainText('closed');
   await detail.getByRole('button', { name: 'Reopen' }).click();
   await expect(row).toContainText('open');
