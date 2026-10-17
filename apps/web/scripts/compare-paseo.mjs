@@ -4,7 +4,7 @@
 // the same disposable host (e2e/support/world.js: alpd with the fake Codex in a temporary home):
 // apps/web through alp-gateway, paseo-web through ALP's Paseo bridge on that alpd.
 //
-//   node apps/web/scripts/compare-paseo.mjs [outDir] [--only chat|workspace|new-session|workspace-p1|panes|tasks]
+//   node apps/web/scripts/compare-paseo.mjs [outDir] [--only chat|workspace|new-session|workspace-p1|panes|tasks|tools]
 //
 // Scenes: chat (t-7679.1: the conversation, the composer), workspace (t-7679.2: attention in
 // the sidebar, the session title on its tab, the Shortcuts dialog, History, an archived session)
@@ -12,7 +12,8 @@
 // preview, Settings General and Appearance, the light theme) and workspace-p1 (t-7679.5: the tab
 // context menu, the command center, a resized sidebar) and panes (t-7679.9: the pane menu, the
 // center split right, ALP's full-screen tasks board) and tasks (t-7679.17: the tasks board's List,
-// Board and Epics views over seeded tasks).
+// Board and Epics views over seeded tasks) and tools (t-7679.13: typed tool-call views: an edit's
+// diff, a new file, a web search, an MCP call, a sub-agent, from the fake Codex's [tools] turn).
 //
 // Needs: apps/web/dist (npm run build:alp-web), packages/{cli,daemon}/dist, dist/web-app
 // (node scripts/build-paseo-web.mjs) and integrations/paseo/server/dist. Nothing touches ~/.alp.
@@ -393,6 +394,50 @@ async function tasksScenes() {
   await context.close();
 }
 
+/**
+ * t-7679.13: one turn of the fake Codex using each native tool (fileChange update and add,
+ * webSearch, mcpToolCall, collabAgentToolCall), alpd's typed details shown in both apps: the
+ * stream, then the edit's diff and the new file opened.
+ */
+async function toolsScenes() {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
+  const web = await context.newPage();
+  await connect(web, world);
+  await newSession(web, 'Tool views');
+  await send(web, 'Use every tool [tools]');
+  await web.getByText('Tools done.').waitFor();
+  await idle(web);
+  await shot(web, 'tools-stream-apps-web.png');
+  const row = kind => web.locator(`[data-testid="tool-call"][data-tool-kind="${kind}"]`).getByRole('button').first();
+  await row('edit').click();
+  await shot(web, 'tools-edit-apps-web.png');
+  await row('edit').click();
+  await row('write').click();
+  await shot(web, 'tools-write-apps-web.png');
+  await row('write').click();
+  await row('sub_agent').click();
+  await web.getByTestId('tool-call').filter({ hasText: 'mcp__docs__lookup' }).getByRole('button').first().click();
+  await shot(web, 'tools-agent-mcp-apps-web.png');
+
+  const app = await openPaseo(context);
+  await tryStep(async () => {
+    await app.getByText('Tools done.').first().waitFor({ timeout: 60_000 });
+    // The sidebar's hover card would cover the stream.
+    await app.mouse.move(1000, 600);
+    await app.waitForTimeout(500);
+    await shot(app, 'tools-stream-paseo-web.png');
+    await app.getByText('src/app.ts').first().click({ timeout: 10_000 });
+    await app.waitForTimeout(1000);
+    await shot(app, 'tools-edit-paseo-web.png');
+    await app.keyboard.press('Escape');
+    await app.getByText('notes/todo.md').first().click({ timeout: 10_000 });
+    await app.waitForTimeout(1000);
+    await shot(app, 'tools-write-paseo-web.png');
+    await app.keyboard.press('Escape');
+  });
+  await context.close();
+}
+
 try {
   if (!only || only === 'chat') await chatScenes();
   if (!only || only === 'workspace') await workspaceScenes();
@@ -400,6 +445,7 @@ try {
   if (!only || only === 'workspace-p1') await workspaceP1Scenes();
   if (!only || only === 'panes') await panesScenes();
   if (!only || only === 'tasks') await tasksScenes();
+  if (!only || only === 'tools') await toolsScenes();
 } finally {
   await browser.close();
   await paseo.close();
