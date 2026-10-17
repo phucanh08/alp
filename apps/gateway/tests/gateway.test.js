@@ -130,7 +130,7 @@ test('frames are checked as protocol §5.2 orders it, and nothing reaches alpd b
   assert.deepEqual(badVersion.error.data, { reason: 'protocol_version', supported: [1] });
   assert.equal(daemon.calls().length, before, 'alpd saw nothing but the gateway\'s own hello');
   const greeting = (await call('daemon.hello', { protocolVersion: 1, client: { name: 'x', version: '0' } })).result;
-  assert.deepEqual(greeting, { protocolVersion: 1, daemonVersion: 'fake', capabilities: ['attach.after', 'prompt.receipts', 'task', 'team', 'library', 'settings.language', 'session.list.page', 'question.watch', 'question.watch.turns', 'workspace.files'] }, 'no pid, no extension.methods');
+  assert.deepEqual(greeting, { protocolVersion: 1, daemonVersion: 'fake', hostname: 'fake-host', capabilities: ['attach.after', 'prompt.receipts', 'task', 'team', 'library', 'settings.language', 'session.list.page', 'question.watch', 'question.watch.turns', 'workspace.files'] }, 'alpd\'s host name; no pid, no extension.methods');
   assert.equal((await call('no.such')).error.code, -32601);
 });
 

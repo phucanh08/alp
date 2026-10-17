@@ -10,6 +10,7 @@ import path from 'node:path';
 import { RPC_METHODS } from '@anhlp/alp-protocol';
 import { METHODS_V1 } from '@anhlp/alp-protocol/contract';
 import { EXPOSURE, unclassified } from '../src/index.js';
+import { hostLabel, projectLibraryContent } from '../src/policy.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway, until } from './support/harness.js';
 
@@ -78,6 +79,7 @@ const OUT_OF_SCOPE = {
   'task.update': ({ b }) => [{ projectRoot: b, id: 't-a000', action: 'close' }, 1003, 'outside_workspace'],
   'task.gate.resolve': ({ b }) => [{ projectRoot: b, id: 't-a000', gate: 'review' }, 1003, 'outside_workspace'],
   'library.list': ({ b }) => [{ kind: 'mcp', projectRoot: b }, 1003, 'outside_workspace'],
+  'library.get': ({ b }) => [{ kind: 'mcp', name: 'x', projectRoot: b }, 1003, 'outside_workspace'],
   'library.models': null, // model ids and labels, as catalog.get
   'settings.language.get': null, // the language the user reads
 };
@@ -94,7 +96,7 @@ const IN_SCOPE = ({ a }) => ({
   'question.answer': { questionId: 'q-a-111', text: 'x' },
   'team.list': { projectRoot: a }, 'task.list': { projectRoot: a }, 'task.create': { projectRoot: a, title: 't' },
   'task.update': { projectRoot: a, id: 't-a000', action: 'close' }, 'task.gate.resolve': { projectRoot: a, id: 't-a000', gate: 'review' },
-  'library.list': { kind: 'agents', projectRoot: a },
+  'library.list': { kind: 'agents', projectRoot: a }, 'library.get': { kind: 'mcp', name: 'x', projectRoot: a },
 });
 
 const LOOKUPS = new Set(['session.get', 'question.list', 'session.list']);
@@ -479,7 +481,7 @@ test('project resources: tasks and teams of a granted workspace, identity params
   // Host-level data and paths the grant does not list exactly are refused before alpd.
   const mark = daemon.calls().length;
   for (const [method, params] of [
-    ['team.list', {}], ['library.list', { kind: 'mcp' }],
+    ['team.list', {}], ['library.list', { kind: 'mcp' }], ['library.get', { kind: 'mcp', name: 'x' }], ['library.get', { kind: 'providers', name: 'x', scope: 'library' }],
   ]) {
     await assert.rejects(client.request(method, params), error => error.code === 1003 && error.data?.reason === 'host_scope', `${method} ${JSON.stringify(params)}`);
   }
@@ -489,20 +491,113 @@ test('project resources: tasks and teams of a granted workspace, identity params
   assert.deepEqual(daemon.calls().slice(mark), []);
 });
 
-// Library entries are configuration of commands alpd runs on the daemon host: MCP servers (with
-// URLs that may hold a token, args, env), hooks (commands), providers. alpd redacts only env and
-// header values on read, so the gateway does not pass entry content on at all until a redaction
-// contract covers every field (docs/alp/remote-gateway.md §5.4, §10).
-test('library.get is not exposed: no entry content reaches a remote client, from any layer', async t => {
-  const { daemon, sdk, a } = await world(t);
-  const { client } = await sdk('alice');
-  for (const params of [
-    { kind: 'mcp', name: 'x', projectRoot: a, scope: 'project' }, { kind: 'hooks', name: 'x', projectRoot: a, scope: 'project' },
-    { kind: 'agents', name: 'main', projectRoot: a, scope: 'project' }, { kind: 'teams', name: 'pho', projectRoot: a },
-  ]) {
-    await assert.rejects(client.request('library.get', params), error => error.code === -32601 && error.data?.reason === 'not_exposed', JSON.stringify(params));
+// Library entries configure commands alpd runs on the daemon host: MCP servers (URLs that may hold
+// a token, args, env, headers), hooks (shell commands), providers (args, env, params). library.get
+// is read only through the gateway, under project.read like library.list, and its content leaves
+// through projectLibraryContent (docs/alp/remote-gateway.md §5.4, §10): listed fields only, every
+// field that can hold a secret answered as a marker. library.save and the other writes stay -32601.
+const S = tag => `SENTINEL-${tag}`;
+const MARK = { $secret: 'keep' };
+const STORED = {
+  agents: { instructions: '# Writer\nWrite notes.', config: { $schema: S('schema'), description: 'notes', provider: 'claude', model: 'claude-sonnet-5-5', thinking: 'medium', mode: 'workspace-write', context: 400000, autocompact: 'auto', skills: ['style'], mcp: ['docs'], hooks: ['tests'], token: S('agent-unknown') } },
+  skills: { body: '# Style\nShort sentences.', path: S('skill-path') },
+  mcp: { server: { command: 'npx', args: ['-y', `--api-key=${S('mcp-arg')}`], env: { GITHUB_TOKEN: S('mcp-env') }, headers: { Authorization: `Bearer ${S('mcp-header')}` }, url: `https://u:${S('mcp-userinfo')}@mcp.example/s/${S('mcp-path')}?key=${S('mcp-query')}`, cwd: `/home/me/${S('mcp-cwd')}`, extra: S('mcp-unknown') } },
+  hooks: { hook: { description: 'tests', event: 'handoff', command: `curl -H "Authorization: Bearer ${S('hook-command')}" https://ci.example`, blocking: true, timeoutSec: 600, match: { agent: 'peer', label: 'web', path: S('hook-match') }, env: S('hook-unknown') } },
+  teams: { team: { $schema: S('team-schema'), label: 'Mine', description: 'team', main: 'main', maxPeers: 2, members: { main: { role: 'main', model: 'claude:claude-opus-5-5', thinking: 'high', token: S('member-unknown') }, peer: { role: 'peer' } }, delegation: { main: ['peer'] }, supervisor: { agent: 'supervisor', model: 'claude:claude-opus-5-5', secret: S('supervisor-unknown') }, oracleModels: ['claude:claude-opus-5-5'], oracleThinking: { claude: 'high' }, modelSetup: { mode: 'default', preset: 'claude' }, hidden: S('team-unknown') }, houseRules: 'Be brief.' },
+  providers: { provider: { kind: 'acp', label: 'Gemini', description: 'g', command: `env TOKEN=${S('provider-command')} gemini`, args: ['--experimental-acp', `--key=${S('provider-arg')}`], env: { GEMINI_API_KEY: S('provider-env') }, params: { apiKey: S('provider-params') }, models: [{ id: 'gemini-2.5-pro', label: 'Pro', secret: S('model-unknown') }], additionalModels: [], enabled: true } },
+};
+const SHOWN = {
+  agents: { content: { instructions: '# Writer\nWrite notes.', config: { description: 'notes', provider: 'claude', model: 'claude-sonnet-5-5', thinking: 'medium', mode: 'workspace-write', context: 400000, autocompact: 'auto', skills: ['style'], mcp: ['docs'], hooks: ['tests'] } }, secrets: [] },
+  skills: { content: { body: '# Style\nShort sentences.' }, secrets: [] },
+  mcp: { content: { server: { command: 'npx', args: [MARK, MARK], env: { GITHUB_TOKEN: MARK }, headers: { Authorization: MARK }, url: MARK, cwd: MARK } }, secrets: ['/server/args/0', '/server/args/1', '/server/env/GITHUB_TOKEN', '/server/headers/Authorization', '/server/url', '/server/cwd'] },
+  hooks: { content: { hook: { description: 'tests', event: 'handoff', command: MARK, blocking: true, timeoutSec: 600, match: { agent: 'peer', label: 'web' } } }, secrets: ['/hook/command'] },
+  teams: { content: { team: { label: 'Mine', description: 'team', main: 'main', maxPeers: 2, oracleModels: ['claude:claude-opus-5-5'], members: { main: { role: 'main', model: 'claude:claude-opus-5-5', thinking: 'high' }, peer: { role: 'peer' } }, delegation: { main: ['peer'] }, oracleThinking: { claude: 'high' }, modelSetup: { mode: 'default', preset: 'claude' }, supervisor: { agent: 'supervisor', model: 'claude:claude-opus-5-5' } }, houseRules: 'Be brief.' }, secrets: [] },
+  providers: { content: { provider: { kind: 'acp', label: 'Gemini', description: 'g', enabled: true, command: MARK, args: [MARK, MARK], env: { GEMINI_API_KEY: MARK }, params: MARK, models: [{ id: 'gemini-2.5-pro', label: 'Pro' }], additionalModels: [] } }, secrets: ['/provider/command', '/provider/args/0', '/provider/args/1', '/provider/env/GEMINI_API_KEY', '/provider/params'] },
+};
+
+test('projectLibraryContent: listed fields only, every field that can hold a secret marked, for every kind', () => {
+  for (const kind of Object.keys(STORED)) {
+    const projected = projectLibraryContent(kind, STORED[kind]);
+    assert.deepEqual(projected, SHOWN[kind], kind);
+    assert.ok(!JSON.stringify(projected).includes('SENTINEL'), `${kind}: ${JSON.stringify(projected)}`);
   }
-  assert.deepEqual(daemon.calls('library.get'), []);
+  // A program name is kept; values of the wrong type are dropped, not passed on.
+  assert.deepEqual(projectLibraryContent('mcp', { server: { command: '/usr/local/bin/mcp-docs', url: 42, env: 'x', args: 'y' } }), { content: { server: { command: '/usr/local/bin/mcp-docs', url: MARK } }, secrets: ['/server/url'] });
+  assert.deepEqual(projectLibraryContent('teams', { team: { supervisor: false, members: { main: 'x' } } }), { content: { team: { supervisor: false, members: {} } }, secrets: [] });
+  assert.deepEqual(projectLibraryContent('agents', { instructions: 7, config: [S('array')] }), { content: {}, secrets: [] });
+  // A key that needs escaping in a JSON Pointer.
+  assert.deepEqual(projectLibraryContent('mcp', { server: { env: { 'a/b~c': S('escaped') } } }).secrets, ['/server/env/a~1b~0c']);
+  // A kind the gateway does not know answers no content at all.
+  assert.deepEqual(projectLibraryContent('plugins', { anything: S('unknown-kind') }), { content: {}, secrets: [] });
+  assert.deepEqual(projectLibraryContent('mcp', null), { content: {}, secrets: [] });
+});
+
+test('library.get: read only under project.read, in a granted workspace, its content redacted for every kind', async t => {
+  const { daemon, sdk, a } = await world(t);
+  daemon.state.handlers['library.get'] = ({ kind, name }) => ({
+    kind, name, source: 'library', overrides: 'builtin', content: structuredClone(STORED[kind]), revision: 'rabc', usedBy: ['agent main'],
+    ...(kind === 'agents' ? { librarySkills: ['style'] } : {}), secrets: ['/server/env/GITHUB_TOKEN'],
+    path: `/home/me/.alp/${kind}/${name}?${S('result-path')}`, raw: S('result-unknown'),
+  });
+  const { client } = await sdk('alice');
+  for (const kind of Object.keys(STORED)) {
+    const answer = await client.request('library.get', { kind, name: 'x', projectRoot: a, scope: 'library', sync: 'known-projects' });
+    assert.ok(!JSON.stringify(answer).includes('SENTINEL'), `${kind}: ${JSON.stringify(answer)}`);
+    assert.deepEqual(answer, {
+      kind, name: 'x', source: 'library', overrides: 'builtin', revision: 'rabc', usedBy: ['agent main'],
+      ...(kind === 'agents' ? { librarySkills: ['style'] } : {}), content: SHOWN[kind].content, ...(SHOWN[kind].secrets.length ? { secrets: SHOWN[kind].secrets } : {}),
+    }, kind);
+    assert.deepEqual(daemon.calls('library.get').at(-1).params, { kind, name: 'x', projectRoot: a, scope: 'library' }, 'listed params only');
+  }
+  // Writes stay closed: library.save and its kin answer -32601 and never reach alpd.
+  const mark = daemon.calls().length;
+  for (const [method, params] of [
+    ['library.save', { kind: 'mcp', name: 'x', scope: 'project', projectRoot: a, content: { server: { command: 'sh' } } }],
+    ['library.delete', { kind: 'mcp', name: 'x', scope: 'project', projectRoot: a }],
+    ['library.duplicate', { kind: 'mcp', from: 'x', to: 'y', scope: 'project', projectRoot: a }],
+    ['library.rename', { kind: 'mcp', from: 'x', to: 'y', scope: 'project', projectRoot: a }],
+    ['library.skills.set', { agent: 'main', skills: [] }],
+  ]) {
+    await assert.rejects(client.request(method, params), error => error.code === -32601 && error.data?.reason === 'not_exposed', method);
+  }
+  assert.deepEqual(daemon.calls().slice(mark), []);
+});
+
+// An entry file that does not parse makes alpd answer its host path and V8's quote of the file,
+// which may hold a secret: the gateway passes on the code and the reason only.
+test('library.get errors from alpd carry no host path or file content to the client', async t => {
+  const { daemon, sdk, a } = await world(t);
+  const failures = {
+    broken: { code: -32602, message: `/home/me/.alp/mcp/broken.json: Unexpected token 'S', ..."env":{"T":${S('error-quote')}"... is not valid JSON`, data: { reason: 'invalid_entry', file: `/home/me/${S('error-data')}` } },
+    linked: { code: 1003, message: `/work/a/.alp/mcp/linked.json is a symbolic link to /home/me/${S('error-link')}`, data: { reason: 'unsafe_path' } },
+    missing: { code: 1001, message: `No mcp entry 'missing' in the project at /home/me/${S('error-missing')}`, data: { reason: 'not_found' } },
+    odd: { code: 1000, message: S('error-odd'), data: { reason: `bad ${S('error-reason')}` } },
+  };
+  daemon.state.handlers['library.get'] = ({ name }) => { throw failures[name]; };
+  const { client } = await sdk('alice');
+  const seen = [];
+  for (const name of Object.keys(failures)) {
+    const error = await client.request('library.get', { kind: 'mcp', name, projectRoot: a, scope: 'project' }).then(() => assert.fail(`${name} answered`), failure => failure);
+    seen.push({ code: error.code, message: error.message, data: error.data });
+  }
+  assert.ok(!JSON.stringify(seen).includes('SENTINEL') && !JSON.stringify(seen).includes('/home/me'), JSON.stringify(seen));
+  assert.deepEqual(seen, [
+    { code: -32602, message: "mcp 'broken' cannot be read on the daemon host", data: { reason: 'invalid_entry' } },
+    { code: 1003, message: "mcp 'linked' cannot be read on the daemon host", data: { reason: 'unsafe_path' } },
+    { code: 1001, message: "No mcp entry 'missing' in the project", data: { reason: 'not_found' } },
+    { code: 1000, message: "mcp 'odd' cannot be read on the daemon host", data: undefined },
+  ]);
+});
+
+test('the hello names the host as alpd does, and nothing when alpd sends no usable name', async t => {
+  assert.equal(hostLabel('  build-host.local  '), 'build-host.local');
+  for (const value of [undefined, 42, '', '   ', 'a\nb', 'x\u0000', 'a\u202eb', 'a\u200bb', 'h'.repeat(254)]) assert.equal(hostLabel(value), undefined, JSON.stringify(value));
+  const { daemon, sdk } = await world(t);
+  assert.equal((await sdk('alice')).hello.hostname, 'fake-host');
+  daemon.state.handlers['daemon.hello'] = () => ({ protocolVersion: 1, daemonVersion: 'fake', hostname: 'evil\u001b[2Jhost', capabilities: ['library'] });
+  const { hello: greeting } = await sdk('alice');
+  assert.equal(greeting.daemonVersion, 'fake');
+  assert.ok(!Object.hasOwn(greeting, 'hostname'), JSON.stringify(greeting));
 });
 
 test('library and team rows carry only their listed fields, and a team error names no host path', async t => {

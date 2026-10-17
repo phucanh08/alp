@@ -59,7 +59,7 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
   }
 
   const builtins = {
-    'daemon.hello': () => ({ protocolVersion: 1, daemonVersion: 'fake', pid: 4242, capabilities }),
+    'daemon.hello': () => ({ protocolVersion: 1, daemonVersion: 'fake', pid: 4242, hostname: 'fake-host', capabilities }),
     'daemon.status': () => ({ pid: 4242, startedAt: new Date().toISOString(), version: 'fake', protocolVersion: 1, sessions: state.sessions.size, questions: state.questions.length, health: { live: true, ready: true, checks: [] } }),
     'catalog.get': () => ({ models: [], modes: [{ id: 'read-only' }, { id: 'workspace-write' }, { id: 'full-access' }], defaultModel: 'codex:gpt' }),
     'session.get': ({ sessionId }) => {
@@ -145,7 +145,8 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
     'team.list': ({ projectRoot = null }) => ({ projectRoot, teams: [{ id: 'pho', source: 'builtin' }, { id: 'mine', source: 'library' }] }),
     'library.list': ({ projectRoot = null }) => ({ projectRoot, entries: [{ name: 'main', source: 'builtin' }] }),
     // An entry as alpd answers it: env redacted, a token in the URL and a secret in args not.
-    'library.get': ({ kind, name, scope }) => ({ kind, name, source: scope ?? 'project', content: { url: 'https://me:SENTINEL-url@mcp.example/x?key=SENTINEL-query', args: ['--token', 'SENTINEL-arg'], env: { KEY: { $alp: 'keep' } } }, revision: 'rev1', usedBy: [], secrets: ['/env/KEY'] }),
+    // As alpd answers an MCP server (env and header values already marked), with what alpd leaves in.
+    'library.get': ({ kind, name, scope }) => ({ kind, name, source: scope ?? 'project', content: { server: { url: 'https://me:SENTINEL-url@mcp.example/x?key=SENTINEL-query', args: ['--token', 'SENTINEL-arg'], env: { KEY: { $secret: 'keep' } } } }, revision: 'rev1', usedBy: [], secrets: ['/server/env/KEY'] }),
     'library.models': () => ({ models: [{ id: 'codex:gpt', label: 'GPT', efforts: [] }] }),
     'settings.language.get': () => ({ language: null, applies: 'English', default: 'English' }),
     'session.interrupt': () => ({}),

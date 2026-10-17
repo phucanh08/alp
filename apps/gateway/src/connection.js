@@ -3,7 +3,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { ERROR, PROTOCOL_VERSION, RPC_ERROR } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 import { isAlpClientError } from '@anhlp/alp-client/portable';
-import { CONTENT_TYPES, FORWARDED_CAPABILITIES, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, isModelId, workspaceOf } from './policy.js';
+import { CONTENT_TYPES, FORWARDED_CAPABILITIES, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, workspaceOf } from './policy.js';
 
 /**
  * One remote client of the gateway (docs/alp/remote-gateway.md §3, §6): its WebSocket, its own
@@ -411,6 +411,7 @@ export class ClientConnection {
     return {
       protocolVersion: PROTOCOL_VERSION,
       ...(typeof this.#daemonHello.daemonVersion === 'string' ? { daemonVersion: this.#daemonHello.daemonVersion } : {}),
+      ...(hostLabel(this.#daemonHello.hostname) ? { hostname: hostLabel(this.#daemonHello.hostname) } : {}),
       capabilities: [...this.#capabilities],
     };
   }
@@ -852,6 +853,25 @@ export class ClientConnection {
       this.#project(params.projectRoot, 'library.list');
       const result = await this.#call('library.list', params);
       return { ...result, entries: (Array.isArray(result?.entries) ? result.entries : []).map((/** @type {any} */ entry) => pick(entry, LIBRARY_ROW_FIELDS)) };
+    },
+    // One entry, read only, as the projectRoot's sessions would use it (project, else library, else
+    // built-in). Its content leaves through projectLibraryContent: listed fields only, every field
+    // that can hold a secret answered as a marker; alpd's own secrets list is replaced by the gateway's.
+    // alpd's errors are rewritten too: an entry file that does not parse fails with its host path
+    // and V8's quote of the file, which may hold a secret. Only the code and the reason pass on.
+    'library.get': async params => {
+      this.#project(params.projectRoot, 'library.get');
+      let result;
+      try { result = await this.#call('library.get', params); }
+      catch (caught) {
+        const error = /** @type {any} */ (caught);
+        if (error instanceof GatewayError || isAlpClientError(error) || typeof error?.code !== 'number') throw error;
+        const reason = typeof error.data?.reason === 'string' && /^[a-z_]{1,64}$/.test(error.data.reason) ? error.data.reason : undefined;
+        const message = error.code === ERROR.notFound ? `No ${params.kind} entry '${params.name}'${params.scope ? ` in the ${params.scope}` : ''}` : `${params.kind} '${params.name}' cannot be read on the daemon host`;
+        throw new GatewayError(error.code, message, reason ? { reason } : undefined);
+      }
+      const { content, secrets } = projectLibraryContent(params.kind, result?.content);
+      return { ...pick(result ?? {}, LIBRARY_ENTRY_FIELDS), content, ...(secrets.length ? { secrets } : {}) };
     },
     'library.models': async () => {
       const result = await this.#call('library.models', {});

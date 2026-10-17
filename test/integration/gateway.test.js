@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { closeSync, openSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
@@ -154,6 +154,7 @@ test('a remote client works through the gateway across reconnects and restarts o
   assert.deepEqual(greeting.capabilities.sort(), ['attach.after', 'library', 'prompt.receipts', 'question.watch', 'question.watch.turns', 'session.list.page', 'settings.language', 'task', 'team', 'workspace.files']);
   assert.ok(!greeting.capabilities.includes('extension.methods'));
   assert.equal(greeting.pid, undefined);
+  assert.equal(greeting.hostname, hostname(), 'alpd\'s machine name, as Paseo labels a host');
 
   // Create and prompt; the stream arrives with cursors.
   const { session } = await alp.request('session.create', { spec: { cwd: w.projects.a, persist: true, model: MODEL }, history: 'skip' });
@@ -245,7 +246,11 @@ test('another credential cannot see, attach, prompt or receive the session or to
   assert.equal((await owner.request('task.update', { projectRoot: w.projects.a, id: task, action: 'close' })).status, 'closed');
   assert.ok((await owner.request('team.list', { projectRoot: w.projects.a })).teams.length > 0);
   assert.equal(typeof (await owner.request('settings.language.get')).applies, 'string');
-  await assert.rejects(owner.request('library.get', { kind: 'agents', name: 'main', projectRoot: w.projects.a, scope: 'project' }), error => error.code === -32601 && error.data?.reason === 'not_exposed');
+  // library.get is read only through the gateway (built-in main: instructions, no secrets to hide).
+  const main = await owner.request('library.get', { kind: 'agents', name: 'main', projectRoot: w.projects.a });
+  assert.equal(main.source, 'builtin');
+  assert.equal(typeof main.content.instructions, 'string');
+  await assert.rejects(owner.request('library.get', { kind: 'agents', name: 'main', projectRoot: w.projects.b }), error => error.code === 1003);
   await assert.rejects(owner.request('library.save', { kind: 'mcp', name: 'x', scope: 'library', content: { command: 'sh' } }), error => error.code === -32601);
   await assert.rejects(other.request('task.list', { projectRoot: w.projects.a }), error => error.code === 1003);
   await assert.rejects(other.request('task.create', { projectRoot: w.projects.a, title: 'intruder' }), error => error.code === 1003);
@@ -323,8 +328,8 @@ test('a read-only grant cannot wake, steer or answer a full-access session on a 
   await until(() => mineEnded() >= 2, 'its asking turn ended after the answer');
 });
 
-// docs/alp/remote-gateway.md §5.4: entry content never leaves through the gateway; rows carry names.
-test('project.read gets no MCP, hook or provider secret from a real alpd: library.get is refused and rows carry names only', { skip, timeout: 60_000 }, async t => {
+// docs/alp/remote-gateway.md §5.4: entry content leaves through the gateway's projection only; rows carry names.
+test('project.read gets no MCP, hook or provider secret from a real alpd: library.get answers them hidden and rows carry names only', { skip, timeout: 60_000 }, async t => {
   const w = await world(t);
   const SENTINELS = ['SENTINEL-userinfo', 'SENTINEL-query', 'SENTINEL-header', 'SENTINEL-arg', 'SENTINEL-env', 'SENTINEL-hook', 'SENTINEL-provider-arg', 'SENTINEL-provider-env'];
   const a = w.projects.a;
@@ -350,15 +355,26 @@ test('project.read gets no MCP, hook or provider secret from a real alpd: librar
   const reader = new AlpRpcClient(await w.open(w.tokens.reader));
   t.after(() => reader.close());
   await hello(reader);
-  for (const params of [{ kind: 'mcp', name: 'remote', projectRoot: a, scope: 'project' }, { kind: 'mcp', name: 'local', projectRoot: a, scope: 'project' }, { kind: 'hooks', name: 'notify', projectRoot: a, scope: 'project' }, { kind: 'mcp', name: 'remote', projectRoot: a }]) {
-    await assert.rejects(reader.request('library.get', params), error => error.code === -32601 && error.data?.reason === 'not_exposed', JSON.stringify(params));
+  const MARK = { $secret: 'keep' };
+  const entries = [];
+  for (const params of [{ kind: 'mcp', name: 'remote', projectRoot: a, scope: 'project' }, { kind: 'mcp', name: 'local', projectRoot: a, scope: 'project' }, { kind: 'hooks', name: 'notify', projectRoot: a, scope: 'project' }, { kind: 'mcp', name: 'remote', projectRoot: a }, { kind: 'providers', name: 'custom', projectRoot: a }]) {
+    entries.push(await reader.request('library.get', params));
   }
-  const answers = [];
+  assert.deepEqual(entries.map(entry => entry.content), [
+    { server: { url: MARK, headers: { Authorization: MARK } } },
+    { server: { command: 'npx', args: [MARK, MARK, MARK], env: { API_KEY: MARK } } },
+    { hook: { event: 'turn.end', command: MARK } },
+    { server: { url: MARK, headers: { Authorization: MARK } } },
+    { provider: { kind: 'acp', label: 'Custom', command: 'custom-agent', args: [MARK, MARK], env: { KEY: MARK }, models: [{ id: 'vendor-model' }] } },
+  ]);
+  assert.deepEqual(entries[1].secrets, ['/server/args/0', '/server/args/1', '/server/args/2', '/server/env/API_KEY']);
+  const answers = [...entries];
   for (const kind of ['mcp', 'hooks', 'agents', 'skills', 'providers']) answers.push(await reader.request('library.list', { kind, projectRoot: a }));
   answers.push(await reader.request('team.list', { projectRoot: a }), await reader.request('library.models'));
   const seen = JSON.stringify(answers);
   for (const sentinel of SENTINELS) assert.ok(!seen.includes(sentinel), `${sentinel} reached the remote client`);
-  assert.ok(answers[0].entries.some(entry => entry.name === 'remote') && answers[1].entries.some(entry => entry.name === 'notify'), 'rows still name the entries');
+  const [mcpRows, hookRows] = answers.slice(entries.length);
+  assert.ok(mcpRows.entries.some(entry => entry.name === 'remote') && hookRows.entries.some(entry => entry.name === 'notify'), 'rows still name the entries');
   assert.ok(!seen.includes(w.home), 'no host library path');
   // The ACP model library.models lists is one a session may use.
   const acp = answers.at(-1).models.find(model => model.id === 'acp:custom/vendor-model');
