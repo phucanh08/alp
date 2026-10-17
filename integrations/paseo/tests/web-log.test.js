@@ -59,6 +59,18 @@ async function waitFor(file, timeoutMs = 20_000) {
   return false;
 }
 
+/** Polls `file` until its text matches `pattern`; returns the last text read (empty if never). */
+async function waitForText(file, pattern, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  let text = '';
+  while (Date.now() < deadline) {
+    text = await readFile(file, 'utf8').catch(() => '');
+    if (pattern.test(text)) return text;
+    await sleep(50);
+  }
+  return text;
+}
+
 test('a normal detached launch writes the advertised integration log', async t => {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-integration-log-'));
   await mkdir(home, { recursive: true });
@@ -72,7 +84,10 @@ test('a normal detached launch writes the advertised integration log', async t =
   assert.ok(await waitFor(logFile(home)), 'the entry creates the log the launcher advertises, with no --service flag');
   const info = await waitFor(path.join(home, 'web.json')) && JSON.parse(await readFile(path.join(home, 'web.json'), 'utf8'));
   assert.ok(Number.isSafeInteger(info.pid), 'the entry published its web.json');
-  assert.match(await readFile(logFile(home), 'utf8'), /web app on http:\/\/127\.0\.0\.1:\d+\//);
+  // The entry publishes web.json inside listen() and logs the listening line only afterwards, so
+  // under load the line can trail the file: wait for it rather than reading once.
+  const listening = /web app on http:\/\/127\.0\.0\.1:\d+\//;
+  assert.match(await waitForText(logFile(home), listening), listening);
 
   // Shut the entry down through the pid its own metadata names; no other process is touched.
   process.kill(info.pid, 'SIGTERM');
