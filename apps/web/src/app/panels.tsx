@@ -67,9 +67,14 @@ function Agents({ onPicked }: { onPicked?: () => void }) {
 const PRIORITIES = [0, 1, 2, 3, 4];
 const STATUS_TONE: Record<string, string> = { open: 'text-muted-foreground', in_progress: 'text-dot-running', review: 'text-dot-warning', closed: 'text-highlight' };
 
-function Tasks({ onPicked }: { onPicked?: () => void }) {
+/**
+ * ALP's task board. `onOpen`, when given, takes a picked task in place of opening its tab (the
+ * full-screen board shows it beside the list), and `current` is the task it shows.
+ */
+export function Tasks({ onPicked, onOpen, current: shown }: { onPicked?: () => void; onOpen?: (id: string) => void; current?: string | null }) {
   const controller = useController();
-  const { openTask, active } = useTabs();
+  const { openTask: openTab, active } = useTabs();
+  const openTask = onOpen ?? openTab;
   const { tasks, principal, workspace } = useAppState();
   const [title, setTitle] = React.useState('');
   const [priority, setPriority] = React.useState(2);
@@ -134,7 +139,7 @@ function Tasks({ onPicked }: { onPicked?: () => void }) {
       {tasks.unreadable ? <p className="px-2 text-xs text-warning">{tasks.unreadable} task file(s) on the host could not be read.</p> : null}
       <ul aria-label="Tasks">
         {rows.map(entry => {
-          const current = active?.kind === 'task' && active.id === entry.id;
+          const current = onOpen ? shown === entry.id : active?.kind === 'task' && active.id === entry.id;
           return (
             <li key={entry.id} className={cn('mb-0.5 rounded-lg', current ? 'bg-sidebar-selected' : 'hover:bg-sidebar-hover')} data-testid="task-row">
               <button type="button" className={row} onClick={() => { openTask(entry.id); onPicked?.(); }} aria-current={current ? 'true' : undefined} title={entry.title}>

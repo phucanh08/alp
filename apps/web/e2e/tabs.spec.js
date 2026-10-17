@@ -129,9 +129,11 @@ test('command center: actions and sessions, search, keys, open a session', async
   const input = center.getByRole('combobox', { name: 'Search commands and sessions' });
   await expect(input).toBeFocused();
   await expect(input).toHaveAttribute('placeholder', 'Search commands, sessions and agents...');
-  await expect(center.getByRole('group')).toHaveText([/^Workspace actions/, /^Actions/, /^Sessions/]);
+  await expect(center.getByRole('group')).toHaveText([/^Workspace actions/, /^Actions/, /^ALP/, /^Sessions/]);
   await expect(center.getByRole('group', { name: 'Workspace actions' }).getByRole('option')).toHaveText([/^New session/]);
   await expect(center.getByRole('group', { name: 'Actions', exact: true }).getByRole('option')).toHaveText([/^History/, /^Settings/, /^Keyboard shortcuts/]);
+  // ALP's own commands, as its plugin adds them to paseo-web's command center (t-7679.9).
+  await expect(center.getByRole('group', { name: 'ALP' }).getByRole('option')).toHaveText(['Open ALP tasks', 'Open ALP tasks full screen']);
   await expect(center.getByRole('group', { name: 'Sessions' }).getByRole('option')).toContainText(['Palette beta', 'Palette alpha']);
   await expect(center.getByRole('option').first()).toHaveAttribute('aria-selected', 'true');
   // Mod+K again closes it.

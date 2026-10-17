@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Archive, ArrowLeftToLine, ArrowRightToLine, ChevronLeft, ChevronRight, CircleAlert, Copy, CopyX, Info, Keyboard, PanelLeft, PanelRight, Pencil, Search, Settings, SquarePen, History as HistoryIcon, WifiOff, X } from 'lucide-react';
+import { Archive, ArrowLeftRight, ArrowLeftToLine, ArrowRightToLine, ChevronLeft, ChevronRight, CircleAlert, Columns2, Copy, CopyX, Crosshair, Info, Keyboard, ListTodo, PanelLeft, PanelRight, Pencil, Rows2, Search, Settings, SquarePen, History as HistoryIcon, WifiOff, X } from 'lucide-react';
 import { needsInput, type SessionSummary } from '../lib/controller.js';
 import { Button } from '../components/ui/button';
 import { cn } from '../lib/utils';
@@ -11,7 +11,7 @@ import { Sidebar } from './Sidebar';
 import { useAppState, useController } from './store';
 import { HistoryScreen } from './History';
 import { ShortcutsDialog, useShortcuts } from './Shortcuts';
-import { TabsProvider, tabKey, useTabs } from './tabs';
+import { TabsProvider, tabKey, useTabs, type Tab } from './tabs';
 import { can } from '../lib/gateway.js';
 import { applyTheme } from '../lib/theme';
 import { BINDINGS, formatShortcut, isMacPlatform, shortcutKeys, type Binding } from '../lib/shortcuts.js';
@@ -22,7 +22,9 @@ import { bucketOf } from './Sidebar';
 import { PANELS } from './panels';
 import { closeRange } from '../lib/tab-close.js';
 import type { PanelKind } from './panels';
-import { TabContent, TabsRow, WorkspaceHeader } from './Workspace';
+import { SplitView, WorkspaceHeader } from './Workspace';
+import { TasksScreen } from './TasksScreen';
+import { paneIds, type Direction } from '../lib/panes.js';
 import { ResizeHandle, usePanelWidth } from './ResizeHandle';
 
 function useMedia(query: string) {
@@ -70,9 +72,13 @@ function ReconnectBanner() {
  * Paseo's workspace shortcuts (lib/shortcuts.js), run against the shell's state. Inside the tabs'
  * provider, so the tab actions reach the open tabs.
  */
-function ShellShortcuts({ settings, history, onAction }: { settings: boolean; history: boolean; onAction: (action: string, binding: Binding, index?: number) => boolean | void }) {
+function ShellShortcuts({ settings, history, splits, onAction }: { settings: boolean; history: boolean; splits: boolean; onAction: (action: string, binding: Binding, index?: number) => boolean | void }) {
   const controller = useController();
-  const { tabs, active, activate, close, openPanel } = useTabs();
+  const { tabs: all, row, active, activate, close, openPanel, panes, focusedPane, splitEmpty, canSplitEmpty, closePane, focusAdjacent, moveTabAdjacent } = useTabs();
+  // The tab keys go through the row on screen: the focused pane's, or every tab on a narrow window.
+  const tabs = splits ? row : all;
+  const { workspace } = useAppState();
+  const many = paneIds(panes.root).length > 1;
   const { sessions, selected } = useAppState();
   useShortcuts((binding, index) => {
     if (settings && binding.action !== 'settings.toggle') return false;
@@ -112,6 +118,23 @@ function ShellShortcuts({ settings, history, onAction }: { settings: boolean; hi
         openPanel(kind);
         return onAction('tab.shown', binding);
       }
+      // Paseo's pane keys: on a wide enough window, with the workspace's tabs on screen.
+      case 'pane.split.right': case 'pane.split.down':
+        if (!splits || history || !workspace || !canSplitEmpty) return false;
+        splitEmpty(binding.action === 'pane.split.right' ? 'right' : 'bottom');
+        return;
+      case 'pane.focus.left': case 'pane.focus.right': case 'pane.focus.up': case 'pane.focus.down':
+        if (!splits || history || !many) return false;
+        focusAdjacent(binding.action.slice(11) as Direction);
+        return;
+      case 'pane.move.left': case 'pane.move.right': case 'pane.move.up': case 'pane.move.down':
+        if (!splits || history || !many) return false;
+        moveTabAdjacent(binding.action.slice(10) as Direction);
+        return;
+      case 'pane.close':
+        if (!splits || history || !many) return false;
+        closePane(focusedPane);
+        return;
       default:
         return onAction(binding.action, binding, index);
     }
@@ -121,7 +144,7 @@ function ShellShortcuts({ settings, history, onAction }: { settings: boolean; hi
 
 /** A binding's keys for a hint beside a command (the binding with `delta` when given). */
 function hint(action: string, mac: boolean, delta?: number) {
-  const binding = BINDINGS.find(entry => entry.action === action && entry.label && (delta === undefined || entry.delta === delta));
+  const binding = BINDINGS.find(entry => entry.action === action && entry.label && (!entry.mac || mac) && (delta === undefined || entry.delta === delta));
   return binding ? formatShortcut(shortcutKeys(binding, mac), mac) : undefined;
 }
 
@@ -130,16 +153,22 @@ function hint(action: string, mac: boolean, delta?: number) {
  * the workspace's (new session, panels, tabs, the open session) and the app's (History,
  * Settings, shortcuts, sidebars, the sidebar's session search). Inside the tabs' provider.
  */
-function CommandCenterHost({ open, onClose, history, onAction, onOpenSession }: {
+function CommandCenterHost({ open, onClose, history, splits, onAction, onOpenSession }: {
   open: boolean;
   onClose: () => void;
   history: boolean;
+  /** Whether the center can split (a wide enough window). */
+  splits: boolean;
   onAction: (action: string) => boolean | void;
   onOpenSession: (id: string) => void;
 }) {
   const state = useAppState();
   const { workspace, principal, connection, sessions, tree, selected } = state;
-  const { tabs, active, activate, close, closeOthers, openPanel } = useTabs();
+  const { tabs: all, row, active, activate, close, closeOthers: closeRow, openPanel, panes, focusedPane, splitEmpty, canSplitEmpty, closePane, focusAdjacent, moveTabAdjacent } = useTabs();
+  // The row on screen: the focused pane's, or every tab on a narrow window (as the tab menu).
+  const tabs = splits ? row : all;
+  const closeOthers = (tab: Tab, which: 'left' | 'right' | 'others') => closeRow(tab, which, splits ? undefined : all);
+  const many = paneIds(panes.root).length > 1;
   // Nothing to close, as the tab menu says (lib/tab-close.js).
   const none = (which: 'left' | 'right' | 'others') => !active || closeRange(tabs, active, which, selected).length === 0;
   const mac = React.useMemo(() => isMacPlatform(), []);
@@ -159,7 +188,6 @@ function CommandCenterHost({ open, onClose, history, onAction, onOpenSession }: 
     panel('open-changes', 'changes', 'Open Changes', hint('tab.changes', mac)),
     panel('open-files', 'files', 'Open Files', hint('tab.files', mac)),
     panel('open-diff', 'diff', 'Open Diff'),
-    panel('open-tasks', 'tasks', 'Open Tasks'),
     panel('open-agents', 'agents', 'Open Agents'),
     { id: 'tab-previous', label: 'Previous tab', group: 'workspace', icon: ChevronLeft, shortcut: hint('tab.relative', mac, -1), disabled: !shownTabs || tabs.length < 2, run: () => step(-1) },
     { id: 'tab-next', label: 'Next tab', group: 'workspace', icon: ChevronRight, shortcut: hint('tab.relative', mac, 1), disabled: !shownTabs || tabs.length < 2, run: () => step(1) },
@@ -170,13 +198,30 @@ function CommandCenterHost({ open, onClose, history, onAction, onOpenSession }: 
     { id: 'session-rename', label: 'Rename session', group: 'workspace', icon: Pencil, disabled: !root || !canWrite, run: () => onAction('session.rename') },
     { id: 'session-copy-id', label: 'Copy session ID', group: 'workspace', icon: Copy, keywords: ['agent id'], disabled: !root, run: () => { if (root) void navigator.clipboard?.writeText(root).catch(() => undefined); } },
     { id: 'session-archive', label: 'Archive session', group: 'workspace', icon: Archive, shortcut: hint('session.archive', mac), disabled: !root || !canWrite, run: () => onAction('session.archive') },
+    // Paseo's pane commands, where the center can split.
+    ...(splits ? paneActions() : []),
     { id: 'toggle-explorer', label: 'Toggle explorer', group: 'workspace', icon: PanelRight, shortcut: hint('sidebar.right', mac), disabled: history, run: () => onAction('sidebar.right') },
     { id: 'history', label: 'History', group: 'actions', always: true, icon: HistoryIcon, keywords: ['archived', 'sessions'], disabled: !workspace, run: () => onAction('history') },
     { id: 'settings', label: 'Settings', group: 'actions', always: true, icon: Settings, shortcut: hint('settings.toggle', mac), keywords: ['preferences', 'theme'], run: () => onAction('settings.toggle') },
     { id: 'shortcuts', label: 'Keyboard shortcuts', group: 'actions', always: true, icon: Keyboard, shortcut: hint('shortcuts.toggle', mac), keywords: ['keys', 'help'], run: () => onAction('shortcuts.toggle') },
     { id: 'toggle-sidebar', label: 'Toggle left sidebar', group: 'actions', icon: PanelLeft, shortcut: hint('sidebar.left', mac), run: () => onAction('sidebar.left') },
     { id: 'search-sessions', label: 'Search sessions in the sidebar', group: 'actions', icon: Search, keywords: ['filter', 'find'], disabled: !workspace, run: () => onAction('search') },
+    // What ALP's plugin adds to paseo-web's command center (integrations/paseo/index.client.tsx).
+    { id: 'alp-open-tasks', label: 'Open ALP tasks', group: 'alp', always: true, icon: ListTodo, keywords: ['tasks', 'todo', 'alp', 'panel'], disabled: !workspace, run: () => { openPanel('tasks'); onAction('tab.shown'); } },
+    { id: 'alp-open-tasks-screen', label: 'Open ALP tasks full screen', group: 'alp', always: true, icon: ListTodo, keywords: ['tasks', 'todo', 'alp', 'phone'], disabled: !workspace, run: () => onAction('tasks.screen') },
   ];
+  function paneActions(): RunnableAction[] {
+    const shown = shownTabs;
+    const focus = (direction: Direction, label: string): RunnableAction => ({ id: `pane-focus-${direction}`, label, group: 'workspace', icon: Crosshair, keywords: ['pane', 'focus', direction], disabled: !shown || !many, run: () => { focusAdjacent(direction); } });
+    const moveTab = (direction: Direction, label: string): RunnableAction => ({ id: `pane-move-tab-${direction}`, label, group: 'workspace', icon: ArrowLeftRight, keywords: ['pane', 'tab', 'move', direction], disabled: !shown || !many || !active, run: () => { moveTabAdjacent(direction); } });
+    return [
+      { id: 'pane-split-right', label: 'Split pane right', group: 'workspace', icon: Columns2, shortcut: hint('pane.split.right', mac), keywords: ['split', 'pane', 'vertical'], disabled: !shown || !canSplitEmpty, run: () => splitEmpty('right') },
+      { id: 'pane-split-down', label: 'Split pane down', group: 'workspace', icon: Rows2, shortcut: hint('pane.split.down', mac), keywords: ['split', 'pane', 'horizontal'], disabled: !shown || !canSplitEmpty, run: () => splitEmpty('bottom') },
+      focus('left', 'Focus pane left'), focus('right', 'Focus pane right'), focus('up', 'Focus pane up'), focus('down', 'Focus pane down'),
+      moveTab('left', 'Move tab left'), moveTab('right', 'Move tab right'), moveTab('up', 'Move tab up'), moveTab('down', 'Move tab down'),
+      { id: 'pane-close', label: 'Close pane', group: 'workspace', icon: X, shortcut: hint('pane.close', mac), keywords: ['pane', 'close'], disabled: !shown || !many, run: () => closePane(focusedPane) },
+    ];
+  }
   const rows = sessions.list.map(session => ({
     id: session.id,
     title: sessionName(session),
@@ -218,11 +263,17 @@ function Shell() {
   const [searchRequest, setSearchRequest] = React.useState(0);
   const [commandCenter, setCommandCenter] = React.useState(false);
   const [tabMenuRequest, setTabMenuRequest] = React.useState(0);
+  // ALP's tasks board in place of the workspace (Open ALP tasks full screen), as History.
+  const [tasksScreen, setTasksScreen] = React.useState(false);
+  const toWorkspace = () => { setHistory(false); setTasksScreen(false); };
+  const openHistory = () => { setTasksScreen(false); setHistory(true); };
+  // The workspace's tabs are not on screen.
+  const away = history || tasksScreen;
   const controller = useController();
   const { selected, workspace, principal, connection, sessions, tree } = useAppState();
   const canWrite = can(principal ?? undefined, 'session.write');
   // A session opened or started from anywhere brings the workspace back in place of History.
-  React.useEffect(() => { if (selected) setHistory(false); }, [selected]);
+  React.useEffect(() => { if (selected) { setHistory(false); setTasksScreen(false); } }, [selected]);
   // Desktop keeps both panels docked and lets the header toggles hide them; narrower screens
   // show each as an overlay the toggles open.
   const [navHidden, setNavHidden] = React.useState(false);
@@ -251,7 +302,7 @@ function Shell() {
     switch (action) {
       case 'session.new': case 'tab.agent':
         if (!workspace || !canWrite || connection.phase !== 'open') return false;
-        setHistory(false);
+        toWorkspace();
         newSession();
         return;
       case 'session.archive': {
@@ -261,7 +312,7 @@ function Shell() {
         return;
       }
       case 'session.opened': case 'tab.shown':
-        setHistory(false);
+        toWorkspace();
         return;
       case 'search':
         showNav();
@@ -270,7 +321,7 @@ function Shell() {
       case 'command-center.toggle': setCommandCenter(value => !value); return;
       case 'history':
         if (!workspace) return false;
-        setHistory(true);
+        openHistory();
         return;
       case 'session.rename': {
         const summary = currentSummary();
@@ -279,9 +330,14 @@ function Shell() {
         return;
       }
       case 'shortcuts.toggle': setShortcuts(value => !value); return;
+      case 'tasks.screen':
+        if (!workspace) return false;
+        setHistory(false);
+        setTasksScreen(true);
+        return;
       case 'settings.toggle': setCommandCenter(false); setSettings(value => !value); return;
       case 'tab.menu':
-        if (!workspace || history) return false;
+        if (!workspace || away) return false;
         setTabMenuRequest(value => value + 1);
         return;
       case 'sidebar.left': toggleNav(); return;
@@ -307,16 +363,21 @@ function Shell() {
           style={medium ? { width: sidebarWidth.width } : undefined} data-testid="sidebar-column"
           {...(!medium && !navOpen ? { inert: true } : {})}>
           {medium ? <ResizeHandle which="sidebar" side="right" width={sidebarWidth.width} onWidth={sidebarWidth.setWidth} onCommit={sidebarWidth.save} testId="left-sidebar-resize-handle" /> : null}
-          <Sidebar onNewSession={() => { setHistory(false); newSession(); }} onRename={setRenaming} onArchive={setArchiving} onSettings={() => setSettings(true)} onNavigate={() => setNavOpen(false)} onClose={medium ? undefined : () => setNavOpen(false)}
-            onHistory={() => setHistory(true)} historyOpen={history} onOpenSession={() => setHistory(false)} searchRequest={searchRequest} onSearchRequestHandled={() => setSearchRequest(0)} />
+          <Sidebar onNewSession={() => { toWorkspace(); newSession(); }} onRename={setRenaming} onArchive={setArchiving} onSettings={() => setSettings(true)} onNavigate={() => setNavOpen(false)} onClose={medium ? undefined : () => setNavOpen(false)}
+            onHistory={() => openHistory()} historyOpen={history} onOpenSession={() => toWorkspace()} searchRequest={searchRequest} onSearchRequestHandled={() => setSearchRequest(0)} />
         </div>
       )}
 
       <main className="flex min-w-0 flex-1 flex-col bg-background">
-        {history ? (
+        {tasksScreen ? (
           <>
             <ReconnectBanner />
-            <HistoryScreen navOpen={navShown} onToggleNav={toggleNav} onOpen={() => setHistory(false)} onBack={() => setHistory(false)} />
+            <TasksScreen navOpen={navShown} onToggleNav={toggleNav} onClose={toWorkspace} />
+          </>
+        ) : history ? (
+          <>
+            <ReconnectBanner />
+            <HistoryScreen navOpen={navShown} onToggleNav={toggleNav} onOpen={() => toWorkspace()} onBack={() => toWorkspace()} />
           </>
         ) : (
           <>
@@ -324,13 +385,12 @@ function Shell() {
               explorerOpen={explorerShown} onToggleExplorer={toggleExplorer}
               onRename={setRenaming} onArchive={setArchiving} />
             <ReconnectBanner />
-            <TabsRow onNewSession={newSession} onRename={setRenaming} menuRequest={tabMenuRequest} onMenuRequestHandled={() => setTabMenuRequest(0)} />
-            <TabContent onNewSession={newSession} />
+            <SplitView splits={medium} onNewSession={newSession} onRename={setRenaming} menuRequest={tabMenuRequest} onMenuRequestHandled={() => setTabMenuRequest(0)} />
           </>
         )}
       </main>
 
-      {explorerShown && !history ? (
+      {explorerShown && !away ? (
         <>
           {!wide ? <div className="fixed inset-0 z-30 bg-black/60" aria-hidden onClick={() => setPanelOpen(false)} /> : null}
           <div className={cn('shrink-0 border-l border-border bg-sidebar', wide ? 'relative' : 'fixed inset-y-0 right-0 z-40 w-[min(100vw,24rem)] shadow-2xl')}
@@ -342,13 +402,13 @@ function Shell() {
       ) : null}
 
       <DraftOpener request={draftRequest} />
-      <PageAttention onOpenSession={id => { controller.selectSession(id); setHistory(false); setSettings(false); }} />
+      <PageAttention onOpenSession={id => { controller.selectSession(id); toWorkspace(); setSettings(false); }} />
       <RenameDialog session={renaming} onClose={() => setRenaming(null)} />
       <ArchiveDialog session={archiving} onClose={() => setArchiving(null)} />
       <ShortcutsDialog open={shortcuts} onClose={() => setShortcuts(false)} />
-      <CommandCenterHost open={commandCenter} onClose={() => setCommandCenter(false)} history={history} onAction={onShortcut}
-        onOpenSession={id => { controller.selectSession(id); setHistory(false); setNavOpen(false); }} />
-      <ShellShortcuts settings={settings} history={history} onAction={onShortcut} />
+      <CommandCenterHost open={commandCenter} onClose={() => setCommandCenter(false)} history={away} splits={medium} onAction={onShortcut}
+        onOpenSession={id => { controller.selectSession(id); toWorkspace(); setNavOpen(false); }} />
+      <ShellShortcuts settings={settings} history={away} splits={medium} onAction={onShortcut} />
       <Notice />
     </div>
     {settings ? <div className="fixed inset-0 z-50" data-modal-overlay><SettingsScreen mobile={!medium} onClose={() => setSettings(false)} /></div> : null}
