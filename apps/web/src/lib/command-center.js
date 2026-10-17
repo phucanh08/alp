@@ -14,7 +14,7 @@
  */
 
 /**
- * @typedef {{ id: string, label: string, group: 'workspace' | 'actions', always?: boolean, keywords?: string[], shortcut?: string, disabled?: boolean }} CommandAction
+ * @typedef {{ id: string, label: string, group: 'workspace' | 'actions' | 'alp', always?: boolean, keywords?: string[], shortcut?: string, disabled?: boolean }} CommandAction
  * @typedef {{ id: string, title: string, subtitle?: string, bucket: 'running' | 'needs_input' | 'failed' | 'done', updatedAt?: string }} CommandSession
  * @typedef {{ kind: 'action', item: CommandAction } | { kind: 'session', item: CommandSession }} CommandRow
  * @typedef {{ id: string, title: string, rows: CommandRow[] }} CommandSection
@@ -95,6 +95,9 @@ export function commandResults({ actions, sessions, query }) {
   const groups = [
     { id: 'workspace', title: 'Workspace actions', rank: -1, rows: [] },
     { id: 'actions', title: 'Actions', rank: 0, rows: [] },
+    // Paseo lists a plugin's commands in a section of the plugin's own: ALP's (its alp-provider
+    // plugin's Open ALP tasks…) come after the app's.
+    { id: 'alp', title: 'ALP', rank: 1, rows: [] },
   ];
   for (const action of actions) {
     const group = groups.find(entry => entry.id === action.group);

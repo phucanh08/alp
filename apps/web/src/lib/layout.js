@@ -6,9 +6,12 @@
  *
  * Per workspace (scoped by gateway address and workspace path): the open session, the other
  * agent tabs of that session, the task and panel tabs, the tabs' order (tab keys, see
- * app/tabs.tsx) and the active tab. Widths: the sidebar and the explorer dock. Ids only: no
+ * app/tabs.tsx), the active tab and, once the center is split, its panes (lib/panes.js: the split
+ * tree, which pane each tab sits in and shows, the focused pane). Widths: the sidebar and the explorer dock. Ids only: no
  * token, no titles, nothing else the host sent.
  */
+
+import { parsePanes } from './panes.js';
 
 export const LAYOUT_KEY = 'alp-web:layout';
 export const LAYOUT_VERSION = 1;
@@ -23,7 +26,7 @@ const MAX_TABS = 50;
 const ID_CHARS = 300;
 
 /**
- * @typedef {{ session?: string, agents: string[], tasks: string[], panels: string[], order: string[], active?: string, at: number }} WorkspaceTabs
+ * @typedef {{ session?: string, agents: string[], tasks: string[], panels: string[], order: string[], active?: string, panes?: import('./panes.js').Panes, at: number }} WorkspaceTabs
  * @typedef {{ sidebarWidth?: number, dockWidth?: number, workspaces: Record<string, WorkspaceTabs> }} Layout
  * @typedef {{ getItem(key: string): string | null, setItem(key: string, value: string): void }} LayoutStorage
  */
@@ -52,6 +55,7 @@ function parseWorkspace(value) {
   const record = /** @type {Record<string, unknown>} */ (value);
   const session = id(record.session);
   const active = id(record.active);
+  const panes = parsePanes(record.panes);
   return {
     ...(session ? { session } : {}),
     agents: session ? ids(record.agents, entry => entry !== session) : [],
@@ -59,6 +63,7 @@ function parseWorkspace(value) {
     panels: ids(record.panels, entry => /** @type {readonly string[]} */ (PANEL_KINDS).includes(entry)),
     order: ids(record.order),
     ...(active ? { active } : {}),
+    ...(panes ? { panes } : {}),
     at: typeof record.at === 'number' && Number.isFinite(record.at) ? record.at : 0,
   };
 }
