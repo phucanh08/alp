@@ -1,7 +1,11 @@
-import type { PaseoAgent, PaseoAgentListResult } from '@getpaseo/client';
 import type { PluginButton, PluginButtonMenuEntry, PluginButtonRegistration, PluginClientContext, PluginOpenScreenInput } from '@getpaseo/plugin/client';
 import { tasksList, type TaskRow } from '../shared/tasks';
 import { stateOf } from './tasks-panel';
+
+// Through the host SDK, not `@getpaseo/client`: that is only a peer, which `paseo plugin add npm:`
+// does not install, and Paseo resolves every type import of a plugin's sources (#111).
+type PaseoAgentListResult = Awaited<ReturnType<PluginClientContext['paseo']['agents']['list']>>;
+type PaseoAgent = PaseoAgentListResult['entries'][number]['agent'];
 
 /**
  * The Tasks pill in the composer of each ALP agent. On a phone the workspace's "+" tab,

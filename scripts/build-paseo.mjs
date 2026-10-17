@@ -7,7 +7,7 @@ const build = async options => {
   metafiles.push(result.metafile);
   return result;
 };
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { requireShim } from './workspace-build-lib.mjs';
 import { assertCoreInputs, assertRemoteInputs } from './build-manifest.mjs';
@@ -55,9 +55,13 @@ const pluginAlpd = await build({ entryPoints: ['packages/daemon/src/main.ts'], o
 // alpd is a core bundle even here: it must not reach the plugin or the Paseo SDK in either direction.
 assertCoreInputs(pluginAlpd.metafile, 'integrations/paseo/server/dist/alpd.js');
 
-// Declarations and per-file artifacts for the plugin's server subpaths (exports ./paseo/*, ./panel/*).
-const { emitPluginDeclarations } = await import('./declarations.mjs');
-await emitPluginDeclarations();
+// The plugin ships no declarations (#111): it is a Paseo plugin, not a library, and Paseo's npm:
+// source install (--legacy-peer-deps, no peers) cannot resolve their `@getpaseo/*` type imports.
+// Remove any left by an earlier build so they cannot be packed. Per-file artifacts for the plugin's
+// server subpaths (exports ./paseo/*, ./panel/*) follow.
+for (const file of await readdir('integrations/paseo/server/dist', { recursive: true }).catch(() => [])) {
+  if (/\.d\.[cm]?ts$/.test(file)) await rm(path.join('integrations/paseo/server/dist', file), { force: true });
+}
 // index.ts and main.ts are already emitted as self-contained bundles above (the package "." and
 // "./main"); these are the source subpaths behind exports ./web, ./paseo/* and ./panel/*.
 const bundledEntries = new Set([`index.ts`, `main.ts`]);

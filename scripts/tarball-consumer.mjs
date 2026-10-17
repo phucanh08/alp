@@ -5,7 +5,10 @@
 //   1. Core: install only the six neutral workspace tarballs. They must come up with no Paseo SDK,
 //      no plugin and no React packages at all, then import at runtime and typecheck strictly.
 //   2. Plugin: install the plugin tarball plus its declared Paseo/React peer dependencies at pinned
-//      published versions. It must import at runtime and typecheck strictly against the real SDK.
+//      published versions. It must import at runtime and pass its behavioural regressions.
+//   3. Paseo npm: source: install the plugin as `paseo plugin add npm:` does (own directory,
+//      --legacy-peer-deps, no peers; scripts/paseo-source-check.mjs). No TypeScript it ships may
+//      import a non-host package that is not installed there, and Paseo's compiler must build it (#111).
 //
 // The only addition is `@types/node` (a consumer always needs Node's types); no `paths`, no
 // `typeRoots`, and no hand-written SDK stubs point anywhere near this repository.
@@ -15,6 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { spawnCommand } from './spawn-command.mjs';
 import { releaseArtifacts } from './release-lib.mjs';
+import { checkPaseoNpmSource, describe as describePaseoSource } from './paseo-source-check.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -167,17 +171,12 @@ console.log('plugin runtime imports ok');
 `);
   run(process.execPath, [path.join(pluginDir, 'import.mjs')], { cwd: pluginDir });
 
-  writeFileSync(path.join(pluginDir, 'consumer.ts'), `
-import contribute, { createProvider, createPaseoBridge, createWebServer, mapSession, sessionTasks, type PaseoGateway } from '@anhlp/alp-paseo';
-import { quietHandlers } from '@anhlp/alp-paseo/paseo/quiet';
-import type { SessionSummary, SessionStatus } from '@anhlp/alp-protocol/session';
-export const use = (session: SessionSummary, status: SessionStatus) => [contribute, createProvider, createPaseoBridge, createWebServer, mapSession, sessionTasks, quietHandlers, session, status] as const;
-export const gateway = (value: PaseoGateway) => value;
-`);
-  typecheck(pluginDir, strictConsumerTsconfig(['consumer.ts']));
-  writeFileSync(path.join(pluginDir, 'bad-wildcard.ts'), `import { nope } from '@anhlp/alp-paseo/paseo/does-not-exist';\nexport { nope };\n`);
-  typecheck(pluginDir, strictConsumerTsconfig(['bad-wildcard.ts']), { expectFailure: true, mustMention: '@anhlp/alp-paseo/paseo/does-not-exist' });
-  console.log('plugin consumer ok (isolated, real SDK)');
+  // A Paseo plugin, not a library: it ships no declarations (#111), and its exports stop at its files.
+  const shipped = readdirSync(path.join(pluginDir, 'node_modules/@anhlp/alp-paseo'), { recursive: true }).filter(file => /\.d\.[cm]?ts$/.test(file) && !file.split(path.sep).includes('node_modules'));
+  if (shipped.length) throw new Error(`@anhlp/alp-paseo must not ship declarations (#111), found: ${shipped.join(', ')}`);
+  const missing = run(process.execPath, ['--input-type=module', '-e', "await import('@anhlp/alp-paseo/paseo/does-not-exist')"], { cwd: pluginDir, capture: true, allowFailure: true });
+  if (missing.status === 0 || !missing.output.includes('ERR_MODULE_NOT_FOUND')) throw new Error(`an unknown ./paseo/* subpath must not import\n${missing.output}`);
+  console.log('plugin consumer ok (isolated, real SDK, no declarations)');
 
   // Run the existing behavioral regressions against installed public APIs, not workspace links.
   const tests = ['paseo', 'team', 'human', 'web', 'relay', 'paseo-web', 'workflow', 'transport'];
@@ -198,6 +197,9 @@ export const gateway = (value: PaseoGateway) => value;
     env: { ...process.env, ALP_HOME: path.join(pluginDir, 'home'), NODE_PATH: '' },
   });
   if (regression.status !== 0) throw new Error(`installed plugin regressions failed: ${regression.status}`);
+
+  // 3. The plugin as Paseo installs an npm: source: no peers, so no shipped type import may need one.
+  console.log(describePaseoSource(await checkPaseoNpmSource({ plugin: tarballs.get('@anhlp/alp-paseo'), dependencies: coreTarballs, work })));
 
   console.log('Tarball consumer check passed');
 } finally {

@@ -54,6 +54,9 @@ if (scope === 'all' || scope === 'packages') {
   // directory with SHA256SUMS and a manifest, then run A5 and every consumer check (installed
   // integrity, tarball-consumer, package-smoke) on those saved files. A rehearsal: CI is untagged.
   const release = mkdtempSync(path.join(os.tmpdir(), 'alp-release-'));
+  // build-paseo-web.mjs made the pinned Paseo checkout above: tarball-consumer must run Paseo's own
+  // plugin compiler on the npm:-style install (scripts/paseo-source-check.mjs, #111), not skip it.
+  process.env.ALP_REQUIRE_PASEO_COMPILER = '1';
   node('scripts/release-check.mjs');
   node('scripts/release-pack.mjs', '--out', release, '--rehearsal', '--ignore-scripts');
   node('scripts/release-consumer.mjs', release, '--rehearsal');
