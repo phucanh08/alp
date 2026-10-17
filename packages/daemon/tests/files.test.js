@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmod, link, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
@@ -389,6 +389,82 @@ test('a git in the workspace never runs: only absolute PATH entries are searched
   assert.equal((await readWorkspaceFile(root, { path: 'src/a.ts' })).content, 'a');
   await listWorkspaceDirectory(root);
   await assert.rejects(readFile(marker), { code: 'ENOENT' }, 'the planted git never ran');
+});
+
+/** A git planted in `directory` that writes a marker beside the workspace when it runs. */
+async function plantGit(root, directory) {
+  const marker = path.join(root, '..', 'planted-ran');
+  await mkdir(directory, { recursive: true });
+  const file = path.join(directory, 'git');
+  await writeFile(file, `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran');\n`);
+  await chmod(file, 0o755);
+  return { file, marker };
+}
+/** A read and a listing of `root` with `entries` first on PATH; the planted git must not have run. */
+async function plantedNeverRuns(root, marker, entries) {
+  await put(path.join(root, 'src', 'a.ts'), 'a');
+  const saved = process.env.PATH;
+  process.env.PATH = [...entries, saved ?? ''].join(path.delimiter);
+  try {
+    assert.equal((await readWorkspaceFile(root, { path: 'src/a.ts' })).content, 'a');
+    await listWorkspaceDirectory(root);
+  } finally {
+    process.env.PATH = saved;
+  }
+  await assert.rejects(readFile(marker), { code: 'ENOENT' }, 'the planted git never ran');
+}
+const flipCase = text => text.replace(/[a-z]/gi, letter => (letter === letter.toLowerCase() ? letter.toUpperCase() : letter.toLowerCase()));
+/** Whether `alias` names the same directory as `directory` (a case-insensitive file system). */
+const sameDirectory = async (alias, directory) => {
+  try { const [a, b] = await Promise.all([stat(alias), stat(directory)]); return a.dev === b.dev && a.ino === b.ino; } catch { return false; }
+};
+
+test('a PATH entry naming the workspace in another case is skipped (case-insensitive file systems)', { skip: process.platform === 'win32' && 'POSIX modes' }, async t => {
+  const { root } = await workspace(t);
+  const bin = path.join(root, 'node_modules', '.bin');
+  const { marker } = await plantGit(root, bin);
+  const aliases = [flipCase(bin), bin.toLowerCase(), bin.toUpperCase(), path.join(path.dirname(root), flipCase(path.basename(root)), 'node_modules', '.bin')].filter(alias => alias !== bin);
+  if (!(await sameDirectory(aliases[0], bin))) { t.skip('case-sensitive file system'); return; }
+  for (const alias of aliases) {
+    if (!(await sameDirectory(alias, bin))) continue;
+    assert.equal(resolveGit('git', alias, root), undefined, `${alias} is the workspace`);
+  }
+  assert.equal(resolveGit('git', `${aliases[0]}${path.sep}`, root), undefined, 'with a trailing separator too');
+  await plantedNeverRuns(root, marker, aliases);
+});
+
+test('a PATH entry outside the workspace that links into it is skipped', { skip: process.platform === 'win32' && 'symlinks and POSIX modes' }, async t => {
+  const { root, outside } = await workspace(t);
+  const { marker } = await plantGit(root, path.join(root, 'tools'));
+  await plantGit(root, root);
+  await symlink(path.join(root, 'tools'), path.join(outside, 'bin'));
+  await symlink(root, path.join(outside, 'project-link'));
+  assert.equal(resolveGit('git', path.join(outside, 'bin'), root), undefined, 'a link to a directory in the workspace');
+  assert.equal(resolveGit('git', path.join(outside, 'project-link'), root), undefined, 'a link to the workspace itself');
+  assert.equal(resolveGit('git', path.join(outside, 'project-link', 'tools'), root), undefined, 'a path through a link to the workspace');
+  assert.equal(resolveGit('git', path.join(outside, '..', path.basename(root), '.', 'tools'), root), undefined, 'a path with .. and . into the workspace');
+  assert.throws(() => resolveGit('git', path.join(outside, 'bin'), path.join(root, 'missing')), /cannot be examined/, 'a workspace that cannot be examined finds no git');
+  await plantedNeverRuns(root, marker, [path.join(outside, 'bin'), path.join(outside, 'project-link'), path.join(outside, 'project-link', 'tools')]);
+});
+
+test('a git outside the workspace that links to a file in it is skipped; git is run by its real path', { skip: process.platform === 'win32' && 'symlinks and POSIX modes' }, async t => {
+  const { root, outside } = await workspace(t);
+  const { file, marker } = await plantGit(root, path.join(root, 'tools'));
+  await mkdir(path.join(outside, 'bin'));
+  await symlink(file, path.join(outside, 'bin', 'git'));
+  await mkdir(path.join(outside, 'via-root'));
+  await symlink(path.join(flipCase(root), 'tools', 'git'), path.join(outside, 'via-root', 'git'));
+  assert.equal(resolveGit('git', path.join(outside, 'bin'), root), undefined, 'a link to a git in the workspace');
+  assert.equal(resolveGit(path.join(outside, 'bin', 'git'), '', root), undefined, 'an absolute binary linking into the workspace');
+  assert.equal(resolveGit(file, '', root), undefined, 'an absolute binary in the workspace');
+  assert.equal(resolveGit('git', path.join(outside, 'via-root'), root), undefined, 'a link through another spelling of the workspace');
+  await plantedNeverRuns(root, marker, [path.join(outside, 'bin'), path.join(outside, 'via-root')]);
+  // A link to a git outside the workspace is followed: git runs by its real path.
+  const real = path.join(outside, 'real');
+  await plantGit(root, real);
+  await mkdir(path.join(outside, 'linked'));
+  await symlink(path.join(real, 'git'), path.join(outside, 'linked', 'git'));
+  assert.equal(resolveGit('git', path.join(outside, 'linked'), root), path.join(real, 'git'));
 });
 
 test('names that look like pathspec magic are plain names to git: `:(glob)*`, `:!a`, `:a`', { skip: (noGit || process.platform === 'win32') && 'git and POSIX names' }, async t => {

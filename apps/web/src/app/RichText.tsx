@@ -2,6 +2,7 @@ import * as React from 'react';
 import { cn } from '../lib/utils';
 import { parseBlocks, type Block } from './chat/markdown';
 import type { FileTarget } from '../lib/file-links.js';
+import { INLINE, splitLink } from '../lib/inline-markdown.js';
 
 /**
  * A small, safe reading of the Markdown agents write, styled as Paseo's assistant markdown:
@@ -26,10 +27,7 @@ function FileLinkButton({ target, links, children, title }: { target: FileTarget
 
 export { parseBlocks };
 
-// Every span is bounded (at most 1000 characters, a link target 2048), so a long line full of
-// unclosed markers costs a bounded scan per position, never one to the end of the line (a 1 MiB
-// Markdown file in a file tab's preview).
-const INLINE = /(`[^`\n]{1,1000}`)|(\*\*[^*\n]{1,1000}?\*\*|__[^_\n]{1,1000}?__)|(~~[^~\n]{1,1000}?~~)|(\[[^[\]\n]{1,1000}\]\([^()\s]{1,2048}\))|((?:https?:\/\/|mailto:)[^\s<>()]{0,2048}[^\s<>().,;:!?'"`*])|(\*[^*\s][^*\n]{0,1000}?\*|(?<![\w])_[^_\s][^_\n]{0,1000}?_(?![\w]))/;
+// INLINE's spans are bounded (lib/inline-markdown.js), so a long line costs a linear scan.
 const safeHref = (url: string) => (/^(https?:\/\/|mailto:)/i.test(url) ? url : undefined);
 
 function Link({ href, children }: { href: string; children: React.ReactNode }) {
@@ -58,11 +56,12 @@ function Inline({ text }: { text: string }) {
     else if (strong) out.push(<strong key={key++} className="font-semibold text-foreground"><Inline text={strong.slice(2, -2)} /></strong>);
     else if (strike) out.push(<s key={key++} className="text-muted-foreground"><Inline text={strike.slice(2, -2)} /></s>);
     else if (link) {
-      const parts = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(link)!;
-      const target = safeHref(parts[2]) ? undefined : links?.resolve(parts[2], 'href');
-      out.push(target && links
-        ? <FileLinkButton key={key++} target={target} links={links} title={`Open ${target.path}${target.line ? `:${target.line}` : ''}`}><Inline text={parts[1]} /></FileLinkButton>
-        : <Link key={key++} href={parts[2]}><Inline text={parts[1]} /></Link>);
+      const parts = splitLink(link);
+      const target = !parts || safeHref(parts.href) ? undefined : links?.resolve(parts.href, 'href');
+      if (!parts) out.push(link);
+      else out.push(target && links
+        ? <FileLinkButton key={key++} target={target} links={links} title={`Open ${target.path}${target.line ? `:${target.line}` : ''}`}><Inline text={parts.text} /></FileLinkButton>
+        : <Link key={key++} href={parts.href}><Inline text={parts.text} /></Link>);
     } else if (url) out.push(<Link key={key++} href={url}>{url}</Link>);
     else if (em) out.push(<em key={key++} className="italic"><Inline text={em.slice(1, -1)} /></em>);
     rest = rest.slice(match.index + token.length);
