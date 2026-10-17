@@ -477,3 +477,85 @@ test('a root is renamed and archived, and archived ones are listed only when ask
   await client.request('session.archive', { sessionId: session.id, archived: false });
   assert.deepEqual(await listed(), [[session.id, 'Fix the login', false]]);
 });
+
+test('session.list pages with a keyset cursor and searches titles on the daemon', async t => {
+  const { project, open } = await setup(t);
+  const { client } = await open();
+  const hello = await client.request('daemon.hello', { protocolVersion: 1 });
+  assert.ok(hello.capabilities.includes('session.list.page'));
+  const ids = [];
+  for (const title of ['Fix the login', 'Write docs', 'Fix the logout', 'Ship it', 'Review login page']) {
+    const { session } = await client.request('session.create', { spec: { cwd: project, persist: true } });
+    await client.request('session.rename', { sessionId: session.id, title });
+    ids.push(session.id);
+    await new Promise(resolve => setTimeout(resolve, 3));
+  }
+  const all = (await client.request('session.list', { rootsOnly: true, includeClosed: true })).sessions.map(row => row.id);
+  assert.deepEqual(all, [...ids].reverse(), 'newest first');
+  // Without paging params the answer is the whole list with no cursor, as before.
+  assert.equal((await client.request('session.list', { rootsOnly: true })).nextCursor, undefined);
+  const pages = [];
+  let cursor;
+  do {
+    const page = await client.request('session.list', { rootsOnly: true, includeClosed: true, limit: 2, ...(cursor ? { cursor } : {}) });
+    assert.ok(page.sessions.length <= 2);
+    pages.push(page.sessions.map(row => row.id));
+    cursor = page.nextCursor;
+  } while (cursor);
+  assert.deepEqual(pages.map(page => page.length), [2, 2, 1]);
+  assert.deepEqual(pages.flat(), all, 'pages join into the list without gaps or repeats');
+  // A page that ends the list exactly has no cursor.
+  assert.equal((await client.request('session.list', { rootsOnly: true, limit: 5 })).nextCursor, undefined);
+  // Search: every word, case-folded, in the title or the id; with paging.
+  const found = await client.request('session.list', { rootsOnly: true, query: '  LOGIN  fix ', limit: 1 });
+  assert.deepEqual(found.sessions.map(row => row.title), ['Fix the login']);
+  assert.equal(found.nextCursor, undefined);
+  const login = await client.request('session.list', { rootsOnly: true, query: 'login', limit: 1 });
+  assert.deepEqual(login.sessions.map(row => row.title), ['Review login page']);
+  const rest = await client.request('session.list', { rootsOnly: true, query: 'login', limit: 1, cursor: login.nextCursor });
+  assert.deepEqual([rest.sessions.map(row => row.title), rest.nextCursor], [['Fix the login'], undefined]);
+  assert.deepEqual((await client.request('session.list', { query: ids[1] })).sessions.map(row => row.id), [ids[1]]);
+  // projectRoots: any of several projects, paged among them only.
+  assert.equal((await client.request('session.list', { projectRoots: ['/elsewhere', project], limit: 10 })).sessions.length, 5);
+  assert.deepEqual(await client.request('session.list', { projectRoots: ['/elsewhere'], limit: 1 }), { sessions: [] });
+  await assert.rejects(client.request('session.list', { cursor: 'not-a-cursor' }), { code: -32602 });
+  await assert.rejects(client.request('session.list', { limit: 0 }), { code: -32602 });
+});
+
+test('question.watch tells a connection of questions in trees it is not attached to', async t => {
+  const { project, runtimes, open } = await setup(t);
+  const owner = await open();
+  const watcher = await open();
+  const other = await open();
+  const { session } = await owner.client.request('session.create', { spec: { cwd: project, persist: true } });
+  assert.ok((await watcher.client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('question.watch'));
+  assert.deepEqual(await watcher.client.request('question.watch', { projectRoot: project }), { questions: [] });
+  await other.client.request('question.watch', { projectRoot: path.join(project, 'elsewhere') });
+  await owner.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Ask me') });
+  const asked = runtimes[0].call('alp_ask', { question: 'Go on?', to: 'user' });
+  await until(() => watcher.events.some(e => e.event.type === 'question'));
+  const question = watcher.events.find(e => e.event.type === 'question');
+  assert.equal(question.sessionId, session.id);
+  assert.equal(question.event.question.body, 'Go on?');
+  assert.equal(question.cursor, undefined, 'not part of a timeline the watcher replays');
+  const kept = owner.events.find(e => e.event.type === 'question');
+  assert.equal(typeof kept.cursor, 'number', 'the attached client still gets the kept envelope');
+  assert.equal(owner.events.filter(e => e.event.type === 'question').length, 1);
+  // A watcher that calls again gets what waits now.
+  assert.deepEqual((await watcher.client.request('question.watch', { projectRoot: project })).questions.map(q => q.id), [question.event.question.id]);
+  await owner.client.request('question.answer', { questionId: question.event.question.id, text: 'yes' });
+  await asked;
+  await until(() => watcher.events.some(e => e.event.type === 'question.resolved'));
+  assert.equal(watcher.events.find(e => e.event.type === 'question.resolved').event.questionId, question.event.question.id);
+  // A watcher attached to the tree is told once, by its attachment.
+  runtimes[0].finish();
+  await until(() => owner.events.some(e => e.event.type === 'turn.ended'));
+  await watcher.client.request('session.attach', { sessionId: session.id, replay: false });
+  await owner.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm2', content: text('Ask again') });
+  await until(() => owner.events.filter(e => e.event.type === 'turn.started').length === 2);
+  void runtimes[0].call('alp_ask', { question: 'Again?', to: 'user' });
+  await until(() => watcher.events.some(e => e.event.type === 'question' && e.event.question.body === 'Again?' && e.cursor !== undefined));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(watcher.events.filter(e => e.event.type === 'question' && e.event.question.body === 'Again?').length, 1);
+  assert.equal(other.events.filter(e => e.event.type.startsWith('question')).length, 0, 'another project hears nothing');
+});

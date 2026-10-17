@@ -38,6 +38,7 @@ async function world(t, { modes } = {}) {
     alice: { workspaces: [a], ...(modes ? { modes } : {}) },
     reader: { workspaces: [a], permissions: ['session.read'] },
     sessions: { workspaces: [a], permissions: ['session.read', 'session.write'] },
+    both: { workspaces: [a, b] },
   } });
   return { daemon, a, b, canonicalA, ...gw };
 }
@@ -59,6 +60,7 @@ const OUT_OF_SCOPE = {
   'session.release': () => [{ sessionId: 'sb' }, 1001],
   'session.preview': ({ b }) => [{ spec: { cwd: b } }, 1003, 'outside_workspace'],
   'question.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
+  'question.watch': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
   'board.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
   'session.create': ({ b }) => [{ spec: { cwd: b } }, 1003, 'outside_workspace'],
   'session.prompt': () => [{ sessionId: 'mix', clientMessageId: 'm', content: text }, 1001],
@@ -84,7 +86,7 @@ const IN_SCOPE = ({ a }) => ({
   'catalog.get': {}, 'library.models': {}, 'settings.language.get': {},
   'session.list': {}, 'session.get': { sessionId: 'sa' }, 'session.status': { sessionId: 'sa' }, 'session.log': { sessionId: 'sa' },
   'session.attach': { sessionId: 'sa' }, 'session.release': { sessionId: 'sa' }, 'session.preview': { spec: { cwd: a } },
-  'question.list': {}, 'board.list': { projectRoot: a },
+  'question.list': {}, 'question.watch': {}, 'board.list': { projectRoot: a },
   'session.create': { spec: { cwd: a } }, 'session.prompt': { sessionId: 'sa', clientMessageId: 'm', content: text },
   'session.interrupt': { sessionId: 'sa' }, 'session.configure': { sessionId: 'sa' }, 'session.close': { sessionId: 'sa' },
   'session.rename': { sessionId: 'sa', title: 't' }, 'session.archive': { sessionId: 'sa' }, 'session.message': { sessionId: 'sa', text: 'x' },
@@ -205,6 +207,107 @@ test('lists keep only what the grant covers', async t => {
   assert.deepEqual(named.sessions.map(session => session.id).sort(), ['ro', 'sa', 'sa-c']);
   const { questions } = await client.request('question.list');
   assert.deepEqual(questions.map(question => question.id), ['q-a-111']);
+});
+
+test('session.list pages: alpd lists the granted workspaces only, reads on past rows the grant drops, and cursors are sealed', async t => {
+  const { daemon, sdk, a, canonicalA } = await world(t);
+  const { client } = await sdk('alice');
+  const mark = daemon.calls().length;
+  const first = await client.request('session.list', { limit: 2 });
+  assert.deepEqual(first.sessions.map(row => row.id), ['sa', 'sa-c']);
+  // The cursor is the gateway's own: alpd's ('@2' here) never reaches the client.
+  assert.match(first.nextCursor, /^g1\./);
+  assert.ok(!first.nextCursor.includes('@2'));
+  // alpd's next page is mix (in a, but in b's tree: dropped) and ro: the gateway reads on.
+  const second = await client.request('session.list', { limit: 1, cursor: first.nextCursor });
+  assert.deepEqual([second.sessions.map(row => row.id), second.nextCursor], [['ro'], undefined]);
+  const sent = reached(daemon, mark, 'session.list').map(call => call.params);
+  assert.deepEqual(sent.map(params => [params.limit, params.cursor]), [[2, undefined], [1, '@2'], [1, '@3']]);
+  for (const params of sent) assert.deepEqual([...params.projectRoots].sort(), [...new Set([a, canonicalA])].sort(), 'only the grant\'s workspaces');
+  // A cursor whose last alpd row was dropped names nothing the client can read.
+  const dropped = await client.request('session.list', { limit: 1, cursor: (await client.request('session.list', { limit: 2 })).nextCursor });
+  assert.equal(dropped.sessions[0].id, 'ro');
+  // A cursor the gateway did not give, or gave another credential, is refused before alpd.
+  const before = daemon.calls('session.list').length;
+  await assert.rejects(client.request('session.list', { limit: 1, cursor: '@4' }), error => error.code === -32602);
+  await assert.rejects(client.request('session.list', { limit: 1, cursor: `${first.nextCursor.slice(0, -2)}AA` }), error => error.code === -32602);
+  const other = (await sdk('both')).client;
+  await assert.rejects(other.request('session.list', { limit: 1, cursor: first.nextCursor }), error => error.code === -32602);
+  assert.equal(daemon.calls('session.list').length, before);
+  // A query is passed on; the client's projectRoot narrows projectRoots and is not sent itself.
+  const named = await client.request('session.list', { projectRoot: canonicalA, limit: 1, query: 'sa' });
+  assert.deepEqual(named.sessions.map(row => row.id), ['sa']);
+  const last = daemon.calls('session.list').at(-1).params;
+  assert.deepEqual([last.limit, last.query, last.projectRoot], [1, 'sa', undefined]);
+  // A query naming a session outside the grant finds nothing of it, even paged.
+  for (const query of ['sb', 'sb-c', 'mix']) {
+    const found = await client.request('session.list', { query, limit: 1 });
+    assert.deepEqual([found.sessions, found.nextCursor], [[], undefined], query);
+  }
+  // The grant of two workspaces lists both.
+  assert.deepEqual((await other.request('session.list', {})).sessions.map(row => row.id).sort(), ['mix', 'ro', 'sa', 'sa-c', 'sb', 'sb-c'], 'mix too: its tree is in b');
+});
+
+test('session.list for a grant too large to name to alpd: the whole list, searched by the gateway, never alpd\'s query', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-many-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const workspaces = [];
+  for (let i = 0; i < 1030; i++) { const workspace = path.join(directory, `w${i}`); await mkdir(workspace); workspaces.push(workspace); }
+  const outside = path.join(directory, 'outside');
+  await mkdir(outside);
+  const first = await realpath(workspaces[0]);
+  const daemon = fakeDaemon({ sessions: [summary('in-1', first, { title: 'Fix login' }), summary('in-2', first, { title: 'Docs' }), summary('out-1', outside, { title: 'Fix secret' })] });
+  const { sdk } = await startGateway(t, { daemon, credentials: { many: { workspaces } } });
+  const { client } = await sdk('many');
+  const found = await client.request('session.list', { limit: 1, query: 'fix' });
+  assert.deepEqual([found.sessions.map(row => row.id), found.nextCursor], [['in-1'], undefined]);
+  const sent = daemon.calls('session.list').at(-1).params;
+  assert.deepEqual([sent.query, sent.limit, sent.cursor, sent.projectRoots], [undefined, undefined, undefined, undefined], 'nothing alpd would match or page across the host');
+  assert.deepEqual((await client.request('session.list', { limit: 1 })).sessions.map(row => row.id).sort(), ['in-1', 'in-2']);
+});
+
+test('question.watch: the list and the events stay in the grant, and in the workspace it names', async t => {
+  const { daemon, sdk, a } = await world(t);
+  const question = (id, sessionId, rootId) => ({ type: 'question', question: { id, sessionId, rootId, agent: 'main', body: `${id}?`, askedAt: '2026-10-15T00:00:00.000Z' } });
+  const { client } = await sdk('alice');
+  assert.ok((await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('question.watch'));
+  const seen = [];
+  client.onEvent(envelope => seen.push([envelope.sessionId, envelope.event.type, envelope.cursor]));
+  const listed = await client.request('question.watch', { projectRoot: a });
+  assert.deepEqual(listed.questions.map(q => q.id), ['q-a-111']);
+  assert.deepEqual(daemon.calls('question.watch').at(-1).params, {}, 'alpd is asked for every tree');
+  daemon.emit('sb', question('q-b-1', 'sb', 'sb'));
+  daemon.emit('mix', question('q-mix', 'mix', 'sb'));
+  daemon.emit('sa-c', question('q-a-1', 'sa-c', 'sa'));
+  daemon.emit('sa-c', { type: 'question.resolved', questionId: 'q-a-1', outcome: 'answered' });
+  await until(() => seen.some(([, type]) => type === 'question.resolved'), 'the resolution');
+  assert.deepEqual(seen, [['sa-c', 'question', undefined], ['sa-c', 'question.resolved', undefined]]);
+  // A session found outside the grant is not looked up again for its next question.
+  const lookups = () => daemon.calls('session.get').filter(call => call.params.sessionId === 'sb').length;
+  const looked = lookups();
+  daemon.emit('sb', question('q-b-1b', 'sb', 'sb'));
+  daemon.emit('sa-c', question('q-a-3', 'sa-c', 'sa'));
+  await until(() => seen.length === 3, 'the next question of a');
+  assert.equal(lookups(), looked);
+
+  // A grant of two workspaces watching one: the other's questions only once it attaches there.
+  const both = (await sdk('both')).client;
+  const heard = [];
+  both.onEvent(envelope => heard.push([envelope.sessionId, envelope.event.type, envelope.cursor !== undefined]));
+  assert.deepEqual((await both.request('question.watch', { projectRoot: a })).questions.map(q => q.id), ['q-a-111']);
+  daemon.emit('sb', question('q-b-2', 'sb', 'sb'));
+  daemon.emit('sa', question('q-a-2', 'sa', 'sa'));
+  await until(() => heard.length === 1, 'the question of a');
+  await both.request('session.attach', { sessionId: 'sb', replay: false });
+  daemon.emit('sb', question('q-b-3', 'sb', 'sb'));
+  await until(() => heard.length === 2, 'the question of the attached tree');
+  // Watching every workspace of the grant.
+  await both.request('question.watch', {});
+  daemon.emit('sb-c', { type: 'question.resolved', questionId: 'q-b-3', outcome: 'answered' });
+  await both.request('session.release', { sessionId: 'sb' });
+  daemon.emit('sb', question('q-b-4', 'sb', 'sb'));
+  await until(() => heard.length === 4, 'every workspace');
+  assert.deepEqual(heard, [['sa', 'question', false], ['sb', 'question', true], ['sb-c', 'question.resolved', true], ['sb', 'question', false]]);
 });
 
 test('question.answer needs an exact id in scope: a prefix that alpd would expand is refused', async t => {

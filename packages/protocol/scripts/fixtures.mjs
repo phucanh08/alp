@@ -94,6 +94,8 @@ R('assignment.recall', { assignmentId: 'a_1', agent: 'peer', taskId: 'bd-1', fin
 P('board.list', { projectRoot: '/work/project' }); P('board.list', {}, false, 'without projectRoot');
 R('board.list', { pins: [pin] });
 P('question.list', { projectRoot: '/work/project' }); R('question.list', { questions: [question] });
+P('question.watch', { projectRoot: '/work/project' }); P('question.watch', {}, true, 'every tree'); R('question.watch', { questions: [question] });
+P('question.watch', { projectRoot: 7 }, false, 'with a numeric projectRoot');
 P('question.answer', { questionId: 'q_1', text: 'có' }); P('question.answer', { questionId: 'q_1', dismiss: true, reason: 'không cần' }, true, 'dismissal');
 R('question.answer', { questionId: 'q_1' });
 P('session.create', { sessionId: 'ses_fixture', spec: { cwd: '/work/project', model: 'codex:gpt-6.1-sol', persist: true, mcpServers: { docs: { type: 'http', url: 'https://example.invalid/mcp' } } }, history: 'replay', delegation: false });
@@ -131,6 +133,13 @@ R('session.get', { session: { ...summary, status: 'paused' } }, false, 'result w
 P('session.list', { projectRoot: '/work/project', rootsOnly: true, includeClosed: true, includeArchived: false });
 P('session.list', { projectRoot: null }, false, 'with a null projectRoot');
 R('session.list', { sessions: [summary] });
+P('session.list', { projectRoot: '/work/project', rootsOnly: true, includeArchived: true, limit: 200, cursor: 'eyJrIjpbMF19', query: 'sửa lỗi' }, true, 'a page with a query');
+P('session.list', { limit: 0 }, false, 'with a zero limit');
+P('session.list', { projectRoots: ['/work/project', '/private/work/project'], limit: 50 }, true, 'of several projects');
+P('session.list', { projectRoots: [] }, false, 'with no projects');
+P('session.list', { limit: 2.5 }, false, 'with a fractional limit');
+P('session.list', { cursor: '' }, false, 'with an empty cursor');
+R('session.list', { sessions: [summary], nextCursor: 'eyJrIjpbMF19' }, true, 'a page with more after it');
 P('session.status', { sessionId: 'ses_fixture' });
 R('session.status', { status: { rootId: 'ses_fixture', sessions: [{ ...snapshot, state: 'waiting_user', idleMs: 1200, workdir: '/work/project', unreadMail: 0 }], assignments: [{ id: 'ses_child', agent: 'peer', mode: 'workspace-write', status: 'running', startedAt: ts, requester: 'ses_fixture', isolation: 'shared', idleMs: 5 }], questions: [question], worktrees: [], leases: [{ checkout: '/work/project', assignmentId: 'ses_child', agent: 'peer' }], claims: [pin] } });
 P('session.message', { sessionId: 'ses_fixture', text: 'Ghi chú' }); R('session.message', {});

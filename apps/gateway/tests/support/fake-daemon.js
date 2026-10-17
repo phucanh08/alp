@@ -15,7 +15,7 @@ const error = (code, message, data) => ({ code, message, ...(data ? { data } : {
 /**
  * @param {{ sessions?: object[], questions?: object[], capabilities?: string[] }} [fixture]
  */
-export function fakeDaemon({ sessions = [], questions = [], capabilities = ['attach.after', 'extension.methods', 'prompt.receipts', 'task', 'team', 'library', 'settings.language'] } = {}) {
+export function fakeDaemon({ sessions = [], questions = [], capabilities = ['attach.after', 'extension.methods', 'prompt.receipts', 'task', 'team', 'library', 'settings.language', 'session.list.page', 'question.watch'] } = {}) {
   const state = {
     /** @type {Map<string, any>} */ sessions: new Map(sessions.map(session => [session.id, session])),
     questions: [...questions],
@@ -47,6 +47,11 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
     if (keep) timeline.push(envelope);
     state.timelines.set(root, timeline);
     for (const link of state.links) if (link.attached.has(root)) link.send({ jsonrpc: '2.0', method: 'event', params: envelope });
+    // question.watch: the trees a connection is not attached to, without the cursor, as alpd does.
+    if (event.type === 'question' || event.type === 'question.resolved') {
+      const { cursor: _cursor, ...announced } = envelope;
+      for (const link of state.links) if (link.watching && !link.attached.has(root) && (link.watching.projectRoot === undefined || state.sessions.get(root)?.projectRoot === link.watching.projectRoot)) link.send({ jsonrpc: '2.0', method: 'event', params: announced });
+    }
     return envelope;
   }
 
@@ -59,7 +64,13 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
       if (!found) throw error(1001, 'Session is not open');
       return { session: found };
     },
-    'session.list': ({ projectRoot }) => ({ sessions: [...state.sessions.values()].filter(session => projectRoot === undefined || session.projectRoot === projectRoot) }),
+    // Pages by position: the cursor is the index of the next session.
+    'session.list': ({ projectRoot, projectRoots, limit, cursor, query }) => {
+      const all = [...state.sessions.values()].filter(session => (projectRoot === undefined || session.projectRoot === projectRoot) && (projectRoots === undefined || projectRoots.includes(session.projectRoot)) && (query === undefined || `${session.title ?? ''}\n${session.id}`.includes(query)));
+      const start = cursor === undefined ? 0 : Number(cursor.slice(1));
+      const end = limit === undefined ? all.length : start + limit;
+      return { sessions: all.slice(start, end), ...(end < all.length ? { nextCursor: `@${end}` } : {}) };
+    },
     'session.status': ({ sessionId }) => ({ status: { rootId: rootOf(sessionId), sessions: [], assignments: [], questions: [], worktrees: [] } }),
     'session.log': ({ sessionId }) => ({ rootId: rootOf(sessionId), entries: [] }),
     'session.attach': ({ sessionId, replay = true, after }, link) => {
@@ -99,6 +110,10 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
     'session.rename': ({ sessionId, title }) => { const found = state.sessions.get(sessionId); found.title = title; return { session: found }; },
     'session.archive': ({ sessionId, archived = true }) => { const found = state.sessions.get(sessionId); found.archived = archived; return { session: found }; },
     'question.list': ({ projectRoot }) => ({ questions: state.questions.filter(question => projectRoot === undefined || state.sessions.get(question.rootId)?.projectRoot === projectRoot) }),
+    'question.watch': ({ projectRoot }, link) => {
+      link.watching = { projectRoot };
+      return { questions: state.questions.filter(question => projectRoot === undefined || state.sessions.get(question.rootId)?.projectRoot === projectRoot) };
+    },
     'question.answer': ({ questionId }) => {
       const matches = state.questions.filter(question => question.id === questionId || question.id.startsWith(questionId));
       if (matches.length !== 1) throw error(1001, `No question ${questionId} waits for an answer`);
@@ -141,6 +156,7 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
     const link = {
       id: ++nextLink,
       attached: new Set(),
+      /** @type {{ projectRoot?: string } | undefined} */ watching: undefined,
       send(message) { if (!ended) { const frame = JSON.stringify(message); queueMicrotask(() => { if (!ended) for (const listener of [...messages]) listener(frame); }); } },
       end(close = {}) {
         if (ended) return;
