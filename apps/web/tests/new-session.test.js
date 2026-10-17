@@ -3,7 +3,7 @@
 // the first message.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSpec, effectiveModel, startNewSession, effortLabel, effortOptions, initialChoices, normalizeModels, parsePreview, previewRows, resolveThinking, titleFromPrompt } from '../src/lib/new-session.js';
+import { buildSpec, effectiveModel, startNewSession, effortLabel, effortOptions, initialChoices, normalizeModels, parsePreview, previewRows, resolveThinking } from '../src/lib/new-session.js';
 
 const models = normalizeModels([
   { id: 'codex:gpt-6.1-sol', label: 'codex · GPT-6.1-Sol', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'low'], effort: 'low' },
@@ -71,15 +71,6 @@ test('a preview: checked, then read as rows', () => {
   // Without a label or a known model, the ids (`custom` reads Custom); empty fields leave their row out.
   const bare = parsePreview({ preview: { teams: [], team: 'custom', agent: 'lead', runtime: 'acp', model: 'x/y', mode: '', thinking: '' } });
   assert.deepEqual(previewRows(bare).map(row => [row.label, row.value]), [['Team', 'Custom'], ['Agent', 'lead'], ['Runtime', 'ACP'], ['Model', 'x/y']]);
-});
-
-test('a title from the first message: its first line, collapsed, at most 80 characters', () => {
-  assert.equal(titleFromPrompt('\n  Fix   the login\tbug  \nwith details'), 'Fix the login bug');
-  assert.equal(titleFromPrompt('   \n '), undefined);
-  const long = 'é'.repeat(100);
-  const title = titleFromPrompt(long);
-  assert.equal([...title].length, 80);
-  assert.ok(title.endsWith('…'));
 });
 
 test('the team a start sends: chosen, else the current preview\'s, else the first listed once the preview cannot answer; none only when the host has no team', async () => {

@@ -166,21 +166,6 @@ export function previewRows(preview, models = []) {
   return rows;
 }
 
-const TITLE_CHARS = 80;
-
-/**
- * The title a session gets from its first message when the person gave none (Paseo names an
- * agent from its first prompt): the first non-blank line, whitespace collapsed, at most 80
- * characters (code points) with an ellipsis.
- * @param {string} prompt @returns {string | undefined}
- */
-export function titleFromPrompt(prompt) {
-  const line = String(prompt ?? '').split('\n').map(entry => entry.replace(/\s+/g, ' ').trim()).find(Boolean);
-  if (!line) return undefined;
-  const chars = [...line];
-  return chars.length <= TITLE_CHARS ? line : `${chars.slice(0, TITLE_CHARS - 1).join('').trimEnd()}…`;
-}
-
 /**
  * What a preview request asked about the model that would run: the team and the model chosen
  * (empty: the host's default). A preview answered for another pair says nothing about this one's

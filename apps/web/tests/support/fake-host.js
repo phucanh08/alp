@@ -250,7 +250,17 @@ export class FakeHost {
         const steer = params.delivery === 'steer';
         const turnId = steer ? root.running : `turn-${++root.turns}`;
         if (!steer) { root.running = turnId; root.summary.busy = true; }
-        const userMessage = () => this.#emit(root, root.id, { type: 'item', item: { kind: 'user_message', id: `u-${params.clientMessageId}`, text, clientMessageId: params.clientMessageId } });
+        const userMessage = () => {
+          this.#emit(root, root.id, { type: 'item', item: { kind: 'user_message', id: `u-${params.clientMessageId}`, text, clientMessageId: params.clientMessageId } });
+          // As alpd: the first message names an unnamed root, announced as session.updated.
+          const line = text.split(/\r?\n/).map(entry => entry.replace(/\s+/g, ' ').trim()).find(Boolean);
+          if (!root.summary.title && line) {
+            root.summary.title = [...line].slice(0, 60).join('').trim();
+            // A runtime snapshot plus the title, as alpd sends: no list-only fields.
+            const { status: _status, createdAt: _created, updatedAt: _updated, archived: _archived, ...snapshot } = root.summary;
+            this.#emit(root, root.id, { type: 'session.updated', session: snapshot });
+          }
+        };
         const accepted = () => {
           this.#emit(root, root.id, { type: 'prompt.accepted', clientMessageId: params.clientMessageId, result: steer ? 'steer' : 'turn', turnId });
           if (steer) return;
