@@ -72,6 +72,8 @@ export function encodePrompt(text: string): string {
  * Emits line-delimited JSON events and parses stdout line by line.
  */
 export class AntigravityTransport {
+  /** Antigravity's prompt is one line of text: no images. */
+  takesImages() { return false; }
   private child?: ChildProcessWithoutNullStreams;
   private lines?: Interface;
   private exit: Promise<void> = Promise.resolve();

@@ -1,5 +1,5 @@
 // @ts-check
-import { CAPABILITY, ERROR, RPC_METHODS } from '@anhlp/alp-protocol';
+import { CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS } from '@anhlp/alp-protocol';
 
 /**
  * What the gateway lets a remote client call (docs/alp/remote-gateway.md §5): the method
@@ -25,7 +25,7 @@ export const PERMISSIONS = Object.freeze(['session.read', 'session.write', 'proj
  * Within `library` and `settings.language` some methods stay unexposed and answer -32601
  * `not_exposed` (docs/alp/remote-gateway.md §5.4).
  */
-export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles]);
+export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles, CAPABILITY.promptImages]);
 
 /** The codes of docs/protocol/alp-json-rpc-v1.md §5.1 the gateway answers its own refusals with; `data.reason` says why. */
 export const GATEWAY_ERROR = Object.freeze({ forbidden: ERROR.forbidden, unavailable: ERROR.unavailable });
@@ -38,6 +38,7 @@ export const GATEWAY_REASON = Object.freeze({
   hostScope: 'host_scope',
   specField: 'spec_field',
   contentType: 'content_type',
+  imageLimit: 'image_limit',
   mode: 'mode',
   rateLimited: 'rate_limited',
   tooManyPending: 'too_many_pending',
@@ -50,8 +51,29 @@ export const GATEWAY_REASON = Object.freeze({
 /** `workflow` names a team the daemon host defines (built-in, library or project), as Paseo picks one. */
 export const SPEC_FIELDS = Object.freeze(['cwd', 'agent', 'model', 'mode', 'thinking', 'persist', 'workflow']);
 
-/** Prompt content parts a remote client may send. The runtime reads text only. */
-export const CONTENT_TYPES = Object.freeze(['text']);
+/**
+ * Prompt content parts a remote client may send: text, and images inline as base64 (the schema
+ * refuses any other field on an image, so never a host path or URL).
+ */
+export const CONTENT_TYPES = Object.freeze(['text', 'image']);
+
+/**
+ * What one remote prompt may carry in images, below alpd's own PROMPT_IMAGES: so many, each of at
+ * most `maxBytes` decoded and `maxTotalBytes` together, which as base64 fits the default 4 MiB frame.
+ */
+export const GATEWAY_PROMPT_IMAGES = Object.freeze({ mimeTypes: PROMPT_IMAGES.mimeTypes, maxCount: 4, maxBytes: 2 * 1024 * 1024, maxTotalBytes: 2.5 * 1024 * 1024 });
+
+/**
+ * The image limits of a gateway whose clients send frames of at most `maxFrame` bytes: those above,
+ * lowered so the images as base64, with 64 KiB for the rest of the request, still fit one frame (a
+ * smaller `limits.maxFrame` refuses them as image_limit rather than closing the socket).
+ * @param {number} [maxFrame]
+ */
+export function promptImageLimits(maxFrame = 4 * 1024 * 1024) {
+  const fits = Math.max(0, Math.floor((maxFrame - 64 * 1024) * 3 / 4));
+  const maxTotalBytes = Math.min(GATEWAY_PROMPT_IMAGES.maxTotalBytes, fits);
+  return { maxCount: GATEWAY_PROMPT_IMAGES.maxCount, maxBytes: Math.min(GATEWAY_PROMPT_IMAGES.maxBytes, maxTotalBytes), maxTotalBytes };
+}
 
 /**
  * Fields of list rows passed on; anything else alpd adds later is dropped until reviewed. Rows name
@@ -234,7 +256,7 @@ export const EXPOSURE = Object.freeze({
   'board.list': { status: 'exposed', permission: 'session.read', scope: 'workspace: projectRoot names a granted workspace', params: ['projectRoot'], tests: ['permission', 'workspace-param'] },
 
   'session.create': { status: 'exposed', permission: 'session.write', scope: 'workspace: spec.cwd names a granted workspace and is replaced by its canonical path; an existing sessionId must be in scope; the created root is checked again', params: ['sessionId', 'spec', 'history', 'delegation', 'resume'], tests: ['permission', 'spec-scope', 'session-scope'] },
-  'session.prompt': { status: 'exposed', permission: 'session.write', scope: 'session; text content only; drives: the modes of the session and every ancestor, looked up afresh, within the grant\'s modes', capability: CAPABILITY.promptReceipts, params: ['sessionId', 'clientMessageId', 'delivery', 'content'], tests: ['permission', 'session-scope', 'content', 'mode'] },
+  'session.prompt': { status: 'exposed', permission: 'session.write', scope: 'session; text, and inline images within GATEWAY_PROMPT_IMAGES; drives: the modes of the session and every ancestor, looked up afresh, within the grant\'s modes', capability: CAPABILITY.promptReceipts, params: ['sessionId', 'clientMessageId', 'delivery', 'content'], tests: ['permission', 'session-scope', 'content', 'mode'] },
   'session.interrupt': { status: 'exposed', permission: 'session.write', scope: 'session; stops: a root always, an assignment when its requesters\' modes are within the grant\'s', params: ['sessionId'], tests: ['permission', 'session-scope', 'mode'] },
   'session.configure': { status: 'exposed', permission: 'session.write', scope: 'session; mode within the grant\'s modes', params: ['sessionId', 'mode'], tests: ['permission', 'session-scope', 'mode'] },
   'session.close': { status: 'exposed', permission: 'session.write', scope: 'session; stops, as session.interrupt', params: ['sessionId'], tests: ['permission', 'session-scope', 'mode'] },

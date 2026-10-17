@@ -39,7 +39,10 @@ export type OpenOptions = {
   delegation?: boolean;
 };
 
-export type PromptContent = Array<{ type: string; text?: string }>;
+/** An image inline in a prompt (capability `prompt.images`): base64 data, never a path or URL; limits in PROMPT_IMAGES. */
+export type PromptImage = { type: 'image'; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; data: string; name?: string };
+/** Text parts carry `text`; image parts (`type: 'image'`) carry PromptImage's fields. */
+export type PromptContent = Array<{ type: string; text?: string; mimeType?: string; data?: string; name?: string }>;
 
 export type PromptInput = {
   clientMessageId: string;

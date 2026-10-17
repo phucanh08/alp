@@ -6,7 +6,7 @@ import type { RuntimeKind, MailEvent, Pin } from './dto.js';
 export type AlpError = { message: string; code?: string };
 
 export type TimelineItem =
-  | { kind: 'user_message'; id: string; text: string; clientMessageId?: string }
+  | { kind: 'user_message'; id: string; text: string; clientMessageId?: string; /** How many images the message carried; their data is not replayed. */ images?: number }
   | { kind: 'assistant_message'; id: string; text: string }
   /** Something about ALP as a whole the user should see, such as a usage limit or a pause (ALPD §29). */
   | { kind: 'notice'; id: string; level: 'info' | 'warning' | 'error'; text: string }
@@ -50,6 +50,8 @@ export type SessionSnapshot = {
   parked?: string;
   /** A digest of the instructions the session runs with (ALPD §34). */
   instructionsSha?: string;
+  /** The session's runtime takes images in session.prompt (capability `prompt.images`); absent means it does not. */
+  promptImages?: boolean;
 };
 
 export type AssignmentSnapshot = {

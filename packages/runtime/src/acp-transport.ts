@@ -146,6 +146,13 @@ function acpServers(servers: Record<string, any>, http: boolean) {
 }
 
 /** Maps an ACP agent over stdio to the normalized runtime protocol. */
+/** One turn-input part as ACP's: text, or a data-URL image as an ACP image block; anything else is dropped. */
+export function acpContent(part: any) {
+  if (typeof part?.text === 'string') return { type: 'text', text: part.text };
+  const image = part?.type === 'image' && typeof part.url === 'string' ? /^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(part.url) : null;
+  return image ? { type: 'image', mimeType: image[1], data: image[2] } : null;
+}
+
 export class AcpTransport {
   private child?: ChildProcessWithoutNullStreams;
   private exit: Promise<void> = Promise.resolve();
@@ -156,6 +163,8 @@ export class AcpTransport {
   private requestHandler?: RequestHandler;
   private closed = false;
   private capabilities: any = {};
+  /** ACP agents say in initialize whether a prompt may hold images (promptCapabilities.image). */
+  takesImages() { return this.capabilities?.promptCapabilities?.image === true; }
   private sessionId = '';
   private config: any;
   /** Instructions go with the first prompt of a new session; a loaded one has them already. */
@@ -230,7 +239,8 @@ export class AcpTransport {
       const turnId = randomUUID();
       this.activeTurn = turnId;
       this.message = undefined;
-      const prompt = (params.input ?? []).filter((part: any) => typeof part?.text === 'string').map((part: any) => ({ type: 'text', text: part.text }));
+      const prompt = (params.input ?? []).map(acpContent).filter(Boolean) as Array<Record<string, unknown>>;
+      if (prompt.some(part => part.type === 'image') && !this.takesImages()) throw new Error(`${this.provider.label} takes no images`);
       if (!this.instructionsSent && this.config?.developerInstructions) {
         prompt.unshift({ type: 'text', text: `Instructions from ALP, which runs you. Follow them for this whole session.\n\n${this.config.developerInstructions}` });
         this.instructionsSent = true;

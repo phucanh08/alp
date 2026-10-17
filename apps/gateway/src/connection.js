@@ -1,9 +1,9 @@
 // @ts-check
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { ERROR, PROTOCOL_VERSION, RPC_ERROR } from '@anhlp/alp-protocol';
+import { ERROR, PROTOCOL_VERSION, RPC_ERROR, base64Bytes } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 import { isAlpClientError } from '@anhlp/alp-client/portable';
-import { CONTENT_TYPES, FORWARDED_CAPABILITIES, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, workspaceOf } from './policy.js';
+import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, workspaceOf } from './policy.js';
 
 /**
  * One remote client of the gateway (docs/alp/remote-gateway.md §3, §6): its WebSocket, its own
@@ -99,6 +99,7 @@ function openCursor(token, principal) {
  * @typedef {{
  *   maxPending: number, rate: number, burst: number, maxStrikes: number, handshakeMs: number,
  *   requestTimeoutMs: number, maxBufferedBytes: number, maxQueue: number, closeGraceMs: number,
+ *   maxFrame?: number,
  * }} ConnectionLimits
  * @typedef {{ client: import('@anhlp/alp-client/portable').AlpRpcClient, hello: Record<string, any> }} Upstream
  * @typedef {{ root: string, projectRoot: string, mode?: string }} Scoped
@@ -809,8 +810,19 @@ export class ClientConnection {
 
     'session.prompt': async params => {
       await this.#drive(params.sessionId);
+      let count = 0;
+      let total = 0;
+      const limits = promptImageLimits(this.#limits.maxFrame);
       for (const part of params.content) {
         if (!CONTENT_TYPES.includes(part?.type)) throw forbidden(`Prompt content of type ${JSON.stringify(part?.type)} cannot be sent through the gateway`, GATEWAY_REASON.contentType, { allowed: [...CONTENT_TYPES] });
+        if (part.type !== 'image') continue;
+        // The schema let only { type, mimeType, data, name } through: inline data, no path or URL.
+        const bytes = base64Bytes(part.data);
+        count++;
+        total += bytes;
+        if (count > limits.maxCount) throw forbidden(`A prompt through the gateway carries at most ${limits.maxCount} images`, GATEWAY_REASON.imageLimit, limits);
+        if (bytes > limits.maxBytes) throw forbidden(`An image through the gateway is at most ${limits.maxBytes} bytes`, GATEWAY_REASON.imageLimit, limits);
+        if (total > limits.maxTotalBytes) throw forbidden(`The images of one prompt through the gateway are at most ${limits.maxTotalBytes} bytes together`, GATEWAY_REASON.imageLimit, limits);
       }
       return this.#call('session.prompt', params);
     },

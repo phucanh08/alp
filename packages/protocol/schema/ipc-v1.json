@@ -107,6 +107,9 @@
         },
         "teamLabel": {
           "type": "string"
+        },
+        "promptImages": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -888,6 +891,10 @@
             },
             "clientMessageId": {
               "type": "string"
+            },
+            "images": {
+              "type": "integer",
+              "minimum": 1
             }
           },
           "required": [
@@ -2002,6 +2009,38 @@
         "source"
       ],
       "additionalProperties": true
+    },
+    "promptImage": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "image"
+        },
+        "mimeType": {
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/gif",
+            "image/webp"
+          ]
+        },
+        "data": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 6990508,
+          "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 255
+        }
+      },
+      "required": [
+        "type",
+        "mimeType",
+        "data"
+      ],
+      "additionalProperties": false
     }
   }
 }

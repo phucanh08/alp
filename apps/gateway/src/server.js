@@ -204,7 +204,7 @@ export function createGateway({ config, store, openTransport, logger, version, m
       const log = logger.child({ connection: id, principal: grant.id, ip: peer.ip });
       const connection = new ClientConnection({
         ws, grant, id, connectUpstream, logger: log,
-        limits: { maxPending: limits.maxPending, rate: limits.rate, burst: limits.burst, maxStrikes: limits.maxStrikes, handshakeMs: limits.handshakeMs, requestTimeoutMs: limits.requestTimeoutMs, maxBufferedBytes: limits.maxBufferedBytes, maxQueue: limits.maxQueue, closeGraceMs: limits.closeGraceMs },
+        limits: { maxPending: limits.maxPending, rate: limits.rate, burst: limits.burst, maxStrikes: limits.maxStrikes, handshakeMs: limits.handshakeMs, requestTimeoutMs: limits.requestTimeoutMs, maxBufferedBytes: limits.maxBufferedBytes, maxQueue: limits.maxQueue, closeGraceMs: limits.closeGraceMs, maxFrame: limits.maxFrame },
         onClosed: (closed, code) => {
           connections.delete(closed);
           perPrincipal.set(grant.id, Math.max(0, (perPrincipal.get(grant.id) ?? 1) - 1));

@@ -11,7 +11,7 @@
 //   fake:fail                   fail the prompt
 //   fake:exit                   die mid-turn
 // FAKE_ACP_LOG names a file each message from ALP is appended to; FAKE_ACP_LOAD=1
-// offers session/load; FAKE_ACP_MODELS=a,b offers models to choose from.
+// offers session/load; FAKE_ACP_IMAGES=1 takes images in a prompt (promptCapabilities.image); FAKE_ACP_MODELS=a,b offers models to choose from.
 import { spawn } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
@@ -90,7 +90,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   if (message.id !== undefined && !message.method) { const resolve = waiting.get(message.id); waiting.delete(message.id); resolve?.(message); return; }
   const { id, method, params } = message;
   if (method === 'initialize') {
-    send({ id, result: { protocolVersion: 1, agentInfo: { name: 'fake-acp', title: 'Fake ACP', version: '1.0.0' }, agentCapabilities: { loadSession: process.env.FAKE_ACP_LOAD === '1', mcpCapabilities: { http: false } }, authMethods: [] } });
+    send({ id, result: { protocolVersion: 1, agentInfo: { name: 'fake-acp', title: 'Fake ACP', version: '1.0.0' }, agentCapabilities: { loadSession: process.env.FAKE_ACP_LOAD === '1', mcpCapabilities: { http: false }, ...(process.env.FAKE_ACP_IMAGES === '1' ? { promptCapabilities: { image: true } } : {}) }, authMethods: [] } });
   } else if (method === 'session/new' || method === 'session/load') {
     const sessionId = method === 'session/load' ? params.sessionId : `fake-session-${++sequence}`;
     sessions.set(sessionId, { prompts: 0, alp: params.mcpServers.find(server => server.name === 'alp') });

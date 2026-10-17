@@ -5,7 +5,7 @@ import os from 'node:os';
 import { assertPrivateDirectory, assertPrivateSocket } from '@anhlp/alp-client/index';
 import path from 'node:path';
 import { createLogger } from '@anhlp/alp-core/log';
-import { AlpRpcError, CAPABILITY, MAX_FRAME, PROTOCOL_VERSION, ERROR, RPC_ERROR, RPC_METHODS, encodeFrame } from '@anhlp/alp-protocol';
+import { AlpRpcError, CAPABILITY, MAX_FRAME, PROMPT_IMAGES, PROTOCOL_VERSION, ERROR, RPC_ERROR, RPC_METHODS, base64Bytes, encodeFrame } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 export { ERROR } from '@anhlp/alp-protocol';
 import { DEFAULT_MODEL, models, modes, thinkingOptions, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '@anhlp/alp-runtime/index';
@@ -889,6 +889,16 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     async 'session.prompt'(_connection, { sessionId, clientMessageId, delivery = 'auto', content }) {
       if (typeof clientMessageId !== 'string' || !Array.isArray(content)) throw new RpcError(-32602, 'clientMessageId and content are required');
       if (delivery !== 'auto' && delivery !== 'steer') throw new RpcError(-32602, 'delivery must be auto or steer');
+      // Images are inline only (the schema refuses a path or URL); here their number and decoded size.
+      const images = content.filter((part: { type?: string }) => part?.type === 'image');
+      if (images.length > PROMPT_IMAGES.maxCount) throw new RpcError(-32602, `A prompt takes at most ${PROMPT_IMAGES.maxCount} images`);
+      let total = 0;
+      for (const image of images) {
+        const bytes = base64Bytes(image.data);
+        total += bytes;
+        if (bytes > PROMPT_IMAGES.maxBytes) throw new RpcError(-32602, `An image in a prompt is at most ${PROMPT_IMAGES.maxBytes} bytes`);
+        if (total > PROMPT_IMAGES.maxTotalBytes) throw new RpcError(-32602, `The images of a prompt are at most ${PROMPT_IMAGES.maxTotalBytes} bytes together`);
+      }
       const send = async () => {
         // Failures of an open session arrive as prompt.failed events; an unknown session has no watcher.
         live(sessionId);
@@ -1008,7 +1018,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles, ...(store ? [CAPABILITY.promptReceipts] : []), ...operations.capabilities];
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {

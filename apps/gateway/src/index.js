@@ -9,6 +9,6 @@ export { ClientConnection, CLOSE_CODE } from './connection.js';
 export { DEFAULT_LIMITS, DEFAULT_PORT, resolveConfig, normalizeOrigin } from './config.js';
 export { CredentialStore, createCredential, rotateCredential, revokeCredential, listCredentials, gatewayHome, credentialsFile, parseToken } from './credentials.js';
 export { TicketBook } from './tickets.js';
-export { EXPOSURE, PERMISSIONS, FORWARDED_CAPABILITIES, GATEWAY_ERROR, GATEWAY_REASON, SPEC_FIELDS, CONTENT_TYPES, exposureOf, unclassified, workspaceOf } from './policy.js';
+export { EXPOSURE, PERMISSIONS, FORWARDED_CAPABILITIES, GATEWAY_ERROR, GATEWAY_REASON, SPEC_FIELDS, CONTENT_TYPES, GATEWAY_PROMPT_IMAGES, promptImageLimits, exposureOf, unclassified, workspaceOf } from './policy.js';
 export { upstreamConnector, daemonMonitor } from './upstream.js';
 export { createGatewayLogger, scrubGatewaySecrets } from './log.js';

@@ -25,7 +25,8 @@
     "session.list.page": "session.list accepts `limit`, `cursor` and `query` and answers `nextCursor` while more sessions follow; without them it answers every session as before.",
     "question.watch": "question.watch: the connection is told of `question` and `question.resolved` in every tree (of a projectRoot when given), attached or not.",
     "question.watch.turns": "question.watch accepts `turns`: the connection is also told of `turn.ended` of every root in the trees it watches.",
-    "workspace.files": "workspace.files.search: files under a directory whose relative path matches a query; read-only, names only, links never followed."
+    "workspace.files": "workspace.files.search: files under a directory whose relative path matches a query; read-only, names only, links never followed.",
+    "prompt.images": "session.prompt takes inline image parts { type: \"image\", mimeType, data } (base64, no paths or URLs) within the image limits; a session snapshot says whether its runtime takes them in promptImages."
   },
   "methods": {
     "assignment.recall": {
@@ -1627,19 +1628,44 @@
           "content": {
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "type": {
-                  "type": "string"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "const": "text"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": true
                 },
-                "text": {
-                  "type": "string"
+                {
+                  "$ref": "#/$defs/promptImage"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "not": {
+                        "enum": [
+                          "text",
+                          "image"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": true
                 }
-              },
-              "required": [
-                "type"
-              ],
-              "additionalProperties": true
+              ]
             }
           }
         },
@@ -2308,6 +2334,9 @@
         },
         "teamLabel": {
           "type": "string"
+        },
+        "promptImages": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -3089,6 +3118,10 @@
             },
             "clientMessageId": {
               "type": "string"
+            },
+            "images": {
+              "type": "integer",
+              "minimum": 1
             }
           },
           "required": [
@@ -4203,6 +4236,38 @@
         "source"
       ],
       "additionalProperties": true
+    },
+    "promptImage": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "image"
+        },
+        "mimeType": {
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/gif",
+            "image/webp"
+          ]
+        },
+        "data": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 6990508,
+          "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 255
+        }
+      },
+      "required": [
+        "type",
+        "mimeType",
+        "data"
+      ],
+      "additionalProperties": false
     }
   }
 }

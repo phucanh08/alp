@@ -74,6 +74,25 @@ test('a provider lives in the library only, names no built-in runtime, and is tr
   assert.match(check.details[1], /no sandbox around an ACP agent/);
 });
 
+// t-7679.11: an ACP agent gets inline images only when its initialize offered promptCapabilities.image.
+test('an ACP agent gets prompt images as ACP image blocks only when it takes them', async t => {
+  const image = { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' };
+  const send = async (runtime, events, id) => {
+    await runtime.prompt('root', { clientMessageId: id, delivery: 'auto', content: [{ type: 'text', text: 'fake:say seen' }, image] });
+    await until(() => events.some(entry => (entry.event.type === 'turn.ended') || (entry.event.type === 'prompt.failed' && entry.event.clientMessageId === id)));
+    return events.find(entry => entry.event.type === 'prompt.failed' && entry.event.clientMessageId === id)?.event;
+  };
+  const taking = await setup(t, { env: { FAKE_ACP_IMAGES: '1' } });
+  assert.equal((await taking.runtime.open('root', { cwd: taking.root, model: 'acp:fake' })).promptImages, true);
+  assert.equal(await send(taking.runtime, taking.events, 'i1'), undefined);
+  const prompt = (await taking.received()).find(message => message.method === 'session/prompt').params.prompt;
+  assert.deepEqual(prompt.at(-1), { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' });
+  const plain = await setup(t);
+  assert.equal((await plain.runtime.open('root', { cwd: plain.root, model: 'acp:fake' })).promptImages, undefined);
+  assert.match((await send(plain.runtime, plain.events, 'i2')).error.message, /takes no images/);
+  assert.equal((await plain.received()).some(message => message.method === 'session/prompt'), false);
+});
+
 test('a session on an ACP agent: instructions in its first prompt, its answer streamed, ALP tools through the bridge', async t => {
   const { root, runtime, received, turn, events } = await setup(t);
   const opened = await runtime.open('root', { cwd: root, model: 'acp:fake' });

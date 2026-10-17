@@ -16,6 +16,8 @@ export type RuntimeTransport = {
   onFailure(listener: (error: unknown) => void): void;
   close(): Promise<void>;
   onRequest?: (listener: (method: string, params: any) => Promise<unknown>) => void;
+  /** Whether turn input may hold images (`{ type: 'image', url: 'data:…' }`); omitted, Codex and Claude do. */
+  takesImages?: () => boolean;
 };
 
 export type RuntimeOptions = {
