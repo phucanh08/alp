@@ -1,5 +1,5 @@
 // Paseo's History list (packages/app/src/components/agent-list.tsx): sessions grouped by the day
-// of their last activity, newest first, filtered by a search on the title.
+// of their last activity, newest first, filtered by a search on the title (every word, title or id).
 
 /** @typedef {'today' | 'yesterday' | 'thisWeek' | 'thisMonth' | 'older'} DateSection */
 
@@ -36,8 +36,9 @@ export function dateSection(iso, now = new Date()) {
  * @param {T[]} sessions @param {string} [query] @param {Date} [now]
  */
 export function groupHistory(sessions, query = '', now = new Date()) {
-  const needle = query.trim().toLowerCase();
-  const shown = needle ? sessions.filter(session => String(session.title ?? '').toLowerCase().includes(needle) || session.id.toLowerCase().includes(needle)) : sessions;
+  // Every word in the title or the id, as a host that searches matches (docs/protocol/alp-json-rpc-v1.md §12.1).
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = words.length ? sessions.filter(session => words.every(word => `${session.title ?? ''}\n${session.id}`.toLowerCase().includes(word))) : sessions;
   /** @type {Map<DateSection, T[]>} */
   const buckets = new Map();
   for (const session of shown) {

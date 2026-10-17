@@ -936,3 +936,120 @@ test('an open New session screen of the workspace takes a kept first message at 
   assert.deepEqual(taken, ['to the open screen'], 'a closed screen takes nothing');
   assert.equal(w.controller.unsentDraft(), 'for the next screen');
 });
+
+test('attention with question.watch: events of roots not attached keep it current, without polling', async t => {
+  const w = setup(t, undefined, { attentionPollMs: 20, attentionWatchPollMs: 60_000 });
+  w.host.capabilities.push('question.watch');
+  w.host.seed('ses_a', { title: 'Asks' });
+  w.host.seed('ses_b', { title: 'Open' });
+  w.host.seed('ses_c', { projectRoot: '/w/b' });
+  w.host.ask('ses_a', 'ses_a', 'qa');
+  await connected(w);
+  w.controller.selectSession('ses_b');
+  await until(() => attached(w.state), 'attached');
+  await until(() => needsInput(w.state(), 'ses_a'), 'the waiting question from the watch answer');
+  assert.ok(w.host.calls.some(call => call.method === 'question.watch' && call.params.projectRoot === '/w/a'));
+  // Asked in a root this view is not attached to: the event alone marks it.
+  w.host.seed('ses_d', { title: 'Later' });
+  w.host.ask('ses_d', 'ses_d', 'qd');
+  await until(() => w.state().attention.ses_d === 1, 'ses_d waits');
+  // Another workspace is not told; the open tree's projection gets none of these.
+  w.host.ask('ses_c', 'ses_c', 'qc');
+  assert.deepEqual(Object.keys(w.state().tree.projection.questions), []);
+  // Resolved elsewhere: the event clears it.
+  w.host.resolve('qa');
+  await until(() => !needsInput(w.state(), 'ses_a'), 'ses_a cleared');
+  assert.deepEqual(w.state().attention, { ses_d: 1 });
+  // The open tree still has its own, once.
+  w.host.ask('ses_b', 'ses_b', 'qb');
+  await until(() => needsInput(w.state(), 'ses_b'), 'ses_b waits');
+  assert.deepEqual(Object.keys(w.state().tree.projection.questions), ['qb']);
+  await w.controller.answerQuestion('qb', { text: 'ok' });
+  await until(() => !needsInput(w.state(), 'ses_b'), 'ses_b answered');
+  const watches = w.host.count('question.watch');
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(w.host.count('question.list'), 0, 'no question.list poll');
+  assert.equal(w.host.count('question.watch'), watches, 'no poll at attentionPollMs');
+  // A reconnect lists again: what was resolved while away is gone.
+  w.host.drop();
+  w.host.questions.delete('qd');
+  await until(() => w.host.count('question.watch') > watches && !w.state().attention.ses_d, 'listed again after the reconnect');
+});
+
+test('history pages: Load more reads the next page, a query is searched by the host', async t => {
+  const w = setup(t, undefined, { historyPageSize: 2 });
+  w.host.capabilities.push('session.list.page');
+  for (const [index, title] of ['Fix login', 'Docs', 'Fix logout', 'Ship'].entries()) {
+    w.host.seed(`ses_${index}`, { title });
+    w.host.root(`ses_${index}`).summary.updatedAt = new Date(Date.UTC(2026, 9, 1, index)).toISOString();
+  }
+  await connected(w);
+  await w.controller.loadHistory();
+  assert.deepEqual(w.state().history.list.map(row => row.title), ['Ship', 'Fix logout']);
+  assert.equal(w.state().history.nextCursor, '@2');
+  await w.controller.loadMoreHistory();
+  assert.deepEqual(w.state().history.list.map(row => row.title), ['Ship', 'Fix logout', 'Docs', 'Fix login']);
+  assert.equal(w.state().history.nextCursor, undefined);
+  await w.controller.loadHistory({ query: 'fix' });
+  assert.deepEqual([w.state().history.list.map(row => row.title), w.state().history.query, w.state().history.nextCursor], [['Fix logout', 'Fix login'], 'fix', undefined]);
+  const asked = w.host.calls.filter(call => call.method === 'session.list' && call.params.limit === 2).map(call => [call.params.cursor, call.params.query]);
+  assert.deepEqual(asked, [[undefined, undefined], ['@2', undefined], [undefined, 'fix']]);
+  // A quiet reload keeps the query.
+  await w.controller.loadHistory({ quiet: true });
+  assert.equal(w.host.calls.at(-1).params.query, 'fix');
+});
+
+test('history without session.list.page reads everything once, with no cursor', async t => {
+  const w = setup(t, undefined, { historyPageSize: 1 });
+  w.host.seed('ses_a', { title: 'One' });
+  w.host.seed('ses_b', { title: 'Two' });
+  await connected(w);
+  await w.controller.loadHistory({ query: 'one' });
+  assert.equal(w.state().history.list.length, 2, 'the screen filters');
+  assert.equal(w.state().history.nextCursor, undefined);
+  const call = w.host.calls.filter(entry => entry.method === 'session.list').at(-1);
+  assert.equal(call.params.limit, undefined);
+  assert.equal(call.params.query, undefined);
+});
+
+test('question events that come before the question.watch answer are not lost to it', async t => {
+  const w = setup(t, undefined, { attentionWatchPollMs: 60_000 });
+  w.host.capabilities.push('question.watch');
+  w.host.seed('ses_a', { title: 'A' });
+  w.host.seed('ses_b', { title: 'B' });
+  w.host.ask('ses_a', 'ses_a', 'qa');
+  // As through the gateway: the host reads its questions, then events of later changes reach the
+  // client before the answer does.
+  w.host.intercept.set('question.watch', (params, connection, { answer }) => {
+    connection.watching = params.projectRoot ?? null;
+    const snapshot = structuredClone([...w.host.questions.values()]);
+    w.host.ask('ses_b', 'ses_b', 'qb');
+    w.host.resolve('qa');
+    setTimeout(() => answer({ questions: snapshot }), 10);
+    return 'handled';
+  });
+  await connected(w);
+  await until(() => w.host.count('question.watch') >= 1, 'watched');
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.deepEqual(w.state().attention, { ses_b: 1 }, 'qb asked and qa resolved after the read');
+});
+
+test('history: a Load more overtaken by a new first page ends without changing it', async t => {
+  const w = setup(t, undefined, { historyPageSize: 1 });
+  w.host.capabilities.push('session.list.page');
+  w.host.seed('ses_a', { title: 'A' });
+  w.host.seed('ses_b', { title: 'B' });
+  await connected(w);
+  await w.controller.loadHistory();
+  assert.equal(w.state().history.list.length, 1);
+  let release;
+  w.host.intercept.set('session.list', params => params.cursor ? new Promise(resolve => { release = () => resolve(undefined); }) : undefined);
+  const more = w.controller.loadMoreHistory();
+  await until(() => w.state().history.more === 'loading' && release, 'loading more');
+  await w.controller.loadHistory({ quiet: true });
+  release();
+  await more;
+  assert.equal(w.state().history.more, undefined);
+  assert.equal(w.state().history.list.length, 1, 'the page of the older list is dropped');
+  assert.ok(w.state().history.nextCursor);
+});

@@ -5,7 +5,7 @@ import { baseName, sessionName } from '../lib/format';
 import { bucketOf } from './Sidebar';
 import { useAppState } from './store';
 
-/** question.list is polled every 5 s: older questions it brings in that long were already there. */
+/** The first read of a workspace's questions (question.watch, or question.list polled every 5 s on an older host) brings in ones already waiting: none of them is new within this long. */
 const SETTLE_MS = 6_000;
 
 /** Whether this browser can show notifications at all. */
@@ -65,8 +65,8 @@ export function usePageAttention({ onOpenSession }: { onOpenSession: (id: string
     return () => { document.title = 'ALP'; };
   }, [title]);
 
-  // Questions per root: the open tree's live ones, the others from question.list. A tree just
-  // left keeps its last live count until the next question.list answer, so a poll that has not
+  // Questions per root: the open tree's live ones, the others from question.watch (or question.list).
+  // A tree just left keeps its last live count until the counts change, so a read that has not
   // seen its question yet does not drop it and bring it back as a new one.
   const remembered = React.useRef<{ attention: Record<string, number>; live: Record<string, number> }>({ attention, live: {} });
   const counts = React.useMemo(() => {

@@ -77,4 +77,6 @@ test('History groups by the calendar day of the last activity, newest first, and
   ];
   assert.deepEqual(groupHistory(sessions, '', now).map(section => [section.label, section.sessions.map(session => session.id)]), [['Today', ['a']], ['Yesterday', ['b']], ['Older', ['c']]]);
   assert.deepEqual(groupHistory(sessions, 'RELEASE', now).flatMap(section => section.sessions.map(session => session.id)), ['a', 'c']);
+  // Every word, in any order, as a host that searches matches.
+  assert.deepEqual(groupHistory(sessions, ' notes  release ', now).flatMap(section => section.sessions.map(session => session.id)), ['c']);
 });

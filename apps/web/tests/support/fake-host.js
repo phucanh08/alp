@@ -45,7 +45,7 @@ export class FakeHost {
     const messages = new Set();
     const closes = new Set();
     let ended = false;
-    const connection = { attached: new Set(), transport: undefined, deliver: undefined, end: undefined };
+    const connection = { attached: new Set(), watching: undefined, transport: undefined, deliver: undefined, end: undefined };
     const end = close => {
       if (ended) return;
       ended = true;
@@ -147,7 +147,26 @@ export class FakeHost {
     const question = { id: questionId, sessionId, rootId, agent: 'main', body, options: ['yes', 'no'], askedAt: new Date().toISOString() };
     this.questions.set(questionId, question);
     const root = this.roots.get(rootId);
-    for (const connection of root.viewers) this.#send(connection, { method: 'event', params: { sessionId, epoch: this.epoch, seq: 0, ts: question.askedAt, event: { type: 'question', question } } });
+    this.#tell(root, { sessionId, epoch: this.epoch, seq: 0, ts: question.askedAt, event: { type: 'question', question } });
+  }
+
+  /** A question event to the tree's viewers, and as alpd's question.watch to the watchers of its project (no cursor). */
+  #tell(root, envelope) {
+    for (const connection of root.viewers) this.#send(connection, { method: 'event', params: envelope });
+    const { cursor: _cursor, ...announced } = envelope;
+    for (const connection of this.connections) {
+      if (connection.watching === undefined || root.viewers.has(connection)) continue;
+      if (connection.watching !== null && connection.watching !== root.spec.cwd) continue;
+      this.#send(connection, { method: 'event', params: announced });
+    }
+  }
+
+  /** A question answered or ended elsewhere: question.resolved to the viewers and watchers. */
+  resolve(questionId, outcome = 'answered', answer) {
+    const question = this.questions.get(questionId);
+    if (!question) return;
+    this.questions.delete(questionId);
+    this.#tell(this.roots.get(question.rootId), { sessionId: question.sessionId, epoch: this.epoch, seq: 0, ts: new Date().toISOString(), event: { type: 'question.resolved', questionId, outcome, ...(answer ? { answer } : {}) } });
   }
 
   close(rootId) {
@@ -195,8 +214,15 @@ export class FakeHost {
       }
       case 'settings.language.get': return { language: null, applies: 'Vietnamese', default: 'Vietnamese' };
       case 'session.list': {
-        const sessions = [...this.roots.values()].filter(root => (!params.projectRoot || root.spec.cwd === params.projectRoot) && (params.includeArchived || !root.summary.archived)).map(root => ({ ...root.summary, busy: !!root.running }));
-        return { sessions };
+        const words = String(params.query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+        let sessions = [...this.roots.values()].filter(root => (!params.projectRoot || root.spec.cwd === params.projectRoot) && (params.includeArchived || !root.summary.archived)).map(root => ({ ...root.summary, busy: !!root.running }));
+        // With session.list.page: newest first, the query, then a page; the cursor is a position here.
+        if (!this.capabilities.includes('session.list.page')) return { sessions };
+        sessions = sessions.filter(session => words.every(word => `${session.title ?? ''}\n${session.id}`.toLowerCase().includes(word)))
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+        const start = params.cursor === undefined ? 0 : Number(params.cursor.slice(1));
+        const end = params.limit === undefined ? sessions.length : start + params.limit;
+        return { sessions: sessions.slice(start, end), ...(end < sessions.length ? { nextCursor: `@${end}` } : {}) };
       }
       case 'session.create': {
         const existing = this.roots.get(params.sessionId);
@@ -312,12 +338,15 @@ export class FakeHost {
         const questions = [...this.questions.values()].filter(question => !params.projectRoot || this.roots.get(question.rootId)?.spec.cwd === params.projectRoot);
         return { questions: structuredClone(questions) };
       }
+      case 'question.watch': {
+        connection.watching = params.projectRoot ?? null;
+        const questions = [...this.questions.values()].filter(question => !params.projectRoot || this.roots.get(question.rootId)?.spec.cwd === params.projectRoot);
+        return { questions: structuredClone(questions) };
+      }
       case 'question.answer': {
         const question = this.questions.get(params.questionId);
         if (!question) throw Object.assign(new Error('no such question'), { code: 1001 });
-        this.questions.delete(params.questionId);
-        const root = this.roots.get(question.rootId);
-        for (const viewer of root.viewers) this.#send(viewer, { method: 'event', params: { sessionId: question.sessionId, epoch: this.epoch, seq: 0, ts: new Date().toISOString(), event: { type: 'question.resolved', questionId: question.id, outcome: params.dismiss ? 'dismissed' : 'answered', ...(params.text ? { answer: params.text } : {}) } } });
+        this.resolve(question.id, params.dismiss ? 'dismissed' : 'answered', params.text);
         return { questionId: question.id };
       }
       case 'task.list': return { projectRoot: params.projectRoot, tasks: structuredClone(this.tasks), unreadable: [], revision: `r${this.taskRev}` };

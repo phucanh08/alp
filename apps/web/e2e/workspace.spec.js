@@ -1,5 +1,5 @@
 // The sidebar/workspace slice of the Paseo parity work (docs/paseo-parity.md §3.1): the session's
-// title on its tab, attention on every session of the list (question.list), History with the
+// title on its tab, attention on every session of the list (question.watch), History with the
 // archived sessions and Unarchive, and Paseo's workspace keyboard shortcuts, through the real UI,
 // gateway and alpd.
 import { expect, test } from '@playwright/test';
@@ -27,7 +27,7 @@ test('tab title, attention on every session, History with archived sessions and 
   await expect(page.getByTestId('question')).toContainText('Deploy to staging now?');
   await expect(page.getByTestId('workspace-tab').first().locator('[data-status="needs_input"]')).toBeVisible();
 
-  // …still shows on its row while another session is open (question.list, not the open tree).
+  // …still shows on its row while another session is open (question.watch, not the open tree).
   await newSession(page, 'Notes');
   await expect(row(page, 'Notes').locator('[data-status]')).toHaveAttribute('data-status', 'done');
   await expect(row(page, 'Release check').locator('[data-status]')).toHaveAttribute('data-status', 'needs_input');
@@ -70,6 +70,19 @@ test('tab title, attention on every session, History with archived sessions and 
   await expect(row(page, 'Notes')).toHaveCount(1);
   await nav(page).getByTestId('sidebar-history').click();
   await expect(page.getByTestId('history-row').filter({ hasText: 'Notes' })).not.toContainText('Archived');
+});
+
+test('a question asked in a session that is not open marks its row at once (question.watch)', async ({ page }) => {
+  await connect(page, world);
+  await newSession(page, 'Asks later');
+  await send(page, 'Check the deploy [ask-later]');
+  // Another session opens before the question comes: the first is no longer attached.
+  await newSession(page, 'Meanwhile');
+  await expect(row(page, 'Asks later').locator('[data-status]')).not.toHaveAttribute('data-status', 'needs_input');
+  // The host tells of it as it is asked, with no question.list poll (that one ran every 5 s).
+  await expect(row(page, 'Asks later').locator('[data-status]')).toHaveAttribute('data-status', 'needs_input', { timeout: 4_000 });
+  await row(page, 'Asks later').click();
+  await expect(page.getByTestId('question')).toContainText('Deploy to staging now?');
 });
 
 test('keyboard shortcuts: help, sidebars, sessions, tabs, search, settings', async ({ page }) => {
