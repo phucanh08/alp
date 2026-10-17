@@ -9,18 +9,30 @@
  * letters in order 6. A match on hidden keywords only ranks after any match on what the row
  * shows. Ties keep the given order.
  *
- * With an empty query: the actions shown always, then the first five sessions (waiting for an
- * answer first, then running, then the most recently updated).
+ * With an empty query: the actions shown always, then the first five workspaces (by name) and
+ * the first five sessions (waiting for an answer first, then a turn ended unseen, then running,
+ * then the most recently updated).
+ *
+ * Sections, as Paseo's bands and ranks: the contributed actions, then Workspaces, Sessions (Paseo's
+ * Agents) and Files. Files are the host's answer to workspace.files.search, already ranked there;
+ * they show for a non-empty query, and alone in the Files scope (Mod+P).
  */
 
 /**
  * @typedef {{ id: string, label: string, group: 'workspace' | 'actions' | 'alp', always?: boolean, keywords?: string[], shortcut?: string, disabled?: boolean }} CommandAction
- * @typedef {{ id: string, title: string, subtitle?: string, bucket: 'running' | 'needs_input' | 'failed' | 'done', updatedAt?: string }} CommandSession
- * @typedef {{ kind: 'action', item: CommandAction } | { kind: 'session', item: CommandSession }} CommandRow
+ * @typedef {{ id: string, title: string, subtitle?: string, bucket: 'running' | 'needs_input' | 'failed' | 'attention' | 'done', attention?: boolean, updatedAt?: string }} CommandSession
+ *   attention: its last turn finished or failed unseen (Paseo's requiresAttention).
+ * @typedef {{ path: string, title: string, subtitle: string, current?: boolean }} CommandWorkspace
+ *   A workspace the token grants: its folder's name, its full path.
+ * @typedef {{ path: string, title: string, subtitle: string }} CommandFile
+ *   A file of the workspace (relative POSIX path): its name, its directory.
+ * @typedef {{ kind: 'action', item: CommandAction } | { kind: 'session', item: CommandSession } | { kind: 'workspace', item: CommandWorkspace } | { kind: 'file', item: CommandFile }} CommandRow
  * @typedef {{ id: string, title: string, rows: CommandRow[] }} CommandSection
  */
 
 export const SESSIONS_SHOWN_EMPTY = 5;
+/** Paseo's DEFAULT_CATEGORY_RESULT_LIMIT, for workspaces with an empty query. */
+export const WORKSPACES_SHOWN_EMPTY = 5;
 const HIDDEN = 10;
 
 const words = (/** @type {string} */ text) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
@@ -72,25 +84,63 @@ export function matchScore(query, visible, hidden = []) {
   return score;
 }
 
-const BUCKET_RANK = { needs_input: 0, running: 1, failed: 2, done: 2 };
+/** Paseo's sortAgents: needs input, then requires attention, then running, then the rest. @param {CommandSession} session */
+const sessionRank = session => session.bucket === 'needs_input' ? 0 : session.attention ? 1 : session.bucket === 'running' ? 2 : 3;
 
-/** Sessions in Paseo's agent order: waiting, running, then the most recent. @param {CommandSession[]} sessions */
+/** Sessions in Paseo's agent order: waiting, ended unseen, running, then the most recent. @param {CommandSession[]} sessions */
 export function sortSessions(sessions) {
   return sessions
     .map((session, index) => ({ session, index }))
-    .sort((a, b) => (BUCKET_RANK[a.session.bucket] - BUCKET_RANK[b.session.bucket])
+    .sort((a, b) => (sessionRank(a.session) - sessionRank(b.session))
       || (Date.parse(b.session.updatedAt ?? '') || 0) - (Date.parse(a.session.updatedAt ?? '') || 0)
       || a.index - b.index)
     .map(entry => entry.session);
 }
 
+/** Paseo's describeWorkspaceFilePath: the name, and the directory it sits in. @param {string} path @returns {CommandFile} */
+export function describeFilePath(path) {
+  const normalized = String(path).replace(/\\/g, '/');
+  const separator = normalized.lastIndexOf('/');
+  return { path: normalized, title: separator >= 0 ? normalized.slice(separator + 1) : normalized, subtitle: separator >= 0 ? normalized.slice(0, separator) : '' };
+}
+
+/** The granted workspaces as rows: the folder's name, the full path; `current` marks the open one. @param {string[]} paths @param {string | null} [current] @returns {CommandWorkspace[]} */
+export function workspaceRows(paths, current = null) {
+  return paths.map(path => {
+    const trimmed = path.replace(/[\\/]+$/, '');
+    const title = trimmed.split(/[\\/]/).pop() || path;
+    return { path, title, subtitle: path, ...(path === current ? { current: true } : {}) };
+  });
+}
+
+/** Paseo's compareWorkspacesByTitle: by name (numbers in order, case aside), then by path. @param {CommandWorkspace} a @param {CommandWorkspace} b */
+const byTitle = (a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }) || a.subtitle.localeCompare(b.subtitle);
+
 /**
- * The sections to show for `query`.
- * @param {{ actions: CommandAction[], sessions: CommandSession[], query: string }} input
+ * Paseo's filterAndRankWorkspaces: with an empty query the first five by name; otherwise every
+ * workspace whose name or path matches, best match first, ties by name.
+ * @param {CommandWorkspace[]} workspaces @param {string} query @returns {CommandWorkspace[]}
+ */
+export function rankWorkspaces(workspaces, query) {
+  const sorted = [...workspaces].sort(byTitle);
+  const needle = query.trim();
+  if (!needle) return sorted.slice(0, WORKSPACES_SHOWN_EMPTY);
+  return sorted.map((workspace, index) => ({ workspace, index, score: matchScore(needle, [workspace.title, workspace.subtitle]) }))
+    .filter(entry => entry.score !== undefined)
+    .sort((a, b) => /** @type {number} */ (a.score) - /** @type {number} */ (b.score) || a.index - b.index)
+    .map(entry => entry.workspace);
+}
+
+/**
+ * The sections to show for `query`. `files` is the host's answer for this query (or undefined
+ * when the host cannot search files); `scope` 'files' shows only them.
+ * @param {{ actions: CommandAction[], sessions: CommandSession[], query: string, workspaces?: CommandWorkspace[], files?: CommandFile[], scope?: 'files' | null }} input
  * @returns {CommandSection[]}
  */
-export function commandResults({ actions, sessions, query }) {
+export function commandResults({ actions, sessions, query, workspaces = [], files, scope = null }) {
   const needle = query.trim();
+  const fileSection = /** @type {CommandSection} */ ({ id: 'files', title: 'Files', rows: (files ?? []).map(item => ({ kind: 'file', item })) });
+  if (scope === 'files') return files?.length ? [fileSection] : [];
   /** @type {{ id: string, title: string, rank: number, rows: { row: CommandRow, score: number }[] }[]} */
   const groups = [
     { id: 'workspace', title: 'Workspace actions', rank: -1, rows: [] },
@@ -120,6 +170,9 @@ export function commandResults({ actions, sessions, query }) {
       .sort((a, b) => /** @type {number} */ (a.score) - /** @type {number} */ (b.score) || a.index - b.index)
       .map(entry => entry.session)
     : ordered.slice(0, SESSIONS_SHOWN_EMPTY);
+  const places = rankWorkspaces(workspaces, needle);
+  if (places.length) sections.push({ id: 'workspaces', title: 'Workspaces', rows: places.map(item => ({ kind: 'workspace', item })) });
   if (matched.length) sections.push({ id: 'sessions', title: 'Sessions', rows: matched.map(item => ({ kind: 'session', item })) });
+  if (needle && files?.length) sections.push(fileSection);
   return sections;
 }

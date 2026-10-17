@@ -50,6 +50,10 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  *   failed: did not reach the host, or the runtime refused it. unknown: may have; retrySameId says
  *   whether resending under the same clientMessageId is safe (receipts dedupe it, §10) or the host
  *   asked for a new id (outcome_unknown).
+ * @typedef {{ reason: 'finished' | 'error', at: number, turnId?: string, message?: string }} TurnAttention
+ *   Paseo's requiresAttention with its reason, for a root whose turn ended while the user did not
+ *   see it: completed is finished, failed is error. Cleared when the user opens or focuses it,
+ *   sends it a message, or it starts another turn. `at` tells one ending from the next.
  * @typedef {{ id: string, rootId: string, text: string }} QueuedPrompt
  *   A message held back while the root works (Paseo's queue): sent by itself, once, when the
  *   root is idle with nothing else in flight, or sooner when the user says send now.
@@ -71,6 +75,7 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  *   sessions: Load & { list: SessionSummary[] },
  *   history: Load & { list: SessionSummary[], query: string, nextCursor?: string, more?: 'loading' | 'error' },
  *   attention: Record<string, number>,
+ *   turnAttention: Record<string, TurnAttention>,
  *   selected: string | null,
  *   focus: string | null,
  *   tree: TreeView | null,
@@ -104,6 +109,20 @@ export function needsInput(state, root) {
 }
 
 /**
+ * Why a root asks for the user's look besides a question: its last turn finished or failed while
+ * they did not see it (Paseo's attentionReason). Questions outrank it (needsInput).
+ * @param {State} state @param {string} root @returns {'finished' | 'error' | undefined}
+ */
+export function attentionReason(state, root) {
+  return state.turnAttention[root]?.reason;
+}
+
+/** The message shown when a token lacks project.read for workspace.files.search. */
+export const FILES_FORBIDDEN = 'This access token cannot list files (needs project.read).';
+/** Paseo's FILE_SEARCH_LIMIT. */
+export const FILE_SEARCH_LIMIT = 100;
+
+/**
  * The roots of a session.list answer for History. The host orders a page itself (§12.1); a whole
  * list is sorted here, newest first.
  * @param {any} result @param {boolean} sort @returns {SessionSummary[]}
@@ -123,6 +142,7 @@ export function initialState(gateway = '') {
     sessions: { status: 'idle', list: [] },
     history: { status: 'idle', list: [], query: '' },
     attention: {},
+    turnAttention: {},
     selected: null,
     focus: null,
     tree: null,
@@ -202,6 +222,11 @@ export class Controller {
   /** Latest question.list and History reads: an older answer that lands later is dropped. */
   #attentionRead = 0;
   #historyRead = 0;
+  /**
+   * Whether the page is visible and focused, as the page tells it (setPresence): a turn that ends
+   * on the session in front of a user who looks at it asks for nothing. Seen until told otherwise.
+   */
+  #presence = { visible: true, focused: true };
   #noticeId = 0;
 
   /** @param {ControllerOptions} [options] */
@@ -418,7 +443,7 @@ export class Controller {
     this.#set(state => ({
       principal,
       connection: { ...state.connection, capabilities, ...(daemonVersion ? { daemonVersion } : {}) },
-      ...(workspace !== state.workspace ? { workspace, selected: null, focus: null, tree: null, sessions: initialState().sessions, history: initialState().history, attention: {}, tasks: { ...initialState().tasks, visible: state.tasks.visible } } : {}),
+      ...(workspace !== state.workspace ? { workspace, selected: null, focus: null, tree: null, sessions: initialState().sessions, history: initialState().history, attention: {}, turnAttention: {}, tasks: { ...initialState().tasks, visible: state.tasks.visible } } : {}),
       ...(changed || workspace !== state.workspace ? { catalog: initialState().catalog } : {}),
     }));
   }
@@ -497,6 +522,19 @@ export class Controller {
       if (this.#waiting && typeof id === 'string' && typeof root === 'string' && this.#waiting.get(id) !== root) { this.#waiting.set(id, root); this.#publishAttention(); }
       return envelope.cursor !== undefined || (!!this.#watching && root === this.#watching);
     }
+    if (event?.type === 'turn.ended' && envelope.cursor === undefined) {
+      // question.watch { turns: true }: a copy of a root's turn end in a tree this connection is
+      // not attached to. Attention only: it never reaches a projection or moves a cursor.
+      if (typeof envelope.sessionId === 'string') {
+        // Its list row stops running now, not at the next session.list read.
+        const id = envelope.sessionId;
+        if (this.#state.sessions.list.some(row => row.id === id && (row.status === 'running' || row.busy))) {
+          this.#set(state => ({ sessions: { ...state.sessions, list: state.sessions.list.map(row => row.id === id ? { ...row, busy: false, ...(row.status === 'running' ? { status: 'idle' } : {}) } : row) } }));
+        }
+        this.#turnEnded(id, event);
+      }
+      return false;
+    }
     if (event?.type === 'question.resolved') {
       if (typeof event.questionId === 'string') this.#watchLog?.events.push({ id: event.questionId });
       if (this.#waiting?.delete(event.questionId)) this.#publishAttention();
@@ -527,6 +565,59 @@ export class Controller {
     if (tree.attaching) { tree.attaching.buffer.push(envelope); return; }
     tree.projection = project(tree.projection, envelope);
     this.#publishTree(root);
+    // Live events of the root itself (a replay is buffered above and never counts).
+    const type = envelope.event?.type;
+    if (envelope.sessionId === root && type === 'turn.ended') this.#turnEnded(root, envelope.event);
+    else if (envelope.sessionId === root && type === 'turn.started') this.clearAttention(root);
+  }
+
+  /**
+   * A root's turn ended (its own tree's live event, or a question.watch copy): as Paseo's
+   * checkAndSetAttention, completed asks for a look ('finished'), failed for attention ('error'),
+   * canceled for nothing; not when the user looks at that session now.
+   * @param {string} root @param {any} event
+   */
+  #turnEnded(root, event) {
+    const reason = event?.state === 'completed' ? 'finished' : event?.state === 'failed' ? 'error' : undefined;
+    if (!reason) { this.clearAttention(root); return; }
+    if (this.#seen(root)) return;
+    // Only a row the page shows (or the open tree): an archived or unlisted root would keep the
+    // favicon asking with nothing to click.
+    if (root !== this.#state.tree?.rootId && !this.#state.sessions.list.some(row => row.id === root && !row.archived)) return;
+    const message = typeof event?.error?.message === 'string' && event.error.message.trim() ? event.error.message : undefined;
+    /** @type {TurnAttention} */
+    const entry = { reason, at: Date.now(), ...(typeof event?.turnId === 'string' ? { turnId: event.turnId } : {}), ...(reason === 'error' && message ? { message } : {}) };
+    this.#set(state => ({ turnAttention: { ...state.turnAttention, [root]: entry } }));
+  }
+
+  /**
+   * Whether the user sees `id` now: the page visible and focused, and it is the session in front,
+   * or the open tree's root while one of its agents is in front.
+   * @param {string} id
+   */
+  #seen(id) {
+    const shown = this.#state.focus ?? this.#state.selected;
+    return this.#presence.visible && this.#presence.focused && (shown === id || this.#state.selected === id);
+  }
+
+  /**
+   * The page tells whether it is visible and focused. Coming back to a session that asked for a
+   * look clears it, as Paseo clears attention on focus.
+   * @param {{ visible: boolean, focused: boolean }} presence
+   */
+  setPresence({ visible, focused }) {
+    this.#presence = { visible: !!visible, focused: !!focused };
+    const shown = this.#state.focus ?? this.#state.selected;
+    if (shown && this.#seen(shown)) this.clearAttention(shown);
+  }
+
+  /** Forgets a root's finished or error attention. @param {string | null | undefined} root */
+  clearAttention(root) {
+    if (!root || !this.#state.turnAttention[root]) return;
+    this.#set(state => {
+      const { [root]: _gone, ...rest } = state.turnAttention;
+      return { turnAttention: rest };
+    });
   }
 
   /**
@@ -698,6 +789,7 @@ export class Controller {
       sessions: initialState().sessions,
       history: initialState().history,
       attention: {},
+      turnAttention: {},
       catalog: initialState().catalog,
       tasks: { ...initialState().tasks, visible: state.tasks.visible },
     }));
@@ -716,6 +808,9 @@ export class Controller {
     if (!workspace) return;
     const context = this.#context;
     if (!quiet) this.#set(state => ({ sessions: { ...state.sessions, status: state.sessions.list.length ? state.sessions.status : 'loading', error: undefined } }));
+    // A turn attention older than this read, of a root the read finds running again, is over: a
+    // new turn started (Paseo clears it then); alpd tells no turn start of a tree not attached.
+    const readAt = Date.now();
     try {
       const client = this.#client();
       const result = await client.request('session.list', { projectRoot: workspace, rootsOnly: true, includeClosed: true });
@@ -728,7 +823,9 @@ export class Controller {
         for (const [root, tree] of this.#trees) sessions = /** @type {any} */ (this.#mergeSummary(sessions, root, tree.projection));
         // A root just created may not be listed yet; keep it visible.
         const selected = state.selected && !list.some((/** @type {any} */ session) => session.id === state.selected) ? state.sessions.list.find(session => session.id === state.selected) : undefined;
-        return { sessions: selected ? { ...sessions, list: [selected, ...sessions.list] } : sessions };
+        const over = Object.keys(state.turnAttention).filter(root => state.turnAttention[root].at < readAt && list.some((/** @type {any} */ row) => row.id === root && (row.status === 'running' || row.busy)));
+        const turnAttention = over.length ? Object.fromEntries(Object.entries(state.turnAttention).filter(([root]) => !over.includes(root))) : state.turnAttention;
+        return { sessions: selected ? { ...sessions, list: [selected, ...sessions.list] } : sessions, turnAttention };
       });
     } catch (error) {
       if (context !== this.#context) return;
@@ -752,7 +849,8 @@ export class Controller {
     const log = watch ? { read, events: /** @type {Array<{ id: string, root?: string }>} */ ([]) } : null;
     this.#watchLog = log;
     try {
-      const result = await this.#client().request(watch ? 'question.watch' : 'question.list', { projectRoot: workspace });
+      const turns = watch && this.hasCapability('question.watch.turns');
+      const result = await this.#client().request(watch ? 'question.watch' : 'question.list', { projectRoot: workspace, ...(turns ? { turns: true } : {}) });
       if (context !== this.#context || read !== this.#attentionRead) return;
       // The answer is every question waiting when the host read it; the events after it follow.
       const waiting = new Map();
@@ -834,6 +932,34 @@ export class Controller {
     if (this.#state.history.more !== 'loading') return;
     const { more: _more, ...history } = this.#state.history;
     this.#set({ history });
+  }
+
+  /** Whether the host lists the workspace's files (workspace.files, the command center's Files). */
+  get filesSearchable() { return this.hasCapability('workspace.files'); }
+
+  /**
+   * Paseo's file search of the command center: workspace.files.search in the open workspace,
+   * paths relative to it, ranked by the host. Throws a Failure-shaped error: a token without
+   * project.read gets FILES_FORBIDDEN, whether the gateway or this app's grant says it.
+   * @param {{ query?: string, limit?: number }} [input]
+   * @returns {Promise<{ files: Array<{ path: string }>, truncated: boolean }>}
+   */
+  async searchWorkspaceFiles({ query = '', limit = FILE_SEARCH_LIMIT } = {}) {
+    const workspace = this.#state.workspace;
+    if (!workspace) throw new ConfigurationError('Choose a workspace first.');
+    if (!this.filesSearchable) throw new ConfigurationError('The host does not offer file search. Update ALP on the host.');
+    if (!can(this.#state.principal ?? undefined, 'project.read')) throw new ConfigurationError(FILES_FORBIDDEN);
+    let result;
+    try {
+      result = await this.#client().request('workspace.files.search', { projectRoot: workspace, query: String(query).slice(0, 200), limit });
+    } catch (error) {
+      if (describe(error).code === 1003) throw new ConfigurationError(FILES_FORBIDDEN);
+      throw error;
+    }
+    const files = (Array.isArray(result?.files) ? result.files : [])
+      .filter((/** @type {any} */ file) => file && typeof file.path === 'string' && file.path)
+      .map((/** @type {any} */ file) => ({ path: String(file.path) }));
+    return { files, truncated: result?.truncated === true };
   }
 
   /** Whether a root is archived, as far as the History read and this client's own actions know. @param {string | null | undefined} id */
@@ -946,6 +1072,8 @@ export class Controller {
 
   /** Opens a root of the list (or nothing). Its tree is attached after its cursor. @param {string | null} root */
   selectSession(root) {
+    // Opened (or chosen again): the user looks at it now.
+    this.clearAttention(root);
     if (root === this.#state.selected) return;
     const tree = root ? this.#ensureTree(root) : undefined;
     if (tree) tree.failed = null;
@@ -961,6 +1089,7 @@ export class Controller {
   focusSession(sessionId) {
     const projection = this.#state.tree?.projection;
     if (!projection || (sessionId !== projection.rootId && !projection.sessions[sessionId])) return;
+    this.clearAttention(sessionId);
     this.#set({ focus: sessionId });
   }
 
@@ -1158,6 +1287,7 @@ export class Controller {
     if (blocked) throw new ConfigurationError(blocked);
     /** @type {PendingPrompt} */
     const prompt = { id: newMessageId(), rootId: root, text: body, delivery: this.rootBusy(root) ? 'steer' : 'auto', status: 'sending', retrySameId: true, at: Date.now() };
+    this.clearAttention(root);
     this.#set(state => ({ prompts: [...state.prompts, prompt] }));
     this.#awaitTurn(prompt);
     await this.#deliverInTurn(prompt);

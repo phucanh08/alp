@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Archive, Bot, ChevronLeft, ChevronRight, PanelLeft, RefreshCw, Search, X } from 'lucide-react';
 import type { SessionSummary } from '../lib/controller.js';
-import { needsInput } from '../lib/controller.js';
+import { attentionReason, needsInput } from '../lib/controller.js';
 import { groupHistory } from '../lib/history.js';
 import { Button } from '../components/ui/button';
 import { Spinner } from '../components/ui/spinner';
@@ -31,16 +31,16 @@ function pendingCount(state: ReturnType<typeof useAppState>, root: string) {
 }
 
 /** Paseo's StatusBadge, muted or in the attention tone. */
-function Badge({ children, tone = 'muted', icon }: { children: React.ReactNode; tone?: 'muted' | 'warning'; icon?: React.ReactNode }) {
+function Badge({ children, tone = 'muted', icon, testId }: { children: React.ReactNode; tone?: 'muted' | 'warning' | 'success' | 'danger'; icon?: React.ReactNode; testId?: string }) {
   return (
-    <span className={cn('inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-px text-xs leading-5',
-      tone === 'warning' ? 'bg-dot-warning/15 text-dot-warning' : 'bg-secondary text-muted-foreground')}>
+    <span data-testid={testId} className={cn('inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-px text-xs leading-5',
+      tone === 'warning' ? 'bg-dot-warning/15 text-dot-warning' : tone === 'success' ? 'bg-dot-success/15 text-dot-success' : tone === 'danger' ? 'bg-dot-danger/15 text-dot-danger' : 'bg-secondary text-muted-foreground')}>
       {icon}{children}
     </span>
   );
 }
 
-function HistoryRow({ session, project, selected, waiting, onOpen }: { session: SessionSummary; project: string; selected: boolean; waiting: number; onOpen: () => void }) {
+function HistoryRow({ session, project, selected, waiting, reason, onOpen }: { session: SessionSummary; project: string; selected: boolean; waiting: number; reason?: 'finished' | 'error'; onOpen: () => void }) {
   const name = sessionName(session);
   const when = relativeTime(session.updatedAt ?? session.createdAt);
   return (
@@ -54,6 +54,7 @@ function HistoryRow({ session, project, selected, waiting, onOpen }: { session: 
           <span className="min-w-0 truncate text-muted-foreground max-md:text-foreground" data-testid="history-row-title">{name}</span>
           {session.archived ? <Badge icon={<Archive aria-hidden className="size-3" />}>Archived</Badge> : null}
           {waiting ? <Badge tone="warning">{waiting} pending</Badge> : null}
+          {!waiting && reason ? <Badge tone={reason === 'error' ? 'danger' : 'success'} testId="history-row-attention">{reason === 'error' ? 'Needs attention' : 'Finished'}</Badge> : null}
         </span>
         <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground md:hidden">
           <span className="truncate">{project}</span><span className="opacity-70">·</span><span className="truncate">{STATUS[session.status] ?? session.status}</span><span className="opacity-70">·</span><span className="shrink-0">{when}</span>
@@ -127,6 +128,7 @@ export function HistoryScreen({ navOpen, onToggleNav, onOpen, onBack }: { navOpe
             <div className="flex flex-col gap-1 md:gap-0">
               {section.sessions.map(session => (
                 <HistoryRow key={session.id} session={session} project={project} selected={session.id === selected} waiting={session.archived || !needsInput(state, session.id) ? 0 : pendingCount(state, session.id)}
+                  reason={session.archived ? undefined : attentionReason(state, session.id)}
                   onOpen={() => { controller.selectSession(session.id); onOpen(); }} />
               ))}
             </div>

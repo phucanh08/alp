@@ -11,14 +11,56 @@
 export const FAVICONS = /** @type {const} */ ({ none: '/favicon.svg', running: '/favicon-running.svg', attention: '/favicon-attention.svg' });
 const BODY_CHARS = 220;
 
+/** @typedef {'running' | 'needs_input' | 'failed' | 'attention' | 'done'} Bucket */
+
 /**
- * Paseo's favicon status from the sessions' buckets: any running wins, then any waiting.
- * @param {Array<'running' | 'needs_input' | 'failed' | 'done'>} buckets @returns {FaviconStatus}
+ * Paseo's status bucket of a session row (protocol/agent-state-bucket.ts deriveAgentStateBucket):
+ * waiting for an answer, then failed (the session's error status or a turn that failed unseen),
+ * then running, then finished unseen ('attention', Paseo's green dot), else done.
+ * @param {{ status?: string, waiting?: boolean, reason?: 'finished' | 'error' }} input @returns {Bucket}
  */
-export function faviconStatus(buckets) {
+export function sessionBucket({ status, waiting = false, reason }) {
+  if (waiting) return 'needs_input';
+  if (status === 'error' || reason === 'error') return 'failed';
+  if (status === 'running' || status === 'initializing') return 'running';
+  if (reason === 'finished') return 'attention';
+  return 'done';
+}
+
+/**
+ * Paseo's favicon status (hooks/use-favicon-status.ts): any session running wins, then any that
+ * asks for the user (a question, or a turn that finished or failed unseen), else none.
+ * @param {Bucket[]} buckets @param {boolean} [attention] some root has a finished or error attention
+ * @returns {FaviconStatus}
+ */
+export function faviconStatus(buckets, attention = false) {
   if (buckets.includes('running')) return 'running';
-  if (buckets.includes('needs_input')) return 'attention';
+  if (attention || buckets.includes('needs_input') || buckets.includes('attention')) return 'attention';
   return 'none';
+}
+
+/**
+ * Paseo's attention notification (protocol/agent-attention-notification.ts) for a root whose turn
+ * ended unseen: "Agent finished" / "Finished working.", "Agent needs attention" / "Encountered an
+ * error." (or the turn's error message), one per root and reason.
+ * @param {{ root: string, name: string, reason: 'finished' | 'error', message?: string }} input
+ */
+export function turnNotification({ root, name, reason, message }) {
+  const detail = reason === 'error' ? (message ? notificationBody(message) : '') || 'Encountered an error.' : 'Finished working.';
+  return {
+    title: reason === 'finished' ? 'Agent finished' : 'Agent needs attention',
+    body: `${name}: ${detail}`,
+    tag: `alp-${reason}-${root}`,
+  };
+}
+
+/**
+ * The turn attentions that are new since the last look: roots whose entry was not there or ended
+ * again (a later `at`).
+ * @param {Record<string, { at: number }>} before @param {Record<string, { at: number }>} now @returns {string[]}
+ */
+export function newlyEnded(before, now) {
+  return Object.entries(now).filter(([id, entry]) => entry.at !== before[id]?.at).map(([id]) => id);
 }
 
 /** Markdown marks out, whitespace folded, cut to Paseo's 220 characters with "...". @param {string} text */
