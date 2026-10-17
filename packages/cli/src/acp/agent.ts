@@ -27,6 +27,11 @@ type Session = {
   cwd: string;
   mcpServers: Record<string, HostMcpServer>;
   preview: SessionPreview;
+  /**
+   * The team the first preview named when the project's team list lacks it (`custom`, for settings
+   * without workflow.mode), kept so the editor can choose it again after trying another team.
+   */
+  unlisted?: Team;
   /** Open in alpd: the team is fixed from then on. */
   opened: boolean;
   /** Prompts this connection sent, which the editor already shows. */
@@ -42,6 +47,10 @@ type Session = {
   /** The prompt waiting for its turn to end. */
   waiting?: { clientMessageId: string; turnId?: string; done(result: { state: 'completed' | 'failed' | 'canceled'; error?: string }): void };
 };
+
+/** The team a preview named when its list lacks it (`custom` runs settings' delegation graph, ALPD §42). */
+const unlistedOf = ({ teams, team, teamLabel }: SessionPreview): Team | undefined =>
+  teams.some(entry => entry.id === team) ? undefined : { id: team, label: teamLabel ?? (team === 'custom' ? 'Custom' : team) };
 
 const MODES = [
   { id: 'read-only', name: 'Read only', description: 'Agents read and search; nothing is changed' },
@@ -157,21 +166,33 @@ export function createAcpAgent(options: AcpAgentOptions) {
   const say = (session: Session, text: string) => send(session, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } });
 
   function configOptions(session: Session): acp.SessionConfigOption[] {
-    const teams: Team[] = session.opened ? session.preview.teams.filter(team => team.id === session.preview.team) : session.preview.teams;
+    const teams: Team[] = session.opened ? choices(session).filter(team => team.id === session.preview.team) : choices(session);
     return [
       {
         id: 'team', name: 'Team', category: 'model', type: 'select', currentValue: session.preview.team,
         description: session.opened ? 'A session keeps its team; start a new one for another team' : 'The team that works on this session',
-        options: (teams.length ? teams : [{ id: session.preview.team, label: session.preview.teamLabel ?? session.preview.team }]).map(team => ({ value: team.id, name: team.label, ...(team.description ? { description: team.description } : {}) })),
+        options: teams.map(team => ({ value: team.id, name: team.label, ...(team.description ? { description: team.description } : {}) })),
       },
       { id: 'mode', name: 'Permissions', category: 'mode', type: 'select', currentValue: session.preview.mode, options: MODES.map(mode => ({ value: mode.id, name: mode.name, description: mode.description })) },
     ];
   }
 
+  /**
+   * The teams the editor may choose: the project's, led by the team the preview named when the
+   * list lacks it (`custom`, for settings without workflow.mode), so it can be chosen back.
+   */
+  function choices(session: Session): Team[] {
+    const { teams, team } = session.preview;
+    const own = unlistedOf(session.preview);
+    const first = session.unlisted && session.unlisted.id !== team && !teams.some(entry => entry.id === session.unlisted!.id) ? [session.unlisted] : [];
+    return [...first, ...(own ? [own] : []), ...teams];
+  }
+
   const modeState = (session: Session): acp.SessionModeState => ({ currentModeId: session.preview.mode, availableModes: MODES });
 
   function track(id: string, cwd: string, mcpServers: Record<string, HostMcpServer>, preview: SessionPreview, opened: boolean) {
-    const session: Session = { id, cwd, mcpServers, preview, opened, ours: new Set(), texts: new Map(), tools: new Set(), questions: new Map(), queue: Promise.resolve() };
+    const unlisted = unlistedOf(preview);
+    const session: Session = { id, cwd, mcpServers, preview, opened, ...(unlisted ? { unlisted } : {}), ours: new Set(), texts: new Map(), tools: new Set(), questions: new Map(), queue: Promise.resolve() };
     sessions.set(id, session);
     return session;
   }
@@ -398,7 +419,7 @@ export function createAcpAgent(options: AcpAgentOptions) {
       if (params.configId === 'mode') await setMode(session, value);
       else if (params.configId === 'team') {
         if (session.opened && value !== session.preview.team) throw acp.RequestError.invalidParams(undefined, 'A session keeps its team; start a new one for another team');
-        if (!session.preview.teams.some(team => team.id === value)) throw acp.RequestError.invalidParams(undefined, `Unknown team ${value}`);
+        if (!choices(session).some(team => team.id === value)) throw acp.RequestError.invalidParams(undefined, `Unknown team ${value}`);
         session.preview = { ...await preview(session.cwd, session.mcpServers, value), mode: session.preview.mode };
       } else throw acp.RequestError.invalidParams(undefined, `Unknown option ${params.configId}`);
       return { configOptions: configOptions(session) };

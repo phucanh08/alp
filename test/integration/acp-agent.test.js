@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import * as acp from '@agentclientprotocol/sdk';
@@ -80,6 +80,34 @@ test('an editor starts an ALP session, chooses its team, and sees main answer an
 
   // Open now: the team is fixed.
   await assert.rejects(agent.request('session/set_config_option', { sessionId: id, configId: 'team', value: 'pho' }), /keeps its team/);
+});
+
+test('a project whose settings name no team offers its custom graph, and the editor can choose it back', async t => {
+  const { root, runtime, agents, editor } = await setup(t);
+  // Settings without workflow.mode: a session runs the custom graph (t-5586), which no team list names.
+  await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['peer'] } }));
+  const { agent } = editor();
+  await agent.request('initialize', { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} });
+  const created = await agent.request('session/new', { cwd: root, mcpServers: [] });
+  const team = created.configOptions.find(option => option.id === 'team');
+  assert.equal(team.currentValue, 'custom');
+  assert.deepEqual(team.options[0], { value: 'custom', name: 'Custom' });
+  assert.ok(team.options.some(option => option.value === 'pho'));
+
+  const away = await agent.request('session/set_config_option', { sessionId: created.sessionId, configId: 'team', value: 'pho' });
+  const awayTeam = away.configOptions.find(option => option.id === 'team');
+  assert.equal(awayTeam.currentValue, 'pho');
+  assert.deepEqual(awayTeam.options.filter(option => option.value === 'custom'), [{ value: 'custom', name: 'Custom' }]);
+  const back = await agent.request('session/set_config_option', { sessionId: created.sessionId, configId: 'team', value: 'custom' });
+  const backTeam = back.configOptions.find(option => option.id === 'team');
+  assert.equal(backTeam.currentValue, 'custom');
+  assert.deepEqual(backTeam.options.map(option => option.value).filter(value => value === 'custom'), ['custom']);
+
+  const answered = agent.request('session/prompt', { sessionId: created.sessionId, prompt: [{ type: 'text', text: 'Go' }] });
+  await until(() => agents[0]?.started.length === 1, 'the first turn');
+  assert.equal(runtime.snapshot(created.sessionId).workflow.mode, 'custom');
+  agents[0].finish('Done.');
+  assert.deepEqual(await answered, { stopReason: 'end_turn' });
 });
 
 test('a question from the team reaches the editor and /answer replies to it', async t => {

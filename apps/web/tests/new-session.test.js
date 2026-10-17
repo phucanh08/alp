@@ -68,9 +68,9 @@ test('a preview: checked, then read as rows', () => {
   assert.deepEqual(previewRows(preview, models).map(row => [row.label, row.value]), [
     ['Team', 'Phở'], ['Agent', 'main'], ['Runtime', 'Codex'], ['Model', 'codex · GPT-6.1-Sol'], ['Thinking', 'Extra high'], ['Permissions', 'Full access'],
   ]);
-  // Without a label or a known model, the ids; empty fields leave their row out.
+  // Without a label or a known model, the ids (`custom` reads Custom); empty fields leave their row out.
   const bare = parsePreview({ preview: { teams: [], team: 'custom', agent: 'lead', runtime: 'acp', model: 'x/y', mode: '', thinking: '' } });
-  assert.deepEqual(previewRows(bare).map(row => [row.label, row.value]), [['Team', 'custom'], ['Agent', 'lead'], ['Runtime', 'ACP'], ['Model', 'x/y']]);
+  assert.deepEqual(previewRows(bare).map(row => [row.label, row.value]), [['Team', 'Custom'], ['Agent', 'lead'], ['Runtime', 'ACP'], ['Model', 'x/y']]);
 });
 
 test('a title from the first message: its first line, collapsed, at most 80 characters', () => {
@@ -154,4 +154,23 @@ test('a New session start takes its workspace and connection before waiting on t
   // Started: the id comes back.
   controller.createSession = async () => 'S1';
   assert.equal(await startNewSession(controller, {}, 'hi', screen), 'S1');
+});
+
+test('a team the preview names that the list lacks (custom) is offered first, and choosing it sends it back', async () => {
+  const { unlistedTeam, teamMenu, startTeam, buildSpec } = await import('../src/lib/new-session.js');
+  const teams = [{ id: 'pho', label: 'Phở' }, { id: 'cafe', label: 'Cafe' }];
+  // Settings without workflow.mode: the preview names `custom`, which team.list does not.
+  const custom = parsePreview({ preview: { teams, team: 'custom', agent: 'main' } });
+  const unlisted = unlistedTeam(teams, custom);
+  assert.deepEqual(unlisted, { id: 'custom', label: 'Custom' });
+  assert.deepEqual(teamMenu(teams, unlisted).map(entry => entry.id), ['custom', 'pho', 'cafe']);
+  assert.equal(unlistedTeam(teams, parsePreview({ preview: { teams, team: 'x', teamLabel: 'Mine', agent: 'main' } }))?.label, 'Mine');
+  // A listed team adds nothing; neither does no preview.
+  assert.equal(unlistedTeam(teams, parsePreview({ preview: { teams, team: 'pho', agent: 'main' } })), undefined);
+  assert.equal(unlistedTeam(teams, undefined), undefined);
+  assert.equal(teamMenu(teams, undefined), teams);
+  assert.deepEqual(teamMenu(teams, teams[1]).map(entry => entry.id), ['pho', 'cafe']);
+  // Chosen back after another team: it is the team sent to session.create.
+  assert.deepEqual(startTeam({ chosen: 'custom', previewTeam: 'custom', previewSettled: false, teams }), { team: 'custom' });
+  assert.equal(buildSpec('/w', { team: 'custom' }, { persist: true }).workflow, 'custom');
 });
