@@ -8,6 +8,8 @@
 //   [ask-later] the same, about two seconds after the turn starts
 //   [hold]      start and never finish (until interrupted)
 //   [slow]      stream the answer over about three seconds
+//   [usage:N]   first report token usage as Codex does: N tokens in a 258,400-token window, N-1000 of
+//               them input (half cached) and 1000 output (thread/tokenUsage/updated)
 // A steer (turn/steer) joins the running turn; one holding [finish] ends it with a reply.
 // Images in a turn's input (data URLs) are journaled as { mimeType, bytes } and echoed as "(+N images)".
 import { appendFileSync } from 'node:fs';
@@ -58,6 +60,13 @@ function complete(threadId, turnId) {
 }
 
 async function run(threadId, turnId, text) {
+  const used = /\[usage:(\d+)\]/.exec(text);
+  if (used) {
+    const total = Number(used[1]);
+    const last = { totalTokens: total, inputTokens: total - 1000, cachedInputTokens: Math.floor((total - 1000) / 2), outputTokens: 1000, reasoningOutputTokens: 0 };
+    send({ method: 'thread/tokenUsage/updated', params: { threadId, turnId, tokenUsage: { total: last, last, modelContextWindow: 258_400 } } });
+    text = text.replace(used[0], '').trim();
+  }
   const prompt = lastLine(text);
   if (text.includes('[tool]')) {
     const id = `cmd-${turnId}`;

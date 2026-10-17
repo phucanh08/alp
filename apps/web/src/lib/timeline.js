@@ -122,6 +122,12 @@ export function project(state, envelope) {
       if (!['user_message', 'assistant_message', 'notice', 'tool_call', 'todo', 'compaction'].includes(item.kind)) return next;
       return upsert(next, { key: `${id}:${item.id}`, sessionId: id, ts, item });
     }
+    case 'usage': {
+      // The whole latest usage of the session, for its context meter (t-7679.12).
+      const previous = next.sessions[id];
+      if (!event.usage || typeof event.usage !== 'object' || Array.isArray(event.usage)) return next;
+      return { ...next, sessions: { ...next.sessions, [id]: { ...previous, id, usage: event.usage } } };
+    }
     case 'question': {
       const question = event.question;
       if (!question || typeof question.id !== 'string') return next;
