@@ -3,7 +3,8 @@
 // on a Mac and Ctrl elsewhere. Keys are matched by their physical code where a modifier changes
 // the character (Alt+1 types "¡" on a Mac), so the same keys work on any layout and platform.
 //
-// Left out, as ALP has no such thing: open project (Cmd+O), search files (Cmd+P), pin, browser
+// Search files (Mod+P) opens the command center in its Files scope, as Paseo's command-center.files.
+// Left out, as ALP has no such thing: open project (Cmd+O), pin, browser
 // tabs, focus mode, themes, voice and dictation. The split pane keys are Paseo's, on a Mac only
 // (as Paseo binds them).
 
@@ -40,6 +41,7 @@ export const SECTIONS = [
 /** @type {Binding[]} */
 export const BINDINGS = [
   { action: 'command-center.toggle', combo: 'Mod+K', section: 'general', label: 'Toggle command center' },
+  { action: 'command-center.files', combo: 'Mod+P', section: 'general', label: 'Search files' },
   { action: 'shortcuts.toggle', combo: 'Shift+?', section: 'general', label: 'Show keyboard shortcuts', scope: 'other', note: 'Available when focus is not in a text field.' },
   { action: 'settings.toggle', combo: 'Mod+,', section: 'general', label: 'Toggle settings' },
 

@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Archive, ChevronDown, ChevronRight, History, LogOut, MoreVertical, Pencil, Plus, RefreshCw, Search, Server, Settings, Settings2, X } from 'lucide-react';
-import { needsInput, type SessionSummary } from '../lib/controller.js';
+import { attentionReason, needsInput, type SessionSummary } from '../lib/controller.js';
+import { sessionBucket } from '../lib/attention.js';
 import { can } from '../lib/gateway.js';
 import { Menu } from '../components/ui/menu';
 import { Spinner } from '../components/ui/spinner';
@@ -70,11 +71,9 @@ function SearchRow({ query, onQuery, open, onOpen, onClose, focusRequest, shortc
   );
 }
 
-export function bucketOf(session: SessionSummary, waiting: boolean): Bucket {
-  if (waiting) return 'needs_input';
-  if (session.status === 'running' || session.status === 'initializing') return 'running';
-  if (session.status === 'error') return 'failed';
-  return 'done';
+/** A row's status (lib/attention.js sessionBucket): its question, its status, a turn that ended unseen. */
+export function bucketOf(session: SessionSummary, waiting: boolean, reason?: 'finished' | 'error'): Bucket {
+  return sessionBucket({ status: session.status, waiting, reason });
 }
 
 /** Paseo's workspace row, indented under its project: status slot, title at 76% that lifts on hover, kebab on hover. */
@@ -263,7 +262,7 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavig
                   <ul>
                     {shown.map(session => (
                       <SessionRow key={session.id} session={session} selected={session.id === selected && !historyOpen} canWrite={canWrite}
-                        bucket={bucketOf(session, needsInput(state, session.id))}
+                        bucket={bucketOf(session, needsInput(state, session.id), attentionReason(state, session.id))}
                         onSelect={() => { controller.selectSession(session.id); onOpenSession(); onNavigate(); }}
                         onRename={() => onRename(session)} onArchive={() => onArchive(session)} />
                     ))}

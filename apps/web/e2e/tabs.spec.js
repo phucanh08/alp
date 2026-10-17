@@ -128,8 +128,11 @@ test('command center: actions and sessions, search, keys, open a session', async
   const center = page.getByRole('dialog', { name: 'Command center' });
   const input = center.getByRole('combobox', { name: 'Search commands and sessions' });
   await expect(input).toBeFocused();
-  await expect(input).toHaveAttribute('placeholder', 'Search commands, sessions and agents...');
-  await expect(center.getByRole('group')).toHaveText([/^Workspace actions/, /^Actions/, /^ALP/, /^Sessions/]);
+  // Paseo's placeholder: this host searches files (workspace.files).
+  await expect(input).toHaveAttribute('placeholder', 'Search commands, files, workspaces, and agents...');
+  // Paseo's Workspaces section: the workspaces the token grants (here one, the open one).
+  await expect(center.getByRole('group')).toHaveText([/^Workspace actions/, /^Actions/, /^ALP/, /^Workspaces/, /^Sessions/]);
+  await expect(center.getByRole('group', { name: 'Workspaces' }).getByRole('option')).toHaveText([/^shop.*Current$/]);
   await expect(center.getByRole('group', { name: 'Workspace actions' }).getByRole('option')).toHaveText([/^New session/]);
   await expect(center.getByRole('group', { name: 'Actions', exact: true }).getByRole('option')).toHaveText([/^History/, /^Settings/, /^Keyboard shortcuts/]);
   // ALP's own commands, as its plugin adds them to paseo-web's command center (t-7679.9).
@@ -143,9 +146,11 @@ test('command center: actions and sessions, search, keys, open a session', async
   // A query narrows to what matches; arrows move and wrap; Enter opens the session.
   await page.keyboard.press('ControlOrMeta+K');
   await input.fill('alpha');
-  await expect(center.getByRole('option')).toHaveCount(1);
-  await expect(center.getByRole('option')).toContainText('Palette alpha');
-  await page.keyboard.press('Enter');
+  // (The workspace's path and its files are searched too: only the sessions are counted here.)
+  const matching = center.getByRole('group', { name: 'Sessions' }).getByRole('option');
+  await expect(matching).toHaveCount(1);
+  await expect(matching).toContainText('Palette alpha');
+  await matching.click();
   await expect(center).toBeHidden();
   await expect(page.getByRole('heading', { level: 1, name: 'Palette alpha' })).toBeVisible();
 

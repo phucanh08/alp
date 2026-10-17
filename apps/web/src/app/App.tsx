@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Archive, ArrowLeftRight, ArrowLeftToLine, ArrowRightToLine, ChevronLeft, ChevronRight, CircleAlert, Columns2, Copy, CopyX, Crosshair, Info, Keyboard, ListTodo, PanelLeft, PanelRight, Pencil, Rows2, Search, Settings, SquarePen, History as HistoryIcon, WifiOff, X } from 'lucide-react';
-import { needsInput, type SessionSummary } from '../lib/controller.js';
+import { attentionReason, FILE_SEARCH_LIMIT, needsInput, type SessionSummary } from '../lib/controller.js';
 import { Button } from '../components/ui/button';
 import { cn } from '../lib/utils';
 import { ConnectScreen } from './ConnectScreen';
@@ -16,7 +16,8 @@ import { can } from '../lib/gateway.js';
 import { applyTheme } from '../lib/theme';
 import { BINDINGS, formatShortcut, isMacPlatform, shortcutKeys, type Binding } from '../lib/shortcuts.js';
 import { baseName, relativeTime, sessionName } from '../lib/format';
-import { CommandCenter, type RunnableAction } from './CommandCenter';
+import { CommandCenter, type CommandScope, type RunnableAction } from './CommandCenter';
+import { workspaceRows } from '../lib/command-center.js';
 import { usePageAttention } from './attention';
 import { bucketOf } from './Sidebar';
 import { PANELS } from './panels';
@@ -153,8 +154,9 @@ function hint(action: string, mac: boolean, delta?: number) {
  * the workspace's (new session, panels, tabs, the open session) and the app's (History,
  * Settings, shortcuts, sidebars, the sidebar's session search). Inside the tabs' provider.
  */
-function CommandCenterHost({ open, onClose, history, splits, onAction, onOpenSession }: {
+function CommandCenterHost({ open, scope, onClose, history, splits, onAction, onOpenSession }: {
   open: boolean;
+  scope: CommandScope;
   onClose: () => void;
   history: boolean;
   /** Whether the center can split (a wide enough window). */
@@ -163,6 +165,7 @@ function CommandCenterHost({ open, onClose, history, splits, onAction, onOpenSes
   onOpenSession: (id: string) => void;
 }) {
   const state = useAppState();
+  const controller = useController();
   const { workspace, principal, connection, sessions, tree, selected } = state;
   const { tabs: all, row, active, activate, close, closeOthers: closeRow, openPanel, panes, focusedPane, splitEmpty, canSplitEmpty, closePane, focusAdjacent, moveTabAdjacent } = useTabs();
   // The row on screen: the focused pane's, or every tab on a narrow window (as the tab menu).
@@ -226,12 +229,29 @@ function CommandCenterHost({ open, onClose, history, splits, onAction, onOpenSes
     id: session.id,
     title: sessionName(session),
     subtitle: [workspace ? baseName(workspace) : '', session.status === 'closed' ? 'Closed' : relativeTime(session.updatedAt ?? session.createdAt)].filter(Boolean).join(' · '),
-    bucket: bucketOf(session, needsInput(state, session.id)),
+    bucket: bucketOf(session, needsInput(state, session.id), attentionReason(state, session.id)),
+    attention: !!attentionReason(state, session.id),
     updatedAt: session.updatedAt ?? session.createdAt,
   }));
   // The open session chosen again brings its tab to the front.
   const openSession = (id: string) => { if (id === state.selected) { activate({ kind: 'agent', id }); onAction('session.opened'); } else onOpenSession(id); };
-  return <CommandCenter open={open} onClose={onClose} actions={actions} sessions={rows} onOpenSession={openSession} mac={mac} />;
+  // Paseo's Workspaces: every workspace the token grants, the open one marked.
+  const workspaceList = React.useMemo(() => workspaceRows(principal?.workspaces ?? [], workspace), [principal, workspace]);
+  // Paseo's file search (workspace.files.search) where the host offers it.
+  const files = React.useMemo(() => ({
+    available: connection.capabilities.includes('workspace.files'),
+    source: workspace,
+    search: (query: string) => controller.searchWorkspaceFiles({ query, limit: FILE_SEARCH_LIMIT }),
+  }), [connection.capabilities, workspace, controller]);
+  // Paseo opens the file in a tab; ALP has no file read yet, so the path goes to the clipboard.
+  const pickFile = (path: string) => {
+    const copy = navigator.clipboard?.writeText(path);
+    if (!copy) { controller.notify('error', `Could not copy ${path}.`); return; }
+    copy.then(() => controller.notify('info', `Copied ${path}`), () => controller.notify('error', `Could not copy ${path}.`));
+  };
+  const selectWorkspace = (path: string) => { controller.selectWorkspace(path); onAction('tab.shown'); };
+  return <CommandCenter open={open} scope={scope} onClose={onClose} actions={actions} sessions={rows} workspaces={workspaceList} files={files}
+    onOpenSession={openSession} onSelectWorkspace={selectWorkspace} onPickFile={pickFile} mac={mac} />;
 }
 
 /** The favicon, window title and browser notifications of the workspace's sessions. */
@@ -261,7 +281,8 @@ function Shell() {
   const [history, setHistory] = React.useState(false);
   const [shortcuts, setShortcuts] = React.useState(false);
   const [searchRequest, setSearchRequest] = React.useState(0);
-  const [commandCenter, setCommandCenter] = React.useState(false);
+  // Closed, or open in a scope (Mod+P: Files).
+  const [commandCenter, setCommandCenter] = React.useState<false | { scope: CommandScope }>(false);
   const [tabMenuRequest, setTabMenuRequest] = React.useState(0);
   // ALP's tasks board in place of the workspace (Open ALP tasks full screen), as History.
   const [tasksScreen, setTasksScreen] = React.useState(false);
@@ -318,7 +339,8 @@ function Shell() {
         showNav();
         setSearchRequest(value => value + 1);
         return;
-      case 'command-center.toggle': setCommandCenter(value => !value); return;
+      case 'command-center.toggle': setCommandCenter(value => value ? false : { scope: null }); return;
+      case 'command-center.files': setCommandCenter({ scope: 'files' }); return;
       case 'history':
         if (!workspace) return false;
         openHistory();
@@ -406,7 +428,7 @@ function Shell() {
       <RenameDialog session={renaming} onClose={() => setRenaming(null)} />
       <ArchiveDialog session={archiving} onClose={() => setArchiving(null)} />
       <ShortcutsDialog open={shortcuts} onClose={() => setShortcuts(false)} />
-      <CommandCenterHost open={commandCenter} onClose={() => setCommandCenter(false)} history={away} splits={medium} onAction={onShortcut}
+      <CommandCenterHost open={!!commandCenter} scope={commandCenter ? commandCenter.scope : null} onClose={() => setCommandCenter(false)} history={away} splits={medium} onAction={onShortcut}
         onOpenSession={id => { controller.selectSession(id); toWorkspace(); setNavOpen(false); }} />
       <ShellShortcuts settings={settings} history={away} splits={medium} onAction={onShortcut} />
       <Notice />

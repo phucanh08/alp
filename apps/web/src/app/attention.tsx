@@ -1,9 +1,9 @@
 import * as React from 'react';
-import { needsInput } from '../lib/controller.js';
-import { FAVICONS, faviconStatus, newlyWaiting, notificationBody, userSees } from '../lib/attention.js';
+import { attentionReason, needsInput } from '../lib/controller.js';
+import { FAVICONS, faviconStatus, newlyEnded, newlyWaiting, notificationBody, turnNotification, userSees } from '../lib/attention.js';
 import { baseName, sessionName } from '../lib/format';
 import { bucketOf } from './Sidebar';
-import { useAppState } from './store';
+import { useAppState, useController } from './store';
 
 /** The first read of a workspace's questions (question.watch, or question.list polled every 5 s on an older host) brings in ones already waiting: none of them is new within this long. */
 const SETTLE_MS = 6_000;
@@ -40,10 +40,23 @@ export function useNotificationPermission() {
  */
 export function usePageAttention({ onOpenSession }: { onOpenSession: (id: string) => void }) {
   const state = useAppState();
-  const { workspace, sessions, tree, attention, selected, focus } = state;
+  const controller = useController();
+  const { workspace, sessions, tree, attention, turnAttention, selected, focus } = state;
 
-  // Favicon: any session running, else any waiting.
-  const status = faviconStatus(sessions.list.map(session => bucketOf(session, needsInput(state, session.id))));
+  // Whether the page is visible and focused, for the controller: a turn that ends on the session
+  // in front of the user asks for nothing, and coming back to one clears its attention.
+  React.useEffect(() => {
+    const tell = () => controller.setPresence({ visible: document.visibilityState === 'visible', focused: document.hasFocus() });
+    tell();
+    window.addEventListener('focus', tell);
+    window.addEventListener('blur', tell);
+    document.addEventListener('visibilitychange', tell);
+    return () => { window.removeEventListener('focus', tell); window.removeEventListener('blur', tell); document.removeEventListener('visibilitychange', tell); };
+  }, [controller]);
+
+  // Favicon: any session running, else any asking for the user (a question, a turn ended unseen).
+  // Only listed rows count, so a root archived since never keeps the favicon asking.
+  const status = faviconStatus(sessions.list.map(session => bucketOf(session, needsInput(state, session.id), attentionReason(state, session.id))), Object.keys(turnAttention).some(id => tree?.rootId === id || sessions.list.some(session => session.id === id && !session.archived)));
   React.useEffect(() => {
     let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
     if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.append(link); }
@@ -115,4 +128,26 @@ export function usePageAttention({ onOpenSession }: { onOpenSession: (id: string
       }
     }
   }, [counts, workspace, tree, sessions, selected, focus]);
+
+  // A root whose turn finished or failed unseen (the controller left out the one the user sees):
+  // Paseo's "Agent finished" / "Agent needs attention", one per root and reason.
+  const ended = React.useRef<{ workspace: string | null; entries: typeof turnAttention }>({ workspace, entries: turnAttention });
+  React.useEffect(() => {
+    const last = ended.current;
+    const fresh = last.workspace === workspace ? newlyEnded(last.entries, turnAttention) : [];
+    ended.current = { workspace, entries: turnAttention };
+    if (!fresh.length || !notificationsSupported() || Notification.permission !== 'granted') return;
+    for (const id of fresh) {
+      const entry = turnAttention[id];
+      if (!entry) continue;
+      const name = sessionName(sessions.list.find(session => session.id === id) ?? { id, title: tree?.rootId === id ? tree.projection.sessions[id]?.title : undefined });
+      const { title, body, tag } = turnNotification({ root: id, name, reason: entry.reason, message: entry.message });
+      try {
+        const note = new Notification(title, { body, tag, icon: FAVICONS.attention });
+        note.onclick = () => { window.focus(); open.current(id); note.close(); };
+      } catch {
+        // As above: no notification outside a service worker on some browsers.
+      }
+    }
+  }, [turnAttention, workspace, sessions, tree]);
 }

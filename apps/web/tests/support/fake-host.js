@@ -29,6 +29,8 @@ export class FakeHost {
     this.taskRev = 0;
     this.questions = new Map();
     this.epoch = 'e1';
+    /** projectRoot → relative file paths, for workspace.files.search (capability workspace.files). */
+    this.files = new Map();
   }
 
   count(method) { return this.calls.filter(call => call.method === method).length; }
@@ -45,7 +47,7 @@ export class FakeHost {
     const messages = new Set();
     const closes = new Set();
     let ended = false;
-    const connection = { attached: new Set(), watching: undefined, transport: undefined, deliver: undefined, end: undefined };
+    const connection = { attached: new Set(), watching: undefined, watchTurns: false, transport: undefined, deliver: undefined, end: undefined };
     const end = close => {
       if (ended) return;
       ended = true;
@@ -130,7 +132,37 @@ export class FakeHost {
     const envelope = { sessionId, epoch: this.epoch, seq: root.timeline.length + 1, ts: new Date().toISOString(), event, ...(kept ? { cursor: ++root.cursor } : {}) };
     if (kept) root.timeline.push(envelope);
     for (const connection of root.viewers) this.#send(connection, { method: 'event', params: envelope });
+    // question.watch { turns: true }: a root's turn end goes, without its cursor, to the watchers
+    // of its project that are not attached to its tree.
+    if (event.type === 'turn.ended' && sessionId === root.id) {
+      const { cursor: _cursor, ...copy } = envelope;
+      for (const connection of this.connections) {
+        if (connection.watching === undefined || !connection.watchTurns || root.viewers.has(connection)) continue;
+        if (connection.watching !== null && connection.watching !== root.spec.cwd) continue;
+        this.#send(connection, { method: 'event', params: copy });
+      }
+    }
     return envelope;
+  }
+
+  /** A turn of a root nobody watches starts (as a local client's prompt would). */
+  startTurn(rootId) {
+    const root = this.roots.get(rootId);
+    const turnId = `turn-${++root.turns}`;
+    root.running = turnId;
+    root.summary.busy = true;
+    this.#emit(root, rootId, { type: 'turn.started', turnId, origin: 'user' });
+    return turnId;
+  }
+
+  /** Ends the running turn of a root as `state` ('completed' | 'failed' | 'canceled'). */
+  endTurn(rootId, state = 'completed', error) {
+    const root = this.roots.get(rootId);
+    const turnId = root.running;
+    if (!turnId) return;
+    root.running = undefined;
+    root.summary.busy = false;
+    this.#emit(root, rootId, { type: 'turn.ended', turnId, state, ...(error ? { error } : {}) });
   }
 
   /** Emits an event as the host would while a turn runs. */
@@ -340,6 +372,7 @@ export class FakeHost {
       }
       case 'question.watch': {
         connection.watching = params.projectRoot ?? null;
+        connection.watchTurns = this.capabilities.includes('question.watch.turns') && params.turns === true;
         const questions = [...this.questions.values()].filter(question => !params.projectRoot || this.roots.get(question.rootId)?.spec.cwd === params.projectRoot);
         return { questions: structuredClone(questions) };
       }
@@ -348,6 +381,14 @@ export class FakeHost {
         if (!question) throw Object.assign(new Error('no such question'), { code: 1001 });
         this.resolve(question.id, params.dismiss ? 'dismissed' : 'answered', params.text);
         return { questionId: question.id };
+      }
+      case 'workspace.files.search': {
+        if (!this.capabilities.includes('workspace.files')) throw Object.assign(new Error('unknown method workspace.files.search'), { code: -32601 });
+        if (!this.principal.permissions.includes('project.read')) throw Object.assign(new Error('forbidden'), { code: 1003 });
+        const query = String(params.query ?? '').toLowerCase();
+        const all = (this.files.get(params.projectRoot) ?? []).filter(path => path.toLowerCase().includes(query));
+        const limit = params.limit ?? 30;
+        return { files: all.slice(0, limit).map(path => ({ path })), ...(all.length > limit ? { truncated: true } : {}) };
       }
       case 'task.list': return { projectRoot: params.projectRoot, tasks: structuredClone(this.tasks), unreadable: [], revision: `r${this.taskRev}` };
       case 'task.create': {
