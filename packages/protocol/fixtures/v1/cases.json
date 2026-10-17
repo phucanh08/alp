@@ -1304,6 +1304,104 @@
    }
   },
   {
+   "name": "question.watch with turns",
+   "check": "params",
+   "method": "question.watch",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "turns": true
+   }
+  },
+  {
+   "name": "question.watch with a string turns",
+   "check": "params",
+   "method": "question.watch",
+   "valid": false,
+   "value": {
+    "turns": "yes"
+   }
+  },
+  {
+   "name": "workspace.files.search params",
+   "check": "params",
+   "method": "workspace.files.search",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "query": "server ts",
+    "limit": 30
+   }
+  },
+  {
+   "name": "workspace.files.search without a query",
+   "check": "params",
+   "method": "workspace.files.search",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project"
+   }
+  },
+  {
+   "name": "workspace.files.search without projectRoot",
+   "check": "params",
+   "method": "workspace.files.search",
+   "valid": false,
+   "value": {
+    "query": "server"
+   }
+  },
+  {
+   "name": "workspace.files.search with a limit over 100",
+   "check": "params",
+   "method": "workspace.files.search",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "limit": 101
+   }
+  },
+  {
+   "name": "workspace.files.search with a query over 200 characters",
+   "check": "params",
+   "method": "workspace.files.search",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "query": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   }
+  },
+  {
+   "name": "workspace.files.search result",
+   "check": "result",
+   "method": "workspace.files.search",
+   "valid": true,
+   "value": {
+    "files": [
+     {
+      "path": "src/server.ts"
+     },
+     {
+      "path": "docs/sửa lỗi.md"
+     }
+    ],
+    "truncated": true
+   }
+  },
+  {
+   "name": "workspace.files.search result with an empty path",
+   "check": "result",
+   "method": "workspace.files.search",
+   "valid": false,
+   "value": {
+    "files": [
+     {
+      "path": ""
+     }
+    ]
+   }
+  },
+  {
    "name": "question.answer params",
    "check": "params",
    "method": "question.answer",

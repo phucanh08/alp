@@ -12,6 +12,7 @@ import type { Receipt, SessionRecord, SessionStatus, Store, UnreadableReceipt } 
 import type { SessionSummary } from '@anhlp/alp-protocol/session';
 import { RpcError } from './rpc-error.js';
 import { createOperations, type OperationsOptions } from './operations.js';
+import { FilesError, searchWorkspaceFiles } from './files.js';
 
 /**
  * alpd's JSON-RPC surface over one shared runtime (plans/reference/ALPD.md §3, §6, §14).
@@ -173,8 +174,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   const restored = store ? restore() : Promise.resolve();
 
   const deliver = (connection: Connection, envelope: Envelope) => connection.send({ jsonrpc: '2.0', method: 'event', params: envelope });
-  /** Connections that called question.watch, with the projectRoot they asked for. */
-  const watchers = new Map<Connection, { projectRoot?: string }>();
+  /** Connections that called question.watch, with the projectRoot they asked for and whether they want roots' turn ends. */
+  const watchers = new Map<Connection, { projectRoot?: string; turns: boolean }>();
 
   /** The project of a tree, live or recorded. */
   function projectOf(root: string) {
@@ -182,14 +183,16 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /**
-   * Tells watchers not attached to the tree of a question asked or resolved there. Their copy has
-   * no `cursor`: it is not part of a timeline they replay (docs/protocol/alp-json-rpc-v1.md §8.1).
+   * Tells watchers not attached to the tree of a question asked or resolved there, or, for those
+   * that asked for `turns`, of the end of a root's turn. Their copy has no `cursor`: it is not part
+   * of a timeline they replay (docs/protocol/alp-json-rpc-v1.md §8.1, §12.2).
    */
-  function tellWatchers(root: string, envelope: Envelope) {
+  function tellWatchers(root: string, envelope: Envelope, turn = false) {
     if (!watchers.size) return;
     const { cursor: _cursor, ...announced } = envelope;
     const project = projectOf(root);
-    for (const [connection, { projectRoot }] of watchers) {
+    for (const [connection, { projectRoot, turns }] of watchers) {
+      if (turn && !turns) continue;
       if (attached.get(root)?.has(connection)) continue;
       if (projectRoot !== undefined && project !== projectRoot) continue;
       deliver(connection, announced);
@@ -278,6 +281,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     }
     for (const connection of attached.get(root) ?? []) deliver(connection, envelope);
     if (event.type === 'question' || event.type === 'question.resolved') tellWatchers(root, envelope);
+    else if (event.type === 'turn.ended' && sessionId === root) tellWatchers(root, envelope, true);
     // After the message that named it, so its cursor follows the message's.
     if (named) announceTitle(root, records.get(root)!.title!);
     if (event.type === 'session.closed' && sessionId === root) {
@@ -718,12 +722,29 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     /**
      * The questions waiting now; from then on this connection is told of `question` and
      * `question.resolved` in every tree, or those of `projectRoot`, attached or not. Calling it
-     * again replaces the filter; it lasts as long as the connection (ALPD §15).
+     * again replaces the filter; it lasts as long as the connection (ALPD §15). With `turns`, also
+     * of `turn.ended` of every root (docs/protocol/alp-json-rpc-v1.md §12.2).
      */
-    'question.watch'(connection, { projectRoot } = {}) {
+    'question.watch'(connection, { projectRoot, turns } = {}) {
       // No await between registering and listing: an event either is in the list or follows it.
-      watchers.set(connection, { projectRoot });
+      watchers.set(connection, { projectRoot, turns: turns === true });
       return { questions: runtime.questions().filter(question => projectRoot === undefined || projectOf(question.rootId) === projectRoot) };
+    },
+
+    /**
+     * The files of a directory whose path matches a query, read-only and confined to it: no link
+     * is followed, only names are read (docs/protocol/alp-json-rpc-v1.md §12.3, ALPD §15).
+     */
+    async 'workspace.files.search'(_connection, { projectRoot, query, limit } = {}) {
+      if (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot) || path.resolve(projectRoot) !== projectRoot) {
+        throw new RpcError(RPC_ERROR.invalidParams, 'projectRoot must be an absolute, normalized path', { reason: 'invalid_path' });
+      }
+      try {
+        return await searchWorkspaceFiles(projectRoot, { query, limit });
+      } catch (error) {
+        if (error instanceof FilesError) throw new RpcError(ERROR.notFound, error.message, { reason: 'not_directory' });
+        throw error;
+      }
     },
 
     /** The project board: live claims, decisions and findings (ALPD §18). */
@@ -986,7 +1007,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, ...(store ? [CAPABILITY.promptReceipts] : []), ...operations.capabilities];
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles, ...(store ? [CAPABILITY.promptReceipts] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {

@@ -11,7 +11,7 @@ export type RpcResponse = { jsonrpc: '2.0'; id: RpcId } & ({ result: unknown; er
 export type EventNotification = { jsonrpc: '2.0'; method: 'event'; params: Envelope };
 
 /** Names a daemon may list in its daemon.hello result (schema/methods-v1.json `capabilities`). */
-export type Capability = 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'settings.language' | 'session.list.page' | 'question.watch';
+export type Capability = 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'workspace.files';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -19,7 +19,9 @@ export type ErrorReason =
   | 'response_too_large' | 'persistence_failed' | 'outcome_unknown' | 'key_conflict'
   // Project, task and library methods (docs/protocol/alp-json-rpc-v1.md §5.3).
   | 'invalid_path' | 'invalid_scope' | 'invalid_entry' | 'secret_marker' | 'not_alp_project' | 'unknown_task' | 'not_found'
-  | 'unsafe_path' | 'revision_conflict' | 'task_state' | 'in_use' | 'busy' | 'unreadable';
+  | 'unsafe_path' | 'revision_conflict' | 'task_state' | 'in_use' | 'busy' | 'unreadable'
+  // workspace.files.search (§12.3).
+  | 'not_directory';
 
 type Empty = Record<string, never>;
 
@@ -48,8 +50,10 @@ export type RpcMethodMap = {
   'assignment.recall': { params: { assignmentId?: string; taskId?: string; projectRoot?: string; question: string }; result: RecallAnswer };
   'board.list': { params: { projectRoot: string }; result: { pins: Pin[] } };
   'question.list': { params: { projectRoot?: string }; result: { questions: UserQuestion[] } };
-  /** Capability `question.watch`: the waiting questions now; then this connection is told of every tree's `question` and `question.resolved` (of `projectRoot` when given). */
-  'question.watch': { params: { projectRoot?: string }; result: { questions: UserQuestion[] } };
+  /** Capability `question.watch`: the waiting questions now; then this connection is told of every tree's `question` and `question.resolved` (of `projectRoot` when given). `turns` (capability `question.watch.turns`): also every root's `turn.ended`. */
+  'question.watch': { params: { projectRoot?: string; turns?: boolean }; result: { questions: UserQuestion[] } };
+  /** Capability `workspace.files`: files under `projectRoot` whose relative path matches `query`, best first; read-only, links not followed. */
+  'workspace.files.search': { params: { projectRoot: string; query?: string; limit?: number }; result: { files: Array<{ path: string }>; truncated?: boolean } };
   'question.answer': { params: { questionId: string; text?: string; dismiss?: boolean; reason?: string }; result: { questionId: string } };
   'session.create': {
     params: { sessionId?: string; spec: SessionSpec; history?: 'skip' | 'replay'; delegation?: boolean; resume?: boolean };

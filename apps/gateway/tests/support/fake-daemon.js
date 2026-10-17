@@ -15,7 +15,7 @@ const error = (code, message, data) => ({ code, message, ...(data ? { data } : {
 /**
  * @param {{ sessions?: object[], questions?: object[], capabilities?: string[] }} [fixture]
  */
-export function fakeDaemon({ sessions = [], questions = [], capabilities = ['attach.after', 'extension.methods', 'prompt.receipts', 'task', 'team', 'library', 'settings.language', 'session.list.page', 'question.watch'] } = {}) {
+export function fakeDaemon({ sessions = [], questions = [], capabilities = ['attach.after', 'extension.methods', 'prompt.receipts', 'task', 'team', 'library', 'settings.language', 'session.list.page', 'question.watch', 'question.watch.turns', 'workspace.files'] } = {}) {
   const state = {
     /** @type {Map<string, any>} */ sessions: new Map(sessions.map(session => [session.id, session])),
     questions: [...questions],
@@ -28,6 +28,8 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
     links: /** @type {Set<any>} */ (new Set()),
     /** Tasks per projectRoot. */
     tasks: /** @type {Map<string, any[]>} */ (new Map()),
+    /** File paths per projectRoot, for workspace.files.search. */
+    files: /** @type {Map<string, string[]>} */ (new Map()),
     opened: 0,
     refuse: false,
   };
@@ -48,9 +50,10 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
     state.timelines.set(root, timeline);
     for (const link of state.links) if (link.attached.has(root)) link.send({ jsonrpc: '2.0', method: 'event', params: envelope });
     // question.watch: the trees a connection is not attached to, without the cursor, as alpd does.
-    if (event.type === 'question' || event.type === 'question.resolved') {
+    // With turns, also a root's turn.ended.
+    if (event.type === 'question' || event.type === 'question.resolved' || (event.type === 'turn.ended' && root === sessionId)) {
       const { cursor: _cursor, ...announced } = envelope;
-      for (const link of state.links) if (link.watching && !link.attached.has(root) && (link.watching.projectRoot === undefined || state.sessions.get(root)?.projectRoot === link.watching.projectRoot)) link.send({ jsonrpc: '2.0', method: 'event', params: announced });
+      for (const link of state.links) if (link.watching && (event.type !== 'turn.ended' || link.watching.turns) && !link.attached.has(root) && (link.watching.projectRoot === undefined || state.sessions.get(root)?.projectRoot === link.watching.projectRoot)) link.send({ jsonrpc: '2.0', method: 'event', params: announced });
     }
     return envelope;
   }
@@ -110,8 +113,8 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
     'session.rename': ({ sessionId, title }) => { const found = state.sessions.get(sessionId); found.title = title; return { session: found }; },
     'session.archive': ({ sessionId, archived = true }) => { const found = state.sessions.get(sessionId); found.archived = archived; return { session: found }; },
     'question.list': ({ projectRoot }) => ({ questions: state.questions.filter(question => projectRoot === undefined || state.sessions.get(question.rootId)?.projectRoot === projectRoot) }),
-    'question.watch': ({ projectRoot }, link) => {
-      link.watching = { projectRoot };
+    'question.watch': ({ projectRoot, turns }, link) => {
+      link.watching = { projectRoot, turns: turns === true };
       return { questions: state.questions.filter(question => projectRoot === undefined || state.sessions.get(question.rootId)?.projectRoot === projectRoot) };
     },
     'question.answer': ({ questionId }) => {
@@ -121,6 +124,8 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
       return { questionId: matches[0].id };
     },
     'board.list': () => ({ pins: [] }),
+    // Files per projectRoot (state.files), as alpd answers them; a test may plant bad paths.
+    'workspace.files.search': ({ projectRoot, limit = 30 }) => ({ files: (state.files.get(projectRoot) ?? []).slice(0, limit).map(file => ({ path: file })) }),
     'session.close': () => ({}),
     // Project resources (§15): keyed by the exact projectRoot, as alpd never walks up.
     'task.list': ({ projectRoot }) => ({ projectRoot, tasks: state.tasks.get(projectRoot) ?? [], unreadable: [], revision: `r${(state.tasks.get(projectRoot) ?? []).length}` }),

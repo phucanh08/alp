@@ -144,13 +144,14 @@ runs before all of them pass**:
 | `persistence_failed` | 1000 | `session.create`, `session.prompt`, `session.rename`, `session.archive` when the store cannot write |
 | `outcome_unknown` | 1004 | `session.prompt`: the daemon cannot tell whether the provider received the prompt (§10) |
 | `key_conflict` | 1004 | `session.prompt`: the `clientMessageId` was used with other content; `task.create`: the `requestId` was used for another task |
-| `invalid_path` | -32602 | `projectRoot` is not an absolute, normalized path (§15.1) |
+| `invalid_path` | -32602 | `projectRoot` is not an absolute, normalized path (§15.1, §12.3) |
 | `invalid_scope` | -32602 | a library `scope` the entry cannot live in: `project` without `projectRoot`, providers outside the library |
 | `invalid_entry` | -32602 | library content core refuses: unknown fields, a bad MCP server, hook, provider or team, a name it refers to that does not exist |
 | `secret_marker` | -32602 | `library.save`: a `{ "$secret": "keep" }` marker with no stored value to keep, or outside a secret map (§15.3) |
 | `not_alp_project` | 1001 | `projectRoot` is not a directory holding `.alp/` |
 | `unknown_task` | 1001 | no task of that id in the project |
 | `not_found` | 1001 | no library entry of that kind and name (in that scope) |
+| `not_directory` | 1001 | `workspace.files.search`: `projectRoot` is not a directory alpd can read (§12.3) |
 | `unsafe_path` | 1003 | a symlink where a project's `.alp`, its tasks or a library entry would be read or written |
 | `revision_conflict` | 1004 | a library `revision` or task `ifRev` that is no longer current; an entry that already exists where a new one was asked |
 | `task_state` | 1004 | the task's state refuses the change: already closed or open, open children, a closed parent, a gate already clear or missing |
@@ -196,6 +197,8 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 | `settings.language` | `settings.language.get/set` (§15.5). Same condition as `team`. |
 | `session.list.page` | `session.list` accepts `limit`, `cursor` and `query` and answers `nextCursor` (§12.1). Every alpd lists it. |
 | `question.watch` | `question.watch`: questions of trees the connection is not attached to (§12.2). Every alpd lists it. |
+| `question.watch.turns` | `question.watch` accepts `turns`: also every root's `turn.ended` (§12.2). Every alpd lists it. |
+| `workspace.files` | `workspace.files.search`: file names under a directory matching a query, read-only (§12.3). Every alpd lists it. |
 
 alpd before this revision already had the first three without listing them; the others are new. A method whose
 capability a daemon does not list answers `-32601`. A client that must work with
@@ -235,8 +238,8 @@ compatible and needs no version change. A future daemon that speaks several vers
 ### 8.1 Envelope
 
 The daemon sends `{ "jsonrpc": "2.0", "method": "event", "params": Envelope }` to every connection
-attached to the event's tree (§9), and a tree's `question` / `question.resolved` also to the
-connections watching questions (§12.2):
+attached to the event's tree (§9), and a tree's `question` / `question.resolved` (and its root's
+`turn.ended`, to those that asked for `turns`) also to the connections watching questions (§12.2):
 
 ```ts
 { sessionId: string; epoch: string; seq: number; cursor?: number; ts: string; event: AlpEvent }
@@ -251,7 +254,7 @@ connections watching questions (§12.2):
   across restarts, starting at 1. Only envelopes with a `cursor` are part of the timeline ("kept").
 - **Synthetic envelopes** without `cursor`: the re-announcement of a live tree when a client reopens a
   root (`session.opened`, `session.ready`, `turn.started` of a running turn), pending `question`s
-  announced on attach, and the `question` / `question.resolved` copies `question.watch` sends (§12.2). A client never advances its cursor from an envelope without one.
+  announced on attach, and the `question` / `question.resolved` / `turn.ended` copies `question.watch` sends (§12.2). A client never advances its cursor from an envelope without one.
 - **History digests**: when resuming a closed root, `session.create { history: "replay" }` sends the
   root's latest version of each timeline item and its children's events. For an already-live root
   (`attached: true`), it sends root items and synthetic announcements of live children, without
@@ -418,7 +421,8 @@ connection on the local socket acts as the owner.
 | `assignment.recall` | asks a finished assignment's thread (a model call) | no | 1000, -32602 | session.write |
 | `board.list` | read | yes | -32602 | session.read |
 | `question.list` | read | yes | — | session.read |
-| `question.watch` | read, then question events of every tree (§12.2) | yes (a second call replaces the filter) | -32602 | session.read |
+| `question.watch` | read, then question events of every tree, and roots' turn ends with `turns` (§12.2) | yes (a second call replaces the filter) | -32602 | session.read |
+| `workspace.files.search` | read: file names under `projectRoot` (§12.3) | yes | -32602, 1001 | project.read |
 | `question.answer` | answers or dismisses; a unique id prefix is accepted | no (second answer → 1001) | 1001, -32602 | session.write |
 | `session.create` | creates or resumes a root, attaches | no (an existing live root is attached: `attached: true`) | -32602, 1000, 1001, `persistence_failed` | session.write |
 | `session.preview` | read (no files written) | yes | -32602, 1000 | session.read |
@@ -480,7 +484,7 @@ host's agents (`fetch_agent_history`, Paseo `b63a325`):
 
 ### 12.2 `question.watch`
 
-`question.watch { projectRoot? }` (capability `question.watch`) answers `{ questions }`, the questions
+`question.watch { projectRoot?, turns? }` (capability `question.watch`) answers `{ questions }`, the questions
 waiting now (as `question.list` with the same `projectRoot`). From then on, for as long as the
 connection lasts, alpd sends it every `question` and `question.resolved` event of every tree (of
 `projectRoot` when given, compared as the string alpd records for the tree), attached or not:
@@ -491,14 +495,59 @@ connection lasts, alpd sends it every `question` and `question.resolved` event o
   event follows it. A second call replaces `projectRoot` and answers the list again.
 - Events sent while a client was disconnected are not replayed. After reconnecting, a client calls
   `question.watch` again and takes its answer as the whole set of waiting questions.
+- **`turns: true`** (capability `question.watch.turns`): the connection is also sent the `turn.ended`
+  of every **root** session (the envelope's `sessionId` is the tree's root; a child's turn ends are
+  not sent) of the watched trees, by the same rules: kept envelope once when attached, else a copy
+  without `cursor`. This is the attention signal of Paseo's "Agent finished" / "Agent needs
+  attention" (`agent_attention_required`, reasons `finished` and `error`, b63a325): a client reads
+  `state` (`completed`, `failed`, `canceled`) and `error`. Turn ends are not listed in the answer and
+  are not replayed after a reconnect. A second call without `turns` stops them. A daemon without the
+  capability ignores `turns`.
 
-The gateway forwards it with no `projectRoot`, filters the answer as `question.list`'s, and lets each
-event out only if its session's tree lies in the grant and, when the client named a workspace, in that
-workspace or a tree the client attached (docs/alp/remote-gateway.md §5.1).
+The gateway forwards it with no `projectRoot` (and `turns: true` when the client sent it), filters the
+answer as `question.list`'s, and lets each event out only if its session's tree lies in the grant and,
+when the client named a workspace, in that workspace or a tree the client attached
+(docs/alp/remote-gateway.md §5.1).
+
+### 12.3 `workspace.files.search`
+
+`workspace.files.search { projectRoot, query?, limit? }` (capability `workspace.files`) answers
+`{ files: [{ path }], truncated? }`: the files under `projectRoot` whose path matches `query`, best
+first, as Paseo's command center finds a workspace's files (`directory_suggestions_request` with
+`includeFiles`, server/utils/directory-suggestions.ts at b63a325):
+
+- **`projectRoot`**: an absolute, normalized path (§15.1; else `-32602 invalid_path`) of a directory
+  (else `1001 not_directory`). Unlike §15 it need not hold `.alp/`. Its real path is walked.
+- **`path`**: relative to the walked directory, `/`-separated; files only.
+- **Read-only, names only**: no file is opened. A symbolic link is never followed: neither listed nor
+  entered, so nothing outside the directory is reached through one. Each directory is checked before
+  and after it is read (a real directory, not a link, at the real path it was reached by, the same
+  device and inode both times); otherwise what was read is dropped. **Residual risk**: a link swapped
+  in and back out between those two checks, by a writer racing inside the directory, can expose the
+  names (never the contents) of the directory it pointed to; Node offers no `openat`/`O_NOFOLLOW`
+  walk that would close it.
+- **Skipped**: names starting with `.` (files always; directories except `.agents`, `.alp`, `.claude`,
+  `.codex`, `.github`, `.opencode`, `.paseo`, `.vscode`), and the directories `node_modules`, `venv`,
+  `env`, `virtualenv`, `dist`, `build`, `target`, `out`, `coverage`, `vendor`, `__pycache__`, `.git`.
+  `.gitignore` is not read (Paseo asks git; alpd runs no process for this).
+- **Ranking** (Paseo's, simplified), case-insensitive: a path segment equal to `query`, then one that
+  starts with it, then one that holds it; then the last segment holding its letters in order. With a
+  `/` in `query` the whole path is matched. Ties: earlier segment, earlier offset, fewer gaps,
+  shallower, then path. An empty `query` lists the shallowest files.
+- **`limit`** 1–100 (default 30); `query` at most 200 code points.
+- **Limits**: 12 directory levels, 20 000 entries looked at, 3 s, checked per entry (a directory is
+  iterated, not read whole); the walk goes breadth first, and when it stops early the answer has
+  `truncated: true`.
+
+The gateway needs `project.read` and a `projectRoot` naming a granted workspace exactly, sends alpd
+its canonical path, and drops any answered path that is not plainly relative (docs/alp/remote-gateway.md
+§5.1). There is no method that reads a file's content (§14).
 
 ## 13. Compatibility notes for this revision
 
 **Additive** (old clients unaffected):
+- `question.watch` `turns` (capability `question.watch.turns`) and `workspace.files.search` (capability
+  `workspace.files`), §12.2, §12.3; error reason `not_directory`.
 - `session.list` `limit` / `cursor` / `query` / `projectRoots` and `nextCursor`, and `question.watch`, with capabilities
   `session.list.page` and `question.watch` (§12.1, §12.2). Without the new params `session.list` answers
   as before; its order now breaks ties of `updatedAt` by `id`.
@@ -555,10 +604,10 @@ answers `-32601`. Each needs its own capability when implemented.
 | Gateway reasons of `1003 forbidden` (`grant`, `outside_workspace`, `spec_field`, `local_only`); `1005 unavailable` reasons `feature_disabled`, `maintenance`, `restoring` | P0 | The codes exist (§5.1, §15); a gateway adds its reasons. |
 | `session.create` spec allow-list for remote principals | P0 | Refuse `env`, stdio `mcpServers`, `workdir`, `writeRoot`, `copy*`, `restore`, `keepThread`. |
 | `project.*`, `workspace.*` registry; `session.create.workspaceId` | P0 (web) | Same file and format as `state/web-workspaces.json`; `idempotencyKey`. |
-| `workspace.git.status/diff`, `workspace.files.list/read/search` | P1 | Read-only; results must fit `MAX_FRAME` (cap or chunk). |
+| `workspace.git.status/diff`, `workspace.files.list/read` | P1 | Read-only; results must fit `MAX_FRAME` (cap or chunk). `workspace.files.search` is implemented (§12.3). Reading content remotely exposes every file of a workspace (`.env`, keys) to a `project.read` token: needs a decision on the permission and on which files. |
 | `provider.list/refresh/diagnose/save/remove`, `library.test` | P1 | Probes spawn processes: separate `exec.probe` grant; timeouts; cancellation when the caller's connection closes needs the probes in `@anhlp/alp-client` to take an abort signal. |
 | `subscribe` / `unsubscribe` and notification `notify` | P1 | Old clients ignore unknown notifications (`AlpClient` handles only `event`). |
-| `host.directories.suggest`, `project.create_directory`, shared attention | P2 | Product decisions pending. |
+| `host.directories.suggest`, `project.create_directory`, shared attention | P2 | Product decisions pending. Per-client attention for finished turns is `question.watch` `turns` (§12.2); attention shared between clients (acknowledged on one, cleared on all) is not. |
 
 Open decisions carried from 09A: tombstones for expired trees; generalising durable receipts beyond prompts (`task.create`
 dedupes only within one alpd process, §10).

@@ -48,6 +48,16 @@ export const CLOSE_CODE = Object.freeze({
 const MAX_DEPTH = 32;
 /** Scope decisions remembered per connection; past this the cache starts again. */
 const MAX_CACHED = 10_000;
+/** Events question.watch sends of trees a client did not attach, as copies without a cursor. */
+const WATCHED = new Set(['question', 'question.resolved', 'turn.ended']);
+
+/** A path relative to a workspace, under it: no root, drive, `.`/`..` or empty segment, no NUL. @param {unknown} file */
+function relativeFile(file) {
+  if (typeof file !== 'string' || !file || file.length > 4096 || file.includes('\0')) return false;
+  if (/^[\\/]/.test(file) || /^[A-Za-z]:/.test(file)) return false;
+  return file.split(/[\\/]/).every(segment => segment !== '' && segment !== '.' && segment !== '..');
+}
+
 /** alpd pages one session.list page may read when the grant leaves out what alpd lists. */
 const MAX_LIST_READS = 8;
 /** At most this many projectRoots go to alpd's session.list (its schema's limit). */
@@ -565,9 +575,10 @@ export class ClientConnection {
       this.#remember(id, { root: parent.root, projectRoot: event.session.projectRoot, mode: event.session.mode });
       return this.#push(frame);
     }
-    // question.watch brings every tree's questions: a session found outside the grant once is
-    // not looked up again (a session's workspace and tree never change), and is not worth a warning.
-    const copy = (event?.type === 'question' || event?.type === 'question.resolved') && envelope.cursor === undefined;
+    // question.watch brings every tree's questions (and roots' turn ends, with turns): a session
+    // found outside the grant once is not looked up again (a session's workspace and tree never
+    // change), and is not worth a warning.
+    const copy = WATCHED.has(event?.type) && envelope.cursor === undefined;
     if (copy && this.#outside.has(id)) return;
     // Otherwise the session is looked up before the event, or anything after it, goes out.
     const fill = this.#slot();
@@ -584,14 +595,15 @@ export class ClientConnection {
   }
 
   /**
-   * Whether an in-scope event goes out. A question a watch announced (no cursor, from a tree this
-   * client did not attach) goes out only for the workspace the watch named: alpd is asked for every
-   * tree, as it compares projectRoot strings and a workspace has two (docs/alp/remote-gateway.md §5.1).
+   * Whether an in-scope event goes out. A question or turn end a watch announced (no cursor, from a
+   * tree this client did not attach) goes out only for the workspace the watch named: alpd is asked
+   * for every tree, as it compares projectRoot strings and a workspace has two
+   * (docs/alp/remote-gateway.md §5.1).
    * @param {import('@anhlp/alp-protocol').Envelope} envelope @param {Scoped} scoped
    */
   #wanted(envelope, scoped) {
     const type = /** @type {any} */ (envelope.event)?.type;
-    if ((type !== 'question' && type !== 'question.resolved') || envelope.cursor !== undefined || this.#attached.has(scoped.root)) return true;
+    if (!WATCHED.has(type) || envelope.cursor !== undefined || this.#attached.has(scoped.root)) return true;
     if (this.#watch === undefined) return false;
     // The tree's workspace, as alpd's watch compares it: its root's.
     const project = this.#sessions.get(scoped.root)?.projectRoot ?? scoped.projectRoot;
@@ -774,7 +786,7 @@ export class ClientConnection {
       const previous = this.#watch;
       this.#watch = only;
       let result;
-      try { result = await this.#call('question.watch', {}); }
+      try { result = await this.#call('question.watch', params.turns === true ? { turns: true } : {}); }
       catch (error) { this.#watch = previous; throw error; }
       const kept = [];
       for (const question of Array.isArray(result?.questions) ? result.questions : []) {
@@ -800,6 +812,20 @@ export class ClientConnection {
     'board.list': async params => {
       this.#workspace(params.projectRoot);
       return this.#call('board.list', params);
+    },
+
+    // File names under a granted workspace, as alpd confines them (docs/protocol/alp-json-rpc-v1.md
+    // §12.3). alpd is sent the canonical path; an answered path that is not plainly relative to it
+    // (absolute, a drive, `.` or `..`, an empty segment, a NUL) is dropped as alpd would never give it.
+    'workspace.files.search': async params => {
+      const workspace = this.#workspace(params.projectRoot);
+      const result = await this.#call('workspace.files.search', { ...params, projectRoot: workspace.canonical });
+      const files = [];
+      for (const file of Array.isArray(result?.files) ? result.files : []) {
+        if (relativeFile(file?.path)) files.push({ path: file.path });
+        else this.#log.error('workspace.files.search answered a path outside the workspace; dropped it', { code: 'ALP_GATEWAY_FILE_OUT_OF_SCOPE' });
+      }
+      return { files, ...(result?.truncated === true ? { truncated: true } : {}) };
     },
 
     // Project resources (docs/protocol/alp-json-rpc-v1.md §15): alpd never walks up from

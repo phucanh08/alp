@@ -559,3 +559,89 @@ test('question.watch tells a connection of questions in trees it is not attached
   assert.equal(watcher.events.filter(e => e.event.type === 'question' && e.event.question.body === 'Again?').length, 1);
   assert.equal(other.events.filter(e => e.event.type.startsWith('question')).length, 0, 'another project hears nothing');
 });
+
+test('question.watch with turns tells a connection when a root it is not attached to ends a turn', async t => {
+  const { project, runtimes, open } = await setup(t);
+  const owner = await open();
+  const watcher = await open();
+  const plain = await open();
+  const other = await open();
+  const { session } = await owner.client.request('session.create', { spec: { cwd: project, persist: true } });
+  assert.ok((await watcher.client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('question.watch.turns'));
+  await watcher.client.request('question.watch', { projectRoot: project, turns: true });
+  await plain.client.request('question.watch', { projectRoot: project });
+  await other.client.request('question.watch', { projectRoot: path.join(project, 'elsewhere'), turns: true });
+  await owner.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Delegate') });
+  // A child's turn end is not the root's: no copy.
+  const lead = runtimes[0].call('alp_delegate', { agent: 'lead', wait: true, task: 'Investigate' });
+  await until(() => runtimes[1]?.calls.some(c => c.method === 'turn/start'));
+  runtimes[1].finish('lead proof');
+  await lead;
+  await until(() => owner.events.some(e => e.event.type === 'turn.ended' && e.sessionId !== session.id));
+  runtimes[0].finish();
+  await until(() => watcher.events.some(e => e.event.type === 'turn.ended'));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const ended = watcher.events.filter(e => e.event.type === 'turn.ended');
+  assert.equal(ended.length, 1, 'only the root\'s turn end');
+  assert.equal(ended[0].sessionId, session.id);
+  assert.equal(ended[0].event.state, 'completed');
+  assert.equal(ended[0].cursor, undefined, 'not part of a timeline the watcher replays');
+  assert.equal(plain.events.length, 0, 'a watch without turns hears no turn ends');
+  assert.equal(other.events.length, 0, 'another project hears nothing');
+  // A failed turn, to a watcher that attached meanwhile: told once, by its attachment.
+  await watcher.client.request('session.attach', { sessionId: session.id, replay: false });
+  await owner.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm2', content: text('Again') });
+  await until(() => owner.events.filter(e => e.event.type === 'turn.started' && e.sessionId === session.id).length === 2);
+  runtimes[0].notification('turn/completed', { threadId: runtimes[0].threadId, turn: { id: runtimes[0].turnId, status: 'failed', error: { message: 'boom' } } });
+  await until(() => watcher.events.some(e => e.event.type === 'turn.ended' && e.event.state === 'failed'));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const failed = watcher.events.filter(e => e.event.type === 'turn.ended' && e.event.state === 'failed');
+  assert.equal(failed.length, 1);
+  assert.equal(typeof failed[0].cursor, 'number', 'the attached watcher gets the kept envelope only');
+  // A second call without turns stops them.
+  await watcher.client.request('session.release', { sessionId: session.id });
+  await watcher.client.request('question.watch', { projectRoot: project });
+  await owner.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm3', content: text('Third') });
+  await until(() => owner.events.filter(e => e.event.type === 'turn.started' && e.sessionId === session.id).length === 3);
+  runtimes[0].finish();
+  await until(() => owner.events.filter(e => e.event.type === 'turn.ended' && e.sessionId === session.id).length === 3);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(watcher.events.filter(e => e.event.type === 'turn.ended' && e.sessionId === session.id).length, 2);
+});
+
+test('workspace.files.search lists matching files inside the directory only, never through a link', async t => {
+  const { project, open } = await setup(t);
+  const { client } = await open();
+  assert.ok((await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('workspace.files'));
+  const outside = await mkdtemp(path.join(tmpdir(), 'alpd-outside-'));
+  t.after(() => rm(outside, { recursive: true, force: true }));
+  await writeFile(path.join(outside, 'secret-server.ts'), 'x');
+  await mkdir(path.join(project, 'src', 'deep'), { recursive: true });
+  await mkdir(path.join(project, 'node_modules', 'pkg'), { recursive: true });
+  await mkdir(path.join(project, '.hidden'), { recursive: true });
+  await writeFile(path.join(project, 'src', 'server.ts'), 'x');
+  await writeFile(path.join(project, 'src', 'deep', 'server-utils.ts'), 'x');
+  await writeFile(path.join(project, 'README.md'), 'x');
+  await writeFile(path.join(project, '.env'), 'SECRET=1');
+  await writeFile(path.join(project, 'node_modules', 'pkg', 'server.js'), 'x');
+  await writeFile(path.join(project, '.hidden', 'server.txt'), 'x');
+  await symlink(outside, path.join(project, 'linked-dir'));
+  await symlink(path.join(outside, 'secret-server.ts'), path.join(project, 'linked-server.ts'));
+  const found = await client.request('workspace.files.search', { projectRoot: project, query: 'server' });
+  assert.deepEqual(found, { files: [{ path: 'src/server.ts' }, { path: 'src/deep/server-utils.ts' }] }, 'exact name first; links, ignored and hidden directories left out');
+  const all = (await client.request('workspace.files.search', { projectRoot: project, limit: 100 })).files.map(f => f.path);
+  assert.ok(all.includes('README.md') && all.includes('src/server.ts'));
+  assert.ok(!all.some(file => file.includes('secret') || file.startsWith('.env') || file.includes('linked') || file.includes('node_modules')), all.join());
+  assert.equal(all.indexOf('README.md') < all.indexOf('src/server.ts'), true, 'shallow files first');
+  assert.deepEqual((await client.request('workspace.files.search', { projectRoot: project, query: 'deep/serv' })).files, [{ path: 'src/deep/server-utils.ts' }]);
+  assert.equal((await client.request('workspace.files.search', { projectRoot: project, limit: 1 })).files.length, 1);
+  // The root itself reached through a link is searched as its real directory.
+  const alias = path.join(outside, 'alias');
+  await symlink(project, alias);
+  assert.deepEqual((await client.request('workspace.files.search', { projectRoot: alias, query: 'server.ts' })).files[0], { path: 'src/server.ts' });
+  await assert.rejects(client.request('workspace.files.search', { projectRoot: 'relative/dir' }), { code: -32602 });
+  await assert.rejects(client.request('workspace.files.search', { projectRoot: `${project}/../project` }), { code: -32602 });
+  await assert.rejects(client.request('workspace.files.search', { projectRoot: path.join(project, 'README.md') }), { code: 1001 });
+  await assert.rejects(client.request('workspace.files.search', { projectRoot: path.join(project, 'missing') }), { code: 1001 });
+  await assert.rejects(client.request('workspace.files.search', { projectRoot: project, limit: 101 }), { code: -32602 });
+});

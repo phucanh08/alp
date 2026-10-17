@@ -40,7 +40,8 @@ Số mục (§) được code tham chiếu; giữ ổn định.
   - `protocolVersion: 1`;
   - `daemonVersion` lấy từ alpd;
   - `capabilities` = capability alpd liệt kê ∩ `{attach.after, prompt.receipts, task, team,
-    library, settings.language, session.list.page, question.watch}`.
+    library, settings.language, session.list.page, question.watch, question.watch.turns,
+    workspace.files}`.
   - Không có `pid` và không bao giờ có `extension.methods`.
   - Trong `library` và `settings.language`, các method ghi trả `-32601 not_exposed` (§5.4).
   - `protocolVersion` khác 1 → `1006 protocol_version` với `supported: [1]`.
@@ -193,6 +194,22 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
      lọc event theo session như mọi event (`E`); một envelope không có `cursor`, thuộc tree mà
      client không attach, chỉ đi ra khi thuộc workspace `projectRoot` đã nêu (không nêu: mọi
      workspace của grant).
+   - `question.watch { turns: true }`: gateway chỉ gửi alpd `{ turns: true }`. `turn.ended` của root
+     mà alpd mang tới đi qua đúng bộ lọc trên như `question` (session trong grant, workspace đã nêu
+     hoặc tree đã attach; session ngoài grant được nhớ, log mức debug).
+   - `workspace.files.search` cần `project.read`; `projectRoot` phải khớp nguyên chuỗi một workspace
+     được cấp và được thay bằng đường dẫn canonical trước khi gửi alpd. alpd chỉ đọc **tên** file dưới
+     đường dẫn thật đó, không đi theo symlink nào (không liệt kê, không đi vào), có giới hạn độ sâu,
+     số mục và thời gian (protocol §12.3). Gateway bỏ mọi đường dẫn trả về không phải tương đối thuần
+     (tuyệt đối, ổ đĩa, đoạn `.`/`..`/rỗng, NUL) và log `ALP_GATEWAY_FILE_OUT_OF_SCOPE`. Chỉ có tìm
+     tên file: **không có method đọc nội dung file** (§10).
+     - Rủi ro còn lại: alpd kiểm tra mỗi thư mục trước và sau khi đọc (thư mục thật, không phải
+       symlink, đúng đường dẫn thật, cùng device/inode). Một symlink được đổi vào rồi đổi ra giữa hai
+       lần kiểm tra, do một tiến trình ghi đang chạy đua bên trong workspace, vẫn có thể lộ **tên**
+       file của thư mục mà nó trỏ tới (không lộ nội dung).
+     - alpd `realpath` đường dẫn canonical lúc nhận request. Nếu sau khi cấp credential, chính
+       workspace (hoặc thư mục cha) bị thay bằng symlink, alpd đi theo đích mới, như mọi method
+       dùng `cwd`. Ai đổi được thư mục đó đã có quyền ghi trên host.
    - `question.answer` chỉ nhận **id đầy đủ**. alpd nhận prefix duy nhất, nên một prefix có thể
      khớp câu hỏi ở workspace khác.
    - `session.status`/`session.log` phải trả về đúng tree của root đã kiểm tra, và mọi session
@@ -299,7 +316,8 @@ Cột Test dùng các mã sau:
 | `session.release` | — | session | session.read | exposed | P S |
 | `session.preview` | — | `spec.cwd` + allowlist spec | session.read | exposed | P S |
 | `question.list` | — | result lọc theo tree | session.read | exposed | P S R |
-| `question.watch` | `question.watch` | result lọc theo tree; event lọc theo session, và theo workspace đã nêu | session.read | exposed | P S R E |
+| `question.watch` | `question.watch` (`question.watch.turns` cho `turns`) | result lọc theo tree; event (`question`, `question.resolved`, `turn.ended` của root) lọc theo session, và theo workspace đã nêu | session.read | exposed | P S R E I |
+| `workspace.files.search` | `workspace.files` | `projectRoot` thuộc grant, gửi alpd bản canonical; alpd không đi theo symlink; path trả về phải tương đối thuần | project.read | exposed | P S R I |
 | `board.list` | — | `projectRoot` thuộc grant | session.read | exposed | P S |
 | `session.create` | — | `spec.cwd` + allowlist; id có sẵn phải trong scope; kiểm lại kết quả | session.write | exposed | P S I |
 | `session.prompt` | `prompt.receipts` | session; chỉ `text`; **drive**: mode của session và mọi tổ tiên, tra mới | session.write | exposed | P S M I |
@@ -571,6 +589,12 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
   `session.create { resume: true }` trước khi prompt lại. Gateway không giữ connection hộ client.
 - `daemon.status` không expose: result schema bắt buộc có `pid` và các con số trải qua mọi
   workspace. Muốn bản rút gọn cần contract riêng.
+- **Đọc nội dung file của workspace qua remote chưa có** (chờ anh quyết định). Chỉ có
+  `workspace.files.search` (tên file, `project.read`). Đọc nội dung sẽ cho một token `project.read`
+  đọc mọi file của workspace (`.env`, khoá, cấu hình), nhiều hơn những gì token đó thấy hôm nay
+  (task, team, tên entry library). Mở cần chọn: quyền riêng (ví dụ `files.read`) hay `project.read`;
+  có chặn file ẩn/`.env`/file bị gitignore không; giới hạn kích thước và loại file (text). Cũng chưa
+  có `.gitignore` trong tìm kiếm (alpd không chạy git cho việc này).
 - **Đọc nội dung library qua remote chưa có** (`library.get` bị chặn mọi kind, mọi layer). alpd
   chỉ redact giá trị `env`/`headers` (`x-alp.redacts`). Token trong URL MCP (userinfo, query),
   `args`, `command`, lệnh hook và args của provider đi nguyên. Gateway không đoán secret bằng

@@ -151,7 +151,7 @@ test('a remote client works through the gateway across reconnects and restarts o
 
   // Handshake through the gateway: alpd's capabilities, never extension methods.
   const greeting = await hello(client, { name: 'e2e', version: '0' });
-  assert.deepEqual(greeting.capabilities.sort(), ['attach.after', 'library', 'prompt.receipts', 'question.watch', 'session.list.page', 'settings.language', 'task', 'team']);
+  assert.deepEqual(greeting.capabilities.sort(), ['attach.after', 'library', 'prompt.receipts', 'question.watch', 'question.watch.turns', 'session.list.page', 'settings.language', 'task', 'team', 'workspace.files']);
   assert.ok(!greeting.capabilities.includes('extension.methods'));
   assert.equal(greeting.pid, undefined);
 
@@ -368,4 +368,50 @@ test('project.read gets no MCP, hook or provider secret from a real alpd: librar
   await hello(owner);
   const { preview } = await owner.request('session.preview', { spec: { cwd: a, model: acp.id } });
   assert.equal(typeof preview, 'object');
+});
+
+// docs/protocol/alp-json-rpc-v1.md §12.2, §12.3 against a real alpd: a watch with turns hears a
+// granted root's turn end and not another workspace's; file search lists names of the granted
+// workspace only, never through a link out of it, and not for another credential's workspace.
+test('question.watch turns and workspace.files.search stay in the grant on a real alpd', { skip, timeout: 60_000 }, async t => {
+  const w = await world(t);
+  const { symlink } = await import('node:fs/promises');
+  await mkdir(path.join(w.projects.a, 'src'), { recursive: true });
+  await writeFile(path.join(w.projects.a, 'src', 'server.ts'), 'x');
+  await writeFile(path.join(w.projects.b, 'b-server.ts'), 'x');
+  await symlink(w.projects.b, path.join(w.projects.a, 'to-b'));
+  const owner = new AlpRpcClient(await w.open(w.tokens.alice));
+  t.after(() => owner.close());
+  await hello(owner);
+  const watcher = new AlpRpcClient(await w.open(w.tokens.alice));
+  t.after(() => watcher.close());
+  await hello(watcher);
+  const heard = [];
+  watcher.onEvent(envelope => heard.push(envelope));
+  await watcher.request('question.watch', { projectRoot: w.projects.a, turns: true });
+  const intruder = new AlpRpcClient(await w.open(w.tokens.bob));
+  t.after(() => intruder.close());
+  await hello(intruder);
+  const leaked = [];
+  intruder.onEvent(envelope => leaked.push(envelope));
+  await intruder.request('question.watch', { turns: true });
+
+  const { session } = await owner.request('session.create', { spec: { cwd: w.projects.a, persist: true, model: MODEL }, history: 'skip' });
+  await owner.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('hello') });
+  await until(() => heard.some(envelope => envelope.event.type === 'turn.ended'), 'the watched turn end');
+  const turn = heard.find(envelope => envelope.event.type === 'turn.ended');
+  assert.equal(turn.sessionId, session.id);
+  assert.equal(turn.cursor, undefined);
+  assert.equal(turn.event.state, 'completed');
+  await sleep(200);
+  assert.deepEqual(leaked, [], 'another credential hears nothing of a');
+
+  const files = (await owner.request('workspace.files.search', { projectRoot: w.projects.a, query: 'server', limit: 100 })).files.map(file => file.path);
+  assert.deepEqual(files, ['src/server.ts'], 'b\'s file behind the link is not listed');
+  await assert.rejects(owner.request('workspace.files.search', { projectRoot: w.projects.b }), error => error.code === 1003);
+  await assert.rejects(intruder.request('workspace.files.search', { projectRoot: w.projects.a }), error => error.code === 1003);
+  const viewer = new AlpRpcClient(await w.open(w.tokens.reader));
+  t.after(() => viewer.close());
+  await hello(viewer);
+  assert.deepEqual((await viewer.request('workspace.files.search', { projectRoot: w.projects.a, query: 'server.ts' })).files, [{ path: 'src/server.ts' }]);
 });
