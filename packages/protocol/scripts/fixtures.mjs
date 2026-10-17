@@ -46,6 +46,7 @@ const events = [
   { type: 'question.resolved', questionId: 'q_1', outcome: 'answered', answer: 'có' },
   { type: 'pin', pin },
   { type: 'unpin', pinId: 'pin_1', reason: 'session_ended' },
+  { type: 'usage', usage: { contextWindowUsedTokens: 42000, contextWindowMaxTokens: 200000, inputTokens: 40000, cachedInputTokens: 36000, outputTokens: 2000, totalCostUsd: 0.1234 } },
 ];
 const items = [
   { kind: 'user_message', id: 'user:m-1', text: 'Chào 👋', clientMessageId: 'm-1' },
@@ -68,6 +69,12 @@ add('envelope', 'cursor 0', env({ type: 'session.ready' }, { cursor: 0 }), false
 add('envelope', 'item event without its item', env({ type: 'item' }), false);
 add('envelope', 'known item kind missing fields', env({ type: 'item', item: { kind: 'notice', id: 'n' } }), false);
 add('envelope', 'known event with a wrong enum', env({ type: 'turn.ended', turnId: 't', state: 'stopped' }), false);
+add('envelope', 'usage before the runtime said its window', env({ type: 'usage', usage: { contextWindowUsedTokens: 1200 } }));
+add('envelope', 'session.updated with usage', env({ type: 'session.updated', session: { ...snapshot, usage: { contextWindowUsedTokens: 42000, contextWindowMaxTokens: 200000 } } }));
+add('envelope', 'usage event without its usage', env({ type: 'usage' }), false);
+add('envelope', 'usage with negative tokens', env({ type: 'usage', usage: { contextWindowUsedTokens: -1 } }), false);
+add('envelope', 'usage with a zero window', env({ type: 'usage', usage: { contextWindowMaxTokens: 0 } }), false);
+add('envelope', 'usage with fractional tokens', env({ type: 'usage', usage: { outputTokens: 1.5 } }), false);
 add('envelope', 'missing epoch', (({ epoch, ...rest }) => rest)(env({ type: 'session.ready' })), false);
 
 // params and results of every method

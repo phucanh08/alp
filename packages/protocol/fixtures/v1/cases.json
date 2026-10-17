@@ -538,6 +538,29 @@
    }
   },
   {
+   "name": "event usage",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "usage",
+     "usage": {
+      "contextWindowUsedTokens": 42000,
+      "contextWindowMaxTokens": 200000,
+      "inputTokens": 40000,
+      "cachedInputTokens": 36000,
+      "outputTokens": 2000,
+      "totalCostUsd": 0.1234
+     }
+    }
+   }
+  },
+  {
    "name": "item user_message",
    "check": "envelope",
    "valid": true,
@@ -890,6 +913,130 @@
      "type": "turn.ended",
      "turnId": "t",
      "state": "stopped"
+    }
+   }
+  },
+  {
+   "name": "usage before the runtime said its window",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "usage",
+     "usage": {
+      "contextWindowUsedTokens": 1200
+     }
+    }
+   }
+  },
+  {
+   "name": "session.updated with usage",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "session.updated",
+     "session": {
+      "id": "ses_fixture",
+      "projectRoot": "/work/project",
+      "agent": "main",
+      "runtime": "codex",
+      "model": "gpt-6.1-sol",
+      "mode": "workspace-write",
+      "thinking": "low",
+      "workflow": {
+       "mode": "pho",
+       "maxPeers": 2,
+       "supervisor": false
+      },
+      "teamLabel": "Phở",
+      "threadId": "thread-1",
+      "persistent": true,
+      "busy": false,
+      "usage": {
+       "contextWindowUsedTokens": 42000,
+       "contextWindowMaxTokens": 200000
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "usage event without its usage",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "usage"
+    }
+   }
+  },
+  {
+   "name": "usage with negative tokens",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "usage",
+     "usage": {
+      "contextWindowUsedTokens": -1
+     }
+    }
+   }
+  },
+  {
+   "name": "usage with a zero window",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "usage",
+     "usage": {
+      "contextWindowMaxTokens": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "usage with fractional tokens",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "usage",
+     "usage": {
+      "outputTokens": 1.5
+     }
     }
    }
   },

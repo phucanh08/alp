@@ -49,9 +49,9 @@ export function fakeTransport(agents) {
         await this.call('alp_handoff', handoff);
         this.finish(text);
       },
-      /** Reports how full its context is, and where its runtime compacts it when it says. */
-      usage(totalTokens, modelContextWindow = 100_000, autoCompactTokens) {
-        this.notification('thread/tokenUsage/updated', { threadId: this.threadId, turnId: this.turnId, tokenUsage: { last: { totalTokens }, total: { totalTokens }, modelContextWindow, ...(autoCompactTokens ? { autoCompactTokens } : {}) } });
+      /** Reports how full its context is, where its runtime compacts it when it says, and the latest call's other token counts (`breakdown`). */
+      usage(totalTokens, modelContextWindow = 100_000, autoCompactTokens, breakdown = {}) {
+        this.notification('thread/tokenUsage/updated', { threadId: this.threadId, turnId: this.turnId, tokenUsage: { last: { totalTokens, ...breakdown }, total: { totalTokens, ...breakdown }, modelContextWindow, ...(autoCompactTokens ? { autoCompactTokens } : {}) } });
       },
       /** Compacts its context, as Codex reports it: a contextCompaction item from start to end. */
       compact(preTokens, postTokens, { failed = false } = {}) {

@@ -157,6 +157,55 @@ test('Claude reports the window and compaction point it resolved, and no guessed
   assert.equal(seen.at(-1).autoCompactTokens, 367_000);
 });
 
+// t-7679.12: each token report becomes the session's usage, sent as a usage event and kept in its snapshot.
+test('a token report becomes the session\'s usage: sent when it changes and kept in the snapshot', async t => {
+  const { directory, root } = await project(t);
+  const runtimes = [];
+  const usages = [];
+  const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home') });
+  t.after(() => runtime.shutdown());
+  runtime.onEvent(envelope => envelope.event.type === 'usage' && usages.push([envelope.sessionId, envelope.event.usage]));
+  await runtime.open('root', { cwd: root });
+  assert.equal(runtime.snapshot('root').usage, undefined);
+  await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Go' }] });
+  const main = runtimes[0];
+  // As Codex reports it: the latest call's breakdown and the model's window.
+  main.usage(42_000, 258_400, undefined, { inputTokens: 41_000, cachedInputTokens: 30_000, outputTokens: 1000, reasoningOutputTokens: 200 });
+  main.usage(42_000, 258_400, undefined, { inputTokens: 41_000, cachedInputTokens: 30_000, outputTokens: 1000, reasoningOutputTokens: 200 });
+  await until(() => usages.length === 1, 'the usage');
+  const first = { contextWindowUsedTokens: 42_000, contextWindowMaxTokens: 258_400, inputTokens: 41_000, cachedInputTokens: 30_000, outputTokens: 1000 };
+  assert.deepEqual(usages[0], ['root', first]);
+  assert.deepEqual(runtime.snapshot('root').usage, first);
+  // A report without the window (Claude before it said one) keeps the one known; bad numbers are dropped.
+  main.notification('thread/tokenUsage/updated', { threadId: main.threadId, turnId: main.turnId, tokenUsage: { last: { totalTokens: 50_000, inputTokens: -1, outputTokens: 1.5 }, modelContextWindow: null } });
+  await until(() => usages.length === 2, 'the second usage');
+  assert.deepEqual(usages[1][1], { ...first, contextWindowUsedTokens: 50_000 });
+  // A cost alone, as Claude's result says it.
+  main.notification('thread/tokenUsage/updated', { threadId: main.threadId, turnId: main.turnId, tokenUsage: { totalCostUsd: 0.42 } });
+  await until(() => usages.length === 3, 'the cost');
+  assert.deepEqual(usages[2][1], { ...first, contextWindowUsedTokens: 50_000, totalCostUsd: 0.42 });
+  // A later response's counts replace the earlier ones together: no cached count of an earlier response stays.
+  main.notification('thread/tokenUsage/updated', { threadId: main.threadId, turnId: main.turnId, tokenUsage: { last: { totalTokens: 51_000, inputTokens: 900, outputTokens: 100 } } });
+  await until(() => usages.length === 4, 'the later response');
+  assert.deepEqual(usages[3][1], { contextWindowUsedTokens: 51_000, contextWindowMaxTokens: 258_400, inputTokens: 900, outputTokens: 100, totalCostUsd: 0.42 });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(usages.length, 4);
+});
+
+test('Claude reports the session\'s cost from its result, before the turn ends', () => {
+  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env);
+  const seen = [];
+  transport.onNotification((method, params) => (method === 'thread/tokenUsage/updated' || method === 'turn/completed') && seen.push([method, params.tokenUsage ?? params.turn.status]));
+  transport.activeTurn = 'turn-1';
+  transport.handle({ type: 'assistant', parent_tool_use_id: null, message: { id: 'm1', content: [], usage: { input_tokens: 10, cache_read_input_tokens: 2000, cache_creation_input_tokens: 0, output_tokens: 30 } } });
+  transport.handle({ type: 'result', subtype: 'success', is_error: false, total_cost_usd: 0.0123, modelUsage: {} });
+  assert.deepEqual(seen, [
+    ['thread/tokenUsage/updated', { last: { totalTokens: 2040, inputTokens: 10, cachedInputTokens: 2000, outputTokens: 30 }, total: { totalTokens: 2040, inputTokens: 10, cachedInputTokens: 2000, outputTokens: 30 }, modelContextWindow: null }],
+    ['thread/tokenUsage/updated', { totalCostUsd: 0.0123 }],
+    ['turn/completed', 'completed'],
+  ]);
+});
+
 test('Claude reports a compaction as Codex does, from its start to its boundary', () => {
   const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env);
   const seen = [];

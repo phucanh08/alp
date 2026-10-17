@@ -218,6 +218,31 @@ test('a remote client works through the gateway across reconnects and restarts o
   assert.ok(!log.includes(w.tokens.alice.split('.').at(-1)) && !log.includes(w.tokens.bob.split('.').at(-1)));
 });
 
+// t-7679.12: a session's token usage reaches a remote client in its grant, live and in session.get; never another credential.
+test('session usage goes through the gateway to the credential that holds the session only', { skip, timeout: 60_000 }, async t => {
+  const w = await world(t);
+  const alice = new AlpRpcClient(await w.open(w.tokens.alice));
+  const bob = new AlpRpcClient(await w.open(w.tokens.bob));
+  t.after(() => { alice.close(); bob.close(); });
+  await hello(alice);
+  await hello(bob);
+  const seen = { alice: /** @type {any[]} */ ([]), bob: /** @type {any[]} */ ([]) };
+  alice.onEvent(envelope => seen.alice.push(envelope));
+  bob.onEvent(envelope => seen.bob.push(envelope));
+  const { session } = await alice.request('session.create', { spec: { cwd: w.projects.a, model: MODEL }, history: 'skip' });
+  await alice.request('session.prompt', { sessionId: session.id, clientMessageId: 'u1', content: text('count [usage]') });
+  await until(() => ended({ events: seen.alice }, 1), 'the turn');
+  const usage = { contextWindowUsedTokens: 26_000, contextWindowMaxTokens: 258_400, inputTokens: 25_000, cachedInputTokens: 20_000, outputTokens: 1000 };
+  const live = seen.alice.filter(envelope => envelope.event.type === 'usage');
+  assert.deepEqual(live.map(envelope => envelope.event.usage), [usage]);
+  assert.equal(typeof live[0].cursor, 'number');
+  assert.deepEqual((await alice.request('session.get', { sessionId: session.id })).session.usage, usage);
+  assert.equal(seen.bob.some(envelope => envelope.sessionId === session.id), false);
+  await assert.rejects(bob.request('session.get', { sessionId: session.id }));
+  // Account-wide usage stays on the host.
+  await assert.rejects(alice.request('daemon.usage', {}), error => /** @type {any} */ (error).code === -32601);
+});
+
 test('another credential cannot see, attach, prompt or receive the session or touch the project\'s tasks, and revocation ends a client', { skip, timeout: 60_000 }, async t => {
   const w = await world(t);
   const owner = new AlpRpcClient(await w.open(w.tokens.alice));

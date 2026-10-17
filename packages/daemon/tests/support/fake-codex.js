@@ -8,6 +8,7 @@
 //   [hold]         answer, but never finish the turn
 //   [slow]         answer after 200 ms
 //   [ask]          answer, then ask the user with the alp_ask tool; the turn ends once it is answered
+//   [usage]        report token usage as Codex does (thread/tokenUsage/updated) before the turn ends
 // FAKE_CODEX_IGNORE_EOF=1 keeps it running after alpd goes away, as a stuck provider would.
 import { appendFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
@@ -61,6 +62,7 @@ lines.on('line', line => {
       const start = () => {
         reply({ turn: { id: turnId } });
         active.set(params.threadId, turnId);
+        if (text.includes('[usage]')) send({ method: 'thread/tokenUsage/updated', params: { threadId: params.threadId, turnId, tokenUsage: { total: { totalTokens: 52_000, inputTokens: 50_000, cachedInputTokens: 40_000, outputTokens: 2000, reasoningOutputTokens: 500 }, last: { totalTokens: 26_000, inputTokens: 25_000, cachedInputTokens: 20_000, outputTokens: 1000, reasoningOutputTokens: 250 }, modelContextWindow: 258_400 } } });
         if (text.includes('[ask]')) {
           const call = `ask-${turnId}`;
           asking.set(call, { threadId: params.threadId, turnId });

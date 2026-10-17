@@ -4,6 +4,7 @@ import type { MailEvent } from './mailbox.js';
 import type { Worktree, WorktreeChange, Copy } from './workspace.js';
 import type { Verification } from '@anhlp/alp-core/verify';
 import type { Handoff } from './handoff.js';
+import type { SessionUsage } from './events.js';
 
 export type Session = {
   runtimeKind: RuntimeKind;
@@ -52,6 +53,8 @@ export type Session = {
   progressAt?: number;
   /** A digest of the instructions the session runs with. */
   instructionsSha?: string;
+  /** The latest usage its runtime reported, shown in viewers' context meters (ALPD §57). */
+  usage?: SessionUsage;
   /** The context advisory was given since the context last emptied (ALPD §57). */
   contextLevel?: number;
   /** An assignment's brief as its requester gave it, repeated after a compaction. */

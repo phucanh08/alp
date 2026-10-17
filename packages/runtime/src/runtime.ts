@@ -43,7 +43,7 @@ import { branchExists, checkoutFingerprint, checkoutKey, createCopy, createWorkt
 import { claudeSandboxAvailable, SKILL_PLUGIN } from './claude-transport.js';
 import { ALP_REPO, gh, projectRepo } from './github.js';
 import { optionalRead, usageAllows, COMPACT_SHARE } from './runtime-context.js';
-import { providerUsage, type ProviderUsage } from './usage.js';
+import { providerUsage, sessionUsage, type ProviderUsage } from './usage.js';
 import { parse as toml } from 'smol-toml';
 import { findFormula, formulaDirs, listFormulas, pourFormula } from '@anhlp/alp-core/formulas';
 import { addAllowRule, capMode, commandDecision, profileFor, unwrapShell } from '@anhlp/alp-core/permissions';
@@ -208,6 +208,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       ...(session.parked ? { parked: session.parked.reason } : {}),
       ...(session.instructionsSha ? { instructionsSha: session.instructionsSha } : {}),
       ...(takesImages(session) ? { promptImages: true } : {}),
+      ...(session.usage ? { usage: session.usage } : {}),
       busy: !!(session.active || session.pending || session.children.size || session.assignments.size || hasActiveMail(session) || reviewing(session)),
     };
   }
@@ -411,6 +412,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
 
     if (method === 'thread/tokenUsage/updated') {
+      const usage = sessionUsage(session.usage, params?.tokenUsage);
+      if (usage) {
+        session.usage = usage;
+        emit(sessionId, { type: 'usage', usage });
+      }
       contextReport(sessionId, session, params?.tokenUsage);
       return;
     }

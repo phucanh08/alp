@@ -228,7 +228,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     let record = records.get(sessionId);
     if (event.type === 'session.opened') {
       record ??= { version: 1, id: sessionId, rootId: root, status: 'initializing', createdAt: now, updatedAt: now };
-      save(record, { rootId: root, session: event.session, status: 'idle', lastError: undefined, activeTurnId: undefined });
+      // A reopened session keeps its last usage until its runtime reports again.
+      const usage = event.session.usage ?? record.session?.usage;
+      save(record, { rootId: root, session: { ...event.session, ...(usage ? { usage } : {}) }, status: 'idle', lastError: undefined, activeTurnId: undefined });
       return false;
     }
     if (!record) return false;
@@ -236,6 +238,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     // Work on an archived session brings it back.
     else if (event.type === 'turn.started') save(record, { status: 'running', activeTurnId: event.turnId, archived: undefined });
     else if (event.type === 'turn.ended') save(record, { status: 'idle', activeTurnId: undefined, ...(event.state === 'failed' ? { lastError: { message: event.error?.message ?? 'Turn failed' } } : {}) });
+    // The latest usage, for a closed session's summary; written with the record's next change.
+    else if (event.type === 'usage' && record.session) record.session = { ...record.session, usage: event.usage };
     else if (event.type === 'session.failed') save(record, { status: 'error', lastError: event.error });
     else if (event.type === 'session.closed') save(record, { status: record.status === 'error' ? 'error' : 'closed', activeTurnId: undefined });
     else if (event.type === 'item' && sessionId === root && !record.title && event.item.kind === 'user_message' && !event.item.clientMessageId?.startsWith('alp-')) {

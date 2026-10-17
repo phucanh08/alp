@@ -246,7 +246,7 @@ export class AcpTransport {
         this.instructionsSent = true;
       }
       this.prompting = this.call('session/prompt', { sessionId: this.sessionId, prompt }).then(
-        result => this.endTurn(turnId, result?.stopReason),
+        result => { this.turnUsage(turnId, result?.usage); this.endTurn(turnId, result?.stopReason); },
         error => this.endTurn(turnId, 'error', error instanceof Error ? error.message : String(error)),
       ).finally(() => { if (this.activeTurn === undefined || this.activeTurn === turnId) this.prompting = undefined; });
       return { turn: { id: turnId } };
@@ -280,6 +280,13 @@ export class AcpTransport {
     if (!Array.isArray(models?.availableModels)) throw new Error(`${this.provider.label} does not let ALP choose its model; use acp:${this.provider.id} alone`);
     if (!models.availableModels.some((model: any) => model?.modelId === wanted)) throw new Error(`${this.provider.label} has no model '${wanted}'`);
     await this.call('session/set_model', { sessionId: this.sessionId, modelId: wanted }, 30_000);
+  }
+
+  /** The tokens of the turn the prompt response says (ACP's unstable usage), before its end. */
+  private turnUsage(turnId: string, usage: any) {
+    if (this.closed || this.activeTurn !== turnId || !usage || typeof usage !== 'object') return;
+    const last = { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cachedInputTokens: usage.cachedReadTokens };
+    this.emit('thread/tokenUsage/updated', { threadId: this.sessionId, turnId, tokenUsage: { last } });
   }
 
   private endTurn(turnId: string, stopReason: string, error?: string) {
@@ -332,7 +339,9 @@ export class AcpTransport {
     }
     if (kind === 'usage_update' && typeof update.used === 'number') {
       const last = { totalTokens: update.used };
-      this.emit('thread/tokenUsage/updated', { threadId: this.sessionId, turnId: this.activeTurn, tokenUsage: { last, total: last, ...(typeof update.size === 'number' ? { modelContextWindow: update.size } : {}) } });
+      // ACP's cost is the session's, in its currency; only US dollars are shown.
+      const cost = update.cost?.currency === 'USD' && typeof update.cost.amount === 'number' ? { totalCostUsd: update.cost.amount } : {};
+      this.emit('thread/tokenUsage/updated', { threadId: this.sessionId, turnId: this.activeTurn, tokenUsage: { last, total: last, ...(typeof update.size === 'number' ? { modelContextWindow: update.size } : {}), ...cost } });
     }
   }
 

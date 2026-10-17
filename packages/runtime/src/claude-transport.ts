@@ -662,6 +662,9 @@ export class ClaudeTransport {
       });
     }
     if (message.type === 'result') {
+      // The session's cost so far, as Claude counts it; a viewer shows it with the context meter.
+      const cost = (message as any).total_cost_usd;
+      if (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0) this.emit('thread/tokenUsage/updated', { threadId: this.threadId, turnId: this.activeTurn, tokenUsage: { totalCostUsd: cost } });
       const windows = Object.values((message as any).modelUsage ?? {}).map((entry: any) => entry?.contextWindow).filter((value): value is number => typeof value === 'number' && value > 0);
       // Only when it was not measured: the measured window may be the setting's, smaller than the model's.
       if (windows.length && !this.compactAt) this.contextWindow = Math.max(...windows);
