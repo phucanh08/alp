@@ -563,6 +563,29 @@ như Paseo, nhưng chỉ đọc, với một quyền riêng.
     một repo (git dừng ở ranh giới filesystem) thì mọi path bị coi là ignore, trừ khi
     `includeIgnored`.
 
+### 5.11 Chi tiết tool call có kiểu (t-7679.13)
+
+- Item `tool_call` giờ có `detail` theo loại: `read`, `edit`, `write`, `search`, `fetch`, `sub_agent`,
+  `plan`, `plain_text` bên cạnh `shell` và `unknown` (docs/protocol/alp-json-rpc-v1.md §8.6). Chúng đi
+  qua như mọi event của session trong grant: gateway chuyển nguyên envelope (`#event` trong
+  `apps/gateway/src/connection.js`, chỉ cho session đã biết thuộc grant hoặc session con của tree
+  trong grant), không đổi code, không viết lại hay lọc detail.
+- **Cùng loại thông tin đã đi qua trước đây.** Output của `shell` (lệnh agent chạy, kể cả `cat` một
+  file), detail `unknown` của tool, và command `Name {json}` của Claude (ví dụ
+  `Edit {"file_path":…,"old_string":…,"new_string":…}`) đã mang đường dẫn agent đụng tới, trích đoạn
+  file và nội dung sửa. Detail có kiểu mang lại đúng những thứ đó, có cấu trúc: `filePath` (thường là
+  đường dẫn tuyệt đối trên host, có thể **ngoài workspace** khi session ở full-access), nội dung tool
+  Read trả về, `oldString`/`newString`/`unifiedDiff`, kết quả Grep/Glob, URL và kết quả fetch.
+- **Luồng mới, cùng loại.** Item gốc của Codex trước đây bị bỏ, giờ đi qua: `fileChange` (diff của
+  file Codex sửa), `webSearch` (câu truy vấn), `mcpToolCall` (input và kết quả của tool MCP, không
+  giới hạn kích thước như `unknown`), `collabAgentToolCall` (prompt của sub-agent). Đây là luồng mới
+  của cùng loại dữ liệu mà credential có `session.read` vốn đã thấy qua output shell.
+- **Không cần `files.read`.** Không file nào được đọc để điền detail: nội dung là những gì chính tool
+  đã trả hay được đưa, như output shell. `files.read` (§5.10) vẫn chỉ gác `workspace.files.list`/`read`.
+- Không có redaction: gateway không lọc nội dung detail, như không lọc output shell. Giới hạn kích
+  thước do runtime đặt (mỗi chuỗi của detail có kiểu ≤ 65.536 ký tự, ≤ 200 đường dẫn, ≤ 50 kết quả
+  web); `shell` và `unknown` như cũ.
+
 ## 6. Streaming và recovery
 
 ### 6.1 Thuật toán client (theo contract §8.3)
