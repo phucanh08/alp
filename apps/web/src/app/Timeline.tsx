@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Ban, Bot, Image as ImageIcon, ChevronDown, ChevronRight, CircleAlert, Info, ListChecks, RotateCcw, Scissors, SquareTerminal, Trash2, TriangleAlert, Wrench } from 'lucide-react';
+import { Ban, Bot, Brain, Eye, Image as ImageIcon, ChevronDown, ChevronRight, CircleAlert, Info, ListChecks, Pencil, RotateCcw, Scissors, Search, SquareTerminal, Trash2, TriangleAlert, Wrench } from 'lucide-react';
 import type { Entry } from '../lib/timeline.js';
 import type { PendingPrompt } from '../lib/controller.js';
 import { Button } from '../components/ui/button';
@@ -12,6 +12,8 @@ import { parseFileLink } from '../lib/file-links.js';
 import { useAppState } from './store';
 import { useTabs } from './tabs';
 import { CopyButton, Elapsed, Loader, formatDuration } from './chat/parts';
+import { ToolCallBody } from './chat/ToolCallDetail';
+import { diffStats, editDiff, presentToolCall, type ToolIcon } from '../lib/tool-calls.js';
 
 /**
  * One agent's conversation laid out as Paseo's agent stream: a centered 820px column, user
@@ -22,7 +24,7 @@ import { CopyButton, Elapsed, Loader, formatDuration } from './chat/parts';
 type Icon = React.ComponentType<{ className?: string }>;
 
 /** Paseo's expandable badge: icon (a chevron on hover), label, secondary label; opens into detail. */
-function Badge({ icon: IconComponent, label, secondary, status, trailing, detail, testId }: {
+function Badge({ icon: IconComponent, label, secondary, status, trailing, detail, testId, kind }: {
   icon: Icon;
   label: string;
   secondary?: string;
@@ -30,13 +32,15 @@ function Badge({ icon: IconComponent, label, secondary, status, trailing, detail
   trailing?: React.ReactNode;
   detail: () => React.ReactNode;
   testId?: string;
+  /** The tool call's detail type, for tests. */
+  kind?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const detailId = React.useId();
   const failed = status === 'failed';
   const running = status === 'running';
   return (
-    <div className="-mx-[13px]" data-testid={testId}>
+    <div className="-mx-[13px]" data-testid={testId} data-tool-kind={kind}>
       <button type="button" onClick={() => setOpen(value => !value)} aria-expanded={open} aria-controls={open ? detailId : undefined}
         className={cn('group/badge flex w-full min-w-0 items-center rounded-lg border border-transparent px-2 py-1 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring active:opacity-90',
           open && 'rounded-b-none border-border bg-card')}>
@@ -59,58 +63,38 @@ function Badge({ icon: IconComponent, label, secondary, status, trailing, detail
   );
 }
 
-/** A monospace block as Paseo's tool detail shows one: full bleed on surface 1, scrolls both ways. */
-function Code({ children, tone }: { children: React.ReactNode; tone?: 'error' }) {
+const TOOL_ICONS: Record<ToolIcon, Icon> = { terminal: SquareTerminal, eye: Eye, pencil: Pencil, search: Search, bot: Bot, brain: Brain, wrench: Wrench };
+
+/** Where a tool call's file paths are shown relative to: the open workspace, as granted and as its real path. */
+function useWorkspaceRoots() {
+  const { workspace, principal } = useAppState();
+  return React.useMemo(() => workspace
+    ? [workspace, ...(principal?.workspaceRoots ?? []).filter(root => root.path === workspace).map(root => root.canonical)]
+    : [], [workspace, principal]);
+}
+
+/** An edit's "+12 −3", shown as Paseo's diff stat. */
+function EditStat({ detail }: { detail: any }) {
+  const { added, removed } = React.useMemo(() => diffStats(editDiff(detail).lines), [detail]);
+  if (!added && !removed) return null;
   return (
-    <pre className={cn('max-h-[360px] overflow-auto bg-card p-3 font-mono text-[12px] leading-[18px] whitespace-pre', tone === 'error' ? 'text-destructive' : 'text-foreground')}>{children}</pre>
+    <span className="ml-2 shrink-0 text-xs tabular-nums" data-testid="tool-diff-stat">
+      <span className="text-dot-success">+{added}</span> <span className="text-destructive">−{removed}</span>
+    </span>
   );
 }
 
-const asText = (value: unknown) => value == null ? '' : typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-
-/** The short "what" of a tool call: its first string argument. */
-function summary(input: unknown) {
-  if (typeof input === 'string') return input;
-  if (input && typeof input === 'object') {
-    const value = Object.values(input).find(field => typeof field === 'string' && field.trim());
-    if (typeof value === 'string') return value.split('\n')[0];
-  }
-  return '';
-}
-
 function ToolCall({ item }: { item: any }) {
-  const shell = item.detail?.type === 'shell';
-  const delegate = item.name === 'alp_delegate';
+  const roots = useWorkspaceRoots();
   const status = item.status as 'running' | 'completed' | 'failed';
-  const label = shell ? 'Shell' : delegate ? 'Delegate' : String(item.name ?? 'Tool').replace(/^alp_/, '').replace(/^\w/, c => c.toUpperCase());
-  const secondary = shell ? String(item.detail.command ?? '').split('\n')[0] : delegate ? `to ${item.detail?.input?.agent ?? 'an agent'}` : summary(item.detail?.input);
-  const exitCode = shell && status !== 'running' ? item.detail.exitCode : null;
+  const view = presentToolCall(item, roots);
+  const exitCode = view.kind === 'shell' && status !== 'running' ? item.detail.exitCode : null;
   return (
-    <Badge testId="tool-call" icon={shell ? SquareTerminal : delegate ? Bot : Wrench} label={label} secondary={secondary} status={status}
+    <Badge testId="tool-call" kind={view.kind} icon={TOOL_ICONS[view.icon]} label={view.label} secondary={view.secondary} status={status}
       trailing={exitCode != null ? (
         <span className={cn('ml-2 shrink-0 text-xs tabular-nums', exitCode === 0 ? 'text-muted-foreground opacity-0 group-hover/badge:opacity-100 group-aria-expanded/badge:opacity-100' : 'text-destructive')}>exit {exitCode}</span>
-      ) : null}
-      detail={() => {
-        if (shell) {
-          const output = String(item.detail.output ?? '').replace(/^\n+/, '');
-          return (
-            <>
-              <Code><span className="text-muted-foreground">$ </span>{String(item.detail.command ?? '').replace(/\n+$/, '')}{output ? `\n\n${output}` : status === 'running' ? '\n\nRunning…' : ''}</Code>
-              {item.error ? <Code tone="error">{item.error}</Code> : null}
-            </>
-          );
-        }
-        const input = asText(item.detail?.input);
-        const output = asText(item.detail?.output);
-        return (
-          <div className="divide-y divide-border">
-            {input ? <Code>{input}</Code> : null}
-            {output ? <Code>{output}</Code> : null}
-            {item.error ? <Code tone="error">{item.error}</Code> : null}
-            {!input && !output && !item.error ? <p className="bg-card px-3 py-2.5 text-sm text-muted-foreground">{status === 'running' ? 'Running…' : 'No output.'}</p> : null}
-          </div>
-        );
-      }} />
+      ) : view.kind === 'edit' ? <EditStat detail={item.detail} /> : null}
+      detail={() => <ToolCallBody item={item} roots={roots} />} />
   );
 }
 

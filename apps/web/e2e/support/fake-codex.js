@@ -8,6 +8,12 @@
 //   [ask-later] the same, about two seconds after the turn starts
 //   [hold]      start and never finish (until interrupted)
 //   [slow]      stream the answer over about three seconds
+//   [edit]      change a file: a fileChange item updating <cwd>/src/app.ts with a unified diff (+2 −1)
+//   [write]     create a file: a fileChange item adding <cwd>/notes/todo.md with its content
+//   [search]    search the web: a webSearch item for "paseo tool call views"
+//   [mcp]       call an MCP tool: an mcpToolCall item (server docs, tool lookup) with arguments and a result
+//   [subagent]  start a sub-agent: a collabAgentToolCall item with its prompt
+//   [tools]     all five of the above in one turn, in that order; each of these turns then answers "Tools done."
 //   [usage:N]   first report token usage as Codex does: N tokens in a 258,400-token window, N-1000 of
 //               them input (half cached) and 1000 output (thread/tokenUsage/updated)
 // A steer (turn/steer) joins the running turn; one holding [finish] ends it with a reply.
@@ -20,6 +26,8 @@ const record = entry => { if (journal) appendFileSync(journal, `${JSON.stringify
 const send = message => process.stdout.write(`${JSON.stringify(message)}\n`);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let threads = 0;
+/** threadId → the working directory thread/start gave it (where the file markers' paths are). */
+const cwds = new Map();
 let turns = 0;
 /** threadId → the turn running on it, so an interrupt ends it. */
 const active = new Map();
@@ -59,6 +67,17 @@ function complete(threadId, turnId) {
   send({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'completed' } } });
 }
 
+/** The Codex-native item of a tool marker, completed. */
+function toolItem(kind, id, cwd) {
+  switch (kind) {
+    case 'edit': return { type: 'fileChange', id, status: 'completed', changes: [{ path: `${cwd}/src/app.ts`, kind: { type: 'update', move_path: null }, diff: '@@ -1,3 +1,4 @@\n import { run } from "./run";\n-run();\n+const code = run();\n+process.exit(code);\n export {};\n' }] };
+    case 'write': return { type: 'fileChange', id, status: 'completed', changes: [{ path: `${cwd}/notes/todo.md`, kind: { type: 'add' }, diff: '# Todo\n\n- write the tests\n- ship it\n' }] };
+    case 'search': return { type: 'webSearch', id, query: 'paseo tool call views', action: { type: 'search', query: 'paseo tool call views' } };
+    case 'mcp': return { type: 'mcpToolCall', id, server: 'docs', tool: 'lookup', status: 'completed', arguments: { topic: 'diff viewer' }, result: { content: [{ type: 'text', text: 'Found 2 pages about the diff viewer' }], structuredContent: null } };
+    default: return { type: 'collabAgentToolCall', id, status: 'completed', tool: 'spawnAgent', prompt: 'Review the parser for edge cases', senderThreadId: 'thread-parent', receiverThreadIds: ['thread-child'] };
+  }
+}
+
 async function run(threadId, turnId, text) {
   const used = /\[usage:(\d+)\]/.exec(text);
   if (used) {
@@ -68,6 +87,19 @@ async function run(threadId, turnId, text) {
     text = text.replace(used[0], '').trim();
   }
   const prompt = lastLine(text);
+  const kinds = ['edit', 'write', 'search', 'mcp', 'subagent'].filter(kind => text.includes('[tools]') || text.includes(`[${kind}]`));
+  if (kinds.length) {
+    const cwd = cwds.get(threadId) ?? process.cwd();
+    for (const kind of kinds) {
+      const item = toolItem(kind, `${kind}-${turnId}`, cwd);
+      send({ method: 'item/started', params: { threadId, turnId, item: { ...item, status: 'inProgress', ...(kind === 'mcp' ? { result: null } : {}) } } });
+      await sleep(40);
+      if (!live(threadId, turnId)) return;
+      send({ method: 'item/completed', params: { threadId, turnId, item } });
+    }
+    if (await stream(threadId, turnId, 'Tools done.')) complete(threadId, turnId);
+    return;
+  }
   if (text.includes('[tool]')) {
     const id = `cmd-${turnId}`;
     const command = 'ls -1 src';
@@ -117,8 +149,14 @@ lines.on('line', line => {
   const reply = result => send({ id, result });
   switch (method) {
     case 'initialize': return reply({});
-    case 'thread/start': return reply({ thread: { id: `thread-${process.pid}-${++threads}` } });
-    case 'thread/resume': return reply({ thread: { id: params.threadId } });
+    case 'thread/start': {
+      const threadId = `thread-${process.pid}-${++threads}`;
+      if (typeof params?.cwd === 'string') cwds.set(threadId, params.cwd);
+      return reply({ thread: { id: threadId } });
+    }
+    case 'thread/resume':
+      if (typeof params?.cwd === 'string') cwds.set(params.threadId, params.cwd);
+      return reply({ thread: { id: params.threadId } });
     case 'turn/start': {
       const turnId = `turn-${process.pid}-${++turns}`;
       reply({ turn: { id: turnId } });
