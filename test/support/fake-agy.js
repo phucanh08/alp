@@ -99,7 +99,19 @@ rl.on('line', async line => {
 
   const content = parsed.message?.content || parsed.prompt || '';
   const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
-  const commandLine = lines.findLast(l => /^(say|tools|call_tool|fail|hang)\b/.test(l)) || lines.at(-1) || '';
+  const commandLine = lines.findLast(l => /^(say|tools|call_tool|tool_step|fail|hang)\b/.test(l)) || lines.at(-1) || '';
+
+  // tool_step JSON: a native tool step, ACTIVE then DONE (or ERROR when JSON has error), with JSON as its
+  // tool_info ({name, parameters, output, error: {type, message}}).
+  if (commandLine.startsWith('tool_step')) {
+    const info = JSON.parse(commandLine.slice('tool_step'.length).trim());
+    const idx = ++stepIndex;
+    send({ event: 'step_update', step_update: { conversation_id: conversationId, step_type: 'tool', step_index: idx, state: 'ACTIVE', tool_name: info.name, tool_info: { name: info.name, parameters: info.parameters || {}, output: '', error: null } } });
+    send({ event: 'step_update', step_update: { conversation_id: conversationId, step_type: 'tool', step_index: idx, state: info.error ? 'ERROR' : 'DONE', tool_name: info.name, tool_info: { name: info.name, parameters: info.parameters || {}, output: info.output || '', error: info.error || null } } });
+    send({ event: 'step_update', step_update: { conversation_id: conversationId, step_type: 'agent_response', step_index: ++stepIndex, state: 'DONE', text_delta: 'done' } });
+    send({ event: 'result', result: { conversation_id: conversationId, status: 'COMPLETED', response: 'done' } });
+    return;
+  }
 
   if (commandLine.startsWith('hang')) {
     // Wait until process is killed

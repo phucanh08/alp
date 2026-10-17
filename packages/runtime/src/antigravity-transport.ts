@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface, type Interface } from 'node:readline';
 import { openMcpTools } from './mcp-tools.js';
+import { antigravityToolDetail } from './tool-detail.js';
 
 /**
  * Antigravity provider definition for ALP.
@@ -385,6 +386,9 @@ export class AntigravityTransport {
       const toolName = step.tool_name || 'tool';
       const callId = `agy-tool-${this.activeTurn}-${step.step_index ?? ++this.messages}`;
 
+      // The command stays the tool's name, as the journal reads it; the typed detail rides along.
+      const detail = antigravityToolDetail(step.tool_info ?? { name: toolName });
+      const typed = { tool: typeof step.tool_info?.name === 'string' && step.tool_info.name ? step.tool_info.name : toolName, detail };
       if (step.state === 'ACTIVE') {
         this.emit('item/started', {
           threadId: this.conversationId,
@@ -395,6 +399,7 @@ export class AntigravityTransport {
             cwd: this.cwd,
             status: 'inProgress',
             aggregatedOutput: '',
+            ...typed,
           },
         });
       } else if (step.state === 'DONE' || step.state === 'ERROR') {
@@ -411,6 +416,8 @@ export class AntigravityTransport {
             status: step.state === 'DONE' ? 'completed' : 'failed',
             exitCode: step.state === 'DONE' ? 0 : 1,
             aggregatedOutput: output,
+            ...typed,
+            ...(step.state === 'ERROR' ? { error: step.tool_info?.error?.message } : {}),
           },
         });
       }
