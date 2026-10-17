@@ -95,3 +95,38 @@ test('a connection whose first refresh fails is dropped as half-open and replace
     assert.equal(connections[2].calls.filter(method => method === 'session.list').length, 1, 'the replacement refreshed exactly once');
   } finally { agents.close(); }
 });
+
+test('a changed alpd epoch resets the delta state for a root; within one epoch only suffixes stream', async () => {
+  const session = { id: 'root-1', status: 'idle', projectRoot: '/', agent: 'main', title: 'root', runtime: 'claude', model: 'opus', mode: 'default', workflow: { mode: 'custom' }, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
+  let emit, connection;
+  const clientFactory = async onEvent => {
+    emit = onEvent;
+    return connection = fakeConnection({
+      onRequest: method => {
+        if (method === 'session.list') return { sessions: [session] };
+        if (method === 'question.list') return { questions: [] };
+        return {};
+      },
+    });
+  };
+  const frames = [];
+  const agents = createAgents({ clientFactory, broadcast: frame => frames.push(frame), directory });
+  const texts = () => frames
+    .filter(frame => frame.type === 'agent_stream' && frame.payload.agentId === session.id && frame.payload.event.type === 'timeline' && frame.payload.event.item.type === 'assistant_message')
+    .map(frame => frame.payload.event.item.text);
+  const item = (epoch, text) => emit({ sessionId: session.id, epoch, ts: new Date().toISOString(), event: { type: 'item', item: { id: 'msg-1', kind: 'assistant_message', text } } });
+  try {
+    await agents.start();
+    // The refresh attaches the live root; once the attach has answered, its timeline exists and is not replaying.
+    await until(() => connection.calls.includes('session.attach'), 'the live root to attach');
+    await sleep(10);
+    item('epoch-A', 'Answer received:');
+    item('epoch-A', 'Answer received: you');
+    assert.deepEqual(texts(), ['Answer received:', ' you'], 'within one epoch only the new suffix streams');
+    // A daemon restart: the same item id arrives under a new epoch and must be appended whole.
+    item('epoch-B', 'Answer received: you');
+    assert.deepEqual(texts(), ['Answer received:', ' you', 'Answer received: you'], 'a new epoch re-appends the full snapshot');
+    item('epoch-B', 'Answer received: you said hi');
+    assert.deepEqual(texts().slice(3), [' said hi'], 'the new epoch then streams suffixes again');
+  } finally { agents.close(); }
+});
