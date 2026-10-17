@@ -22,9 +22,11 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 /** One task in full, in a tab of its own: what task.list says about it, and what can be done to it. */
-export function TaskDetail({ id }: { id: string }) {
+export function TaskDetail({ id, onOpenTask }: { id: string; onOpenTask?: (id: string) => void }) {
   const controller = useController();
-  const { openTask } = useTabs();
+  const { openTask: openTab } = useTabs();
+  // A linked task (parent, blocker) opens where this one is: its tab, or the full-screen board.
+  const openTask = onOpenTask ?? openTab;
   const { tasks, principal } = useAppState();
   const row = tasks.rows.find(entry => entry.id === id);
   const canWrite = can(principal ?? undefined, 'project.write');

@@ -133,7 +133,8 @@ export function NewSessionScreen() {
   const efforts = effortOptions(model);
   const thinkingLabel = thinking ? effortLabel(thinking) : trusted?.thinking ? effortLabel(trusted.thinking) : model?.effort ? effortLabel(model.effort) : 'Default';
   // As Paseo's agent controls (onDropdownClose): a choice made, the message box has focus again.
-  const refocus = () => setTimeout(() => document.getElementById('composer')?.focus(), 0);
+  const boxId = `composer-${React.useId()}`;
+  const refocus = () => setTimeout(() => document.getElementById(boxId)?.focus(), 0);
   const choose = (change: Partial<Choices>) => { setChoices(current => ({ ...current, ...change })); refocus(); };
   const chooseModel = (id: string) => { setChoices(current => ({ ...current, model: id || undefined, thinking: remembered.thinkingByModel?.[id || 'default'] })); refocus(); };
 
@@ -241,6 +242,7 @@ export function NewSessionScreen() {
         initialText={unsent}
         addText={taken}
         autoFocus
+        inputId={boxId}
         controls={controls}
       />
     </div>

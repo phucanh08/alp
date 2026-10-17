@@ -2,6 +2,7 @@ import * as React from 'react';
 import { ArrowUp, Pencil, Square } from 'lucide-react';
 import type { QueuedPrompt } from '../lib/controller.js';
 import { cn } from '../lib/utils';
+import { usePaneFocused } from './pane';
 
 /**
  * The message box, with Paseo's composer logic and layout: one rounded surface with the text on
@@ -24,7 +25,7 @@ import { cn } from '../lib/utils';
  */
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
-export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', startLabel, startHold, initialText, addText, autoFocus }: {
+export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', startLabel, startHold, initialText, addText, autoFocus, inputId }: {
   onSend: (text: string) => Promise<unknown>;
   onQueue: (text: string) => void;
   onStop: () => void;
@@ -55,6 +56,8 @@ export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSend
   /** Text put in the box while it is open, after what is there (a new `id` each time). */
   addText?: { id: number; text: string };
   autoFocus?: boolean;
+  /** The box's id (one of its own by default: split panes can show two composers). */
+  inputId?: string;
 }) {
   const [text, setText] = React.useState(initialText ?? '');
   React.useEffect(() => {
@@ -69,11 +72,15 @@ export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSend
 
   // Paseo's composer keys outside the box: Cmd/Ctrl+L focuses it; Escape interrupts the agent
   // from the box or from nowhere in particular (not from another field, a menu or a dialog).
-  const latest = React.useRef({ running, stopping, blocked, onStop });
-  latest.current = { running, stopping, blocked, onStop };
+  // With split panes, only the focused pane's composer answers these keys.
+  const paneFocused = usePaneFocused();
+  const ownId = React.useId();
+  const boxId = inputId ?? `composer-${ownId}`;
+  const latest = React.useRef({ running, stopping, blocked, onStop, paneFocused });
+  latest.current = { running, stopping, blocked, onStop, paneFocused };
   React.useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing) return;
+      if (event.defaultPrevented || event.isComposing || !latest.current.paneFocused) return;
       if (event.key.toLowerCase() === 'l' && (isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && !event.altKey && !event.shiftKey) {
         if (!area.current || area.current.disabled) return;
         event.preventDefault();
@@ -148,9 +155,9 @@ export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSend
           {!focused && !text && !reason ? (
             <span aria-hidden className="pointer-events-none absolute right-4 top-3 hidden text-xs text-muted-foreground/80 [@media(pointer:fine)]:md:block" data-testid="composer-focus-hint">{isMac ? '⌘L' : 'Ctrl+L'} to focus</span>
           ) : null}
-          <label htmlFor="composer" className="sr-only">Message</label>
+          <label htmlFor={boxId} className="sr-only">Message</label>
           <textarea
-            id="composer"
+            id={boxId}
             ref={area}
             rows={1}
             value={text}
