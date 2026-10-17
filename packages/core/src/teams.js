@@ -100,6 +100,8 @@ async function directories(directory) {
 /**
  * Where each team comes from: built in, then the library, then the project. A team
  * directory counts only with a team.json. `root` may be undefined outside a project.
+ * @param {string | undefined} root
+ * @param {{ library?: string, templates?: Record<string, string> }} [options]
  * @returns {Promise<Map<string, { source: 'builtin' | 'library' | 'project', directory?: string, overrides?: 'builtin' | 'library' }>>}
  */
 export async function teamSources(root, { library, templates } = {}) {
@@ -120,6 +122,9 @@ export async function teamSources(root, { library, templates } = {}) {
 
 /**
  * A team by id, with its house rules.
+ * @param {string | undefined} root
+ * @param {string} id
+ * @param {{ library?: string, templates?: Record<string, string> }} [options]
  * @returns {Promise<{ id: string, source: 'builtin' | 'library' | 'project', label: string, description?: string, main: string,
  *   members: Record<string, { role?: string, model?: string, thinking?: string }>, delegation: Record<string, string[]>,
  *   oracleThinking?: Record<string, string>, oracleModels?: string[], maxPeers?: number, supervisor: false | { agent: string, model?: string, thinking?: string }, houseRules: string }>}
