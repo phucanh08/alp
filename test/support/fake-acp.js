@@ -6,7 +6,8 @@
 //   fake:tool NAME JSON         call that ALP tool through the alp MCP server
 //   fake:permit KIND TEXT       ask permission for a KIND tool call (TEXT is its command or title)
 //   fake:exec COMMAND           report a command it ran
-//   fake:usage USED SIZE        report how full its context is
+//   fake:usage USED SIZE [USD]  report how full its context is, and the session's cost in US dollars
+//   fake:tokens IN OUT CACHED   end the turn with that usage in the prompt response
 //   fake:hang                   wait until ALP cancels the turn
 //   fake:fail                   fail the prompt
 //   fake:exit                   die mid-turn
@@ -51,6 +52,7 @@ async function prompt(id, { sessionId, prompt: blocks }) {
   const text = blocks.filter(block => block.type === 'text').at(-1)?.text ?? '';
   const lines = text.split('\n').filter(line => line.startsWith('fake:'));
   if (!lines.length) lines.push('fake:say ok');
+  let usage;
   for (const line of lines) {
     const [verb, ...rest] = line.slice(5).split(' ');
     const argument = rest.join(' ');
@@ -76,12 +78,13 @@ async function prompt(id, { sessionId, prompt: blocks }) {
       const toolCallId = `call-${++sequence}`;
       update(sessionId, { sessionUpdate: 'tool_call', toolCallId, title: argument, kind: 'execute', status: 'in_progress', rawInput: { command: argument } });
       update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'completed', content: [{ type: 'content', content: { type: 'text', text: `ran ${argument}` } }] });
-    } else if (verb === 'usage') update(sessionId, { sessionUpdate: 'usage_update', used: Number(rest[0]), size: Number(rest[1]) });
+    } else if (verb === 'usage') update(sessionId, { sessionUpdate: 'usage_update', used: Number(rest[0]), size: Number(rest[1]), ...(rest[2] ? { cost: { amount: Number(rest[2]), currency: 'USD' } } : {}) });
+    else if (verb === 'tokens') usage = { inputTokens: Number(rest[0]), outputTokens: Number(rest[1]), cachedReadTokens: Number(rest[2]), totalTokens: Number(rest[0]) + Number(rest[1]) };
     else if (verb === 'hang') { await new Promise(resolve => { cancel = resolve; }); return send({ id, result: { stopReason: 'cancelled' } }); }
     else if (verb === 'fail') return send({ id, error: { code: -32603, message: 'fake failure' } });
     else if (verb === 'exit') process.exit(3);
   }
-  send({ id, result: { stopReason: 'end_turn' } });
+  send({ id, result: { stopReason: 'end_turn', ...(usage ? { usage } : {}) } });
 }
 
 createInterface({ input: process.stdin }).on('line', line => {

@@ -26,6 +26,25 @@ export type TimelineItem =
         | { type: 'unknown'; input: unknown; output: unknown };
     };
 
+/**
+ * How much a session has used, from its runtime's latest token report (ALPD §57), as Paseo's
+ * AgentUsage: the context window's fill, the latest model response's tokens, and the session's
+ * cost when the runtime says it. A field the runtime does not report is absent; a later report
+ * replaces the fields it carries and keeps the others.
+ */
+export type SessionUsage = {
+  /** Tokens the context holds now: the latest model call's input and output. */
+  contextWindowUsedTokens?: number;
+  /** The context window, once the runtime has said what it is. */
+  contextWindowMaxTokens?: number;
+  /** The latest model response's input tokens, of which cachedInputTokens came from cache, and output tokens. */
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  outputTokens?: number;
+  /** The session's cost in US dollars so far, as the runtime counts it (Claude, or ACP in USD). */
+  totalCostUsd?: number;
+};
+
 export type SessionSnapshot = {
   id: string;
   projectRoot: string;
@@ -52,6 +71,8 @@ export type SessionSnapshot = {
   instructionsSha?: string;
   /** The session's runtime takes images in session.prompt (capability `prompt.images`); absent means it does not. */
   promptImages?: boolean;
+  /** The latest usage the session's runtime reported (ALPD §57); absent before its first report. */
+  usage?: SessionUsage;
 };
 
 export type AssignmentSnapshot = {
@@ -105,6 +126,8 @@ export type AlpEvent =
   | { type: 'turn.started'; turnId: string; origin: TurnOrigin }
   | { type: 'turn.ended'; turnId: string; state: 'completed' | 'failed' | 'canceled'; error?: AlpError }
   | { type: 'item'; item: TimelineItem }
+  /** The session's usage changed: the whole latest SessionUsage, not a delta (ALPD §57). */
+  | { type: 'usage'; usage: SessionUsage }
   | { type: 'mail'; mail: Omit<MailEvent, 'passive' | 'deliveredTurn'> }
   | { type: 'assignment'; assignment: AssignmentSnapshot }
   | { type: 'question'; question: UserQuestion }

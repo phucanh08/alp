@@ -110,6 +110,9 @@
         },
         "promptImages": {
           "type": "boolean"
+        },
+        "usage": {
+          "$ref": "#/$defs/usage"
         }
       },
       "required": [
@@ -125,6 +128,36 @@
         "persistent",
         "busy"
       ],
+      "additionalProperties": true
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "contextWindowUsedTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "contextWindowMaxTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "inputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cachedInputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "totalCostUsd": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
       "additionalProperties": true
     },
     "assignment": {
@@ -730,6 +763,22 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "usage"
+            },
+            "usage": {
+              "$ref": "#/$defs/usage"
+            }
+          },
+          "required": [
+            "type",
+            "usage"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "mail"
             },
             "mail": {
@@ -860,6 +909,7 @@
               "turn.started",
               "turn.ended",
               "item",
+              "usage",
               "mail",
               "assignment",
               "question",

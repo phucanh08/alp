@@ -93,6 +93,23 @@ test('an ACP agent gets prompt images as ACP image blocks only when it takes the
   assert.equal((await plain.received()).some(message => message.method === 'session/prompt'), false);
 });
 
+// t-7679.12: an ACP agent's usage_update and prompt-response usage reach the session's usage, as Paseo's.
+test('an ACP agent reports its context fill, cost and turn tokens as the session\'s usage', async t => {
+  const { root, runtime, turn } = await setup(t);
+  await runtime.open('root', { cwd: root, model: 'acp:fake' });
+  const first = await turn('fake:usage 12000 200000 0.25\nfake:tokens 9000 300 8000');
+  const usages = first.events.filter(event => event.type === 'usage').map(event => event.usage);
+  assert.deepEqual(usages, [
+    { contextWindowUsedTokens: 12000, contextWindowMaxTokens: 200000, totalCostUsd: 0.25 },
+    { contextWindowUsedTokens: 12000, contextWindowMaxTokens: 200000, totalCostUsd: 0.25, inputTokens: 9000, outputTokens: 300, cachedInputTokens: 8000 },
+  ]);
+  assert.ok(first.events.findIndex(event => event.type === 'usage') < first.events.findIndex(event => event.type === 'turn.ended'));
+  assert.deepEqual(runtime.snapshot('root').usage, usages[1]);
+  // A report that changes nothing is not sent again.
+  const same = await turn('fake:usage 12000 200000 0.25');
+  assert.equal(same.events.filter(event => event.type === 'usage').length, 0);
+});
+
 test('a session on an ACP agent: instructions in its first prompt, its answer streamed, ALP tools through the bridge', async t => {
   const { root, runtime, received, turn, events } = await setup(t);
   const opened = await runtime.open('root', { cwd: root, model: 'acp:fake' });

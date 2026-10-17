@@ -423,6 +423,37 @@ test('resumed history replays a grandchild while its parent is open', async t =>
   assert.deepEqual(second.events.filter(e => e.event.type === 'session.opened').map(e => e.event.session.agent), ['main', 'lead', 'peer']);
 });
 
+// t-7679.12: a session's usage reaches its viewers live, is kept in its timeline, and stays in its summary after a restart.
+test('session usage is an event in the tree\'s timeline and part of the session, also once closed and after a restart', async t => {
+  const { directory, project } = await durableProject(t);
+  const runtimes = [];
+  const first = await durable(t, directory, project, runtimes);
+  const { session } = await first.client.request('session.create', { spec: { cwd: project, persist: true } });
+  await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Count tokens') });
+  await until(() => runtimes[0]?.notification);
+  const usage = { contextWindowUsedTokens: 42_000, contextWindowMaxTokens: 258_400, inputTokens: 41_000, cachedInputTokens: 30_000, outputTokens: 1000 };
+  runtimes[0].notification('thread/tokenUsage/updated', { threadId: 'thread-0', turnId: 'turn-0', tokenUsage: { last: { totalTokens: 42_000, inputTokens: 41_000, cachedInputTokens: 30_000, outputTokens: 1000 }, modelContextWindow: 258_400 } });
+  await until(() => first.events.some(e => e.event.type === 'usage'));
+  const live = first.events.find(e => e.event.type === 'usage');
+  assert.deepEqual(live.event.usage, usage);
+  assert.equal(typeof live.cursor, 'number');
+  assert.deepEqual((await first.client.request('session.get', { sessionId: session.id })).session.usage, usage);
+  runtimes[0].finish('Counted');
+  await until(() => first.events.some(e => e.event.type === 'turn.ended'));
+  await first.stop();
+
+  const second = await durable(t, directory, project, runtimes);
+  const { sessions } = await second.client.request('session.list', { includeClosed: true });
+  assert.deepEqual(sessions.map(s => [s.id, s.status, s.usage]), [[session.id, 'closed', usage]]);
+  await second.client.request('session.attach', { sessionId: session.id });
+  assert.deepEqual(second.events.filter(e => e.event.type === 'usage').map(e => e.event.usage), [usage]);
+  // Resumed and closed again before its runtime reports: the summary still has the last usage.
+  await second.client.request('session.create', { sessionId: session.id, spec: { cwd: project }, resume: true, history: 'skip' });
+  await second.client.request('session.close', { sessionId: session.id });
+  await until(async () => (await second.client.request('session.get', { sessionId: session.id })).session.status === 'closed');
+  assert.deepEqual((await second.client.request('session.get', { sessionId: session.id })).session.usage, usage);
+});
+
 test('a clientMessageId is delivered once; reuse with other content conflicts', async t => {
   const { directory, project } = await durableProject(t);
   const runtimes = [];

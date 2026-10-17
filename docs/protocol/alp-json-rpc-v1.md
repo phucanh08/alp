@@ -321,6 +321,36 @@ the retained root may later resume under the same id and emit more events. Crash
 may close a root record without a terminal session event, adding only `turn.ended` when needed.
 Clients also consult session summaries. Closed roots stay attachable while their records are retained.
 
+### 8.5 Session usage
+
+`{ type: "usage", usage: SessionUsage }` says a session's usage changed, as Paseo's `usage_updated`
+(packages/protocol/src/agent-types.ts `AgentUsage` at b63a325). It carries the whole latest
+`SessionUsage`, not a delta, and is kept in the tree's timeline like any runtime event, so a replay
+restores it. The session snapshot (`session.opened` / `session.updated`, `session.get`,
+`session.list`) has the same object as `usage` once the runtime has reported; a closed session keeps
+the last one.
+
+```ts
+SessionUsage = {
+  contextWindowUsedTokens?: number; // integer ≥ 0: what the context holds now (the latest model call's input and output)
+  contextWindowMaxTokens?: number;  // integer ≥ 1: the window, once the runtime has said it
+  inputTokens?: number;             // integer ≥ 0: the latest model response's input (ACP: the latest turn's)
+  cachedInputTokens?: number;       // integer ≥ 0: of which read from cache
+  outputTokens?: number;            // integer ≥ 0
+  totalCostUsd?: number;            // ≥ 0: the session's cost so far, as the runtime counts it
+}
+```
+
+Every field is optional: a runtime reports what it knows, and a later report replaces the fields it
+carries and keeps the others, except that `inputTokens`, `cachedInputTokens` and `outputTokens` are
+replaced together (a report with any of them drops those it lacks). alpd sends the event only when the usage changed. What each runtime
+reports (ALPD §57): Codex `thread/tokenUsage/updated` (context, window, tokens; no cost); Claude each
+main-thread assistant message's usage (context, tokens), the window once `getContextUsage` or a
+result names it, and each result's `total_cost_usd` (counted by the Claude process, so it restarts
+when the process does); an ACP agent's `usage_update` (context, window, `cost` in USD only) and the
+prompt response's unstable `usage` (tokens); Antigravity its steps' tokens. No secret, path or
+account data is in it. Account-wide usage (plan windows) is `daemon.usage`, which is local only.
+
 ## 9. Connections, attachment and lifecycle
 
 - `session.create` and `session.attach` attach the calling connection to the root's tree; events of the
@@ -567,6 +597,8 @@ its canonical path, and drops any answered path that is not plainly relative (do
 ## 13. Compatibility notes for this revision
 
 **Additive** (old clients unaffected):
+- The `usage` event and the session snapshot's `usage` (§8.5); old clients ignore an unknown event
+  type (§7) and unknown snapshot fields.
 - `question.watch` `turns` (capability `question.watch.turns`) and `workspace.files.search` (capability
   `workspace.files`), §12.2, §12.3; error reason `not_directory`.
 - `session.list` `limit` / `cursor` / `query` / `projectRoots` and `nextCursor`, and `question.watch`, with capabilities
