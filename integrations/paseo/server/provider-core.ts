@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import type { DaemonConnection, Envelope, SessionSnapshot, TimelineItem } from '@anhlp/alp-protocol';
 import { alpdSessionOf, configModels, DEFAULT_TEAM, handleFor, MODES } from './mapping-wire.js';
 import { sessionTasks } from './session-tasks.js';
+import { paseoDetail } from './tool-detail.js';
 
 /**
  * Paseo is a viewer of alpd: this provider translates Paseo inputs into daemon calls and daemon
@@ -127,7 +128,7 @@ function timelineItem(item: TimelineItem): ProviderTimelineItem {
     callId: item.callId,
     name: item.name,
     ...(item.status === 'failed' ? { status: item.status, error: item.error ?? 'Tool call failed' } : { status: item.status, error: null }),
-    detail: item.detail,
+    detail: paseoDetail(item.detail),
   } as ProviderTimelineItem;
 }
 

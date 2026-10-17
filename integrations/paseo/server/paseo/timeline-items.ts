@@ -1,5 +1,8 @@
 import type { AgentTimelineItem } from '@getpaseo/protocol/agent-types';
 import type { TimelineItem } from '@anhlp/alp-protocol';
+import { paseoDetail } from '../tool-detail.js';
+
+export { paseoDetail };
 
 /**
  * ALP's timeline items are snapshots by id (ALPD §4.2); Paseo's timeline is a log where text
@@ -33,9 +36,7 @@ export class TimelineDeltas {
       case 'todo':
         return { type: 'todo', items: item.items.map(entry => ({ id: entry.id, text: entry.text, status: entry.status, completed: entry.status === 'completed' })) };
       case 'tool_call': {
-        const detail = item.detail.type === 'shell'
-          ? { type: 'shell' as const, command: item.detail.command, ...(item.detail.cwd ? { cwd: item.detail.cwd } : {}), output: item.detail.output, ...(item.detail.exitCode !== undefined ? { exitCode: item.detail.exitCode } : {}) }
-          : { type: 'unknown' as const, input: (item.detail.input ?? null) as never, output: (item.detail.output ?? null) as never };
+        const detail = paseoDetail(item.detail);
         return item.status === 'failed'
           ? { type: 'tool_call', callId: item.callId, name: item.name, status: 'failed', error: item.error ?? 'Tool call failed', detail }
           : { type: 'tool_call', callId: item.callId, name: item.name, status: item.status, error: null, detail };
