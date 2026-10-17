@@ -22,9 +22,11 @@ Số mục (§) có thể được code và test tham chiếu; giữ ổn địn
 | Kết nối | HTTPS, hoặc HTTP chỉ trên loopback (`127.0.0.1`, `localhost`, SSH tunnel). Token dán tay, chỉ giữ trong bộ nhớ của tab. |
 | Projects | Các workspace mà credential cấp (`principal.workspaces`). Không thêm, không xóa. |
 | Sessions | Liệt kê, tạo (team, permissions, model, title), mở, đổi tên, archive. Mỗi agent của cây (main và assignment) là một tab. |
-| Chat | Prompt + stream, tool call, todo, notice; trả lời hoặc từ chối câu hỏi; interrupt; steer khi agent đang chạy; hàng đợi (§4.3). |
+| Chat | Prompt + stream, tool call, todo, notice; trả lời câu hỏi theo luồng chọn rồi Submit của Paseo (Other thay lựa chọn, Enter gửi, Dismiss), thẻ câu hỏi nằm trong stream; interrupt; steer khi agent đang chạy; hàng đợi (§4.3). |
 | Tasks | Liệt kê (poll), tạo, mở chi tiết trong tab lớn, đóng, mở lại, duyệt human gate. Mọi thay đổi gửi `ifRev`. |
 | Settings | Bố cục như `alp web` cũ: App (General, Appearance, Sidebar, Chat, Terminal, Editor, Diagnostics, About) và Host (Overview, Projects, Connections, Templates, Agents, Skills, Hooks, MCP servers, Providers…). Library chỉ hiện tên, nguồn, mô tả. Mục chưa hỗ trợ ghi rõ "not available in this beta". |
+| Workspace | Phím tắt như Paseo (dialog Shortcuts), History với session đã archive và Unarchive, attention trên mọi session (`question.list`), menu chuột phải của tab, kéo đổi thứ tự tab, tab giữ qua reload, sidebar và dock kéo đổi độ rộng, command center (⌘K), trạng thái trên favicon và title, notification của trình duyệt khi session chờ trả lời. |
+| New session | Màn hình như tab new agent của Paseo: tin đầu tiên, chọn team/model/thinking/permissions, `session.preview`, nhớ lựa chọn lần trước (§4.2). |
 | Phục hồi | Reconnect có backoff, resume theo cursor, reload trang, gateway hoặc alpd khởi động lại (§5). |
 
 Không có trong beta (app ghi rõ, không fallback sang Paseo hay app nhúng): CRUD workspace, git và
@@ -106,11 +108,19 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
   - Không ghi log. Request ticket gửi `credentials: 'omit'`, `cache: 'no-store'`,
     `redirect: 'error'`, `referrerPolicy: 'no-referrer'`.
   - E2E kiểm tra token không có trong storage, URL và log gateway.
-- localStorage chỉ giữ **địa chỉ gateway** (`alp-web:gateway`), không phải secret.
+- localStorage chỉ giữ ba key, không key nào chứa token hay secret:
+  - `alp-web:gateway`: địa chỉ gateway;
+  - `alp-web:preferences` (`src/lib/preferences.js`): Default send, theme (System/Light/Dark),
+    lựa chọn của màn New session (team, mode, model, thinking theo model);
+  - `alp-web:layout` (`src/lib/layout.js`): theo gateway + workspace, session đang mở, các tab
+    (agent, task, panel), thứ tự, tab đang mở; độ rộng sidebar và dock. Chỉ id, không có tiêu đề
+    hay dữ liệu khác của host.
+  - Hai key sau có version, đọc dung thứ (field hỏng về mặc định, version khác hoặc rác thì về
+    mặc định), và chỉ ghi các field đã biết.
 - Disconnect, `pagehide` hoặc lỗi xác thực:
   - dừng reconnect và mọi timer;
   - xóa token, cây session, hàng đợi và state về ban đầu.
-- Settings của app (General › Sending › Default send) chỉ sống trong bộ nhớ của tab.
+- Settings có Reset để về mặc định.
 
 ### 4.3 Chat theo logic của Paseo
 
@@ -161,7 +171,7 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
   - các panel mở thành tab đóng được; mặc định là Changes và Files;
   - nút **+** mở tab "New tab" với danh sách Changes, Terminal, Diff, Files, Agents, Tasks. Chọn
     một mục thì tab New tab thành panel đó; panel đã mở thì được đưa lên trước;
-  - tab của dock giữ nguyên khi ẩn/hiện dock, mất khi reload.
+  - tab của dock giữ nguyên khi ẩn/hiện dock và qua reload (`alp-web:layout`).
 - Nút **+** của hàng tab giữa là menu New tab như Paseo: Agent (tạo session), Terminal, Diff, rồi
   Tasks, Agents. Panel mở thành tab ở cột giữa, theo workspace như task tab.
 - Changes, Terminal, Diff, Files mới có giao diện: panel ghi "not available in this beta" vì
@@ -221,20 +231,24 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
 
 ## 7. Kiểm thử
 
-- Unit (`apps/web/tests`, 49 test):
+- Unit (`apps/web/tests`, 107 test):
   - timeline projection;
   - controller, chạy với host JSON-RPC trong bộ nhớ: reconnect, resume, terminal, idle-close,
     stale answers, outcome unknown, task ifRev, create, children/questions, cancel, mode limit,
     reset, hàng đợi (kể cả event tách task, response trước/giữa/sau event, rớt kết nối giữa
     `user_message` và `turn.started`), attach đầu tiên timeout;
   - gateway (URL, ticket, lỗi HTTP);
+  - preferences, layout (đọc dung thứ, không ghi token);
   - boundary.
-- E2E (`apps/web/e2e`, Playwright, 9 test):
+- E2E (`apps/web/e2e`, Playwright, 21 test):
   - Mỗi spec dựng một host thật dùng một lần:
     - alpd từ `packages/daemon/dist`;
-    - fake Codex tất định;
+    - fake Codex tất định; Claude và Antigravity trỏ tới chương trình không tồn tại;
     - `alp-gateway` với `--origin` của trang;
     - bundle đã build.
+  - Bảo vệ fail-closed (`e2e/support/world.js`): khi dọn host, nếu có session alpd ghi lại mà
+    không chạy trên fake Codex thì spec thất bại ("a real runtime may have been called"). E2E chỉ
+    chạy runtime giả.
   - Mọi thứ chạy trên port ngẫu nhiên và home tạm. Spec dừng mọi process và xóa thư mục khi xong.
   - Desktop 1440×900 và Pixel 7.
   - Specs:
@@ -242,6 +256,7 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
       settings;
     - recovery;
     - access: token sai, chỉ đọc, giới hạn mode, workspace khác, revoke, origin không được phép;
+    - chat, new-session, settings, tabs, workspace;
     - mobile.
 - CI: job `alp-web` trên `ubuntu-latest` và `macos-latest`, Node 22, chạy `npm run validate:web`.
   Khi lỗi, CI upload trace và ảnh.
@@ -255,8 +270,9 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
 - Library chỉ có tên, nguồn, mô tả, `usedBy`. `library.get` bị gateway DENY (secret) và không mở
   lại.
 - Ngôn ngữ app chỉ có tiếng Anh. Ngôn ngữ agent chỉ đọc.
-- Theme chỉ có dark.
-- Settings của app không lưu qua reload.
+- Theme chỉ có System/Light/Dark; chưa có font, cỡ chữ, theme khác của Paseo.
+- Chưa có split pane.
+- Danh sách đầy đủ phần đã làm và còn thiếu so với Paseo web: [apps/web/docs/paseo-parity.md](../../apps/web/docs/paseo-parity.md).
 - `npm audit` báo 21 lỗ hổng có sẵn từ trước (chuỗi react-native/jest và ajv của workspace khác).
   Package web không thêm lỗ hổng nào. Không chạy `npm audit fix --force`.
 
@@ -277,3 +293,6 @@ Commit implementation `739ebc0` (nhánh `feat/alp-web`), macOS, Node 26 cục b�
   - hàng đợi;
   - settings;
   - sidebar mobile, panel mobile, settings mobile.
+
+Kiểm lại ngày 2026-10-17 (HEAD `e5e5ae9`, macOS): `cd apps/web && npm test` 107/107 pass;
+`npm run test:alp-web:e2e` 21/21 pass. Vẫn chỉ fake provider.
