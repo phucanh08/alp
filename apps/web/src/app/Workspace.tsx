@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ArrowLeftToLine, ArrowRightToLine, Bot, CircleAlert, CircleDot, Columns2, Copy, CopyX, Ellipsis, ListTodo, Maximize, Minimize, PanelLeft, PanelRight, Pencil, Plus, Rows2, ShieldAlert, SquarePen, Archive, X } from 'lucide-react';
+import { ArrowLeftToLine, ArrowRightToLine, Bot, CircleAlert, CircleDot, Columns2, Copy, CopyX, Ellipsis, FileText, ListTodo, Maximize, Minimize, PanelLeft, PanelRight, Pencil, Plus, Rows2, ShieldAlert, SquarePen, Archive, X } from 'lucide-react';
 import type { SessionSummary } from '../lib/controller.js';
 import { can } from '../lib/gateway.js';
 import { ContextMenu, Menu, type MenuItem } from '../components/ui/menu';
@@ -16,6 +16,7 @@ import { StatusRing } from './status';
 import { TabChip } from './TabChip';
 import { PaneContext } from './pane';
 import { TaskDetail } from './TaskDetail';
+import { FileView } from './FileView';
 import { useAppState } from './store';
 import { tabKey, useTabs, type Tab } from './tabs';
 
@@ -103,6 +104,7 @@ function useTabPresentation(tab: Tab) {
   }
   if (tab.kind === 'draft') return { label: 'New session', icon: <SquarePen aria-hidden className="size-3.5" />, title: 'New session' };
   if (tab.kind === 'launcher') return { label: 'New tab', icon: <Plus aria-hidden className="size-3.5" />, title: 'New tab' };
+  if (tab.kind === 'file') return { label: baseName(tab.id), icon: <FileText aria-hidden className="size-3.5" />, title: tab.id };
   if (tab.kind === 'panel') {
     const panel = PANELS[tab.id];
     return { label: panel.label, icon: <panel.icon aria-hidden className="size-3.5" />, title: panel.label };
@@ -145,6 +147,8 @@ function useTabMenuItems(paneId: string, onRename: (session: SessionSummary) => 
         const summary = listed ?? ({ id: tab.id, title: tree?.projection.sessions[tab.id]?.title } as SessionSummary);
         items.push({ id: 'rename', label: 'Rename', icon: <Pencil aria-hidden />, disabled: !canWrite, testId: `${base}-rename`, onSelect: () => onRename(summary) });
       }
+    } else if (tab.kind === 'file') {
+      items.push({ id: 'copy-path', label: 'Copy path', icon: <Copy aria-hidden />, testId: `${base}-copy-path`, onSelect: () => copy(tab.id) });
     } else if (tab.kind === 'task') {
       items.push({ id: 'copy-task-id', label: 'Copy task id', icon: <Copy aria-hidden />, hint: tab.id, testId: `${base}-copy-task-id`, onSelect: () => copy(tab.id) });
     }
@@ -329,11 +333,13 @@ export function TabsRow({ paneId = MAIN_PANE, whole = false, onNewSession, onRen
 /** A pane's tab in front. */
 export function TabContent({ paneId = MAIN_PANE, onNewSession }: { paneId?: string; onNewSession: () => void }) {
   const { activeOf } = useTabs();
-  const { tree } = useAppState();
+  const { tree, workspace } = useAppState();
   const active = activeOf(paneId);
   if (active?.kind === 'draft') return <NewSessionScreen />;
   if (active?.kind === 'launcher') return <PaneLauncher key={active.id} launcher={active.id} />;
   if (active?.kind === 'task') return <TaskDetail id={active.id} />;
+  // Keyed by the workspace too: the same path in another workspace is another file.
+  if (active?.kind === 'file') return <FileView key={`${workspace ?? ''}\n${active.id}`} path={active.id} />;
   if (active?.kind === 'panel') return <div className="min-h-0 flex-1 overflow-y-auto"><PanelView kind={active.id} /></div>;
   if (active?.kind === 'agent' && tree) return <ChatPanel key={active.id} sessionId={active.id} />;
   return <Empty onNewSession={onNewSession} />;

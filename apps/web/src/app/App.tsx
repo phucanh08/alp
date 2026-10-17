@@ -167,7 +167,7 @@ function CommandCenterHost({ open, scope, onClose, history, splits, onAction, on
   const state = useAppState();
   const controller = useController();
   const { workspace, principal, connection, sessions, tree, selected } = state;
-  const { tabs: all, row, active, activate, close, closeOthers: closeRow, openPanel, panes, focusedPane, splitEmpty, canSplitEmpty, closePane, focusAdjacent, moveTabAdjacent } = useTabs();
+  const { tabs: all, row, active, activate, close, closeOthers: closeRow, openPanel, openFile, panes, focusedPane, splitEmpty, canSplitEmpty, closePane, focusAdjacent, moveTabAdjacent } = useTabs();
   // The row on screen: the focused pane's, or every tab on a narrow window (as the tab menu).
   const tabs = splits ? row : all;
   const closeOthers = (tab: Tab, which: 'left' | 'right' | 'others') => closeRow(tab, which, splits ? undefined : all);
@@ -243,11 +243,14 @@ function CommandCenterHost({ open, scope, onClose, history, splits, onAction, on
     source: workspace,
     search: (query: string) => controller.searchWorkspaceFiles({ query, limit: FILE_SEARCH_LIMIT }),
   }), [connection.capabilities, workspace, controller]);
-  // Paseo opens the file in a tab; ALP has no file read yet, so the path goes to the clipboard.
+  // Paseo opens the file in a tab: so does ALP where the host reads files (workspace.files.read)
+  // and the token may (files.read). Otherwise the path goes to the clipboard, and the notice says why.
   const pickFile = (path: string) => {
+    if (controller.filesReadable && controller.canReadFiles) { openFile(path); onAction('tab.shown'); return; }
+    const why = controller.filesReadable ? 'this access token cannot read files' : 'this host does not offer file reading';
     const copy = navigator.clipboard?.writeText(path);
     if (!copy) { controller.notify('error', `Could not copy ${path}.`); return; }
-    copy.then(() => controller.notify('info', `Copied ${path}`), () => controller.notify('error', `Could not copy ${path}.`));
+    copy.then(() => controller.notify('info', `Copied ${path} (${why})`), () => controller.notify('error', `Could not copy ${path}.`));
   };
   const selectWorkspace = (path: string) => { controller.selectWorkspace(path); onAction('tab.shown'); };
   return <CommandCenter open={open} scope={scope} onClose={onClose} actions={actions} sessions={rows} workspaces={workspaceList} files={files}

@@ -5,13 +5,15 @@
  * tolerantly (garbage or another version gives an empty layout), written with known fields only.
  *
  * Per workspace (scoped by gateway address and workspace path): the open session, the other
- * agent tabs of that session, the task and panel tabs, the tabs' order (tab keys, see
+ * agent tabs of that session, the task, file and panel tabs, the tabs' order (tab keys, see
  * app/tabs.tsx), the active tab and, once the center is split, its panes (lib/panes.js: the split
  * tree, which pane each tab sits in and shows, the focused pane). Widths: the sidebar and the explorer dock. Ids only: no
  * token, no titles, nothing else the host sent.
  */
 
+import { blockedFilePath } from '@anhlp/alp-protocol';
 import { parsePanes } from './panes.js';
+import { relativeFilePath } from './file-tree.js';
 
 export const LAYOUT_KEY = 'alp-web:layout';
 export const LAYOUT_VERSION = 1;
@@ -24,9 +26,13 @@ export const DOCK_WIDTH = Object.freeze({ initial: 320, min: 240, max: 720 });
 const MAX_WORKSPACES = 20;
 const MAX_TABS = 50;
 const ID_CHARS = 300;
+// A file tab's id is its relative path: longer than other ids, kept within reason.
+const PATH_CHARS = 1024;
+// A tab key (order, active): `file:` and such a path.
+const KEY_CHARS = PATH_CHARS + 5;
 
 /**
- * @typedef {{ session?: string, agents: string[], tasks: string[], panels: string[], order: string[], active?: string, panes?: import('./panes.js').Panes, at: number }} WorkspaceTabs
+ * @typedef {{ session?: string, agents: string[], tasks: string[], files?: string[], panels: string[], order: string[], active?: string, panes?: import('./panes.js').Panes, at: number }} WorkspaceTabs
  * @typedef {{ sidebarWidth?: number, dockWidth?: number, workspaces: Record<string, WorkspaceTabs> }} Layout
  * @typedef {{ getItem(key: string): string | null, setItem(key: string, value: string): void }} LayoutStorage
  */
@@ -35,9 +41,13 @@ const ID_CHARS = 300;
 const isRecord = value => !!value && typeof value === 'object' && !Array.isArray(value);
 /** @param {unknown} value */
 const id = value => typeof value === 'string' && value.trim() && value.length <= ID_CHARS ? value : undefined;
-/** @param {unknown} value @param {(entry: string) => boolean} [keep] */
-const ids = (value, keep = () => true) => Array.isArray(value)
-  ? [...new Set(value.map(id).filter(/** @returns {entry is string} */ entry => !!entry && keep(entry)))].slice(0, MAX_TABS)
+/** @param {unknown} value */
+const pathId = value => typeof value === 'string' && value.trim() && value.length <= PATH_CHARS ? value : undefined;
+/** @param {unknown} value */
+const keyId = value => typeof value === 'string' && value.trim() && value.length <= KEY_CHARS ? value : undefined;
+/** @param {unknown} value @param {(entry: string) => boolean} [keep] @param {(value: unknown) => string | undefined} [read] */
+const ids = (value, keep = () => true, read = id) => Array.isArray(value)
+  ? [...new Set(value.map(read).filter(/** @returns {entry is string} */ entry => !!entry && keep(entry)))].slice(0, MAX_TABS)
   : [];
 
 /** A width within its bounds, or undefined. @param {unknown} value @param {{ min: number, max: number }} bounds */
@@ -54,14 +64,17 @@ function parseWorkspace(value) {
   if (!isRecord(value)) return undefined;
   const record = /** @type {Record<string, unknown>} */ (value);
   const session = id(record.session);
-  const active = id(record.active);
+  const active = keyId(record.active);
   const panes = parsePanes(record.panes);
+  // File tabs: workspace-relative paths only, never one the host would refuse as blocked.
+  const files = ids(record.files, entry => relativeFilePath(entry) === entry && !blockedFilePath(entry), pathId);
   return {
     ...(session ? { session } : {}),
     agents: session ? ids(record.agents, entry => entry !== session) : [],
     tasks: ids(record.tasks),
     panels: ids(record.panels, entry => /** @type {readonly string[]} */ (PANEL_KINDS).includes(entry)),
-    order: ids(record.order),
+    order: ids(record.order, undefined, keyId),
+    ...(files.length ? { files } : {}),
     ...(active ? { active } : {}),
     ...(panes ? { panes } : {}),
     at: typeof record.at === 'number' && Number.isFinite(record.at) ? record.at : 0,

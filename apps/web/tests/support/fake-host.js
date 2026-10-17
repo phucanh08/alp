@@ -31,6 +31,30 @@ export class FakeHost {
     this.epoch = 'e1';
     /** projectRoot → relative file paths, for workspace.files.search (capability workspace.files). */
     this.files = new Map();
+    /**
+     * projectRoot → { relative path → node }, for workspace.files.list / read (capability
+     * workspace.files.read, permission files.read). A node: { kind: 'file' | 'directory', content?,
+     * size?, modifiedAt?, binary?, tooLarge?, ignored?, linked?, blocked? }; directories are implied
+     * by their files' paths too.
+     */
+    this.tree = new Map();
+  }
+
+  /** The entries of directory `directory` ('' the root) of a project's tree. */
+  #listTree(projectRoot, directory) {
+    const nodes = this.tree.get(projectRoot) ?? {};
+    const prefix = directory ? `${directory}/` : '';
+    const found = new Map();
+    for (const [path, node] of Object.entries(nodes)) {
+      if (!path.startsWith(prefix)) continue;
+      const rest = path.slice(prefix.length);
+      if (!rest) continue;
+      const [name, ...deeper] = rest.split('/');
+      const child = `${prefix}${name}`;
+      if (deeper.length) { if (!found.has(child)) found.set(child, { name, path: child, kind: 'directory', node: nodes[child] ?? {} }); continue; }
+      found.set(child, { name, path: child, kind: node.kind ?? 'file', node });
+    }
+    return [...found.values()];
   }
 
   count(method) { return this.calls.filter(call => call.method === method).length; }
@@ -389,6 +413,30 @@ export class FakeHost {
         const all = (this.files.get(params.projectRoot) ?? []).filter(path => path.toLowerCase().includes(query));
         const limit = params.limit ?? 30;
         return { files: all.slice(0, limit).map(path => ({ path })), ...(all.length > limit ? { truncated: true } : {}) };
+      }
+      case 'workspace.files.list': case 'workspace.files.read': {
+        if (!this.capabilities.includes('workspace.files.read')) throw Object.assign(new Error(`unknown method ${method}`), { code: -32601 });
+        if (!this.principal.permissions.includes('files.read')) throw Object.assign(new Error('The credential is not allowed this method.'), { code: 1003, data: { reason: 'grant', permission: 'files.read' } });
+        const path = params.path ?? '';
+        const refuse = (code, reason) => { throw Object.assign(new Error(`refused: ${reason}`), { code, data: { reason } }); };
+        if (typeof path !== 'string' || path.startsWith('/') || path.split('/').includes('..')) refuse(-32602, 'invalid_path');
+        const nodes = this.tree.get(params.projectRoot) ?? {};
+        const node = nodes[path];
+        if (node?.blocked || /(^|\/)(\.env[^/]*|\.git|\.alp)(\/|$)/.test(path)) refuse(1003, 'blocked_path');
+        if (node?.linked) refuse(1003, 'linked');
+        if (node?.ignored && !params.includeIgnored) refuse(1003, 'ignored');
+        if (method === 'workspace.files.list') {
+          if (path && !this.#listTree(params.projectRoot, path).length && node?.kind !== 'directory') refuse(1001, 'not_found');
+          const entries = this.#listTree(params.projectRoot, path)
+            .filter(entry => !entry.node.blocked && !entry.node.linked && (params.includeIgnored || !entry.node.ignored))
+            .sort((a, b) => a.kind !== b.kind ? (a.kind === 'directory' ? -1 : 1) : a.name < b.name ? -1 : 1)
+            .map(({ node: entryNode, ...entry }) => ({ ...entry, ...(entry.kind === 'file' ? { size: entryNode.size ?? (entryNode.content ?? '').length } : {}), ...(entryNode.modifiedAt ? { modifiedAt: entryNode.modifiedAt } : {}) }));
+          return { entries, ...(this.extraEntries ? { entries: [...entries, ...this.extraEntries] } : {}) };
+        }
+        if (!node || node.kind === 'directory') refuse(1001, 'not_found');
+        if (node.binary) refuse(1000, 'binary');
+        if (node.tooLarge) refuse(1000, 'too_large');
+        return { path, content: node.content ?? '', size: node.size ?? (node.content ?? '').length, ...(node.modifiedAt ? { modifiedAt: node.modifiedAt } : {}) };
       }
       case 'task.list': return { projectRoot: params.projectRoot, tasks: structuredClone(this.tasks), unreadable: [], revision: `r${this.taskRev}` };
       case 'task.create': {
