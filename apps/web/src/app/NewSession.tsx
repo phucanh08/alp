@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Brain, ChevronDown, CircleAlert, Cpu, Users } from 'lucide-react';
 import { describe } from '../lib/errors.js';
 import { can } from '../lib/gateway.js';
-import { buildSpec, effectiveModel, effortLabel, effortOptions, initialChoices, previewBase, previewRows, resolveThinking, startNewSession, startTeam, type Choices, type Preview } from '../lib/new-session.js';
+import { buildSpec, effectiveModel, effortLabel, effortOptions, initialChoices, previewBase, previewRows, resolveThinking, startNewSession, startTeam, teamMenu, unlistedTeam, type Choices, type Preview } from '../lib/new-session.js';
 import { Menu } from '../components/ui/menu';
 import { Input } from '../components/ui/input';
 import { Spinner } from '../components/ui/spinner';
@@ -90,13 +90,37 @@ export function NewSessionScreen() {
   const creating = !!busy.create;
   const canWrite = can(principal ?? undefined, 'session.write');
   const blocked = !canWrite ? 'Your access token can view sessions but not start them.' : undefined;
-  const teams = catalog.teams.length ? catalog.teams : trusted?.teams ?? [];
+  const listed = catalog.teams.length ? catalog.teams : trusted?.teams ?? [];
+  // A team a preview named that the list lacks (`custom`) stays in the menu once seen in this
+  // workspace, so choosing another team does not lose it. With a team already chosen (a remembered
+  // one), the previews never show the workspace's default, so it is asked for once (no workflow).
+  const seen = unlistedTeam(listed, trusted);
+  const [kept, setKept] = React.useState<{ workspace: string | null; team?: { id: string; label: string } }>();
+  const keptHere = kept?.workspace === workspace ? kept : undefined;
+  React.useEffect(() => {
+    if (seen) setKept(current => current?.workspace === workspace && current.team?.id === seen.id && current.team.label === seen.label ? current : { team: seen, workspace });
+  }, [seen?.id, seen?.label, workspace]); // eslint-disable-line react-hooks/exhaustive-deps
+  const askDefault = !!workspace && connection.phase === 'open' && !!choices.team && !keptHere && catalog.status === 'ready';
+  React.useEffect(() => {
+    if (!askDefault || !workspace || controller.previewBlock()) return;
+    const abort = new AbortController();
+    controller.previewSession(buildSpec(workspace, {}), { signal: abort.signal }).then(
+      answer => {
+        if (abort.signal.aborted) return;
+        const team = unlistedTeam(catalog.teams.length ? catalog.teams : answer.teams, answer);
+        setKept(current => current?.workspace === workspace ? current : { workspace, ...(team ? { team } : {}) });
+      },
+      () => {},
+    );
+    return () => abort.abort();
+  }, [askDefault, workspace, controller]); // eslint-disable-line react-hooks/exhaustive-deps
+  const teams = teamMenu(listed, seen ?? keptHere?.team);
   // The team is always sent: the session gets the team a preview of these choices named (else the
   // first listed), which is what the person saw. alpd's preview and create resolve the same default
   // (t-5586), so sending it back, `custom` included, runs what the preview showed.
   const resolved = startTeam({ chosen: choices.team, previewTeam: trusted?.team, previewSettled: settled, previewError: preview.error,
     previewBlocked: preview.status === 'blocked', previewNeedsRead: !can(principal ?? undefined, 'session.read'),
-    teams, teamsKnown: catalog.teamsKnown, teamsUnavailable: catalog.teamsUnavailable });
+    teams: listed, teamsKnown: catalog.teamsKnown, teamsUnavailable: catalog.teamsUnavailable });
   const stuck = 'stuck' in resolved && resolved.stuck ? resolved.wait : undefined;
   // Retry asks the preview again and, when team.list failed, the team list too.
   const retry = () => { preview.retry(); void controller.retryTeams(); };

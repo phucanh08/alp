@@ -20,6 +20,9 @@
 const RUNTIME_LABELS = /** @type {Record<string, string>} */ ({ codex: 'Codex', claude: 'Claude', acp: 'ACP', antigravity: 'Antigravity' });
 const MODE_LABELS = /** @type {Record<string, string>} */ ({ 'read-only': 'Read only', 'workspace-write': 'Workspace write', 'full-access': 'Full access' });
 
+/** A team the workspace does not list: `custom` runs settings' delegation graph (ALPD §42). @param {string} team */
+const unlistedLabel = team => team === 'custom' ? 'Custom' : team;
+
 /** @param {unknown} value */
 const text = value => typeof value === 'string' && value.trim() ? value : undefined;
 
@@ -153,7 +156,7 @@ export function previewRows(preview, models = []) {
   const model = effectiveModel(models, undefined, preview);
   /** @type {Array<{ key: string, label: string, value: string }>} */
   const rows = [
-    { key: 'team', label: 'Team', value: preview.teamLabel ?? preview.teams.find(entry => entry.id === preview.team)?.label ?? preview.team },
+    { key: 'team', label: 'Team', value: preview.teamLabel ?? preview.teams.find(entry => entry.id === preview.team)?.label ?? unlistedLabel(preview.team) },
     { key: 'agent', label: 'Agent', value: preview.agent },
   ];
   if (preview.runtime) rows.push({ key: 'runtime', label: 'Runtime', value: RUNTIME_LABELS[preview.runtime] ?? preview.runtime });
@@ -193,6 +196,28 @@ export function previewBase(spec) {
  * project.read, or team.list failed (message: its error; Retry asks again).
  * @typedef {{ reason: 'capability' | 'permission' | 'failed', message?: string }} TeamsUnavailable
  */
+
+/**
+ * The team a preview named that the workspace's team list lacks (`custom`, for settings without
+ * workflow.mode, t-5586), as a menu entry; undefined when it is listed or there is no preview.
+ * @param {Array<{ id: string }>} teams @param {Preview | undefined} preview
+ * @returns {{ id: string, label: string } | undefined}
+ */
+export function unlistedTeam(teams, preview) {
+  if (!preview || teams.some(entry => entry.id === preview.team)) return undefined;
+  return { id: preview.team, label: preview.teamLabel ?? unlistedLabel(preview.team) };
+}
+
+/**
+ * The Team menu: the workspace's teams, led by an unlisted one a preview named (kept after
+ * another team is chosen, so it can be chosen back).
+ * @template {{ id: string, label: string }} T
+ * @param {T[]} teams @param {{ id: string, label: string } | undefined} unlisted
+ * @returns {Array<T | { id: string, label: string }>}
+ */
+export function teamMenu(teams, unlisted) {
+  return unlisted && !teams.some(entry => entry.id === unlisted.id) ? [unlisted, ...teams] : teams;
+}
 
 /**
  * The team a session is started with, or why Start must wait. One is always sent (the team the

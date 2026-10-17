@@ -87,7 +87,8 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
   chmodSync(FAKE_CODEX, 0o755);
 
   // Two projects: one granted to the web credentials, one never granted (it must stay invisible).
-  const projects = { main: path.join(directory, 'projects', 'shop'), other: path.join(directory, 'projects', 'secret') };
+  // A third names no team in its settings, so its sessions run the custom graph (no session starts there).
+  const projects = { main: path.join(directory, 'projects', 'shop'), other: path.join(directory, 'projects', 'secret'), custom: path.join(directory, 'projects', 'plain') };
   for (const project of Object.values(projects)) {
     await mkdir(project, { recursive: true });
     await run(process.execPath, [CLI, 'init', project], { env });
@@ -97,7 +98,7 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     const settings = provider === 'fake'
       ? { workflow: { mode: 'pho', supervisor: false }, team: { pho: { main: { profiles: ['codex:gpt-5.6-sol'] } }, cafe: { main: { profiles: ['codex:gpt-5.6-sol'] } } } }
       : { workflow: { supervisor: false } };
-    await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify(settings, null, 2));
+    await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify(project === projects.custom ? { workflow: { supervisor: false } } : settings, null, 2));
   }
 
   const logs = { alpd: path.join(directory, 'alpd.log'), gateway: path.join(directory, 'gateway.log') };
@@ -125,6 +126,7 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     viewer: await credential('viewer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'project.read']),
     readOnlyMode: await credential('read-only-mode', ['--workspace', projects.main, '--mode', 'read-only']),
     other: await credential('other', ['--workspace', projects.other]),
+    custom: await credential('custom', ['--workspace', projects.custom]),
     revocable: await credential('revocable', ['--workspace', projects.main]),
   };
   const tokens = Object.fromEntries(Object.entries(created).map(([name, entry]) => [name, entry.token]));

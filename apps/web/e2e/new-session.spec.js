@@ -86,6 +86,39 @@ test('pick team, model and thinking with a live preview; the first message start
   await expect(page.getByRole('navigation').getByText('Empty start', { exact: true })).toHaveCount(1);
 });
 
+test('a workspace whose settings name no team offers Custom, which can be chosen back after another team', async ({ page }) => {
+  await connect(page, world, world.tokens.custom);
+  await page.getByRole('navigation').getByRole('button', { name: 'New session' }).click();
+  await expect(screen(page)).toBeVisible();
+  const menu = page.getByRole('menu', { name: 'Team' });
+  const item = name => menu.getByRole('menuitemradio', { name, exact: true });
+  await expect(screen(page).getByRole('button', { name: 'Team' })).toContainText('Custom');
+  await screen(page).getByRole('button', { name: 'Team' }).click();
+  await expect(item('Custom')).toHaveAttribute('aria-checked', 'true');
+  await item('Phở').click();
+  await expect(preview(page).getByTestId('preview-team')).toHaveText('Phở');
+  await screen(page).getByRole('button', { name: 'Team' }).click();
+  await expect(item('Custom')).toHaveAttribute('aria-checked', 'false');
+  await item('Custom').click();
+  await expect(screen(page).getByRole('button', { name: 'Team' })).toContainText('Custom');
+  await expect(preview(page)).toHaveAttribute('aria-busy', 'false');
+  await expect(preview(page).getByTestId('preview-team')).toHaveText('Custom');
+  await expect(screen(page).getByRole('button', { name: 'Start session' })).toBeEnabled();
+
+  // A returning person whose last session ran Phở starts with Phở chosen: Custom is still offered.
+  await page.evaluate(() => localStorage.setItem('alp-web:preferences', JSON.stringify({ v: 1, sendBehavior: 'steer', theme: 'system', newSession: { team: 'pho' } })));
+  await page.reload();
+  await connect(page, world, world.tokens.custom);
+  await page.getByRole('navigation').getByRole('button', { name: 'New session' }).click();
+  await expect(screen(page).getByRole('button', { name: 'Team' })).toContainText('Phở');
+  await screen(page).getByRole('button', { name: 'Team' }).click();
+  await expect(item('Phở')).toHaveAttribute('aria-checked', 'true');
+  await item('Custom').click();
+  await expect(preview(page).getByTestId('preview-team')).toHaveText('Custom');
+  // Nothing was started in this workspace.
+  expect(await world.nonFakeSessions()).toEqual([]);
+});
+
 test('a token without session.write cannot open the New session screen', async ({ page }) => {
   await connect(page, world, world.tokens.viewer);
   // The sidebar's New session is disabled; ⌘N does nothing either.
