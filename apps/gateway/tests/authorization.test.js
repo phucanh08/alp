@@ -589,6 +589,75 @@ test('library.get errors from alpd carry no host path or file content to the cli
   ]);
 });
 
+// The same holds for every other forwarded method that reads the host's library, settings or
+// task files (t-70c4): alpd quotes a file that does not parse and names its host path, in the
+// message and sometimes in data. Readers pass on the code and the reason only; session methods,
+// which resolve teams, agents and providers from the library, keep alpd's protocol refusals (a
+// reason the contract names) and answer every other failure with a fixed message.
+test('errors of library, team, model, settings and session readers carry no host path or file content', async t => {
+  const { daemon, sdk, a } = await world(t);
+  const quote = tag => `/home/me/.alp/${tag}.json: Unexpected token 'S', ..."T": ${S(tag)}"... is not valid JSON`;
+  const raw = message => ({ code: 1000, message });
+  const failure = (tag, code, reason) => ({ code, message: quote(tag), data: { ...(reason ? { reason } : {}), file: `/home/me/${S(`${tag}-data`)}` } });
+  const cases = [
+    ['library.list', { kind: 'mcp', projectRoot: a }, failure('library-list', 1000, 'unreadable'), { code: 1000, message: 'The mcp entries cannot be read on the daemon host', data: { reason: 'unreadable' } }],
+    ['library.list', { kind: 'agents', projectRoot: a }, failure('library-list-raw', 1000), { code: 1000, message: 'The agents entries cannot be read on the daemon host', data: undefined }],
+    ['team.list', { projectRoot: a }, failure('team-list', -32602, 'invalid_entry'), { code: -32602, message: 'The teams cannot be read on the daemon host', data: { reason: 'invalid_entry' } }],
+    ['library.models', {}, failure('library-models', -32602, 'invalid_entry'), { code: -32602, message: 'The models cannot be read on the daemon host', data: { reason: 'invalid_entry' } }],
+    ['settings.language.get', {}, failure('settings', 1000, 'unreadable'), { code: 1000, message: 'The language setting cannot be read on the daemon host', data: { reason: 'unreadable' } }],
+    // Session methods: alpd's message picks a fixed template; the names are the client's own.
+    ['session.preview', { spec: { cwd: a, workflow: 'broken' } }, raw(`/home/me/.alp/teams/broken/team.json: Unexpected token 'S', "{"k": ${S('team-quote')}"... is not valid JSON`), { code: 1000, message: "Team 'broken' has a configuration the daemon host cannot read", data: undefined }],
+    ['session.preview', { spec: { cwd: a, workflow: 'gone' } }, raw(`Team 'gone' not found; teams: pho, cafe, ${S('team-list')}`), { code: 1000, message: "Team 'gone' is not available on the daemon host", data: undefined }],
+    ['session.preview', { spec: { cwd: a } }, raw(`built-in teams/pho/team.json: ${S('builtin-team')}`), { code: 1000, message: 'The team has a configuration the daemon host cannot read', data: undefined }],
+    ['session.create', { spec: { cwd: a, agent: 'broken' } }, raw(`/home/me/.alp/agents/broken/agent.json: Unexpected token 'S', "{"k": ${S('agent-quote')}"... is not valid JSON`), { code: 1000, message: "Agent 'broken' has a configuration the daemon host cannot read", data: undefined }],
+    ['session.create', { spec: { cwd: a, agent: 'ghost' } }, raw(`Agent 'ghost' not found: it is not built in, nor under /home/me/${S('agents-dir')}/agents or ${a}/.alp/agents`), { code: 1000, message: "Agent 'ghost' is not available on the daemon host", data: undefined }],
+    ['session.create', { spec: { cwd: a, model: 'acp:broken/m1' } }, raw(`/home/me/.alp/providers/broken.json: Unexpected token 'S', "{"k": ${S('provider-quote')}"... is not valid JSON`), { code: 1000, message: "Provider 'broken' has a configuration the daemon host cannot read", data: undefined }],
+    ['session.create', { spec: { cwd: a, model: 'claude:claude-opus-5-5' } }, raw('Claude executable not found on PATH; set ALP_CLAUDE_BIN to an absolute native executable'), { code: 1000, message: 'The claude CLI is not installed on the daemon host', data: undefined }],
+    ['session.create', { spec: { cwd: a } }, raw(`spawn /home/me/${S('bin')}/codex ENOENT`), { code: 1000, message: 'The agent CLI is not installed on the daemon host', data: undefined }],
+    ['session.create', { spec: { cwd: a, model: 'acp:broken' } }, failure('session-create-entry', -32602, 'invalid_entry'), { code: -32602, message: 'session.create failed on the daemon host; the daemon log there may have details', data: { reason: 'invalid_entry' } }],
+    // configure takes no model: the provider goes unnamed.
+    ['session.configure', { sessionId: 'sa', mode: 'workspace-write' }, raw(`/home/me/.alp/providers/broken.json: ${S('configure-quote')}`), { code: 1000, message: 'The provider has a configuration the daemon host cannot read', data: undefined }],
+    ['session.preview', { spec: { cwd: a } }, failure('session-preview', 1000), { code: 1000, message: 'session.preview failed on the daemon host; the daemon log there may have details', data: undefined }],
+    ['session.create', { spec: { cwd: a } }, failure('session-persist', 1000, 'persistence_failed'), { code: 1000, message: 'session.create failed on the daemon host; the daemon log there may have details', data: { reason: 'persistence_failed' } }],
+    // Any forwarded method: a refusal whose reason marks a host file or alpd's state loses its message.
+    ['session.prompt', { sessionId: 'sa', clientMessageId: 'm-1', content: [{ type: 'text', text: 'x' }] }, failure('session-prompt', 1000, 'persistence_failed'), { code: 1000, message: 'session.prompt failed on the daemon host', data: { reason: 'persistence_failed' } }],
+    ['session.rename', { sessionId: 'sa', title: 'x' }, failure('session-rename', 1000, 'persistence_failed'), { code: 1000, message: 'session.rename failed on the daemon host', data: { reason: 'persistence_failed' } }],
+    ['session.archive', { sessionId: 'sa' }, failure('session-archive', 1000, 'persistence_failed'), { code: 1000, message: 'session.archive failed on the daemon host', data: { reason: 'persistence_failed' } }],
+  ];
+  const { client } = await sdk('alice');
+  const seen = [];
+  for (const [method, params, thrown, expected] of cases) {
+    daemon.state.handlers[method] = () => { throw thrown; };
+    const error = await client.request(method, params).then(() => assert.fail(`${method} answered`), caught => caught);
+    seen.push({ code: error.code, message: error.message, data: error.data });
+    assert.deepEqual(seen.at(-1), expected, `${method} ${JSON.stringify(params)}`);
+  }
+  assert.ok(!JSON.stringify(seen).includes('SENTINEL') && !JSON.stringify(seen).includes('/home/me'), JSON.stringify(seen));
+  // A protocol refusal of a session method, with a reason the contract names, is passed on as alpd gave it.
+  daemon.state.handlers['session.create'] = () => { throw { code: 1004, message: 'Message m-1 was already sent with different content', data: { reason: 'key_conflict' } }; };
+  await assert.rejects(client.request('session.create', { spec: { cwd: a } }), error => error.code === 1004 && error.message === 'Message m-1 was already sent with different content' && error.data?.reason === 'key_conflict');
+});
+
+// task.list answers task files that do not parse with V8's quote of the file: the client learns
+// which file, not what it holds.
+test('task.list names unreadable task files without their content', async t => {
+  const { daemon, sdk, a } = await world(t);
+  daemon.state.handlers['task.list'] = ({ projectRoot }) => ({ projectRoot, tasks: [], revision: 'r1', unreadable: [
+    { file: '.alp/tasks/t-aaaa.json', error: `Unexpected token 'S', "{"x": ${S('task-quote')}"... is not valid JSON` },
+    { file: `/home/me/${S('task-abs')}.json`, error: S('task-abs-error') },
+    { error: S('task-nofile') },
+  ] });
+  const { client } = await sdk('alice');
+  const answer = await client.request('task.list', { projectRoot: a });
+  assert.ok(!JSON.stringify(answer).includes('SENTINEL') && !JSON.stringify(answer).includes('/home/me'), JSON.stringify(answer));
+  assert.deepEqual(answer.unreadable, [
+    { file: '.alp/tasks/t-aaaa.json', error: 'This task file cannot be read on the daemon host' },
+    { error: 'This task file cannot be read on the daemon host' },
+    { error: 'This task file cannot be read on the daemon host' },
+  ]);
+  assert.equal(answer.revision, 'r1');
+});
+
 test('the hello names the host as alpd does, and nothing when alpd sends no usable name', async t => {
   assert.equal(hostLabel('  build-host.local  '), 'build-host.local');
   for (const value of [undefined, 42, '', '   ', 'a\nb', 'x\u0000', 'a\u202eb', 'a\u200bb', 'h'.repeat(254)]) assert.equal(hostLabel(value), undefined, JSON.stringify(value));

@@ -386,6 +386,62 @@ test('project.read gets no MCP, hook or provider secret from a real alpd: librar
   assert.equal(typeof preview, 'object');
 });
 
+// t-70c4: a library, settings or task file that does not parse makes a real alpd answer its host
+// path and V8's quote of the file. Through the gateway the code and the reason remain.
+test('a malformed library or task file reaches a remote client without its host path or content', { skip, timeout: 60_000 }, async t => {
+  const w = await world(t);
+  const a = w.projects.a;
+  const broken = tag => `{"key": SENTINEL-${tag}-secret}`;
+  await mkdir(path.join(w.home, 'providers'), { recursive: true });
+  await mkdir(path.join(w.home, 'teams/broken'), { recursive: true });
+  await mkdir(path.join(w.home, 'agents/broken'), { recursive: true });
+  await mkdir(path.join(a, '.alp/tasks'), { recursive: true });
+  await writeFile(path.join(w.home, 'providers/broken.json'), broken('provider'));
+  await writeFile(path.join(w.home, 'teams/broken/team.json'), broken('team'));
+  await writeFile(path.join(w.home, 'agents/broken/AGENT.md'), '# Broken');
+  await writeFile(path.join(w.home, 'agents/broken/agent.json'), broken('agent'));
+  await writeFile(path.join(a, '.alp/tasks/t-bad0.json'), broken('task'));
+  const calls = [
+    ['library.models', {}],
+    ['library.get', { kind: 'providers', name: 'broken', projectRoot: a }],
+    ['session.preview', { spec: { cwd: a, workflow: 'broken' } }],
+    ['session.preview', { spec: { cwd: a, agent: 'broken' } }],
+    ['session.preview', { spec: { cwd: a, model: 'acp:broken' } }],
+  ];
+  const answer = (client, method, params) => client.request(method, params).then(result => ({ result }), error => ({ code: error.code, message: error.message, data: error.data }));
+
+  // A local client gets alpd's own message: the fixture does make alpd quote the files.
+  const local = new AlpRpcClient(await connectSocket(w.socket));
+  t.after(() => local.close());
+  await hello(local);
+  const direct = [];
+  for (const [method, params] of calls) direct.push(await answer(local, method, params));
+  direct.push(await answer(local, 'task.list', { projectRoot: a }));
+  // V8 quotes about ten characters around the fault: here `SENTINEL-` and the tag's first letter.
+  for (const [index, entry] of direct.entries()) {
+    assert.ok(JSON.stringify(entry).includes('SENTINEL'), `alpd quotes the file to a local client: ${JSON.stringify(entry)}`);
+    if (!entry.result) assert.ok(entry.message.includes(w.home), `alpd names the host path to a local client (${index})`);
+  }
+
+  const owner = new AlpRpcClient(await w.open(w.tokens.alice));
+  t.after(() => owner.close());
+  await hello(owner);
+  const remote = [];
+  for (const [method, params] of calls) remote.push(await answer(owner, method, params));
+  const tasks = await owner.request('task.list', { projectRoot: a });
+  const seen = JSON.stringify([remote, tasks]);
+  assert.ok(!seen.includes('SENTINEL') && !seen.includes(w.home), seen);
+  for (const [index, entry] of remote.entries()) assert.equal(typeof entry.code, 'number', `${calls[index][0]} still fails: ${JSON.stringify(entry)}`);
+  assert.equal(remote[0].data?.reason, 'invalid_entry', 'the reason stays for the UI');
+  // A session spec that fails on a library file says which entry, by the name the client sent.
+  assert.deepEqual(remote.slice(2).map(entry => entry.message), [
+    "Team 'broken' has a configuration the daemon host cannot read",
+    "Agent 'broken' has a configuration the daemon host cannot read",
+    "Provider 'broken' has a configuration the daemon host cannot read",
+  ]);
+  assert.deepEqual(tasks.unreadable, [{ file: path.join('.alp', 'tasks', 't-bad0.json'), error: 'This task file cannot be read on the daemon host' }]);
+});
+
 // docs/protocol/alp-json-rpc-v1.md §12.2, §12.3 against a real alpd: a watch with turns hears a
 // granted root's turn end and not another workspace's; file search lists names of the granted
 // workspace only, never through a link out of it, and not for another credential's workspace.
