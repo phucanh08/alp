@@ -9,6 +9,7 @@ import { Button } from '../components/ui/button';
 import { NativeSelect } from '../components/ui/input';
 import { Spinner } from '../components/ui/spinner';
 import { baseName, modeLabel } from '../lib/format';
+import { HIDDEN, libraryContentParts } from '../lib/library.js';
 import { cn } from '../lib/utils';
 import { useAppState, useController } from './store';
 import { useNotificationPermission } from './attention';
@@ -172,9 +173,14 @@ function Appearance() {
   );
 }
 
+/** The host's label: its machine name from the hello (Paseo patch 0017), else the gateway's address. */
+function hostLabel(connection: { gateway: string; hostname?: string }) {
+  return connection.hostname ?? connection.gateway.replace(/^https?:\/\//, '');
+}
+
 function About() {
   const { connection } = useAppState();
-  const host = connection.gateway.replace(/^https?:\/\//, '');
+  const host = hostLabel(connection);
   return (
     <>
       <Section title="About">
@@ -195,7 +201,8 @@ function Overview() {
   return (
     <>
       <Section title="Host">
-        <Row first title="ALP">{connection.daemonVersion ?? 'unknown'}</Row>
+        <Row first title="Machine" hint="The host's name, as it reports it.">{connection.hostname ?? 'unknown'}</Row>
+        <Row title="ALP">{connection.daemonVersion ?? 'unknown'}</Row>
         <Row title="Gateway"><span className="break-all font-mono text-xs">{connection.gateway}</span></Row>
         <Row title="Agents' language" hint="Set on the host with alp; read only here.">
           {settings.status === 'loading' ? <Spinner label="Loading…" className="text-xs" /> : settings.language ? `${settings.language.applies}${settings.language.language ? '' : ' (default)'}` : 'Not available'}
@@ -270,10 +277,52 @@ function Connections() {
 
 type LibraryKind = 'teams' | 'agents' | 'skills' | 'hooks' | 'mcp' | 'providers';
 
+type LibraryEntry = Awaited<ReturnType<ReturnType<typeof useController>['getLibraryEntry']>>;
+
+/** One entry's content, read only: Markdown files as text, configuration as JSON with secrets hidden. */
+function LibraryEntryView({ kind, name, onClose }: { kind: LibraryKind; name: string; onClose: () => void }) {
+  const controller = useController();
+  const [state, setState] = React.useState<{ status: 'loading' | 'ready' | 'error'; entry?: LibraryEntry; error?: string }>({ status: 'loading' });
+  React.useEffect(() => {
+    let live = true;
+    setState({ status: 'loading' });
+    controller.getLibraryEntry(kind, name).then(
+      entry => { if (live) setState({ status: 'ready', entry }); },
+      error => { if (live) setState({ status: 'error', error: describe(error).message }); },
+    );
+    return () => { live = false; };
+  }, [controller, kind, name]);
+  const entry = state.entry;
+  return (
+    <Section title={name} action={<Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onClose}>Close</Button>}>
+      <div data-testid="library-entry" aria-label={`${name} content`} role="group">
+        {state.status === 'loading' ? <div className="p-4"><Spinner label="Loading…" className="text-xs" /></div> : null}
+        {state.status === 'error' ? <p role="alert" className="p-4 text-xs text-destructive">{state.error}</p> : null}
+        {entry ? (
+          <>
+            <Row first title="Source" hint={entry.usedBy.length ? `Used by ${entry.usedBy.join(', ')}` : undefined}>
+              <span className="text-xs">{entry.source}{entry.overrides ? ` · overrides ${entry.overrides}` : ''}</span>
+            </Row>
+            {entry.librarySkills?.length ? <Row title="Skills the library gives it">{entry.librarySkills.join(', ')}</Row> : null}
+            {libraryContentParts(entry.content).map(part => (
+              <div key={part.key} className="border-t border-border p-4">
+                <div className="mb-2 font-mono text-xs text-muted-foreground">{part.label}</div>
+                <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-secondary p-3 font-mono text-xs text-foreground">{part.text}</pre>
+              </div>
+            ))}
+            {entry.secrets.length ? <p className="border-t border-border px-4 py-3 text-xs text-muted-foreground">{entry.secrets.length === 1 ? 'One value that can hold a secret is' : `${entry.secrets.length} values that can hold secrets are`} shown as {HIDDEN}: the gateway keeps them on the host.</p> : null}
+          </>
+        ) : null}
+      </div>
+    </Section>
+  );
+}
+
 function Library({ kind, noun }: { kind: LibraryKind; noun: string }) {
   const controller = useController();
   const { workspace } = useAppState();
   const [state, setState] = React.useState<{ status: 'loading' | 'ready' | 'error'; entries: any[]; error?: string }>({ status: 'loading', entries: [] });
+  const [open, setOpen] = React.useState<string | null>(null);
   const blocked = controller.libraryBlock();
   const load = React.useCallback(() => {
     let live = true;
@@ -285,6 +334,7 @@ function Library({ kind, noun }: { kind: LibraryKind; noun: string }) {
     return () => { live = false; };
   }, [controller, kind]);
   React.useEffect(() => blocked ? undefined : load(), [load, blocked, workspace]);
+  React.useEffect(() => { setOpen(null); }, [kind, workspace]);
   if (blocked) return <Unavailable what={`Listing ${noun}`} why={blocked} />;
   return (
     <>
@@ -294,13 +344,18 @@ function Library({ kind, noun }: { kind: LibraryKind; noun: string }) {
         {state.status === 'error' ? <p role="alert" className="p-4 text-xs text-destructive">{state.error}</p> : null}
         {state.status === 'ready' && !state.entries.length ? <Row first title={`No ${noun}`} /> : null}
         {state.entries.map((entry, index) => (
-          <Row key={`${entry.source}:${entry.name}`} first={index === 0} title={<span className="font-mono text-[13px]">{entry.name}</span>}
-            hint={[entry.description, entry.usedBy?.length ? `Used by ${entry.usedBy.join(', ')}` : ''].filter(Boolean).join(' · ') || undefined}>
-            <span className="text-xs">{entry.source}{entry.overrides ? ` · overrides ${entry.overrides}` : ''}</span>
-          </Row>
+          <button key={`${entry.source}:${entry.name}`} type="button" onClick={() => setOpen(current => current === entry.name ? null : entry.name)}
+            aria-expanded={open === entry.name} data-testid={`library-row-${entry.name}`}
+            className={cn('block w-full text-left hover:bg-sidebar-hover', focusRing, open === entry.name && 'bg-sidebar-hover')}>
+            <Row first={index === 0} title={<span className="font-mono text-[13px]">{entry.name}</span>}
+              hint={[entry.description, entry.usedBy?.length ? `Used by ${entry.usedBy.join(', ')}` : ''].filter(Boolean).join(' · ') || undefined}>
+              <span className="text-xs">{entry.source}{entry.overrides ? ` · overrides ${entry.overrides}` : ''}</span>
+            </Row>
+          </button>
         ))}
       </Section>
-      <Unavailable what={`Viewing or editing ${noun}' content`} why="Entries can hold secrets (MCP URLs and commands, provider arguments) and commands the host runs, so the gateway sends names only. Edit them on the host with alp." />
+      {open ? <LibraryEntryView kind={kind} name={open} onClose={() => setOpen(null)} /> : null}
+      <Unavailable what={`Editing ${noun}`} why={`Open an entry to read it. Values that can hold secrets (environment, headers, MCP URLs and arguments, hook commands) show as ${HIDDEN}. Changes configure commands the host runs, so edit them on the host with alp.`} />
     </>
   );
 }
@@ -351,7 +406,7 @@ function NavItem({ page, label, icon: IconComponent, selected, onSelect, mobile 
 
 function SettingsNav({ page, onSelect, mobile }: { page: Page | null; onSelect: (page: Page) => void; mobile: boolean }) {
   const { connection } = useAppState();
-  const host = connection.gateway.replace(/^https?:\/\//, '');
+  const host = hostLabel(connection);
   return (
     <>
       <div className="flex flex-col gap-0.5 px-2 py-2">
@@ -360,7 +415,7 @@ function SettingsNav({ page, onSelect, mobile }: { page: Page | null; onSelect: 
       </div>
       <div className="flex flex-col gap-0.5 px-2 py-2">
         <p className="px-2 py-1 text-sm text-extra-muted">Host</p>
-        <div className="flex min-h-7 items-center gap-2 px-2 py-1 text-sm" title={connection.gateway}>
+        <div className="flex min-h-7 items-center gap-2 px-2 py-1 text-sm" title={connection.gateway} data-testid="settings-host-label">
           <span className="flex size-4 items-center justify-center"><span className={cn('size-2 rounded-full', connection.phase === 'open' ? 'bg-dot-success' : 'bg-dot-warning')} /></span>
           <span className="min-w-0 flex-1 truncate text-foreground">{host}</span>
         </div>

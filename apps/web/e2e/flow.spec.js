@@ -176,7 +176,7 @@ test('settings: the old app\'s layout, what the token allows, names from the lib
 
   await settings.getByTestId('settings-alp-agents').click();
   await expect(settings).toContainText('main');
-  await expect(settings).toContainText('Viewing or editing agents\' content is not available in this beta');
+  await expect(settings).toContainText('Editing agents is not available in this beta');
 
   await settings.getByTestId('settings-usage').click();
   await expect(settings).toContainText('Usage and limits is not available in this beta');

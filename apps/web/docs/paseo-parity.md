@@ -50,7 +50,7 @@ Abbreviations: P: = `packages/app/src/` of Paseo; W: = `apps/web/src/`.
 |---|---|
 | Chat/timeline | Done in this slice: the mode control (menu and Shift+Tab), the Tasks pill, the question card in the stream with Paseo's select-then-Submit flow, scroll-to-bottom, Cmd/Ctrl+L and Escape, and a race in sending fixed. Still missing: per-tool detail views (edit/diff/read/search), virtualization and paging of long histories, chat find (Cmd+F), chat outline, the text reveal, attachments, slash commands, dictation and voice, the context meter, rewind and fork. |
 | Sidebar/workspace | Done in t-7679.2: Paseo's workspace keyboard shortcuts and their Shortcuts dialog, History with the archived sessions and Unarchive, attention on every session (`question.list`), the session title on its tab. Done in t-7679.6: History's Load more and host-side search (`session.list` pages), attention from `question.watch` events in place of the 5 s `question.list` poll. Done in t-7679.5: the tab context menu, drag order and tabs kept across reload, resizable sidebar and dock, the command center (⌘K), favicon and title status, browser notifications when a session waits. Done in t-7679.9: split panes, the command center's ALP commands (Open ALP tasks, its full-screen board) and pane commands. |
-| Settings | Done in t-7679.3: settings kept across reload (localStorage, never the token), Appearance › Theme (System/Light/Dark with Paseo's light palette), Reset, the New session screen (Paseo's new agent tab: first message, team/model/thinking/permissions controls, `session.preview`, remembered choices). Still missing: fonts and sizes, Paseo's other themes, chat display settings, library content (blocked: GW denies `library.get/save`), providers (blocked: §14), client diagnostics. |
+| Settings | Done in t-7679.3: settings kept across reload (localStorage, never the token), Appearance › Theme (System/Light/Dark with Paseo's light palette), Reset, the New session screen (Paseo's new agent tab: first message, team/model/thinking/permissions controls, `session.preview`, remembered choices). Still missing: fonts and sizes, Paseo's other themes, chat display settings, editing library content (blocked: the gateway denies `library.save`; viewing done in t-7679.14), providers (blocked: §14), client diagnostics. |
 | Rest | i18n (Vietnamese/English). Stacking toasts. Error boundary. (Browser notifications when a session waits: done in t-7679.5.) |
 
 ## 2. Chat/timeline and composer
@@ -157,8 +157,8 @@ The column **apps/web** gives the state before t-7679.3; **Now** gives it after 
 | Diagnostics | P:components/app-diagnostic-sheet.tsx | Unavailable | partial | P1 | — |
 | About | P:settings-screen.tsx AboutSection; patch 0007 | Có | yes | none | — |
 | Host Overview: name, color, restart, remove | P:screens/settings/host-page.tsx | Một phần | partial | P1 | — |
-| Machine name as the host label (patch 0017) | patch 0017 | Thiếu | no: no hostname in hello | P2 | — |
-| Library screens: Templates, Agents, Skills, Hooks, MCP (patches 0015, 0016) | patches 0015/0016 | Một phần: names only | GW denies `library.get/save` | P1 | — |
+| Machine name as the host label (patch 0017) | patch 0017 | Thiếu | yes: `hostname` in hello (alpd `os.hostname()`, gateway `hostLabel`) | P2 | **Đã làm** (t-7679.14): the Settings sidebar's host row, About's connected host, Host › Overview's Machine row and the sidebar host title use it; the gateway address when the host sends none |
+| Library screens: Templates, Agents, Skills, Hooks, MCP (patches 0015, 0016) | patches 0015/0016 | Một phần: names only | `library.get` read only (project.read, redacted at the gateway, docs/alp/remote-gateway.md §5.7); `library.save` denied | P1 | **Một phần** (t-7679.14): a row opens the entry read only (W:app/Settings.tsx `LibraryEntryView`, lib/library.js): source, users, the library's skills, AGENT.md/SKILL.md/HOUSE_RULES.md as text and configuration as JSON, every value that can hold a secret shown as ‹hidden on the host›. Not done: Paseo's editors (save, duplicate, rename, delete), which need their own permission (user decision 2026-10-17, backlog) |
 | Providers: runtimes, default switch, custom ACP (patches 0012-0014) | P:screens/settings/providers-section.tsx | Một phần: names | no: `provider.*` §14 | P1 | — |
 | Workspaces, Terminals, Plugins, Usage, Pair device, Metadata | host-page.tsx and others | Unavailable | no | P2 | — |
 
@@ -181,12 +181,11 @@ The column **apps/web** gives the state before t-7679.3; **Now** gives it after 
   implemented. There is no terminal protocol.
 - **Workspace and project registry:** `workspace.*` and `project.*` (§14).
 - **Providers:** `provider.*` and `library.test` (§14).
-- **Library content:** the gateway denies `library.get`, `library.save`, `library.delete` and
-  `library.rename`.
+- **Library edits:** the gateway denies `library.save`, `library.delete`, `library.duplicate`,
+  `library.rename` and `library.skills.set`; editing from a browser waits for its own permission.
+  `library.get` is read only and redacted (t-7679.14).
 - **Usage, status, language:** the gateway denies `daemon.usage` and `daemon.status`, and also
   `settings.language.set`.
-- **Host name:** the hello carries no hostname, so patch 0017's machine-name label cannot be done
-  through the gateway.
 - **Chat:**
   - prompts other than text (attachments);
   - token usage (context meter);
