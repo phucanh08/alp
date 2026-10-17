@@ -73,10 +73,10 @@ In Cafe, the lead that main starts shows `codex:gpt-6.1-sol` too.
 
 ## 4. Paseo and the web app
 
-- **Paseo:** `npm install -g @anhlp/alp-paseo@beta`, then
-  `paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"` (in beta.1 the `npm:` source fails,
-  [#111](https://github.com/phucanh08/alp/issues/111)). Phở and Cafe in the model picker
-  use your overrides.
+- **Paseo:** `paseo plugin add npm:@anhlp/alp-paseo@beta` (from `0.0.0-beta.2`; in beta.1
+  the `npm:` source fails, [#111](https://github.com/phucanh08/alp/issues/111): run
+  `npm install -g @anhlp/alp-paseo@beta`, then `paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"`).
+  Phở and Cafe in the model picker use your overrides.
 - **Web app:** it ships in `@anhlp/alp-paseo`, not in `@anhlp/alp`:
   `npm install -g @anhlp/alp-paseo@beta`, `alp-web-integration --register`, then `alp web`
   ([beta-install.md](beta-install.md#alp-web-on-this-machine)).

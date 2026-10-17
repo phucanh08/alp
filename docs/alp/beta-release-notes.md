@@ -117,7 +117,8 @@ All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned t
 - `paseo plugin add npm:@anhlp/alp-paseo@beta` fails with `Could not resolve type dependency
   "@getpaseo/relay/e2ee"`: Paseo checks the type declarations the plugin ships, and they import
   Paseo packages that are only peer dependencies. Install the plugin with npm and add it by path
-  (see Install). To be fixed in `0.0.0-beta.2`
+  (see Install). Fixed in `0.0.0-beta.2`, which ships the plugin without declarations: from
+  that version `paseo plugin add npm:@anhlp/alp-paseo@beta` is the install command
   ([#111](https://github.com/phucanh08/alp/issues/111)).
 - Older versions (`@anhlp/alp` 0.3.0–0.10.0, the other `@anhlp/alp-*` 0.10.0) and the old
   plugin name `alp-paseo-plugin` are deprecated on npm; they still install, with a warning.

@@ -70,14 +70,19 @@ the old name.
 Then enable plugins in Paseo Settings → Plugins and add the provider:
 
 ```sh
-npm install -g @anhlp/alp-paseo@beta
-paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"
+paseo plugin add npm:@anhlp/alp-paseo@beta
 paseo provider models alp
 ```
 
-In `0.0.0-beta.1`, `paseo plugin add npm:@anhlp/alp-paseo@beta` fails: Paseo installs an `npm:`
-source without peers and cannot resolve the `@getpaseo/*` types the plugin's declarations import
-([#111](https://github.com/phucanh08/alp/issues/111)). Add it by path as above.
+This works from `0.0.0-beta.2`, which ships no type declarations. In `0.0.0-beta.1` the `npm:`
+source fails: Paseo installs it without peers and cannot resolve the `@getpaseo/*` types the
+plugin's declarations import ([#111](https://github.com/phucanh08/alp/issues/111)). With beta.1,
+install it with npm and add it by path:
+
+```sh
+npm install -g @anhlp/alp-paseo@beta
+paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"
+```
 
 From then on the plugin keeps alpd running while Paseo runs. It starts alpd when
 Paseo starts, checks every 5 seconds, and starts it again when alpd is down; with
