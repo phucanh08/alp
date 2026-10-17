@@ -11,6 +11,7 @@ import { Spinner } from '../components/ui/spinner';
 import { baseName, modeLabel } from '../lib/format';
 import { cn } from '../lib/utils';
 import { useAppState, useController } from './store';
+import { useNotificationPermission } from './attention';
 
 /*
  * Settings as the old ALP web (the Paseo fork) lays them out: a full screen with its own sidebar
@@ -112,6 +113,21 @@ function Select<T extends string>({ label, value, options, onChange }: { label: 
 
 // ---- pages ----------------------------------------------------------------------------------
 
+/** Browser notifications when a session waits for an answer: the browser asks on this click. */
+function NotificationsRow() {
+  const { permission, request } = useNotificationPermission();
+  const hint = permission === 'unsupported' ? 'This browser cannot show notifications.'
+    : permission === 'denied' ? 'Blocked in this browser. Allow notifications for this site in the browser settings to get them.'
+    : permission === 'granted' ? 'On: a notification when a session waits for your answer while you are elsewhere. The tab icon shows it too.'
+    : 'Get a notification when a session waits for your answer while you are elsewhere. The browser asks first.';
+  return (
+    <Row title="Notifications" hint={hint}>
+      {permission === 'default' ? <Button size="sm" variant="secondary" onClick={() => { void request(); }}>Enable</Button>
+        : <span className="text-sm text-muted-foreground" data-testid="notification-permission">{permission === 'granted' ? 'Allowed' : permission === 'denied' ? 'Blocked' : 'Unavailable'}</span>}
+    </Row>
+  );
+}
+
 function General() {
   const controller = useController();
   const { preferences } = useAppState();
@@ -134,6 +150,7 @@ function General() {
         <Row first title="Saved preferences" hint="Default send, the theme and your last New session choices (team, model, thinking, permissions) stay in this browser. The access token never does.">
           <Button size="sm" variant="secondary" onClick={() => controller.resetPreferences()}>Reset</Button>
         </Row>
+        <NotificationsRow />
       </Section>
     </>
   );

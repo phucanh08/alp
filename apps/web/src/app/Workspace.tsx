@@ -1,7 +1,10 @@
-import { Bot, CircleAlert, CircleDot, Copy, Ellipsis, ListTodo, PanelLeft, PanelRight, Pencil, Plus, ShieldAlert, SquarePen, Archive } from 'lucide-react';
+import * as React from 'react';
+import { ArrowLeftToLine, ArrowRightToLine, Bot, CircleAlert, CircleDot, Copy, CopyX, Ellipsis, ListTodo, PanelLeft, PanelRight, Pencil, Plus, ShieldAlert, SquarePen, Archive, X } from 'lucide-react';
 import type { SessionSummary } from '../lib/controller.js';
 import { can } from '../lib/gateway.js';
-import { Menu } from '../components/ui/menu';
+import { ContextMenu, Menu, type MenuItem } from '../components/ui/menu';
+import { moveKey, orderTabs } from '../lib/layout.js';
+import { closeRange } from '../lib/tab-close.js';
 import { baseName, sessionName } from '../lib/format';
 import { cn } from '../lib/utils';
 import { PANELS, PanelView, type PanelKind } from './panels';
@@ -108,9 +111,98 @@ function useTabPresentation(tab: Tab) {
   };
 }
 
-function WorkspaceTabChip({ tab, active, onSelect, onClose }: { tab: Tab; active: boolean; onSelect: () => void; onClose: () => void }) {
+function WorkspaceTabChip({ tab, active, onSelect, onClose, onMenu, dragging, wrapper }: {
+  tab: Tab; active: boolean; onSelect: () => void; onClose: () => void;
+  onMenu: (at: { x: number; y: number }) => void; dragging: boolean;
+  wrapper: React.ComponentProps<typeof TabChip>['wrapper'];
+}) {
   const view = useTabPresentation(tab);
-  return <TabChip label={view.label} icon={view.icon} title={view.title} active={active} onSelect={onSelect} onClose={onClose} testId="workspace-tab" data-tab={tabKey(tab)} />;
+  return <TabChip label={view.label} icon={view.icon} title={view.title} active={active} onSelect={onSelect} onClose={onClose} onMenu={onMenu} dragging={dragging} wrapper={wrapper} testId="workspace-tab" data-tab={tabKey(tab)} />;
+}
+
+/** Paseo's tab context menu (workspace-tab-menu.ts), with the entries ALP has a backend for. */
+function useTabMenuItems(onRename: (session: SessionSummary) => void) {
+  const { tabs, close, closeOthers } = useTabs();
+  const { selected, sessions, tree, principal } = useAppState();
+  const canWrite = can(principal ?? undefined, 'session.write');
+  return (tab: Tab): MenuItem[] => {
+    const base = `workspace-tab-context-${tabKey(tab)}`;
+    // Disabled when there is nothing to close, as Paseo at the row's ends.
+    const none = (which: 'left' | 'right' | 'others') => closeRange(tabs, tab, which, selected).length === 0;
+    const items: MenuItem[] = [];
+    const copy = (text: string) => { void navigator.clipboard?.writeText(text).catch(() => undefined); };
+    if (tab.kind === 'agent') {
+      items.push({ id: 'copy-agent-id', label: 'Copy agent id', icon: <Copy aria-hidden />, hint: tab.id.slice(0, 7), testId: `${base}-copy-agent-id`, onSelect: () => copy(tab.id) });
+      // Rename names the session (its main agent's tab); ALP has no rename for a team member.
+      if (tab.id === selected) {
+        const listed = sessions.list.find(row => row.id === tab.id);
+        const summary = listed ?? ({ id: tab.id, title: tree?.projection.sessions[tab.id]?.title } as SessionSummary);
+        items.push({ id: 'rename', label: 'Rename', icon: <Pencil aria-hidden />, disabled: !canWrite, testId: `${base}-rename`, onSelect: () => onRename(summary) });
+      }
+    } else if (tab.kind === 'task') {
+      items.push({ id: 'copy-task-id', label: 'Copy task id', icon: <Copy aria-hidden />, hint: tab.id, testId: `${base}-copy-task-id`, onSelect: () => copy(tab.id) });
+    }
+    const closing: MenuItem[] = [
+      { id: 'close-left', label: 'Close to the left', icon: <ArrowLeftToLine aria-hidden />, disabled: none('left'), testId: `${base}-close-left`, onSelect: () => closeOthers(tab, 'left') },
+      { id: 'close-right', label: 'Close to the right', icon: <ArrowRightToLine aria-hidden />, disabled: none('right'), testId: `${base}-close-right`, onSelect: () => closeOthers(tab, 'right') },
+      { id: 'close-others', label: 'Close other tabs', icon: <CopyX aria-hidden />, disabled: none('others'), testId: `${base}-close-others`, onSelect: () => closeOthers(tab, 'others') },
+      { id: 'close', label: 'Close', icon: <X aria-hidden />, testId: `${base}-close`, onSelect: () => close(tab) },
+    ];
+    // Paseo puts a divider under Rename.
+    if (items.some(item => item.id === 'rename')) closing[0] = { ...closing[0], group: true };
+    return [...items, ...closing];
+  };
+}
+
+/** Pixels the pointer moves before a press on a tab becomes a drag (Paseo's activation distance). */
+const DRAG_DISTANCE = 5;
+
+/**
+ * Paseo's drag reordering of the tab row: press a tab and move; the row shows the new order as
+ * the pointer goes, and it is kept on release. A press that does not move is a click.
+ */
+function useTabDrag() {
+  const { tabs, move } = useTabs();
+  const row = React.useRef<HTMLDivElement>(null);
+  const [preview, setPreview] = React.useState<{ key: string; order: string[] } | null>(null);
+  const dragged = React.useRef(false);
+  const start = (tab: Tab) => (event: React.PointerEvent) => {
+    if (event.button !== 0 || (event.target as HTMLElement).closest('[aria-label^="Close "]')) return;
+    const key = tabKey(tab);
+    const startX = event.clientX;
+    const keys = tabs.map(tabKey);
+    let moving = false;
+    let to = keys.indexOf(key);
+    dragged.current = false;
+    const onMove = (next: PointerEvent) => {
+      if (!moving && Math.abs(next.clientX - startX) < DRAG_DISTANCE) return;
+      moving = true;
+      const others = Array.from(row.current?.querySelectorAll<HTMLElement>('[data-drag-tab]') ?? []).filter(element => element.dataset.dragTab !== key);
+      to = others.filter(element => { const rect = element.getBoundingClientRect(); return rect.left + rect.width / 2 < next.clientX; }).length;
+      setPreview({ key, order: moveKey(keys, key, to) });
+    };
+    const finish = (commit: boolean) => () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      if (moving) {
+        // The click that follows this release (if any) is not a selection; later ones are.
+        dragged.current = true;
+        setTimeout(() => { dragged.current = false; }, 0);
+        if (commit) move(tab, to);
+      }
+      setPreview(null);
+    };
+    const up = finish(true);
+    const cancel = finish(false);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+  };
+  // The click that ends a drag does not select the tab.
+  const swallow = (event: React.MouseEvent) => { if (dragged.current) { dragged.current = false; event.stopPropagation(); event.preventDefault(); } };
+  const shown = preview ? orderTabs(tabs, tabKey, preview.order) : tabs;
+  return { row, shown, dragging: preview?.key ?? null, wrapper: (tab: Tab) => ({ onPointerDown: start(tab), onClickCapture: swallow, 'data-drag-tab': tabKey(tab) }) };
 }
 
 /** What the center + menu opens after Agent, as Paseo's: its own panels, then ALP's. */
@@ -118,8 +210,13 @@ const PRIMARY_PANELS: PanelKind[] = ['terminal', 'diff'];
 const ALP_PANELS: PanelKind[] = ['tasks', 'agents'];
 
 /** Paseo's tab row under the header: the open tabs, then + with the New tab menu (Agent starts a session). */
-export function TabsRow({ onNewSession, menuRequest, onMenuRequestHandled }: { onNewSession: () => void; menuRequest?: number; onMenuRequestHandled?: () => void }) {
-  const { tabs, active, activate, close, openPanel } = useTabs();
+export function TabsRow({ onNewSession, onRename, menuRequest, onMenuRequestHandled }: { onNewSession: () => void; onRename: (session: SessionSummary) => void; menuRequest?: number; onMenuRequestHandled?: () => void }) {
+  const { active, activate, close, openPanel } = useTabs();
+  const drag = useTabDrag();
+  const menuItems = useTabMenuItems(onRename);
+  const [menu, setMenu] = React.useState<{ tab: Tab; at: { x: number; y: number } } | null>(null);
+  const closeMenu = React.useCallback(() => setMenu(null), []);
+  const focusActiveTab = React.useCallback(() => drag.row.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'), [drag.row]);
   const { workspace, principal, connection } = useAppState();
   const canWrite = can(principal ?? undefined, 'session.write');
   if (!workspace) return null;
@@ -129,9 +226,10 @@ export function TabsRow({ onNewSession, menuRequest, onMenuRequestHandled }: { o
   };
   return (
     <div className="flex h-9 shrink-0 items-center border-b border-border bg-background">
-      <div role="tablist" aria-label="Open tabs" className="flex min-w-0 flex-1 items-center overflow-x-auto px-1 [scrollbar-width:none]">
-        {tabs.map(tab => (
-          <WorkspaceTabChip key={tabKey(tab)} tab={tab} active={!!active && tabKey(active) === tabKey(tab)} onSelect={() => activate(tab)} onClose={() => close(tab)} />
+      <div ref={drag.row} role="tablist" aria-label="Open tabs" className="flex min-w-0 flex-1 items-center overflow-x-auto px-1 [scrollbar-width:none]">
+        {drag.shown.map(tab => (
+          <WorkspaceTabChip key={tabKey(tab)} tab={tab} active={!!active && tabKey(active) === tabKey(tab)} onSelect={() => activate(tab)} onClose={() => close(tab)}
+            onMenu={at => setMenu({ tab, at })} dragging={drag.dragging === tabKey(tab)} wrapper={drag.wrapper(tab)} />
         ))}
         <Menu label="New tab" align="start" openRequest={menuRequest} onOpenRequestHandled={onMenuRequestHandled} testId="workspace-new-tab"
           trigger={<Plus aria-hidden className="size-4" />}
@@ -142,6 +240,7 @@ export function TabsRow({ onNewSession, menuRequest, onMenuRequestHandled }: { o
             ...ALP_PANELS.map((kind, index) => item(kind, index === 0)),
           ]} />
       </div>
+      <ContextMenu label="Tab actions" at={menu?.at ?? null} items={menu ? menuItems(menu.tab) : []} onClose={closeMenu} fallbackFocus={focusActiveTab} testId={menu ? `workspace-tab-context-${tabKey(menu.tab)}` : undefined} />
     </div>
   );
 }

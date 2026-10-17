@@ -138,8 +138,13 @@ test('keyboard shortcuts: help, sidebars, sessions, tabs, search, settings', asy
   await expect(nav(page)).toBeVisible();
   await expect(explorer).toBeVisible();
 
-  // Mod+K opens the sidebar's search, focused; Mod+N the New session tab.
+  // Mod+K opens Paseo's command center (tests in e2e/tabs.spec.js); the sidebar's session search
+  // stays on its Search row and in the command center.
   await page.keyboard.press('ControlOrMeta+K');
+  await expect(page.getByRole('dialog', { name: 'Command center' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Command center' })).toBeHidden();
+  await nav(page).getByRole('button', { name: /^Search/ }).click();
   await expect(page.getByLabel('Search sessions')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByLabel('Search sessions')).toHaveCount(0);
@@ -150,10 +155,12 @@ test('keyboard shortcuts: help, sidebars, sessions, tabs, search, settings', asy
   await page.keyboard.press('ControlOrMeta+B');
   await expect(nav(page)).toBeVisible();
   await expect(page.getByLabel('Search sessions')).toHaveCount(0);
-  // Mod+K with the sidebar hidden shows it with the search open.
+  // The command center's search command with the sidebar hidden shows it with the search open.
   await page.keyboard.press('ControlOrMeta+B');
   await expect(nav(page)).toBeHidden();
   await page.keyboard.press('ControlOrMeta+K');
+  await page.getByRole('combobox', { name: 'Search commands and sessions' }).fill('search sessions');
+  await page.keyboard.press('Enter');
   await expect(page.getByLabel('Search sessions')).toBeFocused();
   await page.keyboard.press('Escape');
   await body();
