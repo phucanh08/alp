@@ -1,0 +1,189 @@
+diff --git a/packages/app/src/utils/markdown-parser.test.ts b/packages/app/src/utils/markdown-parser.test.ts
+index 38783f92..900444d1 100644
+--- a/packages/app/src/utils/markdown-parser.test.ts
++++ b/packages/app/src/utils/markdown-parser.test.ts
+@@ -1,5 +1,11 @@
+ import { describe, expect, it } from "vitest";
+-import { createMarkdownParser } from "./markdown-parser";
++import { createAssistantMarkdownParser } from "./assistant-markdown-parser";
++import {
++  createMarkdownParser,
++  LINKIFY_MAX_DIRECT_TEXT_LENGTH,
++  LINKIFY_MAX_SOURCE_LENGTH,
++  LINKIFY_MAX_TEXT_LENGTH,
++} from "./markdown-parser";
+ 
+ // Every string markdown-it's typographer would rewrite, with the character it
+ // would rewrite it to. Sourced from markdown-it/lib/rules_core/replacements.js
+@@ -70,6 +76,112 @@ describe("createMarkdownParser", () => {
+   });
+ });
+ 
++// ALP (F3): linkify-it 2.2.0 is quadratic in one run of text. Unbounded, the
++// 64 KB run below takes seconds to parse (GHSA-22p9-wv53-3rq4); each case here
++// has to finish well inside a second.
++const PATHOLOGICAL_UNIT = "a@b.co ";
++const pathological = (length: number) =>
++  PATHOLOGICAL_UNIT.repeat(Math.ceil(length / PATHOLOGICAL_UNIT.length)).slice(0, length);
++const PARSE_BUDGET_MS = 1000;
++
++function timed<T>(work: () => T): { value: T; ms: number } {
++  const start = performance.now();
++  const value = work();
++  return { value, ms: performance.now() - start };
++}
++
++describe("linkify bound (ALP F3)", () => {
++  const parsers = [
++    ["default", () => createMarkdownParser({ linkify: true })],
++    ["assistant", () => createAssistantMarkdownParser()],
++    ["assistant streaming", () => createAssistantMarkdownParser({ streaming: true })],
++  ] as const;
++
++  it.each(parsers)("%s: one 64 KB run of emails renders quickly as plain text", (_, create) => {
++    const source = pathological(64 * 1024);
++    const { value, ms } = timed(() => create().render(source));
++    expect(ms).toBeLessThan(PARSE_BUDGET_MS);
++    expect(value).not.toContain("href");
++    expect(value).toContain("a@b.co");
++  });
++
++  it.each(parsers)("%s: many runs in a long message stay within budget", (_, create) => {
++    const parser = create();
++    const run = pathological(LINKIFY_MAX_TEXT_LENGTH).trim();
++    const under = Array.from(
++      { length: Math.floor(LINKIFY_MAX_SOURCE_LENGTH / (run.length + 2)) },
++      () => run,
++    ).join("\n\n");
++    expect(under.length).toBeLessThanOrEqual(LINKIFY_MAX_SOURCE_LENGTH);
++    const linked = timed(() => parser.render(under));
++    expect(linked.ms).toBeLessThan(PARSE_BUDGET_MS);
++    expect(linked.value).toContain('href="mailto:a@b.co"');
++
++    const over = Array.from({ length: 64 }, () => run).join("\n\n");
++    const plain = timed(() => parser.render(over));
++    expect(plain.ms).toBeLessThan(PARSE_BUDGET_MS);
++    expect(plain.value).not.toContain("href");
++  });
++
++  it("linkifies a run up to the limit and not past it", () => {
++    const parser = createMarkdownParser({ linkify: true });
++    const url = "https://paseo.sh";
++    const atLimit = `${"x".repeat(LINKIFY_MAX_TEXT_LENGTH - url.length - 1)} ${url}`;
++    expect(atLimit.length).toBe(LINKIFY_MAX_TEXT_LENGTH);
++    expect(parser.render(atLimit)).toContain(`href="${url}"`);
++    expect(parser.render(`x${atLimit}`)).not.toContain("href");
++  });
++
++  it("linkifies a long paragraph whose runs of text are short", () => {
++    const parser = createAssistantMarkdownParser();
++    const paragraph = Array.from({ length: 400 }, (_, index) => `*w${index}* https://a.com`).join(
++      " ",
++    );
++    expect(paragraph.length).toBeGreaterThan(LINKIFY_MAX_TEXT_LENGTH);
++    expect(paragraph.length).toBeLessThan(LINKIFY_MAX_SOURCE_LENGTH);
++    expect(parser.render(paragraph)).toContain('href="https://a.com"');
++  });
++
++  it("linkifies again after a source too long for it", () => {
++    const parser = createAssistantMarkdownParser();
++    const long = Array.from({ length: 16 }, () => `see https://paseo.sh ${"y".repeat(2048)}`).join(
++      "\n\n",
++    );
++    expect(long.length).toBeGreaterThan(LINKIFY_MAX_SOURCE_LENGTH);
++    expect(parser.render(long)).not.toContain("href");
++    expect(parser.render("see https://paseo.sh now")).toContain('href="https://paseo.sh"');
++  });
++
++  it("keeps explicit markdown links in a long message", () => {
++    const parser = createAssistantMarkdownParser();
++    const source = `${pathological(LINKIFY_MAX_SOURCE_LENGTH + 1)}\n\n[docs](https://paseo.sh)`;
++    expect(parser.render(source)).toContain('<a href="https://paseo.sh">docs</a>');
++  });
++
++  it("bounds direct linkify calls, as message.tsx makes for inline code", () => {
++    const { linkify } = createAssistantMarkdownParser();
++    expect(linkify.match("https://paseo.sh")?.[0]?.url).toBe("https://paseo.sh");
++    const { value, ms } = timed(() => linkify.match(pathological(64 * 1024)));
++    expect(ms).toBeLessThan(PARSE_BUDGET_MS);
++    expect(value).toBeNull();
++    expect(linkify.test(pathological(64 * 1024))).toBe(false);
++  });
++
++  it("holds direct linkify calls to a short text", () => {
++    const { linkify } = createAssistantMarkdownParser();
++    const prefix = "https://paseo.sh/";
++    const url = `${prefix}${"p".repeat(LINKIFY_MAX_DIRECT_TEXT_LENGTH - prefix.length)}`;
++    expect(linkify.match(url)?.[0]?.url).toBe(url);
++    expect(linkify.match(`${url}p`)).toBeNull();
++    // 256 inline code spans of 4 KB each, as one long message can hold.
++    const span = pathological(4096);
++    const { ms } = timed(() => {
++      for (let index = 0; index < 256; index++) linkify.match(span);
++    });
++    expect(ms).toBeLessThan(PARSE_BUDGET_MS);
++  });
++});
++
+ function escapeHtml(value: string): string {
+   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
+ }
+diff --git a/packages/app/src/utils/markdown-parser.ts b/packages/app/src/utils/markdown-parser.ts
+index 3a408f1f..9f65750f 100644
+--- a/packages/app/src/utils/markdown-parser.ts
++++ b/packages/app/src/utils/markdown-parser.ts
+@@ -15,5 +15,53 @@ import MarkdownIt from "markdown-it";
+  * never have. Unifying that is a product decision on its own.
+  */
+ export function createMarkdownParser({ linkify }: { linkify: boolean }): MarkdownIt {
+-  return new MarkdownIt({ html: false, linkify });
++  const parser = new MarkdownIt({ html: false, linkify });
++  boundLinkify(parser);
++  return parser;
++}
++
++/**
++ * ALP: linkify-it 2.2.0, which markdown-it 10 brings, takes time quadratic in
++ * the length of one run of text (GHSA-22p9-wv53-3rq4, GHSA-v245-v573-v5vm): a
++ * single 64 KB paragraph of `a@b.co ` holds the tab for seconds. The fixed
++ * linkify-it 5 needs markdown-it 14, which react-native-markdown-display does
++ * not take. So linkify only sees text it handles quickly:
++ * - in a parse, no run of text longer than LINKIFY_MAX_TEXT_LENGTH, and
++ *   nothing at all in a source longer than LINKIFY_MAX_SOURCE_LENGTH, whose
++ *   many shorter runs would add up;
++ * - outside a parse (message.tsx asks whether inline code is one URL), no text
++ *   longer than LINKIFY_MAX_DIRECT_TEXT_LENGTH, since those calls have no
++ *   source to count against.
++ * Such text still renders, its bare URLs and emails as plain text; explicit
++ * markdown links are not linkify's and keep working. pretest is one linear
++ * scan of a whole block, so only the source limit applies to it.
++ */
++export const LINKIFY_MAX_TEXT_LENGTH = 2048;
++export const LINKIFY_MAX_SOURCE_LENGTH = 32768;
++export const LINKIFY_MAX_DIRECT_TEXT_LENGTH = 256;
++
++function boundLinkify(parser: MarkdownIt): void {
++  const linkify = parser.linkify;
++  const test = linkify.test.bind(linkify);
++  const pretest = linkify.pretest.bind(linkify);
++  const match = linkify.match.bind(linkify);
++  // Set by the core rules around markdown-it's linkify rule for each parse. A
++  // parse that throws in between leaves them set until the next parse begins:
++  // linkify is then off, or held to the in-parse limits; bounded either way.
++  let parsing = false;
++  let sourceTooLong = false;
++  const allowed = (text: string) =>
++    !sourceTooLong &&
++    text.length <= (parsing ? LINKIFY_MAX_TEXT_LENGTH : LINKIFY_MAX_DIRECT_TEXT_LENGTH);
++  linkify.test = (text: string) => allowed(text) && test(text);
++  linkify.pretest = (text: string) => !sourceTooLong && pretest(text);
++  linkify.match = (text: string) => (allowed(text) ? match(text) : null);
++  parser.core.ruler.before("linkify", "alp_linkify_bound", (state) => {
++    parsing = true;
++    sourceTooLong = state.src.length > LINKIFY_MAX_SOURCE_LENGTH;
++  });
++  parser.core.ruler.after("linkify", "alp_linkify_bound_end", () => {
++    parsing = false;
++    sourceTooLong = false;
++  });
+ }
