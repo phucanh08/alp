@@ -25,6 +25,14 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./files": {
+      "alp-source": {
+        "types": "./src/files.ts",
+        "default": "./src/files.ts"
+      },
+      "types": "./dist/files.d.ts",
+      "default": "./dist/files.js"
+    },
     "./lock": {
       "alp-source": {
         "types": "./src/lock.ts",

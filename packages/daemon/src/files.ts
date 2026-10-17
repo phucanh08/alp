@@ -1,5 +1,11 @@
-import { lstat, opendir, realpath, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open, opendir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { ERROR, RPC_ERROR, WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
+import { gitIgnored, IgnoreUnknown, type GitCheckOptions } from './gitignore.js';
+
+// For tests: which git alpd would run, and how many run now.
+export { gitChecksRunning, resolveGit, GIT_CHECK } from './gitignore.js';
 
 /**
  * `workspace.files.search` (docs/protocol/alp-json-rpc-v1.md §12.3): the files of a workspace whose
@@ -146,4 +152,269 @@ export async function searchWorkspaceFiles(projectRoot: string, { query = '', li
   }
   found.sort(compare);
   return { files: found.slice(0, count).map(entry => ({ path: entry.path })), ...(truncated ? { truncated: true as const } : {}) };
+}
+
+// ---- workspace.files.list and workspace.files.read (docs/protocol/alp-json-rpc-v1.md §12.4) ----
+
+/**
+ * A refusal of workspace.files.list or workspace.files.read: the JSON-RPC code and `data.reason`
+ * alpd answers with. Messages are fixed or name only the client's own relative path, never a host
+ * path or anything read from a file.
+ */
+export class FileAccessError extends Error {
+  constructor(message: string, readonly code: number, readonly reason: string) {
+    super(message);
+  }
+}
+
+/** Extra bounds of one listing: entries looked at, and wall time. */
+const LIST_LIMITS = Object.freeze({ scanned: 20_000, ms: 3_000 });
+/** Opening never follows a final link nor waits on a FIFO; Windows has neither flag. */
+const OPEN_FLAGS = process.platform === 'win32' ? constants.O_RDONLY : constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+
+const notFound = (relative: string) => new FileAccessError(`No readable file or directory at ${relative}`, ERROR.notFound, 'not_found');
+const linked = (relative: string) => new FileAccessError(`${relative} is reached through a link, has more than one name, or changed while it was read; alpd does not follow links`, ERROR.forbidden, 'linked');
+
+/** The real path of a workspace root that is a directory, else FilesError. */
+async function realRoot(projectRoot: string): Promise<string> {
+  if (!path.isAbsolute(projectRoot)) throw new FilesError('projectRoot must be an absolute path');
+  try {
+    const root = await realpath(projectRoot);
+    if (!(await stat(root)).isDirectory()) throw new Error('not a directory');
+    return root;
+  } catch {
+    throw new FilesError('projectRoot is not a directory alpd can read');
+  }
+}
+
+/**
+ * A path relative to the workspace as a client may send it, its segments, or a refusal: '/'
+ * separated, no leading slash, drive or backslash, no `.`, `..` or empty segment, no NUL, at most
+ * WORKSPACE_FILES.maxPathLength characters. A blocked path (blockedFilePath) is refused as such.
+ */
+export function relativeSegments(relative: unknown): string[] {
+  if (typeof relative !== 'string' || !relative || [...relative].length > WORKSPACE_FILES.maxPathLength || relative.includes('\0') || relative.includes('\\') || relative.startsWith('/') || /^[A-Za-z]:/.test(relative)) {
+    throw new FileAccessError('path must be a relative path inside the workspace, with / between names and no . or .. segment', RPC_ERROR.invalidParams, 'invalid_path');
+  }
+  const segments = relative.split('/');
+  if (segments.some(segment => segment === '' || segment === '.' || segment === '..')) {
+    throw new FileAccessError('path must be a relative path inside the workspace, with / between names and no . or .. segment', RPC_ERROR.invalidParams, 'invalid_path');
+  }
+  if (blockedFilePath(relative)) throw new FileAccessError(`${relative} is not readable remotely: .git, .env files, ALP configuration and key or credential files are always refused`, ERROR.forbidden, 'blocked_path');
+  return segments;
+}
+
+/**
+ * The directories from the root to `segments` (the root first), each checked as reached by name:
+ * a real directory, not a link, at its own real path. Their identities (device and inode) are
+ * returned so the caller can check them again after reading.
+ */
+async function directoryChain(root: string, segments: string[], relative: string): Promise<{ paths: string[]; identities: string[] }> {
+  const paths = [root];
+  for (let index = 0; index < segments.length; index++) paths.push(path.join(root, ...segments.slice(0, index + 1)));
+  const identities: string[] = [];
+  for (const directory of paths) identities.push(await directoryIdentity(directory, relative));
+  return { paths, identities };
+}
+
+/** The identity of a directory reached by name, or the refusal: missing or not a directory, or a link. */
+async function directoryIdentity(directory: string, relative: string): Promise<string> {
+  let info;
+  try {
+    info = await lstat(directory, { bigint: true });
+  } catch {
+    throw notFound(relative);
+  }
+  if (info.isSymbolicLink()) throw linked(relative);
+  if (!info.isDirectory()) throw notFound(relative);
+  let real;
+  try {
+    real = await realpath(directory);
+  } catch {
+    throw notFound(relative);
+  }
+  if (real !== directory) throw linked(relative);
+  return `${info.dev}:${info.ino}`;
+}
+
+/** The chain checked again: the same directories, else the read is refused. */
+async function sameChain(chain: { paths: string[]; identities: string[] }, relative: string): Promise<void> {
+  for (const [index, directory] of chain.paths.entries()) {
+    let now;
+    try {
+      now = await directoryIdentity(directory, relative);
+    } catch {
+      throw linked(relative);
+    }
+    if (now !== chain.identities[index]) throw linked(relative);
+  }
+}
+
+/**
+ * Which of `paths` .gitignore hides (gitignore.ts, Git's own answer), failing closed: when Git
+ * cannot answer, every path counts as ignored. No repository or no Git: none is.
+ */
+async function ignoredOf(root: string, paths: string[], git?: GitCheckOptions): Promise<(path: string) => boolean> {
+  try {
+    const ignored = await gitIgnored(root, paths, git);
+    return ignored ? entry => ignored.has(entry) : () => false;
+  } catch (error) {
+    if (!(error instanceof IgnoreUnknown)) throw error;
+    return () => true;
+  }
+}
+
+/**
+ * The bytes of a regular file reached by name, or undefined when it is larger than `maxBytes`;
+ * throws when it is missing, not a regular file, a link, has more than one name, or is not the
+ * file it was a moment before. The file is opened without following a final link and checked by
+ * its handle (same device and inode as by name, before and after).
+ */
+/** Test probes: called between the checks of a read, where a racing writer could change the file. */
+export type FileProbe = (step: 'checked' | 'read' | 'listed') => Promise<void> | void;
+
+async function readConfined(file: string, maxBytes: number, probe?: FileProbe): Promise<{ bytes: Buffer; modifiedAt: Date } | undefined> {
+  const before = await lstat(file, { bigint: true });
+  if (before.isSymbolicLink()) throw Object.assign(new Error('link'), { linked: true });
+  if (!before.isFile()) throw new Error('not a file');
+  if (before.nlink > 1n) throw Object.assign(new Error('hard link'), { linked: true });
+  if ((await realpath(file)) !== file) throw Object.assign(new Error('real path differs'), { linked: true });
+  if (before.size > BigInt(maxBytes)) return undefined;
+  await probe?.('checked');
+  let handle;
+  try {
+    handle = await open(file, OPEN_FLAGS);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP') throw Object.assign(new Error('link'), { linked: true });
+    throw error;
+  }
+  try {
+    const opened = await handle.stat({ bigint: true });
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.nlink > 1n) throw Object.assign(new Error('changed'), { linked: true });
+    // One byte more than allowed tells a file that grew from one that fits.
+    const buffer = Buffer.alloc(maxBytes + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
+      if (!bytesRead) break;
+      length += bytesRead;
+    }
+    if (length > maxBytes) return undefined;
+    await probe?.('read');
+    const after = await lstat(file, { bigint: true });
+    if (after.dev !== before.dev || after.ino !== before.ino) throw Object.assign(new Error('changed'), { linked: true });
+    return { bytes: buffer.subarray(0, length), modifiedAt: opened.mtime };
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Paseo's isLikelyBinary (file-explorer/service.ts at b63a325): a NUL byte, or over 30% control characters. */
+function likelyBinary(buffer: Buffer): boolean {
+  if (!buffer.length) return false;
+  let suspicious = 0;
+  for (const byte of buffer) {
+    if (byte === 0) return true;
+    if ((byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) || byte === 127) suspicious++;
+  }
+  return suspicious / buffer.length > 0.3;
+}
+
+// The BOM is kept: the content is the file's bytes, decoded.
+/** PEM, OpenSSH and PuTTY private-key headers: a file holding one is refused whatever its name. */
+const PRIVATE_KEY = /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|PuTTY-User-Key-File-\d+:/;
+
+const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+export type ListedEntry = { name: string; path: string; kind: 'file' | 'directory'; size?: number; modifiedAt?: string };
+
+/**
+ * The entries of a directory under `projectRoot` (its root without `relative`): regular files and
+ * directories only (links, sockets, devices are left out), never a blocked one (blockedFilePath)
+ * and, unless `includeIgnored`, none .gitignore'd. Directories first, then by name. Each directory
+ * on the way is checked (real directory, real path, same device and inode) before and after the
+ * read. At most WORKSPACE_FILES.maxListEntries entries; then `truncated`.
+ */
+export async function listWorkspaceDirectory(projectRoot: string, { path: relative, includeIgnored = false, now = Date.now, probe, git }: { path?: string; includeIgnored?: boolean; now?: () => number; probe?: FileProbe; git?: GitCheckOptions } = {}): Promise<{ entries: ListedEntry[]; truncated?: true }> {
+  const root = await realRoot(projectRoot);
+  const segments = relative === undefined ? [] : relativeSegments(relative);
+  const shown = relative ?? '.';
+  const chain = await directoryChain(root, segments, shown);
+  const directory = chain.paths.at(-1)!;
+  const prefix = segments.length ? `${relative}/` : '';
+  const deadline = now() + LIST_LIMITS.ms;
+  // Regular files and directories that are not blocked, before .gitignore is asked about them.
+  const candidates: Array<{ name: string; child: string; kind: 'file' | 'directory' }> = [];
+  let scanned = 0;
+  let truncated = false;
+  try {
+    for await (const entry of await opendir(directory)) {
+      if (++scanned > LIST_LIMITS.scanned || now() > deadline) { truncated = true; break; }
+      const kind = entry.isFile() ? 'file' : entry.isDirectory() ? 'directory' : undefined;
+      if (!kind) continue;
+      const child = `${prefix}${entry.name}`;
+      if (entry.name.includes('\\') || blockedFilePath(child)) continue;
+      candidates.push({ name: entry.name, child, kind });
+    }
+  } catch {
+    throw notFound(shown);
+  }
+  // One Git process for the directory and every candidate: Git also says a path inside an
+  // ignored directory is ignored, and a `!` rule can bring one back.
+  if (!includeIgnored) {
+    const ignored = await ignoredOf(root, [...(segments.length ? [relative!] : []), ...candidates.map(entry => entry.child)], git);
+    if (segments.length && ignored(relative!)) throw new FileAccessError(`${relative} is ignored by .gitignore; ask with includeIgnored to see it`, ERROR.forbidden, 'ignored');
+    for (let index = candidates.length - 1; index >= 0; index--) if (ignored(candidates[index]!.child)) candidates.splice(index, 1);
+  }
+  const entries: ListedEntry[] = [];
+  for (const { name, child, kind } of candidates) {
+    if (entries.length >= WORKSPACE_FILES.maxListEntries) { truncated = true; break; }
+    let info;
+    try {
+      info = await lstat(path.join(directory, name));
+    } catch {
+      continue;
+    }
+    // Replaced by something else since it was listed: left out.
+    if (kind === 'file' ? !info.isFile() : !info.isDirectory()) continue;
+    entries.push({ name, path: child, kind, ...(kind === 'file' ? { size: info.size } : {}), modifiedAt: info.mtime.toISOString() });
+  }
+  await probe?.('listed');
+  await sameChain(chain, shown);
+  entries.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'directory' ? -1 : 1) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return { entries, ...(truncated ? { truncated: true as const } : {}) };
+}
+
+/**
+ * The content of a UTF-8 text file under `projectRoot`, read-only: refused when it is blocked
+ * (blockedFilePath), .gitignore'd (unless `includeIgnored`), missing or not a regular file,
+ * reached through a link (any directory on the way or the file), has more than one name (a hard
+ * link may share a file from anywhere), changes while it is read, is over
+ * WORKSPACE_FILES.maxReadBytes, or is not UTF-8 text.
+ */
+export async function readWorkspaceFile(projectRoot: string, { path: relative, includeIgnored = false, probe, git }: { path: string; includeIgnored?: boolean; probe?: FileProbe; git?: GitCheckOptions }): Promise<{ path: string; content: string; size: number; modifiedAt: string }> {
+  const root = await realRoot(projectRoot);
+  const segments = relativeSegments(relative);
+  const chain = await directoryChain(root, segments.slice(0, -1), relative);
+  if (!includeIgnored && (await ignoredOf(root, [relative], git))(relative)) throw new FileAccessError(`${relative} is ignored by .gitignore; ask with includeIgnored to read it`, ERROR.forbidden, 'ignored');
+  const file = path.join(root, ...segments);
+  let read: { bytes: Buffer; modifiedAt: Date } | undefined;
+  try {
+    read = await readConfined(file, WORKSPACE_FILES.maxReadBytes, probe);
+  } catch (error) {
+    if ((error as { linked?: boolean }).linked) throw linked(relative);
+    throw notFound(relative);
+  }
+  if (read === undefined) throw new FileAccessError(`${relative} is larger than ${WORKSPACE_FILES.maxReadBytes} bytes`, ERROR.failed, 'too_large');
+  await sameChain(chain, relative);
+  let content: string;
+  try {
+    if (likelyBinary(read.bytes)) throw new Error('binary');
+    content = UTF8.decode(read.bytes);
+  } catch {
+    throw new FileAccessError(`${relative} is not a UTF-8 text file`, ERROR.failed, 'binary');
+  }
+  // A private key under any name (id_work, a service account's JSON) is refused as a blocked path.
+  if (PRIVATE_KEY.test(content)) throw new FileAccessError(`${relative} holds a private key; such files are never readable remotely`, ERROR.forbidden, 'blocked_path');
+  return { path: relative, content, size: read.bytes.length, modifiedAt: read.modifiedAt.toISOString() };
 }

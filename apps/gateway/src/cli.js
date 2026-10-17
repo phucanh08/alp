@@ -7,7 +7,7 @@ import { alpHome, connectSocket, daemonPaths } from '@anhlp/alp-client';
 import { resolveConfig } from './config.js';
 import { CredentialStore, createCredential, gatewayHome, listCredentials, revokeCredential, rotateCredential } from './credentials.js';
 import { createGatewayLogger } from './log.js';
-import { PERMISSIONS } from './policy.js';
+import { DEFAULT_PERMISSIONS, PERMISSIONS } from './policy.js';
 import { createGateway } from './server.js';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -23,7 +23,9 @@ Usage:
   alp-gateway credential rotate ID [--json]
   alp-gateway credential revoke ID
 
-Permissions: ${PERMISSIONS.join(', ')} (default: both). A token is printed once; only its hash is kept.
+Permissions: ${PERMISSIONS.join(', ')} (default: ${DEFAULT_PERMISSIONS.join(', ')}).
+files.read (list directories and read text files of the workspaces) is never a default: name it with
+--permission for each credential that may read file contents. A token is printed once; only its hash is kept.
 Files live in $ALP_GATEWAY_HOME, else $ALP_HOME/gateway. The gateway never starts alpd.`;
 
 const fail = (/** @type {string} */ message) => { console.error(message); process.exit(2); };
@@ -79,7 +81,7 @@ async function credential(/** @type {string[]} */ args) {
     if (!values.label || !values.workspace?.length) fail('credential create needs --label and at least one --workspace');
     const days = values['expires-in-days'] === undefined ? undefined : Number(values['expires-in-days']);
     if (days !== undefined && !(days > 0)) fail('--expires-in-days must be a positive number');
-    const permissions = (values.permission ?? [...PERMISSIONS]).flatMap(entry => entry.split(',')).map(entry => entry.trim()).filter(Boolean);
+    const permissions = (values.permission ?? [...DEFAULT_PERMISSIONS]).flatMap(entry => entry.split(',')).map(entry => entry.trim()).filter(Boolean);
     const { credential: created, token } = await createCredential(home, {
       label: /** @type {string} */ (values.label), workspaces: /** @type {string[]} */ (values.workspace), permissions,
       ...(values.mode ? { modes: values.mode } : {}),

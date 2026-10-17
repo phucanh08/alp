@@ -11,7 +11,7 @@ export type RpcResponse = { jsonrpc: '2.0'; id: RpcId } & ({ result: unknown; er
 export type EventNotification = { jsonrpc: '2.0'; method: 'event'; params: Envelope };
 
 /** Names a daemon may list in its daemon.hello result (schema/methods-v1.json `capabilities`). */
-export type Capability = 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'workspace.files' | 'prompt.images';
+export type Capability = 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'workspace.files' | 'workspace.files.read' | 'prompt.images';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -20,8 +20,8 @@ export type ErrorReason =
   // Project, task and library methods (docs/protocol/alp-json-rpc-v1.md §5.3).
   | 'invalid_path' | 'invalid_scope' | 'invalid_entry' | 'secret_marker' | 'not_alp_project' | 'unknown_task' | 'not_found'
   | 'unsafe_path' | 'revision_conflict' | 'task_state' | 'in_use' | 'busy' | 'unreadable'
-  // workspace.files.search (§12.3).
-  | 'not_directory';
+  // workspace.files.search (§12.3); workspace.files.list and read (§12.4).
+  | 'not_directory' | 'blocked_path' | 'ignored' | 'linked' | 'binary' | 'too_large';
 
 type Empty = Record<string, never>;
 
@@ -54,6 +54,10 @@ export type RpcMethodMap = {
   'question.watch': { params: { projectRoot?: string; turns?: boolean }; result: { questions: UserQuestion[] } };
   /** Capability `workspace.files`: files under `projectRoot` whose relative path matches `query`, best first; read-only, links not followed. */
   'workspace.files.search': { params: { projectRoot: string; query?: string; limit?: number }; result: { files: Array<{ path: string }>; truncated?: boolean } };
+  /** Capability `workspace.files.read`: the entries of a directory under `projectRoot` (its root when `path` is left out); links, blocked and (unless `includeIgnored`) .gitignore'd entries left out. */
+  'workspace.files.list': { params: { projectRoot: string; path?: string; includeIgnored?: boolean }; result: { entries: Array<{ name: string; path: string; kind: 'file' | 'directory'; size?: number; modifiedAt?: string }>; truncated?: boolean } };
+  /** Capability `workspace.files.read`: a UTF-8 text file under `projectRoot`, at most 1 MiB; read-only, links not followed. */
+  'workspace.files.read': { params: { projectRoot: string; path: string; includeIgnored?: boolean }; result: { path: string; content: string; size: number; modifiedAt?: string } };
   'question.answer': { params: { questionId: string; text?: string; dismiss?: boolean; reason?: string }; result: { questionId: string } };
   'session.create': {
     params: { sessionId?: string; spec: SessionSpec; history?: 'skip' | 'replay'; delegation?: boolean; resume?: boolean };

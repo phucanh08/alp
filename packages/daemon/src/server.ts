@@ -13,7 +13,7 @@ import type { Receipt, SessionRecord, SessionStatus, Store, UnreadableReceipt } 
 import type { SessionSummary } from '@anhlp/alp-protocol/session';
 import { RpcError } from './rpc-error.js';
 import { createOperations, type OperationsOptions } from './operations.js';
-import { FilesError, searchWorkspaceFiles } from './files.js';
+import { FileAccessError, FilesError, listWorkspaceDirectory, readWorkspaceFile, searchWorkspaceFiles } from './files.js';
 
 /**
  * alpd's JSON-RPC surface over one shared runtime (plans/reference/ALPD.md §3, §6, §14).
@@ -752,6 +752,18 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       }
     },
 
+    /**
+     * The entries of a directory under projectRoot, and the content of a text file there:
+     * read-only, confined to it, no link followed, blocked paths always refused, .gitignore'd ones
+     * unless includeIgnored (docs/protocol/alp-json-rpc-v1.md §12.4, ALPD §15).
+     */
+    async 'workspace.files.list'(_connection, { projectRoot, path: relative, includeIgnored } = {}) {
+      return filesCall(projectRoot, () => listWorkspaceDirectory(projectRoot, { path: relative, includeIgnored: includeIgnored === true }));
+    },
+    async 'workspace.files.read'(_connection, { projectRoot, path: relative, includeIgnored } = {}) {
+      return filesCall(projectRoot, () => readWorkspaceFile(projectRoot, { path: relative, includeIgnored: includeIgnored === true }));
+    },
+
     /** The project board: live claims, decisions and findings (ALPD §18). */
     async 'board.list'(_connection, { projectRoot } = {}) {
       if (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot)) throw new RpcError(-32602, 'An absolute projectRoot is required');
@@ -1021,8 +1033,26 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     return { live: true, ready: checks.every(check => check.ok), checks };
   }
 
+  /**
+   * One workspace.files.list or read call: projectRoot checked, refusals answered with their code
+   * and reason, any other failure with a fixed message (it may name a host path; alpd logs it).
+   */
+  async function filesCall<T>(projectRoot: unknown, read: () => Promise<T>): Promise<T> {
+    if (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot) || path.resolve(projectRoot) !== projectRoot) {
+      throw new RpcError(RPC_ERROR.invalidParams, 'projectRoot must be an absolute, normalized path', { reason: 'invalid_path' });
+    }
+    try {
+      return await read();
+    } catch (error) {
+      if (error instanceof FileAccessError) throw new RpcError(error.code, error.message, { reason: error.reason });
+      if (error instanceof FilesError) throw new RpcError(ERROR.notFound, error.message, { reason: 'not_directory' });
+      log.error('workspace file read failed', { code: 'ALPD_FILES_FAILED', error });
+      throw new RpcError(ERROR.failed, 'alpd could not read the workspace file');
+    }
+  }
+
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts] : []), ...operations.capabilities];
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {

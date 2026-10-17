@@ -125,6 +125,7 @@ function checkPermissions(permissions) {
     if (!PERMISSIONS.includes(permission)) throw new Error(`Unknown or ungrantable permission ${JSON.stringify(permission)}; a remote credential may hold ${PERMISSIONS.join(', ')}`);
   }
   const granted = new Set(permissions);
+  // files.read is held only when named: no other permission implies it, and it implies none.
   // Writing without reading is not a useful grant: a client must see what it does.
   if (granted.has('session.write')) granted.add('session.read');
   if (granted.has('project.write')) granted.add('project.read');

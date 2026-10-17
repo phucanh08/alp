@@ -45,7 +45,7 @@ Số mục (§) được code tham chiếu; giữ ổn định.
     secret nhưng là thông tin host: client nào đã qua xác thực và hello cũng thấy, như Paseo;
   - `capabilities` = capability alpd liệt kê ∩ `{attach.after, prompt.receipts, task, team,
     library, settings.language, session.list.page, question.watch, question.watch.turns,
-    workspace.files}`.
+    workspace.files, workspace.files.read, prompt.images}`.
   - Không có `pid` và không bao giờ có `extension.methods`.
   - Trong `library` và `settings.language`, các method ghi trả `-32601 not_exposed` (§5.4).
     `library.get` đọc được, có redaction (§5.4, §5.7).
@@ -120,7 +120,7 @@ gateway, không phải trường mới của Protocol v1.
 
 ```sh
 alp-gateway credential create --label phone --workspace /home/me/project \
-    [--permission session.read] [--mode read-only] [--expires-in-days 90] [--json]
+    [--permission session.read] [--permission files.read] [--mode read-only] [--expires-in-days 90] [--json]
 alp-gateway credential list
 alp-gateway credential rotate <id>     # token cũ chết ngay; connection của nó đóng 4401
 alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, ticket bị hủy
@@ -143,9 +143,16 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
     và `settings.language.get`;
   - `project.read`, `project.write`: tài nguyên khác của project: tasks, danh sách teams, danh
     sách tên entry của library, và nội dung một entry (`library.get`, chỉ đọc, đã redaction §5.7).
-    Ghi library không có qua remote (§5.4).
-  Quyền write kéo theo quyền read cùng họ. CLI mặc định cấp cả bốn. Không có permission quản trị
-  host qua remote.
+    Ghi library không có qua remote (§5.4);
+  - `files.read`: xem danh sách thư mục và đọc nội dung file text của workspace
+    (`workspace.files.list`, `workspace.files.read`, §5.10).
+  Quyền write kéo theo quyền read cùng họ. `files.read` không kéo theo quyền nào và không quyền nào
+  kéo theo nó. Không có `--permission`, CLI cấp bốn quyền `session.*` và `project.*`, **không bao
+  giờ** cấp `files.read`: chủ máy phải ghi rõ `--permission files.read` cho từng credential được đọc
+  file (ví dụ `--permission session.read,session.write,project.read,files.read`). Muốn thêm
+  `files.read` cho một thiết bị đang dùng thì tạo credential mới rồi thu hồi cái cũ (grant của một
+  credential không sửa được; `rotate` giữ nguyên grant). Credential cũ, tạo trước khi có quyền này,
+  không có nó. Không có permission quản trị host qua remote.
 - Thu hồi khẩn cấp: `credential revoke`. Nếu file credentials hỏng hoặc bị lộ: dừng gateway
   (`systemctl --user stop alp-gateway`). alpd vẫn chạy bình thường.
 
@@ -208,8 +215,8 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
      được cấp và được thay bằng đường dẫn canonical trước khi gửi alpd. alpd chỉ đọc **tên** file dưới
      đường dẫn thật đó, không đi theo symlink nào (không liệt kê, không đi vào), có giới hạn độ sâu,
      số mục và thời gian (protocol §12.3). Gateway bỏ mọi đường dẫn trả về không phải tương đối thuần
-     (tuyệt đối, ổ đĩa, đoạn `.`/`..`/rỗng, NUL) và log `ALP_GATEWAY_FILE_OUT_OF_SCOPE`. Chỉ có tìm
-     tên file: **không có method đọc nội dung file** (§10).
+     (tuyệt đối, ổ đĩa, đoạn `.`/`..`/rỗng, NUL) và log `ALP_GATEWAY_FILE_OUT_OF_SCOPE`. Tìm tên
+     file vẫn chỉ cần `project.read`; đọc nội dung là `workspace.files.read`, cần `files.read` (§5.10).
      - Rủi ro còn lại: alpd kiểm tra mỗi thư mục trước và sau khi đọc (thư mục thật, không phải
        symlink, đúng đường dẫn thật, cùng device/inode). Một symlink được đổi vào rồi đổi ra giữa hai
        lần kiểm tra, do một tiến trình ghi đang chạy đua bên trong workspace, vẫn có thể lộ **tên**
@@ -250,6 +257,7 @@ coi là `failed`.
 | 1003 | `host_scope` | `team.list`/`library.list`/`library.get` thiếu `projectRoot` |
 | 1003 | `spec_field` | trường `spec` không cho phép (`data.field`); agent/mode/thinking không phải tên đơn giản; `model` sai ngữ pháp model id (§5.3) |
 | 1003 | `content_type` | prompt có phần không phải `text` hay `image` |
+| 1003 | `blocked_path` | `workspace.files.list`/`read` với đường dẫn trong block list (`.git`, `.env*`, `.alp`, file khoá/credential); gateway từ chối trước alpd (§5.10) |
 | 1003 | `image_limit` | ảnh trong prompt vượt giới hạn của gateway (§5.8; `data` nêu `maxCount`, `maxBytes`, `maxTotalBytes`) |
 | 1003 | `mode` | grant có `modes` và: create/configure chọn mode ngoài danh sách, create không chọn `spec.mode`, hoặc drive/stop một tree có session chạy mode ngoài danh sách (§5.5; `data.sessionId` là session đó) |
 | 1001 | — | session/question ngoài scope (giống không tồn tại); `session.status`/`log` trả tree khác tree đã kiểm tra |
@@ -259,7 +267,8 @@ coi là `failed`.
 | 1000 | `daemon_disconnected` | mất kết nối alpd trước khi có trả lời; **kết quả chưa xác định** |
 
 Lỗi của chính alpd (`1001`, `1004 key_conflict`/`outcome_unknown`, `persistence_failed`…) được
-chuyển nguyên vẹn.
+chuyển nguyên vẹn, trừ các method đọc file của host (§5.7, §5.10): ở đó chỉ mã và `data.reason` đi
+qua, message là câu cố định của gateway.
 
 ### 5.3 `session.create` / `session.preview`
 
@@ -326,6 +335,8 @@ Cột Test dùng các mã sau:
 | `question.list` | — | result lọc theo tree | session.read | exposed | P S R |
 | `question.watch` | `question.watch` (`question.watch.turns` cho `turns`) | result lọc theo tree; event (`question`, `question.resolved`, `turn.ended` của root) lọc theo session, và theo workspace đã nêu | session.read | exposed | P S R E I |
 | `workspace.files.search` | `workspace.files` | `projectRoot` thuộc grant, gửi alpd bản canonical; alpd không đi theo symlink; path trả về phải tương đối thuần | project.read | exposed | P S R I |
+| `workspace.files.list` | `workspace.files.read` | `projectRoot` thuộc grant, gửi bản canonical; `path` tương đối thuần, không bị chặn (gateway kiểm tra trước alpd); entry trả về phải là con trực tiếp của `path`, tương đối thuần, không bị chặn; lỗi alpd thay bằng câu cố định (§5.10) | files.read | exposed | P S R I |
+| `workspace.files.read` | `workspace.files.read` | như `workspace.files.list`; answer phải đúng `path` đã hỏi và ≤ 1 MiB; lỗi alpd thay bằng câu cố định (§5.10) | files.read | exposed | P S R I |
 | `board.list` | — | `projectRoot` thuộc grant | session.read | exposed | P S |
 | `session.create` | — | `spec.cwd` + allowlist; id có sẵn phải trong scope; kiểm lại kết quả | session.write | exposed | P S I |
 | `session.prompt` | `prompt.receipts`, `prompt.images` | session; `text` và ảnh inline trong giới hạn §5.8; **drive**: mode của session và mọi tổ tiên, tra mới | session.write | exposed | P S M I |
@@ -487,6 +498,70 @@ riêng (backlog).
   `daemon.usage` là usage cả tài khoản (mọi workspace, gói, cửa sổ hạn mức) và `refresh` của nó
   khởi chạy probe provider trên host; `daemon.status` mang `pid` và số đếm mọi workspace (§10). Vì
   vậy web không có các thẻ usage tài khoản trong hover card như Paseo.
+
+### 5.10 Đọc file của workspace (t-7679.18)
+
+Anh quyết ngày 2026-10-17: cho web mở file (command center ⌘P, panel Files, link tới file trong chat)
+như Paseo, nhưng chỉ đọc, với một quyền riêng.
+
+- **Quyền `files.read`**, không bao giờ cấp mặc định (§4.2). Một token chỉ có các quyền mặc định gọi
+  `workspace.files.list`/`read` nhận `1003 grant` (`data.permission: "files.read"`), alpd không nhận
+  gì. `workspace.files.search` (tên file) giữ `project.read`.
+- **Phạm vi**: `projectRoot` phải khớp nguyên chuỗi một workspace của grant (`outside_workspace`),
+  được thay bằng đường dẫn canonical trước khi gửi alpd. `path` phải tương đối thuần (không `/` đầu,
+  ổ đĩa, `\`, NUL, đoạn `.`/`..`/rỗng; sai → `-32602 invalid_path`).
+- **Block list** (`blockedFilePath` của `@anhlp/alp-protocol`, protocol §12.4): `.git` (thư mục hay
+  file), `.alp`, `.ssh`, `.gnupg`, `.aws`, `.azure`, `.kube`, `.docker`, `gcloud` ở bất kỳ cấp nào;
+  tên bắt đầu bằng `.env`, `id_` (khoá SSH với mọi tên: `id_rsa`, `id_work`…) hay `service-account`,
+  tên kết thúc bằng `_history` hay `.tfstate.backup`; `token.json`; `.netrc`, `.npmrc`, `.pypirc`, `.pgpass`, `.git-credentials`,
+  `.mcp.json`, `auth.json`, `settings.local.json`, `.vault-token`,
+  `application_default_credentials.json`, `gh/hosts.yml`…; `credential(s).*`, `secret(s).*` (file
+  hay thư mục; trừ file mã nguồn như `src/credentials.ts`, không bao giờ trừ định dạng dữ liệu/cấu
+  hình như json, yaml, toml, txt); đuôi `pem`, `key`, `p12`, `pfx`, `p8`, `jks`, `keystore`, `ppk`,
+  `der`, `gpg`, `pgp`, `asc`, `kdbx`, `ovpn`, `tfstate`, `tfvars`. So khớp không phân biệt hoa
+  thường. Gateway từ chối (`1003 blocked_path`) **trước** alpd, và alpd cũng tự từ chối (hai lớp: một
+  alpd cũ hay lỗi vẫn không trả file bị chặn qua gateway). alpd còn từ chối mọi file có nội dung chứa
+  private key (header PEM/OpenSSH `-----BEGIN … PRIVATE KEY-----`, khoá PuTTY), bất kể tên, kể cả file
+  mã nguồn được miễn. Entry bị chặn mà alpd lỡ trả trong `list` thì gateway bỏ và log
+  `ALP_GATEWAY_FILE_OUT_OF_SCOPE`. `.alp` bị chặn vì cấu hình library của project giữ giá trị `env`
+  của MCP/provider mà `library.get` trả bản đã redaction (§5.7). Danh sách cố ý chặn thừa một số file
+  thường (`id_card.md`, thư mục `secrets/` của mã nguồn, `auth.json` của i18n, AsciiDoc `.asc`).
+- **`.gitignore`**: mặc định file/thư mục bị ignore không được liệt kê và bị từ chối
+  (`1003 ignored`); client gửi `includeIgnored: true` để xem. alpd hỏi chính Git
+  (`git check-ignore --no-index --stdin -z`, một process mỗi request), nên luật đúng như Git. Git chạy
+  trong khung hẹp: chỉ lấy `git` từ các mục PATH tuyệt đối và chạy bằng đường dẫn tuyệt đối (không bao
+  giờ chạy một `git` nằm trong workspace), argv, không shell, cwd là đường dẫn thật của workspace, tên
+  file qua stdin dạng `./<path>` (không bao giờ là tham số hay pathspec magic), bỏ biến `GIT_*` của
+  alpd, tắt `core.fsmonitor`, tối đa 4 process cùng lúc (hàng đợi 64), tối đa 2 s rồi kill cả process
+  group. Timeout, lỗi, hàng đợi đầy hoặc câu trả lời lạ → coi là bị ignore (fail closed). Không có Git,
+  hoặc workspace không có `.git` ở nó hay thư mục cha → không ẩn gì theo `.gitignore`, chỉ còn block
+  list (protocol §12.4). Đây là
+  mặc định hiển thị, **không phải ranh giới bảo mật**: ranh giới là block list và quyền `files.read`.
+- **Chỉ file text, tối đa 1 MiB** (`WORKSPACE_FILES.maxReadBytes`): file lớn hơn → `1000 too_large`,
+  file nhị phân hay không phải UTF-8 → `1000 binary`. Gateway kiểm tra lại: answer phải nêu đúng
+  `path` đã hỏi, `content` là chuỗi ≤ 1 MiB (đo UTF-8), nếu không thì từ chối `1000`. `size` gateway
+  tự tính. `list` tối đa 1000 entry, chỉ giữ `name`, `path`, `kind`, `size`, `modifiedAt`.
+- **Không đi theo link** (alpd, protocol §12.4): mọi thư mục trên đường đi phải là thư mục thật, đúng
+  đường dẫn thật, cùng device/inode trước và sau khi đọc; file phải là file thường **một tên**
+  (`nlink` 1, nên hard link tới file ngoài workspace bị từ chối), mở với `O_NOFOLLOW | O_NONBLOCK`,
+  kiểm tra lại qua handle. Vi phạm → `1003 linked`.
+- **Lỗi không lộ host** (t-70c4): với mọi lỗi của alpd, chỉ mã và `data.reason` (chuỗi đơn giản) đi
+  qua; message là câu cố định của gateway theo reason (`FILE_REFUSALS` trong `connection.js`), lỗi
+  không có reason thành câu chung. Không có đường dẫn host hay trích nội dung file trong lỗi.
+- **Mối đe doạ còn lại**:
+  - Block list là mức sàn: file khác vẫn có thể chứa secret (ví dụ `config/prod.yml`). Vì vậy quyền
+    này không mặc định; ai có token `files.read` đọc được mọi file text còn lại của workspace.
+  - Một tiến trình ghi chạy đua bên trong workspace (agent, tiến trình của chính user) đổi một thư
+    mục trên đường đi thành symlink rồi đổi lại đúng giữa các lần kiểm tra có thể khiến alpd đọc một
+    file ngoài workspace (Node không có `openat`). Tiến trình đó vốn đã tự đọc được file ấy; một
+    client remote chỉ có `files.read` không tạo được symlink.
+  - Nội dung file đi qua TLS như mọi frame; gateway không log nội dung, chỉ log method và thời gian.
+  - Git cho `.gitignore` (protocol §12.4): một client có `files.read` có thể chiếm hết 4 slot và hàng
+    đợi bằng request chậm (ví dụ `.gitignore` là FIFO, mỗi lần 2 s); khi đó `.gitignore` của các
+    request khác fail closed (file bị ẩn, không bao giờ lộ). Nếu alpd chết đúng lúc một git đang bị
+    chặn trên FIFO, process đó có thể còn lại (tối đa 4). Workspace nằm ở filesystem khác bên dưới
+    một repo (git dừng ở ranh giới filesystem) thì mọi path bị coi là ignore, trừ khi
+    `includeIgnored`.
 
 ## 6. Streaming và recovery
 
@@ -682,12 +757,10 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
   `session.create { resume: true }` trước khi prompt lại. Gateway không giữ connection hộ client.
 - `daemon.status` không expose: result schema bắt buộc có `pid` và các con số trải qua mọi
   workspace. Muốn bản rút gọn cần contract riêng.
-- **Đọc nội dung file của workspace qua remote chưa có** (chờ anh quyết định). Chỉ có
-  `workspace.files.search` (tên file, `project.read`). Đọc nội dung sẽ cho một token `project.read`
-  đọc mọi file của workspace (`.env`, khoá, cấu hình), nhiều hơn những gì token đó thấy hôm nay
-  (task, team, tên và nội dung đã redaction của entry library). Mở cần chọn: quyền riêng (ví dụ `files.read`) hay `project.read`;
-  có chặn file ẩn/`.env`/file bị gitignore không; giới hạn kích thước và loại file (text). Cũng chưa
-  có `.gitignore` trong tìm kiếm (alpd không chạy git cho việc này).
+- **Đọc file qua remote chỉ đọc, chỉ text ≤ 1 MiB, cần `files.read`** (§5.10): không có sửa, tạo,
+  xoá, tải file nhị phân hay xem ảnh. Block list là mức sàn, không bảo đảm file còn lại không có
+  secret. `workspace.files.search` vẫn chưa đọc `.gitignore`; `list`/`read` hỏi Git (`--no-index`:
+  file đã track mà khớp luật cũng bị ẩn).
 - **Nội dung library qua remote là bản đã redaction ở gateway** (§5.7), không phải contract của
   daemon: alpd vẫn chỉ redact giá trị `env`/`headers` (`x-alp.redacts`). Gateway không đoán secret
   bằng heuristic; nó ẩn cả field (mọi `args`, cả URL MCP, cả lệnh hook), nên client không thấy

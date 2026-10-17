@@ -75,6 +75,9 @@ async function world(t) {
   // May drive read-only trees of a only; may read a's project resources only.
   const viewer = await createCredential(gatewayHome, { label: 'viewer', workspaces: [projects.a], permissions: all, modes: ['read-only'] });
   const reader = await createCredential(gatewayHome, { label: 'reader', workspaces: [projects.a], permissions: ['session.read', 'project.read'] });
+  // Reads a's files (files.read is never a default); bob reads b's.
+  const files = await createCredential(gatewayHome, { label: 'files', workspaces: [projects.a], permissions: ['session.read', 'files.read'] });
+  const bobFiles = await createCredential(gatewayHome, { label: 'bob-files', workspaces: [projects.b], permissions: ['files.read'] });
   const lines = [];
   const logger = createGatewayLogger({ write: line => lines.push(line) });
   const store = new CredentialStore({ home: gatewayHome, logger, pollMs: 50 });
@@ -105,7 +108,7 @@ async function world(t) {
   const turnStarts = async () => (await readFile(journal, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.method === 'turn/start');
 
   return {
-    projects, home, tokens: { alice: alice.token, bob: bob.token, viewer: viewer.token, reader: reader.token }, ids: { alice: alice.credential.id }, gatewayHome, lines, open, turnStarts, journal: () => readFile(journal, 'utf8').catch(() => ''),
+    projects, home, tokens: { alice: alice.token, bob: bob.token, viewer: viewer.token, reader: reader.token, files: files.token, bobFiles: bobFiles.token }, ids: { alice: alice.credential.id }, gatewayHome, lines, open, turnStarts, journal: () => readFile(journal, 'utf8').catch(() => ''),
     get base() { return base; }, get gateway() { return gateway; }, get socket() { return socket; },
     startDaemon, stopDaemon, startGateway,
     async stopGateway() { await gateway?.close(); gateway = undefined; },
@@ -151,7 +154,7 @@ test('a remote client works through the gateway across reconnects and restarts o
 
   // Handshake through the gateway: alpd's capabilities, never extension methods.
   const greeting = await hello(client, { name: 'e2e', version: '0' });
-  assert.deepEqual(greeting.capabilities.sort(), ['attach.after', 'library', 'prompt.images', 'prompt.receipts', 'question.watch', 'question.watch.turns', 'session.list.page', 'settings.language', 'task', 'team', 'workspace.files']);
+  assert.deepEqual(greeting.capabilities.sort(), ['attach.after', 'library', 'prompt.images', 'prompt.receipts', 'question.watch', 'question.watch.turns', 'session.list.page', 'settings.language', 'task', 'team', 'workspace.files', 'workspace.files.read']);
   assert.ok(!greeting.capabilities.includes('extension.methods'));
   assert.equal(greeting.pid, undefined);
   assert.equal(greeting.hostname, hostname(), 'alpd\'s machine name, as Paseo labels a host');
@@ -511,4 +514,67 @@ test('question.watch turns and workspace.files.search stay in the grant on a rea
   t.after(() => viewer.close());
   await hello(viewer);
   assert.deepEqual((await viewer.request('workspace.files.search', { projectRoot: w.projects.a, query: 'server.ts' })).files, [{ path: 'src/server.ts' }]);
+});
+
+// docs/protocol/alp-json-rpc-v1.md §12.4, docs/alp/remote-gateway.md §5.10 against a real alpd: only
+// a credential holding files.read lists and reads, within its workspace; blocked files, links out
+// of it, a hard link and .gitignore'd files are refused by alpd or the gateway, with fixed text:
+// no host path and no quote of a file reaches the client.
+test('workspace.files.list and read stay in the grant and the block list on a real alpd', { skip, timeout: 60_000 }, async t => {
+  const w = await world(t);
+  const { link, symlink } = await import('node:fs/promises');
+  await mkdir(path.join(w.projects.a, 'src'), { recursive: true });
+  await writeFile(path.join(w.projects.a, 'src', 'server.ts'), 'export const port = 1;\n');
+  await writeFile(path.join(w.projects.a, '.env'), 'TOKEN=SENTINEL-env');
+  await writeFile(path.join(w.projects.a, 'tls.key'), 'SENTINEL-key');
+  await writeFile(path.join(w.projects.a, 'id_github'), 'SENTINEL-ssh');
+  await writeFile(path.join(w.projects.a, 'deploy.txt'), '-----BEGIN OPENSSH PRIVATE KEY-----\nSENTINEL-pem\n-----END OPENSSH PRIVATE KEY-----\n');
+  // alpd asks git which files .gitignore hides: a is a repository.
+  (await import('node:child_process')).execFileSync('git', ['init', '-q'], { cwd: w.projects.a, stdio: 'ignore' });
+  await writeFile(path.join(w.projects.a, '.gitignore'), 'secret-notes.txt\n');
+  await writeFile(path.join(w.projects.a, 'secret-notes.txt'), 'SENTINEL-ignored');
+  await writeFile(path.join(w.projects.b, 'b.txt'), 'SENTINEL-b');
+  await symlink(path.join(w.projects.b, 'b.txt'), path.join(w.projects.a, 'to-b.txt'));
+  await link(path.join(w.projects.b, 'b.txt'), path.join(w.projects.a, 'hard-b.txt'));
+  const reader = new AlpRpcClient(await w.open(w.tokens.files));
+  t.after(() => reader.close());
+  assert.ok((await hello(reader)).capabilities.includes('workspace.files.read'));
+  const root = (await reader.request('workspace.files.list', { projectRoot: w.projects.a })).entries.map(entry => entry.path);
+  assert.ok(root.includes('src') && root.includes('.gitignore') && root.includes('hard-b.txt'), root.join());
+  for (const hidden of ['.env', '.alp', 'tls.key', 'id_github', 'to-b.txt', 'secret-notes.txt']) assert.ok(!root.includes(hidden), hidden);
+  assert.deepEqual(await reader.request('workspace.files.read', { projectRoot: w.projects.a, path: 'src/server.ts' }).then(({ modifiedAt, ...rest }) => rest), { path: 'src/server.ts', content: 'export const port = 1;\n', size: 23 });
+  const refusal = async (client, method, params) => {
+    const error = await client.request(method, params).then(() => assert.fail(`${method} ${JSON.stringify(params)}`), caught => caught);
+    const seen = JSON.stringify({ message: error.message, data: error.data });
+    for (const host of [w.projects.a, w.projects.b, w.home]) assert.ok(!seen.includes(host), `no host path: ${seen}`);
+    assert.ok(!seen.includes('SENTINEL'), `no file content: ${seen}`);
+    return [error.code, error.data?.reason];
+  };
+  assert.deepEqual(await refusal(reader, 'workspace.files.read', { projectRoot: w.projects.a, path: '.env' }), [1003, 'blocked_path']);
+  assert.deepEqual(await refusal(reader, 'workspace.files.read', { projectRoot: w.projects.a, path: 'tls.key' }), [1003, 'blocked_path']);
+  assert.deepEqual(await refusal(reader, 'workspace.files.read', { projectRoot: w.projects.a, path: '.alp/settings.json' }), [1003, 'blocked_path']);
+  assert.deepEqual(await refusal(reader, 'workspace.files.read', { projectRoot: w.projects.a, path: 'id_github' }), [1003, 'blocked_path']);
+  assert.deepEqual(await refusal(reader, 'workspace.files.read', { projectRoot: w.projects.a, path: 'deploy.txt' }), [1003, 'blocked_path'], 'a private key under an ordinary name');
+  assert.deepEqual(await refusal(reader, 'workspace.files.read', { projectRoot: w.projects.a, path: 'to-b.txt' }), [1003, 'linked']);
+  assert.deepEqual(await refusal(reader, 'workspace.files.read', { projectRoot: w.projects.a, path: 'hard-b.txt' }), [1003, 'linked']);
+  assert.deepEqual(await refusal(reader, 'workspace.files.read', { projectRoot: w.projects.a, path: 'secret-notes.txt' }), [1003, 'ignored']);
+  assert.equal((await reader.request('workspace.files.read', { projectRoot: w.projects.a, path: 'secret-notes.txt', includeIgnored: true })).content, 'SENTINEL-ignored', 'shown when asked for');
+  assert.deepEqual(await refusal(reader, 'workspace.files.read', { projectRoot: w.projects.a, path: 'missing.txt' }), [1001, 'not_found']);
+  assert.deepEqual(await refusal(reader, 'workspace.files.read', { projectRoot: w.projects.a, path: '../b/b.txt' }), [-32602, 'invalid_path']);
+  assert.deepEqual(await refusal(reader, 'workspace.files.read', { projectRoot: w.projects.b, path: 'b.txt' }), [1003, 'outside_workspace']);
+  // Without files.read: the default permissions are refused, alpd never asked.
+  const owner = new AlpRpcClient(await w.open(w.tokens.alice));
+  t.after(() => owner.close());
+  await hello(owner);
+  assert.deepEqual(await refusal(owner, 'workspace.files.read', { projectRoot: w.projects.a, path: 'src/server.ts' }), [1003, 'grant']);
+  assert.deepEqual(await refusal(owner, 'workspace.files.list', { projectRoot: w.projects.a }), [1003, 'grant']);
+  // Another credential's workspace: its own files only.
+  const other = new AlpRpcClient(await w.open(w.tokens.bobFiles));
+  t.after(() => other.close());
+  await hello(other);
+  assert.deepEqual(await refusal(other, 'workspace.files.list', { projectRoot: w.projects.a }), [1003, 'outside_workspace']);
+  // b.txt has a second name in a (the hard link above), so it is refused in b as well; another file reads.
+  assert.deepEqual(await refusal(other, 'workspace.files.read', { projectRoot: w.projects.b, path: 'b.txt' }), [1003, 'linked']);
+  await writeFile(path.join(w.projects.b, 'notes.md'), '# b');
+  assert.equal((await other.request('workspace.files.read', { projectRoot: w.projects.b, path: 'notes.md' })).content, '# b');
 });

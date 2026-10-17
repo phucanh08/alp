@@ -36,7 +36,7 @@ async function world(t, { modes } = {}) {
     ],
   });
   const gw = await startGateway(t, { daemon, credentials: {
-    alice: { workspaces: [a], ...(modes ? { modes } : {}) },
+    alice: { workspaces: [a], permissions: ['session.read', 'session.write', 'project.read', 'project.write', 'files.read'], ...(modes ? { modes } : {}) },
     reader: { workspaces: [a], permissions: ['session.read'] },
     sessions: { workspaces: [a], permissions: ['session.read', 'session.write'] },
     both: { workspaces: [a, b] },
@@ -64,6 +64,8 @@ const OUT_OF_SCOPE = {
   'question.watch': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
   'board.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
   'workspace.files.search': ({ b }) => [{ projectRoot: b, query: 'x' }, 1003, 'outside_workspace'],
+  'workspace.files.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
+  'workspace.files.read': ({ b }) => [{ projectRoot: b, path: 'README.md' }, 1003, 'outside_workspace'],
   'session.create': ({ b }) => [{ spec: { cwd: b } }, 1003, 'outside_workspace'],
   'session.prompt': () => [{ sessionId: 'mix', clientMessageId: 'm', content: text }, 1001],
   'session.interrupt': () => [{ sessionId: 'sb' }, 1001],
@@ -90,6 +92,7 @@ const IN_SCOPE = ({ a }) => ({
   'session.list': {}, 'session.get': { sessionId: 'sa' }, 'session.status': { sessionId: 'sa' }, 'session.log': { sessionId: 'sa' },
   'session.attach': { sessionId: 'sa' }, 'session.release': { sessionId: 'sa' }, 'session.preview': { spec: { cwd: a } },
   'question.list': {}, 'question.watch': {}, 'board.list': { projectRoot: a }, 'workspace.files.search': { projectRoot: a },
+  'workspace.files.list': { projectRoot: a }, 'workspace.files.read': { projectRoot: a, path: 'README.md' },
   'session.create': { spec: { cwd: a } }, 'session.prompt': { sessionId: 'sa', clientMessageId: 'm', content: text },
   'session.interrupt': { sessionId: 'sa' }, 'session.configure': { sessionId: 'sa' }, 'session.close': { sessionId: 'sa' },
   'session.rename': { sessionId: 'sa', title: 't' }, 'session.archive': { sessionId: 'sa' }, 'session.message': { sessionId: 'sa', text: 'x' },
@@ -365,6 +368,78 @@ test('workspace.files.search: a granted workspace only, sent as its canonical pa
   const { client: reader } = await sdk('reader');
   await assert.rejects(reader.request('workspace.files.search', { projectRoot: a }), error => error.code === 1003 && error.data?.reason === 'grant');
   assert.deepEqual(reached(daemon, mark, 'workspace.files.search'), [], 'no refused search reached alpd');
+});
+
+test('workspace.files.list and read: files.read only, never a default; canonical workspace; blocked or non-relative paths refused before alpd; answers kept to the request', async t => {
+  const { daemon, sdk, a, canonicalA } = await world(t);
+  let { client } = await sdk('alice');
+  assert.ok((await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('workspace.files.read'));
+  daemon.state.handlers['workspace.files.list'] = ({ path: directory }) => ({
+    entries: [
+      { name: 'server.ts', path: directory ? `${directory}/server.ts` : 'server.ts', kind: 'file', size: 3, modifiedAt: '2026-10-17T00:00:00.000Z', inode: 42, host: '/etc' },
+      { name: 'deep', path: directory ? `${directory}/deep` : 'deep', kind: 'directory' },
+      // Planted by a faulty alpd: other directories, blocked names, links, absolute paths, bad kinds.
+      { name: 'x.ts', path: 'elsewhere/x.ts', kind: 'file' },
+      { name: '.env', path: directory ? `${directory}/.env` : '.env', kind: 'file' },
+      { name: 'id_rsa', path: directory ? `${directory}/id_rsa` : 'id_rsa', kind: 'file' },
+      { name: 'link', path: directory ? `${directory}/link` : 'link', kind: 'link' },
+      { name: '../up', path: '../up', kind: 'file' },
+      { name: '/etc', path: '/etc', kind: 'directory' },
+      { name: 'a/b', path: directory ? `${directory}/a/b` : 'a/b', kind: 'file' },
+    ],
+    truncated: true,
+  });
+  const listed = await client.request('workspace.files.list', { projectRoot: a, path: 'src', includeIgnored: true, extra: 'dropped' });
+  assert.deepEqual(listed, { entries: [{ name: 'server.ts', path: 'src/server.ts', kind: 'file', size: 3, modifiedAt: '2026-10-17T00:00:00.000Z' }, { name: 'deep', path: 'src/deep', kind: 'directory' }], truncated: true });
+  assert.deepEqual(daemon.calls('workspace.files.list').at(-1).params, { projectRoot: canonicalA, path: 'src', includeIgnored: true }, 'the canonical path, no unknown params');
+  assert.deepEqual((await client.request('workspace.files.list', { projectRoot: a })).entries.map(entry => entry.path), ['server.ts', 'deep']);
+  daemon.state.handlers['workspace.files.read'] = ({ path: file }) => ({ path: file, content: 'export {};\n', size: 11, modifiedAt: '2026-10-17T00:00:00.000Z', revision: '1:2:3' });
+  assert.deepEqual(await client.request('workspace.files.read', { projectRoot: a, path: 'src/server.ts' }), { path: 'src/server.ts', content: 'export {};\n', size: 11, modifiedAt: '2026-10-17T00:00:00.000Z' });
+  assert.deepEqual(daemon.calls('workspace.files.read').at(-1).params, { projectRoot: canonicalA, path: 'src/server.ts' });
+
+  // Refused by the gateway itself, before alpd sees the method (one connection per batch: the rate limit is per connection).
+  const mark = daemon.calls().length;
+  ({ client } = await sdk('alice'));
+  for (const file of ['.env', 'config/.env.local', '.git/config', 'sub/.GIT/HEAD', '.alp/mcp/docs.json', 'id_ed25519', 'certs/tls.key', 'server.PEM', 'credentials.json', '.npmrc', '.aws/credentials']) {
+    await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: file }), error => error.code === 1003 && error.data?.reason === 'blocked_path' && !error.message.includes(a), file);
+    await assert.rejects(client.request('workspace.files.list', { projectRoot: a, path: file }), error => error.code === 1003 && error.data?.reason === 'blocked_path', file);
+  }
+  ({ client } = await sdk('alice'));
+  for (const file of ['/etc/passwd', '../b/x', 'src/../../x', './x', 'a//b', 'C:/x', 'a\\b', 'src/']) {
+    await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: file }), error => error.code === -32602 && error.data?.reason === 'invalid_path', file);
+  }
+  await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: '' }), error => error.code === -32602, 'an empty path fails the schema');
+  await assert.rejects(client.request('workspace.files.read', { projectRoot: `${a}/`, path: 'x' }), error => error.code === 1003 && error.data?.reason === 'outside_workspace');
+  // Without files.read: the default credentials (session and project permissions) are refused.
+  for (const label of ['both', 'reader', 'sessions']) {
+    const { client: other } = await sdk(label);
+    for (const [method, params] of [['workspace.files.list', { projectRoot: a }], ['workspace.files.read', { projectRoot: a, path: 'README.md' }]]) {
+      await assert.rejects(other.request(method, params), error => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === 'files.read', `${label} ${method}`);
+    }
+  }
+  assert.deepEqual(daemon.calls().slice(mark).filter(call => call.method.startsWith('workspace.files.')), [], 'no refused call reached alpd');
+
+  // An answer for another file, or over the limit, is refused.
+  ({ client } = await sdk('alice'));
+  daemon.state.handlers['workspace.files.read'] = () => ({ path: 'other.txt', content: 'SENTINEL', size: 8 });
+  await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: 'x.txt' }), error => error.code === 1000 && !error.message.includes('SENTINEL'));
+  daemon.state.handlers['workspace.files.read'] = ({ path: file }) => ({ path: file, content: 'é'.repeat(512 * 1024 + 1), size: 1 });
+  await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: 'x.txt' }), error => error.code === 1000);
+  // alpd's refusals: code and reason pass, the message is the gateway's fixed text (no host path, no quote).
+  ({ client } = await sdk('alice'));
+  for (const reason of ['ignored', 'linked', 'not_found', 'binary', 'too_large', 'not_directory', 'unreadable', 'something_new']) {
+    daemon.state.handlers['workspace.files.read'] = () => { throw { code: reason === 'binary' || reason === 'too_large' ? 1000 : 1003, message: `${canonicalA}/secret.txt: SENTINEL quote`, data: { reason, file: `${canonicalA}/secret.txt` } }; };
+    const caught = await client.request('workspace.files.read', { projectRoot: a, path: 'x.txt' }).then(() => assert.fail(reason), failure => failure);
+    assert.equal(caught.data?.reason, reason);
+    assert.ok(!caught.message.includes(canonicalA) && !caught.message.includes('SENTINEL') && !JSON.stringify(caught.data).includes(canonicalA), `${reason}: ${caught.message}`);
+    daemon.state.handlers['workspace.files.list'] = daemon.state.handlers['workspace.files.read'];
+    const listed = await client.request('workspace.files.list', { projectRoot: a }).then(() => assert.fail(reason), failure => failure);
+    assert.ok(!listed.message.includes(canonicalA) && !listed.message.includes('SENTINEL'), `${reason}: ${listed.message}`);
+  }
+  // A raw failure (no code): the gateway's own generic text.
+  ({ client } = await sdk('alice'));
+  daemon.state.handlers['workspace.files.read'] = () => { throw new Error(`EACCES: ${canonicalA}/x.txt`); };
+  await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: 'x.txt' }), failure => !failure.message.includes(canonicalA));
 });
 
 test('question.answer needs an exact id in scope: a prefix that alpd would expand is refused', async t => {

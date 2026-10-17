@@ -14,18 +14,26 @@ import { CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS } from '@anhlp/alp-protoc
  */
 
 /**
- * Permissions a remote credential can hold: sessions, and a project's other resources (tasks,
- * teams, project library entries). A write permission implies its read. Host administration has
- * no remote permission in v1.
+ * Permissions a remote credential can hold: sessions, a project's other resources (tasks, teams,
+ * project library entries), and the content of a workspace's files (`files.read`: listing
+ * directories and reading text files, docs/alp/remote-gateway.md §5.10). A write permission implies
+ * its read; `files.read` implies nothing and nothing implies it. Host administration has no remote
+ * permission in v1.
  */
-export const PERMISSIONS = Object.freeze(['session.read', 'session.write', 'project.read', 'project.write']);
+export const PERMISSIONS = Object.freeze(['session.read', 'session.write', 'project.read', 'project.write', 'files.read']);
+
+/**
+ * What `alp-gateway credential create` grants without --permission: every permission but
+ * `files.read`, which the owner names for each credential that may read file contents.
+ */
+export const DEFAULT_PERMISSIONS = Object.freeze(['session.read', 'session.write', 'project.read', 'project.write']);
 
 /**
  * Daemon capabilities the gateway passes on when alpd lists them; never `extension.methods`.
  * Within `library` and `settings.language` some methods stay unexposed and answer -32601
  * `not_exposed` (docs/alp/remote-gateway.md §5.4).
  */
-export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles, CAPABILITY.promptImages]);
+export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages]);
 
 /** The codes of docs/protocol/alp-json-rpc-v1.md §5.1 the gateway answers its own refusals with; `data.reason` says why. */
 export const GATEWAY_ERROR = Object.freeze({ forbidden: ERROR.forbidden, unavailable: ERROR.unavailable });
@@ -39,6 +47,7 @@ export const GATEWAY_REASON = Object.freeze({
   specField: 'spec_field',
   contentType: 'content_type',
   imageLimit: 'image_limit',
+  blockedPath: 'blocked_path',
   mode: 'mode',
   rateLimited: 'rate_limited',
   tooManyPending: 'too_many_pending',
@@ -230,7 +239,7 @@ export function isModelId(value) {
  *   exposed until a contract or policy makes its scope checkable; prohibited: never remote in v1.
  * @typedef {{
  *   status: ExposureStatus,
- *   permission?: 'session.read' | 'session.write' | 'project.read' | 'project.write',
+ *   permission?: 'session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read',
  *   scope: string,
  *   capability?: string,
  *   params?: readonly string[],
@@ -267,6 +276,8 @@ export const EXPOSURE = Object.freeze({
 
   'team.list': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot names a granted workspace (required by the gateway); rows also come from the library and built-in layers, as session.preview shows them; TEAM_ROW_FIELDS only, a read error replaced by a fixed text', capability: CAPABILITY.team, params: ['projectRoot'], tests: ['permission', 'workspace-param', 'row-fields'] },
   'workspace.files.search': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot names a granted workspace and is sent as its canonical path; alpd lists file names under it only (no link followed, no contents); answered paths must be relative without . or .. segments, others dropped', capability: CAPABILITY.workspaceFiles, params: ['projectRoot', 'query', 'limit'], tests: ['permission', 'workspace-param', 'result-filter'] },
+  'workspace.files.list': { status: 'exposed', permission: 'files.read', scope: 'workspace: projectRoot names a granted workspace and is sent as its canonical path; path relative, no . or .. segment, never a blocked one (blockedFilePath, refused by the gateway before alpd); alpd lists regular files and directories under it, no link followed; answered entries must be direct children of path, plainly relative and not blocked, others dropped; alpd errors rewritten to fixed text', capability: CAPABILITY.workspaceFilesRead, params: ['projectRoot', 'path', 'includeIgnored'], tests: ['permission', 'workspace-param', 'result-filter', 'path-filter'] },
+  'workspace.files.read': { status: 'exposed', permission: 'files.read', scope: 'workspace: as workspace.files.list; alpd reads one UTF-8 text file of at most WORKSPACE_FILES.maxReadBytes, no link or hard link; the answer must name the requested path and fit the limit, else refused; alpd errors rewritten to fixed text', capability: CAPABILITY.workspaceFilesRead, params: ['projectRoot', 'path', 'includeIgnored'], tests: ['permission', 'workspace-param', 'result-filter', 'path-filter'] },
   'task.list': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot', capability: CAPABILITY.task, params: ['projectRoot'], tests: ['permission', 'workspace-param'] },
   'task.create': { status: 'exposed', permission: 'project.write', scope: 'workspace: projectRoot; requestId dedupes within one alpd process for 10 minutes only, so read task.list before retrying after 1000 or a restart', capability: CAPABILITY.task, params: ['projectRoot', 'title', 'priority', 'requestId'], tests: ['permission', 'workspace-param'] },
   'task.update': { status: 'exposed', permission: 'project.write', scope: 'workspace: projectRoot', capability: CAPABILITY.task, params: ['projectRoot', 'id', 'action', 'note', 'ifRev'], tests: ['permission', 'workspace-param'] },

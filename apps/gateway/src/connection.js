@@ -1,6 +1,6 @@
 // @ts-check
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { ERROR, PROTOCOL_VERSION, RPC_ERROR, base64Bytes } from '@anhlp/alp-protocol';
+import { ERROR, PROTOCOL_VERSION, RPC_ERROR, WORKSPACE_FILES, base64Bytes, blockedFilePath } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 import { isAlpClientError } from '@anhlp/alp-client/portable';
 import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, workspaceOf } from './policy.js';
@@ -53,7 +53,8 @@ const WATCHED = new Set(['question', 'question.resolved', 'turn.ended']);
 
 /** A path relative to a workspace, under it: no root, drive, `.`/`..` or empty segment, no NUL. @param {unknown} file */
 function relativeFile(file) {
-  if (typeof file !== 'string' || !file || file.length > 4096 || file.includes('\0')) return false;
+  // At most 4096 code points, as alpd and the schema count them.
+  if (typeof file !== 'string' || !file || file.length > 8192 || [...file].length > 4096 || file.includes('\0')) return false;
   if (/^[\\/]/.test(file) || /^[A-Za-z]:/.test(file)) return false;
   return file.split(/[\\/]/).every(segment => segment !== '' && segment !== '.' && segment !== '..');
 }
@@ -148,6 +149,26 @@ function opaqueDaemonError(caught, message, { keepReasoned = false } = {}) {
 }
 
 const TASK_UNREADABLE = 'This task file cannot be read on the daemon host';
+
+/**
+ * The message the client gets for each alpd refusal of workspace.files.list and read (t-70c4):
+ * alpd names only the client's own path, but every message is fixed here all the same, so no alpd
+ * text (a host path, a quote of a file) can pass. Code and reason pass on.
+ * @type {Readonly<Record<string, string>>}
+ */
+const FILE_REFUSALS = Object.freeze({
+  blocked_path: 'This path is never readable remotely: .git, .env files, ALP configuration and key or credential files are always refused',
+  ignored: 'This path is ignored by .gitignore; ask with includeIgnored to see it',
+  linked: 'This path is reached through a link, has more than one name, or changed while it was read; links are not followed',
+  not_found: 'No readable file or directory at this path',
+  binary: 'This file is not UTF-8 text',
+  too_large: `This file is larger than ${WORKSPACE_FILES.maxReadBytes} bytes`,
+  not_directory: 'The workspace is not a directory the daemon host can read',
+  invalid_path: 'path must be a relative path inside the workspace, with / between names and no . or .. segment',
+});
+
+/** A file path a client may ask for: plainly relative (relativeFile), '/' separated. @param {unknown} file */
+const requestedFile = file => relativeFile(file) && !String(file).includes('\\');
 
 /**
  * Failures of session.preview, create and configure the gateway can name without alpd's text:
@@ -565,6 +586,18 @@ export class ClientConnection {
     return workspace;
   }
 
+  /** A workspace.files path: plainly relative, never blocked; refused before alpd sees it. @param {unknown} file */
+  #checkFile(file) {
+    if (!requestedFile(file)) throw new GatewayError(RPC_ERROR.invalidParams, FILE_REFUSALS.invalid_path, { reason: 'invalid_path' });
+    if (blockedFilePath(/** @type {string} */ (file))) throw forbidden(FILE_REFUSALS.blocked_path, GATEWAY_REASON.blockedPath);
+  }
+
+  /** alpd's refusal of a workspace.files call with the gateway's fixed text for its reason. @param {unknown} error */
+  #fileError(error) {
+    const reason = /** @type {any} */ (error)?.data?.reason;
+    return opaqueDaemonError(error, typeof reason === 'string' && Object.hasOwn(FILE_REFUSALS, reason) ? FILE_REFUSALS[reason] : 'The file cannot be read on the daemon host');
+  }
+
   /** A projectRoot the gateway requires where alpd would fall back to host-level data. @param {unknown} projectRoot @param {string} method */
   #project(projectRoot, method) {
     if (projectRoot === undefined) throw forbidden(`${method} through the gateway needs a projectRoot this credential may use`, GATEWAY_REASON.hostScope);
@@ -903,6 +936,44 @@ export class ClientConnection {
         else this.#log.error('workspace.files.search answered a path outside the workspace; dropped it', { code: 'ALP_GATEWAY_FILE_OUT_OF_SCOPE' });
       }
       return { files, ...(result?.truncated === true ? { truncated: true } : {}) };
+    },
+
+    // A workspace's directories and text files (docs/protocol/alp-json-rpc-v1.md §12.4,
+    // docs/alp/remote-gateway.md §5.10), with files.read only. The gateway refuses a path that is
+    // not plainly relative or that the block list names before alpd sees it, sends the canonical
+    // workspace, and keeps of the answer only what the request asked for: direct, unblocked
+    // children of the directory; the requested file within the size limit.
+    'workspace.files.list': async params => {
+      const workspace = this.#workspace(params.projectRoot);
+      if (params.path !== undefined) this.#checkFile(params.path);
+      const result = await this.#call('workspace.files.list', { ...params, projectRoot: workspace.canonical }).catch(error => { throw this.#fileError(error); });
+      const prefix = params.path === undefined ? '' : `${params.path}/`;
+      const entries = [];
+      for (const entry of Array.isArray(result?.entries) ? result.entries : []) {
+        const name = entry?.name;
+        const kept = typeof name === 'string' && !/[\\/]/.test(name) && entry.path === `${prefix}${name}` && requestedFile(entry.path) && !blockedFilePath(entry.path) && (entry.kind === 'file' || entry.kind === 'directory');
+        if (!kept || entries.length >= WORKSPACE_FILES.maxListEntries) {
+          if (!kept) this.#log.error('workspace.files.list answered an entry outside the directory or blocked; dropped it', { code: 'ALP_GATEWAY_FILE_OUT_OF_SCOPE' });
+          continue;
+        }
+        entries.push({
+          name, path: entry.path, kind: entry.kind,
+          ...(entry.kind === 'file' && Number.isSafeInteger(entry.size) && entry.size >= 0 ? { size: entry.size } : {}),
+          ...(typeof entry.modifiedAt === 'string' && entry.modifiedAt.length <= 64 ? { modifiedAt: entry.modifiedAt } : {}),
+        });
+      }
+      return { entries, ...(result?.truncated === true ? { truncated: true } : {}) };
+    },
+    'workspace.files.read': async params => {
+      const workspace = this.#workspace(params.projectRoot);
+      this.#checkFile(params.path);
+      const result = await this.#call('workspace.files.read', { ...params, projectRoot: workspace.canonical }).catch(error => { throw this.#fileError(error); });
+      const content = result?.content;
+      if (result?.path !== params.path || typeof content !== 'string' || Buffer.byteLength(content, 'utf8') > WORKSPACE_FILES.maxReadBytes) {
+        this.#log.error('workspace.files.read answered another file or one over the limit; refused it', { code: 'ALP_GATEWAY_FILE_OUT_OF_SCOPE' });
+        throw new GatewayError(ERROR.failed, 'The daemon host answered a file the gateway does not pass on');
+      }
+      return { path: params.path, content, size: Buffer.byteLength(content, 'utf8'), ...(typeof result.modifiedAt === 'string' && result.modifiedAt.length <= 64 ? { modifiedAt: result.modifiedAt } : {}) };
     },
 
     // Project resources (docs/protocol/alp-json-rpc-v1.md §15): alpd never walks up from

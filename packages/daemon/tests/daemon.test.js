@@ -721,3 +721,45 @@ test('workspace.files.search lists matching files inside the directory only, nev
   await assert.rejects(client.request('workspace.files.search', { projectRoot: path.join(project, 'missing') }), { code: 1001 });
   await assert.rejects(client.request('workspace.files.search', { projectRoot: project, limit: 101 }), { code: -32602 });
 });
+
+test('workspace.files.list and read over the socket: capability, confined answers, refusals with a reason and no host path', async t => {
+  const { project, open } = await setup(t);
+  const { client } = await open();
+  assert.ok((await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('workspace.files.read'));
+  const outside = await mkdtemp(path.join(tmpdir(), 'alpd-outside-'));
+  t.after(() => rm(outside, { recursive: true, force: true }));
+  await writeFile(path.join(outside, 'secret.txt'), 'SENTINEL-outside');
+  await mkdir(path.join(project, 'src'), { recursive: true });
+  await writeFile(path.join(project, 'src', 'server.ts'), 'export {};\n');
+  await writeFile(path.join(project, '.env'), 'SENTINEL-env');
+  // alpd asks git which files .gitignore hides: the project is a repository.
+  (await import('node:child_process')).execFileSync('git', ['init', '-q'], { cwd: project, stdio: 'ignore' });
+  await writeFile(path.join(project, '.gitignore'), 'build/\n');
+  await mkdir(path.join(project, 'build'), { recursive: true });
+  await writeFile(path.join(project, 'build', 'out.js'), 'built');
+  await symlink(path.join(outside, 'secret.txt'), path.join(project, 'link.txt'));
+  const root = await client.request('workspace.files.list', { projectRoot: project });
+  const names = root.entries.map(entry => entry.name);
+  assert.ok(names.includes('src') && names.includes('.gitignore'));
+  assert.ok(!names.includes('.env') && !names.includes('.alp') && !names.includes('build') && !names.includes('link.txt'), names.join());
+  assert.deepEqual((await client.request('workspace.files.list', { projectRoot: project, path: 'src' })).entries.map(entry => entry.path), ['src/server.ts']);
+  const read = await client.request('workspace.files.read', { projectRoot: project, path: 'src/server.ts' });
+  assert.equal(read.content, 'export {};\n');
+  assert.equal(read.size, 11);
+  assert.equal((await client.request('workspace.files.read', { projectRoot: project, path: 'build/out.js', includeIgnored: true })).content, 'built');
+  const refused = async (params, method = 'workspace.files.read') => {
+    const error = await client.request(method, { projectRoot: project, ...params }).then(() => assert.fail('expected a refusal'), caught => caught);
+    assert.ok(!String(error.message).includes(project) && !String(error.message).includes(outside) && !JSON.stringify(error.data ?? {}).includes('SENTINEL'), error.message);
+    return { code: error.code, reason: error.data?.reason };
+  };
+  assert.deepEqual(await refused({ path: '.env' }), { code: 1003, reason: 'blocked_path' });
+  assert.deepEqual(await refused({ path: '.alp/settings.json' }), { code: 1003, reason: 'blocked_path' });
+  assert.deepEqual(await refused({ path: 'link.txt' }), { code: 1003, reason: 'linked' });
+  assert.deepEqual(await refused({ path: 'build/out.js' }), { code: 1003, reason: 'ignored' });
+  assert.deepEqual(await refused({ path: 'missing.txt' }), { code: 1001, reason: 'not_found' });
+  assert.deepEqual(await refused({ path: '../outside/secret.txt' }), { code: -32602, reason: 'invalid_path' });
+  assert.deepEqual(await refused({ path: '' }), { code: -32602, reason: 'invalid_params' });
+  assert.deepEqual(await refused({ path: 'build' }, 'workspace.files.list'), { code: 1003, reason: 'ignored' });
+  await assert.rejects(client.request('workspace.files.read', { projectRoot: 'relative', path: 'a' }), { code: -32602 });
+  await assert.rejects(client.request('workspace.files.list', { projectRoot: path.join(project, 'missing') }), { code: 1001, data: { reason: 'not_directory' } });
+});
