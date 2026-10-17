@@ -186,10 +186,16 @@ export class FakeHost {
       case 'daemon.hello': return { protocolVersion: 1, daemonVersion: '0.10.0', capabilities: this.capabilities };
       case 'catalog.get': return { models: [], modes: [{ id: 'read-only' }, { id: 'workspace-write' }, { id: 'full-access' }], defaultModel: 'm' };
       case 'team.list': return { projectRoot: params.projectRoot, teams: [{ id: 'pho', label: 'Phở', source: 'builtin' }, { id: 'cafe', label: 'Cafe', source: 'builtin' }] };
-      case 'library.models': return { models: [{ id: 'codex:gpt-5.6-sol', label: 'GPT', efforts: [] }] };
+      case 'library.models': return { models: [{ id: 'codex:gpt-5.6-sol', label: 'GPT', efforts: ['low', 'medium', 'high'], effort: 'low' }, { id: 'claude:claude-haiku-4-5', label: 'Haiku', efforts: [] }] };
+      case 'session.preview': {
+        const spec = params.spec ?? {};
+        if (spec.thinking && spec.thinking !== 'low' && spec.thinking !== 'medium' && spec.thinking !== 'high') throw Object.assign(new Error(`thinking ${spec.thinking} is not offered`), { code: -32602 });
+        const [runtime, model] = String(spec.model ?? 'codex:gpt-5.6-sol').split(':');
+        return { preview: { teams: [{ id: 'pho', label: 'Phở' }, { id: 'cafe', label: 'Cafe' }], team: spec.workflow ?? 'pho', teamLabel: spec.workflow === 'cafe' ? 'Cafe' : 'Phở', agent: 'main', runtime, model, mode: spec.mode ?? 'full-access', thinking: spec.thinking ?? 'low' } };
+      }
       case 'settings.language.get': return { language: null, applies: 'Vietnamese', default: 'Vietnamese' };
       case 'session.list': {
-        const sessions = [...this.roots.values()].filter(root => !params.projectRoot || root.spec.cwd === params.projectRoot).map(root => ({ ...root.summary, busy: !!root.running }));
+        const sessions = [...this.roots.values()].filter(root => (!params.projectRoot || root.spec.cwd === params.projectRoot) && (params.includeArchived || !root.summary.archived)).map(root => ({ ...root.summary, busy: !!root.running }));
         return { sessions };
       }
       case 'session.create': {
@@ -272,6 +278,14 @@ export class FakeHost {
         }
         return {};
       }
+      case 'session.configure': {
+        const root = this.roots.get(params.sessionId);
+        if (!root?.live) throw Object.assign(new Error(`ALP session ${params.sessionId} is not open`), { code: 1001 });
+        if (params.mode) root.summary.mode = params.mode;
+        const session = { id: root.id, mode: root.summary.mode, busy: !!root.running };
+        this.#emit(root, root.id, { type: 'session.updated', session });
+        return { session };
+      }
       case 'session.rename': {
         const root = this.roots.get(params.sessionId);
         root.summary.title = params.title;
@@ -279,9 +293,14 @@ export class FakeHost {
       }
       case 'session.archive': {
         const root = this.roots.get(params.sessionId);
+        if (params.archived === false) { delete root.summary.archived; return { session: root.summary }; }
         root.summary.archived = true;
         this.close(root.id);
         return { session: root.summary };
+      }
+      case 'question.list': {
+        const questions = [...this.questions.values()].filter(question => !params.projectRoot || this.roots.get(question.rootId)?.spec.cwd === params.projectRoot);
+        return { questions: structuredClone(questions) };
       }
       case 'question.answer': {
         const question = this.questions.get(params.questionId);

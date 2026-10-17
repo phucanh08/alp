@@ -15,9 +15,16 @@ import { cn } from '../lib/utils';
  * - The primary action is Send when there is text, Interrupt while the agent works with an empty
  *   box, and nothing otherwise. Shift+Enter is a new line.
  *
+ * - Paseo's keys: Cmd/Ctrl+L focuses the box (a hint says so while it is empty and unfocused),
+ *   Escape interrupts a working agent, Shift+Tab in the box cycles the permissions mode.
+ * - "Working" includes a message of ours still on its way to its turn (controller.rootBusy).
+ * - The track bar above the box holds pills for the pane's context (ALP's Tasks pill).
+ *
  * A box that cannot take a message keeps its shape with a dotted border.
  */
-export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, sendBehavior = 'steer' }: {
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
+export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', startLabel, startHold, initialText, autoFocus }: {
   onSend: (text: string) => Promise<unknown>;
   onQueue: (text: string) => void;
   onStop: () => void;
@@ -30,15 +37,56 @@ export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSend
   disabledReason?: string;
   placeholder: string;
   controls?: React.ReactNode;
+  /** Paseo's track bar above the box: pills for the pane's context (ALP's tasks). */
+  tracks?: React.ReactNode;
+  /** Shift+Tab in the box: the next permissions mode, as Paseo's mode control. */
+  onCycleMode?: () => void;
   /** What Enter does while the agent works; Cmd/Ctrl+Enter does the other. */
   sendBehavior?: 'steer' | 'queue';
+  /**
+   * The New session screen's composer: the primary action is always this (e.g. Start session)
+   * and may go with an empty box (a session without a first message).
+   */
+  startLabel?: string;
+  /** Why the start action waits for now (the box stays editable), e.g. while the preview checks. */
+  startHold?: string;
+  /** Text the box starts with (a first message a failed start left). */
+  initialText?: string;
+  autoFocus?: boolean;
 }) {
-  const [text, setText] = React.useState('');
+  const [text, setText] = React.useState(initialText ?? '');
   const [error, setError] = React.useState<string | null>(null);
   const area = React.useRef<HTMLTextAreaElement>(null);
   const reason = blocked ?? disabledReason;
   const hasText = !!text.trim();
   const queues = running && sendBehavior === 'queue';
+  const [focused, setFocused] = React.useState(false);
+
+  // Paseo's composer keys outside the box: Cmd/Ctrl+L focuses it; Escape interrupts the agent
+  // from the box or from nowhere in particular (not from another field, a menu or a dialog).
+  const latest = React.useRef({ running, stopping, blocked, onStop });
+  latest.current = { running, stopping, blocked, onStop };
+  React.useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
+      if (event.key.toLowerCase() === 'l' && (isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && !event.altKey && !event.shiftKey) {
+        if (!area.current || area.current.disabled) return;
+        event.preventDefault();
+        area.current.focus();
+        return;
+      }
+      if (event.key !== 'Escape') return;
+      const { running: working, stopping: halting, blocked: refused, onStop: stop } = latest.current;
+      const target = event.target;
+      const fromBox = target === area.current;
+      const fromNowhere = target === document.body || target === document.documentElement || target === null;
+      if (!working || halting || refused || !(fromBox || fromNowhere)) return;
+      if (document.querySelector('[role="dialog"], [role="menu"]')) return;
+      stop();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   React.useLayoutEffect(() => {
     const element = area.current;
     if (!element) return;
@@ -48,7 +96,7 @@ export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSend
 
   const send = async () => {
     const body = text.trim();
-    if (!body || reason) return;
+    if ((!body && !startLabel) || reason || (startLabel && startHold)) return;
     setText('');
     setError(null);
     try { await onSend(body); } catch (failure) { setText(body); setError(failure instanceof Error ? failure.message : String(failure)); }
@@ -69,6 +117,7 @@ export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSend
   return (
     <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-4 md:pb-4">
       <div className="mx-auto flex w-full max-w-[820px] flex-col gap-3">
+        {tracks ? <div className="-mb-1 flex min-w-0 flex-wrap items-center gap-2" data-testid="composer-tracks">{tracks}</div> : null}
         {queued.length ? (
           <ul aria-label="Queued messages" className="flex flex-col gap-2">
             {queued.map(item => (
@@ -89,8 +138,11 @@ export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSend
           </ul>
         ) : null}
         {blocked ? <p className="px-1 text-sm text-warning" role="note">{blocked}</p> : null}
-        {error ? <p className="px-1 text-sm text-[#ef4444]" role="alert">{error}</p> : null}
-        <div className={cn('flex flex-col gap-3 rounded-2xl border border-input bg-card px-3 py-2 transition-colors duration-200 focus-within:border-[#3d4544] md:px-4 md:pb-3 md:pt-4', reason && 'border-dotted')}>
+        {error ? <p className="px-1 text-sm text-destructive" role="alert">{error}</p> : null}
+        <div className={cn('relative flex flex-col gap-3 rounded-2xl border border-input bg-card px-3 py-2 transition-colors duration-200 focus-within:border-[var(--input-focus)] md:px-4 md:pb-3 md:pt-4', reason && 'border-dotted')}>
+          {!focused && !text && !reason ? (
+            <span aria-hidden className="pointer-events-none absolute right-4 top-3 hidden text-xs text-muted-foreground/80 [@media(pointer:fine)]:md:block" data-testid="composer-focus-hint">{isMac ? '⌘L' : 'Ctrl+L'} to focus</span>
+          ) : null}
           <label htmlFor="composer" className="sr-only">Message</label>
           <textarea
             id="composer"
@@ -100,7 +152,16 @@ export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSend
             disabled={!!reason}
             placeholder={reason && !blocked ? reason : placeholder}
             onChange={event => setText(event.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            autoFocus={autoFocus}
+            aria-keyshortcuts={isMac ? 'Meta+L' : 'Control+L'}
             onKeyDown={event => {
+              if (event.key === 'Tab' && event.shiftKey && onCycleMode && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                if (!event.repeat) onCycleMode();
+                return;
+              }
               if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
               event.preventDefault();
               const alternate = event.metaKey || event.ctrlKey;
@@ -112,7 +173,12 @@ export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSend
           <div className="-mx-1.5 flex min-h-7 shrink-0 items-end justify-between">
             <div className="flex min-w-0 flex-1 items-end">{controls}</div>
             <div className="flex shrink-0 items-center gap-1">
-              {hasText ? (
+              {startLabel ? (
+                <button type="button" aria-label={startLabel} title={startHold ?? startLabel} onClick={() => void send()} disabled={!!reason || !!startHold}
+                  className={cn(round, 'ml-1 bg-primary text-primary-foreground hover:bg-primary/85')} data-testid="composer-start">
+                  <ArrowUp aria-hidden />
+                </button>
+              ) : hasText ? (
                 <button type="button" aria-label={!running ? 'Send' : queues ? 'Queue message' : 'Send and steer'}
                   title={!running ? 'Send' : queues ? 'Queue (⌘/Ctrl+Enter sends and steers)' : 'Send and steer (⌘/Ctrl+Enter queues)'}
                   onClick={() => queues ? queue() : void send()} disabled={!!reason}

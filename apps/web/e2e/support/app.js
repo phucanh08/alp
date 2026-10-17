@@ -11,13 +11,19 @@ export async function connect(page, world, token = world.tokens.owner) {
   await expect(page.locator('main header')).toBeVisible();
 }
 
-/** Starts a session from the dialog with a title; waits until it is ready for a message. */
-export async function newSession(page, title, { from = page.getByRole('navigation').getByRole('button', { name: 'New session' }) } = {}) {
+/**
+ * Starts a session from the New session screen (Paseo's new agent tab) with a title and, when
+ * given, a first message; waits until it is ready for a message.
+ */
+export async function newSession(page, title, { from = page.getByRole('navigation').getByRole('button', { name: 'New session' }), prompt } = {}) {
   await from.click();
-  const dialog = page.getByRole('dialog', { name: 'New session' });
-  await dialog.getByLabel('Title (optional)').fill(title);
-  await dialog.getByRole('button', { name: 'Start session' }).click();
-  await expect(dialog).toBeHidden();
+  const screen = page.getByTestId('new-session-screen');
+  await expect(screen).toBeVisible();
+  await screen.getByLabel('Title (optional)').fill(title);
+  if (prompt) await screen.getByLabel('Message', { exact: true }).fill(prompt);
+  await expect(screen.getByRole('button', { name: 'Start session' })).toBeEnabled();
+  await screen.getByRole('button', { name: 'Start session' }).click();
+  await expect(screen).toBeHidden();
   await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
   await expect(page.getByPlaceholder(/^Message main/)).toBeEnabled();
 }

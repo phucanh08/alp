@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Ban, Bot, ChevronRight, CircleAlert, Info, ListChecks, RotateCcw, Scissors, SquareTerminal, Trash2, TriangleAlert, Wrench } from 'lucide-react';
+import { Ban, Bot, ChevronDown, ChevronRight, CircleAlert, Info, ListChecks, RotateCcw, Scissors, SquareTerminal, Trash2, TriangleAlert, Wrench } from 'lucide-react';
 import type { Entry } from '../lib/timeline.js';
 import type { PendingPrompt } from '../lib/controller.js';
 import { Button } from '../components/ui/button';
@@ -298,7 +298,7 @@ function layout(entries: Entry[], running: boolean): Row[] {
   return rows;
 }
 
-export function Timeline({ entries, prompts, agentOf, running, runningAgent, historyUnavailable, onRetry, onDiscard, emptyText }: {
+export function Timeline({ entries, prompts, agentOf, running, runningAgent, historyUnavailable, onRetry, onDiscard, emptyText, tail }: {
   entries: Entry[];
   prompts: PendingPrompt[];
   agentOf: (sessionId: string) => string;
@@ -308,15 +308,31 @@ export function Timeline({ entries, prompts, agentOf, running, runningAgent, his
   onRetry: (id: string) => void;
   onDiscard: (id: string) => void;
   emptyText: string;
+  /** What follows the turn at the end of the stream, as Paseo's pending permissions: the questions. */
+  tail?: React.ReactNode;
 }) {
   void agentOf;
   const scroller = React.useRef<HTMLDivElement>(null);
   const pinned = React.useRef(true);
+  // Paseo's jump-to-bottom button shows while the reader is away from the end.
+  const [away, setAway] = React.useState(false);
+  // While the jump scrolls smoothly, its own scroll events must not unpin the stream.
+  const jumping = React.useRef(0);
+  const toBottom = () => {
+    const element = scroller.current;
+    if (!element) return;
+    pinned.current = true;
+    jumping.current = Date.now() + 700;
+    setAway(false);
+    element.scrollTo({ top: element.scrollHeight, behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  };
   const last = entries.at(-1);
-  const signature = `${entries.length}:${last?.key}:${(last?.item as any)?.text?.length ?? 0}:${(last?.item as any)?.status ?? ''}:${prompts.length}:${running}`;
+  const signature = `${entries.length}:${last?.key}:${(last?.item as any)?.text?.length ?? 0}:${(last?.item as any)?.status ?? ''}:${prompts.length}:${running}:${React.Children.count(tail)}`;
   React.useLayoutEffect(() => {
     const element = scroller.current;
     if (element && pinned.current) element.scrollTop = element.scrollHeight;
+    // Content that shrank or changed may bring the end back into view.
+    if (element && element.scrollHeight - element.scrollTop - element.clientHeight < 80) { pinned.current = true; setAway(false); }
   }, [signature]);
   // Stay at the bottom when the box below grows (a queued message, a question) or the window resizes.
   React.useEffect(() => {
@@ -338,7 +354,16 @@ export function Timeline({ entries, prompts, agentOf, running, runningAgent, his
 
   const rows = React.useMemo(() => layout(entries, running), [entries, running]);
   return (
-    <div ref={scroller} onScroll={event => { const element = event.currentTarget; pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}
+    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div ref={scroller} onScroll={event => {
+      const element = event.currentTarget;
+      const near = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+      if (!near && Date.now() < jumping.current) return;
+      pinned.current = near;
+      setAway(!near);
+    }}
+      // The reader taking over ends the jump at once.
+      onWheel={() => { jumping.current = 0; }} onTouchStart={() => { jumping.current = 0; }} onKeyDown={() => { jumping.current = 0; }}
       className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 md:px-4" role="log" aria-label="Conversation" aria-live="off">
       <div className="mx-auto flex w-full max-w-[820px] flex-col px-2 py-4">
         {historyUnavailable ? <div className="mb-4"><Notice level="warning">Earlier history of this conversation is no longer available on the host.</Notice></div> : null}
@@ -357,7 +382,17 @@ export function Timeline({ entries, prompts, agentOf, running, runningAgent, his
             </div>
           </div>
         ) : null}
+        {tail ? <div className="flex flex-col gap-2 pb-4">{tail}</div> : null}
       </div>
+    </div>
+    {away ? (
+      <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+        <button type="button" onClick={toBottom} aria-label="Scroll to bottom" title="Scroll to bottom" data-testid="scroll-to-bottom"
+          className="pointer-events-auto flex size-12 items-center justify-center rounded-full bg-secondary text-foreground shadow-md shadow-black/30 outline-none hover:bg-bubble focus-visible:ring-2 focus-visible:ring-ring">
+          <ChevronDown aria-hidden className="size-6" />
+        </button>
+      </div>
+    ) : null}
     </div>
   );
 }

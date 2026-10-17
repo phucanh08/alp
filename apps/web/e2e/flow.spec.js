@@ -27,20 +27,22 @@ test('create, stream, tool call, questions, stop, rename', async ({ page }) => {
   await expect(tool).toContainText('util.ts');
   await idle(page);
 
-  // A question: answered with an option button.
+  // A question, as Paseo's question card: pick an option, then Submit.
   await send(page, 'Ship it? [ask]');
   const question = page.getByTestId('question');
   await expect(question).toContainText('Deploy to staging now?');
   await expect(page.getByTestId('working')).toBeVisible();
-  await question.getByRole('button', { name: 'yes' }).click();
+  await question.getByRole('radio', { name: 'yes' }).click();
+  await expect(question.getByRole('radio', { name: 'yes' })).toHaveAttribute('aria-checked', 'true');
+  await question.getByRole('button', { name: 'Submit' }).click();
   await expect(question).toBeHidden();
   await expect(assistant(page).last()).toContainText('you said "yes"');
   await idle(page);
 
-  // Declined.
+  // Dismissed.
   await send(page, 'Again? [ask]');
   await expect(question).toBeVisible();
-  await question.getByRole('button', { name: 'Decline' }).click();
+  await question.getByRole('button', { name: 'Dismiss' }).click();
   await expect(question).toBeHidden();
   await expect(assistant(page).last()).toContainText('you declined');
   await idle(page);

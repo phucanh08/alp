@@ -29,7 +29,7 @@ export function ConnectScreen() {
   };
 
   return (
-    <main className="flex min-h-full items-center justify-center bg-[radial-gradient(ellipse_at_top,_#1b2a20_0%,_var(--background)_55%)] px-4 py-10">
+    <main className="flex min-h-full items-center justify-center bg-[radial-gradient(ellipse_at_top,_var(--glow)_0%,_var(--background)_55%)] px-4 py-10">
       <div className="w-full max-w-md">
         <div className="mb-8 flex items-center gap-3">
           <Logo className="size-10" />
@@ -38,7 +38,7 @@ export function ConnectScreen() {
             <p className="text-sm text-muted-foreground">Connect to your agents on an ALP host</p>
           </div>
         </div>
-        <form onSubmit={submit} className="space-y-5 rounded-xl border border-border bg-card/80 p-6 shadow-xl shadow-black/30 backdrop-blur" aria-describedby={error ? 'connect-error' : undefined}>
+        <form onSubmit={submit} className="space-y-5 rounded-xl border border-border bg-card/80 p-6 shadow-xl shadow-[var(--shadow)] backdrop-blur" aria-describedby={error ? 'connect-error' : undefined}>
           <div className="space-y-1.5">
             <Label htmlFor="gateway">Gateway address</Label>
             <Input id="gateway" name="gateway" inputMode="url" autoComplete="url" spellCheck={false} value={gateway} onChange={event => setGateway(event.target.value)} placeholder="https://alp.example.com" required disabled={connecting} />

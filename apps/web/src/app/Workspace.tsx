@@ -1,10 +1,11 @@
-import { Bot, CircleDot, Copy, Ellipsis, ListTodo, PanelLeft, PanelRight, Pencil, Plus, ShieldAlert, SquarePen, Archive } from 'lucide-react';
+import { Bot, CircleAlert, CircleDot, Copy, Ellipsis, ListTodo, PanelLeft, PanelRight, Pencil, Plus, ShieldAlert, SquarePen, Archive } from 'lucide-react';
 import type { SessionSummary } from '../lib/controller.js';
 import { can } from '../lib/gateway.js';
 import { Menu } from '../components/ui/menu';
 import { baseName, sessionName } from '../lib/format';
 import { cn } from '../lib/utils';
 import { PANELS, PanelView, type PanelKind } from './panels';
+import { NewSessionScreen } from './NewSession';
 import { ChatPanel, Empty } from './SessionView';
 import { StatusRing } from './status';
 import { TabChip } from './TabChip';
@@ -68,19 +69,33 @@ export function WorkspaceHeader({ navOpen, onToggleNav, explorerOpen, onToggleEx
 }
 
 function useTabPresentation(tab: Tab) {
-  const { tree, tasks } = useAppState();
+  const { tree, tasks, sessions } = useAppState();
   if (tab.kind === 'agent') {
     const projection = tree?.projection;
     const session = projection?.sessions[tab.id];
     const root = tab.id === tree?.rootId;
     const waiting = !!projection && Object.values(projection.questions).some(question => (question as any).sessionId === tab.id);
     const running = !!projection && tab.id in projection.running;
+    // Paseo labels an agent's tab with the agent's title: here the session's title for the main
+    // agent (as the sidebar and the header name it), the assignment's agent for the others.
+    const listed = root ? sessions.list.find(row => row.id === tab.id) : undefined;
+    const agent = session?.agent ?? (root ? 'main' : 'agent');
+    const label = root ? sessionName({ id: tab.id, title: session?.title ?? listed?.title }) : (session?.title ?? agent);
     return {
-      label: root ? (session?.agent ?? 'main') : (session?.agent ?? 'agent'),
-      icon: running ? <StatusRing /> : waiting ? <ShieldAlert aria-hidden className="size-3.5 text-dot-warning" /> : <Bot aria-hidden className="size-3.5" />,
-      title: root ? 'Main agent' : `${session?.agent ?? 'Agent'} · assignment`,
+      label,
+      // Paseo's tab icon: the agent glyph, the turning ring while it runs, the alert while it waits.
+      // needs_input outranks running, as Paseo's status buckets order them.
+      icon: waiting ? (
+        // Paseo's needs_input alert over the agent glyph's corner.
+        <span className="relative flex size-3.5" data-status="needs_input">
+          <Bot aria-hidden className="size-3.5" />
+          <CircleAlert aria-hidden className="absolute -bottom-0.5 -right-0.5 size-2 fill-dot-warning text-background" />
+        </span>
+      ) : running ? <StatusRing /> : <Bot aria-hidden className="size-3.5" />,
+      title: root ? `${label} · ${agent}` : `${agent} · assignment from main`,
     };
   }
+  if (tab.kind === 'draft') return { label: 'New session', icon: <SquarePen aria-hidden className="size-3.5" />, title: 'New session' };
   if (tab.kind === 'panel') {
     const panel = PANELS[tab.id];
     return { label: panel.label, icon: <panel.icon aria-hidden className="size-3.5" />, title: panel.label };
@@ -103,7 +118,7 @@ const PRIMARY_PANELS: PanelKind[] = ['terminal', 'diff'];
 const ALP_PANELS: PanelKind[] = ['tasks', 'agents'];
 
 /** Paseo's tab row under the header: the open tabs, then + with the New tab menu (Agent starts a session). */
-export function TabsRow({ onNewSession }: { onNewSession: () => void }) {
+export function TabsRow({ onNewSession, menuRequest, onMenuRequestHandled }: { onNewSession: () => void; menuRequest?: number; onMenuRequestHandled?: () => void }) {
   const { tabs, active, activate, close, openPanel } = useTabs();
   const { workspace, principal, connection } = useAppState();
   const canWrite = can(principal ?? undefined, 'session.write');
@@ -118,7 +133,7 @@ export function TabsRow({ onNewSession }: { onNewSession: () => void }) {
         {tabs.map(tab => (
           <WorkspaceTabChip key={tabKey(tab)} tab={tab} active={!!active && tabKey(active) === tabKey(tab)} onSelect={() => activate(tab)} onClose={() => close(tab)} />
         ))}
-        <Menu label="New tab" align="start"
+        <Menu label="New tab" align="start" openRequest={menuRequest} onOpenRequestHandled={onMenuRequestHandled} testId="workspace-new-tab"
           trigger={<Plus aria-hidden className="size-4" />}
           triggerClassName={cn('mx-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-card hover:text-foreground', focusRing)}
           items={[
@@ -135,6 +150,7 @@ export function TabsRow({ onNewSession }: { onNewSession: () => void }) {
 export function TabContent({ onNewSession }: { onNewSession: () => void }) {
   const { active } = useTabs();
   const { tree } = useAppState();
+  if (active?.kind === 'draft') return <NewSessionScreen />;
   if (active?.kind === 'task') return <TaskDetail id={active.id} />;
   if (active?.kind === 'panel') return <div className="min-h-0 flex-1 overflow-y-auto"><PanelView kind={active.id} /></div>;
   if (active?.kind === 'agent' && tree) return <ChatPanel key={active.id} sessionId={active.id} />;

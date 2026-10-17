@@ -125,9 +125,14 @@ function General() {
       <Section title="Sending">
         <Row first title="Default send" hint={`${preferences.sendBehavior === 'steer'
           ? 'When the agent is running, Enter steers the active turn. Command/Ctrl+Enter queues.'
-          : 'When the agent is running, Enter queues. Command/Ctrl+Enter steers the active turn.'} Kept in this tab's memory: reloading starts from the default.`}>
+          : 'When the agent is running, Enter queues. Command/Ctrl+Enter steers the active turn.'} Saved in this browser.`}>
           <Select label="Default send" value={preferences.sendBehavior} onChange={value => controller.setSendBehavior(value)}
             options={[{ value: 'steer', label: 'Steer' }, { value: 'queue', label: 'Queue' }]} />
+        </Row>
+      </Section>
+      <Section title="This browser">
+        <Row first title="Saved preferences" hint="Default send, the theme and your last New session choices (team, model, thinking, permissions) stay in this browser. The access token never does.">
+          <Button size="sm" variant="secondary" onClick={() => controller.resetPreferences()}>Reset</Button>
         </Row>
       </Section>
     </>
@@ -135,14 +140,17 @@ function General() {
 }
 
 function Appearance() {
+  const controller = useController();
+  const { preferences } = useAppState();
   return (
     <>
       <Section title="Theme">
-        <Row first title="Theme" hint="Paseo's dark theme; other themes are not available in this beta.">
-          <Select label="Theme" value="dark" options={[{ value: 'dark', label: 'Dark' }]} />
+        <Row first title="Theme" hint="Paseo's light and dark themes; System follows this device. Saved in this browser.">
+          <Select label="Theme" value={preferences.theme} onChange={value => controller.setTheme(value)}
+            options={[{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} />
         </Row>
       </Section>
-      <Unavailable what="Changing fonts, sizes and content width" why="This beta keeps Paseo's defaults." />
+      <Unavailable what="Paseo's other themes, fonts, sizes, content width and code highlighting" why="This beta keeps Paseo's defaults for them." />
     </>
   );
 }

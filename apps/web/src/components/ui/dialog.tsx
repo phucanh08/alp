@@ -27,7 +27,7 @@ export function Dialog({ open, onClose, title, description, children, className,
       aria-labelledby={titleId}
       onCancel={event => { event.preventDefault(); onClose(); }}
       onClick={event => { if (event.target === ref.current) onClose(); }}
-      className={cn('m-auto w-[min(92vw,32rem)] max-h-[88dvh] overflow-hidden rounded-xl border border-border bg-popover p-0 text-popover-foreground shadow-2xl shadow-black/50', className)}
+      className={cn('m-auto w-[min(92vw,32rem)] max-h-[88dvh] overflow-hidden rounded-xl border border-border bg-popover p-0 text-popover-foreground shadow-2xl shadow-[var(--shadow)]', className)}
     >
       {open ? (
         <div className="flex max-h-[88dvh] flex-col">
