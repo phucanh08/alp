@@ -562,7 +562,9 @@ authorizes (`scope.kind`, and `scope.param`, the param naming it), its capabilit
 
 The teams a project (or, without `projectRoot`, the library) can use: built-ins, then the library, then the project,
 each with its `source`, what it overrides, and `error` when it does not load. `session.preview` answers which team a new
-session would run with.
+session would run with: the same resolution as `session.create` (the chosen `workflow`, else settings'
+`workflow.mode`, else `custom`; a folder without settings counts as init's, which name `pho`). A preview's `team`
+may be sent back as `workflow`, `custom` included.
 
 ### 15.5 `settings.language` (capability `settings.language`)
 

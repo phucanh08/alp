@@ -4,7 +4,7 @@ import { errorData, plainObject, toolResult } from './tool-results.js';
 import { createLogger } from '@anhlp/alp-core/log';
 import { createBoardDomain } from './board-domain.js';
 import { createWorktreeDomain } from './worktree-domain.js';
-import { DEFAULT_TEAM, type RuntimeTransport, type RuntimeOptions, type OpenOptions, type PromptContent, type PromptInput, type AlpRuntime, type SessionPreview, type RecoveryOutcome, type Pause, type PauseState, type RecallAnswer } from './contracts.js';
+import { type RuntimeTransport, type RuntimeOptions, type OpenOptions, type PromptContent, type PromptInput, type AlpRuntime, type SessionPreview, type RecoveryOutcome, type Pause, type PauseState, type RecallAnswer } from './contracts.js';
 export type { RuntimeTransport, RuntimeOptions, OpenOptions, PromptContent, PromptInput, AlpRuntime, SessionPreview, RecoveryOutcome, Pause, PauseState, RecallAnswer } from './contracts.js';
 export { DEFAULT_TEAM } from './contracts.js';
 import { verdictLine, parseHandoff, type Handoff } from './handoff.js';
@@ -3477,12 +3477,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     async preview(spec) {
       const resolveOptions = { templates: options.templates, library: options.libraryDir, language: options.language };
-      // As Paseo: the team settings name, else Phở; a new project's settings name Phở.
-      const settings = JSON.parse(await readFile(path.join(spec.cwd, '.alp', 'settings.json'), 'utf8').catch(() => '{}'));
-      const named = typeof settings?.workflow?.mode === 'string' && settings.workflow.mode !== 'custom' ? settings.workflow.mode : undefined;
-      const workflow = spec.workflow ?? named ?? DEFAULT_TEAM;
+      // The team session.create would run (resolveWorkflow, ALPD §42): the one chosen, else settings'
+      // workflow.mode, else `custom`; a folder without settings gets init's, which name Phở.
       // A preview only reads: a folder the user has not run anything in stays as it is.
-      const mapping = await resolveSession({ ...spec, workflow }, { ...resolveOptions, initialize: false });
+      const mapping = await resolveSession(spec, { ...resolveOptions, initialize: false });
       const teams = (await listTeams(spec.cwd, { library: options.libraryDir, templates: options.templates }))
         .filter(team => !team.error)
         .map(team => ({ id: team.id, label: team.label ?? team.id, ...(team.description ? { description: team.description } : {}) }));

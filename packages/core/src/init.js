@@ -4,6 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { projectProfiles, profileDefaults, syncTemplateProfiles } from './profiles.js';
 import { validateSettings } from './validation.js';
+import { INIT_TEAM } from './workflow.js';
 
 /**
  * Fill missing scaffold files without replacing existing user content: ALP.md and
@@ -24,7 +25,7 @@ export async function initProject(projectRoot, { templateRoot, templates, librar
   const team = await projectProfiles({ root, templates, library, teamIds });
   const files = {
     'ALP.md': await template('ALP.md'),
-    '.alp/settings.json': JSON.stringify({ defaultAgent: 'main', workflow: { mode: 'pho' }, team, templateDefaults: profileDefaults(team) }, null, 2) + '\n',
+    '.alp/settings.json': JSON.stringify({ defaultAgent: 'main', workflow: { mode: INIT_TEAM }, team, templateDefaults: profileDefaults(team) }, null, 2) + '\n',
   };
   const directories = ['.alp'];
   const created = [];

@@ -195,9 +195,9 @@ export function previewBase(spec) {
  */
 
 /**
- * The team a session is started with, or why Start must wait. alpd's session.create without a
- * workflow runs the custom graph (not the team session.preview names), so one is always sent,
- * except when the host has said it has no team at all (fail closed).
+ * The team a session is started with, or why Start must wait. One is always sent (the team the
+ * preview named, which alpd's session.create accepts back, `custom` included), except when the
+ * host has said it has no team at all (fail closed).
  * @param {{ chosen?: string, previewTeam?: string, previewSettled: boolean, previewError?: string,
  *   previewBlocked?: boolean, previewNeedsRead?: boolean, teams: Array<{ id: string }>, teamsKnown?: boolean,
  *   teamsUnavailable?: TeamsUnavailable }} input
