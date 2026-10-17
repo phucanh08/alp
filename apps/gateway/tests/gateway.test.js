@@ -257,3 +257,22 @@ test('closing the gateway closes clients with 1001 and leaves sessions to alpd',
   assert.equal(daemon.calls('session.close').length + daemon.calls('session.interrupt').length, 0, 'nothing cancelled');
   await until(() => daemon.state.links.size === 0, 'daemon connections closed');
 });
+
+// t-7679.13 (docs/alp/remote-gateway.md §5.11): typed tool-call details pass as they are, in scope only.
+test('typed tool-call details reach a reader of the tree unchanged, later detail types too, and no other tree', async t => {
+  const { daemon, b, sdk } = await setup(t, { sessions: [['s1', 'a'], ['s2', 'b']] });
+  const reader = await sdk('reader');
+  const seen = [];
+  reader.client.onEvent(envelope => envelope.event.type === 'item' && seen.push(envelope));
+  await reader.client.request('session.attach', { sessionId: 's1', replay: false });
+  const items = [
+    { kind: 'tool_call', id: 't1', callId: 't1', name: 'Read', status: 'completed', detail: { type: 'read', filePath: '/etc/hosts', content: '127.0.0.1 localhost', offset: 1 } },
+    { kind: 'tool_call', id: 't2', callId: 't2', name: 'apply_patch', status: 'completed', detail: { type: 'edit', filePath: `${b}/x.ts`, unifiedDiff: '@@ -1 +1 @@\n-a\n+b\n' } },
+    { kind: 'tool_call', id: 't3', callId: 't3', name: 'Screenshot', status: 'completed', detail: { type: 'image', path: '/tmp/s.png' } },
+  ];
+  for (const item of items) daemon.emit('s1', { type: 'item', item });
+  daemon.emit('s2', { type: 'item', item: { ...items[0], id: 'other' } });
+  await until(() => seen.length === 3, 'the three items');
+  assert.deepEqual(seen.map(envelope => envelope.event.item), items);
+  assert.ok(seen.every(envelope => envelope.sessionId === 's1'));
+});
