@@ -94,7 +94,8 @@ export type TreeStatus = {
 export type AlpEvent =
   | { type: 'session.opened'; session: SessionSnapshot; cwd: string; effective: { model: string; thinking: string } }
   | { type: 'session.ready' }
-  | { type: 'session.updated'; session: SessionSnapshot }
+  /** `title` comes with alpd's announcement of a root's name (its first prompt, or `session.rename`). */
+  | { type: 'session.updated'; session: SessionSnapshot & { title?: string } }
   | { type: 'session.closed' }
   | { type: 'session.failed'; error: AlpError }
   | { type: 'prompt.accepted'; clientMessageId: string; result: 'turn' | 'steer'; turnId: string }
