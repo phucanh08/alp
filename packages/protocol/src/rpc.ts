@@ -31,7 +31,7 @@ type Empty = Record<string, never>;
  * properties this map does not name: clients ignore them.
  */
 export type RpcMethodMap = {
-  'daemon.hello': { params: { protocolVersion: 1; client?: { name: string; version: string }; capabilities?: string[] }; result: { protocolVersion: 1; daemonVersion?: string; pid?: number; capabilities?: string[] } };
+  'daemon.hello': { params: { protocolVersion: 1; client?: { name: string; version: string }; capabilities?: string[] }; result: { protocolVersion: 1; daemonVersion?: string; pid?: number; /** The daemon host's machine name (os.hostname()), a label for clients. */ hostname?: string; capabilities?: string[] } };
   'daemon.status': {
     params: Empty;
     result: {

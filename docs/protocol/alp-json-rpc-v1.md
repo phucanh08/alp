@@ -177,8 +177,11 @@ The first request on every connection:
 - `protocolVersion` other than `1` (or missing) → `1006` with `data: { reason: "protocol_version",
   supported: [1] }`. The connection stays open: the client may say hello again or close.
 - Otherwise invalid params (e.g. `client` not an object) → `-32602`; the handshake has not happened.
-- Success: `{ protocolVersion: 1, daemonVersion, pid, capabilities: string[] }`. `daemon.hello` may be
+- Success: `{ protocolVersion: 1, daemonVersion, pid, hostname, capabilities: string[] }`. `daemon.hello` may be
   repeated and answers the same.
+- `hostname` (optional string) is the daemon host's machine name (`os.hostname()`), a label for clients (Paseo names
+  a host by it). It is not an identity and grants nothing. The remote gateway passes it on after its own checks and
+  never passes `pid` (docs/alp/remote-gateway.md §3). A daemon without it is valid; clients fall back to an address.
 - `params.capabilities` (optional string array, a sibling of `client`) is reserved for client capabilities; v1 daemons ignore it.
 
 ### 6.2 Capabilities
@@ -444,7 +447,7 @@ connection on the local socket acts as the owner.
 | `task.create` | writes a task under the task lock | with `requestId`, per alpd process (§10) | -32602, 1001, 1003, 1004 `key_conflict`, 1005 | project write |
 | `task.update` | closes or reopens a task | no (second → 1004 `task_state`); `ifRev` guards | 1001, 1003, 1004, 1005 | project write |
 | `task.gate.resolve` | approves a gate (a human step closes its task) | no (second → 1004 `task_state`); `ifRev` guards | 1001, 1003, 1004, 1005 | project write |
-| `library.list` / `library.get` | read, secrets redacted | yes | -32602, 1001, 1003 | project read + host library read |
+| `library.list` / `library.get` | read, secrets redacted | yes | -32602, 1001, 1003 | project read + host library read (the remote gateway: `project.read` with a granted `projectRoot`; `library.get` content redacted further, docs/alp/remote-gateway.md §5.7) |
 | `library.save` | writes an entry; `sync` writes projects' settings | with `revision` | -32602, 1001, 1003, 1004 | host library or project write; **code-execution config** for mcp, hooks, providers |
 | `library.delete` / `duplicate` / `rename` | writes | no | -32602, 1001, 1003, 1004 | as `library.save` |
 | `library.skills.set` | writes `role-skills.json` | yes (same list) | -32602 | host library write |

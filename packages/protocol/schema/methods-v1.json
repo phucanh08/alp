@@ -228,6 +228,9 @@
           "pid": {
             "type": "integer"
           },
+          "hostname": {
+            "type": "string"
+          },
           "capabilities": {
             "type": "array",
             "items": {
