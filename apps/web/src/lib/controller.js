@@ -3,6 +3,7 @@ import { createReconnectingClient, hello } from '@anhlp/alp-client/portable';
 import { AuthenticationError, ConfigurationError, CreateOutcomeUnknownError, describe, endsRoot } from './errors.js';
 import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
 import { newMessageId, newRequestId, newSessionId } from './ids.js';
+import { promptContent } from './attachments.js';
 import { applyAttach, deliveredPrompts, emptyProjection, members, project, promptTurnOver } from './timeline.js';
 import { normalizeModels, parsePreview } from './new-session.js';
 import { loadPreferences, parsePreferences, rememberChoices, savePreferences } from './preferences.js';
@@ -45,6 +46,7 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  * @typedef {{ id: string, label: string, efforts: string[], effort?: string }} Model
  * @typedef {{
  *   id: string, rootId: string, text: string, delivery: 'auto' | 'steer',
+ *   images?: import('./attachments.js').ImageAttachment[],
  *   status: 'sending' | 'failed' | 'unknown', error?: string, retrySameId: boolean, accepted?: boolean, at: number,
  * }} PendingPrompt
  *   failed: did not reach the host, or the runtime refused it. unknown: may have; retrySameId says
@@ -1291,14 +1293,15 @@ export class Controller {
    * Sends a message to the selected root: a new turn when it is idle, a steer while it runs. It
    * carries a fresh clientMessageId; the host answers it at most once (§10).
    * @param {string} text @param {string | null} [root] the selected root by default
+   * @param {import('./attachments.js').ImageAttachment[]} [images] sent inline after the text (t-7679.11)
    */
-  async sendPrompt(text, root = this.#state.selected) {
+  async sendPrompt(text, root = this.#state.selected, images = []) {
     const body = String(text ?? '');
-    if (!root || !body.trim()) return;
+    if (!root || (!body.trim() && !images.length)) return;
     const blocked = this.driveBlock();
     if (blocked) throw new ConfigurationError(blocked);
     /** @type {PendingPrompt} */
-    const prompt = { id: newMessageId(), rootId: root, text: body, delivery: this.rootBusy(root) ? 'steer' : 'auto', status: 'sending', retrySameId: true, at: Date.now() };
+    const prompt = { id: newMessageId(), rootId: root, text: body, ...(images.length ? { images } : {}), delivery: this.rootBusy(root) ? 'steer' : 'auto', status: 'sending', retrySameId: true, at: Date.now() };
     this.clearAttention(root);
     this.#set(state => ({ prompts: [...state.prompts, prompt] }));
     this.#awaitTurn(prompt);
@@ -1396,7 +1399,7 @@ export class Controller {
     try {
       const client = this.#client();
       if (this.#state.selected === prompt.rootId) await this.#wake(client, prompt.rootId);
-      const result = await client.request('session.prompt', { sessionId: prompt.rootId, clientMessageId: prompt.id, delivery: prompt.delivery, content: [{ type: 'text', text: prompt.text }] }, { timeoutMs: this.#options.requestTimeoutMs });
+      const result = await client.request('session.prompt', { sessionId: prompt.rootId, clientMessageId: prompt.id, delivery: prompt.delivery, content: promptContent(prompt.text, prompt.images) }, { timeoutMs: this.#options.requestTimeoutMs });
       if (result?.outcome === 'failed') {
         update({ status: 'failed', error: result.error?.message ? `The agent did not take the message: ${result.error.message}` : 'The agent did not take the message.', retrySameId: false });
         return;

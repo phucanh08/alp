@@ -1,10 +1,11 @@
 import * as React from 'react';
-import { Ban, Bot, ChevronDown, ChevronRight, CircleAlert, Info, ListChecks, RotateCcw, Scissors, SquareTerminal, Trash2, TriangleAlert, Wrench } from 'lucide-react';
+import { Ban, Bot, Image as ImageIcon, ChevronDown, ChevronRight, CircleAlert, Info, ListChecks, RotateCcw, Scissors, SquareTerminal, Trash2, TriangleAlert, Wrench } from 'lucide-react';
 import type { Entry } from '../lib/timeline.js';
 import type { PendingPrompt } from '../lib/controller.js';
 import { Button } from '../components/ui/button';
 import { clockTime } from '../lib/format';
 import { cn } from '../lib/utils';
+import { previewUrl } from '../lib/attachments.js';
 import { RichText } from './RichText';
 import { CopyButton, Elapsed, Loader, formatDuration } from './chat/parts';
 
@@ -151,10 +152,20 @@ function Marker({ icon, children }: { icon: React.ReactNode; children: React.Rea
   );
 }
 
-function UserBubble({ text, ts }: { text: string; ts?: string }) {
+/** How many images a sent message carried (their data is not replayed). */
+function ImagesChip({ count }: { count: number }) {
+  return (
+    <span className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[13px] text-muted-foreground" data-testid="user-message-images">
+      <ImageIcon aria-hidden className="size-3.5" />{count === 1 ? '1 image' : `${count} images`}
+    </span>
+  );
+}
+
+function UserBubble({ text, ts, images }: { text: string; ts?: string; images?: number }) {
   return (
     <div className="group/user flex flex-col items-end">
-      <div className="min-w-0 max-w-full rounded-2xl rounded-tr-sm bg-bubble p-4 text-[15px] leading-[21px] text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid="user-message">{text}</div>
+      {images ? <ImagesChip count={images} /> : null}
+      {text || !images ? <div className="min-w-0 max-w-full rounded-2xl rounded-tr-sm bg-bubble p-4 text-[15px] leading-[21px] text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid="user-message">{text}</div> : null}
       <div className="mt-2 flex h-6 items-center gap-2 opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100">
         <span className="text-[13px] text-muted-foreground">{clockTime(ts)}</span>
         <CopyButton text={() => text} label="Copy message" className="-mr-1" />
@@ -167,7 +178,7 @@ function EntryView({ entry, compactBottom }: { entry: Entry; compactBottom: bool
   const item = entry.item as any;
   switch (item.kind) {
     case 'user_message':
-      return <UserBubble text={item.text} ts={entry.ts} />;
+      return <UserBubble text={item.text} ts={entry.ts} images={typeof item.images === 'number' && item.images > 0 ? item.images : undefined} />;
     case 'assistant_message':
       return (
         <div className={cn('pt-3', compactBottom ? 'pb-0' : 'pb-3')} data-testid="assistant-message">
@@ -200,10 +211,17 @@ function EntryView({ entry, compactBottom }: { entry: Entry; compactBottom: bool
 function PendingView({ prompt, gap, onRetry, onDiscard }: { prompt: PendingPrompt; gap: number; onRetry: () => void; onDiscard: () => void }) {
   return (
     <div className="flex flex-col items-end gap-2" style={gap ? { marginTop: gap } : undefined} data-testid="pending-message" aria-busy={prompt.status === 'sending'}>
-      <div className={cn('min-w-0 max-w-full rounded-2xl rounded-tr-sm p-4 text-[15px] leading-[21px] whitespace-pre-wrap [overflow-wrap:anywhere]',
-        prompt.status === 'sending' ? 'bg-bubble opacity-70' : prompt.status === 'failed' ? 'border border-destructive/40 bg-destructive/5' : 'border border-warning/40 bg-warning/5')}>
-        {prompt.text}
-      </div>
+      {prompt.images?.length ? (
+        <div className="flex flex-wrap justify-end gap-2">
+          {prompt.images.map(image => <img key={image.id} src={previewUrl(image)} alt={image.name} title={image.name} className="size-16 rounded-lg border border-border object-cover" />)}
+        </div>
+      ) : null}
+      {prompt.text || !prompt.images?.length ? (
+        <div className={cn('min-w-0 max-w-full rounded-2xl rounded-tr-sm p-4 text-[15px] leading-[21px] whitespace-pre-wrap [overflow-wrap:anywhere]',
+          prompt.status === 'sending' ? 'bg-bubble opacity-70' : prompt.status === 'failed' ? 'border border-destructive/40 bg-destructive/5' : 'border border-warning/40 bg-warning/5')}>
+          {prompt.text}
+        </div>
+      ) : null}
       {prompt.status === 'sending' ? (
         <span role="status" className="flex h-6 items-center gap-2 text-[13px] text-muted-foreground"><Loader size={12} />{prompt.accepted ? 'Delivered' : 'Sending…'}</span>
       ) : (

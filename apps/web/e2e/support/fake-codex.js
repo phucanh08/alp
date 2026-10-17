@@ -9,6 +9,7 @@
 //   [hold]      start and never finish (until interrupted)
 //   [slow]      stream the answer over about three seconds
 // A steer (turn/steer) joins the running turn; one holding [finish] ends it with a reply.
+// Images in a turn's input (data URLs) are journaled as { mimeType, bytes } and echoed as "(+N images)".
 import { appendFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
@@ -26,7 +27,12 @@ const asking = new Map();
 record({ method: 'spawn' });
 process.on('SIGTERM', () => process.exit(0));
 
-const textOf = params => (params?.input ?? []).map(part => part.text ?? '').join('\n');
+const textOf = params => (params?.input ?? []).filter(part => typeof part?.text === 'string').map(part => part.text).join('\n');
+/** The images of a turn's input: each data URL's type and decoded size, never written out whole. */
+const imagesOf = params => (params?.input ?? []).filter(part => part?.type === 'image' || part?.type === 'localImage').map(part => {
+  const match = /^data:([^;,]+);base64,(.*)$/s.exec(String(part.url ?? ''));
+  return match ? { mimeType: match[1], bytes: Buffer.from(match[2], 'base64').length } : { type: part.type, ...(part.path ? { path: part.path } : {}), ...(part.url ? { url: String(part.url).slice(0, 64) } : {}) };
+});
 const live = (threadId, turnId) => active.get(threadId) === turnId;
 /** The user's own words: ALP puts context (catalog, tasks) before them. */
 const lastLine = text => text.split('\n').filter(line => line.trim() && !line.startsWith('<')).at(-1) ?? text;
@@ -96,8 +102,9 @@ lines.on('line', line => {
   }
   const { id, method, params } = message;
   const text = textOf(params);
+  const images = imagesOf(params);
   // The model a thread starts on and the effort of each turn, so tests can see what reached Codex.
-  record({ method, ...(params?.threadId ? { threadId: params.threadId } : {}), ...(text ? { text } : {}), ...(typeof params?.model === 'string' ? { model: params.model } : {}), ...(typeof params?.effort === 'string' ? { effort: params.effort } : {}) });
+  record({ method, ...(params?.threadId ? { threadId: params.threadId } : {}), ...(text ? { text } : {}), ...(typeof params?.model === 'string' ? { model: params.model } : {}), ...(typeof params?.effort === 'string' ? { effort: params.effort } : {}), ...(images.length ? { images } : {}) });
   const reply = result => send({ id, result });
   switch (method) {
     case 'initialize': return reply({});
@@ -107,7 +114,7 @@ lines.on('line', line => {
       const turnId = `turn-${process.pid}-${++turns}`;
       reply({ turn: { id: turnId } });
       active.set(params.threadId, turnId);
-      void run(params.threadId, turnId, text);
+      void run(params.threadId, turnId, images.length ? `${text} (+${images.length} image${images.length === 1 ? '' : 's'})` : text);
       return;
     }
     case 'turn/steer': {

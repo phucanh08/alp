@@ -150,7 +150,9 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         <>
           {closed && !running ? <p className="mx-auto w-full max-w-[820px] px-4 pb-2 text-center text-xs text-muted-foreground">This session is closed on the host. Sending a message reopens it.</p> : null}
           <Composer
-            onSend={text => controller.sendPrompt(text)}
+            images={rootSession?.promptImages === true}
+            imagesUnavailable={`${agentOf(root)} runs on ${rootSession?.runtime ?? 'a runtime'} here, which takes no images.`}
+            onSend={(text, images) => controller.sendPrompt(text, undefined, images)}
             onQueue={text => controller.queuePrompt(text)}
             onStop={() => void controller.interrupt()}
             queued={queued.filter(item => item.rootId === root)}
