@@ -103,15 +103,19 @@ in alpd, so install the CLI and start alpd first (above). Then, in Paseo, open
 **Settings → Plugins**, turn on **Enable plugins**, and run:
 
 ```sh
-npm install -g @anhlp/alp-paseo@beta
-paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"
+paseo plugin add npm:@anhlp/alp-paseo@beta
 paseo plugin ls                           # alp-provider is running
 paseo provider models alp                 # Phở and Cafe
 ```
 
-In `0.0.0-beta.1`, `paseo plugin add npm:@anhlp/alp-paseo@beta` fails with `Could not resolve
-type dependency "@getpaseo/relay/e2ee"`, so add the plugin by its installed path as above
-([#111](https://github.com/phucanh08/alp/issues/111)).
+This works from `0.0.0-beta.2`. In `0.0.0-beta.1` the `npm:` source fails with `Could not
+resolve type dependency "@getpaseo/relay/e2ee"` ([#111](https://github.com/phucanh08/alp/issues/111));
+with beta.1, install the plugin with npm and add it by its installed path instead:
+
+```sh
+npm install -g @anhlp/alp-paseo@beta
+paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"
+```
 
 Paseo plugins are trusted, unsandboxed code. The plugin keeps alpd running while Paseo runs.
 More: [integrations/paseo/README.md](../../integrations/paseo/README.md) and
@@ -165,8 +169,9 @@ plugin ID, `alp-provider`, is the same).
 
    ```sh
    paseo plugin remove alp-provider
-   npm install -g @anhlp/alp-paseo@beta
-   paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"     # not npm: in beta.1, see #111
+   paseo plugin add npm:@anhlp/alp-paseo@beta
+   # beta.1 only (#111): npm install -g @anhlp/alp-paseo@beta
+   #                     paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"
    ```
 
 5. Start alpd and check it:

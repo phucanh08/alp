@@ -53,7 +53,7 @@ npm run build --workspace=@anhlp/alp-runtime
 npm run test --workspace=@anhlp/alp-runtime
 ```
 
-Root `npm run build` retains the neutral legacy bundle paths and builds the CLI without Paseo. `npm run build:paseo` builds the optional plugin. Workspace builds compile the selected package and its dependencies, preserving individual module imports and emitting declarations. The `alp-source` export condition is only for repository builds/typechecking; published consumers use ordinary JavaScript and declaration exports.
+Root `npm run build` retains the neutral legacy bundle paths and builds the CLI without Paseo. `npm run build:paseo` builds the optional plugin. Workspace builds compile the selected package and its dependencies, preserving individual module imports and emitting declarations. The `alp-source` export condition is only for repository builds/typechecking; published consumers use ordinary JavaScript and declaration exports. The Paseo plugin `@anhlp/alp-paseo` is the exception: it ships no declarations, since Paseo installs an `npm:` plugin without its peers and resolves every type import ([#111](https://github.com/phucanh08/alp/issues/111)).
 
 ## Test layout
 

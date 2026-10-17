@@ -71,6 +71,8 @@ npm deprecate "@anhlp/alp-paseo@0.0.0-stage" "Bản giữ chỗ. Cài: npm insta
 # Tên plugin cũ không có bản beta nào, nên deprecate cả package (bị bỏ khỏi kết quả tìm kiếm).
 # Thông điệp dùng cách cài theo đường dẫn vì `paseo plugin add npm:` hỏng ở beta.1 (#111):
 npm deprecate alp-paseo-plugin 'Đổi tên thành @anhlp/alp-paseo. Cài: paseo plugin remove alp-provider; npm install -g @anhlp/alp-paseo@beta; paseo plugin add "$(npm root -g)/@anhlp/alp-paseo" (xem github.com/phucanh08/alp/issues/111)'
+# Sau khi publish 0.0.0-beta.2 (đã sửa #111), đổi thông điệp sang lệnh cài chuẩn:
+npm deprecate alp-paseo-plugin 'Đổi tên thành @anhlp/alp-paseo. Cài: paseo plugin remove alp-provider; paseo plugin add npm:@anhlp/alp-paseo@beta'
 ```
 
 [Registry] `alp-paseo-plugin` có 1870 lượt tải tuần trước, nên theo docs cũng không tự unpublish
@@ -648,7 +650,7 @@ Trạng thái ngày 2026-10-16, ở release SHA `2230aa5`.
 | T10 | Test fake-provider cho câu hỏi quyền trong Paseo (§6.2, hàng duyệt quyền, ý 1) | Có | xong: test đã merge, pass trong `validate:paseo` ở release SHA (H1, H2) |
 | T11 | Sửa F3 (`linkify-it@2.2.0` trong `alp web`); owner anh | Không chặn beta.1; chặn beta.2, hạn 2026-11-15 | chưa làm |
 | T13 | Claude stream text vào Paseo/`alp web` (`includePartialMessages`, map `stream_event`) | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16) | chưa làm; [#107](https://github.com/phucanh08/alp/issues/107) |
-| T14 | `paseo plugin add npm:@anhlp/alp-paseo@beta` cài được: không ship `.d.ts` import type từ peer `@getpaseo/*` (hoặc bỏ hẳn `.d.ts` của plugin); thêm kiểm CI cài plugin như Paseo cài nguồn `npm:` (`--legacy-peer-deps`); rồi bỏ cách tạm khỏi docs | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16); chặn beta.2 | chưa làm; [#111](https://github.com/phucanh08/alp/issues/111) |
+| T14 | `paseo plugin add npm:@anhlp/alp-paseo@beta` cài được: không ship `.d.ts` import type từ peer `@getpaseo/*` (hoặc bỏ hẳn `.d.ts` của plugin); thêm kiểm CI cài plugin như Paseo cài nguồn `npm:` (`--legacy-peer-deps`); rồi bỏ cách tạm khỏi docs | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16); chặn beta.2 | đã sửa, chờ publish beta.2 (plugin không ship `.d.ts`; `scripts/paseo-source-check.mjs` trong `release:tarball-check`/`validate:packages`; docs dùng `npm:`, cách tạm chỉ còn cho beta.1); [#111](https://github.com/phucanh08/alp/issues/111) |
 
 ## 9. Không thuộc tài liệu này
 
