@@ -65,8 +65,6 @@ if (scope === 'all' || scope === 'web') {
   // to end against a real alpd and gateway with a fake provider, in Chromium.
   node('node_modules/typescript/bin/tsc', '-p', 'apps/web/tsconfig.json');
   tests(webTests());
-  buildWorkspace('cli');
-  buildWorkspace('daemon');
-  npm('run', 'build', '--workspace', '@anhlp/alp-web');
+  // pretest:e2e in apps/web builds the CLI, daemon and app bundle first.
   npm('run', 'test:e2e', '--workspace', '@anhlp/alp-web');
 }

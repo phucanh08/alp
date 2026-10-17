@@ -258,6 +258,11 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
     - access: token sai, chỉ đọc, giới hạn mode, workspace khác, revoke, origin không được phép;
     - chat, new-session, settings, tabs, workspace;
     - mobile.
+- Chạy E2E: `npm ci` ở gốc repo một lần (workspace dùng chung `node_modules` gốc), rồi
+  `npm run test:alp-web:e2e` ở gốc hoặc `npm run test:e2e` trong `apps/web`. Cả hai đi qua
+  `pretest:e2e` của `apps/web`: build lại `packages/cli`, `packages/daemon` và bundle web trước
+  Playwright, nên dist cũ (lỗi "host too old: lacks attach.after") không còn xảy ra. Gọi thẳng
+  `npx playwright test` thì bỏ qua bước này.
 - CI: job `alp-web` trên `ubuntu-latest` và `macos-latest`, Node 22, chạy `npm run validate:web`.
   Khi lỗi, CI upload trace và ảnh.
 
