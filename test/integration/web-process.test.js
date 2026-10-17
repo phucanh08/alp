@@ -1,6 +1,7 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -227,6 +228,10 @@ test('a disabled web setting fails fast with a clear message', async t => {
 });
 
 test('a missing integration descriptor names the optional package', async t => {
+  // Discovery always searches these system bin directories, whatever PATH and HOME say; an
+  // integration installed there cannot be hidden from the CLI, so the refusal cannot be observed.
+  const installed = ['/opt/homebrew/bin', '/usr/local/bin'].map(directory => path.join(directory, 'alp-web-integration')).find(file => existsSync(file));
+  if (installed) { t.skip(`alp-web-integration is installed at ${installed}, which discovery always searches`); return; }
   const { home } = await createHome(t);
   await startDaemon(home);
 
@@ -235,9 +240,20 @@ test('a missing integration descriptor names the optional package', async t => {
   await rename(integrationDescriptor, hidden);
   t.after(async () => { await rename(hidden, integrationDescriptor).catch(() => {}); });
   try {
-    // The workspace install links `alp-web-integration` into node_modules/.bin, which npm puts on PATH; discovery would find it there.
-    const withoutBin = process.env.PATH.split(path.delimiter).filter(entry => !entry.endsWith(`node_modules${path.sep}.bin`)).join(path.delimiter);
-    const refused = await run(['web', '--print'], home, 60_000, { PATH: withoutBin });
+    // Discovery also searches PATH (the workspace links `alp-web-integration` into node_modules/.bin,
+    // and a developer may have it installed globally, possibly beside node itself) and the well-known
+    // bin directories under HOME (~/.npm-global/bin, ~/.local/bin). The CLI is launched through
+    // process.execPath and the refusal path spawns nothing, so give it an empty PATH and HOME, and
+    // clear the explicit overrides, so no installed integration is reachable.
+    const empty = await mkdtemp(path.join(tmpdir(), 'alp-no-home-'));
+    t.after(() => rm(empty, { recursive: true, force: true }));
+    const refused = await run(['web', '--print'], home, 60_000, {
+      PATH: empty,
+      HOME: empty,
+      USERPROFILE: empty,
+      ALP_WEB_INTEGRATION: '',
+      ALP_INTEGRATION_ENTRY: '',
+    });
     assert.notEqual(refused.code, 0);
     assert.match((refused.stderr || '') + (refused.stdout || ''), /optional integration package/i);
   } finally {
