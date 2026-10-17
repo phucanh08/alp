@@ -67,7 +67,14 @@ In the published packages:
   - `alp acp`: the custom team stays selectable in an editor's team picker;
   - alpd never runs a workspace's git through another spelling of the workspace path
     (case-insensitive file systems) or a PATH binary that links into the workspace;
-  - `@anhlp/alp-core`'s declarations for `teamSources`/`resolveTeam` typecheck.
+  - `@anhlp/alp-core`'s declarations for `teamSources`/`resolveTeam` typecheck;
+  - `alp web`: a very long agent message with many email addresses or `mailto:` links no longer
+    hangs the browser tab (linkify-it 2.2.0; GHSA-22p9-wv53-3rq4, GHSA-v245-v573-v5vm; known
+    issue in beta.1). ALP patch 0020 limits the text that auto-linking scans: in a message, a run
+    of text over 2048 characters or a message over 32 KB is not auto-linked, and inline code over
+    256 characters is not turned into a link. Trade-off: bare URLs and email addresses in such
+    long text show as plain text; explicit markdown links still work
+    ([#126](https://github.com/phucanh08/alp/pull/126)).
 
 In the repository only (not in a published package, still deferred):
 
@@ -101,11 +108,6 @@ the gateway) are still deferred.
 - In Paseo and `alp web`, a session on Claude shows the assistant's text only once each message
   is complete; Codex sessions stream as they go. Stop still works
   ([#107](https://github.com/phucanh08/alp/issues/107)).
-- `alp web`: a very long agent message with many email addresses or `mailto:` links can hang the
-  browser tab (linkify-it 2.2.0 in Paseo's web app; GHSA-22p9-wv53-3rq4, GHSA-v245-v573-v5vm).
-  It affects only the page on this machine. **Decision pending (beta-scope D9):** accepted for
-  beta.1 with the deadline "before `0.0.0-beta.2` or 2026-11-15"; either fixed before this beta
-  is published or accepted again with a new deadline.
 - Windows: no login service; tests that use a fake Codex or POSIX processes are skipped there;
   no CI lane runs the whole suite.
 - Client SDK smoke tests (browser, Metro, tarball) are not in CI.
