@@ -11,7 +11,7 @@ export type RpcResponse = { jsonrpc: '2.0'; id: RpcId } & ({ result: unknown; er
 export type EventNotification = { jsonrpc: '2.0'; method: 'event'; params: Envelope };
 
 /** Names a daemon may list in its daemon.hello result (schema/methods-v1.json `capabilities`). */
-export type Capability = 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'settings.language';
+export type Capability = 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'settings.language' | 'session.list.page' | 'question.watch';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -48,6 +48,8 @@ export type RpcMethodMap = {
   'assignment.recall': { params: { assignmentId?: string; taskId?: string; projectRoot?: string; question: string }; result: RecallAnswer };
   'board.list': { params: { projectRoot: string }; result: { pins: Pin[] } };
   'question.list': { params: { projectRoot?: string }; result: { questions: UserQuestion[] } };
+  /** Capability `question.watch`: the waiting questions now; then this connection is told of every tree's `question` and `question.resolved` (of `projectRoot` when given). */
+  'question.watch': { params: { projectRoot?: string }; result: { questions: UserQuestion[] } };
   'question.answer': { params: { questionId: string; text?: string; dismiss?: boolean; reason?: string }; result: { questionId: string } };
   'session.create': {
     params: { sessionId?: string; spec: SessionSpec; history?: 'skip' | 'replay'; delegation?: boolean; resume?: boolean };
@@ -67,7 +69,8 @@ export type RpcMethodMap = {
   'session.rename': { params: { sessionId: string; title: string }; result: { session: SessionSummary } };
   'session.archive': { params: { sessionId: string; archived?: boolean }; result: { session: SessionSummary } };
   'session.get': { params: { sessionId: string }; result: { session: SessionSummary } };
-  'session.list': { params: { projectRoot?: string; rootsOnly?: boolean; includeClosed?: boolean; includeArchived?: boolean }; result: { sessions: SessionSummary[] } };
+  /** `limit`, `cursor`, `query` and `projectRoots` with capability `session.list.page`: a page, and `nextCursor` while more follow. */
+  'session.list': { params: { projectRoot?: string; projectRoots?: string[]; rootsOnly?: boolean; includeClosed?: boolean; includeArchived?: boolean; limit?: number; cursor?: string; query?: string }; result: { sessions: SessionSummary[]; nextCursor?: string } };
   'session.status': { params: { sessionId: string }; result: { status: TreeStatus } };
   'session.message': { params: { sessionId: string; text: string }; result: Empty };
   'session.log': { params: { sessionId: string }; result: { rootId: string; entries: Array<Record<string, unknown>> } };

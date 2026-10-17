@@ -21,7 +21,9 @@
     "team": "team.list: the teams a project can use, from the daemon host's built-ins, library and project.",
     "task": "task.list, task.create, task.update and task.gate.resolve on a project's .alp/tasks, written by the daemon under the task lock.",
     "library": "library.list/get/save/delete/duplicate/rename, library.skills.set and library.models on the daemon user's library and a project's .alp overrides; secrets are redacted on read.",
-    "settings.language": "settings.language.get/set: the language the daemon user reads, in the daemon's ALP_HOME/settings.json."
+    "settings.language": "settings.language.get/set: the language the daemon user reads, in the daemon's ALP_HOME/settings.json.",
+    "session.list.page": "session.list accepts `limit`, `cursor` and `query` and answers `nextCursor` while more sessions follow; without them it answers every session as before.",
+    "question.watch": "question.watch: the connection is told of `question` and `question.resolved` in every tree (of a projectRoot when given), attached or not."
   },
   "methods": {
     "assignment.recall": {
@@ -1096,6 +1098,43 @@
         "additionalProperties": true
       }
     },
+    "question.watch": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": false
+        },
+        "idempotent": true,
+        "capability": "question.watch"
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "questions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/question"
+            }
+          }
+        },
+        "required": [
+          "questions"
+        ],
+        "additionalProperties": true
+      }
+    },
     "session.archive": {
       "x-alp": {
         "effect": "mutation",
@@ -1399,6 +1438,28 @@
           },
           "includeArchived": {
             "type": "boolean"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "projectRoots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 1024
           }
         },
         "required": [],
@@ -1412,6 +1473,10 @@
             "items": {
               "$ref": "#/$defs/sessionSummary"
             }
+          },
+          "nextCursor": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [

@@ -1257,6 +1257,53 @@
    }
   },
   {
+   "name": "question.watch params",
+   "check": "params",
+   "method": "question.watch",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project"
+   }
+  },
+  {
+   "name": "question.watch every tree",
+   "check": "params",
+   "method": "question.watch",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "question.watch result",
+   "check": "result",
+   "method": "question.watch",
+   "valid": true,
+   "value": {
+    "questions": [
+     {
+      "id": "q_1",
+      "sessionId": "ses_fixture",
+      "rootId": "ses_fixture",
+      "agent": "main",
+      "body": "Tiếp tục?",
+      "options": [
+       "có",
+       "không"
+      ],
+      "askedAt": "2026-10-15T00:00:00.000Z"
+     }
+    ]
+   }
+  },
+  {
+   "name": "question.watch with a numeric projectRoot",
+   "check": "params",
+   "method": "question.watch",
+   "valid": false,
+   "value": {
+    "projectRoot": 7
+   }
+  },
+  {
    "name": "question.answer params",
    "check": "params",
    "method": "question.answer",
@@ -1951,6 +1998,102 @@
       "updatedAt": "2026-10-15T00:00:00.000Z"
      }
     ]
+   }
+  },
+  {
+   "name": "session.list a page with a query",
+   "check": "params",
+   "method": "session.list",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "rootsOnly": true,
+    "includeArchived": true,
+    "limit": 200,
+    "cursor": "eyJrIjpbMF19",
+    "query": "sửa lỗi"
+   }
+  },
+  {
+   "name": "session.list with a zero limit",
+   "check": "params",
+   "method": "session.list",
+   "valid": false,
+   "value": {
+    "limit": 0
+   }
+  },
+  {
+   "name": "session.list of several projects",
+   "check": "params",
+   "method": "session.list",
+   "valid": true,
+   "value": {
+    "projectRoots": [
+     "/work/project",
+     "/private/work/project"
+    ],
+    "limit": 50
+   }
+  },
+  {
+   "name": "session.list with no projects",
+   "check": "params",
+   "method": "session.list",
+   "valid": false,
+   "value": {
+    "projectRoots": []
+   }
+  },
+  {
+   "name": "session.list with a fractional limit",
+   "check": "params",
+   "method": "session.list",
+   "valid": false,
+   "value": {
+    "limit": 2.5
+   }
+  },
+  {
+   "name": "session.list with an empty cursor",
+   "check": "params",
+   "method": "session.list",
+   "valid": false,
+   "value": {
+    "cursor": ""
+   }
+  },
+  {
+   "name": "session.list a page with more after it",
+   "check": "result",
+   "method": "session.list",
+   "valid": true,
+   "value": {
+    "sessions": [
+     {
+      "id": "ses_fixture",
+      "projectRoot": "/work/project",
+      "agent": "main",
+      "runtime": "codex",
+      "model": "gpt-6.1-sol",
+      "mode": "workspace-write",
+      "thinking": "low",
+      "workflow": {
+       "mode": "pho",
+       "maxPeers": 2,
+       "supervisor": false
+      },
+      "teamLabel": "Phở",
+      "threadId": "thread-1",
+      "persistent": true,
+      "busy": false,
+      "status": "idle",
+      "title": "Sửa lỗi 😀",
+      "createdAt": "2026-10-15T00:00:00.000Z",
+      "updatedAt": "2026-10-15T00:00:00.000Z"
+     }
+    ],
+    "nextCursor": "eyJrIjpbMF19"
    }
   },
   {

@@ -194,8 +194,10 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 | `team` | `team.list` (§15.4). Listed when alpd serves its user's home (alpd always does; an embedded server only when given `home`). |
 | `library` | `library.list/get/save/delete/duplicate/rename`, `library.skills.set`, `library.models` (§15.3). Same condition as `team`. |
 | `settings.language` | `settings.language.get/set` (§15.5). Same condition as `team`. |
+| `session.list.page` | `session.list` accepts `limit`, `cursor` and `query` and answers `nextCursor` (§12.1). Every alpd lists it. |
+| `question.watch` | `question.watch`: questions of trees the connection is not attached to (§12.2). Every alpd lists it. |
 
-alpd before this revision already had the first three without listing them; the last four are new. A method whose
+alpd before this revision already had the first three without listing them; the others are new. A method whose
 capability a daemon does not list answers `-32601`. A client that must work with
 both may probe (e.g. send `session.attach` with `after` and look for `cursor` in the result), but should
 prefer capabilities and treat their absence as "not available".
@@ -233,7 +235,8 @@ compatible and needs no version change. A future daemon that speaks several vers
 ### 8.1 Envelope
 
 The daemon sends `{ "jsonrpc": "2.0", "method": "event", "params": Envelope }` to every connection
-attached to the event's tree (§9):
+attached to the event's tree (§9), and a tree's `question` / `question.resolved` also to the
+connections watching questions (§12.2):
 
 ```ts
 { sessionId: string; epoch: string; seq: number; cursor?: number; ts: string; event: AlpEvent }
@@ -248,7 +251,7 @@ attached to the event's tree (§9):
   across restarts, starting at 1. Only envelopes with a `cursor` are part of the timeline ("kept").
 - **Synthetic envelopes** without `cursor`: the re-announcement of a live tree when a client reopens a
   root (`session.opened`, `session.ready`, `turn.started` of a running turn), pending `question`s
-  announced on attach. A client never advances its cursor from an envelope without one.
+  announced on attach, and the `question` / `question.resolved` copies `question.watch` sends (§12.2). A client never advances its cursor from an envelope without one.
 - **History digests**: when resuming a closed root, `session.create { history: "replay" }` sends the
   root's latest version of each timeline item and its children's events. For an already-live root
   (`attached: true`), it sends root items and synthetic announcements of live children, without
@@ -415,6 +418,7 @@ connection on the local socket acts as the owner.
 | `assignment.recall` | asks a finished assignment's thread (a model call) | no | 1000, -32602 | session.write |
 | `board.list` | read | yes | -32602 | session.read |
 | `question.list` | read | yes | — | session.read |
+| `question.watch` | read, then question events of every tree (§12.2) | yes (a second call replaces the filter) | -32602 | session.read |
 | `question.answer` | answers or dismisses; a unique id prefix is accepted | no (second answer → 1001) | 1001, -32602 | session.write |
 | `session.create` | creates or resumes a root, attaches | no (an existing live root is attached: `attached: true`) | -32602, 1000, 1001, `persistence_failed` | session.write |
 | `session.preview` | read (no files written) | yes | -32602, 1000 | session.read |
@@ -426,7 +430,7 @@ connection on the local socket acts as the owner.
 | `session.close` | closes | no (second → 1001) | 1001 | session.write |
 | `session.rename` | renames a root; announced as `session.updated` (§8.1) | yes | -32602, 1001, `persistence_failed` | session.write |
 | `session.archive` | archives/unarchives a root, closes it | yes | -32602, 1001, `persistence_failed` | session.write |
-| `session.get` / `session.list` | read | yes | 1001 | session.read |
+| `session.get` / `session.list` | read; `session.list` pages (§12.1) | yes | 1001; -32602 for a cursor alpd did not give | session.read |
 | `session.status` | read (live tree) | yes | 1001 | session.read |
 | `session.message` | posts user mail to a session | no | 1000, 1001 | session.write |
 | `session.log` | read | yes | — | session.read |
@@ -443,9 +447,61 @@ connection on the local socket acts as the owner.
 | `library.models` | read | yes | — | host read |
 | `settings.language.get` / `set` | read / writes `settings.json` | yes | -32602, 1000 | host read / host write |
 
+### 12.1 `session.list` pages and search
+
+`session.list { projectRoot?, projectRoots?, rootsOnly?, includeClosed?, includeArchived?, limit?, cursor?, query? }`
+(capability `session.list.page`) answers `{ sessions, nextCursor? }`, as Paseo's History reads a
+host's agents (`fetch_agent_history`, Paseo `b63a325`):
+
+- **Order**: roots before children, then the latest `updatedAt` first, then by `id`.
+- **`limit`** (1–1000): at most that many sessions. `nextCursor` is present only when more follow;
+  its absence is the end. Without `limit` every session is answered and there is no `nextCursor`,
+  as before this revision.
+- **`cursor`**: a `nextCursor` from an earlier answer with the same filters; the page continues after
+  the session it names (a keyset, not an offset), so sessions created meanwhile do not shift it. A
+  session whose `updatedAt` changes between pages moves in the order and may be seen twice or missed;
+  a client that must be exact reads again from the start. Clients treat the cursor as opaque; one
+  alpd cannot read answers `-32602`.
+- **`query`** (at most 200 code points): sessions whose `title` or `id` holds every
+  whitespace-separated word, case-insensitive, as a substring. Filters, then pages. Paseo also
+  matches the project name and branch, with typo tolerance; ALP lists one workspace per view, so the
+  title is what tells sessions apart.
+- **`projectRoots`** (1–1024 strings): sessions of any of these projects, compared as strings like
+  `projectRoot`; with `projectRoot` both apply. A gateway names its grant's workspaces with it.
+- A daemon without the capability ignores these params and answers the whole list without
+  `nextCursor`; a client hides server search there.
+- **Through the gateway**: it sends `projectRoots` with the path and canonical path of each granted
+  workspace (only the one `projectRoot` names, when given), reads alpd's pages on while the grant
+  drops rows, and answers its own cursors. A grant with more than 1024 such strings is listed whole,
+  unpaged, and searched by the gateway, as before this revision: alpd is then sent no `query`,
+  `limit` or `cursor`. The cursors it answers are alpd's sealed with AES-256-GCM under a key of the gateway
+  process, bound to the credential. A cursor it did not give that credential (another one's, alpd's
+  own, or one from before a gateway restart) answers `-32602`; the client reads again from the start.
+
+### 12.2 `question.watch`
+
+`question.watch { projectRoot? }` (capability `question.watch`) answers `{ questions }`, the questions
+waiting now (as `question.list` with the same `projectRoot`). From then on, for as long as the
+connection lasts, alpd sends it every `question` and `question.resolved` event of every tree (of
+`projectRoot` when given, compared as the string alpd records for the tree), attached or not:
+
+- A connection attached to the tree gets the kept envelope only, once. Others get a synthetic copy
+  without `cursor` (§8.1): it never advances a replay cursor.
+- Registering and listing happen with no await between them: a question is in the answer or its
+  event follows it. A second call replaces `projectRoot` and answers the list again.
+- Events sent while a client was disconnected are not replayed. After reconnecting, a client calls
+  `question.watch` again and takes its answer as the whole set of waiting questions.
+
+The gateway forwards it with no `projectRoot`, filters the answer as `question.list`'s, and lets each
+event out only if its session's tree lies in the grant and, when the client named a workspace, in that
+workspace or a tree the client attached (docs/alp/remote-gateway.md §5.1).
+
 ## 13. Compatibility notes for this revision
 
 **Additive** (old clients unaffected):
+- `session.list` `limit` / `cursor` / `query` / `projectRoots` and `nextCursor`, and `question.watch`, with capabilities
+  `session.list.page` and `question.watch` (§12.1, §12.2). Without the new params `session.list` answers
+  as before; its order now breaks ties of `updatedAt` by `id`.
 - The project, task, library and settings methods of §15 with their capabilities; error codes `1003` and `1005`;
   the `x-alp` annotation of every method in `methods-v1.json` (effect, resource scope, capability, risks), which
   validators ignore.

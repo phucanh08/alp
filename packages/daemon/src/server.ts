@@ -91,6 +91,28 @@ function titleFromPrompt(text: string): string | undefined {
   return line ? [...line].slice(0, PROMPT_TITLE_CHARS).join('').trim() || undefined : undefined;
 }
 
+/**
+ * session.list's order and its keyset cursor: roots before children, the latest `updatedAt`
+ * first, then by id, so a page continues after the last session it holds, as Paseo's history pages
+ * (server/pagination/sortable-pager.ts at b63a325). The cursor is opaque to clients.
+ */
+type ListKey = [child: 0 | 1, updatedAt: string, id: string];
+const listCursor = {
+  key: (session: SessionSummary): ListKey => [session.parentId ? 1 : 0, session.updatedAt ?? '', session.id],
+  compare([childA, updatedA, idA]: ListKey, [childB, updatedB, idB]: ListKey) {
+    return childA - childB || (updatedA === updatedB ? 0 : updatedA < updatedB ? 1 : -1) || (idA === idB ? 0 : idA < idB ? -1 : 1);
+  },
+  encode: (key: ListKey) => Buffer.from(JSON.stringify(key), 'utf8').toString('base64url'),
+  decode(cursor: string): ListKey {
+    let key: unknown;
+    try { key = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')); } catch {}
+    if (!Array.isArray(key) || key.length !== 3 || (key[0] !== 0 && key[0] !== 1) || typeof key[1] !== 'string' || typeof key[2] !== 'string') {
+      throw new RpcError(RPC_ERROR.invalidParams, 'cursor is not one session.list answered', { reason: 'invalid_params' });
+    }
+    return key as ListKey;
+  },
+};
+
 /** What clients need from a daemon connection; AlpClient implements it over the socket. */
 import type { DaemonConnection } from '@anhlp/alp-protocol/connection';
 export type { DaemonConnection } from '@anhlp/alp-protocol/connection';
@@ -151,6 +173,28 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   const restored = store ? restore() : Promise.resolve();
 
   const deliver = (connection: Connection, envelope: Envelope) => connection.send({ jsonrpc: '2.0', method: 'event', params: envelope });
+  /** Connections that called question.watch, with the projectRoot they asked for. */
+  const watchers = new Map<Connection, { projectRoot?: string }>();
+
+  /** The project of a tree, live or recorded. */
+  function projectOf(root: string) {
+    return runtime.snapshot(root)?.projectRoot ?? records.get(root)?.session?.projectRoot;
+  }
+
+  /**
+   * Tells watchers not attached to the tree of a question asked or resolved there. Their copy has
+   * no `cursor`: it is not part of a timeline they replay (docs/protocol/alp-json-rpc-v1.md §8.1).
+   */
+  function tellWatchers(root: string, envelope: Envelope) {
+    if (!watchers.size) return;
+    const { cursor: _cursor, ...announced } = envelope;
+    const project = projectOf(root);
+    for (const [connection, { projectRoot }] of watchers) {
+      if (attached.get(root)?.has(connection)) continue;
+      if (projectRoot !== undefined && project !== projectRoot) continue;
+      deliver(connection, announced);
+    }
+  }
 
   /** Records a change; the write is queued, and a failure is logged and counted in daemon.status. */
   function save(record: SessionRecord & { activeTurnId?: string }, changes: Partial<SessionRecord & { activeTurnId?: string }> = {}) {
@@ -233,6 +277,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       named = track(sessionId, root, event);
     }
     for (const connection of attached.get(root) ?? []) deliver(connection, envelope);
+    if (event.type === 'question' || event.type === 'question.resolved') tellWatchers(root, envelope);
     // After the message that named it, so its cursor follows the message's.
     if (named) announceTitle(root, records.get(root)!.title!);
     if (event.type === 'session.closed' && sessionId === root) {
@@ -667,8 +712,18 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     },
 
     'question.list'(_connection, { projectRoot } = {}) {
-      const questions = runtime.questions().filter(question => projectRoot === undefined || runtime.snapshot(question.rootId)?.projectRoot === projectRoot);
-      return { questions };
+      return { questions: runtime.questions().filter(question => projectRoot === undefined || projectOf(question.rootId) === projectRoot) };
+    },
+
+    /**
+     * The questions waiting now; from then on this connection is told of `question` and
+     * `question.resolved` in every tree, or those of `projectRoot`, attached or not. Calling it
+     * again replaces the filter; it lasts as long as the connection (ALPD §15).
+     */
+    'question.watch'(connection, { projectRoot } = {}) {
+      // No await between registering and listing: an event either is in the list or follows it.
+      watchers.set(connection, { projectRoot });
+      return { questions: runtime.questions().filter(question => projectRoot === undefined || projectOf(question.rootId) === projectRoot) };
     },
 
     /** The project board: live claims, decisions and findings (ALPD §18). */
@@ -866,15 +921,29 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       return { session: known(sessionId) };
     },
 
-    'session.list'(_connection, { projectRoot, rootsOnly = false, includeClosed = false, includeArchived = false } = {}): { sessions: SessionSummary[] } {
+    /**
+     * Roots first, then newest first, by id last. With `limit` a page, and `nextCursor` while more
+     * follow; `cursor` continues after the session it names; `query` keeps the sessions whose title
+     * or id holds every word of it; `projectRoots` those of any of these projects, as a gateway lists
+     * a grant's workspaces (docs/protocol/alp-json-rpc-v1.md §12.1).
+     */
+    'session.list'(_connection, { projectRoot, projectRoots, rootsOnly = false, includeClosed = false, includeArchived = false, limit, cursor, query } = {}): { sessions: SessionSummary[]; nextCursor?: string } {
+      const projects = Array.isArray(projectRoots) ? new Set<string>(projectRoots) : undefined;
+      const after = cursor === undefined ? undefined : listCursor.decode(cursor);
+      const words = typeof query === 'string' ? query.toLowerCase().split(/\s+/).filter(Boolean) : [];
       const ids = new Set([...runtime.list().map(session => session.id), ...records.keys()]);
       const sessions = [...ids].map(summary).filter((session): session is SessionSummary => !!session)
         .filter(session => includeClosed || session.status === 'idle' || session.status === 'running')
         .filter(session => includeArchived || !session.archived)
         .filter(session => !rootsOnly || !session.parentId)
         .filter(session => projectRoot === undefined || session.projectRoot === projectRoot)
-        .sort((a, b) => Number(!!a.parentId) - Number(!!b.parentId) || (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
-      return { sessions };
+        .filter(session => !projects || projects.has(session.projectRoot))
+        .filter(session => !words.length || words.every(word => `${session.title ?? ''}\n${session.id}`.toLowerCase().includes(word)))
+        .sort((a, b) => listCursor.compare(listCursor.key(a), listCursor.key(b)))
+        .filter(session => !after || listCursor.compare(listCursor.key(session), after) > 0);
+      if (limit === undefined || sessions.length <= limit) return { sessions };
+      const page = sessions.slice(0, limit);
+      return { sessions: page, nextCursor: listCursor.encode(listCursor.key(page.at(-1)!)) };
     },
   };
   for (const [method, handler] of Object.entries(operations.handlers)) handlers[method] = (_connection, params) => handler(params);
@@ -917,7 +986,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, ...(store ? [CAPABILITY.promptReceipts] : []), ...operations.capabilities];
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, ...(store ? [CAPABILITY.promptReceipts] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {
@@ -1004,6 +1073,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       waiting.reject(new Error('ALP daemon caller connection closed'));
     }
     connections.delete(connection);
+    watchers.delete(connection);
     for (const root of [...connection.roots]) {
       detach(connection, root);
       void reap(root);

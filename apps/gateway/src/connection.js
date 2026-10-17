@@ -1,5 +1,5 @@
 // @ts-check
-import { randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { ERROR, PROTOCOL_VERSION, RPC_ERROR } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 import { isAlpClientError } from '@anhlp/alp-client/portable';
@@ -48,6 +48,42 @@ export const CLOSE_CODE = Object.freeze({
 const MAX_DEPTH = 32;
 /** Scope decisions remembered per connection; past this the cache starts again. */
 const MAX_CACHED = 10_000;
+/** alpd pages one session.list page may read when the grant leaves out what alpd lists. */
+const MAX_LIST_READS = 8;
+/** At most this many projectRoots go to alpd's session.list (its schema's limit). */
+const MAX_LIST_PROJECTS = 1024;
+
+/**
+ * session.list cursors leave the gateway sealed (AES-256-GCM, a key of this process, the credential
+ * as associated data): alpd's own cursor names the last session it read, which may be one the grant
+ * leaves out, and a client may continue only from a cursor this gateway gave its credential.
+ */
+const CURSOR_KEY = randomBytes(32);
+const CURSOR_PREFIX = 'g1.';
+
+/** @param {string} cursor @param {string} principal */
+function sealCursor(cursor, principal) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', CURSOR_KEY, iv);
+  cipher.setAAD(Buffer.from(principal, 'utf8'));
+  const body = Buffer.concat([cipher.update(cursor, 'utf8'), cipher.final()]);
+  return CURSOR_PREFIX + Buffer.concat([iv, cipher.getAuthTag(), body]).toString('base64url');
+}
+
+/** alpd's cursor inside a sealed one, or undefined for anything else. @param {string} token @param {string} principal */
+function openCursor(token, principal) {
+  if (!token.startsWith(CURSOR_PREFIX)) return undefined;
+  try {
+    const raw = Buffer.from(token.slice(CURSOR_PREFIX.length), 'base64url');
+    if (raw.length <= 28) return undefined;
+    const decipher = createDecipheriv('aes-256-gcm', CURSOR_KEY, raw.subarray(0, 12));
+    decipher.setAAD(Buffer.from(principal, 'utf8'));
+    decipher.setAuthTag(raw.subarray(12, 28));
+    return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8');
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * @typedef {{
@@ -104,6 +140,11 @@ export class ClientConnection {
   /** @type {Record<string, any>} */ #daemonHello = {};
   /** @type {string[]} */ #capabilities = [];
   /** @type {Map<string, Scoped>} */ #sessions = new Map();
+  /** Sessions whose watched questions were found outside the grant. @type {Set<string>} */ #outside = new Set();
+  /** Roots this client attached (session.create, session.attach) and has not released. */
+  /** @type {Set<string>} */ #attached = new Set();
+  /** After question.watch: the workspace it named, or null for every one of the grant. */
+  /** @type {import('./credentials.js').Workspace | null | undefined} */ #watch;
   /** @type {Array<{ frame: string | null | undefined }>} */ #queue = [];
   #queuedBytes = 0;
   #helloed = false;
@@ -515,21 +556,68 @@ export class ClientConnection {
     const id = envelope?.sessionId;
     if (typeof id !== 'string') return;
     const frame = JSON.stringify({ jsonrpc: '2.0', method: 'event', params: envelope });
-    if (this.#sessions.has(id)) return this.#push(frame);
-    // A child opening in a tree already in scope.
     const event = /** @type {any} */ (envelope.event);
+    const known = this.#sessions.get(id);
+    if (known) { if (this.#wanted(envelope, known)) this.#push(frame); return; }
+    // A child opening in a tree already in scope.
     const parent = event?.type === 'session.opened' && typeof event.session?.parentId === 'string' ? this.#sessions.get(event.session.parentId) : undefined;
     if (parent && workspaceOf(this.#grant, event.session.projectRoot)) {
       this.#remember(id, { root: parent.root, projectRoot: event.session.projectRoot, mode: event.session.mode });
       return this.#push(frame);
     }
+    // question.watch brings every tree's questions: a session found outside the grant once is
+    // not looked up again (a session's workspace and tree never change), and is not worth a warning.
+    const copy = (event?.type === 'question' || event?.type === 'question.resolved') && envelope.cursor === undefined;
+    if (copy && this.#outside.has(id)) return;
     // Otherwise the session is looked up before the event, or anything after it, goes out.
     const fill = this.#slot();
-    this.#resolve(id).then(() => fill(frame), error => {
+    this.#resolve(id).then(scoped => fill(this.#wanted(envelope, scoped) ? frame : null), error => {
       fill(null);
-      if (error instanceof NotInScope) this.#log.warn('dropped an event of a session outside the grant', { code: 'ALP_GATEWAY_EVENT_OUT_OF_SCOPE' });
+      if (error instanceof NotInScope && copy && error.why === 'outside') {
+        if (this.#outside.size >= MAX_CACHED) this.#outside.clear();
+        this.#outside.add(id);
+        this.#log.debug('dropped a question of a session outside the grant', { code: 'ALP_GATEWAY_EVENT_OUT_OF_SCOPE' });
+      } else if (error instanceof NotInScope && copy) this.#log.debug('dropped a question of a session not found', { code: 'ALP_GATEWAY_EVENT_OUT_OF_SCOPE' });
+      else if (error instanceof NotInScope) this.#log.warn('dropped an event of a session outside the grant', { code: 'ALP_GATEWAY_EVENT_OUT_OF_SCOPE' });
       else if (!this.#upstreamGone) this.close(CLOSE_CODE.internal, 'could not check an event; reconnect and replay from your cursor');
     });
+  }
+
+  /**
+   * Whether an in-scope event goes out. A question a watch announced (no cursor, from a tree this
+   * client did not attach) goes out only for the workspace the watch named: alpd is asked for every
+   * tree, as it compares projectRoot strings and a workspace has two (docs/alp/remote-gateway.md §5.1).
+   * @param {import('@anhlp/alp-protocol').Envelope} envelope @param {Scoped} scoped
+   */
+  #wanted(envelope, scoped) {
+    const type = /** @type {any} */ (envelope.event)?.type;
+    if ((type !== 'question' && type !== 'question.resolved') || envelope.cursor !== undefined || this.#attached.has(scoped.root)) return true;
+    if (this.#watch === undefined) return false;
+    // The tree's workspace, as alpd's watch compares it: its root's.
+    const project = this.#sessions.get(scoped.root)?.projectRoot ?? scoped.projectRoot;
+    return this.#watch === null || project === this.#watch.path || project === this.#watch.canonical;
+  }
+
+  /**
+   * session.list pages: alpd's are read with what is left of the limit until the page is full or
+   * alpd has no more, so a page the grant thins out still continues from alpd's own cursor.
+   * @param {Record<string, any>} params @param {(session: any, listed: Map<string, any>) => Promise<boolean>} keep
+   */
+  async #listPages(params, keep) {
+    const limit = params.limit;
+    /** @type {any[]} */ const kept = [];
+    let result;
+    let cursor = params.cursor;
+    for (let reads = 0; reads < MAX_LIST_READS; reads++) {
+      result = await this.#call('session.list', { ...params, ...(limit === undefined ? {} : { limit: limit - kept.length }), ...(cursor === undefined ? {} : { cursor }) });
+      const sessions = Array.isArray(result?.sessions) ? result.sessions : [];
+      const listed = new Map(sessions.map((/** @type {any} */ session) => [session.id, session]));
+      for (const session of sessions) if (await keep(session, listed)) kept.push(session);
+      cursor = typeof result?.nextCursor === 'string' ? result.nextCursor : undefined;
+      if (limit === undefined || cursor === undefined || kept.length >= limit) break;
+    }
+    const { nextCursor: _next, ...rest } = result ?? {};
+    return { ...rest, sessions: kept, ...(cursor === undefined ? {} : { nextCursor: cursor }) };
   }
 
   // ---- handlers of exposed methods: params are already schema-checked and allow-listed ----
@@ -540,16 +628,27 @@ export class ClientConnection {
 
     'session.list': async params => {
       const only = params.projectRoot === undefined ? undefined : this.#workspace(params.projectRoot);
-      const { projectRoot: _projectRoot, ...rest } = params;
-      const result = await this.#call('session.list', rest);
-      const sessions = Array.isArray(result?.sessions) ? result.sessions : [];
-      const listed = new Map(sessions.map((/** @type {any} */ session) => [session.id, session]));
-      const kept = [];
-      for (const session of sessions) {
-        if (only && session.projectRoot !== only.path && session.projectRoot !== only.canonical) continue;
-        if (await this.#listedInScope(session, listed)) kept.push(session);
+      const { projectRoot: _projectRoot, cursor: sealed, ...rest } = params;
+      let cursor;
+      if (sealed !== undefined) {
+        cursor = openCursor(sealed, this.#grant.id);
+        if (cursor === undefined) throw new GatewayError(RPC_ERROR.invalidParams, 'cursor is not one this gateway answered; read the list again from the start', { reason: 'invalid_params' });
       }
-      return { ...result, sessions: kept };
+      const keep = async (/** @type {any} */ session, /** @type {Map<string, any>} */ listed) => {
+        if (only && session.projectRoot !== only.path && session.projectRoot !== only.canonical) return false;
+        return this.#listedInScope(session, listed);
+      };
+      // alpd pages and searches the granted workspaces only (as path and canonical path), so its
+      // pages, cursors and matches never cover another one; the rows are still checked one by one.
+      const roots = [...new Set((only ? [only] : this.#grant.workspaces).flatMap(workspace => [workspace.path, workspace.canonical]))];
+      if (roots.length > MAX_LIST_PROJECTS) {
+        // Too many to name: the whole list, unpaged, searched here, as before session.list.page.
+        const { limit: _limit, query, ...whole } = rest;
+        const words = typeof query === 'string' ? query.toLowerCase().split(/\s+/).filter(Boolean) : [];
+        return this.#listPages(whole, async (session, listed) => (await keep(session, listed)) && words.every(word => `${session.title ?? ''}\n${session.id}`.toLowerCase().includes(word)));
+      }
+      const result = await this.#listPages({ ...rest, ...(cursor === undefined ? {} : { cursor }), projectRoots: roots }, keep);
+      return typeof result.nextCursor === 'string' ? { ...result, nextCursor: sealCursor(result.nextCursor, this.#grant.id) } : result;
     },
 
     'session.get': async params => { await this.#resolve(params.sessionId); return this.#call('session.get', params); },
@@ -570,11 +669,20 @@ export class ClientConnection {
       if (result?.rootId !== scoped.root) throw this.#outOfTree(params.sessionId, 'session.log');
       return result;
     },
-    'session.release': async params => { await this.#resolve(params.sessionId); return this.#call('session.release', params); },
+    'session.release': async params => {
+      const scoped = await this.#resolve(params.sessionId);
+      const result = await this.#call('session.release', params);
+      this.#attached.delete(scoped.root);
+      return result;
+    },
 
     'session.attach': async params => {
-      await this.#resolve(params.sessionId);
-      return this.#call('session.attach', params);
+      const scoped = await this.#resolve(params.sessionId);
+      // Before the call: the questions it announces come before its answer.
+      const before = this.#attached.has(scoped.root);
+      this.#attached.add(scoped.root);
+      try { return await this.#call('session.attach', params); }
+      catch (error) { if (!before) this.#attached.delete(scoped.root); throw error; }
     },
 
     'session.preview': async params => this.#call('session.preview', { spec: this.#spec(params.spec).spec }),
@@ -599,16 +707,21 @@ export class ClientConnection {
         this.#remember(sessionId, { root: sessionId, projectRoot: workspace.canonical, mode: spec.mode });
       }
       let result;
+      const before = this.#attached.has(sessionId);
+      // A root resumes or is created attached; its waiting questions are announced before the answer.
+      this.#attached.add(sessionId);
       try {
         result = await this.#call('session.create', { ...params, sessionId, spec });
       } catch (error) {
         if (generated) this.#sessions.delete(sessionId);
+        if (!before) this.#attached.delete(sessionId);
         throw error;
       }
       const created = result?.session;
       if (!created || !workspaceOf(this.#grant, created.projectRoot) || created.parentId) {
         // Another client took this id in another workspace meanwhile: let go of it.
         this.#sessions.delete(sessionId);
+        this.#attached.delete(sessionId);
         this.#log.error('session.create answered a session outside the grant; released it', { code: 'ALP_GATEWAY_CREATE_OUT_OF_SCOPE' });
         await this.#call('session.release', { sessionId }).catch(() => {});
         throw forbidden(`Session ${sessionId} is not in a workspace this credential may use`, GATEWAY_REASON.outsideWorkspace);
@@ -644,6 +757,25 @@ export class ClientConnection {
     'question.list': async params => {
       const only = params.projectRoot === undefined ? undefined : this.#workspace(params.projectRoot);
       const result = await this.#call('question.list', {});
+      const kept = [];
+      for (const question of Array.isArray(result?.questions) ? result.questions : []) {
+        const scoped = await this.#resolve(question.sessionId).catch(() => undefined);
+        if (!scoped || (only && scoped.projectRoot !== only.path && scoped.projectRoot !== only.canonical)) continue;
+        kept.push(question);
+      }
+      return { ...result, questions: kept };
+    },
+
+    // alpd tells this client of every tree's questions; #event keeps those in scope, and #wanted
+    // those of the workspace named. The list is question.list's, filtered the same way.
+    'question.watch': async params => {
+      const only = params.projectRoot === undefined ? null : this.#workspace(params.projectRoot);
+      // Before the call: alpd may tell of a question before it answers.
+      const previous = this.#watch;
+      this.#watch = only;
+      let result;
+      try { result = await this.#call('question.watch', {}); }
+      catch (error) { this.#watch = previous; throw error; }
       const kept = [];
       for (const question of Array.isArray(result?.questions) ? result.questions : []) {
         const scoped = await this.#resolve(question.sessionId).catch(() => undefined);

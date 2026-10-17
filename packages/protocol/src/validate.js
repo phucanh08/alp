@@ -1,6 +1,6 @@
 /**
  * A dependency-free checker for the JSON Schema subset the protocol schemas use (draft-07:
- * type, const, enum, properties, required, additionalProperties, items, minimum, maximum,
+ * type, const, enum, properties, required, additionalProperties, items, minItems, maxItems, minimum, maximum,
  * minLength, maxLength, pattern, oneOf, anyOf, not and local `#/$defs/...` references).
  * Lengths count Unicode code points, as JSON Schema does. A property whose value is
  * `undefined` counts as absent, so in-process callers behave as their JSON would.
@@ -71,6 +71,8 @@ function check(schema, value, at, root, issues) {
     if (schema.maxLength !== undefined && length > schema.maxLength) issues.push({ path: at, message: `must have at most ${schema.maxLength} characters` });
     if (schema.pattern !== undefined && !new RegExp(schema.pattern, 'u').test(text)) issues.push({ path: at, message: `must match ${schema.pattern}` });
   }
+  if (kind === 'array' && schema.minItems !== undefined && /** @type {unknown[]} */ (value).length < schema.minItems) issues.push({ path: at, message: `must have at least ${schema.minItems} items` });
+  if (kind === 'array' && schema.maxItems !== undefined && /** @type {unknown[]} */ (value).length > schema.maxItems) issues.push({ path: at, message: `must have at most ${schema.maxItems} items` });
   if (kind === 'array' && schema.items !== undefined) {
     const array = /** @type {unknown[]} */ (value);
     for (let index = 0; index < array.length && issues.length < MAX_ISSUES; index++) check(schema.items, array[index] === undefined ? null : array[index], `${at}/${index}`, root, issues);

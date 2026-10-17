@@ -40,7 +40,7 @@ Số mục (§) được code tham chiếu; giữ ổn định.
   - `protocolVersion: 1`;
   - `daemonVersion` lấy từ alpd;
   - `capabilities` = capability alpd liệt kê ∩ `{attach.after, prompt.receipts, task, team,
-    library, settings.language}`.
+    library, settings.language, session.list.page, question.watch}`.
   - Không có `pid` và không bao giờ có `extension.methods`.
   - Trong `library` và `settings.language`, các method ghi trả `-32601 not_exposed` (§5.4).
   - `protocolVersion` khác 1 → `1006 protocol_version` với `supported: [1]`.
@@ -175,6 +175,24 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
      không dùng cache: mỗi lần tra lại từ session tới root.
 4. **Kết quả**:
    - `session.list` và `question.list` gọi alpd không kèm `projectRoot`, rồi lọc theo grant.
+   - `session.list` gửi alpd `projectRoots`: path và canonical của mọi workspace được cấp (chỉ
+     workspace `projectRoot` nêu, nếu có), nên trang, cursor và kết quả tìm của alpd không bao giờ
+     chạm workspace khác; từng dòng vẫn được kiểm tra như trên. Grant có hơn 1024 chuỗi như vậy thì
+     gateway đọc cả danh sách, không phân trang, và tự tìm: alpd không nhận `query`, `limit`, `cursor`.
+   - `session.list` có `limit`: gateway đọc các trang của alpd với phần `limit` còn thiếu, tới khi
+     đủ trang, alpd hết, hoặc đã đọc 8 trang. Trang client nhận có thể ít hơn `limit` mà vẫn có
+     `nextCursor`: chỉ khi không có `nextCursor` mới là hết.
+   - `nextCursor` client nhận là cursor của gateway: cursor của alpd (nêu id và `updatedAt` của dòng
+     alpd đọc sau cùng, có thể là dòng grant bỏ) được niêm phong bằng AES-256-GCM với khoá của tiến
+     trình gateway, gắn với credential. Cursor gateway không cấp cho credential đó (của credential
+     khác, của alpd, hoặc từ trước khi gateway khởi động lại) → `-32602`, không tới alpd.
+   - Một question `question.watch` mang tới từ session ngoài grant: session đó được nhớ (tối đa
+     10 000) để không tra lại, và chỉ log ở mức debug.
+   - `question.watch` gọi alpd không kèm `projectRoot` (alpd so chuỗi, mà một workspace có hai
+     chuỗi). Kết quả lọc như `question.list`. Sau đó mỗi `question`/`question.resolved` đi qua bộ
+     lọc event theo session như mọi event (`E`); một envelope không có `cursor`, thuộc tree mà
+     client không attach, chỉ đi ra khi thuộc workspace `projectRoot` đã nêu (không nêu: mọi
+     workspace của grant).
    - `question.answer` chỉ nhận **id đầy đủ**. alpd nhận prefix duy nhất, nên một prefix có thể
      khớp câu hỏi ở workspace khác.
    - `session.status`/`session.log` phải trả về đúng tree của root đã kiểm tra, và mọi session
@@ -273,7 +291,7 @@ Cột Test dùng các mã sau:
 |---|---|---|---|---|---|
 | `daemon.hello` | — | connection | — | gateway tự trả lời | handshake, I |
 | `catalog.get` | — | không (catalogue tĩnh) | session.read | exposed | P |
-| `session.list` | — | result lọc theo grant; `projectRoot` phải thuộc grant | session.read | exposed | P S R I |
+| `session.list` | (`session.list.page` cho `limit`/`cursor`/`query`) | result lọc theo grant; `projectRoot` phải thuộc grant; trang đọc tiếp tới khi đủ | session.read | exposed | P S R I |
 | `session.get` | — | session (tree) | session.read | exposed | P S I |
 | `session.status` | — | session; answer phải là tree của root đã kiểm tra, mọi session thuộc grant. Có đường dẫn host của tree (§5.6) | session.read | exposed | P S T |
 | `session.log` | — | session; answer phải là run log của root đã kiểm tra. Entry có thể nêu đường dẫn host của tree | session.read | exposed | P S T |
@@ -281,6 +299,7 @@ Cột Test dùng các mã sau:
 | `session.release` | — | session | session.read | exposed | P S |
 | `session.preview` | — | `spec.cwd` + allowlist spec | session.read | exposed | P S |
 | `question.list` | — | result lọc theo tree | session.read | exposed | P S R |
+| `question.watch` | `question.watch` | result lọc theo tree; event lọc theo session, và theo workspace đã nêu | session.read | exposed | P S R E |
 | `board.list` | — | `projectRoot` thuộc grant | session.read | exposed | P S |
 | `session.create` | — | `spec.cwd` + allowlist; id có sẵn phải trong scope; kiểm lại kết quả | session.write | exposed | P S I |
 | `session.prompt` | `prompt.receipts` | session; chỉ `text`; **drive**: mode của session và mọi tổ tiên, tra mới | session.write | exposed | P S M I |
