@@ -160,9 +160,9 @@ test('interrupt closes the subtree and a failed prompt is reported once', async 
   assert.equal(of(childId, 'session.closed').length, 1);
   assert.equal(runtimes[1].closed, true);
   assert.deepEqual(of('root', 'turn.ended').map(event => event.state), ['canceled']);
-  await runtime.prompt('root', { clientMessageId: 'image', delivery: 'auto', content: [{ type: 'image' }] });
-  await runtime.prompt('root', { clientMessageId: 'image', delivery: 'auto', content: [{ type: 'image' }] });
-  assert.deepEqual(of('root', 'prompt.failed'), [{ type: 'prompt.failed', clientMessageId: 'image', error: { message: 'Only text prompts are supported' } }]);
+  await runtime.prompt('root', { clientMessageId: 'image', delivery: 'auto', content: [{ type: 'file', path: '/etc/passwd' }] });
+  await runtime.prompt('root', { clientMessageId: 'image', delivery: 'auto', content: [{ type: 'file', path: '/etc/passwd' }] });
+  assert.deepEqual(of('root', 'prompt.failed'), [{ type: 'prompt.failed', clientMessageId: 'image', error: { message: 'Only text and image prompts are supported' } }]);
   await assert.rejects(runtime.configure('missing', {}), /Session is not open/);
 });
 

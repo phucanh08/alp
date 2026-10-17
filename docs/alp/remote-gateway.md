@@ -249,7 +249,8 @@ coi là `failed`.
 | 1003 | `outside_workspace` | `projectRoot`/`spec.cwd` không thuộc grant; `session.create` với id thuộc workspace khác |
 | 1003 | `host_scope` | `team.list`/`library.list`/`library.get` thiếu `projectRoot` |
 | 1003 | `spec_field` | trường `spec` không cho phép (`data.field`); agent/mode/thinking không phải tên đơn giản; `model` sai ngữ pháp model id (§5.3) |
-| 1003 | `content_type` | prompt có phần không phải `text` |
+| 1003 | `content_type` | prompt có phần không phải `text` hay `image` |
+| 1003 | `image_limit` | ảnh trong prompt vượt giới hạn của gateway (§5.8; `data` nêu `maxCount`, `maxBytes`, `maxTotalBytes`) |
 | 1003 | `mode` | grant có `modes` và: create/configure chọn mode ngoài danh sách, create không chọn `spec.mode`, hoặc drive/stop một tree có session chạy mode ngoài danh sách (§5.5; `data.sessionId` là session đó) |
 | 1001 | — | session/question ngoài scope (giống không tồn tại); `session.status`/`log` trả tree khác tree đã kiểm tra |
 | 1005 | `rate_limited`, `too_many_pending` | vượt giới hạn của connection |
@@ -327,7 +328,7 @@ Cột Test dùng các mã sau:
 | `workspace.files.search` | `workspace.files` | `projectRoot` thuộc grant, gửi alpd bản canonical; alpd không đi theo symlink; path trả về phải tương đối thuần | project.read | exposed | P S R I |
 | `board.list` | — | `projectRoot` thuộc grant | session.read | exposed | P S |
 | `session.create` | — | `spec.cwd` + allowlist; id có sẵn phải trong scope; kiểm lại kết quả | session.write | exposed | P S I |
-| `session.prompt` | `prompt.receipts` | session; chỉ `text`; **drive**: mode của session và mọi tổ tiên, tra mới | session.write | exposed | P S M I |
+| `session.prompt` | `prompt.receipts`, `prompt.images` | session; `text` và ảnh inline trong giới hạn §5.8; **drive**: mode của session và mọi tổ tiên, tra mới | session.write | exposed | P S M I |
 | `session.interrupt` | — | session; **stop**: root luôn được; assignment khi mode các requester trong grant | session.write | exposed | P S M I |
 | `session.configure` | — | session; mode mới trong grant | session.write | exposed | P S M |
 | `session.close` | — | session; **stop** như `interrupt` | session.write | exposed | P S M |
@@ -401,6 +402,26 @@ Quy tắc:
   - entry của `session.log` (run log) có thể có `cwd` và đường dẫn tương tự.
   Credential có `session.read` một workspace thấy được các đường dẫn này. Chúng không chứa
   credential, nhưng lộ bố cục thư mục của host (§10).
+
+### 5.8 Ảnh trong prompt (t-7679.11)
+
+`session.prompt` qua gateway nhận phần `text` và phần `image` **inline** (base64), không gì khác:
+
+- Schema v1 chỉ cho ảnh các trường `type`, `mimeType` (`image/png`, `image/jpeg`, `image/gif`,
+  `image/webp`), `data` (base64) và `name`; `path`, `url` hay trường lạ bị từ chối `-32602` trước
+  khi tới handler. Phần có type khác (`localImage`, `file`, `resource`…) bị `1003 content_type`.
+  Vì vậy client từ xa không thể trỏ tới một file trên host: alpd tự dựng data URL từ `data`.
+- Giới hạn của gateway (`GATEWAY_PROMPT_IMAGES` trong `policy.js`), chặt hơn của alpd (8 ảnh,
+  5 MiB mỗi ảnh): tối đa **4** ảnh, mỗi ảnh tối đa **2 MiB** sau giải mã, tổng tối đa **2,5 MiB**,
+  để dạng base64 vừa frame mặc định 4 MiB (`limits.maxFrame`, §7.3). Với `limits.maxFrame` nhỏ hơn,
+  `promptImageLimits(maxFrame)` hạ cả hai mức xuống `(maxFrame − 64 KiB) × 3/4`, nên ảnh trong giới
+  hạn không bao giờ bị cắt bởi frame (đóng socket). Vượt thì `1003 image_limit`, không gửi gì tới
+  alpd. Kích thước tính từ độ dài base64, không giải mã.
+- alpd tự giới hạn 8 ảnh, 5 MiB mỗi ảnh, 11 MiB tổng (vừa `MAX_FRAME` 16 MiB).
+- Gateway không ghi nội dung prompt vào log; dữ liệu ảnh chỉ đi qua.
+- Capability `prompt.images` được chuyển tiếp; snapshot session mang `promptImages: true` khi
+  runtime của nó nhận ảnh (Codex, Claude, ACP có `promptCapabilities.image`). Web app chỉ hiện nút
+  đính kèm khi có cờ này.
 
 ### 5.7 `library.get`: quyền và redaction
 

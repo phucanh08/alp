@@ -164,6 +164,48 @@ test('an idle released root closes at once; attach replays the retained tree', a
   assert.equal(runtimes[0].closed, true);
 });
 
+// t-7679.11: a prompt may carry inline images, which reach Codex as data URLs; never a host path.
+test('session.prompt takes inline images within the limits and passes them to the runtime', async t => {
+  const { project, runtimes, open } = await setup(t);
+  const { client, events } = await open();
+  assert.ok((await client.request('daemon.hello', { protocolVersion: PROTOCOL_VERSION })).capabilities.includes('prompt.images'));
+  const { session } = await client.request('session.create', { spec: { cwd: project } });
+  assert.equal(session.promptImages, true);
+  const png = { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=', name: 'shot.png' };
+  const prompt = (id, content) => client.request('session.prompt', { sessionId: session.id, clientMessageId: id, content });
+  const refused = async (id, content, pattern) => {
+    await assert.rejects(prompt(id, content), error => error.code === -32602 && pattern.test(error.message));
+  };
+  await refused('p1', [{ ...png, path: '/etc/passwd' }], /content/);
+  await refused('p2', [{ ...png, url: 'file:///etc/passwd' }], /content/);
+  const failed = async (id, content, pattern) => {
+    await prompt(id, content);
+    await until(() => events.some(e => e.event.type === 'prompt.failed' && e.event.clientMessageId === id));
+    assert.match(events.find(e => e.event.type === 'prompt.failed' && e.event.clientMessageId === id).event.error.message, pattern);
+  };
+  await failed('p3', [{ type: 'localImage', path: '/etc/passwd' }], /Only text and image prompts/);
+  await refused('p4', [{ ...png, mimeType: 'image/svg+xml' }], /content/);
+  await refused('p5', Array.from({ length: 9 }, () => png), /at most 8 images/);
+  await refused('p6', [{ ...png, data: 'A'.repeat(6990508) }], /at most 5242880 bytes/);
+  // Three of 3.75 MiB pass one by one but not together (11 MiB), and still fit one 16 MiB frame.
+  await refused('p7', Array.from({ length: 3 }, () => ({ ...png, data: 'A'.repeat(5 * 1024 * 1024) })), /at most 11534336 bytes together/);
+  assert.equal(runtimes[0].calls.filter(c => c.method === 'turn/start').length, 0);
+  await prompt('m1', [...text('What is this?'), png]);
+  const input = runtimes[0].calls.find(c => c.method === 'turn/start').params.input;
+  assert.deepEqual(input.at(-1), { type: 'image', url: 'data:image/png;base64,iVBORw0KGgo=' });
+  assert.equal(input.at(-2).text, 'What is this?');
+  const message = events.map(e => e.event).find(e => e.type === 'item' && e.item.kind === 'user_message');
+  assert.equal(message.item.images, 1);
+  assert.equal(JSON.stringify(events).includes('iVBORw0KGgo'), false, 'image data is not replayed in events');
+  runtimes[0].finish();
+  // A runtime that takes no images refuses them before anything is sent.
+  runtimes[0].takesImages = () => false;
+  await until(() => events.some(e => e.event.type === 'turn.ended'));
+  assert.equal((await client.request('session.get', { sessionId: session.id })).session.promptImages, undefined);
+  await failed('m2', [png], /takes no images/);
+  assert.equal(runtimes[0].calls.filter(c => c.method === 'turn/start').length, 1);
+});
+
 test('alpd starts detached, publishes its socket in the lock, and shuts down cleanly', async t => {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-home-'));
   t.after(() => rm(home, { recursive: true, force: true }));

@@ -217,6 +217,13 @@ export function claudeSandboxAvailable() {
 
 const WRITERS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
 /** What ALP asks the user for a permission Claude would otherwise not have. */
+/** One turn-input part as Claude's: text, or a data-URL image as a base64 image block. */
+export function claudeContent(part: any) {
+  const image = part?.type === 'image' && typeof part.url === 'string' ? /^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(part.url) : null;
+  if (part?.type === 'image' && !image) throw new Error('Claude takes images as inline base64 PNG, JPEG, GIF or WebP only');
+  return image ? { type: 'image', source: { type: 'base64', media_type: image[1], data: image[2] } } : { type: 'text', text: part.text };
+}
+
 export type PermissionRequest = { tool: string; input: Record<string, unknown>; reason: 'rule' | 'mode'; rule?: string };
 export type PermissionAnswer = { allow: boolean; always?: boolean; message?: string };
 
@@ -448,10 +455,7 @@ export class ClaudeTransport {
         type: 'user',
         message: {
           role: 'user',
-          content: params.input.map((part: any) => ({
-            type: 'text',
-            text: part.text,
-          })),
+          content: params.input.map(claudeContent),
         },
         parent_tool_use_id: null,
         uuid: randomUUID(),

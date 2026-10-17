@@ -10,7 +10,7 @@ import path from 'node:path';
 import { RPC_METHODS } from '@anhlp/alp-protocol';
 import { METHODS_V1 } from '@anhlp/alp-protocol/contract';
 import { EXPOSURE, unclassified } from '../src/index.js';
-import { hostLabel, projectLibraryContent } from '../src/policy.js';
+import { hostLabel, projectLibraryContent, promptImageLimits } from '../src/policy.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway, until } from './support/harness.js';
 
@@ -412,14 +412,36 @@ test('a created root that turns out to be outside the grant is released and refu
   assert.equal(daemon.calls('session.release').at(-1).params.sessionId, 'raced');
 });
 
-test('prompts carry text only', async t => {
+test('prompts carry text and inline images only, within the gateway image limits (t-7679.11)', async t => {
   const { daemon, sdk } = await world(t);
   const { client } = await sdk('alice');
-  for (const part of [{ type: 'image', data: 'xx' }, { type: 'file', path: '/etc/passwd' }, { type: 'resource', uri: 'file:///etc/passwd' }]) {
-    await assert.rejects(client.request('session.prompt', { sessionId: 'sa', clientMessageId: 'm', content: [part] }), error => error.code === 1003 && error.data?.reason === 'content_type');
+  const prompt = content => client.request('session.prompt', { sessionId: 'sa', clientMessageId: 'm', content });
+  for (const part of [{ type: 'file', path: '/etc/passwd' }, { type: 'resource', uri: 'file:///etc/passwd' }, { type: 'localImage', path: '/etc/passwd' }]) {
+    await assert.rejects(prompt([part]), error => error.code === 1003 && error.data?.reason === 'content_type');
+  }
+  // An image is inline base64 of an allowed type and nothing else: no path, URL or other field.
+  const png = { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' };
+  for (const part of [{ type: 'image', data: 'xx' }, { ...png, path: '/etc/passwd' }, { ...png, url: 'file:///etc/passwd' }, { ...png, mimeType: 'image/svg+xml' }, { ...png, data: '../../etc/passwd' }]) {
+    await assert.rejects(prompt([part]), error => error.code === -32602);
+  }
+  const size = bytes => ({ ...png, data: 'A'.repeat(Math.ceil(bytes / 3) * 4) });
+  for (const content of [Array.from({ length: 5 }, () => png), [size(2 * 1024 * 1024 + 3)], [size(1.3 * 1024 * 1024), size(1.3 * 1024 * 1024)]]) {
+    await assert.rejects(prompt(content), error => error.code === 1003 && error.data?.reason === 'image_limit' && error.data.maxCount === 4);
   }
   assert.deepEqual(daemon.calls('session.prompt'), []);
-  assert.equal((await client.request('session.prompt', { sessionId: 'sa', clientMessageId: 'm', content: text })).outcome, 'accepted');
+  assert.equal((await prompt(text)).outcome, 'accepted');
+  const images = [{ type: 'text', text: 'see' }, ...Array.from({ length: 4 }, () => png)];
+  assert.equal((await client.request('session.prompt', { sessionId: 'sa', clientMessageId: 'm2', content: images })).outcome, 'accepted');
+  assert.deepEqual(daemon.calls('session.prompt').at(-1).params.content, images);
+});
+
+test('the image limits shrink with a smaller limits.maxFrame, so images that fit are never cut by the frame', () => {
+  const MiB = 1024 * 1024;
+  assert.deepEqual(promptImageLimits(), { maxCount: 4, maxBytes: 2 * MiB, maxTotalBytes: 2.5 * MiB });
+  assert.deepEqual(promptImageLimits(4 * MiB), promptImageLimits());
+  assert.deepEqual(promptImageLimits(MiB), { maxCount: 4, maxBytes: 737280, maxTotalBytes: 737280 });
+  assert.ok(Math.ceil(737280 / 3) * 4 + 64 * 1024 <= MiB);
+  assert.deepEqual(promptImageLimits(1024), { maxCount: 4, maxBytes: 0, maxTotalBytes: 0 });
 });
 
 test('a grant limited to some modes cannot create, configure or prompt beyond them', async t => {

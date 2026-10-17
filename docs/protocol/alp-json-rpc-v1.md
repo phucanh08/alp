@@ -202,6 +202,7 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 | `question.watch` | `question.watch`: questions of trees the connection is not attached to (§12.2). Every alpd lists it. |
 | `question.watch.turns` | `question.watch` accepts `turns`: also every root's `turn.ended` (§12.2). Every alpd lists it. |
 | `workspace.files` | `workspace.files.search`: file names under a directory matching a query, read-only (§12.3). Every alpd lists it. |
+| `prompt.images` | `session.prompt` takes inline image parts (§10, Prompt content); a session snapshot's `promptImages: true` says its runtime takes them. Every alpd lists it. |
 
 alpd before this revision already had the first three without listing them; the others are new. A method whose
 capability a daemon does not list answers `-32601`. A client that must work with
@@ -365,6 +366,23 @@ Clients also consult session summaries. Closed roots stay attachable while their
     exactly-once for tools or other external side effects of a turn.
 - Without `prompt.receipts` (alpd without a store) `session.prompt` answers `{}` and is not
   idempotent.
+- **Prompt content** (capability `prompt.images`, t-7679.11): `content` is an array of parts.
+  - `{ type: "text", text }` is the user's words; the text parts are joined with newlines.
+  - `{ type: "image", mimeType, data, name? }` is an image **inline**: `mimeType` is `image/png`,
+    `image/jpeg`, `image/gif` or `image/webp`, `data` is its base64 (`PROMPT_IMAGES` in
+    `@anhlp/alp-protocol`: at most 8 images, each at most 5 MiB decoded and 11 MiB together, so their
+    base64 fits one `MAX_FRAME`), `name` at most 255
+    characters, and no other field: the schema refuses `path`, `url` or anything else, so a
+    prompt can never name a file on the host. Over the limits it fails `-32602`.
+  - alpd hands images to the runtime as data URLs it builds (`{ type: "image", url: "data:…" }` in
+    the Codex turn input); Claude gets base64 image blocks, an ACP agent ACP image blocks when its
+    `initialize` offered `promptCapabilities.image`. Antigravity, and an ACP agent that did not
+    offer it, take none: the session snapshot has no `promptImages`, and a prompt with an image
+    answers `prompt.failed` ("… takes no images") before anything is sent. Any other part type
+    (such as Codex's `localImage` with a path) fails the same way.
+  - The `user_message` item of such a prompt carries `images: <count>`; image data is never put in
+    events, the timeline or the run log, so a replay shows the count, not the image.
+  - The receipt's fingerprint covers the images: a repeat with another image is `key_conflict`.
 - **`task.create` with `requestId`** is answered once per `(projectRoot, requestId)` for 10 minutes **within one alpd
   process**: a repeat with the same title and priority answers the first `{ id }` with `duplicate: true`, concurrent repeats
   wait for the first, other content fails `1004 key_conflict`, and a create that failed may be tried again. Nothing is

@@ -22,3 +22,17 @@ test('provider adapters are extensible per instance and preserve legacy factory 
   assert.throws(() => custom.register('', () => transport), /needs an id/);
   assert.throws(() => custom.create('missing', {}), /Unknown runtime provider/);
 });
+
+// t-7679.11: prompt images reach Claude and ACP agents as their own inline image blocks, never a path or URL.
+test('turn-input images map to Claude and ACP image blocks; other URLs are refused or dropped', async () => {
+  const { claudeContent } = await import('@anhlp/alp-runtime/claude-transport');
+  const { acpContent } = await import('@anhlp/alp-runtime/acp-transport');
+  const image = { type: 'image', url: 'data:image/webp;base64,UklGRg==' };
+  assert.deepEqual(claudeContent({ type: 'text', text: 'hi' }), { type: 'text', text: 'hi' });
+  assert.deepEqual(claudeContent(image), { type: 'image', source: { type: 'base64', media_type: 'image/webp', data: 'UklGRg==' } });
+  assert.throws(() => claudeContent({ type: 'image', url: 'file:///etc/passwd' }), /inline base64/);
+  assert.throws(() => claudeContent({ type: 'image', url: 'data:image/svg+xml;base64,PHN2Zz4=' }), /inline base64/);
+  assert.deepEqual(acpContent(image), { type: 'image', mimeType: 'image/webp', data: 'UklGRg==' });
+  assert.equal(acpContent({ type: 'image', url: 'https://example.invalid/a.png' }), null);
+  assert.equal(acpContent({ type: 'localImage', path: '/etc/passwd' }), null);
+});

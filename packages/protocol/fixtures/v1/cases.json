@@ -708,6 +708,28 @@
    }
   },
   {
+   "name": "item user_message with images",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "user_message",
+      "id": "user:m-2",
+      "text": "Xem ảnh",
+      "clientMessageId": "m-2",
+      "images": 2
+     }
+    }
+   }
+  },
+  {
    "name": "announcement without a cursor",
    "check": "envelope",
    "valid": true,
@@ -1756,6 +1778,114 @@
    }
   },
   {
+   "name": "session.prompt with an inline image",
+   "check": "params",
+   "method": "session.prompt",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "clientMessageId": "m-2",
+    "content": [
+     {
+      "type": "text",
+      "text": "Xem ảnh"
+     },
+     {
+      "type": "image",
+      "mimeType": "image/png",
+      "data": "iVBORw0KGgo=",
+      "name": "ảnh.png"
+     }
+    ]
+   }
+  },
+  {
+   "name": "session.prompt with an image path",
+   "check": "params",
+   "method": "session.prompt",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "clientMessageId": "m-2",
+    "content": [
+     {
+      "type": "image",
+      "mimeType": "image/png",
+      "data": "iVBORw0KGgo=",
+      "path": "/etc/passwd"
+     }
+    ]
+   }
+  },
+  {
+   "name": "session.prompt with an image url",
+   "check": "params",
+   "method": "session.prompt",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "clientMessageId": "m-2",
+    "content": [
+     {
+      "type": "image",
+      "mimeType": "image/png",
+      "data": "iVBORw0KGgo=",
+      "url": "file:///etc/passwd"
+     }
+    ]
+   }
+  },
+  {
+   "name": "session.prompt with an svg image",
+   "check": "params",
+   "method": "session.prompt",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "clientMessageId": "m-2",
+    "content": [
+     {
+      "type": "image",
+      "mimeType": "image/svg+xml",
+      "data": "PHN2Zz4="
+     }
+    ]
+   }
+  },
+  {
+   "name": "session.prompt with image data that is not base64",
+   "check": "params",
+   "method": "session.prompt",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "clientMessageId": "m-2",
+    "content": [
+     {
+      "type": "image",
+      "mimeType": "image/png",
+      "data": "not base64!"
+     }
+    ]
+   }
+  },
+  {
+   "name": "session.prompt with an image without data",
+   "check": "params",
+   "method": "session.prompt",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "clientMessageId": "m-2",
+    "content": [
+     {
+      "type": "image",
+      "mimeType": "image/png"
+     }
+    ]
+   }
+  },
+  {
    "name": "session.prompt with an unknown delivery",
    "check": "params",
    "method": "session.prompt",
@@ -2065,6 +2195,37 @@
      "title": "Sửa lỗi 😀",
      "createdAt": "2026-10-15T00:00:00.000Z",
      "updatedAt": "2026-10-15T00:00:00.000Z"
+    }
+   }
+  },
+  {
+   "name": "session.get result of a session that takes images",
+   "check": "result",
+   "method": "session.get",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_fixture",
+     "projectRoot": "/work/project",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "low",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "teamLabel": "Phở",
+     "threadId": "thread-1",
+     "persistent": true,
+     "busy": false,
+     "status": "idle",
+     "title": "Sửa lỗi 😀",
+     "createdAt": "2026-10-15T00:00:00.000Z",
+     "updatedAt": "2026-10-15T00:00:00.000Z",
+     "promptImages": true
     }
    }
   },

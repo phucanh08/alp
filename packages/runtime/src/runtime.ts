@@ -2,6 +2,7 @@ import { constants as fsConstants } from 'node:fs';
 import type { Session, Assignment, Waiter } from './session-state.js';
 import { errorData, plainObject, toolResult } from './tool-results.js';
 import { createLogger } from '@anhlp/alp-core/log';
+import { PROMPT_IMAGES, base64Bytes } from '@anhlp/alp-protocol';
 import { createBoardDomain } from './board-domain.js';
 import { createWorktreeDomain } from './worktree-domain.js';
 import { type RuntimeTransport, type RuntimeOptions, type OpenOptions, type PromptContent, type PromptInput, type AlpRuntime, type SessionPreview, type RecoveryOutcome, type Pause, type PauseState, type RecallAnswer } from './contracts.js';
@@ -183,6 +184,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     return run;
   }
 
+  /** Whether the session's runtime takes images in a prompt: the transport says, else Codex and Claude do. */
+  function takesImages(session: Session) {
+    return session.runtime.takesImages ? session.runtime.takesImages() : session.runtimeKind === 'codex' || session.runtimeKind === 'claude';
+  }
+
   function snapshot(sessionId: string, session: Session): SessionSnapshot {
     return {
       id: sessionId,
@@ -201,6 +207,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       ...(session.active ? { activeTurnId: session.active } : {}),
       ...(session.parked ? { parked: session.parked.reason } : {}),
       ...(session.instructionsSha ? { instructionsSha: session.instructionsSha } : {}),
+      ...(takesImages(session) ? { promptImages: true } : {}),
       busy: !!(session.active || session.pending || session.children.size || session.assignments.size || hasActiveMail(session) || reviewing(session)),
     };
   }
@@ -290,7 +297,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         .filter((c: any) => c.type === 'text')
         .map((c: any) => c.text)
         .join('\n');
-      emit(sessionId, { type: 'item', item: { kind: 'user_message', id: item.id, text } });
+      const images = (item.content ?? []).filter((c: any) => c.type === 'image' || c.type === 'localImage').length;
+      emit(sessionId, { type: 'item', item: { kind: 'user_message', id: item.id, text, ...(images ? { images } : {}) } });
       return;
     }
 
@@ -3165,15 +3173,21 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       return;
     }
 
-    if (
-      prompt.content.some(
-        (content) =>
-          content.type !== 'text',
-      )
-    ) {
-      throw new Error(
-        'Only text prompts are supported',
-      );
+    if (prompt.content.some(content => content.type !== 'text' && content.type !== 'image')) {
+      throw new Error('Only text and image prompts are supported');
+    }
+    // Inline images only, never a path or URL: the native input gets a data URL ALP builds itself.
+    const images = prompt.content.filter(content => content.type === 'image') as Array<{ type: 'image'; mimeType: string; data: string }>;
+    if (images.length) {
+      if (!takesImages(session)) throw new Error(`${session.runtimeKind === 'acp' ? 'This ACP agent' : session.runtimeKind[0].toUpperCase() + session.runtimeKind.slice(1)} takes no images; send the message as text`);
+      if (images.length > PROMPT_IMAGES.maxCount) throw new Error(`A prompt takes at most ${PROMPT_IMAGES.maxCount} images`);
+      if (images.reduce((sum, image) => sum + (typeof image.data === 'string' ? base64Bytes(image.data) : 0), 0) > PROMPT_IMAGES.maxTotalBytes) throw new Error(`The images of a prompt are at most ${PROMPT_IMAGES.maxTotalBytes} bytes together`);
+      for (const image of images) {
+        const keys = Object.keys(image).filter(key => !['type', 'mimeType', 'data', 'name'].includes(key));
+        if (keys.length || !PROMPT_IMAGES.mimeTypes.includes(image.mimeType) || typeof image.data !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(image.data) || base64Bytes(image.data) > PROMPT_IMAGES.maxBytes) {
+          throw new Error(`An image must be inline base64 ${PROMPT_IMAGES.mimeTypes.join(', ')} of at most ${PROMPT_IMAGES.maxBytes} bytes`);
+        }
+      }
     }
 
     if (
@@ -3195,9 +3209,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
 
     const text = prompt.content
-      .map(
-        (content) => content.text ?? '',
-      )
+      .filter(content => content.type === 'text')
+      .map(content => content.text ?? '')
       .join('\n');
 
     // Steering changes the brief; live assignments keep running and report by mail.
@@ -3251,6 +3264,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
           text: origin === 'user' ? text : promptSafe(text),
           text_elements: [],
         },
+        ...images.map(image => ({ type: 'image', url: `data:${image.mimeType};base64,${image.data}` })),
         ...(mail.length && !wake ? [{ type: 'text', text: promptSafe(renderMail(mail, session.parentAgent)), text_elements: [] }] : []),
       ];
 
@@ -3305,6 +3319,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
           id: `user:${prompt.clientMessageId}`,
           clientMessageId: prompt.clientMessageId,
           text,
+          ...(images.length ? { images: images.length } : {}),
         },
       });
       if (origin === 'user' && !session.parent) session.userWaiting ??= Date.now();

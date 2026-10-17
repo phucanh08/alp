@@ -58,6 +58,7 @@ const items = [
 ];
 for (const event of events) add('envelope', `event ${event.type}${event.state ? ` ${event.state}` : ''}`, env(event));
 for (const item of items) add('envelope', `item ${item.kind}${item.detail ? ` ${item.detail.type}` : ''}`, env({ type: 'item', item }));
+add('envelope', 'item user_message with images', env({ type: 'item', item: { kind: 'user_message', id: 'user:m-2', text: 'Xem ảnh', clientMessageId: 'm-2', images: 2 } }));
 add('envelope', 'announcement without a cursor', { sessionId: 'ses_fixture', epoch: 'announce-2026', seq: 0, ts, event: { type: 'question', question } });
 add('envelope', 'a future event type (receivers ignore it)', env({ type: 'tree.renamed', title: 'x' }));
 add('envelope', 'a future item kind (receivers ignore it)', env({ type: 'item', item: { kind: 'image', id: 'img-1', url: 'x' } }));
@@ -124,6 +125,12 @@ R('session.attach', { session: summary, cursor: 40, reset: false }, false, 'resu
 P('session.release', { sessionId: 'ses_fixture' }); R('session.release', { closed: true });
 P('session.prompt', { sessionId: 'ses_fixture', clientMessageId: 'm-1', delivery: 'steer', content: [{ type: 'text', text: 'Dừng lại 🛑' }] });
 P('session.prompt', { sessionId: 'ses_fixture', clientMessageId: 'm-1', content: 'text' }, false, 'with string content');
+P('session.prompt', { sessionId: 'ses_fixture', clientMessageId: 'm-2', content: [{ type: 'text', text: 'Xem ảnh' }, { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=', name: 'ảnh.png' }] }, true, 'with an inline image');
+P('session.prompt', { sessionId: 'ses_fixture', clientMessageId: 'm-2', content: [{ type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=', path: '/etc/passwd' }] }, false, 'with an image path');
+P('session.prompt', { sessionId: 'ses_fixture', clientMessageId: 'm-2', content: [{ type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=', url: 'file:///etc/passwd' }] }, false, 'with an image url');
+P('session.prompt', { sessionId: 'ses_fixture', clientMessageId: 'm-2', content: [{ type: 'image', mimeType: 'image/svg+xml', data: 'PHN2Zz4=' }] }, false, 'with an svg image');
+P('session.prompt', { sessionId: 'ses_fixture', clientMessageId: 'm-2', content: [{ type: 'image', mimeType: 'image/png', data: 'not base64!' }] }, false, 'with image data that is not base64');
+P('session.prompt', { sessionId: 'ses_fixture', clientMessageId: 'm-2', content: [{ type: 'image', mimeType: 'image/png' }] }, false, 'with an image without data');
 P('session.prompt', { sessionId: 'ses_fixture', clientMessageId: 'm-1', delivery: 'later', content: [] }, false, 'with an unknown delivery');
 R('session.prompt', { outcome: 'accepted', durable: true });
 R('session.prompt', { outcome: 'accepted', duplicate: true, durable: true }, true, 'result of a repeat');
@@ -141,6 +148,7 @@ P('session.archive', { sessionId: 'ses_fixture', archived: false }); R('session.
 P('session.get', { sessionId: 'ses_fixture' }); P('session.get', { sessionId: null }, false, 'with a null session id');
 R('session.get', { session: { ...summary, status: 'error', lastError: { code: 'daemon_restarted', message: 'alpd stopped' } } });
 R('session.get', { session: { ...summary, status: 'paused' } }, false, 'result with an unknown status');
+R('session.get', { session: { ...summary, promptImages: true } }, true, 'result of a session that takes images');
 P('session.list', { projectRoot: '/work/project', rootsOnly: true, includeClosed: true, includeArchived: false });
 P('session.list', { projectRoot: null }, false, 'with a null projectRoot');
 R('session.list', { sessions: [summary] });
