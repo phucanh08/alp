@@ -45,8 +45,9 @@ and project overrides.
 
 ## Install
 
-This is the beta `0.0.0-beta.1` (not published yet); name it when you install (`@beta`, or
-exactly `@0.0.0-beta.1`). See the
+This is the beta `0.0.0-beta.2` (until it is on npm, `@beta` installs `0.0.0-beta.1`; check with
+`npm view @anhlp/alp-paseo dist-tags`); name it when you install (`@beta`, or
+exactly `@0.0.0-beta.2`). See the
 [release notes](https://github.com/phucanh08/alp/blob/main/docs/alp/beta-release-notes.md) and
 [install, upgrade and removal steps](https://github.com/phucanh08/alp/blob/main/docs/alp/beta-install.md).
 
@@ -128,7 +129,7 @@ for existing projects, model selection, permissions, and runtime limitations.
 
 ## Remote mode (deferred, not in the beta)
 
-Remote mode is **not part of `0.0.0-beta.1`**: it needs `@anhlp/alp-gateway`, which is not
+Remote mode is **not part of the beta (`0.0.0-beta.2`)**: it needs `@anhlp/alp-gateway`, which is not
 published. The text below describes the code in this repository for development only.
 
 To use ALP running on another machine, start the daemon process that loads this plugin with
@@ -169,7 +170,7 @@ Do not use `--legacy-peer-deps` for a standalone installation unless you supply 
 peers explicitly. The binary is also discoverable on PATH, so registration is optional
 for a global install. For a local install, run
 `./node_modules/.bin/alp-web-integration --register` with the intended `ALP_HOME`.
-Adding the plugin to a Paseo host (by path in beta.1, see above) remains
+Adding the plugin to a Paseo host (`npm:` from beta.2; by path in beta.1, see above) remains
 available independently of this standalone web process.
 
 Core upgrades no longer update a bundled plugin: upgrade `@anhlp/alp-paseo`
