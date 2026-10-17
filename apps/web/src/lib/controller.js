@@ -68,7 +68,7 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  *   projection: Projection,
  * }} TreeView
  * @typedef {{
- *   connection: { phase: Phase, gateway: string, attempt: number, error?: Failure, daemonVersion?: string, capabilities: string[] },
+ *   connection: { phase: Phase, gateway: string, attempt: number, error?: Failure, daemonVersion?: string, hostname?: string, capabilities: string[] },
  *   principal: Principal | null,
  *   workspace: string | null,
  *   catalog: Load & { teams: Team[], teamsKnown?: boolean, teamsUnavailable?: import('./new-session.js').TeamsUnavailable, modes: Mode[], models: Model[], defaultMode?: string },
@@ -121,6 +121,17 @@ export function attentionReason(state, root) {
 export const FILES_FORBIDDEN = 'This access token cannot list files (needs project.read).';
 /** Paseo's FILE_SEARCH_LIMIT. */
 export const FILE_SEARCH_LIMIT = 100;
+
+/**
+ * The host's machine name from the hello (alpd's os.hostname(), passed on by the gateway), as
+ * Paseo labels a host with it (patch 0017); undefined when there is none to show.
+ * @param {unknown} value
+ */
+export function hostName(value) {
+  if (typeof value !== 'string') return undefined;
+  const name = value.trim();
+  return name && name.length <= 253 && !/[\p{Cc}\p{Cf}]/u.test(name) ? name : undefined;
+}
 
 /**
  * The roots of a session.list answer for History. The host orders a page itself (§12.1); a whole
@@ -414,7 +425,7 @@ export class Controller {
     const capabilities = Array.isArray(greeting?.capabilities) ? greeting.capabilities.filter((/** @type {unknown} */ name) => typeof name === 'string') : [];
     const missing = REQUIRED_CAPABILITIES.filter(name => !capabilities.includes(name));
     if (missing.length) throw new ConfigurationError(`The host behind this gateway is too old for this app (it lacks ${missing.join(', ')}). Update ALP on the host.`);
-    this.#adopt(/** @type {Principal} */ (run.principal), capabilities, typeof greeting?.daemonVersion === 'string' ? greeting.daemonVersion : undefined);
+    this.#adopt(/** @type {Principal} */ (run.principal), capabilities, typeof greeting?.daemonVersion === 'string' ? greeting.daemonVersion : undefined, hostName(greeting?.hostname));
     this.#attached = null;
     this.#watching = null;
     const root = this.#state.selected;
@@ -434,15 +445,16 @@ export class Controller {
    * The principal and capabilities of a new connection. A workspace the grant no longer names is
    * left (with its session and tasks); with none chosen yet, the first granted one is opened.
    * @param {Principal} principal @param {string[]} capabilities @param {string | undefined} daemonVersion
+   * @param {string | undefined} hostname the host's machine name from the hello, Paseo's host label (patch 0017)
    */
-  #adopt(principal, capabilities, daemonVersion) {
+  #adopt(principal, capabilities, daemonVersion, hostname) {
     const current = this.#state.workspace;
     const workspace = current && grantedWorkspace(principal, current) ? current : principal.workspaces[0] ?? null;
     const changed = JSON.stringify(principal) !== JSON.stringify(this.#state.principal);
     if (workspace !== current) { this.#context = {}; this.#waiting = null; }
     this.#set(state => ({
       principal,
-      connection: { ...state.connection, capabilities, ...(daemonVersion ? { daemonVersion } : {}) },
+      connection: { ...state.connection, capabilities, ...(daemonVersion ? { daemonVersion } : {}), hostname },
       ...(workspace !== state.workspace ? { workspace, selected: null, focus: null, tree: null, sessions: initialState().sessions, history: initialState().history, attention: {}, turnAttention: {}, tasks: { ...initialState().tasks, visible: state.tasks.visible } } : {}),
       ...(changed || workspace !== state.workspace ? { catalog: initialState().catalog } : {}),
     }));
@@ -1804,7 +1816,7 @@ export class Controller {
 
   /**
    * Names, sources and descriptions of one kind of library entry, as the selected workspace sees
-   * them (library.list). Never content: the gateway keeps that on the host.
+   * them (library.list). Content is read one entry at a time with getLibraryEntry.
    * @param {'agents' | 'skills' | 'mcp' | 'hooks' | 'teams' | 'providers'} kind
    * @returns {Promise<Array<{ name: string, source: string, overrides?: string, description?: string, usedBy?: string[] }>>}
    */
@@ -1813,6 +1825,31 @@ export class Controller {
     if (blocked) throw new ConfigurationError(blocked);
     const result = await this.#client().request('library.list', { kind, projectRoot: this.#state.workspace }, { timeoutMs: this.#options.requestTimeoutMs });
     return (Array.isArray(result?.entries) ? result.entries : []).filter((/** @type {any} */ entry) => entry && typeof entry.name === 'string');
+  }
+
+  /**
+   * One library entry as the selected workspace's sessions would use it (library.get), read only.
+   * The gateway answers its content with `{ $secret: 'keep' }` in place of every value that can
+   * hold a secret, and `secrets` lists where; this app shows those as hidden and never edits.
+   * @param {'agents' | 'skills' | 'mcp' | 'hooks' | 'teams' | 'providers'} kind @param {string} name
+   * @returns {Promise<{ kind: string, name: string, source: string, overrides?: string, content: Record<string, unknown>, usedBy: string[], librarySkills?: string[], secrets: string[] }>}
+   */
+  async getLibraryEntry(kind, name) {
+    const blocked = this.libraryBlock();
+    if (blocked) throw new ConfigurationError(blocked);
+    const result = await this.#client().request('library.get', { kind, name, projectRoot: this.#state.workspace }, { timeoutMs: this.#options.requestTimeoutMs });
+    if (!result || typeof result !== 'object' || !result.content || typeof result.content !== 'object' || Array.isArray(result.content)) throw new ConfigurationError('The host answered library.get in a form this app does not read.');
+    const strings = (/** @type {unknown} */ value) => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
+    return {
+      kind: typeof result.kind === 'string' ? result.kind : kind,
+      name: typeof result.name === 'string' ? result.name : name,
+      source: typeof result.source === 'string' ? result.source : 'unknown',
+      ...(typeof result.overrides === 'string' ? { overrides: result.overrides } : {}),
+      content: result.content,
+      usedBy: strings(result.usedBy),
+      ...(Array.isArray(result.librarySkills) ? { librarySkills: strings(result.librarySkills) } : {}),
+      secrets: strings(result.secrets),
+    };
   }
 
   async loadSettings() {

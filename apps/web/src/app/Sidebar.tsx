@@ -194,7 +194,7 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavig
     onSearchRequestHandled?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchRequest]);
-  const host = `${principal?.label ?? 'Access token'} · ${connection.gateway.replace(/^https?:\/\//, '')}${online ? '' : ' · reconnecting'}`;
+  const host = `${principal?.label ?? 'Access token'} · ${connection.hostname ?? connection.gateway.replace(/^https?:\/\//, '')}${online ? '' : ' · reconnecting'}`;
 
   return (
     <nav aria-label="Workspaces and sessions" className="relative flex h-full min-h-0 flex-col bg-sidebar">
