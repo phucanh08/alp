@@ -132,6 +132,8 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     both: await credential('both', ['--workspace', projects.main, '--workspace', projects.custom]),
     // Sessions only, without project.read: workspace.files.search is refused (1003).
     sessionsOnly: await credential('sessions-only', ['--workspace', projects.main, '--permission', 'session.read']),
+    // File reading (files.read) is never a default: only this credential has it, the owner does not.
+    filesReader: await credential('files-reader', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'files.read']),
   };
   const tokens = Object.fromEntries(Object.entries(created).map(([name, entry]) => [name, entry.token]));
   const credentialIds = Object.fromEntries(Object.entries(created).map(([name, entry]) => [name, entry.credential.id]));

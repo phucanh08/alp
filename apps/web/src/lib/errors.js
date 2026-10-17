@@ -125,6 +125,50 @@ export function describe(error) {
   return { message: error instanceof Error && error.message ? error.message : 'Something went wrong.', sent: 'unknown', terminal: false };
 }
 
+/**
+ * The messages of workspace.files.list / workspace.files.read refusals (docs/protocol/alp-json-rpc-v1.md
+ * §12.4), by (code, reason). Binary and too-large say what Paseo's file pane says.
+ */
+export const FILE_MESSAGES = Object.freeze({
+  blocked_path: 'This file is never shown remotely: secrets, keys, .git and ALP configuration are blocked.',
+  ignored: 'This file is ignored by .gitignore, so it is hidden by default.',
+  linked: 'This path is a link, or it changed while it was read. Links are not followed.',
+  binary: 'Binary preview unavailable',
+  too_large: 'This file is too large to display',
+  not_found: 'This file or folder is not on the host. It may have been moved or removed.',
+  invalid_path: 'That is not a valid path in this workspace.',
+  not_directory: 'The workspace folder cannot be read on the host.',
+});
+
+/**
+ * A refused or failed file read or listing, as the app shows it: the Failure with its reason
+ * (blocked_path, ignored, linked, binary, too_large, not_found, invalid_path, grant…).
+ */
+export class FileAccessError extends Error {
+  /** @param {Failure} failure */
+  constructor(failure) {
+    super(failure.message);
+    this.name = 'FileAccessError';
+    this.failure = failure;
+    this.reason = failure.reason;
+  }
+}
+
+/**
+ * describe() for a file request: the reasons of §12.4 get their own words; the rest as describe().
+ * @param {unknown} error @returns {Failure}
+ */
+export function describeFileError(error) {
+  if (error instanceof FileAccessError) return error.failure;
+  const failure = describe(error);
+  const reason = failure.reason;
+  if (!isRpcError(error) || !reason) return failure;
+  const known = /** @type {Record<string, string>} */ (FILE_MESSAGES)[reason];
+  if (!known) return failure;
+  if (reason === 'not_found' && failure.code !== 1001) return failure;
+  return { ...failure, message: known };
+}
+
 /** Whether a failure may be retried by the connection loop (everything but a terminal verdict). @param {unknown} error */
 export function retryableConnect(error) {
   return !describe(error).terminal;

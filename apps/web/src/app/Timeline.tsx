@@ -4,9 +4,13 @@ import type { Entry } from '../lib/timeline.js';
 import type { PendingPrompt } from '../lib/controller.js';
 import { Button } from '../components/ui/button';
 import { clockTime } from '../lib/format';
+import { can } from '../lib/gateway.js';
 import { cn } from '../lib/utils';
 import { previewUrl } from '../lib/attachments.js';
-import { RichText } from './RichText';
+import { FileLinkContext, RichText, type FileLinks } from './RichText';
+import { parseFileLink } from '../lib/file-links.js';
+import { useAppState } from './store';
+import { useTabs } from './tabs';
 import { CopyButton, Elapsed, Loader, formatDuration } from './chat/parts';
 
 /**
@@ -174,6 +178,30 @@ function UserBubble({ text, ts, images }: { text: string; ts?: string; images?: 
   );
 }
 
+/**
+ * Paseo's file links in an agent's reply: where the host reads files and the token may
+ * (files.read), paths of the open workspace open in a file tab; otherwise they stay text.
+ */
+function useFileLinks(): FileLinks | null {
+  const { workspace, principal, connection } = useAppState();
+  const { openFile } = useTabs();
+  const readable = connection.capabilities.includes('workspace.files.read') && can(principal ?? undefined, 'files.read');
+  return React.useMemo(() => {
+    if (!readable || !workspace) return null;
+    // An absolute path may start with the workspace as granted or as its real path on the host.
+    const roots = [workspace, ...(principal?.workspaceRoots ?? []).filter(root => root.path === workspace).map(root => root.canonical)];
+    return {
+      resolve: (raw, kind) => parseFileLink(raw, { roots, kind }),
+      open: target => openFile(target.path, target.line),
+    };
+  }, [readable, workspace, principal, openFile]);
+}
+
+function AssistantText({ text }: { text: string }) {
+  const links = useFileLinks();
+  return <FileLinkContext.Provider value={links}><RichText text={text} /></FileLinkContext.Provider>;
+}
+
 function EntryView({ entry, compactBottom }: { entry: Entry; compactBottom: boolean }) {
   const item = entry.item as any;
   switch (item.kind) {
@@ -182,7 +210,7 @@ function EntryView({ entry, compactBottom }: { entry: Entry; compactBottom: bool
     case 'assistant_message':
       return (
         <div className={cn('pt-3', compactBottom ? 'pb-0' : 'pb-3')} data-testid="assistant-message">
-          <RichText text={item.text} />
+          <AssistantText text={item.text} />
         </div>
       );
     case 'tool_call':

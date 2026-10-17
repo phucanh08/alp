@@ -3,6 +3,8 @@ import type { PanelKind } from './panels';
 import { useAppState, useController } from './store';
 import { orderTabs, updateLayout, loadLayout, moveKey, workspaceScope, workspaceTabs } from '../lib/layout.js';
 import { layoutStorage } from './layoutStorage';
+import { relativeFilePath } from '../lib/file-tree.js';
+import { blockedFilePath } from '@anhlp/alp-protocol';
 import { closeRange, planClose } from '../lib/tab-close.js';
 import { adjacentPane, moveToPane, nearestPane, paneIds, paneOf, removePane, resizeGroup, singlePane, splitPane, tabsByPane, type Direction, type Panes, type SplitPosition } from '../lib/panes.js';
 
@@ -12,8 +14,9 @@ import { adjacentPane, moveToPane, nearestPane, paneIds, paneOf, removePane, res
  * panel opened from the + menu (Terminal, Diff, Tasks…). An agent tab shows that agent's
  * conversation; a task tab shows the task in full; a panel tab shows the panel.
  *
- * Agent tabs follow the controller: the open session's root and the agent in focus. Task and
- * panel tabs belong to the workspace and stay while sessions change.
+ * Agent tabs follow the controller: the open session's root and the agent in focus. Task, file
+ * and panel tabs belong to the workspace and stay while sessions change. A file tab (Paseo's file
+ * pane) shows one workspace file read-only; its id is the file's workspace-relative path.
  *
  * The draft tab is Paseo's new agent tab: the New session screen (composer, team/model/thinking
  * pickers, preview). One at a time; it stays in front while its session is being created and
@@ -30,7 +33,7 @@ import { adjacentPane, moveToPane, nearestPane, paneIds, paneOf, removePane, res
  * a launcher (Agent, the panels) that turns into what is picked.
  */
 
-export type Tab = { kind: 'agent'; id: string } | { kind: 'task'; id: string } | { kind: 'panel'; id: PanelKind } | { kind: 'draft'; id: 'new' } | { kind: 'launcher'; id: string };
+export type Tab = { kind: 'agent'; id: string } | { kind: 'task'; id: string } | { kind: 'file'; id: string } | { kind: 'panel'; id: PanelKind } | { kind: 'draft'; id: 'new' } | { kind: 'launcher'; id: string };
 
 /** Tabs that are not kept across reloads (Paseo's ephemeral tabs): the draft and New tab launchers. */
 const ephemeral = (tab: Tab) => tab.kind === 'draft' || tab.kind === 'launcher';
@@ -80,6 +83,10 @@ type TabsValue = {
   /** Drag reorder: `tab` moves to index `to` of its pane's row (of all tabs when `whole`). */
   move: (tab: Tab, to: number, whole?: boolean) => void;
   openTask: (id: string) => void;
+  /** Opens a file tab (or brings it forward), scrolled to `line` when given. */
+  openFile: (path: string, line?: number) => void;
+  /** The line a file tab was last asked to show, with a count that changes on each ask. */
+  fileTarget: (path: string) => { line?: number; nonce: number } | undefined;
   openAgent: (id: string) => void;
   openPanel: (kind: PanelKind) => void;
   openDraft: () => void;
@@ -102,6 +109,7 @@ const parseKey = (key: string | undefined): Tab | null => {
   const id = key.slice(at + 1);
   if (!id) return null;
   if (kind === 'agent' || kind === 'task') return { kind, id };
+  if (kind === 'file') return relativeFilePath(id) === id && !blockedFilePath(id) ? { kind, id } : null;
   if (kind === 'panel') return { kind, id: id as PanelKind };
   return null;
 };
@@ -111,6 +119,8 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
   const { selected, focus, workspace, connection, sessions, tree } = useAppState();
   const [agents, setAgents] = React.useState<string[]>([]);
   const [tasks, setTasks] = React.useState<string[]>([]);
+  const [files, setFiles] = React.useState<string[]>([]);
+  const [fileTargets, setFileTargets] = React.useState<Record<string, { line?: number; nonce: number }>>({});
   const [panels, setPanels] = React.useState<PanelKind[]>([]);
   const [draft, setDraft] = React.useState(false);
   const [launchers, setLaunchers] = React.useState<string[]>([]);
@@ -166,6 +176,8 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     const saved = scope ? workspaceTabs(loadLayout(layoutStorage()), scope) : undefined;
     setTasks(saved?.tasks ?? []);
+    setFiles(saved?.files ?? []);
+    setFileTargets({});
     setPanels((saved?.panels ?? []) as PanelKind[]);
     setOrder(saved?.order ?? []);
     // A saved pane left with no tab kept (it held a New tab or the draft) gets a New tab, as
@@ -183,7 +195,7 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
     // The focused pane's fresh New tab is in front when nothing else is.
     const focusedFresh = fresh.find(entry => entry.pane === savedPanes.focused);
     setActive(current => {
-      if (savedActive && savedActive.kind !== 'agent' && (savedActive.kind === 'task' ? saved?.tasks.includes(savedActive.id) : saved?.panels.includes(savedActive.id))) return savedActive;
+      if (savedActive && savedActive.kind !== 'agent' && (savedActive.kind === 'task' ? saved?.tasks.includes(savedActive.id) : savedActive.kind === 'file' ? saved?.files?.includes(savedActive.id) : saved?.panels.includes(savedActive.id))) return savedActive;
       const next = current && current.kind !== 'agent' ? null : current;
       return next ?? (focusedFresh ? { kind: 'launcher', id: focusedFresh.id } : null);
     });
@@ -231,10 +243,11 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
   const tabs = React.useMemo<Tab[]>(() => orderTabs([
     ...agents.map(id => ({ kind: 'agent' as const, id })),
     ...tasks.map(id => ({ kind: 'task' as const, id })),
+    ...files.map(id => ({ kind: 'file' as const, id })),
     ...panels.map(id => ({ kind: 'panel' as const, id })),
     ...(draft ? [DRAFT_TAB] : []),
     ...launchers.map(id => ({ kind: 'launcher' as const, id })),
-  ], tabKey, order), [agents, tasks, panels, draft, launchers, order]);
+  ], tabKey, order), [agents, tasks, files, panels, draft, launchers, order]);
 
   // The panes: which tabs each holds, which has focus (the active tab's), what each shows.
   const ids = React.useMemo(() => paneIds(panes.root), [panes.root]);
@@ -304,14 +317,14 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
         [scope]: {
           ...(session ? { session } : {}),
           agents: session ? [...agents.filter(id => id !== session), ...(restore.current?.agents ?? [])] : [],
-          tasks, panels, order: shown,
+          tasks, files, panels, order: shown,
           ...(active && !ephemeral(active) ? { active: tabKey(active) } : restore.current?.active ? { active: restore.current.active } : {}),
           ...(split ? { panes: split } : {}),
           at: Date.now(),
         },
       },
     }));
-  }, [scope, loaded, selected, agents, tasks, panels, tabs, active, ids, panes, focusedPane]);
+  }, [scope, loaded, selected, agents, tasks, files, panels, tabs, active, ids, panes, focusedPane]);
 
   /** A tab the user brings forward while a saved session is still to open: that tab stays in front. */
   const userChose = (tab: Tab) => { const pending = restore.current; if (pending && !ephemeral(tab)) pending.active = tabKey(tab); };
@@ -356,6 +369,7 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
     endRestore();
     setAgents(current => closingRoot ? [] : current.filter(id => !keys.has(`agent:${id}`)));
     setTasks(current => current.filter(id => !keys.has(`task:${id}`)));
+    setFiles(current => current.filter(id => !keys.has(`file:${id}`)));
     setPanels(current => current.filter(id => !keys.has(`panel:${id}`)));
     if (keys.has(tabKey(DRAFT_TAB))) setDraft(false);
     setLaunchers(current => current.filter(id => !keys.has(`launcher:${id}`)));
@@ -485,6 +499,16 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
     setActive({ kind: 'task', id });
   }, []);
 
+  const openFile = React.useCallback((path: string, line?: number) => {
+    const id = relativeFilePath(path);
+    if (!id || blockedFilePath(id)) return;
+    setFiles(current => current.includes(id) ? current : [...current, id]);
+    setFileTargets(current => ({ ...current, [id]: { ...(line ? { line } : {}), nonce: (current[id]?.nonce ?? 0) + 1 } }));
+    userChose({ kind: 'file', id });
+    setActive({ kind: 'file', id });
+  }, []);
+  const fileTarget = React.useCallback((path: string) => fileTargets[path], [fileTargets]);
+
   const openAgent = React.useCallback((id: string) => {
     controller.focusSession(id);
     setAgents(current => current.includes(id) ? current : [...current, id]);
@@ -510,8 +534,8 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
 
   const value = React.useMemo(() => ({
     tabs, row, active, panes, byPane, focusedPane, activeOf, focusPane, splitEmpty, canSplitEmpty, launch, splitWith, moveTabToPane, closePane, focusAdjacent, moveTabAdjacent, resize, maximized, toggleMaximized,
-    activate, close, closeOthers, move, openTask, openAgent, openPanel, openDraft, finishDraft,
+    activate, close, closeOthers, move, openTask, openFile, fileTarget, openAgent, openPanel, openDraft, finishDraft,
   }), [tabs, row, active, panes, byPane, focusedPane, activeOf, focusPane, splitEmpty, canSplitEmpty, launch, splitWith, moveTabToPane, closePane, focusAdjacent, moveTabAdjacent, resize, maximized, toggleMaximized,
-    activate, close, closeOthers, move, openTask, openAgent, openPanel, openDraft, finishDraft]);
+    activate, close, closeOthers, move, openTask, openFile, fileTarget, openAgent, openPanel, openDraft, finishDraft]);
   return <TabsContext.Provider value={value}>{children}</TabsContext.Provider>;
 }

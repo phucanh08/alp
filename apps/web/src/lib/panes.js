@@ -31,7 +31,8 @@ export const MIN_SPLIT_SIZE = 0.1;
 export const EDGE_RATIO = 0.15;
 export const CENTER_RATIO = 0.4;
 const MAX_PANES = 16;
-const ID_CHARS = 300;
+/** A pane map key: a tab key, `file:` and a workspace path of up to 1024 characters (layout.js PATH_CHARS) included. */
+const ID_CHARS = 1030;
 
 /** @returns {Panes} */
 export const singlePane = () => ({ root: { kind: 'pane', id: MAIN_PANE }, focused: MAIN_PANE, assign: {}, actives: {} });

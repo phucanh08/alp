@@ -5,12 +5,13 @@ import { cn } from '../lib/utils';
 import { StatusIndicator } from './status';
 import { useAppState } from './store';
 import { Tasks } from './TaskBoard';
+import { FilesPanel } from './FilesPanel';
 import { useTabs } from './tabs';
 
 /*
  * The panels a tab can show, in the explorer dock or the center column, as Paseo's: Changes,
- * Terminal, Diff and Files (Paseo's own; this beta shows them unavailable, the gateway has no git,
- * file or terminal access yet), and ALP's Agents and Tasks. Picking an agent or a task opens it
+ * Terminal and Diff (Paseo's own; this beta shows them unavailable, the gateway has no git or
+ * terminal access yet), Files (read-only, with files.read: FilesPanel), and ALP's Agents and Tasks. Picking an agent or a task opens it
  * in a tab of the center column.
  */
 
@@ -20,7 +21,7 @@ export const PANELS: Record<PanelKind, { label: string; icon: typeof Bot; unavai
   changes: { label: 'Changes', icon: FileDiff, unavailable: "The gateway has no git access yet, so this panel cannot show the workspace's changes. Use git on the host." },
   terminal: { label: 'Terminal', icon: SquareTerminal, unavailable: 'The gateway does not run terminals yet. Open a terminal on the host.' },
   diff: { label: 'Diff', icon: GitCompareArrows, unavailable: 'The gateway has no git access yet, so this panel cannot show a diff. Use git on the host.' },
-  files: { label: 'Files', icon: FolderTree, unavailable: "The gateway has no file access yet, so this panel cannot browse the workspace. Use the host's editor." },
+  files: { label: 'Files', icon: FolderTree },
   agents: { label: 'Agents', icon: Bot },
   tasks: { label: 'Tasks', icon: ListTodo },
 };
@@ -76,5 +77,6 @@ function Unavailable({ kind }: { kind: PanelKind }) {
 export function PanelView({ kind, onPicked }: { kind: PanelKind; onPicked?: () => void }) {
   if (kind === 'agents') return <Agents onPicked={onPicked} />;
   if (kind === 'tasks') return <Tasks onPicked={onPicked} />;
+  if (kind === 'files') return <FilesPanel onPicked={onPicked} />;
   return <Unavailable kind={kind} />;
 }

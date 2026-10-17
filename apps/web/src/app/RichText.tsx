@@ -1,26 +1,46 @@
 import * as React from 'react';
 import { cn } from '../lib/utils';
 import { parseBlocks, type Block } from './chat/markdown';
+import type { FileTarget } from '../lib/file-links.js';
 
 /**
  * A small, safe reading of the Markdown agents write, styled as Paseo's assistant markdown:
  * paragraphs, headings, nested lists, quotes, fenced code, tables, rules, and inline bold, italic,
- * strike, code and links. Nothing becomes raw HTML; only http(s) and mailto links are live.
+ * strike, code and links. Nothing becomes raw HTML; only http(s) and mailto links are live, and,
+ * where a FileLinks context is given (an agent's reply, where the token may read files), inline code
+ * and link targets that name a workspace file, which open it in a file tab (Paseo's file links).
  */
+
+/** Resolves a token to a workspace file and opens it; given by the chat for agents' replies only. */
+export type FileLinks = { resolve: (raw: string, kind: 'code' | 'href') => FileTarget | undefined; open: (target: FileTarget) => void };
+export const FileLinkContext = React.createContext<FileLinks | null>(null);
+
+const fileLinkClass = 'cursor-pointer text-highlight underline-offset-2 hover:underline focus-visible:underline outline-none';
+
+function FileLinkButton({ target, links, children, title }: { target: FileTarget; links: FileLinks; children: React.ReactNode; title: string }) {
+  return (
+    <button type="button" className={cn('inline break-words text-left [overflow-wrap:anywhere]', fileLinkClass)} title={title} data-testid="chat-file-link" data-path={target.path}
+      onClick={() => links.open(target)}><FileLinkContext.Provider value={null}>{children}</FileLinkContext.Provider></button>
+  );
+}
 
 export { parseBlocks };
 
-const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+?\*\*|__[^_\n]+?__)|(~~[^~\n]+?~~)|(\[[^\]\n]+\]\([^)\s]+\))|((?:https?:\/\/|mailto:)[^\s<>()]*[^\s<>().,;:!?'"`*])|(\*[^*\s][^*\n]*?\*|(?<![\w])_[^_\s][^_\n]*?_(?![\w]))/;
+// Every span is bounded (at most 1000 characters, a link target 2048), so a long line full of
+// unclosed markers costs a bounded scan per position, never one to the end of the line (a 1 MiB
+// Markdown file in a file tab's preview).
+const INLINE = /(`[^`\n]{1,1000}`)|(\*\*[^*\n]{1,1000}?\*\*|__[^_\n]{1,1000}?__)|(~~[^~\n]{1,1000}?~~)|(\[[^[\]\n]{1,1000}\]\([^()\s]{1,2048}\))|((?:https?:\/\/|mailto:)[^\s<>()]{0,2048}[^\s<>().,;:!?'"`*])|(\*[^*\s][^*\n]{0,1000}?\*|(?<![\w])_[^_\s][^_\n]{0,1000}?_(?![\w]))/;
 const safeHref = (url: string) => (/^(https?:\/\/|mailto:)/i.test(url) ? url : undefined);
 
 function Link({ href, children }: { href: string; children: React.ReactNode }) {
   const url = safeHref(href);
   if (!url) return <>{children}</>;
-  return <a href={url} target="_blank" rel="noopener noreferrer" className="break-words text-highlight [overflow-wrap:anywhere] hover:underline">{children}</a>;
+  return <a href={url} target="_blank" rel="noopener noreferrer" className="break-words text-highlight [overflow-wrap:anywhere] hover:underline"><FileLinkContext.Provider value={null}>{children}</FileLinkContext.Provider></a>;
 }
 
 /** Inline code, bold, italic, strike and links; everything else as text. */
 function Inline({ text }: { text: string }) {
+  const links = React.useContext(FileLinkContext);
   const out: React.ReactNode[] = [];
   let rest = text;
   let key = 0;
@@ -29,12 +49,20 @@ function Inline({ text }: { text: string }) {
     if (!match) { out.push(rest); break; }
     if (match.index) out.push(rest.slice(0, match.index));
     const [token, code, strong, strike, link, url, em] = match;
-    if (code) out.push(<code key={key++} className="rounded-md bg-muted px-1 py-0.5 font-mono text-[12px] text-foreground">{code.slice(1, -1)}</code>);
+    if (code) {
+      const inner = code.slice(1, -1);
+      const target = links?.resolve(inner, 'code');
+      const element = <code className={cn('rounded-md bg-muted px-1 py-0.5 font-mono text-[12px]', target ? 'text-highlight' : 'text-foreground')}>{inner}</code>;
+      out.push(target && links ? <FileLinkButton key={key++} target={target} links={links} title={`Open ${target.path}${target.line ? `:${target.line}` : ''}`}>{element}</FileLinkButton> : <React.Fragment key={key++}>{element}</React.Fragment>);
+    }
     else if (strong) out.push(<strong key={key++} className="font-semibold text-foreground"><Inline text={strong.slice(2, -2)} /></strong>);
     else if (strike) out.push(<s key={key++} className="text-muted-foreground"><Inline text={strike.slice(2, -2)} /></s>);
     else if (link) {
       const parts = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(link)!;
-      out.push(<Link key={key++} href={parts[2]}><Inline text={parts[1]} /></Link>);
+      const target = safeHref(parts[2]) ? undefined : links?.resolve(parts[2], 'href');
+      out.push(target && links
+        ? <FileLinkButton key={key++} target={target} links={links} title={`Open ${target.path}${target.line ? `:${target.line}` : ''}`}><Inline text={parts[1]} /></FileLinkButton>
+        : <Link key={key++} href={parts[2]}><Inline text={parts[1]} /></Link>);
     } else if (url) out.push(<Link key={key++} href={url}>{url}</Link>);
     else if (em) out.push(<em key={key++} className="italic"><Inline text={em.slice(1, -1)} /></em>);
     rest = rest.slice(match.index + token.length);

@@ -1,6 +1,8 @@
 // @ts-check
 import { createReconnectingClient, hello } from '@anhlp/alp-client/portable';
-import { AuthenticationError, ConfigurationError, CreateOutcomeUnknownError, describe, endsRoot } from './errors.js';
+import { AuthenticationError, ConfigurationError, CreateOutcomeUnknownError, FILE_MESSAGES, FileAccessError, describe, describeFileError, endsRoot } from './errors.js';
+import { cleanListing, relativeFilePath } from './file-tree.js';
+import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
 import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
 import { newMessageId, newRequestId, newSessionId } from './ids.js';
 import { promptContent } from './attachments.js';
@@ -121,6 +123,10 @@ export function attentionReason(state, root) {
 
 /** The message shown when a token lacks project.read for workspace.files.search. */
 export const FILES_FORBIDDEN = 'This access token cannot list files (needs project.read).';
+/** The message shown when a token lacks files.read for workspace.files.list / read (never a default grant). */
+export const FILES_READ_FORBIDDEN = 'This access token cannot read files (needs files.read).';
+/** The message shown when the host does not offer workspace.files.read. */
+export const FILES_READ_UNAVAILABLE = 'This host does not offer file reading. Update ALP on the host.';
 /** Paseo's FILE_SEARCH_LIMIT. */
 export const FILE_SEARCH_LIMIT = 100;
 
@@ -974,6 +980,86 @@ export class Controller {
       .filter((/** @type {any} */ file) => file && typeof file.path === 'string' && file.path)
       .map((/** @type {any} */ file) => ({ path: String(file.path) }));
     return { files, truncated: result?.truncated === true };
+  }
+
+  /** Whether the host lists directories and reads files (workspace.files.read). */
+  get filesReadable() { return this.hasCapability('workspace.files.read'); }
+
+  /** Whether this token may read files (files.read, granted per credential, never by default). */
+  get canReadFiles() { return can(this.#state.principal ?? undefined, 'files.read'); }
+
+  /**
+   * The guards of a file request, in searchWorkspaceFiles' order (workspace, capability, grant),
+   * then the path: a blocked or malformed path is refused here, without a request.
+   * @param {string | undefined} path @param {boolean} required
+   */
+  #fileRequest(path, required) {
+    const refuse = (/** @type {string} */ message, /** @type {string} */ reason, terminal = false) => new FileAccessError({ message, reason, sent: 'no', terminal });
+    const workspace = this.#state.workspace;
+    if (!workspace) throw refuse('Choose a workspace first.', 'workspace');
+    if (!this.filesReadable) throw refuse(FILES_READ_UNAVAILABLE, 'capability', true);
+    if (!this.canReadFiles) throw refuse(FILES_READ_FORBIDDEN, 'grant', true);
+    if (path === undefined || path === '') {
+      if (required) throw refuse(FILE_MESSAGES.invalid_path, 'invalid_path');
+      return { workspace, path: undefined };
+    }
+    const relative = relativeFilePath(path);
+    if (!relative) throw refuse(FILE_MESSAGES.invalid_path, 'invalid_path');
+    if (blockedFilePath(relative)) throw refuse(FILE_MESSAGES.blocked_path, 'blocked_path');
+    return { workspace, path: relative };
+  }
+
+  /** A file request's failure as a FileAccessError; a grant refusal says what is missing. @param {unknown} error */
+  #fileFailure(error) {
+    const failure = describeFileError(error);
+    if (failure.code === 1003 && failure.reason === 'grant') return new FileAccessError({ ...failure, message: FILES_READ_FORBIDDEN });
+    return new FileAccessError(failure);
+  }
+
+  /**
+   * Paseo's list_directory: the entries of a directory of the open workspace (the root when `path`
+   * is left out), through workspace.files.list. Only entries of that directory with a clean
+   * relative path that is not blocked are kept, at most WORKSPACE_FILES.maxListEntries. Throws a
+   * FileAccessError (its `reason` and `failure`).
+   * @param {{ path?: string, includeIgnored?: boolean }} [input]
+   * @returns {Promise<{ entries: import('./file-tree.js').FileEntry[], truncated: boolean }>}
+   */
+  async listWorkspaceFiles({ path, includeIgnored = false } = {}) {
+    const request = this.#fileRequest(path, false);
+    let result;
+    try {
+      result = await this.#client().request('workspace.files.list', { projectRoot: request.workspace, ...(request.path ? { path: request.path } : {}), ...(includeIgnored ? { includeIgnored: true } : {}) });
+    } catch (error) {
+      throw this.#fileFailure(error);
+    }
+    return cleanListing(result, request.path ?? '');
+  }
+
+  /**
+   * Paseo's read_file: a UTF-8 text file of the open workspace (at most 1 MiB), through
+   * workspace.files.read. Throws a FileAccessError: binary, too_large, ignored (ask again with
+   * includeIgnored), blocked_path, linked, not_found, grant…
+   * @param {{ path: string, includeIgnored?: boolean }} input
+   * @returns {Promise<{ path: string, content: string, size: number, modifiedAt?: string }>}
+   */
+  async readWorkspaceFile({ path, includeIgnored = false }) {
+    const request = this.#fileRequest(path, true);
+    let result;
+    try {
+      result = await this.#client().request('workspace.files.read', { projectRoot: request.workspace, path: request.path, ...(includeIgnored ? { includeIgnored: true } : {}) });
+    } catch (error) {
+      throw this.#fileFailure(error);
+    }
+    const content = typeof result?.content === 'string' ? result.content : undefined;
+    if (content === undefined || content.length > WORKSPACE_FILES.maxReadBytes) {
+      throw new FileAccessError({ message: content === undefined ? 'The host sent something this app does not understand.' : FILE_MESSAGES.too_large, ...(content === undefined ? {} : { reason: 'too_large' }), sent: 'yes', terminal: false });
+    }
+    return {
+      path: /** @type {string} */ (request.path),
+      content,
+      size: typeof result?.size === 'number' && Number.isFinite(result.size) ? result.size : content.length,
+      ...(typeof result?.modifiedAt === 'string' ? { modifiedAt: result.modifiedAt } : {}),
+    };
   }
 
   /** Whether a root is archived, as far as the History read and this client's own actions know. @param {string | null | undefined} id */

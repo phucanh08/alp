@@ -43,7 +43,7 @@ test('a turn that finishes in a session not open marks its row and the favicon; 
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute('data-status', 'none');
 });
 
-test('Cmd/Ctrl+P searches the workspace\'s files; picking one copies its path', async ({ page, context }) => {
+test('Cmd/Ctrl+P searches the workspace\'s files; without files.read picking one copies its path', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await connect(page, world);
   await body(page);
@@ -65,7 +65,8 @@ test('Cmd/Ctrl+P searches the workspace\'s files; picking one copies its path', 
   await expect(file).toContainText('src/checkout');
   await page.keyboard.press('Enter');
   await expect(dialog).toBeHidden();
-  // Paseo opens the file; ALP has no file read yet: the relative path goes to the clipboard.
+  // Paseo opens the file; this token has no files.read (never a default, e2e/files.spec.js has
+  // one that does): the relative path goes to the clipboard.
   await expect(page.getByRole('status').filter({ hasText: 'Copied src/checkout/cart-total.ts' })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('src/checkout/cart-total.ts');
 
