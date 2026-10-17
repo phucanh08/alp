@@ -163,6 +163,10 @@ export class Controller {
   /** A first message whose start failed after the New session screen closed: the next one shows it again (memory only). */
   /** @type {{ workspace: string, text: string } | null} */
   #unsentDraft = null;
+  /** New session screens open now: one takes a kept first message of its workspace at once. @type {Set<(kept: { workspace: string, text: string }) => boolean>} */
+  #unsentTakers = new Set();
+  /** Counts connections: a start begun on an earlier one keeps nothing for this one. */
+  #generation = 0;
   #syncAgain = false;
   /** A root being created: the sync loop leaves it alone. @type {string | null} */
   #creating = null;
@@ -305,6 +309,7 @@ export class Controller {
     this.#watching = null;
     this.#attached = null;
     this.#unsentDraft = null;
+    this.#generation += 1;
     this.#context = {};
     if (run?.alp) run.alp.stop();
     if (run) this.#set({ ...initialState(this.#state.connection.gateway), preferences: this.#state.preferences });
@@ -767,17 +772,41 @@ export class Controller {
   }
 
   /**
-   * Keeps a first message that was not sent, for the next New session screen of the workspace it
-   * was written for (memory only; a disconnect forgets it).
-   * @param {string} text @param {string | null | undefined} workspace
+   * Where a New session start begins: its workspace and connection, taken before it waits on the
+   * host, so a failure keeps the first message for them (keepUnsentDraft).
+   * @returns {{ workspace: string | null, connection: number }}
    */
-  keepUnsentDraft(text, workspace) { this.#unsentDraft = text && workspace ? { workspace, text: String(text) } : null; }
+  startOrigin() { return { workspace: this.#state.workspace, connection: this.#generation }; }
+
+  /**
+   * Keeps a first message that was not sent for the workspace it was written for: a New session
+   * screen of that workspace open now takes it at once, otherwise the next one does (memory only;
+   * a disconnect forgets it, and a start begun on an earlier connection keeps nothing).
+   * @param {string} text @param {{ workspace: string | null, connection: number }} origin from startOrigin()
+   */
+  keepUnsentDraft(text, origin) {
+    if (!text || !origin?.workspace || origin.connection !== this.#generation) return;
+    const kept = { workspace: origin.workspace, text: String(text) };
+    for (const take of this.#unsentTakers) if (take(kept)) { this.#unsentDraft = null; return; }
+    this.#unsentDraft = kept;
+  }
+
+  /**
+   * An open New session screen asks for first messages kept while it is open; `take` returns
+   * whether it showed one. Returns the release.
+   * @param {(kept: { workspace: string, text: string }) => boolean} take
+   */
+  takeUnsentDrafts(take) { this.#unsentTakers.add(take); return () => { this.#unsentTakers.delete(take); }; }
 
   /** The first message a failed start left in the open workspace, if any (read when a New session screen opens). */
   unsentDraft() { const kept = this.#unsentDraft; return kept && kept.workspace === this.#state.workspace ? kept.text : ''; }
 
-  /** The New session screen showed the kept message again. */
-  clearUnsentDraft() { this.#unsentDraft = null; }
+  /**
+   * The New session screen showed the kept message again. With `text`, only that message is
+   * forgotten (one kept after the screen read it stays for the screen to take).
+   * @param {string} [text]
+   */
+  clearUnsentDraft(text) { if (text === undefined || this.#unsentDraft?.text === text) this.#unsentDraft = null; }
 
   /** Asks team.list again after it failed (the New session preview's Retry); otherwise does nothing. */
   async retryTeams() {
