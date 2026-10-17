@@ -4,13 +4,14 @@
 // the same disposable host (e2e/support/world.js: alpd with the fake Codex in a temporary home):
 // apps/web through alp-gateway, paseo-web through ALP's Paseo bridge on that alpd.
 //
-//   node apps/web/scripts/compare-paseo.mjs [outDir] [--only chat|workspace|new-session|workspace-p1]
+//   node apps/web/scripts/compare-paseo.mjs [outDir] [--only chat|workspace|new-session|workspace-p1|panes]
 //
 // Scenes: chat (t-7679.1: the conversation, the composer), workspace (t-7679.2: attention in
 // the sidebar, the session title on its tab, the Shortcuts dialog, History, an archived session)
 // and new-session (t-7679.3: the New session / new agent tab with its pickers and effort, ALP's
 // preview, Settings General and Appearance, the light theme) and workspace-p1 (t-7679.5: the tab
-// context menu, the command center, a resized sidebar).
+// context menu, the command center, a resized sidebar) and panes (t-7679.9: the pane menu, the
+// center split right, ALP's full-screen tasks board).
 //
 // Needs: apps/web/dist (npm run build:alp-web), packages/{cli,daemon}/dist, dist/web-app
 // (node scripts/build-paseo-web.mjs) and integrations/paseo/server/dist. Nothing touches ~/.alp.
@@ -252,13 +253,19 @@ async function workspaceP1Scenes() {
   await shot(web, 'workspace-tab-menu-apps-web.png');
   await web.keyboard.press('Escape');
   const app = await openPaseo(context);
-  await tryStep(async () => {
-    await app.getByText('Tab work').first().click({ timeout: 30_000 });
-    await app.waitForTimeout(1500);
-    await app.getByText('Tab work').last().click({ button: 'right', timeout: 10_000 });
+  const tabMenu = await tryStep(async () => {
+    // The workspace opens with the session's agent tab already there (its sidebar row may be
+    // covered by a hover card, so it is not clicked).
+    // The agent's tab in the tab row (Paseo's testID workspace-tab-agent_<id>), not its sidebar
+    // row or the header: a right click there fires the web contextmenu Paseo's trigger opens on.
+    const tab = app.locator('[data-testid^="workspace-tab-agent_"]').filter({ hasText: 'Tab work' }).first();
+    await tab.waitFor({ timeout: 30_000 });
+    await tab.click({ button: 'right' });
+    await app.locator('[data-testid^="workspace-tab-context-"]').first().waitFor({ timeout: 10_000 });
     await shot(app, 'workspace-tab-menu-paseo-web.png');
     await app.keyboard.press('Escape');
   });
+  if (!tabMenu) console.warn('paseo-web: the tab context menu did not open; no workspace-tab-menu-paseo-web.png');
 
   // The command center (Mod+K).
   await web.locator('body').click({ position: { x: 700, y: 300 } });
@@ -291,11 +298,54 @@ async function workspaceP1Scenes() {
   await context.close();
 }
 
+/** t-7679.9: the center split right (the pane menu), and ALP's tasks board over the whole window. */
+async function panesScenes() {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
+  const web = await context.newPage();
+  await connect(web, world);
+  await newSession(web, 'Split work');
+  await web.locator('body').click({ position: { x: 700, y: 300 } });
+  await web.getByTestId('workspace-pane-main').getByTestId('workspace-split-pane-menu').click();
+  await web.getByRole('menu').waitFor();
+  await shot(web, 'workspace-split-menu-apps-web.png');
+  await web.getByRole('menuitem', { name: /^Split pane right/ }).click();
+  await web.getByTestId('workspace-pane-pane-1').waitFor();
+  await shot(web, 'workspace-split-apps-web.png');
+  await web.locator('body').click({ position: { x: 700, y: 120 } });
+  await web.keyboard.press('ControlOrMeta+K');
+  const center = web.getByRole('dialog', { name: 'Command center' });
+  await center.getByRole('combobox').fill('full screen');
+  await center.getByTestId('command-center-action-alp-open-tasks-screen').click();
+  await web.getByRole('region', { name: 'ALP tasks' }).waitFor();
+  await shot(web, 'workspace-alp-tasks-screen-apps-web.png');
+
+  const app = await openPaseo(context);
+  await tryStep(async () => {
+    await app.locator('[data-testid^="workspace-tab-agent_"]').filter({ hasText: 'Split work' }).first().click({ timeout: 30_000 });
+    await app.getByTestId('workspace-pane-main').getByTestId('workspace-split-pane-menu').click({ timeout: 30_000 });
+    await app.getByTestId('workspace-split-pane-menu-content').waitFor({ timeout: 10_000 });
+    await shot(app, 'workspace-split-menu-paseo-web.png');
+    await app.getByTestId('workspace-split-pane-right').click();
+    await app.waitForTimeout(1500);
+    await shot(app, 'workspace-split-paseo-web.png');
+  });
+  await tryStep(async () => {
+    await app.locator('body').click({ position: { x: 700, y: 120 } });
+    await app.keyboard.press('ControlOrMeta+K');
+    await app.getByTestId('command-center-panel').waitFor({ timeout: 10_000 });
+    await app.getByText('Open ALP tasks full screen').click({ timeout: 10_000 });
+    await app.waitForTimeout(2500);
+    await shot(app, 'workspace-alp-tasks-screen-paseo-web.png');
+  });
+  await context.close();
+}
+
 try {
   if (!only || only === 'chat') await chatScenes();
   if (!only || only === 'workspace') await workspaceScenes();
   if (!only || only === 'new-session') await newSessionScenes();
   if (!only || only === 'workspace-p1') await workspaceP1Scenes();
+  if (!only || only === 'panes') await panesScenes();
 } finally {
   await browser.close();
   await paseo.close();
