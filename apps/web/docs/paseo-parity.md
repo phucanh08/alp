@@ -2,7 +2,8 @@
 
 This document compares the screens and features of **paseo-web** with those of **apps/web**,
 lists what apps/web is missing, and ranks the gaps. Tasks t-7679.1 (chat/timeline), t-7679.2
-(sidebar/workspace) and t-7679.3 (settings persistence and the New session flow), part of epic t-7679.
+(sidebar/workspace), t-7679.3 (settings persistence and the New session flow) and t-7679.5 (the workspace's
+P1 items that need no backend), part of epic t-7679.
 
 - **paseo-web** is Paseo 0.11.2 (getpaseo/paseo @ `b63a325`, `paseo-web/upstream.json`) with the 19
   ALP patches in `paseo-web/patches`, built into `dist/web-app`.
@@ -24,7 +25,7 @@ for pixel.
 - **Có**: has it.
 - **Một phần**: has part of it.
 - **Thiếu**: missing.
-- **Đã làm**: done in t-7679.1 (chat), t-7679.2 (sidebar/workspace) or t-7679.3 (settings, New session).
+- **Đã làm**: done in t-7679.1 (chat), t-7679.2 (sidebar/workspace), t-7679.3 (settings, New session) or t-7679.5 (workspace P1).
 
 **Backend** says whether the gateway exposes what the feature needs (`apps/gateway/src/policy.js`,
 `docs/protocol/alp-json-rpc-v1.md` §12, §14):
@@ -45,9 +46,9 @@ Abbreviations: P: = `packages/app/src/` of Paseo; W: = `apps/web/src/`.
 | Area | Main gaps |
 |---|---|
 | Chat/timeline | Done in this slice: the mode control (menu and Shift+Tab), the Tasks pill, the question card in the stream with Paseo's select-then-Submit flow, scroll-to-bottom, Cmd/Ctrl+L and Escape, and a race in sending fixed. Still missing: per-tool detail views (edit/diff/read/search), virtualization and paging of long histories, chat find (Cmd+F), chat outline, the text reveal, attachments, slash commands, dictation and voice, the context meter, rewind and fork. |
-| Sidebar/workspace | Done in t-7679.2: Paseo's workspace keyboard shortcuts and their Shortcuts dialog, History with the archived sessions and Unarchive, attention on every session (`question.list`), the session title on its tab. Still missing: tab menu, persistence and drag order; split panes; resizable sidebar and dock; command center; favicon status. |
+| Sidebar/workspace | Done in t-7679.2: Paseo's workspace keyboard shortcuts and their Shortcuts dialog, History with the archived sessions and Unarchive, attention on every session (`question.list`), the session title on its tab. Done in t-7679.5: the tab context menu, drag order and tabs kept across reload, resizable sidebar and dock, the command center (⌘K), favicon and title status, browser notifications when a session waits. Still missing: split panes. |
 | Settings | Done in t-7679.3: settings kept across reload (localStorage, never the token), Appearance › Theme (System/Light/Dark with Paseo's light palette), Reset, the New session screen (Paseo's new agent tab: first message, team/model/thinking/permissions controls, `session.preview`, remembered choices). Still missing: fonts and sizes, Paseo's other themes, chat display settings, library content (blocked: GW denies `library.get/save`), providers (blocked: §14), client diagnostics. |
-| Rest | i18n (Vietnamese/English). Stacking toasts. Browser notifications when an agent needs input. Error boundary. |
+| Rest | i18n (Vietnamese/English). Stacking toasts. Error boundary. (Browser notifications when a session waits: done in t-7679.5.) |
 
 ## 2. Chat/timeline and composer
 
@@ -103,17 +104,18 @@ The column **apps/web** gives the state before t-7679.2; **Now** gives it after.
 | Pinned section; display preferences (grouping, filters, title source) | P:sidebar/pinned-section-header.tsx, display-preferences/menu.tsx | Thiếu / Một phần | client only | P1 | Thiếu / Một phần |
 | Workspace labels, hover card | P:workspace-labels/, workspace-hover-card.tsx | Thiếu | no / partial | P2 | Thiếu |
 | Status dot with attention on every session | P:components/agent-status-dot.tsx | Một phần: needs_input only for the attached tree | yes: `question.list` | P0 | **Đã làm**: `question.list` polled every 5 s per workspace; the open tree's own questions count at once; needs_input outranks running, as Paseo's buckets (W:lib/controller.js refreshAttention, needsInput; Sidebar.tsx; History.tsx) |
-| Sidebar items: New workspace, History, Search, Schedules, Usage | P:sidebar-nav/model.ts | Một phần: New session, Search | History: yes | P1 | Một phần: New session (⌘N badge on hover), History, Search (⌘K badge); Schedules and Usage have no backend |
+| Sidebar items: New workspace, History, Search, Schedules, Usage | P:sidebar-nav/model.ts | Một phần: New session, Search | History: yes | P1 | Một phần: New session (⌘N badge on hover), History, Search (an inline filter; since t-7679.5 ⌘K opens the command center, which also has "Search sessions in the sidebar"); Schedules and Usage have no backend |
 | History screen (search, load more, archived, restore) | P:screens/sessions-screen.tsx | Thiếu: archived sessions are hidden (W:lib/controller.js session list) | yes: `session.list includeArchived`, `session.archive archived:false` | P0 | **Đã làm**: date sections, search, Archived and Needs input badges, Refresh; an archived session opens with Paseo's "archived" callout and Unarchive in place of the composer (W:app/History.tsx, lib/history.js, controller loadHistory/restoreSession). No Load more: `session.list` has no paging |
 | Workspace header menu (new agent/terminal, copy path/branch, import) | P:screens/workspace/workspace-header-menu.tsx | Một phần: Rename, Copy ID, Archive | partial | P1 | Một phần |
 | Tab row and + New tab | P:workspace-desktop-tabs-row.tsx | Có | yes | none | Có; ⌘T opens the + menu |
-| Tab context menu, drag order, kept across reload | P:workspace-tab-menu.ts, drag-reorder/, workspace-tabs/model.ts | Thiếu | client only | P1 | Thiếu |
+| Tab context menu, drag order, kept across reload | P:workspace-tab-menu.ts, drag-reorder/, workspace-tabs/model.ts, stores/workspace-layout-store.ts | Thiếu | client only | P1 | **Đã làm** (t-7679.5): right click (or Shift+F10 / the Menu key) on a tab opens Paseo's menu with its labels and order: Copy agent id (with the id's first 7 characters) and Rename (the session's tab: renames the session) on agent tabs, Copy task id on task tabs (ALP), then Close to the left / Close to the right / Close other tabs (disabled at the ends, as Paseo) and Close; closing the session's tab closes the session view as its × does (so the close actions of one of the session's other agent tabs leave the session's tab open), and the draft stays while its session starts; after a close the tab beside the closed active one comes forward, or the tab the menu was opened on. Copy resume command and Reload agent are left out (ALP has neither). Tabs drag into another order with the pointer (5 px before a press becomes a drag, as Paseo's activation distance; the row shows the order live). Each workspace's tabs (scoped by gateway and path) are kept in localStorage `alp-web:layout` v1: the open session (reopened after a reconnect once the list shows it is still there), its other agent tabs, task and panel tabs, the order and the active tab; ids only, never the token; at most 20 workspaces (W:app/tabs.tsx, Workspace.tsx, components/ui/menu.tsx ContextMenu, lib/layout.js) |
 | Split panes | P:components/split-container.tsx | Thiếu | client only | P1 | Thiếu |
 | Explorer dock with tabs | P:screens/workspace/explorer-sidebar.tsx | Có | Changes/Files: no | none | Có |
-| Resizable sidebar and dock | P:sidebar-resize-handle.tsx | Thiếu (fixed 320px) | client only | P1 | Thiếu |
-| Keyboard shortcuts (new agent, toggle panels, navigate, archive) and their help dialog | P:keyboard/actions.ts, keyboard-shortcuts-dialog.tsx | Thiếu: only Esc, plus Cmd+L, Escape and Shift+Tab in chat | client only | P0 | **Đã làm**: the web build's bindings, Mod = Cmd on a Mac, Ctrl elsewhere: ⌘N new session, ⌘⇧⌫ archive, ⌥1-9 / ⌥[ ⌥] sessions, ⌘T new tab menu, ⌘⇧A agent, ⌘⇧G Changes, ⌘⇧E Files, ⌘⇧T terminal, ⌥⇧W close tab, ⌥⇧1-9 / ⌥⇧[ ⌥⇧] tabs, ⌘B / ⌘E (or Ctrl+Backquote) / ⌘. sidebars, ⌘, settings, ⌘K search, ? the searchable Shortcuts dialog (W:lib/shortcuts.js, app/Shortcuts.tsx, App.tsx). Left out, as ALP has no such feature: open project, search files, pin, browser tabs, panes, focus mode, theme, voice. Shortcuts wait while a dialog is open. ⌥1-9 and ⌥[ ⌥] follow the full session list even while the sidebar search filters it. No rebinding |
-| Command center (Cmd+K) | P:command-center/ | Thiếu | partial (sessions and tasks: yes; files: no) | P1 | Thiếu: ⌘K opens the sidebar's session search for now |
-| Favicon status | P:hooks/use-favicon-status | Thiếu | yes | P1 | Thiếu |
+| Resizable sidebar and dock | P:sidebar-resize-handle.tsx, resize-handle.tsx, split-container.tsx | Thiếu (fixed 320px) | client only | P1 | **Đã làm** (t-7679.5): a 10 px handle over each inner edge, col-resize cursor, a highlight on hover and while dragging; Paseo's bounds: sidebar 320 (200–600, never past the window width minus 400), explorer 320 (240–720, never past its container, the window less the docked sidebar, minus 400, so the center keeps 400 px); kept in `alp-web:layout` (one explorer width for all workspaces, where Paseo keeps one per workspace). ALP adds the arrow keys (Shift for 48 px), Home and End on the focused handle (a `separator` with its value) (W:app/ResizeHandle.tsx) |
+| Keyboard shortcuts (new agent, toggle panels, navigate, archive) and their help dialog | P:keyboard/actions.ts, keyboard-shortcuts-dialog.tsx | Thiếu: only Esc, plus Cmd+L, Escape and Shift+Tab in chat | client only | P0 | **Đã làm**: the web build's bindings, Mod = Cmd on a Mac, Ctrl elsewhere: ⌘N new session, ⌘⇧⌫ archive, ⌥1-9 / ⌥[ ⌥] sessions, ⌘T new tab menu, ⌘⇧A agent, ⌘⇧G Changes, ⌘⇧E Files, ⌘⇧T terminal, ⌥⇧W close tab, ⌥⇧1-9 / ⌥⇧[ ⌥⇧] tabs, ⌘B / ⌘E (or Ctrl+Backquote) / ⌘. sidebars, ⌘, settings, ⌘K the command center (t-7679.5; it was the sidebar's search before), ? the searchable Shortcuts dialog (W:lib/shortcuts.js, app/Shortcuts.tsx, App.tsx). Left out, as ALP has no such feature: open project, search files, pin, browser tabs, panes, focus mode, theme, voice. Shortcuts wait while a dialog is open. ⌥1-9 and ⌥[ ⌥] follow the full session list even while the sidebar search filters it. No rebinding |
+| Command center (Cmd+K) | P:command-center/ | Thiếu | partial (sessions and tasks: yes; files: no) | P1 | **Đã làm** (t-7679.5): ⌘K (Ctrl+K) toggles it: a 640 px panel near the top, sections Workspace actions, Actions, then Sessions; with no query only the always-shown actions (New session; History, Settings, Keyboard shortcuts) and the first five sessions (waiting, then running, then most recent); a query matches every word with Paseo's tiers (exact, whole word, prefix, word start, substring, letters in order; hidden keywords rank last) and puts the best section first. Actions ALP has: New session, New terminal, Open Changes/Files/Diff/Tasks/Agents, Previous/Next tab, Close current tab, Close to the left/right, Close other tabs, Rename/Copy ID/Archive session, Toggle explorer, Toggle left sidebar, Search sessions in the sidebar; shortcut hints beside them. Arrows move and wrap, Enter runs, Escape/⌘K/a click outside close, focus goes back. No files scope or workspaces section (no backend; one project per token) (W:app/CommandCenter.tsx, lib/command-center.js, App.tsx CommandCenterHost) |
+| Favicon status | P:hooks/use-favicon-status | Thiếu | yes | P1 | **Đã làm** (t-7679.5): the ALP favicon with patch 0004's corner badge, blue while a session of the workspace runs, green while one waits for an answer (running first, as Paseo); the window title is the open session's name, else the workspace's (W:app/attention.tsx, lib/attention.js, public/favicon-*.svg) |
+| Browser notifications when a session needs input | P:utils/os-notifications.ts, contexts/session-context.tsx | Thiếu | yes (`question.list`, the open tree's questions) | P1 | **Đã làm** (t-7679.5): "Agent needs attention" with the session's name and the question (markdown stripped, 220 characters) when a session starts waiting, unless the window is visible, focused and on that session; a click focuses the window and opens the session. Permission is asked only from Settings › General › This browser › Notifications › Enable (a click), where Paseo's web build asks on its first notification; questions already waiting when the workspace opens do not notify. Finished turns do not notify (ALP has no attention event for them) |
 | Mobile gestures | P:mobile-panels/gestures.ts | Một phần (drawers, no swipe) | client only | P2 | Một phần |
 | Board (ALP pins) | none in Paseo | Thiếu | yes: `board.list` | P1 | Thiếu |
 
@@ -221,14 +223,23 @@ size: 1440×900, phone 412×915. The images are in `docs/screenshots/`.
 | Settings › General | settings-general-apps-web.png | settings-general-paseo-web.png |
 | Settings › Appearance | settings-appearance-apps-web.png | settings-appearance-paseo-web.png |
 | Light theme (Appearance, New session) | settings-appearance-light-apps-web.png, new-session-light-apps-web.png | — |
+| Tab context menu on the session's tab (t-7679.5) | workspace-tab-menu-apps-web.png | none: the script's right click did not open paseo-web's menu on the bridged session |
+| Command center (⌘K), empty query | workspace-command-center-apps-web.png | workspace-command-center-paseo-web.png |
+| Sidebar dragged 120 px wider | workspace-resized-apps-web.png | workspace-resized-paseo-web.png |
 
 `node apps/web/scripts/compare-paseo.mjs --only workspace` captures the attention, Shortcuts and
-History rows; `--only new-session` the t-7679.3 rows; `--only chat` the others.
+History rows; `--only new-session` the t-7679.3 rows; `--only workspace-p1` the t-7679.5 rows; `--only chat` the others.
 
 Differences on the New session screenshots, kept on purpose: paseo-web's draft tab shows only the
 composer (with a "Select team" picker of teams and their descriptions); apps/web adds the Title field
 and the preview card, and has separate Team, Model and Thinking controls because ALP sessions take a
 team, a main-agent model and an effort.
+
+Differences on the t-7679.5 screenshots, kept on purpose: paseo-web's command center lists its own
+features (New workspace, Import session, Schedules, Pin to top, ALP's plugin commands) and agents,
+not sessions; apps/web lists the actions ALP has and the workspace's sessions, so its placeholder
+says "sessions and agents" in place of "files, workspaces". The favicon and notifications have no
+screenshot (the browser's chrome); e2e/tabs.spec.js checks them.
 
 Differences on the workspace screenshots, kept on purpose: paseo-web groups sessions under a
 workspace row (ALP has no `workspace.*`), lists Schedules and Usage (no backend), and its Shortcuts
