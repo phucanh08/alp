@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -77,6 +77,50 @@ test('Phở and Cafe give main the coordination text it had before teams, and a 
     // Main still runs on Opus 5.5 with high effort, in a team or a custom graph.
     assert.deepEqual([runtimes[0].kind, runtimes[0].config.model, runtimes[0].config.thinking], ['claude', 'claude-opus-5-5', 'high']);
   }
+});
+
+test('session.preview names the team, main and model session.create runs, from one resolution (t-5586)', async t => {
+  const ran = snapshot => ({ team: snapshot.workflow.mode, teamLabel: snapshot.teamLabel, agent: snapshot.agent, runtime: snapshot.runtime, model: snapshot.model, mode: snapshot.mode, thinking: snapshot.thinking });
+  const cases = [
+    // A folder without settings: init writes settings naming Phở before the session runs.
+    ['no workflow, no settings', {}, {}, 'pho'],
+    // Settings without workflow.mode: the custom graph of settings' delegation, not Phở.
+    ['no workflow, settings without workflow.mode', { '.alp/settings.json': { delegation: { main: ['peer'] } } }, {}, 'custom'],
+    ['no workflow, settings name cafe', { '.alp/settings.json': { workflow: { mode: 'cafe' } } }, {}, 'cafe'],
+    ['explicit workflow over settings', { '.alp/settings.json': { workflow: { mode: 'cafe' } } }, { workflow: 'pho' }, 'pho'],
+    ['explicit workflow, no settings', {}, { workflow: 'smart' }, 'pho'],
+  ];
+  for (const [name, entries, spec, team] of cases) {
+    const root = await fixture(t);
+    await files(root, entries);
+    const runtimes = [];
+    const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(root, '.runs'), supervisor: false });
+    t.after(() => runtime.shutdown());
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const settingsBefore = await readFile(path.join(root, '.alp/settings.json'), 'utf8').catch(() => undefined);
+    const { teams, ...preview } = await runtime.preview({ cwd: root, ...spec });
+    // A preview writes nothing.
+    assert.equal(await readFile(path.join(root, '.alp/settings.json'), 'utf8').catch(() => undefined), settingsBefore, name);
+    assert.ok(teams.length > 0, name);
+    assert.equal(preview.team, team, name);
+    // A client sends back the team the preview named, as the ACP agent and apps/web do; without one it is the same session.
+    for (const [index, sent] of [{ ...spec }, { ...spec, workflow: preview.team }].entries()) {
+      const id = `root-${index}`;
+      const opened = await runtime.open(id, { cwd: root, ...sent });
+      assert.deepEqual(JSON.parse(JSON.stringify(ran(opened))), preview, `${name} (${index ? 'team sent back' : 'as previewed'})`);
+      assert.equal(runtimes.at(-1).kind, preview.runtime, name);
+      assert.equal(runtimes.at(-1).config.model, preview.model, name);
+      await runtime.close(id);
+    }
+  }
+  // `custom` may be sent only when it is what would run anyway.
+  const root = await fixture(t);
+  await files(root, { '.alp/settings.json': { workflow: { mode: 'pho' } } });
+  const runtime = createAlpRuntime({ transport: fakeTransport([]), runLogDir: path.join(root, '.runs'), supervisor: false });
+  t.after(() => runtime.shutdown());
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await assert.rejects(runtime.preview({ cwd: root, workflow: 'custom' }), /Choose a team/);
+  await assert.rejects(runtime.open('root', { cwd: root, workflow: 'custom' }), /Choose a team/);
 });
 
 test('teams come from the built-ins, then the library, then the project, and are checked', async t => {

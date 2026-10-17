@@ -156,8 +156,12 @@ export type AlpRuntime = {
 import type { SessionPreview } from '@anhlp/alp-protocol/session';
 export type { SessionPreview } from '@anhlp/alp-protocol/session';
 
-/** The team a viewer starts a root in when neither it nor the project's settings choose one, as Paseo does. */
-export const DEFAULT_TEAM = 'pho';
+/**
+ * The team `alp init` names in a new project's settings (core INIT_TEAM). Kept for compatibility;
+ * it is not the default of a session: preview and create both resolve that through core
+ * `defaultTeam` (settings without workflow.mode run `custom`).
+ */
+export { INIT_TEAM as DEFAULT_TEAM } from '@anhlp/alp-core/workflow';
 
 import type { RecoveryOutcome, Pause, PauseState } from '@anhlp/alp-protocol/session';
 export type { RecoveryOutcome, Pause, PauseState } from '@anhlp/alp-protocol/session';

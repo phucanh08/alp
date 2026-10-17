@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { access, readFile, stat } from 'node:fs/promises';
-import { resolveWorkflow } from '@anhlp/alp-core/workflow';
+import { defaultTeam, resolveWorkflow } from '@anhlp/alp-core/workflow';
 import { initProject } from '@anhlp/alp-core/init';
 import { profileModel, agentProfiles, selectedProfile } from '@anhlp/alp-core/profiles';
 import { jsonObject, resolveAgent } from '@anhlp/alp-core/resolver';
@@ -95,13 +95,13 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
     if (scaffoldMissing) await initProject(spec.cwd, { ...starter, library: options.library });
     else if (!spec.restore) {
       const settings = await jsonObject(settingsFile, 'INVALID_SETTINGS');
-      await initProject(spec.cwd, { ...starter, library: options.library, onlyManagedProfiles: true, teamIds: [teamOf(spec.workflow ?? settings.workflow?.mode ?? 'custom')] });
+      await initProject(spec.cwd, { ...starter, library: options.library, onlyManagedProfiles: true, teamIds: [spec.workflow === undefined ? defaultTeam(settings) : teamOf(spec.workflow)] });
     }
   }
   if (options.library) await ensureLibrary(options.library, options.templates ? { templates: options.templates } : {});
   const restored = spec.restore;
   if (restored && spec.agent !== undefined && spec.agent !== restored.agent) throw new Error('Cannot resume a thread as a different ALP agent');
-  const { team, ...workflow } = await resolveWorkflow(spec.cwd, spec.workflow, restored?.workflow, { library: options.library, templates: options.templates });
+  const { team, ...workflow } = await resolveWorkflow(spec.cwd, spec.workflow, restored?.workflow, { library: options.library, templates: options.templates, scaffold: options.initialize === false });
   const agent = await resolveAgent(spec.cwd, { agent: spec.agent ?? restored?.agent, library: options.library, templates: options.templates });
   const oracleModels = team?.oracleModels ?? ORACLE_MODELS;
   if (agent.name === 'oracle' && !restored && !oracleModels.includes(spec.model ?? '')) throw new Error(`Oracle runs on ${oracleModels.join(' or ')}; choose one`);

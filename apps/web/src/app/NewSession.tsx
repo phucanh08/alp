@@ -91,9 +91,9 @@ export function NewSessionScreen() {
   const canWrite = can(principal ?? undefined, 'session.write');
   const blocked = !canWrite ? 'Your access token can view sessions but not start them.' : undefined;
   const teams = catalog.teams.length ? catalog.teams : trusted?.teams ?? [];
-  // The team is always sent: alpd's session.create without one runs the custom graph, while
-  // session.preview without one answers for the default team. So the session gets the team a
-  // preview of these choices named (else the first listed), which is what the person saw.
+  // The team is always sent: the session gets the team a preview of these choices named (else the
+  // first listed), which is what the person saw. alpd's preview and create resolve the same default
+  // (t-5586), so sending it back, `custom` included, runs what the preview showed.
   const resolved = startTeam({ chosen: choices.team, previewTeam: trusted?.team, previewSettled: settled, previewError: preview.error,
     previewBlocked: preview.status === 'blocked', previewNeedsRead: !can(principal ?? undefined, 'session.read'),
     teams, teamsKnown: catalog.teamsKnown, teamsUnavailable: catalog.teamsUnavailable });
