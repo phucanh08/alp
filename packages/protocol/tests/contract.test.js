@@ -50,6 +50,21 @@ test('event types and item kinds in the schema are those of the TypeScript union
   assert.deepEqual(ipc.$defs.unknownItem.properties.kind.not.enum.sort(), [...new Set(itemKinds)].sort());
 });
 
+test('tool-call detail types in the schema are those of the TypeScript union; any other type is accepted as a later one', async () => {
+  const events = await source('events.ts');
+  const detailTypes = Array.from(events.split('export type ToolCallDetail =')[1].split(';\n\n')[0].matchAll(/\| \{\s*type: '([^']+)'/g), match => match[1]);
+  const variants = ipc.$defs.toolCallDetail.oneOf;
+  const known = variants.filter(variant => variant.properties.type.const).map(variant => variant.properties.type.const);
+  assert.deepEqual(known.sort(), [...detailTypes].sort());
+  assert.deepEqual(variants.find(variant => !variant.properties.type.const).properties.type.not.enum.sort(), [...detailTypes].sort());
+  const tool = ipc.$defs.knownItem.oneOf.find(item => item.properties.kind.const === 'tool_call');
+  assert.deepEqual(tool.properties.detail, { $ref: '#/$defs/toolCallDetail' });
+  const detail = value => validateDefinition('toolCallDetail', value);
+  for (const type of detailTypes.filter(type => !['shell', 'unknown', 'sub_agent', 'plain_text'].includes(type))) assert.ok(detail({ type }).length, `${type} without its required fields`);
+  assert.deepEqual(detail({ type: 'diagram', anything: 1 }), []);
+  assert.ok(detail({ type: 7 }).length);
+});
+
 test('golden fixtures: Ajv and the built-in checker agree with every verdict', () => {
   const message = ajv.getSchema(ipc.$id);
   const envelope = ajvDefinition('envelope');

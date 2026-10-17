@@ -21,10 +21,38 @@ export type TimelineItem =
       name: string;
       status: 'running' | 'completed' | 'failed';
       error?: string;
-      detail:
-        | { type: 'shell'; command: string; cwd?: string; output: string; exitCode?: number | null }
-        | { type: 'unknown'; input: unknown; output: unknown };
+      detail: ToolCallDetail;
     };
+
+/**
+ * What a tool call did, typed by kind (ALPD §4.2), in the shapes of Paseo's ToolCallDetail.
+ * `shell` is a command; `unknown` the fallback with the tool's raw input and output. The typed
+ * kinds between come from the runtime's own tools; filePath is the path the runtime reported.
+ * The runtime clips each string field of a typed detail (not shell, not unknown) to 65,536
+ * characters, filePaths to 200 entries and webResults to 50. A receiver shows a detail whose
+ * type it does not know as unknown: new types may be added within v1.
+ */
+export type ToolCallDetail =
+  | { type: 'shell'; command: string; cwd?: string; output: string; exitCode?: number | null }
+  | { type: 'read'; filePath: string; content?: string; offset?: number; limit?: number }
+  | { type: 'edit'; filePath: string; oldString?: string; newString?: string; unifiedDiff?: string }
+  | { type: 'write'; filePath: string; content?: string }
+  | {
+      type: 'search';
+      query: string;
+      toolName?: 'search' | 'grep' | 'glob' | 'web_search';
+      content?: string;
+      filePaths?: string[];
+      webResults?: Array<{ title: string; url: string }>;
+      numFiles?: number;
+      numMatches?: number;
+      truncated?: boolean;
+    }
+  | { type: 'fetch'; url: string; prompt?: string; result?: string; code?: number }
+  | { type: 'sub_agent'; subAgentType?: string; description?: string; log?: string }
+  | { type: 'plan'; text: string }
+  | { type: 'plain_text'; label?: string; text?: string }
+  | { type: 'unknown'; input: unknown; output: unknown };
 
 /**
  * How much a session has used, from its runtime's latest token report (ALPD §57), as Paseo's

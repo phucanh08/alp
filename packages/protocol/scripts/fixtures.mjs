@@ -56,18 +56,31 @@ const items = [
   { kind: 'todo', id: 't-1', items: [{ id: 'bd-1', text: 'Viết test', status: 'in_progress' }] },
   { kind: 'tool_call', id: 'tc-1', callId: 'call-1', name: 'shell', status: 'completed', detail: { type: 'shell', command: 'npm test', cwd: '/work/project', output: 'ok', exitCode: 0 } },
   { kind: 'tool_call', id: 'tc-2', callId: 'call-2', name: 'alp_ask', status: 'failed', error: 'denied', detail: { type: 'unknown', input: { to: 'user' }, output: null } },
+  { kind: 'tool_call', id: 'tc-3', callId: 'tc-3', name: 'Read', status: 'completed', detail: { type: 'read', filePath: '/work/project/src/a.ts', content: 'export const a = 1;\n', offset: 1, limit: 200 } },
+  { kind: 'tool_call', id: 'tc-4', callId: 'tc-4', name: 'Edit', status: 'completed', detail: { type: 'edit', filePath: '/work/project/src/a.ts', oldString: 'a = 1', newString: 'a = 2', unifiedDiff: '@@ -1 +1 @@\n-export const a = 1;\n+export const a = 2;\n' } },
+  { kind: 'tool_call', id: 'tc-5', callId: 'tc-5', name: 'Write', status: 'running', detail: { type: 'write', filePath: 'docs/ghi-chú.md', content: '# Ghi chú\n' } },
+  { kind: 'tool_call', id: 'tc-6', callId: 'tc-6', name: 'Grep', status: 'completed', detail: { type: 'search', query: 'TODO', toolName: 'grep', content: 'src/a.ts:3: // TODO', filePaths: ['src/a.ts'], numFiles: 1, numMatches: 1, truncated: false } },
+  { kind: 'tool_call', id: 'tc-7', callId: 'tc-7', name: 'web_search', status: 'completed', detail: { type: 'search', query: 'json-rpc 2.0', toolName: 'web_search', webResults: [{ title: 'JSON-RPC 2.0 Specification', url: 'https://www.jsonrpc.org/specification' }] } },
+  { kind: 'tool_call', id: 'tc-8', callId: 'tc-8', name: 'WebFetch', status: 'failed', error: 'Request failed with status code 404', detail: { type: 'fetch', url: 'https://example.com/missing', prompt: 'Summarize', code: 404 } },
+  { kind: 'tool_call', id: 'tc-9', callId: 'tc-9', name: 'Task', status: 'running', detail: { type: 'sub_agent', subAgentType: 'Explore', description: 'Find the parser', log: '' } },
+  { kind: 'tool_call', id: 'tc-10', callId: 'tc-10', name: 'ExitPlanMode', status: 'completed', detail: { type: 'plan', text: '1. Đọc\n2. Sửa' } },
+  { kind: 'tool_call', id: 'tc-11', callId: 'tc-11', name: 'Skill', status: 'completed', detail: { type: 'plain_text', label: 'smart-commits', text: 'Launching skill: smart-commits' } },
 ];
 for (const event of events) add('envelope', `event ${event.type}${event.state ? ` ${event.state}` : ''}`, env(event));
-for (const item of items) add('envelope', `item ${item.kind}${item.detail ? ` ${item.detail.type}` : ''}`, env({ type: 'item', item }));
+for (const item of items) add('envelope', `item ${item.kind}${item.detail ? ` ${item.detail.type}${item.detail.toolName ? ` ${item.detail.toolName}` : ''}` : ''}`, env({ type: 'item', item }));
 add('envelope', 'item user_message with images', env({ type: 'item', item: { kind: 'user_message', id: 'user:m-2', text: 'Xem ảnh', clientMessageId: 'm-2', images: 2 } }));
 add('envelope', 'announcement without a cursor', { sessionId: 'ses_fixture', epoch: 'announce-2026', seq: 0, ts, event: { type: 'question', question } });
 add('envelope', 'a future event type (receivers ignore it)', env({ type: 'tree.renamed', title: 'x' }));
 add('envelope', 'a future item kind (receivers ignore it)', env({ type: 'item', item: { kind: 'image', id: 'img-1', url: 'x' } }));
+add('envelope', 'a future tool-call detail type (receivers show it as unknown)', env({ type: 'item', item: { kind: 'tool_call', id: 'tc-12', callId: 'tc-12', name: 'Screenshot', status: 'completed', detail: { type: 'image', path: '/tmp/s.png' } } }));
 add('envelope', 'unknown envelope properties', env({ type: 'session.ready' }, { trace: { span: 'abc' } }));
 add('envelope', 'negative seq', env({ type: 'session.ready' }, { seq: -1 }), false);
 add('envelope', 'cursor 0', env({ type: 'session.ready' }, { cursor: 0 }), false);
 add('envelope', 'item event without its item', env({ type: 'item' }), false);
 add('envelope', 'known item kind missing fields', env({ type: 'item', item: { kind: 'notice', id: 'n' } }), false);
+add('envelope', 'edit detail without its filePath', env({ type: 'item', item: { kind: 'tool_call', id: 'tc-x', callId: 'tc-x', name: 'Edit', status: 'completed', detail: { type: 'edit', newString: 'x' } } }), false);
+add('envelope', 'search detail with a non-string file path', env({ type: 'item', item: { kind: 'tool_call', id: 'tc-x', callId: 'tc-x', name: 'Glob', status: 'completed', detail: { type: 'search', query: '*.ts', filePaths: [1] } } }), false);
+add('envelope', 'tool-call detail without a type', env({ type: 'item', item: { kind: 'tool_call', id: 'tc-x', callId: 'tc-x', name: 'Read', status: 'completed', detail: { filePath: 'a' } } }), false);
 add('envelope', 'known event with a wrong enum', env({ type: 'turn.ended', turnId: 't', state: 'stopped' }), false);
 add('envelope', 'usage before the runtime said its window', env({ type: 'usage', usage: { contextWindowUsedTokens: 1200 } }));
 add('envelope', 'session.updated with usage', env({ type: 'session.updated', session: { ...snapshot, usage: { contextWindowUsedTokens: 42000, contextWindowMaxTokens: 200000 } } }));
@@ -231,6 +244,6 @@ P('extension.register', {}, false, 'without method');
 P('question.answer', { text: 'có' }, false, 'without questionId');
 R('session.prompt', { outcome: 'unknown' }, false, 'result with outcome unknown (that is an error, never a result)');
 add('envelope', 'fractional cursor', env({ type: 'session.ready' }, { cursor: 1.5 }), false);
-for (const fixture of cases) if (['a future event type (receivers ignore it)', 'a future item kind (receivers ignore it)', 'unknown envelope properties'].includes(fixture.name)) fixture.projection = false;
+for (const fixture of cases) if (['a future event type (receivers ignore it)', 'a future item kind (receivers ignore it)', 'a future tool-call detail type (receivers show it as unknown)', 'unknown envelope properties'].includes(fixture.name)) fixture.projection = false;
 writeFileSync(out, JSON.stringify({ $comment: 'Golden v1 values (docs/protocol/alp-json-rpc-v1.md §11). check: message (one frame), envelope, params or result of `method`. Every valid case must pass schema/methods-v1.json and the TypeScript projection in src/; every invalid one must fail the schema; `projection: false` marks values the closed TypeScript unions deliberately leave out. Implementations in any language can load this file.', cases }, null, 1) + '\n');
 console.log(cases.length);
