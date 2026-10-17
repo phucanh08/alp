@@ -60,6 +60,130 @@ export const CONTENT_TYPES = Object.freeze(['text']);
 export const LIBRARY_ROW_FIELDS = Object.freeze(['name', 'source', 'overrides', 'description', 'usedBy']);
 export const TEAM_ROW_FIELDS = Object.freeze(['id', 'label', 'description', 'source', 'overrides', 'error']);
 export const MODEL_ROW_FIELDS = Object.freeze(['id', 'label', 'efforts', 'effort']);
+/** Fields of a library.get answer passed on; `content` and `secrets` are the gateway's own (projectLibraryContent). */
+export const LIBRARY_ENTRY_FIELDS = Object.freeze(['kind', 'name', 'source', 'overrides', 'revision', 'usedBy', 'librarySkills']);
+
+/** What stands for a hidden value in library.get content, as alpd's own marker (docs/protocol/alp-json-rpc-v1.md §15.3). */
+export const SECRET_MARKER = Object.freeze({ $secret: 'keep' });
+
+const plain = (/** @type {unknown} */ value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const pointerOf = (/** @type {string[]} */ parts) => parts.map(part => `/${part.replaceAll('~', '~0').replaceAll('/', '~1')}`).join('');
+const isString = (/** @type {unknown} */ value) => typeof value === 'string';
+const isBoolean = (/** @type {unknown} */ value) => typeof value === 'boolean';
+const isNumber = (/** @type {unknown} */ value) => typeof value === 'number' && Number.isFinite(value);
+const isStrings = (/** @type {unknown} */ value) => Array.isArray(value) && value.every(isString);
+const isStringOrNumber = (/** @type {unknown} */ value) => isString(value) || isNumber(value);
+
+/**
+ * How each field of an entry's content leaves the gateway. A function keeps a value of that type
+ * (others are dropped); 'secret' answers the marker in its place; 'secretValues' keeps an object's
+ * keys and marks each value; 'secretItems' keeps a list's length and marks each item; 'program'
+ * keeps a program name, and marks a command with whitespace, which may carry inline arguments;
+ * { $each } projects every value of an object, { $list } every item of a list, { $orFalse } keeps
+ * false or projects an object; any other object projects the fields it names. A field the map
+ * does not name is dropped, so a field alpd or core adds later stays on the host until it is
+ * reviewed here. ($-names never collide with content fields: $schema is dropped.)
+ * @typedef {((value: unknown) => boolean) | 'secret' | 'secretValues' | 'secretItems' | 'program' | { $each: Projection } | { $list: Projection } | { $orFalse: Projection } | { [key: string]: Projection }} Projection
+ */
+const MODEL_ENTRY = { id: isString, label: isString, description: isString };
+const MEMBER = { role: isString, model: isString, thinking: isString };
+/** @type {Readonly<Record<string, { [key: string]: Projection }>>} */
+const LIBRARY_CONTENT = Object.freeze({
+  agents: {
+    instructions: isString,
+    config: { description: isString, provider: isString, model: isString, thinking: isString, mode: isString, context: isStringOrNumber, autocompact: isStringOrNumber, skills: isStrings, mcp: isStrings, hooks: isStrings },
+  },
+  skills: { body: isString },
+  // url may hold a token in its userinfo, query or path; cwd is a host path.
+  mcp: { server: { command: 'program', args: 'secretItems', env: 'secretValues', headers: 'secretValues', url: 'secret', cwd: 'secret' } },
+  // A hook's command is a shell line, which can carry a token.
+  hooks: { hook: { description: isString, event: isString, command: 'secret', blocking: isBoolean, timeoutSec: isNumber, match: { agent: isString, label: isString } } },
+  teams: {
+    team: {
+      label: isString, description: isString, main: isString, maxPeers: isNumber, oracleModels: isStrings,
+      members: { $each: MEMBER }, delegation: { $each: isStrings }, oracleThinking: { $each: isString },
+      modelSetup: { mode: isString, preset: isString },
+      supervisor: { $orFalse: { agent: isString, model: isString, thinking: isString } },
+    },
+    houseRules: isString,
+  },
+  providers: {
+    provider: {
+      kind: isString, label: isString, description: isString, enabled: isBoolean, readOnlyMode: isString,
+      command: 'program', args: 'secretItems', env: 'secretValues', params: 'secret',
+      models: { $list: MODEL_ENTRY }, additionalModels: { $list: MODEL_ENTRY },
+    },
+  },
+});
+
+/**
+ * An entry's content as a remote client may see it, and the JSON Pointers of the values it hides.
+ * alpd hides env and header values itself (§15.3); the gateway hides every other field that can
+ * hold a secret and drops what it does not know. A kind it does not know answers no content.
+ * @param {string} kind @param {unknown} content
+ * @returns {{ content: Record<string, unknown>, secrets: string[] }}
+ */
+export function projectLibraryContent(kind, content) {
+  /** @type {string[]} */
+  const secrets = [];
+  const map = Object.hasOwn(LIBRARY_CONTENT, kind) ? LIBRARY_CONTENT[kind] : undefined;
+  if (!map || !plain(content)) return { content: {}, secrets };
+  /** @param {any} rule @param {unknown} value @param {string[]} parts @returns {unknown} */
+  const project = (rule, value, parts) => {
+    if (typeof rule === 'function') return rule(value) ? (Array.isArray(value) ? [...value] : value) : undefined;
+    if (rule === 'secret') { secrets.push(pointerOf(parts)); return { ...SECRET_MARKER }; }
+    if (rule === 'program') {
+      if (!isString(value)) return undefined;
+      if (!/\s/.test(value)) return value;
+      secrets.push(pointerOf(parts));
+      return { ...SECRET_MARKER };
+    }
+    if (rule === 'secretValues') {
+      if (!plain(value)) return undefined;
+      return Object.fromEntries(Object.keys(/** @type {object} */ (value)).map(key => { secrets.push(pointerOf([...parts, key])); return [key, { ...SECRET_MARKER }]; }));
+    }
+    if (rule === 'secretItems') {
+      if (!Array.isArray(value)) return undefined;
+      return value.map((_, index) => { secrets.push(pointerOf([...parts, String(index)])); return { ...SECRET_MARKER }; });
+    }
+    if (Object.hasOwn(rule, '$list')) {
+      if (!Array.isArray(value)) return undefined;
+      return value.map((item, index) => project(rule.$list, item, [...parts, String(index)])).filter(item => item !== undefined);
+    }
+    if (Object.hasOwn(rule, '$orFalse')) return value === false ? false : project(rule.$orFalse, value, parts);
+    if (!plain(value)) return undefined;
+    const source = /** @type {Record<string, unknown>} */ (value);
+    /** @type {Record<string, unknown>} */
+    const out = {};
+    if (Object.hasOwn(rule, '$each')) {
+      for (const key of Object.keys(source)) {
+        const kept = project(rule.$each, source[key], [...parts, key]);
+        if (kept !== undefined) out[key] = kept;
+      }
+      return out;
+    }
+    for (const key of Object.keys(rule)) {
+      if (!Object.hasOwn(source, key)) continue;
+      const kept = project(rule[key], source[key], [...parts, key]);
+      if (kept !== undefined) out[key] = kept;
+    }
+    return out;
+  };
+  return { content: /** @type {Record<string, unknown>} */ (project(map, content, [])), secrets };
+}
+
+/**
+ * The daemon host's machine name as the gateway passes it on in its hello (Paseo's host label,
+ * patch 0017): alpd's os.hostname(), trimmed, at most 253 characters, no control or format
+ * characters (bidi overrides, zero-width), which could make one host look like another.
+ * Anything else answers no hostname.
+ * @param {unknown} value
+ */
+export function hostLabel(value) {
+  if (typeof value !== 'string') return undefined;
+  const name = value.trim();
+  return name && name.length <= 253 && !/[\p{Cc}\p{Cf}]/u.test(name) ? name : undefined;
+}
 
 /** Visible characters: no whitespace, no control characters. */
 const VISIBLE = '[^\\s\\u0000-\\u001f\\u007f-\\u009f]';
@@ -95,7 +219,7 @@ export function isModelId(value) {
 
 /** @type {Readonly<Record<string, Exposure>>} */
 export const EXPOSURE = Object.freeze({
-  'daemon.hello': { status: 'gateway', scope: 'connection', reason: 'Answered by the gateway after its own hello to alpd: capabilities are alpd\'s intersected with FORWARDED_CAPABILITIES; no pid.', tests: ['handshake'] },
+  'daemon.hello': { status: 'gateway', scope: 'connection', reason: 'Answered by the gateway after its own hello to alpd: capabilities are alpd\'s intersected with FORWARDED_CAPABILITIES; alpd\'s hostname when hostLabel accepts it; no pid.', tests: ['handshake'] },
 
   'catalog.get': { status: 'exposed', permission: 'session.read', scope: 'none: the static model and mode catalogue', params: [], tests: ['permission'] },
   'session.list': { status: 'exposed', permission: 'session.read', scope: 'result: sessions whose tree lies in a granted workspace; projectRoot must name one; with limit, alpd pages are read until the filtered page is full', params: ['projectRoot', 'rootsOnly', 'includeClosed', 'includeArchived', 'limit', 'cursor', 'query'], tests: ['permission', 'workspace-param', 'result-filter', 'paging'] },
@@ -128,8 +252,8 @@ export const EXPOSURE = Object.freeze({
   'library.list': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot (required by the gateway); rows (names, descriptions, sources, users) also come from the library and built-in layers; LIBRARY_ROW_FIELDS only, never content', capability: CAPABILITY.library, params: ['kind', 'projectRoot'], tests: ['permission', 'workspace-param', 'row-fields'] },
   'library.models': { status: 'exposed', permission: 'session.read', scope: 'none: model ids and labels, as catalog.get; MODEL_ROW_FIELDS only', capability: CAPABILITY.library, params: [], tests: ['permission', 'row-fields'] },
   'settings.language.get': { status: 'exposed', permission: 'session.read', scope: 'none: the language the user reads', capability: CAPABILITY.settingsLanguage, params: [], tests: ['permission'] },
+  'library.get': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot (required by the gateway); the entry that applies may come from the library or built-in layers, as library.list rows do; read only. Content is projected by projectLibraryContent: listed fields only, every field that can hold a secret (env, headers, url, cwd, args, params, hook commands, commands with spaces) answered as a secret marker and listed in secrets', capability: CAPABILITY.library, params: ['kind', 'name', 'projectRoot', 'scope'], tests: ['permission', 'workspace-param', 'redaction'] },
 
-  'library.get': { status: 'denied', scope: 'library-or-project', reason: 'Answers an entry\'s whole content: MCP servers (URLs that may hold tokens in userinfo or query, args, command), hooks (commands), providers, agents. alpd redacts only env and header values, so no layer is passed on until a redaction contract covers every field that can hold a secret.' },
   'library.save': { status: 'denied', scope: 'library-or-project', reason: 'Configures commands alpd runs on the daemon host (mcp, hooks, providers, agents naming them) and, with sync, writes every known project; not exposed until a policy tells project-scope, non-executable changes apart.' },
   'library.delete': { status: 'denied', scope: 'library-or-project', reason: 'Writes ALP configuration; with library.save.' },
   'library.duplicate': { status: 'denied', scope: 'library-or-project', reason: 'Copies executable configuration, secrets included; with library.save.' },
