@@ -4,11 +4,13 @@ Provider-neutral filesystem agent resolution with a server-side Paseo provider. 
 
 ## Install
 
-The current release is the beta `0.0.0-beta.1` (not published yet): see the
+The current release is the beta `0.0.0-beta.2` (until it is on npm, `@beta` installs
+`0.0.0-beta.1`; check with `npm view @anhlp/alp dist-tags`): see the
 [release notes](docs/alp/beta-release-notes.md) for what it includes and its known issues, and
 [installing, upgrading and removing the beta](docs/alp/beta-install.md) for every step. Name the
-beta when you install (`@beta`, or exactly `@0.0.0-beta.1`); a plain `npm install -g @anhlp/alp`
-installs the older `0.10.0`.
+beta when you install (`@beta`, or exactly `@0.0.0-beta.2`); a plain `npm install -g @anhlp/alp`
+installs whatever npm's `latest` tag points at, which moves to a new beta only after that
+beta's post-publish checks.
 
 Supported: Linux or macOS, Node.js 22 (22.12 or later) or 24, and a signed-in Codex CLI or
 Claude Code on PATH. Windows and Node.js 26 are experimental; Node.js 20 is not supported.

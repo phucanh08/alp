@@ -1,8 +1,8 @@
 # ALP web (Task 10A, beta)
 
-> **Trạng thái beta `0.0.0-beta.1`: deferred.** App `apps/web` (`@anhlp/alp-web`, private) không
+> **Trạng thái beta `0.0.0-beta.2`: deferred.** App `apps/web` (`@anhlp/alp-web`, private) không
 > phát hành trong beta, và gateway nó cần cũng không. "Beta" trong tài liệu này là giai đoạn
-> riêng của app, không phải bản phát hành `0.0.0-beta.1`. Web có trong beta là `alp web` cục bộ
+> riêng của app, không phải bản phát hành `0.0.0-beta.2`. Web có trong beta là `alp web` cục bộ
 > (loopback, port 7433) của `@anhlp/alp-paseo`: xem [beta-install.md](beta-install.md#alp-web-on-this-machine).
 > Kết quả ở cuối tài liệu là bằng chứng lịch sử của nhánh phát triển. Phạm vi: [beta-scope.md](beta-scope.md) §4.
 

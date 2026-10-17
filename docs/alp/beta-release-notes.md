@@ -1,4 +1,142 @@
-# ALP 0.0.0-beta.1 — release notes
+# ALP 0.0.0-beta.2 — release notes
+
+> Draft for `0.0.0-beta.2`, not published yet. Release commit, checksums and the publish results
+> are filled in at publish ([beta-scope.md](beta-scope.md) §6.4, §7). The `0.0.0-beta.1` notes
+> follow below, unchanged.
+
+The second beta of the `alp` CLI and its per-user daemon `alpd`, which run filesystem-defined
+agent teams on Codex CLI and Claude Code, and of the optional plugin that shows them in Paseo and
+serves `alp web` on this machine. The packages, platforms and support levels are the same as in
+`0.0.0-beta.1`.
+
+## Install
+
+```sh
+npm install -g @anhlp/alp@beta                 # CLI and alpd
+paseo plugin add npm:@anhlp/alp-paseo@beta     # optional: the Paseo plugin
+npm install -g @anhlp/alp-paseo@beta           # optional: alp web outside Paseo
+```
+
+From this beta Paseo adds the plugin straight from npm
+([#111](https://github.com/phucanh08/alp/issues/111)); the install-by-path workaround of
+`0.0.0-beta.1` is no longer needed. Coming from `0.0.0-beta.1`: `npm install -g
+@anhlp/alp@beta` (and `@anhlp/alp-paseo@beta` if you have it), then `alp daemon restart`; in
+Paseo, `paseo plugin remove alp-provider` and add it again as above. There is no state
+migration between the two betas. Coming from 0.10.0: as in the beta.1 notes below, and
+[upgrading from 0.10.0](beta-install.md#upgrading-from-0100-or-earlier).
+
+The npm tag `beta` points at `0.0.0-beta.2` once it is published; `latest` moves to it only after
+the post-publish checks (Q1–Q3 in beta-scope §7.5), so until then a plain `npm install -g
+@anhlp/alp` still installs `0.0.0-beta.1`.
+
+## Packages
+
+All at `0.0.0-beta.2`, on the npm tag `beta`; internal dependencies are pinned to that version.
+The same eight packages as in `0.0.0-beta.1`: `@anhlp/alp`, `@anhlp/alp-protocol`, `-core`,
+`-runtime`, `-client`, `-daemon`, `-cli` and `@anhlp/alp-paseo`. `@anhlp/alp-gateway`,
+`@anhlp/alp-web` (`apps/web`) and `@anhlp/alp-tui` are still not published.
+
+## What changed since 0.0.0-beta.1
+
+In the published packages:
+
+- **Paseo plugin from npm** ([#111](https://github.com/phucanh08/alp/issues/111), PR #124):
+  `@anhlp/alp-paseo` ships no type declarations, and its client code takes its Paseo types from
+  the plugin SDK, so `paseo plugin add npm:@anhlp/alp-paseo@beta` installs. The release checks
+  now install the packed plugin the way Paseo installs an `npm:` source (no peers) and run
+  Paseo's own plugin compiler on it.
+- **Paseo plugin, streaming:** the plugin no longer sends a whole assistant message again with
+  each new piece, which showed repeated text in Paseo and `alp web` (PR #113).
+- **Tool calls:** typed details (command, file edits, reads, searches, …) for each runtime, shown
+  in Paseo, `alp acp` and the CLI's session output; Codex file changes, web searches and MCP
+  calls are no longer dropped (PR #123).
+- **alpd and its protocol** (additive; existing clients keep working), used by `apps/web`:
+  - a root session is named from its first prompt, as Paseo does, and viewers are told
+    (`session.updated` carries `title`);
+  - `session.list` pages and searches, and questions can be watched across every session tree;
+  - turn ends of root sessions can be watched, and a workspace's files searched;
+  - `daemon.hello` carries the host's machine name;
+  - `session.prompt` accepts inline images (PNG, JPEG, GIF, WebP; at most 8, 5 MiB each,
+    11 MiB together) for Codex, Claude Code and ACP agents that accept images;
+  - session token usage in Paseo's `AgentUsage` shape;
+  - `files.read`: read-only access to a workspace's files;
+  - typed tool-call details in `tool_call` items.
+- **Fixes:**
+  - a new session's preview names the team that `session.create` will actually run (before,
+    a project without `workflow.mode` previewed Phở but ran the custom team);
+  - `alp acp`: the custom team stays selectable in an editor's team picker;
+  - alpd never runs a workspace's git through another spelling of the workspace path
+    (case-insensitive file systems) or a PATH binary that links into the workspace;
+  - `@anhlp/alp-core`'s declarations for `teamSources`/`resolveTeam` typecheck.
+
+In the repository only (not in a published package, still deferred):
+
+- `apps/web`, the standalone web app, reaches Paseo parity for chat, workspaces, New session,
+  split panes, the tasks board (List/Board/Epics), History, image attachments, a context window
+  meter, read-only workspace files (⌘P, Files panel) and library entries, and per-tool detail
+  views (PRs #113, #123).
+- `@anhlp/alp-gateway`: the `files.read` permission (never a default; confined to a granted
+  workspace, read-only, 1 MiB, a block list for `.git`, `.alp`, `.ssh`, `.env*` and keys),
+  read-only `library.get` with redaction, inline images within its own limits, typed tool-call
+  details only in the caller's scope, and no host paths or file contents in forwarded errors
+  (PR #123).
+
+## Support
+
+Unchanged from `0.0.0-beta.1` (below): Linux and macOS; Node.js 22 (22.12 or later) and 24;
+Codex CLI and Claude Code; Paseo `>=0.11.1 <0.12.0`. Windows, Node.js 26, ACP and Antigravity
+stay experimental.
+
+## What is in the beta
+
+Included, Experimental and Deferred are as in `0.0.0-beta.1` (below). The new alpd protocol
+features above are covered by the hermetic suites; the clients that use most of them (`apps/web`,
+the gateway) are still deferred.
+
+## Known issues
+
+- Real Codex and Claude runs on the release tarballs are a release condition on macOS only
+  (beta-scope D7). On Linux, the hermetic CI suites and fake-provider rehearsals on the same
+  tarballs pass; real-provider runs there are done when possible. Windows stays experimental.
+- In Paseo and `alp web`, a session on Claude shows the assistant's text only once each message
+  is complete; Codex sessions stream as they go. Stop still works
+  ([#107](https://github.com/phucanh08/alp/issues/107)).
+- `alp web`: a very long agent message with many email addresses or `mailto:` links can hang the
+  browser tab (linkify-it 2.2.0 in Paseo's web app; GHSA-22p9-wv53-3rq4, GHSA-v245-v573-v5vm).
+  It affects only the page on this machine. **Decision pending (beta-scope D9):** accepted for
+  beta.1 with the deadline "before `0.0.0-beta.2` or 2026-11-15"; either fixed before this beta
+  is published or accepted again with a new deadline.
+- Windows: no login service; tests that use a fake Codex or POSIX processes are skipped there;
+  no CI lane runs the whole suite.
+- Client SDK smoke tests (browser, Metro, tarball) are not in CI.
+- A backup does not hold Codex or Claude threads, which those tools keep; a restore on another
+  machine does not bring their native context.
+- `alp web` is Paseo's web app at a pinned commit with ALP's patches. What Paseo has and ALP
+  has not built yet (terminals, commit and push, worktrees from the app, voice, …) says it is
+  in development.
+- `alp --version` prints the usage instead of the version.
+- Older versions (`@anhlp/alp` 0.3.0–0.10.0, the other `@anhlp/alp-*` 0.10.0) and the old
+  plugin name `alp-paseo-plugin` are deprecated on npm; they still install, with a warning.
+  `0.0.0-beta.1` is not deprecated.
+
+## Checksums
+
+The release attaches the eight `*-0.0.0-beta.2.tgz` tarballs, `SHA256SUMS` and
+`release-manifest.json`. Check a download with `shasum -a 256 -c SHA256SUMS` (macOS) or
+`sha256sum -c SHA256SUMS` (Linux). Release commit and `SHA256SUMS`: filled in at publish.
+
+## More
+
+- [Install, upgrade, back up and remove](beta-install.md)
+- [Backups, restores, upgrades and recovery](data-recovery.md)
+- [Paseo plugin](../../integrations/paseo/README.md) · [plugin internals](paseo-plugin.md)
+- [Phở and Cafe teams](team-workflow.md) · [agent library](agent-library.md) ·
+  [Codex only](codex-only.md)
+- [Beta scope, gate and release checklist](beta-scope.md) (Vietnamese)
+
+---
+
+## 0.0.0-beta.1 (2026-10-16)
 
 > Published on 2026-10-16 as the GitHub prerelease
 > [v0.0.0-beta.1](https://github.com/phucanh08/alp/releases/tag/v0.0.0-beta.1); there the links are
@@ -8,7 +146,7 @@ ALP's first beta: the `alp` CLI and its per-user daemon `alpd`, which run filesy
 agent teams on Codex CLI and Claude Code, and an optional plugin that shows them in Paseo and
 serves `alp web` on this machine.
 
-## Install
+### Install
 
 ```sh
 npm install -g @anhlp/alp@beta                 # CLI and alpd
@@ -30,7 +168,7 @@ install and add the new one as above. On its first start the beta migrates alpd'
 and saves a `pre-migrate-v1-v2-*` backup first. Full steps:
 [upgrading from 0.10.0](beta-install.md#upgrading-from-0100-or-earlier).
 
-## Packages
+### Packages
 
 All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned to that version.
 
@@ -43,7 +181,7 @@ All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned t
 | `@anhlp/alp-web` (`apps/web`) | Not published (deferred) | — |
 | `@anhlp/alp-tui` | Not published | — |
 
-## Support
+### Support
 
 | | Supported | Experimental | Not supported |
 |---|---|---|---|
@@ -52,7 +190,7 @@ All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned t
 | Provider | Codex CLI, Claude Code | ACP (OpenCode, Gemini CLI), Antigravity (full access; its read-only is only an instruction in the prompt) | — |
 | Paseo host | `>=0.11.1 <0.12.0` | — | 0.12 and later |
 
-## What is in the beta
+### What is in the beta
 
 **Included** (covered by the beta's acceptance gate):
 
@@ -83,7 +221,7 @@ All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned t
 - React Native on Hermes or real devices.
 - Automated publishing.
 
-## Known issues
+### Known issues
 
 - Real Codex and Claude runs were made on these exact release tarballs, on macOS only
   (beta-scope §6.4). After publishing, the packages installed from npm were checked again on
@@ -123,7 +261,7 @@ All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned t
 - Older versions (`@anhlp/alp` 0.3.0–0.10.0, the other `@anhlp/alp-*` 0.10.0) and the old
   plugin name `alp-paseo-plugin` are deprecated on npm; they still install, with a warning.
 
-## Checksums
+### Checksums
 
 The release attaches the eight `*-0.0.0-beta.1.tgz` tarballs, `SHA256SUMS` and
 `release-manifest.json`. Check a download with `shasum -a 256 -c SHA256SUMS` (macOS) or
@@ -143,7 +281,7 @@ ed9bb789596c05bf9cb7957b9793d0c514846219f5ece67857347778531eb634  anhlp-alp-pase
 36155728dc360bd0037478283c1d9053bd74360ca6e0e5f0e1f4a513bd3442ea  anhlp-alp-runtime-0.0.0-beta.1.tgz
 ```
 
-## More
+### More
 
 - [Install, upgrade, back up and remove](beta-install.md)
 - [Backups, restores, upgrades and recovery](data-recovery.md)

@@ -538,7 +538,7 @@ say "alpd stopped unexpectedly" instead of "alpd restarted". `alp log` shows
 `⏹` interrupted, `↻` reopened or restarted, and `▶` running again.
 
 **Restart after a crash.** Recovery needs an alpd to run. `alp daemon install`
-(experimental in the beta `0.0.0-beta.1`; not on Windows) makes alpd a login service: a LaunchAgent on macOS
+(experimental in the beta `0.0.0-beta.2`; not on Windows) makes alpd a login service: a LaunchAgent on macOS
 (`~/Library/LaunchAgents/com.alp.alpd.plist`), a systemd user unit on Linux
 (`~/.config/systemd/user/alpd.service`). The service starts alpd at login, and
 again about ten seconds after it crashes or is killed. A clean stop stays
