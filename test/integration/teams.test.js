@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,6 +10,17 @@ import { listTeams, resolveTeam } from '../../packages/core/src/teams.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createProvider } from '../../integrations/paseo/server/dist/index.js';
 import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
+
+// The user library is $ALP_HOME (default ~/.alp), read when a session resolves its team and
+// providers. Give this file an empty library of its own, so it never reads the user's real one
+// whether or not a runner (scripts/test.mjs) already isolated ALP_HOME.
+const previousHome = process.env.ALP_HOME;
+let isolatedHome;
+before(async () => { isolatedHome = await mkdtemp(path.join(tmpdir(), 'alp-teams-home-')); process.env.ALP_HOME = isolatedHome; });
+after(async () => {
+  if (previousHome === undefined) delete process.env.ALP_HOME; else process.env.ALP_HOME = previousHome;
+  if (isolatedHome) await rm(isolatedHome, { recursive: true, force: true });
+});
 
 // The coordination text the runtime held before teams; Phở and Cafe's house rules are this text, moved.
 const BEFORE_TEAMS = mode => `Profile: ${mode}; fixed for this session. In Phở (pho), main implements or directly delegates to peer; do not create lead. In Cafe (cafe), main supervises lead; lead may implement or delegate to peer. The technical coordinator chooses each peer's model and effort. Use oracle for significant uncertainty; use reviewer for logic changes and risky changes, not mandatory for typo/format fixes. Advisors return only to their requesting coordinator.`;
