@@ -1105,53 +1105,7 @@
               "type": "string"
             },
             "detail": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "type": {
-                      "const": "shell"
-                    },
-                    "command": {
-                      "type": "string"
-                    },
-                    "cwd": {
-                      "type": "string"
-                    },
-                    "output": {
-                      "type": "string"
-                    },
-                    "exitCode": {
-                      "type": [
-                        "integer",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "type",
-                    "command",
-                    "output"
-                  ],
-                  "additionalProperties": true
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "type": {
-                      "const": "unknown"
-                    },
-                    "input": {},
-                    "output": {}
-                  },
-                  "required": [
-                    "type",
-                    "input",
-                    "output"
-                  ],
-                  "additionalProperties": true
-                }
-              ]
+              "$ref": "#/$defs/toolCallDetail"
             }
           },
           "required": [
@@ -1191,6 +1145,291 @@
         "id"
       ],
       "additionalProperties": true
+    },
+    "toolCallDetail": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "shell"
+            },
+            "command": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "output": {
+              "type": "string"
+            },
+            "exitCode": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "command",
+            "output"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "read"
+            },
+            "filePath": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "offset": {
+              "type": "integer"
+            },
+            "limit": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "type",
+            "filePath"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "edit"
+            },
+            "filePath": {
+              "type": "string"
+            },
+            "oldString": {
+              "type": "string"
+            },
+            "newString": {
+              "type": "string"
+            },
+            "unifiedDiff": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "filePath"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "write"
+            },
+            "filePath": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "filePath"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "search"
+            },
+            "query": {
+              "type": "string"
+            },
+            "toolName": {
+              "enum": [
+                "search",
+                "grep",
+                "glob",
+                "web_search"
+              ]
+            },
+            "content": {
+              "type": "string"
+            },
+            "filePaths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "webResults": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "title",
+                  "url"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "numFiles": {
+              "type": "integer"
+            },
+            "numMatches": {
+              "type": "integer"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "query"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "fetch"
+            },
+            "url": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "result": {
+              "type": "string"
+            },
+            "code": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "type",
+            "url"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "sub_agent"
+            },
+            "subAgentType": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "log": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "plan"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "plain_text"
+            },
+            "label": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "unknown"
+            },
+            "input": {},
+            "output": {}
+          },
+          "required": [
+            "type",
+            "input",
+            "output"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "not": {
+                "enum": [
+                  "shell",
+                  "read",
+                  "edit",
+                  "write",
+                  "search",
+                  "fetch",
+                  "sub_agent",
+                  "plan",
+                  "plain_text",
+                  "unknown"
+                ]
+              }
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": true
+        }
+      ]
     },
     "alpError": {
       "type": "object",

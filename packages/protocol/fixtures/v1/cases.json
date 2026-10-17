@@ -731,6 +731,268 @@
    }
   },
   {
+   "name": "item tool_call read",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "tool_call",
+      "id": "tc-3",
+      "callId": "tc-3",
+      "name": "Read",
+      "status": "completed",
+      "detail": {
+       "type": "read",
+       "filePath": "/work/project/src/a.ts",
+       "content": "export const a = 1;\n",
+       "offset": 1,
+       "limit": 200
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "item tool_call edit",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "tool_call",
+      "id": "tc-4",
+      "callId": "tc-4",
+      "name": "Edit",
+      "status": "completed",
+      "detail": {
+       "type": "edit",
+       "filePath": "/work/project/src/a.ts",
+       "oldString": "a = 1",
+       "newString": "a = 2",
+       "unifiedDiff": "@@ -1 +1 @@\n-export const a = 1;\n+export const a = 2;\n"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "item tool_call write",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "tool_call",
+      "id": "tc-5",
+      "callId": "tc-5",
+      "name": "Write",
+      "status": "running",
+      "detail": {
+       "type": "write",
+       "filePath": "docs/ghi-chú.md",
+       "content": "# Ghi chú\n"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "item tool_call search grep",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "tool_call",
+      "id": "tc-6",
+      "callId": "tc-6",
+      "name": "Grep",
+      "status": "completed",
+      "detail": {
+       "type": "search",
+       "query": "TODO",
+       "toolName": "grep",
+       "content": "src/a.ts:3: // TODO",
+       "filePaths": [
+        "src/a.ts"
+       ],
+       "numFiles": 1,
+       "numMatches": 1,
+       "truncated": false
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "item tool_call search web_search",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "tool_call",
+      "id": "tc-7",
+      "callId": "tc-7",
+      "name": "web_search",
+      "status": "completed",
+      "detail": {
+       "type": "search",
+       "query": "json-rpc 2.0",
+       "toolName": "web_search",
+       "webResults": [
+        {
+         "title": "JSON-RPC 2.0 Specification",
+         "url": "https://www.jsonrpc.org/specification"
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "item tool_call fetch",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "tool_call",
+      "id": "tc-8",
+      "callId": "tc-8",
+      "name": "WebFetch",
+      "status": "failed",
+      "error": "Request failed with status code 404",
+      "detail": {
+       "type": "fetch",
+       "url": "https://example.com/missing",
+       "prompt": "Summarize",
+       "code": 404
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "item tool_call sub_agent",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "tool_call",
+      "id": "tc-9",
+      "callId": "tc-9",
+      "name": "Task",
+      "status": "running",
+      "detail": {
+       "type": "sub_agent",
+       "subAgentType": "Explore",
+       "description": "Find the parser",
+       "log": ""
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "item tool_call plan",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "tool_call",
+      "id": "tc-10",
+      "callId": "tc-10",
+      "name": "ExitPlanMode",
+      "status": "completed",
+      "detail": {
+       "type": "plan",
+       "text": "1. Đọc\n2. Sửa"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "item tool_call plain_text",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "tool_call",
+      "id": "tc-11",
+      "callId": "tc-11",
+      "name": "Skill",
+      "status": "completed",
+      "detail": {
+       "type": "plain_text",
+       "label": "smart-commits",
+       "text": "Launching skill: smart-commits"
+      }
+     }
+    }
+   }
+  },
+  {
    "name": "item user_message with images",
    "check": "envelope",
    "valid": true,
@@ -817,6 +1079,33 @@
    "projection": false
   },
   {
+   "name": "a future tool-call detail type (receivers show it as unknown)",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "tool_call",
+      "id": "tc-12",
+      "callId": "tc-12",
+      "name": "Screenshot",
+      "status": "completed",
+      "detail": {
+       "type": "image",
+       "path": "/tmp/s.png"
+      }
+     }
+    }
+   },
+   "projection": false
+  },
+  {
    "name": "unknown envelope properties",
    "check": "envelope",
    "valid": true,
@@ -895,6 +1184,86 @@
      "item": {
       "kind": "notice",
       "id": "n"
+     }
+    }
+   }
+  },
+  {
+   "name": "edit detail without its filePath",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "tool_call",
+      "id": "tc-x",
+      "callId": "tc-x",
+      "name": "Edit",
+      "status": "completed",
+      "detail": {
+       "type": "edit",
+       "newString": "x"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "search detail with a non-string file path",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "tool_call",
+      "id": "tc-x",
+      "callId": "tc-x",
+      "name": "Glob",
+      "status": "completed",
+      "detail": {
+       "type": "search",
+       "query": "*.ts",
+       "filePaths": [
+        1
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "tool-call detail without a type",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "tool_call",
+      "id": "tc-x",
+      "callId": "tc-x",
+      "name": "Read",
+      "status": "completed",
+      "detail": {
+       "filePath": "a"
+      }
      }
     }
    }

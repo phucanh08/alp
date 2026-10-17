@@ -357,6 +357,54 @@ when the process does); an ACP agent's `usage_update` (context, window, `cost` i
 prompt response's unstable `usage` (tokens); Antigravity its steps' tokens. No secret, path or
 account data is in it. Account-wide usage (plan windows) is `daemon.usage`, which is local only.
 
+### 8.6 Tool-call details
+
+A `tool_call` item (`{ kind: "tool_call", id, callId, name, status: "running" | "completed" | "failed",
+error?, detail }`) says what the call did in `detail`, typed by kind in the shapes of Paseo's
+`ToolCallDetail` (packages/server/src/server/agent/agent-sdk-types.ts at b63a325). The schema's
+`$defs/toolCallDetail` is normative; fields are optional unless named:
+
+```ts
+ToolCallDetail =
+  | { type: "shell"; command: string; cwd?: string; output: string; exitCode?: number | null }
+  | { type: "read"; filePath: string; content?: string; offset?: number; limit?: number }
+  | { type: "edit"; filePath: string; oldString?: string; newString?: string; unifiedDiff?: string }
+  | { type: "write"; filePath: string; content?: string }
+  | { type: "search"; query: string; toolName?: "search" | "grep" | "glob" | "web_search"; content?: string;
+      filePaths?: string[]; webResults?: { title: string; url: string }[]; numFiles?: number;
+      numMatches?: number; truncated?: boolean }
+  | { type: "fetch"; url: string; prompt?: string; result?: string; code?: number }
+  | { type: "sub_agent"; subAgentType?: string; description?: string; log?: string }
+  | { type: "plan"; text: string }
+  | { type: "plain_text"; label?: string; text?: string }
+  | { type: "unknown"; input: unknown; output: unknown }
+```
+
+- **Name.** `name` is the native tool's name: Claude's `Read`, `Edit`, `Grep`, `Task`, `mcp__server__tool`…;
+  Codex `apply_patch` (a file change), `web_search`, `mcp__<server>__<tool>`, `Sub-agent`; an ACP agent's
+  call title, else its kind; Antigravity's tool name. A command is `shell`; ALP's own tools
+  (`alp_*`) are `unknown` with their input and output.
+- **What each runtime types** (ALPD §4.2): Claude's Read, Write, Edit, MultiEdit, NotebookEdit, Grep, Glob,
+  WebFetch, WebSearch, Task/Agent (`sub_agent`), ExitPlanMode (`plan`), Skill and TodoWrite (`plain_text`);
+  an ACP call by its kind (read, edit, delete, move, search, fetch, think; execute is `shell`); Antigravity's
+  run_command (`shell`), view_file, write_to_file, replace_file_content and multi_replace_file_content;
+  Codex's fileChange, webSearch, mcpToolCall and collabAgentToolCall items. Any other tool is `unknown`.
+  A running item already carries what the runtime has said, such as a Read's path.
+- **Paths.** `filePath` and `filePaths` are what the runtime reported, often absolute paths on the
+  daemon's host, possibly outside the workspace; a viewer shows them relative to the session's working
+  directory when inside it. No file is read to fill a detail: contents and diffs are what the tool
+  itself returned or was given.
+- **Bounds.** The runtime clips each string field of a typed detail (not `shell`, not `unknown`) to 65,536
+  UTF-16 code units, keeping the head and appending `\n… (N more characters)`; `filePaths` to 200 entries
+  (then `truncated: true`) and `webResults` to 50. `shell` and `unknown` details are as they were. The
+  schema states no length limits for them.
+- **Errors.** A failed typed call carries `error`, the tool's own error text clipped to 2,000 code units, or
+  `"Tool call failed"`; a failed command `"Command failed"` as before.
+- **Forward compatibility.** Later revisions of v1 may add detail types. The schema accepts a detail whose
+  `type` is any other string (as it accepts unknown item kinds); a receiver shows it as `unknown`: the
+  item's name and the detail's `input` / `output` when present. The TypeScript union is closed, so
+  receivers need a default branch.
+
 ## 9. Connections, attachment and lifecycle
 
 - `session.create` and `session.attach` attach the calling connection to the root's tree; events of the
@@ -683,6 +731,11 @@ The gateway exposes both with the `files.read` permission only (docs/alp/remote-
 ## 13. Compatibility notes for this revision
 
 **Additive** (old clients unaffected):
+- Typed tool-call details (§8.6): `read`, `edit`, `write`, `search`, `fetch`, `sub_agent`, `plan` and
+  `plain_text` beside `shell` and `unknown`, and any later detail type. A client that knew only `shell` and
+  `unknown` needs a default branch for the rest; Claude's tools other than Bash, which were `shell` items
+  named `shell` with a `Name {json}` command, are now items named after the tool with a typed or `unknown`
+  detail.
 - The `usage` event and the session snapshot's `usage` (§8.5); old clients ignore an unknown event
   type (§7) and unknown snapshot fields.
 - `question.watch` `turns` (capability `question.watch.turns`) and `workspace.files.search` (capability
