@@ -9,6 +9,21 @@ import { UsageError } from './usage.js';
 import { start, running, stop } from './daemon.js';
 import { taskProject } from './tasks.js';
 
+/** One line for a finished tool call: its command, or what a typed call touched (ALPD §4.2). */
+export function toolLine(item) {
+  const detail = item.detail ?? {};
+  const first = text => String(text ?? '').split('\n')[0].slice(0, 200);
+  switch (detail.type) {
+    case 'shell': return detail.command;
+    case 'read': case 'edit': case 'write': return `${item.name} ${detail.filePath}`;
+    case 'search': return `${item.name} ${first(detail.query)}`;
+    case 'fetch': return `${item.name} ${detail.url}`;
+    case 'sub_agent': return `${item.name}${detail.description ? ` ${first(detail.description)}` : ''}`;
+    case 'plain_text': return `${item.name}${detail.label ? ` ${detail.label}` : ''}`;
+  }
+  return item.name === 'alp_delegate' ? `delegate → ${detail.input?.agent}` : item.name;
+}
+
 function printer(json) {
   const depth = new Map();
   const agents = new Map();
@@ -28,7 +43,7 @@ function printer(json) {
       latest.set(item.id, { sessionId, item });
       if (item.kind === 'tool_call' && item.status !== 'running' && !printed.has(item.id)) {
         printed.add(item.id);
-        const detail = item.detail.type === 'shell' ? item.detail.command : item.name === 'alp_delegate' ? `delegate → ${item.detail.input?.agent}` : item.name;
+        const detail = toolLine(item);
         line(sessionId, `  ${item.status === 'failed' ? '✗' : '✓'} ${detail}`);
       }
       if (item.kind === 'notice') line(sessionId, `  ${item.level === 'error' ? '‼' : item.level === 'warning' ? '!' : 'ℹ'} ${item.text}`);

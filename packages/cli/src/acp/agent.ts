@@ -95,35 +95,104 @@ export function promptText(blocks: acp.ContentBlock[]) {
   return text.trim();
 }
 
-/** What kind of work a tool call is, from its name or its command's first word (Claude reports tools as `Read {…}`). */
-export function toolKind(item: Extract<TimelineItem, { kind: 'tool_call' }>): acp.ToolKind {
-  const word = item.detail.type === 'shell' ? String(item.detail.command ?? '').trim().split(/[\s{(]/)[0] : item.name;
+type ToolItem = Extract<TimelineItem, { kind: 'tool_call' }>;
+/** A detail as received; a type later than this version's falls to the unknown branches. */
+type AnyDetail = ToolItem['detail'];
+
+/** A path as the editor's user knows it: relative to the session's folder when inside it. */
+function shown(file: string, cwd?: string) {
+  if (!cwd || !path.isAbsolute(file)) return file;
+  const relative = path.relative(cwd, file);
+  return relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? relative : file;
+}
+
+/** What kind of work a tool call is: from its typed detail, else its name or its command's first word (older Claude items are `Read {…}` commands). */
+export function toolKind(item: ToolItem): acp.ToolKind {
+  const detail = item.detail as AnyDetail;
+  switch (detail.type) {
+    case 'read': return 'read';
+    case 'edit': case 'write': return 'edit';
+    case 'search': return detail.toolName === 'web_search' ? 'fetch' : 'search';
+    case 'fetch': return 'fetch';
+    case 'plan': return 'think';
+    case 'sub_agent': case 'plain_text': return 'other';
+  }
+  const word = detail.type === 'shell' ? String(detail.command ?? '').trim().split(/[\s{(]/)[0] : item.name;
   if (/^(Read|NotebookRead|LS)$/.test(word)) return 'read';
   if (/^(Edit|MultiEdit|Write|NotebookEdit)$/.test(word)) return 'edit';
   if (/^(Grep|Glob)$/.test(word)) return 'search';
   if (/^(WebFetch|WebSearch)$/.test(word)) return 'fetch';
   if (/^(Skill|Task|TodoWrite)$/.test(word) || item.name.startsWith('alp_')) return 'other';
-  return item.detail.type === 'shell' ? 'execute' : 'other';
+  return detail.type === 'shell' ? 'execute' : 'other';
 }
 
-function toolTitle(item: Extract<TimelineItem, { kind: 'tool_call' }>) {
-  if (item.detail.type === 'shell') return clip(String(item.detail.command ?? '').split('\n')[0], 160);
-  const input = (item.detail.input ?? {}) as Record<string, unknown>;
+export function toolTitle(item: ToolItem, cwd?: string) {
+  const detail = item.detail as AnyDetail;
+  switch (detail.type) {
+    case 'shell': return clip(String(detail.command ?? '').split('\n')[0], 160);
+    case 'read': return clip(`Read ${shown(detail.filePath, cwd)}`, 160);
+    case 'edit': return clip(`Edit ${shown(detail.filePath, cwd)}`, 160);
+    case 'write': return clip(`Write ${shown(detail.filePath, cwd)}`, 160);
+    case 'search': return clip(`${detail.toolName === 'web_search' ? 'Search the web' : 'Search'} ${detail.query}`, 160);
+    case 'fetch': return clip(`Fetch ${detail.url}`, 160);
+    case 'sub_agent': return clip(`${detail.subAgentType ?? 'Sub-agent'}${detail.description ? `: ${detail.description.split('\n')[0]}` : ''}`, 160);
+    case 'plan': return 'Plan';
+    case 'plain_text': return clip(`${item.name}${detail.label ? `: ${detail.label}` : ''}`, 160);
+  }
+  const input = ((detail as { input?: unknown }).input ?? {}) as Record<string, unknown>;
   if (item.name === 'alp_delegate') return clip(`Delegate to ${input.agent ?? 'an agent'}: ${String(input.task ?? '').split('\n')[0]}`, 160);
   return clip(`${item.name} ${JSON.stringify(input)}`, 160);
 }
 
-function toolOutput(item: Extract<TimelineItem, { kind: 'tool_call' }>): acp.ToolCallContent[] {
+const bounded = (text: string) => text.length > OUTPUT_CHARS ? `${text.slice(0, OUTPUT_CHARS)}\n… (${text.length - OUTPUT_CHARS} more characters)` : text;
+
+export function toolOutput(item: ToolItem): acp.ToolCallContent[] {
+  const detail = item.detail as AnyDetail;
+  const parts: acp.ToolCallContent[] = [];
   let text = '';
-  if (item.detail.type === 'shell') text = item.detail.output ?? '';
-  else {
-    const output = item.detail.output as unknown;
-    text = Array.isArray(output) ? output.map(part => typeof part?.text === 'string' ? part.text : JSON.stringify(part)).join('\n') : output == null ? '' : typeof output === 'string' ? output : JSON.stringify(output, null, 2);
+  switch (detail.type) {
+    case 'shell': text = detail.output ?? ''; break;
+    case 'read': text = detail.content ?? ''; break;
+    case 'edit':
+      // The editor shows a change as a diff when both sides are known.
+      if (detail.newString !== undefined || detail.oldString !== undefined) parts.push({ type: 'diff', path: detail.filePath, oldText: detail.oldString ?? null, newText: detail.newString ?? '' });
+      else if (detail.unifiedDiff) text = '```diff\n' + detail.unifiedDiff + (detail.unifiedDiff.endsWith('\n') ? '' : '\n') + '```';
+      break;
+    case 'write':
+      if (detail.content !== undefined) parts.push({ type: 'diff', path: detail.filePath, oldText: null, newText: detail.content });
+      break;
+    case 'search':
+      text = detail.content ?? [...(detail.filePaths ?? []), ...(detail.webResults ?? []).map(hit => `${hit.title} — ${hit.url}`)].join('\n');
+      break;
+    case 'fetch': text = detail.result ?? ''; break;
+    case 'sub_agent': text = detail.log || detail.description || ''; break;
+    case 'plan': text = detail.text; break;
+    case 'plain_text': text = detail.text ?? ''; break;
+    default: {
+      const output = (detail as { output?: unknown }).output;
+      text = Array.isArray(output) ? output.map(part => typeof part?.text === 'string' ? part.text : JSON.stringify(part)).join('\n') : output == null ? '' : typeof output === 'string' ? output : JSON.stringify(output, null, 2);
+    }
   }
   if (item.error) text = text ? `${text}\n${item.error}` : item.error;
-  if (!text) return [];
-  if (text.length > OUTPUT_CHARS) text = `${text.slice(0, OUTPUT_CHARS)}\n… (${text.length - OUTPUT_CHARS} more characters)`;
-  return [{ type: 'content', content: { type: 'text', text } }];
+  if (text) parts.push({ type: 'content', content: { type: 'text', text: bounded(text) } });
+  return parts.map(part => part.type === 'diff' ? { ...part, newText: bounded(part.newText), ...(part.oldText ? { oldText: bounded(part.oldText) } : {}) } : part);
+}
+
+/** The call's input as the editor shows it raw: a command, a typed call's own fields without its long texts, or the tool's input. */
+export function toolInput(item: ToolItem): unknown {
+  const detail = item.detail as AnyDetail;
+  if (detail.type === 'shell') return { command: detail.command, cwd: detail.cwd };
+  if (detail.type === 'unknown' || !['read', 'edit', 'write', 'search', 'fetch', 'sub_agent', 'plan', 'plain_text'].includes(detail.type as string)) return (detail as { input?: unknown }).input;
+  const { type: _type, content: _content, oldString: _old, newString: _new, unifiedDiff: _diff, result: _result, log: _log, text: _text, filePaths: _paths, webResults: _hits, ...rest } = detail as Record<string, unknown>;
+  return rest;
+}
+
+/** The file a typed call read or changed, for the editor to follow. */
+export function toolLocations(item: ToolItem): acp.ToolCallLocation[] | undefined {
+  const detail = item.detail as AnyDetail;
+  if (detail.type !== 'read' && detail.type !== 'edit' && detail.type !== 'write') return undefined;
+  const filePath = String(detail.filePath);
+  return [{ path: filePath, ...(detail.type === 'read' && typeof detail.offset === 'number' ? { line: detail.offset } : {}) }];
 }
 
 const clip = (text: string, chars: number) => text.length > chars ? `${text.slice(0, chars - 1)}…` : text;
@@ -281,7 +350,8 @@ export function createAcpAgent(options: AcpAgentOptions) {
         send(session, { sessionUpdate: 'plan', entries: item.items.map(entry => ({ content: entry.text, priority: 'medium', status: entry.status })) });
         return;
       case 'tool_call': {
-        const fields = { title: toolTitle(item), kind: toolKind(item), status: status(item.status), content: toolOutput(item), rawInput: item.detail.type === 'shell' ? { command: item.detail.command, cwd: item.detail.cwd } : item.detail.input };
+        const locations = toolLocations(item);
+        const fields = { title: toolTitle(item, session.cwd), kind: toolKind(item), status: status(item.status), content: toolOutput(item), rawInput: toolInput(item), ...(locations ? { locations } : {}) };
         if (session.tools.has(item.id)) send(session, { sessionUpdate: 'tool_call_update', toolCallId: item.id, ...fields });
         else {
           session.tools.add(item.id);

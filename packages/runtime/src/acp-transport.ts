@@ -8,6 +8,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { commandDecision, unwrapShell, type PermissionProfile } from '@anhlp/alp-core/permissions';
 import { launchCommand } from '@anhlp/alp-core/providers';
+import { acpText, acpToolDetail, type AcpCall } from './tool-detail.js';
 
 /**
  * ACP agents (ALPD §46): a generic transport for any agent that speaks the Agent Client
@@ -176,7 +177,7 @@ export class AcpTransport {
   /** Text of the running turn's current message; a tool call starts the next one. */
   private message?: { id: string; text: string };
   private messages = 0;
-  private toolCalls = new Map<string, { command: string; alp: boolean }>();
+  private toolCalls = new Map<string, { command: string; alp: boolean; state: AcpCall; done?: boolean }>();
   /** Permission questions of the running turn, answered cancelled when it is cancelled. */
   private questions = new Set<(value: unknown) => void>();
   private bridge?: { server: net.Server; socket: string; token: string; connections: Set<net.Socket> };
@@ -321,19 +322,34 @@ export class AcpTransport {
       const id = String(update.toolCallId ?? '');
       if (!id) return;
       let call = this.toolCalls.get(id);
+      const first = !call;
+      // A call reported done stays done: a late update must not reopen it or replace its detail.
+      if (call?.done) return;
       if (!call) {
         const request = acpPermission(update, this.tools.map(tool => tool.name));
-        call = { command: request.command ?? `${request.kind}: ${request.title}`, alp: request.alpTool };
+        call = { command: request.command ?? `${request.kind}: ${request.title}`, alp: request.alpTool, state: {} };
         this.toolCalls.set(id, call);
         this.closeMessage();
-        // ALP's own tools show as ALP tool calls; the agent's call to the bridge would repeat them.
-        if (!call.alp) this.emit('item/started', { threadId: this.sessionId, item: { type: 'commandExecution', id, command: call.command, cwd: this.cwd, status: 'inProgress', aggregatedOutput: '' } });
       }
-      if ((update.status === 'completed' || update.status === 'failed') && !call.alp) {
+      // An update carries only what changed; the call's detail is built from all of it.
+      for (const field of ['kind', 'title', 'rawInput', 'rawOutput', 'locations', 'content'] as const) if (update[field] !== undefined && update[field] !== null) call.state[field] = update[field];
+      if (call.alp) return;
+      // The command stays what skill use, copy escapes and the journal read; the typed detail rides along.
+      const detail = acpToolDetail(call.state);
+      const typed = detail ? { tool: call.state.title || call.state.kind || 'tool', detail } : {};
+      const done = update.status === 'completed' || update.status === 'failed';
+      // ALP's own tools show as ALP tool calls; the agent's call to the bridge would repeat them.
+      if (first) this.emit('item/started', { threadId: this.sessionId, item: { type: 'commandExecution', id, command: call.command, cwd: this.cwd, status: 'inProgress', aggregatedOutput: '', ...typed } });
+      else if (!done && detail) this.emit('item/updated', { threadId: this.sessionId, item: { type: 'commandExecution', id, command: call.command, cwd: this.cwd, status: 'inProgress', aggregatedOutput: '', ...typed } });
+      if (done) {
+        // What the call held is in its detail now; a long turn need not keep every result.
+        call.state = {};
+        call.done = true;
         const output = (Array.isArray(update.content) ? update.content : [])
           .map((part: any) => part?.type === 'content' && part.content?.type === 'text' ? part.content.text : part?.type === 'diff' ? `diff ${part.path}` : '')
           .filter(Boolean).join('\n');
-        this.emit('item/completed', { threadId: this.sessionId, item: { type: 'commandExecution', id, command: call.command, cwd: this.cwd, status: update.status, exitCode: update.status === 'failed' ? 1 : 0, aggregatedOutput: output } });
+        const error = update.status === 'failed' && detail ? { error: acpText(update.content) ?? (typeof update.rawOutput === 'string' ? update.rawOutput : undefined) } : {};
+        this.emit('item/completed', { threadId: this.sessionId, item: { type: 'commandExecution', id, command: call.command, cwd: this.cwd, status: update.status, exitCode: update.status === 'failed' ? 1 : 0, aggregatedOutput: output, ...typed, ...error } });
       }
       return;
     }

@@ -122,21 +122,39 @@ type AlpEvent =
 Shapes copied nearly verbatim from Paseo's `AgentTimelineItem` / `ToolCallDetail` so the plugin projection is renames only. Unlike Paseo's client wire (deltas + collapse rules), alpd emits **full snapshots keyed by `item.id`**; a later event with the same id replaces the earlier one. That matches Paseo's provider contract (`timeline.item`), and Paseo's daemon produces deltas itself.
 
 ```ts
-type TimelineItem = { id: string } & (
-  | { kind: 'user_message'; text: string; clientMessageId?: string; source?: 'user' | 'mail' | 'assignment' }
-  | { kind: 'assistant_message'; text: string }
-  | { kind: 'reasoning'; text: string }
-  | { kind: 'tool_call'; callId: string; name: string; status: 'running' | 'completed' | 'failed' | 'canceled';
-      detail: { type: 'shell'; command: string; cwd?: string; output?: string; exitCode?: number }
-            | { type: 'sub_agent'; childSessionId: string; agent: string; assignmentId: string }
-            | { type: 'unknown'; input?: unknown; output?: unknown };
-      error?: string }
-  | { kind: 'handoff'; assignmentId: string; handoff: Handoff }
-  | { kind: 'error'; message: string }
-);
+type TimelineItem =
+  | { kind: 'user_message'; id: string; text: string; clientMessageId?: string; images?: number }
+  | { kind: 'assistant_message'; id: string; text: string }
+  | { kind: 'notice'; id: string; level: 'info' | 'warning' | 'error'; text: string }
+  | { kind: 'compaction'; id: string; status: 'running' | 'completed' | 'failed'; trigger?: 'auto' | 'manual'; preTokens?: number; postTokens?: number }
+  | { kind: 'todo'; id: string; items: Array<{ id: string; text: string; status: 'pending' | 'in_progress' | 'completed' }> }
+  | { kind: 'tool_call'; id: string; callId: string; name: string; status: 'running' | 'completed' | 'failed';
+      error?: string; detail: ToolCallDetail };
+
+type ToolCallDetail =
+  | { type: 'shell'; command: string; cwd?: string; output: string; exitCode?: number | null }
+  | { type: 'read'; filePath: string; content?: string; offset?: number; limit?: number }
+  | { type: 'edit'; filePath: string; oldString?: string; newString?: string; unifiedDiff?: string }
+  | { type: 'write'; filePath: string; content?: string }
+  | { type: 'search'; query: string; toolName?: 'search' | 'grep' | 'glob' | 'web_search'; content?: string;
+      filePaths?: string[]; webResults?: Array<{ title: string; url: string }>; numFiles?: number; numMatches?: number; truncated?: boolean }
+  | { type: 'fetch'; url: string; prompt?: string; result?: string; code?: number }
+  | { type: 'sub_agent'; subAgentType?: string; description?: string; log?: string }
+  | { type: 'plan'; text: string }
+  | { type: 'plain_text'; label?: string; text?: string }
+  | { type: 'unknown'; input: unknown; output: unknown };
 ```
 
-`sub_agent` replaces today's `detail.type: 'unknown'` for `alp_delegate`, so viewers can link parent and child. More native item types (file edits, search, todo) are added as the transports surface them; the union is open by `kind`.
+`packages/protocol/src/events.ts` is the source; the schema's `$defs/toolCallDetail` is normative (docs/protocol/alp-json-rpc-v1.md §8.6). The union is open by `kind` and by detail `type`: a viewer shows an item kind it does not know as nothing and a detail type it does not know as `unknown`.
+
+Tool calls are typed by `packages/runtime/src/tool-detail.ts`, pure functions per runtime (t-7679.13):
+
+- **Claude**: Read, Write, Edit, MultiEdit, NotebookEdit, Grep, Glob, WebFetch, WebSearch become their types, from the tool's input and, once done, the SDK's structured `tool_use_result` (the Read gutter stripped when only the text is there); Task/Agent `sub_agent`, ExitPlanMode `plan`, Skill and TodoWrite `plain_text` (a checklist); any other tool, MCP tools included, `unknown`. Bash stays `shell`.
+- **ACP**: by the call's kind, from its merged updates (rawInput, rawOutput, locations, content with `diff` parts): read, edit (a diff without old text is a `write`), delete, move (`plain_text`), search, fetch, think (`plain_text`); execute stays `shell`; other `unknown`. A running update that adds a path or diff updates the running item (`item/updated`).
+- **Antigravity**: run_command `shell` with its CommandLine, view_file `read`, write_to_file `write`, replace_file_content and multi_replace_file_content `edit`; else `unknown`.
+- **Codex**: fileChange `edit` (an added file `write`; a deleted file, or an added or deleted one among several, a hunk built from the content Codex reports; several files one `edit` with their diffs joined), webSearch `search`, mcpToolCall `unknown`, collabAgentToolCall `sub_agent`; these were dropped before. commandExecution stays `shell`; ALP's own tools (`dynamicToolCall`) stay `unknown`.
+
+The transports still report commandExecution items with the same `command` (`Read {"file_path":…}` for Claude), and attach `tool` and `detail`: skill use (§59), copy escapes and the supervisor's journal read the command as before. The runtime clips each string of a typed detail to 65,536 characters, file paths to 200 and web results to 50; a failed typed call's `error` is the tool's error text (≤ 2,000) or `Tool call failed`.
 
 ### 4.3 Storage, fetch, and catch-up
 
@@ -1887,7 +1905,7 @@ Goal (D30, step 1): editors that speak the Agent Client Protocol use ALP as thei
 - **Prompts.** Text, `@path` for a resource link, and an embedded resource inlined as `<file path>`. `session.prompt` with `delivery: 'auto'`, so a turn main started by itself takes the words as a steer. The prompt answers when its turn ends: `end_turn`, `cancelled`, or an error for a failed turn. `session/cancel` is `session.interrupt`, which stops the subtree.
 - **Updates**, from the root's events only; children show through main's `alp_delegate` tool call:
   - assistant text as `agent_message_chunk`, only what is new since the last snapshot of the item;
-  - tool calls as `tool_call` then `tool_call_update`, with a kind from the tool or the command's first word (Claude's `Read {…}` is `read`, `Edit` is `edit`, a shell command is `execute`) and the output, clipped to 20,000 characters;
+  - tool calls as `tool_call` then `tool_call_update`, with a kind from the typed detail (§4.2: `read`, `edit` for edit and write, `search`, `fetch` for fetch and web search, `think` for a plan), else from the tool or the command's first word (an older Claude `Read {…}` command is `read`, a shell command is `execute`); a title with the file relative to the session's folder, an edit or write as an ACP `diff` when its text is known, the file as a location, and the output, clipped to 20,000 characters;
   - mail and ALP's own prompts to main as a completed `other` tool call "ALP: …", not as the user's words; another viewer's prompt as `user_message_chunk`;
   - notices and compactions as a quoted `ALP:` line, the task list as a `plan`.
   Updates go out in order, and a prompt answers after its updates. Work after the prompt (wake turns) streams into the thread too.

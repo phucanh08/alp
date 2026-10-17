@@ -8,6 +8,8 @@
 // then its turn ends with a success result; a prompt sent mid-turn is answered within that turn.
 // A marker in a prompt chooses what happens to its turn:
 //   [hold]         answer, but never finish the turn until an interrupt ends it
+//   [tool NAME JSON]  first call the tool NAME: a tool_use with JSON's `input`, then its tool_result with
+//                  JSON's `text` (is_error when `error`) and `structured` as the SDK's tool_use_result
 // `--session-id=<id>` names a new session and `--resume=<id>` keeps the resumed id (with
 // `--fork-session`, the new --session-id). `--version` and `auth status` answer as the real CLI does.
 import { appendFileSync } from 'node:fs';
@@ -93,6 +95,14 @@ function startTurn(text, prompt) {
     type: 'system', subtype: 'init', session_id: sessionId, uuid: randomUUID(), cwd: process.cwd(), model, permissionMode,
     apiKeySource: 'none', claude_code_version: VERSION.split(' ')[0], tools: [], mcp_servers: [], slash_commands: [], output_style: 'default', skills: [], plugins: [],
   });
+  const tool = /\[tool (\S+) (\{.*\})\]/.exec(text);
+  if (tool) {
+    const [, name, json] = tool;
+    const call = JSON.parse(json);
+    const id = `toolu_fake_${process.pid}_${++messages}`;
+    send({ type: 'assistant', session_id: sessionId, uuid: randomUUID(), parent_tool_use_id: null, message: { id: `msg_fake_${process.pid}_${messages}`, type: 'message', role: 'assistant', model, content: [{ type: 'tool_use', id, name, input: call.input ?? {} }], stop_reason: 'tool_use', stop_sequence: null, usage: usage(1, 1) } });
+    send({ type: 'user', session_id: sessionId, uuid: randomUUID(), parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: call.text ?? '', ...(call.error ? { is_error: true } : {}) }] }, ...(call.structured !== undefined ? { tool_use_result: call.structured } : {}) });
+  }
   reply(turn, text, prompt);
   if (!turn.held) setTimeout(() => endTurn(turn, { subtype: 'success', is_error: false, result: turn.answer, stop_reason: 'end_turn', terminal_reason: 'completed' }), 20);
 }

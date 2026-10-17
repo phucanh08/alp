@@ -6,6 +6,7 @@ import { optionalRead, claudeUsage } from './runtime-context.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { PIN_KINDS } from './board.js';
+import { claudeToolDetail, resultText } from './tool-detail.js';
 import { CLOSE_REASONS, GATE_KINDS, TASK_STATUSES, TASK_TYPES } from '@anhlp/alp-core/tasks';
 import { commandDecision } from '@anhlp/alp-core/permissions';
 
@@ -344,7 +345,7 @@ export class ClaudeTransport {
   private activeTurn?: string;
   private closed = false;
   private assistantText = new Map<string, string>();
-  private toolCalls = new Map<string, { name: string; command: string }>();
+  private toolCalls = new Map<string, { name: string; command: string; input: unknown }>();
   /** The last rate limit Claude reported, and whether the running turn hit one. */
   private rateLimit?: { status: string; resetsAt?: number; overageStatus?: string; rateLimitType?: string; utilization?: number };
   private limitedTurn = false;
@@ -683,7 +684,9 @@ export class ClaudeTransport {
           const command = block.name === 'Bash'
             ? String(block.input?.command ?? '')
             : `${block.name} ${JSON.stringify(block.input ?? {})}`;
-          this.toolCalls.set(block.id, { name: block.name, command });
+          this.toolCalls.set(block.id, { name: block.name, command, input: block.input });
+          // The command stays what skill use, copy escapes and the journal read; the typed detail rides along.
+          const detail = claudeToolDetail(block.name, block.input);
           this.emit('item/started', {
             threadId: this.threadId,
             item: {
@@ -693,6 +696,7 @@ export class ClaudeTransport {
               cwd: this.cwd,
               status: 'inProgress',
               aggregatedOutput: '',
+              ...(detail ? { tool: block.name, detail } : {}),
             },
           });
         }
@@ -704,13 +708,17 @@ export class ClaudeTransport {
       const content = Array.isArray(message.message.content)
         ? message.message.content as any[]
         : [];
-      for (const block of content) {
-        if (block.type !== 'tool_result') continue;
+      // The SDK's structured output belongs to the message's one tool result.
+      const results = content.filter(block => block.type === 'tool_result');
+      const structured = results.length === 1 ? (message as any).tool_use_result : undefined;
+      for (const block of results) {
         const call = this.toolCalls.get(block.tool_use_id);
         if (!call) continue;
         const output = typeof block.content === 'string'
           ? block.content
           : JSON.stringify(block.content ?? '');
+        const text = resultText(block.content);
+        const detail = claudeToolDetail(call.name, call.input, { text, structured, error: Boolean(block.is_error) });
         this.emit('item/completed', {
           threadId: this.threadId,
           item: {
@@ -721,6 +729,7 @@ export class ClaudeTransport {
             status: block.is_error ? 'failed' : 'completed',
             exitCode: block.is_error ? 1 : 0,
             aggregatedOutput: output,
+            ...(detail ? { tool: call.name, detail, ...(block.is_error ? { error: text } : {}) } : {}),
           },
         });
         this.toolCalls.delete(block.tool_use_id);

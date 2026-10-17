@@ -41,6 +41,7 @@ import { OWN_START, sameProcessAlive } from './process-info.js';
 import { createRecallBook, recallPrompt, RECALL_KEEP_MS, RECALL_QUESTION_CHARS, RECALL_TIMEOUT_MS, type RecallEntry } from './recall.js';
 import { branchExists, checkoutFingerprint, checkoutKey, createCopy, createWorktree, reattachWorktree, removeCopy, removeWorktree } from './workspace.js';
 import { claudeSandboxAvailable, SKILL_PLUGIN } from './claude-transport.js';
+import { boundDetail, codexToolCall, toolError } from './tool-detail.js';
 import { ALP_REPO, gh, projectRepo } from './github.js';
 import { optionalRead, usageAllows, COMPACT_SHARE } from './runtime-context.js';
 import { providerUsage, sessionUsage, type ProviderUsage } from './usage.js';
@@ -281,6 +282,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     sessionId: string,
     session: Session,
     item: any,
+    done = false,
   ) {
     if (item.type === 'agentMessage') {
       // The first words main shows after the user wrote: how long the user waited.
@@ -344,23 +346,36 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         session.journal.push(stamp(`${session.mapping.agent.name} shell ${status}${item.exitCode != null ? ` (exit ${item.exitCode})` : ''}: ${clip(String(item.command ?? ''))}`));
       }
 
+      // A transport that knows the tool attaches its typed detail; the command stays as it was.
+      // The protocol's bounds hold here for every transport (boundDetail passes unknown as it is).
+      const typed = item.detail && typeof item.detail === 'object' && item.detail.type !== 'shell' ? boundDetail(item.detail) : undefined;
       emit(sessionId, {
         type: 'item',
         item: {
           kind: 'tool_call',
           id: item.id,
           callId: item.id,
-          name: 'shell',
+          name: typed ? String(item.tool || 'tool') : 'shell',
           status,
-          ...(status === 'failed' ? { error: 'Command failed' } : {}),
-          detail: {
+          ...(status === 'failed' ? { error: typed ? toolError(item.error) : 'Command failed' } : {}),
+          detail: typed ?? (item.detail?.type === 'shell' ? item.detail : {
             type: 'shell',
             command: item.command,
             cwd: item.cwd,
             output: item.aggregatedOutput ?? '',
             exitCode: item.exitCode,
-          },
+          }),
         },
+      });
+      return;
+    }
+
+    // Codex's own file changes, web searches, MCP calls and sub-agents (ALPD §4.2).
+    const call = codexToolCall(item, done);
+    if (call) {
+      emit(sessionId, {
+        type: 'item',
+        item: { kind: 'tool_call', id: item.id, callId: item.id, name: call.name, status: call.status, ...(call.error ? { error: call.error } : {}), detail: call.detail },
       });
     }
   }
@@ -399,10 +414,16 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (method === 'item/completed' || method === 'item/started') {
       if (method === 'item/completed') session.progressAt = Date.now();
       if (params.item?.type !== 'userMessage') {
-        nativeItem(sessionId, session, params.item);
+        nativeItem(sessionId, session, params.item, method === 'item/completed');
       }
       if (method === 'item/started' && params.item?.type === 'commandExecution') watchCopy(sessionId, session, params.item);
       if (method === 'item/started' && params.item) skillUse(sessionId, session, params.item);
+      return;
+    }
+
+    // A running tool call that learned more, such as an ACP call's path or diff.
+    if (method === 'item/updated') {
+      if (params.item?.type === 'commandExecution' && params.item.status === 'inProgress') nativeItem(sessionId, session, params.item);
       return;
     }
 

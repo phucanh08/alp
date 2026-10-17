@@ -6,6 +6,10 @@
 //   fake:tool NAME JSON         call that ALP tool through the alp MCP server
 //   fake:permit KIND TEXT       ask permission for a KIND tool call (TEXT is its command or title)
 //   fake:exec COMMAND           report a command it ran
+//   fake:call JSON              report a tool call: JSON is {kind, title, rawInput, locations, rawOutput, content,
+//                               status} of its last update; with `running` (another update), kind and title go
+//                               first, the rest in a running update, then the last one; with `late`, one more
+//                               running update after it
 //   fake:usage USED SIZE [USD]  report how full its context is, and the session's cost in US dollars
 //   fake:tokens IN OUT CACHED   end the turn with that usage in the prompt response
 //   fake:hang                   wait until ALP cancels the turn
@@ -78,6 +82,13 @@ async function prompt(id, { sessionId, prompt: blocks }) {
       const toolCallId = `call-${++sequence}`;
       update(sessionId, { sessionUpdate: 'tool_call', toolCallId, title: argument, kind: 'execute', status: 'in_progress', rawInput: { command: argument } });
       update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'completed', content: [{ type: 'content', content: { type: 'text', text: `ran ${argument}` } }] });
+    } else if (verb === 'call') {
+      const { kind, title, status = 'completed', running, late, ...rest } = JSON.parse(argument);
+      const toolCallId = `call-${++sequence}`;
+      update(sessionId, { sessionUpdate: 'tool_call', toolCallId, title, kind, status: 'pending', ...(running ? {} : { rawInput: rest.rawInput, locations: rest.locations }) });
+      if (running) update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'in_progress', ...(rest.rawInput ? { rawInput: rest.rawInput } : {}), ...(rest.locations ? { locations: rest.locations } : {}) });
+      update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status, ...(rest.content ? { content: rest.content } : {}), ...(rest.rawOutput !== undefined ? { rawOutput: rest.rawOutput } : {}) });
+      if (late) update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'in_progress', kind: 'other' });
     } else if (verb === 'usage') update(sessionId, { sessionUpdate: 'usage_update', used: Number(rest[0]), size: Number(rest[1]), ...(rest[2] ? { cost: { amount: Number(rest[2]), currency: 'USD' } } : {}) });
     else if (verb === 'tokens') usage = { inputTokens: Number(rest[0]), outputTokens: Number(rest[1]), cachedReadTokens: Number(rest[2]), totalTokens: Number(rest[0]) + Number(rest[1]) };
     else if (verb === 'hang') { await new Promise(resolve => { cancel = resolve; }); return send({ id, result: { stopReason: 'cancelled' } }); }
