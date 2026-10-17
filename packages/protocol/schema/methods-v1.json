@@ -26,6 +26,7 @@
     "question.watch": "question.watch: the connection is told of `question` and `question.resolved` in every tree (of a projectRoot when given), attached or not.",
     "question.watch.turns": "question.watch accepts `turns`: the connection is also told of `turn.ended` of every root in the trees it watches.",
     "workspace.files": "workspace.files.search: files under a directory whose relative path matches a query; read-only, names only, links never followed.",
+    "workspace.files.read": "workspace.files.list and workspace.files.read: the entries of a directory and the content of a UTF-8 text file (at most 1 MiB) under a directory; read-only, links never followed, .git, .env* and key or credential files refused, .gitignore'd paths hidden unless asked.",
     "prompt.images": "session.prompt takes inline image parts { type: \"image\", mimeType, data } (base64, no paths or URLs) within the image limits; a session snapshot says whether its runtime takes them in promptImages."
   },
   "methods": {
@@ -2236,6 +2237,151 @@
         },
         "required": [
           "files"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "workspace.files.list": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": true
+        },
+        "idempotent": true,
+        "capability": "workspace.files.read",
+        "risks": [
+          "lists names, kinds, sizes and times of a directory's entries (not contents)"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "includeIgnored": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "projectRoot"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "enum": [
+                    "file",
+                    "directory"
+                  ]
+                },
+                "size": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "modifiedAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "path",
+                "kind"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "workspace.files.read": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": true
+        },
+        "idempotent": true,
+        "capability": "workspace.files.read",
+        "risks": [
+          "returns the content of a text file under the directory"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "includeIgnored": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "projectRoot",
+          "path"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1048576
+          },
+          "modifiedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content",
+          "size"
         ],
         "additionalProperties": true
       }

@@ -144,14 +144,19 @@ runs before all of them pass**:
 | `persistence_failed` | 1000 | `session.create`, `session.prompt`, `session.rename`, `session.archive` when the store cannot write |
 | `outcome_unknown` | 1004 | `session.prompt`: the daemon cannot tell whether the provider received the prompt (§10) |
 | `key_conflict` | 1004 | `session.prompt`: the `clientMessageId` was used with other content; `task.create`: the `requestId` was used for another task |
-| `invalid_path` | -32602 | `projectRoot` is not an absolute, normalized path (§15.1, §12.3) |
+| `invalid_path` | -32602 | `projectRoot` is not an absolute, normalized path (§15.1, §12.3); a `workspace.files` `path` that is not plainly relative (§12.4) |
 | `invalid_scope` | -32602 | a library `scope` the entry cannot live in: `project` without `projectRoot`, providers outside the library |
 | `invalid_entry` | -32602 | library content core refuses: unknown fields, a bad MCP server, hook, provider or team, a name it refers to that does not exist |
 | `secret_marker` | -32602 | `library.save`: a `{ "$secret": "keep" }` marker with no stored value to keep, or outside a secret map (§15.3) |
 | `not_alp_project` | 1001 | `projectRoot` is not a directory holding `.alp/` |
 | `unknown_task` | 1001 | no task of that id in the project |
 | `not_found` | 1001 | no library entry of that kind and name (in that scope) |
-| `not_directory` | 1001 | `workspace.files.search`: `projectRoot` is not a directory alpd can read (§12.3) |
+| `not_directory` | 1001 | `workspace.files.search`, `workspace.files.list`, `workspace.files.read`: `projectRoot` is not a directory alpd can read (§12.3, §12.4) |
+| `blocked_path` | 1003 | `workspace.files.list`/`read`: the path is on the block list (`.git`, `.env*`, ALP configuration, key and credential files), whatever the caller (§12.4) |
+| `ignored` | 1003 | `workspace.files.list`/`read`: the path is `.gitignore`'d and `includeIgnored` was not set (§12.4) |
+| `linked` | 1003 | `workspace.files.list`/`read`: a symbolic link on the way or at the end, a file with more than one name (hard link), a real path other than the one asked for, or a file or directory that changed while it was read (§12.4) |
+| `binary` | 1000 | `workspace.files.read`: the file is not UTF-8 text (§12.4) |
+| `too_large` | 1000 | `workspace.files.read`: the file is over 1 MiB (§12.4) |
 | `unsafe_path` | 1003 | a symlink where a project's `.alp`, its tasks or a library entry would be read or written |
 | `revision_conflict` | 1004 | a library `revision` or task `ifRev` that is no longer current; an entry that already exists where a new one was asked |
 | `task_state` | 1004 | the task's state refuses the change: already closed or open, open children, a closed parent, a gate already clear or missing |
@@ -202,6 +207,7 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 | `question.watch` | `question.watch`: questions of trees the connection is not attached to (§12.2). Every alpd lists it. |
 | `question.watch.turns` | `question.watch` accepts `turns`: also every root's `turn.ended` (§12.2). Every alpd lists it. |
 | `workspace.files` | `workspace.files.search`: file names under a directory matching a query, read-only (§12.3). Every alpd lists it. |
+| `workspace.files.read` | `workspace.files.list` and `workspace.files.read`: a directory's entries and a UTF-8 text file's content (at most 1 MiB) under a directory, read-only, links never followed, blocked paths refused (§12.4). Every alpd lists it. |
 | `prompt.images` | `session.prompt` takes inline image parts (§10, Prompt content); a session snapshot's `promptImages: true` says its runtime takes them. Every alpd lists it. |
 
 alpd before this revision already had the first three without listing them; the others are new. A method whose
@@ -474,6 +480,7 @@ connection on the local socket acts as the owner.
 | `question.list` | read | yes | — | session.read |
 | `question.watch` | read, then question events of every tree, and roots' turn ends with `turns` (§12.2) | yes (a second call replaces the filter) | -32602 | session.read |
 | `workspace.files.search` | read: file names under `projectRoot` (§12.3) | yes | -32602, 1001 | project.read |
+| `workspace.files.list` / `workspace.files.read` | read: a directory's entries; a text file's content (§12.4) | yes | -32602, 1000, 1001, 1003 | files.read (never a default; docs/alp/remote-gateway.md §5.10) |
 | `question.answer` | answers or dismisses; a unique id prefix is accepted | no (second answer → 1001) | 1001, -32602 | session.write |
 | `session.create` | creates or resumes a root, attaches | no (an existing live root is attached: `attached: true`) | -32602, 1000, 1001, `persistence_failed` | session.write |
 | `session.preview` | read (no files written) | yes | -32602, 1000 | session.read |
@@ -592,7 +599,86 @@ first, as Paseo's command center finds a workspace's files (`directory_suggestio
 
 The gateway needs `project.read` and a `projectRoot` naming a granted workspace exactly, sends alpd
 its canonical path, and drops any answered path that is not plainly relative (docs/alp/remote-gateway.md
-§5.1). There is no method that reads a file's content (§14).
+§5.1). File contents are read by `workspace.files.read` (§12.4), with its own capability and permission.
+
+### 12.4 `workspace.files.list` and `workspace.files.read`
+
+Capability `workspace.files.read` (2026-10-17). Paseo's file explorer and file pane read a
+workspace's directories and files (`list_directory`, `read_file`, server/file-explorer/service.ts at
+b63a325); these are their read-only part, for the command center's file pick, the Files panel and
+file links in chat.
+
+- `workspace.files.list { projectRoot, path?, includeIgnored? }` answers
+  `{ entries: [{ name, path, kind: 'file' | 'directory', size?, modifiedAt? }], truncated? }`: the
+  entries of the directory `path` (the root when left out), directories first, then by name (code
+  points). `size` (bytes) is given for files; `modifiedAt` is ISO 8601. At most 1000 entries
+  (`WORKSPACE_FILES.maxListEntries`), 20 000 looked at, 3 s; then `truncated: true`. Dot-names are
+  listed (a client may hide them).
+- `workspace.files.read { projectRoot, path, includeIgnored? }` answers
+  `{ path, content, size, modifiedAt? }`: the file's bytes as UTF-8 text (a BOM kept), at most 1 MiB
+  (`WORKSPACE_FILES.maxReadBytes`), else `1000 too_large`. A NUL byte, over 30% control characters
+  (Paseo's isLikelyBinary) or invalid UTF-8: `1000 binary`. Nothing else is decoded or previewed.
+- **`projectRoot`** as §12.3 (`-32602 invalid_path`, `1001 not_directory`); its real path is the root.
+- **`path`**: relative to the root, `/`-separated, 1–4096 code points, no leading `/`, drive, `\`,
+  NUL, `.`, `..` or empty segment; else `-32602 invalid_path`.
+- **Block list** (`blockedFilePath` in `@anhlp/alp-protocol`, checked by alpd and by the gateway,
+  case-insensitively, on every segment): directories `.git` (also a `.git` file), `.alp` (ALP
+  configuration: its library overrides hold MCP and provider env values, read redacted through
+  `library.get`), `.ssh`, `.gnupg`, `.aws`, `.azure`, `.kube`, `.docker`, `gcloud`; names starting
+  with `.env` (`.env.local`, `.envrc`), `id_` (SSH keys under any name: `id_rsa`, `id_ed25519.pub`,
+  `id_work`) or `service-account`/`service_account`/`serviceaccount`, and names ending in `_history`
+  or `.tfstate.backup`; names `.netrc`,
+  `_netrc`, `.npmrc`, `.yarnrc.yml`, `.pypirc`, `.pgpass`, `.htpasswd`, `.git-credentials`,
+  `.dockercfg`, `.boto`, `.s3cfg`, `.mcp.json`, `auth.json`, `kubeconfig`, `settings.local.json`,
+  `.vault-token`, `application_default_credentials.json`, `token.json`, and `gh/hosts.yml`; names with a
+  dotted part (the extension aside, a leading dot ignored) `credential(s)` or `secret(s)`
+  (`secrets.yaml`, `prod.secrets.yaml`, `.credentials.json`, a `secrets/` directory), except
+  source code (`ts`, `tsx`, `js`, `jsx`, `mjs`, `cjs`, `py`, `go`, `rs`, `java`, `kt`, `rb`, `php`,
+  `cs`, `swift`, `c`, `cpp`, `h`, `scala`, `dart`, `vue`, `svelte`…; never a data or config format:
+  `secrets.json`, `secrets.yaml`, `credentials.toml`, `secret.txt` stay blocked); extensions `pem`,
+  `key`, `p12`, `pfx`, `p8`, `jks`, `keystore`, `ppk`, `der`, `gpg`, `pgp`, `asc`, `kdbx`, `ovpn`,
+  `tfstate`, `tfvars`. A blocked path is refused (`1003 blocked_path`) and never listed, with or
+  without `includeIgnored`. alpd also refuses (`1003 blocked_path`) a file whose content holds a
+  private key (a PEM or OpenSSH `-----BEGIN … PRIVATE KEY-----` header, a PuTTY key), whatever its
+  name, exempt source files included. The list over-blocks some ordinary files (`id_card.md`,
+  `secrets/` of a code base, an i18n `auth.json`, AsciiDoc `.asc`) on purpose. It is a floor, not a
+  guarantee: any other file may hold a secret, which is why the permission is never a default.
+- **`.gitignore`**: without `includeIgnored: true`, a path Git ignores is not listed and is refused
+  (`1003 ignored`). alpd asks Git itself, one `git -c core.fsmonitor=false check-ignore --no-index
+  --stdin -z` per request (`packages/daemon/src/gitignore.ts`), so the rules are Git's exactly: every
+  `.gitignore` on the way, `.git/info/exclude`, `core.excludesFile`, a path inside an ignored
+  directory, `!` re-includes. `--no-index`: the index is not read, so a tracked file a rule matches is
+  hidden too. The workspace is not trusted, so Git runs boxed in: the Git found on the absolute
+  entries of PATH outside the workspace, run by its absolute path (never a `git` in the workspace,
+  which a relative or empty PATH entry, an entry such as `<workspace>/node_modules/.bin`, or Windows
+  searching the working directory first, would pick), an argument list, no
+  shell, the root's real path as its working directory, the paths on stdin separated by NUL and
+  each sent as `./<path>` (no name is ever an argument, and none is read as pathspec magic such as
+  `:(glob)…` or `:!…`), an environment without alpd's own `GIT_*` variables (`GIT_OPTIONAL_LOCKS=0`,
+  `GIT_TERMINAL_PROMPT=0`), `core.fsmonitor` off, at most 4 Git processes at once in alpd with at most
+  64 requests waiting, at most 2 s per request (then its whole process group is killed), and no more
+  output than it was sent. A timeout, a crash, a fatal error (such as a repository Git refuses as
+  unsafe, or a `.git` it cannot use), a full queue or an answer naming a path that was not asked
+  **fails closed**: the paths count as ignored (a listing of the root then shows nothing, of a
+  directory answers `ignored`). Git not installed, or a root with no `.git` in it or above it: no
+  rules apply, and only the block list hides anything. `includeIgnored` runs no Git. Hiding ignored
+  files is a default view, not a boundary.
+- **Confinement**: the root is the real path of `projectRoot`; every directory on the way is
+  checked as reached by name (a real directory, not a link, at its own real path), and again after
+  the read with the same device and inode; else `1003 linked`. Links are never listed or followed.
+  A file must be a regular file with one name (`nlink` 1: a hard link may give a file from anywhere a
+  second name inside), at its own real path; it is opened with `O_NOFOLLOW | O_NONBLOCK` (no final
+  link, no wait on a FIFO), checked by its handle (same device and inode as by name before, and by
+  name after the read), else `1003 linked`. Missing, or not a regular file (or not a directory for
+  list): `1001 not_found`. **Residual risk**, as §12.3: a writer racing inside the workspace that
+  swaps a directory on the way for a link and back, between checks, could have a file outside read;
+  Node has no `openat` walk. Such a writer (an agent or a process of the user) can already read that
+  file itself.
+- **Errors** name only the caller's own relative path, never a host path or anything read from a
+  file; a failure that is not one of the reasons above answers `1000` with a fixed message, and alpd
+  logs it.
+
+The gateway exposes both with the `files.read` permission only (docs/alp/remote-gateway.md §5.10).
 
 ## 13. Compatibility notes for this revision
 
@@ -601,6 +687,9 @@ its canonical path, and drops any answered path that is not plainly relative (do
   type (§7) and unknown snapshot fields.
 - `question.watch` `turns` (capability `question.watch.turns`) and `workspace.files.search` (capability
   `workspace.files`), §12.2, §12.3; error reason `not_directory`.
+- `workspace.files.list` and `workspace.files.read` (capability `workspace.files.read`), §12.4; error
+  reasons `blocked_path`, `ignored`, `linked`, `binary`, `too_large`; exports `WORKSPACE_FILES` and
+  `blockedFilePath` (root).
 - `session.list` `limit` / `cursor` / `query` / `projectRoots` and `nextCursor`, and `question.watch`, with capabilities
   `session.list.page` and `question.watch` (§12.1, §12.2). Without the new params `session.list` answers
   as before; its order now breaks ties of `updatedAt` by `id`.
@@ -657,7 +746,7 @@ answers `-32601`. Each needs its own capability when implemented.
 | Gateway reasons of `1003 forbidden` (`grant`, `outside_workspace`, `spec_field`, `local_only`); `1005 unavailable` reasons `feature_disabled`, `maintenance`, `restoring` | P0 | The codes exist (§5.1, §15); a gateway adds its reasons. |
 | `session.create` spec allow-list for remote principals | P0 | Refuse `env`, stdio `mcpServers`, `workdir`, `writeRoot`, `copy*`, `restore`, `keepThread`. |
 | `project.*`, `workspace.*` registry; `session.create.workspaceId` | P0 (web) | Same file and format as `state/web-workspaces.json`; `idempotencyKey`. |
-| `workspace.git.status/diff`, `workspace.files.list/read` | P1 | Read-only; results must fit `MAX_FRAME` (cap or chunk). `workspace.files.search` is implemented (§12.3). Reading content remotely exposes every file of a workspace (`.env`, keys) to a `project.read` token: needs a decision on the permission and on which files. |
+| `workspace.git.status/diff` | P1 | Read-only; results must fit `MAX_FRAME` (cap or chunk). `workspace.files.search`, `workspace.files.list` and `workspace.files.read` are implemented (§12.3, §12.4). |
 | `provider.list/refresh/diagnose/save/remove`, `library.test` | P1 | Probes spawn processes: separate `exec.probe` grant; timeouts; cancellation when the caller's connection closes needs the probes in `@anhlp/alp-client` to take an abort signal. |
 | `subscribe` / `unsubscribe` and notification `notify` | P1 | Old clients ignore unknown notifications (`AlpClient` handles only `event`). |
 | `host.directories.suggest`, `project.create_directory`, shared attention | P2 | Product decisions pending. Per-client attention for finished turns is `question.watch` `turns` (§12.2); attention shared between clients (acknowledged on one, cleared on all) is not. |

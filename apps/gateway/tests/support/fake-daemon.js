@@ -15,7 +15,7 @@ const error = (code, message, data) => ({ code, message, ...(data ? { data } : {
 /**
  * @param {{ sessions?: object[], questions?: object[], capabilities?: string[] }} [fixture]
  */
-export function fakeDaemon({ sessions = [], questions = [], capabilities = ['attach.after', 'extension.methods', 'prompt.receipts', 'task', 'team', 'library', 'settings.language', 'session.list.page', 'question.watch', 'question.watch.turns', 'workspace.files'] } = {}) {
+export function fakeDaemon({ sessions = [], questions = [], capabilities = ['attach.after', 'extension.methods', 'prompt.receipts', 'task', 'team', 'library', 'settings.language', 'session.list.page', 'question.watch', 'question.watch.turns', 'workspace.files', 'workspace.files.read'] } = {}) {
   const state = {
     /** @type {Map<string, any>} */ sessions: new Map(sessions.map(session => [session.id, session])),
     questions: [...questions],
@@ -126,6 +126,9 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
     'board.list': () => ({ pins: [] }),
     // Files per projectRoot (state.files), as alpd answers them; a test may plant bad paths.
     'workspace.files.search': ({ projectRoot, limit = 30 }) => ({ files: (state.files.get(projectRoot) ?? []).slice(0, limit).map(file => ({ path: file })) }),
+    // workspace.files.list and read: empty by default; a test plants answers with state.handlers.
+    'workspace.files.list': () => ({ entries: [] }),
+    'workspace.files.read': ({ path }) => ({ path, content: '', size: 0 }),
     'session.close': () => ({}),
     // Project resources (§15): keyed by the exact projectRoot, as alpd never walks up.
     'task.list': ({ projectRoot }) => ({ projectRoot, tasks: state.tasks.get(projectRoot) ?? [], unreadable: [], revision: `r${(state.tasks.get(projectRoot) ?? []).length}` }),

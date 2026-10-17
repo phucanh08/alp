@@ -15,6 +15,10 @@ alp-gateway serve                                                           # 12
   permission check and a workspace/session scope check; results and events are filtered too.
   Daemon shutdown, extension registration and host administration are never remote. Library
   entry content (MCP servers, hooks, providers) never leaves: list rows carry names only.
+- Permissions: `session.read`/`session.write`, `project.read`/`project.write` (the default), and
+  `files.read`, which lists a workspace's directories and reads its text files (at most 1 MiB;
+  `.git`, `.env*`, `.alp`, key and credential files always refused, links never followed). It is
+  never a default: `credential create --permission session.read,session.write,project.read,files.read`.
 - `credential create --mode read-only` limits a credential to driving (prompt, message, answer)
   trees that run in the given modes, checked up to the root on every request.
 - Loopback by default. Put a TLS reverse proxy in front for remote clients (`deploy/Caddyfile`,

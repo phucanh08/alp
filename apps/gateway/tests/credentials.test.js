@@ -42,6 +42,23 @@ test('creation refuses relative or missing workspaces and host permissions', asy
   await assert.rejects(createCredential(gatewayHome, { label: 'x', workspaces: [], permissions: ['session.read'] }), /at least one workspace/);
 });
 
+test('files.read is held only when named: never by default, implied by nothing, implying nothing', async t => {
+  const { directory, home: gatewayHome, workspace } = await home(t);
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const cli = path.join(import.meta.dirname, '..', 'src', 'cli.js');
+  const env = { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory };
+  const create = async (...extra) => JSON.parse((await promisify(execFile)(process.execPath, [cli, 'credential', 'create', '--label', 'x', '--workspace', workspace, '--json', ...extra], { env })).stdout).credential.permissions;
+  assert.deepEqual(await create(), ['session.read', 'session.write', 'project.read', 'project.write'], 'the default leaves files.read out');
+  assert.deepEqual(await create('--permission', 'session.write,project.write'), ['session.read', 'session.write', 'project.read', 'project.write']);
+  assert.deepEqual(await create('--permission', 'session.read', '--permission', 'files.read'), ['session.read', 'files.read']);
+  assert.deepEqual(await create('--permission', 'files.read'), ['files.read'], 'files.read implies no other permission');
+  const usage = await promisify(execFile)(process.execPath, [cli, 'help'], { env }).then(result => result.stdout, failure => `${failure.stdout}${failure.stderr}`);
+  assert.match(usage, /files\.read .*never a default/s);
+  const held = (await listCredentials(gatewayHome)).map(entry => entry.permissions.includes('files.read'));
+  assert.deepEqual(held, [false, false, true, true]);
+});
+
 test('the store verifies tokens, and rotation, revocation and expiry end them with a change notice', async t => {
   const { home: gatewayHome, workspace } = await home(t);
   const { credential, token } = await createCredential(gatewayHome, { label: 'a', workspaces: [workspace], permissions: ['session.read'] });
