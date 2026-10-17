@@ -216,6 +216,86 @@ export function hostLabel(value) {
   return name && name.length <= 253 && !/[\p{Cc}\p{Cf}]/u.test(name) ? name : undefined;
 }
 
+/** The longest error text the gateway passes on; longer text is cut. */
+export const MAX_ERROR_TEXT = 1000;
+/** What stands for a host path outside the grant in error text. */
+export const HOST_PATH = '<host path>';
+/** What stands for a granted workspace's own root in error text; paths under it become relative. */
+export const WORKSPACE = '<workspace>';
+/** What stands for V8's quote of a file in error text. */
+export const FILE_QUOTE = '<file content>';
+
+const escapeRegExp = (/** @type {string} */ text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Characters that end a path token in prose: whitespace, quotes, brackets, `,` `;` `:`. */
+const PATH_CHAR = '[^\\s\'"`()\\[\\]{}<>,;:|]';
+/**
+ * One pass over error text: file: URLs, with any number of slashes and a drive (paths; `file:` in prose is not one), other URLs (kept), then
+ * absolute POSIX paths, Windows drive and UNC paths, and ~/ paths, each starting at the text's start
+ * or after a character that cannot be inside a word: a space, a quote, a bracket, `=` `,` `;` `|`,
+ * `:` (PATH=/a:/b, cfg:/x), `@`. A URL's own `//` is consumed with its scheme first.
+ */
+const TOKENS = new RegExp([
+  `(?<file>\\b[Ff][Ii][Ll][Ee]:(?:[\\\\/]*[A-Za-z]:)?[\\\\/]${PATH_CHAR}*)`,
+  `(?<url>\\b[A-Za-z][A-Za-z0-9+.-]*://${PATH_CHAR}*)`,
+  `(?<=^|[\\s'"\`(\\[{<=,;|:@])(?<path>(?:/|~/|[A-Za-z]:[\\\\/]|\\\\\\\\)${PATH_CHAR}*)`,
+].join('|'), 'g');
+
+/**
+ * Error text of alpd, a runtime or a provider as a remote client may see it (t-d27c,
+ * docs/alp/remote-gateway.md §5.12). The first line only (stack traces, CLI stderr, code frames of
+ * a config file go), V8's quote of a file that does not parse replaced by FILE_QUOTE, absolute
+ * paths inside a granted workspace made relative to it (its root WORKSPACE), every other absolute host path (POSIX,
+ * Windows, UNC, ~/, file: URLs, the gateway's home directory) replaced by HOST_PATH, at most
+ * MAX_ERROR_TEXT characters. Text with none of these (a rate limit, an HTTP status, a URL) passes as it is.
+ * @param {unknown} value @param {readonly { path: string, canonical: string }[]} workspaces @param {{ lines?: boolean, home?: string }} [options]
+ *   lines: keep every line (alpd's own notices); home: the host's home directory, replaced wherever it appears
+ */
+export function safeErrorText(value, workspaces, { lines = false, home } = {}) {
+  // Never String() an object: one without a primitive conversion would throw.
+  let text = typeof value === 'string' ? value : typeof value === 'number' || typeof value === 'boolean' ? String(value) : '';
+  if (!lines) text = text.split(/\r\n|\r|\n|\u0085|\u2028|\u2029/, 1)[0];
+  // Bounded before any pattern runs: a provider may answer a whole page.
+  if (text.length > 4 * MAX_ERROR_TEXT) text = text.slice(0, 4 * MAX_ERROR_TEXT);
+  // V8: `Unexpected token 'x', "<quote>" is not valid JSON`, `"<quote>" is not valid JSON`.
+  text = text.replace(/"(?:[^"\\]|\\.|"(?!(?:\.\.\.|…)?\s+is not valid JSON))*"(?=(?:\.\.\.|…)?\s+is not valid JSON)/g, `"${FILE_QUOTE}"`);
+  // Workspace roots first, longest first, as literals: a path with spaces is still one path.
+  const roots = [...new Set(workspaces.flatMap(workspace => [workspace.canonical, workspace.path]))].filter(root => typeof root === 'string' && root.length > 1).sort((a, b) => b.length - a.length);
+  for (const root of roots) {
+    const bare = root.replace(/[\\/]+$/, '');
+    text = text.replace(new RegExp(`(?<![\\w.~-])${escapeRegExp(bare)}(?:[\\\\/]+(${PATH_CHAR}+)|(?=[.!?]*(?:$|[\\s'"\`()\\[\\]{}<>,;:|])))`, 'g'), (_match, rest) => {
+      if (rest === undefined) return WORKSPACE;
+      // A path that climbs out of the workspace is a host path.
+      return rest.split(/[\\/]/).includes('..') ? HOST_PATH : rest;
+    });
+  }
+  // The home directory as a literal too (a user name with a space), with the rest of its path.
+  if (home && home.replace(/[\\/]+$/, '').length > 1) text = text.replace(new RegExp(`${escapeRegExp(home.replace(/[\\/]+$/, ''))}(?:[\\\\/]${PATH_CHAR}*)?`, 'g'), HOST_PATH);
+  text = text.replace(TOKENS, (match, ...rest) => {
+    const groups = rest.at(-1);
+    if (groups.file !== undefined) return HOST_PATH;
+    if (groups.url !== undefined) return match;
+    // A lone `/` or one ending a sentence is not a path.
+    if (/^[/\\]+$/.test(match)) return match;
+    const trailing = /[.!?]+$/.exec(match)?.[0] ?? '';
+    return HOST_PATH + trailing;
+  });
+  if (text.length > MAX_ERROR_TEXT) text = `${text.slice(0, MAX_ERROR_TEXT)}…`;
+  return text;
+}
+
+/**
+ * An error object of an event, a prompt receipt or a session's lastError (`{ message, code? }`) as
+ * a remote client may see it: the code when it is a plain identifier, the message through
+ * safeErrorText; every other field dropped. Anything that is not an object answers a generic one.
+ * @param {unknown} error @param {readonly { path: string, canonical: string }[]} workspaces @param {{ home?: string }} [options]
+ */
+export function safeAlpError(error, workspaces, options = {}) {
+  const source = /** @type {any} */ (plain(error) ? error : {});
+  const code = typeof source.code === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(source.code) ? source.code : undefined;
+  const message = typeof source.message === 'string' && source.message ? safeErrorText(source.message, workspaces, options) : 'Failed';
+  return { message, ...(code ? { code } : {}) };
+}
+
 /** Visible characters: no whitespace, no control characters. */
 const VISIBLE = '[^\\s\\u0000-\\u001f\\u007f-\\u009f]';
 const MODEL_ID = new RegExp(`^(?:(?:codex|claude|antigravity):${VISIBLE}+|acp:(?!\\.\\.?(?:/|$))[\\w.-]+(?:/${VISIBLE}+)?|[A-Za-z0-9][\\w.@\\[\\]-]*)$`, 'u');

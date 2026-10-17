@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { RPC_METHODS } from '@anhlp/alp-protocol';
 import { METHODS_V1 } from '@anhlp/alp-protocol/contract';
 import { EXPOSURE, unclassified } from '../src/index.js';
@@ -753,6 +754,124 @@ test('task.list names unreadable task files without their content', async t => {
     { error: 'This task file cannot be read on the daemon host' },
   ]);
   assert.equal(answer.revision, 'r1');
+});
+
+// t-d27c: a session's lastError, a prompt's receipt, the failure events and alpd's raw errors carry
+// the text of a runtime, a provider or alpd's store, which names host paths (EACCES on alpd's state
+// directory, a CLI's location) and may run on with a stack or a CLI's stderr. The client keeps the
+// code and the first line, host paths outside the grant replaced, its own workspace's made relative.
+const HOSTED = tag => `EACCES: permission denied, open '/home/me/.alp/state/${S(tag)}.json'\n    at ${S(`${tag}-stack`)} (/home/me/${S(`${tag}-frame`)}.js:1:2)`;
+const HOSTED_SHOWN = "EACCES: permission denied, open '<host path>'";
+const clean = value => { const text = JSON.stringify(value); assert.ok(!text.includes('SENTINEL') && !text.includes('/home/me'), text); };
+
+test('session summaries carry no host path in lastError or parked (t-d27c)', async t => {
+  const { daemon, sdk, a } = await world(t);
+  const { client } = await sdk('alice');
+  const sa = daemon.state.sessions.get('sa');
+  Object.assign(sa, { status: 'error', lastError: { code: 'turn_failed', message: HOSTED('last-error'), file: S('last-error-extra') }, parked: `Usage limit; see /home/me/${S('parked')}.log` });
+  const answers = {
+    get: (await client.request('session.get', { sessionId: 'sa' })).session,
+    list: (await client.request('session.list', { projectRoot: a })).sessions.find(session => session.id === 'sa'),
+    attach: (await client.request('session.attach', { sessionId: 'sa', replay: false })).session,
+    configure: (await client.request('session.configure', { sessionId: 'sa' })).session,
+    rename: (await client.request('session.rename', { sessionId: 'sa', title: 'named' })).session,
+    archive: (await client.request('session.archive', { sessionId: 'sa', archived: false })).session,
+  };
+  // session.status rows are snapshots too: parked passes through the same rule (lastError is not a snapshot field).
+  daemon.state.handlers['session.status'] = () => ({ status: { rootId: 'sa', sessions: [{ ...sa, state: 'idle', idleMs: 0, workdir: sa.projectRoot, unreadMail: 0 }], assignments: [], questions: [], worktrees: [] } });
+  const row = (await client.request('session.status', { sessionId: 'sa' })).status.sessions[0];
+  answers.status = { ...row, lastError: { code: 'turn_failed', message: HOSTED_SHOWN }, ...(row.lastError ? { lastError: row.lastError } : {}) };
+  // Each surface on its own, so a failure names every method that leaks.
+  const wrong = Object.entries(answers).filter(([, session]) => !isDeepStrictEqual({ lastError: session.lastError, parked: session.parked, status: session.status }, { lastError: { code: 'turn_failed', message: HOSTED_SHOWN }, parked: 'Usage limit; see <host path>', status: 'error' })).map(([method]) => method);
+  assert.deepEqual(wrong, [], `leaking: ${wrong.join(', ')}`);
+  clean(answers);
+});
+
+test('alpd errors of session.attach, interrupt, close and message name no host path (t-d27c)', async t => {
+  const { daemon, sdk, canonicalA } = await world(t);
+  const { client } = await sdk('alice');
+  const cases = [
+    ['session.attach', { sessionId: 'sa' }, HOSTED('attach'), HOSTED_SHOWN],
+    ['session.interrupt', { sessionId: 'sa' }, `codex app-server at /home/me/${S('bin')}/codex did not answer turn/interrupt`, 'codex app-server at <host path> did not answer turn/interrupt'],
+    ['session.close', { sessionId: 'sa' }, `could not remove /home/me/.alp/worktrees/${S('close')}: EBUSY`, 'could not remove <host path>: EBUSY'],
+    // A path in the client's own workspace stays, relative to it.
+    ['session.message', { sessionId: 'sa', text: 'x' }, `mail for ${canonicalA}/src/${S('relative')}.ts failed: C:\\Users\\me\\${S('windows')} and file:///home/me/${S('url')}\n${S('stderr')}`, `mail for src/${S('relative')}.ts failed: <host path> and <host path>`],
+  ];
+  const seen = [];
+  const wrong = [];
+  for (const [method, params, message, shown] of cases) {
+    daemon.state.handlers[method] = () => { throw { code: 1000, message, data: { reason: 'busy' } }; };
+    const error = await client.request(method, params).then(() => assert.fail(`${method} answered`), caught => caught);
+    seen.push({ code: error.code, message: error.message.replace(S('relative'), 'r'), data: error.data });
+    if (!isDeepStrictEqual({ code: error.code, message: error.message, data: error.data }, { code: 1000, message: shown, data: { reason: 'busy' } })) wrong.push(method);
+  }
+  assert.deepEqual(wrong, [], `leaking: ${wrong.join(', ')}`);
+  clean(seen);
+});
+
+test('a failed prompt receipt reaches the client without host paths (t-d27c)', async t => {
+  const { daemon, sdk } = await world(t);
+  const { client } = await sdk('alice');
+  daemon.state.handlers['session.prompt'] = () => ({ outcome: 'failed', error: { message: `Claude exited with code 1: /home/me/${S('claude-bin')}/claude\nstderr: ${S('claude-stderr')}`, code: 'outcome_unknown', detail: S('receipt-extra') } });
+  const receipt = await client.request('session.prompt', { sessionId: 'sa', clientMessageId: 'm-1', content: [{ type: 'text', text: 'x' }] });
+  clean(receipt);
+  assert.deepEqual(receipt, { outcome: 'failed', error: { message: 'Claude exited with code 1: <host path>', code: 'outcome_unknown' } });
+});
+
+test('session.failed, prompt.failed, turn.ended, session.updated and notices reach the client without host paths (t-d27c)', async t => {
+  const { daemon, sdk, canonicalA } = await world(t);
+  const { client } = await sdk('alice');
+  const seen = [];
+  client.onEvent(envelope => seen.push(envelope.event));
+  await client.request('session.attach', { sessionId: 'sa', replay: false });
+  const limit = "You've hit your limit · resets 3pm (Europe/Berlin); see https://status.anthropic.com/v1/incidents";
+  daemon.emit('sa', { type: 'prompt.failed', clientMessageId: 'm-2', error: { message: `/home/me/.alp/providers/p.json: Unexpected token 'S', "{"key": ${S('quote')}"... is not valid JSON` } });
+  daemon.emit('sa', { type: 'prompt.failed', clientMessageId: 'm-3', error: { message: limit } });
+  daemon.emit('sa-c', { type: 'turn.ended', turnId: 't-1', state: 'failed', error: { message: `edit of ${canonicalA}/lib/a.js failed; backup in /home/me/${S('backup')}`, code: 'x' } });
+  daemon.emit('sa', { type: 'session.updated', session: { ...daemon.state.sessions.get('sa'), lastError: { message: HOSTED('updated') } } });
+  daemon.emit('sa', { type: 'item', item: { kind: 'notice', id: 'n-1', level: 'warning', text: `ALP: Could not continue: peer a-1 (spawn /home/me/${S('notice')}/codex ENOENT)\nRun alp resume in ${canonicalA}.` } });
+  daemon.emit('sa', { type: 'session.failed', error: { message: HOSTED('failed'), code: 'provider_failed' } });
+  await until(() => seen.some(event => event.type === 'session.failed'), 'session.failed');
+  const leaking = seen.filter(event => /SENTINEL|\/home\/me/.test(JSON.stringify(event))).map(event => event.type);
+  assert.deepEqual(leaking, [], `leaking: ${leaking.join(', ')}`);
+  assert.deepEqual(seen.filter(event => event.type !== 'session.updated' && event.type !== 'item'), [
+    { type: 'prompt.failed', clientMessageId: 'm-2', error: { message: `<host path>: Unexpected token 'S', "<file content>"... is not valid JSON` } },
+    { type: 'prompt.failed', clientMessageId: 'm-3', error: { message: limit } },
+    { type: 'turn.ended', turnId: 't-1', state: 'failed', error: { message: 'edit of lib/a.js failed; backup in <host path>', code: 'x' } },
+    { type: 'session.failed', error: { message: HOSTED_SHOWN, code: 'provider_failed' } },
+  ]);
+  assert.deepEqual(seen.find(event => event.type === 'session.updated').session.lastError, { message: HOSTED_SHOWN });
+  assert.equal(seen.find(event => event.type === 'item').item.text, 'ALP: Could not continue: peer a-1 (spawn <host path> ENOENT)\nRun alp resume in <workspace>.');
+});
+
+test('safeErrorText keeps useful text and replaces host paths (t-d27c)', async () => {
+  const { safeErrorText, safeAlpError } = await import('../src/policy.js');
+  assert.equal(typeof safeErrorText, 'function', 'policy.js exports safeErrorText');
+  const workspaces = [{ path: '/tmp/my ws', canonical: '/private/tmp/my ws' }];
+  const cases = [
+    ['429 Too Many Requests: rate limited, 50/min; retry after 20s', '429 Too Many Requests: rate limited, 50/min; retry after 20s'],
+    ['POST https://api.openai.com/v1/responses failed (ECONNRESET)', 'POST https://api.openai.com/v1/responses failed (ECONNRESET)'],
+    ['cannot read /private/tmp/my ws/a b/c.txt or /tmp/my ws.', 'cannot read a b/c.txt or <workspace>.'],
+    ['escape /tmp/my ws/../../etc/passwd', 'escape <host path>'],
+    ['sibling /tmp/my-wsx/y', 'sibling <host path>'],
+    ['~/.codex/config.toml, \\\\host\\share\\k and D:/keys/k.pem', '<host path>, <host path> and <host path>'],
+    ['"{"token": "abc"... is not valid JSON', '"<file content>"... is not valid JSON'],
+    ['and/or a / b', 'and/or a / b'],
+    // After `:` or `@`, and file: with any slashes (review round 1); `a:/` reads as a drive.
+    ['spawn codex ENOENT (PATH=/usr/bin:/home/me/bin) cfg:/home/me/x at file:/home/me/y user@/home/me/z', 'spawn codex ENOENT (PATH=<host path>:<host path>) cfg:<host path> at <host path> user@<host path>'],
+    ['bad /private/tmp/my ws/a:/etc/passwd; https://h.example:8443/v1/x and localhost:8080/v1', 'bad <host path>; https://h.example:8443/v1/x and localhost:8080/v1'],
+    ['first\u0085/home/me/second', 'first'],
+    // Review round 2: prose `file:`, JSON pointers and globs stay; Windows file: URLs go whole.
+    ['Error reading file: permission denied at #/properties/foo for src/**/*.ts', 'Error reading file: permission denied at #/properties/foo for src/**/*.ts'],
+    ['file:C:\\Users\\me\\secret and file:///C:\\Users\\me\\x and FILE:///C:/Users/me/y', '<host path> and <host path> and <host path>'],
+    ['x'.repeat(5000), `${'x'.repeat(1000)}…`],
+  ];
+  for (const [text, shown] of cases) assert.equal(safeErrorText(text, workspaces), shown, text);
+  assert.equal(safeErrorText('/Users/Jo Doe/.alp/x failed', [], { home: '/Users/Jo Doe' }), '<host path> failed');
+  assert.deepEqual(safeAlpError({ message: '/etc/x', code: 'bad code!' }, workspaces), { message: '<host path>' });
+  assert.deepEqual(safeAlpError('oops', workspaces), { message: 'Failed' });
+  assert.equal(safeErrorText(Object.create(null), workspaces), '');
+  assert.equal(safeErrorText({ toString: 1 }, workspaces), '');
 });
 
 test('the hello names the host as alpd does, and nothing when alpd sends no usable name', async t => {

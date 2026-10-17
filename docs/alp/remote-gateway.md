@@ -586,6 +586,46 @@ như Paseo, nhưng chỉ đọc, với một quyền riêng.
   thước do runtime đặt (mỗi chuỗi của detail có kiểu ≤ 65.536 ký tự, ≤ 200 đường dẫn, ≤ 50 kết quả
   web); `shell` và `unknown` như cũ.
 
+### 5.12 Text lỗi của runtime, provider và alpd (t-d27c)
+
+Text lỗi của runtime, của provider (CLI Codex/Claude, ACP) và của store alpd có thể nêu đường dẫn
+host (EACCES trên `$ALP_HOME/state`, chỗ cài CLI, worktree), kéo theo stack trace hay stderr của CLI,
+và trích file không parse được (V8). Gateway áp một quy tắc chung (`safeErrorText`, `safeAlpError`
+trong `apps/gateway/src/policy.js`):
+
+- **Giữ**: mã lỗi (số JSON-RPC và `data` như cũ; `code` chuỗi của `AlpError`/`SessionError` nếu là
+  định danh đơn giản `[A-Za-z0-9_.-]{1,64}`), và dòng đầu của message.
+- **Bỏ**: mọi dòng sau dòng đầu (`\n`, `\r`, U+0085, U+2028/2029: stack, stderr, code frame); các field
+  khác của object lỗi; message không phải chuỗi (trừ số, boolean) thành rỗng.
+- **Thay**: trích của V8 (`"…" is not valid JSON`) → `"<file content>"`; đường dẫn tuyệt đối trong
+  workspace của grant (path hoặc canonical) → tương đối với workspace, chính gốc workspace →
+  `<workspace>`, đường dẫn leo ra ngoài bằng `..` → `<host path>`; mọi đường dẫn tuyệt đối khác (POSIX,
+  `C:\`/`C:/`, UNC, `~/`, URL `file:` với số `/` bất kỳ và ổ đĩa (`file:` trong câu văn thì không), thư mục home của host gateway) → `<host path>`;
+  một đường dẫn được nhận ra khi đứng đầu text hoặc sau khoảng trắng, dấu nháy, ngoặc, `=` `,` `;` `|`
+  `:` `@` (vậy `PATH=/a:/b`, `cfg:/x` đều bị thay). URL khác (http, https...) giữ nguyên. Tối đa
+  1000 ký tự; text vào bị cắt ở 4000 ký tự trước khi dò.
+- Text không có những thứ trên (rate limit, mã HTTP, URL của provider) đi qua nguyên vẹn.
+
+Áp ở đâu (mọi field/event mang text lỗi đi qua gateway):
+
+| Bề mặt | Field |
+|---|---|
+| Lỗi JSON-RPC của mọi method forward (`#errorOf`), trừ lỗi của gateway và lỗi đã viết lại theo t-70c4 (§5.7) | `error.message` (ví dụ `session.attach` khi đọc timeline lỗi; `session.interrupt`, `close`, `message`, `prompt`... với message thô của runtime) |
+| `session.get`, `session.list`, `session.attach`, `session.rename`, `session.archive`, `session.create`, `session.configure` | `session(s).lastError` (`safeAlpError`), `session(s).parked` |
+| `session.status` | `status.sessions[].parked` (và `lastError` nếu có); `workdir` vẫn như §5.6 |
+| `session.prompt` (receipt) | `error` |
+| Event `session.failed`, `prompt.failed`, `turn.ended` (kể cả bản sao không cursor của `question.watch` turns) | `error` |
+| Event `session.opened`, `session.updated` | `session.lastError`, `session.parked` |
+| Item `notice` | `text` (giữ mọi dòng, chỉ thay đường dẫn) |
+
+Không áp: item `tool_call` (`error`, `detail`) là kết quả tool của agent, cùng loại với output shell
+(§5.11); `session.log`, `session.status` (`workdir`, leases, worktrees) như §5.6; `data` của lỗi alpd
+(đã xử lý theo reason ở §5.7). Giới hạn: phát hiện đường dẫn dựa trên ký tự, nên đường dẫn ngoài
+workspace có khoảng trắng chỉ bị thay tới khoảng trắng đầu (phần sau, một mảnh tên, còn lại) trừ khi
+nó nằm dưới home của host; đường dẫn dính liền sau ký tự khác (ví dụ `x#/a`, `a*/b`) không được nhận ra,
+để glob và JSON pointer (`src/**/*.ts`, `#/properties/x`) giữ nguyên; trích file dạng khác V8 trên cùng dòng đầu (YAML, TOML) không được nhận ra.
+Test sentinel: `apps/gateway/tests/authorization.test.js` (các test `t-d27c`).
+
 ## 6. Streaming và recovery
 
 ### 6.1 Thuật toán client (theo contract §8.3)
