@@ -418,7 +418,23 @@ riêng (backlog).
 - **Lỗi**: lỗi alpd trả cho `library.get` được viết lại, chỉ giữ `code` và `data.reason`: file entry
   không parse được làm alpd báo đường dẫn trên host kèm đoạn trích file (V8 trích nội dung, có thể
   có secret). Không tìm thấy → `No <kind> entry '<name>'`; lỗi khác → `<kind> '<name>' cannot be read
-  on the daemon host`.
+  on the daemon host`. Cùng quy tắc (t-70c4, helper `opaqueDaemonError`) cho các method khác đọc file
+  của host: `library.list`, `team.list`, `library.models`, `settings.language.get` viết lại mọi lỗi
+  alpd thành message cố định, giữ `code` và `data.reason`. `session.preview`, `session.create`,
+  `session.configure` (resolve team, agent, provider từ library) giữ nguyên lỗi có `data.reason` của
+  hợp đồng. Lỗi không có reason (exception thô) và reason `invalid_entry`, `unreadable`,
+  `unsafe_path`, `persistence_failed` được thay bằng message cố định theo loại (`SESSION_FAULTS`):
+  team hoặc agent không có (`... is not available on the daemon host`), file cấu hình team, agent
+  hoặc provider không đọc được (`... has a configuration the daemon host cannot read`), CLI chưa cài
+  (`The <runtime> CLI is not installed on the daemon host`). Message của alpd chỉ dùng để chọn mẫu;
+  tên trong mẫu lấy từ params client gửi (`spec.workflow`, `spec.agent`, `spec.model`) và phải là
+  tên đơn giản, nếu không thì bỏ tên. Lỗi khác → `<method> failed on the daemon host; the daemon
+  log there may have details`. Đổi lại, client remote mất các message cụ thể khác (ví dụ session
+  đã mở). Với mọi method khác, lỗi có một trong bốn reason trên thành `<method> failed on the daemon
+  host` (`#errorOf`), vì `persistence_failed` của `session.prompt`, `rename`, `archive` nêu thư mục
+  state; kể cả `unsafe_path` của `task.*` vốn chỉ nêu đường dẫn trong workspace (chấp nhận mất message
+  đó cho quy tắc đơn giản). `task.list` giữ `unreadable[].file` (đường dẫn tương đối với projectRoot) nhưng `error`
+  thành `This task file cannot be read on the daemon host`.
 - **Kết quả**: chỉ `kind`, `name`, `source`, `overrides`, `revision` (opaque, HMAC theo tiến trình
   alpd), `usedBy`, `librarySkills` (`LIBRARY_ENTRY_FIELDS`); field khác alpd trả (đường dẫn...) bị
   bỏ. `content` do `projectLibraryContent` dựng lại; `secrets` liệt kê JSON Pointer của mọi giá

@@ -124,6 +124,60 @@ class NotInScope extends GatewayError {
 
 const forbidden = (/** @type {string} */ message, /** @type {string} */ reason, extra = {}) => new GatewayError(GATEWAY_ERROR.forbidden, message, { reason, ...extra });
 
+/**
+ * Reasons of alpd refusals whose message names a host path or quotes a file: an entry, team,
+ * provider or settings file that does not parse comes back as `<host path>: <V8's quote of the
+ * file>`, and the quote may hold a secret. A failed write of alpd's state names its state directory.
+ */
+const HOST_FILE_REASONS = new Set(['invalid_entry', 'unreadable', 'unsafe_path', 'persistence_failed']);
+
+/**
+ * alpd's error with its message replaced by `message`: the code and a plain reason pass on, the
+ * rest of data does not (t-70c4). With `keepReasoned`, a refusal with a reason the contract names
+ * passes unchanged unless that reason is one of HOST_FILE_REASONS; raw failures (no reason) are
+ * replaced, as alpd logs them in full on its host. Errors that are not alpd's are returned as they are.
+ * @param {unknown} caught @param {string} message @param {{ keepReasoned?: boolean }} [options]
+ */
+function opaqueDaemonError(caught, message, { keepReasoned = false } = {}) {
+  const error = /** @type {any} */ (caught);
+  if (error instanceof GatewayError || isAlpClientError(error) || typeof error?.code !== 'number') return error;
+  const reason = typeof error.data?.reason === 'string' && /^[a-z_]{1,64}$/.test(error.data.reason) ? error.data.reason : undefined;
+  if (keepReasoned && reason !== undefined && !HOST_FILE_REASONS.has(reason)) return error;
+  return new GatewayError(error.code, message, reason ? { reason } : undefined);
+}
+
+const TASK_UNREADABLE = 'This task file cannot be read on the daemon host';
+
+/**
+ * Failures of session.preview, create and configure the gateway can name without alpd's text:
+ * alpd's message only chooses the template; the names in it are the client's own (validated) params.
+ * @type {Array<[RegExp, (names: { team: string | undefined, agent: string | undefined, provider: string | undefined, runtime: string | undefined }) => string]>}
+ */
+const SESSION_FAULTS = [
+  [/^Team '[^']*' not found/, ({ team }) => `${team ? `Team '${team}'` : 'The team'} is not available on the daemon host`],
+  [/(^|[\\/])team\.json: /, ({ team }) => `${team ? `Team '${team}'` : 'The team'} has a configuration the daemon host cannot read`],
+  [/^Agent '[^']*' not found/, ({ agent }) => `${agent ? `Agent '${agent}'` : 'The agent'} is not available on the daemon host`],
+  [/(^|[\\/])agent\.json: /, ({ agent }) => `${agent ? `Agent '${agent}'` : 'The agent'} has a configuration the daemon host cannot read`],
+  [/[\\/]providers[\\/][^\\/]+\.json: /, ({ provider }) => `${provider ? `Provider '${provider}'` : 'The provider'} has a configuration the daemon host cannot read`],
+  [/executable not found on PATH|is not installed or not on PATH|^spawn \S+ ENOENT/, ({ runtime }) => `${runtime ? `The ${runtime} CLI` : 'The agent CLI'} is not installed on the daemon host`],
+];
+
+/**
+ * A session method's failure as the client sees it: protocol refusals with a reason pass; a
+ * failure SESSION_FAULTS knows gets its fixed message; the rest a generic one.
+ * @param {unknown} error @param {string} method @param {{ workflow?: unknown, agent?: unknown, model?: unknown }} [ask] the spec or params the client sent
+ */
+function sessionFault(error, method, ask = {}) {
+  const text = String(/** @type {any} */ (error)?.message ?? '');
+  const plain = (/** @type {unknown} */ value) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}$/.test(value) ? value : undefined;
+  const model = typeof ask.model === 'string' ? ask.model : '';
+  const provider = model.startsWith('acp:') ? plain(model.slice(4).split('/')[0]) : undefined;
+  const runtime = provider ?? (/^(codex|claude|antigravity):/.test(model) ? model.split(':')[0] : undefined);
+  const names = { team: plain(ask.workflow), agent: plain(ask.agent), provider, runtime };
+  const known = SESSION_FAULTS.find(([pattern]) => pattern.test(text));
+  return opaqueDaemonError(error, known ? known[1](names) : `${method} failed on the daemon host; the daemon log there may have details`, { keepReasoned: true });
+}
+
 /** A request id v1 accepts (docs/protocol/alp-json-rpc-v1.md §3). @param {unknown} id */
 function validId(id) {
   if (typeof id !== 'string') return Number.isSafeInteger(id);
@@ -376,7 +430,12 @@ export class ClientConnection {
       if (error.reason === 'timeout') return { code: ERROR.failed, message: `alpd did not answer ${method} within ${this.#limits.requestTimeoutMs} ms; it may still complete. Read the state before trying again.`, data: { reason: GATEWAY_REASON.gatewayTimeout } };
       return { code: ERROR.failed, message: `The connection to alpd ended before ${method} was answered; it may have run. Read the state before trying again.`, data: { reason: GATEWAY_REASON.daemonDisconnected } };
     }
-    if (error && typeof error.code === 'number') return { code: error.code, message: String(error.message ?? 'Request failed'), ...(error.data !== undefined ? { data: error.data } : {}) };
+    if (error && typeof error.code === 'number') {
+      // Whatever the method, a refusal whose reason marks a host file or alpd's state directory
+      // loses its message (t-70c4): session.prompt, rename and archive name the state path on a failed write.
+      if (HOST_FILE_REASONS.has(error.data?.reason)) return { code: error.code, message: `${method} failed on the daemon host`, data: { reason: error.data.reason } };
+      return { code: error.code, message: String(error.message ?? 'Request failed'), ...(error.data !== undefined ? { data: error.data } : {}) };
+    }
     this.#log.error(`${method} failed in the gateway`, { code: 'ALP_GATEWAY_INTERNAL', method, error });
     return { code: ERROR.failed, message: `${method} failed in the gateway` };
   }
@@ -698,7 +757,12 @@ export class ClientConnection {
       catch (error) { if (!before) this.#attached.delete(scoped.root); throw error; }
     },
 
-    'session.preview': async params => this.#call('session.preview', { spec: this.#spec(params.spec).spec }),
+    // session.preview, create and configure resolve teams, agents and providers from the host's
+    // library; a file there that does not parse fails with its host path and a quote of it.
+    'session.preview': async params => {
+      const { spec } = this.#spec(params.spec);
+      return this.#call('session.preview', { spec }).catch(error => { throw sessionFault(error, 'session.preview', spec); });
+    },
 
     'session.create': async params => {
       const { workspace, spec } = this.#spec(params.spec);
@@ -728,7 +792,7 @@ export class ClientConnection {
       } catch (error) {
         if (generated) this.#sessions.delete(sessionId);
         if (!before) this.#attached.delete(sessionId);
-        throw error;
+        throw sessionFault(error, 'session.create', spec);
       }
       const created = result?.session;
       if (!created || !workspaceOf(this.#grant, created.projectRoot) || created.parentId) {
@@ -754,7 +818,7 @@ export class ClientConnection {
     'session.configure': async params => {
       await this.#resolve(params.sessionId);
       if (params.mode !== undefined) this.#checkMode(params.mode);
-      const result = await this.#call('session.configure', params);
+      const result = await this.#call('session.configure', params).catch(error => { throw sessionFault(error, 'session.configure', params); });
       const scoped = this.#sessions.get(params.sessionId);
       if (scoped && typeof result?.session?.mode === 'string') scoped.mode = result.session.mode;
       return result;
@@ -832,16 +896,25 @@ export class ClientConnection {
     // Project resources (docs/protocol/alp-json-rpc-v1.md §15): alpd never walks up from
     // projectRoot, so the exact string the grant lists is the whole check. Writes are recorded by
     // alpd as the user's; params carry no identity (any `by` is dropped with the other unknown params).
-    'task.list': async params => { this.#workspace(params.projectRoot); return this.#call('task.list', params); },
+    // A task file that does not parse is listed with V8's quote of it: the client learns which file
+    // (a path relative to projectRoot), not what it holds.
+    'task.list': async params => {
+      this.#workspace(params.projectRoot);
+      const result = await this.#call('task.list', params);
+      if (!Array.isArray(result?.unreadable)) return result;
+      const unreadable = result.unreadable.map((/** @type {any} */ entry) => ({ ...(relativeFile(entry?.file) ? { file: entry.file } : {}), error: TASK_UNREADABLE }));
+      return { ...result, unreadable };
+    },
     'task.create': async params => { this.#workspace(params.projectRoot); return this.#call('task.create', params); },
     'task.update': async params => { this.#workspace(params.projectRoot); return this.#call('task.update', params); },
     'task.gate.resolve': async params => { this.#workspace(params.projectRoot); return this.#call('task.gate.resolve', params); },
     // Without projectRoot alpd answers the host library alone: the gateway asks for a project.
     // Rows name entries; their listed fields only. A team that cannot be read says so without the
     // file and parse error alpd reports, which name host paths and quote the file.
+    // alpd's errors here are rewritten for the same reason (opaqueDaemonError).
     'team.list': async params => {
       this.#project(params.projectRoot, 'team.list');
-      const result = await this.#call('team.list', params);
+      const result = await this.#call('team.list', params).catch(error => { throw opaqueDaemonError(error, 'The teams cannot be read on the daemon host'); });
       const teams = (Array.isArray(result?.teams) ? result.teams : []).map((/** @type {any} */ team) => {
         const row = pick(team, TEAM_ROW_FIELDS);
         if (row.error !== undefined) row.error = 'This team cannot be read on the daemon host';
@@ -851,7 +924,7 @@ export class ClientConnection {
     },
     'library.list': async params => {
       this.#project(params.projectRoot, 'library.list');
-      const result = await this.#call('library.list', params);
+      const result = await this.#call('library.list', params).catch(error => { throw opaqueDaemonError(error, `The ${params.kind} entries cannot be read on the daemon host`); });
       return { ...result, entries: (Array.isArray(result?.entries) ? result.entries : []).map((/** @type {any} */ entry) => pick(entry, LIBRARY_ROW_FIELDS)) };
     },
     // One entry, read only, as the projectRoot's sessions would use it (project, else library, else
@@ -861,23 +934,18 @@ export class ClientConnection {
     // and V8's quote of the file, which may hold a secret. Only the code and the reason pass on.
     'library.get': async params => {
       this.#project(params.projectRoot, 'library.get');
-      let result;
-      try { result = await this.#call('library.get', params); }
-      catch (caught) {
-        const error = /** @type {any} */ (caught);
-        if (error instanceof GatewayError || isAlpClientError(error) || typeof error?.code !== 'number') throw error;
-        const reason = typeof error.data?.reason === 'string' && /^[a-z_]{1,64}$/.test(error.data.reason) ? error.data.reason : undefined;
-        const message = error.code === ERROR.notFound ? `No ${params.kind} entry '${params.name}'${params.scope ? ` in the ${params.scope}` : ''}` : `${params.kind} '${params.name}' cannot be read on the daemon host`;
-        throw new GatewayError(error.code, message, reason ? { reason } : undefined);
-      }
+      const result = await this.#call('library.get', params).catch(caught => {
+        const message = caught?.code === ERROR.notFound ? `No ${params.kind} entry '${params.name}'${params.scope ? ` in the ${params.scope}` : ''}` : `${params.kind} '${params.name}' cannot be read on the daemon host`;
+        throw opaqueDaemonError(caught, message);
+      });
       const { content, secrets } = projectLibraryContent(params.kind, result?.content);
       return { ...pick(result ?? {}, LIBRARY_ENTRY_FIELDS), content, ...(secrets.length ? { secrets } : {}) };
     },
     'library.models': async () => {
-      const result = await this.#call('library.models', {});
+      const result = await this.#call('library.models', {}).catch(error => { throw opaqueDaemonError(error, 'The models cannot be read on the daemon host'); });
       return { ...result, models: (Array.isArray(result?.models) ? result.models : []).map((/** @type {any} */ model) => pick(model, MODEL_ROW_FIELDS)) };
     },
-    'settings.language.get': () => this.#call('settings.language.get', {}),
+    'settings.language.get': () => this.#call('settings.language.get', {}).catch(error => { throw opaqueDaemonError(error, 'The language setting cannot be read on the daemon host'); }),
   };
 
 }
