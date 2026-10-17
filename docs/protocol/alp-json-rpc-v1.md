@@ -255,6 +255,13 @@ attached to the event's tree (§9):
   closed children's history. Kept envelopes retain their cursors, but this is a digest, not a
   cursor-ordered replay: a cursor-tracking client uses `history: "skip"` and then
   `session.attach { after }`.
+- **Session names**: alpd keeps a kept `session.updated` (epoch `title-…`, `seq: 0`) for a live root
+  whose name is set, its `session` carrying `title`. The first user message of an unnamed root names it,
+  as Paseo names an agent: its first non-blank line, whitespace folded, at most 60 code points, no
+  ellipsis (messages ALP sends itself, `clientMessageId` `alp-…`, do not). The announcement follows the
+  `item` of that message. `session.rename` is announced the same way. Runtime `session.updated` events
+  carry no `title`; a client keeps the last one it saw. `session.get` / `session.list` give the same
+  `title`.
 
 ### 8.2 Ordering
 
@@ -417,7 +424,7 @@ connection on the local socket acts as the owner.
 | `session.interrupt` | cancels the running turn, closes child sessions | yes | 1001 | session.write |
 | `session.configure` | changes mode | yes (same mode) | 1000, 1001 | session.write |
 | `session.close` | closes | no (second → 1001) | 1001 | session.write |
-| `session.rename` | renames a root | yes | -32602, 1001, `persistence_failed` | session.write |
+| `session.rename` | renames a root; announced as `session.updated` (§8.1) | yes | -32602, 1001, `persistence_failed` | session.write |
 | `session.archive` | archives/unarchives a root, closes it | yes | -32602, 1001, `persistence_failed` | session.write |
 | `session.get` / `session.list` | read | yes | 1001 | session.read |
 | `session.status` | read (live tree) | yes | 1001 | session.read |

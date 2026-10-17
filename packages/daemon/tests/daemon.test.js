@@ -120,7 +120,7 @@ test('a client creates, prompts and receives the events of its whole tree over t
   const child = events.find(e => e.event.type === 'session.opened' && e.event.session.parentId === session.id);
   assert.ok(child, 'child events reach the root client');
   assert.deepEqual(types(events, child.sessionId).slice(0, 3), ['session.opened', 'session.ready', 'item']);
-  assert.deepEqual(types(events, session.id).slice(0, 5), ['session.opened', 'session.ready', 'item', 'prompt.accepted', 'turn.started']);
+  assert.deepEqual(types(events, session.id).slice(0, 6), ['session.opened', 'session.ready', 'item', 'session.updated', 'prompt.accepted', 'turn.started']);
   const listed = await client.request('session.list');
   assert.deepEqual(listed.sessions.map(s => s.id), [session.id]);
 });
@@ -155,7 +155,7 @@ test('an idle released root closes at once; attach replays the retained tree', a
   await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Hi') });
   runtimes[0].finish('hello');
   await watcher.client.request('session.attach', { sessionId: session.id });
-  assert.deepEqual(types(watcher.events), ['session.opened', 'session.ready', 'item', 'prompt.accepted', 'turn.started', 'item', 'turn.ended']);
+  assert.deepEqual(types(watcher.events), ['session.opened', 'session.ready', 'item', 'session.updated', 'prompt.accepted', 'turn.started', 'item', 'turn.ended']);
   await watcher.client.request('session.release', { sessionId: session.id });
   assert.deepEqual(await client.request('session.release', { sessionId: session.id }), { closed: true });
   assert.equal(runtimes[0].closed, true);
@@ -415,6 +415,52 @@ test('a prompt cut off by a crash answers outcome unknown instead of sending twi
   }
 });
 
+
+// Paseo names an agent from its first message (server/agent/create-agent-title.ts at b63a325): the
+// first non-blank line, whitespace folded, at most 60 characters, no ellipsis. Every viewer hears it.
+test('a root is named after its first prompt, as Paseo names an agent, and every attached viewer hears it', async t => {
+  const { project, runtimes, open } = await setup(t);
+  const { client, events } = await open();
+  const watcher = await open();
+  const { session } = await client.request('session.create', { spec: { cwd: project, persist: true } });
+  await watcher.client.request('session.attach', { sessionId: session.id });
+  const first = `\n   \n  Fix   the\tlogin ${'é'.repeat(70)}  \nsecond line`;
+  await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text(first) });
+  const title = `Fix the login ${'é'.repeat(46)}`;
+  assert.equal([...title].length, 60);
+  const named = list => list.find(e => e.event.type === 'session.updated' && e.event.session.title);
+  await until(() => named(events) && named(watcher.events));
+  for (const seen of [events, watcher.events]) {
+    const update = named(seen);
+    assert.equal(update.sessionId, session.id);
+    assert.equal(update.event.session.title, title);
+    assert.equal(update.event.session.id, session.id);
+    // After the message it names, so a viewer that drops older cursors still keeps the message.
+    const message = seen.find(e => e.event.type === 'item' && e.event.item.kind === 'user_message');
+    assert.ok(update.cursor > message.cursor, 'the title follows its message');
+  }
+  assert.equal((await client.request('session.get', { sessionId: session.id })).session.title, title);
+  runtimes[0].finish('ok');
+  await until(() => events.some(e => e.event.type === 'turn.ended'));
+  // Only the first message names it.
+  await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm2', content: text('Something else') });
+  await until(() => events.filter(e => e.event.type === 'item' && e.event.item.kind === 'user_message').length === 2);
+  assert.equal((await client.request('session.get', { sessionId: session.id })).session.title, title);
+  assert.equal(events.filter(e => e.event.type === 'session.updated' && e.event.session.title).length, 1);
+  // A name the user gives is announced the same way.
+  await client.request('session.rename', { sessionId: session.id, title: 'Login fix' });
+  await until(() => watcher.events.some(e => e.event.type === 'session.updated' && e.event.session.title === 'Login fix'));
+});
+
+test('a root named before its first prompt keeps that name', async t => {
+  const { project, open } = await setup(t);
+  const { client, events } = await open();
+  const { session } = await client.request('session.create', { spec: { cwd: project, persist: true } });
+  await client.request('session.rename', { sessionId: session.id, title: 'Chosen' });
+  await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Fix the login') });
+  await until(() => events.some(e => e.event.type === 'item' && e.event.item.kind === 'user_message'));
+  assert.equal((await client.request('session.get', { sessionId: session.id })).session.title, 'Chosen');
+});
 
 test('a root is renamed and archived, and archived ones are listed only when asked', async t => {
   const { project, open } = await setup(t);

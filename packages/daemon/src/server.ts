@@ -79,6 +79,17 @@ const RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 /** How often a running alpd applies retention, besides at start (ALPD §68). */
 const RETENTION_SWEEP_MS = 6 * 60 * 60 * 1000;
 const LIVE: SessionStatus[] = ['initializing', 'idle', 'running'];
+const PROMPT_TITLE_CHARS = 60;
+
+/**
+ * A root's name from its first prompt, as Paseo names an agent (server/agent/create-agent-title.ts
+ * at b63a325): the first non-blank line, whitespace folded, at most 60 characters, no ellipsis.
+ * Counted in code points, where Paseo counts UTF-16 units, so a cut never splits a character.
+ */
+function titleFromPrompt(text: string): string | undefined {
+  const line = text.split(/\r?\n/).map(entry => entry.replace(/\s+/g, ' ').trim()).find(Boolean);
+  return line ? [...line].slice(0, PROMPT_TITLE_CHARS).join('').trim() || undefined : undefined;
+}
 
 /** What clients need from a daemon connection; AlpClient implements it over the socket. */
 import type { DaemonConnection } from '@anhlp/alp-protocol/connection';
@@ -163,16 +174,16 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     if (last > (cursors.get(root) ?? 0)) cursors.set(root, last);
   }
 
-  /** Lifecycle bookkeeping for one event; returns true when the record changed. */
-  function track(sessionId: string, root: string, event: AlpEvent) {
+  /** Lifecycle bookkeeping for one event; returns true when it named the root. */
+  function track(sessionId: string, root: string, event: AlpEvent): boolean {
     const now = new Date().toISOString();
     let record = records.get(sessionId);
     if (event.type === 'session.opened') {
       record ??= { version: 1, id: sessionId, rootId: root, status: 'initializing', createdAt: now, updatedAt: now };
       save(record, { rootId: root, session: event.session, status: 'idle', lastError: undefined, activeTurnId: undefined });
-      return;
+      return false;
     }
-    if (!record) return;
+    if (!record) return false;
     if (event.type === 'session.updated') save(record, { session: { ...record.session, ...event.session, ...(event.session.parked ? {} : { parked: undefined }) } });
     // Work on an archived session brings it back.
     else if (event.type === 'turn.started') save(record, { status: 'running', activeTurnId: event.turnId, archived: undefined });
@@ -180,8 +191,26 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     else if (event.type === 'session.failed') save(record, { status: 'error', lastError: event.error });
     else if (event.type === 'session.closed') save(record, { status: record.status === 'error' ? 'error' : 'closed', activeTurnId: undefined });
     else if (event.type === 'item' && sessionId === root && !record.title && event.item.kind === 'user_message' && !event.item.clientMessageId?.startsWith('alp-')) {
-      save(record, { title: event.item.text.replace(/\s+/g, ' ').trim().slice(0, 80) });
+      // The user's first message names an unnamed root, as Paseo names an agent (ALPD §15).
+      const title = titleFromPrompt(event.item.text);
+      if (title) { save(record, { title }); return true; }
     }
+    return false;
+  }
+
+  /**
+   * Tells the viewers of a live root its name, as a `session.updated` kept in its timeline, so a
+   * viewer attached later replays it. Nothing is sent for a root that is not open.
+   */
+  function announceTitle(root: string, title: string) {
+    const session = runtime.snapshot(root);
+    if (!session || rootOf.get(root) !== root) return;
+    const envelope = keep(root, { sessionId: root, epoch: `title-${startedAt}`, seq: 0, ts: new Date().toISOString(), event: { type: 'session.updated', session: { ...session, title } } });
+    const log = logs.get(root) ?? [];
+    log.push(envelope);
+    if (log.length > TREE_LOG_LIMIT) log.splice(0, log.length - TREE_LOG_LIMIT);
+    logs.set(root, log);
+    for (const connection of attached.get(root) ?? []) deliver(connection, envelope);
   }
 
   runtime.onEvent(original => {
@@ -194,15 +223,18 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       rootOf.set(sessionId, parent ? rootOf.get(parent) ?? parent : sessionId);
     }
     const root = rootOf.get(sessionId) ?? sessionId;
+    let named = false;
     if (rootOf.has(sessionId)) {
       envelope = keep(root, envelope);
       const log = logs.get(root) ?? [];
       log.push(envelope);
       if (log.length > TREE_LOG_LIMIT) log.splice(0, log.length - TREE_LOG_LIMIT);
       logs.set(root, log);
-      track(sessionId, root, event);
+      named = track(sessionId, root, event);
     }
     for (const connection of attached.get(root) ?? []) deliver(connection, envelope);
+    // After the message that named it, so its cursor follows the message's.
+    if (named) announceTitle(root, records.get(root)!.title!);
     if (event.type === 'session.closed' && sessionId === root) {
       setImmediate(() => forget(root));
     } else {
@@ -815,6 +847,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       Object.assign(record, { title: title.replace(/\s+/g, ' ').trim() });
       try { await store?.put(record); }
       catch (error) { record.title = before; throw persistenceFailed(`the name of ${record.id}`, error); }
+      announceTitle(record.id, record.title!);
       return { session: summary(record.id) };
     },
 
