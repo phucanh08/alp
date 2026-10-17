@@ -24,7 +24,7 @@ import { cn } from '../lib/utils';
  */
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
-export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', startLabel, startHold, initialText, autoFocus }: {
+export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', startLabel, startHold, initialText, addText, autoFocus }: {
   onSend: (text: string) => Promise<unknown>;
   onQueue: (text: string) => void;
   onStop: () => void;
@@ -52,9 +52,14 @@ export function Composer({ onSend, onQueue, onStop, queued, onEditQueued, onSend
   startHold?: string;
   /** Text the box starts with (a first message a failed start left). */
   initialText?: string;
+  /** Text put in the box while it is open, after what is there (a new `id` each time). */
+  addText?: { id: number; text: string };
   autoFocus?: boolean;
 }) {
   const [text, setText] = React.useState(initialText ?? '');
+  React.useEffect(() => {
+    if (addText) setText(current => current.trim() ? `${current.replace(/\s+$/, '')}\n\n${addText.text}` : addText.text);
+  }, [addText]);
   const [error, setError] = React.useState<string | null>(null);
   const area = React.useRef<HTMLTextAreaElement>(null);
   const reason = blocked ?? disabledReason;

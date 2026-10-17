@@ -247,3 +247,26 @@ export function failedStartNotice(message, prompt, where) {
   if (!String(prompt ?? '').trim()) return message;
   return `${message} Your first message was not sent; it is back in the New session box${where ? ` of ${where}` : ''}.`;
 }
+
+/**
+ * Starts a session from the New session screen. Where the start began (workspace, connection) is
+ * taken before it waits on the host: a failure after the screen closed keeps the first message
+ * for that workspace and names it in the notice, even if the person moved on meanwhile. The error
+ * is thrown again, for the screen when it is still open (its composer keeps the text).
+ * @param {{ startOrigin(): { workspace: string | null, connection: number }, createSession(spec: any): Promise<string>, keepUnsentDraft(text: string, origin: { workspace: string | null, connection: number }): void, notify(level: string, text: string): void }} controller
+ * @param {any} spec what createSession sends @param {string} text the first message
+ * @param {{ mounted: () => boolean, describe: (error: unknown) => { message: string }, nameOf: (path: string) => string }} screen
+ * @returns {Promise<string>} the new session's id
+ */
+export async function startNewSession(controller, spec, text, { mounted, describe, nameOf }) {
+  const origin = controller.startOrigin();
+  try {
+    return await controller.createSession(spec);
+  } catch (error) {
+    if (!mounted()) {
+      if (text.trim()) controller.keepUnsentDraft(text, origin);
+      controller.notify('error', failedStartNotice(describe(error).message, text, origin.workspace ? nameOf(origin.workspace) : undefined));
+    }
+    throw error;
+  }
+}

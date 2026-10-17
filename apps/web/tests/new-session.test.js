@@ -3,7 +3,7 @@
 // the first message.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSpec, effectiveModel, effortLabel, effortOptions, initialChoices, normalizeModels, parsePreview, previewRows, resolveThinking, titleFromPrompt } from '../src/lib/new-session.js';
+import { buildSpec, effectiveModel, startNewSession, effortLabel, effortOptions, initialChoices, normalizeModels, parsePreview, previewRows, resolveThinking, titleFromPrompt } from '../src/lib/new-session.js';
 
 const models = normalizeModels([
   { id: 'codex:gpt-6.1-sol', label: 'codex · GPT-6.1-Sol', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'low'], effort: 'low' },
@@ -129,4 +129,29 @@ test('a start that cannot tell its team says why and what unblocks it, and never
   assert.match(stuck({ teamsUnavailable: { reason: 'capability' }, previewBlocked: true, previewError: 'Not connected.' }), /connect to a host that lists teams or previews sessions/);
   // Not stuck while the preview may still answer.
   assert.equal(startTeam({ previewSettled: false, teams: [], teamsUnavailable: { reason: 'permission' } }).stuck, undefined);
+});
+
+test('a New session start takes its workspace and connection before waiting on the host', async () => {
+  let workspace = '/w/shop';
+  const kept = [];
+  const notices = [];
+  const controller = {
+    startOrigin: () => ({ workspace, connection: 7 }),
+    // The person moves to another workspace while the host answers, then the start fails.
+    createSession: async () => { workspace = '/w/other'; await Promise.resolve(); throw new Error('Refused.'); },
+    keepUnsentDraft: (text, origin) => kept.push({ text, origin }),
+    notify: (level, text) => notices.push({ level, text }),
+  };
+  const screen = { mounted: () => false, describe: error => ({ message: error.message }), nameOf: path => path.split('/').pop() };
+  await assert.rejects(startNewSession(controller, { prompt: 'hi' }, 'hi', screen), /Refused/);
+  assert.deepEqual(kept, [{ text: 'hi', origin: { workspace: '/w/shop', connection: 7 } }]);
+  assert.deepEqual(notices, [{ level: 'error', text: 'Refused. Your first message was not sent; it is back in the New session box of shop.' }]);
+  // Still open: the screen shows the failure itself; nothing is kept or announced.
+  workspace = '/w/shop';
+  await assert.rejects(startNewSession(controller, {}, 'hi', { ...screen, mounted: () => true }), /Refused/);
+  assert.equal(kept.length, 1);
+  assert.equal(notices.length, 1);
+  // Started: the id comes back.
+  controller.createSession = async () => 'S1';
+  assert.equal(await startNewSession(controller, {}, 'hi', screen), 'S1');
 });

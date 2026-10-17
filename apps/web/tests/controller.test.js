@@ -880,12 +880,14 @@ test('a first message kept from a failed start is handed to the next New session
   const w = setup(t);
   await connected(w);
   assert.equal(w.controller.unsentDraft(), '');
-  w.controller.keepUnsentDraft('x'.repeat(500), '/w/a');
+  const origin = w.controller.startOrigin();
+  assert.equal(origin.workspace, '/w/a');
+  w.controller.keepUnsentDraft('x'.repeat(500), origin);
   assert.equal(w.controller.unsentDraft().length, 500, 'kept whole');
   w.controller.clearUnsentDraft();
   assert.equal(w.controller.unsentDraft(), '');
   // Written for /w/a: another workspace does not see it, its own does again.
-  w.controller.keepUnsentDraft('for a', '/w/a');
+  w.controller.keepUnsentDraft('for a', origin);
   w.controller.selectWorkspace('/w/b');
   assert.equal(w.controller.unsentDraft(), '', 'not offered in another workspace');
   w.controller.selectWorkspace('/w/a');
@@ -893,4 +895,41 @@ test('a first message kept from a failed start is handed to the next New session
   // A disconnect forgets it (the next sign-in may be another token).
   w.controller.disconnect();
   assert.equal(w.controller.unsentDraft(), '', 'forgotten on disconnect');
+});
+
+test('a kept first message belongs to its connection: another token forgets it, a start from an earlier connection keeps nothing', async t => {
+  const w = setup(t);
+  await connected(w);
+  w.controller.keepUnsentDraft('first', w.controller.startOrigin());
+  assert.equal(w.controller.unsentDraft(), 'first');
+  // connect() with another token while connected: the kept message goes with the old connection.
+  w.controller.connect({ url: 'http://127.0.0.1:7434', token: 'alpgw1.fedcba9876543210.other' });
+  await until(() => w.state().connection.phase === 'open', 'open again');
+  w.controller.selectWorkspace('/w/a');
+  assert.equal(w.controller.unsentDraft(), '', 'another token does not see it');
+  // A start begun before a disconnect fails after the next connect: nothing is kept for this one.
+  const before = w.controller.startOrigin();
+  w.controller.disconnect();
+  await connected(w);
+  w.controller.keepUnsentDraft('late', before);
+  assert.equal(w.controller.unsentDraft(), '', 'a start from an earlier connection keeps nothing');
+  w.controller.keepUnsentDraft('now', w.controller.startOrigin());
+  assert.equal(w.controller.unsentDraft(), 'now', 'this connection keeps its own');
+});
+
+test('an open New session screen of the workspace takes a kept first message at once', async t => {
+  const w = setup(t);
+  await connected(w);
+  const taken = [];
+  const release = w.controller.takeUnsentDrafts(kept => kept.workspace === '/w/a' && (taken.push(kept.text), true));
+  w.controller.keepUnsentDraft('to the open screen', w.controller.startOrigin());
+  assert.deepEqual(taken, ['to the open screen']);
+  assert.equal(w.controller.unsentDraft(), '', 'not kept again for the next screen');
+  release();
+  w.controller.keepUnsentDraft('for the next screen', w.controller.startOrigin());
+  // A screen forgets only the message it showed: one kept after it read stays.
+  w.controller.clearUnsentDraft('something it showed earlier');
+  assert.equal(w.controller.unsentDraft(), 'for the next screen');
+  assert.deepEqual(taken, ['to the open screen'], 'a closed screen takes nothing');
+  assert.equal(w.controller.unsentDraft(), 'for the next screen');
 });

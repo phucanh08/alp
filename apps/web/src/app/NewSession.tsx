@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Brain, ChevronDown, CircleAlert, Cpu, Users } from 'lucide-react';
 import { describe } from '../lib/errors.js';
 import { can } from '../lib/gateway.js';
-import { buildSpec, effectiveModel, effortLabel, effortOptions, failedStartNotice, initialChoices, previewBase, previewRows, resolveThinking, startTeam, type Choices, type Preview } from '../lib/new-session.js';
+import { buildSpec, effectiveModel, effortLabel, effortOptions, initialChoices, previewBase, previewRows, resolveThinking, startNewSession, startTeam, type Choices, type Preview } from '../lib/new-session.js';
 import { Menu } from '../components/ui/menu';
 import { Input } from '../components/ui/input';
 import { Spinner } from '../components/ui/spinner';
@@ -117,31 +117,38 @@ export function NewSessionScreen() {
   // failure after this screen closed still reaches the person, with their message.
   // A first message a failed start left behind (its screen had closed) comes back here, once.
   const [unsent] = React.useState(() => controller.unsentDraft());
-  React.useEffect(() => { if (unsent) controller.clearUnsentDraft(); }, [unsent, controller]);
+  // One kept while this screen is open (a start from an earlier screen of this workspace failed)
+  // lands in this box at once, after anything typed, so the notice's "back in the box" is true;
+  // so does one kept between this screen's first render and this effect.
+  const [taken, setTaken] = React.useState<{ id: number; text: string }>();
+  React.useEffect(() => {
+    if (unsent) controller.clearUnsentDraft(unsent);
+    const add = (text: string) => setTaken(current => ({ id: (current?.id ?? 0) + 1, text }));
+    const release = controller.takeUnsentDrafts(kept => {
+      if (kept.workspace !== controller.getState().workspace) return false;
+      add(kept.text);
+      return true;
+    });
+    const late = controller.unsentDraft();
+    if (late) { controller.clearUnsentDraft(late); add(late); }
+    return release;
+  }, [unsent, controller]);
   const starting = React.useRef(false);
   const mounted = React.useRef(true);
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const start = async (text: string) => {
     if (starting.current || controller.getState().busy.create || waiting) return;
     starting.current = true;
-    const workspace = controller.getState().workspace;
     try {
-      const id = await controller.createSession({
+      const id = await startNewSession(controller, {
         ...(team ? { team } : {}),
         ...(effective.mode ? { mode: effective.mode } : {}),
         ...(effective.model ? { model: effective.model } : {}),
         ...(effective.thinking ? { thinking: effective.thinking } : {}),
         ...(title.trim() ? { title: title.trim() } : {}),
         ...(text.trim() ? { prompt: text } : {}),
-      });
+      }, text, { mounted: () => mounted.current, describe, nameOf: baseName });
       finishDraft(id);
-    } catch (error) {
-      // Shown here (the composer keeps the text), or as a notice when the draft is gone.
-      if (!mounted.current) {
-        if (text.trim()) controller.keepUnsentDraft(text, workspace);
-        controller.notify('error', failedStartNotice(describe(error).message, text, workspace ? baseName(workspace) : undefined));
-      }
-      throw error;
     } finally {
       starting.current = false;
     }
@@ -208,6 +215,7 @@ export function NewSessionScreen() {
         placeholder="What should main work on?"
         startLabel="Start session"
         initialText={unsent}
+        addText={taken}
         autoFocus
         controls={controls}
       />
