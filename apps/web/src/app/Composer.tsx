@@ -29,10 +29,13 @@ import { usePaneFocused } from './pane';
  *   as a path. Without `images` (the session's runtime takes none) there is no button, and a
  *   pasted or dropped image is refused with `imagesUnavailable`. A message with images is sent
  *   (or steered), never queued: a queued message is text.
+ * - The context meter (t-7679.12): Paseo's ring before the primary action, when given `meter`.
  */
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
-export function Composer({ images: takesImages = false, imagesUnavailable, onSend, onQueue, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', startLabel, startHold, initialText, addText, autoFocus, inputId }: {
+export function Composer({ meter, images: takesImages = false, imagesUnavailable, onSend, onQueue, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', startLabel, startHold, initialText, addText, autoFocus, inputId }: {
+  /** Paseo's context window meter, before the primary action (t-7679.12). */
+  meter?: React.ReactNode;
   /** The session takes images: the + button, paste and drop add them. */
   images?: boolean;
   /** Why a pasted or dropped image cannot go (the runtime takes none). */
@@ -248,6 +251,7 @@ export function Composer({ images: takesImages = false, imagesUnavailable, onSen
               {controls}
             </div>
             <div className="flex shrink-0 items-center gap-1">
+              {meter}
               {startLabel ? (
                 <button type="button" aria-label={startLabel} title={startHold ?? startLabel} onClick={() => void send()} disabled={!!reason || !!startHold}
                   className={cn(round, 'ml-1 bg-primary text-primary-foreground hover:bg-primary/85')} data-testid="composer-start">
