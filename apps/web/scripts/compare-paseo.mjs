@@ -4,12 +4,13 @@
 // the same disposable host (e2e/support/world.js: alpd with the fake Codex in a temporary home):
 // apps/web through alp-gateway, paseo-web through ALP's Paseo bridge on that alpd.
 //
-//   node apps/web/scripts/compare-paseo.mjs [outDir] [--only chat|workspace|new-session]
+//   node apps/web/scripts/compare-paseo.mjs [outDir] [--only chat|workspace|new-session|workspace-p1]
 //
 // Scenes: chat (t-7679.1: the conversation, the composer), workspace (t-7679.2: attention in
 // the sidebar, the session title on its tab, the Shortcuts dialog, History, an archived session)
 // and new-session (t-7679.3: the New session / new agent tab with its pickers and effort, ALP's
-// preview, Settings General and Appearance, the light theme).
+// preview, Settings General and Appearance, the light theme) and workspace-p1 (t-7679.5: the tab
+// context menu, the command center, a resized sidebar).
 //
 // Needs: apps/web/dist (npm run build:alp-web), packages/{cli,daemon}/dist, dist/web-app
 // (node scripts/build-paseo-web.mjs) and integrations/paseo/server/dist. Nothing touches ~/.alp.
@@ -233,10 +234,68 @@ async function newSessionScenes() {
   await context.close();
 }
 
+/** Best effort on paseo-web: a step that does not find its element is skipped, not fatal. */
+const tryStep = async step => { try { await step(); return true; } catch { return false; } };
+
+async function workspaceP1Scenes() {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
+  const web = await context.newPage();
+  await connect(web, world);
+  await newSession(web, 'Tab work');
+  await web.locator('body').click({ position: { x: 700, y: 300 } });
+  await web.keyboard.press('ControlOrMeta+Shift+T');
+  await web.getByTestId('workspace-new-tab').click();
+  await web.getByRole('menuitem', { name: 'Diff' }).click();
+  // The tab context menu (right click on the session's tab).
+  await web.getByRole('tab', { name: 'Tab work' }).click({ button: 'right' });
+  await web.getByRole('menu', { name: 'Tab actions' }).waitFor();
+  await shot(web, 'workspace-tab-menu-apps-web.png');
+  await web.keyboard.press('Escape');
+  const app = await openPaseo(context);
+  await tryStep(async () => {
+    await app.getByText('Tab work').first().click({ timeout: 30_000 });
+    await app.waitForTimeout(1500);
+    await app.getByText('Tab work').last().click({ button: 'right', timeout: 10_000 });
+    await shot(app, 'workspace-tab-menu-paseo-web.png');
+    await app.keyboard.press('Escape');
+  });
+
+  // The command center (Mod+K).
+  await web.locator('body').click({ position: { x: 700, y: 300 } });
+  await web.keyboard.press('ControlOrMeta+K');
+  await web.getByRole('dialog', { name: 'Command center' }).waitFor();
+  await shot(web, 'workspace-command-center-apps-web.png');
+  await web.keyboard.press('Escape');
+  await tryStep(async () => {
+    await app.locator('body').click({ position: { x: 700, y: 120 } });
+    await app.keyboard.press('ControlOrMeta+K');
+    await app.getByTestId('command-center-panel').waitFor({ timeout: 10_000 });
+    await shot(app, 'workspace-command-center-paseo-web.png');
+    await app.keyboard.press('Escape');
+  });
+
+  // The sidebar dragged 120px wider.
+  const drag = async (page, handle) => {
+    const box = await handle.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2, { steps: 8 });
+    await page.mouse.up();
+  };
+  await drag(web, web.getByTestId('left-sidebar-resize-handle'));
+  await shot(web, 'workspace-resized-apps-web.png');
+  await tryStep(async () => {
+    await drag(app, app.getByTestId('left-sidebar-resize-handle'));
+    await shot(app, 'workspace-resized-paseo-web.png');
+  });
+  await context.close();
+}
+
 try {
   if (!only || only === 'chat') await chatScenes();
   if (!only || only === 'workspace') await workspaceScenes();
   if (!only || only === 'new-session') await newSessionScenes();
+  if (!only || only === 'workspace-p1') await workspaceP1Scenes();
 } finally {
   await browser.close();
   await paseo.close();
