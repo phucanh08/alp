@@ -5,6 +5,7 @@
 //   (none)      stream "Echo: <prompt>" in a few deltas, then finish
 //   [tool]      run a shell command (a commandExecution item with output), then answer
 //   [ask]       ask the user with alp_ask; the turn ends once it is answered or declined
+//   [ask-later] the same, about two seconds after the turn starts
 //   [hold]      start and never finish (until interrupted)
 //   [slow]      stream the answer over about three seconds
 // A steer (turn/steer) joins the running turn; one holding [finish] ends it with a reply.
@@ -61,10 +62,10 @@ async function run(threadId, turnId, text) {
     if (await stream(threadId, turnId, 'The **src** folder has three files:\n\n- `app.ts`\n- `index.ts`\n- `util.ts`')) complete(threadId, turnId);
     return;
   }
-  if (text.includes('[ask]')) {
+  if (text.includes('[ask]') || text.includes('[ask-later]')) {
     const call = `ask-${turnId}`;
     asking.set(call, { threadId, turnId });
-    await sleep(50);
+    await sleep(text.includes('[ask-later]') ? 2_000 : 50);
     send({ id: call, method: 'item/tool/call', params: { threadId, turnId, callId: `call-${turnId}`, namespace: null, tool: 'alp_ask', arguments: { question: 'Deploy to staging now?', options: ['yes', 'no'], to: 'user' } } });
     return;
   }

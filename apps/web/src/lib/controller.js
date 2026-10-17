@@ -69,7 +69,7 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  *   workspace: string | null,
  *   catalog: Load & { teams: Team[], teamsKnown?: boolean, teamsUnavailable?: import('./new-session.js').TeamsUnavailable, modes: Mode[], models: Model[], defaultMode?: string },
  *   sessions: Load & { list: SessionSummary[] },
- *   history: Load & { list: SessionSummary[] },
+ *   history: Load & { list: SessionSummary[], query: string, nextCursor?: string, more?: 'loading' | 'error' },
  *   attention: Record<string, number>,
  *   selected: string | null,
  *   focus: string | null,
@@ -87,6 +87,8 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
 /** Modes the runtime knows, in order of how much they allow; labels for people. */
 /** How long a message the host took counts as working while its turn has not been seen starting. */
 const BUSY_UNSEEN_MS = 15_000;
+/** Sessions per History page, as Paseo's AGENT_HISTORY_PAGE_LIMIT. */
+const HISTORY_PAGE_SIZE = 200;
 const MODE_LABELS = /** @type {Record<string, string>} */ ({ 'read-only': 'Read only', 'workspace-write': 'Workspace write', 'full-access': 'Full access' });
 
 /**
@@ -101,6 +103,16 @@ export function needsInput(state, root) {
   return live || (state.attention[root] ?? 0) > 0;
 }
 
+/**
+ * The roots of a session.list answer for History. The host orders a page itself (§12.1); a whole
+ * list is sorted here, newest first.
+ * @param {any} result @param {boolean} sort @returns {SessionSummary[]}
+ */
+function historyRows(result, sort) {
+  const rows = (Array.isArray(result?.sessions) ? result.sessions : []).filter((/** @type {any} */ session) => session && typeof session.id === 'string' && !session.parentId);
+  return sort ? rows.sort((/** @type {any} */ a, /** @type {any} */ b) => String(b.updatedAt ?? b.createdAt ?? '').localeCompare(String(a.updatedAt ?? a.createdAt ?? ''))) : rows;
+}
+
 /** @returns {State} */
 export function initialState(gateway = '') {
   return {
@@ -109,7 +121,7 @@ export function initialState(gateway = '') {
     workspace: null,
     catalog: { status: 'idle', teams: [], modes: [], models: [] },
     sessions: { status: 'idle', list: [] },
-    history: { status: 'idle', list: [] },
+    history: { status: 'idle', list: [], query: '' },
     attention: {},
     selected: null,
     focus: null,
@@ -175,6 +187,18 @@ export class Controller {
   /** @type {ReturnType<typeof setInterval> | undefined} */ #taskTimer;
   /** @type {ReturnType<typeof setInterval> | undefined} */ #sessionTimer;
   /** @type {ReturnType<typeof setInterval> | undefined} */ #attentionTimer;
+  /**
+   * The workspace's waiting questions (id → root) after question.watch, kept current by the
+   * question events that follow it; null without a watch (question.list is polled then).
+   * @type {Map<string, string> | null}
+   */
+  #waiting = null;
+  /**
+   * Question events seen while a question.watch read is on its way: the answer is what the host
+   * held when it read it, and the gateway may pass on events of later questions before it.
+   * @type {{ read: number, events: Array<{ id: string, root?: string }> } | null}
+   */
+  #watchLog = null;
   /** Latest question.list and History reads: an older answer that lands later is dropped. */
   #attentionRead = 0;
   #historyRead = 0;
@@ -192,6 +216,9 @@ export class Controller {
       taskPollMs: 5_000,
       sessionPollMs: 15_000,
       attentionPollMs: 5_000,
+      // With question.watch the events keep attention current; this read only repairs drift.
+      attentionWatchPollMs: 60_000,
+      historyPageSize: HISTORY_PAGE_SIZE,
       releaseTimeoutMs: 5_000,
       busyUnseenMs: BUSY_UNSEEN_MS,
       ...options,
@@ -288,7 +315,7 @@ export class Controller {
       client: { timeoutMs: requestTimeoutMs },
     });
     run.alp = alp;
-    alp.onEvent(envelope => { if (this.#run === run) this.#onEnvelope(envelope); });
+    alp.onEvent(envelope => { if (this.#run === run && this.#onQuestionEvent(envelope)) this.#onEnvelope(envelope); });
     alp.onState((state, error) => { if (this.#run === run) this.#onState(run, state, error); });
   }
 
@@ -311,6 +338,7 @@ export class Controller {
     this.#unsentDraft = null;
     this.#generation += 1;
     this.#context = {};
+    this.#waiting = null;
     if (run?.alp) run.alp.stop();
     if (run) this.#set({ ...initialState(this.#state.connection.gateway), preferences: this.#state.preferences });
   }
@@ -386,7 +414,7 @@ export class Controller {
     const current = this.#state.workspace;
     const workspace = current && grantedWorkspace(principal, current) ? current : principal.workspaces[0] ?? null;
     const changed = JSON.stringify(principal) !== JSON.stringify(this.#state.principal);
-    if (workspace !== current) this.#context = {};
+    if (workspace !== current) { this.#context = {}; this.#waiting = null; }
     this.#set(state => ({
       principal,
       connection: { ...state.connection, capabilities, ...(daemonVersion ? { daemonVersion } : {}) },
@@ -410,7 +438,8 @@ export class Controller {
   #startTimers() {
     this.#stopTimers();
     this.#sessionTimer = setInterval(() => { if (this.#state.workspace && this.#state.connection.phase === 'open') void this.refreshSessions({ quiet: true }); }, this.#options.sessionPollMs);
-    this.#attentionTimer = setInterval(() => { if (this.#state.workspace && this.#state.connection.phase === 'open') void this.refreshAttention(); }, this.#options.attentionPollMs);
+    const attentionMs = this.hasCapability('question.watch') ? this.#options.attentionWatchPollMs : this.#options.attentionPollMs;
+    this.#attentionTimer = setInterval(() => { if (this.#state.workspace && this.#state.connection.phase === 'open') void this.refreshAttention(); }, attentionMs);
     this.#taskTimer = setInterval(() => { if (this.#state.tasks.visible && this.#state.workspace && this.#state.connection.phase === 'open') void this.refreshTasks({ quiet: true }); }, this.#options.taskPollMs);
   }
 
@@ -451,6 +480,42 @@ export class Controller {
       this.#membership.set(sessionId, root);
     }
     return root === this.#watching ? root : undefined;
+  }
+
+  /**
+   * Keeps the workspace's waiting questions from question events, and tells whether the envelope
+   * is the attached tree's: question.watch also sends, without a cursor, those of trees this
+   * client is not attached to, which must not reach its projection.
+   * @param {any} envelope
+   */
+  #onQuestionEvent(envelope) {
+    const event = envelope?.event;
+    if (event?.type === 'question') {
+      const id = event.question?.id;
+      const root = event.question?.rootId;
+      if (typeof id === 'string' && typeof root === 'string') this.#watchLog?.events.push({ id, root });
+      if (this.#waiting && typeof id === 'string' && typeof root === 'string' && this.#waiting.get(id) !== root) { this.#waiting.set(id, root); this.#publishAttention(); }
+      return envelope.cursor !== undefined || (!!this.#watching && root === this.#watching);
+    }
+    if (event?.type === 'question.resolved') {
+      if (typeof event.questionId === 'string') this.#watchLog?.events.push({ id: event.questionId });
+      if (this.#waiting?.delete(event.questionId)) this.#publishAttention();
+      if (envelope.cursor !== undefined) return true;
+      const tree = this.#watching ? this.#trees.get(this.#watching) : undefined;
+      if (!tree) return false;
+      return Object.hasOwn(tree.projection.questions, event.questionId)
+        || !!tree.attaching?.buffer.some((/** @type {any} */ entry) => entry.event?.type === 'question' && entry.event.question?.id === event.questionId);
+    }
+    return true;
+  }
+
+  /** The attention counts per root from the watched questions. */
+  #publishAttention() {
+    if (!this.#waiting) return;
+    /** @type {Record<string, number>} */
+    const attention = {};
+    for (const root of this.#waiting.values()) attention[root] = (attention[root] ?? 0) + 1;
+    if (JSON.stringify(attention) !== JSON.stringify(this.#state.attention)) this.#set({ attention });
   }
 
   /** @param {any} envelope */
@@ -627,6 +692,7 @@ export class Controller {
     const chosen = workspace && grantedWorkspace(principal ?? undefined, workspace) ? workspace : null;
     if (chosen === this.#state.workspace) return;
     this.#context = {};
+    this.#waiting = null;
     this.#set(state => ({
       workspace: chosen, selected: null, focus: null, tree: null,
       sessions: initialState().sessions,
@@ -671,50 +737,103 @@ export class Controller {
   }
 
   /**
-   * The questions waiting in the workspace (question.list), counted per root, so every session of
-   * the list shows when it needs an answer, not only the one open. Quiet: a failed read keeps the
-   * last counts.
+   * The questions waiting in the workspace, counted per root, so every session of the list shows
+   * when it needs an answer, not only the one open. With question.watch (docs/protocol/alp-json-rpc-v1.md
+   * §12.2) the host then tells of each question asked or resolved, and this read runs again only on
+   * a new connection or workspace and as a slow repair; without it question.list is polled. Quiet:
+   * a failed read keeps the last counts.
    */
   async refreshAttention() {
     const workspace = this.#state.workspace;
     if (!workspace || !can(this.#state.principal ?? undefined, 'session.read')) return;
     const context = this.#context;
     const read = ++this.#attentionRead;
+    const watch = this.hasCapability('question.watch');
+    const log = watch ? { read, events: /** @type {Array<{ id: string, root?: string }>} */ ([]) } : null;
+    this.#watchLog = log;
     try {
-      const result = await this.#client().request('question.list', { projectRoot: workspace });
+      const result = await this.#client().request(watch ? 'question.watch' : 'question.list', { projectRoot: workspace });
       if (context !== this.#context || read !== this.#attentionRead) return;
-      /** @type {Record<string, number>} */
-      const attention = {};
+      // The answer is every question waiting when the host read it; the events after it follow.
+      const waiting = new Map();
       for (const question of Array.isArray(result?.questions) ? result.questions : []) {
-        const root = typeof question?.rootId === 'string' ? question.rootId : undefined;
-        if (root) attention[root] = (attention[root] ?? 0) + 1;
+        if (typeof question?.id === 'string' && typeof question.rootId === 'string') waiting.set(question.id, question.rootId);
       }
-      if (JSON.stringify(attention) !== JSON.stringify(this.#state.attention)) this.#set({ attention });
+      // Events seen meanwhile, in order: one older than the read changes nothing it does not
+      // also undo (asked then resolved), one newer brings the answer up to date.
+      for (const entry of log?.events ?? []) {
+        if (entry.root) waiting.set(entry.id, entry.root); else waiting.delete(entry.id);
+      }
+      this.#waiting = waiting;
+      this.#publishAttention();
+      if (!watch) this.#waiting = null;
     } catch {
-      // The next poll tries again.
+      // The next read tries again.
+    } finally {
+      if (this.#watchLog === log) this.#watchLog = null;
     }
   }
 
+  /** Whether the host pages and searches History itself (session.list.page, docs/protocol/alp-json-rpc-v1.md §12.1). */
+  get historyPaged() { return this.hasCapability('session.list.page'); }
+
   /**
-   * Paseo's History: every root of the workspace, the archived ones too, newest first.
-   * @param {{ quiet?: boolean }} [options]
+   * Paseo's History: every root of the workspace, the archived ones too, newest first. Where the
+   * host pages it, the first page of the sessions matching `query` (the last one asked for when
+   * absent), and Load more reads the next; otherwise every session, `query` filtered by the screen.
+   * @param {{ quiet?: boolean, query?: string }} [options]
    */
-  async loadHistory({ quiet = false } = {}) {
+  async loadHistory({ quiet = false, query = this.#state.history.query } = {}) {
     const workspace = this.#state.workspace;
     if (!workspace) return;
     const context = this.#context;
     const read = ++this.#historyRead;
-    if (!quiet) this.#set(state => ({ history: { ...state.history, status: 'loading', error: undefined } }));
+    const paged = this.historyPaged;
+    const search = query.trim();
+    if (!quiet) this.#set(state => ({ history: { ...state.history, status: 'loading', error: undefined, query } }));
     try {
-      const result = await this.#client().request('session.list', { projectRoot: workspace, rootsOnly: true, includeClosed: true, includeArchived: true });
+      const result = await this.#client().request('session.list', { projectRoot: workspace, rootsOnly: true, includeClosed: true, includeArchived: true, ...(paged ? { limit: this.#options.historyPageSize, ...(search ? { query: search } : {}) } : {}) });
       if (context !== this.#context || read !== this.#historyRead) return;
-      const list = (Array.isArray(result?.sessions) ? result.sessions : []).filter((/** @type {any} */ session) => session && typeof session.id === 'string' && !session.parentId)
-        .sort((/** @type {any} */ a, /** @type {any} */ b) => String(b.updatedAt ?? b.createdAt ?? '').localeCompare(String(a.updatedAt ?? a.createdAt ?? '')));
-      this.#set({ history: { status: 'ready', list } });
+      const nextCursor = paged && typeof result?.nextCursor === 'string' ? result.nextCursor : undefined;
+      this.#set({ history: { status: 'ready', list: historyRows(result, !paged), query, ...(nextCursor ? { nextCursor } : {}) } });
     } catch (error) {
       if (context !== this.#context || read !== this.#historyRead) return;
-      if (!quiet || this.#state.history.status !== 'ready') this.#set(state => ({ history: { ...state.history, status: 'error', error: describe(error) } }));
+      if (!quiet || this.#state.history.status !== 'ready') this.#set(state => ({ history: { ...state.history, status: 'error', error: describe(error), query } }));
     }
+  }
+
+  /** Paseo's Load more: the next History page after the last one read, with the same query. */
+  async loadMoreHistory() {
+    const workspace = this.#state.workspace;
+    const { status, nextCursor, query, more } = this.#state.history;
+    if (!workspace || status !== 'ready' || !nextCursor || more === 'loading') return;
+    const context = this.#context;
+    const read = this.#historyRead;
+    const search = query.trim();
+    this.#set(state => ({ history: { ...state.history, more: 'loading' } }));
+    try {
+      const result = await this.#client().request('session.list', { projectRoot: workspace, rootsOnly: true, includeClosed: true, includeArchived: true, limit: this.#options.historyPageSize, cursor: nextCursor, ...(search ? { query: search } : {}) });
+      if (context !== this.#context) return;
+      // A first page read meanwhile replaced the list this page continued.
+      if (read !== this.#historyRead) { this.#settleMore(); return; }
+      const next = typeof result?.nextCursor === 'string' ? result.nextCursor : undefined;
+      this.#set(state => {
+        const known = new Set(state.history.list.map(row => row.id));
+        const { more: _more, nextCursor: _cursor, ...history } = state.history;
+        return { history: { ...history, list: [...history.list, ...historyRows(result, false).filter(row => !known.has(row.id))], ...(next ? { nextCursor: next } : {}) } };
+      });
+    } catch {
+      if (context !== this.#context) return;
+      if (read !== this.#historyRead) { this.#settleMore(); return; }
+      this.#set(state => ({ history: { ...state.history, more: 'error' } }));
+    }
+  }
+
+  /** Ends a Load more whose list was replaced while it ran. */
+  #settleMore() {
+    if (this.#state.history.more !== 'loading') return;
+    const { more: _more, ...history } = this.#state.history;
+    this.#set({ history });
   }
 
   /** Whether a root is archived, as far as the History read and this client's own actions know. @param {string | null | undefined} id */

@@ -14,7 +14,9 @@ import { useAppState, useController } from './store';
  * a header, a search field, then every session of the workspace by the day of its last activity,
  * the archived ones too with an "Archived" badge. Choosing one opens it; an archived one opens
  * with Paseo's "This agent is archived" callout and its Unarchive button in place of the composer.
- * ALP lists one workspace at a time and session.list has no paging, so there is no Load more.
+ * ALP lists one workspace at a time. A host that pages session.list (session.list.page) searches
+ * on its side and gives Paseo's pages of 200 with Load more under them, as Paseo's History asks its
+ * hosts (hooks/use-agent-history.ts); an older host lists everything and the search filters here.
  */
 
 const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-ring';
@@ -73,10 +75,13 @@ export function HistoryScreen({ navOpen, onToggleNav, onOpen, onBack }: { navOpe
   const [query, setQuery] = React.useState('');
   const [debounced, setDebounced] = React.useState('');
   const online = connection.phase === 'open';
+  const paged = connection.capabilities.includes('session.list.page');
   React.useEffect(() => { const timer = setTimeout(() => setDebounced(query), 200); return () => clearTimeout(timer); }, [query]);
-  // Read afresh each time it opens, and while it stays open on a new connection or workspace.
-  React.useEffect(() => { if (workspace && online) void controller.loadHistory({ quiet: history.status === 'ready' }); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [workspace, online, controller]);
-  const sections = React.useMemo(() => groupHistory(history.list, debounced), [history.list, debounced]);
+  // The query the host searches: none where the screen filters itself.
+  const asked = paged ? debounced.trim() : '';
+  // Read afresh each time it opens, while it stays open on a new connection or workspace, and for each query.
+  React.useEffect(() => { if (workspace && online) void controller.loadHistory({ quiet: history.status === 'ready' && history.query === asked, query: asked }); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [workspace, online, controller, asked]);
+  const sections = React.useMemo(() => groupHistory(history.list, paged ? '' : debounced), [history.list, debounced, paged]);
   const project = workspace ? baseName(workspace) : '';
   const searching = !!debounced.trim();
 
@@ -127,6 +132,14 @@ export function HistoryScreen({ navOpen, onToggleNav, onOpen, onBack }: { navOpe
             </div>
           </section>
         ))}
+        {paged && history.nextCursor && history.status === 'ready' ? (
+          <div className="flex items-center justify-center gap-3 py-4" data-testid="history-more">
+            <Button variant="ghost" onClick={() => void controller.loadMoreHistory()} disabled={history.more === 'loading' || !online}>
+              {history.more === 'loading' ? 'Loading...' : 'Load more'}
+            </Button>
+            {history.more === 'error' ? <span role="alert" className="text-sm text-destructive">Unable to load more sessions</span> : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
