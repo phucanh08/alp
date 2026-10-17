@@ -228,6 +228,27 @@ test('the app starts an ALP session as an agent, sees it stream, reads its timel
   assert.equal((await history({ page: { limit: 1, cursor: '1' } })).entries[0].agent.id, agentId);
 });
 
+test('streamed assistant text reaches the app once: each delta appended, never the whole message again (t-d858)', async t => {
+  const { connected, ask, root, agents } = await setup(t);
+  const client = await connected();
+  const created = await ask(client, { type: 'create_agent_request', requestId: 'a1', config: { provider: 'alp', cwd: root, title: 'Stream' }, initialPrompt: 'Stream', clientMessageId: 'm1', labels: {} });
+  const agentId = created.payload.agentId;
+  await until(() => agents[0]?.started.length === 1, 'the first turn');
+  await client.next(frame => frame.message?.type === 'agent_stream' && frame.message.payload.event.type === 'turn_started');
+  const agent = agents[0];
+  const text = 'Answer received: you said hello.';
+  for (const delta of ['Answer', ' received:', ' you said', ' hello.']) agent.notification('item/agentMessage/delta', { threadId: agent.threadId, turnId: agent.turnId, itemId: 'msg-1', delta });
+  agent.notification('item/completed', { threadId: agent.threadId, turnId: agent.turnId, item: { type: 'agentMessage', id: 'msg-1', text } });
+  agent.notification('turn/completed', { threadId: agent.threadId, turn: { id: agent.turnId, status: 'completed' } });
+  await client.next(frame => frame.message?.type === 'agent_stream' && frame.message.payload.event.type === 'turn_completed');
+  const streamed = client.frames
+    .filter(frame => frame.message?.type === 'agent_stream' && frame.message.payload.agentId === agentId && frame.message.payload.event.type === 'timeline' && frame.message.payload.event.item.type === 'assistant_message')
+    .map(frame => frame.message.payload.event.item.text);
+  assert.equal(streamed.join(''), text);
+  const timeline = (await ask(client, { type: 'fetch_agent_timeline_request', requestId: 'tl1', agentId })).payload;
+  assert.deepEqual(timeline.entries.filter(entry => entry.item.type === 'assistant_message').map(entry => entry.item.text), [text]);
+});
+
 test('what an agent asks the user is a question card on its root, answered from the app or dismissed', async t => {
   const { connected, ask, session, root, agents } = await setup(t);
   const client = await connected();

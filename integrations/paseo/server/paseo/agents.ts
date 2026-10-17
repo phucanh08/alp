@@ -111,6 +111,8 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
   const roots = new Map<string, SessionSummary>();
   const timelines = new InMemoryAgentTimelineStore();
   const deltas = new Map<string, TimelineDeltas>();
+  /** The alpd epoch of the last event seen for each root, to notice a daemon restart. */
+  const epochs = new Map<string, string>();
   /** Roots whose history is being replayed into their timeline; nothing of it is broadcast. */
   const replaying = new Set<string>();
   const attaching = new Map<string, Promise<void>>();
@@ -227,7 +229,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       // A live root's events come to the bridge, so its timeline stays current.
       if ((session.status === 'idle' || session.status === 'running') && !timelines.has(session.id)) void ensureTimeline(session.id).catch(() => {});
     }
-    for (const id of [...roots.keys()]) if (!seen.has(id)) { roots.delete(id); broadcast({ type: 'agent_update', payload: { kind: 'remove', agentId: id } }); directory.changed(); }
+    for (const id of [...roots.keys()]) if (!seen.has(id)) { roots.delete(id); epochs.delete(id); broadcast({ type: 'agent_update', payload: { kind: 'remove', agentId: id } }); directory.changed(); }
     // Questions come as events from attached trees; the list catches any other and any missed end.
     const { questions: waiting } = await alp.request<{ questions: UserQuestion[] }>('question.list', {});
     for (const question of waiting) asked(question);
@@ -318,8 +320,11 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     const { event } = envelope;
     switch (event.type) {
       case 'item': {
-        // Daemon restarts change the epoch: reset the delta state so history is not de-duplicated against stale snapshots.
-        if (envelope.epoch && timelines.has(root) && envelope.epoch !== timelines.getEpoch(root)) deltas.set(root, new TimelineDeltas());
+        // Daemon restarts change alpd's epoch: reset the delta state so history is not de-duplicated against stale
+        // snapshots. Compare with the last alpd epoch seen for this root, never the bridge's own timeline epoch.
+        const seenEpoch = epochs.get(root);
+        if (envelope.epoch) epochs.set(root, envelope.epoch);
+        if (envelope.epoch && seenEpoch && envelope.epoch !== seenEpoch) deltas.set(root, new TimelineDeltas());
         let maker = deltas.get(root);
         if (!maker) deltas.set(root, maker = new TimelineDeltas());
         append(root, maker.next(event.item), envelope.ts);
@@ -358,6 +363,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       pending = (async () => {
         timelines.initialize(root);
         deltas.set(root, new TimelineDeltas());
+        epochs.delete(root);
         replaying.add(root);
         try { await alp!.request('session.attach', { sessionId: root, replay: true }); }
         catch (error) { timelines.delete(root); throw error; }
@@ -377,6 +383,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     timelines.delete(root);
     deltas.set(root, new TimelineDeltas());
     attaching.delete(root);
+    epochs.delete(root);
     replaying.delete(root);
     turns.delete(root);
     for (const child of children.values()) {
