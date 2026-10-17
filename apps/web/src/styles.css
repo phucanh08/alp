@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
 /*
- * ALP web theme: charcoal surfaces with a green accent, in shadcn/ui's token names so its
- * components read them unchanged. One dark theme; contrast checked for text on every surface.
+ * ALP web theme: Paseo's palettes in shadcn/ui's token names so its components read them
+ * unchanged. Dark (charcoal surfaces, green accent) by default; light from Paseo's light theme
+ * (styles/theme.ts lightSemanticColors) when <html data-theme="light"> (lib/theme.ts).
  */
 :root {
   /* Paseo's dark palette (teal-green tint): the same surfaces, borders and accent. */
@@ -41,6 +42,54 @@
   --input: #2f3534;
   --ring: #7ccba0;
   --radius: 0.625rem;
+  /* Surfaces that were literal colors: the composer's focused border, the error toast, scrollbars, the connect glow. */
+  --input-focus: #3d4544;
+  --notice-error: #2a1515;
+  --scrollbar: #2f3a34;
+  --glow: #1b2a20;
+  --shadow: rgb(0 0 0 / 0.4);
+}
+
+/* Paseo's light theme: zinc surfaces, the same green accent. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: #ffffff;
+  --foreground: #1a1a1e;
+  --sidebar: #f4f4f5;
+  --sidebar-hover: #e9e9ec;
+  --sidebar-selected: #e4e4e7;
+  --extra-muted: #8a8a93;
+  --dot-running: #2f80d1;
+  --dot-warning: #c27a12;
+  --dot-danger: #d4473b;
+  --dot-success: #1f9a4c;
+  --card: #fafafa;
+  --card-foreground: #1a1a1e;
+  --popover: #ffffff;
+  --popover-foreground: #1a1a1e;
+  --primary: #20744a;
+  --primary-foreground: #ffffff;
+  --highlight: #1d6b44;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #1a1a1e;
+  --muted: #f4f4f5;
+  --muted-foreground: #63636d;
+  --accent: #f0f0f2;
+  --accent-foreground: #1a1a1e;
+  --bubble: #ececef;
+  --destructive: #b04138;
+  --destructive-foreground: #ffffff;
+  --stop: #b04138;
+  --warning: #8a5a00;
+  --info: #1f6fb8;
+  --border: #e4e4e7;
+  --input: #d4d4d8;
+  --ring: #18181b;
+  --input-focus: #a1a1aa;
+  --notice-error: #fdf0ef;
+  --scrollbar: #d4d4d8;
+  --glow: #e3f1e8;
+  --shadow: rgb(0 0 0 / 0.12);
 }
 
 @theme inline {
@@ -99,7 +148,7 @@
   }
   ::selection { background: color-mix(in oklab, var(--primary) 35%, transparent); }
   :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-  * { scrollbar-width: thin; scrollbar-color: #2f3a34 transparent; }
+  * { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
   dialog::backdrop { background: rgb(5 8 6 / 0.7); backdrop-filter: blur(2px); }
 }
 

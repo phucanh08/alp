@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AlpRpcError } from '@anhlp/alp-client/portable';
-import { Controller } from '../src/lib/controller.js';
+import { Controller, needsInput } from '../src/lib/controller.js';
 import { AuthenticationError } from '../src/lib/errors.js';
 import { entriesOf } from '../src/lib/timeline.js';
 import { FakeHost, until } from './support/fake-host.js';
@@ -510,4 +510,387 @@ test('a reset from the host rebuilds the view from the start', async t => {
 test('RPC errors keep their codes through the SDK', () => {
   const error = new AlpRpcError({ code: 1003, message: 'no', data: { reason: 'grant', permission: 'session.write' } });
   assert.equal(error.code, 1003);
+});
+
+for (const answer of ['before', 'middle', 'after']) {
+  test(`a message sent before its predecessor's turn shows as running steers it instead of being refused (answer ${answer})`, async t => {
+    const w = setup(t, { separateTasks: true, promptTiming: { gapMs: 50, answer } });
+    w.host.seed('ses_a');
+    await connected(w);
+    w.controller.selectSession('ses_a');
+    await until(() => attached(w.state), 'attached');
+    const first = w.controller.sendPrompt('one [hold]');
+    assert.equal(w.controller.rootBusy('ses_a'), true, 'busy while the first message is on its way');
+    // The second goes before turn.started: it must not start a turn of its own.
+    const second = w.controller.sendPrompt('two');
+    await Promise.all([first, second]);
+    await until(() => texts(w.state, 'ses_a').includes('two'), 'second user message');
+    const sent = w.host.calls.filter(call => call.method === 'session.prompt');
+    assert.deepEqual(sent.map(call => call.params.delivery), ['auto', 'steer']);
+    assert.equal(w.state().prompts.length, 0, 'nothing failed');
+    await until(() => 'ses_a' in w.state().tree.projection.running, 'turn started');
+    await new Promise(resolve => setTimeout(resolve, 80));
+    assert.equal(w.controller.rootBusy('ses_a'), true);
+    w.host.finishTurn('ses_a', 'done');
+    await until(() => !w.controller.rootBusy('ses_a'), 'idle once the turn ended');
+  });
+}
+
+test('rootBusy: an idle root with nothing of ours in flight is not busy; a refused message does not keep it busy', async t => {
+  const w = setup(t);
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  assert.equal(w.controller.rootBusy('ses_a'), false);
+  await w.controller.sendPrompt('hello');
+  await until(() => texts(w.state, 'ses_a').includes('echo: hello'), 'reply');
+  await until(() => !w.controller.rootBusy('ses_a'), 'idle after the turn');
+  w.host.intercept.set('session.prompt', (_params, _connection, { answer }) => { answer({ outcome: 'failed', error: { message: 'refused' } }); return 'handled'; });
+  await w.controller.sendPrompt('nope');
+  assert.equal(w.state().prompts[0].status, 'failed');
+  assert.equal(w.controller.rootBusy('ses_a'), false);
+});
+
+test('configureMode changes the open session\'s mode through session.configure', async t => {
+  const w = setup(t);
+  w.host.seed('ses_a', { mode: 'full-access' });
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  await w.controller.configureMode('read-only');
+  const call = w.host.calls.find(entry => entry.method === 'session.configure');
+  assert.deepEqual(call.params, { sessionId: 'ses_a', mode: 'read-only' });
+  assert.equal(w.state().tree.projection.sessions.ses_a.mode, 'read-only');
+  assert.equal(w.state().busy.mode, false);
+});
+
+test('configureMode refuses a mode outside the token\'s grant without calling the host', async t => {
+  const w = setup(t, { principal: { id: 'p1', label: 'ro', permissions: ['session.read', 'session.write', 'project.read'], modes: ['read-only', 'workspace-write'], workspaces: ['/w/a'], workspaceRoots: [{ path: '/w/a', canonical: '/w/a' }] } });
+  w.host.seed('ses_a', { mode: 'read-only' });
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  await w.controller.configureMode('full-access');
+  assert.equal(w.host.count('session.configure'), 0);
+  assert.match(w.state().notice.text, /only use read-only, workspace-write/);
+});
+
+test('a message the host took but whose events never come stops counting as working after a while (no stuck steer)', async t => {
+  const w = setup(t, {}, { busyUnseenMs: 150 });
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  // Taken, and then nothing: no user message, no prompt.accepted, no turn.
+  w.host.intercept.set('session.prompt', (_params, _connection, { answer }) => { answer({ outcome: 'accepted', durable: true }); return 'handled'; });
+  await w.controller.sendPrompt('lost');
+  assert.equal(w.controller.rootBusy('ses_a'), true, 'busy right after it was taken');
+  const renders = [];
+  const stop = w.controller.subscribe(() => renders.push(w.controller.rootBusy('ses_a')));
+  t.after(stop);
+  await until(() => !w.controller.rootBusy('ses_a'), 'not busy after the limit', 2000);
+  await until(() => renders.includes(false), 'the views are told to render again', 2000);
+  w.host.intercept.delete('session.prompt');
+  await w.controller.sendPrompt('next');
+  const sent = w.host.calls.filter(call => call.method === 'session.prompt');
+  assert.deepEqual(sent.map(call => call.params.delivery), ['auto', 'auto']);
+  await until(() => texts(w.state, 'ses_a').includes('echo: next'), 'reply to the next message');
+});
+
+test('a second message waits for the answer to the first before it goes out', async t => {
+  const w = setup(t);
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  // The host holds its answer to the first message (and the turn it starts) for a while.
+  let firstAnswered = false;
+  const order = [];
+  w.host.intercept.set('session.prompt', async params => {
+    order.push({ text: params.content[0].text, firstAnswered });
+    if (params.content[0].text === 'one [hold]') { await new Promise(resolve => setTimeout(resolve, 100)); firstAnswered = true; }
+    return undefined;
+  });
+  const first = w.controller.sendPrompt('one [hold]');
+  const second = w.controller.sendPrompt('two');
+  await Promise.all([first, second]);
+  assert.deepEqual(order, [{ text: 'one [hold]', firstAnswered: false }, { text: 'two', firstAnswered: true }]);
+  const sent = w.host.calls.filter(call => call.method === 'session.prompt');
+  assert.deepEqual(sent.map(call => call.params.delivery), ['auto', 'steer']);
+  assert.equal(w.state().prompts.filter(prompt => prompt.status === 'failed').length, 0);
+});
+
+test('a retry under a new id waits for the message before it and steers the turn that message started', async t => {
+  const w = setup(t);
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  // A message the runtime refused, waiting for Retry (a new id).
+  w.host.intercept.set('session.prompt', (_params, _connection, { answer }) => { answer({ outcome: 'failed', error: { message: 'busy' } }); return 'handled'; });
+  await w.controller.sendPrompt('again [finish]');
+  const failed = w.state().prompts.find(prompt => prompt.status === 'failed');
+  assert.ok(failed);
+  // Then a new turn whose answer the host holds; the retry comes before that answer.
+  const order = [];
+  let firstAnswered = false;
+  w.host.intercept.set('session.prompt', async params => {
+    order.push({ text: params.content[0].text, firstAnswered });
+    if (params.content[0].text === 'long [hold]') { await new Promise(resolve => setTimeout(resolve, 100)); firstAnswered = true; }
+    return undefined;
+  });
+  const first = w.controller.sendPrompt('long [hold]');
+  const retry = w.controller.retryPrompt(failed.id);
+  await Promise.all([first, retry]);
+  assert.deepEqual(order, [{ text: 'long [hold]', firstAnswered: false }, { text: 'again [finish]', firstAnswered: true }]);
+  const sent = w.host.calls.filter(call => call.method === 'session.prompt');
+  assert.deepEqual(sent.map(call => call.params.delivery), ['auto', 'auto', 'steer']);
+  assert.notEqual(sent[2].params.clientMessageId, sent[0].params.clientMessageId);
+  await until(() => texts(w.state, 'ses_a').includes('again [finish]'), 'steered in');
+});
+
+test('three quick messages to an idle root, the first refused: the others are not sent as steers', async t => {
+  const w = setup(t);
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  let refused = false;
+  w.host.intercept.set('session.prompt', (_params, _connection, { answer }) => {
+    if (refused) return undefined;
+    refused = true;
+    answer({ outcome: 'failed', error: { message: 'not now' } });
+    return 'handled';
+  });
+  await Promise.all([w.controller.sendPrompt('a'), w.controller.sendPrompt('b'), w.controller.sendPrompt('c')]);
+  const sent = w.host.calls.filter(call => call.method === 'session.prompt');
+  assert.equal(sent[0].params.delivery, 'auto');
+  assert.equal(sent[1].params.delivery, 'auto', 'b starts a turn: nothing of ours is running');
+  const failures = w.state().prompts.filter(prompt => prompt.status === 'failed').map(prompt => prompt.text);
+  assert.ok(!failures.includes('b'), `b was refused: ${JSON.stringify(w.state().prompts)}`);
+});
+
+test('attention: question.list marks every root that waits, not only the open one', async t => {
+  const w = setup(t, undefined, { attentionPollMs: 20 });
+  w.host.seed('ses_a', { title: 'Asks' });
+  w.host.seed('ses_b', { title: 'Open' });
+  w.host.seed('ses_c', { projectRoot: '/w/b' });
+  w.host.ask('ses_a', 'ses_a', 'qa');
+  w.host.ask('ses_c', 'ses_c', 'qc');
+  await connected(w);
+  w.controller.selectSession('ses_b');
+  await until(() => attached(w.state), 'attached');
+  await until(() => needsInput(w.state(), 'ses_a'), 'ses_a waits');
+  assert.deepEqual(w.state().attention, { ses_a: 1 }, 'only the workspace asked for');
+  assert.equal(needsInput(w.state(), 'ses_b'), false);
+  assert.ok(w.host.calls.some(call => call.method === 'question.list' && call.params.projectRoot === '/w/a'));
+  // The open tree's own questions count at once, before the next poll.
+  w.host.ask('ses_b', 'ses_b', 'qb');
+  await until(() => needsInput(w.state(), 'ses_b'), 'ses_b waits');
+  await w.controller.answerQuestion('qb', { text: 'ok' });
+  assert.equal(needsInput(w.state(), 'ses_b'), false);
+  // Answered elsewhere: the next poll clears it.
+  w.host.questions.delete('qa');
+  await until(() => !needsInput(w.state(), 'ses_a'), 'ses_a cleared');
+});
+
+test('history lists archived roots too; unarchive brings one back into the list', async t => {
+  const w = setup(t);
+  w.host.seed('ses_a', { title: 'Kept' });
+  w.host.seed('ses_b', { title: 'Put away' });
+  await connected(w);
+  await w.controller.archiveSession('ses_b');
+  assert.deepEqual(w.state().sessions.list.map(row => row.id), ['ses_a']);
+  await w.controller.loadHistory();
+  assert.equal(w.state().history.status, 'ready');
+  assert.deepEqual(w.state().history.list.map(row => [row.id, !!row.archived]).sort(), [['ses_a', false], ['ses_b', true]]);
+  assert.ok(w.host.calls.some(call => call.method === 'session.list' && call.params.includeArchived === true));
+  w.controller.selectSession('ses_b');
+  assert.equal(w.controller.isArchived('ses_b'), true);
+  assert.equal(w.controller.isArchived('ses_a'), false);
+  await w.controller.restoreSession('ses_b');
+  assert.deepEqual(w.host.calls.filter(call => call.method === 'session.archive').map(call => call.params), [{ sessionId: 'ses_b', archived: true }, { sessionId: 'ses_b', archived: false }]);
+  assert.equal(w.controller.isArchived('ses_b'), false);
+  assert.ok(w.state().sessions.list.some(row => row.id === 'ses_b'));
+  await until(() => w.state().sessions.list.length === 2, 'listed again');
+  await w.controller.renameSession('ses_b', 'Back again');
+  assert.equal(w.state().history.list.find(row => row.id === 'ses_b')?.title, 'Back again');
+});
+
+// ---- t-7679.3: preferences in storage, session.preview, a session started with a first message
+
+const memoryStorage = () => {
+  const entries = new Map();
+  return { entries, getItem: key => entries.get(key) ?? null, setItem: (key, value) => { entries.set(key, String(value)); } };
+};
+
+test('preferences survive a new controller (a reload) and connect/disconnect; the token never reaches storage', async t => {
+  const storage = memoryStorage();
+  const w = setup(t, undefined, { storage });
+  assert.deepEqual(w.state().preferences, { sendBehavior: 'steer', theme: 'system', newSession: {} });
+  await connected(w);
+  w.controller.setSendBehavior('queue');
+  w.controller.setTheme('light');
+  w.controller.disconnect();
+  assert.equal(w.state().preferences.sendBehavior, 'queue', 'disconnecting keeps them');
+  await connected(w);
+  assert.equal(w.state().preferences.theme, 'light', 'a new connection keeps them');
+  const stored = [...storage.entries.values()].join('\n');
+  assert.doesNotMatch(stored, /alpgw1|secret|127\.0\.0\.1/);
+  const reloaded = setup(t, undefined, { storage });
+  assert.deepEqual(reloaded.state().preferences, { sendBehavior: 'queue', theme: 'light', newSession: {} });
+  reloaded.controller.resetPreferences();
+  assert.equal(JSON.parse(storage.entries.get('alp-web:preferences')).sendBehavior, 'steer');
+  // Another tab wrote something: reloadPreferences follows it; garbage gives the defaults.
+  storage.setItem('alp-web:preferences', JSON.stringify({ v: 1, sendBehavior: 'queue', theme: 'dark' }));
+  reloaded.controller.reloadPreferences();
+  assert.equal(reloaded.state().preferences.theme, 'dark');
+  storage.setItem('alp-web:preferences', '{broken');
+  reloaded.controller.reloadPreferences();
+  assert.equal(reloaded.state().preferences.theme, 'system');
+});
+
+test('the catalog keeps each model\'s efforts; session.preview answers for the workspace', async t => {
+  const w = setup(t);
+  await connected(w);
+  await until(() => w.state().catalog.status === 'ready', 'catalog');
+  assert.deepEqual(w.state().catalog.models[0], { id: 'codex:gpt-5.6-sol', label: 'GPT', efforts: ['low', 'medium', 'high'], effort: 'low' });
+  const preview = await w.controller.previewSession({ workflow: 'cafe', model: 'codex:gpt-5.6-sol', thinking: 'high', cwd: '/elsewhere' });
+  assert.deepEqual(preview, { teams: [{ id: 'pho', label: 'Phở' }, { id: 'cafe', label: 'Cafe' }], team: 'cafe', teamLabel: 'Cafe', agent: 'main', runtime: 'codex', model: 'gpt-5.6-sol', mode: 'full-access', thinking: 'high' });
+  const call = w.host.calls.find(entry => entry.method === 'session.preview');
+  assert.equal(call.params.spec.cwd, '/w/a', 'the cwd is always the open workspace');
+  await assert.rejects(w.controller.previewSession({ thinking: 'ultra' }), /not offered/);
+});
+
+test('session.preview is not asked without session.read', async t => {
+  // project.read only: session.write would imply session.read.
+  const w = setup(t, { principal: { id: 'p2', label: 'blind', permissions: ['project.read'], workspaces: ['/w/a'], workspaceRoots: [{ path: '/w/a', canonical: '/w/a' }] } });
+  await connected(w);
+  assert.match(w.controller.previewBlock(), /cannot read sessions/);
+  await assert.rejects(w.controller.previewSession({}), /cannot read sessions/);
+  assert.equal(w.host.count('session.preview'), 0);
+});
+
+test('a session started with a first message and thinking: spec.thinking sent, the message delivered once after attach, the title taken from it, the choices remembered', async t => {
+  const storage = memoryStorage();
+  const w = setup(t, undefined, { storage });
+  await connected(w);
+  const id = await w.controller.createSession({ team: 'cafe', mode: 'workspace-write', model: 'codex:gpt-5.6-sol', thinking: 'high', prompt: 'Fix the login bug\nmore detail' });
+  await until(() => texts(w.state, id).includes('echo: Fix the login bug\nmore detail'), 'the first message ran');
+  const create = w.host.calls.find(call => call.method === 'session.create');
+  assert.deepEqual(create.params.spec, { cwd: '/w/a', persist: true, workflow: 'cafe', mode: 'workspace-write', model: 'codex:gpt-5.6-sol', thinking: 'high' });
+  const prompts = w.host.calls.filter(call => call.method === 'session.prompt');
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].params.sessionId, id);
+  assert.ok(w.host.calls.indexOf(prompts[0]) > w.host.calls.findIndex(call => call.method === 'session.attach' && call.params.sessionId === id), 'sent after the attach');
+  assert.equal(w.host.root(id).summary.title, 'Fix the login bug');
+  assert.deepEqual(w.state().preferences.newSession, { team: 'cafe', mode: 'workspace-write', model: 'codex:gpt-5.6-sol', thinkingByModel: { 'codex:gpt-5.6-sol': 'high' } });
+  assert.deepEqual(JSON.parse(storage.entries.get('alp-web:preferences')).newSession, w.state().preferences.newSession);
+  // An explicit title wins; no prompt sends nothing.
+  const second = await w.controller.createSession({ title: 'Named' });
+  await until(() => attached(w.state) && w.state().tree.rootId === second, 'second attached');
+  assert.equal(w.host.root(second).summary.title, 'Named');
+  assert.equal(w.host.count('session.prompt'), 1);
+});
+
+test('a refused create sends no first message', async t => {
+  const w = setup(t);
+  await connected(w);
+  w.host.intercept.set('session.create', (params, connection, { fail }) => { fail(1003, 'mode not allowed'); return 'handled'; });
+  await assert.rejects(w.controller.createSession({ prompt: 'hello' }));
+  assert.equal(w.host.count('session.prompt'), 0);
+  assert.equal(w.state().selected, null);
+});
+
+test('a second create while the first waits on session.release is refused: exactly one session.create', async t => {
+  const w = setup(t);
+  await connected(w);
+  const first = await w.controller.createSession({ team: 'pho', title: 'First' });
+  await until(() => attached(w.state) && w.state().tree.rootId === first, 'first attached');
+  let release = () => {};
+  w.host.intercept.set('session.release', () => new Promise(resolve => { release = () => resolve(undefined); }));
+  const creates = w.host.count('session.create');
+  const one = w.controller.createSession({ team: 'pho', prompt: 'one' });
+  assert.equal(w.state().busy.create, true, 'busy before any await');
+  await assert.rejects(w.controller.createSession({ team: 'pho', prompt: 'two' }), /already starting/);
+  release();
+  await one;
+  assert.equal(w.host.count('session.create'), creates + 1);
+  assert.equal(w.state().busy.create, false);
+});
+
+test('a create whose answer is lost (timeout) rejects with its id: the caller keeps the first message, none is sent', async t => {
+  const w = setup(t, undefined, { createTimeoutMs: 30 });
+  await connected(w);
+  w.host.intercept.set('session.create', () => 'handled');
+  const failure = await w.controller.createSession({ team: 'pho', prompt: 'keep me' }).then(() => null, error => error);
+  assert.ok(failure, 'not a silent success');
+  assert.equal(failure.name, 'CreateOutcomeUnknownError');
+  assert.match(failure.message, /may still have run/);
+  assert.match(failure.message, /open it and send your message there/);
+  assert.doesNotMatch(failure.message, /first message was not sent/, 'the caller words what happened to the message');
+  assert.equal(w.state().selected, failure.sessionId, 'the maybe-session stays selected');
+  assert.equal(w.state().busy.create, false);
+  assert.equal(w.host.count('session.prompt'), 0);
+  // A new start is possible afterwards.
+  w.host.intercept.delete('session.create');
+  const id = await w.controller.createSession({ team: 'pho', prompt: 'again' });
+  await until(() => texts(w.state, id).includes('echo: again'), 'the second start ran');
+});
+
+test('the catalog says why teams are unknown, and retryTeams asks team.list again only after a failure', async t => {
+  const w = setup(t);
+  let fail = true;
+  w.host.intercept.set('team.list', (_params, _connection, { fail: reject }) => { if (fail) { reject(1000, 'Gateway busy.'); return 'handled'; } });
+  await connected(w);
+  await until(() => w.state().catalog.status === 'ready', 'catalog');
+  assert.equal(w.state().catalog.teamsKnown, false);
+  assert.equal(w.state().catalog.teamsUnavailable?.reason, 'failed');
+  assert.match(w.state().catalog.teamsUnavailable?.message ?? '', /Gateway busy/);
+  fail = false;
+  const before = w.host.count('team.list');
+  await w.controller.retryTeams();
+  assert.equal(w.host.count('team.list'), before + 1);
+  assert.equal(w.state().catalog.teamsKnown, true);
+  assert.equal(w.state().catalog.teamsUnavailable, undefined);
+  assert.ok(w.state().catalog.teams.length > 0, 'the teams arrived');
+  // Answered: a further retry does not ask again.
+  await w.controller.retryTeams();
+  assert.equal(w.host.count('team.list'), before + 1);
+});
+
+test('teams are unknown (not empty) without project.read or the team capability, and nothing is asked', async t => {
+  const w = setup(t, { principal: { id: 'p3', label: 'no-project', permissions: ['session.read', 'session.write'], workspaces: ['/w/a'], workspaceRoots: [{ path: '/w/a', canonical: '/w/a' }] } });
+  await connected(w);
+  await until(() => w.state().catalog.status === 'ready', 'catalog');
+  assert.deepEqual(w.state().catalog.teamsUnavailable, { reason: 'permission' });
+  assert.equal(w.state().catalog.teamsKnown, false);
+  const v = setup(t);
+  v.host.capabilities = v.host.capabilities.filter(capability => capability !== 'team');
+  await connected(v);
+  await until(() => v.state().catalog.status === 'ready', 'catalog');
+  assert.deepEqual(v.state().catalog.teamsUnavailable, { reason: 'capability' });
+  assert.equal(v.host.count('team.list'), 0);
+  await v.controller.retryTeams();
+  assert.equal(v.host.count('team.list'), 0, 'retry does not ask a host without teams');
+});
+
+test('a first message kept from a failed start is handed to the next New session screen of its workspace once', async t => {
+  const w = setup(t);
+  await connected(w);
+  assert.equal(w.controller.unsentDraft(), '');
+  w.controller.keepUnsentDraft('x'.repeat(500), '/w/a');
+  assert.equal(w.controller.unsentDraft().length, 500, 'kept whole');
+  w.controller.clearUnsentDraft();
+  assert.equal(w.controller.unsentDraft(), '');
+  // Written for /w/a: another workspace does not see it, its own does again.
+  w.controller.keepUnsentDraft('for a', '/w/a');
+  w.controller.selectWorkspace('/w/b');
+  assert.equal(w.controller.unsentDraft(), '', 'not offered in another workspace');
+  w.controller.selectWorkspace('/w/a');
+  assert.equal(w.controller.unsentDraft(), 'for a');
+  // A disconnect forgets it (the next sign-in may be another token).
+  w.controller.disconnect();
+  assert.equal(w.controller.unsentDraft(), '', 'forgotten on disconnect');
 });

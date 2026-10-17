@@ -1,14 +1,17 @@
 // @ts-check
 import { createReconnectingClient, hello } from '@anhlp/alp-client/portable';
-import { AuthenticationError, ConfigurationError, describe, endsRoot } from './errors.js';
+import { AuthenticationError, ConfigurationError, CreateOutcomeUnknownError, describe, endsRoot } from './errors.js';
 import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
 import { newMessageId, newRequestId, newSessionId } from './ids.js';
 import { applyAttach, deliveredPrompts, emptyProjection, members, project, promptTurnOver } from './timeline.js';
+import { normalizeModels, parsePreview, titleFromPrompt } from './new-session.js';
+import { loadPreferences, parsePreferences, rememberChoices, savePreferences } from './preferences.js';
 
 /**
  * Everything the web app knows and does, without React: one connection to alpd through the
  * gateway, the workspace and session the user chose, and each request's fate. The UI renders
- * `getState()` and calls the methods; nothing here touches the DOM or browser storage.
+ * `getState()` and calls the methods; nothing here touches the DOM. The app's preferences (never
+ * the token) go to the `storage` the page passes in (lib/preferences.js).
  *
  * Recovery follows docs/protocol/alp-json-rpc-v1.md §8.3 and the lessons of the Paseo remote mode
  * (docs/alp/paseo-remote.md §3.3):
@@ -39,7 +42,7 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  * @typedef {{ status: 'idle' | 'loading' | 'ready' | 'error', error?: Failure }} Load
  * @typedef {{ id: string, label: string, description?: string }} Team
  * @typedef {{ id: string, label: string, description?: string }} Mode
- * @typedef {{ id: string, label: string }} Model
+ * @typedef {{ id: string, label: string, efforts: string[], effort?: string }} Model
  * @typedef {{
  *   id: string, rootId: string, text: string, delivery: 'auto' | 'steer',
  *   status: 'sending' | 'failed' | 'unknown', error?: string, retrySameId: boolean, accepted?: boolean, at: number,
@@ -64,8 +67,10 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  *   connection: { phase: Phase, gateway: string, attempt: number, error?: Failure, daemonVersion?: string, capabilities: string[] },
  *   principal: Principal | null,
  *   workspace: string | null,
- *   catalog: Load & { teams: Team[], modes: Mode[], models: Model[], defaultMode?: string },
+ *   catalog: Load & { teams: Team[], teamsKnown?: boolean, teamsUnavailable?: import('./new-session.js').TeamsUnavailable, modes: Mode[], models: Model[], defaultMode?: string },
  *   sessions: Load & { list: SessionSummary[] },
+ *   history: Load & { list: SessionSummary[] },
+ *   attention: Record<string, number>,
  *   selected: string | null,
  *   focus: string | null,
  *   tree: TreeView | null,
@@ -75,12 +80,26 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  *   tasks: Load & { visible: boolean, rows: any[], revision?: string, unreadable: number, creates: TaskCreate[], busy: Record<string, boolean>, message?: { level: 'info' | 'error', text: string } },
  *   settings: Load & { language?: { language: string | null, applies: string, default: string }, models: Model[] },
  *   notice: { id: number, level: 'info' | 'error', text: string } | null,
- *   preferences: { sendBehavior: 'steer' | 'queue' },
+ *   preferences: import('./preferences.js').Preferences,
  * }} State
  */
 
 /** Modes the runtime knows, in order of how much they allow; labels for people. */
+/** How long a message the host took counts as working while its turn has not been seen starting. */
+const BUSY_UNSEEN_MS = 15_000;
 const MODE_LABELS = /** @type {Record<string, string>} */ ({ 'read-only': 'Read only', 'workspace-write': 'Workspace write', 'full-access': 'Full access' });
+
+/**
+ * Whether a root waits for the user's answer: the open tree's own questions while it is attached
+ * (they change the moment one is answered), otherwise the workspace's question.list.
+ * @param {State} state @param {string} root
+ */
+export function needsInput(state, root) {
+  const tree = state.tree;
+  const live = tree && tree.rootId === root ? Object.keys(tree.projection.questions).length > 0 : false;
+  if (tree && tree.rootId === root && tree.status === 'attached') return live;
+  return live || (state.attention[root] ?? 0) > 0;
+}
 
 /** @returns {State} */
 export function initialState(gateway = '') {
@@ -90,6 +109,8 @@ export function initialState(gateway = '') {
     workspace: null,
     catalog: { status: 'idle', teams: [], modes: [], models: [] },
     sessions: { status: 'idle', list: [] },
+    history: { status: 'idle', list: [] },
+    attention: {},
     selected: null,
     focus: null,
     tree: null,
@@ -99,7 +120,7 @@ export function initialState(gateway = '') {
     tasks: { status: 'idle', visible: false, rows: [], unreadable: 0, creates: [], busy: {} },
     settings: { status: 'idle', models: [] },
     notice: null,
-    preferences: { sendBehavior: 'steer' },
+    preferences: parsePreferences(null),
   };
 }
 
@@ -113,7 +134,10 @@ export function initialState(gateway = '') {
  *   createTimeoutMs?: number,
  *   taskPollMs?: number,
  *   sessionPollMs?: number,
+ *   attentionPollMs?: number,
  *   releaseTimeoutMs?: number,
+ *   busyUnseenMs?: number,
+ *   storage?: import('./preferences.js').PreferenceStorage,
  * }} ControllerOptions
  */
 
@@ -135,6 +159,10 @@ export class Controller {
   /** The root attached on a client, so a switch knows what to release. @type {{ client: AlpRpcClient, root: string } | null} */
   #attached = null;
   #syncing = false;
+  #retryingTeams = false;
+  /** A first message whose start failed after the New session screen closed: the next one shows it again (memory only). */
+  /** @type {{ workspace: string, text: string } | null} */
+  #unsentDraft = null;
   #syncAgain = false;
   /** A root being created: the sync loop leaves it alone. @type {string | null} */
   #creating = null;
@@ -142,6 +170,10 @@ export class Controller {
   #context = {};
   /** @type {ReturnType<typeof setInterval> | undefined} */ #taskTimer;
   /** @type {ReturnType<typeof setInterval> | undefined} */ #sessionTimer;
+  /** @type {ReturnType<typeof setInterval> | undefined} */ #attentionTimer;
+  /** Latest question.list and History reads: an older answer that lands later is dropped. */
+  #attentionRead = 0;
+  #historyRead = 0;
   #noticeId = 0;
 
   /** @param {ControllerOptions} [options] */
@@ -155,10 +187,12 @@ export class Controller {
       createTimeoutMs: 120_000,
       taskPollMs: 5_000,
       sessionPollMs: 15_000,
+      attentionPollMs: 5_000,
       releaseTimeoutMs: 5_000,
+      busyUnseenMs: BUSY_UNSEEN_MS,
       ...options,
     };
-    this.#state = initialState();
+    this.#state = { ...initialState(), preferences: loadPreferences(options.storage) };
   }
 
   // ---- store -------------------------------------------------------------------------------
@@ -195,6 +229,9 @@ export class Controller {
 
   dismissNotice() { this.#set({ notice: null }); }
 
+  /** Shows a notice from a screen that cannot show it itself (it closed meanwhile). @param {'info' | 'error'} level @param {string} text */
+  notify(level, text) { this.#notify(level, text); }
+
   // ---- connection --------------------------------------------------------------------------
 
   /** The open client of the current connection, or a failure saying why there is none. */
@@ -221,7 +258,7 @@ export class Controller {
       return;
     }
     this.#token = secret;
-    this.#state = initialState(gateway);
+    this.#state = { ...initialState(gateway), preferences: this.#state.preferences };
     this.#set({ connection: { phase: 'connecting', gateway, attempt: 1, capabilities: [] } });
     /** @type {{ alp?: ReconnectingClient, principal?: Principal, opened: boolean }} */
     const run = { opened: false };
@@ -260,11 +297,17 @@ export class Controller {
     this.#trees.clear();
     this.#membership.clear();
     this.#turnWaits.clear();
+    this.#sentAt.clear();
+    this.#taken.clear();
+    this.#inflight.clear();
+    this.#requesting.clear();
+    if (this.#busyTimer !== undefined) { clearTimeout(this.#busyTimer); this.#busyTimer = undefined; }
     this.#watching = null;
     this.#attached = null;
+    this.#unsentDraft = null;
     this.#context = {};
     if (run?.alp) run.alp.stop();
-    if (run) this.#set(initialState(this.#state.connection.gateway));
+    if (run) this.#set({ ...initialState(this.#state.connection.gateway), preferences: this.#state.preferences });
   }
 
   /**
@@ -342,7 +385,7 @@ export class Controller {
     this.#set(state => ({
       principal,
       connection: { ...state.connection, capabilities, ...(daemonVersion ? { daemonVersion } : {}) },
-      ...(workspace !== state.workspace ? { workspace, selected: null, focus: null, tree: null, sessions: initialState().sessions, tasks: { ...initialState().tasks, visible: state.tasks.visible } } : {}),
+      ...(workspace !== state.workspace ? { workspace, selected: null, focus: null, tree: null, sessions: initialState().sessions, history: initialState().history, attention: {}, tasks: { ...initialState().tasks, visible: state.tasks.visible } } : {}),
       ...(changed || workspace !== state.workspace ? { catalog: initialState().catalog } : {}),
     }));
   }
@@ -351,6 +394,8 @@ export class Controller {
     this.#sync();
     if (this.#state.workspace) {
       void this.refreshSessions();
+      void this.refreshAttention();
+      if (this.#state.history.status !== 'idle') void this.loadHistory({ quiet: true });
       if (this.#state.catalog.status !== 'ready') void this.#loadCatalog();
       if (this.#state.tasks.visible) void this.refreshTasks();
     }
@@ -360,13 +405,15 @@ export class Controller {
   #startTimers() {
     this.#stopTimers();
     this.#sessionTimer = setInterval(() => { if (this.#state.workspace && this.#state.connection.phase === 'open') void this.refreshSessions({ quiet: true }); }, this.#options.sessionPollMs);
+    this.#attentionTimer = setInterval(() => { if (this.#state.workspace && this.#state.connection.phase === 'open') void this.refreshAttention(); }, this.#options.attentionPollMs);
     this.#taskTimer = setInterval(() => { if (this.#state.tasks.visible && this.#state.workspace && this.#state.connection.phase === 'open') void this.refreshTasks({ quiet: true }); }, this.#options.taskPollMs);
   }
 
   #stopTimers() {
     if (this.#sessionTimer !== undefined) clearInterval(this.#sessionTimer);
     if (this.#taskTimer !== undefined) clearInterval(this.#taskTimer);
-    this.#sessionTimer = this.#taskTimer = undefined;
+    if (this.#attentionTimer !== undefined) clearInterval(this.#attentionTimer);
+    this.#sessionTimer = this.#taskTimer = this.#attentionTimer = undefined;
   }
 
   /** @param {string} capability */
@@ -578,12 +625,15 @@ export class Controller {
     this.#set(state => ({
       workspace: chosen, selected: null, focus: null, tree: null,
       sessions: initialState().sessions,
+      history: initialState().history,
+      attention: {},
       catalog: initialState().catalog,
       tasks: { ...initialState().tasks, visible: state.tasks.visible },
     }));
     this.#sync();
     if (chosen && this.#state.connection.phase === 'open') {
       void this.refreshSessions();
+      void this.refreshAttention();
       void this.#loadCatalog();
       if (this.#state.tasks.visible) void this.refreshTasks();
     }
@@ -615,6 +665,59 @@ export class Controller {
     }
   }
 
+  /**
+   * The questions waiting in the workspace (question.list), counted per root, so every session of
+   * the list shows when it needs an answer, not only the one open. Quiet: a failed read keeps the
+   * last counts.
+   */
+  async refreshAttention() {
+    const workspace = this.#state.workspace;
+    if (!workspace || !can(this.#state.principal ?? undefined, 'session.read')) return;
+    const context = this.#context;
+    const read = ++this.#attentionRead;
+    try {
+      const result = await this.#client().request('question.list', { projectRoot: workspace });
+      if (context !== this.#context || read !== this.#attentionRead) return;
+      /** @type {Record<string, number>} */
+      const attention = {};
+      for (const question of Array.isArray(result?.questions) ? result.questions : []) {
+        const root = typeof question?.rootId === 'string' ? question.rootId : undefined;
+        if (root) attention[root] = (attention[root] ?? 0) + 1;
+      }
+      if (JSON.stringify(attention) !== JSON.stringify(this.#state.attention)) this.#set({ attention });
+    } catch {
+      // The next poll tries again.
+    }
+  }
+
+  /**
+   * Paseo's History: every root of the workspace, the archived ones too, newest first.
+   * @param {{ quiet?: boolean }} [options]
+   */
+  async loadHistory({ quiet = false } = {}) {
+    const workspace = this.#state.workspace;
+    if (!workspace) return;
+    const context = this.#context;
+    const read = ++this.#historyRead;
+    if (!quiet) this.#set(state => ({ history: { ...state.history, status: 'loading', error: undefined } }));
+    try {
+      const result = await this.#client().request('session.list', { projectRoot: workspace, rootsOnly: true, includeClosed: true, includeArchived: true });
+      if (context !== this.#context || read !== this.#historyRead) return;
+      const list = (Array.isArray(result?.sessions) ? result.sessions : []).filter((/** @type {any} */ session) => session && typeof session.id === 'string' && !session.parentId)
+        .sort((/** @type {any} */ a, /** @type {any} */ b) => String(b.updatedAt ?? b.createdAt ?? '').localeCompare(String(a.updatedAt ?? a.createdAt ?? '')));
+      this.#set({ history: { status: 'ready', list } });
+    } catch (error) {
+      if (context !== this.#context || read !== this.#historyRead) return;
+      if (!quiet || this.#state.history.status !== 'ready') this.#set(state => ({ history: { ...state.history, status: 'error', error: describe(error) } }));
+    }
+  }
+
+  /** Whether a root is archived, as far as the History read and this client's own actions know. @param {string | null | undefined} id */
+  isArchived(id) {
+    if (!id) return false;
+    return !!this.#state.history.list.find(row => row.id === id)?.archived && !this.#state.sessions.list.some(row => row.id === id);
+  }
+
   async #loadCatalog() {
     const workspace = this.#state.workspace;
     const principal = this.#state.principal;
@@ -623,8 +726,8 @@ export class Controller {
     this.#set(state => ({ catalog: { ...state.catalog, status: 'loading', error: undefined } }));
     try {
       const client = this.#client();
-      const [teams, catalog, models] = await Promise.all([
-        this.hasCapability('team') && can(principal, 'project.read') ? client.request('team.list', { projectRoot: workspace }).catch(() => undefined) : undefined,
+      const [teamList, catalog, models] = await Promise.all([
+        this.#fetchTeams(client, principal, workspace),
         can(principal, 'session.read') ? client.request('catalog.get', {}).catch(() => undefined) : undefined,
         this.hasCapability('library') && can(principal, 'session.read') ? client.request('library.models', {}).catch(() => undefined) : undefined,
       ]);
@@ -633,14 +736,63 @@ export class Controller {
       const modeRows = Array.isArray(catalog?.modes) && catalog.modes.length ? catalog.modes : Object.keys(MODE_LABELS).map(id => ({ id }));
       const modes = modeRows.filter((/** @type {any} */ mode) => typeof mode?.id === 'string' && (!allowed || allowed.includes(mode.id)))
         .map((/** @type {any} */ mode) => ({ id: mode.id, label: typeof mode.label === 'string' ? mode.label : MODE_LABELS[mode.id] ?? mode.id, ...(typeof mode.description === 'string' ? { description: mode.description } : {}) }));
-      const teamRows = Array.isArray(teams?.teams) ? teams.teams.filter((/** @type {any} */ team) => typeof team?.id === 'string' && !team.error)
-        .map((/** @type {any} */ team) => ({ id: team.id, label: typeof team.label === 'string' ? team.label : team.id, ...(typeof team.description === 'string' ? { description: team.description } : {}) })) : [];
-      const modelRows = Array.isArray(models?.models) ? models.models.filter((/** @type {any} */ model) => typeof model?.id === 'string').map((/** @type {any} */ model) => ({ id: model.id, label: typeof model.label === 'string' ? model.label : model.id })) : [];
+      const modelRows = normalizeModels(models?.models);
       const defaultMode = modes.some((/** @type {Mode} */ mode) => mode.id === 'full-access') ? 'full-access' : modes[0]?.id;
-      this.#set({ catalog: { status: 'ready', teams: teamRows, modes, models: modelRows, ...(defaultMode ? { defaultMode } : {}) } });
+      this.#set({ catalog: { status: 'ready', ...teamList, modes, models: modelRows, ...(defaultMode ? { defaultMode } : {}) } });
     } catch (error) {
       if (context !== this.#context) return;
       this.#set(state => ({ catalog: { ...state.catalog, status: 'error', error: describe(error) } }));
+    }
+  }
+
+  /**
+   * The workspace's teams. teamsKnown: team.list answered, so an empty list means the host has no
+   * team (not that it could not be asked); otherwise teamsUnavailable says why it was not asked or
+   * did not answer.
+   * @param {any} client @param {Principal} principal @param {string} workspace
+   * @returns {Promise<{ teams: Team[], teamsKnown: boolean, teamsUnavailable?: import('./new-session.js').TeamsUnavailable }>}
+   */
+  async #fetchTeams(client, principal, workspace) {
+    if (!this.hasCapability('team')) return { teams: [], teamsKnown: false, teamsUnavailable: { reason: 'capability' } };
+    if (!can(principal, 'project.read')) return { teams: [], teamsKnown: false, teamsUnavailable: { reason: 'permission' } };
+    try {
+      const answer = await client.request('team.list', { projectRoot: workspace });
+      if (!Array.isArray(answer?.teams)) return { teams: [], teamsKnown: false, teamsUnavailable: { reason: 'failed', message: 'The host answered team.list in a form this app does not read.' } };
+      const teams = answer.teams.filter((/** @type {any} */ team) => typeof team?.id === 'string' && !team.error)
+        .map((/** @type {any} */ team) => ({ id: team.id, label: typeof team.label === 'string' ? team.label : team.id, ...(typeof team.description === 'string' ? { description: team.description } : {}) }));
+      return { teams, teamsKnown: true };
+    } catch (error) {
+      return { teams: [], teamsKnown: false, teamsUnavailable: { reason: 'failed', message: describe(error).message } };
+    }
+  }
+
+  /**
+   * Keeps a first message that was not sent, for the next New session screen of the workspace it
+   * was written for (memory only; a disconnect forgets it).
+   * @param {string} text @param {string | null | undefined} workspace
+   */
+  keepUnsentDraft(text, workspace) { this.#unsentDraft = text && workspace ? { workspace, text: String(text) } : null; }
+
+  /** The first message a failed start left in the open workspace, if any (read when a New session screen opens). */
+  unsentDraft() { const kept = this.#unsentDraft; return kept && kept.workspace === this.#state.workspace ? kept.text : ''; }
+
+  /** The New session screen showed the kept message again. */
+  clearUnsentDraft() { this.#unsentDraft = null; }
+
+  /** Asks team.list again after it failed (the New session preview's Retry); otherwise does nothing. */
+  async retryTeams() {
+    const { workspace, principal, catalog } = this.#state;
+    if (!workspace || !principal || catalog.status !== 'ready' || catalog.teamsUnavailable?.reason !== 'failed' || this.#retryingTeams) return;
+    const context = this.#context;
+    this.#retryingTeams = true;
+    try {
+      const teamList = await this.#fetchTeams(this.#client(), principal, workspace);
+      if (context !== this.#context || this.#state.workspace !== workspace || this.#state.catalog.status !== 'ready') return;
+      this.#set(state => ({ catalog: { ...state.catalog, teams: teamList.teams, teamsKnown: teamList.teamsKnown, teamsUnavailable: teamList.teamsUnavailable } }));
+    } catch {
+      // Not connected: the next connection loads the catalog again.
+    } finally {
+      this.#retryingTeams = false;
     }
   }
 
@@ -667,15 +819,21 @@ export class Controller {
   /**
    * Starts a root in the workspace: an id chosen here (its first events may come before the
    * answer), session.create with history skipped, then session.attach for the whole timeline.
-   * @param {{ team?: string, mode?: string, model?: string, title?: string }} input
+   * A first message (Paseo's initial prompt) is sent once attached, through the same path as
+   * the composer's (receipts, retry); with no title given, it names the session.
+   * @param {{ team?: string, mode?: string, model?: string, thinking?: string, title?: string, prompt?: string }} input
    */
-  async createSession({ team, mode, model, title } = {}) {
+  async createSession({ team, mode, model, thinking, title, prompt } = {}) {
     const workspace = this.#state.workspace;
     if (!workspace) throw new ConfigurationError('Choose a workspace first.');
+    // One create at a time: a second Enter or click while one is starting must not make a second
+    // session. Claimed synchronously, before any await.
+    if (this.#creating || this.#state.busy.create) throw new ConfigurationError('A new session is already starting.');
     const client = this.#client();
     const id = newSessionId();
     const previous = this.#attached;
     this.#creating = id;
+    this.#set(state => ({ busy: { ...state.busy, create: true } }));
     try {
       // Leave the tree shown now first, so its last events do not mix with the new one's.
       if (previous && previous.client === client) {
@@ -692,9 +850,8 @@ export class Controller {
         selected: id, focus: id,
         tree: { rootId: id, status: 'attaching', projection: tree.projection },
         sessions: { ...state.sessions, list: [placeholder, ...state.sessions.list.filter(session => session.id !== id)] },
-        busy: { ...state.busy, create: true },
       }));
-      const spec = { cwd: workspace, persist: true, ...(team ? { workflow: team } : {}), ...(mode ? { mode } : {}), ...(model ? { model } : {}) };
+      const spec = { cwd: workspace, persist: true, ...(team ? { workflow: team } : {}), ...(mode ? { mode } : {}), ...(model ? { model } : {}), ...(thinking ? { thinking } : {}) };
       try {
         await client.request('session.create', { sessionId: id, spec, history: 'skip' }, { timeoutMs: this.#options.createTimeoutMs });
       } catch (error) {
@@ -707,10 +864,10 @@ export class Controller {
           this.#set(state => ({ selected: null, focus: null, tree: null, sessions: { ...state.sessions, list: state.sessions.list.filter(session => session.id !== id) } }));
           throw error;
         }
-        // It may exist: keep it selected; the list and the next attach tell.
-        this.#notify('error', `${failure.message} The session list was refreshed; if the new session is not there, create it again.`);
+        // It may exist: keep it selected; the list and the next attach tell. Its first message
+        // is not sent; the caller is told (it keeps the text), never a silent success.
         void this.refreshSessions();
-        return id;
+        throw new CreateOutcomeUnknownError(`${failure.message} If the new session shows in the list, open it and send your message there; otherwise start again.`, id);
       }
       try {
         const response = await client.request('session.attach', { sessionId: id }, { timeoutMs: this.#options.requestTimeoutMs });
@@ -728,7 +885,14 @@ export class Controller {
         // timeout or refusal on a live connection is shown with Retry (an attach is a read).
         this.#attachFailed(client, id, error);
       }
-      if (title?.trim()) await this.renameSession(id, title.trim()).catch(() => {});
+      const name = title?.trim() || (prompt ? titleFromPrompt(prompt) : undefined);
+      if (name) await this.renameSession(id, name).catch(() => {});
+      this.#rememberNewSession({ team, mode, model, thinking });
+      if (prompt?.trim()) {
+        // Sent like a composer message: a failure stays in the timeline with Retry, never
+        // resent by itself.
+        void this.sendPrompt(prompt, id).catch(error => this.#notify('error', describe(error).message));
+      }
       void this.refreshSessions({ quiet: true });
       return id;
     } finally {
@@ -743,7 +907,8 @@ export class Controller {
     const client = this.#client();
     const result = await client.request('session.rename', { sessionId: id, title });
     const session = result?.session;
-    this.#set(state => ({ sessions: { ...state.sessions, list: state.sessions.list.map(row => row.id === id ? { ...row, ...(session && typeof session === 'object' ? session : {}), title } : row) } }));
+    const update = (/** @type {SessionSummary} */ row) => row.id === id ? { ...row, ...(session && typeof session === 'object' ? session : {}), title } : row;
+    this.#set(state => ({ sessions: { ...state.sessions, list: state.sessions.list.map(update) }, history: { ...state.history, list: state.history.list.map(update) } }));
     const tree = this.#trees.get(id);
     if (tree) {
       tree.projection = { ...tree.projection, sessions: { ...tree.projection.sessions, [id]: { ...tree.projection.sessions[id], id, title } } };
@@ -754,9 +919,35 @@ export class Controller {
   /** Archives a root: alpd closes it and hides it from the list (data is kept). @param {string} id */
   async archiveSession(id) {
     const client = this.#client();
+    const context = this.#context;
     await client.request('session.archive', { sessionId: id, archived: true });
+    if (context !== this.#context) return;
     if (this.#state.selected === id) this.selectSession(null);
-    this.#set(state => ({ sessions: { ...state.sessions, list: state.sessions.list.filter(row => row.id !== id) } }));
+    const { [id]: _gone, ...attention } = this.#state.attention;
+    this.#set(state => ({
+      sessions: { ...state.sessions, list: state.sessions.list.filter(row => row.id !== id) },
+      history: { ...state.history, list: state.history.list.map(row => row.id === id ? { ...row, archived: true } : row) },
+      attention,
+    }));
+  }
+
+  /** Brings an archived root back into the list (Paseo's Unarchive). @param {string} id */
+  async restoreSession(id) {
+    const client = this.#client();
+    const context = this.#context;
+    const result = await client.request('session.archive', { sessionId: id, archived: false });
+    // The workspace changed meanwhile: its lists are not this session's.
+    if (context !== this.#context) return;
+    const session = result?.session && typeof result.session === 'object' ? result.session : undefined;
+    this.#set(state => {
+      const known = state.history.list.find(row => row.id === id);
+      const row = /** @type {SessionSummary} */ ({ ...(known ?? {}), ...(session ?? {}), id, archived: false });
+      return {
+        history: { ...state.history, list: state.history.list.map(entry => entry.id === id ? row : entry) },
+        sessions: { ...state.sessions, list: state.sessions.list.some(entry => entry.id === id) ? state.sessions.list : [row, ...state.sessions.list] },
+      };
+    });
+    void this.refreshSessions({ quiet: true });
   }
 
   // ---- prompts, questions, interrupt -------------------------------------------------------
@@ -810,26 +1001,108 @@ export class Controller {
   /**
    * Sends a message to the selected root: a new turn when it is idle, a steer while it runs. It
    * carries a fresh clientMessageId; the host answers it at most once (§10).
-   * @param {string} text
+   * @param {string} text @param {string | null} [root] the selected root by default
    */
-  async sendPrompt(text) {
-    const root = this.#state.selected;
+  async sendPrompt(text, root = this.#state.selected) {
     const body = String(text ?? '');
     if (!root || !body.trim()) return;
     const blocked = this.driveBlock();
     if (blocked) throw new ConfigurationError(blocked);
-    const running = !!this.#state.tree && root in this.#state.tree.projection.running;
     /** @type {PendingPrompt} */
-    const prompt = { id: newMessageId(), rootId: root, text: body, delivery: running ? 'steer' : 'auto', status: 'sending', retrySameId: true, at: Date.now() };
+    const prompt = { id: newMessageId(), rootId: root, text: body, delivery: this.rootBusy(root) ? 'steer' : 'auto', status: 'sending', retrySameId: true, at: Date.now() };
     this.#set(state => ({ prompts: [...state.prompts, prompt] }));
     this.#awaitTurn(prompt);
-    await this.#deliver(prompt);
+    await this.#deliverInTurn(prompt);
+  }
+
+  /**
+   * Delivers a message under a new id after the root's previous message of ours got its answer,
+   * then as a steer if the root works by then, else as a new turn: the host refuses a second turn
+   * while one is active, and a steer before the turn exists.
+   * @param {PendingPrompt} prompt
+   */
+  async #deliverInTurn(prompt) {
+    const root = prompt.rootId;
+    const before = this.#inflight.get(root);
+    const delivered = (async () => {
+      if (before) await before.catch(() => {});
+      const current = this.#state.prompts.find(entry => entry.id === prompt.id);
+      if (!current || current.status !== 'sending') return;
+      const delivery = this.rootBusy(root, prompt.id) ? 'steer' : 'auto';
+      if (delivery !== current.delivery) this.#set(state => ({ prompts: state.prompts.map(entry => entry.id === prompt.id ? { ...entry, delivery } : entry) }));
+      await this.#deliver({ ...current, delivery });
+    })();
+    this.#inflight.set(root, delivered);
+    try { await delivered; } finally { if (this.#inflight.get(root) === delivered) this.#inflight.delete(root); }
+  }
+
+  /** The last message of each root still being delivered, so the next one waits for its answer. @type {Map<string, Promise<void>>} */
+  #inflight = new Map();
+
+  /**
+   * Whether a root is working as far as the composer is concerned: a turn runs, or a message of
+   * ours was taken and its turn has not ended yet (prompt.accepted and turn.started may still be
+   * on their way), or one is still being sent. `except` leaves one message of ours out.
+   * @param {string | null} [root] @param {string} [except]
+   */
+  rootBusy(root = this.#state.selected, except) {
+    if (!root) return false;
+    const tree = this.#trees.get(root);
+    if (tree && root in tree.projection.running) return true;
+    // Still on its way, no answer yet. One the host answered as taken counts below, with a limit.
+    // Messages still waiting behind it in the chain have not gone out and do not count.
+    if (this.#state.prompts.some(prompt => prompt.rootId === root && prompt.id !== except && prompt.status === 'sending' && !prompt.accepted && this.#requesting.has(prompt.id))) return true;
+    const waits = this.#turnWaits.get(root);
+    if (!waits || !tree) return false;
+    for (const [id] of waits) {
+      if (id === except) continue;
+      const outcome = tree.projection.prompts[id];
+      if (outcome?.state === 'failed') continue;
+      // Taken (its answer or prompt.accepted said so), its turn not over: the host has an active
+      // turn even before prompt.accepted or turn.started arrives. A turn never seen starting stops
+      // counting after a while, in case its events were lost.
+      if (!outcome && !this.#taken.has(id)) continue;
+      const unseen = !outcome?.turnId || !tree.projection.turns[outcome.turnId];
+      if (unseen && Date.now() - (this.#sentAt.get(id) ?? 0) > this.#busyUnseenMs) continue;
+      if (!outcome || !promptTurnOver(tree.projection, id)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Changes the open session's permissions mode (session.configure), within the modes the
+   * access token allows; the gateway checks the grant again.
+   * @param {string} mode
+   */
+  async configureMode(mode) {
+    const root = this.#state.selected;
+    if (!root || !mode) return;
+    const allowed = this.#state.principal?.modes;
+    const blocked = this.driveBlock() ?? (allowed && !allowed.includes(mode) ? `Your access token can only use ${allowed.join(', ')} mode.` : undefined);
+    if (blocked) { this.#notify('error', blocked); return; }
+    if (this.#state.busy.mode) return;
+    this.#set(state => ({ busy: { ...state.busy, mode: true } }));
+    try {
+      const result = await this.#client().request('session.configure', { sessionId: root, mode }, { timeoutMs: this.#options.requestTimeoutMs });
+      const tree = this.#trees.get(root);
+      const next = typeof result?.session?.mode === 'string' ? result.session.mode : mode;
+      if (tree) {
+        tree.projection = { ...tree.projection, sessions: { ...tree.projection.sessions, [root]: { ...tree.projection.sessions[root], id: root, mode: next } } };
+        this.#publishTree(root);
+      }
+      this.#set(state => ({ sessions: { ...state.sessions, list: state.sessions.list.map(row => row.id === root ? { ...row, mode: next } : row) } }));
+    } catch (error) {
+      this.#notify('error', describe(error).message);
+    } finally {
+      this.#set(state => ({ busy: { ...state.busy, mode: false } }));
+    }
   }
 
   /** @param {PendingPrompt} prompt */
   async #deliver(prompt) {
     /** @param {Partial<PendingPrompt>} change */
     const update = change => this.#set(state => ({ prompts: state.prompts.map(entry => entry.id === prompt.id ? { ...entry, ...change } : entry) }));
+    this.#requesting.add(prompt.id);
     try {
       const client = this.#client();
       if (this.#state.selected === prompt.rootId) await this.#wake(client, prompt.rootId);
@@ -839,6 +1112,8 @@ export class Controller {
         return;
       }
       // Accepted: the entry stays until its user message shows in the timeline.
+      this.#taken.add(prompt.id);
+      this.#recheckBusyLater();
       if (this.#isDelivered(prompt)) this.#dropPrompt(prompt.id);
       else update({ accepted: true });
     } catch (error) {
@@ -848,8 +1123,13 @@ export class Controller {
       if (failure.sent === 'no') update({ status: 'failed', error: failure.message, retrySameId: true });
       else if (failure.sent === 'yes' && failure.reason !== 'outcome_unknown') update({ status: 'failed', error: failure.message, retrySameId: false });
       else update({ status: 'unknown', error: failure.message, retrySameId: failure.reason !== 'outcome_unknown' });
+    } finally {
+      this.#requesting.delete(prompt.id);
     }
   }
+
+  /** Messages of ours whose delivery (wake, then session.prompt) has started and not been answered. @type {Set<string>} */
+  #requesting = new Set();
 
   /** @param {PendingPrompt} prompt */
   #isDelivered(prompt) {
@@ -870,21 +1150,29 @@ export class Controller {
   async retryPrompt(id) {
     const prompt = this.#state.prompts.find(entry => entry.id === id);
     if (!prompt || prompt.status === 'sending') return;
-    const tree = this.#state.tree;
-    const running = !!tree && tree.rootId === prompt.rootId && prompt.rootId in tree.projection.running;
     /** @type {PendingPrompt} */
     const next = prompt.retrySameId
       ? { ...prompt, status: 'sending', error: undefined, accepted: false }
-      : { ...prompt, id: newMessageId(), delivery: running ? 'steer' : 'auto', status: 'sending', error: undefined, retrySameId: true, accepted: false };
+      : { ...prompt, id: newMessageId(), delivery: this.rootBusy(prompt.rootId, prompt.id) ? 'steer' : 'auto', status: 'sending', error: undefined, retrySameId: true, accepted: false };
     this.#set(state => ({ prompts: state.prompts.map(entry => entry.id === id ? next : entry) }));
-    if (next.id !== prompt.id) { this.#turnWaits.get(prompt.rootId)?.delete(prompt.id); this.#awaitTurn(next); }
-    await this.#deliver(next);
+    // The same id repeats the first request (receipts); a new one is a new message, in turn.
+    if (next.id === prompt.id) return this.#deliver(next);
+    this.#forget(prompt.rootId, prompt.id);
+    this.#awaitTurn(next);
+    await this.#deliverInTurn(next);
+  }
+
+  /** The bookkeeping of one message of ours. @param {string} root @param {string} id */
+  #forget(root, id) {
+    this.#turnWaits.get(root)?.delete(id);
+    this.#sentAt.delete(id);
+    this.#taken.delete(id);
   }
 
   /** Drops a message the user gave up on; the queue no longer waits for its turn. @param {string} id */
   discardPrompt(id) {
     const prompt = this.#state.prompts.find(entry => entry.id === id);
-    if (prompt) this.#turnWaits.get(prompt.rootId)?.delete(id);
+    if (prompt) this.#forget(prompt.rootId, id);
     this.#dropPrompt(id);
   }
 
@@ -902,6 +1190,24 @@ export class Controller {
     let waits = this.#turnWaits.get(prompt.rootId);
     if (!waits) this.#turnWaits.set(prompt.rootId, waits = new Map());
     waits.set(prompt.id, this.#trees.get(prompt.rootId)?.projection.reset ?? 0);
+    this.#sentAt.set(prompt.id, Date.now());
+  }
+
+  /** When each message of ours was sent, for rootBusy. @type {Map<string, number>} */
+  #sentAt = new Map();
+  /** Messages of ours the host answered as taken, for rootBusy. @type {Set<string>} */
+  #taken = new Set();
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  #busyTimer;
+  get #busyUnseenMs() { return this.#options.busyUnseenMs; }
+
+  /** Views read rootBusy when they render; once a taken message stops counting, render again. */
+  #recheckBusyLater() {
+    if (this.#busyTimer !== undefined) clearTimeout(this.#busyTimer);
+    this.#busyTimer = setTimeout(() => {
+      this.#busyTimer = undefined;
+      if (this.#run) this.#set(state => ({ busy: { ...state.busy } }));
+    }, this.#busyUnseenMs + 100);
   }
 
   /**
@@ -915,7 +1221,7 @@ export class Controller {
     if (!waits) return true;
     for (const [id, reset] of waits) {
       const untraceable = projection.historyUnavailable && projection.reset > reset && Object.keys(projection.running).length === 0;
-      if (promptTurnOver(projection, id) || untraceable) waits.delete(id);
+      if (promptTurnOver(projection, id) || untraceable) { waits.delete(id); this.#sentAt.delete(id); this.#taken.delete(id); }
     }
     return waits.size === 0;
   }
@@ -1002,6 +1308,7 @@ export class Controller {
         tree.projection = { ...tree.projection, questions };
         this.#publishTree(root);
       }
+      void this.refreshAttention();
     } catch (error) {
       const failure = describe(error);
       // Gone (answered elsewhere, timed out): the host's next announcement is the truth.
@@ -1151,7 +1458,60 @@ export class Controller {
    * @param {'steer' | 'queue'} sendBehavior
    */
   setSendBehavior(sendBehavior) {
-    this.#set(state => ({ preferences: { ...state.preferences, sendBehavior } }));
+    this.#setPreferences({ sendBehavior });
+  }
+
+  /** Paseo's Appearance › Theme: light, dark, or the system's. @param {'system' | 'light' | 'dark'} theme */
+  setTheme(theme) {
+    this.#setPreferences({ theme });
+  }
+
+  /** @param {Partial<import('./preferences.js').Preferences>} change */
+  #setPreferences(change) {
+    // Validated as stored, so state and storage hold the same thing.
+    const preferences = parsePreferences(JSON.stringify({ ...this.#state.preferences, ...change, v: 1 }));
+    this.#set({ preferences });
+    savePreferences(this.#options.storage, preferences);
+  }
+
+  /** The New session choices that started a session, for the next one (as Paseo's form preferences). @param {{ team?: string, mode?: string, model?: string, thinking?: string }} used */
+  #rememberNewSession(used) {
+    this.#setPreferences({ newSession: rememberChoices(this.#state.preferences.newSession, used) });
+  }
+
+  /** Back to the defaults, in state and storage (Paseo's reset settings). */
+  resetPreferences() {
+    this.#setPreferences(parsePreferences(null));
+  }
+
+  /** Reads the preferences again, after another tab changed them (the page's storage event). */
+  reloadPreferences() {
+    const preferences = loadPreferences(this.#options.storage);
+    if (JSON.stringify(preferences) !== JSON.stringify(this.#state.preferences)) this.#set({ preferences });
+  }
+
+  /** Why session.preview cannot be asked here, if it cannot. */
+  previewBlock() {
+    const { principal, workspace } = this.#state;
+    if (!principal) return 'Not connected.';
+    if (!can(principal, 'session.read')) return 'Your access token cannot read sessions, so the host cannot say what would run.';
+    if (!workspace) return 'Choose a workspace first.';
+    return undefined;
+  }
+
+  /**
+   * What a new session with this spec would run (session.preview: team, main agent, runtime,
+   * model, mode, thinking), without starting it. The spec's cwd is the workspace.
+   * @param {Record<string, unknown>} spec @param {{ signal?: AbortSignal }} [options]
+   * @returns {Promise<import('./new-session.js').Preview>}
+   */
+  async previewSession(spec, { signal } = {}) {
+    const blocked = this.previewBlock();
+    if (blocked) throw new ConfigurationError(blocked);
+    const result = await this.#client().request('session.preview', { spec: { ...spec, cwd: this.#state.workspace } }, { timeoutMs: this.#options.requestTimeoutMs, ...(signal ? { signal } : {}) });
+    const preview = parsePreview(result);
+    if (!preview) throw new ConfigurationError('The host answered the preview in a form this app does not read.');
+    return preview;
   }
 
   /** Why the library cannot be listed here, if it cannot. */
@@ -1192,7 +1552,7 @@ export class Controller {
       this.#set({ settings: {
         status: 'ready',
         ...(language && typeof language.applies === 'string' ? { language } : {}),
-        models: Array.isArray(models?.models) ? models.models.filter((/** @type {any} */ model) => typeof model?.id === 'string').map((/** @type {any} */ model) => ({ id: model.id, label: typeof model.label === 'string' ? model.label : model.id })) : [],
+        models: normalizeModels(models?.models),
       } });
     } catch (error) {
       if (context !== this.#context) return;

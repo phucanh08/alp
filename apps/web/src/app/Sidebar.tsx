@@ -1,11 +1,12 @@
 import * as React from 'react';
-import { Archive, ChevronDown, ChevronRight, LogOut, MoreVertical, Pencil, Plus, RefreshCw, Search, Server, Settings, Settings2, X } from 'lucide-react';
-import type { SessionSummary } from '../lib/controller.js';
+import { Archive, ChevronDown, ChevronRight, History, LogOut, MoreVertical, Pencil, Plus, RefreshCw, Search, Server, Settings, Settings2, X } from 'lucide-react';
+import { needsInput, type SessionSummary } from '../lib/controller.js';
 import { can } from '../lib/gateway.js';
 import { Menu } from '../components/ui/menu';
 import { Spinner } from '../components/ui/spinner';
 import { baseName, relativeTime, sessionName } from '../lib/format';
 import { cn } from '../lib/utils';
+import { isMacPlatform, shortcutLabel } from '../lib/shortcuts.js';
 import { useAppState, useController } from './store';
 import { StatusIndicator, type Bucket } from './status';
 
@@ -29,27 +30,29 @@ const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-ring foc
 const rowFill = 'hover:bg-sidebar-hover active:bg-secondary';
 
 /** Paseo's SidebarHeaderRow, "compact": a 28px row, 14px muted icon and label that light on hover. */
-function NavRow({ icon: Icon, label, onClick, disabled, title, active }: {
-  icon: typeof Plus; label: string; onClick: () => void; disabled?: boolean; title?: string; active?: boolean;
+function NavRow({ icon: Icon, label, onClick, disabled, title, active, shortcut, testId }: {
+  icon: typeof Plus; label: string; onClick: () => void; disabled?: boolean; title?: string; active?: boolean; shortcut?: string; testId?: string;
 }) {
   return (
     <div className="px-2">
-      <button type="button" onClick={onClick} disabled={disabled} title={title}
+      <button type="button" onClick={onClick} disabled={disabled} title={title} aria-current={active ? 'page' : undefined} data-testid={testId}
         className={cn('group flex min-h-9 w-full items-center gap-2 rounded-lg px-2 py-1 md:min-h-7 text-left text-sm text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-45', rowFill, active && 'bg-sidebar-hover text-foreground', focusRing)}>
         <Icon aria-hidden className="size-[18px] shrink-0 md:size-3.5" />
-        <span className="truncate">{label}</span>
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {/* Paseo's shortcut badge: shown while the row is hovered, on screens with a keyboard. */}
+        {shortcut ? <kbd aria-hidden className="hidden rounded-md bg-secondary/50 px-1 py-px font-sans text-[11px] leading-4 text-muted-foreground md:group-hover:inline">{shortcut}</kbd> : null}
       </button>
     </div>
   );
 }
 
 /** The Search nav row: pressed, it becomes a filter field in the same 28px box. */
-function SearchRow({ query, onQuery, open, onOpen, onClose }: {
-  query: string; onQuery: (value: string) => void; open: boolean; onOpen: () => void; onClose: () => void;
+function SearchRow({ query, onQuery, open, onOpen, onClose, focusRequest, shortcut }: {
+  query: string; onQuery: (value: string) => void; open: boolean; onOpen: () => void; onClose: () => void; focusRequest?: number; shortcut?: string;
 }) {
   const field = React.useRef<HTMLInputElement>(null);
-  React.useEffect(() => { if (open) field.current?.focus(); }, [open]);
-  if (!open) return <NavRow icon={Search} label="Search" onClick={onOpen} />;
+  React.useEffect(() => { if (open) field.current?.focus(); }, [open, focusRequest]);
+  if (!open) return <NavRow icon={Search} label="Search" onClick={onOpen} shortcut={shortcut} />;
   return (
     <div className="px-2">
       <div className="flex min-h-9 w-full items-center gap-2 rounded-lg bg-sidebar-hover px-2 py-1 md:min-h-7 focus-within:ring-1 focus-within:ring-border">
@@ -143,8 +146,16 @@ function FooterButton({ label, title, onClick, children }: { label: string; titl
   );
 }
 
-export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavigate, onClose }: {
+export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavigate, onClose, onHistory, historyOpen, onOpenSession, searchRequest, onSearchRequestHandled }: {
   onNewSession: () => void;
+  onHistory: () => void;
+  historyOpen: boolean;
+  /** A session row was chosen: the workspace shows it (History closes). */
+  onOpenSession: () => void;
+  /** Opens and focuses the search field each time it changes (Cmd/Ctrl+K). */
+  searchRequest?: number;
+  /** The search request was taken: the owner clears it, so a remount does not open search again. */
+  onSearchRequestHandled?: () => void;
   onRename: (session: SessionSummary) => void;
   onArchive: (session: SessionSummary) => void;
   onSettings: () => void;
@@ -152,14 +163,15 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavig
   onClose?: () => void;
 }) {
   const controller = useController();
-  const { principal, workspace, sessions, selected, connection, tree } = useAppState();
+  const state = useAppState();
+  const { principal, workspace, sessions, selected, connection } = state;
+  const mac = React.useMemo(() => isMacPlatform(), []);
   const [collapsed, setCollapsed] = React.useState(false);
   const [searching, setSearching] = React.useState(false);
   const [query, setQuery] = React.useState('');
   const canWrite = can(principal ?? undefined, 'session.write');
   const online = connection.phase === 'open';
   const workspaces = principal?.workspaces ?? [];
-  const waiting = tree && Object.keys(tree.projection.questions).length ? tree.rootId : null;
   const needle = query.trim().toLowerCase();
   const shown = needle ? sessions.list.filter(session => sessionName(session).toLowerCase().includes(needle)) : sessions.list;
 
@@ -174,14 +186,25 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavig
     onNavigate();
   };
   const closeSearch = () => { setQuery(''); setSearching(false); };
+  const [searchFocus, setSearchFocus] = React.useState(0);
+  React.useEffect(() => {
+    if (!searchRequest) return;
+    setSearching(true);
+    setCollapsed(false);
+    setSearchFocus(value => value + 1);
+    onSearchRequestHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchRequest]);
   const host = `${principal?.label ?? 'Access token'} · ${connection.gateway.replace(/^https?:\/\//, '')}${online ? '' : ' · reconnecting'}`;
 
   return (
     <nav aria-label="Workspaces and sessions" className="relative flex h-full min-h-0 flex-col bg-sidebar">
       <div className="flex shrink-0 flex-col gap-0.5 border-b border-border pb-1.5 pt-2">
         <NavRow icon={Plus} label="New session" onClick={() => { onNewSession(); onNavigate(); }} disabled={!workspace || !canWrite || !online}
-          title={!canWrite ? 'Your access token cannot start sessions.' : undefined} />
-        <SearchRow query={query} onQuery={setQuery} open={searching} onOpen={() => { setSearching(true); setCollapsed(false); }} onClose={closeSearch} />
+          title={!canWrite ? 'Your access token cannot start sessions.' : undefined} shortcut={shortcutLabel('session.new', mac)} />
+        <NavRow icon={History} label="History" onClick={() => { onHistory(); onNavigate(); }} active={historyOpen} disabled={!workspace} testId="sidebar-history" />
+        <SearchRow query={query} onQuery={setQuery} open={searching} onOpen={() => { setSearching(true); setCollapsed(false); }} onClose={closeSearch}
+          focusRequest={searchFocus} shortcut={shortcutLabel('search', mac)} />
       </div>
       {onClose ? (
         <button type="button" aria-label="Close sessions" onClick={onClose}
@@ -239,9 +262,9 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavig
                   ) : null}
                   <ul>
                     {shown.map(session => (
-                      <SessionRow key={session.id} session={session} selected={session.id === selected} canWrite={canWrite}
-                        bucket={bucketOf(session, session.id === waiting)}
-                        onSelect={() => { controller.selectSession(session.id); onNavigate(); }}
+                      <SessionRow key={session.id} session={session} selected={session.id === selected && !historyOpen} canWrite={canWrite}
+                        bucket={bucketOf(session, needsInput(state, session.id))}
+                        onSelect={() => { controller.selectSession(session.id); onOpenSession(); onNavigate(); }}
                         onRename={() => onRename(session)} onArchive={() => onArchive(session)} />
                     ))}
                   </ul>

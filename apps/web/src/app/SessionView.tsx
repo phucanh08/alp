@@ -1,11 +1,15 @@
 import type { ReactNode } from 'react';
-import { ArrowLeft, Bot, CircleAlert, Cpu, MessageSquarePlus, RotateCcw, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Bot, ChevronDown, CircleAlert, MessageSquarePlus, RotateCcw, Shield, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { Menu } from '../components/ui/menu';
+import { cn } from '../lib/utils';
+import { TasksPill } from './chat/tracks';
 import { can } from '../lib/gateway.js';
 import { entriesOf } from '../lib/timeline.js';
 import { Button } from '../components/ui/button';
 import { Spinner } from '../components/ui/spinner';
 import { modeLabel } from '../lib/format';
 import { Composer } from './Composer';
+import { ArchivedCallout } from './History';
 import { QuestionCard } from './QuestionCard';
 import { Timeline } from './Timeline';
 import { useAppState, useController } from './store';
@@ -29,12 +33,33 @@ export function Empty({ onNewSession }: { onNewSession: () => void }) {
   );
 }
 
+export const controlClass = 'inline-flex h-7 min-w-0 shrink items-center gap-1 rounded-2xl px-2 text-sm text-muted-foreground [&_svg]:size-3.5 [&_svg]:shrink-0';
+
 /** An agent control as Paseo's composer toolbar shows one (icon and value), read-only: set when the session started. */
 function Control({ icon, label, title }: { icon: ReactNode; label: string; title: string }) {
   return (
-    <span title={title} className="inline-flex h-7 min-w-0 shrink items-center gap-1 rounded-2xl px-2 text-sm text-muted-foreground [&_svg]:size-3.5 [&_svg]:shrink-0">
+    <span title={title} className={controlClass}>
       {icon}<span className="truncate">{label}</span>
     </span>
+  );
+}
+
+const MODE_ICONS: Record<string, typeof Shield> = { 'read-only': Shield, 'workspace-write': ShieldCheck, 'full-access': ShieldAlert };
+const modeIcon = (mode: string | undefined) => (mode && MODE_ICONS[mode]) || ShieldCheck;
+
+/** Paseo's mode control: the session's permissions mode, a menu of the modes the token allows. */
+export function ModeControl({ mode, modes, disabled, locked, onSelect }: { mode: string; modes: Array<{ id: string; label?: string }>; disabled: boolean; locked: boolean; onSelect: (mode: string) => void }) {
+  const Icon = modeIcon(mode);
+  const label = modes.find(entry => entry.id === mode)?.label ?? modeLabel(mode);
+  if (modes.length < 2 && modes[0]?.id === mode) return <Control icon={<Icon aria-hidden />} label={label} title="Permissions" />;
+  return (
+    <Menu label="Permissions" title={locked ? `Permissions: ${label}. They change once the agent and its team are idle.` : `Permissions: ${label}`} align="start" disabled={disabled}
+      triggerClassName={cn(controlClass, 'outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-expanded:bg-muted aria-expanded:text-foreground disabled:pointer-events-none disabled:opacity-60')}
+      trigger={<><Icon aria-hidden /><span className="truncate" data-testid="mode-control-label">{label}</span><ChevronDown aria-hidden className="!size-3 opacity-70" /></>}
+      items={modes.map(entry => {
+        const EntryIcon = modeIcon(entry.id);
+        return { id: entry.id, label: entry.label ?? modeLabel(entry.id), icon: <EntryIcon aria-hidden />, checked: entry.id === mode, onSelect: () => { if (entry.id !== mode) onSelect(entry.id); } };
+      })} />
   );
 }
 
@@ -42,7 +67,7 @@ function Control({ icon, label, title }: { icon: ReactNode; label: string; title
 export function ChatPanel({ sessionId }: { sessionId: string }) {
   const controller = useController();
   const { openAgent } = useTabs();
-  const { tree, prompts, queued, busy, sessions, connection, preferences } = useAppState();
+  const { tree, prompts, queued, busy, sessions, connection, preferences, catalog, principal } = useAppState();
   if (!tree) return null;
   const projection = tree.projection;
   const root = tree.rootId;
@@ -51,6 +76,8 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const rootSession = projection.sessions[root];
   const agentOf = (id: string) => projection.sessions[id]?.agent ?? (id === root ? 'main' : 'agent');
   const running = root in projection.running;
+  // Working as the composer sees it: also while a message of ours is on its way to a turn.
+  const working = running || controller.rootBusy(root);
   const viewingRunning = viewing in projection.running;
   const closed = !!projection.closed[root] || (!rootSession && listed?.status === 'closed');
   const questions = Object.values(projection.questions);
@@ -75,6 +102,23 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const team = rootSession?.teamLabel ?? listed?.teamLabel;
   const mode = rootSession?.mode ?? listed?.mode;
   const model = rootSession?.model;
+  const canWrite = can(principal ?? undefined, 'session.write');
+  const modes = catalog.modes.length ? catalog.modes : mode ? [{ id: mode }] : [];
+  // The host changes permissions only between turns, with no child session running.
+  const modeLocked = working || Object.keys(projection.running).length > 0;
+  const canCycle = !!mode && modes.length > 1 && !busy.mode && !blocked && canWrite && !modeLocked && connection.phase === 'open';
+  const cycleMode = () => {
+    if (!canCycle) return;
+    const at = modes.findIndex(entry => entry.id === mode);
+    void controller.configureMode(modes[(at + 1) % modes.length].id);
+  };
+  // The tasks this session's tree worked on: the latest todo of the main agent's timeline.
+  const todo = viewing === root ? [...entries].reverse().find(entry => (entry.item as any).kind === 'todo') : undefined;
+  const worked = ((todo?.item as any)?.items ?? []) as Array<{ id: string; text: string; status: string }>;
+  const questionCards = questions.length ? questions.map(question => (
+    <QuestionCard key={question.id} question={question} busy={!!busy[`question:${question.id}`]} blocked={blocked}
+      onAnswer={text => void controller.answerQuestion(question.id, { text })} onDecline={() => void controller.answerQuestion(question.id, { dismiss: true })} />
+  )) : null;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {tree.status === 'error' ? (
@@ -96,19 +140,13 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           onRetry={id => void controller.retryPrompt(id)}
           onDiscard={id => controller.discardPrompt(id)}
           emptyText={viewing === root ? (closed ? 'Nothing here yet.' : 'Send a message to start.') : 'This agent has not written anything yet.'}
+          tail={questionCards}
         />
       )}
-      {questions.length ? (
-        <div className="px-3 pb-3 md:px-4">
-          <div className="mx-auto flex w-full max-w-[820px] flex-col gap-2 px-2">
-          {questions.map(question => (
-            <QuestionCard key={question.id} question={question} busy={!!busy[`question:${question.id}`]} blocked={blocked}
-              onAnswer={text => void controller.answerQuestion(question.id, { text })} onDecline={() => void controller.answerQuestion(question.id, { dismiss: true })} />
-          ))}
-          </div>
-        </div>
+      {loading && !entries.length && questionCards ? (
+        <div className="px-3 pb-3 md:px-4"><div className="mx-auto flex w-full max-w-[820px] flex-col gap-2 px-2">{questionCards}</div></div>
       ) : null}
-      {viewing === root ? (
+      {viewing === root && controller.isArchived(root) ? <ArchivedCallout sessionId={root} /> : viewing === root ? (
         <>
           {closed && !running ? <p className="mx-auto w-full max-w-[820px] px-4 pb-2 text-center text-xs text-muted-foreground">This session is closed on the host. Sending a message reopens it.</p> : null}
           <Composer
@@ -118,16 +156,17 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             queued={queued.filter(item => item.rootId === root)}
             onEditQueued={id => controller.editQueued(id)}
             onSendQueued={id => void controller.sendQueuedNow(id)}
-            running={running}
+            running={working}
             stopping={!!busy.interrupt}
             blocked={blocked}
             disabledReason={connection.phase !== 'open' ? 'Reconnecting…' : loading ? 'Loading…' : undefined}
             placeholder={`Message ${agentOf(root)}…`}
             sendBehavior={preferences.sendBehavior}
+            onCycleMode={canCycle ? cycleMode : undefined}
+            tracks={<TasksPill worked={worked} />}
             controls={<>
-              {team ? <Control icon={<Bot aria-hidden />} label={team} title="Team, set when the session started" /> : null}
-              {mode ? <Control icon={<ShieldCheck aria-hidden />} label={modeLabel(mode)} title="Permissions, set when the session started" /> : null}
-              {model ? <Control icon={<Cpu aria-hidden />} label={model} title="Main agent's model" /> : null}
+              {team ? <Control icon={<Bot aria-hidden />} label={team} title={`Team, set when the session started${model ? ` · main runs ${model}` : ''}`} /> : null}
+              {mode ? <ModeControl mode={mode} modes={modes} locked={modeLocked} disabled={!!busy.mode || !!blocked || !canWrite || connection.phase !== 'open' || modeLocked} onSelect={next => void controller.configureMode(next)} /> : null}
             </>}
           />
         </>

@@ -5,7 +5,7 @@
 import { spawn, execFile } from 'node:child_process';
 import { once } from 'node:events';
 import { chmodSync, closeSync, existsSync, openSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
@@ -80,7 +80,10 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
   const env = { ...process.env, ALP_HOME: home, ALP_GATEWAY_HOME: gatewayHome, ALP_LOG_LEVEL: 'info' };
   delete env.ALP_GATEWAY_URL;
   delete env.ALP_GATEWAY_TOKEN;
-  if (provider === 'fake') Object.assign(env, { ALP_CODEX_BIN: FAKE_CODEX, FAKE_CODEX_JOURNAL: journal });
+  // Fake runs never reach a real model: Codex is the fake, and the other runtimes point at a
+  // program that does not exist, so a session that lands on them fails loudly instead.
+  const runtimeBins = provider === 'fake' ? { ALP_CODEX_BIN: FAKE_CODEX, FAKE_CODEX_JOURNAL: journal, ALP_CLAUDE_BIN: path.join(directory, 'no-real-claude'), ALP_ANTIGRAVITY_BIN: path.join(directory, 'no-real-antigravity') } : {};
+  Object.assign(env, runtimeBins);
   chmodSync(FAKE_CODEX, 0o755);
 
   // Two projects: one granted to the web credentials, one never granted (it must stay invisible).
@@ -88,8 +91,11 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
   for (const project of Object.values(projects)) {
     await mkdir(project, { recursive: true });
     await run(process.execPath, [CLI, 'init', project], { env });
+    // A fake host names its team (Phở) so a session created without one still runs the fake
+    // Codex profile: alpd's session.create without a workflow otherwise runs the custom graph on
+    // Phở's built-in (real) main model.
     const settings = provider === 'fake'
-      ? { workflow: { supervisor: false }, team: { pho: { main: { profiles: ['codex:gpt-5.6-sol'] } }, cafe: { main: { profiles: ['codex:gpt-5.6-sol'] } } } }
+      ? { workflow: { mode: 'pho', supervisor: false }, team: { pho: { main: { profiles: ['codex:gpt-5.6-sol'] } }, cafe: { main: { profiles: ['codex:gpt-5.6-sol'] } } } }
       : { workflow: { supervisor: false } };
     await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify(settings, null, 2));
   }
@@ -151,10 +157,28 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
 
   const web = serveWeb ? await serveStatic(path.join(WEB, 'dist'), webPort) : undefined;
 
+  /**
+   * Every session alpd recorded on this host that did not run on Codex (the fake): with the fake
+   * provider, any such session is a test that reached (or tried to reach) a real runtime.
+   */
+  const nonFakeSessions = async () => {
+    const folder = path.join(home, 'state', 'sessions');
+    const files = (await readdir(folder).catch(() => [])).filter(name => name.endsWith('.json'));
+    const found = [];
+    for (const name of files) {
+      const record = await readJson(path.join(folder, name));
+      const runtime = record?.session?.runtime;
+      if (runtime !== 'codex') found.push(`${name.replace(/\.json$/, '')}: runtime ${runtime ?? 'unknown'}, model ${record?.session?.model ?? 'unknown'}, team ${record?.session?.workflow?.mode ?? 'none'}`);
+    }
+    return found;
+  };
+
   const turnStarts = async () => (await readFile(journal, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.method === 'turn/start');
 
   return {
-    directory, home, projects, tokens, credentialIds, logs, journal, turnStarts,
+    directory, home, projects, tokens, credentialIds, logs, journal, turnStarts, nonFakeSessions,
+    /** The runtime programs alpd was given (fake runs: the fake Codex, missing Claude/Antigravity). */
+    runtimeBins,
     webUrl: webOrigin,
     gatewayUrl: `http://127.0.0.1:${gatewayPort}`,
     get socket() { return socket; },
@@ -173,7 +197,10 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
       await stop(gateway);
       await stop(daemon);
       await web?.close();
+      // Fail closed: a fake run whose sessions left the fake Codex fails loudly, after cleanup.
+      const escaped = provider === 'fake' ? await nonFakeSessions() : [];
       await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      if (escaped.length) throw new Error(`A disposable test host ran sessions outside the fake Codex (a real runtime may have been called):\n${escaped.join('\n')}`);
     },
   };
 }

@@ -35,6 +35,19 @@ export class TransientError extends Error {
 }
 
 /**
+ * session.create's answer was lost (timeout, drop): the session may or may not exist. Carries the
+ * id it was asked under, so the caller can keep what the person typed and point at it.
+ */
+export class CreateOutcomeUnknownError extends Error {
+  /** @param {string} message @param {string} sessionId */
+  constructor(message, sessionId) {
+    super(message);
+    this.name = 'CreateOutcomeUnknownError';
+    this.sessionId = sessionId;
+  }
+}
+
+/**
  * @typedef {{
  *   message: string,
  *   code?: number,
@@ -63,6 +76,7 @@ export function describe(error) {
   if (error instanceof AuthenticationError) return { message: error.message, sent: 'no', terminal: true };
   if (error instanceof ConfigurationError) return { message: error.message, sent: 'no', terminal: true };
   if (error instanceof TransientError) return { message: error.message, sent: 'no', terminal: false };
+  if (error instanceof CreateOutcomeUnknownError) return { message: error.message, sent: 'unknown', terminal: false };
   if (isAlpClientError(error)) {
     switch (error.reason) {
       case 'send_failed': case 'overloaded':

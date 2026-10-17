@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // A deterministic stand-in for `codex app-server` for the web app's end-to-end tests: it speaks
 // the JSON-RPC lines alpd's Codex transport sends and never calls a model. Every request it
-// receives is appended to $FAKE_CODEX_JOURNAL. Markers in a prompt choose what its turn does:
+// receives is appended to $FAKE_CODEX_JOURNAL (with thread/start's model and turn/start's effort). Markers in a prompt choose what its turn does:
 //   (none)      stream "Echo: <prompt>" in a few deltas, then finish
 //   [tool]      run a shell command (a commandExecution item with output), then answer
 //   [ask]       ask the user with alp_ask; the turn ends once it is answered or declined
@@ -95,7 +95,8 @@ lines.on('line', line => {
   }
   const { id, method, params } = message;
   const text = textOf(params);
-  record({ method, ...(params?.threadId ? { threadId: params.threadId } : {}), ...(text ? { text } : {}) });
+  // The model a thread starts on and the effort of each turn, so tests can see what reached Codex.
+  record({ method, ...(params?.threadId ? { threadId: params.threadId } : {}), ...(text ? { text } : {}), ...(typeof params?.model === 'string' ? { model: params.model } : {}), ...(typeof params?.effort === 'string' ? { effort: params.effort } : {}) });
   const reply = result => send({ id, result });
   switch (method) {
     case 'initialize': return reply({});

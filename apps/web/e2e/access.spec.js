@@ -45,12 +45,14 @@ test('grants: read-only token, mode-limited token and another workspace', async 
   await expect(limited.getByText(/can only drive sessions in read-only mode/).first()).toBeVisible();
   await expect(limited.getByLabel('Message', { exact: true })).toBeDisabled();
   await limited.getByRole('navigation').getByRole('button', { name: 'New session' }).click();
-  const dialog = limited.getByRole('dialog', { name: 'New session' });
-  await expect(dialog.getByLabel('Permissions').locator('option')).toHaveText(['Read only']);
-  await dialog.getByLabel('Title (optional)').fill('Read-only work');
-  await dialog.getByRole('button', { name: 'Start session' }).click();
+  const draft = limited.getByTestId('new-session-screen');
+  // The only mode the token allows, shown as a fixed control; the preview says it too.
+  await expect(draft.getByTitle('Permissions')).toHaveText('Read only');
+  await expect(draft.getByTestId('preview-mode')).toHaveText('Read only');
+  await draft.getByLabel('Title (optional)').fill('Read-only work');
+  await draft.getByRole('button', { name: 'Start session' }).click();
   // As newSession waits: a message typed before main's composer is ready is lost (seen on Ubuntu CI).
-  await expect(dialog).toBeHidden();
+  await expect(draft).toBeHidden();
   await expect(limited.getByRole('heading', { level: 1, name: 'Read-only work' })).toBeVisible();
   await expect(limited.getByPlaceholder(/^Message main/)).toBeEnabled();
   await send(limited, 'read only hello');
