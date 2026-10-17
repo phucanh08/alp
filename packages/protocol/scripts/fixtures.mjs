@@ -77,6 +77,8 @@ P('daemon.hello', { protocolVersion: 1 }, true, 'without client');
 P('daemon.hello', { protocolVersion: 1, client: 'paseo' }, false, 'with a string client');
 R('daemon.hello', { protocolVersion: 1, daemonVersion: '0.10.0', pid: 42, capabilities: ['attach.after', 'prompt.receipts', 'extension.methods'] });
 R('daemon.hello', { protocolVersion: 1, daemonVersion: '0.9.5', pid: 42 }, true, 'from a daemon before capabilities');
+R('daemon.hello', { protocolVersion: 1, daemonVersion: '0.10.0', pid: 42, hostname: 'build-host', capabilities: [] }, true, 'with the host name');
+R('daemon.hello', { protocolVersion: 1, hostname: 42 }, false, 'with a numeric hostname');
 P('daemon.status', {});
 R('daemon.status', { pid: 42, startedAt: ts, version: '0.10.0', protocolVersion: 1, sessions: 1, questions: 0, previousExit: { kind: 'clean' }, persistence: { failing: 0 }, health: { live: true, ready: true, checks: [{ id: 'accepting', ok: true }] } });
 R('daemon.status', { pid: 42, startedAt: ts, version: '0.10.0', protocolVersion: 1, sessions: 1, questions: 0 }, false, 'result without health');

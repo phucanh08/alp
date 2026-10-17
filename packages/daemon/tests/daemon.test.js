@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { access, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { realpath as realpathOf } from 'node:fs/promises';
@@ -78,7 +78,10 @@ test('handshake is required and versioned', async t => {
   t.after(() => raw.close());
   await assert.rejects(raw.request('session.list'), { code: 1006 });
   await assert.rejects(raw.request('daemon.hello', { protocolVersion: PROTOCOL_VERSION + 1 }), { code: 1006 });
-  assert.equal((await raw.request('daemon.hello', { protocolVersion: PROTOCOL_VERSION })).protocolVersion, PROTOCOL_VERSION);
+  const hello = await raw.request('daemon.hello', { protocolVersion: PROTOCOL_VERSION });
+  assert.equal(hello.protocolVersion, PROTOCOL_VERSION);
+  // The machine name, as Paseo's hello carries it (patch 0017): clients label the host with it.
+  assert.equal(hello.hostname, hostname());
   await assert.rejects(raw.request('session.nope'), { code: -32601 });
   await assert.rejects(raw.request('session.get', { sessionId: 'missing' }), { code: 1001 });
 });

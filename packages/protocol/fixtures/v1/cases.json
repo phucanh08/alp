@@ -945,6 +945,29 @@
    }
   },
   {
+   "name": "daemon.hello with the host name",
+   "check": "result",
+   "method": "daemon.hello",
+   "valid": true,
+   "value": {
+    "protocolVersion": 1,
+    "daemonVersion": "0.10.0",
+    "pid": 42,
+    "hostname": "build-host",
+    "capabilities": []
+   }
+  },
+  {
+   "name": "daemon.hello with a numeric hostname",
+   "check": "result",
+   "method": "daemon.hello",
+   "valid": false,
+   "value": {
+    "protocolVersion": 1,
+    "hostname": 42
+   }
+  },
+  {
    "name": "daemon.status params",
    "check": "params",
    "method": "daemon.status",

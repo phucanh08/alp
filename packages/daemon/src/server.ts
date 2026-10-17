@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { appendFile, chmod, mkdir, readFile, unlink, lstat, rename } from 'node:fs/promises';
 import net from 'node:net';
+import os from 'node:os';
 import { assertPrivateDirectory, assertPrivateSocket } from '@anhlp/alp-client/index';
 import path from 'node:path';
 import { createLogger } from '@anhlp/alp-core/log';
@@ -1058,7 +1059,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         const issues = validateParams(method, params)!;
         if (issues.length) throw invalidParams(issues);
         connection.helloed = true;
-        respond({ result: { protocolVersion: PROTOCOL_VERSION, daemonVersion: version, pid: process.pid, capabilities } });
+        respond({ result: { protocolVersion: PROTOCOL_VERSION, daemonVersion: version, pid: process.pid, hostname: os.hostname(), capabilities } });
         return;
       }
       if (!connection.helloed) throw new RpcError(ERROR.protocol, 'daemon.hello is required first', { reason: 'hello_required' });
