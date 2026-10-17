@@ -652,7 +652,7 @@ Trạng thái ngày 2026-10-16, ở release SHA `2230aa5`.
 | T9 | Đưa client SDK smoke vào CI; workflow publish; ~~thêm macOS vào lane `core`/`paseo`~~ (đã làm theo D8) | Không (sau beta) | deferred; phần acceptance Linux kéo lên trước theo D6 (T12) |
 | T12 | Workflow `release-acceptance` (D6, D7): pack một lần trên CI + `release:consumer` + rehearsal fake (Codex, Claude, W6) trên macOS, Ubuntu, Windows | Có (pack là bộ tarball của release) | xong (PR #102); bộ tarball release: [release-acceptance 38901108957](https://github.com/phucanh08/alp/actions/runs/38901108957) |
 | T10 | Test fake-provider cho câu hỏi quyền trong Paseo (§6.2, hàng duyệt quyền, ý 1) | Có | xong: test đã merge, pass trong `validate:paseo` ở release SHA (H1, H2) |
-| T11 | Sửa F3 (`linkify-it@2.2.0` trong `alp web`); owner anh | Không chặn beta.1; chặn beta.2, hạn 2026-11-15 | chưa làm ở `99a8d15`; chờ anh quyết định D9 (§11.5) |
+| T11 | Sửa F3 (`linkify-it@2.2.0` trong `alp web`); owner anh | Không chặn beta.1; chặn beta.2, hạn 2026-11-15 | xong cho beta.2: patch `paseo-web/patches/0020-ALP-bound-linkify-on-long-messages.patch` (PR #126, `7469721`); D9 = sửa (§11.5) |
 | T13 | Claude stream text vào Paseo/`alp web` (`includePartialMessages`, map `stream_event`) | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16) | chưa làm; [#107](https://github.com/phucanh08/alp/issues/107) |
 | T14 | `paseo plugin add npm:@anhlp/alp-paseo@beta` cài được: không ship `.d.ts` import type từ peer `@getpaseo/*` (hoặc bỏ hẳn `.d.ts` của plugin); thêm kiểm CI cài plugin như Paseo cài nguồn `npm:` (`--legacy-peer-deps`); rồi bỏ cách tạm khỏi docs | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16); chặn beta.2 | đã sửa, chờ publish beta.2 (plugin không ship `.d.ts`; `scripts/paseo-source-check.mjs` trong `release:tarball-check`/`validate:packages`; docs dùng `npm:`, cách tạm chỉ còn cho beta.1); [#111](https://github.com/phucanh08/alp/issues/111) |
 
@@ -794,8 +794,8 @@ deprecate hay tag gì.
   tool details), sửa preview team, team custom trong `alp acp`, git của workspace. `apps/web` và
   `@anhlp/alp-gateway` có nhiều thay đổi nhưng vẫn deferred, không phát hành.
 - State schema không đổi (`STATE_SCHEMA` = 2 như beta.1): từ beta.1 lên beta.2 không có migrate.
-- Known issues: như beta.1, bỏ #111 (đã sửa, chờ Q3 xác nhận trên registry), giữ #107 (T13) và
-  F3 (T11, chờ D9).
+- Known issues: như beta.1, bỏ #111 (đã sửa, chờ Q3 xác nhận trên registry), giữ #107 (T13). F3 (T11)
+  đã sửa trong beta.2 (patch 0020, PR #126; D9), chuyển từ known issue sang Fixes.
 
 ### 11.2 Pre-publish gate
 
@@ -814,7 +814,7 @@ Như §6.1, §6.4 và §7.1–§7.3, với `0.0.0-beta.2` thay cho `0.0.0-beta.1
 | R5 | macOS, plugin và `alp web`, W1–W6, như beta.1. W1 thêm plugin bằng đường dẫn trong consumer (đã có peer), nên không thử đường `npm:` của Paseo; đường đó do H3 (`paseo-source-check`) kiểm trên tarball và Q3 kiểm trên registry | Có |
 | R3, R4, R6 | Linux, khi có thể (D7) | Không |
 | R7 | `beta-acceptance-r7.mjs` ở release SHA, Codex và Claude, macOS | Có (phần macOS) |
-| T11/F3 | sửa xong, hoặc anh ghi D9 chấp nhận lại (§11.5) | Có, theo §8 |
+| T11/F3 | sửa xong, hoặc anh ghi D9 chấp nhận lại (§11.5) — đã sửa (PR #126, D9) | Có, theo §8 |
 
 Lệnh gate local đã chạy trên nhánh release (chưa phải release SHA; chỉ để định hướng): §11.6.
 
@@ -869,11 +869,13 @@ deprecate khác của T7. Cuối cùng `release:gate … --phase announce` exit 
 
 ### 11.5 Quyết định còn mở
 
-- **D9 (anh).** F3/T11 ghi "chặn beta.2", hạn "trước beta.2 hoặc 2026-11-15" (D5), và chưa sửa
-  ở `99a8d15`. Trước P4, anh chọn: (a) sửa F3 trước beta.2 (theo audit: patch ALP trong
-  `paseo-web/patches` tắt linkify cho tin nhắn dài, build lại web app; chạy lại A5, R5), hoặc
-  (b) chấp nhận lại cho beta.2, giữ known issue và đặt hạn mới. Notes beta.2 đang ghi "Decision
-  pending (D9)"; phải sửa theo quyết định trước khi tạo draft release.
+- **D9 (anh) — đã chốt: sửa.** F3/T11 ghi "chặn beta.2", hạn "trước beta.2 hoặc 2026-11-15"
+  (D5), và chưa sửa ở `99a8d15`. Anh chọn (a) sửa trước beta.2, không chấp nhận lại. Đã sửa bằng
+  patch ALP `paseo-web/patches/0020-ALP-bound-linkify-on-long-messages.patch` (PR #126, merge
+  `7469721`): trong `createMarkdownParser`, linkify không quét đoạn text liền quá 2048 ký tự hay
+  nguồn quá 32 KB; inline code tự thành link chỉ tới 256 ký tự. Đánh đổi UX: URL/email trần trong
+  đoạn rất dài hiện dạng text thường; link markdown tường minh không đổi. Notes beta.2 ghi F3 trong
+  Fixes, bỏ khỏi Known issues. Lịch sử beta.1 (D5, §5, §7.6) giữ nguyên.
 
 ### 11.6 Kết quả (điền khi chạy)
 
