@@ -1,9 +1,10 @@
 // @ts-check
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { homedir } from 'node:os';
 import { ERROR, PROTOCOL_VERSION, RPC_ERROR, WORKSPACE_FILES, base64Bytes, blockedFilePath } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 import { isAlpClientError } from '@anhlp/alp-client/portable';
-import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, workspaceOf } from './policy.js';
+import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.js';
 
 /**
  * One remote client of the gateway (docs/alp/remote-gateway.md §3, §6): its WebSocket, its own
@@ -63,6 +64,8 @@ function relativeFile(file) {
 const MAX_LIST_READS = 8;
 /** At most this many projectRoots go to alpd's session.list (its schema's limit). */
 const MAX_LIST_PROJECTS = 1024;
+/** The gateway host's home directory: in error text it is a host path wherever it appears. */
+const HOME = (() => { try { return homedir(); } catch { return undefined; } })();
 
 /**
  * session.list cursors leave the gateway sealed (AES-256-GCM, a key of this process, the credential
@@ -456,10 +459,60 @@ export class ClientConnection {
       // Whatever the method, a refusal whose reason marks a host file or alpd's state directory
       // loses its message (t-70c4): session.prompt, rename and archive name the state path on a failed write.
       if (HOST_FILE_REASONS.has(error.data?.reason)) return { code: error.code, message: `${method} failed on the daemon host`, data: { reason: error.data.reason } };
-      return { code: error.code, message: String(error.message ?? 'Request failed'), ...(error.data !== undefined ? { data: error.data } : {}) };
+      // Any other alpd error: its code and data pass, its message through safeErrorText (t-d27c):
+      // a runtime's or a store's failure names host paths (EACCES on alpd's state, a CLI's stderr).
+      return { code: error.code, message: this.#safeText(error.message ?? 'Request failed'), ...(error.data !== undefined ? { data: error.data } : {}) };
     }
     this.#log.error(`${method} failed in the gateway`, { code: 'ALP_GATEWAY_INTERNAL', method, error });
     return { code: ERROR.failed, message: `${method} failed in the gateway` };
+  }
+
+  // ---- error text (t-d27c, docs/alp/remote-gateway.md §5.12) ----
+
+  /** Error text through safeErrorText, against this grant's workspaces. @param {unknown} text @param {{ lines?: boolean }} [options] */
+  #safeText(text, options = {}) {
+    return safeErrorText(text, this.#grant.workspaces, { ...options, home: HOME });
+  }
+
+  /**
+   * A session summary or snapshot as the client sees it: lastError through safeAlpError, parked
+   * (why a limit or a pause holds it) through safeErrorText; everything else as alpd gave it.
+   * @param {any} session
+   */
+  #safeSession(session) {
+    if (!session || typeof session !== 'object' || Array.isArray(session)) return session;
+    if (session.lastError === undefined && typeof session.parked !== 'string') return session;
+    return {
+      ...session,
+      ...(session.lastError !== undefined ? { lastError: safeAlpError(session.lastError, this.#grant.workspaces, { home: HOME }) } : {}),
+      ...(typeof session.parked === 'string' ? { parked: this.#safeText(session.parked) } : {}),
+    };
+  }
+
+  /** A result whose `session` (and `sessions`) go through #safeSession. @param {any} result */
+  #safeResult(result) {
+    if (!result || typeof result !== 'object') return result;
+    return {
+      ...result,
+      ...(Object.hasOwn(result, 'session') ? { session: this.#safeSession(result.session) } : {}),
+      ...(Array.isArray(result.sessions) ? { sessions: result.sessions.map((/** @type {any} */ session) => this.#safeSession(session)) } : {}),
+    };
+  }
+
+  /**
+   * An event as the client sees it: the error of session.failed, prompt.failed and turn.ended
+   * through safeAlpError; the session of session.opened and session.updated through #safeSession;
+   * a notice's text through safeErrorText, every line kept. Other events pass as alpd gave them.
+   * @param {import('@anhlp/alp-protocol').Envelope} envelope
+   */
+  #safeEnvelope(envelope) {
+    const event = /** @type {any} */ (envelope.event);
+    if (!event || typeof event !== 'object') return envelope;
+    let safe = event;
+    if ((event.type === 'session.failed' || event.type === 'prompt.failed' || event.type === 'turn.ended') && event.error !== undefined) safe = { ...event, error: safeAlpError(event.error, this.#grant.workspaces, { home: HOME }) };
+    else if (event.type === 'session.opened' || event.type === 'session.updated') safe = { ...event, session: this.#safeSession(event.session) };
+    else if (event.type === 'item' && event.item?.kind === 'notice' && typeof event.item.text === 'string') safe = { ...event, item: { ...event.item, text: this.#safeText(event.item.text, { lines: true }) } };
+    return safe === event ? envelope : { ...envelope, event: safe };
   }
 
   /** @param {string} method @param {Record<string, any>} params */
@@ -659,7 +712,7 @@ export class ClientConnection {
     if (this.#closed) return;
     const id = envelope?.sessionId;
     if (typeof id !== 'string') return;
-    const frame = JSON.stringify({ jsonrpc: '2.0', method: 'event', params: envelope });
+    const frame = JSON.stringify({ jsonrpc: '2.0', method: 'event', params: this.#safeEnvelope(envelope) });
     const event = /** @type {any} */ (envelope.event);
     const known = this.#sessions.get(id);
     if (known) { if (this.#wanted(envelope, known)) this.#push(frame); return; }
@@ -751,13 +804,14 @@ export class ClientConnection {
         // Too many to name: the whole list, unpaged, searched here, as before session.list.page.
         const { limit: _limit, query, ...whole } = rest;
         const words = typeof query === 'string' ? query.toLowerCase().split(/\s+/).filter(Boolean) : [];
-        return this.#listPages(whole, async (session, listed) => (await keep(session, listed)) && words.every(word => `${session.title ?? ''}\n${session.id}`.toLowerCase().includes(word)));
+        return this.#safeResult(await this.#listPages(whole, async (session, listed) => (await keep(session, listed)) && words.every(word => `${session.title ?? ''}\n${session.id}`.toLowerCase().includes(word))));
       }
       const result = await this.#listPages({ ...rest, ...(cursor === undefined ? {} : { cursor }), projectRoots: roots }, keep);
-      return typeof result.nextCursor === 'string' ? { ...result, nextCursor: sealCursor(result.nextCursor, this.#grant.id) } : result;
+      const safe = this.#safeResult(result);
+      return typeof safe.nextCursor === 'string' ? { ...safe, nextCursor: sealCursor(safe.nextCursor, this.#grant.id) } : safe;
     },
 
-    'session.get': async params => { await this.#resolve(params.sessionId); return this.#call('session.get', params); },
+    'session.get': async params => { await this.#resolve(params.sessionId); return this.#safeResult(await this.#call('session.get', params)); },
     // A tree has one workspace: alpd opens assignments and the supervisor with their requester's
     // projectRoot. A whole-tree answer is checked against it anyway, and refused if it spans more.
     'session.status': async params => {
@@ -766,7 +820,7 @@ export class ClientConnection {
       const status = result?.status;
       const sessions = Array.isArray(status?.sessions) ? status.sessions : [];
       if (status?.rootId !== scoped.root || sessions.some((/** @type {any} */ session) => !workspaceOf(this.#grant, session?.projectRoot))) throw this.#outOfTree(params.sessionId, 'session.status');
-      return result;
+      return { ...result, status: { ...status, sessions: sessions.map((/** @type {any} */ session) => this.#safeSession(session)) } };
     },
     // The run log of the session's root: entries name no workspace, so the root is the check.
     'session.log': async params => {
@@ -787,7 +841,7 @@ export class ClientConnection {
       // Before the call: the questions it announces come before its answer.
       const before = this.#attached.has(scoped.root);
       this.#attached.add(scoped.root);
-      try { return await this.#call('session.attach', params); }
+      try { return this.#safeResult(await this.#call('session.attach', params)); }
       catch (error) { if (!before) this.#attached.delete(scoped.root); throw error; }
     },
 
@@ -838,7 +892,7 @@ export class ClientConnection {
         throw forbidden(`Session ${sessionId} is not in a workspace this credential may use`, GATEWAY_REASON.outsideWorkspace);
       }
       this.#remember(created.id, { root: created.id, projectRoot: created.projectRoot, mode: created.mode });
-      return result;
+      return this.#safeResult(result);
     },
 
     'session.prompt': async params => {
@@ -857,7 +911,9 @@ export class ClientConnection {
         if (bytes > limits.maxBytes) throw forbidden(`An image through the gateway is at most ${limits.maxBytes} bytes`, GATEWAY_REASON.imageLimit, limits);
         if (total > limits.maxTotalBytes) throw forbidden(`The images of one prompt through the gateway are at most ${limits.maxTotalBytes} bytes together`, GATEWAY_REASON.imageLimit, limits);
       }
-      return this.#call('session.prompt', params);
+      // A receipt's error is the provider's or the runtime's text (t-d27c).
+      const result = await this.#call('session.prompt', params);
+      return result && typeof result === 'object' && result.error !== undefined ? { ...result, error: safeAlpError(result.error, this.#grant.workspaces, { home: HOME }) } : result;
     },
 
     'session.configure': async params => {
@@ -866,13 +922,13 @@ export class ClientConnection {
       const result = await this.#call('session.configure', params).catch(error => { throw sessionFault(error, 'session.configure', params); });
       const scoped = this.#sessions.get(params.sessionId);
       if (scoped && typeof result?.session?.mode === 'string') scoped.mode = result.session.mode;
-      return result;
+      return this.#safeResult(result);
     },
 
     'session.interrupt': async params => { await this.#drive(params.sessionId, { stop: true }); return this.#call('session.interrupt', params); },
     'session.close': async params => { await this.#drive(params.sessionId, { stop: true }); return this.#call('session.close', params); },
-    'session.rename': async params => { await this.#resolve(params.sessionId); return this.#call('session.rename', params); },
-    'session.archive': async params => { await this.#resolve(params.sessionId); return this.#call('session.archive', params); },
+    'session.rename': async params => { await this.#resolve(params.sessionId); return this.#safeResult(await this.#call('session.rename', params)); },
+    'session.archive': async params => { await this.#resolve(params.sessionId); return this.#safeResult(await this.#call('session.archive', params)); },
     // Mail from the user wakes or steers the session, and an assignment's is passed to its requester.
     'session.message': async params => { await this.#drive(params.sessionId); return this.#call('session.message', params); },
 
