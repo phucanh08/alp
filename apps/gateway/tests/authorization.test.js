@@ -62,6 +62,7 @@ const OUT_OF_SCOPE = {
   'question.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
   'question.watch': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
   'board.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
+  'workspace.files.search': ({ b }) => [{ projectRoot: b, query: 'x' }, 1003, 'outside_workspace'],
   'session.create': ({ b }) => [{ spec: { cwd: b } }, 1003, 'outside_workspace'],
   'session.prompt': () => [{ sessionId: 'mix', clientMessageId: 'm', content: text }, 1001],
   'session.interrupt': () => [{ sessionId: 'sb' }, 1001],
@@ -86,7 +87,7 @@ const IN_SCOPE = ({ a }) => ({
   'catalog.get': {}, 'library.models': {}, 'settings.language.get': {},
   'session.list': {}, 'session.get': { sessionId: 'sa' }, 'session.status': { sessionId: 'sa' }, 'session.log': { sessionId: 'sa' },
   'session.attach': { sessionId: 'sa' }, 'session.release': { sessionId: 'sa' }, 'session.preview': { spec: { cwd: a } },
-  'question.list': {}, 'question.watch': {}, 'board.list': { projectRoot: a },
+  'question.list': {}, 'question.watch': {}, 'board.list': { projectRoot: a }, 'workspace.files.search': { projectRoot: a },
   'session.create': { spec: { cwd: a } }, 'session.prompt': { sessionId: 'sa', clientMessageId: 'm', content: text },
   'session.interrupt': { sessionId: 'sa' }, 'session.configure': { sessionId: 'sa' }, 'session.close': { sessionId: 'sa' },
   'session.rename': { sessionId: 'sa', title: 't' }, 'session.archive': { sessionId: 'sa' }, 'session.message': { sessionId: 'sa', text: 'x' },
@@ -308,6 +309,60 @@ test('question.watch: the list and the events stay in the grant, and in the work
   daemon.emit('sb', question('q-b-4', 'sb', 'sb'));
   await until(() => heard.length === 4, 'every workspace');
   assert.deepEqual(heard, [['sa', 'question', false], ['sb', 'question', true], ['sb-c', 'question.resolved', true], ['sb', 'question', false]]);
+});
+
+test('question.watch with turns: roots\' turn ends of the grant, of the workspace named, and only when asked', async t => {
+  const { daemon, sdk, a, b } = await world(t);
+  const ended = state => ({ type: 'turn.ended', turnId: 't1', state });
+  const both = (await sdk('both')).client;
+  assert.ok((await both.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('question.watch.turns'));
+  const heard = [];
+  both.onEvent(envelope => heard.push([envelope.sessionId, envelope.event.type, envelope.event.state, envelope.cursor !== undefined]));
+  // Without turns: no turn ends.
+  await both.request('question.watch', { projectRoot: a });
+  assert.deepEqual(daemon.calls('question.watch').at(-1).params, {});
+  daemon.emit('sa', ended('completed'));
+  // With turns, of workspace a: alpd is asked for every tree, the gateway keeps a's.
+  await both.request('question.watch', { projectRoot: a, turns: true });
+  assert.deepEqual(daemon.calls('question.watch').at(-1).params, { turns: true }, 'turns and nothing else reach alpd');
+  daemon.emit('sb', ended('completed'));
+  daemon.emit('sa', ended('failed'));
+  await until(() => heard.length === 1, 'the turn end of a');
+  // Every workspace of the grant.
+  await both.request('question.watch', { projectRoot: undefined, turns: true });
+  daemon.emit('sb', ended('completed'));
+  await until(() => heard.length === 2, 'the turn end of b');
+  assert.deepEqual(heard, [['sa', 'turn.ended', 'failed', false], ['sb', 'turn.ended', 'completed', false]]);
+  // A grant of a only never hears b's, nor of a tree mixing workspaces.
+  const alice = (await sdk('alice')).client;
+  const got = [];
+  alice.onEvent(envelope => got.push([envelope.sessionId, envelope.event.state]));
+  await alice.request('question.watch', { turns: true });
+  daemon.emit('sb', ended('completed'));
+  daemon.emit('mix', ended('completed'));
+  daemon.emit('sa', ended('canceled'));
+  await until(() => got.length === 1, 'the turn end of a');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.deepEqual(got, [['sa', 'canceled']]);
+  void b;
+});
+
+test('workspace.files.search: a granted workspace only, sent as its canonical path, needing project.read, answered paths kept relative', async t => {
+  const { daemon, sdk, a, b, canonicalA } = await world(t);
+  daemon.state.files.set(canonicalA, ['src/server.ts', '/etc/passwd', '../b/secret.txt', 'src/../../x', 'C:/Windows/win.ini', '', 'a//b', './README.md', 'docs/sửa lỗi.md', 'nul\u0000.txt']);
+  daemon.state.files.set(b, ['b-only.txt']);
+  const { client } = await sdk('alice');
+  assert.ok((await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('workspace.files'));
+  const found = await client.request('workspace.files.search', { projectRoot: a, query: 'server', limit: 50, extra: 'dropped' });
+  assert.deepEqual(found, { files: [{ path: 'src/server.ts' }, { path: 'docs/sửa lỗi.md' }] }, 'only plainly relative paths');
+  assert.deepEqual(daemon.calls('workspace.files.search').at(-1).params, { projectRoot: canonicalA, query: 'server', limit: 50 }, 'the canonical path, no unknown params');
+  const mark = daemon.calls().length;
+  for (const projectRoot of [b, path.join(a, 'src'), `${a}/`, `${a}/../a`, '/', 'relative']) {
+    await assert.rejects(client.request('workspace.files.search', { projectRoot }), error => error.code === 1003 && error.data?.reason === 'outside_workspace', projectRoot);
+  }
+  const { client: reader } = await sdk('reader');
+  await assert.rejects(reader.request('workspace.files.search', { projectRoot: a }), error => error.code === 1003 && error.data?.reason === 'grant');
+  assert.deepEqual(reached(daemon, mark, 'workspace.files.search'), [], 'no refused search reached alpd');
 });
 
 test('question.answer needs an exact id in scope: a prefix that alpd would expand is refused', async t => {

@@ -54,7 +54,7 @@ test('without a store, hello lists no prompt.receipts and a cursor before the ke
   raw.receive({ jsonrpc: '2.0', id: 1, method: 'daemon.hello', params: { protocolVersion: PROTOCOL_VERSION } });
   await new Promise(resolve => setImmediate(resolve));
   // Tasks need only a project; the library, team and settings methods need the daemon user's home, which this server has not.
-  assert.deepEqual(frames[0].result.capabilities.sort(), [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.task].sort());
+  assert.deepEqual(frames[0].result.capabilities.sort(), [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles, CAPABILITY.task].sort());
   raw.close();
 
   await client.request('session.create', { sessionId: 'root', spec: { cwd: '/work' } });

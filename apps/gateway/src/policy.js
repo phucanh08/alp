@@ -25,7 +25,7 @@ export const PERMISSIONS = Object.freeze(['session.read', 'session.write', 'proj
  * Within `library` and `settings.language` some methods stay unexposed and answer -32601
  * `not_exposed` (docs/alp/remote-gateway.md §5.4).
  */
-export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch]);
+export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles]);
 
 /** The codes of docs/protocol/alp-json-rpc-v1.md §5.1 the gateway answers its own refusals with; `data.reason` says why. */
 export const GATEWAY_ERROR = Object.freeze({ forbidden: ERROR.forbidden, unavailable: ERROR.unavailable });
@@ -106,7 +106,7 @@ export const EXPOSURE = Object.freeze({
   'session.release': { status: 'exposed', permission: 'session.read', scope: 'session', params: ['sessionId'], tests: ['permission', 'session-scope'] },
   'session.preview': { status: 'exposed', permission: 'session.read', scope: 'workspace: spec.cwd names a granted workspace; spec fields allow-listed', params: ['spec'], tests: ['permission', 'spec-scope'] },
   'question.list': { status: 'exposed', permission: 'session.read', scope: 'result: questions whose tree lies in a granted workspace; projectRoot must name one', params: ['projectRoot'], tests: ['permission', 'workspace-param', 'result-filter'] },
-  'question.watch': { status: 'exposed', permission: 'session.read', scope: 'result: as question.list; then question events filtered per envelope, and to the workspace projectRoot names', capability: CAPABILITY.questionWatch, params: ['projectRoot'], tests: ['permission', 'workspace-param', 'result-filter', 'event-filter'] },
+  'question.watch': { status: 'exposed', permission: 'session.read', scope: 'result: as question.list; then question events, and with turns (question.watch.turns) roots\' turn.ended, filtered per envelope, and to the workspace projectRoot names', capability: CAPABILITY.questionWatch, params: ['projectRoot', 'turns'], tests: ['permission', 'workspace-param', 'result-filter', 'event-filter'] },
   'board.list': { status: 'exposed', permission: 'session.read', scope: 'workspace: projectRoot names a granted workspace', params: ['projectRoot'], tests: ['permission', 'workspace-param'] },
 
   'session.create': { status: 'exposed', permission: 'session.write', scope: 'workspace: spec.cwd names a granted workspace and is replaced by its canonical path; an existing sessionId must be in scope; the created root is checked again', params: ['sessionId', 'spec', 'history', 'delegation', 'resume'], tests: ['permission', 'spec-scope', 'session-scope'] },
@@ -120,6 +120,7 @@ export const EXPOSURE = Object.freeze({
   'question.answer': { status: 'exposed', permission: 'session.write', scope: 'question: an exact id (no prefix) whose tree lies in a granted workspace; drives the asking session, as session.prompt', params: ['questionId', 'text', 'dismiss', 'reason'], tests: ['permission', 'question-scope', 'mode'] },
 
   'team.list': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot names a granted workspace (required by the gateway); rows also come from the library and built-in layers, as session.preview shows them; TEAM_ROW_FIELDS only, a read error replaced by a fixed text', capability: CAPABILITY.team, params: ['projectRoot'], tests: ['permission', 'workspace-param', 'row-fields'] },
+  'workspace.files.search': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot names a granted workspace and is sent as its canonical path; alpd lists file names under it only (no link followed, no contents); answered paths must be relative without . or .. segments, others dropped', capability: CAPABILITY.workspaceFiles, params: ['projectRoot', 'query', 'limit'], tests: ['permission', 'workspace-param', 'result-filter'] },
   'task.list': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot', capability: CAPABILITY.task, params: ['projectRoot'], tests: ['permission', 'workspace-param'] },
   'task.create': { status: 'exposed', permission: 'project.write', scope: 'workspace: projectRoot; requestId dedupes within one alpd process for 10 minutes only, so read task.list before retrying after 1000 or a restart', capability: CAPABILITY.task, params: ['projectRoot', 'title', 'priority', 'requestId'], tests: ['permission', 'workspace-param'] },
   'task.update': { status: 'exposed', permission: 'project.write', scope: 'workspace: projectRoot', capability: CAPABILITY.task, params: ['projectRoot', 'id', 'action', 'note', 'ifRev'], tests: ['permission', 'workspace-param'] },

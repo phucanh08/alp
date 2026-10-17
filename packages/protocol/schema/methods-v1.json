@@ -23,7 +23,9 @@
     "library": "library.list/get/save/delete/duplicate/rename, library.skills.set and library.models on the daemon user's library and a project's .alp overrides; secrets are redacted on read.",
     "settings.language": "settings.language.get/set: the language the daemon user reads, in the daemon's ALP_HOME/settings.json.",
     "session.list.page": "session.list accepts `limit`, `cursor` and `query` and answers `nextCursor` while more sessions follow; without them it answers every session as before.",
-    "question.watch": "question.watch: the connection is told of `question` and `question.resolved` in every tree (of a projectRoot when given), attached or not."
+    "question.watch": "question.watch: the connection is told of `question` and `question.resolved` in every tree (of a projectRoot when given), attached or not.",
+    "question.watch.turns": "question.watch accepts `turns`: the connection is also told of `turn.ended` of every root in the trees it watches.",
+    "workspace.files": "workspace.files.search: files under a directory whose relative path matches a query; read-only, names only, links never followed."
   },
   "methods": {
     "assignment.recall": {
@@ -1114,6 +1116,9 @@
         "properties": {
           "projectRoot": {
             "type": "string"
+          },
+          "turns": {
+            "type": "boolean"
           }
         },
         "required": [],
@@ -2137,6 +2142,71 @@
         "required": [
           "projectRoot",
           "teams"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "workspace.files.search": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": true
+        },
+        "idempotent": true,
+        "capability": "workspace.files",
+        "risks": [
+          "lists file names of the directory (not contents)"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "projectRoot"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "files"
         ],
         "additionalProperties": true
       }
