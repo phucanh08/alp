@@ -772,7 +772,7 @@ test('session.preview is not asked without session.read', async t => {
   assert.equal(w.host.count('session.preview'), 0);
 });
 
-test('a session started with a first message and thinking: spec.thinking sent, the message delivered once after attach, the title taken from it, the choices remembered', async t => {
+test('a session started with a first message and thinking: spec.thinking sent, the message delivered once after attach, named by the host after it, the choices remembered', async t => {
   const storage = memoryStorage();
   const w = setup(t, undefined, { storage });
   await connected(w);
@@ -784,13 +784,16 @@ test('a session started with a first message and thinking: spec.thinking sent, t
   assert.equal(prompts.length, 1);
   assert.equal(prompts[0].params.sessionId, id);
   assert.ok(w.host.calls.indexOf(prompts[0]) > w.host.calls.findIndex(call => call.method === 'session.attach' && call.params.sessionId === id), 'sent after the attach');
-  assert.equal(w.host.root(id).summary.title, 'Fix the login bug');
+  // alpd names it after the message (Paseo's rule); the app no longer renames it itself.
+  assert.equal(w.host.count('session.rename'), 0);
+  await until(() => w.state().sessions.list.find(row => row.id === id)?.title === 'Fix the login bug', 'the list row took the name the host announced');
   assert.deepEqual(w.state().preferences.newSession, { team: 'cafe', mode: 'workspace-write', model: 'codex:gpt-5.6-sol', thinkingByModel: { 'codex:gpt-5.6-sol': 'high' } });
   assert.deepEqual(JSON.parse(storage.entries.get('alp-web:preferences')).newSession, w.state().preferences.newSession);
   // An explicit title wins; no prompt sends nothing.
   const second = await w.controller.createSession({ title: 'Named' });
   await until(() => attached(w.state) && w.state().tree.rootId === second, 'second attached');
   assert.equal(w.host.root(second).summary.title, 'Named');
+  assert.equal(w.host.count('session.rename'), 1);
   assert.equal(w.host.count('session.prompt'), 1);
 });
 

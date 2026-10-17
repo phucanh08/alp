@@ -4,7 +4,7 @@ import { AuthenticationError, ConfigurationError, CreateOutcomeUnknownError, des
 import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
 import { newMessageId, newRequestId, newSessionId } from './ids.js';
 import { applyAttach, deliveredPrompts, emptyProjection, members, project, promptTurnOver } from './timeline.js';
-import { normalizeModels, parsePreview, titleFromPrompt } from './new-session.js';
+import { normalizeModels, parsePreview } from './new-session.js';
 import { loadPreferences, parsePreferences, rememberChoices, savePreferences } from './preferences.js';
 
 /**
@@ -849,7 +849,8 @@ export class Controller {
    * Starts a root in the workspace: an id chosen here (its first events may come before the
    * answer), session.create with history skipped, then session.attach for the whole timeline.
    * A first message (Paseo's initial prompt) is sent once attached, through the same path as
-   * the composer's (receipts, retry); with no title given, it names the session.
+   * the composer's (receipts, retry). A title given is set before it; without one alpd names the
+   * session after that message, as Paseo does, and announces it (session.updated).
    * @param {{ team?: string, mode?: string, model?: string, thinking?: string, title?: string, prompt?: string }} input
    */
   async createSession({ team, mode, model, thinking, title, prompt } = {}) {
@@ -914,8 +915,7 @@ export class Controller {
         // timeout or refusal on a live connection is shown with Retry (an attach is a read).
         this.#attachFailed(client, id, error);
       }
-      const name = title?.trim() || (prompt ? titleFromPrompt(prompt) : undefined);
-      if (name) await this.renameSession(id, name).catch(() => {});
+      if (title?.trim()) await this.renameSession(id, title.trim()).catch(() => {});
       this.#rememberNewSession({ team, mode, model, thinking });
       if (prompt?.trim()) {
         // Sent like a composer message: a failure stays in the timeline with Retry, never
