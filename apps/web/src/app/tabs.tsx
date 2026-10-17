@@ -155,6 +155,9 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
         const saved = parseKey(pending.active);
         if (saved && saved.kind !== 'agent') return saved;
       }
+      // The saved session reopening keeps the focus where the reload left it: on a pane whose
+      // fresh New tab is in front (its tab was not kept, so nothing else was saved as active).
+      if (selected && pending?.session === selected && !pending.active && current?.kind === 'launcher') return current;
       return selected ? { kind: 'agent', id: selected } : current && current.kind !== 'agent' ? current : null;
     });
   }, [selected, controller, endRestore]);

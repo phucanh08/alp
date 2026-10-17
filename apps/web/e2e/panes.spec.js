@@ -184,6 +184,12 @@ test('a narrow window shows the focused pane with every tab, without the split a
   await expect(panes(page)).toHaveAttribute('data-panes', '3');
   await expect(paneTabs(page, 'pane-2')).toHaveText(['New tab']);
   await expect(paneTabs(page, 'main')).toHaveText(['Narrow split']);
+  // The focus was in that pane: it keeps it, though the saved session reopens in another pane,
+  // and its fresh New tab's launcher works (t-7679.17).
+  await expect(pane(page, 'pane-2')).toHaveAttribute('data-focused', 'true');
+  await pane(page, 'pane-2').getByTestId('workspace-pane-new-tab-diff').click();
+  await expect(paneTabs(page, 'pane-2')).toHaveText(['Diff']);
+  await expect(pane(page, 'pane-2')).toHaveAttribute('data-focused', 'true');
 });
 
 test('command center: Open ALP tasks, and the full-screen board', async ({ page }) => {
