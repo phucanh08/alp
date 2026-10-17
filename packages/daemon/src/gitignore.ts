@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { accessSync, constants, lstatSync, realpathSync, statSync } from 'node:fs';
+import { accessSync, constants, lstatSync, realpathSync, statSync, type BigIntStats } from 'node:fs';
 import path from 'node:path';
 
 /**
@@ -8,9 +8,9 @@ import path from 'node:path';
  * are Git's exactly (every `.gitignore` on the way, `.git/info/exclude`, `core.excludesFile`).
  *
  * The workspace is not trusted, so Git runs boxed in:
- * - the Git found on the absolute entries of PATH, by its absolute path: never a `git` the
- *   workspace holds (a relative or empty PATH entry, or Windows searching the working directory
- *   first, would run one);
+ * - the Git found on the absolute entries of PATH, by its real path: never a `git` the workspace
+ *   holds (a relative or empty PATH entry, or Windows searching the working directory first, would
+ *   run one), whatever the spelling of the entry or a link on the way (see resolveGit);
  * - spawned with an argument list, never a shell, in the workspace's real path;
  * - `--no-index`: the index is not read (no fsmonitor or index extension runs; a tracked file a
  *   rule matches is hidden too), and `core.fsmonitor` is turned off besides;
@@ -57,29 +57,78 @@ const executable = (file: string) => {
   }
 };
 
-/** Whether `directory` (real path) is `root` or inside it. */
-const inside = (directory: string, root: string) => directory === root || directory.startsWith(root.endsWith(path.sep) ? root : `${root}${path.sep}`);
+/** The file system's identity of a directory: one per directory, whatever path names it. */
+type Identity = Pick<BigIntStats, 'dev' | 'ino'>;
+const identity = (file: string): Identity => { const { dev, ino } = statSync(file, { bigint: true }); return { dev, ino }; };
+// macOS and Windows file systems compare names without case, mostly: a name compare there folds it.
+const foldCase = process.platform === 'darwin' || process.platform === 'win32';
+const comparable = (file: string) => (foldCase ? file.toLowerCase() : file);
+
+/**
+ * Whether `file` is `root` or inside it, however either is spelled: a case-insensitive file
+ * system's other case, a Windows drive letter's case or 8.3 short name, a link, a bind mount. Both
+ * are made real paths by the system (realpath(3), which spells names as they are stored), and then
+ * each directory from `file` up to the file system's root is compared with `root` by device and
+ * inode, and by its name (case-folded where names are, for a file system without inode numbers).
+ * Anything that cannot be resolved or examined counts as inside: the caller skips it.
+ */
+function insideRoot(file: string, root: { path: string; id: Identity }): boolean {
+  let directory;
+  try { directory = realpathSync.native(file); } catch { return true; }
+  const rootName = comparable(root.path.endsWith(path.sep) && root.path.length > 1 ? root.path.slice(0, -1) : root.path);
+  for (;;) {
+    const name = comparable(directory);
+    if (name === rootName || name.startsWith(rootName.endsWith(path.sep) ? rootName : `${rootName}${path.sep}`)) return true;
+    let id;
+    try { id = identity(directory); } catch { return true; }
+    if (root.id.ino !== 0n && id.dev === root.id.dev && id.ino === root.id.ino) return true;
+    const parent = path.dirname(directory);
+    if (parent === directory) return false;
+    directory = parent;
+  }
+}
+
+/** The workspace as insideRoot compares it, or undefined if it cannot be examined. */
+function rootOf(root: string): { path: string; id: Identity } | undefined {
+  try {
+    const real = realpathSync.native(root);
+    return { path: real, id: identity(real) };
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * The absolute path of `name` on the absolute entries of PATH (Windows: with .exe or .com), or
- * undefined. An absolute `name` is taken as it is, when it is an executable file. Relative and
- * empty PATH entries are skipped: they name the working directory, which is the workspace. So is
- * an entry inside `root` (alpd started by npm or npx has `<project>/node_modules/.bin` on PATH).
+ * undefined. An absolute `name` (tests) is taken when it is an executable file. Relative and empty
+ * PATH entries are skipped: they name the working directory, which is the workspace.
+ *
+ * With `root`, nothing in the workspace is ever the answer (alpd started by npm or npx has
+ * `<project>/node_modules/.bin` on PATH): a PATH entry inside `root` is skipped, and so is a
+ * binary that is, or links to, a file inside it; both by insideRoot, which no other spelling of
+ * the path fools. The answer is then the binary's real path, so a link swapped later changes
+ * nothing. A workspace that cannot be examined finds no Git at all (IgnoreUnknown).
  */
 export function resolveGit(name = 'git', searchPath = process.env.PATH ?? process.env.Path ?? '', root?: string): string | undefined {
-  if (path.isAbsolute(name)) return executable(name) ? name : undefined;
+  const box = root === undefined ? undefined : rootOf(root);
+  if (root !== undefined && !box) throw new IgnoreUnknown('the workspace cannot be examined');
+  /** `file` as the answer, or undefined: not executable, or in the workspace. */
+  const accept = (file: string) => {
+    if (!executable(file)) return undefined;
+    if (!box) return file;
+    let real;
+    try { real = realpathSync.native(file); } catch { return undefined; }
+    return insideRoot(path.dirname(real), box) || !executable(real) ? undefined : real;
+  };
+  if (path.isAbsolute(name)) return accept(name);
   if (name.includes('/') || name.includes('\\')) return undefined;
   const names = process.platform === 'win32' ? [`${name}.exe`, `${name}.com`] : [name];
   for (const directory of searchPath.split(path.delimiter)) {
     if (!directory || !path.isAbsolute(directory)) continue;
-    if (root !== undefined) {
-      let real;
-      try { real = realpathSync(directory); } catch { continue; }
-      if (inside(real, root)) continue;
-    }
+    if (box && insideRoot(directory, box)) continue;
     for (const candidate of names) {
-      const file = path.join(directory, candidate);
-      if (executable(file)) return file;
+      const file = accept(path.join(directory, candidate));
+      if (file) return file;
     }
   }
   return undefined;
