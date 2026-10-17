@@ -70,7 +70,7 @@ function SearchRow({ query, onQuery, open, onOpen, onClose, focusRequest, shortc
   );
 }
 
-function bucketOf(session: SessionSummary, waiting: boolean): Bucket {
+export function bucketOf(session: SessionSummary, waiting: boolean): Bucket {
   if (waiting) return 'needs_input';
   if (session.status === 'running' || session.status === 'initializing') return 'running';
   if (session.status === 'error') return 'failed';
@@ -204,7 +204,7 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavig
           title={!canWrite ? 'Your access token cannot start sessions.' : undefined} shortcut={shortcutLabel('session.new', mac)} />
         <NavRow icon={History} label="History" onClick={() => { onHistory(); onNavigate(); }} active={historyOpen} disabled={!workspace} testId="sidebar-history" />
         <SearchRow query={query} onQuery={setQuery} open={searching} onOpen={() => { setSearching(true); setCollapsed(false); }} onClose={closeSearch}
-          focusRequest={searchFocus} shortcut={shortcutLabel('search', mac)} />
+          focusRequest={searchFocus} />
       </div>
       {onClose ? (
         <button type="button" aria-label="Close sessions" onClick={onClose}

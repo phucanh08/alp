@@ -8,7 +8,7 @@ const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-ring';
  * One tab of Paseo's tab rows (the center column's and the explorer dock's): icon and label,
  * a close button that shows on hover or when active, Delete/Backspace closes it.
  */
-export function TabChip({ label, icon, title, badge, active, onSelect, onClose, testId, tabRef, ...rest }: {
+export function TabChip({ label, icon, title, badge, active, onSelect, onClose, testId, tabRef, onMenu, dragging, wrapper, ...rest }: {
   label: string;
   icon: React.ReactNode;
   title?: string;
@@ -18,11 +18,26 @@ export function TabChip({ label, icon, title, badge, active, onSelect, onClose, 
   onClose: () => void;
   testId?: string;
   tabRef?: (element: HTMLButtonElement | null) => void;
+  /** Paseo's tab context menu: right click, or Shift+F10 / the Menu key on the tab. */
+  onMenu?: (at: { x: number; y: number }) => void;
+  /** Being dragged into another place. */
+  dragging?: boolean;
+  /** Pointer handlers for drag reordering, on the chip. */
+  wrapper?: Pick<React.ComponentProps<'div'>, 'onPointerDown' | 'onClickCapture'> & { [data: `data-${string}`]: string };
 } & Pick<React.ComponentProps<'button'>, 'id' | 'aria-controls' | 'tabIndex'> & { [data: `data-${string}`]: string }) {
   return (
-    <div role="presentation" className={cn('group relative mx-0.5 flex h-7 max-w-[220px] shrink-0 items-center rounded-md', active ? 'bg-secondary' : 'hover:bg-card')}>
+    <div role="presentation" {...wrapper}
+      onContextMenu={onMenu ? event => { event.preventDefault(); onMenu({ x: event.clientX, y: event.clientY }); } : undefined}
+      className={cn('group relative mx-0.5 flex h-7 max-w-[220px] shrink-0 items-center rounded-md', active ? 'bg-secondary' : 'hover:bg-card', dragging && 'z-10 opacity-80 ring-1 ring-border')}>
       <button ref={tabRef} type="button" role="tab" aria-selected={active} onClick={onSelect} title={title} data-testid={testId} {...rest}
-        onKeyDown={event => { if ((event.key === 'Delete' || event.key === 'Backspace') && !event.repeat) { event.preventDefault(); onClose(); } }}
+        onKeyDown={event => {
+          if ((event.key === 'Delete' || event.key === 'Backspace') && !event.repeat) { event.preventDefault(); onClose(); }
+          else if (onMenu && (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey))) {
+            event.preventDefault();
+            const rect = event.currentTarget.getBoundingClientRect();
+            onMenu({ x: rect.left, y: rect.bottom + 4 });
+          }
+        }}
         className={cn('flex h-7 min-w-0 items-center gap-1 rounded-md pl-2 pr-7 text-sm', focusRing, active ? 'text-foreground' : 'text-muted-foreground')}>
         <span className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground">{icon}</span>
         <span className="truncate">{label}</span>

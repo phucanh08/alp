@@ -36,7 +36,7 @@ export const SECTIONS = [
 
 /** @type {Binding[]} */
 export const BINDINGS = [
-  { action: 'search', combo: 'Mod+K', section: 'general', label: 'Search sessions' },
+  { action: 'command-center.toggle', combo: 'Mod+K', section: 'general', label: 'Toggle command center' },
   { action: 'shortcuts.toggle', combo: 'Shift+?', section: 'general', label: 'Show keyboard shortcuts', scope: 'other', note: 'Available when focus is not in a text field.' },
   { action: 'settings.toggle', combo: 'Mod+,', section: 'general', label: 'Toggle settings' },
 
