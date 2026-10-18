@@ -1,8 +1,7 @@
 # ALP 0.0.0-beta.2 — release notes
 
-> Draft for `0.0.0-beta.2`, not published yet. Release commit, checksums and the publish results
-> are filled in at publish ([beta-scope.md](beta-scope.md) §6.4, §7). The `0.0.0-beta.1` notes
-> follow below, unchanged.
+> Published 2026-10-18 on the npm tag `beta` (release commit `1b16b14`; results in
+> [beta-scope.md](beta-scope.md) §11.6). The `0.0.0-beta.1` notes follow below, unchanged.
 
 The second beta of the `alp` CLI and its per-user daemon `alpd`, which run filesystem-defined
 agent teams on Codex CLI and Claude Code, and of the optional plugin that shows them in Paseo and
@@ -125,7 +124,21 @@ the gateway) are still deferred.
 
 The release attaches the eight `*-0.0.0-beta.2.tgz` tarballs, `SHA256SUMS` and
 `release-manifest.json`. Check a download with `shasum -a 256 -c SHA256SUMS` (macOS) or
-`sha256sum -c SHA256SUMS` (Linux). Release commit and `SHA256SUMS`: filled in at publish.
+`sha256sum -c SHA256SUMS` (Linux).
+
+Release commit `1b16b14004e01eb6d5064a3e9cddb642f9d9f509`. `SHA256SUMS` (its own SHA-256 is
+`916f49a91a3069c61bdb3bd6f2fdb9e27436acd33167f44891fabbed08040364`):
+
+```text
+94326c505df4704db830ffe3c65883980c93929d9a1b6718173d150cc371395a  anhlp-alp-0.0.0-beta.2.tgz
+bd6addcbc76df731cc89b6e4e100fc5070e3f5b1a37f91288709208bc44f4ab8  anhlp-alp-cli-0.0.0-beta.2.tgz
+d597ec27b08769a07620699e18f706392df742e82f4a486f5437c89578de9971  anhlp-alp-client-0.0.0-beta.2.tgz
+ccac64973f98465a3e630b63c5c7d8ed5c625e9afaa87a24c3d92ac86f909e6e  anhlp-alp-core-0.0.0-beta.2.tgz
+2b0b093db49278cf4fea0fa4d06756874dd5b6f2541a8008f01caccb88cdaca3  anhlp-alp-daemon-0.0.0-beta.2.tgz
+e46e0cabae3843e671bd9cfdedd4e6e48e2e86e0564d29b7d7181acc0bb3588b  anhlp-alp-paseo-0.0.0-beta.2.tgz
+502272b511b73f192d20c2934e03a679fde331e06f055dd185753cd54aacb975  anhlp-alp-protocol-0.0.0-beta.2.tgz
+312dd6654f4f61fa0296eef574b0e5980b508bfa5ea480c67312140687930132  anhlp-alp-runtime-0.0.0-beta.2.tgz
+```
 
 ## More
 
