@@ -654,7 +654,7 @@ Trạng thái ngày 2026-10-16, ở release SHA `2230aa5`.
 | T10 | Test fake-provider cho câu hỏi quyền trong Paseo (§6.2, hàng duyệt quyền, ý 1) | Có | xong: test đã merge, pass trong `validate:paseo` ở release SHA (H1, H2) |
 | T11 | Sửa F3 (`linkify-it@2.2.0` trong `alp web`); owner anh | Không chặn beta.1; chặn beta.2, hạn 2026-11-15 | xong cho beta.2: patch `paseo-web/patches/0020-ALP-bound-linkify-on-long-messages.patch` (PR #126, `7469721`); D9 = sửa (§11.5) |
 | T13 | Claude stream text vào Paseo/`alp web` (`includePartialMessages`, map `stream_event`) | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16) | chưa làm; [#107](https://github.com/phucanh08/alp/issues/107) |
-| T14 | `paseo plugin add npm:@anhlp/alp-paseo@beta` cài được: không ship `.d.ts` import type từ peer `@getpaseo/*` (hoặc bỏ hẳn `.d.ts` của plugin); thêm kiểm CI cài plugin như Paseo cài nguồn `npm:` (`--legacy-peer-deps`); rồi bỏ cách tạm khỏi docs | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16); chặn beta.2 | đã sửa, chờ publish beta.2 (plugin không ship `.d.ts`; `scripts/paseo-source-check.mjs` trong `release:tarball-check`/`validate:packages`; docs dùng `npm:`, cách tạm chỉ còn cho beta.1); [#111](https://github.com/phucanh08/alp/issues/111) |
+| T14 | `paseo plugin add npm:@anhlp/alp-paseo@beta` cài được: không ship `.d.ts` import type từ peer `@getpaseo/*` (hoặc bỏ hẳn `.d.ts` của plugin); thêm kiểm CI cài plugin như Paseo cài nguồn `npm:` (`--legacy-peer-deps`); rồi bỏ cách tạm khỏi docs | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16); chặn beta.2 | xong: plugin không ship `.d.ts`; `scripts/paseo-source-check.mjs` trong `release:tarball-check`/`validate:packages`; docs dùng `npm:`, cách tạm chỉ còn cho beta.1. Q3 của beta.2 (2026-10-18): `paseo plugin add npm:@anhlp/alp-paseo@beta` cài được; [#111](https://github.com/phucanh08/alp/issues/111) đã đóng |
 
 ## 9. Không thuộc tài liệu này
 
@@ -777,8 +777,8 @@ Không còn quyết định nào mở trong scope này.
 ## 11. Beta.2 (`0.0.0-beta.2`)
 
 Soạn ngày 2026-10-17 (task t-4393.2), trên nhánh `release/beta.2` từ `origin/main` `99a8d15`.
-Chưa có release SHA: SHA chốt là commit merge của PR release vào `main` (§11.3). Chưa publish,
-deprecate hay tag gì.
+**Đã publish ngày 2026-10-18** (task t-4393.3) từ release SHA `1b16b14` (`main`, sau PR #124–#127);
+kết quả ở §11.6.
 
 ### 11.1 Phạm vi
 
@@ -877,9 +877,63 @@ deprecate khác của T7. Cuối cùng `release:gate … --phase announce` exit 
   đoạn rất dài hiện dạng text thường; link markdown tường minh không đổi. Notes beta.2 ghi F3 trong
   Fixes, bỏ khỏi Known issues. Lịch sử beta.1 (D5, §5, §7.6) giữ nguyên.
 
-### 11.6 Kết quả (điền khi chạy)
+### 11.6 Kết quả
 
 | # | SHA | Tarball | Máy, OS, Node | Kết quả | Bằng chứng |
 |---|---|---|---|---|---|
 | Gate local, nhánh release | `99a8d15` + diff release (trước merge) | rehearsal, không phải evidence | macOS arm64, Node 26.3.0 (experimental), npm 11.16.0 | pass | `release:check-version`; `release:check` (999 test: 994 pass, 0 fail, 5 skip; pack-check 8 package); `validate:core` 467/471 (4 skip); `validate:paseo` 144/144 và 197/198 (1 skip); `validate:packages` (A5, `release-consumer`, `paseo-source-check` với compiler Paseo); `validate:web` 186/186 unit, 40/40 e2e; `release:pack --rehearsal` + `release:verify` + `release:gate --init`/`--phase publish` (11 dòng chặn còn mở, đúng dự kiến). Lần chạy `release:check` đầu có 1 fail `test/integration/service.test.js:55` (alpd.log rỗng ngay sau ready); chạy lại riêng 3/3 pass và pass trong `validate:paseo` |
-| H1–H5, L1, S1, A5, R1, R2, R5, R7, P4, P5, Publish, Q1–Q5 | — | — | — | chưa chạy | — |
+| H1–H4 | `1b16b14` | — | CI: Ubuntu Node 22/24 (H1, H3), macOS Node 24 (H2, `core-paseo-macos`), Windows Node 22/24 (H4) | pass, không cần chạy lại job nào | [CI 39081421077](https://github.com/phucanh08/alp/actions/runs/39081421077); H3 gồm `paseo-source-check` với compiler của Paseo (server 2358497 B, client 167496 B) |
+| H5 | `1b16b14` | — | CI: Ubuntu, macOS | pass (không chặn) | [CI 39081421077](https://github.com/phucanh08/alp/actions/runs/39081421077) |
+| L1 | `1b16b14` | — | macOS arm64, Node 24.22.0, worktree ở release SHA | pass | `release:check-version` pass (8 package `0.0.0-beta.2`, dependency nội bộ pin, lockfile khớp); 8 manifest `Apache-2.0`, `repository`/`homepage` trỏ `phucanh08/alp`; LICENSE/NOTICE không đổi từ `2230aa5`; LICENSE/NOTICE trong tarball do A5 kiểm |
+| S1 | `1b16b14` | khớp (audit consumer trên 8 tarball) | macOS arm64, Node 24.22.0, npm 11.19.1, bật kiểm TLS | pass | `npm audit --omit=dev` trên repo: 0 (554 dependency); consumer cài 8 tarball: 0/0 có peer (146 package) và `--legacy-peer-deps` (131); F3 đã sửa (patch 0020). High trong `npm audit` đầy đủ chỉ thuộc dev (jest, metro, react-native của `apps/*`), không vào 8 package |
+| A5 | `1b16b14` | `SHA256SUMS` = `916f49a9…0364` | pack: [release-acceptance 39081508130](https://github.com/phucanh08/alp/actions/runs/39081508130), Ubuntu Node 22.23.3, npm 10.9.9; verify lại: macOS Node 24.22.0 | pass | job `pack` (`release:pack` + `release:verify --sha`); trên Mac: `shasum -c` 8/8, manifest `0.0.0-beta.2`, `git.sha` = `1b16b14…`, `dirty` false, `rehearsal` false; `release:verify --record` và `release:consumer` pass (Paseo compiler bỏ qua trên Mac vì không có checkout Paseo; H3 chạy nó). Job `acceptance` (fake, macOS/Ubuntu/Windows) cũng xanh |
+| R1 | `1b16b14` | khớp | macOS 27 arm64, Node 24.22.0, Codex CLI 0.162.1, `gpt-6.1-sol` | pass; C5 do lead đọc | `--unattended`: 9 pass, C5 `check`: turn bị hủy 5 giây sau khi bắt đầu, trước khi có output; `alp ps` không còn session chạy; câu trả lời "Mình chưa đếm ra số nào trước khi bị ngắt." đúng (cùng trường hợp anh xác nhận ở beta.1) |
+| R2 | `1b16b14` | khớp | như R1, Claude Code 2.1.300, `claude-opus-5-5` | pass 10/10 | `--unattended` |
+| R5 | `1b16b14` | khớp | như R1, Paseo 0.11.4 chạy **daemon riêng** (xem dưới) | pass: W1–W6 (Codex, Claude); W3 Claude không stream (#107) | W1/W2 harness; W3/W4 qua `paseo` CLI (`run`, `stop`, `send`, `permit allow --input`); W5/W6 qua Chromium headless (Playwright) trên `alp web`, có ảnh chụp; W3–W6 do lead chấm từ log và ảnh |
+| R7 | `1b16b14` | — (mã nguồn) | như R1 | pass (Codex `gpt-6.1-sol`, Claude `claude-opus-5-5`) | `beta-acceptance-r7.mjs --live --sha`, sau `npm ci && npm run build` trong worktree ở release SHA |
+| P4 | `1b16b14` | `SHA256SUMS` = `916f49a9…0364` (`shasum -c` OK) | macOS arm64, Node 24.22.0, npm 11.19.1 | pass | `release:gate --phase publish` exit 0; `npm whoami` = `anhlp`, owner của các tên; cả 8 package E404 ở `0.0.0-beta.2`; trước publish `beta` = `latest` = `0.0.0-beta.1` cả 8 |
+| P5 | `1b16b14` | asset tải lại: `shasum -c` OK, giống từng byte (10/10) | như P4 | go (anh đồng ý publish 2026-10-17) | tag `v0.0.0-beta.2` (annotated `eb2e1bf`) đã push, trỏ `1b16b14`; GitHub prerelease draft, 8 tarball + `SHA256SUMS` + `release-manifest.json` |
+| Publish (§7.4) | `1b16b14` | `shasum -c` OK trước khi publish; dry-run: tên, version, tag `beta`, số file (44, 144, 97, 69, 36, 47, 119, 175) khớp manifest, không có bước build | như P4, không cần OTP | pass 8/8, 2026-10-18 | `npm publish ./<file>.tgz --tag beta --access public`, từng package; `dist.integrity` trên registry khớp manifest cả 8 (bảng dưới) |
+| Q1 | `1b16b14` | `dist.integrity` khớp manifest 8/8 | macOS arm64, Node 24.22.0, npm 11.19.1 | pass, 00:49:45Z | `beta` = `0.0.0-beta.2` cả 8; `latest` trước Q4 = `0.0.0-beta.1` cả 8 (đúng dự kiến §11.4; lần này không có tên mới nên registry không tự gán `latest`) |
+| Q2 | `1b16b14` | lockfile consumer: `integrity` khớp manifest 8/8, `resolved` là `registry.npmjs.org` | như Q1; HOME mới (cache rỗng), prefix riêng; Linux không chạy (D7) | pass (macOS) | `npm install -g --prefix … @anhlp/alp@beta @anhlp/alp-paseo@beta`: mọi `@anhlp/*` trong cây là `0.0.0-beta.2` |
+| Q3 | `1b16b14` | bản cài của Q2 | như Q1, Codex CLI 0.162.1, Paseo 0.11.4 (daemon riêng) | pass; [#111](https://github.com/phucanh08/alp/issues/111) đã đóng | C1, C2, C4 (Codex, `ALP_HOME` tạm 0700) pass. **`paseo plugin add npm:@anhlp/alp-paseo@beta` exit 0**, revision `0.0.0-beta.2`; W2 có Phở và Cafe; W6: `alp-web-integration --register` (bản cài global của Q2), không token / sai token bị từ chối, đúng token được nhận; web thấy project, session của C4 và Tasks. `release:gate --phase latest` exit 0 |
+| Q4 | `1b16b14` | — | như Q1 | chờ anh xác nhận các bước do lead chấm | `release:gate --phase latest` exit 0; chưa chạy `npm dist-tag add … latest` |
+| Q5 | `1b16b14` | — | như Q1 | chờ Q4 | — |
+| Dọn npm (§11.4) | — | — | như Q1 | chờ anh | `npm deprecate alp-paseo-plugin` với thông điệp `npm:` chưa chạy lại |
+| Announce | `1b16b14` | asset không đổi (10 file) | — | chờ | GitHub prerelease vẫn là draft |
+
+Publish `0.0.0-beta.2` ngày 2026-10-18 (giờ UTC). "Registry" là `time["0.0.0-beta.2"]` trong
+packument. Dist-tags đọc lúc 00:49:45Z, sau package cuối.
+
+| # | Package | Lệnh publish xong | Registry | `dist.integrity` | `beta` | `latest` (trước Q4) |
+|---|---|---|---|---|---|---|
+| 1 | `@anhlp/alp-protocol` | 00:34:33Z | 00:35:48Z | khớp | `0.0.0-beta.2` | `0.0.0-beta.1` |
+| 2 | `@anhlp/alp-core` | 00:35:58Z | 00:37:14Z | khớp | `0.0.0-beta.2` | `0.0.0-beta.1` |
+| 3 | `@anhlp/alp-runtime` | 00:37:34Z | 00:39:11Z | khớp | `0.0.0-beta.2` | `0.0.0-beta.1` |
+| 4 | `@anhlp/alp-client` | 00:39:31Z | 00:40:27Z | khớp | `0.0.0-beta.2` | `0.0.0-beta.1` |
+| 5 | `@anhlp/alp-daemon` | 00:40:48Z | 00:42:03Z | khớp | `0.0.0-beta.2` | `0.0.0-beta.1` |
+| 6 | `@anhlp/alp-cli` | 00:42:24Z | 00:43:20Z | khớp | `0.0.0-beta.2` | `0.0.0-beta.1` |
+| 7 | `@anhlp/alp-paseo` | 00:43:42Z | 00:46:53Z | khớp | `0.0.0-beta.2` | `0.0.0-beta.1` |
+| 8 | `@anhlp/alp` | 00:47:13Z | 00:49:20Z | khớp | `0.0.0-beta.2` | `0.0.0-beta.1` |
+
+Khác với beta.1 khi chạy:
+- **Paseo riêng cho R5 và Q3.** Phiên ALP chạy việc publish (main, lead, supervisor) là con của
+  alpd `~/.alp` mà Paseo của anh khởi động (beta.1, plugin từ `~/.npm-global`). Dừng alpd đó, hay
+  `paseo plugin add` vào `~/.paseo`, sẽ dừng chính phiên đang publish và thay plugin anh đang dùng.
+  Vì vậy R5 và Q3 chạy trên một daemon Paseo 0.11.4 khác (cùng binary, `PASEO_HOME` riêng dưới
+  `/tmp`, cổng 6797–6799, tắt relay) với `ALP_HOME` mới; main duyệt cách này. Không có alpd cũ để
+  "dừng trước mỗi lượt R5" (§10): alpd của mỗi lượt là bản `0.0.0-beta.2` vừa cài. `~/.paseo`,
+  `~/.alp`, bản cài global và alpd của anh không bị đụng; nâng plugin của anh lên beta.2 là việc
+  của anh.
+- **Bước cần người đọc** (C5 của R1; W3–W6 của R5; nửa trình duyệt của W6 ở Q3) do lead (agent)
+  chấm từ log và ảnh chụp, ghi rõ trong trường `runner` của evidence; anh xem lại trước Q4.
+- Máy này đã lên Node 26.3.0 (experimental, §3). Gate và Q dùng Node 24.22.0 tải từ nodejs.org
+  (kiểm `SHASUMS256.txt`), như beta.1.
+- Quan sát, chưa sửa: chạy thẳng `server/dist/main.js --register` trong bản plugin Paseo cài từ
+  `npm:` báo `ERR_MODULE_NOT_FOUND` `@getpaseo/plugin` (peer do Paseo cung cấp khi nạp plugin).
+  Đường có trong docs (`npm install -g @anhlp/alp-paseo@beta`, rồi `alp-web-integration
+  --register`) chạy được.
+
+Evidence (output lệnh, lockfile, ảnh chụp) nằm ngoài repo, trên máy anh: `~/alp-release/evidence/beta2/`,
+`~/alp-release/evidence/q-1b16b14/`, `~/alp-release/runs/{1b16b14-cli-*,r5-1b16b14,r7-1b16b14}/`;
+các dòng đã ghi vào `~/alp-release/release-evidence-1b16b14.json`.
