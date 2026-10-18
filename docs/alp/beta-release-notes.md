@@ -1,7 +1,9 @@
 # ALP 0.0.0-beta.2 — release notes
 
-> Published 2026-10-18 on the npm tag `beta` (release commit `1b16b14`; results in
-> [beta-scope.md](beta-scope.md) §11.6). The `0.0.0-beta.1` notes follow below, unchanged.
+> Published 2026-10-18 on the npm tags `beta` and `latest` as the GitHub prerelease
+> [v0.0.0-beta.2](https://github.com/phucanh08/alp/releases/tag/v0.0.0-beta.2) (release commit
+> `1b16b14`; results in [beta-scope.md](beta-scope.md) §11.6). The `0.0.0-beta.1` notes follow
+> below, unchanged.
 
 The second beta of the `alp` CLI and its per-user daemon `alpd`, which run filesystem-defined
 agent teams on Codex CLI and Claude Code, and of the optional plugin that shows them in Paseo and
@@ -24,13 +26,13 @@ Paseo, `paseo plugin remove alp-provider` and add it again as above. There is no
 migration between the two betas. Coming from 0.10.0: as in the beta.1 notes below, and
 [upgrading from 0.10.0](beta-install.md#upgrading-from-0100-or-earlier).
 
-The npm tag `beta` points at `0.0.0-beta.2` once it is published; `latest` moves to it only after
-the post-publish checks (Q1–Q3 in beta-scope §7.5), so until then a plain `npm install -g
-@anhlp/alp` still installs `0.0.0-beta.1`.
+The npm tags `beta` and `latest` both point at `0.0.0-beta.2`, so a plain `npm install -g
+@anhlp/alp` installs this beta too.
 
 ## Packages
 
-All at `0.0.0-beta.2`, on the npm tag `beta`; internal dependencies are pinned to that version.
+All at `0.0.0-beta.2`, on the npm tags `beta` and `latest`; internal dependencies are pinned to
+that version.
 The same eight packages as in `0.0.0-beta.1`: `@anhlp/alp`, `@anhlp/alp-protocol`, `-core`,
 `-runtime`, `-client`, `-daemon`, `-cli` and `@anhlp/alp-paseo`. `@anhlp/alp-gateway`,
 `@anhlp/alp-web` (`apps/web`) and `@anhlp/alp-tui` are still not published.

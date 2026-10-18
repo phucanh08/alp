@@ -778,7 +778,8 @@ Không còn quyết định nào mở trong scope này.
 
 Soạn ngày 2026-10-17 (task t-4393.2), trên nhánh `release/beta.2` từ `origin/main` `99a8d15`.
 **Đã publish ngày 2026-10-18** (task t-4393.3) từ release SHA `1b16b14` (`main`, sau PR #124–#127);
-kết quả ở §11.6.
+`latest` chuyển sang `0.0.0-beta.2` và release đã công khai cùng ngày (task t-4393.5). Kết quả ở
+§11.6.
 
 ### 11.1 Phạm vi
 
@@ -794,7 +795,7 @@ kết quả ở §11.6.
   tool details), sửa preview team, team custom trong `alp acp`, git của workspace. `apps/web` và
   `@anhlp/alp-gateway` có nhiều thay đổi nhưng vẫn deferred, không phát hành.
 - State schema không đổi (`STATE_SCHEMA` = 2 như beta.1): từ beta.1 lên beta.2 không có migrate.
-- Known issues: như beta.1, bỏ #111 (đã sửa, chờ Q3 xác nhận trên registry), giữ #107 (T13). F3 (T11)
+- Known issues: như beta.1, bỏ #111 (đã sửa, Q3 xác nhận trên registry), giữ #107 (T13). F3 (T11)
   đã sửa trong beta.2 (patch 0020, PR #126; D9), chuyển từ known issue sang Fixes.
 
 ### 11.2 Pre-publish gate
@@ -897,13 +898,14 @@ deprecate khác của T7. Cuối cùng `release:gate … --phase announce` exit 
 | Q1 | `1b16b14` | `dist.integrity` khớp manifest 8/8 | macOS arm64, Node 24.22.0, npm 11.19.1 | pass, 00:49:45Z | `beta` = `0.0.0-beta.2` cả 8; `latest` trước Q4 = `0.0.0-beta.1` cả 8 (đúng dự kiến §11.4; lần này không có tên mới nên registry không tự gán `latest`) |
 | Q2 | `1b16b14` | lockfile consumer: `integrity` khớp manifest 8/8, `resolved` là `registry.npmjs.org` | như Q1; HOME mới (cache rỗng), prefix riêng; Linux không chạy (D7) | pass (macOS) | `npm install -g --prefix … @anhlp/alp@beta @anhlp/alp-paseo@beta`: mọi `@anhlp/*` trong cây là `0.0.0-beta.2` |
 | Q3 | `1b16b14` | bản cài của Q2 | như Q1, Codex CLI 0.162.1, Paseo 0.11.4 (daemon riêng) | pass; [#111](https://github.com/phucanh08/alp/issues/111) đã đóng | C1, C2, C4 (Codex, `ALP_HOME` tạm 0700) pass. **`paseo plugin add npm:@anhlp/alp-paseo@beta` exit 0**, revision `0.0.0-beta.2`; W2 có Phở và Cafe; W6: `alp-web-integration --register` (bản cài global của Q2), không token / sai token bị từ chối, đúng token được nhận; web thấy project, session của C4 và Tasks. `release:gate --phase latest` exit 0 |
-| Q4 | `1b16b14` | — | như Q1 | chờ anh xác nhận các bước do lead chấm | `release:gate --phase latest` exit 0; chưa chạy `npm dist-tag add … latest` |
-| Q5 | `1b16b14` | — | như Q1 | chờ Q4 | — |
-| Dọn npm (§11.4) | — | — | như Q1 | chờ anh | `npm deprecate alp-paseo-plugin` với thông điệp `npm:` chưa chạy lại |
-| Announce | `1b16b14` | asset không đổi (10 file) | — | chờ | GitHub prerelease vẫn là draft |
+| Q4 | `1b16b14` | `916f49a9…0364` | như Q1 | pass, 01:10:18Z (anh xác nhận các bước do lead chấm ngày 2026-10-18, gate g1 của t-4393.5) | `release:gate --phase latest` exit 0; `npm dist-tag add @anhlp/<pkg>@0.0.0-beta.2 latest` exit 0 cả 8 (01:10:10Z–01:10:18Z); `npm view … dist-tags`: `latest` = `beta` = `0.0.0-beta.2` cả 8 |
+| Q5 | `1b16b14` | `916f49a9…0364` | như Q1; HOME mới, prefix `/tmp/alp-b2/q5` | pass, 01:10:54Z | `npm install -g @anhlp/alp @anhlp/alp-paseo` không tag (232 package): mọi `@anhlp/*` trong cây là `0.0.0-beta.2` |
+| Dọn npm (§11.4) | — | — | như Q1 | xong, 01:11:39Z | `npm deprecate alp-paseo-plugin` với thông điệp `npm:` (§1.1) exit 0; `npm view alp-paseo-plugin@0.10.0 deprecated` ra thông điệp mới ngay; packument: 15/15 version mang thông điệp mới; `@anhlp/alp` và `@anhlp/alp-paseo` `0.0.0-beta.1`/`0.0.0-beta.2` không có `deprecated` |
+| Announce | `1b16b14` | asset không đổi (10 file) | — | xong, 01:12:28Z | `release:gate --phase announce` exit 0 (Q4, Q5 pass); `gh release edit v0.0.0-beta.2 --notes-file … --draft=false`: [prerelease v0.0.0-beta.2](https://github.com/phucanh08/alp/releases/tag/v0.0.0-beta.2), notes ghi `latest` = `beta` = `0.0.0-beta.2` |
 
 Publish `0.0.0-beta.2` ngày 2026-10-18 (giờ UTC). "Registry" là `time["0.0.0-beta.2"]` trong
-packument. Dist-tags đọc lúc 00:49:45Z, sau package cuối.
+packument. Dist-tags đọc lúc 00:49:45Z, sau package cuối. Sau Q4 (01:10:18Z), `latest` =
+`beta` = `0.0.0-beta.2` cả 8.
 
 | # | Package | Lệnh publish xong | Registry | `dist.integrity` | `beta` | `latest` (trước Q4) |
 |---|---|---|---|---|---|---|
@@ -926,7 +928,8 @@ Khác với beta.1 khi chạy:
   `~/.alp`, bản cài global và alpd của anh không bị đụng; nâng plugin của anh lên beta.2 là việc
   của anh.
 - **Bước cần người đọc** (C5 của R1; W3–W6 của R5; nửa trình duyệt của W6 ở Q3) do lead (agent)
-  chấm từ log và ảnh chụp, ghi rõ trong trường `runner` của evidence; anh xem lại trước Q4.
+  chấm từ log và ảnh chụp, ghi rõ trong trường `runner` của evidence. Anh xem lại và xác nhận
+  ngày 2026-10-18 (gate g1 của t-4393.5) trước Q4.
 - Máy này đã lên Node 26.3.0 (experimental, §3). Gate và Q dùng Node 24.22.0 tải từ nodejs.org
   (kiểm `SHASUMS256.txt`), như beta.1.
 - Quan sát, chưa sửa: chạy thẳng `server/dist/main.js --register` trong bản plugin Paseo cài từ
