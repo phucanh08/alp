@@ -1,8 +1,8 @@
 # Beta.2 (`0.0.0-beta.2`): publish và nghiệm thu sau publish
 
-Task t-4393.3, lead (ALP, Claude Code) theo yêu cầu của anh ngày 2026-10-17. Runbook:
-`docs/alp/beta-scope.md` §7, §11.3–§11.4. Kết quả chuẩn ghi ở §11.6; báo cáo này tóm tắt và chỉ
-chỗ để evidence.
+Task t-4393.3 (bước cuối: t-4393.5), lead (ALP, Claude Code) theo yêu cầu của anh ngày
+2026-10-17. Runbook: `docs/alp/beta-scope.md` §7, §11.3–§11.4. Kết quả chuẩn ghi ở §11.6; báo cáo
+này tóm tắt và chỉ chỗ để evidence.
 
 ## Tóm tắt
 
@@ -17,9 +17,11 @@ chỗ để evidence.
   khớp manifest cả 8.
 - Q1–Q3 pass; gate `latest` exit 0. Q3: `paseo plugin add npm:@anhlp/alp-paseo@beta` cài được,
   #111 đã đóng.
-- Q4, Q5, chạy lại `npm deprecate alp-paseo-plugin` và bỏ draft: chưa chạy. Anh xem lại các bước do lead chấm (dưới) trước; lệnh còn lại ghi ở §11.6
-  (dòng Q4, Q5, Dọn npm, Announce) và trong handoff của t-4393.3. Tới lúc đó `latest` vẫn là
-  `0.0.0-beta.1` cả 8 và GitHub prerelease vẫn là draft.
+- Anh xác nhận các bước do lead chấm (dưới) ngày 2026-10-18 (gate g1 của t-4393.5). Sau đó
+  (task t-4393.5): gate `latest` exit 0; Q4 `latest` = `beta` = `0.0.0-beta.2` cả 8 (01:10:18Z);
+  Q5 cài không tag ra `0.0.0-beta.2` cho mọi `@anhlp/*`; `npm deprecate alp-paseo-plugin` với
+  thông điệp `npm:` (15/15 version); gate `announce` exit 0; bỏ draft lúc 01:12:28Z:
+  [v0.0.0-beta.2](https://github.com/phucanh08/alp/releases/tag/v0.0.0-beta.2).
 
 ## Khác với beta.1
 
@@ -29,7 +31,7 @@ chỗ để evidence.
 - W3/W4 lái bằng `paseo` CLI (`run`, `stop`, `send`, `permit allow --input '{"answers":…}'`), W5/W6
   bằng Chromium headless (Playwright 1.64.1 của repo) trên `alp web`, có ảnh chụp.
 - Bước cần người đọc (C5 của R1, W3–W6 của R5, nửa trình duyệt W6 của Q3) do lead chấm; ghi trong
-  trường `runner` của evidence.
+  trường `runner` của evidence. Anh xác nhận trước Q4.
 - Node 24.22.0 tải từ nodejs.org (đã kiểm `SHASUMS256.txt`), vì Node hệ thống là 26.3.0.
 - Hai tiến trình mồ côi từ worktree `alp-beta2` đã xóa (web integration giữ cổng 7433 và alpd của
   nó, cả hai dùng `ALP_HOME` tạm) bị dừng trước R5 để trả cổng 7433.
