@@ -62,8 +62,20 @@ test('a start that cannot open its IPC endpoint says so in the log and doctor re
 
 test('a launcher that fails at once reports why, in its error and not only in a log', { skip }, async t => {
   const { directory, home } = await privateHome(t);
-  await chmod(home, 0o755);
+  // Admission accepts the home; the real launcher fails while preparing its log directory.
+  await chmod(path.join(home, 'logs'), 0o755);
   await assert.rejects(ensureDaemon({ home, entry: ALPD, timeoutMs: 2000 }), error => /launcher exited \(1\): ALP_HOME_UNUSABLE, alpd failed to start while preparing its home/.test(error.message) && !error.message.includes(SECRET));
+});
+
+test('startup admission reports an unusable home before launching a child', { skip }, async t => {
+  const { directory, home } = await privateHome(t);
+  await chmod(home, 0o755);
+  await assert.rejects(ensureDaemon({ home, entry: path.join(directory, 'must-not-launch.js'), env: { ...process.env, ALP_HOME: home } }), error => {
+    assert.equal(error.code, 'ALP_HOME_UNUSABLE');
+    assert.match(error.message, /ALP_HOME_UNUSABLE.*preparing its home/);
+    assert.match(error.cause.message, /private permissions/);
+    return true;
+  });
 });
 
 test('doctor and alp daemon status tell a ready alpd, one that is not ready, and one that is gone', { skip }, async t => {

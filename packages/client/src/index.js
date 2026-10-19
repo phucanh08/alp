@@ -263,7 +263,13 @@ export async function readDaemonLifecycle(home) {
  * racing stale reapers cannot remove a successor's nonempty directory.
  */
 export async function withDaemonLifecycle(home, action, run, { joinStart = false } = {}) {
-  await assertPrivateDirectory(home, { create: true });
+  try {
+    await assertPrivateDirectory(home, { create: true });
+  } catch (cause) {
+    // Admission now prepares the home before the launcher can report this failure.
+    // Preserve the operator-facing startup code at this earlier boundary.
+    throw Object.assign(new Error(`ALP_HOME_UNUSABLE, alpd failed to start while preparing its home: ${cause.message}`, { cause }), { code: 'ALP_HOME_UNUSABLE' });
+  }
   const state = path.join(home, 'state');
   await assertPrivateDirectory(state, { create: true });
   const directory = path.join(state, 'alpd.starting');
