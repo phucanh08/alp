@@ -2,7 +2,7 @@
 // its content, and every value that can hold a secret shows as hidden. The secrets never reach the
 // browser: not in the page, not in any WebSocket frame. The host is labelled with its machine name
 // (patch 0017). Through the real UI, gateway and alpd.
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -63,4 +63,31 @@ test('library entries open read only with their secrets hidden, and the host is 
   expect(await page.content()).not.toContain('SENTINEL-E2E');
   expect(frames.some(frame => frame.includes('"library.get"') || frame.includes('"content"'))).toBe(true);
   expect(frames.filter(frame => frame.includes('SENTINEL-E2E'))).toEqual([]);
+});
+
+
+test('library.write edits project instructions through UI, gateway and daemon', async ({ page }) => {
+  await connect(page, world, world.tokens.libraryWriter);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const settings = page.getByRole('region', { name: 'Settings' });
+  await settings.getByTestId('settings-alp-skills').click();
+  await settings.getByRole('textbox', { name: 'Entry name', exact: true }).fill('browser-notes');
+  await settings.getByRole('textbox', { name: 'Instruction entry JSON' }).fill(JSON.stringify({ body: 'Browser notes' }));
+  await settings.getByRole('button', { name: 'Save project entry' }).click();
+  await expect(settings.getByTestId('library-row-browser-notes')).toBeVisible();
+  expect(await readFile(path.join(world.projects.main, '.alp/skills/browser-notes/SKILL.md'), 'utf8')).toBe('Browser notes\n');
+  await settings.getByTestId('library-row-browser-notes').click();
+  await settings.getByRole('textbox', { name: 'Instruction entry JSON' }).fill(JSON.stringify({ body: 'Updated notes' }));
+  await settings.getByRole('button', { name: 'Save project entry' }).click();
+  await expect.poll(() => readFile(path.join(world.projects.main, '.alp/skills/browser-notes/SKILL.md'), 'utf8')).toBe('Updated notes\n');
+  await settings.getByRole('textbox', { name: 'New entry name' }).fill('browser-copy');
+  await settings.getByRole('button', { name: 'Duplicate', exact: true }).click();
+  await expect(settings.getByTestId('library-row-browser-copy')).toBeVisible();
+  await settings.getByTestId('library-row-browser-copy').click();
+  await settings.getByRole('textbox', { name: 'New entry name' }).fill('browser-renamed');
+  await settings.getByRole('button', { name: 'Rename', exact: true }).click();
+  await expect(settings.getByTestId('library-row-browser-renamed')).toBeVisible();
+  await settings.getByTestId('library-row-browser-renamed').click();
+  await settings.getByRole('button', { name: 'Delete project entry' }).click();
+  await expect(settings.getByTestId('library-row-browser-renamed')).toHaveCount(0);
 });

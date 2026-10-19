@@ -27,7 +27,8 @@
     "question.watch.turns": "question.watch accepts `turns`: the connection is also told of `turn.ended` of every root in the trees it watches.",
     "workspace.files": "workspace.files.search: files under a directory whose relative path matches a query; read-only, names only, links never followed.",
     "workspace.files.read": "workspace.files.list and workspace.files.read: the entries of a directory and the content of a UTF-8 text file (at most 1 MiB) under a directory; read-only, links never followed, .git, .env* and key or credential files refused, .gitignore'd paths hidden unless asked.",
-    "prompt.images": "session.prompt takes inline image parts { type: \"image\", mimeType, data } (base64, no paths or URLs) within the image limits; a session snapshot says whether its runtime takes them in promptImages."
+    "prompt.images": "session.prompt takes inline image parts { type: \"image\", mimeType, data } (base64, no paths or URLs) within the image limits; a session snapshot says whether its runtime takes them in promptImages.",
+    "library.project.write": "library save/delete/duplicate/rename accept policy project-data: only project-only pure-data agents and skills, no executable configuration, sidecars or library/built-in collisions."
   },
   "methods": {
     "assignment.recall": {
@@ -238,6 +239,30 @@
             "items": {
               "type": "string"
             }
+          },
+          "promptImageLimits": {
+            "type": "object",
+            "description": "Optional effective inline image limits for this connection, when prompt.images is advertised. Missing on older peers. Byte limits count decoded bytes.",
+            "properties": {
+              "maxCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxBytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxTotalBytes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "maxCount",
+              "maxBytes",
+              "maxTotalBytes"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -563,6 +588,12 @@
           },
           "revision": {
             "type": "string"
+          },
+          "policy": {
+            "enum": [
+              "project-data"
+            ],
+            "description": "Opt-in strict project-only non-executable mutation policy; requires library.project.write capability."
           }
         },
         "required": [
@@ -626,6 +657,12 @@
           },
           "projectRoot": {
             "$ref": "#/$defs/projectRoot"
+          },
+          "policy": {
+            "enum": [
+              "project-data"
+            ],
+            "description": "Opt-in strict project-only non-executable mutation policy; requires library.project.write capability."
           }
         },
         "required": [
@@ -880,6 +917,12 @@
           },
           "projectRoot": {
             "$ref": "#/$defs/projectRoot"
+          },
+          "policy": {
+            "enum": [
+              "project-data"
+            ],
+            "description": "Opt-in strict project-only non-executable mutation policy; requires library.project.write capability."
           }
         },
         "required": [
@@ -944,6 +987,12 @@
               "none",
               "known-projects"
             ]
+          },
+          "policy": {
+            "enum": [
+              "project-data"
+            ],
+            "description": "Opt-in strict project-only non-executable mutation policy; requires library.project.write capability."
           }
         },
         "required": [

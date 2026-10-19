@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Controller } from '../src/lib/controller.js';
-import { IMAGE_LIMITS, addImages, filesOf, fitImages, imageType, promptContent, readImages, toBase64 } from '../src/lib/attachments.js';
+import { IMAGE_LIMITS, imageLimits, addImages, filesOf, fitImages, imageType, promptContent, readImages, toBase64 } from '../src/lib/attachments.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 /** A File-like value of `size` bytes. */
@@ -58,6 +58,7 @@ test('promptContent: the text, then each image inline; an image-only message has
 
 test('the controller sends attached images inline in session.prompt, also without text', async t => {
   const host = new FakeHost();
+  host.capabilities.push('prompt.images');
   const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500 });
   t.after(() => controller.disconnect());
   const state = () => controller.getState();
@@ -78,4 +79,42 @@ test('the controller sends attached images inline in session.prompt, also withou
   assert.deepEqual(sent().at(-1), [{ type: 'image', mimeType: 'image/png', data: 'QUFBQQ==', name: 'shot.png' }]);
   await controller.sendPrompt('   ');
   assert.equal(sent().length, 2, 'an empty message without images is not sent');
+});
+
+
+test('negotiated image limits shrink reads and fits, with safe older-peer fallback', async () => {
+  assert.deepEqual(imageLimits(undefined), IMAGE_LIMITS);
+  const small = imageLimits({ maxCount: 2, maxBytes: 6, maxTotalBytes: 8 });
+  const read = await addImages([], [file('one.png', 'image/png', 4), file('two.png', 'image/png', 5)], small);
+  assert.equal(read.attachments.length, 1);
+  assert.match(read.error, /together/);
+  assert.equal((await readImages([], [file('big.png', 'image/png', 7)], small)).added.length, 0);
+  assert.equal(fitImages([], read.attachments, imageLimits(undefined, false)).attachments.length, 0);
+  for (const malformed of [null, {}, { maxCount: -1, maxBytes: 4, maxTotalBytes: 4 }, { maxCount: 1, maxBytes: Infinity, maxTotalBytes: 4 }]) assert.equal(imageLimits(malformed).maxCount, 0);
+});
+
+
+test('controller adopts smaller hello limits, rejects attachments before RPC and refreshes after reconnect', async t => {
+  const host = new FakeHost();
+  host.capabilities.push('prompt.images');
+  let offer = { maxCount: 1, maxBytes: 3, maxTotalBytes: 3 };
+  host.intercept.set('daemon.hello', (_params, _connection, { answer }) => { answer({ protocolVersion: 1, capabilities: host.capabilities, promptImageLimits: offer }); return 'handled'; });
+  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, requestTimeoutMs: 2_000 });
+  t.after(() => controller.disconnect());
+  host.seed('ses_a');
+  controller.connect({ url: 'http://127.0.0.1:7434', token: 'alpgw1.0123456789abcdef.secret' });
+  await until(() => controller.getState().connection.phase === 'open');
+  controller.selectWorkspace('/w/a');
+  await until(() => controller.getState().sessions.status === 'ready');
+  controller.selectSession('ses_a');
+  await until(() => controller.getState().tree?.status === 'attached');
+  assert.deepEqual(controller.getState().connection.promptImageLimits, offer);
+  const { attachments } = await addImages([], [file('shot.png', 'image/png', 4)]);
+  await assert.rejects(controller.sendPrompt('look', undefined, attachments), /an image is at most/);
+  assert.equal(host.count('session.prompt'), 0);
+  offer = { maxCount: 1, maxBytes: 8, maxTotalBytes: 8 };
+  host.drop();
+  await until(() => controller.getState().connection.phase === 'open' && controller.getState().connection.promptImageLimits.maxBytes === 8);
+  await controller.sendPrompt('look', undefined, attachments);
+  assert.equal(host.count('session.prompt'), 1);
 });

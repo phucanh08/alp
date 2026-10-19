@@ -60,7 +60,7 @@ test('getLibraryEntry reads library.get for the selected workspace and keeps its
   await connect(w);
   const entry = await w.controller.getLibraryEntry('mcp', 'vault');
   assert.deepEqual(w.host.calls.filter(call => call.method === 'library.get').map(call => call.params), [{ kind: 'mcp', name: 'vault', projectRoot: '/w/a' }]);
-  assert.deepEqual(entry, { kind: 'mcp', name: 'vault', source: 'library', content: answer.content, usedBy: ['agent main'], secrets: ['/server/env/TOKEN'] });
+  assert.deepEqual(entry, { kind: 'mcp', name: 'vault', source: 'library', content: answer.content, revision: 'r1', usedBy: ['agent main'], secrets: ['/server/env/TOKEN'] });
   w.host.intercept.set('library.get', reply({ kind: 'mcp', name: 'vault', content: 'text' }));
   await assert.rejects(w.controller.getLibraryEntry('mcp', 'vault'), /does not read/);
 });
@@ -72,4 +72,24 @@ test('getLibraryEntry asks nothing of the host without project.read', async t =>
   await connect({ controller, state: () => controller.getState() });
   await assert.rejects(controller.getLibraryEntry('agents', 'main'), /cannot read this workspace's configuration/);
   assert.equal(host.count('library.get'), 0);
+});
+
+
+test('project library editor requires its own permission and new daemon capability', async t => {
+  const w = setup(t);
+  await connect(w);
+  await assert.rejects(w.controller.writeLibrary('save', 'skills', { name: 'notes', content: { body: 'text' } }), /library.write/);
+  assert.equal(w.host.count('library.save'), 0);
+  w.controller.disconnect();
+  w.host.principal.permissions.push('library.write');
+  await connect(w);
+  await assert.rejects(w.controller.writeLibrary('save', 'skills', { name: 'notes', content: { body: 'text' } }), /Update the host/);
+  w.controller.disconnect();
+  w.host.capabilities.push('library.project.write');
+  await connect(w);
+  w.host.intercept.set('library.save', reply({ revision: 'new' }));
+  const saved = await w.controller.writeLibrary('save', 'skills', { name: 'notes', content: { body: 'text' }, scope: 'library', projectRoot: '/other', revision: null });
+  assert.equal(saved.revision, 'new');
+  assert.deepEqual(w.host.calls.filter(c => c.method === 'library.save').at(-1).params, { name: 'notes', content: { body: 'text' }, scope: 'project', projectRoot: '/w/a', kind: 'skills', revision: null });
+  await assert.rejects(w.controller.writeLibrary('save', 'hooks', { name: 'run' }), /administrative/);
 });

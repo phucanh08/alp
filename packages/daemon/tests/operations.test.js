@@ -54,7 +54,7 @@ test('capabilities name only what this daemon serves; unserved methods are unkno
   const bare = await setup(t, { home: false });
   const hello = await bare.client.request('daemon.hello', { protocolVersion: 1 });
   assert.ok(hello.capabilities.includes(CAPABILITY.task));
-  for (const name of [CAPABILITY.team, CAPABILITY.library, CAPABILITY.settingsLanguage]) assert.ok(!hello.capabilities.includes(name), name);
+  for (const name of [CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage]) assert.ok(!hello.capabilities.includes(name), name);
   for (const method of ['team.list', 'library.list', 'library.models', 'settings.language.get']) await bare.fails(method, { kind: 'agents' }, -32601);
   await bare.call('task.list', { projectRoot: bare.project });
   // No extension takes a v1 name or namespace, served here or not.
@@ -63,7 +63,7 @@ test('capabilities name only what this daemon serves; unserved methods are unkno
 
   const full = await setup(t);
   const capabilities = (await full.client.request('daemon.hello', { protocolVersion: 1 })).capabilities;
-  for (const name of [CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.settingsLanguage]) assert.ok(capabilities.includes(name), name);
+  for (const name of [CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage]) assert.ok(capabilities.includes(name), name);
 });
 
 test('tasks: create, list, close, reopen and approve a gate, with revisions and the task state checked', async t => {
@@ -271,4 +271,31 @@ test('a team save syncs the projects alpd knows only when asked, and reports eac
   assert.equal(typeof synced.syncedProjects, 'number');
   assert.equal(synced.syncErrors.length, 1);
   assert.ok(synced.syncErrors[0].startsWith(`${other}:`));
+});
+
+
+test('project-data library policy is enforced by the authoritative daemon mutation', async t => {
+  const { home, project, call, fails } = await setup(t);
+  const safe = { kind: 'agents', scope: 'project', projectRoot: project, policy: 'project-data' };
+  const content = { instructions: 'Project writer', config: { model: 'codex:gpt-6.1-sol', description: 'Docs' } };
+  const saved = await call('library.save', { ...safe, name: 'project-writer', content, revision: null });
+  await call('library.save', { ...safe, name: 'project-writer', content, revision: saved.revision });
+  await call('library.duplicate', { ...safe, from: 'project-writer', to: 'project-copy' });
+  await call('library.rename', { ...safe, from: 'project-copy', to: 'project-renamed' });
+  await call('library.delete', { ...safe, name: 'project-renamed' });
+  for (const config of [{ provider: 'codex' }, { mcp: [] }, { hooks: [] }, { skills: [] }, { mode: 'full-access' }, { model: 'acp:host' }]) {
+    await fails('library.save', { ...safe, name: 'project-writer', content: { instructions: 'unsafe', config } }, 1003, 'library_policy');
+  }
+  await fails('library.save', { ...safe, name: 'project-writer', content, sync: 'known-projects' }, 1003, 'library_policy');
+  await fails('library.save', { ...safe, name: 'host-write', scope: 'library', content }, 1003, 'library_policy');
+  // Trusted local administration can keep its full contract; remote policy cannot reuse its references.
+  await call('library.save', { kind: 'agents', name: 'host-entry', scope: 'library', content: { instructions: 'host', config: { provider: 'codex' } } });
+  await call('library.save', { kind: 'agents', name: 'host-entry', scope: 'project', projectRoot: project, content: { instructions: 'override' } });
+  await fails('library.delete', { ...safe, name: 'host-entry' }, 1003, 'library_policy');
+  await fails('library.duplicate', { ...safe, from: 'host-entry', to: 'host-copy' }, 1003, 'library_policy');
+  await fails('library.rename', { ...safe, from: 'host-entry', to: 'host-renamed' }, 1003, 'library_policy');
+  await mkdir(path.join(project, '.alp/agents/project-writer/hooks'));
+  await writeFile(path.join(project, '.alp/agents/project-writer/hooks/sidecar.sh'), 'echo unsafe');
+  for (const [method, params] of [['save', { name: 'project-writer', content }], ['delete', { name: 'project-writer' }], ['duplicate', { from: 'project-writer', to: 'copy' }], ['rename', { from: 'project-writer', to: 'renamed' }]]) await fails('library.' + method, { ...safe, ...params }, 1003, 'library_policy');
+  assert.equal(await readFile(path.join(project, '.alp/agents/project-writer/hooks/sidecar.sh'), 'utf8'), 'echo unsafe');
 });

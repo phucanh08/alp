@@ -11,7 +11,7 @@ export type RpcResponse = { jsonrpc: '2.0'; id: RpcId } & ({ result: unknown; er
 export type EventNotification = { jsonrpc: '2.0'; method: 'event'; params: Envelope };
 
 /** Names a daemon may list in its daemon.hello result (schema/methods-v1.json `capabilities`). */
-export type Capability = 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'workspace.files' | 'workspace.files.read' | 'prompt.images';
+export type Capability = 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'workspace.files' | 'workspace.files.read' | 'prompt.images';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -19,7 +19,7 @@ export type ErrorReason =
   | 'response_too_large' | 'persistence_failed' | 'outcome_unknown' | 'key_conflict'
   // Project, task and library methods (docs/protocol/alp-json-rpc-v1.md §5.3).
   | 'invalid_path' | 'invalid_scope' | 'invalid_entry' | 'secret_marker' | 'not_alp_project' | 'unknown_task' | 'not_found'
-  | 'unsafe_path' | 'revision_conflict' | 'task_state' | 'in_use' | 'busy' | 'unreadable'
+  | 'library_policy' | 'unsafe_path' | 'revision_conflict' | 'task_state' | 'in_use' | 'busy' | 'unreadable'
   // workspace.files.search (§12.3); workspace.files.list and read (§12.4).
   | 'not_directory' | 'blocked_path' | 'ignored' | 'linked' | 'binary' | 'too_large';
 
@@ -31,7 +31,7 @@ type Empty = Record<string, never>;
  * properties this map does not name: clients ignore them.
  */
 export type RpcMethodMap = {
-  'daemon.hello': { params: { protocolVersion: 1; client?: { name: string; version: string }; capabilities?: string[] }; result: { protocolVersion: 1; daemonVersion?: string; pid?: number; /** The daemon host's machine name (os.hostname()), a label for clients. */ hostname?: string; capabilities?: string[] } };
+  'daemon.hello': { params: { protocolVersion: 1; client?: { name: string; version: string }; capabilities?: string[] }; result: { protocolVersion: 1; daemonVersion?: string; pid?: number; /** The daemon host's machine name (os.hostname()), a label for clients. */ hostname?: string; promptImageLimits?: { maxCount: number; maxBytes: number; maxTotalBytes: number }; capabilities?: string[] } };
   'daemon.status': {
     params: Empty;
     result: {
@@ -96,12 +96,12 @@ export type RpcMethodMap = {
     result: { kind: LibraryKind; name: string; source: LibrarySource; overrides?: LibrarySource; content: Record<string, unknown>; revision: string | null; usedBy: string[]; librarySkills?: string[]; secrets?: string[] };
   };
   'library.save': {
-    params: { kind: LibraryKind; name: EntryName; scope: LibraryScope; projectRoot?: string; content: Record<string, unknown>; revision?: string | null; sync?: 'none' | 'known-projects' };
+    params: { kind: LibraryKind; name: EntryName; scope: LibraryScope; projectRoot?: string; policy?: 'project-data'; content: Record<string, unknown>; revision?: string | null; sync?: 'none' | 'known-projects' };
     result: { revision: string | null; syncedProjects?: number; syncErrors?: string[] };
   };
-  'library.delete': { params: { kind: LibraryKind; name: EntryName; scope: LibraryScope; projectRoot?: string; revision?: string }; result: { removed: true; now?: 'builtin' | 'library' } };
-  'library.duplicate': { params: { kind: LibraryKind; from: EntryName; to: EntryName; scope: LibraryScope; projectRoot?: string }; result: { revision: string | null } };
-  'library.rename': { params: { kind: LibraryKind; from: EntryName; to: EntryName; scope: LibraryScope; projectRoot?: string }; result: { revision: string | null } };
+  'library.delete': { params: { kind: LibraryKind; name: EntryName; scope: LibraryScope; projectRoot?: string; policy?: 'project-data'; revision?: string }; result: { removed: true; now?: 'builtin' | 'library' } };
+  'library.duplicate': { params: { kind: LibraryKind; from: EntryName; to: EntryName; scope: LibraryScope; projectRoot?: string; policy?: 'project-data' }; result: { revision: string | null } };
+  'library.rename': { params: { kind: LibraryKind; from: EntryName; to: EntryName; scope: LibraryScope; projectRoot?: string; policy?: 'project-data' }; result: { revision: string | null } };
   'library.skills.set': { params: { agent: EntryName; skills: EntryName[] }; result: { skills: string[] } };
   'library.models': { params: Empty; result: { models: Array<{ id: string; label: string; efforts: string[]; effort?: string }> } };
   'settings.language.get': { params: Empty; result: LanguageSetting };

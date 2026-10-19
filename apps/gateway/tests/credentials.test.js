@@ -6,6 +6,9 @@ import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import * as credentials from '../src/credentials.js';
+import { fakeDaemon } from './support/fake-daemon.js';
+import { startGateway } from './support/harness.js';
 import { CredentialStore, TicketBook, createCredential, createGatewayLogger, credentialsFile, listCredentials, parseToken, revokeCredential, rotateCredential, scrubGatewaySecrets } from '../src/index.js';
 
 async function home(t) {
@@ -15,6 +18,87 @@ async function home(t) {
   await mkdir(workspace);
   return { directory, home: path.join(directory, 'gateway'), workspace };
 }
+
+test('reissue replaces grants and secret, preserving device identity and invalidating the old grant', async t => {
+  const { home: gatewayHome, workspace, directory } = await home(t);
+  const second = path.join(directory, 'second');
+  await mkdir(second);
+  const original = await createCredential(gatewayHome, { label: 'phone', workspaces: [workspace], permissions: ['session.write'], modes: ['cafe'] });
+  const store = new CredentialStore({ home: gatewayHome, pollMs: 0 });
+  t.after(() => store.close());
+  await store.reload();
+  const notices = [];
+  store.onChange(change => notices.push(Object.fromEntries(change)));
+  const issued = await credentials.reissueCredential(gatewayHome, original.credential.id, { workspaces: [second], permissions: ['files.read'], modes: ['pho'] });
+  assert.equal(issued.credential.id, original.credential.id);
+  assert.equal(issued.credential.createdAt, original.credential.createdAt);
+  assert.equal(issued.credential.label, 'phone');
+  await store.reload();
+  assert.equal(store.verify(original.token), undefined);
+  assert.deepEqual([...store.verify(issued.token).permissions], ['files.read']);
+  assert.equal(store.verify(issued.token).workspaces[0].path, second);
+  assert.deepEqual([...store.verify(issued.token).modes], ['pho']);
+  assert.deepEqual(notices, [{ [original.credential.id]: 'revoked' }]);
+  const disk = await readFile(credentialsFile(gatewayHome), 'utf8');
+  assert.ok(!disk.includes(parseToken(issued.token).secret));
+  const restarted = new CredentialStore({ home: gatewayHome, pollMs: 0 });
+  t.after(() => restarted.close());
+  await restarted.reload();
+  assert.equal(restarted.verify(original.token), undefined);
+  assert.deepEqual([...restarted.verify(issued.token).permissions], ['files.read']);
+  for (const options of [{ permissions: ['host.admin'] }, { permissions: [] }, { workspaces: ['relative'] }, { workspaces: [] }, { modes: [] }, { expiresAt: 'yesterday' }, { label: '' }]) {
+    await assert.rejects(credentials.reissueCredential(gatewayHome, original.credential.id, options));
+    assert.equal(await readFile(credentialsFile(gatewayHome), 'utf8'), disk, 'invalid edits leave disk unchanged');
+  }
+  await revokeCredential(gatewayHome, original.credential.id);
+  await assert.rejects(credentials.reissueCredential(gatewayHome, original.credential.id, {}), /revoked/);
+});
+
+test('CLI edit/reissue replaces named grants, retains omitted fields, and rejects invalid edits', async t => {
+  const { home: gatewayHome, workspace, directory } = await home(t);
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const run = (...args) => promisify(execFile)(process.execPath, [path.join(import.meta.dirname, '../src/cli.js'), 'credential', ...args], { env: { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory } });
+  const original = JSON.parse((await run('create', '--label', 'phone', '--workspace', workspace, '--permission', 'session.write', '--mode', 'cafe', '--json')).stdout);
+  const edited = JSON.parse((await run('edit', original.credential.id, '--permission', 'files.read', '--expires-in-days', '2', '--json')).stdout);
+  assert.equal(edited.credential.id, original.credential.id);
+  assert.equal(edited.credential.createdAt, original.credential.createdAt);
+  assert.deepEqual(edited.credential.workspaces, original.credential.workspaces);
+  assert.deepEqual(edited.credential.modes, ['cafe']);
+  assert.deepEqual(edited.credential.permissions, ['files.read']);
+  assert.notEqual(edited.token, original.token);
+  const store = new CredentialStore({ home: gatewayHome, pollMs: 0 });
+  t.after(() => store.close());
+  await store.reload();
+  assert.equal(store.verify(original.token), undefined);
+  assert.ok(store.verify(edited.token));
+  const reissued = JSON.parse((await run('reissue', original.credential.id, '--json')).stdout);
+  assert.deepEqual(reissued.credential.permissions, ['files.read']);
+  const before = await readFile(credentialsFile(gatewayHome), 'utf8');
+  for (const flags of [['--permission', 'host.admin'], ['--workspace', 'relative'], ['--permission', ''], ['--expires-in-days', 'Infinity']]) {
+    await assert.rejects(run('edit', original.credential.id, ...flags));
+    assert.equal(await readFile(credentialsFile(gatewayHome), 'utf8'), before);
+  }
+  await run('revoke', original.credential.id);
+  await assert.rejects(run('edit', original.credential.id, '--permission', 'session.write'), /revoked/);
+});
+
+test('reissue closes active old-grant connections, kills outstanding tickets and enforces the replacement grant', async t => {
+  const { workspace } = await home(t);
+  const daemon = fakeDaemon();
+  const gw = await startGateway(t, { daemon, credentials: { phone: { workspaces: [workspace] } } });
+  const active = await gw.rawSession('phone');
+  const pending = await gw.ticket(gw.tokens.phone);
+  const issued = await credentials.reissueCredential(gw.home, gw.ids.phone, { permissions: ['files.read'] });
+  await gw.store.reload();
+  assert.equal((await active.closed).code, 4401);
+  assert.equal((await gw.ticket(gw.tokens.phone)).status, 401);
+  assert.equal((await gw.raw(pending.body.subprotocols)).refused, 401);
+  gw.tokens.phone = issued.token;
+  const replacement = await gw.sdk('phone');
+  await assert.rejects(replacement.client.request('session.list', {}), error => error.code === 1003);
+  assert.equal(daemon.calls('session.list').length, 0, 'old session.read grant cannot reach daemon');
+});
 
 test('a credential is shown once and stored as a hash, with its workspaces resolved by the owner', async t => {
   const { directory, home: gatewayHome, workspace } = await home(t);

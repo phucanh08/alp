@@ -20,11 +20,11 @@ import { CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS } from '@anhlp/alp-protoc
  * its read; `files.read` implies nothing and nothing implies it. Host administration has no remote
  * permission in v1.
  */
-export const PERMISSIONS = Object.freeze(['session.read', 'session.write', 'project.read', 'project.write', 'files.read']);
+export const PERMISSIONS = Object.freeze(['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write']);
 
 /**
- * What `alp-gateway credential create` grants without --permission: every permission but
- * `files.read`, which the owner names for each credential that may read file contents.
+ * What `alp-gateway credential create` grants without --permission: session and project read/write;
+ * files.read and library.write require explicit owner opt-in.
  */
 export const DEFAULT_PERMISSIONS = Object.freeze(['session.read', 'session.write', 'project.read', 'project.write']);
 
@@ -33,7 +33,7 @@ export const DEFAULT_PERMISSIONS = Object.freeze(['session.read', 'session.write
  * Within `library` and `settings.language` some methods stay unexposed and answer -32601
  * `not_exposed` (docs/alp/remote-gateway.md §5.4).
  */
-export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages]);
+export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages]);
 
 /** The codes of docs/protocol/alp-json-rpc-v1.md §5.1 the gateway answers its own refusals with; `data.reason` says why. */
 export const GATEWAY_ERROR = Object.freeze({ forbidden: ERROR.forbidden, unavailable: ERROR.unavailable });
@@ -319,7 +319,7 @@ export function isModelId(value) {
  *   exposed until a contract or policy makes its scope checkable; prohibited: never remote in v1.
  * @typedef {{
  *   status: ExposureStatus,
- *   permission?: 'session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read',
+ *   permission?: 'session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write',
  *   scope: string,
  *   capability?: string,
  *   params?: readonly string[],
@@ -367,10 +367,10 @@ export const EXPOSURE = Object.freeze({
   'settings.language.get': { status: 'exposed', permission: 'session.read', scope: 'none: the language the user reads', capability: CAPABILITY.settingsLanguage, params: [], tests: ['permission'] },
   'library.get': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot (required by the gateway); the entry that applies may come from the library or built-in layers, as library.list rows do; read only. Content is projected by projectLibraryContent: listed fields only, every field that can hold a secret (env, headers, url, cwd, args, params, hook commands, commands with spaces) answered as a secret marker and listed in secrets', capability: CAPABILITY.library, params: ['kind', 'name', 'projectRoot', 'scope'], tests: ['permission', 'workspace-param', 'redaction'] },
 
-  'library.save': { status: 'denied', scope: 'library-or-project', reason: 'Configures commands alpd runs on the daemon host (mcp, hooks, providers, agents naming them) and, with sync, writes every known project; not exposed until a policy tells project-scope, non-executable changes apart.' },
-  'library.delete': { status: 'denied', scope: 'library-or-project', reason: 'Writes ALP configuration; with library.save.' },
-  'library.duplicate': { status: 'denied', scope: 'library-or-project', reason: 'Copies executable configuration, secrets included; with library.save.' },
-  'library.rename': { status: 'denied', scope: 'library-or-project', reason: 'Writes ALP configuration; with library.save.' },
+  'library.save': { status: 'exposed', permission: 'library.write', scope: 'workspace: projectRoot required; project-only agents and skills under authoritative project-data policy; no host/builtin collision, executable config or sidecars', capability: CAPABILITY.libraryProjectWrite, params: ['kind', 'name', 'scope', 'projectRoot', 'content', 'revision', 'sync'], tests: ['permission', 'workspace-param', 'library-policy'] },
+  'library.delete': { status: 'exposed', permission: 'library.write', scope: 'workspace: projectRoot required; project-only agents and skills under authoritative project-data policy; no host/builtin collision, executable config or sidecars', capability: CAPABILITY.libraryProjectWrite, params: ['kind', 'name', 'scope', 'projectRoot', 'revision'], tests: ['permission', 'workspace-param', 'library-policy'] },
+  'library.duplicate': { status: 'exposed', permission: 'library.write', scope: 'workspace: projectRoot required; project-only agents and skills under authoritative project-data policy; no host/builtin collision, executable config or sidecars', capability: CAPABILITY.libraryProjectWrite, params: ['kind', 'from', 'to', 'scope', 'projectRoot'], tests: ['permission', 'workspace-param', 'library-policy'] },
+  'library.rename': { status: 'exposed', permission: 'library.write', scope: 'workspace: projectRoot required; project-only agents and skills under authoritative project-data policy; no host/builtin collision, executable config or sidecars', capability: CAPABILITY.libraryProjectWrite, params: ['kind', 'from', 'to', 'scope', 'projectRoot'], tests: ['permission', 'workspace-param', 'library-policy'] },
   'library.skills.set': { status: 'denied', scope: 'host', reason: 'Host-level write (role-skills.json).' },
   'settings.language.set': { status: 'denied', scope: 'host', reason: 'Host-level write (settings.json).' },
   'daemon.status': { status: 'denied', scope: 'host', reason: 'Host-wide: pid, persistence state and counts across every workspace; the result schema requires pid. Readiness is GET /readyz.' },

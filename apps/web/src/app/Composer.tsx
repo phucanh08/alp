@@ -33,11 +33,12 @@ import { usePaneFocused } from './pane';
  */
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
-export function Composer({ meter, images: takesImages = false, imagesUnavailable, onSend, onQueue, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', startLabel, startHold, initialText, addText, autoFocus, inputId }: {
+export function Composer({ meter, imageLimits, images: takesImages = false, imagesUnavailable, onSend, onQueue, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', startLabel, startHold, initialText, addText, autoFocus, inputId }: {
   /** Paseo's context window meter, before the primary action (t-7679.12). */
   meter?: React.ReactNode;
   /** The session takes images: the + button, paste and drop add them. */
   images?: boolean;
+  imageLimits?: { maxCount: number; maxBytes: number; maxTotalBytes: number };
   /** Why a pasted or dropped image cannot go (the runtime takes none). */
   imagesUnavailable?: string;
   onSend: (text: string, images: ImageAttachment[]) => Promise<unknown>;
@@ -87,13 +88,15 @@ export function Composer({ meter, images: takesImages = false, imagesUnavailable
   // The attached images as of now, set together with the state: a read that ends after a send, a
   // Remove or another paste joins what is attached then, never an earlier copy.
   const attachedRef = React.useRef(attached);
+  const limitsRef = React.useRef(imageLimits);
+  limitsRef.current = imageLimits;
   const setImages = (next: ImageAttachment[]) => { attachedRef.current = next; setAttached(next); };
   /** Adds image files within the limits; a file left out says why. */
   const attach = async (files: File[]) => {
     if (!files.length || reason) return;
     if (!takesImages) { setError(imagesUnavailable ?? 'This session takes no images.'); return; }
-    const { added, error: unread } = await readImages(attachedRef.current, files);
-    const { attachments, error: unfit } = fitImages(attachedRef.current, added);
+    const { added, error: unread } = await readImages(attachedRef.current, files, limitsRef.current);
+    const { attachments, error: unfit } = fitImages(attachedRef.current, added, limitsRef.current);
     setImages(attachments);
     setError(unread ?? unfit);
   };
@@ -139,10 +142,12 @@ export function Composer({ meter, images: takesImages = false, imagesUnavailable
     const body = text.trim();
     const images = attachedRef.current;
     if ((!body && !images.length && !startLabel) || reason || (startLabel && startHold)) return;
+    const fitted = fitImages([], images, limitsRef.current);
+    if (fitted.error) { setError(fitted.error); return; }
     setText('');
     setImages([]);
     setError(null);
-    try { await onSend(body, images); } catch (failure) { setText(body); setImages(fitImages(images, attachedRef.current).attachments); setError(failure instanceof Error ? failure.message : String(failure)); }
+    try { await onSend(body, images); } catch (failure) { setText(body); setImages(fitImages(images, attachedRef.current, limitsRef.current).attachments); setError(failure instanceof Error ? failure.message : String(failure)); }
   };
   const queue = () => {
     const body = text.trim();

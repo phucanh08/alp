@@ -6,7 +6,7 @@ import {
 import { can } from '../lib/gateway.js';
 import { describe } from '../lib/errors.js';
 import { Button } from '../components/ui/button';
-import { NativeSelect } from '../components/ui/input';
+import { Input, NativeSelect } from '../components/ui/input';
 import { Spinner } from '../components/ui/spinner';
 import { baseName, modeLabel } from '../lib/format';
 import { HIDDEN, libraryContentParts } from '../lib/library.js';
@@ -318,6 +318,64 @@ function LibraryEntryView({ kind, name, onClose }: { kind: LibraryKind; name: st
   );
 }
 
+/** Writes pure project instructions; executable and inherited entries stay on the host. */
+function LibraryEditor({ kind, selected, onChanged }: { kind: LibraryKind; selected: string | null; onChanged: () => void }) {
+  const controller = useController();
+  const [name, setName] = React.useState('');
+  const [target, setTarget] = React.useState('');
+  const [content, setContent] = React.useState('');
+  const [revision, setRevision] = React.useState<string | null>(null);
+  const [ready, setReady] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let live = true;
+    setReady(false); setError(null); setTarget('');
+    if (!selected) {
+      setName(''); setRevision(null);
+      setContent(JSON.stringify(kind === 'skills' ? { body: '' } : { instructions: '', config: { description: '' } }, null, 2));
+      setReady(true);
+    } else controller.getLibraryEntry(kind, selected).then(entry => {
+      if (!live) return;
+      if (entry.source !== 'project' || entry.overrides || entry.secrets.length || entry.revision === undefined) {
+        setError('Only project-only instruction entries can be edited here.'); return;
+      }
+      setName(selected); setRevision(entry.revision); setContent(JSON.stringify(entry.content, null, 2)); setReady(true);
+    }, failure => { if (live) setError(describe(failure).message); });
+    return () => { live = false; };
+  }, [controller, kind, selected]);
+  const mutate = async (action: 'save' | 'delete' | 'duplicate' | 'rename') => {
+    setBusy(true); setError(null);
+    try {
+      const params = action === 'save' ? { name, content: JSON.parse(content), revision } : action === 'delete' ? { name, revision } : { from: name, to: target };
+      const result = await controller.writeLibrary(action, kind, params);
+      if (action === 'save') setRevision(result.revision);
+      if (action === 'delete' || action === 'rename') setReady(false);
+      onChanged();
+    } catch (failure) { setError(describe(failure).message); }
+    finally { setBusy(false); }
+  };
+  return <Section title={selected ? 'Edit project instructions' : 'New project instructions'}>
+    <div className="flex flex-col gap-3 p-4">
+      <p className="text-xs text-muted-foreground">Agents and skills only. Host entries, executable configuration, references and extra files cannot be changed here.</p>
+      {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
+      {ready ? <>
+        <Input aria-label="Entry name" value={name} onChange={e => setName(e.target.value)} disabled={busy || !!selected} placeholder="Entry name" />
+        <textarea aria-label="Instruction entry JSON" className="min-h-48 rounded border border-border bg-background p-2 font-mono text-xs" value={content} onChange={e => setContent(e.target.value)} disabled={busy} />
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" disabled={busy || !name.trim()} onClick={() => void mutate('save')}>Save project entry</Button>
+          {selected ? <Button size="sm" variant="secondary" disabled={busy} onClick={() => void mutate('delete')}>Delete project entry</Button> : null}
+        </div>
+        {selected ? <div className="flex flex-wrap gap-2">
+          <Input aria-label="New entry name" value={target} onChange={e => setTarget(e.target.value)} placeholder="New name" disabled={busy} />
+          <Button size="sm" variant="secondary" disabled={busy || !target.trim()} onClick={() => void mutate('duplicate')}>Duplicate</Button>
+          <Button size="sm" variant="secondary" disabled={busy || !target.trim()} onClick={() => void mutate('rename')}>Rename</Button>
+        </div> : null}
+      </> : null}
+    </div>
+  </Section>;
+}
+
 function Library({ kind, noun }: { kind: LibraryKind; noun: string }) {
   const controller = useController();
   const { workspace } = useAppState();
@@ -354,8 +412,9 @@ function Library({ kind, noun }: { kind: LibraryKind; noun: string }) {
           </button>
         ))}
       </Section>
+      {!controller.libraryWriteBlock(kind) ? <LibraryEditor key={`${kind}:${workspace}:${open ?? 'new'}`} kind={kind} selected={open} onChanged={() => load()} /> : null}
       {open ? <LibraryEntryView kind={kind} name={open} onClose={() => setOpen(null)} /> : null}
-      <Unavailable what={`Editing ${noun}`} why={`Open an entry to read it. Values that can hold secrets (environment, headers, MCP URLs and arguments, hook commands) show as ${HIDDEN}. Changes configure commands the host runs, so edit them on the host with alp.`} />
+      {controller.libraryWriteBlock(kind) ? <Unavailable what={`Editing ${noun}`} why={`${controller.libraryWriteBlock(kind)} Open an entry to read it. Values that can hold secrets (environment, headers, MCP URLs and arguments, hook commands) show as ${HIDDEN}. Changes configure commands the host runs, so edit them on the host with alp.`} /> : null}
     </>
   );
 }

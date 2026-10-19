@@ -131,3 +131,51 @@ for (const placement of ['scope', 'kind', 'entry', 'file']) {
     }
   });
 }
+
+
+test('project-data mutations support pure project agents and skills only', async t => {
+  const { root, options } = await setup(t);
+  const safe = { ...options, scope: 'project', policy: 'project-data' };
+  for (const [kind, content] of [['agents', { instructions: 'Write docs', config: { description: 'Writer', model: 'codex:gpt-6.1-sol' } }], ['skills', { body: 'Review docs' }]]) {
+    const saved = await saveEntry(kind, 'remote-writer', content, { ...safe, revision: null });
+    assert.ok(saved.revision);
+    await saveEntry(kind, 'remote-writer', content, { ...safe, revision: saved.revision });
+    await duplicateEntry(kind, 'remote-writer', 'remote-copy', safe);
+    await renameEntry(kind, 'remote-copy', 'remote-renamed', safe);
+    assert.equal((await getEntry(kind, 'remote-renamed', options)).source, 'project');
+    await deleteEntry(kind, 'remote-renamed', safe);
+    await deleteEntry(kind, 'remote-writer', safe);
+  }
+});
+
+test('project-data rejects host writes, execution references, sidecars and fallback changes before mutation', async t => {
+  const { root, library, options } = await setup(t);
+  const safe = { ...options, scope: 'project', policy: 'project-data' };
+  const denied = promise => assert.rejects(promise, { code: 'UNSAFE_LIBRARY_WRITE' });
+  await denied(saveEntry('skills', 'remote', { body: 'text' }, { ...safe, scope: 'library' }));
+  for (const kind of ['mcp', 'hooks', 'providers', 'teams']) await denied(saveEntry(kind, 'remote', {}, safe));
+  for (const config of [{ hooks: [] }, { mcp: ['host-server'] }, { provider: 'host-command' }, { skills: [] }, { mode: 'full-access' }, { model: 'acp:host-command' }, { futureExec: true }]) {
+    await denied(saveEntry('agents', 'remote', { instructions: 'text', config }, safe));
+  }
+  await saveEntry('agents', 'local-only', { instructions: 'old', config: { provider: 'codex' } }, { ...options, scope: 'project' });
+  await denied(saveEntry('agents', 'local-only', { instructions: 'new' }, safe));
+  await denied(duplicateEntry('agents', 'local-only', 'copy', safe));
+  await denied(renameEntry('agents', 'local-only', 'renamed', safe));
+  await denied(deleteEntry('agents', 'local-only', safe));
+  assert.equal((await getEntry('agents', 'local-only', options)).content.instructions, 'old\n');
+  await saveEntry('skills', 'has-assets', { body: 'old' }, safe);
+  await writeFile(path.join(root, '.alp/skills/has-assets/run.sh'), 'executable sidecar');
+  for (const mutate of [() => saveEntry('skills', 'has-assets', { body: 'new' }, safe), () => deleteEntry('skills', 'has-assets', safe), () => duplicateEntry('skills', 'has-assets', 'copy', safe), () => renameEntry('skills', 'has-assets', 'renamed', safe)]) await denied(mutate());
+  assert.equal(await readFile(path.join(root, '.alp/skills/has-assets/run.sh'), 'utf8'), 'executable sidecar');
+  await saveEntry('agents', 'host-agent', { instructions: 'host', config: { provider: 'codex' } }, { ...options, scope: 'library' });
+  await denied(saveEntry('agents', 'host-agent', { instructions: 'override' }, safe));
+  await saveEntry('agents', 'host-agent', { instructions: 'project' }, { ...options, scope: 'project' });
+  await denied(deleteEntry('agents', 'host-agent', safe));
+  await denied(renameEntry('agents', 'host-agent', 'renamed', safe));
+  await denied(duplicateEntry('agents', 'host-agent', 'copy', safe));
+  await denied(saveEntry('agents', 'main', { instructions: 'builtin override' }, safe));
+  // Destination collisions in lower layers are refused too.
+  await saveEntry('agents', 'safe-source', { instructions: 'pure' }, safe);
+  await denied(duplicateEntry('agents', 'safe-source', 'host-agent', safe));
+  await denied(renameEntry('agents', 'safe-source', 'main', safe));
+});

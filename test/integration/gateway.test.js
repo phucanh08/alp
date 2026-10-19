@@ -279,7 +279,7 @@ test('another credential cannot see, attach, prompt or receive the session or to
   assert.equal(main.source, 'builtin');
   assert.equal(typeof main.content.instructions, 'string');
   await assert.rejects(owner.request('library.get', { kind: 'agents', name: 'main', projectRoot: w.projects.b }), error => error.code === 1003);
-  await assert.rejects(owner.request('library.save', { kind: 'mcp', name: 'x', scope: 'library', content: { command: 'sh' } }), error => error.code === -32601);
+  await assert.rejects(owner.request('library.save', { kind: 'mcp', name: 'x', scope: 'library', content: { command: 'sh' } }), error => error.code === 1003 && error.data.permission === 'library.write');
   await assert.rejects(other.request('task.list', { projectRoot: w.projects.a }), error => error.code === 1003);
   await assert.rejects(other.request('task.create', { projectRoot: w.projects.a, title: 'intruder' }), error => error.code === 1003);
   await assert.rejects(other.request('task.update', { projectRoot: w.projects.a, id: task, action: 'reopen' }), error => error.code === 1003);
