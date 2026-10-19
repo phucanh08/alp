@@ -32,7 +32,10 @@ export type Session = {
   peerCount: number;
   /** Live assignments this session requested, keyed by child session id. */
   assignments: Map<string, Assignment>;
+  /** Root-tree implementation starts since the last new root user turn. */
   calls: number;
+  /** Separate finite budget for mandatory read-only reviewer/oracle starts. */
+  advisorCalls: number;
 
   mail: MailEvent[];
   waiters: Waiter[];

@@ -153,6 +153,7 @@ export function nativeSessionConfig(
   }
   const delegationInstruction = targets.length
     ? `Use alp_delegate to assign bounded work to: ${targets.join(', ')}. ` +
+      'Delegation has two finite budgets shared by the entire root session tree: 16 implementation starts (lead/peer) and separately 16 read-only advisor starts (reviewer/oracle). Only a new accepted user prompt in root, including steering, resets both; child turns, mail wakes and approval answers do not. Started assignments count even when they fail. ' +
       'Work runs in the background: by default alp_delegate starts the assignment and returns its assignmentId at once, and its result, questions and stall reports come to you as mail. ' +
       'Pass wait: true only when your very next step cannot go on without the result; it then returns the result, or early with the child\'s first question. ' +
       'A result carries the child\'s structured handoff (null if it filed none) and output, its final message. ' +
@@ -250,7 +251,7 @@ export function nativeSessionConfig(
             type: 'function',
             name: 'alp_delegate',
             description:
-              'Delegate a bounded task to an authorized ALP agent and wait for its real handoff.',
+              'Delegate a bounded task to an authorized ALP agent. Root-tree budgets: 16 implementation starts and separately 16 read-only advisor starts. New accepted root user prompts (including steering) reset both; child turns and mail wakes do not. The default returns immediately; wait true waits for handoff.',
             inputSchema: {
               type: 'object',
               properties: {

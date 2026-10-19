@@ -259,7 +259,7 @@ export const SKILL_TOOL = {
 export const ISSUE_TOOL = {
   type: 'function',
   name: 'alp_issue',
-  description: 'GitHub issues of this project (target project, from its origin remote) or of ALP itself (target alp). search needs no approval. create and comment show the whole draft to the user and post it only when the user approves; any other answer comes back as feedback.',
+  description: 'GitHub issues of this project (target project, from its origin remote) or of ALP itself (target alp). search needs no approval. create and comment show the whole draft to the user and post it only when the user approves; create/comment return pending_approval with approvalId immediately, then send one decision/posting result by mail, even after your turn ends. Continue other work. Draft retries return the existing pending/result in this session. Use a fresh requestId only to intentionally propose an identical draft again; reuse one requestId with the exact draft to replay safely.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -269,6 +269,7 @@ export const ISSUE_TOOL = {
       title: { type: 'string', description: 'For create.' },
       body: { type: 'string', description: 'For create and comment: Markdown. Facts, reproduction and evidence; no secrets.' },
       issue: { type: 'integer', description: 'For comment: the issue number.' },
+      requestId: { type: 'string', description: 'Optional session-scoped idempotency key (1-100 characters). Reuse with the same draft on retries; a fresh key explicitly proposes a new operation.' },
       labels: { type: 'array', items: { type: 'string' }, description: 'For create: existing labels of the repository.' },
     },
     required: ['action', 'target'],

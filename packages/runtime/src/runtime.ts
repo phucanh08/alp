@@ -238,7 +238,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       clearTimeout(waiter.timer);
       waiter.resolve(null);
     }
-    cancelQuestions(sessionId);
+    cancelQuestions(sessionId, true);
     if (session.parent) sessions.get(session.parent)?.assignments.get(sessionId)?.ask?.resolve(toolResult(false, { error: 'Turn ended' }));
 
     // Mail is acknowledged only by a turn that completed; otherwise it is delivered again.
@@ -484,6 +484,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     session.closed = true;
     cancelQuestions(sessionId);
+    issueApprovals.delete(sessionId);
     releaseClaims(sessionId, session.mapping.agent.projectRoot);
 
     await Promise.all(
@@ -624,7 +625,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   const boards = new Map<string, Promise<Pin[]>>();
   /** The same boards once loaded, for synchronous status. */
   const loadedBoards = new Map<string, Pin[]>();
-  const userQuestions = new Map<string, { question: UserQuestion; settle: (outcome: 'answered' | 'dismissed' | 'timeout' | 'canceled', answer?: string, reason?: string, result?: unknown) => void }>();
+  const userQuestions = new Map<string, { question: UserQuestion; persistent?: boolean; settle: (outcome: 'answered' | 'dismissed' | 'timeout' | 'canceled', answer?: string, reason?: string, result?: unknown) => void }>();
   let mailSequence = 0;
   let watchdog: NodeJS.Timeout | undefined;
 
@@ -793,6 +794,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       : entry.event === 'task' ? `${entry.agent} ${TASK_PAST[entry.action] ?? entry.action} task ${entry.id} "${clip(entry.title, 120)}"${entry.status ? ` (now ${entry.status})` : ''}${entry.detail ? `: ${clip(entry.detail)}` : ''}`
       : entry.event === 'epic.landed' ? `${entry.agent} closed ${entry.id} "${clip(entry.title, 120)}": ${entry.tasks} tasks, ${entry.reworked} reworked, ${entry.unverified?.length ?? 0} closed unverified`
       : entry.event === 'recall' ? `${entry.agent} recalled ${entry.recalled} assignment ${entry.assignmentId}: ${clip(entry.question)}`
+      : entry.event === 'issue.approval' ? `issue approval ${entry.approvalId} in ${entry.repo}: ${entry.posted ? entry.url : entry.error ?? entry.outcome}`
       : entry.event === 'issue' ? `${entry.action === 'create' ? `opened issue "${clip(entry.title, 200)}"` : `commented on issue #${entry.issue}`} in ${entry.repo} with the user's approval: ${entry.url}`
       : entry.event?.startsWith('worktree.') ? `${entry.event.slice('worktree.'.length)} worktree of ${entry.assignmentId} (${entry.branch})${entry.status ? `: ${entry.status}` : ''}`
       : undefined;
@@ -1478,10 +1480,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
    * Asks the user to approve a proposal and waits for the answer. Only an approving
    * answer approves; a dismissal, a timeout or another answer does not.
    */
-  async function confirm(sessionId: string, session: Session, body: string): Promise<{ approved: boolean; feedback?: string; outcome?: string }> {
+  async function confirm(sessionId: string, session: Session, body: string, approval?: { id: string }): Promise<{ approved: boolean; feedback?: string; outcome?: string }> {
     if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId)) return { approved: false, outcome: 'busy', feedback: 'A question is already waiting for the user' };
     const say = wordsFor(session);
-    const result = await askUser(sessionId, session, undefined, body, [say.approve, say.reject]) as { contentItems: Array<{ text: string }> };
+    const result = await askUser(sessionId, session, undefined, body, [say.approve, say.reject], approval) as { contentItems: Array<{ text: string }> };
     let value: any;
     try { value = JSON.parse(result.contentItems[0].text); } catch { value = {}; }
     if (value.status !== 'answered') return { approved: false, outcome: value.status ?? 'canceled', ...(value.reason ? { feedback: value.reason } : {}) };
@@ -1565,8 +1567,14 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     });
   }
 
+  // Retain draft identities until session close: tool/turn replay must never repost.
+  const issueCancellation = new WeakMap<Session, number>();
+  const issueApprovals = new Map<string, Map<string, { approvalId: string; draftKey: string; result?: Record<string, unknown> }>>();
+
   async function issueTool(sessionId: string, session: Session, args: unknown) {
-    if (!plainObject(args, ['action', 'target', 'query', 'title', 'body', 'issue', 'labels']) || !['search', 'create', 'comment'].includes(args.action) || !['project', 'alp'].includes(args.target)) {
+    const cancellation = issueCancellation.get(session) ?? 0;
+    args = structuredClone(args);
+    if (!plainObject(args, ['action', 'target', 'query', 'title', 'body', 'issue', 'labels', 'requestId']) || !['search', 'create', 'comment'].includes(args.action) || !['project', 'alp'].includes(args.target)) {
       return toolResult(false, { error: 'An issue call needs action (search, create or comment) and target (project or alp)' });
     }
     const project = session.mapping.agent.projectRoot;
@@ -1589,6 +1597,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (args.labels !== undefined && (args.action !== 'create' || !Array.isArray(args.labels) || args.labels.length > 10 || !args.labels.every((label: unknown) => text(label, 50)))) {
       return toolResult(false, { error: 'labels are up to 10 existing label names, for create' });
     }
+    if (args.requestId !== undefined && !text(args.requestId, 100)) return toolResult(false, { error: 'requestId must be a nonempty string of at most 100 characters' });
     // Resolve labels before approval, so a draft with an unknown label never
     // consumes the user's approval and then fails during issue creation.
     if (args.action === 'create' && args.labels?.length) {
@@ -1601,24 +1610,49 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         return toolResult(false, { repo, error: `Could not validate issue labels: ${errorData(error).message}` });
       }
     }
+    if (closed || session.closed || cancellation !== (issueCancellation.get(session) ?? 0)) return toolResult(false, { error: 'Issue proposal canceled or session closed; no approval was created' });
+    const draftKey = JSON.stringify([repo, args.action, args.title ?? null, args.issue ?? null, args.body, [...(args.labels ?? [])].sort()]);
+    const key = args.requestId ?? draftKey;
+    let approvals = issueApprovals.get(sessionId);
+    if (!approvals) issueApprovals.set(sessionId, approvals = new Map());
+    const previous = approvals.get(key);
+    if (previous && previous.draftKey !== draftKey) return toolResult(false, { error: 'requestId was already used for a different draft' });
+    if (previous) return toolResult(true, previous.result ?? { status: 'pending_approval', approvalId: previous.approvalId, repo });
+    if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId)) return toolResult(false, { error: 'A question is already waiting for the user; finish it before proposing another issue draft' });
+    const approvalId = `q-${randomUUID()}`;
+    const record: { approvalId: string; draftKey: string; result?: Record<string, unknown> } = { approvalId, draftKey };
+    approvals.set(key, record);
     const where = `${repo}${args.target === 'alp' ? ' (ALP itself)' : ''}`;
     const say = wordsFor(session);
-    const decision = await confirm(sessionId, session,
+    const decision = confirm(sessionId, session,
       say.issue(session.mapping.agent.name, args.action === 'create', args.issue, where) + '\n' +
       `${say.answerLine(session.mapping.agent.name)}\n\n` +
-      (args.action === 'create' ? `${say.issueTitle}: ${args.title}\n${args.labels?.length ? `${say.issueLabels}: ${args.labels.join(', ')}\n` : ''}\n` : '') + args.body);
-    if (!decision.approved) return declined(decision);
-    const body = args.body.trim() + ISSUE_FOOTER;
-    try {
-      const output = args.action === 'create'
-        ? await github(['issue', 'create', '-R', repo, '--title', args.title, '--body-file', '-', ...(args.labels ?? []).flatMap((label: string) => ['--label', label])], { cwd: project, input: body })
-        : await github(['issue', 'comment', String(args.issue), '-R', repo, '--body-file', '-'], { cwd: project, input: body });
-      const url = output.trim().split('\n').at(-1) ?? '';
-      runLog(rootOf(sessionId), { event: 'issue', action: args.action, repo, ...(args.title ? { title: args.title } : {}), ...(args.issue ? { issue: args.issue } : {}), url });
-      return toolResult(true, { approved: true, posted: true, repo, url });
-    } catch (error) {
-      return toolResult(false, { approved: true, posted: false, repo, error: errorData(error).message, next: 'Tell the user; the GitHub CLI may need `gh auth login`.' });
-    }
+      (args.action === 'create' ? `${say.issueTitle}: ${args.title}\n${args.labels?.length ? `${say.issueLabels}: ${args.labels.join(', ')}\n` : ''}\n` : '') + args.body.trim() + ISSUE_FOOTER, { id: approvalId });
+    void (async () => {
+      const answer = await decision;
+      let result: Record<string, unknown>;
+      const canceled = closed || session.closed || cancellation !== (issueCancellation.get(session) ?? 0);
+      if (!answer.approved || canceled) {
+        result = { approved: false, posted: false, outcome: canceled ? 'canceled' : answer.outcome, ...(answer.feedback ? { feedback: answer.feedback } : {}) };
+      } else {
+        try {
+          const body = args.body.trim() + ISSUE_FOOTER;
+          const output = args.action === 'create'
+            ? await github(['issue', 'create', '-R', repo, '--title', args.title, '--body-file', '-', ...(args.labels ?? []).flatMap((label: string) => ['--label', label])], { cwd: project, input: body })
+            : await github(['issue', 'comment', String(args.issue), '-R', repo, '--body-file', '-'], { cwd: project, input: body });
+          result = { approved: true, posted: true, url: output.trim().split('\n').at(-1) ?? '' };
+        } catch (error) {
+          result = { approved: true, posted: false, error: errorData(error).message, next: 'Tell the user; do not retry this draft automatically: GitHub may have accepted it before reporting an error.' };
+        }
+      }
+      record.result = { status: 'resolved', approvalId, repo, ...result };
+      runLog(rootOf(sessionId), { event: 'issue.approval', action: args.action, ...(args.title ? { title: args.title } : {}), ...(args.issue ? { issue: args.issue } : {}), ...record.result });
+      if (!closed && !session.closed && sessions.get(sessionId) === session) {
+        // Result mail renews the bounded wake allowance and reaches this main only.
+        post(sessionId, { kind: 'result', from: 'ALP', assignment: approvalId, body: `Issue approval result: ${JSON.stringify(record.result)}` });
+      }
+    })();
+    return toolResult(true, { status: 'pending_approval', approvalId, repo, next: 'Continue other work. ALP sends the decision and posting result by mail; do not resubmit this draft.' });
   }
 
   /** Activity anywhere in a subtree keeps its ancestors' assignments alive. */
@@ -2160,10 +2194,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   }
 
   /** Asks the user; viewers show the question, and answer() or a timeout resolves it. */
-  function askUser(sessionId: string, session: Session, assignment: Assignment | undefined, body: string, options?: string[]) {
+  function askUser(sessionId: string, session: Session, assignment: Assignment | undefined, body: string, options?: string[], approval?: { id: string }) {
     const rootId = rootOf(sessionId);
     const question: UserQuestion = {
-      id: `q-${randomUUID().slice(0, 8)}`,
+      id: approval?.id ?? `q-${randomUUID().slice(0, 8)}`,
       sessionId,
       rootId,
       agent: session.mapping.agent.name,
@@ -2191,7 +2225,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
             next: 'Decide, and record the assumption in your handoff or final message; or report that you are blocked.',
           })));
       };
-      userQuestions.set(question.id, { question, settle });
+      userQuestions.set(question.id, { question, settle, persistent: !!approval });
       // The watchdog does not count time spent waiting for an answer.
       if (assignment) assignment.ask = { id: question.id, resolve: result => settle('canceled', undefined, undefined, result) };
       emit(sessionId, { type: 'question', question });
@@ -2209,10 +2243,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     post(session.parent, { kind: 'note', from: session.mapping.agent.name, assignment: sessionId, body: `[ALP, on behalf of ${session.mapping.agent.name}] ${body}` });
   }
 
-  /** Questions to the user end with the turn or session that asked them. */
-  function cancelQuestions(sessionId: string) {
-    for (const { question, settle } of [...userQuestions.values()]) {
-      if (question.sessionId === sessionId) settle('canceled', undefined, undefined, toolResult(false, { error: 'Turn ended' }));
+  /** Ordinary questions end with their turn; issue approvals survive until decision or session cancellation. */
+  function cancelQuestions(sessionId: string, turnOnly = false) {
+    for (const { question, settle, persistent } of [...userQuestions.values()]) {
+      if (question.sessionId === sessionId && (!turnOnly || !persistent)) settle('canceled', undefined, undefined, toolResult(false, { error: 'Turn ended' }));
     }
   }
 
@@ -2426,9 +2460,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const rootId = rootOf(sessionId);
     const root = sessions.get(rootId)!;
 
-    if (root.calls >= 16) {
+    const advisor = ['advisor', 'reviewer'].includes(roleOf(session.mapping, args.agent) ?? '') && childMode === 'read-only';
+    const budget = advisor ? 'advisorCalls' : 'calls';
+    if (root[budget] >= 16) {
       return toolResult(false, {
-        error: 'Delegation limit reached for this turn',
+        error: `${advisor ? 'Advisor' : 'Implementation'} delegation budget exhausted (16 starts across the root session tree since its last new user turn). Mail wakes and child turns do not reset it; a new accepted user prompt in root (including steering) resets both budgets.`,
       });
     }
 
@@ -2443,7 +2479,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const continued = args.continueFrom !== undefined ? session.worktrees.get(args.continueFrom) : undefined;
     if (args.continueFrom !== undefined && !continued && !sharedContinuation) return toolResult(false, { error: `${args.continueFrom} was merged or discarded meanwhile` });
     if (continued) session.worktrees.delete(args.continueFrom);
-    root.calls++;
+    root[budget]++;
     if (peer) root.peerCount++;
 
     const childId = `alp-child-${randomUUID()}`;
@@ -2713,6 +2749,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       peerCount: 0,
       assignments: new Map(),
       calls: 0,
+      advisorCalls: 0,
       mail: [],
       waiters: [],
       lastActivity: Date.now(),
@@ -3166,6 +3203,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     session.wakeBlocked = true;
     session.userStopped = true;
+    issueCancellation.set(session, (issueCancellation.get(session) ?? 0) + 1);
+    cancelQuestions(sessionId);
     // Codex keeps no output of an interrupted turn in its thread: remember what the user saw, by
     // thread, since a client that leaves closes the session and the next prompt opens it again.
     if (activeTurn && session.runtimeKind === 'codex' && session.threadId) {
@@ -3279,10 +3318,6 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         session.wakeFailures = 0;
         session.wakeBlocked = false;
         session.userStopped = false;
-
-        if (!session.parent) {
-          session.calls = 0;
-        }
       }
     }
 
@@ -3347,6 +3382,12 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
           : result.turn.id;
 
       for (const event of mail) event.deliveredTurn = turnId;
+
+      // Only transport-accepted user input renews the root-tree budgets.
+      if (!session.parent && origin === 'user') {
+        session.calls = 0;
+        session.advisorCalls = 0;
+      }
 
       session.seen.add(
         prompt.clientMessageId,

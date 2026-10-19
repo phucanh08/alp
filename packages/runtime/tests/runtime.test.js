@@ -239,3 +239,55 @@ for (const existing of ['new', 'public', 'symlink']) {
     } else assert.equal(await readFile(existing === 'symlink' ? external : file, 'utf8'), 'original');
   });
 }
+
+test('root implementation budget preserves a separate finite advisor budget across main and lead', async t => {
+  const { root, runtime, runtimes, of } = await setup(t);
+  await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead', 'reviewer'], lead: ['peer', 'oracle'] } }));
+  await runtime.open('root', { cwd: root }); await runtime.prompt('root', prompt('first', 'Work'));
+  const main = runtimes[0];
+  const first = decode(await main.call('alp_delegate', { agent: 'lead', task: 'Work' }));
+  await until(() => runtimes[1]?.calls.some(c => c.method === 'turn/start'));
+  const lead = runtimes[1];
+  let budgetCall = 0;
+  for (const transport of [main, lead]) { const call = transport.call.bind(transport); transport.call = (tool, args) => call(tool, args, 'budget-' + ++budgetCall); }
+  for (let i = 0; i < 15; i++) {
+    const child = decode(await lead.call('alp_delegate', { agent: 'peer', task: 'Work', mode: 'read-only' }));
+    assert.equal(child.status, 'running');
+    await lead.call('alp_cancel', { assignmentId: child.assignmentId });
+  }
+  assert.match(decode(await lead.call('alp_delegate', { agent: 'peer', task: 'No' })).error, /implementation.*16.*root.*user/i);
+  const advisor = decode(await lead.call('alp_delegate', { agent: 'oracle', model: 'codex:gpt-6-astra', task: 'Advise' }));
+  assert.equal(advisor.status, 'running', JSON.stringify(advisor));
+  await lead.call('alp_cancel', { assignmentId: advisor.assignmentId });
+  for (let i = 0; i < 15; i++) {
+    const review = decode(await main.call('alp_delegate', { agent: 'reviewer', task: 'Review' }));
+    assert.equal(review.status, 'running'); await main.call('alp_cancel', { assignmentId: review.assignmentId });
+  }
+  assert.match(decode(await main.call('alp_delegate', { agent: 'reviewer', task: 'No' })).error, /advisor.*16.*root.*user/i);
+  // Automatic wake (even from a user note) is not a new authenticated prompt.
+  await main.call('alp_cancel', { assignmentId: first.assignmentId });
+  main.finish(); runtime.message('root', 'Status');
+  await until(() => of('root', 'turn.started').length === 2);
+  assert.match(decode(await main.call('alp_delegate', { agent: 'reviewer', task: 'No reset on wake' })).error, /Advisor delegation budget/);
+  // A rejected transport prompt must not mint a fresh delegation budget.
+  const nativeRequest = main.request.bind(main);
+  main.request = async (method, params) => { if (method === 'turn/steer') throw new Error('injected steering rejection'); return nativeRequest(method, params); };
+  await runtime.prompt('root', { ...prompt('rejected', 'Continue'), delivery: 'steer' });
+  assert.match(of('root', 'prompt.failed').at(-1).error.message, /injected steering rejection/);
+  main.request = nativeRequest;
+  assert.match(decode(await main.call('alp_delegate', { agent: 'reviewer', task: 'No reset on rejection' })).error, /Advisor delegation budget/);
+  // New actual steering resets once; replaying its client ID must not reset again.
+  const steering = { ...prompt('steering', 'Continue'), delivery: 'steer' };
+  await runtime.prompt('root', steering);
+  for (let i = 0; i < 16; i++) {
+    const review = decode(await main.call('alp_delegate', { agent: 'reviewer', task: 'Review' }));
+    assert.equal(review.status, 'running'); await main.call('alp_cancel', { assignmentId: review.assignmentId });
+  }
+  await runtime.prompt('root', steering);
+  assert.match(decode(await main.call('alp_delegate', { agent: 'reviewer', task: 'No reset on duplicate' })).error, /Advisor delegation budget/);
+  // Exhausting advisors leaves implementation slots available after the reset.
+  const implementation = decode(await main.call('alp_delegate', { agent: 'lead', task: 'Work' }));
+  assert.equal(implementation.status, 'running'); await main.call('alp_cancel', { assignmentId: implementation.assignmentId });
+  main.finish(); await runtime.prompt('root', prompt('second', 'Continue'));
+  assert.equal(decode(await main.call('alp_delegate', { agent: 'reviewer', task: 'Review' })).status, 'running');
+});

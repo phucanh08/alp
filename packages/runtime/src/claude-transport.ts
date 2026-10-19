@@ -73,6 +73,7 @@ export const toolShapes: Record<string, Record<string, z.ZodType>> = {
     action: z.enum(['search', 'create', 'comment']),
     target: z.enum(['project', 'alp']),
     query: z.string().min(1).max(200).optional(),
+    requestId: z.string().min(1).max(100).optional(),
     title: z.string().min(1).max(200).optional(),
     body: z.string().min(1).max(20_000).optional(),
     issue: z.number().int().positive().optional(),

@@ -217,7 +217,7 @@ test('a root turn has a bounded total number of child assignments', async t => {
     await until(() => runtimes[i]?.calls.some(c => c.method === 'turn/start'));
     runtimes[i].finish(); assert.equal((await result).success, true);
   }
-  assert.match(decode(await runtimes[0].tool('lead', 'task', {}, 'excess')).error, /limit reached/);
+  assert.match(decode(await runtimes[0].tool('lead', 'task', {}, 'excess')).error, /Implementation delegation budget.*16.*root.*user/);
   assert.equal(runtimes.length, 17);
 });
 
