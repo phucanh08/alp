@@ -14,7 +14,8 @@ import {
 } from '../../scripts/release-lib.mjs';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
-const VERSION = '0.0.0-beta.1';
+// Synthetic semver: unrelated to any current or published release.
+const VERSION = '42.17.9-fixture.314';
 const SHA = 'a'.repeat(40);
 const LICENSE = 'Apache License\nVersion 2.0\n';
 const NOTICE = 'ALP\nCopyright 2026\n';
@@ -90,6 +91,10 @@ function writeRelease(directory, { change, git = { sha: SHA, tag: `v${VERSION}`,
   return manifest;
 }
 
+function fixtureEnv(directory) {
+  return { PATH: process.env.PATH, HOME: directory, ALP_HOME: path.join(directory, 'home') };
+}
+
 function withRelease(options, check) {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'alp-release-test-'));
   try { return check(directory, writeRelease(directory, options)); } finally { rmSync(directory, { recursive: true, force: true }); }
@@ -101,8 +106,8 @@ test('digests are npm\'s integrity and shasum plus the SHA-256 that SHA256SUMS l
   assert.equal(abc.shasum, 'a9993e364706816aba3e25717850c26c9cd0d89d');
   assert.equal(abc.integrity, 'sha512-3a81oZNherrMQXNJriBBMRLm+k6JqX6iCp7u5ktV05ohkpkqJ0/BqDa6PCOj/uu9RU1EI2Q86A4qmslPpUyknw==');
   assert.equal(abc.size, 3);
-  assert.equal(tarballFilename('@anhlp/alp-core', VERSION), 'anhlp-alp-core-0.0.0-beta.1.tgz');
-  assert.equal(tarballFilename('@anhlp/alp', VERSION), 'anhlp-alp-0.0.0-beta.1.tgz');
+  assert.equal(tarballFilename('@anhlp/alp-core', VERSION), 'anhlp-alp-core-42.17.9-fixture.314.tgz');
+  assert.equal(tarballFilename('@anhlp/alp', VERSION), 'anhlp-alp-42.17.9-fixture.314.tgz');
 });
 
 test('SHA256SUMS is written sorted in sha256sum format and read back, binary marker included', () => {
@@ -131,23 +136,25 @@ test('the source check wants exactly the eight packages public, one version, pin
 
   const broken = structuredClone(workspaces);
   broken.at(-1).pkg.private = false;
-  broken[2].pkg.dependencies['@anhlp/alp-protocol'] = '^0.0.0-beta.1';
+  broken[2].pkg.dependencies['@anhlp/alp-protocol'] = '^42.17.9-fixture.314';
   broken[3].pkg.version = '0.0.0-beta';
   assert.deepEqual(sourceProblems({ workspaces: broken, lock, version: VERSION }), [
     '@anhlp/alp-gateway is public but not a release package; mark it "private": true',
-    '@anhlp/alp-runtime: dependencies @anhlp/alp-protocol@^0.0.0-beta.1, not pinned to 0.0.0-beta.1',
-    '@anhlp/alp-runtime: package-lock.json dependencies @anhlp/alp-protocol@0.0.0-beta.1 differs from package.json ^0.0.0-beta.1; run npm install',
-    '@anhlp/alp-client: version 0.0.0-beta, expected 0.0.0-beta.1',
+    '@anhlp/alp-runtime: dependencies @anhlp/alp-protocol@^42.17.9-fixture.314, not pinned to 42.17.9-fixture.314',
+    '@anhlp/alp-runtime: package-lock.json dependencies @anhlp/alp-protocol@42.17.9-fixture.314 differs from package.json ^42.17.9-fixture.314; run npm install',
+    '@anhlp/alp-client: version 0.0.0-beta, expected 42.17.9-fixture.314',
   ]);
   const staleLock = structuredClone(lock);
   staleLock.packages['packages/core'].version = '0.10.0';
-  assert.deepEqual(sourceProblems({ workspaces, lock: staleLock, version: VERSION }), ['@anhlp/alp-core: package-lock.json records 0.10.0, expected 0.0.0-beta.1']);
+  assert.deepEqual(sourceProblems({ workspaces, lock: staleLock, version: VERSION }), ['@anhlp/alp-core: package-lock.json records 0.10.0, expected 42.17.9-fixture.314']);
   assert.match(sourceProblems({ workspaces, lock, version: 'beta' })[0], /not a semver version/);
 });
 
 test('this repository passes the release source check at its own version', () => {
-  const result = spawnSync(process.execPath, ['scripts/release-check.mjs'], { cwd: root, encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stdout + result.stderr);
+  withRelease({}, directory => {
+    const result = spawnSync(process.execPath, ['scripts/release-check.mjs'], { cwd: root, env: fixtureEnv(directory), encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  });
 });
 
 test('A5 passes on a saved release and binds it to the release SHA', () => withRelease({}, (directory, manifest) => {
@@ -157,7 +164,7 @@ test('A5 passes on a saved release and binds it to the release SHA', () => withR
   assert.equal(manifest.sha256sums, digests(readFileSync(path.join(directory, SUMS_FILE))).sha256);
   assert.deepEqual(manifest.packages.map(entry => Object.keys(entry).sort()), RELEASE_NAMES.map(() => ['entryCount', 'filename', 'integrity', 'name', 'sha256', 'shasum', 'size', 'version']));
   assert.match(verifyRelease(directory, { sha: 'b'.repeat(40) }).problems.join('\n'), /not the release SHA b{40}/);
-  assert.match(verifyRelease(directory, { version: '0.0.0-beta.2' }).problems.join('\n'), /version 0\.0\.0-beta\.1, expected 0\.0\.0-beta\.2/);
+  assert.match(verifyRelease(directory, { version: '42.17.9-fixture.315' }).problems.join('\n'), /version 42\.17\.9-fixture\.314, expected 42\.17\.9-fixture\.315/);
 }));
 
 test('a tarball changed after packing fails A5 and is never handed to the consumer checks', () => withRelease({}, directory => {
@@ -171,7 +178,7 @@ test('a tarball changed after packing fails A5 and is never handed to the consum
 
 test('an extra tarball, an edited SHA256SUMS or a missing tarball fails A5', () => withRelease({}, directory => {
   writeFileSync(path.join(directory, tarballFilename('@anhlp/alp-gateway', VERSION)), tarball(packageFiles('@anhlp/alp-gateway')));
-  assert.match(verifyRelease(directory).problems.join('\n'), /anhlp-alp-gateway-0\.0\.0-beta\.1\.tgz: tarball not in release-manifest\.json/);
+  assert.match(verifyRelease(directory).problems.join('\n'), /anhlp-alp-gateway-42\.17\.9-fixture\.314\.tgz: tarball not in release-manifest\.json/);
   rmSync(path.join(directory, tarballFilename('@anhlp/alp-gateway', VERSION)));
   writeFileSync(path.join(directory, SUMS_FILE), `${readFileSync(path.join(directory, SUMS_FILE), 'utf8')}${'d'.repeat(64)}  extra.tgz\n`);
   const edited = verifyRelease(directory).problems.join('\n');
@@ -191,7 +198,7 @@ test('A5 reads the packed package.json: version, pinned internal dependencies, l
     pkg.dependencies['@anhlp/alp-gateway'] = VERSION;
     files['package.json'] = JSON.stringify(pkg);
   }), [
-    '@anhlp/alp-daemon: dependencies @anhlp/alp-protocol@0.10.0, not pinned to 0.0.0-beta.1',
+    '@anhlp/alp-daemon: dependencies @anhlp/alp-protocol@0.10.0, not pinned to 42.17.9-fixture.314',
     '@anhlp/alp-daemon: dependencies @anhlp/alp-gateway is not one of the released packages',
   ]);
   assert.deepEqual(problems((name, files) => { if (name === '@anhlp/alp-core') delete files.LICENSE; }), ['@anhlp/alp-core: no LICENSE']);
@@ -219,7 +226,7 @@ test('a dirty, untagged or script-less pack is a rehearsal, never gate evidence'
     assert.deepEqual(rehearsal.problems, []);
     assert.deepEqual(rehearsal.notes, strict);
     assert.equal(releaseArtifacts(directory).length, 8);
-    const cli = spawnSync(process.execPath, ['scripts/release-verify.mjs', directory, '--rehearsal', '--sha', SHA, '--record', path.join(directory, 'evidence.json')], { cwd: root, encoding: 'utf8' });
+    const cli = spawnSync(process.execPath, ['scripts/release-verify.mjs', directory, '--rehearsal', '--sha', SHA, '--record', path.join(directory, 'evidence.json')], { cwd: root, env: fixtureEnv(directory), encoding: 'utf8' });
     assert.notEqual(cli.status, 0);
     assert.match(cli.stderr, /--record needs --sha <RELEASE_SHA> and a non-rehearsal run/);
   });
@@ -227,10 +234,10 @@ test('a dirty, untagged or script-less pack is a rehearsal, never gate evidence'
 
 test('release-verify and release-gate run on a saved release; the gate stays open until every row has evidence', () => withRelease({}, (directory, manifest) => {
   const evidence = path.join(directory, 'evidence.json');
-  const run = (...args) => spawnSync(process.execPath, args, { cwd: root, encoding: 'utf8' });
+  const run = (...args) => spawnSync(process.execPath, args, { cwd: root, env: fixtureEnv(directory), encoding: 'utf8' });
   const verify = run('scripts/release-verify.mjs', directory, '--sha', SHA, '--record', evidence);
   assert.equal(verify.status, 0, verify.stdout + verify.stderr);
-  assert.match(verify.stdout, /A5 passed: 8 tarballs of 0\.0\.0-beta\.1/);
+  assert.match(verify.stdout, /A5 passed: 8 tarballs of 42\.17\.9-fixture\.314/);
   const recorded = JSON.parse(readFileSync(evidence, 'utf8'));
   assert.equal(recorded.rows.A5.status, 'pass');
   assert.equal(recorded.rows.A5.artifacts, manifest.sha256sums);
@@ -281,7 +288,7 @@ test('the gate counts a row only for the release SHA, and artifact rows only for
   for (const id of ['Q1', 'Q2', 'Q3']) evidence.rows[id] = pass(id);
   assert.equal(evaluateGate(evidence, manifest, 'latest').passed, true);
   assert.deepEqual(evaluateGate(evidence, manifest, 'announce').blocking.map(row => row.id), ['Q4', 'Q5']);
-  assert.match(evaluateGate({ ...evidence, version: '0.0.0-beta.2' }, manifest).blocking.at(-1).reasons[0], /evidence is for 0\.0\.0-beta\.2/);
+  assert.match(evaluateGate({ ...evidence, version: '42.17.9-fixture.315' }, manifest).blocking.at(-1).reasons[0], /evidence is for 42\.17\.9-fixture\.315/);
   assert.throws(() => evaluateGate(evidence, manifest, 'ship'), /unknown gate phase/);
   assert.equal(evaluateGate(evidence, { ...manifest, git: { sha: null } }).passed, false, 'a manifest without a SHA never passes');
 });
@@ -290,16 +297,16 @@ test('the consumer lockfile must resolve every @anhlp package to the saved tarba
   const lock = { packages: Object.fromEntries(manifest.packages.map(entry => [`node_modules/${entry.name}`, { version: VERSION, resolved: `file:${path.join(directory, entry.filename)}`, integrity: entry.integrity }])) };
   assert.deepEqual(installedProblems(lock, manifest), []);
   const fromRegistry = structuredClone(lock);
-  fromRegistry.packages['node_modules/@anhlp/alp-core'] = { version: VERSION, resolved: 'https://registry.npmjs.org/@anhlp/alp-core/-/alp-core-0.0.0-beta.1.tgz', integrity: 'sha512-other' };
+  fromRegistry.packages['node_modules/@anhlp/alp-core'] = { version: VERSION, resolved: 'https://registry.npmjs.org/@anhlp/alp-core/-/alp-core-42.17.9-fixture.314.tgz', integrity: 'sha512-other' };
   fromRegistry.packages['node_modules/@anhlp/alp/node_modules/@anhlp/alp-client'] = { version: '0.10.0' };
   fromRegistry.packages['node_modules/@anhlp/alp-gateway'] = { version: VERSION };
   delete fromRegistry.packages['node_modules/@anhlp/alp-cli'];
   assert.deepEqual(installedProblems(fromRegistry, manifest), [
     `node_modules/@anhlp/alp-core: integrity sha512-other is not the saved tarball's ${manifest.packages[1].integrity}`,
-    'node_modules/@anhlp/alp-core: resolved from https://registry.npmjs.org/@anhlp/alp-core/-/alp-core-0.0.0-beta.1.tgz, not the saved anhlp-alp-core-0.0.0-beta.1.tgz',
-    'node_modules/@anhlp/alp/node_modules/@anhlp/alp-client: installed 0.10.0, expected 0.0.0-beta.1',
+    'node_modules/@anhlp/alp-core: resolved from https://registry.npmjs.org/@anhlp/alp-core/-/alp-core-42.17.9-fixture.314.tgz, not the saved anhlp-alp-core-42.17.9-fixture.314.tgz',
+    'node_modules/@anhlp/alp/node_modules/@anhlp/alp-client: installed 0.10.0, expected 42.17.9-fixture.314',
     `node_modules/@anhlp/alp/node_modules/@anhlp/alp-client: integrity undefined is not the saved tarball's ${manifest.packages[3].integrity}`,
-    'node_modules/@anhlp/alp/node_modules/@anhlp/alp-client: resolved from undefined, not the saved anhlp-alp-client-0.0.0-beta.1.tgz',
+    'node_modules/@anhlp/alp/node_modules/@anhlp/alp-client: resolved from undefined, not the saved anhlp-alp-client-42.17.9-fixture.314.tgz',
     'node_modules/@anhlp/alp-gateway: @anhlp/alp-gateway is not part of the release',
     '@anhlp/alp-cli: not installed',
   ]);

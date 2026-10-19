@@ -2,6 +2,8 @@
 // temporary home and a fake Codex, a real alp-gateway process with its own credentials, and the
 // built web app served by Vite's preview server, each on a free loopback port. Nothing touches the
 // user's ~/.alp, a running alpd, Paseo or the default ports (7433/7434/7435).
+import assert from 'node:assert/strict';
+import { alpHome } from '@anhlp/alp-client';
 import { spawn, execFile } from 'node:child_process';
 import { once } from 'node:events';
 import { chmodSync, closeSync, existsSync, openSync } from 'node:fs';
@@ -78,6 +80,10 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
   await writeFile(path.join(home, 'settings.json'), '{}');
   const journal = path.join(directory, 'codex.jsonl');
   const env = { ...process.env, ALP_HOME: home, ALP_GATEWAY_HOME: gatewayHome, ALP_LOG_LEVEL: 'info' };
+  // Fail before any CLI/daemon starts if fixture paths ever escape its owned root.
+  for (const fixturePath of [alpHome(env), path.join(alpHome(env), 'state'), path.join(alpHome(env), 'logs'), gatewayHome]) {
+    assert.ok(path.resolve(fixturePath).startsWith(`${path.resolve(directory)}${path.sep}`), fixturePath);
+  }
   delete env.ALP_GATEWAY_URL;
   delete env.ALP_GATEWAY_TOKEN;
   // Fake runs never reach a real model: Codex is the fake, and the other runtimes point at a

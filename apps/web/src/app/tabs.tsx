@@ -237,8 +237,13 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
     if (!focus || !selected) return;
     setAgents(current => current.includes(focus) ? current : [...current, focus]);
     if (ownFocus.current === focus) { ownFocus.current = null; return; }
-    setActive(current => current && restore.current?.session === selected && focus === selected && current.kind !== 'agent' ? current : { kind: 'agent', id: focus });
-  }, [focus, selected]);
+    setActive(current => {
+      // Creating selects and focuses the new tree before attach/rename finish. Like the
+      // selected effect above, keep its draft in front until finishDraft closes it.
+      if (current?.kind === 'draft' && controller.getState().busy.create) return current;
+      return current && restore.current?.session === selected && focus === selected && current.kind !== 'agent' ? current : { kind: 'agent', id: focus };
+    });
+  }, [focus, selected, controller]);
 
   const tabs = React.useMemo<Tab[]>(() => orderTabs([
     ...agents.map(id => ({ kind: 'agent' as const, id })),
