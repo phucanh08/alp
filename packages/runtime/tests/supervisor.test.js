@@ -248,6 +248,20 @@ test('main distills lessons into a skill scoped to the roles it picks, saved onl
   assert.ok(runtimes[2].config.developerInstructions.includes(`- verify-claims (${path.join(library, 'skills/verify-claims/SKILL.md')})`));
 });
 
+async function approvedIssue(runtime, pending, answer) {
+  const events = []; const off = runtime.onEvent(e => events.push(e));
+  try {
+    const result = await pending;
+    assert.equal(result.status, 'pending_approval');
+    const question = runtime.questions().find(q => q.id === result.approvalId);
+    assert.ok(question);
+    runtime.answer(question.id, { text: answer });
+    let terminal;
+    await until(() => { terminal = events.find(e => e.event.type === 'mail' && e.event.mail.assignment === result.approvalId); return terminal; });
+    return { question, result: JSON.parse(terminal.event.mail.body.slice('Issue approval result: '.length)) };
+  } finally { if (typeof off === 'function') off(); }
+}
+
 test('main searches, then opens or comments on GitHub issues only with the user\'s approval', async t => {
   const calls = [];
   const github = async (args, { input }) => {
@@ -269,15 +283,15 @@ test('main searches, then opens or comments on GitHub issues only with the user\
   assert.deepEqual(calls[0].args.slice(0, 4), ['issue', 'list', '-R', 'acme/widgets']);
 
   const draft = { action: 'create', target: 'alp', title: 'Supervisor misses lead routing', body: 'Steps: ...' };
-  const declined = await answered(runtime, main.call('alp_issue', draft), 'Reject');
+  const declined = await approvedIssue(runtime, main.call('alp_issue', draft), 'Reject');
   assert.match(declined.question.body, /open an issue in phucanh08\/alp \(ALP itself\)[\s\S]*Title: Supervisor misses lead routing\n\nSteps: \.\.\./);
   assert.equal(declined.result.approved, false);
   assert.equal(calls.length, 1);
-  const created = (await answered(runtime, main.call('alp_issue', draft), 'Approve')).result;
+  const created = (await approvedIssue(runtime, main.call('alp_issue', { ...draft, requestId: 'approved-again' }), 'Approve')).result;
   assert.deepEqual([created.posted, created.url], [true, 'https://github.com/phucanh08/alp/issues/8']);
   assert.deepEqual(calls[1].args, ['issue', 'create', '-R', 'phucanh08/alp', '--title', 'Supervisor misses lead routing', '--body-file', '-']);
   assert.match(calls[1].input, /^Steps: \.\.\.\n\n---\n_Drafted by an ALP agent and posted with the user's approval\._$/);
-  const commented = (await answered(runtime, main.call('alp_issue', { action: 'comment', target: 'project', issue: 7, body: 'Also fails on Safari.' }), 'đồng ý')).result;
+  const commented = (await approvedIssue(runtime, main.call('alp_issue', { action: 'comment', target: 'project', issue: 7, body: 'Also fails on Safari.' }), 'đồng ý')).result;
   assert.equal(commented.url, 'https://github.com/acme/widgets/issues/7');
   assert.deepEqual(calls[2].args, ['issue', 'comment', '7', '-R', 'acme/widgets', '--body-file', '-']);
 
@@ -319,7 +333,140 @@ test('issue labels are validated before asking the user to approve a draft', asy
   assert.deepEqual(invalid.missingLabels, ['runtime']);
   assert.equal(runtime.questions().length, 0);
   assert.equal(calls.length, 1);
-  const created = (await answered(runtime, main.call('alp_issue', { ...draft, labels: ['bug'] }), 'Approve')).result;
+  const created = (await approvedIssue(runtime, main.call('alp_issue', { ...draft, labels: ['bug'] }), 'Approve')).result;
   assert.equal(created.posted, true);
   assert.deepEqual(calls.at(-1).slice(-2), ['--label', 'bug']);
+});
+
+test('issue approval returns before the user decides and survives turn completion', async t => {
+  const writes = [];
+  const { root, runtime, runtimes, prompt } = await setup(t, undefined, { github: async args => { writes.push(args); return 'https://github.com/phucanh08/alp/issues/9'; } });
+  const events = []; runtime.onEvent(e => events.push(e));
+  await runtime.open('root', { cwd: root }); await prompt('first', 'Work');
+  const main = runtimes[0];
+  const pending = await Promise.race([main.call('alp_issue', { action: 'create', target: 'alp', title: 'Bug', body: 'Full evidence' }), new Promise(resolve => setTimeout(() => resolve({ status: 'blocked' }), 100))]);
+  assert.equal(pending.status, 'pending_approval');
+  assert.equal(writes.length, 0);
+  const question = runtime.questions()[0]; assert.equal(pending.approvalId, question.id);
+  main.finish(); await settle();
+  await prompt('second', 'Other work');
+  const replay = await main.call('alp_issue', { action: 'create', target: 'alp', title: 'Bug', body: 'Full evidence' });
+  assert.equal(replay.approvalId, pending.approvalId);
+  main.finish(); await settle();
+  assert.equal(runtime.questions().length, 1);
+  runtime.answer(question.id, { text: 'Approve' });
+  await until(() => events.some(e => e.event.type === 'mail' && e.event.mail.body?.includes('"posted":true')));
+  assert.equal(writes.length, 1);
+  assert.match(question.body, /Full evidence[\s\S]*Drafted by an ALP agent/);
+  await until(() => main.started.length === 3);
+  assert.throws(() => runtime.answer(question.id, { text: 'Approve' }), /No question/);
+  assert.equal(writes.length, 1);
+});
+
+test('issue approvals report refusal, dismissal, timeout and posting errors once without retry', async t => {
+  for (const scenario of ['Reject', 'revise first', 'dismiss', 'timeout', 'failure']) {
+    await t.test(scenario, async t => {
+      let writes = 0;
+      const { root, runtime, runtimes, prompt } = await setup(t, undefined, { userAskTimeoutMs: scenario === 'timeout' ? 40 : 2000, github: async () => { writes++; throw new Error('injected posting failure'); } });
+      const events = []; runtime.onEvent(e => events.push(e));
+      await runtime.open('root', { cwd: root }); await prompt('first', 'Work');
+      const main = runtimes[0]; const draft = { action: 'comment', target: 'alp', issue: 114, body: 'Evidence', requestId: 'one' };
+      const pending = await main.call('alp_issue', draft);
+      assert.equal(pending.status, 'pending_approval');
+      assert.equal((await main.call('alp_issue', draft)).approvalId, pending.approvalId);
+      assert.equal(runtime.questions().length, 1);
+      assert.match((await main.call('alp_issue', { ...draft, body: 'Changed' })).error, /different draft/);
+      const q = runtime.questions()[0];
+      if (scenario !== 'timeout') runtime.answer(q.id, scenario === 'dismiss' ? { dismiss: true } : { text: scenario === 'failure' ? 'Approve' : scenario });
+      const terminal = () => events.filter(e => e.event.type === 'mail' && e.event.mail.assignment === pending.approvalId);
+      await until(() => terminal().length === 1);
+      const result = JSON.parse(terminal()[0].event.mail.body.slice('Issue approval result: '.length));
+      assert.equal(result.posted, false);
+      assert.equal(writes, scenario === 'failure' ? 1 : 0);
+      if (scenario === 'failure') assert.match(result.error, /injected posting failure/);
+      else assert.equal(result.outcome, scenario === 'timeout' ? 'unanswered' : scenario === 'dismiss' ? 'dismissed' : 'answered');
+      const replay = await main.call('alp_issue', draft);
+      assert.equal(replay.status, 'resolved'); assert.equal(replay.approvalId, q.id);
+      await settle(); assert.equal(terminal().length, 1); assert.equal(runtime.questions().length, 0);
+    });
+  }
+});
+
+test('issue approval leaves tools, user steering and child result delivery responsive', async t => {
+  const writes = [];
+  const { root, runtime, runtimes, prompt } = await setup(t, undefined, { github: async args => { writes.push(args); return 'url'; } });
+  const events = []; runtime.onEvent(e => events.push(e));
+  await runtime.open('root', { cwd: root }); await prompt('first', 'Work');
+  const main = runtimes[0]; const draft = { action: 'create', target: 'alp', title: 'Bug', body: 'All facts', labels: [] };
+  const p = await main.call('alp_issue', draft);
+  assert.equal(p.status, 'pending_approval');
+  assert.ok(Array.isArray((await main.call('alp_board', {})).claims));
+  const child = await main.call('alp_delegate', { agent: 'peer', task: 'Inspect', mode: 'read-only' });
+  await until(() => runtimes[2]?.started.length);
+  await runtime.prompt('root', { clientMessageId: 'steer', delivery: 'steer', content: [{ type: 'text', text: 'Keep working' }] });
+  assert.equal(runtime.questions().length, 1);
+  await runtimes[2].call('alp_handoff', { outcome: 'complete', summary: 'Inspected' });
+  runtimes[2].finish('Evidence');
+  await until(() => events.some(e => e.event.type === 'mail' && e.event.mail.assignment === child.assignmentId));
+  runtime.answer(p.approvalId, { text: 'Approve' });
+  await until(() => writes.length === 1);
+  await until(() => events.some(e => e.event.type === 'mail' && e.event.mail.assignment === p.approvalId));
+  assert.equal(events.filter(e => e.event.type === 'mail' && e.event.mail.assignment === p.approvalId)[0].sessionId, 'root');
+  assert.equal((await main.call('alp_issue', draft)).status, 'resolved');
+  assert.equal(writes.length, 1);
+});
+
+
+test('interrupt, close and shutdown cancel pending issue approvals; in-flight posting is not repeated', async t => {
+  for (const operation of ['interrupt', 'close', 'shutdown', 'inflight']) {
+    await t.test(operation, async t => {
+      let writes = 0; let release;
+      const { root, runtime, runtimes, prompt } = await setup(t, undefined, { github: async () => { writes++; if (operation === 'inflight') await new Promise(resolve => { release = resolve; }); return 'url'; } });
+      const events = []; runtime.onEvent(e => events.push(e));
+      await runtime.open('root', { cwd: root }); await prompt('first', 'Work');
+      const pending = await runtimes[0].call('alp_issue', { action: 'comment', target: 'alp', issue: 114, body: 'Facts' });
+      if (operation === 'inflight') {
+        runtime.answer(pending.approvalId, { text: 'Approve' }); await until(() => release);
+        await runtime.close('root'); release();
+      } else if (operation === 'shutdown') await runtime.shutdown();
+      else await runtime[operation]('root');
+      assert.equal(runtime.questions().length, 0);
+      assert.throws(() => runtime.answer(pending.approvalId, { text: 'Approve' }), /No question/);
+      await settle();
+      assert.equal(writes, operation === 'inflight' ? 1 : 0);
+      assert.equal(events.filter(e => e.event.type === 'question.resolved' && e.event.questionId === pending.approvalId).length, 1);
+      if (operation !== 'interrupt') assert.equal(events.filter(e => e.event.type === 'mail' && e.event.mail.assignment === pending.approvalId).length, 0);
+    });
+  }
+});
+
+test('issue preflight cannot create approval after interruption or close', async t => {
+  for (const operation of ['interrupt', 'close']) await t.test(operation, async t => {
+    let labels; let entered = false; let writes = 0;
+    const { root, runtime, runtimes, prompt } = await setup(t, undefined, { github: async args => {
+      if (args[0] === 'label') { entered = true; return new Promise(resolve => { labels = resolve; }); }
+      writes++; return 'url';
+    } });
+    await runtime.open('root', { cwd: root }); await prompt('first', 'Work');
+    const pending = runtimes[0].call('alp_issue', { action: 'create', target: 'alp', title: 'Bug', body: 'Facts', labels: ['bug'] });
+    await until(() => entered);
+    await runtime[operation]('root'); labels(JSON.stringify([{ name: 'bug' }]));
+    const result = await pending;
+    assert.match(result.error, /canceled|closed/i);
+    assert.equal(runtime.questions().length, 0); assert.equal(writes, 0);
+  });
+});
+
+test('approval immediately followed by interrupt cancels before GitHub dispatch', async t => {
+  let writes = 0;
+  const { root, runtime, runtimes, prompt } = await setup(t, undefined, { github: async () => { writes++; return 'url'; } });
+  const events = []; runtime.onEvent(e => events.push(e));
+  await runtime.open('root', { cwd: root }); await prompt('first', 'Work');
+  const pending = await runtimes[0].call('alp_issue', { action: 'comment', target: 'alp', issue: 114, body: 'Facts' });
+  runtime.answer(pending.approvalId, { text: 'Approve' });
+  await runtime.interrupt('root');
+  const terminal = () => events.filter(e => e.event.type === 'mail' && e.event.mail.assignment === pending.approvalId);
+  await until(() => terminal().length === 1);
+  assert.equal(writes, 0);
+  assert.match(terminal()[0].event.mail.body, /"outcome":"canceled"/);
 });

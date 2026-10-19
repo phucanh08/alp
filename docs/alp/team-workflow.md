@@ -1215,3 +1215,35 @@ Edit tools are denied; Bash is available inside the read-only OS sandbox. Withou
 sandbox support, supply a diff or arrange shell inspection with the requester. Claude executables are
 resolved from PATH (or `ALP_CLAUDE_BIN`) and passed explicitly to the SDK to avoid
 trying to execute bundled binaries inside Paseo Desktop's Electron archive.
+
+## Runtime delegation budgets and issue approvals
+
+Each root session tree shares two finite budgets: 16 implementation starts
+(lead/peer, including read-only peers) and 16 read-only advisor starts (resolved
+advisor/reviewer roles, including oracle/reviewer). A started assignment consumes
+one slot even if startup fails or it is canceled. Main and lead share these
+counters. A new accepted user prompt in root, including steering, resets both;
+duplicate prompt IDs, child prompts, completion mail, approval answers, compaction
+and automatic wakes do not. Depth, cycle, peer concurrency and permission guards
+still apply. Exhaustion reports category, root-tree scope and reset condition.
+
+`alp_issue search` remains synchronous and read-only. `create`/`comment` show the
+full final draft (including attribution), return `pending_approval` and an
+`approvalId` promptly, and leave main free to work or finish its turn. ALP sends
+one terminal result as result mail to that same main, waking it if idle. Only an
+explicit approving answer authorizes a GitHub write. Other answers, dismissal,
+timeout (`unanswered`) and cancellation post nothing. Pending issue questions
+survive normal turn completion and fresh prompts; interruption, session close
+and shutdown cancel them. `alp_ask` and skill approval retain their turn lifetime.
+
+Retries with the same draft return its existing pending or terminal result for
+the session. Optional `requestId` (1-100 characters) explicitly identifies an
+operation: reuse it with the exact draft on retries; different content with the
+same key is refused. Use a fresh key to intentionally propose an identical draft
+again, including after rejection. The ledger lives until session close; it is
+not durable across process restart. Exactly-once means one GitHub invocation per
+in-process operation, not an assertion about a remote write after a network
+failure. A posting error is reported once and never retried automatically,
+because GitHub may already have accepted the write. Closing a session cancels
+pending approvals; an already dispatched GitHub request cannot be revoked and
+its eventual outcome is logged without waking a closed session.
