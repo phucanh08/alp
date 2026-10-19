@@ -253,10 +253,12 @@ test('shared writers in different repositories run together, with external board
   const alias = await other.call('alp_delegate', { agent: 'peer', task: 'Write core alias', mode: 'workspace-write', writeRoot: '../core-link' }, 'alias');
   assert.match(alias.error, /another session is writing/);
   // The original project's verification command must never run in the external repository.
+  // Use Node so these real shell commands also work on Windows without POSIX utilities.
+  const markerCommand = file => `"${process.execPath}" -e "require('node:fs').writeFileSync('${file}', '')"`;
   const settings = path.join(project, '.alp/settings.json');
-  await writeFile(settings, JSON.stringify({ ...JSON.parse(await readFile(settings, 'utf8')), verify: { test: 'touch wrong-project-check' } }));
+  await writeFile(settings, JSON.stringify({ ...JSON.parse(await readFile(settings, 'utf8')), verify: { test: markerCommand('wrong-project-check') } }));
   await mkdir(path.join(core, '.alp'));
-  await writeFile(path.join(core, '.alp/settings.json'), JSON.stringify({ verify: { test: 'touch core-check' } }));
+  await writeFile(path.join(core, '.alp/settings.json'), JSON.stringify({ verify: { test: markerCommand('core-check') } }));
   await writeFile(path.join(core, 'src/a.txt'), 'changed');
   corePeer.finish();
   const [done] = await results(main, 1);
