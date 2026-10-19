@@ -56,6 +56,8 @@ const USER_REPLY_MS = 60_000;
 
 /** What a waiting session hears when the user wrote to it. */
 const USER_WROTE = 'The user just wrote to you; their message follows. Answer them first in a short message they can read (tool calls alone show them nothing), and steer an assignment with alp_send when their words change its brief. Your assignments keep running: then alp_wait again, or end your turn and ALP wakes you with their results.';
+/** A wait cut short by the end of its turn: what it waited for goes on. */
+const TURN_ENDED = 'Turn ended before the result arrived. Running assignments keep running; ALP wakes you with their results as mail.';
 /** What a waiting session hears with a check-in, or mail from its requester or the user. */
 const CHECKED_IN = 'Not a result: the assignment keeps running. Act on this mail first (a steer from your requester or the user\'s words may change what your assignments should do: pass that on with alp_send), then alp_wait again or end your turn.';
 /** A session's native process is restarted at most RESTART_LIMIT times within RESTART_WINDOW_MS unless it makes progress meanwhile. */
@@ -484,7 +486,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     session.closed = true;
     cancelQuestions(sessionId);
-    issueApprovals.delete(sessionId);
+    approvalLedger.delete(sessionId);
     releaseClaims(sessionId, session.mapping.agent.projectRoot);
 
     await Promise.all(
@@ -625,7 +627,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   const boards = new Map<string, Promise<Pin[]>>();
   /** The same boards once loaded, for synchronous status. */
   const loadedBoards = new Map<string, Pin[]>();
-  const userQuestions = new Map<string, { question: UserQuestion; persistent?: boolean; settle: (outcome: 'answered' | 'dismissed' | 'timeout' | 'canceled', answer?: string, reason?: string, result?: unknown) => void }>();
+  const userQuestions = new Map<string, { question: UserQuestion; persistent?: boolean; /** From alp_ask: the user's words in the chat end it (#116). */ asked?: boolean; settle: (outcome: 'answered' | 'dismissed' | 'timeout' | 'canceled', answer?: string, reason?: string, result?: unknown) => void }>();
   let mailSequence = 0;
   let watchdog: NodeJS.Timeout | undefined;
 
@@ -794,6 +796,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       : entry.event === 'task' ? `${entry.agent} ${TASK_PAST[entry.action] ?? entry.action} task ${entry.id} "${clip(entry.title, 120)}"${entry.status ? ` (now ${entry.status})` : ''}${entry.detail ? `: ${clip(entry.detail)}` : ''}`
       : entry.event === 'epic.landed' ? `${entry.agent} closed ${entry.id} "${clip(entry.title, 120)}": ${entry.tasks} tasks, ${entry.reworked} reworked, ${entry.unverified?.length ?? 0} closed unverified`
       : entry.event === 'recall' ? `${entry.agent} recalled ${entry.recalled} assignment ${entry.assignmentId}: ${clip(entry.question)}`
+      : entry.event === 'skill.approval' && !entry.saved ? `skill approval ${entry.approvalId} for ${entry.name}: not saved (${entry.error ?? entry.outcome})`
       : entry.event === 'issue.approval' ? `issue approval ${entry.approvalId} in ${entry.repo}: ${entry.posted ? entry.url : entry.error ?? entry.outcome}`
       : entry.event === 'issue' ? `${entry.action === 'create' ? `opened issue "${clip(entry.title, 200)}"` : `commented on issue #${entry.issue}`} in ${entry.repo} with the user's approval: ${entry.url}`
       : entry.event?.startsWith('worktree.') ? `${entry.event.slice('worktree.'.length)} worktree of ${entry.assignmentId} (${entry.branch})${entry.status ? `: ${entry.status}` : ''}`
@@ -1491,18 +1494,25 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     return APPROVALS.includes(answer.toLowerCase()) ? { approved: true } : { approved: false, outcome: 'answered', feedback: answer };
   }
 
-  const declined = (decision: { feedback?: string; outcome?: string }) => toolResult(true, {
-    approved: false,
-    outcome: decision.outcome,
-    ...(decision.feedback ? { feedback: decision.feedback } : {}),
-    next: 'Nothing was saved or posted. Revise from the feedback and propose again, or drop it.',
-  });
-
   const text = (value: unknown, limit: number) => typeof value === 'string' && !!value.trim() && value.length <= limit;
 
+  // Approvals of alp_issue and alp_skill (#114, #116): the tool returns a pending id at once and the
+  // decision comes as result mail. Draft identities stay until session close, so a replayed tool
+  // call or turn never applies an approved draft twice. Interrupting a session cancels its approvals.
+  const approvalCancellation = new WeakMap<Session, number>();
+  const approvalLedger = new Map<string, Map<string, { approvalId: string; draftKey: string; result?: Record<string, unknown> }>>();
+  const approvalsOf = (sessionId: string) => {
+    let approvals = approvalLedger.get(sessionId);
+    if (!approvals) approvalLedger.set(sessionId, approvals = new Map());
+    return approvals;
+  };
+  const approvalCanceled = (session: Session, cancellation: number) => closed || session.closed || cancellation !== (approvalCancellation.get(session) ?? 0);
+
   async function skillTool(sessionId: string, session: Session, args: unknown) {
+    const cancellation = approvalCancellation.get(session) ?? 0;
+    args = structuredClone(args);
     if (
-      !plainObject(args, ['name', 'description', 'body', 'roles', 'lessons', 'replace']) ||
+      !plainObject(args, ['name', 'description', 'body', 'roles', 'lessons', 'replace', 'requestId']) ||
       typeof args.name !== 'string' || !/^[a-z0-9][a-z0-9-]{1,62}$/.test(args.name) ||
       !text(args.description, 300) || !text(args.body, SKILL_BODY_CHARS) ||
       !Array.isArray(args.roles) || !args.roles.length || args.roles.length > 10 || !args.roles.every((role: unknown) => typeof role === 'string' && /^[\w.-]+$/.test(role) && role !== '.' && role !== '..') ||
@@ -1511,14 +1521,25 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     ) {
       return toolResult(false, { error: `A skill needs a name (lowercase letters, digits, hyphens), a one-line description, a body of at most ${SKILL_BODY_CHARS} characters, and the roles that get it` });
     }
-    if (!options.libraryDir) return toolResult(false, { error: 'This host keeps no user skill library' });
-    const known = new Set([...STARTER_ROLES, ...await discoverAgents(session.mapping.agent.projectRoot, { library: options.libraryDir, templates: options.templates })]);
+    if (args.requestId !== undefined && !text(args.requestId, 100)) return toolResult(false, { error: 'requestId must be a nonempty string of at most 100 characters' });
+    const library = options.libraryDir;
+    if (!library) return toolResult(false, { error: 'This host keeps no user skill library' });
+    const known = new Set([...STARTER_ROLES, ...await discoverAgents(session.mapping.agent.projectRoot, { library, templates: options.templates })]);
     const unknown = args.roles.filter((role: string) => !known.has(role));
     if (unknown.length) return toolResult(false, { error: `Unknown roles: ${unknown.join(', ')}. Roles are ${[...known].join(', ')}` });
-    const file = path.join(options.libraryDir, 'skills', args.name, 'SKILL.md');
+    const file = path.join(library, 'skills', args.name, 'SKILL.md');
+    const content = `---\nname: ${args.name}\ndescription: ${JSON.stringify(args.description.replace(/\s+/g, ' ').trim())}\n---\n\n${args.body.trim()}\n`;
+    const lessons: string[] = (args.lessons ?? []).map((lesson: string) => lesson.replace(/\s+/g, ' ').trim());
+    // A replay of a proposed draft returns its approval, before anything it changed is checked again.
+    const draftKey = JSON.stringify(['skill', content, args.roles, lessons, !!args.replace]);
+    const key = `skill:${args.requestId ?? draftKey}`;
+    const approvals = approvalsOf(sessionId);
+    const previous = approvals.get(key);
+    if (previous && previous.draftKey !== draftKey) return toolResult(false, { error: 'requestId was already used for a different draft' });
+    if (previous) return toolResult(true, previous.result ?? { status: 'pending_approval', approvalId: previous.approvalId, file });
     const existing = await readFile(file, 'utf8').catch(() => undefined);
     if (existing !== undefined && !args.replace) return toolResult(false, { error: `The library already has a skill named ${args.name} (${file}); read it, then pass replace: true to propose a new version, or choose another name` });
-    const rolesFile = path.join(options.libraryDir, 'role-skills.json');
+    const rolesFile = path.join(library, 'role-skills.json');
     const readRoles = async () => {
       const raw = await readFile(rolesFile, 'utf8').catch(() => '{}');
       const roles = JSON.parse(raw);
@@ -1526,53 +1547,72 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       return roles as Record<string, unknown>;
     };
     try { await readRoles(); } catch (error) { return toolResult(false, { error: errorData(error).message }); }
-    const content = `---\nname: ${args.name}\ndescription: ${JSON.stringify(args.description.replace(/\s+/g, ' ').trim())}\n---\n\n${args.body.trim()}\n`;
-    const lessons: string[] = (args.lessons ?? []).map((lesson: string) => lesson.replace(/\s+/g, ' ').trim());
+    if (approvalCanceled(session, cancellation)) return toolResult(false, { error: 'Skill proposal canceled or session closed; no approval was created' });
+    if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId)) return toolResult(false, { error: 'A question is already waiting for the user; finish it before proposing a skill' });
+    const approvalId = `q-${randomUUID()}`;
+    const record: { approvalId: string; draftKey: string; result?: Record<string, unknown> } = { approvalId, draftKey };
+    approvals.set(key, record);
     const say = wordsFor(session);
-    const decision = await confirm(sessionId, session,
+    // The user sees the whole skill, as it will be saved.
+    const decision = confirm(sessionId, session,
       say.skill(session.mapping.agent.name, existing !== undefined, file, args.roles.join(', '), lessons) +
-      `\n${say.answerLine(session.mapping.agent.name)}\n\n${content}`);
-    if (!decision.approved) return declined(decision);
-    try {
-      await mkdir(path.dirname(file), { recursive: true });
-      await writeFile(file, content);
-      const roles = await readRoles();
-      for (const role of args.roles) {
-        const list = Array.isArray(roles[role]) ? roles[role] as string[] : [];
-        if (!list.includes(args.name)) list.push(args.name);
-        roles[role] = list;
+      `\n${say.answerLine(session.mapping.agent.name)}\n\n${content}`, { id: approvalId });
+    const save = async (): Promise<Record<string, unknown>> => {
+      // A skill of this name saved meanwhile is not overwritten by a proposal that was not a replacement.
+      if (existing === undefined && !args.replace && await readFile(file, 'utf8').then(() => true, () => false)) {
+        return { approved: true, saved: false, error: `A skill named ${args.name} was saved meanwhile (${file}); nothing was overwritten`, next: 'Read it, then propose again with replace: true if yours should replace it.' };
       }
-      await writeFile(rolesFile, JSON.stringify(roles, null, 2) + '\n');
-    } catch (error) {
-      return toolResult(false, { error: errorData(error).message });
-    }
-    // The lessons the skill replaces leave both files; a lesson matches only by its exact text.
-    const removed = new Set<string>();
-    for (const lessonFile of lessonFiles(session.mapping)) {
-      const current = await readFile(lessonFile, 'utf8').catch(() => undefined);
-      if (current === undefined) continue;
-      const kept = current.split('\n').filter(line => {
-        const match = /^- \d{4}-\d\d-\d\d: (.*)$/.exec(line);
-        if (!match || !lessons.includes(match[1].trim())) return true;
-        removed.add(match[1].trim());
-        return false;
-      });
-      if (kept.length !== current.split('\n').length) await writeFile(lessonFile, kept.join('\n')).catch(() => {});
-    }
-    runLog(rootOf(sessionId), { event: 'skill', agent: session.mapping.agent.name, name: args.name, roles: args.roles, replaced: existing !== undefined, lessons: [...removed] });
-    return toolResult(true, {
-      approved: true, saved: file, roles: args.roles, lessonsRemoved: [...removed],
-      ...(lessons.length > removed.size ? { lessonsNotFound: lessons.filter(lesson => !removed.has(lesson)) } : {}),
-      next: 'New sessions of those roles list the skill; read the file now if you need it in this one.',
-    });
+      try {
+        await mkdir(path.dirname(file), { recursive: true });
+        await writeFile(file, content);
+        const roles = await readRoles();
+        for (const role of args.roles) {
+          const list = Array.isArray(roles[role]) ? roles[role] as string[] : [];
+          if (!list.includes(args.name)) list.push(args.name);
+          roles[role] = list;
+        }
+        await writeFile(rolesFile, JSON.stringify(roles, null, 2) + '\n');
+      } catch (error) {
+        return { approved: true, saved: false, error: errorData(error).message, next: 'Tell the user; nothing is retried automatically.' };
+      }
+      // The lessons the skill replaces leave both files; a lesson matches only by its exact text.
+      const removed = new Set<string>();
+      for (const lessonFile of lessonFiles(session.mapping)) {
+        const current = await readFile(lessonFile, 'utf8').catch(() => undefined);
+        if (current === undefined) continue;
+        const kept = current.split('\n').filter(line => {
+          const match = /^- \d{4}-\d\d-\d\d: (.*)$/.exec(line);
+          if (!match || !lessons.includes(match[1].trim())) return true;
+          removed.add(match[1].trim());
+          return false;
+        });
+        if (kept.length !== current.split('\n').length) await writeFile(lessonFile, kept.join('\n')).catch(() => {});
+      }
+      runLog(rootOf(sessionId), { event: 'skill', agent: session.mapping.agent.name, name: args.name, roles: args.roles, replaced: existing !== undefined, lessons: [...removed] });
+      return {
+        approved: true, saved: file, roles: args.roles, lessonsRemoved: [...removed],
+        ...(lessons.length > removed.size ? { lessonsNotFound: lessons.filter(lesson => !removed.has(lesson)) } : {}),
+        next: 'New sessions of those roles list the skill; read the file now if you need it in this one.',
+      };
+    };
+    void (async () => {
+      const answer = await decision;
+      const canceled = approvalCanceled(session, cancellation);
+      const result = !answer.approved || canceled
+        ? { approved: false, saved: false, outcome: canceled ? 'canceled' : answer.outcome, ...(answer.feedback ? { feedback: answer.feedback } : {}), next: 'Nothing was saved. Revise from the feedback and propose again with a fresh requestId, or drop it.' }
+        : await save();
+      record.result = { status: 'resolved', approvalId, name: args.name, ...result };
+      runLog(rootOf(sessionId), { event: 'skill.approval', agent: session.mapping.agent.name, ...record.result });
+      if (!closed && !session.closed && sessions.get(sessionId) === session) {
+        // Result mail renews the bounded wake allowance and reaches this main only.
+        post(sessionId, { kind: 'result', from: 'ALP', assignment: approvalId, body: `Skill approval result: ${JSON.stringify(record.result)}` });
+      }
+    })();
+    return toolResult(true, { status: 'pending_approval', approvalId, file, next: 'Continue other work or end your turn. ALP sends the user\'s decision, and whether the skill was saved, by mail; do not resubmit this draft.' });
   }
 
-  // Retain draft identities until session close: tool/turn replay must never repost.
-  const issueCancellation = new WeakMap<Session, number>();
-  const issueApprovals = new Map<string, Map<string, { approvalId: string; draftKey: string; result?: Record<string, unknown> }>>();
-
   async function issueTool(sessionId: string, session: Session, args: unknown) {
-    const cancellation = issueCancellation.get(session) ?? 0;
+    const cancellation = approvalCancellation.get(session) ?? 0;
     args = structuredClone(args);
     if (!plainObject(args, ['action', 'target', 'query', 'title', 'body', 'issue', 'labels', 'requestId']) || !['search', 'create', 'comment'].includes(args.action) || !['project', 'alp'].includes(args.target)) {
       return toolResult(false, { error: 'An issue call needs action (search, create or comment) and target (project or alp)' });
@@ -1610,11 +1650,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         return toolResult(false, { repo, error: `Could not validate issue labels: ${errorData(error).message}` });
       }
     }
-    if (closed || session.closed || cancellation !== (issueCancellation.get(session) ?? 0)) return toolResult(false, { error: 'Issue proposal canceled or session closed; no approval was created' });
+    if (approvalCanceled(session, cancellation)) return toolResult(false, { error: 'Issue proposal canceled or session closed; no approval was created' });
     const draftKey = JSON.stringify([repo, args.action, args.title ?? null, args.issue ?? null, args.body, [...(args.labels ?? [])].sort()]);
-    const key = args.requestId ?? draftKey;
-    let approvals = issueApprovals.get(sessionId);
-    if (!approvals) issueApprovals.set(sessionId, approvals = new Map());
+    const key = `issue:${args.requestId ?? draftKey}`;
+    const approvals = approvalsOf(sessionId);
     const previous = approvals.get(key);
     if (previous && previous.draftKey !== draftKey) return toolResult(false, { error: 'requestId was already used for a different draft' });
     if (previous) return toolResult(true, previous.result ?? { status: 'pending_approval', approvalId: previous.approvalId, repo });
@@ -1631,7 +1670,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     void (async () => {
       const answer = await decision;
       let result: Record<string, unknown>;
-      const canceled = closed || session.closed || cancellation !== (issueCancellation.get(session) ?? 0);
+      const canceled = approvalCanceled(session, cancellation);
       if (!answer.approved || canceled) {
         result = { approved: false, posted: false, outcome: canceled ? 'canceled' : answer.outcome, ...(answer.feedback ? { feedback: answer.feedback } : {}) };
       } else {
@@ -1884,6 +1923,21 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     for (const waiter of session.waiters.splice(0)) {
       clearTimeout(waiter.timer);
       waiter.resolve('user');
+    }
+  }
+
+  /**
+   * The user wrote in the chat while main's own alp_ask question to them waits (#116): the question
+   * ends now, so the message reaches main. Approvals, permission prompts and the hook-trust
+   * question keep waiting for the user's decision.
+   */
+  function releaseQuestions(sessionId: string) {
+    for (const { question, settle, asked } of [...userQuestions.values()]) {
+      if (question.sessionId !== sessionId || !asked) continue;
+      settle('canceled', undefined, 'the user wrote instead of answering', toolResult(true, {
+        status: 'user_wrote', userMessage: true, question: question.id,
+        next: `${USER_WROTE} Their message may be the answer to your question; if it is not, ask again later.`,
+      }));
     }
   }
 
@@ -2152,7 +2206,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const pending = [...session.assignments.keys()].some(id => !ids || ids.has(id)) || takeBatch(session.mail, event => event.kind !== 'board' && !event.defer && accept(event)).length > 0;
     const events = pending ? await waitFor(sessionId, session, accept, Math.min(args.timeoutMs ?? 300_000, 900_000)) : [];
     if (events === 'user') return toolResult(true, { events: [], userMessage: true, running: running(session), next: USER_WROTE });
-    if (!events) return toolResult(false, { error: 'Turn ended' });
+    if (!events) return toolResult(false, session.closed || session.wakeBlocked ? { error: 'Turn ended' } : { error: TURN_ENDED, running: running(session) });
     return toolResult(true, { events: events.map(publicEvent), running: running(session) });
   }
 
@@ -2194,7 +2248,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   }
 
   /** Asks the user; viewers show the question, and answer() or a timeout resolves it. */
-  function askUser(sessionId: string, session: Session, assignment: Assignment | undefined, body: string, options?: string[], approval?: { id: string }) {
+  function askUser(sessionId: string, session: Session, assignment: Assignment | undefined, body: string, options?: string[], approval?: { id: string }, asked = false) {
     const rootId = rootOf(sessionId);
     const question: UserQuestion = {
       id: approval?.id ?? `q-${randomUUID().slice(0, 8)}`,
@@ -2225,7 +2279,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
             next: 'Decide, and record the assumption in your handoff or final message; or report that you are blocked.',
           })));
       };
-      userQuestions.set(question.id, { question, settle, persistent: !!approval });
+      userQuestions.set(question.id, { question, settle, persistent: !!approval, asked });
       // The watchdog does not count time spent waiting for an answer.
       if (assignment) assignment.ask = { id: question.id, resolve: result => settle('canceled', undefined, undefined, result) };
       emit(sessionId, { type: 'question', question });
@@ -2268,7 +2322,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (to === 'user' && session.parent && !session.userOpened) {
       return Promise.resolve(toolResult(false, { error: `Only main talks to the user; ask ${session.parentAgent ?? 'your requester'} with alp_ask instead` }));
     }
-    if (to === 'user') return askUser(sessionId, session, assignment, args.question, args.options);
+    if (to === 'user') return askUser(sessionId, session, assignment, args.question, args.options, undefined, true);
     if (!session.parent || !parent || !assignment) return Promise.resolve(toolResult(false, { error: 'This session has no requester; ask the user with to: "user"' }));
     const parentId = session.parent;
     return new Promise<unknown>(resolve => {
@@ -2645,12 +2699,16 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (events === 'user') return toolResult(true, { assignmentId: childId, agent: args.agent, status: 'running', userMessage: true, next: USER_WROTE });
 
     if (!events) {
-      return toolResult(false, {
-        agent: args.agent,
-        assignmentId: childId,
-        status: 'canceled',
-        error: 'Parent assignment stopped',
-      });
+      // Only the user's stop or a closing session ends the assignment with the wait (#116).
+      if (session.closed || session.wakeBlocked || !session.assignments.has(childId)) {
+        return toolResult(false, {
+          agent: args.agent,
+          assignmentId: childId,
+          status: 'canceled',
+          error: 'Parent assignment stopped',
+        });
+      }
+      return toolResult(false, { agent: args.agent, assignmentId: childId, status: 'running', error: TURN_ENDED });
     }
 
     // A result that came with a check-in makes the check-in moot.
@@ -3203,7 +3261,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     session.wakeBlocked = true;
     session.userStopped = true;
-    issueCancellation.set(session, (issueCancellation.get(session) ?? 0) + 1);
+    approvalCancellation.set(session, (approvalCancellation.get(session) ?? 0) + 1);
     cancelQuestions(sessionId);
     // Codex keeps no output of an interrupted turn in its thread: remember what the user saw, by
     // thread, since a client that leaves closes the session and the next prompt opens it again.
@@ -3406,7 +3464,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (origin === 'user' && !session.parent) session.userWaiting ??= Date.now();
       if (session.supervisor && origin === 'user') session.journal.push(stamp(`user ${prompt.delivery === 'steer' ? 'steered' : 'asked'} ${session.mapping.agent.name}: ${clip(text, 1500)}`));
       // The steer reaches the model once its waiting tool returns; return it now, not when the work ends.
-      if (prompt.delivery === 'steer' && origin === 'user' && !session.parent) releaseWaiters(session);
+      if (prompt.delivery === 'steer' && origin === 'user' && !session.parent) { releaseWaiters(session); releaseQuestions(sessionId); }
 
       emit(sessionId, {
         type: 'prompt.accepted',

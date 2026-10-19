@@ -68,6 +68,7 @@ export const toolShapes: Record<string, Record<string, z.ZodType>> = {
     roles: z.array(z.string().min(1)).min(1).max(10),
     lessons: z.array(z.string().min(1).max(600)).max(50).optional(),
     replace: z.boolean().optional(),
+    requestId: z.string().min(1).max(100).optional(),
   },
   alp_issue: {
     action: z.enum(['search', 'create', 'comment']),

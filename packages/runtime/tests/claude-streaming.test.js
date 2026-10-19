@@ -187,3 +187,29 @@ test('the real Agent SDK opts into partials and public runtime items grow before
   assert.deepEqual(completed(seen), ['final']);
   assert.equal(seen.find(event => event.method === 'item/agentMessage/delta').delta, 'draft');
 });
+
+// #116/#107: a reply main writes before a call that holds its turn (here alp_ask, through the real
+// Agent SDK and its in-process MCP server) reaches viewers while that call still waits.
+test('a reply written before a blocking ALP tool reaches viewers before the tool returns and the turn ends', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-claude-blocking-'));
+  const root = path.join(directory, 'project');
+  await initProject(root);
+  const runtime = createAlpRuntime({ supervisor: false, libraryDir: path.join(directory, 'home'), transport: () =>
+    new ClaudeTransport(fileURLToPath(new URL('./support/blocking-claude.js', import.meta.url)), root, process.env) });
+  t.after(async () => {
+    await runtime.shutdown();
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  });
+  const events = [];
+  runtime.onEvent(envelope => events.push(envelope.event));
+  await runtime.open('root', { cwd: root, model: 'claude:sonnet' });
+  await runtime.prompt('root', { clientMessageId: 'one', delivery: 'auto', content: [text('go')] });
+  await until(() => runtime.questions().length === 1);
+  const replies = () => events.filter(event => event.type === 'item' && event.item.kind === 'assistant_message').map(event => event.item.text);
+  // The tool is still waiting for the user and the turn has not ended, yet the reply is out.
+  assert.ok(replies().includes('Reply written before the blocking call.'), JSON.stringify(replies()));
+  assert.equal(events.some(event => event.type === 'turn.ended'), false);
+  runtime.answer(runtime.questions()[0].id, { text: 'Option A' });
+  await until(() => events.some(event => event.type === 'turn.ended'));
+  assert.equal(replies().at(-1), 'Thanks for answering.');
+});

@@ -560,7 +560,8 @@ turn; `options` suggests answers. The question appears in Paseo as a question
 prompt, and in `alp run`/`attach`/`send`, `alp questions` and `alp top`;
 `alp answer` answers or dismisses it. Main receives `answered` with the answer,
 `dismissed`, or `unanswered` on timeout. A question ends with the turn that
-asked it.
+asked it, and when the user writes in the chat instead of answering: main then
+receives `user_wrote` with `userMessage: true`, and the message follows.
 
 Other agents do not talk to the user: their questions go to their requester
 (`alp_ask` defaults to `to: "parent"`), and `to: "user"` is refused. The user
@@ -948,16 +949,24 @@ or delete lessons freely.
 
 When three or more lessons cover one theme, or a lesson recurs, the supervisor
 suggests distilling them into a skill, and main proposes one with
-`alp_skill { name, description, body, roles, lessons?, replace? }`. Main scopes it to
+`alp_skill { name, description, body, roles, lessons?, replace?, requestId? }`. Main scopes it to
 the roles whose work it guides: itself, `lead`, `peer`, `oracle`, `reviewer`,
 `supervisor`, or a custom agent of the project; an unknown role is refused. `lessons`
 lists the exact text of the lessons the skill replaces.
 
 ALP asks the user before saving anything: the question shows the target file, the
 roles, the lessons that move, and the whole `SKILL.md`, with the answers Approve and
-Reject. Only an approving answer (`Approve`, `yes`, `ok`, `đồng ý`, `duyệt`, …) saves
-it; another answer comes back to main as feedback, and a dismissal or a timeout
-saves nothing. An approved skill is written to `$ALP_HOME/skills/<name>/SKILL.md`,
+Reject. The approval does not hold main's turn: `alp_skill` returns
+`pending_approval` with an `approvalId` at once, main goes on or ends its turn, and
+ALP sends one `Skill approval result` as result mail to that main, waking it if
+idle. Only an approving answer (`Approve`, `yes`, `ok`, `đồng ý`, `duyệt`, …) saves
+it; another answer comes back to main as feedback, and a dismissal, a timeout or a
+cancellation saves nothing. The ledger, `requestId`, replay and cancellation rules
+are those of issue approvals (see
+[Runtime delegation budgets and issue approvals](#runtime-delegation-budgets-and-issue-approvals)):
+a retried draft returns its pending or final result and is never saved twice. A
+skill of the same name saved while the approval waited is not overwritten unless
+the proposal had `replace: true`. An approved skill is written to `$ALP_HOME/skills/<name>/SKILL.md`,
 added to each chosen role in `$ALP_HOME/role-skills.json`, and the lessons it
 replaces leave both lessons files. A skill of an existing name needs
 `replace: true`. New sessions of those roles list it; ALP updates never touch it,
@@ -1052,6 +1061,35 @@ work runs, so you can keep talking with it.
 When a command main ran in the background ends, Claude may answer in a turn of its
 own. ALP follows that turn as one of main's: its ALP tools work, and its end is
 reviewed and reported like any other turn's.
+
+### Which tools hold a turn, and for how long
+
+Text main writes before a tool call reaches you while that call runs; only the
+reply it writes after the call waits for it (#107, #116). These ALP tools can
+still hold a turn:
+
+| Tool | Holds the turn until | Longest |
+| --- | --- | --- |
+| `alp_ask` to the user (main) | the user answers or dismisses it, or writes in the chat instead (`user_wrote`) | 30 minutes, then `unanswered` |
+| `alp_ask` to the requester (assignment) | the requester answers with `alp_send` | 15 minutes, then `unanswered`; the watchdog does not count it |
+| `alp_delegate {…, wait: true}` | the result, the child's first question, a check-in, mail to the waiting agent itself, or (main) the user's message | no fixed limit: main's check-ins come about every ten minutes; a lead's ends at the result, a question, its requester's mail or the ETA check-in |
+| `alp_wait {timeoutMs?}` | any mail from its assignments, a check-in, mail to the waiting agent itself, or (main) the user's message | `timeoutMs`, default 5 minutes, at most 15 |
+
+These do not hold a turn: `alp_delegate` without `wait: true` (the default), and
+the user's approvals of `alp_issue create`/`comment` and `alp_skill`. Those return
+`pending_approval` with an `approvalId` at once; the decision arrives later as one
+result mail that wakes an idle main. A permission prompt for a command beyond the
+sandbox holds the native tool call until the user decides (at most 30 minutes;
+it also ends with its turn), and a message in the chat does not end it; it is
+not an ALP tool.
+
+Ending a turn never cancels running assignments. When a turn ends while
+`alp_wait` or `wait: true` still waits (for example a runtime that ends its own
+turn), the call returns `Turn ended before the result arrived. Running
+assignments keep running…` with the assignment's status `running`, and the result
+wakes main as mail. Assignments end only with their own handoff or failure (such
+as the watchdog's), `alp_cancel`, the user's stop (interrupt), or closing the
+session; a wait cut short by the user's stop or a close says `canceled`.
 
 ## Structured handoff
 
@@ -1234,7 +1272,8 @@ one terminal result as result mail to that same main, waking it if idle. Only an
 explicit approving answer authorizes a GitHub write. Other answers, dismissal,
 timeout (`unanswered`) and cancellation post nothing. Pending issue questions
 survive normal turn completion and fresh prompts; interruption, session close
-and shutdown cancel them. `alp_ask` and skill approval retain their turn lifetime.
+and shutdown cancel them. `alp_skill` approvals work the same way (see
+[Skills from lessons](#skills-from-lessons)); `alp_ask` keeps its turn lifetime.
 
 Retries with the same draft return its existing pending or terminal result for
 the session. Optional `requestId` (1-100 characters) explicitly identifies an
