@@ -1645,6 +1645,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (session && !session.closed) {
       emit(sessionId, { type: 'mail', mail: publicEvent(mail) });
       session.mail.push(mail);
+      // New assignment progress deserves a fresh delivery allowance. Reset here,
+      // never on redelivery, so a failing turn cannot retry the same mail forever.
+      if (mail.kind === 'result' || mail.kind === 'question') session.wakes = 0;
+      if (mail.kind === 'result' || mail.kind === 'question' || mail.kind === 'checkin') session.wakeFailures = 0;
       deliver(sessionId, session);
     }
     return mail;
@@ -1673,7 +1677,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (session.mail.some(event => !event.deliveredTurn && !event.passive && !event.defer)) void steerMail(sessionId, session);
     } else if (!waking) {
       return;
-    } else if (!session.wakeBlocked && session.wakes < MAX_WAKES) {
+    } else if (!session.wakeBlocked && session.wakeFailures < MAX_WAKES && (session.wakes < MAX_WAKES || session.mail.some(event => !event.deliveredTurn && event.kind === 'checkin'))) {
       autoWake(sessionId, session);
     } else if (session.parent && !session.wakeBlocked && !held(session)) {
       // A child never gets the user prompt that resets its wakes; report instead of waiting out the watchdog.
@@ -1711,6 +1715,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   function autoWake(sessionId: string, session: Session) {
     // Its runtime is paused or it is parked: the mail waits for resume.
     if (held(session)) { session.wakeHeld = true; return; }
+    // A check-in authorizes delivery of older mail too: the capped first batch
+    // may not reach the check-in itself. Keep that authorization through queuing.
+    const checkIn = session.mail.find(event => !event.deliveredTurn && event.kind === 'checkin');
     const batch = takeBatch(session.mail, () => true);
     if (!batch.length) return;
     for (const event of batch) event.deliveredTurn = STARTING;
@@ -1724,11 +1731,15 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         release();
         return deliver(sessionId, session);
       }
+      // Earlier queued attempts may have consumed the allowance since delivery
+      // reserved this batch. Keep retries bounded at the actual start boundary.
+      if (session.wakeFailures >= MAX_WAKES || (session.wakes >= MAX_WAKES && (!checkIn || !session.mail.includes(checkIn)))) return release();
       if (!batch.every(event => event.kind === 'checkin')) session.wakes++;
       const id = `alp-wake-${randomUUID()}`;
       try {
         await startPrompt(sessionId, { clientMessageId: id, delivery: 'auto', content: [{ type: 'text', text: renderMail(batch, session.parentAgent) }] }, 'wake', batch);
       } catch {
+        session.wakeFailures++;
         release();
         deliver(sessionId, session);
       }
@@ -2706,6 +2717,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       waiters: [],
       lastActivity: Date.now(),
       wakes: 0,
+      wakeFailures: 0,
       wakeBlocked: false,
 
       toolCalls: new Map(),
@@ -3264,6 +3276,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (!wake) {
         session.handoff = undefined;
         session.wakes = 0;
+        session.wakeFailures = 0;
         session.wakeBlocked = false;
         session.userStopped = false;
 

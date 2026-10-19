@@ -998,8 +998,12 @@ otherwise it is steered into the recipient's running turn; otherwise an idle
 recipient is woken with a new turn carrying the mail. Notes from the recipient's own
 assignments never wake it: they ride with its next turn, which a result, a question,
 a check-in or its requester's mail starts. Interrupt stops wakes until
-the next user prompt, which then carries the held mail. At most 8 wakes run per
-user prompt, and wakes do not reset the per-turn delegation limit. Steered and wake
+the next user prompt, which then carries the held mail. At most 8 counted wakes run
+without a new assignment result or question, which renews the delivery allowance.
+Check-ins can wake the recipient even when that allowance is exhausted and do not
+renew it. Failed wake starts have a separate limit of 8 attempts, renewed only by
+a new result, question, check-in or user prompt, so failed check-ins cannot retry
+forever. Wakes do not reset the per-turn delegation limit. Steered and wake
 batches are capped at 9,000 characters; bodies at 8,000.
 
 Mail is acknowledged only when the turn that received it completes. If that turn

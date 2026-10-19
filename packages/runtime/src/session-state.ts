@@ -37,8 +37,10 @@ export type Session = {
   mail: MailEvent[];
   waiters: Waiter[];
   lastActivity: number;
-  /** Auto-wakes since the last user prompt; capped to stop runaway loops. Check-ins do not count. */
+  /** Auto-wakes since the last user prompt or new result/question; check-ins do not count. */
   wakes: number;
+  /** Failed wake starts since fresh result/question/check-in mail or a user prompt. */
+  wakeFailures: number;
   /** When it last got a check-in, or when its assignments started running. */
   checkInAt?: number;
   /** Set by interrupt: pending mail waits for the next user prompt. */

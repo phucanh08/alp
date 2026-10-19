@@ -9,6 +9,162 @@ import { tree, until } from '../../../test/support/fake-agent.js';
 const steer = (runtime, text) => runtime.prompt('root', { clientMessageId: `steer-${text}`, delivery: 'steer', content: [{ type: 'text', text }] });
 const peerHandoff = { outcome: 'complete', summary: 'Done' };
 
+test('the final background result wakes idle main after more than eight assignment completions', async t => {
+  const { runtime, agents, main } = await tree(t, { options: () => ({ checkInMs: 0 }) });
+  const results = [];
+  runtime.onEvent(({ sessionId, event }) => {
+    if (sessionId === 'root' && event.type === 'mail' && event.mail.kind === 'result') results.push(event.mail);
+  });
+  // Each round is a real background delegation and a completed wake turn, with no
+  // intervening user prompt or check-in to rescue the last result.
+  for (let round = 1; round <= 10; round++) {
+    const delegated = await main.call('alp_delegate', { agent: 'peer', task: `Job ${round}`, mode: 'read-only' });
+    assert.equal(delegated.status, 'running');
+    await until(() => agents[round]?.started.length, `job ${round} to start`);
+    main.finish(`Job ${round} is running.`);
+    await agents[round].call('alp_handoff', peerHandoff);
+    agents[round].finish(`completed job ${round}`);
+    await until(() => results.length === round, `job ${round} result to be posted`);
+    await until(() => main.started.length === round + 1, `job ${round} result to wake main`);
+    const text = main.started.at(-1).params.input.at(-1).text;
+    assert.ok(text.includes(delegated.assignmentId));
+    assert.ok(text.includes(`completed job ${round}`));
+    assert.match(text, /result from peer/);
+  }
+  main.finish('All results received.');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(main.started.length, 11, 'acknowledged results do not start duplicate turns');
+  assert.equal(runtime.snapshot('root').busy, false, 'no result or assignment remains outstanding');
+});
+
+// Exercise the real retry guard without changing private counters: one message
+// whose turn/start repeatedly fails consumes eight wakes, then stays queued.
+async function exhaustWakes(runtime, main) {
+  main.finish('Work continues in the background.');
+  const request = main.request;
+  let attempts = 0;
+  main.request = async function(method, params) {
+    if (method === 'turn/start') { attempts++; throw new Error('Provider temporarily unavailable'); }
+    return request.call(this, method, params);
+  };
+  runtime.message('root', 'Please report when done.');
+  await until(() => attempts >= 8, 'eight failed wake requests');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(attempts, 8, 'the same undelivered mail cannot retry forever');
+  main.request = request;
+}
+
+test('a new assignment question renews delivery after exhausted retries, and its result still wakes main', async t => {
+  const { runtime, agents, main } = await tree(t, { options: () => ({ checkInMs: 0 }) });
+  const { assignmentId } = await main.call('alp_delegate', { agent: 'peer', task: 'Ask then finish', mode: 'read-only' });
+  await until(() => agents[1]?.started.length);
+  await exhaustWakes(runtime, main);
+  const answer = agents[1].call('alp_ask', { question: 'Which output?' });
+  await until(() => main.started.length === 2, 'the new question wake');
+  const text = main.started.at(-1).params.input.at(-1).text;
+  assert.match(text, /question from peer[\s\S]*Which output\?/);
+  assert.match(text, /Please report when done/);
+  const replyTo = text.match(/\[(#\d+)\] question from peer/)[1];
+  await main.call('alp_send', { to: assignmentId, kind: 'answer', replyTo, body: 'JSON' });
+  assert.equal((await answer).answer, 'JSON');
+  main.finish('The peer has its answer.');
+  await agents[1].call('alp_handoff', peerHandoff);
+  agents[1].finish('JSON produced');
+  await until(() => main.started.length === 3, 'the final result wake');
+  assert.match(main.started.at(-1).params.input.at(-1).text, /JSON produced/);
+});
+
+test('check-ins reach idle main after exhausted retries without renewing its retry allowance', async t => {
+  const { runtime, agents, main } = await tree(t, { options: () => ({ checkInMs: 60_000, watchMs: 10, silentForMs: 3_600_000 }) });
+  await main.call('alp_delegate', { agent: 'peer', task: 'Long job', mode: 'read-only' });
+  await until(() => agents[1]?.started.length);
+  await exhaustWakes(runtime, main);
+  const real = Date.now;
+  t.after(() => { Date.now = real; });
+  Date.now = () => real() + 61_000;
+  await until(() => main.started.length === 2, 'a check-in after the budget is exhausted');
+  assert.match(main.started.at(-1).params.input.at(-1).text, /check-in from ALP/);
+  main.finish('Still working.');
+  // New ordinary mail still cannot wake main: the check-in did not renew it.
+  runtime.message('root', 'Another status note');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(main.started.length, 2);
+});
+
+test('a check-in after exhausted retries has bounded failed starts and a fresh check-in can recover', async t => {
+  const { runtime, agents, main } = await tree(t, { options: () => ({ checkInMs: 60_000, watchMs: 10, silentForMs: 3_600_000 }) });
+  await main.call('alp_delegate', { agent: 'peer', task: 'Long job', mode: 'read-only' });
+  await until(() => agents[1]?.started.length);
+  await exhaustWakes(runtime, main);
+  const request = main.request;
+  let attempts = 0;
+  main.request = async function(method, params) {
+    if (method === 'turn/start') { attempts++; throw new Error('Provider is still unavailable'); }
+    return request.call(this, method, params);
+  };
+  const real = Date.now;
+  t.after(() => { Date.now = real; main.request = request; });
+  Date.now = () => real() + 61_000;
+  await until(() => attempts >= 8, 'check-in delivery attempts');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(attempts, 8, 'the same check-in cannot bypass the failed-start limit');
+  main.request = request;
+  Date.now = () => real() + 122_000;
+  await until(() => main.started.length === 2, 'fresh check-in to renew the failed-start allowance');
+  assert.match(main.started.at(-1).params.input.at(-1).text, /check-in from ALP/);
+});
+
+test('a check-in beyond the first mail batch wakes exhausted main and delivers the backlog', async t => {
+  const { runtime, agents, main } = await tree(t, { options: () => ({ checkInMs: 60_000, watchMs: 10, silentForMs: 3_600_000 }) });
+  await main.call('alp_delegate', { agent: 'peer', task: 'Long job', mode: 'read-only' });
+  await until(() => agents[1]?.started.length);
+  await exhaustWakes(runtime, main);
+  const older = 'older backlog ' + 'x'.repeat(7900);
+  const newer = 'newer backlog ' + 'y'.repeat(7900);
+  runtime.message('root', older);
+  runtime.message('root', newer);
+  const real = Date.now;
+  t.after(() => { Date.now = real; });
+  Date.now = () => real() + 61_000;
+  await until(() => main.started.length === 2, 'check-in beyond the capped batch to wake main');
+  const received = () => [...main.started.slice(1).map(call => call.params.input.at(-1).text), ...main.steered].join('\n');
+  await until(() => received().includes('check-in from ALP') && received().includes(older) && received().includes(newer), 'the check-in and both complete backlog messages');
+  main.finish('Backlog received.');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(main.started.length, 2, 'the backlog does not create duplicate turns');
+});
+
+test('concurrent final results reach a pending user turn without duplicate wakes', async t => {
+  const { runtime, agents, main } = await tree(t, { options: () => ({ checkInMs: 0 }) });
+  for (const task of ['A', 'B']) await main.call('alp_delegate', { agent: 'peer', task, mode: 'read-only' });
+  await until(() => agents[2]?.started.length);
+  await exhaustWakes(runtime, main);
+  const request = main.request;
+  let pending = false;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  main.request = async function(method, params) {
+    if (method === 'turn/start') { pending = true; await gate; }
+    return request.call(this, method, params);
+  };
+  const posted = [];
+  runtime.onEvent(({ sessionId, event }) => {
+    if (sessionId === 'root' && event.type === 'mail' && event.mail.kind === 'result') posted.push(event.mail);
+  });
+  const prompt = runtime.prompt('root', { clientMessageId: 'concurrent-user', delivery: 'auto', content: [{ type: 'text', text: 'Status?' }] });
+  await until(() => pending, 'the user prompt to be pending');
+  agents[1].finish('parallel result A');
+  agents[2].finish('parallel result B');
+  await until(() => posted.length === 2, 'both final results to post');
+  release();
+  await prompt;
+  await until(() => main.steered.join('\n').includes('parallel result A') && main.steered.join('\n').includes('parallel result B'), 'both results in the running turn');
+  main.finish('Both results received.');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(main.started.length, 2, 'only the user prompt starts a turn');
+  assert.equal(runtime.snapshot('root').busy, false, 'both results are acknowledged');
+});
+
 test('the user\'s message ends main\'s wait for an assignment, which keeps running', async t => {
   const { runtime, agents, main } = await tree(t, { options: () => ({ checkInMs: 0 }) });
   const waiting = main.call('alp_delegate', { agent: 'peer', task: 'Do the long job', mode: 'read-only', wait: true });
