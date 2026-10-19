@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { createTask, getTask, loadTasks } from '@anhlp/alp-core/tasks';
@@ -430,36 +432,73 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
     let again = runtimes.slice(before).find(agent => agent.calls.some(call => call.method === 'thread/resume' && call.params.threadId === main.threadId));
     assert.ok(again);
     assert.equal(await readFile(path.join(root, 'notes.txt'), 'utf8'), 'unfinished work');
-    used = 0;
-    if (mode === 'autoResume false' || mode === 'manual pause' || mode === 'global pause') {
-      await new Promise(resolve => setTimeout(resolve, 80));
-      assert.equal(again.started.length, 0);
-      assert.ok(second.runtime.snapshot(session.id).parked);
+    // Hold real atomic record replacements so runtime completion cannot accidentally
+    // stand in for persistence completion. Other tests/files keep their normal I/O.
+    await second.store.flush();
+    const rename = fs.rename;
+    let releaseWrites;
+    let heldWrites = 0;
+    if (mode === 'global pause') {
+      const held = new Promise(resolve => { releaseWrites = resolve; });
+      const recordFile = path.join(directory, 'state', 'sessions', `${session.id}.json`);
+      fs.rename = async (from, to) => {
+        if (to === recordFile) { heldWrites++; await held; }
+        return rename(from, to);
+      };
+      syncBuiltinESMExports();
+    }
+    try {
+      used = 0;
+      if (mode === 'autoResume false' || mode === 'manual pause' || mode === 'global pause') {
+        await new Promise(resolve => setTimeout(resolve, 80));
+        assert.equal(again.started.length, 0);
+        assert.ok(second.runtime.snapshot(session.id).parked);
+        second.runtime.resume();
+      }
+      if (mode === 'failed start') {
+        await until(() => !failNext && second.runtime.snapshot(session.id)?.parked, 'failed start retains intent');
+        assert.equal(again.started.length, 0);
+        await second.stop();
+        const retryIndex = runtimes.length;
+        second = await daemon();
+        await until(() => second.runtime.snapshot(session.id)?.threadId === main.threadId, 'failed start recovers on another restart');
+        again = runtimes.slice(retryIndex).find(agent => agent.calls.some(call => call.method === 'thread/resume' && call.params.threadId === main.threadId));
+      }
+      await until(() => again.started.length === 1, 'exactly one continued root turn');
       second.runtime.resume();
-    }
-    if (mode === 'failed start') {
-      await until(() => !failNext && second.runtime.snapshot(session.id)?.parked, 'failed start retains intent');
-      assert.equal(again.started.length, 0);
+      await new Promise(resolve => setTimeout(resolve, 60));
+      assert.equal(again.started.length, 1);
+      assert.equal(again.started[0].params.threadId, main.threadId);
+      assert.doesNotMatch(again.lastText(), /alp_handoff/);
+      let closed = false;
+      const unsubscribe = second.runtime.onEvent(({ sessionId: id, event }) => {
+        if (id === session.id && event.type === 'session.closed') closed = true;
+      });
+      try {
+        again.finish('done');
+        await until(() => closed, 'finished unwatched root emits session.closed');
+      } finally { unsubscribe(); }
+      assert.equal(second.runtime.snapshot(session.id), undefined, 'finished unwatched root closes');
+      if (mode === 'global pause') {
+        assert.ok(heldWrites > 0, 'a real record replacement is held');
+        assert.ok((await second.store.list()).find(record => record.id === session.id).session.parked, 'disk still has the parked record while replacement is held');
+      }
+      releaseWrites?.();
+      await second.store.flush();
+      const completed = (await second.store.list()).find(record => record.id === session.id);
+      assert.equal(completed.status, 'closed');
+      assert.equal(completed.session.parked, undefined);
       await second.stop();
-      const retryIndex = runtimes.length;
-      second = await daemon();
-      await until(() => second.runtime.snapshot(session.id)?.threadId === main.threadId, 'failed start recovers on another restart');
-      again = runtimes.slice(retryIndex).find(agent => agent.calls.some(call => call.method === 'thread/resume' && call.params.threadId === main.threadId));
+      const finishedIndex = runtimes.length;
+      const third = await daemon();
+      await new Promise(resolve => setTimeout(resolve, 50));
+      assert.equal(third.runtime.snapshot(session.id), undefined, 'completed root stays closed after restart');
+      assert.ok(runtimes.slice(finishedIndex).every(agent => !agent.calls.some(call => call.method === 'thread/resume' && call.params.threadId === main.threadId)));
+    } finally {
+      releaseWrites?.();
+      fs.rename = rename;
+      syncBuiltinESMExports();
+      await second.store.flush();
     }
-    await until(() => again.started.length === 1, 'exactly one continued root turn');
-    second.runtime.resume();
-    await new Promise(resolve => setTimeout(resolve, 60));
-    assert.equal(again.started.length, 1);
-    assert.equal(again.started[0].params.threadId, main.threadId);
-    assert.doesNotMatch(again.lastText(), /alp_handoff/);
-    again.finish('done');
-    await until(() => !second.runtime.snapshot(session.id), 'finished unwatched root closes');
-    assert.equal((await second.store.list()).find(record => record.id === session.id).session.parked, undefined);
-    await second.stop();
-    const finishedIndex = runtimes.length;
-    const third = await daemon();
-    await new Promise(resolve => setTimeout(resolve, 50));
-    assert.equal(third.runtime.snapshot(session.id), undefined, 'completed root stays closed after restart');
-    assert.ok(runtimes.slice(finishedIndex).every(agent => !agent.calls.some(call => call.method === 'thread/resume' && call.params.threadId === main.threadId)));
   });
 }
