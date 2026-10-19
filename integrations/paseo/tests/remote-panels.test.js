@@ -18,6 +18,8 @@ function fakeClient() {
       if (method === 'library.models') return { models: [] };
       if (method === 'library.list') return { entries: [{ name: 'main', source: 'builtin' }] };
       if (method === 'settings.language.get') return { language: null, applies: 'Vietnamese', default: 'Vietnamese' };
+      // As the gateway answers it: its own projection, each secret a marker listed in secrets.
+      if (method === 'library.get') return { kind: params.kind, name: params.name, source: 'project', overrides: 'library', content: { command: 'node', env: { TOKEN: { $secret: 'keep' } } }, revision: 'r1', usedBy: ['main'], secrets: ['/env/TOKEN'], path: '/host/home/.alp/mcp/github.json' };
       return {};
     },
     onEvent() { return () => {}; },
@@ -63,4 +65,28 @@ test('the library list and language say they are read-only; with no workspace, w
   const language = await call('alp.settings.language.get', {});
   assert.equal(language.applies, 'Vietnamese');
   assert.match(language.readOnly, /Unavailable in ALP remote mode/);
+});
+
+test('one library entry is read through the gateway, read only, with its secrets redacted; changes stay refused', async () => {
+  const client = fakeClient();
+  const handlers = new Map();
+  const server = { handle(contract, handler) { handlers.set(contract.name, { contract, handler }); } };
+  registerRemoteLibraryRpc(server, { request: (method, params) => client.request(method, params), principal: async () => principal });
+  const call = async (name, input) => { const { contract, handler } = handlers.get(name); return contract.output.parse(await handler(contract.input.parse(input))); };
+  const entry = await call('alp.library.get', { directory: '/w/sub', kind: 'mcp', name: 'github', scope: 'project' });
+  assert.deepEqual(client.requests.filter(request => request.method === 'library.get').map(request => request.params), [{ kind: 'mcp', name: 'github', projectRoot: '/w', scope: 'project' }], 'asked of the granted workspace');
+  assert.deepEqual(entry, { kind: 'mcp', name: 'github', source: 'project', overrides: 'library', content: { command: 'node', env: { TOKEN: { $secret: 'keep' } } }, revision: 'r1', usedBy: ['main'], secrets: ['/env/TOKEN'] });
+  assert.ok(!JSON.stringify(entry).includes('/host/'), 'a field outside the contract (a host path) is not passed on');
+  // Outside a granted workspace nothing is asked of alpd.
+  await assert.rejects(call('alp.library.get', { kind: 'mcp', name: 'github' }), /not in a workspace your ALP credential grants|Open a workspace/);
+  await assert.rejects(call('alp.library.get', { directory: '/other', kind: 'mcp', name: 'github' }), /not in a workspace your ALP credential grants|Open a workspace/);
+  assert.equal(client.requests.filter(request => request.method === 'library.get').length, 1);
+  for (const [name, input] of [
+    ['alp.library.save', { directory: '/w', kind: 'skills', name: 'x', scope: 'project', content: {} }],
+    ['alp.library.delete', { directory: '/w', kind: 'skills', name: 'x', scope: 'project' }],
+    ['alp.library.test', { directory: '/w', kind: 'hooks', name: 'x' }],
+    ['alp.library.skills', { agent: 'main', skills: [] }],
+    ['alp.settings.language.set', { language: 'English' }],
+  ]) await assert.rejects(call(name, input), /Unavailable in ALP remote mode/, name);
+  assert.deepEqual([...new Set(client.requests.map(request => request.method))], ['library.get'], 'nothing else reached alpd');
 });

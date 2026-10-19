@@ -321,6 +321,21 @@ test('a compaction shows as Paseo\'s own compaction row, and a failed one as a w
   assert.deepEqual(shown.map(item => [item.type, item.status ?? item.level, item.preTokens ?? null]), [['compaction', 'loading', null], ['compaction', 'completed', 170_000], ['notification', 'warning', null]]);
 });
 
+test("the session's usage reaches Paseo as session.usage, the whole latest report each time (t-7679.12)", async t => {
+  const root = await fixture(t);
+  const { conn, events, runtimes } = await connection(t, root);
+  await conn.send(prompt('m1'));
+  const turnId = events.find(e => e.type === 'session.turn').turnId;
+  runtimes[0].notify('thread/tokenUsage/updated', { threadId: 'native-thread', turnId, tokenUsage: { last: { totalTokens: 50_000, inputTokens: 40_000, cachedInputTokens: 30_000, outputTokens: 10_000 }, modelContextWindow: 200_000 } });
+  runtimes[0].notify('thread/tokenUsage/updated', { threadId: 'native-thread', turnId, tokenUsage: { last: { totalTokens: 60_000, inputTokens: 50_000, outputTokens: 10_000 } } });
+  for (let i = 0; i < 100 && events.filter(e => e.type === 'session.usage').length < 2; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  const usage = events.filter(e => e.type === 'session.usage');
+  assert.deepEqual(usage.map(e => e.sessionId), ['s', 's']);
+  assert.deepEqual(usage[0].usage, { contextWindowUsedTokens: 50_000, contextWindowMaxTokens: 200_000, inputTokens: 40_000, cachedInputTokens: 30_000, outputTokens: 10_000 });
+  // Each report is the session's whole latest usage: the window size stays, the counts are the newest response's.
+  assert.deepEqual(usage[1].usage, { contextWindowUsedTokens: 60_000, contextWindowMaxTokens: 200_000, inputTokens: 50_000, outputTokens: 10_000 });
+});
+
 test('the plugin loads where import.meta.url is no URL, as when Paseo bundles it', async t => {
   const { build } = await import('esbuild');
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-paseo-bundle-'));

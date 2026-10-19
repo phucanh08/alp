@@ -19,14 +19,32 @@ async function until(check, what = 'condition', ms = 15_000) {
   assert.fail(`Expected ${what} did not arrive`);
 }
 
-/** Stops every alpd of `home`, including one still starting, until none has run for a second. */
+/** alpd forces its own exit 10 s after a shutdown begins; one that has not stopped (or come up) by then is stuck. */
+const STOP_MS = 20_000;
+/** Longer than an alpd launched before the supervisor stopped takes to reach its lock under load (about 2 s seen). */
+const QUIET_MS = 3_000;
+
+/**
+ * Stops every alpd of `home` until none has held the lock for QUIET_MS. One may still be starting:
+ * the supervisor can launch an alpd while the test starts its own, and under load that one takes
+ * the lock only after the test's has let go of it. An alpd is asked to stop once it listens (asked
+ * again if asking failed), and killed if it has not stopped STOP_MS after it was first seen, so
+ * none outlives the test (#117: a stop asked of an alpd still starting failed silently, and the
+ * teardown then waited for a stop nobody had asked for, and left that alpd running).
+ */
 async function shutdown(home) {
-  for (let quiet = 0; quiet < 10;) {
-    const lock = await readLock(home);
-    if (!lockAlive(lock)) { quiet++; await new Promise(resolve => setTimeout(resolve, 100)); continue; }
-    quiet = 0;
-    await connect(lock.socket).then(client => client.request('daemon.shutdown').finally(() => client.close())).catch(() => {});
-    await until(async () => !lockAlive(await readLock(home)), 'alpd to stop');
+  let current;
+  for (let quiet = Date.now(); Date.now() - quiet < QUIET_MS;) {
+    const lock = await readLock(home).catch(() => undefined);
+    if (lockAlive(lock)) {
+      quiet = Date.now();
+      if (current?.pid !== lock.pid) current = { pid: lock.pid, since: Date.now(), asked: false };
+      if (lock.ready && !current.asked) {
+        current.asked = await connect(lock.socket).then(client => client.request('daemon.shutdown').finally(() => client.close())).then(() => true, () => false);
+      }
+      if (Date.now() - current.since > STOP_MS) { try { process.kill(lock.pid, 'SIGKILL'); } catch {} }
+    }
+    await new Promise(resolve => setTimeout(resolve, 50));
   }
 }
 
@@ -35,7 +53,12 @@ test('the plugin keeps alpd up: started with Paseo, started again after a crash,
   const logged = [];
   // Two misses must take longer than alpd takes to start, as with the real 5 s interval.
   const stop = superviseDaemon({ home, entry: ENTRY, intervalMs: 600, log: message => logged.push(message) });
-  t.after(async () => { await stop(); await shutdown(home); await rm(home, { recursive: true, force: true }); });
+  // The home goes even if stopping failed: an alpd whose lock is gone stops at its next heartbeat.
+  t.after(async () => {
+    try { await stop(); } finally {
+      try { await shutdown(home); } finally { await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+    }
+  });
   await stop.started;
   const first = await readLock(home);
   assert.ok(lockAlive(first) && first.ready);

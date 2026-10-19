@@ -166,6 +166,12 @@ test('Codex native file changes, web searches, MCP calls and sub-agents become t
     codexToolCall({ type: 'fileChange', id: 'f8', status: 'completed', changes: [{ path: 'a.ts', kind: { type: 'update' }, diff: '@@ -1 +1 @@\n-a\n+b\n' }, { path: 'q.sql', kind: { type: 'delete' }, diff: '-- comment\nselect 1\n' }] }, true).detail.unifiedDiff,
     '--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-a\n+b\n--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +0,0 @@\n--- comment\n-select 1\n',
   );
+  // #117: an update's diff that starts with its `+++ ` header gets only the `--- ` line it lacks,
+  // so the target header is not repeated; a moved file keeps its own target.
+  assert.equal(
+    codexToolCall({ type: 'fileChange', id: 'f9', status: 'completed', changes: [{ path: 'x', kind: { type: 'update' }, diff: '+++ b/x\n@@ -1 +1 @@\n-a\n+b\n' }, { path: 'old.ts', kind: { type: 'update', move_path: 'new.ts' }, diff: '+++ b/new.ts\n@@ -1 +1 @@\n-c\n+d' }] }, true).detail.unifiedDiff,
+    '--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n--- a/old.ts\n+++ b/new.ts\n@@ -1 +1 @@\n-c\n+d\n',
+  );
   // An update's diff passes as it is.
   assert.equal(codexToolCall({ type: 'fileChange', id: 'f7', status: 'completed', changes: [{ path: 'a.ts', kind: { type: 'update' }, diff: 'x\n' }] }, true).detail.unifiedDiff, 'x\n');
   assert.deepEqual(

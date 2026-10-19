@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
 
+import { AgentSnapshotPayloadSchema, AgentStreamMessageSchema } from '@getpaseo/protocol/messages';
+
 import { createAgents } from '../server/dist/paseo/agents.js';
 
 /**
@@ -37,6 +39,19 @@ function fakeConnection({ onRequest } = {}) {
     },
   };
   return connection;
+}
+
+/**
+ * A frame the bridge sends, held to Paseo's own schema where it is the bridge's (the placement is
+ * this file's stub). A mismatch is collected, not thrown: frames sent from a background refresh
+ * would swallow a throw. Each test asserts it collected none.
+ */
+function checked(frame, problems) {
+  const result = frame.type === 'agent_stream' ? AgentStreamMessageSchema.safeParse(frame)
+    : frame.type === 'agent_update' && frame.payload.kind === 'upsert' ? AgentSnapshotPayloadSchema.safeParse(frame.payload.agent)
+    : { success: true };
+  if (!result.success) problems.push({ type: frame.type, issues: result.error.issues });
+  return frame;
 }
 
 async function until(check, what, tries = 200) {
@@ -128,5 +143,167 @@ test('a changed alpd epoch resets the delta state for a root; within one epoch o
     assert.deepEqual(texts(), ['Answer received:', ' you', 'Answer received: you'], 'a new epoch re-appends the full snapshot');
     item('epoch-B', 'Answer received: you said hi');
     assert.deepEqual(texts().slice(3), [' said hi'], 'the new epoch then streams suffixes again');
+  } finally { agents.close(); }
+});
+
+test('a root removed from alpd drops its timeline; when it reappears it replays freshly, without stale or repeated rows', async () => {
+  const session = { id: 'root-1', status: 'idle', projectRoot: '/', agent: 'main', title: 'root', runtime: 'claude', model: 'opus', mode: 'default', workflow: { mode: 'custom' }, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
+  let listed = [session];
+  let emit, connection;
+  const item = text => ({ sessionId: session.id, epoch: 'epoch-A', ts: new Date().toISOString(), event: { type: 'item', item: { id: 'msg-1', kind: 'assistant_message', text } } });
+  const clientFactory = async onEvent => {
+    emit = onEvent;
+    return connection = fakeConnection({
+      onRequest: method => {
+        if (method === 'session.list') return { sessions: listed };
+        if (method === 'question.list') return { questions: [] };
+        // alpd replays the root's history as it is now: the fully streamed message.
+        if (method === 'session.attach') { emit(item('Hello world')); return {}; }
+        return {};
+      },
+    });
+  };
+  const frames = [];
+  const problems = [];
+  const agents = createAgents({ clientFactory, broadcast: frame => frames.push(checked(frame, problems)), directory });
+  const live = () => frames.filter(frame => frame.type === 'agent_stream' && frame.payload.agentId === session.id && frame.payload.event.type === 'timeline').map(frame => frame.payload.event.item.text);
+  const timeline = async () => (await agents.handlers.fetch_agent_timeline_request({ type: 'fetch_agent_timeline_request', requestId: 'r', agentId: session.id })).payload;
+  const attaches = () => connection.calls.filter(method => method === 'session.attach').length;
+  // A root opening makes the bridge read alpd's roots again, as its poll does, known or not.
+  const relist = async () => { emit({ sessionId: session.id, epoch: 'epoch-A', ts: new Date().toISOString(), event: { type: 'session.opened', session, cwd: '/' } }); await sleep(20); };
+  try {
+    await agents.start();
+    await until(() => attaches() === 1, 'the live root to attach');
+    await sleep(10);
+    const first = await timeline();
+    assert.deepEqual(first.entries.map(entry => entry.item.text), ['Hello world']);
+
+    // The root goes away in alpd: the bridge removes it and forgets its timeline.
+    listed = [];
+    await relist();
+    assert.ok(frames.some(frame => frame.type === 'agent_update' && frame.payload.kind === 'remove' && frame.payload.agentId === session.id));
+    // A late event of the removed root is not streamed into a timeline nobody shows.
+    frames.length = 0;
+    emit(item('Hello world, again'));
+    assert.deepEqual(live(), [], 'nothing streams for a removed root');
+
+    // The root reappears: it attaches again with a replay into a new timeline epoch.
+    listed = [session];
+    await relist();
+    await until(() => attaches() === 2, 'the reappearing root to attach again');
+    await sleep(10);
+    const second = await timeline();
+    assert.notEqual(second.epoch, first.epoch, 'clients see a new epoch and reset');
+    assert.deepEqual(second.entries.map(entry => entry.item.text), ['Hello world'], 'the replay seeds the message once, with no stale suffix');
+    // Within the new timeline, streaming continues by suffix: the replayed message is not appended whole again.
+    frames.length = 0;
+    emit(item('Hello world!'));
+    assert.deepEqual(live(), ['!']);
+    await sleep(20);
+    assert.deepEqual(problems, [], 'every frame is one Paseo accepts');
+  } finally { agents.close(); }
+});
+
+test("a root's usage is the agent's lastUsage, and its turn's usage when the turn completes (t-7679.12)", async () => {
+  const usage = { contextWindowUsedTokens: 50_000, contextWindowMaxTokens: 200_000, inputTokens: 40_000, cachedInputTokens: 30_000, outputTokens: 10_000 };
+  let session = { id: 'root-1', status: 'idle', projectRoot: '/', agent: 'main', title: 'root', runtime: 'claude', model: 'opus', mode: 'default', workflow: { mode: 'custom' }, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', usage };
+  let emit, connection;
+  const clientFactory = async onEvent => {
+    emit = onEvent;
+    return connection = fakeConnection({
+      onRequest: method => {
+        if (method === 'session.list') return { sessions: [structuredClone(session)] };
+        if (method === 'question.list') return { questions: [] };
+        return {};
+      },
+    });
+  };
+  const frames = [];
+  const problems = [];
+  // Every agent and stream frame must be one Paseo's own clients accept.
+  const agents = createAgents({ clientFactory, broadcast: frame => frames.push(checked(frame, problems)), directory });
+  const fetched = async () => (await agents.handlers.fetch_agent_request({ type: 'fetch_agent_request', requestId: 'r', agentId: session.id })).payload.agent;
+  const event = (sessionId, body) => emit({ sessionId, epoch: 'e', ts: new Date().toISOString(), event: body });
+  try {
+    await agents.start();
+    await until(() => connection.calls.includes('session.attach'), 'the live root to attach');
+    await sleep(10);
+    // The usage alpd lists with the root is the agent's lastUsage from the start.
+    assert.deepEqual((await fetched()).lastUsage, usage);
+    event(session.id, { type: 'turn.started', turnId: 'turn-1' });
+    await sleep(20);
+    frames.length = 0;
+    const next = { contextWindowUsedTokens: 60_000, contextWindowMaxTokens: 200_000, inputTokens: 50_000, outputTokens: 10_000, totalCostUsd: 0.25 };
+    session = { ...session, usage: next };
+    event(session.id, { type: 'usage', usage: next });
+    const upserts = frames.filter(frame => frame.type === 'agent_update' && frame.payload.kind === 'upsert');
+    assert.equal(upserts.length, 1, 'clients get the agent again at once');
+    assert.deepEqual(upserts[0].payload.agent.lastUsage, next, 'with its new lastUsage');
+    assert.deepEqual((await fetched()).lastUsage, next);
+    event(session.id, { type: 'turn.ended', turnId: 'turn-1', state: 'completed' });
+    const completed = frames.find(frame => frame.type === 'agent_stream' && frame.payload.event.type === 'turn_completed');
+    assert.deepEqual(completed?.payload.event, { type: 'turn_completed', provider: 'alp', turnId: 'turn-1', usage: next });
+    // A team member's usage is its own, not the root's context meter.
+    await sleep(20);
+    frames.length = 0;
+    event('child-1', { type: 'session.opened', session: { id: 'child-1', parentId: session.id, agent: 'peer', runtime: 'codex', model: 'x' }, cwd: '/' });
+    event('child-1', { type: 'usage', usage: { contextWindowUsedTokens: 1 } });
+    assert.ok(!frames.some(frame => frame.type === 'agent_update'), 'the root is not sent again');
+    assert.deepEqual((await fetched()).lastUsage, next);
+    await sleep(20);
+    assert.deepEqual(problems, [], 'every frame is one Paseo accepts');
+  } finally { agents.close(); }
+});
+
+test('an attach that a later one replaced leaves the later timeline alone when it settles', async () => {
+  const session = { id: 'root-1', status: 'idle', projectRoot: '/', agent: 'main', title: 'root', runtime: 'claude', model: 'opus', mode: 'default', workflow: { mode: 'custom' }, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
+  let listed = [session];
+  let emit, connection;
+  let failFirst;
+  const item = text => ({ sessionId: session.id, epoch: 'epoch-A', ts: new Date().toISOString(), event: { type: 'item', item: { id: 'msg-1', kind: 'assistant_message', text } } });
+  const clientFactory = async onEvent => {
+    emit = onEvent;
+    return connection = fakeConnection({
+      onRequest: method => {
+        if (method === 'session.list') return { sessions: listed };
+        if (method === 'question.list') return { questions: [] };
+        if (method === 'session.attach') {
+          // The first attach hangs, then fails late (as on a connection that went away); the next replays.
+          if (connection.calls.filter(call => call === 'session.attach').length === 1) return new Promise((_, reject) => { failFirst = () => reject(new Error('connection lost')); });
+          emit(item('Hello world'));
+          return {};
+        }
+        return {};
+      },
+    });
+  };
+  const frames = [];
+  const problems = [];
+  const agents = createAgents({ clientFactory, broadcast: frame => frames.push(checked(frame, problems)), directory });
+  const live = () => frames.filter(frame => frame.type === 'agent_stream' && frame.payload.agentId === session.id && frame.payload.event.type === 'timeline').map(frame => frame.payload.event.item.text);
+  const attaches = () => connection.calls.filter(method => method === 'session.attach').length;
+  // The root is replaying, so its own events do not refresh: a root the bridge does not know yet does, as the poll would.
+  const relist = async () => { emit({ sessionId: 'unknown', epoch: 'epoch-A', ts: new Date().toISOString(), event: { type: 'session.opened', session: { ...session, id: 'unknown' }, cwd: '/' } }); await sleep(20); };
+  try {
+    await agents.start();
+    await until(() => attaches() === 1 && failFirst, 'the first attach to hang');
+    // The root goes and comes back while its first attach still hangs: a second attach replays it.
+    listed = [];
+    await relist();
+    listed = [session];
+    await relist();
+    await until(() => attaches() === 2, 'the second attach');
+    await sleep(10);
+    // The first attach fails now; the second one's timeline and live state must survive it.
+    failFirst();
+    await sleep(20);
+    const page = (await agents.handlers.fetch_agent_timeline_request({ type: 'fetch_agent_timeline_request', requestId: 'r', agentId: session.id })).payload;
+    assert.equal(page.error, null);
+    assert.deepEqual(page.entries.map(entry => entry.item.text), ['Hello world']);
+    assert.equal(attaches(), 2, 'the timeline was kept, so nothing attached again');
+    frames.length = 0;
+    emit(item('Hello world!'));
+    assert.deepEqual(live(), ['!'], 'the root streams live, not as a replay');
+    assert.deepEqual(problems, []);
   } finally { agents.close(); }
 });

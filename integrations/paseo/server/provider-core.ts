@@ -15,6 +15,7 @@ import type { DaemonConnection, Envelope, SessionSnapshot, TimelineItem } from '
 import { alpdSessionOf, configModels, DEFAULT_TEAM, handleFor, MODES } from './mapping-wire.js';
 import { sessionTasks } from './session-tasks.js';
 import { paseoDetail } from './tool-detail.js';
+import { agentUsage } from './session-usage.js';
 
 /**
  * Paseo is a viewer of alpd: this provider translates Paseo inputs into daemon calls and daemon
@@ -258,6 +259,10 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
             return;
           case 'turn.ended':
             emit({ type: 'session.turn', sessionId, turnId: event.turnId, state: event.state, ...(event.error ? { error: event.error } : {}) });
+            return;
+          case 'usage':
+            // The session's whole latest usage (t-7679.12): Paseo keeps it as the agent's lastUsage for its context meter.
+            emit({ type: 'session.usage', sessionId, usage: agentUsage(event.usage) });
             return;
           case 'item':
             // A todo list of tasks becomes the Tasks pill's, not Paseo's own pill (ALPD §55).

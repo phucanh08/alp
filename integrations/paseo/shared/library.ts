@@ -49,6 +49,8 @@ export const libraryGet = defineRpc({
     usedBy: z.array(z.string()),
     /** Agents: the skills the library gives it by name (role-skills.json). */
     librarySkills: z.array(z.string()).optional(),
+    /** ALP remote mode: JSON Pointers of the values `content` holds as a secret marker, not as the value. */
+    secrets: z.array(z.string()).optional(),
   }),
 });
 
