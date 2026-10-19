@@ -140,8 +140,8 @@ function hasGitEntry(root: string): boolean {
     try {
       lstatSync(path.join(directory, '.git'));
       return true;
-    } catch {
-      // none here
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new IgnoreUnknown('cannot examine .git');
     }
     if (path.dirname(directory) === directory) return false;
   }
@@ -229,23 +229,30 @@ function check(git: string, root: string, paths: readonly string[], deadline: nu
     });
     child.stderr!.on('data', (chunk: Buffer) => { if (err.length < GIT_CHECK.maxErrorBytes) err += chunk.toString('utf8'); });
     child.on('error', error => finish(() => {
-      // Removed since it was found: no rules to apply.
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') resolve(null);
-      else reject(new IgnoreUnknown(error.message));
+      // Git was resolved already. ENOENT can also mean a missing cwd or interpreter;
+      // it does not establish that no ignore rules apply.
+      reject(new IgnoreUnknown(error.message));
     }));
     child.on('close', code => finish(() => {
       // No repository: no rules. A `.git` that Git cannot use (a worktree whose repository moved)
       // is not "no repository": fail closed.
       if (code === 128 && /not a git repository/i.test(err)) {
-        if (hasGitEntry(root)) reject(new IgnoreUnknown('a .git Git cannot use'));
-        else resolve(null);
+        try {
+          if (hasGitEntry(root)) reject(new IgnoreUnknown('a .git Git cannot use'));
+          else resolve(null);
+        } catch (error) { reject(error); }
         return;
       }
       // 0: some paths are ignored; 1: none is.
       if (code !== 0 && code !== 1) { reject(new IgnoreUnknown(`exit ${code}`)); return; }
+      if (err.length || (code === 1 && outBytes) || (code === 0 && !outBytes)) {
+        reject(new IgnoreUnknown('inconsistent exit status or diagnostics')); return;
+      }
+      const output = Buffer.concat(out).toString('utf8');
+      if (outBytes && !output.endsWith('\0')) { reject(new IgnoreUnknown('unterminated answer')); return; }
       const asked = new Set(paths);
       const ignored = new Set<string>();
-      for (const entry of Buffer.concat(out).toString('utf8').split('\0')) {
+      for (const entry of output.split('\0')) {
         if (!entry) continue;
         const relative = entry.startsWith('./') ? entry.slice(2) : undefined;
         if (relative === undefined || !asked.has(relative)) { reject(new IgnoreUnknown('an answer for a path not asked')); return; }

@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { alpHome, connectSocket, daemonPaths } from '@anhlp/alp-client';
 import { resolveConfig } from './config.js';
-import { CredentialStore, createCredential, gatewayHome, listCredentials, revokeCredential, rotateCredential } from './credentials.js';
+import { CredentialStore, createCredential, gatewayHome, listCredentials, reissueCredential, revokeCredential, rotateCredential } from './credentials.js';
 import { createGatewayLogger } from './log.js';
 import { DEFAULT_PERMISSIONS, PERMISSIONS } from './policy.js';
 import { createGateway } from './server.js';
@@ -21,6 +21,9 @@ Usage:
                                 [--mode MODE]... [--expires-in-days N] [--json]
   alp-gateway credential list [--json]
   alp-gateway credential rotate ID [--json]
+  alp-gateway credential reissue ID [--label TEXT] [--workspace DIR]... [--permission P]...
+                                  [--mode MODE]... [--expires-in-days N] [--json]
+    (alias: edit; named fields replace existing grants, omitted fields stay; issues a new token)
   alp-gateway credential revoke ID
 
 Permissions: ${PERMISSIONS.join(', ')} (default: ${DEFAULT_PERMISSIONS.join(', ')}).
@@ -100,6 +103,22 @@ async function credential(/** @type {string[]} */ args) {
       const state = entry.revokedAt ? `revoked ${entry.revokedAt}` : entry.expiresAt && Date.parse(entry.expiresAt) <= Date.now() ? `expired ${entry.expiresAt}` : 'active';
       console.log(`${entry.id}  ${entry.label}  ${state}  ${entry.permissions.join(',')}  ${entry.workspaces.map(workspace => workspace.path).join(', ')}${entry.modes ? `  modes ${entry.modes.join(',')}` : ''}`);
     }
+    return;
+  }
+  if (action === 'reissue' || action === 'edit') {
+    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { label: { type: 'string' }, workspace: { type: 'string', multiple: true }, permission: { type: 'string', multiple: true }, mode: { type: 'string', multiple: true }, 'expires-in-days': { type: 'string' }, json: { type: 'boolean' } } });
+    if (positionals.length !== 1) fail(`credential ${action} needs one credential id`);
+    const days = values['expires-in-days'] === undefined ? undefined : Number(values['expires-in-days']);
+    if (days !== undefined && (!Number.isFinite(days) || !(days > 0))) fail('--expires-in-days must be a positive finite number');
+    const { credential: issued, token } = await reissueCredential(home, positionals[0], {
+      ...(values.label !== undefined ? { label: values.label } : {}),
+      ...(values.workspace !== undefined ? { workspaces: values.workspace } : {}),
+      ...(values.permission !== undefined ? { permissions: values.permission.flatMap(entry => entry.split(',')).map(entry => entry.trim()).filter(Boolean) } : {}),
+      ...(values.mode !== undefined ? { modes: values.mode } : {}),
+      ...(days !== undefined ? { expiresAt: new Date(Date.now() + days * 86_400_000).toISOString() } : {}),
+    });
+    if (values.json) console.log(JSON.stringify({ credential: issued, token }));
+    else console.log(`Reissued ${issued.id}; the old token no longer works and its connections close after the gateway reloads.\nNew token, shown once:\n\n  ${token}\n`);
     return;
   }
   if (action === 'rotate') {

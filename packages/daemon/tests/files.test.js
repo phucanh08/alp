@@ -7,12 +7,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
-import { GIT_CHECK, gitChecksRunning, listWorkspaceDirectory, readWorkspaceFile, relativeSegments, resolveGit } from '@anhlp/alp-daemon/files';
+import { GIT_CHECK, gitChecksRunning, listWorkspaceDirectory, readWorkspaceFile, relativeSegments, resolveGit, searchWorkspaceFiles } from '@anhlp/alp-daemon/files';
 
 /** A workspace and a directory beside it ("outside"), both removed after the test. */
 async function workspace(t) {
   const base = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-files-')));
-  t.after(() => rm(base, { recursive: true, force: true }));
+  t.after(() => rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const root = path.join(base, 'project');
   const outside = path.join(base, 'outside');
   await mkdir(root);
@@ -265,11 +265,12 @@ test('.gitignore: ignored paths are hidden and refused unless includeIgnored, as
   assert.deepEqual(await names('pkg'), ['sub', '.gitignore', 'root-only.txt', 'x.log'], 'a deeper .gitignore re-includes and anchors to its directory');
   assert.deepEqual(await refusal(listWorkspaceDirectory(root, { path: 'dist' }), root), { code: 1003, reason: 'ignored' });
   assert.ok((await names('dist', true)).includes('out.js'));
-  // A .gitignore that is a link is not read.
+  // Git refuses a linked .gitignore with a diagnostic. Unknown rules fail closed.
   await rm(path.join(root, 'pkg', '.gitignore'));
   await put(path.join(root, 'elsewhere.gitignore'), 'main.ts\n');
   await symlink(path.join(root, 'elsewhere.gitignore'), path.join(root, 'src', '.gitignore'));
-  assert.equal((await readWorkspaceFile(root, { path: 'src/main.ts' })).content, 'src/main.ts');
+  assert.deepEqual(await refusal(readWorkspaceFile(root, { path: 'src/main.ts' }), root), { code: 1003, reason: 'ignored' });
+  assert.equal((await readWorkspaceFile(root, { path: 'src/main.ts', includeIgnored: true })).content, 'src/main.ts');
 });
 
 test('list: entries with kinds, sizes and times; at most maxListEntries, then truncated', async t => {
@@ -332,6 +333,10 @@ test('git that hangs, fails, crashes or answers what was not asked fails closed:
   const answers = await fakeGit(t, 'process.exit(1);');
   assert.equal((await readWorkspaceFile(root, { path: 'src/a.ts', git: { binary: answers.binary } })).content, 'a', 'a git that says none is ignored');
   const cases = {
+    diagnosticExit1: 'process.stderr.write("fatal: cannot read ignore rules\\n"); process.exit(1);',
+    outputExit1: 'process.stdout.write(input); process.exit(1);',
+    emptyExit0: 'process.exit(0);',
+    unterminated: 'process.stdout.write(input.slice(0, -1)); process.exit(0);',
     hangs: 'setTimeout(() => {}, 60000);',
     fails: 'process.stderr.write("fatal: detected dubious ownership\\n"); process.exit(128);',
     // POSIX: killed by a signal. Windows has no signals: a self-kill there is TerminateProcess with
@@ -350,6 +355,60 @@ test('git that hangs, fails, crashes or answers what was not asked fails closed:
     assert.ok(performance.now() - started < 3000, `${name} took ${Math.round(performance.now() - started)} ms`);
     assert.equal((await readWorkspaceFile(root, { path: 'src/a.ts', includeIgnored: true, git })).content, 'a', `${name}: includeIgnored asks no git`);
   }
+});
+
+test('search respects nested Git ignores and negation before applying the result limit', { skip: noGit }, async t => {
+  const { root } = await workspace(t);
+  repo(root);
+  await put(path.join(root, '.gitignore'), 'ignored/\n*.generated.ts\n');
+  await put(path.join(root, 'src', '.gitignore'), '*.ts\n!visible.ts\n');
+  for (const file of ['ignored/deep/a.ts', 'a.generated.ts', 'src/hidden.ts', 'src/visible.ts', 'z.ts']) await put(path.join(root, file), 'text');
+  assert.deepEqual((await searchWorkspaceFiles(root, { limit: 1 })).files, [{ path: 'z.ts' }]);
+  assert.deepEqual((await searchWorkspaceFiles(root, { query: 'ts', limit: 100 })).files.map(file => file.path).sort(), ['src/visible.ts', 'z.ts']);
+});
+
+test('search fails closed on Git failure and preserves missing-git/nonrepo fallback', { skip: noFakeGit || noGit }, async t => {
+  const { root } = await workspace(t);
+  await put(path.join(root, 'src', 'a.ts'), 'text');
+  await put(path.join(root, '.gitignore'), '*.ts\n');
+  assert.deepEqual((await searchWorkspaceFiles(root)).files, [{ path: 'src/a.ts' }], 'no repository');
+  repo(root);
+  assert.deepEqual((await searchWorkspaceFiles(root, { git: { binary: path.join(root, 'missing-git') } })).files, [{ path: 'src/a.ts' }], 'no Git');
+  for (const body of ['process.exit(128);', 'process.stderr.write("fatal: rules unavailable"); process.exit(1);', 'setTimeout(() => {}, 60000);']) {
+    const { binary } = await fakeGit(t, body);
+    const started = performance.now();
+    assert.deepEqual((await searchWorkspaceFiles(root, { git: { binary, timeoutMs: 100 } })).files, []);
+    assert.ok(performance.now() - started < 2000, 'Git failure is bounded');
+  }
+});
+
+test('a resolved git whose interpreter is missing fails closed on spawn ENOENT', { skip: process.platform === 'win32' && 'POSIX interpreter' }, async t => {
+  const { root, outside } = await workspace(t);
+  await put(path.join(root, 'a.ts'), 'text');
+  const binary = path.join(outside, 'git');
+  await writeFile(binary, '#!/nonexistent/alp-test-interpreter\n');
+  await chmod(binary, 0o755);
+  assert.deepEqual(await refusal(readWorkspaceFile(root, { path: 'a.ts', git: { binary } }), root), { code: 1003, reason: 'ignored' });
+});
+
+test('search batches each level and never descends into an ignored subtree', { skip: noFakeGit }, async t => {
+  const { root, outside } = await workspace(t);
+  for (const file of ['ignored/deep/a.ts', 'src/a.ts', 'src/b.ts', 'top.ts']) await put(path.join(root, file), 'text');
+  const record = path.join(outside, 'calls.jsonl');
+  const { binary } = await fakeGit(t, `fs.appendFileSync(${JSON.stringify(record)}, JSON.stringify(input.split('\\0').filter(Boolean)) + '\\n');
+    const ignored = input.split('\\0').filter(entry => entry === './ignored');
+    if (ignored.length) process.stdout.write(ignored.join('\\0') + '\\0');
+    process.exit(ignored.length ? 0 : 1);`);
+  const result = await searchWorkspaceFiles(root, { git: { binary } });
+  assert.deepEqual(result.files.map(file => file.path).sort(), ['src/a.ts', 'src/b.ts', 'top.ts']);
+  const calls = (await readFile(record, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(calls.length, 2, 'one Git process per level, rather than per file');
+  assert.deepEqual(calls[0].sort(), ['./ignored', './src', './top.ts']);
+  assert.deepEqual(calls[1].sort(), ['./src/a.ts', './src/b.ts']);
+  // Exhaustion before checking ignore status returns no unchecked candidates.
+  let tick = 0;
+  assert.deepEqual(await searchWorkspaceFiles(root, { now: () => (tick += 4000), git: { binary } }), { files: [], truncated: true });
+  assert.equal((await readFile(record, 'utf8')).trim().split('\n').length, 2, 'no Git work after deadline');
 });
 
 test('git runs boxed: argv only, no shell, the real root as cwd, names on stdin with NUL, none of alpd\'s GIT_* variables', { skip: noFakeGit }, async t => {

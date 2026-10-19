@@ -45,7 +45,7 @@ Số mục (§) được code tham chiếu; giữ ổn định.
     secret nhưng là thông tin host: client nào đã qua xác thực và hello cũng thấy, như Paseo;
   - `capabilities` = capability alpd liệt kê ∩ `{attach.after, prompt.receipts, task, team,
     library, settings.language, session.list.page, question.watch, question.watch.turns,
-    workspace.files, workspace.files.read, prompt.images}`.
+    workspace.files, workspace.files.read, prompt.images, library.project.write}`.
   - Không có `pid` và không bao giờ có `extension.methods`.
   - Trong `library` và `settings.language`, các method ghi trả `-32601 not_exposed` (§5.4).
     `library.get` đọc được, có redaction (§5.4, §5.7).
@@ -122,6 +122,8 @@ gateway, không phải trường mới của Protocol v1.
 alp-gateway credential create --label phone --workspace /home/me/project \
     [--permission session.read] [--permission files.read] [--mode read-only] [--expires-in-days 90] [--json]
 alp-gateway credential list
+alp-gateway credential reissue <id> [--workspace <absolute>] [--permission <permission>] [--mode <mode>] [--label <label>] [--expires-in-days 90] [--json]
+# edit is an alias; retains device id, replaces secret and only the supplied grant fields
 alp-gateway credential rotate <id>     # token cũ chết ngay; connection của nó đóng 4401
 alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, ticket bị hủy
 ```
@@ -143,16 +145,16 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
     và `settings.language.get`;
   - `project.read`, `project.write`: tài nguyên khác của project: tasks, danh sách teams, danh
     sách tên entry của library, và nội dung một entry (`library.get`, chỉ đọc, đã redaction §5.7).
-    Ghi library không có qua remote (§5.4);
+    Ghi instruction project cần quyền riêng `library.write` (policy #118);
+  - `library.write`: project-only agents/skills theo policy `project-data`, bao hàm `project.read`;
   - `files.read`: xem danh sách thư mục và đọc nội dung file text của workspace
     (`workspace.files.list`, `workspace.files.read`, §5.10).
   Quyền write kéo theo quyền read cùng họ. `files.read` không kéo theo quyền nào và không quyền nào
   kéo theo nó. Không có `--permission`, CLI cấp bốn quyền `session.*` và `project.*`, **không bao
   giờ** cấp `files.read`: chủ máy phải ghi rõ `--permission files.read` cho từng credential được đọc
-  file (ví dụ `--permission session.read,session.write,project.read,files.read`). Muốn thêm
-  `files.read` cho một thiết bị đang dùng thì tạo credential mới rồi thu hồi cái cũ (grant của một
-  credential không sửa được; `rotate` giữ nguyên grant). Credential cũ, tạo trước khi có quyền này,
-  không có nó. Không có permission quản trị host qua remote.
+  file (ví dụ `--permission session.read,session.write,project.read,files.read`). Dùng `credential reissue`
+  để sửa grant giữ device id, và nêu đủ danh sách quyền muốn giữ; `rotate` chỉ thay secret.
+  `library.write` cũng cần explicit opt-in, không có trong default grant. Không có permission quản trị host qua remote.
 - Thu hồi khẩn cấp: `credential revoke`. Nếu file credentials hỏng hoặc bị lộ: dừng gateway
   (`systemctl --user stop alp-gateway`). alpd vẫn chạy bình thường.
 
@@ -361,7 +363,7 @@ Cột Test dùng các mã sau:
 | `daemon.pause`/`resume`/`pauses` | — | host.admin | — | denied | -32601 |
 | `daemon.shutdown` | — | host | — | prohibited | -32601 |
 | `extension.register`/`unregister` | `extension.methods` | host | — | prohibited | -32601 |
-| `library.save`/`delete`/`duplicate`/`rename` | `library` | library-or-project | — | denied: cấu hình lệnh chạy trên daemon host (mcp, hooks, providers, agents tham chiếu chúng); `sync` ghi mọi project | -32601 |
+| `library.save`/`delete`/`duplicate`/`rename` | `library.project.write` | project | `library.write` | agents/skills project-only, policy `project-data`; no host/builtin collision, executable config or sidecars | 1003 / 1005 for old daemon |
 | `library.skills.set` | `library` | host | — | denied: ghi host | -32601 |
 | `settings.language.set` | `settings.language` | host | — | denied: ghi host | -32601 |
 
@@ -437,8 +439,7 @@ Quy tắc:
 ### 5.7 `library.get`: quyền và redaction
 
 Quyết định của người dùng ngày 2026-10-17 (t-7679.14): web xem được nội dung Library trong Settings
-như paseo-web (patch 0015), chỉ đọc; `library.save` và các method ghi vẫn bị chặn, sẽ cần một quyền
-riêng (backlog).
+như paseo-web (patch 0015). `project.read` chỉ đọc; project instruction editing cần quyền riêng `library.write` (xem #118 bên dưới).
 
 - **Quyền**: `project.read`, cùng quyền với `library.list` và `team.list`. Ba method này đều đọc
   cấu hình mà session của project sẽ dùng: layer project, rồi library và built-in mà project kế
@@ -806,7 +807,7 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
 | `apps/gateway/tests/gateway.test.js` | như trên (fake daemon) | healthz/readyz theo alpd, ticket flow, CORS, Host/DNS rebinding, proxy tin cậy, chặn bind không TLS, các kiểm tra §5.2, binary 4003, quá lớn 1009, hello timeout 4408, rate/pending, slow consumer 4431 không ảnh hưởng client khác, hai client đồng thời, revoke/rotate 4401, mất alpd 4503 + request chờ `daemon_disconnected` không gửi lại, alpd không chạy, tắt gateway 1001 không hủy gì |
 | `apps/gateway/tests/authorization.test.js` | như trên | matrix đủ, mọi method không expose → -32601 không tới alpd (kể cả ghi library), credential thiếu permission → 1003 `grant` cho **mọi** method ngoài quyền của nó, **mọi method expose có ca vượt scope** (không tới alpd), tasks/teams/library trong project, host scope bị chặn, param danh tính bị bỏ, đường dẫn chỉ khớp tuyệt đối, param lạ bị bỏ, lọc list, `question.answer` không nhận prefix, allowlist spec và tên agent, ngữ pháp model id (ACP `acp:<provider>/<model>`, id có `[1m]`; id sai bị từ chối), gateway đặt id root, race create ngoài scope → release, chỉ prompt text, giới hạn mode khi create/configure, lọc event có giữ thứ tự, replay đứng trước response attach, đối chiếu `x-alp`; `library.get` qua `projectLibraryContent` cho cả sáu kind (sentinel ở mọi field có thể chứa secret, field lạ, kiểu sai, pointer cần escape, kind lạ), kết quả chỉ giữ `LIBRARY_ENTRY_FIELDS`, param lạ bị bỏ, các method ghi library → -32601 không tới alpd; `hostname` của hello qua `hostLabel` (ký tự điều khiển, quá dài → bỏ); dòng library/team/model chỉ giữ field liệt kê, lỗi team không nêu đường dẫn; `session.status`/`log` trả tree khác → 1001 |
 | `apps/gateway/tests/modes.test.js` | như trên | grant `read-only`: prompt, message, answer, dismiss một session full-access → `1003 mode` trước alpd; assignment read-only trong tree full-access cũng bị từ chối; mode đổi bởi client local có hiệu lực ngay (tra lại tới root); trong grant thì drive được; credential không có `modes` không bị giới hạn; dừng root luôn được, dừng assignment của requester full-access bị từ chối; get/status/log/attach/rename/archive/release không bị giới hạn; hạ mode bằng configure được, nâng thì không |
-| `test/integration/gateway.test.js` | `node scripts/test.mjs integration`; lane paseo | **alpd thật + fake Codex** qua SDK WebSocket: handshake, create, prompt, stream; client rớt mà turn vẫn chạy; gateway restart trong lúc turn kết thúc → nhận `turn.ended` bằng replay; alpd restart → 4503, readyz 503→200, resume và prompt tiếp; cursor 1..n không trùng, không thiếu, không reset; mỗi prompt tới provider đúng một lần; credential khác không thấy, attach, prompt hay nhận event; event `usage` và `session.get().session.usage` tới đúng credential của session, credential khác không nhận, `daemon.usage` vẫn -32601; `task.create/list/update`, `team.list`, `settings.language.get` qua gateway; hello có `hostname` = `os.hostname()`; credential khác không đọc/ghi được tasks của project; `library.get` của built-in `main` đọc được, projectRoot ngoài grant → 1003; `library.save` → -32601; revoke → 4401. **Mode**: credential `read-only`, session full-access do client local tạo: message lúc rảnh (wake), lúc turn chạy (steer), prompt, answer và dismiss một câu hỏi `alp_ask` thật đều → `1003 mode`, câu hỏi vẫn chờ, không marker nào tới provider; dừng root vẫn được; tree read-only của chính nó thì message đánh thức (marker tới provider) và answer cho turn chạy tiếp. **Secret**: MCP (userinfo, query, header, args, env), hook và provider có sentinel; alpd trả chúng cho client local, còn credential `project.read` qua gateway: `library.get` trả các field đó là marker (nội dung đúng từng field), `library.list` (5 kind), `team.list`, `library.models` không chứa sentinel hay đường dẫn library; model `acp:custom/vendor-model` từ `library.models` qua được `session.preview` |
+| `test/integration/gateway.test.js` | `node scripts/test.mjs integration`; lane paseo | **alpd thật + fake Codex** qua SDK WebSocket: handshake, create, prompt, stream; client rớt mà turn vẫn chạy; gateway restart trong lúc turn kết thúc → nhận `turn.ended` bằng replay; alpd restart → 4503, readyz 503→200, resume và prompt tiếp; cursor 1..n không trùng, không thiếu, không reset; mỗi prompt tới provider đúng một lần; credential khác không thấy, attach, prompt hay nhận event; event `usage` và `session.get().session.usage` tới đúng credential của session, credential khác không nhận, `daemon.usage` vẫn -32601; `task.create/list/update`, `team.list`, `settings.language.get` qua gateway; hello có `hostname` = `os.hostname()`; credential khác không đọc/ghi được tasks của project; `library.get` của built-in `main` đọc được, projectRoot ngoài grant → 1003; `library.save` without `library.write` → 1003 grant; revoke → 4401. **Mode**: credential `read-only`, session full-access do client local tạo: message lúc rảnh (wake), lúc turn chạy (steer), prompt, answer và dismiss một câu hỏi `alp_ask` thật đều → `1003 mode`, câu hỏi vẫn chờ, không marker nào tới provider; dừng root vẫn được; tree read-only của chính nó thì message đánh thức (marker tới provider) và answer cho turn chạy tiếp. **Secret**: MCP (userinfo, query, header, args, env), hook và provider có sentinel; alpd trả chúng cho client local, còn credential `project.read` qua gateway: `library.get` trả các field đó là marker (nội dung đúng từng field), `library.list` (5 kind), `team.list`, `library.models` không chứa sentinel hay đường dẫn library; model `acp:custom/vendor-model` từ `library.models` qua được `session.preview` |
 | `scripts/gateway-smoke.mjs` | `npm run test:gateway:smoke`; lane packages | cài từ tarball protocol/core/client/gateway vào project rỗng, **không có Paseo hay React**; chạy `alp-gateway` đã cài với alpd thật: credential, serve, readyz, ticket, create và prompt, `task.create`/`task.list` qua SDK đã cài, `daemon.shutdown` bị chặn, log không có token |
 | `tsconfig.gateway.json` | lane core | type-check JSDoc (`// @ts-check`) của `apps/gateway/src` |
 
@@ -822,7 +823,7 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
   workspace. Muốn bản rút gọn cần contract riêng.
 - **Đọc file qua remote chỉ đọc, chỉ text ≤ 1 MiB, cần `files.read`** (§5.10): không có sửa, tạo,
   xoá, tải file nhị phân hay xem ảnh. Block list là mức sàn, không bảo đảm file còn lại không có
-  secret. `workspace.files.search` vẫn chưa đọc `.gitignore`; `list`/`read` hỏi Git (`--no-index`:
+  secret. `workspace.files.search`, `list` và `read` đều hỏi Git (`--no-index`:
   file đã track mà khớp luật cũng bị ẩn).
 - **Nội dung library qua remote là bản đã redaction ở gateway** (§5.7), không phải contract của
   daemon: alpd vẫn chỉ redact giá trị `env`/`headers` (`x-alp.redacts`). Gateway không đoán secret
@@ -831,10 +832,9 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
   `description`) và tên chương trình (`command` không khoảng trắng, có thể là đường dẫn trên host)
   đi nguyên: secret người dùng tự viết vào đó sẽ tới client. Một field mới của core chỉ tới client
   sau khi được thêm vào `LIBRARY_CONTENT` trong `policy.js`.
-- Ghi library qua remote chưa có (người dùng quyết ngày 2026-10-17: cần một quyền riêng, để
-  backlog): chưa có chính sách tách thay đổi project-scope không thực thi (skills, teams không
-  sync, agents không tham chiếu mcp/hooks/provider) khỏi phần còn lại. Marker trong `content` của
-  `library.get` vì vậy chưa có nghĩa "giữ giá trị cũ" qua remote.
+- Ghi instruction project cần explicit `library.write` và daemon `library.project.write` (#118):
+  agents/skills project-only thuần dữ liệu, không executable references, sidecars hoặc host fallback.
+  Marker secret không được chấp nhận trong nội dung ghi của policy này.
 - `library.list` và `team.list` vẫn trả tên, mô tả, source và `usedBy` của layer library và
   built-in của host, như `session.preview`. Mô tả là chữ người dùng tự viết trong file cấu hình;
   gateway không lọc nội dung của nó. Muốn chặt hơn thì lọc theo `source` ở gateway.
@@ -877,14 +877,15 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
      authorization, test fake và E2E với alpd thật;
    - `library.get` ban đầu bị chặn; từ t-7679.14 đọc được với `project.read`, qua redaction của
      gateway (§5.7);
-   - các method ghi library, `library.skills.set` và `settings.language.set` vẫn bị chặn;
+   - project-only agents/skills CRUD có qua `library.write` + `library.project.write`;
+     host `library.skills.set` và `settings.language.set` vẫn bị chặn;
    - test `x-alp` chạy trên schema thật.
 3. Muốn expose thêm method, sửa `policy.js`:
    - `status: 'exposed'`, permission, params, scope;
    - handler trong `connection.js` (`#workspace`/`#project` cho `projectRoot`);
    - thêm ca vào `OUT_OF_SCOPE` và `IN_SCOPE` của `authorization.test.js`.
-   Ứng viên tiếp theo: `library.save` cho `scope: project` với kind `skills` và `teams` không có
-   `sync`, sau khi có quyết định chính sách. Agents/mcp/hooks/providers vẫn là quản trị.
+   #118 expose project-only agents/skills với authoritative policy `project-data`;
+   teams/mcp/hooks/providers và executable reference vẫn là quản trị.
 4. Phía Paseo:
    - thay `readLock`/`connect` bằng luồng §8;
    - lưu token an toàn;
@@ -909,3 +910,49 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
    - `alp-gateway credential create`;
    - bật `alp-gateway.service`;
    - kiểm tra `curl https://alp.example.com/readyz`.
+
+
+### #118: grant reissue, project instruction writes, negotiated images and ignored search
+
+`credential reissue <id>` (`edit` alias) retains `id` and `createdAt`, rotates the secret and
+persists the replacement grant atomically. Supplied workspace/permission/mode lists replace
+whole lists; omitted fields retain their values. A revoked credential cannot be restored.
+Old tokens, outstanding tickets and active connections lose authorization when the running gateway
+reloads (default poll 1 second, same as rotation). Install the newly printed token on the device.
+For example, grant file access while retaining session/project writes with
+`alp-gateway credential reissue <id> --permission session.write,project.write,files.read`.
+
+`library.write` is opt-in, absent from default grants and never implied by `project.write`.
+It implies `project.read` so the client can inspect entries, never `files.read`.
+Gateway mutations require daemon capability `library.project.write`; older daemons get no
+mutation (1005). The gateway requires project scope and a granted canonical projectRoot,
+and injects `policy: project-data` independently of client input.
+
+The authoritative core preflight, inside the daemon's mutation queue, supports save/delete/duplicate/
+rename for **project-only agents and skills**. Skills accept `{body}`; agents accept
+`{instructions, config?}`, with only description/model/thinking/context/autocompact configuration.
+Models must be explicit `codex:<id>` or `claude:<id>`. Provider/mode/skills/MCP/hooks references and
+unknown fields are refused. Source and target cannot collide with library/built-in names, so writes
+cannot shadow or reveal host fallback configuration. Existing entries must contain only regular
+AGENT.md/agent.json or SKILL.md files: no sidecars, links or hardlinks. This also guards an
+instruction-only save over unsafe existing content. Revisions, in-use and destination collision checks
+still apply. MCP/hooks/providers/teams, known-projects sync, host `library.skills.set` (role-skills.json)
+and administrative settings remain denied. Instruction text carries **prompt authority** over future
+agents; this policy excludes automatically executable configuration, not instructions asking agents
+to use tools. Preflight shares the existing safe-path boundary: it does not sandbox malicious
+concurrent same-user processes. Settings exposes a project JSON instruction editor with create,
+save, duplicate, rename and delete only for an opted-in credential and capable daemon. Inherited
+entries remain read-only; unsafe entries fail with an error rather than silently losing fields.
+
+Gateway `daemon.hello` optionally returns
+`promptImageLimits: {maxCount,maxBytes,maxTotalBytes}` when it advertises `prompt.images`.
+These limits come from `promptImageLimits(limits.maxFrame)`; bytes are decoded bytes. Web uses them
+for reads, attachment merges, sends and retries, refreshing on reconnect. An older peer without this
+field retains compatible defaults when it advertises the image capability. Malformed offers or no
+capability disable image admission. Frames smaller than 64 KiB advertise zero byte limits.
+
+Search uses shared hardened `gitIgnored` in one batch per BFS level, prunes ignored directories
+before descent and filters before ranking/limit under the existing 3-second deadline. IgnoreUnknown
+returns an empty truncated list, never partial unverified names. Truly missing Git or a true nonrepo
+retain the existing fallback; a resolved binary that fails to spawn, diagnostics and inconsistent
+exit/output fail closed. Silent clean exit1 remains Git's valid 'none ignored' result.

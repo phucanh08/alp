@@ -37,7 +37,7 @@ async function world(t, { modes } = {}) {
     ],
   });
   const gw = await startGateway(t, { daemon, credentials: {
-    alice: { workspaces: [a], permissions: ['session.read', 'session.write', 'project.read', 'project.write', 'files.read'], ...(modes ? { modes } : {}) },
+    alice: { workspaces: [a], permissions: ['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write'], ...(modes ? { modes } : {}) },
     reader: { workspaces: [a], permissions: ['session.read'] },
     sessions: { workspaces: [a], permissions: ['session.read', 'session.write'] },
     both: { workspaces: [a, b] },
@@ -83,6 +83,10 @@ const OUT_OF_SCOPE = {
   'task.gate.resolve': ({ b }) => [{ projectRoot: b, id: 't-a000', gate: 'review' }, 1003, 'outside_workspace'],
   'library.list': ({ b }) => [{ kind: 'mcp', projectRoot: b }, 1003, 'outside_workspace'],
   'library.get': ({ b }) => [{ kind: 'mcp', name: 'x', projectRoot: b }, 1003, 'outside_workspace'],
+  'library.save': ({ b }) => [{ kind: 'skills', scope: 'project', projectRoot: b, name: 'writer', content: { body: 'text' } }, 1003, 'outside_workspace'],
+  'library.delete': ({ b }) => [{ kind: 'skills', scope: 'project', projectRoot: b, name: 'writer' }, 1003, 'outside_workspace'],
+  'library.duplicate': ({ b }) => [{ kind: 'skills', scope: 'project', projectRoot: b, from: 'writer', to: 'copy' }, 1003, 'outside_workspace'],
+  'library.rename': ({ b }) => [{ kind: 'skills', scope: 'project', projectRoot: b, from: 'writer', to: 'copy' }, 1003, 'outside_workspace'],
   'library.models': null, // model ids and labels, as catalog.get
   'settings.language.get': null, // the language the user reads
 };
@@ -100,6 +104,10 @@ const IN_SCOPE = ({ a }) => ({
   'question.answer': { questionId: 'q-a-111', text: 'x' },
   'team.list': { projectRoot: a }, 'task.list': { projectRoot: a }, 'task.create': { projectRoot: a, title: 't' },
   'task.update': { projectRoot: a, id: 't-a000', action: 'close' }, 'task.gate.resolve': { projectRoot: a, id: 't-a000', gate: 'review' },
+  'library.save': { kind: 'skills', scope: 'project', projectRoot: a, name: 'writer', content: { body: 'text' } },
+  'library.delete': { kind: 'skills', scope: 'project', projectRoot: a, name: 'writer' },
+  'library.duplicate': { kind: 'skills', scope: 'project', projectRoot: a, from: 'writer', to: 'copy' },
+  'library.rename': { kind: 'skills', scope: 'project', projectRoot: a, from: 'writer', to: 'copy' },
   'library.list': { kind: 'agents', projectRoot: a }, 'library.get': { kind: 'mcp', name: 'x', projectRoot: a },
 });
 
@@ -136,10 +144,10 @@ test('the exposure matrix agrees with the daemon\'s x-alp annotations', t => {
     assert.ok(exposure, `${method} is annotated but not classified in src/policy.js`);
     if (exposure.status !== 'exposed') continue;
     assert.ok(scope?.kind !== 'host' || (effect === 'query' && hostReads.has(method)), `${method}: host-level ${effect} exposed`);
-    assert.ok(scope?.kind !== 'library-or-project', `${method}: can write the host library`);
+    assert.ok(scope?.kind !== 'library-or-project' || exposure.permission === 'library.write', `${method}: can write the host library`);
     assert.ok(!(scope?.kind === 'connection' && effect === 'mutation'), `${method}: a connection-level mutation is exposed`);
     // A risk the gateway removes itself is allowed, with the test that proves it.
-    const mitigated = { 'session.create': /^exec: spec\.env and stdio spec\.mcpServers/ }[method];
+    const mitigated = method.startsWith('library.') && exposure.permission === 'library.write' ? /^exec-config/ : { 'session.create': /^exec: spec\.env and stdio spec\.mcpServers/ }[method];
     assert.ok(!risks.some(risk => /admin|exec/.test(risk) && !mitigated?.test(risk)), `${method}: an administrative or code-executing method is exposed`);
     if (effect === 'mutation' && !readerMutations.has(method)) assert.match(exposure.permission ?? '', /\.write$/, `${method} writes and needs a write permission`);
     // The resource the daemon names is the one the gateway checks.
@@ -647,7 +655,7 @@ test('library.get: read only under project.read, in a granted workspace, its con
     }, kind);
     assert.deepEqual(daemon.calls('library.get').at(-1).params, { kind, name: 'x', projectRoot: a, scope: 'library' }, 'listed params only');
   }
-  // Writes stay closed: library.save and its kin answer -32601 and never reach alpd.
+  // Executable writes stay closed; host skills.set remains unexposed.
   const mark = daemon.calls().length;
   for (const [method, params] of [
     ['library.save', { kind: 'mcp', name: 'x', scope: 'project', projectRoot: a, content: { server: { command: 'sh' } } }],
@@ -656,7 +664,7 @@ test('library.get: read only under project.read, in a granted workspace, its con
     ['library.rename', { kind: 'mcp', from: 'x', to: 'y', scope: 'project', projectRoot: a }],
     ['library.skills.set', { agent: 'main', skills: [] }],
   ]) {
-    await assert.rejects(client.request(method, params), error => error.code === -32601 && error.data?.reason === 'not_exposed', method);
+    await assert.rejects(client.request(method, params), error => method === 'library.skills.set' ? error.code === -32601 && error.data?.reason === 'not_exposed' : error.code === 1003 && error.data?.reason === 'library_policy', method);
   }
   assert.deepEqual(daemon.calls().slice(mark), []);
 });
@@ -937,4 +945,42 @@ test('session.status answers only a tree wholly inside the grant', async t => {
   await assert.rejects(client.request('session.status', { sessionId: 'sa' }), error => error.code === 1001);
   daemon.state.handlers['session.status'] = () => ({ status: { rootId: 'sb', sessions: [], assignments: [], questions: [], worktrees: [], leases: [], claims: [] } });
   await assert.rejects(client.request('session.status', { sessionId: 'sa' }), error => error.code === 1001, 'another root than the one checked');
+});
+
+
+test('library.write is opt-in and forces the safe project policy without executable references', async t => {
+  const { daemon, sdk, a, canonicalA } = await world(t);
+  const { client } = await sdk('alice');
+  for (const method of ['save', 'delete', 'duplicate', 'rename']) {
+    const params = IN_SCOPE({ a })['library.' + method];
+    daemon.state.handlers['library.' + method] = () => method === 'delete' ? { removed: true } : { revision: 'r1' };
+    await client.request('library.' + method, { ...params, policy: 'project-data' });
+    assert.deepEqual(daemon.calls('library.' + method).at(-1).params, { ...params, projectRoot: canonicalA, policy: 'project-data' });
+    const mark = daemon.calls().length;
+    for (const altered of [{ scope: 'library' }, { projectRoot: undefined }, { kind: 'hooks' }, { kind: 'mcp' }, { kind: 'teams' }, { kind: 'providers' }]) {
+      await assert.rejects(client.request('library.' + method, { ...params, ...altered }), e => e.code === 1003);
+      assert.deepEqual(reached(daemon, mark, 'library.' + method), []);
+    }
+  }
+  for (const content of [{ instructions: 'text', config: { provider: 'host' } }, { instructions: 'text', config: { model: 'acp:host' } }, { instructions: 'text', config: { hooks: ['run'] } }, { instructions: 'text', config: { mcp: ['run'] } }, { instructions: 'text', config: { skills: ['run'] } }, { instructions: 'text', unknown: true }]) {
+    const mark = daemon.calls().length;
+    await assert.rejects(client.request('library.save', { kind: 'agents', name: 'safe', scope: 'project', projectRoot: a, content }), e => e.code === 1003 && e.data.reason === 'library_policy');
+    assert.deepEqual(reached(daemon, mark, 'library.save'), []);
+  }
+  await assert.rejects(client.request('library.save', { ...IN_SCOPE({ a })['library.save'], sync: 'known-projects' }), e => e.code === 1003);
+  const { client: defaultClient } = await sdk('both');
+  await assert.rejects(defaultClient.request('library.save', IN_SCOPE({ a })['library.save']), e => e.code === 1003 && e.data.permission === 'library.write');
+  await assert.rejects(client.request('library.skills.set', { agent: 'main', skills: [] }), e => e.code === -32601);
+});
+
+test('older daemon cannot receive project-data writes; image hello advertises effective frame limits only with capability', async t => {
+  for (const capability of [false, true]) {
+    const daemon = fakeDaemon({ capabilities: capability ? ['library', 'prompt.images'] : ['library'] });
+    const { sdk } = await startGateway(t, { daemon, config: { limits: { maxFrame: 1024 * 1024 } }, credentials: { writer: { workspaces: [process.cwd()], permissions: ['library.write'] } } });
+    const { client, hello } = await sdk('writer');
+    assert.deepEqual(hello.promptImageLimits, capability ? promptImageLimits(1024 * 1024) : undefined);
+    const mark = daemon.calls().length;
+    await assert.rejects(client.request('library.save', { kind: 'skills', name: 'writer', scope: 'project', projectRoot: process.cwd(), content: { body: 'text' } }), e => e.code === 1005 && e.data.capability === 'library.project.write');
+    assert.deepEqual(reached(daemon, mark, 'library.save'), []);
+  }
 });

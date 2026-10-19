@@ -1,4 +1,4 @@
-import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { moveFile } from './atomic.js';
@@ -59,6 +59,46 @@ function base(scope, { root, library }, kind) {
   return fail('INVALID_SCOPE', `Scope must be library or project, not '${scope}'`);
 }
 const revisionOf = content => content === undefined ? null : createHash('sha256').update(JSON.stringify(content)).digest('hex').slice(0, 16);
+
+/** Strict payload contract for opt-in project-data writes. Instructions carry prompt authority;
+ * executable configuration and references to it have no place in this policy. */
+export function assertProjectDataContent(kind, content) {
+  const deny = () => fail('UNSAFE_LIBRARY_WRITE', 'Project-data writes allow only instruction entries and non-executable agent configuration');
+  if (!object(content) || !['agents', 'skills'].includes(kind)) deny();
+  const keys = kind === 'skills' ? ['body'] : ['instructions', 'config'];
+  if (Object.keys(content).some(key => !keys.includes(key))) deny();
+  const text = kind === 'skills' ? content.body : content.instructions;
+  if (typeof text !== 'string' || !text.trim()) deny();
+  if (content.config !== undefined) {
+    const config = content.config;
+    if (!object(config)) deny();
+    const allowed = ['description', 'model', 'thinking', 'context', 'autocompact'];
+    if (Object.keys(config).some(key => !allowed.includes(key))) deny();
+    for (const key of ['description', 'thinking']) if (config[key] !== undefined && typeof config[key] !== 'string') deny();
+    if (config.model !== undefined && (typeof config.model !== 'string' || !/^(codex|claude):[^\s/\\:]{1,240}$/.test(config.model))) deny();
+    for (const key of ['context', 'autocompact']) if (config[key] !== undefined && !(typeof config[key] === 'string' || typeof config[key] === 'number' && Number.isFinite(config[key]))) deny();
+  }
+}
+
+/** Authoritative mutation preflight. Reject sidecars and lower-layer collisions rather than
+ * moving executable assets or revealing a different host configuration. Like safeEntryPaths,
+ * this protects static repository input, not a concurrently malicious same-user process. */
+async function projectDataEntry(kind, name, { scope, root, library, templates }) {
+  if (scope !== 'project' || !root || !['agents', 'skills'].includes(kind)) fail('UNSAFE_LIBRARY_WRITE', 'Project-data writes require project scope and agents or skills');
+  nameOf(name);
+  const directory = base(scope, { root, library }, kind);
+  await safeEntryPaths(directory, kind, name);
+  const found = await layers(kind, name, { root, library, templates });
+  if (found.library !== undefined || found.builtin !== undefined) fail('UNSAFE_LIBRARY_WRITE', 'Project-data writes cannot shadow or reveal a library or built-in entry');
+  if (found.project !== undefined) assertProjectDataContent(kind, found.project);
+  const owned = path.join(directory, kind, name);
+  const files = await readdir(owned).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
+  const allowed = new Set(FILES[kind](name).map(([file]) => path.basename(file)));
+  for (const file of files) {
+    const info = await lstat(path.join(owned, file));
+    if (!allowed.has(file) || !info.isFile() || info.isSymbolicLink() || info.nlink !== 1) fail('UNSAFE_LIBRARY_WRITE', 'Project-data entries cannot contain sidecars, links or executable assets');
+  }
+}
 
 /** Reject repository-controlled links before any entry read or mutation. This is
  * a preflight for static repository input, not a sandbox against same-user races. */
@@ -274,8 +314,12 @@ const exists = target => stat(target).then(() => true, () => false);
  * that scope (null to create); a different current revision refuses the save.
  * @returns {Promise<{ revision: string | null }>}
  */
-export async function saveEntry(kind, name, content, { scope, root, library, templates, revision } = {}) {
+export async function saveEntry(kind, name, content, { scope, root, library, templates, revision, policy } = {}) {
   kindOf(kind); nameOf(name);
+  if (policy === 'project-data') {
+    assertProjectDataContent(kind, content);
+    await projectDataEntry(kind, name, { scope, root, library, templates });
+  }
   const directory = base(scope, { root, library }, kind);
   await safeEntryPaths(directory, kind, name);
   await check(kind, name, content, { scope, root, library, templates });
@@ -300,8 +344,9 @@ export async function saveEntry(kind, name, content, { scope, root, library, tem
  * entry others refer to stays, and the error lists them.
  * @returns {Promise<{ removed: boolean, now?: 'builtin' | 'library' }>}
  */
-export async function deleteEntry(kind, name, { scope, root, library, templates, revision } = {}) {
+export async function deleteEntry(kind, name, { scope, root, library, templates, revision, policy } = {}) {
   kindOf(kind); nameOf(name);
+  if (policy === 'project-data') await projectDataEntry(kind, name, { scope, root, library, templates });
   const directory = base(scope, { root, library }, kind);
   const current = await readLayer(kind, name, directory);
   if (current === undefined) fail('NOT_FOUND', `No ${kind} entry '${name}' in the ${scope}`);
@@ -320,14 +365,23 @@ export async function deleteEntry(kind, name, { scope, root, library, templates,
 }
 
 /** Copies the entry that applies under `from` to a new entry `to` in a scope; built-ins are copied this way. */
-export async function duplicateEntry(kind, from, to, { scope, root, library, templates } = {}) {
+export async function duplicateEntry(kind, from, to, { scope, root, library, templates, policy } = {}) {
+  kindOf(kind); nameOf(from); nameOf(to);
+  if (policy === 'project-data') {
+    await projectDataEntry(kind, from, { scope, root, library, templates });
+    await projectDataEntry(kind, to, { scope, root, library, templates });
+  }
   const { content } = await getEntry(kind, from, { root, library, templates });
-  return saveEntry(kind, to, structuredClone(content), { scope, root, library, templates, revision: null });
+  return saveEntry(kind, to, structuredClone(content), { scope, root, library, templates, revision: null, policy });
 }
 
 /** Renames an entry within a scope; refused while others refer to it by its old name. */
-export async function renameEntry(kind, from, to, { scope, root, library, templates } = {}) {
+export async function renameEntry(kind, from, to, { scope, root, library, templates, policy } = {}) {
   kindOf(kind); nameOf(from); nameOf(to);
+  if (policy === 'project-data') {
+    await projectDataEntry(kind, from, { scope, root, library, templates });
+    await projectDataEntry(kind, to, { scope, root, library, templates });
+  }
   const directory = base(scope, { root, library }, kind);
   const content = await readLayer(kind, from, directory);
   if (content === undefined) fail('NOT_FOUND', `No ${kind} entry '${from}' in the ${scope}`);
@@ -343,4 +397,3 @@ export async function renameEntry(kind, from, to, { scope, root, library, templa
   }
   return { revision: revisionOf(await readLayer(kind, to, directory)) };
 }
-

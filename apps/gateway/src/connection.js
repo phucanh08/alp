@@ -5,6 +5,7 @@ import { ERROR, PROTOCOL_VERSION, RPC_ERROR, WORKSPACE_FILES, base64Bytes, block
 import { validateParams } from '@anhlp/alp-protocol/contract';
 import { isAlpClientError } from '@anhlp/alp-client/portable';
 import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.js';
+import { assertProjectDataContent } from '@anhlp/alp-core/library-edit';
 
 /**
  * One remote client of the gateway (docs/alp/remote-gateway.md §3, §6): its WebSocket, its own
@@ -547,6 +548,7 @@ export class ClientConnection {
       ...(typeof this.#daemonHello.daemonVersion === 'string' ? { daemonVersion: this.#daemonHello.daemonVersion } : {}),
       ...(hostLabel(this.#daemonHello.hostname) ? { hostname: hostLabel(this.#daemonHello.hostname) } : {}),
       capabilities: [...this.#capabilities],
+      ...(this.#capabilities.includes('prompt.images') ? { promptImageLimits: promptImageLimits(this.#limits.maxFrame) } : {}),
     };
   }
 
@@ -655,6 +657,21 @@ export class ClientConnection {
   #project(projectRoot, method) {
     if (projectRoot === undefined) throw forbidden(`${method} through the gateway needs a projectRoot this credential may use`, GATEWAY_REASON.hostScope);
     return this.#workspace(projectRoot);
+  }
+
+  /** @param {string} method @param {Record<string, any>} params */
+  async #writeLibrary(method, params) {
+    const workspace = this.#project(params.projectRoot, method);
+    if (params.scope !== 'project') throw forbidden('Library writes require project scope', GATEWAY_REASON.hostScope);
+    if (!['agents', 'skills'].includes(params.kind) || params.sync !== undefined && params.sync !== 'none') throw forbidden('Only project instruction entries may be changed remotely', 'library_policy');
+    if (method === 'library.save') {
+      try { assertProjectDataContent(params.kind, params.content); }
+      catch { throw forbidden('Executable configuration and references cannot be written remotely', 'library_policy'); }
+    }
+    if (!this.#capabilities.includes('library.project.write')) throw new GatewayError(GATEWAY_ERROR.unavailable, 'Update the daemon to support safe project library writes', { reason: 'capability', capability: 'library.project.write' });
+    return this.#call(method, { ...params, projectRoot: workspace.canonical, policy: 'project-data' }).catch(error => {
+      throw opaqueDaemonError(error, 'The project instruction entry could not be changed');
+    });
   }
 
   /** @param {unknown} mode @param {string} [sessionId] the session that runs in it, when the refusal is about one */
@@ -1084,6 +1101,10 @@ export class ClientConnection {
       const result = await this.#call('library.models', {}).catch(error => { throw opaqueDaemonError(error, 'The models cannot be read on the daemon host'); });
       return { ...result, models: (Array.isArray(result?.models) ? result.models : []).map((/** @type {any} */ model) => pick(model, MODEL_ROW_FIELDS)) };
     },
+    'library.save': params => this.#writeLibrary('library.save', params),
+    'library.delete': params => this.#writeLibrary('library.delete', params),
+    'library.duplicate': params => this.#writeLibrary('library.duplicate', params),
+    'library.rename': params => this.#writeLibrary('library.rename', params),
     'settings.language.get': () => this.#call('settings.language.get', {}).catch(error => { throw opaqueDaemonError(error, 'The language setting cannot be read on the daemon host'); }),
   };
 

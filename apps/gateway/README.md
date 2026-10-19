@@ -27,3 +27,18 @@ alp-gateway serve                                                           # 12
 
 See [docs/alp/remote-gateway.md](../../docs/alp/remote-gateway.md) for the authentication flow,
 the method exposure matrix, recovery, deployment and client integration.
+
+
+`credential reissue <id>` (alias `edit`) retains device identity and replaces only supplied grant
+fields, rotating the secret. Supplied permission/workspace/mode lists replace whole lists; omitted
+fields persist. Old tokens, tickets and connections stop on the gateway's next credential reload.
+
+Opt-in `library.write` (implies `project.read`, absent from defaults) permits project-only agent/skill
+instruction CRUD. The daemon must advertise `library.project.write` and enforces `project-data`:
+no host/built-in collisions, executable references/configuration, sidecars or links. Host skill
+assignment (`library.skills.set`), teams, MCP, hooks and providers remain denied. See the policy
+and prompt-authority boundary in the linked remote gateway documentation.
+
+The hello publishes effective `promptImageLimits` when image capability is available. The web
+client honors these limits, including gateways configured with a smaller `limits.maxFrame`.
+Workspace search applies the same hardened Git ignore checks as listing and reading.

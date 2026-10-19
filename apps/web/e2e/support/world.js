@@ -122,6 +122,7 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     return JSON.parse(stdout);
   };
   const created = {
+    libraryWriter: await credential('library-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'project.read', '--permission', 'library.write']),
     owner: await credential('web-e2e', ['--workspace', projects.main]),
     viewer: await credential('viewer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'project.read']),
     readOnlyMode: await credential('read-only-mode', ['--workspace', projects.main, '--mode', 'read-only']),

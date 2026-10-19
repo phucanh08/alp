@@ -51,6 +51,7 @@ function fromCore(error: any, context: { notFound?: 'not_found' | 'invalid_entry
   if (error instanceof RpcError || typeof error?.code !== 'string' || error?.name !== 'AlpError') return error;
   const message = error.message as string;
   switch (error.code) {
+    case 'UNSAFE_LIBRARY_WRITE': return failure(ERROR.forbidden, 'library_policy', message);
     case 'UNSAFE_PATH': return failure(ERROR.forbidden, 'unsafe_path', message);
     case 'TASK_NOT_FOUND': return failure(ERROR.notFound, 'unknown_task', message);
     case 'TASK_CHANGED': case 'REVISION_CONFLICT': return failure(ERROR.conflict, 'revision_conflict', message);
@@ -228,7 +229,8 @@ export function createOperations({ home, templates, knownProjects = () => [] }: 
       return { ...entry, content, revision: toWire(entry.revision), ...(secrets.length ? { secrets } : {}) };
     }),
 
-    'library.save': guard(({ kind, name, scope, projectRoot, content, revision, sync = 'none' }) => serial(async () => {
+    'library.save': guard(({ kind, name, scope, projectRoot, content, revision, policy, sync = 'none' }) => serial(async () => {
+      if (policy === 'project-data' && sync !== 'none') throw failure(ERROR.forbidden, 'library_policy', 'Project-data writes cannot synchronize projects');
       const options = await where(projectRoot, scope);
       const current = await layer(kind, name, options, scope);
       if (revision !== undefined && revision !== toWire(current?.revision ?? null)) {
@@ -237,7 +239,7 @@ export function createOperations({ home, templates, knownProjects = () => [] }: 
       const previous = current?.content ?? (await layer(kind, name, options))?.content;
       const next = unredact(kind, content, previous);
       // Core checks the revision again as it writes, against writers outside alpd.
-      const saved = await saveEntry(kind, name, next, { ...options, scope, ...(revision !== undefined ? { revision: current?.revision ?? null } : {}) });
+      const saved = await saveEntry(kind, name, next, { ...options, scope, policy, ...(revision !== undefined ? { revision: current?.revision ?? null } : {}) });
       if (kind !== 'teams' || sync !== 'known-projects') return { revision: toWire(saved.revision) };
       const roots = new Set<string>(options.root ? [options.root] : []);
       if (scope === 'library') for (const root of knownProjects()) if (typeof root === 'string' && path.isAbsolute(root)) roots.add(path.resolve(root));
@@ -250,24 +252,24 @@ export function createOperations({ home, templates, knownProjects = () => [] }: 
       return { revision: toWire(saved.revision), syncedProjects, syncErrors };
     }), { notFound: 'invalid_entry' }),
 
-    'library.delete': guard(({ kind, name, scope, projectRoot, revision }) => serial(async () => {
+    'library.delete': guard(({ kind, name, scope, projectRoot, revision, policy }) => serial(async () => {
       const options = await where(projectRoot, scope);
       const current = await layer(kind, name, options, scope);
       if (!current) throw failure(ERROR.notFound, 'not_found', `No ${kind} entry '${name}' in the ${scope}`);
       if (revision !== undefined && revision !== toWire(current.revision)) throw failure(ERROR.conflict, 'revision_conflict', `${kind} '${name}' changed in the ${scope} since you opened it`);
-      return deleteEntry(kind, name, { ...options, scope, ...(revision !== undefined ? { revision: current.revision } : {}) });
+      return deleteEntry(kind, name, { ...options, scope, policy, ...(revision !== undefined ? { revision: current.revision } : {}) });
     })),
 
-    'library.duplicate': guard(({ kind, from, to, scope, projectRoot }) => serial(async () => {
+    'library.duplicate': guard(({ kind, from, to, scope, projectRoot, policy }) => serial(async () => {
       const options = await where(projectRoot, scope);
       try { await getEntry(kind, from, options); }
       catch (error) { throw fromCore(error, { notFound: 'not_found' }); }
-      return { revision: toWire((await duplicateEntry(kind, from, to, { ...options, scope })).revision) };
+      return { revision: toWire((await duplicateEntry(kind, from, to, { ...options, scope, policy })).revision) };
     }), { notFound: 'invalid_entry' }),
 
-    'library.rename': guard(({ kind, from, to, scope, projectRoot }) => serial(async () => {
+    'library.rename': guard(({ kind, from, to, scope, projectRoot, policy }) => serial(async () => {
       const options = await where(projectRoot, scope);
-      return { revision: toWire((await renameEntry(kind, from, to, { ...options, scope })).revision) };
+      return { revision: toWire((await renameEntry(kind, from, to, { ...options, scope, policy })).revision) };
     })),
 
     'library.skills.set': guard(({ agent, skills }) => serial(() => setGivenSkills(agent, skills, { library: home })), { notFound: 'invalid_entry' }),
@@ -293,6 +295,6 @@ export function createOperations({ home, templates, knownProjects = () => [] }: 
   const library = home !== undefined;
   return {
     handlers: { ...taskHandlers, ...(library ? libraryHandlers : {}) },
-    capabilities: [CAPABILITY.task, ...(library ? [CAPABILITY.team, CAPABILITY.library, CAPABILITY.settingsLanguage] : [])],
+    capabilities: [CAPABILITY.task, ...(library ? [CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage] : [])],
   };
 }

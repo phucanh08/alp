@@ -128,7 +128,7 @@ function checkPermissions(permissions) {
   // files.read is held only when named: no other permission implies it, and it implies none.
   // Writing without reading is not a useful grant: a client must see what it does.
   if (granted.has('session.write')) granted.add('session.read');
-  if (granted.has('project.write')) granted.add('project.read');
+  if (granted.has('project.write') || granted.has('library.write')) granted.add('project.read');
   return PERMISSIONS.filter(permission => granted.has(permission));
 }
 
@@ -183,6 +183,31 @@ export async function rotateCredential(home, id, { now = new Date() } = {}) {
   if (credential.revokedAt) throw new Error(`Credential ${id} is revoked; create a new one`);
   const token = newToken(id);
   Object.assign(credential, { hash: digest(token.secret), rotatedAt: now.toISOString() });
+  await writeCredentials(home, data);
+  return { credential: describeCredential(credential), token: token.token };
+}
+
+/**
+ * Locally replaces named grant fields and reissues the secret, keeping the device id.
+ * Omitted fields retain their grants; supplied lists replace rather than append.
+ * @param {string} home @param {string} id
+ * @param {{ label?: string, workspaces?: string[], permissions?: string[], modes?: string[], expiresAt?: string, now?: Date }} [options]
+ */
+export async function reissueCredential(home, id, { label, workspaces, permissions, modes, expiresAt, now = new Date() } = {}) {
+  const data = await readCredentials(home);
+  const credential = find(data, id);
+  if (credential.revokedAt) throw new Error(`Credential ${id} is revoked; create a new one`);
+  if (label !== undefined && (typeof label !== 'string' || !label.trim() || label.length > 100)) throw new Error('A credential needs a label of 1 to 100 characters');
+  if (expiresAt !== undefined && !(Date.parse(expiresAt) > now.getTime())) throw new Error('expiresAt must be a future ISO 8601 time');
+  const replacement = {
+    ...(label !== undefined ? { label: label.trim() } : {}),
+    ...(workspaces !== undefined ? { workspaces: await resolveWorkspaces(workspaces) } : {}),
+    ...(permissions !== undefined ? { permissions: checkPermissions(permissions) } : {}),
+    ...(modes !== undefined ? { modes: checkModes(modes) } : {}),
+    ...(expiresAt !== undefined ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
+  };
+  const token = newToken(id);
+  Object.assign(credential, replacement, { hash: digest(token.secret), rotatedAt: now.toISOString() });
   await writeCredentials(home, data);
   return { credential: describeCredential(credential), token: token.token };
 }
@@ -326,4 +351,3 @@ export class CredentialStore {
     this.#listeners.clear();
   }
 }
-

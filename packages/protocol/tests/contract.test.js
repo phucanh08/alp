@@ -146,3 +146,12 @@ test('every method carries x-alp: its effect, the resource scope a gateway autho
     assert.ok(Object.values(methods.methods).some(method => method['x-alp'].capability === capability), capability);
   }
 });
+
+
+test('hello effective image limits and project-data policy are additive and validated', () => {
+  assert.deepEqual(validateResult('daemon.hello', { protocolVersion: 1 }), []);
+  assert.deepEqual(validateResult('daemon.hello', { protocolVersion: 1, promptImageLimits: { maxCount: 4, maxBytes: 0, maxTotalBytes: 0 } }), []);
+  for (const promptImageLimits of [{}, { maxCount: -1, maxBytes: 4, maxTotalBytes: 4 }, { maxCount: 1, maxBytes: 1.5, maxTotalBytes: 4 }]) assert.ok(validateResult('daemon.hello', { protocolVersion: 1, promptImageLimits }).length);
+  assert.deepEqual(validateParams('library.save', { kind: 'skills', name: 'data', scope: 'project', content: { body: 'text' }, policy: 'project-data' }), []);
+  assert.ok(validateParams('library.save', { kind: 'skills', name: 'data', scope: 'project', content: { body: 'text' }, policy: 'unknown' }).length);
+});

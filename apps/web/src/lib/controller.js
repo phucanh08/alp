@@ -5,7 +5,7 @@ import { cleanListing, relativeFilePath } from './file-tree.js';
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
 import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
 import { newMessageId, newRequestId, newSessionId } from './ids.js';
-import { promptContent } from './attachments.js';
+import { fitImages, imageLimits, promptContent } from './attachments.js';
 import { applyAttach, deliveredPrompts, emptyProjection, members, project, promptTurnOver } from './timeline.js';
 import { normalizeModels, parsePreview } from './new-session.js';
 import { loadPreferences, parsePreferences, rememberChoices, savePreferences } from './preferences.js';
@@ -72,7 +72,7 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  *   projection: Projection,
  * }} TreeView
  * @typedef {{
- *   connection: { phase: Phase, gateway: string, attempt: number, error?: Failure, daemonVersion?: string, hostname?: string, capabilities: string[] },
+ *   connection: { phase: Phase, gateway: string, attempt: number, error?: Failure, daemonVersion?: string, hostname?: string, promptImageLimits?: ReturnType<typeof imageLimits>, capabilities: string[] },
  *   principal: Principal | null,
  *   workspace: string | null,
  *   catalog: Load & { teams: Team[], teamsKnown?: boolean, teamsUnavailable?: import('./new-session.js').TeamsUnavailable, modes: Mode[], models: Model[], defaultMode?: string },
@@ -433,7 +433,7 @@ export class Controller {
     const capabilities = Array.isArray(greeting?.capabilities) ? greeting.capabilities.filter((/** @type {unknown} */ name) => typeof name === 'string') : [];
     const missing = REQUIRED_CAPABILITIES.filter(name => !capabilities.includes(name));
     if (missing.length) throw new ConfigurationError(`The host behind this gateway is too old for this app (it lacks ${missing.join(', ')}). Update ALP on the host.`);
-    this.#adopt(/** @type {Principal} */ (run.principal), capabilities, typeof greeting?.daemonVersion === 'string' ? greeting.daemonVersion : undefined, hostName(greeting?.hostname));
+    this.#adopt(/** @type {Principal} */ (run.principal), capabilities, typeof greeting?.daemonVersion === 'string' ? greeting.daemonVersion : undefined, hostName(greeting?.hostname), imageLimits(greeting?.promptImageLimits, capabilities.includes('prompt.images')));
     this.#attached = null;
     this.#watching = null;
     const root = this.#state.selected;
@@ -453,16 +453,17 @@ export class Controller {
    * The principal and capabilities of a new connection. A workspace the grant no longer names is
    * left (with its session and tasks); with none chosen yet, the first granted one is opened.
    * @param {Principal} principal @param {string[]} capabilities @param {string | undefined} daemonVersion
+   * @param {ReturnType<typeof imageLimits>} limits
    * @param {string | undefined} hostname the host's machine name from the hello, Paseo's host label (patch 0017)
    */
-  #adopt(principal, capabilities, daemonVersion, hostname) {
+  #adopt(principal, capabilities, daemonVersion, hostname, limits) {
     const current = this.#state.workspace;
     const workspace = current && grantedWorkspace(principal, current) ? current : principal.workspaces[0] ?? null;
     const changed = JSON.stringify(principal) !== JSON.stringify(this.#state.principal);
     if (workspace !== current) { this.#context = {}; this.#waiting = null; }
     this.#set(state => ({
       principal,
-      connection: { ...state.connection, capabilities, ...(daemonVersion ? { daemonVersion } : {}), hostname },
+      connection: { ...state.connection, capabilities, ...(daemonVersion ? { daemonVersion } : {}), hostname, promptImageLimits: limits },
       ...(workspace !== state.workspace ? { workspace, selected: null, focus: null, tree: null, sessions: initialState().sessions, history: initialState().history, attention: {}, turnAttention: {}, tasks: { ...initialState().tasks, visible: state.tasks.visible } } : {}),
       ...(changed || workspace !== state.workspace ? { catalog: initialState().catalog } : {}),
     }));
@@ -1386,6 +1387,8 @@ export class Controller {
     if (!root || (!body.trim() && !images.length)) return;
     const blocked = this.driveBlock();
     if (blocked) throw new ConfigurationError(blocked);
+    const fitted = fitImages([], images, this.#state.connection.promptImageLimits);
+    if (fitted.error) throw new ConfigurationError(fitted.error);
     /** @type {PendingPrompt} */
     const prompt = { id: newMessageId(), rootId: root, text: body, ...(images.length ? { images } : {}), delivery: this.rootBusy(root) ? 'steer' : 'auto', status: 'sending', retrySameId: true, at: Date.now() };
     this.clearAttention(root);
@@ -1485,6 +1488,8 @@ export class Controller {
     try {
       const client = this.#client();
       if (this.#state.selected === prompt.rootId) await this.#wake(client, prompt.rootId);
+      const fitted = fitImages([], prompt.images ?? [], this.#state.connection.promptImageLimits);
+      if (fitted.error) throw new ConfigurationError(fitted.error);
       const result = await client.request('session.prompt', { sessionId: prompt.rootId, clientMessageId: prompt.id, delivery: prompt.delivery, content: promptContent(prompt.text, prompt.images) }, { timeoutMs: this.#options.requestTimeoutMs });
       if (result?.outcome === 'failed') {
         update({ status: 'failed', error: result.error?.message ? `The agent did not take the message: ${result.error.message}` : 'The agent did not take the message.', retrySameId: false });
@@ -1921,7 +1926,7 @@ export class Controller {
    * The gateway answers its content with `{ $secret: 'keep' }` in place of every value that can
    * hold a secret, and `secrets` lists where; this app shows those as hidden and never edits.
    * @param {'agents' | 'skills' | 'mcp' | 'hooks' | 'teams' | 'providers'} kind @param {string} name
-   * @returns {Promise<{ kind: string, name: string, source: string, overrides?: string, content: Record<string, unknown>, usedBy: string[], librarySkills?: string[], secrets: string[] }>}
+   * @returns {Promise<{ kind: string, name: string, source: string, overrides?: string, content: Record<string, unknown>, revision?: string | null, usedBy: string[], librarySkills?: string[], secrets: string[] }>}
    */
   async getLibraryEntry(kind, name) {
     const blocked = this.libraryBlock();
@@ -1935,10 +1940,29 @@ export class Controller {
       source: typeof result.source === 'string' ? result.source : 'unknown',
       ...(typeof result.overrides === 'string' ? { overrides: result.overrides } : {}),
       content: result.content,
+      ...(typeof result.revision === 'string' || result.revision === null ? { revision: result.revision } : {}),
       usedBy: strings(result.usedBy),
       ...(Array.isArray(result.librarySkills) ? { librarySkills: strings(result.librarySkills) } : {}),
       secrets: strings(result.secrets),
     };
+  }
+
+  /** Why project instruction editing is unavailable. @param {string} kind */
+  libraryWriteBlock(kind) {
+    const blocked = this.libraryBlock();
+    if (blocked) return blocked;
+    if (!can(this.#state.principal ?? undefined, 'library.write')) return 'This token does not grant library.write.';
+    if (!this.hasCapability('library.project.write')) return 'Update the host to support safe project instruction editing.';
+    if (!['agents', 'skills'].includes(kind)) return 'Executable and administrative configuration is edited on the host.';
+    return null;
+  }
+
+  /** Project-only instruction mutations; the gateway and daemon enforce the content policy.
+   * @param {'save'|'delete'|'duplicate'|'rename'} action @param {string} kind @param {Record<string, unknown>} params */
+  async writeLibrary(action, kind, params) {
+    const blocked = this.libraryWriteBlock(kind);
+    if (blocked) throw new ConfigurationError(blocked);
+    return this.#client().request(`library.${action}`, { ...params, kind, scope: 'project', projectRoot: this.#state.workspace }, { timeoutMs: this.#options.requestTimeoutMs });
   }
 
   async loadSettings() {

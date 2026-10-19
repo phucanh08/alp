@@ -2,7 +2,7 @@ import { constants } from 'node:fs';
 import { lstat, open, opendir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { ERROR, RPC_ERROR, WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
-import { gitIgnored, IgnoreUnknown, type GitCheckOptions } from './gitignore.js';
+import { gitIgnored, IgnoreUnknown, GIT_CHECK, type GitCheckOptions } from './gitignore.js';
 
 // For tests: which git alpd would run, and how many run now.
 export { gitChecksRunning, resolveGit, GIT_CHECK } from './gitignore.js';
@@ -97,7 +97,7 @@ export class FilesError extends Error {}
  * The files under `projectRoot` matching `query`, best first. `projectRoot` must be an absolute path
  * of a directory; anything else throws FilesError.
  */
-export async function searchWorkspaceFiles(projectRoot: string, { query = '', limit = LIMITS.defaultLimit, now = Date.now }: { query?: string; limit?: number; now?: () => number } = {}): Promise<{ files: Array<{ path: string }>; truncated?: true }> {
+export async function searchWorkspaceFiles(projectRoot: string, { query = '', limit = LIMITS.defaultLimit, now = Date.now, git }: { query?: string; limit?: number; now?: () => number; git?: GitCheckOptions } = {}): Promise<{ files: Array<{ path: string }>; truncated?: true }> {
   if (!path.isAbsolute(projectRoot)) throw new FilesError('projectRoot must be an absolute path');
   let root: string;
   try {
@@ -109,6 +109,7 @@ export async function searchWorkspaceFiles(projectRoot: string, { query = '', li
   const wanted = query.trim().replace(/\\/g, '/').replace(/^\.?\/+/, '').toLowerCase();
   const count = Math.max(1, Math.min(LIMITS.maxLimit, Math.trunc(limit)));
   const deadline = now() + LIMITS.ms;
+  const realDeadline = Date.now() + LIMITS.ms;
   const found: Rank[] = [];
   let scanned = 0;
   let truncated = false;
@@ -116,6 +117,7 @@ export async function searchWorkspaceFiles(projectRoot: string, { query = '', li
   let level: string[] = [''];
   for (let depth = 0; level.length && !truncated; depth++) {
     const next: string[] = [];
+    const levelFiles: Rank[] = [];
     for (const relative of level) {
       if (scanned >= LIMITS.scanned || now() > deadline) { truncated = true; break; }
       // Reached by names alone from the real root, so it is inside it unless a link took its place.
@@ -130,6 +132,7 @@ export async function searchWorkspaceFiles(projectRoot: string, { query = '', li
           if (++scanned > LIMITS.scanned || now() > deadline) { truncated = true; break; }
           const name = entry.name;
           const child = relative ? `${relative}/${name}` : name;
+          if (name.includes('\\') || blockedFilePath(child)) continue;
           if (entry.isFile()) {
             if (name.startsWith('.')) continue;
             const ranked = rank(child, wanted);
@@ -144,11 +147,26 @@ export async function searchWorkspaceFiles(projectRoot: string, { query = '', li
       } catch {
         continue;
       }
-      found.push(...files);
+      levelFiles.push(...files);
       next.push(...directories);
       if (truncated) break;
     }
-    level = next;
+    // One bounded Git request per breadth-first level, before entering its directories or
+    // ranking its files. Git evaluates nested rules and ignored ancestors itself.
+    const remaining = Math.min(deadline - now(), realDeadline - Date.now());
+    if (remaining <= 0) { truncated = true; break; }
+    let ignored: Set<string> | null;
+    try {
+      ignored = await gitIgnored(root, [...levelFiles.map(file => file.path), ...next], {
+        ...git, timeoutMs: Math.min(git?.timeoutMs ?? GIT_CHECK.timeoutMs, remaining),
+      });
+    } catch (error) {
+      if (!(error instanceof IgnoreUnknown)) throw error;
+      // No partial result may reveal paths whose ignore status could not be established.
+      return { files: [], truncated: true };
+    }
+    found.push(...levelFiles.filter(file => !ignored?.has(file.path)));
+    level = next.filter(directory => !ignored?.has(directory));
   }
   found.sort(compare);
   return { files: found.slice(0, count).map(entry => ({ path: entry.path })), ...(truncated ? { truncated: true as const } : {}) };

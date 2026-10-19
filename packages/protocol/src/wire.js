@@ -17,7 +17,7 @@ export const RPC_ERROR = Object.freeze({ parseError: -32700, invalidRequest: -32
  * Features a daemon lists in its daemon.hello result. A client uses a feature only when listed;
  * a daemon that lists none (one older than this list) has none of them. Unknown names are ignored.
  */
-export const CAPABILITY = Object.freeze({ attachAfter: 'attach.after', promptReceipts: 'prompt.receipts', extensionMethods: 'extension.methods', team: 'team', task: 'task', library: 'library', settingsLanguage: 'settings.language', sessionListPage: 'session.list.page', questionWatch: 'question.watch', questionWatchTurns: 'question.watch.turns', workspaceFiles: 'workspace.files', workspaceFilesRead: 'workspace.files.read', promptImages: 'prompt.images' });
+export const CAPABILITY = Object.freeze({ attachAfter: 'attach.after', promptReceipts: 'prompt.receipts', extensionMethods: 'extension.methods', team: 'team', task: 'task', library: 'library', libraryProjectWrite: 'library.project.write', settingsLanguage: 'settings.language', sessionListPage: 'session.list.page', questionWatch: 'question.watch', questionWatchTurns: 'question.watch.turns', workspaceFiles: 'workspace.files', workspaceFilesRead: 'workspace.files.read', promptImages: 'prompt.images' });
 /**
  * What alpd takes as images in one session.prompt (capability `prompt.images`): inline base64 of
  * these types only, never a path or URL; at most `maxCount` of them, each at most `maxBytes`

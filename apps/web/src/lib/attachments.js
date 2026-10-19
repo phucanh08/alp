@@ -8,8 +8,23 @@
 
 /** The types the host takes (protocol PROMPT_IMAGES.mimeTypes). */
 export const IMAGE_TYPES = Object.freeze(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
-/** At most so many images, each of at most `maxBytes`, `maxTotalBytes` together (the gateway's limits). */
+/** At most so many images, each of at most maxBytes, maxTotalBytes together.
+ * @type {Readonly<{ maxCount: number, maxBytes: number, maxTotalBytes: number }>} */
 export const IMAGE_LIMITS = Object.freeze({ maxCount: 4, maxBytes: 2 * 1024 * 1024, maxTotalBytes: 2.5 * 1024 * 1024 });
+
+/** Effective limits from hello; old peers use the compatible defaults, malformed offers fail closed.
+ * @param {unknown} offered @param {boolean} [capable]
+ */
+export function imageLimits(offered, capable = true) {
+  const none = { maxCount: 0, maxBytes: 0, maxTotalBytes: 0 };
+  if (!capable) return none;
+  if (offered === undefined) return { ...IMAGE_LIMITS };
+  if (!offered || typeof offered !== 'object' || Array.isArray(offered)) return none;
+  const value = /** @type {Record<string, unknown>} */ (offered);
+  if (!['maxCount', 'maxBytes', 'maxTotalBytes'].every(key => Number.isSafeInteger(value[key]) && /** @type {number} */ (value[key]) >= 0)) return none;
+  const maxTotalBytes = Math.min(IMAGE_LIMITS.maxTotalBytes, /** @type {number} */ (value.maxTotalBytes));
+  return { maxCount: Math.min(IMAGE_LIMITS.maxCount, /** @type {number} */ (value.maxCount)), maxBytes: Math.min(IMAGE_LIMITS.maxBytes, maxTotalBytes, /** @type {number} */ (value.maxBytes)), maxTotalBytes };
+}
 
 /**
  * One attached image: what session.prompt carries, plus its size for the limits.
@@ -47,12 +62,13 @@ let counter = 0;
  * Why one more image of `size` bytes (named `name`, of type `mimeType`) cannot join `current`, or null.
  * @param {ReadonlyArray<{ size: number }>} current @param {string} name @param {string | null} mimeType @param {number} size
  */
-function refusal(current, name, mimeType, size) {
+function refusal(current, name, mimeType, size, limits = IMAGE_LIMITS) {
   const total = current.reduce((sum, entry) => sum + entry.size, 0);
   return !mimeType ? `${name} is not a PNG, JPEG, GIF or WebP image.`
-    : current.length >= IMAGE_LIMITS.maxCount ? `A message carries at most ${IMAGE_LIMITS.maxCount} images.`
-    : size > IMAGE_LIMITS.maxBytes ? `${name} is ${formatBytes(size)}; an image is at most ${formatBytes(IMAGE_LIMITS.maxBytes)}.`
-    : total + size > IMAGE_LIMITS.maxTotalBytes ? `The images of a message are at most ${formatBytes(IMAGE_LIMITS.maxTotalBytes)} together.`
+    : !limits.maxCount || !limits.maxBytes || !limits.maxTotalBytes ? 'This connection takes no images.'
+    : current.length >= limits.maxCount ? `A message carries at most ${limits.maxCount} images.`
+    : size > limits.maxBytes ? `${name} is ${formatBytes(size)}; an image is at most ${formatBytes(limits.maxBytes)}.`
+    : total + size > limits.maxTotalBytes ? `The images of a message are at most ${formatBytes(limits.maxTotalBytes)} together.`
     : null;
 }
 
@@ -63,14 +79,14 @@ function refusal(current, name, mimeType, size) {
  * @param {ArrayLike<{ name?: string, type?: string, size: number, arrayBuffer: () => Promise<ArrayBuffer> }>} files
  * @returns {Promise<{ added: ImageAttachment[], error: string | null }>}
  */
-export async function readImages(current, files) {
+export async function readImages(current, files, limits = IMAGE_LIMITS) {
   /** @type {ImageAttachment[]} */
   const added = [];
   let error = null;
   for (const file of Array.from(files)) {
     const name = String(file.name || 'image');
     const mimeType = imageType(file);
-    const refuse = refusal([...current, ...added], name, mimeType, file.size);
+    const refuse = refusal([...current, ...added], name, mimeType, file.size, limits);
     if (refuse || !mimeType) { error ??= refuse; continue; }
     const data = toBase64(new Uint8Array(await file.arrayBuffer()));
     added.push({ id: `image-${++counter}`, type: 'image', mimeType, data, name, size: file.size });
@@ -84,11 +100,11 @@ export async function readImages(current, files) {
  * @param {ReadonlyArray<ImageAttachment>} current @param {ReadonlyArray<ImageAttachment>} added
  * @returns {{ attachments: ImageAttachment[], error: string | null }}
  */
-export function fitImages(current, added) {
+export function fitImages(current, added, limits = IMAGE_LIMITS) {
   const attachments = [...current];
   let error = null;
   for (const image of added) {
-    const refuse = refusal(attachments, image.name, image.mimeType, image.size);
+    const refuse = refusal(attachments, image.name, image.mimeType, image.size, limits);
     if (refuse) { error ??= refuse; continue; }
     attachments.push(image);
   }
@@ -96,9 +112,9 @@ export function fitImages(current, added) {
 }
 
 /** Reads `files` and adds those that fit to `current`. @param {ReadonlyArray<ImageAttachment>} current @param {Parameters<typeof readImages>[1]} files */
-export async function addImages(current, files) {
-  const { added, error } = await readImages(current, files);
-  const fitted = fitImages(current, added);
+export async function addImages(current, files, limits = IMAGE_LIMITS) {
+  const { added, error } = await readImages(current, files, limits);
+  const fitted = fitImages(current, added, limits);
   return { attachments: fitted.attachments, error: error ?? fitted.error };
 }
 

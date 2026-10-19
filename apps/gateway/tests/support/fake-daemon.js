@@ -15,7 +15,7 @@ const error = (code, message, data) => ({ code, message, ...(data ? { data } : {
 /**
  * @param {{ sessions?: object[], questions?: object[], capabilities?: string[] }} [fixture]
  */
-export function fakeDaemon({ sessions = [], questions = [], capabilities = ['attach.after', 'extension.methods', 'prompt.receipts', 'task', 'team', 'library', 'settings.language', 'session.list.page', 'question.watch', 'question.watch.turns', 'workspace.files', 'workspace.files.read'] } = {}) {
+export function fakeDaemon({ sessions = [], questions = [], capabilities = ['attach.after', 'extension.methods', 'prompt.receipts', 'task', 'team', 'library', 'library.project.write', 'settings.language', 'session.list.page', 'question.watch', 'question.watch.turns', 'workspace.files', 'workspace.files.read'] } = {}) {
   const state = {
     /** @type {Map<string, any>} */ sessions: new Map(sessions.map(session => [session.id, session])),
     questions: [...questions],
