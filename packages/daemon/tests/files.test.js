@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmod, link, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
+import { existsSync, rmSync } from 'node:fs';
+import { chmod, copyFile, link, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
 import { GIT_CHECK, gitChecksRunning, listWorkspaceDirectory, readWorkspaceFile, relativeSegments, resolveGit } from '@anhlp/alp-daemon/files';
 
@@ -23,12 +25,38 @@ const hasGit = (() => { try { execFileSync('git', ['--version'], { stdio: 'ignor
 const noGit = !hasGit && 'git is not installed';
 /** Makes `root` a Git repository, as a workspace whose .gitignore applies is. */
 const repo = root => execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
+/**
+ * Windows runs no script as a program without a shell, and alpd runs git with none: there the
+ * stand-in git is git.exe, built once from support/fake-git.cs with the C# compiler of the .NET
+ * Framework that Windows ships, which runs the script with node (its arguments, cwd, environment
+ * and stdio unchanged) and takes node down with it when it is killed.
+ */
+const csc = process.platform === 'win32'
+  ? ['Framework64', 'Framework'].map(bits => path.join(process.env.SystemRoot ?? 'C:\\Windows', 'Microsoft.NET', bits, 'v4.0.30319', 'csc.exe')).find(file => existsSync(file))
+  : undefined;
+const noFakeGit = process.platform === 'win32' && !csc && 'no C# compiler (.NET Framework 4) to build a stand-in git.exe';
+let launcher;
+const fakeGitExe = () => (launcher ??= (async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alpd-fake-git-exe-'));
+  process.once('exit', () => rmSync(directory, { recursive: true, force: true }));
+  const exe = path.join(directory, 'git.exe');
+  execFileSync(csc, ['-nologo', '-optimize', `-out:${exe}`, fileURLToPath(new URL('./support/fake-git.cs', import.meta.url))], { stdio: 'pipe', windowsHide: true });
+  return exe;
+})());
 /** A stand-in git: a Node script that does what `body` says (it gets argv, env, cwd and stdin). */
 async function fakeGit(t, body) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-fake-git-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
+  const script = `const fs = require('node:fs');\nconst input = fs.readFileSync(0, 'utf8');\n${body}\n`;
+  if (process.platform === 'win32') {
+    const file = path.join(directory, 'git.exe');
+    await copyFile(await fakeGitExe(), file);
+    await writeFile(path.join(directory, 'git.js'), script);
+    await writeFile(path.join(directory, 'git.node'), process.execPath);
+    return { binary: file, directory };
+  }
   const file = path.join(directory, 'git');
-  await writeFile(file, `#!${process.execPath}\nconst fs = require('node:fs');\nconst input = fs.readFileSync(0, 'utf8');\n${body}\n`);
+  await writeFile(file, `#!${process.execPath}\n${script}`);
   await chmod(file, 0o755);
   return { binary: file, directory };
 }
@@ -166,16 +194,41 @@ test('races: a file or directory swapped while it is read is refused (TOCTOU)', 
     await rename(path.join(root, 'other.txt'), path.join(root, 'sub', 'a.txt'));
   };
   assert.deepEqual(await refusal(readWorkspaceFile(root, { path: 'sub/a.txt', probe: replace }), root), { code: 1003, reason: 'linked' });
-  // Its directory is swapped for a link to outside after the read, and back: the identity check sees it.
+  // Its directory is swapped for a link to outside, before the open or after the read: the
+  // handle's identity check, or the directories' check after the read, sees it.
   await put(path.join(outside, 'sub', 'a.txt'), 'SENTINEL-outside-sub');
-  const swapDirectory = async step => {
-    if (step !== 'read') return;
+  await writeFile(path.join(root, 'sub', 'a.txt'), 'inside');
+  const swapDirectory = at => async step => {
+    if (step !== at) return;
     await rename(path.join(root, 'sub'), path.join(root, 'sub-moved'));
     await symlink(path.join(outside, 'sub'), path.join(root, 'sub'));
   };
-  assert.deepEqual(await refusal(readWorkspaceFile(root, { path: 'sub/a.txt', probe: swapDirectory }), root), { code: 1003, reason: 'linked' });
-  await unlink(path.join(root, 'sub'));
-  await rename(path.join(root, 'sub-moved'), path.join(root, 'sub'));
+  const swapBack = async () => {
+    await unlink(path.join(root, 'sub'));
+    await rename(path.join(root, 'sub-moved'), path.join(root, 'sub'));
+  };
+  assert.deepEqual(await refusal(readWorkspaceFile(root, { path: 'sub/a.txt', probe: swapDirectory('checked') }), root), { code: 1003, reason: 'linked' });
+  await swapBack();
+  if (process.platform === 'win32') {
+    // NTFS renames no directory that holds an open file: while the file is read, its directory
+    // cannot be swapped, and what is read is the file inside. Where the swap does happen, it is refused.
+    let swap;
+    const probe = async step => {
+      if (step !== 'read') return;
+      swap = await swapDirectory('read')(step).then(() => 'swapped', error => error.code);
+    };
+    const read = await readWorkspaceFile(root, { path: 'sub/a.txt', probe }).then(file => file.content, error => ({ code: error.code, reason: error.reason }));
+    if (swap === 'swapped') {
+      assert.deepEqual(read, { code: 1003, reason: 'linked' });
+      await swapBack();
+    } else {
+      assert.ok(['EPERM', 'EACCES', 'EBUSY'].includes(swap), `the swap failed for another reason: ${swap}`);
+      assert.equal(read, 'inside');
+    }
+  } else {
+    assert.deepEqual(await refusal(readWorkspaceFile(root, { path: 'sub/a.txt', probe: swapDirectory('read') }), root), { code: 1003, reason: 'linked' });
+    await swapBack();
+  }
   // A directory listed and then swapped: the listing is dropped.
   const swapListed = async step => {
     if (step !== 'listed') return;
@@ -271,14 +324,19 @@ test('outside a repository, or without git, .gitignore hides nothing; the block 
   assert.deepEqual(await refusal(readWorkspaceFile(root, { path: '.env', git: missing }), root), { code: 1003, reason: 'blocked_path' });
 });
 
-test('git that hangs, fails, crashes or answers what was not asked fails closed: the paths count as ignored, quickly; includeIgnored still reads', async t => {
+test('git that hangs, fails, crashes or answers what was not asked fails closed: the paths count as ignored, quickly; includeIgnored still reads', { skip: noFakeGit }, async t => {
   const { root } = await workspace(t);
   await put(path.join(root, 'src', 'a.ts'), 'a');
   await put(path.join(root, 'b.ts'), 'b');
+  // The control: this stand-in git runs and is believed, so the refusals below are its doing.
+  const answers = await fakeGit(t, 'process.exit(1);');
+  assert.equal((await readWorkspaceFile(root, { path: 'src/a.ts', git: { binary: answers.binary } })).content, 'a', 'a git that says none is ignored');
   const cases = {
     hangs: 'setTimeout(() => {}, 60000);',
     fails: 'process.stderr.write("fatal: detected dubious ownership\\n"); process.exit(128);',
-    crashes: 'process.kill(process.pid, "SIGKILL");',
+    // POSIX: killed by a signal. Windows has no signals: a self-kill there is TerminateProcess with
+    // exit status 1, which is git's own "none is ignored"; a crash there ends with an abnormal status.
+    crashes: process.platform === 'win32' ? 'process.abort();' : 'process.kill(process.pid, "SIGKILL");',
     strays: 'process.stdout.write("../outside\\0"); process.exit(0);',
     floods: 'const chunk = "x".repeat(1 << 20); for (let i = 0; i < 12; i++) process.stdout.write(chunk); process.exit(0);',
   };
@@ -294,7 +352,7 @@ test('git that hangs, fails, crashes or answers what was not asked fails closed:
   }
 });
 
-test('git runs boxed: argv only, no shell, the real root as cwd, names on stdin with NUL, none of alpd\'s GIT_* variables', async t => {
+test('git runs boxed: argv only, no shell, the real root as cwd, names on stdin with NUL, none of alpd\'s GIT_* variables', { skip: noFakeGit }, async t => {
   const { root } = await workspace(t);
   await put(path.join(root, 'src', 'weird $(touch pwned) ;name.ts'), 'x');
   await put(path.join(root, '-n.ts'), 'x');
