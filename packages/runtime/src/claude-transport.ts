@@ -344,7 +344,8 @@ export class ClaudeTransport {
   private threadId = '';
   private activeTurn?: string;
   private closed = false;
-  private assistantText = new Map<string, string>();
+  private assistantText = new Map<string, { blocks: Map<number, { text: string; final: boolean }>; seen: Set<string> }>();
+  private streamingMessage?: string;
   private toolCalls = new Map<string, { name: string; command: string; input: unknown }>();
   /** The last rate limit Claude reported, and whether the running turn hit one. */
   private rateLimit?: { status: string; resetsAt?: number; overageStatus?: string; rateLimitType?: string; utilization?: number };
@@ -433,6 +434,7 @@ export class ClaudeTransport {
     }
 
     if (method === 'thread/start' || method === 'thread/resume' || method === 'thread/fork') {
+      this.clearAssistantText();
       this.config = params as NativeConfig;
       this.threadId =
         method === 'thread/resume' ? params.threadId : randomUUID();
@@ -451,7 +453,10 @@ export class ClaudeTransport {
       const turnId = method === 'turn/steer'
         ? params.expectedTurnId
         : randomUUID();
-      if (method === 'turn/start') this.activeTurn = turnId;
+      if (method === 'turn/start') {
+        this.clearAssistantText();
+        this.activeTurn = turnId;
+      }
       this.input.push({
         type: 'user',
         message: {
@@ -466,6 +471,7 @@ export class ClaudeTransport {
     }
 
     if (method === 'turn/interrupt') {
+      this.streamingMessage = undefined;
       await this.query?.interrupt();
       return {};
     }
@@ -574,7 +580,7 @@ export class ClaudeTransport {
       ...(plugins.length ? { plugins } : {}),
       persistSession: !config.ephemeral,
       promptSuggestions: false,
-      includePartialMessages: false,
+      includePartialMessages: true,
       ...(from ? { resume: from.resume, ...(from.fork ? { forkSession: true, sessionId: this.threadId } : {}) } : { sessionId: this.threadId }),
       // Explicit native path avoids SDK optional binaries inside Electron app.asar.
       pathToClaudeCodeExecutable: this.command,
@@ -620,6 +626,7 @@ export class ClaudeTransport {
   }
 
   private handle(message: SDKMessage) {
+    if (this.closed) return;
     if (message.type === 'rate_limit_event') {
       this.rateLimit = message.rate_limit_info;
       this.emit('account/rateLimits/updated', { claude: message.rate_limit_info });
@@ -627,9 +634,35 @@ export class ClaudeTransport {
     }
     // Claude starts a turn by itself when a background task it ran ends (ALPD §56). Adopt it, so
     // ALP's tools work in it and its end is reported like any other turn's.
-    if (message.type === 'assistant' && !message.parent_tool_use_id && !this.activeTurn && !this.closed) {
+    const streamStart = message.type === 'stream_event' && message.event?.type === 'message_start';
+    if ((message.type === 'assistant' || streamStart) && !message.parent_tool_use_id && !this.activeTurn) {
       this.activeTurn = randomUUID();
       this.emit('turn/started', { threadId: this.threadId, turn: { id: this.activeTurn } });
+    }
+    if (message.type === 'stream_event') {
+      if (message.parent_tool_use_id) return;
+      const event = message.event;
+      if (event.type === 'message_start') {
+        this.streamingMessage = event.message.id;
+      } else if (event.type === 'message_stop') {
+        this.streamingMessage = undefined;
+      } else if (this.streamingMessage) {
+        const id = this.streamingMessage;
+        const state = this.assistantState(id);
+        let delta: string | undefined;
+        if (event.type === 'content_block_start' && event.content_block.type === 'text') {
+          state.blocks.set(event.index, { text: event.content_block.text, final: false });
+          delta = event.content_block.text;
+        } else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+          const block = state.blocks.get(event.index);
+          if (block && !block.final) {
+            block.text += event.delta.text;
+            delta = event.delta.text;
+          }
+        }
+        if (delta) this.emit('item/agentMessage/delta', { threadId: this.threadId, turnId: this.activeTurn, itemId: id, delta });
+      }
+      return;
     }
     if (message.type === 'assistant' && message.error === 'rate_limit') this.limitedTurn = true;
     // A compaction, reported as Codex reports one: a contextCompaction item from start to end (ALPD §57).
@@ -671,14 +704,21 @@ export class ClaudeTransport {
       if (windows.length && !this.compactAt) this.contextWindow = Math.max(...windows);
     }
     if (message.type === 'assistant' && !message.parent_tool_use_id) {
+      const id = message.message.id;
+      const state = this.assistantState(id);
+      if (message.uuid && state.seen.has(message.uuid)) return;
+      if (message.uuid) state.seen.add(message.uuid);
       for (const block of message.message.content as any[]) {
         if (block.type === 'text') {
-          const id = message.message.id;
-          const text = (this.assistantText.get(id) ?? '') + block.text;
-          this.assistantText.set(id, text);
+          // SDK 0.3.292 delivers one authoritative assistant event per completed
+          // block, sharing message.id. Replace that block's draft, never append
+          // the final text to its streamed draft or replace earlier final blocks.
+          const pending = [...state.blocks.entries()].sort(([a], [b]) => a - b).find(([, value]) => !value.final);
+          const index = pending?.[0] ?? Math.max(-1, ...state.blocks.keys()) + 1;
+          state.blocks.set(index, { text: block.text, final: true });
           this.emit('item/completed', {
             threadId: this.threadId,
-            item: { type: 'agentMessage', id, text },
+            item: { type: 'agentMessage', id, text: [...state.blocks.entries()].sort(([a], [b]) => a - b).map(([, block]) => block.text).join('') },
           });
         } else if (block.type === 'tool_use') {
           const command = block.name === 'Bash'
@@ -737,6 +777,7 @@ export class ClaudeTransport {
       return;
     }
 
+    if (message.type === 'result') this.clearAssistantText();
     if (message.type === 'result' && this.activeTurn) {
       const turnId = this.activeTurn;
       this.activeTurn = undefined;
@@ -764,8 +805,20 @@ export class ClaudeTransport {
     for (const listener of this.listeners) listener(method, params);
   }
 
+  private assistantState(id: string) {
+    let state = this.assistantText.get(id);
+    if (!state) this.assistantText.set(id, state = { blocks: new Map(), seen: new Set() });
+    return state;
+  }
+
+  private clearAssistantText() {
+    this.streamingMessage = undefined;
+    this.assistantText.clear();
+  }
+
   private fail(value: unknown) {
     if (this.closed) return;
+    this.clearAssistantText();
     const error = value instanceof Error ? value : new Error(String(value));
     for (const listener of this.failures) listener(error);
   }
@@ -773,6 +826,7 @@ export class ClaudeTransport {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    this.clearAssistantText();
     this.input.close();
     this.query?.close();
     await this.pump?.catch(() => {});
