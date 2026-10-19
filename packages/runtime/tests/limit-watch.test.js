@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createAlpRuntime, usageAllows } from '@anhlp/alp-runtime';
+import { codexUsage } from '@anhlp/alp-runtime/runtime-context';
 import { fakeTransport, tree, until } from '../../../test/support/fake-agent.js';
 
 const codex = (...used) => ({ available: true, limits: [{ windows: used.map(usedPercent => ({ usedPercent, windowMinutes: 300, resetsAt: 1_900_000_000 })), spendControlReached: false }] });
@@ -18,6 +19,58 @@ test('a usage report says whether the runtime may work again, or nothing when it
   assert.equal(usageAllows({ available: false }), undefined);
   assert.equal(usageAllows({ available: true, windows: [] }), undefined);
   assert.equal(usageAllows(undefined), undefined);
+});
+
+test('Codex denial survives normalization and vetoes window capacity without granting on true alone', () => {
+  const report = allowed => codexUsage({ ordinaryUsageAllowed: allowed, rateLimits: {
+    primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1_900_000_000 },
+  } });
+  assert.equal(report(false).ordinaryUsageAllowed, false);
+  assert.equal(usageAllows(report(false)), false);
+  assert.equal(usageAllows(report(true)), true);
+  assert.equal(usageAllows(report(null)), true);
+  assert.equal(usageAllows({ available: true, ordinaryUsageAllowed: false, limits: [] }), false);
+  assert.equal(usageAllows({ available: true, ordinaryUsageAllowed: true, limits: [] }), undefined);
+  assert.equal(usageAllows({ available: false, ordinaryUsageAllowed: false }), undefined);
+  assert.equal(usageAllows({ ...codex(100), ordinaryUsageAllowed: true }), false);
+});
+
+for (const expired of [false, true]) {
+  test(`provider denial keeps a recovered pause with ${expired ? 'elapsed' : 'future'} reset until a fresh allowed report`, async t => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'alp-denial-'));
+    const file = path.join(directory, 'pause.json');
+    await writeFile(file, JSON.stringify({ runtimes: { codex: {
+      since: new Date().toISOString(), by: 'alpd', reason: 'Codex usage limit reached',
+      resetsAt: new Date(Date.now() + (expired ? -120_000 : 3_600_000)).toISOString(),
+    } } }));
+    let usage = { ...codex(20), ordinaryUsageAllowed: false };
+    const agents = [];
+    const factory = fakeTransport(agents);
+    const runtime = createAlpRuntime({ supervisor: false, pauseFile: file, limitCheckMs: 20,
+      transport: (...args) => Object.assign(factory(...args), { async orchestrationContext() { return { usage }; } }),
+    });
+    t.after(async () => { await runtime.shutdown(); await rm(directory, { recursive: true, force: true }); });
+    await until(() => runtime.pauses().runtimes.codex?.checkedAt || !runtime.pauses().runtimes.codex, 'the denial check');
+    assert.ok(runtime.pauses().runtimes.codex, 'explicit denial must keep the runtime paused');
+    usage = { ...codex(20), ordinaryUsageAllowed: true };
+    await until(() => !runtime.pauses().runtimes.codex, 'automatic resume after a fresh allowed report');
+    assert.ok(agents.every(agent => agent.closed), 'usage probes close without a model turn');
+    assert.ok(agents.every(agent => agent.started.length === 0));
+  });
+}
+
+test('an unavailable usage report retains the elapsed reset fallback', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-reset-'));
+  const file = path.join(directory, 'pause.json');
+  await writeFile(file, JSON.stringify({ runtimes: { codex: {
+    since: new Date().toISOString(), by: 'alpd', reason: 'Codex usage limit reached',
+    resetsAt: new Date(Date.now() - 120_000).toISOString(),
+  } } }));
+  const agents = [];
+  const runtime = createAlpRuntime({ supervisor: false, pauseFile: file, transport: fakeTransport(agents) });
+  t.after(async () => { await runtime.shutdown(); await rm(directory, { recursive: true, force: true }); });
+  await until(() => !runtime.pauses().runtimes.codex, 'resume after elapsed reset without usage information');
+  assert.ok(agents.length > 0 && agents.every(agent => agent.closed));
 });
 
 test('while a limit pauses Codex, alpd asks it every interval and resumes it once the limit lifts', async t => {
