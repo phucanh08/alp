@@ -4,7 +4,7 @@ import { mkdir, open, readFile, rename, stat, unlink, utimes, writeFile } from '
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import templates from 'alp:templates';
-import { alpHome, daemonPaths, assertPrivateDirectory, PROTOCOL_VERSION } from '@anhlp/alp-client/index';
+import { alpHome, daemonPaths, assertPrivateDirectory, PROTOCOL_VERSION, withDaemonLifecycle } from '@anhlp/alp-client/index';
 import { createAlpRuntime, reclaimCopies, reclaimWorktrees } from '@anhlp/alp-runtime/index';
 import { createDaemonServer } from './server.js';
 import { acquireLock, heartbeat, releaseLock, updateLock } from './lock.js';
@@ -28,7 +28,9 @@ async function rotate(log: string) {
   }
 }
 
-/** Starts the daemon in a new session and returns at once, so it is not part of the caller's process tree. */
+/** The launcher owns its detached child until that child acknowledges readiness or exits.
+ * A ready lock belonging to some other process cannot settle this launch.
+ */
 async function detach(home: string) {
   await assertPrivateDirectory(home, { create: true });
   const { log } = daemonPaths(home);
@@ -37,12 +39,35 @@ async function detach(home: string) {
   const output = await open(log, 'a', 0o600);
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url)], {
     detached: true,
-    stdio: ['ignore', output.fd, output.fd],
+    stdio: ['ignore', output.fd, output.fd, 'ipc'],
     env: process.env,
     windowsHide: true,
   });
-  child.unref();
   await output.close();
+  await new Promise<void>((resolve, reject) => {
+    const requested = Number(process.argv.find(arg => arg.startsWith('--startup-timeout='))?.split('=')[1]);
+    const timeoutMs = Number.isFinite(requested) && requested > 0 ? requested : 15_000;
+    let timedOut = false;
+    let force: ReturnType<typeof setTimeout> | undefined;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+      force = setTimeout(() => child.kill('SIGKILL'), 1_000);
+    }, timeoutMs);
+    child.once('error', error => { clearTimeout(timer); clearTimeout(force); reject(error); });
+    child.once('exit', (code, signal) => {
+      clearTimeout(timer);
+      clearTimeout(force);
+      reject(new Error(timedOut ? `alpd startup timed out after ${timeoutMs} ms` : `alpd exited during startup (${code ?? signal})`));
+    });
+    child.once('message', message => {
+      if (message !== 'alpd.ready' || timedOut) return;
+      clearTimeout(timer);
+      child.disconnect();
+      child.unref();
+      resolve();
+    });
+  });
 }
 
 /**
@@ -177,8 +202,8 @@ async function run(home: string) {
   // Review copies of interrupted assignments hold nothing to keep.
   const copyDir = path.join(home, 'copies');
   await reclaimCopies(copyDir).catch(() => 0);
-  // A hold (ALPD §40) only means something while alpd is stopped.
-  await unlink(path.join(home, 'state', 'alpd.held')).catch(() => {});
+  // Requested starts lift the existing hold before launching. Never erase a stop
+  // published while this daemon was starting.
   const settings = await userSettings(home);
   const runtime = createAlpRuntime({
     templates, runLogDir, worktreeDir, copyDir, boardDir: path.join(home, 'boards'), libraryDir: home,
@@ -229,6 +254,7 @@ async function run(home: string) {
     .then(() => rename(`${install}.tmp`, install))
     .catch(error => log.warn('could not record alpd\'s location', { code: 'ALP_INSTALL_RECORD_FAILED', error }));
   if (opened.restored) await clearRestoredMarker(home).catch(error => log.warn('could not clear the restore marker', { code: 'ALP_STATE_RESTORED', error }));
+  if (process.connected) process.send?.('alpd.ready');
   log.info(`alpd ${VERSION} ready on ${socket} (pid ${process.pid})`, { event: 'ready', version: VERSION, pid: process.pid });
 }
 
@@ -236,8 +262,18 @@ const home = alpHome();
 try {
   if (process.argv.includes('--detach')) await detach(home);
   else {
+    // A direct foreground/login invocation is an explicit start. Do this before
+    // admission registration, so a stop published during startup is preserved.
+    if (!process.connected) await unlink(path.join(home, 'state', 'alpd.held')).catch(() => {});
     if (process.argv.includes('--service')) await serviceLog(home);
-    await run(home);
+    if (process.connected) await run(home);
+    else {
+      // Retain admission through readiness even if the requesting service client
+      // times out. An invocation without a requester (including login) is explicit.
+      await withDaemonLifecycle(home, 'start', async () => {
+        await run(home);
+      }, { joinStart: true });
+    }
   }
 } catch (error: any) {
   // The log says where start-up stopped; alp doctor reads it from there.

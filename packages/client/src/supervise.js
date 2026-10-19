@@ -1,6 +1,6 @@
 import { mkdir, unlink, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { ensureDaemon, lockAlive, readLock } from './index.js';
+import { ensureDaemon, lockAlive, readLock, withDaemonLifecycle } from './index.js';
 import { installedProgram, serviceFor, startService } from './service.js';
 
 /**
@@ -41,16 +41,20 @@ async function whenReady(home, timeoutMs) {
  * Starts alpd for `home` unless it runs, and lifts a hold: someone asked for it.
  * Returns its socket.
  */
-export async function startDaemon({ home, entry, env = process.env, timeoutMs = 15_000 }) {
-  await releaseHold(home);
-  const lock = await readLock(home);
-  if (lockAlive(lock)) return lock.ready ? lock.socket : whenReady(home, timeoutMs);
-  const service = serviceFor({ home, env });
-  if (service && await installedProgram(service)) {
-    await startService(service);
-    return whenReady(home, timeoutMs);
-  }
-  return ensureDaemon({ home, entry, env, timeoutMs });
+export async function startDaemon({ home, entry, env = process.env, timeoutMs = 15_000, automatic = false }) {
+  return withDaemonLifecycle(home, 'start', async () => {
+    if (automatic) {
+      if (await daemonHeld(home)) return;
+    } else await releaseHold(home);
+    const lock = await readLock(home);
+    if (lockAlive(lock)) return lock.ready ? lock.socket : whenReady(home, timeoutMs);
+    const service = serviceFor({ home, env });
+    if (service && await installedProgram(service)) {
+      await startService(service);
+      return whenReady(home, timeoutMs);
+    }
+    return ensureDaemon({ home, entry, env, timeoutMs, lifecycleLocked: true });
+  });
 }
 
 /**
@@ -64,8 +68,8 @@ export function superviseDaemon({ home, entry, env = process.env, intervalMs = 5
   let missed = 0;
   let starting;
   const start = reason => {
-    starting ??= startDaemon({ home, entry: typeof entry === 'function' ? entry() : entry, env })
-      .then(() => log(`alpd ${reason}`), error => log(`could not start alpd: ${error?.message ?? error}`))
+    starting ??= startDaemon({ home, entry: typeof entry === 'function' ? entry() : entry, env, automatic: reason !== 'started with Paseo' })
+      .then(socket => { if (socket) log(`alpd ${reason}`); }, error => log(`could not start alpd: ${error?.message ?? error}`))
       .finally(() => { starting = undefined; missed = 0; });
     return starting;
   };

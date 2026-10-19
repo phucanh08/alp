@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { open, readFile, realpath, stat, lstat, mkdir, readlink, unlink } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { open, readFile, writeFile, realpath, stat, lstat, mkdir, readlink, unlink, readdir, rename, rmdir, link } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -242,12 +242,77 @@ async function tail(file, lines = 30) {
   try { return scrubText((await readFile(file, 'utf8')).split('\n').slice(-lines).join('\n'), { max: 8000 }); } catch { return ''; }
 }
 
+/** Immutable admission identities live in filenames, including for service hard links. */
+async function lifecycleOwners(home) {
+  const directory = path.join(home, 'state', 'alpd.starting');
+  const names = await readdir(directory).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
+  return names.map(token => {
+    const match = /^owner-(\d+)-(\d+)-(start|stop)-[a-f0-9-]+$/.exec(token);
+    if (!match) throw new Error('Invalid alpd startup admission owner');
+    return { token, pid: Number(match[1]), bootTime: Number(match[2]), action: match[3] };
+  });
+}
+
+export async function readDaemonLifecycle(home) {
+  return (await lifecycleOwners(home)).find(owner => lockAlive(owner));
+}
+
+/** Serializes requested starts and stops, including the time before alpd has a lock.
+ * Rename publishes a fully populated directory: an existing nonempty directory cannot
+ * be replaced. Reaping/release unlinks only its unique owner token, then rmdir; even
+ * racing stale reapers cannot remove a successor's nonempty directory.
+ */
+export async function withDaemonLifecycle(home, action, run, { joinStart = false } = {}) {
+  await assertPrivateDirectory(home, { create: true });
+  const state = path.join(home, 'state');
+  await assertPrivateDirectory(state, { create: true });
+  const directory = path.join(state, 'alpd.starting');
+  const token = `owner-${process.pid}-${bootTime()}-${action}-${randomUUID()}`;
+  const candidate = path.join(state, `alpd.starting-${token}`);
+  await mkdir(candidate, { mode: 0o700 });
+  await writeFile(path.join(candidate, token), JSON.stringify({ pid: process.pid, bootTime: bootTime(), action }), { mode: 0o600 });
+  try {
+    let joined = false;
+    if (joinStart) {
+      const owner = await readDaemonLifecycle(home);
+      if (owner?.action === 'start') {
+        try {
+          // Linking the unique source token both validates this generation and
+          // pins its directory until this service has finished starting.
+          await link(path.join(directory, owner.token), path.join(directory, token));
+          joined = true;
+        } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      }
+    }
+    while (!joined) {
+      try { await rename(candidate, directory); break; }
+      catch (error) {
+        if (!['EEXIST', 'ENOTEMPTY', 'EPERM', 'EACCES'].includes(error.code)) throw error;
+        for (const owner of await lifecycleOwners(home)) {
+          if (!lockAlive(owner)) await unlink(path.join(directory, owner.token)).catch(error => { if (error.code !== 'ENOENT') throw error; });
+        }
+        await rmdir(directory).catch(error => { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error; });
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+    }
+    try { return await run(); }
+    finally {
+      await unlink(path.join(directory, token));
+      await rmdir(directory).catch(error => { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error; });
+    }
+  } finally {
+    await unlink(path.join(candidate, token)).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    await rmdir(candidate).catch(error => { if (error.code !== 'ENOENT') throw error; });
+  }
+}
+
 /**
  * Returns the socket of a ready daemon, starting one when none runs.
  * `entry` is the daemon script; it is started through its own detaching launcher so the
  * daemon outlives the client that started it.
  */
-export async function ensureDaemon({ home = alpHome(), entry = /** @type {string | undefined} */ (undefined), env = process.env, execPath = process.execPath, timeoutMs = 15_000 } = {}) {
+export async function ensureDaemon({ home = alpHome(), entry = /** @type {string | undefined} */ (undefined), env = process.env, execPath = process.execPath, timeoutMs = 15_000, lifecycleLocked = false } = {}) {
+  if (!lifecycleLocked) return withDaemonLifecycle(home, 'start', () => ensureDaemon({ home, entry, env, execPath, timeoutMs, lifecycleLocked: true }));
   const ready = async () => {
     const lock = await readLock(home);
     return lockAlive(lock) && lock.ready ? lock.socket : undefined;
@@ -260,7 +325,7 @@ export async function ensureDaemon({ home = alpHome(), entry = /** @type {string
     entry ??= await findDaemonEntry({ home, env });
     if (!entry) throw new Error('ALP daemon is not running and alpd.js was not found. Install the ALP CLI and run `alp daemon start`, or set ALP_DAEMON_ENTRY to alpd.js');
     await new Promise((resolve, reject) => {
-      const launcher = spawn(execPath, [entry, '--detach'], {
+      const launcher = spawn(execPath, [entry, '--detach', `--startup-timeout=${timeoutMs}`], {
         env: { ...env, ALP_HOME: home, ELECTRON_RUN_AS_NODE: '1' },
         stdio: ['ignore', 'ignore', 'pipe'],
         windowsHide: true,
