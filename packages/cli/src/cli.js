@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
 import { setup } from '@anhlp/alp-client/setup';
 import { alpHome } from '@anhlp/alp-client/index';
 import { scrubText } from '@anhlp/alp-core/log';
@@ -14,8 +15,14 @@ import { backupCommand, restoreCommand } from './backup.js';
 const commands = { setup: args => setup(args, alpHome()), init: args => project('init', args), upgrade: args => project('upgrade', args), update: args => project('upgrade', args), daemon, doctor, run, ps, top, attach, send, questions, answer, log, board, tasks: tasksCommand, task: taskCommand, formula: formulaCommand, permissions: permissionsCommand, agents: args => libraryCommand('agents', args), skills: args => libraryCommand('skills', args), mcp: args => ['add', 'rm', 'mv', 'cp', 'test', 'show', 'edit'].includes(args[0]) ? editCommand('mcp', args) : libraryCommand('mcp', args), hooks: args => libraryCommand('hooks', args), providers: args => libraryCommand('providers', args), provider: args => editCommand('providers', args), teams: teamsCommand, trust: trustCommand, agent: args => editCommand('agents', args), team: args => editCommand('teams', args), skill: args => editCommand('skills', args), hook: args => editCommand('hooks', args), verify, recall, pause, resume, language, interrupt, acp: acpCommand, web: webCommand, backup: backupCommand, restore: restoreCommand };
 const [command, ...args] = process.argv.slice(2);
 try {
-  if (!Object.hasOwn(commands, command)) throw new UsageError();
-  await commands[command](args);
+  if (command === '--version') {
+    // Published builds inject their package version; source execution reads the same metadata.
+    /* global __ALP_VERSION__ */
+    console.log(typeof __ALP_VERSION__ === 'string' ? __ALP_VERSION__ : JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
+  } else {
+    if (!Object.hasOwn(commands, command)) throw new UsageError();
+    await commands[command](args);
+  }
 } catch (error) {
   if (error instanceof UsageError || error?.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') console.error(USAGE);
   else console.error(`alp: ${scrubText(error?.message ?? error)}`);
