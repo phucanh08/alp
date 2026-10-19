@@ -327,7 +327,10 @@ export type CodexToolCall = { name: string; status: 'running' | 'completed' | 'f
 /** `--- a/<path>` / `+++ b/<path>` headers on a file's diff that lacks them. */
 function withHeaders(path: string, diff: string) {
   // Only a diff that starts with its header has one: a removed `-- x` line inside is not it.
-  return /^(--- |diff --git )/.test(diff) ? diff : `--- a/${path}\n+++ b/${path}\n${diff}`;
+  if (/^(--- |diff --git )/.test(diff)) return diff;
+  // A diff that starts with its target header lacks only the source one (#117).
+  if (diff.startsWith('+++ ')) return `--- a/${path}\n${diff}`;
+  return `--- a/${path}\n+++ b/${path}\n${diff}`;
 }
 
 /** Text that starts as a unified diff does: a file header or a hunk (a line inside content does not count). */

@@ -12,6 +12,7 @@ import type { AgentsView, CreateAgentInput, Placement } from './workspaces.js';
 import { searchTimeline } from './chat-search.js';
 import { TimelineDeltas } from './timeline-items.js';
 import { InMemoryAgentTimelineStore } from './timeline-store.js';
+import { agentUsage } from '../session-usage.js';
 
 /**
  * ALP's roots as Paseo's agents (D31 step 3, ALPD §62). Each root session is one agent of the
@@ -155,6 +156,8 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       pendingPermissions: [...questions.values()].filter(question => question.rootId === session.id).map(permissionOf),
       persistence: session.persistent ? { provider: PROVIDER, sessionId: session.id } : null,
       runtimeInfo: { provider: PROVIDER, sessionId: session.id, model: `${session.runtime}:${session.model}`, modeId: session.mode },
+      // Paseo's context meter reads the agent's last usage.
+      ...(session.usage ? { lastUsage: agentUsage(session.usage) } : {}),
       ...(session.lastError ? { lastError: session.lastError.message } : {}),
       title: session.title ?? null,
       labels: {},
@@ -229,7 +232,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       // A live root's events come to the bridge, so its timeline stays current.
       if ((session.status === 'idle' || session.status === 'running') && !timelines.has(session.id)) void ensureTimeline(session.id).catch(() => {});
     }
-    for (const id of [...roots.keys()]) if (!seen.has(id)) { roots.delete(id); epochs.delete(id); broadcast({ type: 'agent_update', payload: { kind: 'remove', agentId: id } }); directory.changed(); }
+    for (const id of [...roots.keys()]) if (!seen.has(id)) { forget(id); broadcast({ type: 'agent_update', payload: { kind: 'remove', agentId: id } }); directory.changed(); }
     // Questions come as events from attached trees; the list catches any other and any missed end.
     const { questions: waiting } = await alp.request<{ questions: UserQuestion[] }>('question.list', {});
     for (const question of waiting) asked(question);
@@ -337,7 +340,10 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
         break;
       case 'turn.ended': {
         turns.delete(root);
-        if (event.state === 'completed') stream(root, { type: 'turn_completed', provider: PROVIDER, turnId: event.turnId }, envelope.ts);
+        if (event.state === 'completed') {
+          const usage = roots.get(root)?.usage;
+          stream(root, { type: 'turn_completed', provider: PROVIDER, turnId: event.turnId, ...(usage ? { usage: agentUsage(usage) } : {}) }, envelope.ts);
+        }
         else if (event.state === 'canceled') stream(root, { type: 'turn_canceled', provider: PROVIDER, turnId: event.turnId, reason: event.error?.message ?? 'Stopped' }, envelope.ts);
         else stream(root, { type: 'turn_failed', provider: PROVIDER, turnId: event.turnId, error: event.error?.message ?? 'The turn failed' }, envelope.ts);
         if (!replaying.has(root) && event.state !== 'canceled') {
@@ -346,6 +352,17 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
           stream(root, { type: 'attention_required', provider: PROVIDER, reason, timestamp: envelope.ts, shouldNotify: true }, envelope.ts);
         }
         break;
+      }
+      case 'usage': {
+        // The root's whole latest usage. Paseo's daemon takes a provider's usage_updated into the
+        // agent's lastUsage and sends clients the agent again (agent_stream has no usage event on
+        // the wire); so does the bridge. A team member's usage stays its own (childEvent). A
+        // replayed report is older than the usage alpd lists with the root now: it changes nothing.
+        if (replaying.has(root) || !session) return;
+        const next = { ...session, usage: event.usage };
+        roots.set(root, next);
+        upsert(next);
+        return;
       }
       case 'session.opened': case 'session.updated': case 'session.closed': case 'session.failed':
         break;
@@ -360,14 +377,19 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     if (timelines.has(root)) return Promise.resolve();
     let pending = attaching.get(root);
     if (!pending) {
+      // Without a connection there is nothing to attach to, and no failed attach is kept for the root.
+      const connection = alp;
+      if (!connection) return Promise.reject(new Error('ALP daemon is not connected'));
       pending = (async () => {
         timelines.initialize(root);
         deltas.set(root, new TimelineDeltas());
         epochs.delete(root);
         replaying.add(root);
-        try { await alp!.request('session.attach', { sessionId: root, replay: true }); }
-        catch (error) { timelines.delete(root); throw error; }
-        finally { replaying.delete(root); attaching.delete(root); }
+        // An attach a later one replaced (a reconnect, a root removed and back) leaves the later one's state alone.
+        const current = () => attaching.get(root) === pending;
+        try { await connection.request('session.attach', { sessionId: root, replay: true }); }
+        catch (error) { if (current()) timelines.delete(root); throw error; }
+        finally { if (current()) { replaying.delete(root); attaching.delete(root); } }
       })();
       attaching.set(root, pending);
     }
@@ -392,6 +414,29 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       childDeltas.set(child.id, new TimelineDeltas());
     }
     void ensureTimeline(root).catch(error => log(`agents reattach failed: ${error?.message ?? error}`));
+  }
+
+  /**
+   * A root alpd no longer lists: everything kept for it goes. Its timeline goes too, not only its
+   * delta state: a delta state reset under a kept timeline would append a fully streamed message
+   * again (the t-d858 review). Without a timeline, late events of the root are dropped, and a root
+   * that reappears attaches again with a replay into a new timeline epoch, as on first sight.
+   */
+  function forget(root: string) {
+    roots.delete(root);
+    timelines.delete(root);
+    deltas.delete(root);
+    attaching.delete(root);
+    replaying.delete(root);
+    epochs.delete(root);
+    turns.delete(root);
+    attention.delete(root);
+    for (const child of [...children.values()]) {
+      if (child.root !== root) continue;
+      children.delete(child.id);
+      childTimelines.delete(child.id);
+      childDeltas.delete(child.id);
+    }
   }
 
   function known(agentId: string) {

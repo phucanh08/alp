@@ -100,7 +100,19 @@ export function registerRemoteLibraryRpc(server: PluginServerContext, link: Remo
     // Rows name entries only (the gateway keeps their content and host paths in).
     return { projectRoot, library: 'the ALP host', entries, readOnly: { reason: READ_ONLY } };
   });
-  server.handle(libraryGet, async () => { throw new RemoteUnavailableError('reading a library entry\'s content (it can hold MCP tokens, hook commands and provider arguments)', ON_HOST); });
+  // One entry, read only, as the granted workspace's sessions use it. The gateway projects its
+  // content (t-7679.14): each field that can hold a secret answers as a secret marker listed in `secrets`.
+  server.handle(libraryGet, async ({ directory, kind, name, scope }) => {
+    const projectRoot = await project(link, directory);
+    if (!projectRoot) throw new Error(`${directory ?? 'This screen'} is not in a workspace your ALP credential grants; open one to read the host library`);
+    const entry = await link.request('library.get', { kind, name, projectRoot, ...(scope ? { scope } : {}) });
+    return {
+      kind: entry.kind, name: entry.name, source: entry.source, ...(entry.overrides ? { overrides: entry.overrides } : {}),
+      content: entry.content, revision: entry.revision ?? null, usedBy: entry.usedBy ?? [],
+      ...(entry.librarySkills ? { librarySkills: entry.librarySkills } : {}),
+      ...(entry.secrets ? { secrets: entry.secrets } : {}),
+    };
+  });
   for (const contract of [librarySave, libraryDelete, libraryDuplicate, libraryRename]) {
     server.handle(contract as typeof librarySave, async () => { throw new RemoteUnavailableError('changing the library', ON_HOST); });
   }

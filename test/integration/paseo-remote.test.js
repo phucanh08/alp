@@ -4,7 +4,7 @@
 // home (B) under Node's permission model: it may read the code and use the network, nothing else,
 // so it cannot read A or the project, and cannot start a process. Through it: authentication,
 // catalog, create, prompt and stream, a question answered and one dismissed, tasks, the library
-// list and the refusals of what remote mode does not have, interrupt, a gateway restart and an alpd
+// list and one entry with its secrets hidden, the refusals of what remote mode does not have, interrupt, a gateway restart and an alpd
 // restart with replay after the last cursor and no repeated item, and a mode-limited credential.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -191,7 +191,7 @@ test('Paseo remote mode through the gateway to a real alpd: create, stream, ques
   assert.equal((await paseo.call('panel', { name: 'alp.tasks.change', input: { directory: w.project, id: task, action: 'close' } })).status, 'closed');
   assert.deepEqual((await paseo.call('panel', { name: 'alp.tasks.list', input: { directory: w.project } })).tasks.map(row => row.status), ['closed']);
 
-  // Library: names and models come from alpd; content, edits, tests and usage are refused clearly.
+  // Library: names, models and one entry's redacted content come from alpd; edits, tests and usage are refused clearly.
   const libraryRows = await paseo.call('panel', { name: 'alp.library.list', input: { directory: w.project, kind: 'agents' } });
   assert.ok(libraryRows.entries.length > 0);
   assert.match(libraryRows.readOnly.reason, /not opened or changed/, 'the screen knows it is read-only');
@@ -201,8 +201,15 @@ test('Paseo remote mode through the gateway to a real alpd: create, stream, ques
   const language = await paseo.call('panel', { name: 'alp.settings.language.get', input: {} });
   assert.equal(typeof language.applies, 'string');
   assert.match(language.readOnly, /Unavailable in ALP remote mode/);
+  // One entry opens read only through the gateway, its secrets hidden (t-7679.14, #117): the host's
+  // values never reach this side, which says where each hidden one is.
+  await mkdir(path.join(w.project, '.alp/mcp'), { recursive: true });
+  await writeFile(path.join(w.project, '.alp/mcp/local.json'), JSON.stringify({ command: 'npx', args: ['server', '--api-key', 'SENTINEL-arg'], env: { API_KEY: 'SENTINEL-env' } }));
+  const entry = await paseo.call('panel', { name: 'alp.library.get', input: { directory: w.project, kind: 'mcp', name: 'local', scope: 'project' } });
+  assert.deepEqual(entry.content, { server: { command: 'npx', args: [{ $secret: 'keep' }, { $secret: 'keep' }, { $secret: 'keep' }], env: { API_KEY: { $secret: 'keep' } } } });
+  assert.deepEqual(entry.secrets, ['/server/args/0', '/server/args/1', '/server/args/2', '/server/env/API_KEY']);
+  assert.ok(!JSON.stringify(entry).includes('SENTINEL'), 'no secret value crosses');
   for (const [name, input] of [
-    ['alp.library.get', { directory: w.project, kind: 'mcp', name: 'x' }],
     ['alp.library.save', { directory: w.project, kind: 'skills', name: 'x', scope: 'project', content: {} }],
     ['alp.library.test', { directory: w.project, kind: 'hooks', name: 'x' }],
     ['alp.settings.language.set', { language: 'English' }],
