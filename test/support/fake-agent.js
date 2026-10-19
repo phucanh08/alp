@@ -5,8 +5,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../../packages/core/src/init.js';
-import { createAlpRuntime } from '../../dist/runtime/index.js';
+import { initProject } from '@anhlp/alp-core/init';
+import { createAlpRuntime } from '@anhlp/alp-runtime';
 
 let calls = 0;
 
