@@ -282,6 +282,26 @@ test('the user answers permission questions; always allow writes the rule and st
   main.finish('Done');
 });
 
+// #116: the user writing in the chat ends main's own alp_ask, never a permission prompt.
+test('a permission prompt keeps waiting for the user\'s decision when the user writes in the chat', async t => {
+  const { directory, root, home } = await project(t, { profiles: { guard: { ask: ['Bash(git push *)'] } }, agents: { main: 'guard' } });
+  const runtimes = [];
+  const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: home, runLogDir: path.join(directory, 'runs') });
+  t.after(() => runtime.shutdown());
+  await runtime.open('root', { cwd: root, model: 'codex:gpt-6.1-sol' });
+  await until(() => runtimes.length === 2);
+  const [main] = runtimes;
+  await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Ship it' }] });
+  const push = main.serverRequest('item/commandExecution/requestApproval', { kind: 'command', threadId: main.threadId, command: "/bin/zsh -lc 'git push origin main'" });
+  await until(() => runtime.questions().length === 1);
+  const [question] = runtime.questions();
+  await runtime.prompt('root', { clientMessageId: 'steer', delivery: 'steer', content: [{ type: 'text', text: 'Sao rồi e' }] });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.deepEqual(runtime.questions().map(q => q.id), [question.id], 'the permission prompt is still open');
+  runtime.answer(question.id, { text: 'Allow once' });
+  assert.deepEqual(await push, { decision: 'accept' });
+});
+
 test('by default ALP asks permission questions in Vietnamese and takes Vietnamese answers (ALPD §54)', async t => {
   const { directory, root, home } = await project(t, {
     profiles: { review: { base: 'read-only', ask: ['Bash(git push *)'], beyondMode: 'ask' } },

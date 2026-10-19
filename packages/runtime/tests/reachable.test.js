@@ -340,3 +340,93 @@ test('ALP follows a turn the runtime started by itself: its tools work and its e
   assert.notEqual(events.at(-1).turnId, 'late');
   assert.ok((await runLog()).length);
 });
+
+// #116 (2026-10-17 20:56): the user wrote during a long alp_wait, main's turn ended with
+// "Turn ended", and its running lead was canceled without a handoff. Ending main's turn, by any
+// route short of the user's explicit stop, must leave its assignments running; their results
+// later wake main as mail.
+test('main\'s turn ending while it waits never cancels its running assignment (#116)', async t => {
+  for (const scenario of ['alp_wait, user steers, turn completes', 'wait true, user steers, turn completes', 'alp_wait pending as turn completes', 'alp_wait pending as turn fails', 'wait true pending as turn completes', 'user prompt while busy']) {
+    await t.test(scenario, async t => {
+      const { runtime, agents, main } = await tree(t, { options: () => ({ checkInMs: 0, silentForMs: 3_600_000 }) });
+      const ended = [];
+      runtime.onEvent(({ sessionId, event }) => sessionId === 'root' && event.type === 'turn.ended' && ended.push(event.state));
+      const blocking = scenario.startsWith('wait true');
+      const delegated = main.call('alp_delegate', { agent: 'peer', task: 'Long job', mode: 'read-only', ...(blocking ? { wait: true } : {}) });
+      await until(() => agents[1]?.started.length, 'the peer to start');
+      const assignmentId = runtime.status('root').assignments[0].id;
+      const waiting = blocking ? delegated : (await delegated, main.call('alp_wait', { timeoutMs: 3_000_000 }));
+      // The tool call is waiting before anything else happens.
+      await new Promise(resolve => setTimeout(resolve, 30));
+      if (scenario.includes('user steers')) {
+        await steer(runtime, 'Sao rồi e');
+        const early = await waiting;
+        assert.equal(early.userMessage, true);
+        main.finish('Peer is still on it; I will report when it finishes.');
+      } else if (scenario === 'user prompt while busy') {
+        // A plain prompt to a busy turn is refused; it must not stop the work either.
+        await runtime.prompt('root', { clientMessageId: 'busy', delivery: 'auto', content: [{ type: 'text', text: 'Sao rồi e' }] });
+        main.finish('Peer is still on it.');
+        assert.match(JSON.stringify(await waiting), /Turn ended/);
+      } else {
+        // The native turn ends while the tool still waits (a provider that ends its turn on its own).
+        main.notification('item/completed', { threadId: main.threadId, item: { type: 'agentMessage', id: 'reply', text: 'Still working.' } });
+        main.notification('turn/completed', { threadId: main.threadId, turn: { id: main.turnId, status: scenario.endsWith('fails') ? 'failed' : 'completed', ...(scenario.endsWith('fails') ? { error: { message: 'stream closed' } } : {}) } });
+        const result = await waiting;
+        await new Promise(resolve => setTimeout(resolve, 30));
+        assert.equal(agents[1].closed, false, 'the assignment keeps running');
+        // What the ended tool call says must match: the assignment was not canceled.
+        assert.match(result.error, /Turn ended/, JSON.stringify(result));
+        assert.doesNotMatch(JSON.stringify(result), /canceled|stopped/i);
+        if (blocking) assert.deepEqual([result.assignmentId, result.status], [assignmentId, 'running']);
+      }
+      await until(() => ended.length === 1, 'main\'s turn to end');
+      await new Promise(resolve => setTimeout(resolve, 30));
+      assert.equal(agents[1].closed, false, 'the assignment keeps running');
+      assert.deepEqual(runtime.status('root').assignments.map(entry => [entry.id, entry.status]), [[assignmentId, 'running']]);
+      await agents[1].call('alp_handoff', peerHandoff);
+      agents[1].finish('long job finished');
+      await until(() => main.started.length === 2, 'the result to wake main');
+      const wake = main.started.at(-1).params.input.at(-1).text;
+      assert.ok(wake.includes(assignmentId));
+      assert.match(wake, /result from peer[\s\S]*long job finished/);
+    });
+  }
+});
+
+// The other side of #116: the user's stop and a closing session do end the work, and say so.
+test('the user\'s stop or closing the session cancels the assignment a wait was for, and the wait says so', async t => {
+  for (const operation of ['interrupt', 'close']) for (const waiting of ['wait true', 'alp_wait']) {
+    await t.test(`${operation}, ${waiting}`, async t => {
+      const { runtime, agents, main } = await tree(t, { options: () => ({ checkInMs: 0, silentForMs: 3_600_000 }) });
+      const delegated = main.call('alp_delegate', { agent: 'peer', task: 'Long job', mode: 'read-only', ...(waiting === 'wait true' ? { wait: true } : {}) });
+      await until(() => agents[1]?.started.length, 'the peer to start');
+      const pending = waiting === 'wait true' ? delegated : (await delegated, main.call('alp_wait', { timeoutMs: 3_000_000 }));
+      await new Promise(resolve => setTimeout(resolve, 30));
+      await runtime[operation]('root');
+      const result = await pending;
+      if (waiting === 'wait true') assert.deepEqual([result.status, result.error], ['canceled', 'Parent assignment stopped']);
+      else assert.deepEqual([result.error, result.running], ['Turn ended', undefined]);
+      await until(() => agents[1].closed, 'the assignment to be closed');
+    });
+  }
+});
+
+// #116: main asking the user is a deliberate wait for an answer, but a message the user writes in
+// the chat instead must not queue behind it for the question's 30 minutes.
+test('the user writing instead of answering ends main\'s question at once', async t => {
+  const { runtime, main } = await tree(t, { options: () => ({ checkInMs: 0 }) });
+  const asked = main.call('alp_ask', { question: 'SQLite or Postgres?', options: ['SQLite', 'Postgres'] });
+  await until(() => runtime.questions().length === 1, 'the question to reach the user');
+  await steer(runtime, 'Sao rồi e');
+  const released = await Promise.race([asked, new Promise(resolve => setTimeout(() => resolve({ status: 'still waiting' }), 200))]);
+  assert.deepEqual([released.status, released.userMessage], ['user_wrote', true], JSON.stringify(released));
+  assert.match(released.next, /Answer them first/);
+  assert.equal(runtime.questions().length, 0, 'the question leaves the user\'s screen');
+  assert.deepEqual(main.calls.filter(call => call.method === 'turn/steer').map(call => call.params.input.at(-1).text), ['Sao rồi e']);
+  // An answer to the question still works as before.
+  const again = main.call('alp_ask', { question: 'Which port?' });
+  await until(() => runtime.questions().length === 1, 'the second question');
+  runtime.answer(runtime.questions()[0].id, { text: '8080' });
+  assert.deepEqual([(await again).status, (await again).answer], ['answered', '8080']);
+});

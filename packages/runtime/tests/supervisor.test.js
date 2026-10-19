@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -201,13 +201,20 @@ test('no supervisor when settings turn it off or the project uses a custom graph
   }
 });
 
-/** Starts the call, waits for its approval question, and answers it. */
-async function answered(runtime, pending, reply) {
-  await until(() => runtime.questions().length === 1);
-  const [question] = runtime.questions();
-  if (reply === null) runtime.answer(question.id, { dismiss: true, reason: 'Not now' });
-  else runtime.answer(question.id, { text: reply });
-  return { question, result: await pending };
+/** Proposes a skill, checks it returns pending at once, answers its approval and returns the result mail. */
+async function approvedSkill(runtime, pending, reply) {
+  const events = []; const off = runtime.onEvent(e => events.push(e));
+  try {
+    const result = await pending;
+    assert.equal(result.status, 'pending_approval', JSON.stringify(result));
+    const question = runtime.questions().find(q => q.id === result.approvalId);
+    assert.ok(question);
+    if (reply === null) runtime.answer(question.id, { dismiss: true, reason: 'Not now' });
+    else runtime.answer(question.id, { text: reply });
+    let terminal;
+    await until(() => { terminal = events.find(e => e.event.type === 'mail' && e.event.mail.assignment === result.approvalId); return terminal; });
+    return { question, pending: result, result: JSON.parse(terminal.event.mail.body.slice('Skill approval result: '.length)) };
+  } finally { off(); }
 }
 
 test('main distills lessons into a skill scoped to the roles it picks, saved only after the user approves', async t => {
@@ -221,16 +228,23 @@ test('main distills lessons into a skill scoped to the roles it picks, saved onl
   for (const lesson of lessons) await main.call('alp_lesson', { scope: lesson.startsWith('Keep') ? 'user' : 'project', lesson });
   const skill = { name: 'verify-claims', description: 'Use before reporting any check: run it and quote what it printed.', body: '# Verify claims\n\n1. Run the check.\n2. Quote its output.', roles: ['main', 'peer', 'oracle'], lessons: lessons.slice(0, 2) };
   assert.match((await main.call('alp_skill', { ...skill, roles: ['main', 'tester'] })).error, /Unknown roles: tester/);
+  assert.equal(runtime.questions().length, 0);
 
-  const rejected = await answered(runtime, main.call('alp_skill', skill), 'Make it shorter');
+  const rejected = await approvedSkill(runtime, main.call('alp_skill', skill), 'Make it shorter');
   assert.deepEqual(rejected.question.options, ['Approve', 'Reject']);
   assert.match(rejected.question.body, /Roles that get it: main, peer, oracle\.[\s\S]*- Run the command before reporting its result\.[\s\S]*name: verify-claims\ndescription: "Use before reporting/);
-  assert.deepEqual([rejected.result.approved, rejected.result.feedback], [false, 'Make it shorter']);
+  assert.deepEqual([rejected.result.approved, rejected.result.saved, rejected.result.feedback], [false, false, 'Make it shorter']);
   await assert.rejects(readFile(path.join(library, 'skills/verify-claims/SKILL.md'), 'utf8'), { code: 'ENOENT' });
-  assert.equal((await answered(runtime, main.call('alp_skill', skill), null)).result.approved, false);
+  // The same draft replays its decision; a fresh requestId proposes it again on purpose.
+  const replayed = await main.call('alp_skill', skill);
+  assert.deepEqual([replayed.status, replayed.approvalId], ['resolved', rejected.pending.approvalId]);
+  assert.equal(runtime.questions().length, 0);
+  const dismissed = await approvedSkill(runtime, main.call('alp_skill', { ...skill, requestId: 'again' }), null);
+  assert.deepEqual([dismissed.result.approved, dismissed.result.outcome], [false, 'dismissed']);
 
-  const { result } = await answered(runtime, main.call('alp_skill', skill), 'Approve');
-  assert.equal(result.approved, true);
+  const { result, question } = await approvedSkill(runtime, main.call('alp_skill', { ...skill, requestId: 'approve' }), 'Approve');
+  assert.equal(question.body, rejected.question.body, 'the user sees the whole skill each time');
+  assert.deepEqual([result.status, result.approved, result.saved], ['resolved', true, path.join(library, 'skills', 'verify-claims', 'SKILL.md')]);
   assert.deepEqual(result.lessonsRemoved.sort(), lessons.slice(0, 2).sort());
   assert.match(await readFile(path.join(library, 'skills/verify-claims/SKILL.md'), 'utf8'), /^---\nname: verify-claims\n[\s\S]*1\. Run the check\./);
   const roles = JSON.parse(await readFile(path.join(library, 'role-skills.json'), 'utf8'));
@@ -239,13 +253,102 @@ test('main distills lessons into a skill scoped to the roles it picks, saved onl
   assert.ok(roles.main.includes('xia'), 'the shipped assignments stay');
   assert.doesNotMatch(await readFile(path.join(root, '.alp/lessons.md'), 'utf8'), /Run the command|exit code/);
   assert.match(await readFile(path.join(library, 'lessons.md'), 'utf8'), /Keep briefs short/);
-  assert.match((await main.call('alp_skill', skill)).error, /already has a skill named verify-claims/);
+  assert.equal((await main.call('alp_skill', { ...skill, requestId: 'approve' })).saved, result.saved, 'a replay does not save twice');
+  assert.match((await main.call('alp_skill', { ...skill, requestId: 'third' })).error, /already has a skill named verify-claims/);
   main.finish();
 
   // Later sessions of those roles list it.
   await runtime.open('next', { cwd: root });
   await until(() => runtimes.length === 4);
   assert.ok(runtimes[2].config.developerInstructions.includes(`- verify-claims (${path.join(library, 'skills/verify-claims/SKILL.md')})`));
+});
+
+const skillDraft = { name: 'quote-output', description: 'Quote what a check printed.', body: '1. Run it.\n2. Quote it.', roles: ['main'] };
+const skillMail = (events, approvalId) => events.filter(e => e.event.type === 'mail' && e.event.mail.assignment === approvalId);
+
+test('skill approval returns before the user decides, survives turn completion, and its decision wakes main', async t => {
+  const { root, library, runtime, runtimes, prompt } = await setup(t);
+  const events = []; runtime.onEvent(e => events.push(e));
+  await runtime.open('root', { cwd: root }); await prompt('first', 'Work');
+  const main = runtimes[0];
+  const pending = await Promise.race([main.call('alp_skill', skillDraft), new Promise(resolve => setTimeout(() => resolve({ status: 'blocked' }), 100))]);
+  assert.equal(pending.status, 'pending_approval');
+  const question = runtime.questions()[0]; assert.equal(pending.approvalId, question.id);
+  assert.match(question.body, /name: quote-output[\s\S]*1\. Run it\.\n2\. Quote it\./);
+  // Main keeps working; another question cannot stack on the pending approval.
+  assert.ok(Array.isArray((await main.call('alp_board', {})).claims));
+  assert.match((await main.call('alp_skill', { ...skillDraft, name: 'other-skill' })).error, /already waiting for the user/);
+  main.finish(); await settle();
+  await prompt('second', 'Other work');
+  assert.equal((await main.call('alp_skill', skillDraft)).approvalId, pending.approvalId);
+  main.finish(); await settle();
+  assert.equal(runtime.questions().length, 1);
+  const started = main.started.length;
+  await assert.rejects(readFile(path.join(library, 'skills/quote-output/SKILL.md'), 'utf8'), { code: 'ENOENT' });
+  runtime.answer(question.id, { text: 'Approve' });
+  await until(() => skillMail(events, pending.approvalId).length === 1);
+  assert.equal(skillMail(events, pending.approvalId)[0].sessionId, 'root');
+  assert.match(await readFile(path.join(library, 'skills/quote-output/SKILL.md'), 'utf8'), /name: quote-output/);
+  await until(() => main.started.length === started + 1);
+  assert.match(main.started.at(-1).params.input.at(-1).text, /Skill approval result: .*"saved"/);
+  assert.throws(() => runtime.answer(question.id, { text: 'Approve' }), /No question/);
+  assert.equal((await main.call('alp_skill', skillDraft)).status, 'resolved');
+  await settle(); assert.equal(skillMail(events, pending.approvalId).length, 1);
+});
+
+test('skill approvals report refusal, dismissal, timeout and save errors once and save nothing', async t => {
+  for (const scenario of ['Reject', 'dismiss', 'timeout', 'failure']) {
+    await t.test(scenario, async t => {
+      const { root, library, runtime, runtimes, prompt } = await setup(t, undefined, { userAskTimeoutMs: scenario === 'timeout' ? 40 : 2000 });
+      const events = []; runtime.onEvent(e => events.push(e));
+      await runtime.open('root', { cwd: root }); await prompt('first', 'Work');
+      const main = runtimes[0]; const draft = { ...skillDraft, requestId: 'one' };
+      const pending = await main.call('alp_skill', draft);
+      assert.equal(pending.status, 'pending_approval');
+      assert.equal((await main.call('alp_skill', draft)).approvalId, pending.approvalId);
+      assert.equal(runtime.questions().length, 1);
+      assert.match((await main.call('alp_skill', { ...draft, body: 'Changed' })).error, /different draft/);
+      const file = path.join(library, 'skills/quote-output/SKILL.md');
+      // A directory where the file goes makes saving fail after the approval.
+      if (scenario === 'failure') await mkdir(file, { recursive: true });
+      const q = runtime.questions()[0];
+      if (scenario !== 'timeout') runtime.answer(q.id, scenario === 'dismiss' ? { dismiss: true } : { text: scenario === 'failure' ? 'Approve' : scenario });
+      await until(() => skillMail(events, pending.approvalId).length === 1);
+      const result = JSON.parse(skillMail(events, pending.approvalId)[0].event.mail.body.slice('Skill approval result: '.length));
+      assert.equal(result.saved, false);
+      if (scenario === 'failure') { assert.equal(result.approved, true); assert.ok(result.error); }
+      else {
+        assert.equal(result.outcome, scenario === 'timeout' ? 'unanswered' : scenario === 'dismiss' ? 'dismissed' : 'answered');
+        await assert.rejects(readFile(file, 'utf8'), { code: 'ENOENT' });
+      }
+      assert.doesNotMatch(await readFile(path.join(library, 'role-skills.json'), 'utf8').catch(() => ''), /quote-output/);
+      const replay = await main.call('alp_skill', draft);
+      assert.equal(replay.status, 'resolved'); assert.equal(replay.approvalId, q.id);
+      await settle(); assert.equal(skillMail(events, pending.approvalId).length, 1); assert.equal(runtime.questions().length, 0);
+    });
+  }
+});
+
+test('interrupt, close and shutdown cancel a pending skill approval; an approval followed by interrupt saves nothing', async t => {
+  for (const operation of ['interrupt', 'close', 'shutdown', 'approve then interrupt']) {
+    await t.test(operation, async t => {
+      const { root, library, runtime, runtimes, prompt } = await setup(t);
+      const events = []; runtime.onEvent(e => events.push(e));
+      await runtime.open('root', { cwd: root }); await prompt('first', 'Work');
+      const pending = await runtimes[0].call('alp_skill', skillDraft);
+      assert.equal(pending.status, 'pending_approval');
+      if (operation === 'approve then interrupt') { runtime.answer(pending.approvalId, { text: 'Approve' }); await runtime.interrupt('root'); }
+      else if (operation === 'shutdown') await runtime.shutdown();
+      else await runtime[operation]('root');
+      assert.equal(runtime.questions().length, 0);
+      assert.throws(() => runtime.answer(pending.approvalId, { text: 'Approve' }), /No question/);
+      await settle();
+      await assert.rejects(readFile(path.join(library, 'skills/quote-output/SKILL.md'), 'utf8'), { code: 'ENOENT' });
+      const terminal = skillMail(events, pending.approvalId);
+      if (operation === 'close' || operation === 'shutdown') assert.equal(terminal.length, 0);
+      else { assert.equal(terminal.length, 1); assert.match(terminal[0].event.mail.body, /"outcome":"canceled"/); }
+    });
+  }
 });
 
 async function approvedIssue(runtime, pending, answer) {

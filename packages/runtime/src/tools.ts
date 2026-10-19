@@ -67,7 +67,7 @@ export const HANDOFF_TOOL = {
 export const WAIT_TOOL = {
   type: 'function',
   name: 'alp_wait',
-  description: 'Wait for mail from your assignments: results, questions, notes, and stall reports. Returns as soon as any arrives, or with an empty list and a status snapshot on timeout.',
+  description: 'Wait for mail from your assignments: results, questions, notes, and stall reports. Returns as soon as any arrives, a check-in comes or the user writes to you; otherwise with an empty list and a status snapshot after timeoutMs (default 5 minutes, at most 15). Ending your turn instead never cancels your assignments.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -209,7 +209,7 @@ export const UNPIN_TOOL = {
 export const ASK_TOOL = {
   type: 'function',
   name: 'alp_ask',
-  description: 'Ask a question and wait for the answer: your requester, or the user. Only main talks to the user, unless the user has written to you. Returns unanswered after the ask timeout.',
+  description: 'Ask a question and wait for the answer: your requester, or the user. Only main talks to the user, unless the user has written to you. Holds your turn until answered; returns unanswered after the ask timeout (15 minutes for a requester, 30 for the user), and user_wrote when the user writes in the chat instead of answering.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -240,7 +240,7 @@ export const LESSON_TOOL = {
 export const SKILL_TOOL = {
   type: 'function',
   name: 'alp_skill',
-  description: 'Propose a skill distilled from your lessons. ALP shows the whole skill to the user, and saves it to the user\'s skill library and gives it to the roles only when the user approves; any other answer comes back as feedback.',
+  description: 'Propose a skill distilled from your lessons. ALP shows the whole skill to the user, and saves it to the user\'s skill library and gives it to the roles only when the user approves. Returns pending_approval with approvalId immediately; the decision (saved, or not saved with the user\'s feedback) arrives once by mail, even after your turn ends. Continue other work. A retry of the same draft returns its existing pending/result in this session; use a fresh requestId only to propose an identical draft again.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -250,6 +250,7 @@ export const SKILL_TOOL = {
       roles: { type: 'array', items: { type: 'string' }, description: 'The roles whose work the skill guides, and only those: any of main (yourself), lead, peer, oracle, reviewer, supervisor, or a custom agent of this project.' },
       lessons: { type: 'array', items: { type: 'string' }, description: 'The exact text of the lessons this skill replaces; they leave the lessons files once it is saved.' },
       replace: { type: 'boolean', description: 'Propose a new version of an existing skill of this name.' },
+      requestId: { type: 'string', description: 'Optional session-scoped idempotency key (1-100 characters). Reuse with the same draft on retries; a fresh key explicitly proposes a new operation.' },
     },
     required: ['name', 'description', 'body', 'roles'],
     additionalProperties: false,
