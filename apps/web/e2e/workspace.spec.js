@@ -195,3 +195,45 @@ test('keyboard shortcuts: help, sidebars, sessions, tabs, search, settings', asy
   await nav(page).getByRole('button', { name: /^New session/ }).hover();
   await expect(nav(page).getByRole('button', { name: /^New session/ }).locator('kbd')).toBeVisible();
 });
+
+// Keep the real gateway/daemon, but hold the rename response so create completion cannot
+// race ahead of React's selected/focus effects. A selected tree is not a finished draft.
+test('a creating draft stays in front until its final rename response', async ({ page }) => {
+  let release;
+  let held;
+  const intercepted = new Promise(resolve => { held = resolve; });
+  await page.routeWebSocket('**/*', socket => {
+    const server = socket.connectToServer();
+    let rename;
+    let captured = false;
+    socket.onMessage(message => {
+      const packet = JSON.parse(String(message));
+      if (!captured && packet.method === 'session.rename') { captured = true; rename = packet.id; }
+      server.send(message);
+    });
+    server.onMessage(message => {
+      const packet = JSON.parse(String(message));
+      if (rename !== undefined && packet.id === rename) {
+        rename = undefined;
+        release = () => socket.send(message);
+        held();
+      } else socket.send(message);
+    });
+  });
+  await connect(page, world);
+  const screen = page.getByTestId('new-session-screen');
+  try {
+    await nav(page).getByRole('button', { name: 'New session', exact: true }).click();
+    await screen.getByLabel('Title (optional)').fill('Held create');
+    await screen.getByRole('button', { name: 'Start session' }).click();
+    await intercepted;
+    // The header title can already be ready, but the in-flight draft owns the tab.
+    await expect(heading(page, 'Held create')).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'New session' })).toHaveAttribute('aria-selected', 'true');
+    await expect(screen.getByLabel('Title (optional)')).toBeDisabled();
+  } finally { release?.(); }
+  // Only the first rename is held; subsequent creates use the same real connection.
+  await expect(screen).toBeHidden();
+  await newSession(page, 'After held create');
+  await expect(heading(page, 'After held create')).toBeVisible();
+});
