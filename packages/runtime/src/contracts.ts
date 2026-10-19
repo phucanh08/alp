@@ -147,8 +147,8 @@ export type AlpRuntime = {
   recall(target: { assignmentId?: string; taskId?: string; projectRoot?: string }, question: string): Promise<RecallAnswer>;
   /** Assignments an earlier alpd left running, which recover() can continue once their root is open again. */
   recoverable(): LiveEntry[];
-  /** Continues the assignments an earlier alpd left running in an open root's tree; with continueRoot, the root's own turn too. */
-  recover(rootId: string, options?: { continueRoot?: boolean }): Promise<RecoveryOutcome[]>;
+  /** Continues work in a reopened tree. continueRoot resumes its running turn; parkedRoot restores its held continuation intent. */
+  recover(rootId: string, options?: { continueRoot?: boolean; parkedRoot?: string }): Promise<RecoveryOutcome[]>;
   /** Gives up the assignments of a tree whose root cannot be opened again: their tasks go back to open. */
   abandon(rootId: string, reason: string): Promise<RecoveryOutcome[]>;
   /** Closes everything; assignments still running stay in the live file, so the next alpd continues them. */

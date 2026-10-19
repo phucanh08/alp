@@ -374,3 +374,92 @@ test('finished shared assignments remain continuable after a daemon restart', as
   assert.match(next.lastText(), /Found the parser/);
   assert.match(next.lastText(), /Look in parser.js/);
 });
+
+for (const mode of ['poll after restart', 'reset before restart', 'autoResume false', 'manual pause', 'global pause', 'failed start']) {
+  test(`an isolated usage-stopped root survives daemon restart: ${mode}`, async t => {
+    const { directory, root, options } = await workspace(t);
+    const runtimes = [];
+    let used = 100;
+    let failNext = mode === 'failed start';
+    const factory = fakeTransport(runtimes);
+    const pauseFile = path.join(directory, 'state', 'pause.json');
+    const daemon = async () => {
+      const runtime = createAlpRuntime({ ...options, pauseFile, autoResume: mode !== 'autoResume false', limitCheckMs: 20,
+        transport: (...args) => {
+          const agent = factory(...args);
+          const request = agent.request.bind(agent);
+          return Object.assign(agent, {
+            async orchestrationContext() { return { usage: { available: true, limits: [{ windows: [{ usedPercent: used }] }] } }; },
+            async request(method, params) {
+              if (failNext && method === 'turn/start' && agent.calls.some(call => call.method === 'thread/resume')) {
+                failNext = false;
+                throw new Error('resume start failed');
+              }
+              return request(method, params);
+            },
+          });
+        } });
+      const store = createStore(path.join(directory, 'state'));
+      const socketPath = daemonPaths(path.join(directory, `limit-${runtimes.length}`)).socket;
+      const server = createDaemonServer({ runtime, store, socketPath, version: 'test', runLogDir: options.runLogDir });
+      await server.listen();
+      let stopped = false;
+      const stop = async () => { if (stopped) return; stopped = true; await server.close(); await runtime.shutdown(); await store.flush(); };
+      t.after(stop);
+      return { runtime, store, socketPath, stop };
+    };
+    const first = await daemon();
+    const client = await connect(first.socketPath);
+    const { session } = await client.request('session.create', { spec: { cwd: root, persist: true, model: 'codex:gpt-5.6-sol' } });
+    await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'limit-work', content: [{ type: 'text', text: 'Finish notes' }] });
+    const main = runtimes.find(agent => agent.started.length);
+    await until(() => first.runtime.snapshot(session.id)?.activeTurnId, 'root active');
+    await writeFile(path.join(root, 'notes.txt'), 'unfinished work');
+    main.notification('turn/completed', { threadId: main.threadId, turn: { id: main.turnId, status: 'failed', error: { message: 'limit', codexErrorInfo: 'usageLimitExceeded', resetsAt: Math.floor(Date.now() / 1000) + 3600 } } });
+    await until(() => first.runtime.snapshot(session.id)?.parked, 'root parked');
+    await until(() => first.runtime.pauses().runtimes.codex, 'usage pause');
+    if (mode === 'global pause') await first.runtime.pause({});
+    if (mode === 'manual pause') await first.runtime.pause({ runtime: 'codex' });
+    client.close();
+    await first.stop();
+    assert.ok((await first.store.list()).find(record => record.id === session.id).session.parked);
+    const before = runtimes.length;
+    if (mode === 'reset before restart') { used = 0; await writeFile(pauseFile, JSON.stringify({ runtimes: {} })); }
+    let second = await daemon();
+    await until(() => second.runtime.snapshot(session.id)?.threadId === main.threadId, 'root thread reopened without client');
+    let again = runtimes.slice(before).find(agent => agent.calls.some(call => call.method === 'thread/resume' && call.params.threadId === main.threadId));
+    assert.ok(again);
+    assert.equal(await readFile(path.join(root, 'notes.txt'), 'utf8'), 'unfinished work');
+    used = 0;
+    if (mode === 'autoResume false' || mode === 'manual pause' || mode === 'global pause') {
+      await new Promise(resolve => setTimeout(resolve, 80));
+      assert.equal(again.started.length, 0);
+      assert.ok(second.runtime.snapshot(session.id).parked);
+      second.runtime.resume();
+    }
+    if (mode === 'failed start') {
+      await until(() => !failNext && second.runtime.snapshot(session.id)?.parked, 'failed start retains intent');
+      assert.equal(again.started.length, 0);
+      await second.stop();
+      const retryIndex = runtimes.length;
+      second = await daemon();
+      await until(() => second.runtime.snapshot(session.id)?.threadId === main.threadId, 'failed start recovers on another restart');
+      again = runtimes.slice(retryIndex).find(agent => agent.calls.some(call => call.method === 'thread/resume' && call.params.threadId === main.threadId));
+    }
+    await until(() => again.started.length === 1, 'exactly one continued root turn');
+    second.runtime.resume();
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.equal(again.started.length, 1);
+    assert.equal(again.started[0].params.threadId, main.threadId);
+    assert.doesNotMatch(again.lastText(), /alp_handoff/);
+    again.finish('done');
+    await until(() => !second.runtime.snapshot(session.id), 'finished unwatched root closes');
+    assert.equal((await second.store.list()).find(record => record.id === session.id).session.parked, undefined);
+    await second.stop();
+    const finishedIndex = runtimes.length;
+    const third = await daemon();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(third.runtime.snapshot(session.id), undefined, 'completed root stays closed after restart');
+    assert.ok(runtimes.slice(finishedIndex).every(agent => !agent.calls.some(call => call.method === 'thread/resume' && call.params.threadId === main.threadId)));
+  });
+}

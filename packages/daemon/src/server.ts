@@ -230,14 +230,18 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       record ??= { version: 1, id: sessionId, rootId: root, status: 'initializing', createdAt: now, updatedAt: now };
       // A reopened session keeps its last usage until its runtime reports again.
       const usage = event.session.usage ?? record.session?.usage;
-      save(record, { rootId: root, session: { ...event.session, ...(usage ? { usage } : {}) }, status: 'idle', lastError: undefined, activeTurnId: undefined });
+      // Recovery has not yet restored runtime parking when session.opened arrives.
+      const parked = recovering.has(root) ? record.session?.parked : event.session.parked;
+      save(record, { rootId: root, session: { ...event.session, ...(usage ? { usage } : {}), ...(parked ? { parked } : {}) }, status: 'idle', lastError: undefined, activeTurnId: undefined });
       return false;
     }
     if (!record) return false;
     if (event.type === 'session.updated') save(record, { session: { ...record.session, ...event.session, ...(event.session.parked ? {} : { parked: undefined }) } });
     // Work on an archived session brings it back.
     else if (event.type === 'turn.started') save(record, { status: 'running', activeTurnId: event.turnId, archived: undefined });
-    else if (event.type === 'turn.ended') save(record, { status: 'idle', activeTurnId: undefined, ...(event.state === 'failed' ? { lastError: { message: event.error?.message ?? 'Turn failed' } } : {}) });
+    else if (event.type === 'turn.ended') save(record, { status: 'idle', activeTurnId: undefined,
+      ...(record.session ? { session: { ...record.session, parked: event.state === 'failed' ? runtime.snapshot(sessionId)?.parked : undefined } } : {}),
+      ...(event.state === 'failed' ? { lastError: { message: event.error?.message ?? 'Turn failed' } } : {}) });
     // The latest usage, for a closed session's summary; written with the record's next change.
     else if (event.type === 'usage' && record.session) record.session = { ...record.session, usage: event.usage };
     else if (event.type === 'session.failed') save(record, { status: 'error', lastError: event.error });
@@ -315,7 +319,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     for (const [root, tree] of byRoot) {
       const head = tree.find(record => record.id === root);
       if (removed.has(root)) continue;
-      if (head && resumable(head) && (head.status === 'running' || tree.some(record => continuing.has(record.id)))) reopen.push({ record: head, working: head.status === 'running' });
+      if (head && resumable(head) && (head.status === 'running' || (head.status === 'idle' && head.session?.parked) || tree.some(record => continuing.has(record.id)))) reopen.push({ record: head, working: head.status === 'running' });
       if (tree.some(record => LIVE.includes(record.status))) seen(root, await store!.timeline(root));
       for (const record of tree as Array<SessionRecord & { activeTurnId?: string }>) {
         records.set(record.id, record);
@@ -324,7 +328,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         // The turn a crash or a stop cut off is reported interrupted, never continued as if nothing happened.
         if (record.activeTurnId) keep(root, envelope({ type: 'turn.ended', turnId: record.activeTurnId, state: 'failed', error: { message: ended.message, code: ended.code } }));
         if (record.id === root) {
-          save(record, record.status === 'idle' ? { status: 'closed', activeTurnId: undefined } : { status: 'error', lastError: ended, activeTurnId: undefined });
+          if (!(record.status === 'idle' && record.session?.parked)) save(record, record.status === 'idle' ? { status: 'closed', activeTurnId: undefined } : { status: 'error', lastError: ended, activeTurnId: undefined });
         } else if (continuing.has(record.id) && reopen.some(entry => entry.record.id === root)) {
           // The runtime reopens it under the same id; until then it is closed.
           save(record, { status: 'closed', activeTurnId: undefined });
@@ -444,7 +448,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         persist: true,
         restore: { agent: session.agent, threadId: session.threadId, runtime: session.runtime, model: session.model, workflow: session.workflow },
       }, { history: 'skip', delegation: record.delegation ?? true });
-      const outcomes = await runtime.recover(record.id, { continueRoot: working });
+      const outcomes = await runtime.recover(record.id, { continueRoot: working, parkedRoot: session.parked });
       recoveryLog.info(`recovered ${record.id}: ${outcomes.map(outcome => `${outcome.agent} ${outcome.outcome}`).join(', ') || 'root'}`, { event: 'recovered', sessionId: record.id, rootId: record.rootId });
     } catch (error: any) {
       recoveryLog.error(`could not recover ${record.id}`, { code: 'ALP_RECOVERY_FAILED', sessionId: record.id, rootId: record.rootId, error });

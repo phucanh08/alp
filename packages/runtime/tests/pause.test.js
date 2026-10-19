@@ -108,8 +108,8 @@ test('a usage limit pauses its runtime and parks the assignment it stopped, unti
 
   assert.throws(() => runtime.resume({ runtime: 'gemini' }), /runtime must be codex or claude/);
   runtime.resume({ runtime: 'codex' });
-  assert.deepEqual(runtime.pauses(), { runtimes: {}, parked: [] });
   await until(() => peer.started.length === 2);
+  assert.deepEqual(runtime.pauses(), { runtimes: {}, parked: [] });
   assert.match(peer.started[1].params.input.at(-1).text, /^ALP resumed this assignment; it had stopped because the Codex usage limit was reached\. Continue where you left off/);
   assert.match(notices(events).at(-1).text, /^Codex resumed by the user\. Parked assignments continue\.$/);
   await peer.call('alp_handoff', { outcome: 'complete', summary: 'Finished the long job' });
