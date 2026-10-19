@@ -34,7 +34,14 @@ test('while a limit pauses Codex, alpd asks it every interval and resumes it onc
   // The limit lifts, early or on time: the next check resumes it.
   main.limits = codex(0, 55);
   await until(() => !runtime.pauses().runtimes.codex, 'the resume');
-  assert.match(noticesOf(events).at(-1), /Codex resumed by alpd, after the limit lifted/);
+  await until(() => main.started.length === 2, 'the root continuation');
+  assert.equal(main.started[1].params.threadId, main.threadId);
+  assert.match(main.started[1].params.input.at(-1).text, /Continue the user's request/);
+  assert.doesNotMatch(main.started[1].params.input.at(-1).text, /alp_handoff/);
+  runtime.resume();
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(main.started.length, 2);
+  assert.ok(noticesOf(events).some(text => /Codex resumed by alpd, after the limit lifted/.test(text)));
 });
 
 test('a delegation to a paused runtime asks it first, and goes ahead when the limit lifted', async t => {
@@ -68,6 +75,9 @@ test('with autoResume off, alpd tells the user once that the limit lifted and le
   await new Promise(resolve => setTimeout(resolve, 100));
   assert.equal(noticesOf(events).filter(text => /has lifted/.test(text)).length, 1);
   assert.ok(runtime.pauses().runtimes.codex);
+  assert.equal(main.started.length, 1);
+  runtime.resume();
+  await until(() => main.started.length === 2, 'explicit root resume');
 });
 
 test('a limit pause an earlier alpd left is checked at start, by a runtime process of its own when no session is open', async t => {
@@ -103,3 +113,78 @@ test('a limit pause an earlier alpd left is checked at start, by a runtime proce
   // Stop pause-file writes before the directory is removed.
   await lifted.shutdown();
 });
+
+test('root resume coalesces with repeated resume and keeps a simultaneous user prompt', async t => {
+  for (const userFirst of [true, false]) {
+    const { runtime, main } = await tree(t, { options: () => ({ limitCheckMs: 3_600_000 }) });
+    main.limits = codex(100);
+    main.limit();
+    await until(() => runtime.snapshot('root').parked);
+    const input = { clientMessageId: 'concurrent', delivery: 'auto', content: [{ type: 'text', text: 'Keep this instruction' }] };
+    let sent;
+    if (userFirst) sent = runtime.prompt('root', input);
+    main.limits = codex(0);
+    runtime.resume();
+    runtime.resume();
+    if (!userFirst) sent = runtime.prompt('root', input);
+    await sent;
+    await until(() => main.started.length === 2);
+    assert.equal(runtime.snapshot('root').parked, undefined);
+    assert.match([...main.started, ...main.calls.filter(call => call.method === 'turn/steer')].map(call => call.params.input.at(-1).text).join('\n'), /Keep this instruction/);
+    assert.equal(main.started.length, 2);
+  }
+});
+
+test('a failed root continuation start stays parked for retry; interruption and close revoke it', async t => {
+  const { runtime, main } = await tree(t, { options: () => ({ limitCheckMs: 3_600_000 }) });
+  main.limit();
+  await until(() => runtime.snapshot('root').parked);
+  const request = main.request.bind(main);
+  let fail = true;
+  main.request = async (method, params) => {
+    if (method === 'turn/start' && fail) { fail = false; throw new Error('start failed'); }
+    return request(method, params);
+  };
+  runtime.resume();
+  await until(() => !fail);
+  await until(() => runtime.snapshot('root').parked);
+  assert.equal(main.started.length, 1);
+  runtime.resume();
+  await until(() => main.started.length === 2);
+  main.limit();
+  await until(() => runtime.snapshot('root').parked);
+  await runtime.interrupt('root');
+  runtime.resume();
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(main.started.length, 2);
+  assert.equal(runtime.snapshot('root').parked, undefined);
+  await runtime.close('root');
+  runtime.resume();
+  assert.equal(main.started.length, 2);
+});
+
+for (const timing of ['before failure', 'during reset lookup']) {
+  test(`an explicit runtime pause survives a usage failure ${timing}`, async t => {
+    const { runtime, main } = await tree(t, { open: { model: 'codex:gpt-5.6-sol' }, options: () => ({ limitCheckMs: 20 }) });
+    let release;
+    let looking = false;
+    if (timing === 'before failure') {
+      await runtime.pause({ runtime: 'codex' });
+      main.limit();
+    } else {
+      const reset = new Promise(resolve => { release = resolve; });
+      main.orchestrationContext = async () => { looking = true; await reset; return { usage: codex(0) }; };
+      main.notification('turn/completed', { threadId: main.threadId, turn: { id: main.turnId, status: 'failed', error: { message: 'limit', codexErrorInfo: 'usageLimitExceeded' } } });
+      await until(() => looking, 'reset lookup started');
+      await runtime.pause({ runtime: 'codex' });
+      release();
+    }
+    await until(() => runtime.snapshot('root').parked);
+    main.limits = codex(0);
+    await new Promise(resolve => setTimeout(resolve, 80));
+    assert.equal(runtime.pauses().runtimes.codex?.by, 'the user');
+    assert.equal(main.started.length, 1);
+    runtime.resume();
+    await until(() => main.started.length === 2);
+  });
+}

@@ -12,6 +12,8 @@ export type Session = {
   mapping: ResolvedSession;
   threadId: string;
   active?: string;
+  /** A continued turn accepts a simultaneous user auto prompt as steering. */
+  resumedTurn?: string;
 
   pending: boolean;
   buffered: Array<[string, any]>;
