@@ -88,7 +88,9 @@ test('C5 live completion without output stays pending and stops viewer', async t
 });
 
 test('C5 interrupt command failure stops viewer and fails', async t => {
-  const stream = await fixture(t, [opened, started], { hold: true });
+  const stream = await fixture(t, [opened, started], { hold: true, startupDelay: 250 });
+  // Keep real child startup outside the command-failure behavior budget.
+  await stream.next(e => e.event.type === 'turn.started', 'fixture ready', 2000);
   await assert.rejects(interruptTurn(stream, () => { throw new Error('command failed'); }, { timeout: 200 }), /command failed/);
   assert.ok(stream.child.exitCode !== null || stream.child.signalCode !== null);
 });
