@@ -37,6 +37,8 @@ if (scope === 'all' || scope === 'core') {
   node('scripts/core-standalone-smoke.mjs');
 }
 if (scope === 'all' || scope === 'paseo') {
+  // The host's requirements.paseo and the @getpaseo/* peers are one range that admits the installed SDK (t-e5dc).
+  node('scripts/check-paseo-compat.mjs');
   node('node_modules/typescript/bin/tsc', '-p', 'tsconfig.paseo.json');
   node('node_modules/typescript/bin/tsc', '-p', 'tsconfig.client.json');
   buildAll();

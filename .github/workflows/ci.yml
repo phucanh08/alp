@@ -40,6 +40,24 @@ jobs:
       # Plugin-owned and all cross-package tests use fake providers.
       - run: npm run validate:paseo
 
+  # The paseo lane above builds and tests with the SDK in the lockfile, the newest supported Paseo.
+  # This one runs it against the lowest release requirements.paseo admits, so both bounds of the
+  # supported range are tested (t-e5dc). The newest published release: .github/workflows/paseo-compat.yml.
+  paseo-sdk-floor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/use-paseo-sdk.mjs floor
+      - run: npm ci
+      - run: node scripts/use-paseo-sdk.mjs --verify
+      - run: npm run validate:paseo
+
   # H2 (docs/alp/beta-scope.md §6.1, D7): macOS is the primary test platform, so the core and paseo
   # lanes run there too, on a runner with no global ALP install. A new job name: the required checks
   # core (22/24) and paseo (22/24) keep theirs.

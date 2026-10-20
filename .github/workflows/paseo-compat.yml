@@ -1,0 +1,73 @@
+name: Paseo compatibility
+
+# Catches a Paseo release outside the plugin's supported range before users upgrade into it
+# (t-e5dc: beta.2 declared <0.12.0, and Paseo 0.12.0 refused to load it).
+#
+# Network-bound, so it is not part of the PR lanes in ci.yml: a new upstream release would turn
+# every unrelated PR red at once. It runs daily and opens (or comments on) one issue when it
+# fails, and on PRs that change the range, the SDK pins or this guard. The offline half of the
+# check (manifest and peers agree, installed SDK inside the range) runs in every validate:paseo.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - integrations/paseo/package.json
+      - integrations/paseo/paseo-plugin.json
+      - package-lock.json
+      - scripts/check-paseo-compat.mjs
+      - scripts/use-paseo-sdk.mjs
+      - .github/workflows/paseo-compat.yml
+
+permissions:
+  contents: read
+
+jobs:
+  # The latest release is inside requirements.paseo and the peers, npm installs the packed plugin
+  # with it as peers under --strict-peer-deps, and that release's own plugin check accepts it.
+  latest-range:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/check-paseo-compat.mjs --latest
+
+  # The plugin's types and tests against the latest release: API breaks, not only the range.
+  latest-sdk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/use-paseo-sdk.mjs latest
+      - run: npm ci
+      - run: node scripts/use-paseo-sdk.mjs --verify
+      - run: npm run validate:paseo
+
+  report:
+    needs: [latest-range, latest-sdk]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title='Paseo compatibility check failed: a Paseo release is outside the plugin range'
+          body="The scheduled Paseo compatibility check failed: $RUN_URL
+          Test @anhlp/alp-paseo against the new release, then widen requirements.paseo (integrations/paseo/paseo-plugin.json), the @getpaseo/* peers and the docs requirement tables together."
+          number=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then gh issue comment "$number" --body "$body"; else gh issue create --title "$title" --body "$body"; fi
