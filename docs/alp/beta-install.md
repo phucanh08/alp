@@ -35,7 +35,7 @@ Use `npm install`, not `npm update`, to move to the beta: by semver, `0.0.0-beta
 | OS | macOS, Linux (see below) | Windows: CLI and a local alpd; no `alp daemon install` | — |
 | Node.js | 22 (22.12 or later), 24 | 26 (local evidence only) | 20 (end of life) |
 | Provider | Codex CLI, Claude Code | ACP (OpenCode, Gemini CLI), Antigravity (full access; its read-only is only an instruction in the prompt) | — |
-| Paseo (for the plugin) | `>=0.11.1 <0.12.0` | — | 0.12 and later |
+| Paseo (for the plugin) | `>=0.11.1 <0.13.0` (0.11.x and 0.12.x; `0.0.0-beta.2` and earlier: `<0.12.0`) | — | 0.13 and later |
 
 macOS is the primary test platform: this beta is accepted there with real Codex and Claude.
 Linux passes the same automated tests (the providers are simulated there); real-provider runs on
@@ -100,7 +100,10 @@ Codex only: see [codex-only.md](codex-only.md).
 
 ## Paseo plugin
 
-The plugin `@anhlp/alp-paseo` shows ALP's sessions in Paseo `>=0.11.1 <0.12.0`. Sessions run
+The plugin `@anhlp/alp-paseo` shows ALP's sessions in Paseo `>=0.11.1 <0.13.0`. Plugin
+releases up to `0.0.0-beta.2` declare `<0.12.0`, and Paseo 0.12 refuses to load them (`Plugin
+"alp-provider" requires Paseo >=0.11.1 <0.12.0`); use the release after `0.0.0-beta.2` with
+Paseo 0.12. Sessions run
 in alpd, so install the CLI and start alpd first (above). Then, in Paseo, open
 **Settings → Plugins**, turn on **Enable plugins**, and run:
 

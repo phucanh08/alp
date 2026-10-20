@@ -51,7 +51,7 @@ exactly `@0.0.0-beta.2`). See the
 [release notes](https://github.com/phucanh08/alp/blob/main/docs/alp/beta-release-notes.md) and
 [install, upgrade and removal steps](https://github.com/phucanh08/alp/blob/main/docs/alp/beta-install.md).
 
-Requires Paseo `>=0.11.1 <0.12.0`, Node.js 22 (22.12 or later) or 24 on Linux or macOS
+Requires Paseo `>=0.11.1 <0.13.0` (0.11.x or 0.12.x), Node.js 22 (22.12 or later) or 24 on Linux or macOS
 (Windows and Node.js 26 are experimental), and an authenticated native Codex or Claude Code
 executable on PATH.
 

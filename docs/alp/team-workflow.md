@@ -857,8 +857,8 @@ contains the workspace's directory, the way the beads viewers do:
 are made as the user. It works through the plugin's server RPCs
 (`alp.tasks.list`, `alp.tasks.add`, `alp.tasks.change`), which read and write
 the files directly, without alpd. Plugin RPC cannot push, so the panel asks
-again every five seconds while it is open. It needs Paseo 0.11.1 or a later
-0.11 release.
+again every five seconds while it is open. It needs Paseo 0.11.1 or later, up
+to 0.12.x.
 
 Every writer holds the lock directory `.alp/tasks/.lock` while it reads, checks
 and writes one task; a lock older than ten seconds is cleared. Each write bumps
