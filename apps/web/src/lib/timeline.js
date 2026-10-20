@@ -233,5 +233,7 @@ export function prependHistory(current, items) {
     if (at !== undefined) entries[at] = entry;
     else { positions[entry.key] = entries.length; entries.push(entry); }
   }
-  return { ...current, entries, positions, sessions: { ...older.sessions, ...current.sessions }, order: [...new Set([...older.order, ...current.order])] };
+  const sessions = { ...older.sessions };
+  for (const [id, session] of Object.entries(current.sessions)) sessions[id] = { ...sessions[id], ...session };
+  return { ...current, entries, positions, sessions, order: [...new Set([...older.order, ...current.order])] };
 }
