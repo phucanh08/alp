@@ -142,6 +142,18 @@ Native are optional peers that the Paseo app provides, so npm does not install t
 your own machine: `ssh -L 7433:127.0.0.1:7433 <host>`. Pairing Paseo's app on another device
 through the relay (`alp web pair --on`) is **experimental** and off by default.
 
+A plugin directory managed by `paseo plugin add npm:…` is not a standalone web
+installation. Paseo installs it without peers and supplies `@getpaseo/plugin` through
+its plugin loader. Running `node <managed-plugin>/server/dist/main.js --register`
+directly bypasses that loader and can fail with `ERR_MODULE_NOT_FOUND` for
+`@getpaseo/plugin`; this invocation from the managed directory is unsupported
+([#154](https://github.com/phucanh08/alp/issues/154)). Use the normal npm installation
+and `alp-web-integration --register` shown above. For a local npm installation with
+required peers, use `./node_modules/.bin/alp-web-integration --register` with the
+intended `ALP_HOME`. Registration records the entry path; it does not install missing
+peers or turn a host-managed plugin into a standalone installation.
+
+
 ## Upgrading from 0.10.0 or earlier
 
 0.10.0 has no `alp backup` or `alp restore`, so copy alpd's home yourself before upgrading.

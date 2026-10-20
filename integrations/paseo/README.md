@@ -170,6 +170,18 @@ Do not use `--legacy-peer-deps` for a standalone installation unless you supply 
 peers explicitly. The binary is also discoverable on PATH, so registration is optional
 for a global install. For a local install, run
 `./node_modules/.bin/alp-web-integration --register` with the intended `ALP_HOME`.
+
+A plugin directory managed by `paseo plugin add npm:…` is not a standalone web
+installation. Paseo installs it without peers and supplies `@getpaseo/plugin` through
+its plugin loader. Running `node <managed-plugin>/server/dist/main.js --register`
+directly bypasses that loader and can fail with `ERR_MODULE_NOT_FOUND` for
+`@getpaseo/plugin`; this invocation from the managed directory is unsupported
+([#154](https://github.com/phucanh08/alp/issues/154)). Use the normal npm installation
+and `alp-web-integration --register` shown above. For a local npm installation with
+required peers, use `./node_modules/.bin/alp-web-integration --register` with the
+intended `ALP_HOME`. Registration records the entry path; it does not install missing
+peers or turn a host-managed plugin into a standalone installation.
+
 Adding the plugin to a Paseo host (`npm:` from beta.2; by path in beta.1, see above) remains
 available independently of this standalone web process.
 
