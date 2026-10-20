@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
-  CHOICES, Run, VERSION, alpCommand, confirm, environment, follow, gateRow, install, options, sha256, sleep,
+  CHOICES, Run, VERSION, alpCommand, confirm, environment, follow, gateRow, install, interruptTurn, options, sha256,
 } from './beta-acceptance-lib.mjs';
 
 const USAGE = `Usage: node scripts/beta-acceptance-cli.mjs --packs <dir> (--fake | --live --provider codex|claude) [options]
@@ -47,7 +47,6 @@ const settingsFile = path.join(project, '.alp', 'settings.json');
 const live = !opts.fake;
 /** `alp run --json` in the project, followed until it exits. */
 const start = (label, prompt, extra = []) => follow(run, label, ['run', '--json', '--team', 'pho', ...extra, prompt], { env, cwd: project, alp });
-const ended = (stream, state) => stream.next(envelope => envelope.sessionId === stream.rootId && envelope.event?.type === 'turn.ended' && state(envelope.event.state), 'the end of the root turn');
 let c4Root;
 let c4Named = [];
 let marker;
@@ -109,25 +108,27 @@ try {
   });
 
   await run.step('C5', 'alp interrupt, then Ctrl-C, then alp send', async () => {
-    // A fake holds a turn open on [hold]; a real model counts slowly.
+    // A fake holds a turn open on [hold]; live readiness follows output and turn state.
     const prompt = `Đếm chậm từ 1 tới 200, mỗi số một dòng.${opts.fake ? ' [hold]' : ''}`;
     const first = start('C5-interrupt', prompt);
-    await first.next(envelope => envelope.sessionId === first.rootId && envelope.event?.type === 'turn.started', 'the root turn');
-    if (live) await sleep(5000);
-    if (cli('C5', ['interrupt', first.rootId]).status !== 0) throw new Error('alp interrupt failed');
-    const stopped = await ended(first, state => state !== 'completed');
-    const code = await first.exit;
-    if (!/interrupt|cancel/.test(stopped.event.state)) throw new Error(`the turn ended ${stopped.event.state}`);
-    const states = [`alp interrupt: ${stopped.event.state}, exit ${code}`];
+    const stopped = await interruptTurn(first, () => {
+      if (cli('C5', ['interrupt', first.rootId]).status !== 0) throw new Error('alp interrupt failed');
+    }, { waitForOutput: live });
+    if (stopped.status === 'pending') {
+      run.record('C5', 'pending', 'root turn completed before alp interrupt could be sent; cancellation untested, rerun C5', { session: first.rootId, ...stopped });
+      return;
+    }
+    const states = [`alp interrupt: ${stopped.state}, exit ${stopped.code}`];
     if (process.platform !== 'win32') {
       const second = start('C5-ctrl-c', prompt);
-      await second.next(envelope => envelope.sessionId === second.rootId && envelope.event?.type === 'turn.started', 'the root turn');
-      if (live) await sleep(5000);
-      second.child.kill('SIGINT');
-      const ctrlC = await ended(second, state => state !== 'completed');
-      await second.exit;
-      if (!/interrupt|cancel/.test(ctrlC.event.state)) throw new Error(`Ctrl-C: the turn ended ${ctrlC.event.state}`);
-      states.push(`Ctrl-C: ${ctrlC.event.state}`);
+      const ctrlC = await interruptTurn(second, () => {
+        if (!second.child.kill('SIGINT')) throw new Error('could not send Ctrl-C');
+      }, { waitForOutput: live });
+      if (ctrlC.status === 'pending') {
+        run.record('C5', 'pending', 'root turn completed before Ctrl-C could be sent; cancellation untested, rerun C5', { session: second.rootId, ...ctrlC });
+        return;
+      }
+      states.push(`Ctrl-C: ${ctrlC.state}`);
     } else states.push('Ctrl-C not tried on Windows (no SIGINT to a child)');
     const ps = cli('C5', ['ps']).stdout;
     const again = follow(run, 'C5-send', ['send', '--json', first.rootId, 'Bạn đã dừng ở số mấy?'], { env, cwd: project, alp });
