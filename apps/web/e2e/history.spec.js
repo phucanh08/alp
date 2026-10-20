@@ -1,0 +1,43 @@
+import { test, expect } from '@playwright/test';
+import { startWorld } from './support/world.js';
+import { connect, newSession, send, idle, assistant } from './support/app.js';
+let world;
+test.beforeAll(async () => { world = await startWorld(); });
+test.afterAll(async () => { await world?.close(); });
+test('650 history items load older with a stable visible anchor, then append and reconnect once', async ({ page }, info) => {
+  await connect(page, world);
+  await newSession(page, 'Durable history');
+  await send(page, '[history650]');
+  await expect(assistant(page)).toHaveCount(650);
+  await idle(page);
+  await world.restartGateway();
+  await expect(page.getByText(/Connection to the host lost/)).toBeHidden({ timeout: 30000 });
+  await expect(assistant(page)).toHaveCount(650);
+  await page.reload();
+  await connect(page, world);
+  await page.getByTestId('session-row').filter({ hasText: 'Durable history' }).click();
+  await expect(page.getByRole('button', { name: 'Load older messages' })).toBeVisible();
+  expect(await assistant(page).count()).toBeLessThan(650);
+  const log = page.getByRole('log', { name: 'Conversation' });
+  await log.evaluate(element => { element.scrollTop = 0; });
+  const anchor = await page.locator('[data-entry-key]').first().evaluate(element => ({ key: element.dataset.entryKey, top: element.getBoundingClientRect().top }));
+  await page.getByRole('button', { name: 'Load older messages' }).click();
+  await expect(page.getByRole('button', { name: 'Loading…', exact: true })).toBeHidden();
+  const after = await page.locator('[data-entry-key]').evaluateAll((elements, key) => elements.find(element => element.dataset.entryKey === key)?.getBoundingClientRect().top, anchor.key);
+  expect(Math.abs(after - anchor.top)).toBeLessThan(3);
+  await page.screenshot({ path: info.outputPath('history-anchor.png') });
+  let rounds = 0;
+  while (await page.getByRole('button', { name: 'Load older messages' }).count()) {
+    expect(rounds++).toBeLessThan(20);
+    await page.getByRole('button', { name: 'Load older messages' }).click();
+    await expect(page.getByRole('button', { name: 'Loading…', exact: true })).toBeHidden();
+  }
+  await expect(assistant(page)).toHaveCount(650);
+  await send(page, 'After history');
+  await expect(assistant(page)).toHaveCount(651);
+  await idle(page);
+  await world.restartGateway();
+  await expect(page.getByText(/Connection to the host lost/)).toBeHidden({ timeout: 30000 });
+  await expect(assistant(page)).toHaveCount(651);
+  await page.screenshot({ path: info.outputPath('history-reconnected.png') });
+});

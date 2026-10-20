@@ -6,7 +6,7 @@ import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
 import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
 import { newMessageId, newRequestId, newSessionId } from './ids.js';
 import { fitImages, imageLimits, promptContent } from './attachments.js';
-import { applyAttach, deliveredPrompts, emptyProjection, members, project, promptTurnOver } from './timeline.js';
+import { applyAttach, historyEnvelope, prependHistory, deliveredPrompts, emptyProjection, members, project, promptTurnOver } from './timeline.js';
 import { normalizeModels, parsePreview } from './new-session.js';
 import { loadPreferences, parsePreferences, rememberChoices, savePreferences } from './preferences.js';
 
@@ -73,6 +73,7 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  *   status: 'attaching' | 'attached' | 'detached' | 'gone' | 'error',
  *   error?: Failure,
  *   projection: Projection,
+ *   older?: { generation: string, olderCursor?: string, hasOlder: boolean, loading?: boolean, error?: string },
  * }} TreeView
  * @typedef {{
  *   connection: { phase: Phase, gateway: string, attempt: number, error?: Failure, daemonVersion?: string, hostname?: string, promptImageLimits?: ReturnType<typeof imageLimits>, capabilities: string[] },
@@ -233,6 +234,8 @@ export class Controller {
   #watching = null;
   /** The root attached on a client, so a switch knows what to release. @type {{ client: AlpRpcClient, root: string } | null} */
   #attached = null;
+  /** @type {Map<string, { generation: string, olderCursor?: string, hasOlder: boolean, loading?: boolean, error?: string }>} */
+  #older = new Map();
   #syncing = false;
   #retryingTeams = false;
   /** A first message whose start failed after the New session screen closed: the next one shows it again (memory only). */
@@ -402,6 +405,7 @@ export class Controller {
     this.#token = '';
     this.#stopTimers();
     this.#trees.clear();
+    this.#older.clear();
     this.#membership.clear();
     this.#turnWaits.clear();
     this.#sentAt.clear();
@@ -744,22 +748,38 @@ export class Controller {
   /**
    * Attaches a root on `client` after its cursor, buffering its events until the answer (§8.3).
    * @param {AlpRpcClient} client @param {string} root @param {AbortSignal} [signal]
+   * @param {number} [staleRetries]
+   * @returns {Promise<void>}
    */
-  async #attachTree(client, root, signal) {
+  async #attachTree(client, root, signal, staleRetries = 0) {
     const tree = this.#ensureTree(root);
     const operation = { buffer: /** @type {any[]} */ ([]) };
     tree.attaching = operation;
     this.#watching = root;
     if (this.#state.selected === root) this.#set(state => ({ tree: { rootId: root, status: 'attaching', projection: tree.projection, ...(state.tree?.rootId === root && state.tree.error ? {} : {}) } }));
     try {
+      if (this.hasCapability('session.history') && !this.#older.has(root)) {
+        const page = await client.request('session.history', { sessionId: root }, { timeoutMs: this.#options.requestTimeoutMs, ...(signal ? { signal } : {}) });
+        if (tree.attaching !== operation) return;
+        tree.projection = emptyProjection(root);
+        for (const item of page.items) tree.projection = project(tree.projection, historyEnvelope(item, root));
+        tree.projection = { ...tree.projection, cursor: page.tipCursor };
+        this.#older.set(root, { generation: page.generation, olderCursor: page.olderCursor, hasOlder: page.hasOlder });
+      }
       const after = tree.projection.cursor;
-      const response = await client.request('session.attach', { sessionId: root, ...(after > 0 ? { after } : {}) }, { timeoutMs: this.#options.requestTimeoutMs, ...(signal ? { signal } : {}) });
+      const page = this.#older.get(root);
+      const response = await client.request('session.attach', { sessionId: root, ...(page ? { after, generation: page.generation } : after > 0 ? { after } : {}) }, { timeoutMs: this.#options.requestTimeoutMs, ...(signal ? { signal } : {}) });
       if (tree.attaching !== operation) return;
       tree.attaching = null;
       tree.gone = null;
       tree.failed = null;
       this.#finishAttach(root, tree, response, operation.buffer);
     } catch (error) {
+      if (/** @type {any} */ (error)?.data?.reason === 'stale_cursor' && staleRetries < 1 && this.#older.has(root)) {
+        this.#older.delete(root); tree.projection = emptyProjection(root);
+        if (tree.attaching === operation) tree.attaching = null;
+        return this.#attachTree(client, root, signal, staleRetries + 1);
+      }
       if (tree.attaching === operation) tree.attaching = null;
       // Its events stop here: applied without the replay they could skip a gap. The next attach
       // replays from the cursor.
@@ -774,6 +794,28 @@ export class Controller {
     for (const id of tree.projection.order) this.#membership.set(id, root);
     if (response?.reset && !tree.projection.historyUnavailable) this.#notify('info', 'The host restarted this conversation\'s history; it was loaded again from the beginning.');
     this.#publishTree(root, 'attached');
+  }
+
+  /** Load one older page; a failed page keeps its cursor so it can be retried. */
+  async loadOlder() {
+    const root = this.#state.selected;
+    if (!root) return;
+    const page = this.#older.get(root);
+    const tree = this.#trees.get(root);
+    const client = this.#attached?.root === root ? this.#attached.client : null;
+    if (!page?.hasOlder || page.loading || !tree || !client) return;
+    const loading = { ...page, loading: true, error: undefined };
+    this.#older.set(root, loading); this.#publishTree(root);
+    try {
+      const result = await client.request('session.history', { sessionId: root, before: page.olderCursor }, { timeoutMs: this.#options.requestTimeoutMs });
+      if (this.#older.get(root) !== loading) return;
+      if (result.generation !== page.generation) throw new Error('History changed; reconnect to refresh it.');
+      tree.projection = prependHistory(tree.projection, result.items);
+      this.#older.set(root, { generation: result.generation, olderCursor: result.olderCursor, hasOlder: result.hasOlder });
+    } catch (error) {
+      if (this.#older.get(root) === loading) this.#older.set(root, { ...page, error: describe(error).message });
+    }
+    this.#publishTree(root);
   }
 
   /** @param {string} root @param {unknown} error */
@@ -799,7 +841,7 @@ export class Controller {
       ? { ...prompt, status: /** @type {const} */ ('failed'), error: refused[prompt.id].error ? `The agent did not take the message: ${refused[prompt.id].error}` : 'The agent did not take the message.', retrySameId: false }
       : prompt);
     this.#set(state => ({
-      tree: { rootId: root, status: status ?? (state.tree?.rootId === root ? state.tree.status : 'attached'), projection: tree.projection, ...(status === 'attached' ? {} : state.tree?.rootId === root && state.tree.error ? { error: state.tree.error } : {}) },
+      tree: { rootId: root, status: status ?? (state.tree?.rootId === root ? state.tree.status : 'attached'), projection: tree.projection, ...(this.#older.has(root) ? { older: this.#older.get(root) } : {}), ...(status === 'attached' ? {} : state.tree?.rootId === root && state.tree.error ? { error: state.tree.error } : {}) },
       ...(prompts.length !== state.prompts.length || prompts.some((prompt, index) => prompt !== state.prompts[index]) ? { prompts } : {}),
       sessions: this.#mergeSummary(state.sessions, root, tree.projection),
     }));
@@ -1372,6 +1414,7 @@ export class Controller {
         const failure = describe(error);
         if (failure.sent !== 'unknown') {
           this.#trees.delete(id);
+          this.#older.delete(id);
           this.#membership.delete(id);
           if (this.#watching === id) this.#watching = null;
           this.#set(state => ({ selected: null, focus: null, tree: null, sessions: { ...state.sessions, list: state.sessions.list.filter(session => session.id !== id) } }));
@@ -1383,7 +1426,13 @@ export class Controller {
         throw new CreateOutcomeUnknownError(`${failure.message} If the new session shows in the list, open it and send your message there; otherwise start again.`, id);
       }
       try {
-        const response = await client.request('session.attach', { sessionId: id }, { timeoutMs: this.#options.requestTimeoutMs });
+        let generation;
+        if (this.hasCapability('session.history')) {
+          const checkpoint = await client.request('session.history', { sessionId: id, limit: 1 }, { timeoutMs: this.#options.requestTimeoutMs });
+          generation = checkpoint.generation;
+          this.#older.set(id, { generation, hasOlder: false });
+        }
+        const response = await client.request('session.attach', { sessionId: id, ...(generation ? { generation, after: 0 } : {}) }, { timeoutMs: this.#options.requestTimeoutMs });
         if (tree.attaching === operation) {
           tree.attaching = null;
           tree.failed = null;
@@ -1500,8 +1549,17 @@ export class Controller {
     try {
       await client.request('session.create', { sessionId: root, spec: { cwd: workspace, ...(mode ? { mode } : {}) }, resume: true, history: 'skip' }, { timeoutMs: this.#options.createTimeoutMs });
       this.#attached = { client, root };
+      if (this.hasCapability('session.history') && !this.#older.has(root)) {
+        const page = await client.request('session.history', { sessionId: root }, { timeoutMs: this.#options.requestTimeoutMs });
+        if (tree.attaching !== operation) return;
+        tree.projection = emptyProjection(root);
+        for (const item of page.items) tree.projection = project(tree.projection, historyEnvelope(item, root));
+        tree.projection = { ...tree.projection, cursor: page.tipCursor };
+        this.#older.set(root, { generation: page.generation, olderCursor: page.olderCursor, hasOlder: page.hasOlder });
+      }
       const after = tree.projection.cursor;
-      const response = await client.request('session.attach', { sessionId: root, ...(after > 0 ? { after } : {}) }, { timeoutMs: this.#options.requestTimeoutMs });
+      const page = this.#older.get(root);
+      const response = await client.request('session.attach', { sessionId: root, ...(page ? { after, generation: page.generation } : after > 0 ? { after } : {}) }, { timeoutMs: this.#options.requestTimeoutMs });
       if (tree.attaching === operation) {
         tree.attaching = null;
         this.#finishAttach(root, tree, response, operation.buffer);
@@ -2028,7 +2086,7 @@ export class Controller {
   async previewSession(spec, { signal } = {}) {
     const blocked = this.previewBlock();
     if (blocked) throw new ConfigurationError(blocked);
-    const result = await this.#client().request('session.preview', { spec: { ...spec, cwd: this.#state.workspace } }, { timeoutMs: this.#options.requestTimeoutMs, ...(signal ? { signal } : {}) });
+    const result = await this.#client().request('session.preview', { spec: { ...spec, cwd: this.#state.workspace } }, { timeoutMs: this.#options.requestTimeoutMs });
     const preview = parsePreview(result);
     if (!preview) throw new ConfigurationError('The host answered the preview in a form this app does not read.');
     return preview;

@@ -138,6 +138,8 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           running={viewingRunning}
           runningAgent={agentOf(viewing)}
           historyUnavailable={projection.historyUnavailable}
+          older={tree.older}
+          onLoadOlder={() => controller.loadOlder()}
           onRetry={id => void controller.retryPrompt(id)}
           onDiscard={id => controller.discardPrompt(id)}
           emptyText={viewing === root ? (closed ? 'Nothing here yet.' : 'Send a message to start.') : 'This agent has not written anything yet.'}

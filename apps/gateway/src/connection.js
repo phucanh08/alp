@@ -737,7 +737,13 @@ export class ClientConnection {
     if (this.#closed) return;
     const id = envelope?.sessionId;
     if (typeof id !== 'string') return;
-    const frame = JSON.stringify({ jsonrpc: '2.0', method: 'event', params: this.#safeEnvelope(envelope) });
+    let safe = this.#safeEnvelope(envelope);
+    let frame = JSON.stringify({ jsonrpc: '2.0', method: 'event', params: safe });
+    const sourceBytes = Math.max(Buffer.byteLength(JSON.stringify(envelope)), Buffer.byteLength(frame));
+    if (sourceBytes > (this.#limits.maxFrame ?? 512 * 1024) - 1024 && envelope.cursor !== undefined) {
+      safe = { ...envelope, event: { type: 'item', item: { kind: 'notice', id: `oversized:${envelope.cursor}`, level: 'warning', text: `History event ${envelope.cursor} is too large to display (${sourceBytes} bytes).` } } };
+      frame = JSON.stringify({ jsonrpc: '2.0', method: 'event', params: safe });
+    }
     const event = /** @type {any} */ (envelope.event);
     const known = this.#sessions.get(id);
     if (known) { if (this.#wanted(envelope, known)) this.#push(frame); return; }
@@ -859,6 +865,19 @@ export class ClientConnection {
       const result = await this.#call('session.release', params);
       this.#attached.delete(scoped.root);
       return result;
+    },
+
+    'session.history': async params => {
+      const scoped = await this.#resolve(params.sessionId);
+      const result = await this.#call('session.history', { sessionId: params.sessionId, ...(params.before !== undefined ? { before: params.before } : {}), ...(params.limit !== undefined ? { limit: params.limit } : {}), maxBytes: Math.min(512 * 1024, Math.floor((this.#limits.maxFrame ?? 512 * 1024) / 2)) });
+      const items = [];
+      for (const item of result.items ?? []) {
+        if (item.oversized) { items.push(item); continue; }
+        const member = await this.#resolve(item.sessionId);
+        if (member.root !== scoped.root) throw this.#outOfTree(params.sessionId, 'session.history');
+        items.push(this.#safeEnvelope(item));
+      }
+      return { ...result, items };
     },
 
     'session.attach': async params => {

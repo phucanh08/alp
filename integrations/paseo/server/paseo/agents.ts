@@ -5,6 +5,7 @@ import type { AgentSnapshotPayload, SessionInboundMessage, SessionOutboundMessag
 import { listTeams } from '@anhlp/alp-core/teams';
 import { modes } from '@anhlp/alp-runtime/index';
 import type { DaemonConnection, Envelope, UserQuestion } from '@anhlp/alp-protocol';
+import type { HistoryPage } from '@anhlp/alp-protocol';
 import type { SessionSummary } from '@anhlp/alp-protocol/session';
 import { alpHome, connect, readLock } from '@anhlp/alp-client/index';
 import type { ClientContext, Handler } from './gateway.js';
@@ -110,6 +111,8 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     }
   };
   const roots = new Map<string, SessionSummary>();
+  const durable = new Map<string, { page: HistoryPage; events: Map<number, Envelope> }>();
+  let sourceCursor: number | undefined;
   const timelines = new InMemoryAgentTimelineStore();
   const deltas = new Map<string, TimelineDeltas>();
   /** The alpd epoch of the last event seen for each root, to notice a daemon restart. */
@@ -243,7 +246,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
   function append(root: string, item: ReturnType<TimelineDeltas['next']>, timestamp: string) {
     if (!item || !timelines.has(root)) return;
     const turnId = turns.get(root);
-    const row = timelines.append(root, item, { timestamp, ...(turnId ? { turnId } : {}) });
+    const row = timelines.append(root, item, { timestamp, ...(sourceCursor !== undefined ? { seq: sourceCursor } : {}), ...(turnId ? { turnId } : {}) });
     if (replaying.has(root)) return;
     broadcast({ type: 'agent_stream', payload: { agentId: root, event: { type: 'timeline', provider: PROVIDER, item: row.item, ...(turnId ? { turnId } : {}) }, timestamp: row.timestamp, seq: row.seq, epoch: timelines.getEpoch(root) } });
   }
@@ -296,7 +299,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       if (event.item.kind === 'user_message' && child.description === null) { child.description = event.item.text.slice(0, 500); publishChild(child); }
       const item = childDeltas.get(child.id)?.next(event.item);
       if (!item) return;
-      const row = childTimelines.append(child.id, item, { timestamp: envelope.ts });
+      const row = childTimelines.append(child.id, item, { timestamp: envelope.ts, ...(envelope.cursor !== undefined ? { seq: envelope.cursor } : {}) });
       if (!replaying.has(child.root)) broadcast({ type: 'agent.provider_subagents.update', payload: { kind: 'timeline', parentAgentId: child.root, subagentId: child.id, provider: PROVIDER, item: row.item, timestamp: row.timestamp, seq: row.seq, epoch: childTimelines.getEpoch(child.id) } });
       return;
     }
@@ -310,7 +313,13 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     publishChild(child);
   }
 
-  function onEvent(envelope: Envelope) {
+  function onEvent(envelope: Envelope, historyRoot?: string) {
+    sourceCursor = envelope.cursor;
+    const cached = durable.get(historyRoot ?? rootOf(envelope.sessionId) ?? envelope.sessionId);
+    if (cached && envelope.cursor !== undefined) {
+      if (cached.events.has(envelope.cursor)) return;
+      cached.events.set(envelope.cursor, envelope);
+    }
     // A question may come from any session of a tree; it belongs to the tree's root.
     if (envelope.event.type === 'question') { asked(envelope.event.question); return; }
     if (envelope.event.type === 'question.resolved') { resolved(envelope.event.questionId, resolutionOf(envelope.event.questionId, envelope.event.outcome)); return; }
@@ -374,6 +383,8 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
 
   /** The root's timeline, from its history in alpd the first time; afterwards alpd sends its events here. */
   function ensureTimeline(root: string) {
+    const active = attaching.get(root);
+    if (active) return active;
     if (timelines.has(root)) return Promise.resolve();
     let pending = attaching.get(root);
     if (!pending) {
@@ -387,13 +398,66 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
         replaying.add(root);
         // An attach a later one replaced (a reconnect, a root removed and back) leaves the later one's state alone.
         const current = () => attaching.get(root) === pending;
-        try { await connection.request('session.attach', { sessionId: root, replay: true }); }
+        try {
+          let page: HistoryPage | undefined;
+          try { if (connection.capabilities?.includes('session.history')) page = await connection.request('session.history', { sessionId: root }); }
+          catch (error: any) { if (error.code !== -32601 && error.code !== 1005) throw error; }
+          if (page) {
+            durable.set(root, { page, events: new Map() });
+            await seedHistoryChildren(connection, root, page.items);
+            for (const item of page.items) { const event = historyEvent(root, item); if (event.event.type !== 'question' && event.event.type !== 'question.resolved') onEvent(event, root); }
+          }
+          await connection.request('session.attach', { sessionId: root, replay: true, ...(page ? { after: page.tipCursor, generation: page.generation } : {}) });
+        }
         catch (error) { if (current()) timelines.delete(root); throw error; }
         finally { if (current()) { replaying.delete(root); attaching.delete(root); } }
       })();
       attaching.set(root, pending);
     }
     return pending;
+  }
+
+  async function seedHistoryChildren(connection: DaemonConnection, root: string, items: HistoryPage['items']) {
+    const pending = new Set<string>();
+    async function seed(id: string, depth = 0): Promise<void> {
+      if (id === root || children.has(id)) return;
+      if (depth >= 32 || pending.has(id)) throw new Error('Invalid history ancestry');
+      pending.add(id);
+      const { session } = await connection.request<{ session: SessionSummary }>('session.get', { sessionId: id });
+      if (!session?.parentId) throw new Error('History child is outside its tree');
+      await seed(session.parentId, depth + 1);
+      childOpened({ sessionId: id, epoch: 'history', seq: 0, ts: session.createdAt ?? '', event: { type: 'session.opened', session, cwd: session.projectRoot, effective: { model: session.model, thinking: session.thinking } } });
+      const child = children.get(id)!;
+      child.status = session.status === 'closed' ? 'completed' : session.status === 'error' ? 'failed' : 'running';
+      pending.delete(id);
+    }
+    for (const item of items) if (!('oversized' in item)) await seed(item.sessionId);
+  }
+
+  function historyEvent(root: string, item: HistoryPage['items'][number]): Envelope {
+    return 'oversized' in item ? { sessionId: root, epoch: 'history', seq: item.cursor, cursor: item.cursor, ts: '', event: { type: 'item', item: { kind: 'notice', id: `oversized:${item.cursor}`, level: 'warning', text: `History event ${item.cursor} is too large to display (${item.oversized.bytes} bytes).` } } } : item;
+  }
+
+  async function olderTimeline(root: string) {
+    const cached = durable.get(root);
+    if (!cached?.page.hasOlder || !alp) return;
+    const page = await alp.request('session.history', { sessionId: root, before: cached.page.olderCursor }) as HistoryPage;
+    if (durable.get(root) !== cached) return;
+    await seedHistoryChildren(alp, root, page.items);
+    for (const item of page.items) { const event = historyEvent(root, item); cached.events.set(event.cursor!, event); }
+    cached.page = page;
+    const epoch = timelines.getEpoch(root);
+    const events = [...cached.events.values()].sort((a, b) => a.cursor! - b.cursor!);
+    timelines.initialize(root, { epoch });
+    deltas.set(root, new TimelineDeltas()); epochs.delete(root); turns.delete(root);
+    for (const child of children.values()) if (child.root === root) {
+      const childEpoch = childTimelines.has(child.id) ? childTimelines.getEpoch(child.id) : undefined;
+      childTimelines.initialize(child.id, { epoch: childEpoch });
+      childDeltas.set(child.id, new TimelineDeltas());
+    }
+    cached.events.clear(); replaying.add(root);
+    try { for (const event of events) if (event.event.type !== 'question' && event.event.type !== 'question.resolved') onEvent(event, root); }
+    finally { replaying.delete(root); }
   }
 
   /**
@@ -404,6 +468,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
   function reattachRoot(root: string) {
     timelines.delete(root);
     deltas.set(root, new TimelineDeltas());
+    durable.delete(root);
     attaching.delete(root);
     epochs.delete(root);
     replaying.delete(root);
@@ -426,6 +491,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     roots.delete(root);
     timelines.delete(root);
     deltas.delete(root);
+    durable.delete(root);
     attaching.delete(root);
     replaying.delete(root);
     epochs.delete(root);
@@ -563,6 +629,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       try {
         const session = known(message.agentId);
         await ensureTimeline(session.id);
+        if (direction === 'before' && durable.get(session.id)?.page.hasOlder) await olderTimeline(session.id);
         const page = timelines.fetch(session.id, { direction, ...(message.cursor ? { cursor: message.cursor } : {}), limit: message.limit ?? (direction === 'after' ? 0 : 200) });
         return {
           type: 'fetch_agent_timeline_response',
@@ -576,7 +643,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
             window: page.window,
             startCursor: page.startSeq !== null ? { epoch: page.epoch, seq: page.startSeq } : null,
             endCursor: page.endSeq !== null ? { epoch: page.epoch, seq: page.endSeq } : null,
-            hasOlder: page.hasOlder,
+            hasOlder: page.hasOlder || !!durable.get(session.id)?.page.hasOlder,
             hasNewer: page.hasNewer,
             entries: page.rows.map(row => ({ provider: PROVIDER, item: row.item, ...(row.turnId ? { turnId: row.turnId } : {}), timestamp: row.timestamp, seqStart: row.seqStart, seqEnd: row.seqEnd, sourceSeqRanges: row.sourceSeqRanges, collapsed: row.collapsed })),
             error: null,
@@ -621,6 +688,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       try {
         await started;
         await ensureTimeline(known(message.parentAgentId).id);
+        if (direction === 'before' && durable.get(message.parentAgentId)?.page.hasOlder) await olderTimeline(message.parentAgentId);
         const child = children.get(message.subagentId);
         if (!child || child.root !== message.parentAgentId) throw new Error(`No subagent ${message.subagentId}`);
         const page = childTimelines.fetch(child.id, { direction, ...(message.cursor ? { cursor: message.cursor } : {}), limit: message.limit ?? (direction === 'after' ? 0 : 200) });
@@ -635,7 +703,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
             staleCursor: page.staleCursor,
             gap: page.gap,
             window: page.window,
-            hasOlder: page.hasOlder,
+            hasOlder: page.hasOlder || !!durable.get(message.parentAgentId)?.page.hasOlder,
             hasNewer: page.hasNewer,
             rows: page.rows.map(row => ({ item: row.item, timestamp: row.timestamp, seq: row.seqEnd, seqStart: row.seqStart, seqEnd: row.seqEnd, sourceSeqRanges: row.sourceSeqRanges })),
             error: null,

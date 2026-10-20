@@ -328,13 +328,15 @@ function layout(entries: Entry[], running: boolean): Row[] {
   return rows;
 }
 
-export function Timeline({ entries, prompts, agentOf, running, runningAgent, historyUnavailable, onRetry, onDiscard, emptyText, tail }: {
+export function Timeline({ entries, prompts, agentOf, running, runningAgent, historyUnavailable, older, onLoadOlder, onRetry, onDiscard, emptyText, tail }: {
   entries: Entry[];
   prompts: PendingPrompt[];
   agentOf: (sessionId: string) => string;
   running: boolean;
   runningAgent: string;
   historyUnavailable: boolean;
+  older?: { hasOlder: boolean; loading?: boolean; error?: string };
+  onLoadOlder?: () => Promise<void>;
   onRetry: (id: string) => void;
   onDiscard: (id: string) => void;
   emptyText: string;
@@ -343,6 +345,15 @@ export function Timeline({ entries, prompts, agentOf, running, runningAgent, his
 }) {
   void agentOf;
   const scroller = React.useRef<HTMLDivElement>(null);
+  const anchor = React.useRef<{ key: string; top: number } | null>(null);
+  const loadOlder = async () => {
+    const element = scroller.current;
+    if (!element || !onLoadOlder) return;
+    const row = [...element.querySelectorAll<HTMLElement>('[data-entry-key]')].find(row => row.getBoundingClientRect().bottom > element.getBoundingClientRect().top);
+    anchor.current = row ? { key: row.dataset.entryKey!, top: row.getBoundingClientRect().top } : null;
+    pinned.current = false;
+    await onLoadOlder();
+  };
   const pinned = React.useRef(true);
   // Paseo's jump-to-bottom button shows while the reader is away from the end.
   const [away, setAway] = React.useState(false);
@@ -360,10 +371,16 @@ export function Timeline({ entries, prompts, agentOf, running, runningAgent, his
   const signature = `${entries.length}:${last?.key}:${(last?.item as any)?.text?.length ?? 0}:${(last?.item as any)?.status ?? ''}:${prompts.length}:${running}:${React.Children.count(tail)}`;
   React.useLayoutEffect(() => {
     const element = scroller.current;
+    if (element && anchor.current && !older?.loading) {
+      const saved = anchor.current;
+      const row = [...element.querySelectorAll<HTMLElement>('[data-entry-key]')].find(row => row.dataset.entryKey === saved.key);
+      if (row) element.scrollTop += row.getBoundingClientRect().top - saved.top;
+      anchor.current = null;
+    }
     if (element && pinned.current) element.scrollTop = element.scrollHeight;
     // Content that shrank or changed may bring the end back into view.
     if (element && element.scrollHeight - element.scrollTop - element.clientHeight < 80) { pinned.current = true; setAway(false); }
-  }, [signature]);
+  }, [signature, older?.loading]);
   // Stay at the bottom when the box below grows (a queued message, a question) or the window resizes.
   React.useEffect(() => {
     const element = scroller.current;
@@ -394,12 +411,13 @@ export function Timeline({ entries, prompts, agentOf, running, runningAgent, his
     }}
       // The reader taking over ends the jump at once.
       onWheel={() => { jumping.current = 0; }} onTouchStart={() => { jumping.current = 0; }} onKeyDown={() => { jumping.current = 0; }}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 md:px-4" role="log" aria-label="Conversation" aria-live="off">
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none] px-3 md:px-4" role="log" aria-label="Conversation" aria-live="off">
       <div className="mx-auto flex w-full max-w-[820px] flex-col px-2 py-4">
+        {older?.hasOlder ? <div className="mb-4 flex flex-col items-center gap-2"><Button variant="ghost" disabled={older.loading} onClick={() => void loadOlder()}>{older.loading ? 'Loading…' : 'Load older messages'}</Button>{older.error ? <p role="alert" className="text-xs text-destructive">{older.error}</p> : null}</div> : null}
         {historyUnavailable ? <div className="mb-4"><Notice level="warning">Earlier history of this conversation is no longer available on the host.</Notice></div> : null}
         {!entries.length && !prompts.length ? <p className="py-12 text-center text-sm text-muted-foreground">{emptyText}</p> : null}
         {rows.map(row => row.type === 'footer' ? <TurnFooter key={row.key} entries={row.entries} startTs={row.startTs} /> : (
-          <div key={row.entry.key} className="flex flex-col" style={row.gap ? { marginTop: row.gap } : undefined}>
+          <div key={row.entry.key} data-entry-key={row.entry.key} className="flex flex-col" style={row.gap ? { marginTop: row.gap } : undefined}>
             <EntryView entry={row.entry} compactBottom={row.compactBottom} />
           </div>
         ))}

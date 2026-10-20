@@ -82,7 +82,7 @@ most `MAX_FRAME - 1` bytes).
   exceed the limit.
 - A message over the limit arriving on another transport fails with `-32600 frame_too_large`.
 - A response that would exceed the limit is replaced by `1000` with `data.reason: "response_too_large"`.
-- An event over the limit is not specially handled in v1; producers keep events small (known gap).
+- Large stable timeline events become bounded warning notices retaining their cursor (§8.7); other producers keep their events within the transport limit.
 
 **Encoding.** Senders send valid UTF-8 and no lone surrogate escapes (`"\ud800"`): JavaScript accepts
 them, Rust's serde_json does not. Invalid UTF-8 bytes received by alpd become U+FFFD. Object keys are
@@ -196,6 +196,7 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 
 | Capability | Meaning |
 |---|---|
+| `session.history` | Durable backward pages and a generation precondition on attach (§8.7). |
 | `attach.after` | `session.attach` accepts `after` and answers `cursor` and `reset`; kept envelopes carry `cursor` (§8). |
 | `prompt.receipts` | `session.prompt` is answered from durable receipts (§10). Listed only when alpd has a store. |
 | `extension.methods` | `extension.register` / `extension.unregister` and `extension.invoke` (§3). |
@@ -413,6 +414,58 @@ ToolCallDetail =
   `type` is any other string (as it accepts unknown item kinds); a receiver shows it as `unknown`: the
   item's name and the detail's `input` / `output` when present. The TypeScript union is closed, so
   receivers need a default branch.
+
+### 8.7 Durable backward history
+
+With `session.history`, `session.history { sessionId, before?, limit?, maxBytes? }`
+returns `{ generation, items, olderCursor?, hasOlder, tipCursor }`. `items` are source
+**envelopes in ascending cursor order**, including updates of the same item. Clients
+merge by stable item ID; newer snapshots win. This is distinct from session-list paging.
+Default limit is 200, maximum 500. The response is at most 512 KiB (including reserved
+response overhead); `maxBytes` may reduce that budget. The gateway supplies a host-selected
+budget below its frame limit, ignoring a remote client's budget. All reads require
+`session.read` and the gateway authorizes the requested session before forwarding a cursor.
+Each returned envelope is confined to the same authorized tree and uses normal event redaction.
+
+`olderCursor` is an opaque signed token bound to the requested session, persisted history
+generation, exclusive source position and original upper watermark. Pass it unchanged as
+`before`; do not derive it from item IDs or timestamps. The watermark stays fixed when new
+events append. Invalid, modified and cross-session cursors fail with `-32602` /
+`invalid_cursor`; a replaced generation fails with `1004` / `stale_cursor`. No history is
+silently reset. Generations and cursor authentication survive normal daemon restarts.
+
+`tipCursor` is a **numeric forward attach watermark**, not the opaque backward token. It is
+the last source position covered by the initial tail, including oversized markers (0 for
+an empty history). Buffer events, fetch the initial history page, then send
+`session.attach { sessionId, after: tipCursor, generation }`, including `after: 0` for an
+empty page. Attach checks generation before the final synchronous replay/subscription
+handoff. On `stale_cursor`, discard the cached history and fetch a fresh tail. An append
+burst that overruns replay coverage during an asynchronous read explicitly fails with
+`1005` / `history_gap`; retry attach from the same checkpoint. Legacy attaches without
+`generation` retain their existing shapes and behavior. Reconnect using the last applied
+numeric cursor and the cached generation; do not resend prompts.
+
+An envelope too large for one page is represented by
+`{ cursor, oversized: { bytes } }`. It consumes its source position so paging progresses,
+but its content is unavailable; clients display an explicit warning. Large stable replay
+and live events likewise become small warning notices with their original cursor, rather
+than breaking the connection or silently disappearing. The gateway further reduces these
+notices for its transport frame limit. This does not provide a separate large-event fetch.
+
+Storage uses a derived fixed-width seek index (offset, byte length, stable cursor) and private
+persisted metadata. After migration, each page seeks at most `limit` index records and reads
+at most its byte budget of source data. First use, or recovery from missing/truncated index
+or corrupt metadata, scans the source once, one complete JSONL line at a time; a pathological
+single historical line can therefore require memory proportional to that line. Rebuilding
+a damaged index rotates generation and explicitly invalidates old cursors. New appends are
+indexed incrementally. Removing a tree also removes its index/metadata. This has the same
+process-crash durability guarantee as the existing store, without an fsync/power-loss promise.
+
+The web app fetches a bounded tail, offers **Load older messages**, preserves the first visible
+stable row's screen position when prepending, and retains loaded pages across reconnects.
+The Paseo bridge lazily fetches older source pages and rebuilds their projected turn/tool
+fragments at stable source positions. Virtualization of already-loaded web rows is separate.
+
 
 ## 9. Connections, attachment and lifecycle
 

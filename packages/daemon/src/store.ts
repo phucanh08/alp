@@ -1,3 +1,4 @@
+import { createHistoryIndex } from './history.js';
 import { appendFile, mkdir, open, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { replaceFile } from './lock.js';
 import { randomBytes } from 'node:crypto';
@@ -72,6 +73,7 @@ export type Store = ReturnType<typeof createStore>;
 export function createStore(root: string) {
   const sessionsDir = path.join(root, 'sessions');
   const timelineDir = path.join(root, 'timeline');
+  const historyIndexes = new Map<string, ReturnType<typeof createHistoryIndex>>();
   const receiptsDir = path.join(root, 'receipts');
   const writes = new Map<string, Promise<void>>();
   const appends = new Map<string, Promise<void>>();
@@ -270,6 +272,14 @@ export function createStore(root: string) {
       }, true, { rootId });
     },
 
+    async history(rootId: string, sessionId: string, options: { before?: string; limit?: number; maxBytes?: number } = {}) {
+      await prepare();
+      await appends.get(rootId);
+      let index = historyIndexes.get(rootId);
+      if (!index) { index = createHistoryIndex(path.join(timelineDir, `${fileName(rootId)}.jsonl`)); historyIndexes.set(rootId, index); }
+      return index.page(sessionId, options);
+    },
+
     async timeline(rootId: string): Promise<Envelope[]> {
       await appends.get(rootId);
       const name = `${fileName(rootId)}.jsonl`;
@@ -325,10 +335,11 @@ export function createStore(root: string) {
       await Promise.all([...ids.map(id => writes.get(id)), appends.get(rootId)]);
       await Promise.all([
         ...ids.map(id => rm(path.join(sessionsDir, `${fileName(id)}.json`), { force: true })),
-        rm(path.join(timelineDir, `${fileName(rootId)}.jsonl`), { force: true }),
+        ...['.jsonl', '.jsonl.idx', '.jsonl.history.json'].map(suffix => rm(path.join(timelineDir, `${fileName(rootId)}${suffix}`), { force: true })),
       ]);
       for (const id of ids) failed.delete(id);
       failed.delete(`timeline:${rootId}`);
+      historyIndexes.delete(rootId);
       repaired.delete(rootId);
     },
 

@@ -77,6 +77,8 @@ test('connect: handshake, requests, streamed events and frames arriving in piece
   const client = await connect(daemon.socketPath, { name: 'test', version: '1' });
   t.after(() => client.close());
   assert.ok(client instanceof AlpClient && client instanceof AlpRpcClient);
+  assert.ok(Array.isArray(client.capabilities));
+  assert.ok(Object.isFrozen(client.capabilities));
   assert.deepEqual(daemon.received[0].params, { protocolVersion: PROTOCOL_VERSION, client: { name: 'test', version: '1' } });
   const events = [];
   client.onEvent(envelope => events.push(envelope.seq));

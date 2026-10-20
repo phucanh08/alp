@@ -30,7 +30,8 @@
     "workspace.files.read": "workspace.files.list and workspace.files.read: the entries of a directory and the content of a UTF-8 text file (at most 1 MiB) under a directory; read-only, links never followed, .git, .env* and key or credential files refused, .gitignore'd paths hidden unless asked.",
     "prompt.images": "session.prompt takes inline image parts { type: \"image\", mimeType, data } (base64, no paths or URLs) within the image limits; a session snapshot says whether its runtime takes them in promptImages.",
     "library.project.write": "library save/delete/duplicate/rename accept policy project-data: only project-only pure-data agents and skills, no executable configuration, sidecars or library/built-in collisions.",
-    "schedule": "schedule.create/list/get/cancel: one-shot continuations of a root session. alpd opens the turn by itself when the time comes; a job that comes due late says how late it is, and a job that cannot run says why."
+    "schedule": "schedule.create/list/get/cancel: one-shot continuations of a root session. alpd opens the turn by itself when the time comes; a job that comes due late says how late it is, and a job that cannot run says why.",
+    "session.history": "Durable bounded backward envelope pages, persisted generation and numeric attach watermark."
   },
   "methods": {
     "assignment.recall": {
@@ -1502,6 +1503,10 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "generation": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -2680,6 +2685,105 @@
           "path",
           "content",
           "size"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "session.history": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "idempotent": true,
+        "capability": "session.history"
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "before": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "maxBytes": {
+            "type": "integer",
+            "minimum": 2048,
+            "maximum": 524288
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "generation": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/envelope"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "cursor": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "oversized": {
+                      "type": "object",
+                      "properties": {
+                        "bytes": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      },
+                      "required": [
+                        "bytes"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "cursor",
+                    "oversized"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "olderCursor": {
+            "type": "string"
+          },
+          "hasOlder": {
+            "type": "boolean"
+          },
+          "tipCursor": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "generation",
+          "items",
+          "hasOlder",
+          "tipCursor"
         ],
         "additionalProperties": true
       }

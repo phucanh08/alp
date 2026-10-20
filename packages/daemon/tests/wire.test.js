@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { connect, daemonPaths } from '@anhlp/alp-client';
@@ -159,4 +159,74 @@ test('portable checks reject null params, non-finite numbers and array holes lik
   assert.notDeepEqual(validateSchema({ type: 'number' }, Infinity), []);
   assert.notDeepEqual(validateSchema({ type: 'array', items: { type: 'string' } }, Array(1)), []);
   assert.deepEqual(validateSchema({ type: 'array', items: { type: 'null' } }, Array(1)), []);
+});
+
+test('history tail then generation-bound attach closes a >memory-retention append gap, including huge events', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alpd-history-gap-'));
+  const store = createStore(directory);
+  const runtime = scriptedRuntime();
+  const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', store });
+  t.after(async () => { await server.close(); await rm(directory, { recursive: true, force: true }); });
+  const client = server.local(); t.after(() => client.close());
+  await client.request('session.create', { sessionId: 'root', spec: { cwd: '/work' } });
+  for (let i = 0; i < 650; i++) runtime.emit('root', { type: 'item', item: { kind: 'notice', id: `initial${i}`, level: 'info', text: String(i) } });
+  const page = await client.request('session.history', { sessionId: 'root' });
+  assert.equal(page.tipCursor, 651);
+  for (let i = 0; i < 20005; i++) runtime.emit('root', { type: 'item', item: { kind: 'notice', id: `gap${i}`, level: 'info', text: i === 3 ? 'x'.repeat(MAX_FRAME + 1) : String(i) } });
+  const watcher = server.local(); t.after(() => watcher.close());
+  const replay = [];
+  watcher.onEvent(envelope => replay.push(envelope));
+  const attached = await watcher.request('session.attach', { sessionId: 'root', after: page.tipCursor, generation: page.generation });
+  assert.equal(attached.reset, undefined);
+  assert.equal(replay.length, 20005);
+  assert.equal(replay[0].cursor, page.tipCursor + 1);
+  assert.equal(new Set(replay.map(event => event.cursor)).size, replay.length);
+  assert.ok(replay.every(event => Buffer.byteLength(JSON.stringify(event)) <= 512 * 1024));
+  assert.match(replay[3].event.item.text, /too large/);
+  runtime.emit('root', { type: 'item', item: { kind: 'notice', id: 'live-huge', level: 'info', text: 'x'.repeat(700000) } });
+  assert.match(replay.at(-1).event.item.text, /too large/);
+});
+
+test('attach refuses a generation replacement whose numeric tip still exceeds the old watermark', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alpd-history-stale-'));
+  const store = createStore(directory);
+  const runtime = scriptedRuntime();
+  const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', store });
+  t.after(async () => { await server.close(); await rm(directory, { recursive: true, force: true }); });
+  const client = server.local(); t.after(() => client.close());
+  await client.request('session.create', { sessionId: 'root', spec: { cwd: '/work' } });
+  const page = await client.request('session.history', { sessionId: 'root' });
+  const file = path.join(directory, 'timeline/root.jsonl');
+  await unlink(file);
+  await writeFile(file, JSON.stringify({ sessionId: 'root', epoch: 'replacement', seq: 50, cursor: 50, ts: '', event: { type: 'session.closed' } }) + '\n');
+  await assert.rejects(client.request('session.attach', { sessionId: 'root', after: page.tipCursor, generation: page.generation }), error => error.code === 1004 && error.data.reason === 'stale_cursor');
+});
+
+test('append overrunning memory during generation await refuses a replay gap, then retry catches up', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alpd-history-await-'));
+  const store = createStore(directory);
+  const runtime = scriptedRuntime();
+  const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', store });
+  t.after(async () => { await server.close(); await rm(directory, { recursive: true, force: true }); });
+  const client = server.local(); t.after(() => client.close());
+  await client.request('session.create', { sessionId: 'root', spec: { cwd: '/work' } });
+  const page = await client.request('session.history', { sessionId: 'root' });
+  const history = store.history.bind(store);
+  let race = true;
+  store.history = async (...args) => {
+    const result = await history(...args);
+    if (race && args[2]?.limit === 1) {
+      race = false;
+      for (let i = 0; i < 20005; i++) runtime.emit('root', { type: 'item', item: { kind: 'notice', id: `await${i}`, level: 'info', text: String(i) } });
+    }
+    return result;
+  };
+  const watcher = server.local(); t.after(() => watcher.close());
+  const replay = []; watcher.onEvent(event => replay.push(event.cursor));
+  const params = { sessionId: 'root', after: page.tipCursor, generation: page.generation };
+  await assert.rejects(watcher.request('session.attach', params), error => error.code === 1005 && error.data.reason === 'history_gap');
+  assert.equal(replay.length, 0, 'no incomplete replay is announced as successful');
+  await watcher.request('session.attach', params);
+  assert.equal(replay.length, 20005);
+  assert.equal(replay[0], 2);
 });

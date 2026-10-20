@@ -79,6 +79,10 @@ function toolItem(kind, id, cwd) {
 }
 
 async function run(threadId, turnId, text) {
+  if (text.includes('[history650]')) {
+    for (let i = 0; i < 650; i++) send({ method: 'item/completed', params: { threadId, turnId, item: { type: 'agentMessage', id: `history-${i}`, text: `History row ${String(i).padStart(3, '0')} — durable backward paging.` } } });
+    complete(threadId, turnId); return;
+  }
   const used = /\[usage:(\d+)\]/.exec(text);
   if (used) {
     const total = Number(used[1]);
