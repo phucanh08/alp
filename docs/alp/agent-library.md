@@ -114,7 +114,7 @@ ALP runs an agent's hooks itself, whatever runtime the agent is on (ALPD §45):
 
 ## ACP providers
 
-ACP and Antigravity providers are experimental in the beta `0.0.0-beta.2`: documented, but outside
+ACP and Antigravity providers are experimental in the beta `0.0.1-beta.3`: documented, but outside
 its acceptance gate ([beta-scope.md](beta-scope.md) §4). ALP adds OpenCode (`opencode acp`) and Antigravity (`agy`, using its native stream
 protocol) to the library by default. Install and sign in to their CLIs, then use
 Settings → Providers to enable or disable them with the switch at the end of the

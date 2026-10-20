@@ -45,9 +45,9 @@ and project overrides.
 
 ## Install
 
-This is the beta `0.0.0-beta.2` (until it is on npm, `@beta` installs `0.0.0-beta.1`; check with
+This is the beta `0.0.1-beta.3` (until it is on npm, `@beta` installs `0.0.0-beta.2`, which Paseo 0.12 refuses; check with
 `npm view @anhlp/alp-paseo dist-tags`); name it when you install (`@beta`, or
-exactly `@0.0.0-beta.2`). See the
+exactly `@0.0.1-beta.3`). See the
 [release notes](https://github.com/phucanh08/alp/blob/main/docs/alp/beta-release-notes.md) and
 [install, upgrade and removal steps](https://github.com/phucanh08/alp/blob/main/docs/alp/beta-install.md).
 
@@ -129,7 +129,7 @@ for existing projects, model selection, permissions, and runtime limitations.
 
 ## Remote mode (deferred, not in the beta)
 
-Remote mode is **not part of the beta (`0.0.0-beta.2`)**: it needs `@anhlp/alp-gateway`, which is not
+Remote mode is **not part of the beta (`0.0.1-beta.3`)**: it needs `@anhlp/alp-gateway`, which is not
 published. The text below describes the code in this repository for development only.
 
 To use ALP running on another machine, start the daemon process that loads this plugin with

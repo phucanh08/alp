@@ -987,3 +987,59 @@ Khác với beta.1 khi chạy:
 Evidence (output lệnh, lockfile, ảnh chụp) nằm ngoài repo, trên máy anh: `~/alp-release/evidence/beta2/`,
 `~/alp-release/evidence/q-1b16b14/`, `~/alp-release/runs/{1b16b14-cli-*,r5-1b16b14,r7-1b16b14}/`;
 các dòng đã ghi vào `~/alp-release/release-evidence-1b16b14.json`.
+
+## 12. Beta.3 (`0.0.1-beta.3`)
+
+Soạn ngày 2026-10-20 (task t-3627), trên nhánh `release/0.0.1-beta.3` từ `origin/main` `23e22ee`
+(sau PR #166). **Chưa publish.**
+
+### 12.1 Phạm vi
+
+- **Version (D10, anh chọn):** `0.0.1-beta.3`, không phải `0.0.0-beta.3` như §1 dự kiến. Theo semver
+  nó đứng trên mọi `0.0.0-beta.*` và vẫn dưới `0.10.0` cũ, nên docs vẫn ghi `@beta` và
+  `npm install`, không `npm update`. Cùng 8 package, cùng dist-tag `beta`, cùng nền tảng và mức hỗ
+  trợ như §2–§4, trừ Paseo. Mọi manifest (8 package phát hành và 3 workspace private) ở
+  `0.0.1-beta.3`, dependency nội bộ pin đúng version (`npm run version:package` cho 7 workspace phát
+  hành, root và 3 workspace private sửa tay, rồi `npm install --package-lock-only`; lockfile chỉ đổi
+  chuỗi version). `scripts/beta-acceptance-lib.mjs` `VERSION` đổi theo.
+- **Lý do chính: Paseo 0.12.** Plugin `0.0.0-beta.2` (và cũ hơn) khai `requirements.paseo`
+  `>=0.11.1 <0.12.0`; host Paseo 0.12.0 từ chối nạp (`assertPluginCompatibility`). PR #166 (t-e5dc)
+  mở thành `>=0.11.1 <0.13.0` ở manifest và peer `@getpaseo/*`. Hỗ trợ: **Paseo 0.11.x và 0.12.x**.
+  Bản beta.2 trở về trước giữ nguyên trên npm, chỉ chạy với Paseo `<0.12.0`; notes ghi rõ.
+- Thay đổi khác so với beta.2: PR #130–#163 (danh sách: `beta-release-notes.md`, mục "What changed
+  since 0.0.0-beta.2"), trong đó #133 sửa #107 (Claude stream vào Paseo/`alp web`) và #158 sửa
+  `alp --version`. State schema không đổi (`STATE_SCHEMA` = 2): không có migrate.
+- Known issues: như beta.2, bỏ #107 (đã sửa; R5 W3 với Claude phải stream) và `alp --version`
+  (đã sửa); thêm "beta.2 trở về trước không chạy với Paseo 0.12".
+
+### 12.2 Pre-publish gate
+
+Như §11.2, với `0.0.1-beta.3`, release SHA mới và bộ 8 tarball mới pack một lần ở SHA đó. Khác
+§11.2:
+
+| # | Ở beta.3 | Chặn |
+|---|---|---|
+| H1–H4 | CI ở release SHA; thêm job `paseo-sdk-floor` (Paseo SDK 0.11.1) của #166 | Có |
+| H6 | `paseo-compat` (`check-paseo-compat.mjs --latest`, Paseo mới nhất = 0.12.0) chạy `workflow_dispatch` ở release SHA | Có |
+| R5 | macOS, W1–W6 (Codex, Claude) trên **Paseo 0.11.4** như beta.2, W3 với Claude phải stream (#107) | Có |
+| R5b | macOS, W1–W3 với một provider trên **Paseo 0.12.0**, daemon Paseo riêng (`PASEO_HOME`, `ALP_HOME`, cổng riêng, §6.3); plugin nạp được, không có lỗi `requires Paseo` | Có |
+
+Các dòng khác (H5, L1, S1, A5, R1, R2, R3/R4/R6, R7) như §11.2. Người chạy như §6.1; bước cần
+người đọc do agent chấm thì ghi trong `runner` và anh xác nhận trước Q4, như beta.2 (§11.6).
+
+### 12.3 Kế hoạch publish
+
+Như §11.3, thay `0.0.0-beta.2` bằng `0.0.1-beta.3` (tag `v0.0.1-beta.3`, evidence
+`release-evidence-<sha>.json` ngoài `$OUT`). Publish dở dang: §7.7 (sửa mã thì lên version mới).
+
+### 12.4 Post-publish acceptance
+
+Như §11.4 với `0.0.1-beta.3`. Q1: ghi `latest` trước Q4 (dự kiến `0.0.0-beta.2` cả 8). Q3 chạy
+`paseo plugin add npm:@anhlp/alp-paseo@beta` trên **Paseo 0.12.0** (daemon riêng như R5b) và trên
+Paseo 0.11.4. Không deprecate `0.0.0-beta.2` (bản tốt với Paseo 0.11.x); không có bước dọn npm.
+
+### 12.5 Kết quả
+
+| # | SHA | Tarball | Máy, OS, Node | Kết quả | Bằng chứng |
+|---|---|---|---|---|---|
+| Gate local, nhánh release | `23e22ee` + diff release (trước merge) | rehearsal, không phải evidence | macOS arm64, Node 24.22.0 | điền khi chạy | |

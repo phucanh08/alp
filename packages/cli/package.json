@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp-cli",
-  "version": "0.0.0-beta.2",
+  "version": "0.0.1-beta.3",
   "type": "module",
   "description": "ALP cli module",
   "files": [
@@ -126,9 +126,9 @@
     "node": ">=22.12"
   },
   "dependencies": {
-    "@anhlp/alp-core": "0.0.0-beta.2",
-    "@anhlp/alp-client": "0.0.0-beta.2",
-    "@anhlp/alp-protocol": "0.0.0-beta.2",
+    "@anhlp/alp-core": "0.0.1-beta.3",
+    "@anhlp/alp-client": "0.0.1-beta.3",
+    "@anhlp/alp-protocol": "0.0.1-beta.3",
     "smol-toml": "1.9.0",
     "@agentclientprotocol/sdk": "1.7.0",
     "@anthropic-ai/claude-agent-sdk": "^0.3.292"

@@ -4,11 +4,11 @@ Provider-neutral filesystem agent resolution with a server-side Paseo provider. 
 
 ## Install
 
-The current release is the beta `0.0.0-beta.2` (until it is on npm, `@beta` installs
-`0.0.0-beta.1`; check with `npm view @anhlp/alp dist-tags`): see the
+The current release is the beta `0.0.1-beta.3` (until it is on npm, `@beta` installs
+`0.0.0-beta.2`; check with `npm view @anhlp/alp dist-tags`): see the
 [release notes](docs/alp/beta-release-notes.md) for what it includes and its known issues, and
 [installing, upgrading and removing the beta](docs/alp/beta-install.md) for every step. Name the
-beta when you install (`@beta`, or exactly `@0.0.0-beta.2`); a plain `npm install -g @anhlp/alp`
+beta when you install (`@beta`, or exactly `@0.0.1-beta.3`); a plain `npm install -g @anhlp/alp`
 installs whatever npm's `latest` tag points at, which moves to a new beta only after that
 beta's post-publish checks.
 
