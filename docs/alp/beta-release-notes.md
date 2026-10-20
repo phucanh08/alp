@@ -1,8 +1,9 @@
 # ALP 0.0.1-beta.3 — release notes
 
-> **Draft, not published yet.** To be published on the npm tag `beta` as the GitHub prerelease
-> `v0.0.1-beta.3`; `latest` moves to it only after the post-publish checks (beta-scope.md §12).
-> The `0.0.0-beta.2` and `0.0.0-beta.1` notes follow below, unchanged.
+> Published 2026-10-20 on the npm tags `beta` and `latest` as the GitHub prerelease
+> [v0.0.1-beta.3](https://github.com/phucanh08/alp/releases/tag/v0.0.1-beta.3) (release commit
+> `18aa65f`; results in [beta-scope.md](beta-scope.md) §12.5). The `0.0.0-beta.2` and
+> `0.0.0-beta.1` notes follow below, unchanged.
 
 The third beta of the `alp` CLI and its per-user daemon `alpd`, and of the optional Paseo plugin
 that also serves `alp web` on this machine. Its main reason is **Paseo 0.12**: the plugin of
@@ -103,7 +104,22 @@ Included, Experimental and Deferred are as in `0.0.0-beta.1` (below).
 
 The release attaches the eight `*-0.0.1-beta.3.tgz` tarballs, `SHA256SUMS` and
 `release-manifest.json`. Check a download with `shasum -a 256 -c SHA256SUMS` (macOS) or
-`sha256sum -c SHA256SUMS` (Linux). Release commit and checksums: filled in at P5.
+`sha256sum -c SHA256SUMS` (Linux). Release commit `18aa65f0844bb89abb360e590e3e4146bad1b0db`.
+`SHA256SUMS` (its own SHA-256 is `c6fa00c29172486e1934e032a117be7f595ccdd1f5a3d2436bd0930dd72e8eee`):
+
+```text
+cfa0fe03c849f884c4ee0b98cedb47d544450e11d08d8c2554cbdefb33605442  anhlp-alp-0.0.1-beta.3.tgz
+60e44ab928886eec4697b4795e3dbeb7751af9e7c172d7d002ded0e1f8fd4c9e  anhlp-alp-cli-0.0.1-beta.3.tgz
+df283221260e4119d30ef77d2be213daaa020783fcd64ce074c7ef85ddeadb19  anhlp-alp-client-0.0.1-beta.3.tgz
+28d5e24acab9dd777cfb38566669a8bf21f9bda0947208a3579e47beb3d051d8  anhlp-alp-core-0.0.1-beta.3.tgz
+6c51c22465c6ec7dfe9a4c7648f9c4075283a84b8323b667a313dd5319fe30a9  anhlp-alp-daemon-0.0.1-beta.3.tgz
+bc10d780872f6b19051642ba968dce8b35316760574dc31ee56ddbb8d36a415b  anhlp-alp-paseo-0.0.1-beta.3.tgz
+4f0849abba917f4e6ffbaaaf60100ff597a21956d6797f988cc7b012e6cc54df  anhlp-alp-protocol-0.0.1-beta.3.tgz
+7dffc3c15584de9868046ae5b804c0f15aee3442c8d74dee88a6df9f1631513c  anhlp-alp-runtime-0.0.1-beta.3.tgz
+```
+
+Acceptance for this beta ran real Claude Code on macOS (CLI, Paseo 0.11.4 and Paseo 0.12.0);
+the real-Codex rows were skipped for this beta by the owner's decision.
 
 ---
 
