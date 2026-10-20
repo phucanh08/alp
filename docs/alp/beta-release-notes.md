@@ -1,3 +1,109 @@
+# ALP 0.0.1-beta.3 — release notes
+
+> **Draft, not published yet.** To be published on the npm tag `beta` as the GitHub prerelease
+> `v0.0.1-beta.3`; `latest` moves to it only after the post-publish checks (beta-scope.md §12).
+> The `0.0.0-beta.2` and `0.0.0-beta.1` notes follow below, unchanged.
+
+The third beta of the `alp` CLI and its per-user daemon `alpd`, and of the optional Paseo plugin
+that also serves `alp web` on this machine. Its main reason is **Paseo 0.12**: the plugin of
+`0.0.0-beta.2` and earlier declares Paseo `<0.12.0`, and Paseo 0.12.0 refuses to load it
+(`Plugin "alp-provider" requires Paseo >=0.11.1 <0.12.0. Your daemon is 0.12.0`). This beta
+supports **Paseo 0.11.x and 0.12.x** (`>=0.11.1 <0.13.0`). The packages, platforms and support
+levels are otherwise the same as in `0.0.0-beta.2`.
+
+The version moves from `0.0.0-beta.N` to `0.0.1-beta.3`. By semver it sorts above every
+`0.0.0-beta.*` and still below the old `0.10.0`, so name the beta when you install (below).
+
+## Install
+
+```sh
+npm install -g @anhlp/alp@beta                 # CLI and alpd
+paseo plugin add npm:@anhlp/alp-paseo@beta     # optional: the Paseo plugin (Paseo 0.11.x or 0.12.x)
+npm install -g @anhlp/alp-paseo@beta           # optional: alp web outside Paseo
+```
+
+Coming from `0.0.0-beta.2` or `0.0.0-beta.1`: `npm install -g @anhlp/alp@beta` (and
+`@anhlp/alp-paseo@beta` if you have it), then `alp daemon restart`; in Paseo,
+`paseo plugin remove alp-provider` and add it again as above. Do this **before or together with**
+moving Paseo to 0.12: a `0.0.0-beta.2` (or earlier) plugin only runs with Paseo `<0.12.0`. There
+is no state migration between the betas. Coming from 0.10.0: as in the beta.1 notes below, and
+[upgrading from 0.10.0](beta-install.md#upgrading-from-0100-or-earlier).
+
+## Packages
+
+All at `0.0.1-beta.3`, on the npm tag `beta`; internal dependencies are pinned to that version.
+The same eight packages as before: `@anhlp/alp`, `@anhlp/alp-protocol`, `-core`, `-runtime`,
+`-client`, `-daemon`, `-cli` and `@anhlp/alp-paseo`. `@anhlp/alp-gateway`, `@anhlp/alp-web`
+(`apps/web`) and `@anhlp/alp-tui` are still not published.
+
+## What changed since 0.0.0-beta.2
+
+In the published packages:
+
+- **Paseo 0.12** (PR #166): the plugin manifest (`paseo-plugin.json` `requirements.paseo`) and
+  the `@getpaseo/*` peers declare `>=0.11.1 <0.13.0`. Between Paseo 0.11.4 and 0.12.0 the plugin
+  SDK and relay are unchanged and the client and protocol changes are additive. CI checks both
+  bounds (Paseo 0.11.1 and the latest release) and that the manifest and the peers stay equal.
+- **Claude streams into Paseo and `alp web`** (PR #133, fixes
+  [#107](https://github.com/phucanh08/alp/issues/107)): a Claude session shows the assistant's
+  text as it is written, not only once each message is complete.
+- **`alp --version`** prints the package version (PR #158, #152).
+- **Agent teams in long runs:**
+  - a finished assignment wakes its parent even after many earlier wakes (PR #130, #115);
+  - delegation budgets are per root session and separate for implementation and advisor
+    assignments, so a run no longer runs out of reviewers; `alp_issue` and `alp_skill` approvals
+    return at once and their decision arrives as mail (PR #134, #137; #114, #116);
+  - a user message ends main's own pending `alp_ask`; a `wait: true` call whose turn ended
+    reports `running`, not `canceled` (PR #137);
+  - a root session stopped by a provider usage limit continues by itself once the limit lifts,
+    also after an alpd restart (PR #141, #139); an explicit "usage not allowed" from Codex keeps
+    the pause (PR #160, #149).
+- **alpd lifecycle:** starting and stopping alpd no longer race each other into a second daemon
+  or a lost stop (PR #157, #146); startup errors reach the client that started it.
+- **Paseo plugin:** a session removed and added back re-attaches; usage reaches Paseo; diffs
+  that start with `+++` show correctly (PR #138, #117). In remote mode the settings open library
+  entries in a read-only viewer (PR #161, #147).
+- **Docs:** registering `alp web` from a plugin that Paseo installed from `npm:` is not
+  supported; use the npm-installed CLI (PR #162, #154).
+
+In the repository only: `@anhlp/alp-gateway` credential grants and project library access
+(PR #140), and test and CI fixes (PRs #131, #136, #156, #159, #163).
+
+## Support
+
+Linux and macOS; Node.js 22 (22.12 or later) and 24; Codex CLI and Claude Code; Paseo
+`>=0.11.1 <0.13.0` (0.11.x and 0.12.x). Plugin releases `0.0.0-beta.2` and earlier: Paseo
+`>=0.11.1 <0.12.0` only. Windows, Node.js 26, ACP and Antigravity stay experimental.
+
+## What is in the beta
+
+Included, Experimental and Deferred are as in `0.0.0-beta.1` (below).
+
+## Known issues
+
+- Real Codex and Claude runs on the release tarballs are a release condition on macOS only
+  (beta-scope D7). On Linux, the hermetic CI suites and fake-provider rehearsals on the same
+  tarballs pass; real-provider runs there are done when possible. Windows stays experimental.
+- `0.0.0-beta.2` and earlier stay on npm unchanged and do not load in Paseo 0.12 (above).
+- Windows: no login service; tests that use a fake Codex or POSIX processes are skipped there;
+  no CI lane runs the whole suite.
+- Client SDK smoke tests (browser, Metro, tarball) are not in CI.
+- A backup does not hold Codex or Claude threads, which those tools keep; a restore on another
+  machine does not bring their native context.
+- `alp web` is Paseo's web app at a pinned commit with ALP's patches. What Paseo has and ALP
+  has not built yet (terminals, commit and push, worktrees from the app, voice, …) says it is
+  in development.
+- Older versions (`@anhlp/alp` 0.3.0–0.10.0, the other `@anhlp/alp-*` 0.10.0) and the old
+  plugin name `alp-paseo-plugin` are deprecated on npm; they still install, with a warning.
+
+## Checksums
+
+The release attaches the eight `*-0.0.1-beta.3.tgz` tarballs, `SHA256SUMS` and
+`release-manifest.json`. Check a download with `shasum -a 256 -c SHA256SUMS` (macOS) or
+`sha256sum -c SHA256SUMS` (Linux). Release commit and checksums: filled in at P5.
+
+---
+
 # ALP 0.0.0-beta.2 — release notes
 
 > Published 2026-10-18 on the npm tags `beta` and `latest` as the GitHub prerelease

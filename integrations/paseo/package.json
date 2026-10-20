@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp-paseo",
-  "version": "0.0.0-beta.2",
+  "version": "0.0.1-beta.3",
   "type": "module",
   "files": [
     "paseo-plugin.json",
@@ -16,11 +16,11 @@
     "@anthropic-ai/sdk": "0.131.0",
     "@modelcontextprotocol/sdk": "1.32.1",
     "zod": "4.4.3",
-    "@anhlp/alp-protocol": "0.0.0-beta.2",
-    "@anhlp/alp-core": "0.0.0-beta.2",
-    "@anhlp/alp-runtime": "0.0.0-beta.2",
-    "@anhlp/alp-daemon": "0.0.0-beta.2",
-    "@anhlp/alp-client": "0.0.0-beta.2",
+    "@anhlp/alp-protocol": "0.0.1-beta.3",
+    "@anhlp/alp-core": "0.0.1-beta.3",
+    "@anhlp/alp-runtime": "0.0.1-beta.3",
+    "@anhlp/alp-daemon": "0.0.1-beta.3",
+    "@anhlp/alp-client": "0.0.1-beta.3",
     "ws": "^8.22.0"
   },
   "peerDependencies": {

@@ -1,14 +1,14 @@
-# Installing, upgrading and removing the ALP beta (`0.0.0-beta.2`)
+# Installing, upgrading and removing the ALP beta (`0.0.1-beta.3`)
 
-This guide covers the beta (`0.0.0-beta.2`; the first beta was `0.0.0-beta.1`): a new install, signing in to a provider, the daemon, the
+This guide covers the beta (`0.0.1-beta.3`; earlier betas were `0.0.0-beta.1` and `0.0.0-beta.2`): a new install, signing in to a provider, the daemon, the
 Paseo plugin, `alp web` on this machine, upgrading from 0.10.0 or earlier, backups, going back,
 and removing ALP. What the beta includes and what it does not is in the
 [release notes](beta-release-notes.md); the scope, gate and release checklist are in
 [beta-scope.md](beta-scope.md).
 
-> **Check the version.** Until `0.0.0-beta.2` is on npm, the `@beta` commands below install
-> `0.0.0-beta.1`. Check with `npm view @anhlp/alp dist-tags`: it lists `beta: '0.0.0-beta.2'`
-> once beta.2 is published.
+> **Check the version.** Until `0.0.1-beta.3` is on npm, the `@beta` commands below install
+> `0.0.0-beta.2`, whose plugin does not load in Paseo 0.12. Check with `npm view @anhlp/alp
+> dist-tags`: it lists `beta: '0.0.1-beta.3'` once beta.3 is published.
 
 ## Always ask for the beta
 
@@ -18,14 +18,14 @@ either by tag or exactly:
 
 | Package | By tag | Exact |
 |---|---|---|
-| CLI and daemon | `@anhlp/alp@beta` | `@anhlp/alp@0.0.0-beta.2` |
-| Paseo plugin and `alp web` | `@anhlp/alp-paseo@beta` | `@anhlp/alp-paseo@0.0.0-beta.2` |
+| CLI and daemon | `@anhlp/alp@beta` | `@anhlp/alp@0.0.1-beta.3` |
+| Paseo plugin and `alp web` | `@anhlp/alp-paseo@beta` | `@anhlp/alp-paseo@0.0.1-beta.3` |
 
 The six core packages (`@anhlp/alp-protocol`, `-core`, `-runtime`, `-client`, `-daemon`,
 `-cli`) come with these at the same pinned version; you do not install them yourself. The old
 plugin name `alp-paseo-plugin` stays at `0.10.0`; do not install it with the beta.
 
-Use `npm install`, not `npm update`, to move to the beta: by semver, `0.0.0-beta.2` sorts below
+Use `npm install`, not `npm update`, to move to the beta: by semver, `0.0.1-beta.3` sorts below
 `0.10.0`.
 
 ## Requirements
@@ -51,7 +51,7 @@ install or sign in to them.
 ```sh
 node -v                                   # v22.12+ or v24
 npm install -g @anhlp/alp@beta
-npm ls -g @anhlp/alp                      # @anhlp/alp@0.0.0-beta.2
+npm ls -g @anhlp/alp                      # @anhlp/alp@0.0.1-beta.3
 ```
 
 The package provides `alp`; `alp` starts `alpd`, the per-user daemon that runs sessions.
@@ -102,7 +102,7 @@ Codex only: see [codex-only.md](codex-only.md).
 
 The plugin `@anhlp/alp-paseo` shows ALP's sessions in Paseo `>=0.11.1 <0.13.0`. Plugin
 releases up to `0.0.0-beta.2` declare `<0.12.0`, and Paseo 0.12 refuses to load them (`Plugin
-"alp-provider" requires Paseo >=0.11.1 <0.12.0`); use the release after `0.0.0-beta.2` with
+"alp-provider" requires Paseo >=0.11.1 <0.12.0`); use `0.0.1-beta.3` or later with
 Paseo 0.12. Sessions run
 in alpd, so install the CLI and start alpd first (above). Then, in Paseo, open
 **Settings → Plugins**, turn on **Enable plugins**, and run:
@@ -177,7 +177,7 @@ plugin ID, `alp-provider`, is the same).
 
    ```sh
    npm install -g @anhlp/alp@beta @anhlp/alp-paseo@beta
-   npm ls -g @anhlp/alp @anhlp/alp-paseo     # both 0.0.0-beta.2
+   npm ls -g @anhlp/alp @anhlp/alp-paseo     # both 0.0.1-beta.3
    alp-web-integration --register
    ```
 

@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp",
-  "version": "0.0.0-beta.2",
+  "version": "0.0.1-beta.3",
   "description": "ALP command line and alpd, the per-user daemon that runs filesystem-defined Codex and Claude Code agent teams",
   "type": "module",
   "files": [
@@ -91,9 +91,9 @@
     "zod": "4.4.3"
   },
   "dependencies": {
-    "@anhlp/alp-client": "0.0.0-beta.2",
-    "@anhlp/alp-core": "0.0.0-beta.2",
-    "@anhlp/alp-protocol": "0.0.0-beta.2",
+    "@anhlp/alp-client": "0.0.1-beta.3",
+    "@anhlp/alp-core": "0.0.1-beta.3",
+    "@anhlp/alp-protocol": "0.0.1-beta.3",
     "@anthropic-ai/claude-agent-sdk": "^0.3.292",
     "smol-toml": "1.9.0"
   },

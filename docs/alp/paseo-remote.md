@@ -1,6 +1,6 @@
 # ALP Paseo remote mode (Task 09B-2)
 
-> **Trạng thái beta `0.0.0-beta.2`: deferred.** Chế độ remote (`ALP_GATEWAY_URL`) cần
+> **Trạng thái beta `0.0.1-beta.3`: deferred.** Chế độ remote (`ALP_GATEWAY_URL`) cần
 > `@anhlp/alp-gateway`, package này không phát hành trong beta. Beta chỉ hỗ trợ chế độ
 > local/embedded. Tài liệu này mô tả mã trong repo; kết quả ở §7 là bằng chứng lịch sử của nhánh
 > phát triển (tarball 0.10.0), không phải của bản beta. Phạm vi: [beta-scope.md](beta-scope.md) §4.
