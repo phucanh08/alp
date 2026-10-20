@@ -194,7 +194,7 @@ test('Paseo remote mode through the gateway to a real alpd: create, stream, ques
   // Library: names, models and one entry's redacted content come from alpd; edits, tests and usage are refused clearly.
   const libraryRows = await paseo.call('panel', { name: 'alp.library.list', input: { directory: w.project, kind: 'agents' } });
   assert.ok(libraryRows.entries.length > 0);
-  assert.match(libraryRows.readOnly.reason, /not opened or changed/, 'the screen knows it is read-only');
+  assert.match(libraryRows.readOnly.reason, /viewed here with secrets hidden/, 'the screen knows it is read-only');
   // The settings screen opened with no workspace: no entries, why, and nothing asked of alpd.
   assert.match((await paseo.call('panel', { name: 'alp.library.list', input: { kind: 'agents' } })).readOnly.unlisted, /Open a workspace/);
   assert.ok((await paseo.call('panel', { name: 'alp.library.models', input: {} })).models.length > 0);
@@ -211,6 +211,9 @@ test('Paseo remote mode through the gateway to a real alpd: create, stream, ques
   assert.ok(!JSON.stringify(entry).includes('SENTINEL'), 'no secret value crosses');
   for (const [name, input] of [
     ['alp.library.save', { directory: w.project, kind: 'skills', name: 'x', scope: 'project', content: {} }],
+    ['alp.library.delete', { directory: w.project, kind: 'skills', name: 'x', scope: 'project' }],
+    ['alp.library.duplicate', { directory: w.project, kind: 'skills', from: 'x', to: 'y', scope: 'project' }],
+    ['alp.library.rename', { directory: w.project, kind: 'skills', from: 'x', to: 'y', scope: 'project' }],
     ['alp.library.test', { directory: w.project, kind: 'hooks', name: 'x' }],
     ['alp.settings.language.set', { language: 'English' }],
     ['alp.usage.get', {}],
@@ -279,6 +282,12 @@ test('a mode-limited credential is refused a full-access session and works withi
   const w = await world(t);
   const paseo = w.client(w.tokens.viewer);
   await paseo.call('connect');
+  // A read-only session-mode grant still carries project.read; it can view, never mutate via this panel.
+  const entry = await paseo.call('panel', { name: 'alp.library.get', input: { directory: w.project, kind: 'agents', name: 'main' } });
+  assert.equal(entry.name, 'main');
+  assert.equal(typeof entry.content.instructions, 'string');
+  await assert.rejects(paseo.call('panel', { name: 'alp.library.save', input: { directory: w.project, kind: 'skills', name: 'x', scope: 'project', content: {} } }), /Unavailable in ALP remote mode/);
+  await assert.rejects(paseo.call('panel', { name: 'alp.library.get', input: { directory: w.base, kind: 'agents', name: 'main' } }), /not in a workspace your ALP credential grants/);
   await paseo.call('send', { input: { type: 'catalog', requestId: 'catalog', cwd: w.project } });
   assert.deepEqual(paseo.events.find(event => event.type === 'catalog').catalog.modes.map(mode => mode.id), ['read-only']);
   await paseo.call('send', { input: { type: 'session.open', requestId: 'wide', sessionId: 'v1', config: config(w.project, { mode: 'full-access' }), history: 'skip' } });

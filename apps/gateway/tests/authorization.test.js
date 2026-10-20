@@ -984,3 +984,23 @@ test('older daemon cannot receive project-data writes; image hello advertises ef
     assert.deepEqual(reached(daemon, mark, 'library.save'), []);
   }
 });
+
+// Session mode is separate from the permission to read project configuration.
+test('library viewer requires project.read and a granted workspace; no write grant is implied', async t => {
+  const daemon = fakeDaemon({ capabilities: ['library'] });
+  daemon.state.handlers['library.get'] = ({ kind, name }) => ({ kind, name, source: 'builtin', content: { body: 'Viewable instructions' }, revision: null, usedBy: [] });
+  const { sdk } = await startGateway(t, { daemon, credentials: {
+    viewer: { workspaces: [process.cwd()], permissions: ['project.read'], modes: ['read-only'] },
+    noProject: { workspaces: [process.cwd()], permissions: ['session.read'] },
+  } });
+  const params = { kind: 'skills', name: 'example', projectRoot: process.cwd() };
+  const { client } = await sdk('viewer');
+  assert.equal((await client.request('library.get', params)).content.body, 'Viewable instructions');
+  const deniedMark = daemon.calls().length;
+  const { client: denied } = await sdk('noProject');
+  await assert.rejects(denied.request('library.get', params), e => e.code === 1003 && e.data.reason === 'grant');
+  await assert.rejects(client.request('library.get', { ...params, projectRoot: path.dirname(process.cwd()) }), e => e.code === 1003 && e.data.reason === 'outside_workspace');
+  await assert.rejects(client.request('library.save', { ...params, scope: 'project', content: { body: 'Attempted write' } }), e => e.code === 1003 && e.data.permission === 'library.write');
+  assert.deepEqual(reached(daemon, deniedMark, 'library.get'), []);
+  assert.deepEqual(reached(daemon, deniedMark, 'library.save'), []);
+});

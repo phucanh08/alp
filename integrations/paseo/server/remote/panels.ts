@@ -25,7 +25,7 @@ export class RemoteUnavailableError extends Error {
 const ON_HOST = 'Do this on the ALP host (the alp CLI or the ALP web app there).';
 
 /** What the settings screens show instead of their edit actions in remote mode. */
-const READ_ONLY = `ALP remote mode: the library of the ALP host is listed here but not opened or changed (entries can hold MCP tokens, hook commands and provider arguments). ${ON_HOST}`;
+const READ_ONLY = `ALP remote mode: the library of the ALP host is viewed here with secrets hidden; changes and tests require the ALP host. ${ON_HOST}`;
 
 /**
  * One connection to alpd for the panels, opened when first needed and again after it closed. A

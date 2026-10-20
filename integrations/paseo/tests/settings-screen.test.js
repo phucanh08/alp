@@ -310,19 +310,32 @@ test('template presets select only their provider and preserve the team graph, w
   assert.throws(() => presetTeamModels(team, 'opencode', []), /Configure the provider/);
 });
 
-test('in ALP remote mode the library is listed read-only: no New, Duplicate or overrides, rows do not open, the reason shows', async () => {
+test('in ALP remote mode entries open read-only without write or execution controls', async () => {
   const { code } = await compileClient('client/library.tsx');
   const { LibraryWorkspace, navGroups } = load(code);
-  const readOnly = { reason: 'ALP remote mode: the library of the ALP host is listed here but not opened or changed.' };
+  const readOnly = { reason: 'ALP remote mode: the library of the ALP host is viewed here with secrets hidden; changes require the ALP host.' };
   const remote = { projectRoot: '/w', library: 'the ALP host', readOnly };
   const render = (scope, where, extra = {}) => renderToStaticMarkup(createElement(LibraryWorkspace, { theme, compact: false, scope, where, lists, error: null, selection: { kind: 'agents' }, entry: null, actions, ...extra }));
   for (const scope of ['library', 'project']) {
     const html = render(scope, remote);
-    assert.match(html, /listed here but not opened or changed/);
-    assert.doesNotMatch(html, /New agent|Duplicate agent|Override in this project|Use library|data-label="Open agent/);
+    assert.match(html, /viewed here with secrets hidden/);
+    assert.match(html, /data-label="Open agent main"/);
+    assert.doesNotMatch(html, /New agent|Duplicate agent|Override in this project|Use library/);
     assert.doesNotMatch(html, /Loading…/);
   }
-  assert.ok(navGroups('library', lists, true).every(group => group.items.every(item => !item.children?.length)), 'the aside does not offer entries to open');
+  assert.ok(navGroups('library', lists).some(group => group.items.some(item => item.children?.some(child => child.key === 'main'))), 'the aside offers authorized entries');
+  for (const kind of ['teams', 'agents', 'skills', 'mcp', 'hooks', 'providers']) {
+    const html = render('library', remote, { selection: { kind, name: 'example' }, entry: { kind, name: 'example', source: 'library', content: { body: '<script>example</script>', token: { $secret: 'keep' } }, revision: 'r1', usedBy: ['main'], secrets: ['/token'], librarySkills: ['style'] } });
+    assert.match(html, /&lt;script&gt;example&lt;\/script&gt;/);
+    assert.match(html, /Secrets hidden/);
+    assert.match(html, /\$secret/);
+    assert.match(html, /\/token/);
+    assert.doesNotMatch(html, /Save|Remove|Unsaved changes|<field|<input|<select|<switch|data-label="Test"|Start the server|Run once/);
+  }
+  assert.match(render('library', remote, { selection: { kind: 'agents', name: 'missing' }, error: 'Read denied' }), /Read denied/);
+  const pending = render('library', remote, { selection: { kind: 'agents', name: 'next' }, entry: { kind: 'agents', name: 'previous', source: 'library', content: { body: 'stale content' }, revision: null, usedBy: [] } });
+  assert.match(pending, /Loading…/);
+  assert.doesNotMatch(pending, /stale content/);
   // No granted workspace open: why nothing is listed, never Loading or "not an ALP project".
   const unlisted = { projectRoot: null, library: 'the ALP host', readOnly: { ...readOnly, unlisted: 'Open a workspace your ALP credential grants to list the host library here.' } };
   const empty = render('library', unlisted, { lists: { teams: [], agents: [], skills: [], mcp: [], hooks: [], providers: [] } });
@@ -338,4 +351,31 @@ test('in ALP remote mode the library is listed read-only: no New, Duplicate or o
   assert.match(language, /Vietnamese \(default\)/);
   assert.match(language, /Unavailable in ALP remote mode: changing the language/);
   assert.doesNotMatch(language, /<select|Reset|Use this language/);
+});
+
+// Keep the real row condition and event: rendering only text would miss a disabled Pressable.
+test('remote library row press selects the entry and the aside routes its child', async () => {
+  const { code } = await compileClient('client/library.tsx');
+  const presses = [];
+  const selected = [];
+  const { LibraryWorkspace } = load(code, { 'react-native': { View: tag('view'), Text: tag('text'), TextInput: tag('input'), Pressable: props => { presses.push(props); return createElement('button', null, props.children); } } });
+  renderToStaticMarkup(createElement(LibraryWorkspace, { theme, compact: false, scope: 'library', where: { projectRoot: '/w', library: 'host', readOnly: { reason: 'Read only' } }, lists, error: null, selection: { kind: 'agents' }, entry: null, actions: { ...actions, select: value => selected.push(value) } }));
+  const row = presses.find(props => props.accessibilityLabel === 'Open agent main');
+  assert.ok(row, 'opening row exists');
+  assert.ok(!row.disabled, 'opening row enabled');
+  row.onPress();
+  assert.deepEqual(selected.pop(), { kind: 'agents', name: 'main' });
+  const child = presses.find(props => props.accessibilityLabel === 'Agents main');
+  assert.ok(child, 'aside child exists');
+  child.onPress();
+  assert.deepEqual(selected.pop(), { kind: 'agents', name: 'main' });
+});
+
+test('remote detail renders the gateway projection as text and never offers editor controls', async () => {
+  const { code } = await compileClient('client/library.tsx');
+  const { LibraryWorkspace } = load(code);
+  const html = renderToStaticMarkup(createElement(LibraryWorkspace, { theme, compact: false, scope: 'project', where: { projectRoot: '/w', library: 'host', readOnly: { reason: 'Read only' } }, lists, error: null, selection: { kind: 'mcp', name: 'example' }, entry: { kind: 'mcp', name: 'example', source: 'project', content: { server: { command: 'node', env: { TOKEN: { $secret: 'keep' } } } }, secrets: ['/server/env/TOKEN'], usedBy: ['main'], revision: 'r1' }, actions }));
+  assert.match(html, /Secrets hidden/);
+  assert.match(html, /\$secret/);
+  assert.doesNotMatch(html, /Save|Remove|<field|<input|<select|<switch|data-label="Test"/);
 });
