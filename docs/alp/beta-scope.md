@@ -132,7 +132,7 @@ Thứ tự publish: protocol → core → runtime → client → daemon → cli 
 | OS | macOS (nền tảng test chính, D7), Linux (CI hermetic và fake; provider thật khi có thể) | Windows: CLI và alpd cục bộ; không có `alp daemon install`; CI chỉ chạy subset daemon/IPC và fake; test thật khi có thể | — |
 | Node | 22.12+, 24 | 26 (chỉ có bằng chứng local) | 20 (EOL 2026-04-30) |
 | Provider | Codex CLI, Claude Code | ACP (OpenCode, Gemini CLI), Antigravity (full-access; read-only chỉ là lời dặn trong prompt) | — |
-| Host Paseo | `>=0.11.1 <0.12.0` | — | 0.12 trở lên |
+| Host Paseo | `>=0.11.1 <0.13.0` (0.11.x, 0.12.x; tới `0.0.0-beta.2`: `<0.12.0`) | — | 0.13 trở lên |
 
 [Local] `engines` hiện vẫn ghi `>=20` ở mọi package; nâng lên `>=22.12` là T3, chưa làm.
 

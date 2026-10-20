@@ -334,13 +334,13 @@ Details: [ALPD §60](plans/reference/ALPD.md#60-alp-as-an-acp-agent-2026-10-10).
 
 ## Paseo
 
-To use the published plugin, follow [the plugin's README](integrations/paseo/README.md) or [beta-install.md](docs/alp/beta-install.md#paseo-plugin): `paseo plugin add npm:@anhlp/alp-paseo@beta` (from `0.0.0-beta.2`; in beta.1 the `npm:` source fails, [#111](https://github.com/phucanh08/alp/issues/111), so there run `npm install -g @anhlp/alp-paseo@beta`, then `paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"`). The beta supports Paseo `>=0.11.1 <0.12.0`. See [installation and runtime behavior](docs/alp/paseo-plugin.md) and the historical [phase acceptance evidence](docs/alp/phase-2-5-results.md). The plugin was verified with Paseo 0.11.1 and live Codex and Claude Code permission changes before the beta; the beta's own runs are in [beta-scope.md](docs/alp/beta-scope.md) §6.
+To use the published plugin, follow [the plugin's README](integrations/paseo/README.md) or [beta-install.md](docs/alp/beta-install.md#paseo-plugin): `paseo plugin add npm:@anhlp/alp-paseo@beta` (from `0.0.0-beta.2`; in beta.1 the `npm:` source fails, [#111](https://github.com/phucanh08/alp/issues/111), so there run `npm install -g @anhlp/alp-paseo@beta`, then `paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"`). The plugin supports Paseo `>=0.11.1 <0.13.0` (`0.0.0-beta.2` and earlier: `<0.12.0`, so Paseo 0.12 needs the release after `0.0.0-beta.2`). See [installation and runtime behavior](docs/alp/paseo-plugin.md) and the historical [phase acceptance evidence](docs/alp/phase-2-5-results.md). The plugin was verified with Paseo 0.11.1 and live Codex and Claude Code permission changes before the beta; the beta's own runs are in [beta-scope.md](docs/alp/beta-scope.md) §6.
 
 **Settings → ALP** manages your library of teams, agents, skills, MCP servers, hooks and ACP providers, and the **ALP project** workspace panel manages a project's overrides ([settings screen](docs/alp/paseo-plugin.md#alp-settings-and-the-project-panel)).
 
 ### Build and add the plugin to Paseo
 
-This section builds the plugin from a checkout of this repository. Prerequisites: Node.js 22 (22.12 or later) or 24, Paseo 0.11.1 or a later 0.11 release (the Tasks panel needs its plugin client API), and a logged-in Codex CLI and/or Claude Code installation. Set `ALP_CODEX_BIN` or `ALP_CLAUDE_BIN` to an absolute native executable path when it is not available on `PATH`.
+This section builds the plugin from a checkout of this repository. Prerequisites: Node.js 22 (22.12 or later) or 24, Paseo 0.11.1 or later, up to 0.12.x (the Tasks panel needs the 0.11.1 plugin client API), and a logged-in Codex CLI and/or Claude Code installation. Set `ALP_CODEX_BIN` or `ALP_CLAUDE_BIN` to an absolute native executable path when it is not available on `PATH`.
 
 Install dependencies, type-check the plugin, and build its server bundle:
 
