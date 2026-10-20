@@ -251,3 +251,9 @@ principal. Cầu nối WS trong test chỉ chuyển frame và không xác thực
   job đang chạy `web-app-smoke`) là việc tích hợp sau 04B.
 - Không đổi root `package.json` hay lockfile: `ws`, `esbuild`, `metro`, `typescript` đã là
   devDependency/hoisted ở root.
+
+`workspaceRegistry(client)` is available from the portable and Node entries. Its typed
+`projects`, `workspaces`, `get`, `register`, `remove` and `update` methods use the daemon registry
+contract (`workspace.registry`). Updates require the last registry `revision` as `ifRevision` and
+a caller-retained `requestId`. The helper sends once; an uncertain result is reconciled with the
+identical ID/payload/precondition. Remote registry writes require explicit `workspace.write`.

@@ -30,7 +30,7 @@ async function setup(t) {
     await saveEntry('providers', id, { provider: { ...file, command: `alp-test-missing-${id}` } }, { scope: 'library', library: home });
   }
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false, libraryDir: home });
-  const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test' });
+  const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test', home });
   let web;
   const gateway = createPaseoBridge({ clientFactory: async (onEvent) => {
     const client = daemon.local();

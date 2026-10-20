@@ -1,3 +1,5 @@
+import { realpath as fsRealpath } from 'node:fs/promises';
+import { createRegistry, RegistryError } from './registry.js';
 import { HistoryError } from './history.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { appendFile, chmod, mkdir, readFile, unlink, lstat, rename } from 'node:fs/promises';
@@ -893,6 +895,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** Projects, tasks, library and settings (docs/protocol/alp-json-rpc-v1.md §15); a team save syncs the projects sessions ran in. */
+  const registry = home ? createRegistry(home) : undefined;
   const operations = createOperations({ home, templates, knownProjects: () => new Set([...records.values()].flatMap(record => record.session?.projectRoot ? [record.session.projectRoot] : [])) });
   const extensionOwners = new Map<string, Connection>();
   const handlers: Record<string, (connection: Connection, params: any) => Promise<unknown> | unknown> = {
@@ -1070,20 +1073,57 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       return {};
     },
 
+    'registry.owner': (_c, params) => registryCall(async () => {
+      const result = params.operation ? await registry!.mutate(params.operation, params.args ?? {}, { requestId: params.requestId, ifRevision: params.ifRevision }) : undefined;
+      const { receipts: _receipts, ...metadata } = await registry!.snapshot();
+      return { ...(result ? { result } : {}), registry: metadata };
+    }),
+    'project.list': (_c, p) => registryList('projects', p),
+    'workspace.list': (_c, p) => registryList('workspaces', p),
+    'workspace.get': (_c, p) => registryCall(async () => {
+      await registry!.resolve(p.workspaceId, undefined, true);
+      const r = await registry!.snapshot();
+      return { workspace: { ...r.workspaces.find(w => w.id === p.workspaceId), revision: r.revision }, revision: r.revision };
+    }),
+    'project.register': (_c, p) => registryMutation('project.register', p),
+    'project.remove': (_c, p) => registryMutation('project.remove', p),
+    'workspace.update': (_c, p) => registryMutation('workspace.update', p),
     'catalog.get': () => ({ models, modes, thinkingOptions, defaultModel: `codex:${DEFAULT_MODEL}` }),
 
-    async 'session.create'(connection, { sessionId, spec, history = 'skip', delegation = true, resume: resuming = false }) {
+    async 'session.create'(connection, { sessionId, workspaceId, spec, history = 'skip', delegation = true, resume: resuming = false }) {
+      if (workspaceId !== undefined) {
+        if (!registry || typeof workspaceId !== 'string') throw new RpcError(-32602, 'Invalid workspaceId');
+        try { spec = { ...spec, cwd: await registry.resolve(workspaceId, spec?.cwd) }; } catch (e) { if (e instanceof RegistryError) throw new RpcError(e.code, e.message, e.data); throw e; }
+        const placements = (await registryCall(() => registry!.snapshot())).sessions;
+        const prior = Object.hasOwn(placements, sessionId) ? placements[sessionId] : undefined;
+        if (prior && prior !== workspaceId) throw new RpcError(ERROR.conflict, 'Session belongs to another workspace', { reason: 'workspace_mismatch' });
+      }
       if (!spec || typeof spec !== 'object' || typeof spec.cwd !== 'string') throw new RpcError(-32602, 'spec.cwd is required');
       if (sessionId !== undefined && (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId))) throw new RpcError(-32602, 'Invalid session id');
       if (history !== 'replay' && history !== 'skip') throw new RpcError(-32602, 'history must be replay or skip');
       const id = sessionId ?? `ses_${randomBytes(8).toString('hex')}`;
       // A root alpd is reopening after a restart: attach once it is open, rather than open it twice.
       await recovering.get(id);
+      let reservedWorkspaceId: string | undefined;
+      const reserve = async () => {
+        if (!registry) return;
+        const directory = runtime.snapshot(id)?.projectRoot ?? records.get(id)?.session?.projectRoot ?? records.get(id)?.spec?.cwd ?? spec.cwd;
+        if (workspaceId) await registryCall(() => registry!.resolve(workspaceId, directory));
+        if (Object.hasOwn((await registry.snapshot()).sessions, id)) return;
+        if (workspaceId) await registryCall(() => registry!.mutate('placement.assign', { sessionId: id, workspaceId }, { requestId: `reserve:${randomBytes(12).toString('hex')}` }));
+        else await registryCall(() => registry!.mutate('placement.prepare', { sessions: [{ id, projectRoot: directory }] }, { requestId: `prepare:${randomBytes(12).toString('hex')}` }));
+        reservedWorkspaceId = (await registry.snapshot()).sessions[id];
+      };
+      const rollback = async () => {
+        if (!registry || !reservedWorkspaceId) return;
+        await registryCall(() => registry!.mutate('placement.remove', { sessionId: id, workspaceId: reservedWorkspaceId }, { requestId: `rollback:${randomBytes(12).toString('hex')}` }));
+      };
       const existing = runtime.snapshot(id);
       if (existing) {
         // Reopening a root that kept working after its viewer left: attach to it.
         const agent = spec.agent ?? spec.restore?.agent;
         if (existing.parentId || (agent !== undefined && agent !== existing.agent)) throw new RpcError(ERROR.failed, 'Session is already open');
+        await reserve();
         attach(connection, id);
         announce(connection, id, history);
         return { session: existing, attached: true };
@@ -1091,8 +1131,11 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       const record = records.get(id);
       if (!record && resuming) throw new RpcError(ERROR.notFound, `ALP session ${id} no longer exists in alpd`);
       if (record) {
-        const session = await resume(connection, record, spec, history, delegation);
-        return { session, attached: false, resumed: true, ...await persisted(id) };
+        await reserve();
+        try {
+          const session = await resume(connection, record, spec, history, delegation);
+          return { session, attached: false, resumed: true, ...await persisted(id) };
+        } catch (error) { await rollback(); throw error; }
       }
       const { restore: _restore, ...kept } = spec;
       const now = new Date().toISOString();
@@ -1104,14 +1147,16 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         if (records.get(id) === created) records.delete(id);
         throw persistenceFailed(`session ${id}; it was not started`, error);
       }
-      attach(connection, id);
       try {
+        await reserve();
+        attach(connection, id);
         const session = await runtime.open(id, spec, { history, delegation });
         return { session, attached: false, ...await persisted(id) };
       } catch (error) {
         detach(connection, id);
         records.delete(id);
         await store?.remove(id, [id]);
+        await rollback();
         throw error;
       }
     },
@@ -1350,6 +1395,35 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       }
     },
   };
+  const registryCall = async (run: () => Promise<any>) => {
+    if (!registry) throw new RpcError(ERROR.unavailable, 'Registry needs ALP_HOME');
+    try { return await run(); } catch (e) {
+      if (e instanceof RegistryError) throw new RpcError(e.code, e.message, e.data);
+      throw new RpcError(ERROR.failed, e instanceof Error ? e.message : String(e), { reason: 'persistence_failed' });
+    }
+  };
+  const registryList = async (kind: 'projects' | 'workspaces', params: any = {}) => registryCall(async () => {
+    const r = await registry!.snapshot();
+    const allowed = params.projectRoots;
+    let entries: any[] = r[kind].filter((e: any) => kind === 'projects' ? params.includeRemoved || !e.removedAt : params.includeArchived || (!e.archivedAt && !r.projects.find(p => p.id === e.projectId)?.removedAt));
+    if (allowed !== undefined) {
+      entries = (await Promise.all(entries.map(async e => {
+        const directory = kind === 'projects' ? e.root : e.directory;
+        const canonical = await fsRealpath(directory).catch(() => undefined);
+        return canonical && (!e.canonical || canonical === e.canonical) && allowed.includes(canonical) ? e : undefined;
+      }))).filter(Boolean);
+    }
+    const offset = params.cursor === undefined ? 0 : Number(params.cursor);
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new RpcError(-32602, 'Invalid registry cursor');
+    const limit = params.limit ?? 100;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new RpcError(-32602, 'Invalid registry limit');
+    return { [kind]: entries.slice(offset, offset + limit).map(e => ({ ...e, revision: r.revision })), revision: r.revision, total: entries.length, nextCursor: offset + limit < entries.length ? String(offset + limit) : null };
+  });
+  const registryMutation = (method: string, p: any) => registryCall(async () => {
+    if (!Number.isSafeInteger(p.ifRevision) || p.ifRevision < 0) throw new RpcError(-32602, 'ifRevision is required');
+    const { requestId, ifRevision, authorizedRoots, ...args } = p;
+    return registry!.mutate(method, args, { requestId, ifRevision, allowedRoots: authorizedRoots });
+  });
   runtime.bindSchedules?.(async (action, params) => handlers[`schedule.${action}`](undefined as any, params));
   for (const [method, handler] of Object.entries(operations.handlers)) handlers[method] = (_connection, params) => handler(params);
   Object.setPrototypeOf(handlers, null);
@@ -1409,7 +1483,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...operations.capabilities];
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry'] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {

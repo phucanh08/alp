@@ -14,6 +14,7 @@ import { createAgents } from '../server/dist/paseo/agents.js';
  */
 const directory = {
   load: async () => {},
+  prepare: async () => {},
   workspaceIdFor: () => 'workspace',
   placement: () => ({ projectKey: 'p', projectName: 'p', directory: '/' }),
   assign: () => {},
@@ -372,4 +373,23 @@ test('durable backward pages rebuild split snapshots at stable source positions 
     const again = await fetch({ limit: 0 });
     assert.equal(again.entries.length, merged.entries.length, 'stable cursor replay is deduplicated');
   } finally { agents.close(); }
+});
+
+
+test('root snapshots wait for committed placement preparation', async () => {
+  const session = { id: 'root-prepared', status: 'idle', projectRoot: '/', agent: 'main', runtime: 'codex', model: 'm', mode: 'read-only', workflow: { mode: 'custom' }, updatedAt: '' };
+  let release; let prepared = false; let entered = false;
+  const gate = new Promise(resolve => { release = resolve; });
+  const sent = [];
+  const agents = createAgents({
+    clientFactory: async () => fakeConnection({ onRequest(method) { if (method === 'session.list') return { sessions: [session] }; if (method === 'question.list') return { questions: [] }; return {}; } }),
+    broadcast: message => sent.push(message),
+    directory: { ...directory, async prepare(sessions) { assert.deepEqual(sessions, [session]); entered = true; await gate; prepared = true; }, workspaceIdFor() { assert.ok(prepared); return 'workspace'; }, placement() { assert.ok(prepared); return directory.placement(); } },
+  });
+  try {
+    const started = agents.start(); await until(() => entered, 'placement prepare');
+    assert.equal(sent.filter(message => message.type === 'agent_update').length, 0);
+    release(); await started;
+    assert.ok(sent.some(message => message.type === 'agent_update'));
+  } finally { release(); agents.close(); }
 });

@@ -582,7 +582,7 @@
           "send": {
             "jsonrpc": "2.0",
             "id": 2,
-            "method": "workspace.list"
+            "method": "conformance.unknown"
           },
           "expect": {
             "id": 2,

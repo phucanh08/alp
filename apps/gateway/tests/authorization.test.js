@@ -53,6 +53,8 @@ const reached = (daemon, mark, method) => daemon.calls().slice(mark).filter(call
 // the method under test must not.
 const text = [{ type: 'text', text: 'hi' }];
 const OUT_OF_SCOPE = {
+  'project.list': null, 'workspace.list': null, 'workspace.get': null, 'project.register': null, 'project.remove': null, 'workspace.update': null, // registry.test.js checks scoped rows and every mutation
+
   'catalog.get': null, // global: the static catalogue of models and modes
   'session.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
   'session.get': () => [{ sessionId: 'sb' }, 1001],
@@ -95,6 +97,10 @@ const OUT_OF_SCOPE = {
 
 /** Schema-valid params in scope for every exposed method, for permission checks. */
 const IN_SCOPE = ({ a }) => ({
+  'project.list': {}, 'workspace.list': {}, 'workspace.get': { workspaceId: 'wks_a' },
+  'project.register': { directory: a, ifRevision: 0, requestId: 'r' },
+  'project.remove': { projectId: 'prj_a', ifRevision: 0, requestId: 'r' },
+  'workspace.update': { workspaceId: 'wks_a', pinned: true, ifRevision: 0, requestId: 'r' },
   'catalog.get': {}, 'library.models': {}, 'settings.language.get': {},
   'session.list': {}, 'session.get': { sessionId: 'sa' }, 'session.status': { sessionId: 'sa' }, 'session.log': { sessionId: 'sa' },
   'session.history': { sessionId: 'sa' }, 'session.attach': { sessionId: 'sa' }, 'session.release': { sessionId: 'sa' }, 'session.attention.clear': { sessionId: 'sa' }, 'session.preview': { spec: { cwd: a } },
@@ -162,7 +168,7 @@ test('the exposure matrix agrees with the daemon\'s x-alp annotations', t => {
 test('methods not exposed answer -32601 and never reach alpd: host, administration, library writes and unknown methods', async t => {
   const { daemon, sdk } = await world(t);
   const { client } = await sdk('alice');
-  const refused = [...Object.entries(EXPOSURE).filter(([, entry]) => entry.status === 'denied' || entry.status === 'prohibited').map(([method]) => method), 'workspace.list', 'subscribe', 'provider.list'];
+  const refused = [...Object.entries(EXPOSURE).filter(([, entry]) => entry.status === 'denied' || entry.status === 'prohibited').map(([method]) => method), 'subscribe', 'provider.list'];
   const mark = daemon.calls().length;
   for (const method of refused) {
     const params = method === 'extension.register' ? { method: 'x.y' } : method === 'assignment.recall' ? { question: 'q' } : {};

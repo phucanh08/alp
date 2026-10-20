@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -39,7 +39,7 @@ async function setup(t, usage) {
   await writeFile(path.join(directory, 'secret.txt'), 'no');
   const factory = fakeTransport(agents);
   const runtime = createAlpRuntime({ language: 'English', transport: (...args) => { const transport = factory(...args); if (usage) transport.orchestrationContext = async () => ({ usage: usage[args[2]] }); return transport; }, supervisor: false, libraryDir: home });
-  const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test' });
+  const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test', home });
   let web;
   const gateway = createPaseoBridge({ clientFactory: async (onEvent) => {
     const client = daemon.local();
@@ -634,4 +634,25 @@ test('Save limits project overrides to their project and reports partial global 
   assert.deepEqual(refreshed.runtime, otherSettings.runtime, 'Save leaves other project settings intact');
   assert.equal(await readFile(path.join(broken, '.alp/settings.json'), 'utf8'), '{invalid');
   await assert.rejects(readFile(path.join(plain, '.alp/settings.json')), { code: 'ENOENT' });
+});
+
+
+test('failed bridge pin save returns accepted false, retains committed metadata, and retries same request', async t => {
+  const { connected, ask, root, home } = await setup(t);
+  const client = await connected();
+  const opened = (await ask(client, { type: 'open_project_request', requestId: 'open-failure', cwd: root })).payload;
+  const workspaceId = opened.workspace.id;
+  const file = path.join(home, 'state/web-workspaces.json');
+  const before = JSON.parse(await readFile(file, 'utf8'));
+  await rename(file, file + '.saved'); await mkdir(file);
+  try {
+    const reply = (await ask(client, { type: 'workspace.pin.set.request', requestId: 'retry-pin', workspaceId, pinned: true })).payload;
+    assert.equal(reply.accepted, false); assert.ok(reply.error); assert.equal(reply.pinnedAt, null);
+    const rows = (await ask(client, { type: 'fetch_workspaces_request', requestId: 'list-failed' })).payload;
+    assert.equal(rows.entries.find(w => w.id === workspaceId).pinnedAt, null);
+  } finally { await rm(file, { recursive: true }); await rename(file + '.saved', file); }
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).revision, before.revision);
+  const retryClient = await connected();
+  const retry = (await ask(retryClient, { type: 'workspace.pin.set.request', requestId: 'retry-pin', workspaceId, pinned: true })).payload;
+  assert.equal(retry.accepted, true); assert.ok(retry.pinnedAt);
 });

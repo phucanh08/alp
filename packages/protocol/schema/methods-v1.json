@@ -31,7 +31,8 @@
     "prompt.images": "session.prompt takes inline image parts { type: \"image\", mimeType, data } (base64, no paths or URLs) within the image limits; a session snapshot says whether its runtime takes them in promptImages.",
     "library.project.write": "library save/delete/duplicate/rename accept policy project-data: only project-only pure-data agents and skills, no executable configuration, sidecars or library/built-in collisions.",
     "schedule": "schedule.create/list/get/cancel: one-shot continuations of a root session. alpd opens the turn by itself when the time comes; a job that comes due late says how late it is, and a job that cannot run says why.",
-    "session.history": "Durable bounded backward envelope pages, persisted generation and numeric attach watermark."
+    "session.history": "Durable bounded backward envelope pages, persisted generation and numeric attach watermark.",
+    "workspace.registry": "Daemon-owned project/workspace registry, durable pins, revision CAS and requestId replay."
   },
   "methods": {
     "assignment.recall": {
@@ -1622,7 +1623,36 @@
             "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
           },
           "spec": {
-            "$ref": "#/$defs/spec"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/spec"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "agent": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "mode": {
+                    "type": "string"
+                  },
+                  "thinking": {
+                    "type": "string"
+                  },
+                  "persist": {
+                    "type": "boolean"
+                  },
+                  "workflow": {
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            ]
           },
           "history": {
             "enum": [
@@ -1635,12 +1665,29 @@
           },
           "resume": {
             "type": "boolean"
+          },
+          "workspaceId": {
+            "type": "string"
           }
         },
         "required": [
           "spec"
         ],
-        "additionalProperties": true
+        "additionalProperties": true,
+        "anyOf": [
+          {
+            "required": [
+              "workspaceId"
+            ]
+          },
+          {
+            "properties": {
+              "spec": {
+                "$ref": "#/$defs/spec"
+              }
+            }
+          }
+        ]
       },
       "result": {
         "type": "object",
@@ -2786,6 +2833,412 @@
           "tipCursor"
         ],
         "additionalProperties": true
+      }
+    },
+    "project.list": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "projectRoots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "includeRemoved": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/registryProject"
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "projects",
+          "revision",
+          "total",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project"
+        },
+        "capability": "workspace.registry",
+        "idempotent": true
+      }
+    },
+    "workspace.list": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "projectRoots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "includeArchived": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "workspaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/registryWorkspace"
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "workspaces",
+          "revision",
+          "total",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project"
+        },
+        "capability": "workspace.registry",
+        "idempotent": true
+      }
+    },
+    "workspace.get": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "workspace": {
+            "$ref": "#/$defs/registryWorkspace"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "workspace",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project"
+        },
+        "capability": "workspace.registry",
+        "idempotent": true
+      }
+    },
+    "project.register": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "ifRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "directory": {
+            "type": "string"
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "directory",
+          "requestId",
+          "ifRevision"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "$ref": "#/$defs/registryProject"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "project",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "project"
+        },
+        "capability": "workspace.registry",
+        "idempotent": true
+      }
+    },
+    "project.remove": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "ifRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "projectId",
+          "requestId",
+          "ifRevision"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "$ref": "#/$defs/registryProject"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "project",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "project"
+        },
+        "capability": "workspace.registry",
+        "idempotent": true
+      }
+    },
+    "workspace.update": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "ifRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "workspaceId",
+          "requestId",
+          "ifRevision"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "workspace": {
+            "$ref": "#/$defs/registryWorkspace"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "workspace",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "project"
+        },
+        "capability": "workspace.registry",
+        "idempotent": true
+      }
+    },
+    "registry.owner": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "enum": [
+              "project.add",
+              "project.rename",
+              "project.remove",
+              "workspace.create",
+              "workspace.update",
+              "placement.prepare",
+              "placement.assign",
+              "label.assign",
+              "label.update",
+              "label.delete",
+              "placement.remove"
+            ]
+          },
+          "args": {
+            "type": "object"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "ifRevision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "registry": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "registry"
+        ]
+      },
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "host"
+        },
+        "capability": "workspace.registry",
+        "idempotent": false
       }
     }
   },
@@ -5246,6 +5699,104 @@
         "updatedAt"
       ],
       "additionalProperties": true
+    },
+    "registryProject": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "customName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "addedAt": {
+          "type": "string"
+        },
+        "removedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "canonical": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "root",
+        "addedAt"
+      ],
+      "additionalProperties": false
+    },
+    "registryWorkspace": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "directory": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pinnedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "archivedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "canonical": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "projectId",
+        "directory",
+        "labels",
+        "createdAt"
+      ],
+      "additionalProperties": false
     }
   }
 }

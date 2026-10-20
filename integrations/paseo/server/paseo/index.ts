@@ -66,7 +66,7 @@ export function createPaseoBridge({ clientFactory, version, token, serverId, hom
     },
   });
   const broadcast = (message: Parameters<typeof gateway.broadcast>[0]) => gateway.broadcast(message);
-  const workspaces = createWorkspaces({ home, broadcast, agents: () => agents.view, inDevelopment, log });
+  const workspaces = createWorkspaces({ rpc: (method, params) => agents.request(method, params), broadcast, agents: () => agents.view, inDevelopment, log });
   const agents = createAgents({ clientFactory, home, broadcast, directory: workspaces, log });
   const readUsage = async (refresh = false) => {
     if (clientFactory) {

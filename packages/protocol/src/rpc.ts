@@ -15,12 +15,13 @@ export type EventNotification = { jsonrpc: '2.0'; method: 'event'; params: Envel
 export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
 export type HistoryPage = { generation: string; items: HistoryItem[]; olderCursor?: string; hasOlder: boolean; tipCursor: number };
 
-export type Capability = 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
+export type Capability = 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
   | 'hello_required' | 'protocol_version' | 'invalid_params' | 'invalid_id' | 'batch_unsupported' | 'frame_too_large'
   | 'invalid_cursor' | 'stale_cursor' | 'history_gap'
+  | 'stale_revision' | 'request_conflict' | 'cwd_mismatch' | 'workspace_mismatch' | 'corrupt_registry' | 'identity_changed'
   | 'response_too_large' | 'persistence_failed' | 'outcome_unknown' | 'key_conflict'
   // Project, task and library methods (docs/protocol/alp-json-rpc-v1.md §5.3).
   | 'invalid_path' | 'invalid_scope' | 'invalid_entry' | 'secret_marker' | 'not_alp_project' | 'unknown_task' | 'not_found'
@@ -35,7 +36,19 @@ type Empty = Record<string, never>;
  * type-check the golden fixtures against this map, so the two cannot drift. Results may carry
  * properties this map does not name: clients ignore them.
  */
+export type RegistryProject = { id: string; root: string; canonical?: string; customName?: string | null; addedAt: string; removedAt?: string | null; revision?: number };
+export type RegistryWorkspace = { id: string; projectId: string; directory: string; canonical?: string; title?: string | null; pinnedAt?: string | null; archivedAt?: string | null; labels: string[]; createdAt: string; revision?: number; idempotencyKey?: string };
+export type RegistryMutation = { requestId: string; ifRevision: number };
+export type RegistryPage = { revision: number; total: number; nextCursor: string | null };
 export type RpcMethodMap = {
+  'project.list': { params: { cursor?: string; limit?: number; projectRoots?: string[] }; result: RegistryPage & { projects: RegistryProject[] } };
+  'workspace.list': { params: { cursor?: string; limit?: number; projectRoots?: string[] }; result: RegistryPage & { workspaces: RegistryWorkspace[] } };
+  'workspace.get': { params: { workspaceId: string }; result: { workspace: RegistryWorkspace; revision: number } };
+  'project.register': { params: RegistryMutation & { directory: string }; result: { project: RegistryProject; revision: number } };
+  'project.remove': { params: RegistryMutation & { projectId: string }; result: { project: RegistryProject; revision: number } };
+  'workspace.update': { params: RegistryMutation & { workspaceId: string; title?: string | null; pinned?: boolean; archived?: boolean }; result: { workspace: RegistryWorkspace; revision: number } };
+  'registry.owner': { params: { operation?: string; args?: Record<string, unknown>; requestId?: string; ifRevision?: number }; result: { registry: Record<string, unknown> } };
+
   'daemon.hello': { params: { protocolVersion: 1; client?: { name: string; version: string }; capabilities?: string[] }; result: { protocolVersion: 1; daemonVersion?: string; pid?: number; /** The daemon host's machine name (os.hostname()), a label for clients. */ hostname?: string; promptImageLimits?: { maxCount: number; maxBytes: number; maxTotalBytes: number }; capabilities?: string[] } };
   'daemon.status': {
     params: Empty;
@@ -67,7 +80,7 @@ export type RpcMethodMap = {
   'workspace.files.read': { params: { projectRoot: string; path: string; includeIgnored?: boolean }; result: { path: string; content: string; size: number; modifiedAt?: string } };
   'question.answer': { params: { questionId: string; text?: string; dismiss?: boolean; reason?: string }; result: { questionId: string } };
   'session.create': {
-    params: { sessionId?: string; spec: SessionSpec; history?: 'skip' | 'replay'; delegation?: boolean; resume?: boolean };
+    params: { sessionId?: string; history?: 'skip' | 'replay'; delegation?: boolean; resume?: boolean } & ({ workspaceId: string; spec: Omit<SessionSpec, 'cwd'> & { cwd?: string } } | { workspaceId?: undefined; spec: SessionSpec });
     result: { session: SessionSnapshot; attached: boolean; resumed?: true; durable?: boolean };
   };
   'session.preview': { params: { spec: SessionSpec }; result: { preview: SessionPreview } };

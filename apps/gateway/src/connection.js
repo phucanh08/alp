@@ -1,5 +1,6 @@
+import { realpath as registryRealpath, stat as registryStat } from 'node:fs/promises';
 // @ts-check
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { ERROR, PROTOCOL_VERSION, RPC_ERROR, WORKSPACE_FILES, base64Bytes, blockedFilePath } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
@@ -810,10 +811,81 @@ export class ClientConnection {
     return { ...rest, sessions: kept, ...(cursor === undefined ? {} : { nextCursor: cursor }) };
   }
 
+  /** Fixed error text keeps host registry/migration paths out of remote failures. @param {string} method @param {any} params */
+  #registryCall(method, params) { return this.#call(method, params).catch(error => { throw opaqueDaemonError(error, 'Workspace metadata could not be read or saved. Refresh and retry; ask the host owner if it persists.'); }); }
+  /** Live identity check: a retargeted granted symlink never follows its new target.
+   * @param {unknown} directory */
+  async #registryDirectory(directory) {
+    const grant = this.#workspace(directory);
+    const canonical = await registryRealpath(grant.path).catch(() => undefined);
+    if (!canonical || canonical !== grant.canonical || !(await registryStat(canonical)).isDirectory()) throw forbidden('Granted directory changed; ask the owner to update the credential', GATEWAY_REASON.outsideWorkspace);
+    return grant;
+  }
+  async #registryRoots() {
+    const roots = [];
+    for (const grant of this.#grant.workspaces) { try { roots.push((await this.#registryDirectory(grant.path)).canonical); } catch {} }
+    return roots;
+  }
+  /** Explicit remote projection: owner canonical/placement/receipts never cross this boundary.
+   * @param {any} entry @param {'project'|'workspace'} kind */
+  #registryProjection(entry, kind) {
+    const fields = kind === 'project' ? ['id', 'root', 'customName', 'addedAt', 'removedAt', 'revision'] : ['id', 'projectId', 'directory', 'title', 'pinnedAt', 'archivedAt', 'labels', 'createdAt', 'revision'];
+    return Object.fromEntries(fields.filter(key => Object.hasOwn(entry, key)).map(key => [key, entry[key]]));
+  }
+  /** @param {string} workspaceId */
+  async #registryWorkspace(workspaceId) {
+    const result = await this.#registryCall('workspace.get', { workspaceId }).catch(() => { throw forbidden('Workspace is unavailable to this credential', GATEWAY_REASON.outsideWorkspace); });
+    const grant = await this.#registryDirectory(result?.workspace?.directory);
+    const canonical = await registryRealpath(result.workspace.directory).catch(() => undefined);
+    if (canonical !== grant.canonical || (result.workspace.canonical && result.workspace.canonical !== canonical)) throw forbidden('Workspace directory changed', GATEWAY_REASON.outsideWorkspace);
+    return result;
+  }
+  /** Principal-scoped durable IDs without trusting an actor field from the client. @param {string} id */
+  #registryRequestId(id) { return 'gw:' + createHash('sha256').update(JSON.stringify([this.#grant.id, id])).digest('hex'); }
+  /** @param {string} kind @param {any} params */
+  async #registryList(kind, params) {
+    const result = await this.#registryCall(kind + '.list', { ...params, projectRoots: await this.#registryRoots() });
+    const key = kind + 's';
+    return { [key]: (result[key] ?? []).map((/** @type {any} */ entry) => this.#registryProjection(entry, /** @type {'project'|'workspace'} */ (kind))), total: result.total, nextCursor: result.nextCursor, revision: result.revision };
+  }
+
   // ---- handlers of exposed methods: params are already schema-checked and allow-listed ----
 
   /** @type {Record<string, (params: Record<string, any>) => Promise<unknown>>} */
   #handlers = {
+    'project.list': params => this.#registryList('project', params),
+    'workspace.list': params => this.#registryList('workspace', params),
+    'workspace.get': async params => {
+      const result = await this.#registryWorkspace(params.workspaceId);
+      return { workspace: this.#registryProjection(result.workspace, 'workspace'), revision: result.revision };
+    },
+    'project.register': async params => {
+      const grant = await this.#registryDirectory(params.directory);
+      const result = await this.#registryCall('project.register', { ...params, authorizedRoots: await this.#registryRoots(), requestId: this.#registryRequestId(params.requestId), directory: grant.canonical });
+      return { project: this.#registryProjection(result.project, 'project'), revision: result.revision };
+    },
+    'workspace.update': async params => {
+      await this.#registryWorkspace(params.workspaceId);
+      const result = await this.#registryCall('workspace.update', { ...params, authorizedRoots: await this.#registryRoots(), requestId: this.#registryRequestId(params.requestId) });
+      return { workspace: this.#registryProjection(result.workspace, 'workspace'), revision: result.revision };
+    },
+    'project.remove': async params => {
+      let projectCursor; let found = false;
+      do {
+        const page = await this.#registryList('project', { limit: 500, includeRemoved: true, ...(projectCursor ? { cursor: projectCursor } : {}) });
+        found = page.projects.some((/** @type {any} */ p) => p.id === params.projectId);
+        projectCursor = page.nextCursor;
+      } while (!found && projectCursor);
+      if (!found) throw forbidden('Project is unavailable to this credential', GATEWAY_REASON.outsideWorkspace);
+      let cursor;
+      do {
+        const page = await this.#registryCall('workspace.list', { limit: 500, includeArchived: true, ...(cursor ? { cursor } : {}) });
+        for (const w of page.workspaces ?? []) if (w.projectId === params.projectId) await this.#registryDirectory(w.directory);
+        cursor = page.nextCursor;
+      } while (cursor);
+      const result = await this.#registryCall('project.remove', { ...params, authorizedRoots: await this.#registryRoots(), requestId: this.#registryRequestId(params.requestId) });
+      return { project: this.#registryProjection(result.project, 'project'), revision: result.revision };
+    },
     'catalog.get': () => this.#call('catalog.get', {}),
 
     'session.list': async params => {
@@ -897,6 +969,11 @@ export class ClientConnection {
     },
 
     'session.create': async params => {
+      if (params.workspaceId !== undefined) {
+        const result = await this.#registryWorkspace(params.workspaceId);
+        if (params.spec?.cwd !== undefined && this.#workspace(params.spec.cwd).canonical !== this.#workspace(result.workspace.directory).canonical) throw forbidden('cwd and workspaceId must agree', GATEWAY_REASON.outsideWorkspace);
+        params = { ...params, spec: { ...params.spec, cwd: result.workspace.directory } };
+      }
       const { workspace, spec } = this.#spec(params.spec);
       let sessionId = params.sessionId;
       let generated = false;

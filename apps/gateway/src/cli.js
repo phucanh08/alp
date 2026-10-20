@@ -27,6 +27,7 @@ Usage:
   alp-gateway credential revoke ID
 
 Permissions: ${PERMISSIONS.join(', ')} (default: ${DEFAULT_PERMISSIONS.join(', ')}).
+workspace.write (register pregranted projects and change shared workspace metadata) requires explicit --permission.
 files.read (list directories and read text files of the workspaces) is never a default: name it with
 --permission for each credential that may read file contents. A token is printed once; only its hash is kept.
 Files live in $ALP_GATEWAY_HOME, else $ALP_HOME/gateway. The gateway never starts alpd.`;

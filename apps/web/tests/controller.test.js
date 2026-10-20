@@ -1063,3 +1063,25 @@ test('history: a Load more overtaken by a new first page ends without changing i
   assert.equal(w.state().history.list.length, 1, 'the page of the older list is dropped');
   assert.ok(w.state().history.nextCursor);
 });
+
+test('credential-wide registry load survives workspace switch and subsequent shared pin', async t => {
+  const w = setup(t);
+  w.host.capabilities.push('workspace.registry');
+  w.host.principal.permissions.push('workspace.write');
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let pinned = false;
+  let reads = 0;
+  const row = () => ({ id: 'wks_a', projectId: 'prj_a', directory: '/w/a', title: null, pinnedAt: pinned ? 'pin' : null, labels: [], createdAt: 'old' });
+  w.host.intercept.set('workspace.list', async (_params, _connection, { answer }) => { if (++reads === 1) await gate; answer({ workspaces: [row()], revision: pinned ? 2 : 1, total: 1, nextCursor: null }); return 'handled'; });
+  w.host.intercept.set('workspace.update', (params, _connection, { answer }) => { assert.equal(params.ifRevision, 1); pinned = params.pinned; answer({ workspace: row(), revision: 2 }); return 'handled'; });
+  await connected(w);
+  await until(() => reads === 1 && w.state().registry.loading, 'registry pending');
+  w.controller.selectWorkspace('/w/b');
+  release();
+  await until(() => !w.state().registry.loading, 'registry finishes after switching workspace');
+  assert.equal(w.state().registry.workspaces[0].id, 'wks_a');
+  await w.controller.pinWorkspace('wks_a', true);
+  assert.equal(w.state().registry.workspaces[0].pinnedAt, 'pin');
+  assert.ok(reads >= 2);
+});

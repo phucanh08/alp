@@ -886,7 +886,7 @@ answers `-32601`. Each needs its own capability when implemented.
 | Principal on connections; `accept(send, { principal })` | P0 | Authentication stays outside `daemon.hello` (gateway). Hello result would add `principal { kind, grants }`. |
 | Gateway reasons of `1003 forbidden` (`grant`, `outside_workspace`, `spec_field`, `local_only`); `1005 unavailable` reasons `feature_disabled`, `maintenance`, `restoring` | P0 | The codes exist (§5.1, §15); a gateway adds its reasons. |
 | `session.create` spec allow-list for remote principals | P0 | Refuse `env`, stdio `mcpServers`, `workdir`, `writeRoot`, `copy*`, `restore`, `keepThread`. |
-| `project.*`, `workspace.*` registry; `session.create.workspaceId` | P0 (web) | Same file and format as `state/web-workspaces.json`; `idempotencyKey`. |
+| Project/workspace registry; `session.create.workspaceId` | Implemented (§16) | Versioned migration of `state/web-workspaces.json`; shared pins and scoped add of existing granted directories. Worktree creation/removal remains proposed. |
 | `workspace.git.status/diff` | P1 | Read-only; results must fit `MAX_FRAME` (cap or chunk). `workspace.files.search`, `workspace.files.list` and `workspace.files.read` are implemented (§12.3, §12.4). |
 | `provider.list/refresh/diagnose/save/remove`, `library.test` | P1 | Probes spawn processes: separate `exec.probe` grant; timeouts; cancellation when the caller's connection closes needs the probes in `@anhlp/alp-client` to take an abort signal. |
 | `subscribe` / `unsubscribe` and notification `notify` | P1 | Old clients ignore unknown notifications (`AlpClient` handles only `event`). |
@@ -994,3 +994,41 @@ mean execution is unknown: timeout does not cancel the outstanding runtime reque
 a late ACK updates lastError to delivery_accepted_late without retry or status change.
 See [scheduler semantics](../alp/schedules.md) and ALPD §71 for restart, bounded waits,
 missed deadlines, approval and receipt deduplication.
+
+## 16. Project/workspace registry (`workspace.registry`)
+
+The daemon is the only writer of `state/web-workspaces.json`. It migrates the complete legacy
+Paseo envelope to version 1, retaining project/workspace IDs, titles, pins, labels, custom names,
+archives, idempotency keys and session placement. An exact private `web-workspaces.json.legacy-v0.json`
+backup precedes migration. Invalid JSON/schema/reference data fails closed and retains the file.
+The state directory is mode 0700 and registry/backup files are mode 0600. Atomic replacement gives
+process-crash persistence; this does not promise power-loss durability.
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `project.list` | `cursor?`, `limit?` (1–500) | `projects`, `revision`, `total`, `nextCursor` |
+| `project.register` | `directory`, `ifRevision`, `requestId` | `project`, `revision`; creates a default workspace if missing |
+| `project.remove` | `projectId`, `ifRevision`, `requestId` | `project`, `revision`; unregisters/archives metadata, deletes no filesystem data and stops no sessions |
+| `workspace.list` | `cursor?`, `limit?` (1–500) | `workspaces`, `revision`, `total`, `nextCursor` |
+| `workspace.get` | `workspaceId` | `workspace`, `revision`; archived records remain addressable |
+| `workspace.update` | `workspaceId`, `title?`, `pinned?`, `archived?`, `ifRevision`, `requestId` | `workspace`, `revision` |
+
+`revision` is a registry-wide integer. Mutations are serialized copy-on-write and publish only
+after replacement succeeds. A failed save throws with no committed revision or metadata change.
+An identical successful `(operation, requestId, payload, ifRevision)` retry returns its original
+result, including after restart; replay precedes CAS. Reusing an ID with another payload returns
+1004 `request_conflict`; stale CAS returns 1004 `stale_revision`. Retain the original ID and
+precondition when reconciling an uncertain outcome. A new edit after refresh uses a new ID.
+Canonical realpath deduplicates future registration while preserving legacy alias IDs and maps.
+
+`session.create` additionally accepts `workspaceId`, resolving cwd on the host; `spec` may omit cwd
+in that case. A supplied cwd must have the same canonical identity. Existing/resumed roots must
+also agree. Placement persists before runtime open; failed opens release newly reserved placement.
+Old cwd clients keep their launch behavior and receive deterministic default placement. Bridge
+placement preparation and all label/name/archive mutations use the owner-only `registry.owner`
+domain operations; that method never accepts a client replacement snapshot and is denied remotely.
+
+`projectRoots`, `authorizedRoots`, `includeRemoved` and `includeArchived` support the trusted local
+adapter's filtering/authorization. The gateway supplies them itself and never forwards remote
+values for them. Filtering and totals precede pagination. Scoped mutations recheck every affected
+canonical directory before receipt replay/CAS, including archived workspaces on project removal.

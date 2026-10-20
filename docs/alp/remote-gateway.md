@@ -965,3 +965,25 @@ exit/output fail closed. Silent clean exit1 remains Git's valid 'none ignored' r
 | `schedule.create`, `schedule.list`, `schedule.get`, `schedule.cancel` | prohibited | local daemon jobs can wake a future session; no remote scheduling grant in v1 |
 
 See [scheduled continuations](schedules.md) for the local CLI and main tool.
+
+### Registry and shared pins (`workspace.registry`)
+
+`project.list`, `workspace.list` and `workspace.get` require `project.read`. Registering a project,
+unregistering it or updating a workspace requires **explicit `workspace.write`**. This permission
+is absent from defaults; `project.write` does not imply it. For example the owner can issue a
+credential with `--workspace /existing/project --permission session.read,session.write,project.read,workspace.write`.
+To use another directory, the owner first changes the credential's local grants. The web Add project
+picker only offers granted directories; no remote method browses parents, creates directories or
+expands grants. Missing permission is explained in the web UI.
+
+The gateway checks exact canonical existing directory grants, including each workspace's own
+directory (a legacy workspace can differ from its project's root). Retargeted grant links fail
+closed. Lists filter before pagination and counts. Mutations reauthorize before durable replay;
+request IDs are namespaced to the credential. Removing a project checks archived workspace
+directories too, changes metadata only, and an identical retry can address the removed record.
+Responses project only reviewed metadata; owner canonical/placement/receipt data and host storage
+errors never pass through. `registry.owner` is prohibited.
+
+Pins are daemon metadata shared across browser contexts, observed by the normal sidebar refresh
+and retained after daemon restart. A pin is shown as saved only after the mutation succeeds.
+A CAS conflict asks the client to refresh and retry; transport uncertainty is never silently retried.
