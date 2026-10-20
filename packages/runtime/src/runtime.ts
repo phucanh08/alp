@@ -1548,7 +1548,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (unknown.length) return toolResult(false, { error: `Unknown roles: ${unknown.join(', ')}. Roles are ${[...known].join(', ')}` });
     const file = path.join(library, 'skills', args.name, 'SKILL.md');
     const content = `---\nname: ${args.name}\ndescription: ${JSON.stringify(args.description.replace(/\s+/g, ' ').trim())}\n---\n\n${args.body.trim()}\n`;
-    const lessons: string[] = (args.lessons ?? []).map((lesson: string) => lesson.replace(/\s+/g, ' ').trim());
+    const normalizeLesson = (lesson: string) => lesson.replace(/\s+/g, ' ').trim().replace(/^(?:- )?\d{4}-\d\d-\d\d: /, '').trim();
+    const lessons: string[] = [...new Set<string>((args.lessons ?? []).map(normalizeLesson))];
     // A replay of a proposed draft returns its approval, before anything it changed is checked again.
     const draftKey = JSON.stringify(['skill', content, args.roles, lessons, !!args.replace]);
     const key = `skill:${args.requestId ?? draftKey}`;
@@ -1594,15 +1595,17 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       } catch (error) {
         return { approved: true, saved: false, error: errorData(error).message, next: 'Tell the user; nothing is retried automatically.' };
       }
-      // The lessons the skill replaces leave both files; a lesson matches only by its exact text.
+      // Compare exact rule text after normalizing whitespace and the optional recorded date.
       const removed = new Set<string>();
       for (const lessonFile of lessonFiles(session.mapping)) {
         const current = await readFile(lessonFile, 'utf8').catch(() => undefined);
         if (current === undefined) continue;
         const kept = current.split('\n').filter(line => {
           const match = /^- \d{4}-\d\d-\d\d: (.*)$/.exec(line);
-          if (!match || !lessons.includes(match[1].trim())) return true;
-          removed.add(match[1].trim());
+          if (!match) return true;
+          const lesson = normalizeLesson(line);
+          if (!lessons.includes(lesson)) return true;
+          removed.add(lesson);
           return false;
         });
         if (kept.length !== current.split('\n').length) await writeFile(lessonFile, kept.join('\n')).catch(() => {});
