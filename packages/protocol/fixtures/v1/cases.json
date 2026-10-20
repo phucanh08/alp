@@ -3914,6 +3914,209 @@
      "type": "session.ready"
     }
    }
+  },
+  {
+   "name": "schedule.create params",
+   "check": "params",
+   "method": "schedule.create",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "sessionId": "ses_0123456789abcdef",
+    "dueAt": "2026-10-20T10:00:00.000Z",
+    "prompt": "Check the provider quota and continue."
+   }
+  },
+  {
+   "name": "schedule.create without a prompt",
+   "check": "params",
+   "method": "schedule.create",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "sessionId": "ses_0123456789abcdef",
+    "dueAt": "2026-10-20T10:00:00.000Z"
+   }
+  },
+  {
+   "name": "schedule.create with a dueAt that is not a time",
+   "check": "params",
+   "method": "schedule.create",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "sessionId": "ses_0123456789abcdef",
+    "dueAt": "tomorrow",
+    "prompt": "Check the provider quota and continue."
+   }
+  },
+  {
+   "name": "schedule.create result",
+   "check": "result",
+   "method": "schedule.create",
+   "valid": true,
+   "value": {
+    "job": {
+     "id": "sch_0123456789abcdef",
+     "projectRoot": "/work/project",
+     "sessionId": "ses_0123456789abcdef",
+     "prompt": "Check the provider quota and continue.",
+     "dueAt": "2026-10-20T10:00:00.000Z",
+     "status": "pending",
+     "attempts": 0,
+     "createdAt": "2026-10-20T09:59:00.000Z",
+     "updatedAt": "2026-10-20T09:59:00.000Z"
+    }
+   }
+  },
+  {
+   "name": "schedule.list params",
+   "check": "params",
+   "method": "schedule.list",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project"
+   }
+  },
+  {
+   "name": "schedule.list with a status",
+   "check": "params",
+   "method": "schedule.list",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "status": "pending"
+   }
+  },
+  {
+   "name": "schedule.list with an unknown status",
+   "check": "params",
+   "method": "schedule.list",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "status": "unknown"
+   }
+  },
+  {
+   "name": "schedule.list without a project",
+   "check": "params",
+   "method": "schedule.list",
+   "valid": false,
+   "value": {
+    "status": "pending"
+   }
+  },
+  {
+   "name": "schedule.list result",
+   "check": "result",
+   "method": "schedule.list",
+   "valid": true,
+   "value": {
+    "jobs": [
+     {
+      "id": "sch_0123456789abcdef",
+      "projectRoot": "/work/project",
+      "sessionId": "ses_0123456789abcdef",
+      "prompt": "Check the provider quota and continue.",
+      "dueAt": "2026-10-20T10:00:00.000Z",
+      "status": "pending",
+      "attempts": 0,
+      "createdAt": "2026-10-20T09:59:00.000Z",
+      "updatedAt": "2026-10-20T09:59:00.000Z"
+     }
+    ]
+   }
+  },
+  {
+   "name": "schedule.get params",
+   "check": "params",
+   "method": "schedule.get",
+   "valid": true,
+   "value": {
+    "id": "sch_0123456789abcdef",
+    "projectRoot": "/work/project"
+   }
+  },
+  {
+   "name": "schedule.get with an id that is not a job",
+   "check": "params",
+   "method": "schedule.get",
+   "valid": false,
+   "value": {
+    "id": "nope",
+    "projectRoot": "/work/project"
+   }
+  },
+  {
+   "name": "schedule.get without a project",
+   "check": "params",
+   "method": "schedule.get",
+   "valid": false,
+   "value": {
+    "id": "sch_0123456789abcdef"
+   }
+  },
+  {
+   "name": "schedule.get result",
+   "check": "result",
+   "method": "schedule.get",
+   "valid": true,
+   "value": {
+    "job": {
+     "id": "sch_0123456789abcdef",
+     "projectRoot": "/work/project",
+     "sessionId": "ses_0123456789abcdef",
+     "prompt": "Check the provider quota and continue.",
+     "dueAt": "2026-10-20T10:00:00.000Z",
+     "status": "delivered",
+     "attempts": 1,
+     "createdAt": "2026-10-20T09:59:00.000Z",
+     "updatedAt": "2026-10-20T10:00:03.000Z",
+     "attemptedAt": "2026-10-20T10:00:03.000Z",
+     "deliveredAt": "2026-10-20T10:00:03.000Z",
+     "lateByMs": 3000
+    }
+   }
+  },
+  {
+   "name": "schedule.cancel params",
+   "check": "params",
+   "method": "schedule.cancel",
+   "valid": true,
+   "value": {
+    "id": "sch_0123456789abcdef",
+    "projectRoot": "/work/project"
+   }
+  },
+  {
+   "name": "schedule.cancel without a project",
+   "check": "params",
+   "method": "schedule.cancel",
+   "valid": false,
+   "value": {
+    "id": "sch_0123456789abcdef"
+   }
+  },
+  {
+   "name": "schedule.cancel result",
+   "check": "result",
+   "method": "schedule.cancel",
+   "valid": true,
+   "value": {
+    "job": {
+     "id": "sch_0123456789abcdef",
+     "projectRoot": "/work/project",
+     "sessionId": "ses_0123456789abcdef",
+     "prompt": "Check the provider quota and continue.",
+     "dueAt": "2026-10-20T10:00:00.000Z",
+     "status": "cancelled",
+     "attempts": 0,
+     "createdAt": "2026-10-20T09:59:00.000Z",
+     "updatedAt": "2026-10-20T09:59:30.000Z",
+     "cancelledAt": "2026-10-20T09:59:30.000Z"
+    }
+   }
   }
  ]
 }

@@ -18,6 +18,9 @@ const USAGE = `Usage:
   alp restore <file> [--home-only] [--dry-run] [--stop] [--replace-newer] [--json]   checks the whole backup first; keeps what it replaces
             alpd must be stopped for both; --stop stops it and starts it again after
   alp run [--agent A] [--team pho|cafe|ID] [--model M] [--mode read-only|workspace-write|full-access] [--thinking T] [--project DIR] [--json] <prompt>
+  alp schedule create --session ID --at ISO_WITH_OFFSET --prompt TEXT [--project DIR] [--json]
+  alp schedule list [--status pending|delivered|failed|cancelled] [--project DIR] [--json]
+  alp schedule <show|cancel> ID [--project DIR] [--json]   one-shot wake; timer gates only unblock tasks
   alp ps [--all]
   alp top [session] [--once]
   alp attach <session> [--json]

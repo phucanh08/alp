@@ -3,6 +3,7 @@ import type { RuntimeKind, Pin } from './dto.js';
 import type { AlpError, Envelope, SessionSnapshot, TreeStatus, UserQuestion } from './events.js';
 import type { PauseState, PromptContent, RecallAnswer, SessionPreview, SessionSpec, SessionSummary } from './session.js';
 import type { EntryName, LanguageSetting, LibraryEntryRow, LibraryKind, LibraryScope, LibrarySource, TaskRow, TeamRow } from './dto.js';
+import type { ScheduleJob, ScheduleStatus } from './schedule.js';
 
 export type RpcId = string | number | null;
 export type RpcErrorData = { code: number; message: string; data?: unknown };
@@ -11,7 +12,7 @@ export type RpcResponse = { jsonrpc: '2.0'; id: RpcId } & ({ result: unknown; er
 export type EventNotification = { jsonrpc: '2.0'; method: 'event'; params: Envelope };
 
 /** Names a daemon may list in its daemon.hello result (schema/methods-v1.json `capabilities`). */
-export type Capability = 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'workspace.files' | 'workspace.files.read' | 'prompt.images';
+export type Capability = 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -106,6 +107,11 @@ export type RpcMethodMap = {
   'library.models': { params: Empty; result: { models: Array<{ id: string; label: string; efforts: string[]; effort?: string }> } };
   'settings.language.get': { params: Empty; result: LanguageSetting };
   'settings.language.set': { params: { language: string | null }; result: LanguageSetting };
+  /** Capability `schedule`: a one-shot continuation of a root session, due at `dueAt` (UTC, ISO 8601). */
+  'schedule.create': { params: { projectRoot: string; sessionId: string; dueAt: string; prompt: string }; result: { job: ScheduleJob } };
+  'schedule.list': { params: { projectRoot: string; status?: ScheduleStatus }; result: { jobs: ScheduleJob[] } };
+  'schedule.get': { params: { id: string; projectRoot: string }; result: { job: ScheduleJob } };
+  'schedule.cancel': { params: { id: string; projectRoot: string }; result: { job: ScheduleJob } };
 };
 
 export type RpcMethod = keyof RpcMethodMap;

@@ -10,10 +10,13 @@ import { validateParams } from '@anhlp/alp-protocol/contract';
 export { ERROR } from '@anhlp/alp-protocol';
 import { DEFAULT_MODEL, models, modes, thinkingOptions, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '@anhlp/alp-runtime/index';
 import type { Receipt, SessionRecord, SessionStatus, Store, UnreadableReceipt } from './store.js';
-import type { SessionSummary } from '@anhlp/alp-protocol/session';
+import type { PromptContent, SessionSummary } from '@anhlp/alp-protocol/session';
+import type { ScheduleJob } from '@anhlp/alp-protocol/index';
 import { RpcError } from './rpc-error.js';
 import { createOperations, type OperationsOptions } from './operations.js';
 import { FileAccessError, FilesError, listWorkspaceDirectory, readWorkspaceFile, searchWorkspaceFiles } from './files.js';
+import { createScheduleStore, projectKey } from './schedules.js';
+import { clientMessageId as scheduleMessageId, createScheduler, SCHEDULE_TICK_MS, type ScheduleDelivery } from './scheduler.js';
 
 /**
  * alpd's JSON-RPC surface over one shared runtime (plans/reference/ALPD.md §3, §6, §14).
@@ -55,6 +58,30 @@ function crashPoint(name: string) {
 
 const persistenceFailed = (what: string, error: unknown) =>
   new RpcError(ERROR.failed, `alpd could not record ${what}: ${error instanceof Error ? error.message : String(error)}`, { reason: 'persistence_failed' });
+
+/** A job store's refusal as a protocol error: what it refused, and why. */
+const scheduleFailed = (error: any) => {
+  if (error instanceof RpcError) return error;
+  switch (error?.code) {
+    case 'SCHEDULE_NOT_FOUND': return new RpcError(ERROR.notFound, error.message, { reason: 'not_found' });
+    case 'SCHEDULE_NOT_PENDING': return new RpcError(ERROR.conflict, error.message, { reason: 'task_state' });
+    case 'INVALID_SCHEDULE': return new RpcError(RPC_ERROR.invalidParams, error.message, { reason: 'invalid_params' });
+  }
+  return error;
+};
+
+/**
+ * The project of a request: an absolute path, or nothing. The three methods that read
+ * or change a job refuse a missing project the same way, so a client that names no
+ * project is told what is wrong, not shown the jobs of the host.
+ */
+const requestedProject = (projectRoot: unknown): string => {
+  if (typeof projectRoot !== 'string' || !projectRoot) throw new RpcError(RPC_ERROR.invalidParams, 'projectRoot is required');
+  // A relative path would be read against the daemon's own directory, which is another
+  // project.
+  if (!path.isAbsolute(projectRoot)) throw new RpcError(RPC_ERROR.invalidParams, 'projectRoot must be an absolute path');
+  return projectRoot;
+};
 
 /** A stable hash of JSON data, independent of key order (as Paseo's receipts). */
 function digest(value: unknown) {
@@ -137,7 +164,7 @@ export type DaemonServer = {
  * shape so every viewer agrees; re-exported here to keep `@anhlp/alp-daemon/server`'s API. */
 export type { SessionSummary };
 
-export function createDaemonServer({ runtime, socketPath, version, onShutdown, store, runLogDir, previousExit, retentionSweepMs = RETENTION_SWEEP_MS, home, templates }: {
+export function createDaemonServer({ runtime, socketPath, version, onShutdown, store, runLogDir, previousExit, retentionSweepMs = RETENTION_SWEEP_MS, home, templates, scheduleTickMs = SCHEDULE_TICK_MS, scheduleDeliveryTimeoutMs }: {
   runtime: AlpRuntime;
   socketPath: string;
   version: string;
@@ -154,6 +181,10 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   home?: OperationsOptions['home'];
   /** ALP's built-in agents and teams, for the library and team methods. */
   templates?: OperationsOptions['templates'];
+  /** How often the scheduler looks for jobs whose time has come; tests shorten it. */
+  scheduleTickMs?: number;
+  /** How long a job's delivery may take; tests shorten it. */
+  scheduleDeliveryTimeoutMs?: number;
 }): DaemonServer {
   const connections = new Set<Connection>();
   /** Root of every live session. */
@@ -172,7 +203,71 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   /** Roots alpd reopens after a restart; they stay open until their recovery has started. */
   const recovering = new Map<string, Promise<void>>();
   const startedAt = new Date().toISOString();
-  const restored = store ? restore() : Promise.resolve();
+  /** The clock of this daemon: the job store and the scheduler share it. */
+  const clock = () => Date.now();
+  /**
+   * The scheduled continuations of this host; their own directory, beside the state.
+   * They need the prompt receipt (the store) to deliver a job at most once, so a
+   * daemon without a store serves no jobs at all.
+   */
+  const schedules = home && store ? createScheduleStore(path.join(home, 'schedules'), { now: clock }) : undefined;
+  /**
+   * The job of that id in that project: the store keeps the project boundary, and a
+   * refusal of the store is answered like one of the daemon's own.
+   */
+  const storeJob = async (id: string, projectRoot: string) => {
+    if (!schedules) return undefined;
+    try { return await schedules.get(id, { projectRoot }); }
+    catch (error) { throw scheduleFailed(error); }
+  };
+  /** The daemon's own start-up; the scheduler waits for it before it delivers. */
+  let restored: Promise<unknown> = Promise.resolve();
+  /**
+   * The sessions the recovery is opening again, and the ones it could not open. A job
+   * that waits for such a session waits for it, and a session that could not be opened
+   * fails the job with the reason.
+   */
+  const openingSessions = new Map<string, number>();
+  const recoveryErrors = new Map<string, string>();
+  /** A session is being opened again; two opens at once are counted, not overwritten. */
+  const markOpening = (sessionId: string) => openingSessions.set(sessionId, (openingSessions.get(sessionId) ?? 0) + 1);
+  /** The session is open again (or was never open): the next open is counted anew. */
+  const clearOpening = (sessionId: string) => {
+    const count = (openingSessions.get(sessionId) ?? 0) - 1;
+    if (count > 0) openingSessions.set(sessionId, count);
+    else openingSessions.delete(sessionId);
+  };
+  /**
+   * The reason a session could not be opened again belongs to the jobs that wait for
+   * that session: a reason no job needs is no reason at all, and the map of them must
+   * not grow with the number of sessions.
+   */
+  function keepRecoveryError(sessionId: string, message: string) {
+    if (scheduler?.holds(sessionId)) recoveryErrors.set(sessionId, message);
+  }
+  /** The reason is dropped when the last job that needed it is through. */
+  function dropRecoveryError(sessionId: string) {
+    if (!scheduler?.holds(sessionId)) recoveryErrors.delete(sessionId);
+  }
+  /**
+   * The tick that delivers the jobs whose time has come.
+   */
+  const scheduler = schedules ? createScheduler({
+    store: schedules,
+    runtime,
+    deliver: deliverJob,
+    ready: () => restored,
+    session: sessionId => openingSessions.has(sessionId)
+      ? { opening: true }
+      : recoveryErrors.has(sessionId)
+        ? { error: { message: `The session this job continues could not be opened again: ${recoveryErrors.get(sessionId)}`, code: 'session_open_failed' } }
+        : undefined,
+    settled: sessionId => dropRecoveryError(sessionId),
+    stopping: () => closing,
+    now: clock,
+    ...(scheduleDeliveryTimeoutMs === undefined ? {} : { deliveryTimeoutMs: scheduleDeliveryTimeoutMs }),
+  }) : undefined;
+  restored = store ? restore() : Promise.resolve();
 
   const deliver = (connection: Connection, envelope: Envelope) => connection.send({ jsonrpc: '2.0', method: 'event', params: envelope });
   /** Connections that called question.watch, with the projectRoot they asked for and whether they want roots' turn ends. */
@@ -302,8 +397,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
 
   /**
    * Loads records, settles sessions a crash or a stop left working, and prunes expired
-   * trees. Trees with assignments the runtime can continue, or whose root was working,
-   * are reopened afterwards (ALPD §31).
+   * trees. Trees with assignments the runtime can continue, whose root was working, or
+   * whose root a scheduled job waits for, are reopened afterwards (ALPD §31).
    */
   async function restore() {
     await store!.pruneReceipts(RECEIPT_RETENTION_MS, { temporaries: true });
@@ -313,13 +408,20 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     const ended = { code: 'daemon_restarted', message: 'alpd stopped while this session was working' };
     const epoch = `restart-${startedAt}`;
     const continuing = new Set(runtime.recoverable().map(entry => entry.assignmentId));
+    // The roots a job waits for: they are reopened, so the job finds its session.
+    // Every project of the host is read here: the daemon serves them all.
+    const pending = await schedules?.all({ status: 'pending' }) ?? [];
+    for (const job of pending) scheduler?.hold(job);
+    const scheduled = new Set(pending.map(job => job.sessionId));
     const reopen: Array<{ record: SessionRecord; working: boolean }> = [];
     const byRoot = trees(loaded);
     const removed = await expire(byRoot, now);
     for (const [root, tree] of byRoot) {
       const head = tree.find(record => record.id === root);
       if (removed.has(root)) continue;
-      if (head && resumable(head) && (head.status === 'running' || (head.status === 'idle' && head.session?.parked) || tree.some(record => continuing.has(record.id)))) reopen.push({ record: head, working: head.status === 'running' });
+      // A root that was closed is not opened again for a job: a job continues a session
+      // that is alive, and a closed one fails with the reason.
+      if (head && resumable(head) && (head.status === 'running' || (head.status === 'idle' && head.session?.parked) || tree.some(record => continuing.has(record.id)) || (scheduled.has(head.id) && head.status !== 'closed'))) reopen.push({ record: head, working: head.status === 'running' });
       if (tree.some(record => LIVE.includes(record.status))) seen(root, await store!.timeline(root));
       for (const record of tree as Array<SessionRecord & { activeTurnId?: string }>) {
         records.set(record.id, record);
@@ -348,7 +450,11 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     for (const rootId of new Set(runtime.recoverable().map(entry => entry.rootId))) {
       if (!reopened.has(rootId)) await runtime.abandon(rootId, 'its root session cannot be reopened').catch(() => {});
     }
-    for (const { record, working } of reopen) recovering.set(record.id, recoverTree(record, working));
+    for (const { record, working } of reopen) {
+      // The session is opened again: a job that waits for it waits, it does not fail.
+      markOpening(record.id);
+      recovering.set(record.id, recoverTree(record, working, () => { clearOpening(record.id); }));
+    }
   }
 
   function trees(list: Iterable<SessionRecord>) {
@@ -380,6 +486,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       if (now - Math.max(...tree.map(record => Date.parse(record.updatedAt) || now)) <= RETENTION_MS) continue;
       if (tree.some(record => now - (receiptWritten.get(record.id) ?? 0) <= RECEIPT_RETENTION_MS)) continue;
       if (continuing.has(root) || rootOf.has(root) || attached.get(root)?.size || recovering.has(root)) continue;
+      // A tree a job waits for stays: the job is to continue that very session.
+      if (scheduler?.holds(root)) continue;
       const ids = tree.map(record => record.id);
       // A tree restored from a backup counts from its restore: its files were written then.
       if (now - await store!.writtenAt(ids) <= RETENTION_MS) continue;
@@ -410,6 +518,13 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   sweeper?.unref();
 
   /**
+   * The scheduler's tick. It runs as long as alpd runs, so a job that comes due is
+   * delivered even when nobody is watching: the tick is not the runtime's watchdog,
+   * which stops as soon as no assignment is left.
+   */
+  scheduler?.start(scheduleTickMs);
+
+  /**
    * Completes receipts a crash left pending when the tree's timeline shows how the runtime
    * answered; the rest stay pending, so their prompt answers outcome_unknown and is never
    * sent again by itself.
@@ -437,8 +552,13 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** Reopens a root nobody watches yet and continues what it and its assignments were doing. */
-  async function recoverTree(record: SessionRecord, working: boolean) {
+  async function recoverTree(record: SessionRecord, working: boolean, opened?: () => void) {
     const session = record.session!;
+    // The open of this session is counted once: the flag is cleared when the open is
+    // over, whether it succeeded or not, and a second open of the same session keeps
+    // its own count.
+    let openedOnce = false;
+    const open = () => { if (openedOnce) return; openedOnce = true; opened?.(); };
     try {
       const stored = await treeLog(record.id);
       seen(record.id, stored);
@@ -448,9 +568,14 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         persist: true,
         restore: { agent: session.agent, threadId: session.threadId, runtime: session.runtime, model: session.model, workflow: session.workflow },
       }, { history: 'skip', delegation: record.delegation ?? true });
+      // The session is open again: a job that waits for it may be delivered.
+      open();
       const outcomes = await runtime.recover(record.id, { continueRoot: working, parkedRoot: session.parked });
       recoveryLog.info(`recovered ${record.id}: ${outcomes.map(outcome => `${outcome.agent} ${outcome.outcome}`).join(', ') || 'root'}`, { event: 'recovered', sessionId: record.id, rootId: record.rootId });
     } catch (error: any) {
+      // The session is not open: a job that waits for it fails with the reason.
+      open();
+      keepRecoveryError(record.id, error?.message ?? String(error));
       recoveryLog.error(`could not recover ${record.id}`, { code: 'ALP_RECOVERY_FAILED', sessionId: record.id, rootId: record.rootId, error });
       await runtime.abandon(record.id, error?.message ?? String(error)).catch(() => {});
     } finally {
@@ -466,7 +591,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
    * the first delivery did, with other content a conflict; a receipt left pending by a
    * crash, or a delivery the provider may or may not have received, is outcome_unknown.
    */
-  function deliverOnce(sessionId: string, clientMessageId: string, fingerprint: string, send: () => Promise<void>) {
+  function deliverOnce(sessionId: string, clientMessageId: string, fingerprint: string, send: () => Promise<void>, { requireReceipt = false } = {}) {
     const key = digest(['prompt', sessionId, clientMessageId]);
     const unknown = () => new RpcError(ERROR.conflict, `alpd cannot tell whether message ${clientMessageId} reached the agent; check the session, then send it again with a new id`, { reason: 'outcome_unknown' });
     const answer = (receipt: Receipt, extra: object = {}) => ({ outcome: receipt.outcome ?? 'accepted', ...(receipt.error ? { error: receipt.error } : {}), ...extra });
@@ -482,6 +607,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         if (existing.state === 'pending' || existing.outcome === 'unknown') throw unknown();
         return answer(existing, { duplicate: true, durable: !unsaved.has(key) });
       }
+      // Scheduler replays fail closed when a prior attempt's receipt was pruned,
+      // lost or never committed. Absence cannot prove that nothing was sent.
+      if (requireReceipt) throw unknown();
       const receipt = (state: Receipt['state'], changes: Partial<Receipt> = {}): Receipt => ({ version: 1, sessionId, clientMessageId, fingerprint, state, ...changes, updatedAt: new Date().toISOString() });
       live(sessionId);
       crashPoint('prompt.before-receipt');
@@ -527,6 +655,20 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /**
+   * The delivery of a scheduled job: the prompt path a client uses, with a
+   * clientMessageId of the job's own. The receipt of that message is what keeps a job
+   * from running twice: a retry after a crash reads the receipt instead of sending.
+   */
+  async function deliverJob(job: ScheduleJob, content: PromptContent, messageId: string): Promise<ScheduleDelivery> {
+    // The id is the job's own, so it is the same in every attempt of this job.
+    const clientMessageId = messageId || scheduleMessageId(job);
+    return deliverOnce(job.sessionId, clientMessageId, digest({ delivery: 'auto', content }), async () => {
+      live(job.sessionId);
+      await runtime.prompt(job.sessionId, { clientMessageId, delivery: 'auto', content });
+    }, { requireReceipt: job.attempts > 1 });
+  }
+
+  /**
    * Waits for an opened root's record and timeline (its native thread) to be written, so a
    * crash after the answer can still resume it (ALPD §66); `durable: false` when they were not.
    */
@@ -537,13 +679,16 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
 
   function forget(root: string) {
     if (runtime.snapshot(root)) return;
-    for (const [id, candidate] of rootOf) if (candidate === root) rootOf.delete(id);
+    for (const [id, candidate] of rootOf) if (candidate === root) { rootOf.delete(id); recoveryErrors.delete(id); }
+    recoveryErrors.delete(root);
     logs.delete(root);
   }
 
   /** Closes an idle root that no client watches. */
   async function reap(root: string) {
     if (closing || attached.get(root)?.size || recovering.has(root)) return false;
+    // A root a job waits for stays open: the job is to continue that very session.
+    if (scheduler?.holds(root)) return false;
     const session = runtime.snapshot(root);
     if (!session || session.busy) return false;
     await runtime.close(root).catch(() => {});
@@ -649,11 +794,16 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     if (!session?.persistent || !session.threadId || !record.spec) throw new RpcError(ERROR.failed, 'This session cannot be resumed');
     const agent = spec.agent ?? spec.restore?.agent;
     if (agent !== undefined && agent !== session.agent) throw new RpcError(ERROR.failed, 'Cannot resume a session as a different ALP agent');
-    const stored = await treeLog(record.id);
-    seen(record.id, stored);
-    logs.set(record.id, [...stored]);
-    attach(connection, record.id);
+    // The session is opened again from the first moment: a job that waits for it waits
+    // for the open, it does not fail with 'the session is closed'.
+    markOpening(record.id);
+    // The reason of an earlier failure is not true while the session opens again.
+    recoveryErrors.delete(record.id);
     try {
+      const stored = await treeLog(record.id);
+      seen(record.id, stored);
+      logs.set(record.id, [...stored]);
+      attach(connection, record.id);
       const opened = await runtime.open(record.id, {
         ...record.spec,
         ...(spec.mode !== undefined ? { mode: spec.mode } : {}),
@@ -663,9 +813,13 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       }, { history: stored.length ? 'skip' : history, delegation: record.delegation ?? delegation });
       if (history === 'replay') replayHistory(connection, record.id, stored);
       return opened;
-    } catch (error) {
+    } catch (error: any) {
       detach(connection, record.id);
+      // The session could not be opened: a job that waits for it says why.
+      keepRecoveryError(record.id, error?.message ?? String(error));
       throw error;
+    } finally {
+      clearOpening(record.id);
     }
   }
 
@@ -997,7 +1151,83 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       const page = sessions.slice(0, limit);
       return { sessions: page, nextCursor: listCursor.encode(listCursor.key(page.at(-1)!)) };
     },
+
+    /**
+     * A scheduled continuation of a root session: alpd opens the turn itself
+     * when the time comes, without a user message. The target is a live root session of
+     * the project; a session that is closed when the job is due fails the job, and the
+     * reason is kept.
+     */
+    async 'schedule.create'(_connection, { projectRoot, sessionId, dueAt, prompt } = {}) {
+      if (!schedules) throw new RpcError(ERROR.failed, 'alpd does not serve scheduled jobs');
+      if (typeof projectRoot !== 'string' || typeof sessionId !== 'string' || typeof dueAt !== 'string' || typeof prompt !== 'string') {
+        throw new RpcError(RPC_ERROR.invalidParams, 'projectRoot, sessionId, dueAt and prompt are required');
+      }
+      if (!path.isAbsolute(projectRoot)) throw new RpcError(RPC_ERROR.invalidParams, 'projectRoot must be an absolute path');
+      const snapshot = runtime.snapshot(sessionId);
+      if (!snapshot) throw new RpcError(ERROR.notFound, `Session ${sessionId} is not open`);
+      if (snapshot.parentId) throw new RpcError(RPC_ERROR.invalidParams, 'A scheduled job continues a root session');
+      // The project is compared as a path, not as a spelling: a client that names the
+      // same directory with a trailing slash means the same project.
+      if (projectKey(snapshot.projectRoot) !== projectKey(projectRoot)) throw new RpcError(RPC_ERROR.invalidParams, 'That session does not belong to that project');
+      if (!snapshot.persistent || !snapshot.threadId) log.warn(`a job on ${sessionId} cannot survive a restart of alpd: the session keeps no thread to resume`, { code: 'ALP_SCHEDULE_SESSION_NOT_RESUMABLE', sessionId });
+      // The session waits for the job before the job is written, so it is not closed
+      // in between; the job's own hold takes over once it exists.
+      scheduler?.holdSession(sessionId);
+      try {
+        const job = await schedules.create({ projectRoot, sessionId, dueAt, prompt });
+        scheduler?.hold(job);
+        return { job };
+      } catch (error) {
+        throw scheduleFailed(error);
+      } finally {
+        scheduler?.releaseSession(sessionId);
+      }
+    },
+
+    /** The jobs of this project, oldest first by the time they are due. */
+    async 'schedule.list'(_connection, { projectRoot, status } = {}) {
+      if (!schedules) throw new RpcError(ERROR.failed, 'alpd does not serve scheduled jobs');
+      // The jobs of every project live in one directory: the project is the boundary.
+      requestedProject(projectRoot);
+      try {
+        return { jobs: await schedules.list({ projectRoot, status }) };
+      } catch (error) {
+        throw scheduleFailed(error);
+      }
+    },
+
+    /** One job, with what became of it. */
+    async 'schedule.get'(_connection, { id, projectRoot } = {}) {
+      if (!schedules) throw new RpcError(ERROR.failed, 'alpd does not serve scheduled jobs');
+      if (typeof id !== 'string') throw new RpcError(RPC_ERROR.invalidParams, 'id is required');
+      requestedProject(projectRoot);
+      // The store keeps the project boundary itself: a job of another project is not
+      // there for this one, whatever the caller asked for.
+      const job = await storeJob(id, projectRoot);
+      if (!job) throw new RpcError(ERROR.notFound, `No scheduled job ${id}`);
+      return { job };
+    },
+
+    /** A job that will not run: cancelled before its time. */
+    async 'schedule.cancel'(_connection, { id, projectRoot } = {}) {
+      if (!schedules) throw new RpcError(ERROR.failed, 'alpd does not serve scheduled jobs');
+      if (typeof id !== 'string') throw new RpcError(RPC_ERROR.invalidParams, 'id is required');
+      requestedProject(projectRoot);
+      const job = await storeJob(id, projectRoot);
+      if (!job) throw new RpcError(ERROR.notFound, `No scheduled job ${id}`);
+      // A job that is being delivered now is not cancelled: the delivery is under way.
+      if (scheduler?.delivering(id)) throw new RpcError(ERROR.conflict, `Job ${id} is being delivered now`, { reason: 'key_conflict' });
+      try {
+        const cancelled = await schedules.cancel(id, { projectRoot });
+        scheduler?.release(cancelled);
+        return { job: cancelled };
+      } catch (error) {
+        throw scheduleFailed(error);
+      }
+    },
   };
+  runtime.bindSchedules?.(async (action, params) => handlers[`schedule.${action}`](undefined as any, params));
   for (const [method, handler] of Object.entries(operations.handlers)) handlers[method] = (_connection, params) => handler(params);
   Object.setPrototypeOf(handlers, null);
   // Every v1 method name stays the daemon's, served here or not, so no extension takes one.
@@ -1056,7 +1286,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts] : []), ...operations.capabilities];
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {
@@ -1318,6 +1548,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     async close() {
       closing = true;
       if (sweeper) clearInterval(sweeper);
+      // The tick that runs now is waited for: a delivery under way finishes, so its
+      // receipt is written and the job is not left half delivered.
+      await scheduler?.stop();
       const stopped = new Promise<void>(resolve => server.close(() => resolve()));
       for (const connection of connections) connection.socket?.destroy();
       await stopped;

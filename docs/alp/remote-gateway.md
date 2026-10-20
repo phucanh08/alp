@@ -956,3 +956,11 @@ before descent and filters before ranking/limit under the existing 3-second dead
 returns an empty truncated list, never partial unverified names. Truly missing Git or a true nonrepo
 retain the existing fallback; a resolved binary that fails to spawn, diagnostics and inconsistent
 exit/output fail closed. Silent clean exit1 remains Git's valid 'none ignored' result.
+
+### Scheduled continuations exposure
+
+| Methods | Exposure | Reason |
+|---|---|---|
+| `schedule.create`, `schedule.list`, `schedule.get`, `schedule.cancel` | prohibited | local daemon jobs can wake a future session; no remote scheduling grant in v1 |
+
+See [scheduled continuations](schedules.md) for the local CLI and main tool.

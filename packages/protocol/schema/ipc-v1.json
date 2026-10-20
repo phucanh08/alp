@@ -2330,6 +2330,95 @@
         "data"
       ],
       "additionalProperties": false
+    },
+    "scheduleId": {
+      "type": "string",
+      "pattern": "^sch_[0-9a-f]{16}$"
+    },
+    "scheduleError": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "additionalProperties": true
+    },
+    "scheduleJob": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/scheduleId"
+        },
+        "projectRoot": {
+          "$ref": "#/$defs/projectRoot"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "dueAt": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?(Z|[+-]\\d{2}:\\d{2})$"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "delivered",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "deliveredAt": {
+          "type": "string"
+        },
+        "failedAt": {
+          "type": "string"
+        },
+        "cancelledAt": {
+          "type": "string"
+        },
+        "attemptedAt": {
+          "type": "string"
+        },
+        "lateByMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastError": {
+          "$ref": "#/$defs/scheduleError"
+        }
+      },
+      "required": [
+        "id",
+        "projectRoot",
+        "sessionId",
+        "prompt",
+        "dueAt",
+        "status",
+        "attempts",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": true
     }
   }
 }
