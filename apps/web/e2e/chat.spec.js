@@ -45,6 +45,7 @@ test('composer: focus key, a quick second message steers, Escape interrupts, mod
   await expect(page.getByTestId('queued-message')).toContainText('Queued right away');
   await expect(page.getByTestId('pending-message')).toHaveCount(0);
   await page.getByRole('button', { name: 'Interrupt agent' }).click();
+  await expect(page.getByText('Stopped.')).toHaveCount(1);
   await expect(assistant(page).last()).toContainText('Echo: Queued right away');
   await idle(page);
 

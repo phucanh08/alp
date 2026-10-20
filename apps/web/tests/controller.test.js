@@ -381,6 +381,35 @@ test('cancel interrupts the running turn', async t => {
   assert.equal(w.state().tree.projection.entries.at(-1).item.state, 'canceled');
 });
 
+test('interrupt waits for a sending prompt to reach the host turn', async t => {
+  const w = setup(t);
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  let release;
+  const receipt = new Promise(resolve => { release = resolve; });
+  // alpd persists a pending receipt before enqueuing runtime.prompt; an interrupt can
+  // otherwise reach the runtime first, while no turn exists to cancel.
+  w.host.intercept.set('session.prompt', async () => { await receipt; });
+  const sending = w.controller.sendPrompt('long [hold]');
+  await until(() => w.host.count('session.prompt') === 1, 'pending receipt');
+  assert.equal(w.controller.rootBusy(), true, 'the composer already offers Interrupt');
+  const stopping = w.controller.interrupt();
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(w.host.count('session.interrupt'), 0, 'stop must follow prompt delivery');
+    assert.equal(w.state().busy.interrupt, true);
+  } finally {
+    release();
+    await sending;
+    await stopping;
+  }
+  await until(() => !('ses_a' in w.state().tree.projection.running), 'stopped');
+  assert.equal(w.host.count('session.interrupt'), 1);
+  assert.equal(w.state().tree.projection.entries.at(-1).item.state, 'canceled');
+});
+
 test('a queued message waits for the turn, then goes once by itself; edit takes it back', async t => {
   const w = setup(t);
   w.host.seed('ses_a');
