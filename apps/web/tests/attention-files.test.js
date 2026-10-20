@@ -3,7 +3,7 @@
 // (workspace.files.search: requests, debounce, stale answers, scope, errors).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Controller, FILES_FORBIDDEN, FILE_SEARCH_LIMIT, attentionReason } from '../src/lib/controller.js';
+import { Controller, FILES_FORBIDDEN, FILE_SEARCH_LIMIT, attentionReason, visibleAttention } from '../src/lib/controller.js';
 import { faviconStatus, newlyEnded, sessionBucket, turnNotification } from '../src/lib/attention.js';
 import { commandResults, describeFilePath, rankWorkspaces, workspaceRows } from '../src/lib/command-center.js';
 import { FILE_SEARCH_DEBOUNCE_MS, FileSearch } from '../src/lib/file-search.js';
@@ -172,6 +172,121 @@ test('turn attention: switching workspace forgets it', async t => {
   assert.deepEqual(w.state().turnAttention, {});
 });
 
+// ---- controller: attention kept by the host (session.attention, issue #120) -------------------
+
+const SHARED = ['question.watch', 'question.watch.turns', 'session.attention'];
+
+/** A second page on the same host. */
+function page(t, host) {
+  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, attentionWatchPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500 });
+  t.after(() => controller.disconnect());
+  return { host, controller, state: () => controller.getState() };
+}
+
+test('shared attention: a look on one page clears it on the other, through the host', async t => {
+  const one = setup(t);
+  one.host.capabilities.push(...SHARED);
+  one.host.seed('ses_a', { title: 'Alpha' });
+  one.host.seed('ses_b', { title: 'Bee' });
+  const two = page(t, one.host);
+  await connected(one);
+  await connected(two);
+  await until(() => watchCalls(one.host).length >= 2, 'both watch');
+  assert.deepEqual(watchCalls(one.host)[0].params, { projectRoot: '/w/a', turns: true, attention: true });
+  one.controller.setPresence({ visible: false, focused: false });
+  two.controller.setPresence({ visible: false, focused: false });
+  one.host.startTurn('ses_b');
+  one.host.endTurn('ses_b', 'failed', { message: 'quota exceeded' });
+  await until(() => attentionReason(one.state(), 'ses_b') === 'error' && attentionReason(two.state(), 'ses_b') === 'error', 'both ask');
+  assert.equal(two.state().turnAttention.ses_b.message, 'quota exceeded');
+  // The user opens it on page one: the host forgets it, and page two stops asking.
+  one.controller.selectSession('ses_b');
+  assert.equal(attentionReason(one.state(), 'ses_b'), undefined);
+  await until(() => attentionReason(two.state(), 'ses_b') === undefined, 'cleared on the other page');
+  const ack = one.host.calls.filter(call => call.method === 'session.attention.clear');
+  assert.equal(ack.length, 1);
+  assert.equal(ack[0].params.sessionId, 'ses_b');
+  assert.equal(typeof ack[0].params.at, 'string', 'the ending it saw, so a newer one stays');
+  assert.equal(one.host.root('ses_b').summary.attention, undefined);
+  // A turn that ends on the session the user looks at is acknowledged at once, for every page.
+  one.controller.setPresence({ visible: true, focused: true });
+  await until(() => one.state().tree?.status === 'attached', 'attached');
+  one.host.startTurn('ses_b');
+  one.host.endTurn('ses_b', 'completed');
+  await until(() => one.host.calls.filter(call => call.method === 'session.attention.clear').length === 2, 'acknowledged');
+  await until(() => one.host.root('ses_b').summary.attention === undefined && attentionReason(two.state(), 'ses_b') === undefined, 'nobody asks');
+  assert.equal(attentionReason(one.state(), 'ses_b'), undefined);
+});
+
+test('shared attention: a turn that ended while the page was disconnected asks once it is back', async t => {
+  const w = setup(t);
+  w.host.capabilities.push(...SHARED);
+  w.host.seed('ses_b', { title: 'Bee' });
+  await connected(w);
+  await until(() => watchCalls(w.host).length >= 1, 'watched');
+  w.controller.setPresence({ visible: false, focused: false });
+  w.host.startTurn('ses_b');
+  w.host.refuse = Object.assign(new Error('host away'), { code: 'ECONNREFUSED' });
+  w.host.drop();
+  await until(() => w.state().connection.phase !== 'open', 'disconnected');
+  w.host.endTurn('ses_b', 'completed');
+  await settle();
+  assert.equal(attentionReason(w.state(), 'ses_b'), undefined, 'not told while away');
+  w.host.refuse = null;
+  await until(() => w.state().connection.phase === 'open', 'reconnected');
+  await until(() => attentionReason(w.state(), 'ses_b') === 'finished', 'the host tells it on the next watch');
+  // Acknowledged elsewhere while away again: the next watch read forgets it.
+  w.host.refuse = Object.assign(new Error('host away'), { code: 'ECONNREFUSED' });
+  w.host.drop();
+  await until(() => w.state().connection.phase !== 'open', 'disconnected again');
+  delete w.host.root('ses_b').summary.attention;
+  w.host.refuse = null;
+  await until(() => w.state().connection.phase === 'open', 'reconnected again');
+  await until(() => attentionReason(w.state(), 'ses_b') === undefined, 'gone with the host\'s');
+});
+
+for (const [label, capabilities] of [['shared', SHARED], ['turn ends only', ['question.watch', 'question.watch.turns']]]) {
+  test(`attention of a root not listed yet (${label}): kept, shown once its row is, never when archived`, async t => {
+    const w = setup(t);
+    w.host.capabilities.push(...capabilities);
+    w.host.seed('ses_a', { title: 'Alpha' });
+    await connected(w);
+    await until(() => watchCalls(w.host).length >= 1, 'watched');
+    w.controller.setPresence({ visible: false, focused: false });
+    const fresh = w.host.seed('ses_new', { title: 'New' });
+    fresh.unlisted = true;
+    w.host.startTurn('ses_new');
+    w.host.endTurn('ses_new', 'completed');
+    await until(() => w.state().turnAttention.ses_new?.reason === 'finished', 'kept');
+    assert.deepEqual(Object.keys(visibleAttention(w.state())), [], 'nothing to click yet: the page does not ask');
+    fresh.unlisted = false;
+    await w.controller.refreshSessions();
+    assert.equal(attentionReason(w.state(), 'ses_new'), 'finished');
+    assert.deepEqual(Object.keys(visibleAttention(w.state())), ['ses_new'], 'shown with its row');
+    // Archived: it never asks again.
+    await w.controller.archiveSession('ses_new');
+    await settle();
+    assert.equal(w.state().turnAttention.ses_new, undefined);
+  });
+}
+
+test('without session.attention the watch asks for no attention and nothing is acknowledged on the host', async t => {
+  const w = setup(t);
+  w.host.capabilities.push('question.watch', 'question.watch.turns');
+  w.host.seed('ses_b', { title: 'Bee' });
+  await connected(w);
+  await until(() => watchCalls(w.host).length >= 1, 'watched');
+  assert.deepEqual(watchCalls(w.host)[0].params, { projectRoot: '/w/a', turns: true });
+  w.controller.setPresence({ visible: false, focused: false });
+  w.host.startTurn('ses_b');
+  w.host.endTurn('ses_b', 'completed');
+  await until(() => attentionReason(w.state(), 'ses_b') === 'finished', 'finished');
+  w.controller.selectSession('ses_b');
+  assert.equal(attentionReason(w.state(), 'ses_b'), undefined);
+  await settle();
+  assert.equal(w.host.count('session.attention.clear'), 0);
+});
+
 // ---- controller: workspace.files.search ------------------------------------------------------
 
 test('file search: workspace.files.search in the open workspace; refusals in words', async t => {
@@ -302,7 +417,9 @@ test('shortcuts: Cmd+P on a Mac, Ctrl+P elsewhere is Paseo\'s Search files, list
 
 // ---- review fixes (t-7679.10 round 1) --------------------------------------------------------
 
-test('turn attention: a root the list does not show (archived, unlisted) asks for nothing', async t => {
+// Issue #120: an unlisted root keeps its entry until its row appears (the test above); what the
+// page shows (favicon, rows, notifications) is visibleAttention, never a root without a row.
+test('turn attention: a root the list does not show (archived, unlisted) shows nothing', async t => {
   const w = setup(t);
   w.host.capabilities.push('question.watch', 'question.watch.turns');
   w.host.seed('ses_listed', { title: 'Listed' });
@@ -317,8 +434,7 @@ test('turn attention: a root the list does not show (archived, unlisted) asks fo
   w.host.endTurn('ses_listed', 'completed');
   await until(() => attentionReason(w.state(), 'ses_listed') === 'finished', 'the listed root');
   await settle();
-  assert.equal(attentionReason(w.state(), 'ses_gone'), undefined);
-  assert.deepEqual(Object.keys(w.state().turnAttention), ['ses_listed']);
+  assert.deepEqual(Object.keys(visibleAttention(w.state())), ['ses_listed']);
 });
 
 test('turn attention: a root the list finds running again is over (a new turn started elsewhere)', async t => {

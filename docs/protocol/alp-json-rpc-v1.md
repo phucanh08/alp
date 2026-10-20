@@ -207,6 +207,7 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 | `session.list.page` | `session.list` accepts `limit`, `cursor` and `query` and answers `nextCursor` (§12.1). Every alpd lists it. |
 | `question.watch` | `question.watch`: questions of trees the connection is not attached to (§12.2). Every alpd lists it. |
 | `question.watch.turns` | `question.watch` accepts `turns`: also every root's `turn.ended` (§12.2). Every alpd lists it. |
+| `session.attention` | `question.watch` accepts `attention`: each root's finished or error attention, kept by alpd for every client, in the answer and as `attention` events; `session.attention.clear` acknowledges one (§12.2). Every alpd lists it. |
 | `workspace.files` | `workspace.files.search`: file names under a directory matching a query, read-only (§12.3). Every alpd lists it. |
 | `workspace.files.read` | `workspace.files.list` and `workspace.files.read`: a directory's entries and a UTF-8 text file's content (at most 1 MiB) under a directory, read-only, links never followed, blocked paths refused (§12.4). Every alpd lists it. |
 | `prompt.images` | `session.prompt` takes inline image parts (§10, Prompt content); a session snapshot's `promptImages: true` says its runtime takes them. Every alpd lists it. |
@@ -265,7 +266,8 @@ attached to the event's tree (§9), and a tree's `question` / `question.resolved
   across restarts, starting at 1. Only envelopes with a `cursor` are part of the timeline ("kept").
 - **Synthetic envelopes** without `cursor`: the re-announcement of a live tree when a client reopens a
   root (`session.opened`, `session.ready`, `turn.started` of a running turn), pending `question`s
-  announced on attach, and the `question` / `question.resolved` / `turn.ended` copies `question.watch` sends (§12.2). A client never advances its cursor from an envelope without one.
+  announced on attach, the `question` / `question.resolved` / `turn.ended` copies `question.watch` sends,
+  and its `attention` events, which are never kept (§12.2). A client never advances its cursor from an envelope without one.
 - **History digests**: when resuming a closed root, `session.create { history: "replay" }` sends the
   root's latest version of each timeline item and its children's events. For an already-live root
   (`attached: true`), it sends root items and synthetic announcements of live children, without
@@ -275,7 +277,13 @@ attached to the event's tree (§9), and a tree's `question` / `question.resolved
 - **Session names**: alpd keeps a kept `session.updated` (epoch `title-…`, `seq: 0`) for a live root
   whose name is set, its `session` carrying `title`. The first user message of an unnamed root names it,
   as Paseo names an agent: its first non-blank line, whitespace folded, at most 60 code points, no
-  ellipsis (messages ALP sends itself, `clientMessageId` `alp-…`, do not). The announcement follows the
+  ellipsis. Only the user's words do: a `user_message` says who wrote it in `origin` (`user`, or ALP
+  itself: `wake`, `assignment`, `runtime`); one ALP sent itself (`origin` other than `user`, or a
+  `clientMessageId` `alp-…`) never names a root, nor does one without `origin` or `clientMessageId`,
+  which nobody can place. A message replayed from a resumed thread's native history carries the
+  `clientMessageId` ALP sent it under (Codex keeps it as the item's `clientId`) and only the prompt
+  ALP built the input around, never ALP's context parts (catalog, task digest, mail); one from a
+  thread started outside ALP is `user`. The announcement follows the
   `item` of that message. `session.rename` is announced the same way. Runtime `session.updated` events
   carry no `title`; a client keeps the last one it saw. `session.get` / `session.list` give the same
   `title`.
@@ -527,7 +535,8 @@ connection on the local socket acts as the owner.
 | `assignment.recall` | asks a finished assignment's thread (a model call) | no | 1000, -32602 | session.write |
 | `board.list` | read | yes | -32602 | session.read |
 | `question.list` | read | yes | — | session.read |
-| `question.watch` | read, then question events of every tree, and roots' turn ends with `turns` (§12.2) | yes (a second call replaces the filter) | -32602 | session.read |
+| `question.watch` | read, then question events of every tree, roots' turn ends with `turns`, roots' attention with `attention` (§12.2) | yes (a second call replaces the filter) | -32602 | session.read |
+| `session.attention.clear` | acknowledges a root's attention for every client; told as an `attention` event (§12.2) | yes (a second call answers `cleared: false`) | -32602, 1001, `persistence_failed` | session.read (a look is a read) |
 | `workspace.files.search` | read: file names under `projectRoot` (§12.3) | yes | -32602, 1001 | project.read |
 | `workspace.files.list` / `workspace.files.read` | read: a directory's entries; a text file's content (§12.4) | yes | -32602, 1000, 1001, 1003 | files.read (never a default; docs/alp/remote-gateway.md §5.10) |
 | `question.answer` | answers or dismisses; a unique id prefix is accepted | no (second answer → 1001) | 1001, -32602 | session.write |
@@ -610,6 +619,25 @@ connection lasts, alpd sends it every `question` and `question.resolved` event o
   `state` (`completed`, `failed`, `canceled`) and `error`. Turn ends are not listed in the answer and
   are not replayed after a reconnect. A second call without `turns` stops them. A daemon without the
   capability ignores `turns`.
+- **`attention: true`** (capability `session.attention`): alpd keeps, on each root's record (persisted,
+  so it survives a restart), the attention of its last turn, as Paseo keeps `requiresAttention` on its
+  host: a turn that ends `completed` sets `{ reason: "finished", at, turnId }`, `failed` sets
+  `{ reason: "error", at, turnId, message? }`, `canceled` clears it, as do the root's next
+  `turn.started` and `session.archive` (an archived root never has one). The answer then also holds
+  `attention: [{ sessionId, attention }]`, every root of the watched project that has one now, so a
+  client that was disconnected or closed when a turn ended learns of it from its next
+  `question.watch`; and the connection is sent an `attention` event (envelope `sessionId` = the root,
+  no `cursor`, epoch `attention-…`, never kept, attached or not) each time one is set (`attention`)
+  or cleared (no `attention`). `session.get` / `session.list` rows carry `attention` too. A second
+  call without `attention` stops the events. A daemon without the capability ignores `attention`
+  and answers no `attention`.
+- **`session.attention.clear { sessionId, at? }`** (capability `session.attention`): the user looked at
+  the root, so its attention is over for every client (Paseo's `clear_agent_attention`): alpd clears
+  it, persists that without changing the root's `updatedAt`, tells the watchers, and answers
+  `{ cleared: true }`; `{ cleared: false }` when it had none or, with `at`, when its attention is not
+  the one set at `at` (a look at an older ending never hides a newer one). A session alpd does not
+  know answers `1001`. apps/web acknowledges when the user opens, focuses or writes to the root, or
+  when an ending arrives on the root in front of them.
 
 The gateway forwards it with no `projectRoot` (and `turns: true` when the client sent it), filters the
 answer as `question.list`'s, and lets each event out only if its session's tree lies in the grant and,
@@ -739,6 +767,9 @@ The gateway exposes both with the `files.read` permission only (docs/alp/remote-
   detail.
 - The `usage` event and the session snapshot's `usage` (§8.5); old clients ignore an unknown event
   type (§7) and unknown snapshot fields.
+- `question.watch` `attention`, the `attention` event, `session.attention.clear`, the `attention` of
+  session rows and the `origin` of `user_message` (capability `session.attention`), §8.1, §12.2 (issue
+  #120). Old clients ignore the event type and properties; an old alpd ignores the param.
 - `question.watch` `turns` (capability `question.watch.turns`) and `workspace.files.search` (capability
   `workspace.files`), §12.2, §12.3; error reason `not_directory`.
 - `workspace.files.list` and `workspace.files.read` (capability `workspace.files.read`), §12.4; error

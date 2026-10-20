@@ -54,10 +54,13 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  *   failed: did not reach the host, or the runtime refused it. unknown: may have; retrySameId says
  *   whether resending under the same clientMessageId is safe (receipts dedupe it, §10) or the host
  *   asked for a new id (outcome_unknown).
- * @typedef {{ reason: 'finished' | 'error', at: number, turnId?: string, message?: string }} TurnAttention
+ * @typedef {{ reason: 'finished' | 'error', at: number, turnId?: string, message?: string, hostAt?: string }} TurnAttention
  *   Paseo's requiresAttention with its reason, for a root whose turn ended while the user did not
  *   see it: completed is finished, failed is error. Cleared when the user opens or focuses it,
- *   sends it a message, or it starts another turn. `at` tells one ending from the next.
+ *   sends it a message, or it starts another turn. `at` tells one ending from the next. With the
+ *   capability `session.attention` the host keeps it for every client (`hostAt`, its time there,
+ *   names it when this page acknowledges it); a root not listed yet keeps its entry until it is
+ *   (visibleAttention), an archived one never has one.
  * @typedef {{ id: string, rootId: string, text: string }} QueuedPrompt
  *   A message held back while the root works (Paseo's queue): sent by itself, once, when the
  *   root is idle with nothing else in flight, or sooner when the user says send now.
@@ -119,6 +122,27 @@ export function needsInput(state, root) {
  */
 export function attentionReason(state, root) {
   return state.turnAttention[root]?.reason;
+}
+
+/**
+ * A root's attention as the host keeps it (an ISO `at`), for this page; undefined when it is none.
+ * @param {any} attention @returns {TurnAttention | undefined}
+ */
+function hostEntry(attention) {
+  if (!attention || (attention.reason !== 'finished' && attention.reason !== 'error') || typeof attention.at !== 'string') return undefined;
+  const at = Date.parse(attention.at);
+  const message = attention.reason === 'error' && typeof attention.message === 'string' && attention.message.trim() ? attention.message : undefined;
+  return { reason: attention.reason, at: Number.isFinite(at) ? at : Date.now(), hostAt: attention.at, ...(typeof attention.turnId === 'string' ? { turnId: attention.turnId } : {}), ...(message ? { message } : {}) };
+}
+
+/**
+ * The turn attentions the page shows: of roots in the list (archived ones never are) or the open
+ * tree. A root that ended before it was listed keeps its entry and shows once it is.
+ * @param {State} state @returns {Record<string, TurnAttention>}
+ */
+export function visibleAttention(state) {
+  const shown = Object.entries(state.turnAttention).filter(([id]) => state.tree?.rootId === id || state.sessions.list.some(session => session.id === id && !session.archived));
+  return shown.length === Object.keys(state.turnAttention).length ? state.turnAttention : Object.fromEntries(shown);
 }
 
 /** The message shown when a token lacks project.read for workspace.files.search. */
@@ -238,6 +262,12 @@ export class Controller {
    * @type {{ read: number, events: Array<{ id: string, root?: string }> } | null}
    */
   #watchLog = null;
+  /**
+   * Attention events seen while a question.watch read with `attention` is on its way, applied after
+   * its answer as the question events are (root → attention, or null when cleared).
+   * @type {Array<[string, any]> | null}
+   */
+  #attentionLog = null;
   /** Latest question.list and History reads: an older answer that lands later is dropped. */
   #attentionRead = 0;
   #historyRead = 0;
@@ -543,6 +573,14 @@ export class Controller {
       if (this.#waiting && typeof id === 'string' && typeof root === 'string' && this.#waiting.get(id) !== root) { this.#waiting.set(id, root); this.#publishAttention(); }
       return envelope.cursor !== undefined || (!!this.#watching && root === this.#watching);
     }
+    if (event?.type === 'attention' && envelope.cursor === undefined) {
+      // The host's attention of a root (capability session.attention): set, or cleared when absent.
+      if (typeof envelope.sessionId === 'string') {
+        if (this.#attentionLog) this.#attentionLog.push([envelope.sessionId, event.attention ?? null]);
+        this.#hostAttention(envelope.sessionId, event.attention);
+      }
+      return false;
+    }
     if (event?.type === 'turn.ended' && envelope.cursor === undefined) {
       // question.watch { turns: true }: a copy of a root's turn end in a tree this connection is
       // not attached to. Attention only: it never reaches a projection or moves a cursor.
@@ -589,7 +627,43 @@ export class Controller {
     // Live events of the root itself (a replay is buffered above and never counts).
     const type = envelope.event?.type;
     if (envelope.sessionId === root && type === 'turn.ended') this.#turnEnded(root, envelope.event);
-    else if (envelope.sessionId === root && type === 'turn.started') this.clearAttention(root);
+    else if (envelope.sessionId === root && type === 'turn.started') this.#forgetAttention(root);
+  }
+
+  /** Whether the host keeps turn attention for every client (docs/protocol/alp-json-rpc-v1.md §12.2). */
+  get #sharedAttention() { return this.hasCapability('session.attention') && this.hasCapability('question.watch'); }
+
+  /**
+   * The host set or cleared a root's attention. One the user sees now is acknowledged at once, for
+   * every client, as Paseo clears attention on focus.
+   * @param {string} root @param {any} attention
+   */
+  #hostAttention(root, attention) {
+    const entry = hostEntry(attention);
+    if (!entry) { this.#forgetAttention(root); return; }
+    if (this.#seen(root)) { this.#forgetAttention(root); this.#acknowledge(root, entry.hostAt); return; }
+    if (this.#state.history.list.some(row => row.id === root && row.archived)) return;
+    if (this.#state.turnAttention[root]?.hostAt === entry.hostAt) return;
+    this.#set(state => ({ turnAttention: { ...state.turnAttention, [root]: entry } }));
+  }
+
+  /** Tells the host the user looked at a root's attention; quiet, the next watch read repairs a miss. @param {string} root @param {string | undefined} hostAt */
+  #acknowledge(root, hostAt) {
+    if (!this.#sharedAttention || this.#state.connection.phase !== 'open') return;
+    try {
+      void this.#client().request('session.attention.clear', { sessionId: root, ...(hostAt ? { at: hostAt } : {}) }).catch(() => {});
+    } catch {
+      // No client now: the next watch read shows it again, and a look clears it then.
+    }
+  }
+
+  /** Drops a root's attention from this page only (the host cleared it, or a new turn started). @param {string} root */
+  #forgetAttention(root) {
+    if (!this.#state.turnAttention[root]) return;
+    this.#set(state => {
+      const { [root]: _gone, ...rest } = state.turnAttention;
+      return { turnAttention: rest };
+    });
   }
 
   /**
@@ -599,12 +673,14 @@ export class Controller {
    * @param {string} root @param {any} event
    */
   #turnEnded(root, event) {
+    // The host keeps it for every client and tells of it with an attention event.
+    if (this.#sharedAttention) return;
     const reason = event?.state === 'completed' ? 'finished' : event?.state === 'failed' ? 'error' : undefined;
-    if (!reason) { this.clearAttention(root); return; }
+    if (!reason) { this.#forgetAttention(root); return; }
     if (this.#seen(root)) return;
-    // Only a row the page shows (or the open tree): an archived or unlisted root would keep the
-    // favicon asking with nothing to click.
-    if (root !== this.#state.tree?.rootId && !this.#state.sessions.list.some(row => row.id === root && !row.archived)) return;
+    // A root not listed yet keeps it until it is (visibleAttention shows only listed rows and the
+    // open tree, so the favicon never asks with nothing to click); an archived one never asks.
+    if (this.#state.history.list.some(row => row.id === root && row.archived)) return;
     const message = typeof event?.error?.message === 'string' && event.error.message.trim() ? event.error.message : undefined;
     /** @type {TurnAttention} */
     const entry = { reason, at: Date.now(), ...(typeof event?.turnId === 'string' ? { turnId: event.turnId } : {}), ...(reason === 'error' && message ? { message } : {}) };
@@ -632,13 +708,15 @@ export class Controller {
     if (shown && this.#seen(shown)) this.clearAttention(shown);
   }
 
-  /** Forgets a root's finished or error attention. @param {string | null | undefined} root */
+  /**
+   * The user looked at a root: its finished or error attention is over, on the host too, so every
+   * other client stops asking (Paseo's clear_agent_attention). @param {string | null | undefined} root
+   */
   clearAttention(root) {
-    if (!root || !this.#state.turnAttention[root]) return;
-    this.#set(state => {
-      const { [root]: _gone, ...rest } = state.turnAttention;
-      return { turnAttention: rest };
-    });
+    const entry = root ? this.#state.turnAttention[root] : undefined;
+    if (!root || !entry) return;
+    this.#forgetAttention(root);
+    this.#acknowledge(root, entry.hostAt);
   }
 
   /**
@@ -844,7 +922,10 @@ export class Controller {
         for (const [root, tree] of this.#trees) sessions = /** @type {any} */ (this.#mergeSummary(sessions, root, tree.projection));
         // A root just created may not be listed yet; keep it visible.
         const selected = state.selected && !list.some((/** @type {any} */ session) => session.id === state.selected) ? state.sessions.list.find(session => session.id === state.selected) : undefined;
-        const over = Object.keys(state.turnAttention).filter(root => state.turnAttention[root].at < readAt && list.some((/** @type {any} */ row) => row.id === root && (row.status === 'running' || row.busy)));
+        // Without the host's attention (which ends it itself), one older than this read of a root
+        // found running again is over.
+        const shared = this.#sharedAttention;
+        const over = shared ? [] : Object.keys(state.turnAttention).filter(root => state.turnAttention[root].at < readAt && list.some((/** @type {any} */ row) => row.id === root && (row.status === 'running' || row.busy)));
         const turnAttention = over.length ? Object.fromEntries(Object.entries(state.turnAttention).filter(([root]) => !over.includes(root))) : state.turnAttention;
         return { sessions: selected ? { ...sessions, list: [selected, ...sessions.list] } : sessions, turnAttention };
       });
@@ -869,10 +950,17 @@ export class Controller {
     const watch = this.hasCapability('question.watch');
     const log = watch ? { read, events: /** @type {Array<{ id: string, root?: string }>} */ ([]) } : null;
     this.#watchLog = log;
+    const shared = this.#sharedAttention;
+    /** @type {Array<[string, any]> | null} */
+    const attentionLog = shared ? [] : null;
+    this.#attentionLog = attentionLog;
     try {
       const turns = watch && this.hasCapability('question.watch.turns');
-      const result = await this.#client().request(watch ? 'question.watch' : 'question.list', { projectRoot: workspace, ...(turns ? { turns: true } : {}) });
+      const result = await this.#client().request(watch ? 'question.watch' : 'question.list', { projectRoot: workspace, ...(turns ? { turns: true } : {}), ...(shared ? { attention: true } : {}) });
       if (context !== this.#context || read !== this.#attentionRead) return;
+      // The host's attention of every root now, then what changed since it read it: a turn that
+      // ended while this page was away or disconnected asks again here.
+      if (shared && Array.isArray(result?.attention)) this.#applyHostAttention(result.attention, attentionLog ?? []);
       // The answer is every question waiting when the host read it; the events after it follow.
       const waiting = new Map();
       for (const question of Array.isArray(result?.questions) ? result.questions : []) {
@@ -890,7 +978,31 @@ export class Controller {
       // The next read tries again.
     } finally {
       if (this.#watchLog === log) this.#watchLog = null;
+      if (this.#attentionLog === attentionLog) this.#attentionLog = null;
     }
+  }
+
+  /**
+   * Takes the host's attention as the whole set, with the events seen while it was read applied
+   * after it. One the user sees now is acknowledged instead of shown.
+   * @param {any[]} listed @param {Array<[string, any]>} changes
+   */
+  #applyHostAttention(listed, changes) {
+    /** @type {Map<string, any>} */
+    const host = new Map();
+    for (const entry of listed) if (typeof entry?.sessionId === 'string' && hostEntry(entry.attention)) host.set(entry.sessionId, entry.attention);
+    for (const [root, attention] of changes) host.set(root, attention);
+    /** @type {Record<string, TurnAttention>} */
+    const turnAttention = {};
+    for (const [root, attention] of host) {
+      const entry = hostEntry(attention);
+      if (!entry || this.#state.history.list.some(row => row.id === root && row.archived)) continue;
+      if (this.#seen(root)) { this.#acknowledge(root, entry.hostAt); continue; }
+      // The same ending keeps its local time, so it is not notified again.
+      const known = this.#state.turnAttention[root];
+      turnAttention[root] = known?.hostAt === entry.hostAt ? known : entry;
+    }
+    if (JSON.stringify(turnAttention) !== JSON.stringify(this.#state.turnAttention)) this.#set({ turnAttention });
   }
 
   /** Whether the host pages and searches History itself (session.list.page, docs/protocol/alp-json-rpc-v1.md §12.1). */
@@ -1302,7 +1414,9 @@ export class Controller {
     if (context !== this.#context) return;
     if (this.#state.selected === id) this.selectSession(null);
     const { [id]: _gone, ...attention } = this.#state.attention;
+    const { [id]: _ended, ...turnAttention } = this.#state.turnAttention;
     this.#set(state => ({
+      turnAttention,
       sessions: { ...state.sessions, list: state.sessions.list.filter(row => row.id !== id) },
       history: { ...state.history, list: state.history.list.map(row => row.id === id ? { ...row, archived: true } : row) },
       attention,

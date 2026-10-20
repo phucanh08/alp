@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createLogger } from '@anhlp/alp-core/log';
 import type { Envelope, SessionSnapshot, SessionSpec } from '@anhlp/alp-runtime/index';
 import type { SessionError, SessionStatus } from '@anhlp/alp-protocol/session';
+import type { TurnAttention } from '@anhlp/alp-protocol/events';
 
 /**
  * alpd's durable state (plans/reference/ALPD.md §5, §66): one JSON record per session,
@@ -30,6 +31,8 @@ export type SessionRecord = {
   title?: string;
   /** Set aside by the user: closed, and listed only when asked (ALPD §61). */
   archived?: boolean;
+  /** A root's last turn that ended unseen, until a client acknowledges it or another turn starts (Paseo's requiresAttention). */
+  attention?: TurnAttention;
   createdAt: string;
   updatedAt: string;
 };

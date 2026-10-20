@@ -6,7 +6,11 @@ import type { RuntimeKind, MailEvent, Pin } from './dto.js';
 export type AlpError = { message: string; code?: string };
 
 export type TimelineItem =
-  | { kind: 'user_message'; id: string; text: string; clientMessageId?: string; /** How many images the message carried; their data is not replayed. */ images?: number }
+  | {
+    kind: 'user_message'; id: string; text: string; clientMessageId?: string; /** How many images the message carried; their data is not replayed. */ images?: number;
+    /** Who wrote it: the user, or ALP itself (mail, a brief, a resume); absent when the runtime cannot tell. Only the user's words name a root (ALPD §15). */
+    origin?: TurnOrigin;
+  }
   | { kind: 'assistant_message'; id: string; text: string }
   /** Something about ALP as a whole the user should see, such as a usage limit or a pause (ALPD §29). */
   | { kind: 'notice'; id: string; level: 'info' | 'warning' | 'error'; text: string }
@@ -116,6 +120,13 @@ export type AssignmentSnapshot = {
 /** runtime: a turn the native runtime started by itself, such as Claude after a background task ended. */
 export type TurnOrigin = 'user' | 'wake' | 'assignment' | 'runtime';
 
+/**
+ * A root's turn that ended while nobody looked (Paseo's attention): `finished` for a completed turn,
+ * `error` for a failed one. alpd keeps it for every client until one acknowledges it or the root
+ * starts another turn (docs/protocol/alp-json-rpc-v1.md §12.2).
+ */
+export type TurnAttention = { reason: 'finished' | 'error'; at: string; turnId?: string; message?: string };
+
 /** A question an agent asked the user with alp_ask to: "user". */
 export type UserQuestion = {
   id: string;
@@ -162,7 +173,9 @@ export type AlpEvent =
   | { type: 'question.resolved'; questionId: string; outcome: 'answered' | 'dismissed' | 'timeout' | 'canceled'; answer?: string }
   /** Emitted on the session that pinned it (plans/reference/ALPD.md §18). */
   | { type: 'pin'; pin: Pin }
-  | { type: 'unpin'; pinId: string; reason: 'unpinned' | 'session_ended' };
+  | { type: 'unpin'; pinId: string; reason: 'unpinned' | 'session_ended' }
+  /** A root's attention set, or cleared when absent: sent only to `question.watch { attention: true }` connections, never kept. */
+  | { type: 'attention'; attention?: TurnAttention };
 
 export type Envelope = {
   sessionId: string;

@@ -343,6 +343,31 @@
       ],
       "additionalProperties": true
     },
+    "attention": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "enum": [
+            "finished",
+            "error"
+          ]
+        },
+        "at": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "at"
+      ],
+      "additionalProperties": true
+    },
     "spec": {
       "type": "object",
       "properties": {
@@ -889,6 +914,21 @@
             "reason"
           ],
           "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "attention"
+            },
+            "attention": {
+              "$ref": "#/$defs/attention"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": true
         }
       ]
     },
@@ -915,7 +955,8 @@
               "question",
               "question.resolved",
               "pin",
-              "unpin"
+              "unpin",
+              "attention"
             ]
           }
         }
@@ -945,6 +986,14 @@
             "images": {
               "type": "integer",
               "minimum": 1
+            },
+            "origin": {
+              "enum": [
+                "user",
+                "wake",
+                "assignment",
+                "runtime"
+              ]
             }
           },
           "required": [
@@ -1536,6 +1585,9 @@
         },
         "archived": {
           "type": "boolean"
+        },
+        "attention": {
+          "$ref": "#/$defs/attention"
         },
         "lastError": {
           "type": "object",

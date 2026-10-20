@@ -1,6 +1,6 @@
 /** Portable JSON-RPC structures; implementations and provider SDKs stay outside protocol. */
 import type { RuntimeKind, Pin } from './dto.js';
-import type { AlpError, Envelope, SessionSnapshot, TreeStatus, UserQuestion } from './events.js';
+import type { AlpError, Envelope, SessionSnapshot, TreeStatus, TurnAttention, UserQuestion } from './events.js';
 import type { PauseState, PromptContent, RecallAnswer, SessionPreview, SessionSpec, SessionSummary } from './session.js';
 import type { EntryName, LanguageSetting, LibraryEntryRow, LibraryKind, LibraryScope, LibrarySource, TaskRow, TeamRow } from './dto.js';
 import type { ScheduleJob, ScheduleStatus } from './schedule.js';
@@ -12,7 +12,7 @@ export type RpcResponse = { jsonrpc: '2.0'; id: RpcId } & ({ result: unknown; er
 export type EventNotification = { jsonrpc: '2.0'; method: 'event'; params: Envelope };
 
 /** Names a daemon may list in its daemon.hello result (schema/methods-v1.json `capabilities`). */
-export type Capability = 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
+export type Capability = 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -51,8 +51,10 @@ export type RpcMethodMap = {
   'assignment.recall': { params: { assignmentId?: string; taskId?: string; projectRoot?: string; question: string }; result: RecallAnswer };
   'board.list': { params: { projectRoot: string }; result: { pins: Pin[] } };
   'question.list': { params: { projectRoot?: string }; result: { questions: UserQuestion[] } };
-  /** Capability `question.watch`: the waiting questions now; then this connection is told of every tree's `question` and `question.resolved` (of `projectRoot` when given). `turns` (capability `question.watch.turns`): also every root's `turn.ended`. */
-  'question.watch': { params: { projectRoot?: string; turns?: boolean }; result: { questions: UserQuestion[] } };
+  /** Capability `question.watch`: the waiting questions now; then this connection is told of every tree's `question` and `question.resolved` (of `projectRoot` when given). `turns` (capability `question.watch.turns`): also every root's `turn.ended`. `attention` (capability `session.attention`): also each root's attention, now and as it changes. */
+  'question.watch': { params: { projectRoot?: string; turns?: boolean; attention?: boolean }; result: { questions: UserQuestion[]; attention?: Array<{ sessionId: string; attention: TurnAttention }> } };
+  /** Capability `session.attention`: acknowledges a root's attention for every client; with `at`, only that one (a later turn's stays). */
+  'session.attention.clear': { params: { sessionId: string; at?: string }; result: { cleared: boolean } };
   /** Capability `workspace.files`: files under `projectRoot` whose relative path matches `query`, best first; read-only, links not followed. */
   'workspace.files.search': { params: { projectRoot: string; query?: string; limit?: number }; result: { files: Array<{ path: string }>; truncated?: boolean } };
   /** Capability `workspace.files.read`: the entries of a directory under `projectRoot` (its root when `path` is left out); links, blocked and (unless `includeIgnored`) .gitignore'd entries left out. */

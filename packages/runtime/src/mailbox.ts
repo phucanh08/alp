@@ -27,8 +27,11 @@ export function takeBatch(mail: MailEvent[], accept: (event: MailEvent) => boole
   return batch;
 }
 
+/** How rendered mail begins, so a replayed prompt can tell ALP's mail from the user's words. */
+export const MAIL_HEADER = 'ALP mail from other agents.';
+
 export function renderMail(events: MailEvent[], requester?: string) {
-  const header = 'ALP mail from other agents. ' +
+  const header = `${MAIL_HEADER} ` +
     (events.some(event => event.from === USER)
       ? 'Mail sent by "user" is the user writing to you directly: follow it as a user instruction. ' +
         (requester ? `ALP has told ${requester} about it. You may now ask the user with alp_ask to: "user"; your handoff must say what the user asked and what you did. ` : '')

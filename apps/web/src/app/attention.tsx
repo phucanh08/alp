@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { attentionReason, needsInput } from '../lib/controller.js';
+import { attentionReason, needsInput, visibleAttention } from '../lib/controller.js';
 import { FAVICONS, faviconStatus, newlyEnded, newlyWaiting, notificationBody, turnNotification, userSees } from '../lib/attention.js';
 import { baseName, sessionName } from '../lib/format';
 import { bucketOf } from './Sidebar';
@@ -41,7 +41,9 @@ export function useNotificationPermission() {
 export function usePageAttention({ onOpenSession }: { onOpenSession: (id: string) => void }) {
   const state = useAppState();
   const controller = useController();
-  const { workspace, sessions, tree, attention, turnAttention, selected, focus } = state;
+  const { workspace, sessions, tree, attention, selected, focus } = state;
+  // A root not listed yet waits: its notification comes once its row does (visibleAttention).
+  const turnAttention = React.useMemo(() => visibleAttention(state), [state.turnAttention, sessions, tree]);
 
   // Whether the page is visible and focused, for the controller: a turn that ends on the session
   // in front of the user asks for nothing, and coming back to one clears its attention.
@@ -56,7 +58,7 @@ export function usePageAttention({ onOpenSession }: { onOpenSession: (id: string
 
   // Favicon: any session running, else any asking for the user (a question, a turn ended unseen).
   // Only listed rows count, so a root archived since never keeps the favicon asking.
-  const status = faviconStatus(sessions.list.map(session => bucketOf(session, needsInput(state, session.id), attentionReason(state, session.id))), Object.keys(turnAttention).some(id => tree?.rootId === id || sessions.list.some(session => session.id === id && !session.archived)));
+  const status = faviconStatus(sessions.list.map(session => bucketOf(session, needsInput(state, session.id), attentionReason(state, session.id))), Object.keys(turnAttention).length > 0);
   React.useEffect(() => {
     let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
     if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.append(link); }

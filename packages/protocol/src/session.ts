@@ -1,5 +1,5 @@
 import type { RuntimeKind } from './dto.js';
-import type { SessionSnapshot } from './events.js';
+import type { SessionSnapshot, TurnAttention } from './events.js';
 /** MCP servers a client adds to the agent's own; the agent's names win no collisions. */
 export type HostMcpServer =
   | { type: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
@@ -91,6 +91,8 @@ export type SessionSummary = SessionSnapshot & {
   status: SessionStatus;
   title?: string;
   archived?: boolean;
+  /** A root's turn that ended unseen, until a client acknowledges it (capability `session.attention`). */
+  attention?: TurnAttention;
   lastError?: SessionError;
   createdAt?: string;
   updatedAt?: string;

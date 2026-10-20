@@ -51,7 +51,7 @@ const MAX_DEPTH = 32;
 /** Scope decisions remembered per connection; past this the cache starts again. */
 const MAX_CACHED = 10_000;
 /** Events question.watch sends of trees a client did not attach, as copies without a cursor. */
-const WATCHED = new Set(['question', 'question.resolved', 'turn.ended']);
+const WATCHED = new Set(['question', 'question.resolved', 'turn.ended', 'attention']);
 
 /** A path relative to a workspace, under it: no root, drive, `.`/`..` or empty segment, no NUL. @param {unknown} file */
 function relativeFile(file) {
@@ -482,12 +482,19 @@ export class ClientConnection {
    */
   #safeSession(session) {
     if (!session || typeof session !== 'object' || Array.isArray(session)) return session;
-    if (session.lastError === undefined && typeof session.parked !== 'string') return session;
+    if (session.lastError === undefined && typeof session.parked !== 'string' && session.attention?.message === undefined) return session;
     return {
       ...session,
       ...(session.lastError !== undefined ? { lastError: safeAlpError(session.lastError, this.#grant.workspaces, { home: HOME }) } : {}),
       ...(typeof session.parked === 'string' ? { parked: this.#safeText(session.parked) } : {}),
+      ...(session.attention?.message !== undefined ? { attention: this.#safeAttention(session.attention) } : {}),
     };
+  }
+
+  /** A root's attention, its failed turn's message through safeErrorText as turn.ended's error. @param {any} attention */
+  #safeAttention(attention) {
+    if (!attention || typeof attention !== 'object' || attention.message === undefined) return attention;
+    return { ...attention, message: this.#safeText(attention.message) };
   }
 
   /** A result whose `session` (and `sessions`) go through #safeSession. @param {any} result */
@@ -513,6 +520,7 @@ export class ClientConnection {
     if ((event.type === 'session.failed' || event.type === 'prompt.failed' || event.type === 'turn.ended') && event.error !== undefined) safe = { ...event, error: safeAlpError(event.error, this.#grant.workspaces, { home: HOME }) };
     else if (event.type === 'session.opened' || event.type === 'session.updated') safe = { ...event, session: this.#safeSession(event.session) };
     else if (event.type === 'item' && event.item?.kind === 'notice' && typeof event.item.text === 'string') safe = { ...event, item: { ...event.item, text: this.#safeText(event.item.text, { lines: true }) } };
+    else if (event.type === 'attention' && event.attention?.message !== undefined) safe = { ...event, attention: this.#safeAttention(event.attention) };
     return safe === event ? envelope : { ...envelope, event: safe };
   }
 
@@ -969,16 +977,23 @@ export class ClientConnection {
       const previous = this.#watch;
       this.#watch = only;
       let result;
-      try { result = await this.#call('question.watch', params.turns === true ? { turns: true } : {}); }
+      try { result = await this.#call('question.watch', { ...(params.turns === true ? { turns: true } : {}), ...(params.attention === true ? { attention: true } : {}) }); }
       catch (error) { this.#watch = previous; throw error; }
+      /** @param {string} sessionId */
+      const inScope = async sessionId => {
+        const scoped = await this.#resolve(sessionId).catch(() => undefined);
+        return !!scoped && (!only || scoped.projectRoot === only.path || scoped.projectRoot === only.canonical);
+      };
       const kept = [];
-      for (const question of Array.isArray(result?.questions) ? result.questions : []) {
-        const scoped = await this.#resolve(question.sessionId).catch(() => undefined);
-        if (!scoped || (only && scoped.projectRoot !== only.path && scoped.projectRoot !== only.canonical)) continue;
-        kept.push(question);
-      }
-      return { ...result, questions: kept };
+      for (const question of Array.isArray(result?.questions) ? result.questions : []) if (await inScope(question.sessionId)) kept.push(question);
+      if (!Array.isArray(result?.attention)) return { ...result, questions: kept };
+      const attention = [];
+      for (const entry of result.attention) if (typeof entry?.sessionId === 'string' && await inScope(entry.sessionId)) attention.push({ ...entry, attention: this.#safeAttention(entry.attention) });
+      return { ...result, questions: kept, attention };
     },
+
+    // Acknowledging a root's attention is what a look at it does: a reader may (docs/alp/remote-gateway.md §5.1).
+    'session.attention.clear': async params => { await this.#resolve(params.sessionId); return this.#call('session.attention.clear', params); },
 
     'question.answer': async params => {
       // An exact id only: alpd accepts a unique prefix, which could match a question elsewhere.

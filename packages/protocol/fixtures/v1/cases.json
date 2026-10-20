@@ -4117,6 +4117,200 @@
      "cancelledAt": "2026-10-20T09:59:30.000Z"
     }
    }
+  },
+  {
+   "name": "event attention",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "attention-1",
+    "seq": 0,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "attention",
+     "attention": {
+      "reason": "error",
+      "at": "2026-10-15T00:00:00.000Z",
+      "turnId": "turn-2",
+      "message": "Hết hạn mức"
+     }
+    }
+   }
+  },
+  {
+   "name": "event attention cleared",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "attention-1",
+    "seq": 0,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "attention"
+    }
+   }
+  },
+  {
+   "name": "event attention with an unknown reason",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "attention-1",
+    "seq": 0,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "attention",
+     "attention": {
+      "reason": "done",
+      "at": "2026-10-15T00:00:00.000Z"
+     }
+    }
+   }
+  },
+  {
+   "name": "item user_message with origin",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "user_message",
+      "id": "user:alp-wake-1",
+      "text": "ALP mail from other agents.",
+      "clientMessageId": "alp-wake-1",
+      "origin": "wake"
+     }
+    }
+   }
+  },
+  {
+   "name": "item user_message with an unknown origin",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "user_message",
+      "id": "user:m-3",
+      "text": "x",
+      "origin": "robot"
+     }
+    }
+   }
+  },
+  {
+   "name": "question.watch with attention",
+   "check": "params",
+   "method": "question.watch",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "turns": true,
+    "attention": true
+   }
+  },
+  {
+   "name": "question.watch with a numeric attention",
+   "check": "params",
+   "method": "question.watch",
+   "valid": false,
+   "value": {
+    "attention": 1
+   }
+  },
+  {
+   "name": "question.watch with attention",
+   "check": "result",
+   "method": "question.watch",
+   "valid": true,
+   "value": {
+    "questions": [],
+    "attention": [
+     {
+      "sessionId": "ses_fixture",
+      "attention": {
+       "reason": "finished",
+       "at": "2026-10-15T00:00:00.000Z",
+       "turnId": "turn-1"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "question.watch with an unknown attention reason",
+   "check": "result",
+   "method": "question.watch",
+   "valid": false,
+   "value": {
+    "questions": [],
+    "attention": [
+     {
+      "sessionId": "ses_fixture",
+      "attention": {
+       "reason": "done",
+       "at": "2026-10-15T00:00:00.000Z"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "session.attention.clear params",
+   "check": "params",
+   "method": "session.attention.clear",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture"
+   }
+  },
+  {
+   "name": "session.attention.clear with at",
+   "check": "params",
+   "method": "session.attention.clear",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "at": "2026-10-15T00:00:00.000Z"
+   }
+  },
+  {
+   "name": "session.attention.clear without sessionId",
+   "check": "params",
+   "method": "session.attention.clear",
+   "valid": false,
+   "value": {}
+  },
+  {
+   "name": "session.attention.clear result",
+   "check": "result",
+   "method": "session.attention.clear",
+   "valid": true,
+   "value": {
+    "cleared": true
+   }
+  },
+  {
+   "name": "session.attention.clear without cleared",
+   "check": "result",
+   "method": "session.attention.clear",
+   "valid": false,
+   "value": {}
   }
  ]
 }

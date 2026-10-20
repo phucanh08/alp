@@ -11,7 +11,7 @@ export { ERROR } from '@anhlp/alp-protocol';
 import { DEFAULT_MODEL, models, modes, thinkingOptions, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '@anhlp/alp-runtime/index';
 import type { Receipt, SessionRecord, SessionStatus, Store, UnreadableReceipt } from './store.js';
 import type { PromptContent, SessionSummary } from '@anhlp/alp-protocol/session';
-import type { ScheduleJob } from '@anhlp/alp-protocol/index';
+import type { ScheduleJob, TurnAttention } from '@anhlp/alp-protocol/index';
 import { RpcError } from './rpc-error.js';
 import { createOperations, type OperationsOptions } from './operations.js';
 import { FileAccessError, FilesError, listWorkspaceDirectory, readWorkspaceFile, searchWorkspaceFiles } from './files.js';
@@ -118,6 +118,17 @@ const PROMPT_TITLE_CHARS = 60;
 function titleFromPrompt(text: string): string | undefined {
   const line = text.split(/\r?\n/).map(entry => entry.replace(/\s+/g, ' ').trim()).find(Boolean);
   return line ? [...line].slice(0, PROMPT_TITLE_CHARS).join('').trim() || undefined : undefined;
+}
+
+/**
+ * Whether a message is the user's own words, which alone may name a root: ALP's mail, briefs,
+ * resumes and scheduled jobs (`alp-` ids) never do. A runtime says who wrote it in `origin`;
+ * without it, only a message a client sent (its clientMessageId) counts, so a replayed message
+ * nobody can place does not.
+ */
+function fromUser(item: { origin?: string; clientMessageId?: string }) {
+  if (item.clientMessageId?.startsWith('alp-')) return false;
+  return item.origin !== undefined ? item.origin === 'user' : item.clientMessageId !== undefined;
 }
 
 /**
@@ -270,8 +281,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   restored = store ? restore() : Promise.resolve();
 
   const deliver = (connection: Connection, envelope: Envelope) => connection.send({ jsonrpc: '2.0', method: 'event', params: envelope });
-  /** Connections that called question.watch, with the projectRoot they asked for and whether they want roots' turn ends. */
-  const watchers = new Map<Connection, { projectRoot?: string; turns: boolean }>();
+  /** Connections that called question.watch, with the projectRoot they asked for and whether they want roots' turn ends and attention. */
+  const watchers = new Map<Connection, { projectRoot?: string; turns: boolean; attention: boolean }>();
 
   /** The project of a tree, live or recorded. */
   function projectOf(root: string) {
@@ -293,6 +304,37 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       if (projectRoot !== undefined && project !== projectRoot) continue;
       deliver(connection, announced);
     }
+  }
+
+  /**
+   * Tells the connections watching attention that a root's changed: `attention` when set, none when
+   * cleared. Never kept: a client reads the current ones from question.watch (§12.2), so a change
+   * missed while it was away is not lost.
+   */
+  function tellAttention(root: string, attention: TurnAttention | undefined) {
+    if (!watchers.size) return;
+    const project = projectOf(root);
+    const envelope: Envelope = { sessionId: root, epoch: `attention-${startedAt}`, seq: 0, ts: new Date().toISOString(), event: { type: 'attention', ...(attention ? { attention } : {}) } };
+    for (const [connection, watch] of watchers) {
+      if (!watch.attention) continue;
+      if (watch.projectRoot !== undefined && project !== watch.projectRoot) continue;
+      deliver(connection, envelope);
+    }
+  }
+
+  /** How many times each root's attention was set or cleared by something other than an acknowledgement. */
+  const attentionChanges = new Map<string, number>();
+  const attentionChanged = (root: string) => attentionChanges.set(root, (attentionChanges.get(root) ?? 0) + 1);
+
+  /** The attention of the roots of `projectRoot` (every project when absent): archived roots never ask. */
+  function attentionOf(projectRoot?: string) {
+    const found: Array<{ sessionId: string; attention: TurnAttention }> = [];
+    for (const record of records.values()) {
+      if (record.id !== record.rootId || !record.attention || record.archived) continue;
+      if (projectRoot !== undefined && projectOf(record.id) !== projectRoot) continue;
+      found.push({ sessionId: record.id, attention: record.attention });
+    }
+    return found;
   }
 
   /** Records a change; the write is queued, and a failure is logged and counted in daemon.status. */
@@ -333,20 +375,30 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     if (!record) return false;
     if (event.type === 'session.updated') save(record, { session: { ...record.session, ...event.session, ...(event.session.parked ? {} : { parked: undefined }) } });
     // Work on an archived session brings it back.
-    else if (event.type === 'turn.started') save(record, { status: 'running', activeTurnId: event.turnId, archived: undefined });
+    // A root's new turn ends the attention of its last one, as Paseo clears it then.
+    else if (event.type === 'turn.started') save(record, { status: 'running', activeTurnId: event.turnId, archived: undefined, ...(sessionId === root ? { attention: undefined } : {}) });
     else if (event.type === 'turn.ended') save(record, { status: 'idle', activeTurnId: undefined,
+      // A root's turn that completed or failed asks every client for a look until one acknowledges it (Paseo's checkAndSetAttention).
+      ...(sessionId === root ? { attention: turnAttention(event) } : {}),
       ...(record.session ? { session: { ...record.session, parked: event.state === 'failed' ? runtime.snapshot(sessionId)?.parked : undefined } } : {}),
       ...(event.state === 'failed' ? { lastError: { message: event.error?.message ?? 'Turn failed' } } : {}) });
     // The latest usage, for a closed session's summary; written with the record's next change.
     else if (event.type === 'usage' && record.session) record.session = { ...record.session, usage: event.usage };
     else if (event.type === 'session.failed') save(record, { status: 'error', lastError: event.error });
     else if (event.type === 'session.closed') save(record, { status: record.status === 'error' ? 'error' : 'closed', activeTurnId: undefined });
-    else if (event.type === 'item' && sessionId === root && !record.title && event.item.kind === 'user_message' && !event.item.clientMessageId?.startsWith('alp-')) {
+    else if (event.type === 'item' && sessionId === root && !record.title && event.item.kind === 'user_message' && fromUser(event.item)) {
       // The user's first message names an unnamed root, as Paseo names an agent (ALPD §15).
       const title = titleFromPrompt(event.item.text);
       if (title) { save(record, { title }); return true; }
     }
     return false;
+  }
+
+  /** What a root's ended turn asks of the user: a look when it completed, attention when it failed, nothing when canceled. */
+  function turnAttention(event: Extract<AlpEvent, { type: 'turn.ended' }>): TurnAttention | undefined {
+    if (event.state === 'canceled') return undefined;
+    const message = event.error?.message?.trim();
+    return { reason: event.state === 'completed' ? 'finished' : 'error', at: new Date().toISOString(), turnId: event.turnId, ...(event.state === 'failed' && message ? { message: event.error!.message } : {}) };
   }
 
   /**
@@ -381,7 +433,10 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       log.push(envelope);
       if (log.length > TREE_LOG_LIMIT) log.splice(0, log.length - TREE_LOG_LIMIT);
       logs.set(root, log);
+      const before = records.get(root)?.attention;
       named = track(sessionId, root, event);
+      const after = records.get(root)?.attention;
+      if (after !== before) { attentionChanged(root); tellAttention(root, after); }
     }
     for (const connection of attached.get(root) ?? []) deliver(connection, envelope);
     if (event.type === 'question' || event.type === 'question.resolved') tellWatchers(root, envelope);
@@ -714,7 +769,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     const session = live ?? record?.session;
     if (!session) return undefined;
     const status: SessionStatus = live ? (live.activeTurnId ? 'running' : 'idle') : record?.status === 'error' ? 'error' : 'closed';
-    return { ...session, ...(live ? {} : { busy: false, activeTurnId: undefined }), status, title: record?.title, ...(record?.archived ? { archived: true } : {}), lastError: record?.lastError, createdAt: record?.createdAt, updatedAt: record?.updatedAt };
+    return { ...session, ...(live ? {} : { busy: false, activeTurnId: undefined }), status, title: record?.title, ...(record?.archived ? { archived: true } : {}), ...(record?.attention && !record.archived ? { attention: record.attention } : {}), lastError: record?.lastError, createdAt: record?.createdAt, updatedAt: record?.updatedAt };
   }
 
   /** The record of a root the user acts on. */
@@ -886,12 +941,41 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
      * The questions waiting now; from then on this connection is told of `question` and
      * `question.resolved` in every tree, or those of `projectRoot`, attached or not. Calling it
      * again replaces the filter; it lasts as long as the connection (ALPD §15). With `turns`, also
-     * of `turn.ended` of every root (docs/protocol/alp-json-rpc-v1.md §12.2).
+     * of `turn.ended` of every root; with `attention`, also of each root's attention, now and as it
+     * changes (docs/protocol/alp-json-rpc-v1.md §12.2).
      */
-    'question.watch'(connection, { projectRoot, turns } = {}) {
+    'question.watch'(connection, { projectRoot, turns, attention } = {}) {
       // No await between registering and listing: an event either is in the list or follows it.
-      watchers.set(connection, { projectRoot, turns: turns === true });
-      return { questions: runtime.questions().filter(question => projectRoot === undefined || projectOf(question.rootId) === projectRoot) };
+      watchers.set(connection, { projectRoot, turns: turns === true, attention: attention === true });
+      return {
+        questions: runtime.questions().filter(question => projectRoot === undefined || projectOf(question.rootId) === projectRoot),
+        ...(attention === true ? { attention: attentionOf(projectRoot) } : {}),
+      };
+    },
+
+    /**
+     * Acknowledges a root's attention for every client, as Paseo's clear_agent_attention; with `at`,
+     * only the attention set then, so a look at an older turn end never hides a newer one (§12.2).
+     */
+    async 'session.attention.clear'(_connection, { sessionId, at }) {
+      if (typeof sessionId !== 'string') throw new RpcError(-32602, 'sessionId is required');
+      if (at !== undefined && typeof at !== 'string') throw new RpcError(-32602, 'at must be a string');
+      const record = records.get(sessionId);
+      if (!record) throw new RpcError(ERROR.notFound, `No session ${sessionId}`);
+      const attention = record.attention;
+      if (!attention || (at !== undefined && attention.at !== at)) return { cleared: false };
+      // Not a change of the session: its place in session.list stays.
+      const changes = attentionChanges.get(record.id) ?? 0;
+      record.attention = undefined;
+      try { await store?.put(record); }
+      catch (error) {
+        // Brought back only if its attention did not change meanwhile: a turn that started since ended it anyway.
+        if ((attentionChanges.get(record.id) ?? 0) === changes) record.attention = attention;
+        throw persistenceFailed(`the attention of ${record.id}`, error);
+      }
+      // What holds now: a turn that ended while the write was on its way set a newer one, which stays.
+      tellAttention(record.id, record.attention);
+      return { cleared: true };
     },
 
     /**
@@ -1116,10 +1200,12 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     async 'session.archive'(_connection, { sessionId, archived = true }) {
       const record = rootRecord(sessionId);
       if (archived && runtime.snapshot(record.id)) await runtime.close(record.id);
-      const before = record.archived;
-      Object.assign(record, { archived: archived === true ? true : undefined });
+      const before = { archived: record.archived, attention: record.attention };
+      // An archived root never asks for attention.
+      Object.assign(record, { archived: archived === true ? true : undefined }, archived === true ? { attention: undefined } : {});
       try { await store?.put(record); }
-      catch (error) { record.archived = before; throw persistenceFailed(`the archive state of ${record.id}`, error); }
+      catch (error) { Object.assign(record, before); throw persistenceFailed(`the archive state of ${record.id}`, error); }
+      if (before.attention && !record.attention) { attentionChanged(record.id); tellAttention(record.id, undefined); }
       return { session: summary(record.id) };
     },
 
@@ -1286,7 +1372,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...operations.capabilities];
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {
