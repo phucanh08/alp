@@ -2086,7 +2086,7 @@ export class Controller {
   async previewSession(spec, { signal } = {}) {
     const blocked = this.previewBlock();
     if (blocked) throw new ConfigurationError(blocked);
-    const result = await this.#client().request('session.preview', { spec: { ...spec, cwd: this.#state.workspace } }, { timeoutMs: this.#options.requestTimeoutMs });
+    const result = await this.#client().request('session.preview', { spec: { ...spec, cwd: this.#state.workspace } }, { timeoutMs: this.#options.requestTimeoutMs, ...(signal ? { signal } : {}) });
     const preview = parsePreview(result);
     if (!preview) throw new ConfigurationError('The host answered the preview in a form this app does not read.');
     return preview;

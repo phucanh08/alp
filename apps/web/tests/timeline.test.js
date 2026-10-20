@@ -149,3 +149,14 @@ test('a child item in a bounded tail remains reachable before its older opening 
   assert.ok(members(state).some(member => member.id === 'child'));
   assert.equal(entriesOf(state, 'child')[0].item.text, 'child tail');
 });
+
+test('an older child opening enriches tail membership while newer descriptor fields win', () => {
+  let state = project(emptyProjection('r'), item(600, 'child-item', 'child tail', 'child'));
+  state = project(state, env(601, { type: 'session.updated', session: { title: 'Current title' } }, 'child'));
+  state = prependHistory(state, [env(1, { type: 'session.opened', session: { id: 'child', parentId: 'r', agent: 'peer', title: 'Old title', runtime: 'codex' } }, 'child')]);
+  assert.equal(state.sessions.child.agent, 'peer');
+  assert.equal(state.sessions.child.parentId, 'r');
+  assert.equal(state.sessions.child.runtime, 'codex');
+  assert.equal(state.sessions.child.title, 'Current title');
+  assert.equal(entriesOf(state, 'child')[0].item.text, 'child tail');
+});

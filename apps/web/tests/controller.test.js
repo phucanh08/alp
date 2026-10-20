@@ -772,6 +772,16 @@ test('session.preview is not asked without session.read', async t => {
   assert.equal(w.host.count('session.preview'), 0);
 });
 
+test('session.preview honors caller cancellation before sending a request', async t => {
+  const w = setup(t);
+  await connected(w);
+  await until(() => w.state().catalog.status === 'ready', 'catalog');
+  const abort = new AbortController();
+  abort.abort();
+  await assert.rejects(w.controller.previewSession({}, { signal: abort.signal }), /abort/i);
+  assert.equal(w.host.count('session.preview'), 0);
+});
+
 test('a session started with a first message and thinking: spec.thinking sent, the message delivered once after attach, named by the host after it, the choices remembered', async t => {
   const storage = memoryStorage();
   const w = setup(t, undefined, { storage });
