@@ -80,6 +80,14 @@ export const toolShapes: Record<string, Record<string, z.ZodType>> = {
     issue: z.number().int().positive().optional(),
     labels: z.array(z.string().min(1).max(50)).max(10).optional(),
   },
+  alp_schedule: {
+    action: z.enum(['create', 'list', 'get', 'cancel']),
+    dueAt: z.string().min(1).max(80).optional(),
+    prompt: z.string().min(1).max(8000).optional(),
+    requestId: z.string().min(1).max(200).optional(),
+    id: z.string().min(1).optional(),
+    status: z.enum(['pending', 'delivered', 'failed', 'cancelled']).optional(),
+  },
   alp_task: {
     action: z.enum(['create', 'update', 'link', 'start', 'close', 'reopen', 'gate', 'clear', 'pour', 'formulas', 'show', 'list', 'ready']),
     id: z.string().min(1).optional(),

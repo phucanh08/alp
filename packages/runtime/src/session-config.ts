@@ -5,7 +5,7 @@ import type { ResolvedSession, RuntimeKind } from './resolve.js';
 import { models, thinkingOptionsFor } from './catalog.js';
 import { claudeSandboxAvailable, SKILL_PLUGIN } from './claude-transport.js';
 import { languageInstruction } from './language.js';
-import { HANDOFF_TOOL, WAIT_TOOL, SEND_TOOL, MERGE_TOOL, VERIFY_TOOL, DISCARD_TOOL, CANCEL_TOOL, RECALL_TOOL, PIN_TOOL, BOARD_TOOL, UNPIN_TOOL, ASK_TOOL, LESSON_TOOL, SKILL_TOOL, ISSUE_TOOL, mainOf, taskActions, taskTool } from './tools.js';
+import { HANDOFF_TOOL, WAIT_TOOL, SEND_TOOL, MERGE_TOOL, VERIFY_TOOL, DISCARD_TOOL, CANCEL_TOOL, RECALL_TOOL, PIN_TOOL, BOARD_TOOL, UNPIN_TOOL, ASK_TOOL, LESSON_TOOL, SKILL_TOOL, ISSUE_TOOL, SCHEDULE_TOOL, mainOf, taskActions, taskTool } from './tools.js';
 
 import { COMPACT_SHARE } from './runtime-context.js';
 
@@ -293,7 +293,7 @@ export function nativeSessionConfig(
       ...(targets.length || parentAgent ? [SEND_TOOL] : []),
       ...(parentAgent ? [HANDOFF_TOOL] : []),
       ...(supervised ? [LESSON_TOOL, SKILL_TOOL] : []),
-      ...(!parentAgent && mapping.agent.name === mainOf(mapping) ? [ISSUE_TOOL] : []),
+      ...(!parentAgent && mapping.agent.name === mainOf(mapping) ? [ISSUE_TOOL, SCHEDULE_TOOL] : []),
       ASK_TOOL,
       PIN_TOOL,
       BOARD_TOOL,

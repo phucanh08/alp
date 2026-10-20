@@ -5,7 +5,7 @@ import { createLogger } from '@anhlp/alp-core/log';
 import { PROMPT_IMAGES, base64Bytes } from '@anhlp/alp-protocol';
 import { createBoardDomain } from './board-domain.js';
 import { createWorktreeDomain } from './worktree-domain.js';
-import { type RuntimeTransport, type RuntimeOptions, type OpenOptions, type PromptContent, type PromptInput, type AlpRuntime, type SessionPreview, type RecoveryOutcome, type Pause, type PauseState, type RecallAnswer } from './contracts.js';
+import { type RuntimeTransport, type RuntimeOptions, type OpenOptions, type PromptContent, type PromptInput, type AlpRuntime, type SessionPreview, type RecoveryOutcome, type Pause, type PauseState, type RecallAnswer, type ScheduleHandler } from './contracts.js';
 export type { RuntimeTransport, RuntimeOptions, OpenOptions, PromptContent, PromptInput, AlpRuntime, SessionPreview, RecoveryOutcome, Pause, PauseState, RecallAnswer } from './contracts.js';
 export { DEFAULT_TEAM } from './contracts.js';
 import { verdictLine, parseHandoff, type Handoff } from './handoff.js';
@@ -1633,6 +1633,52 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     return toolResult(true, { status: 'pending_approval', approvalId, file, next: 'Continue other work or end your turn. ALP sends the user\'s decision, and whether the skill was saved, by mail; do not resubmit this draft.' });
   }
 
+  let scheduleHandler: ScheduleHandler | undefined;
+
+  async function scheduleTool(sessionId: string, session: Session, args: unknown) {
+    if (session.parent || session.role === 'supervisor' || session.mapping.agent.name !== mainOf(session.mapping)) return toolResult(false, { error: 'Only the main root session schedules continuations' });
+    if (!scheduleHandler) return toolResult(false, { error: 'This host does not support scheduled continuations' });
+    if (!plainObject(args, ['action', 'dueAt', 'prompt', 'requestId', 'id', 'status']) || !['create', 'list', 'get', 'cancel'].includes(args.action)) return toolResult(false, { error: 'Unknown schedule action' });
+    const action = args.action as 'create' | 'list' | 'get' | 'cancel';
+    const fields = action === 'create' ? ['action', 'dueAt', 'prompt', 'requestId'] : action === 'list' ? ['action', 'status'] : ['action', 'id'];
+    if (Object.keys(args).some(key => !fields.includes(key))) return toolResult(false, { error: 'Unexpected schedule argument' });
+    const handler = scheduleHandler;
+    const projectRoot = session.mapping.agent.projectRoot;
+    const invoke = async (params: Record<string, unknown>) => {
+      try { return toolResult(true, await handler(action, { ...params, projectRoot })); }
+      catch (error) { return toolResult(false, { error: errorData(error).message }); }
+    };
+    if (action !== 'create') return invoke(action === 'list' ? { ...(args.status ? { status: args.status } : {}) } : { id: args.id });
+    if (!text(args.requestId, 200) || !text(args.prompt, 8000) || !text(args.dueAt, 80) ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/.test(args.dueAt) || !Number.isFinite(Date.parse(args.dueAt))) return toolResult(false, { error: 'create needs requestId, prompt (1–8000 characters) and dueAt with an explicit UTC offset' });
+    const draftKey = JSON.stringify([args.dueAt, args.prompt]);
+    const key = `schedule:${args.requestId}`;
+    const approvals = approvalsOf(sessionId);
+    const previous = approvals.get(key);
+    if (previous) return previous.draftKey !== draftKey
+      ? toolResult(false, { error: 'requestId already names another schedule draft' })
+      : toolResult(true, previous.result ?? { status: 'pending_approval', approvalId: previous.approvalId });
+    const cancellation = approvalCancellation.get(session) ?? 0;
+    const approvalId = `q-${randomUUID()}`;
+    const record: { approvalId: string; draftKey: string; result?: Record<string, unknown> } = { approvalId, draftKey };
+    approvals.set(key, record);
+    const decision = confirm(sessionId, session,
+      `Tạo lịch tiếp tục một lần?\nProject: ${projectRoot}\nSession: ${sessionId}\nThời gian: ${args.dueAt} (${new Date(args.dueAt).toISOString()})\n\n${args.prompt}`, { id: approvalId });
+    void decision.then(async answer => {
+      const canceled = approvalCanceled(session, cancellation);
+      let result: Record<string, unknown>;
+      if (!answer.approved || canceled) result = { approved: false, created: false, outcome: canceled ? 'canceled' : answer.outcome, feedback: answer.feedback };
+      else {
+        try { result = { approved: true, created: true, ...await handler('create', { projectRoot, sessionId, dueAt: args.dueAt, prompt: args.prompt }) as object }; }
+        catch (error) { result = { approved: true, created: false, error: errorData(error).message }; }
+      }
+      record.result = { status: 'resolved', approvalId, ...result };
+      runLog(rootOf(sessionId), { event: 'schedule.approval', ...record.result });
+      if (!session.closed) post(sessionId, { kind: 'result', from: 'ALP', assignment: approvalId, body: `Schedule approval result: ${JSON.stringify(record.result)}` });
+    }).catch(error => { record.result = { status: 'resolved', approvalId, created: false, error: errorData(error).message }; });
+    return toolResult(true, { status: 'pending_approval', approvalId, next: 'Continue other work or end your turn. ALP sends the decision and creation result by mail; do not resubmit this draft.' });
+  }
+
   async function issueTool(sessionId: string, session: Session, args: unknown) {
     const cancellation = approvalCancellation.get(session) ?? 0;
     args = structuredClone(args);
@@ -2112,7 +2158,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
 
     if (
-      !['alp_delegate', 'alp_handoff', 'alp_wait', 'alp_cancel', 'alp_send', 'alp_ask', 'alp_merge', 'alp_discard', 'alp_recall', 'alp_verify', 'alp_pin', 'alp_board', 'alp_unpin', 'alp_lesson', 'alp_skill', 'alp_issue', 'alp_task'].includes(params.tool) ||
+      !['alp_delegate', 'alp_handoff', 'alp_wait', 'alp_cancel', 'alp_send', 'alp_ask', 'alp_merge', 'alp_discard', 'alp_recall', 'alp_verify', 'alp_pin', 'alp_board', 'alp_unpin', 'alp_lesson', 'alp_skill', 'alp_issue', 'alp_task', 'alp_schedule'].includes(params.tool) ||
       params.namespace != null ||
       typeof params.callId !== 'string'
     ) {
@@ -2133,6 +2179,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       params.tool === 'alp_lesson' ? lessonTool(sessionId, session, args)
       : params.tool === 'alp_skill' ? skillTool(sessionId, session, args)
       : params.tool === 'alp_issue' ? issueTool(sessionId, session, args)
+      : params.tool === 'alp_schedule' ? scheduleTool(sessionId, session, args)
       : params.tool === 'alp_task' ? taskToolCall(sessionId, session, args)
       : params.tool === 'alp_delegate' ? runDelegation(sessionId, session, params)
       : params.tool === 'alp_wait' ? waitTool(sessionId, session, args)
@@ -3536,6 +3583,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   if (options.recallFile) void forgetExpired();
 
   return {
+    bindSchedules(handler: ScheduleHandler | undefined) { scheduleHandler = handler; },
     onEvent(listener) {
       listeners.add(listener);
       return () => {

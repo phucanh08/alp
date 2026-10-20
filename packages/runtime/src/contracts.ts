@@ -109,7 +109,11 @@ export type RuntimeOptions = {
 import type { OpenOptions, PromptContent, PromptInput } from '@anhlp/alp-protocol/session';
 export type { OpenOptions, PromptContent, PromptInput } from '@anhlp/alp-protocol/session';
 
+export type ScheduleHandler = (action: 'create' | 'list' | 'get' | 'cancel', params: Record<string, unknown>) => Promise<unknown>;
+
 export type AlpRuntime = {
+  /** The daemon supplies its persistent schedule operations; standalone runtimes have none. */
+  bindSchedules?: (handler: ScheduleHandler | undefined) => void;
   onEvent(listener: (envelope: Envelope) => void): () => void;
   /** Opens a root session under a client-chosen id. */
   open(sessionId: string, spec: SessionSpec, options?: OpenOptions): Promise<SessionSnapshot>;

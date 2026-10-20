@@ -28,7 +28,8 @@
     "workspace.files": "workspace.files.search: files under a directory whose relative path matches a query; read-only, names only, links never followed.",
     "workspace.files.read": "workspace.files.list and workspace.files.read: the entries of a directory and the content of a UTF-8 text file (at most 1 MiB) under a directory; read-only, links never followed, .git, .env* and key or credential files refused, .gitignore'd paths hidden unless asked.",
     "prompt.images": "session.prompt takes inline image parts { type: \"image\", mimeType, data } (base64, no paths or URLs) within the image limits; a session snapshot says whether its runtime takes them in promptImages.",
-    "library.project.write": "library save/delete/duplicate/rename accept policy project-data: only project-only pure-data agents and skills, no executable configuration, sidecars or library/built-in collisions."
+    "library.project.write": "library save/delete/duplicate/rename accept policy project-data: only project-only pure-data agents and skills, no executable configuration, sidecars or library/built-in collisions.",
+    "schedule": "schedule.create/list/get/cancel: one-shot continuations of a root session. alpd opens the turn by itself when the time comes; a job that comes due late says how late it is, and a job that cannot run says why."
   },
   "methods": {
     "assignment.recall": {
@@ -1190,6 +1191,193 @@
         },
         "required": [
           "questions"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "schedule.create": {
+      "x-alp": {
+        "effect": "mutation",
+        "capability": "schedule",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": true
+        },
+        "writes": [
+          "ALP_HOME/schedules"
+        ],
+        "idempotent": false
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "$ref": "#/$defs/projectRoot"
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "dueAt": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?(Z|[+-]\\d{2}:\\d{2})$"
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8000,
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "projectRoot",
+          "sessionId",
+          "dueAt",
+          "prompt"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "$ref": "#/$defs/scheduleJob"
+          }
+        },
+        "required": [
+          "job"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "schedule.list": {
+      "x-alp": {
+        "effect": "query",
+        "capability": "schedule",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": true
+        },
+        "idempotent": true
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "$ref": "#/$defs/projectRoot"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "delivered",
+              "failed",
+              "cancelled"
+            ]
+          }
+        },
+        "required": [
+          "projectRoot"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/scheduleJob"
+            }
+          }
+        },
+        "required": [
+          "jobs"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "schedule.get": {
+      "x-alp": {
+        "effect": "query",
+        "capability": "schedule",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": true
+        },
+        "idempotent": true
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/scheduleId"
+          },
+          "projectRoot": {
+            "$ref": "#/$defs/projectRoot"
+          }
+        },
+        "required": [
+          "id",
+          "projectRoot"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "$ref": "#/$defs/scheduleJob"
+          }
+        },
+        "required": [
+          "job"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "schedule.cancel": {
+      "x-alp": {
+        "effect": "mutation",
+        "capability": "schedule",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": true
+        },
+        "writes": [
+          "ALP_HOME/schedules"
+        ],
+        "idempotent": true
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/scheduleId"
+          },
+          "projectRoot": {
+            "$ref": "#/$defs/projectRoot"
+          }
+        },
+        "required": [
+          "id",
+          "projectRoot"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "$ref": "#/$defs/scheduleJob"
+          }
+        },
+        "required": [
+          "job"
         ],
         "additionalProperties": true
       }
@@ -4752,6 +4940,95 @@
         "data"
       ],
       "additionalProperties": false
+    },
+    "scheduleId": {
+      "type": "string",
+      "pattern": "^sch_[0-9a-f]{16}$"
+    },
+    "scheduleError": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "additionalProperties": true
+    },
+    "scheduleJob": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/scheduleId"
+        },
+        "projectRoot": {
+          "$ref": "#/$defs/projectRoot"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "dueAt": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?(Z|[+-]\\d{2}:\\d{2})$"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "delivered",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "deliveredAt": {
+          "type": "string"
+        },
+        "failedAt": {
+          "type": "string"
+        },
+        "cancelledAt": {
+          "type": "string"
+        },
+        "attemptedAt": {
+          "type": "string"
+        },
+        "lateByMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastError": {
+          "$ref": "#/$defs/scheduleError"
+        }
+      },
+      "required": [
+        "id",
+        "projectRoot",
+        "sessionId",
+        "prompt",
+        "dueAt",
+        "status",
+        "attempts",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": true
     }
   }
 }

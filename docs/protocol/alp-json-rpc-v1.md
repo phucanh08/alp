@@ -199,6 +199,7 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 | `attach.after` | `session.attach` accepts `after` and answers `cursor` and `reset`; kept envelopes carry `cursor` (§8). |
 | `prompt.receipts` | `session.prompt` is answered from durable receipts (§10). Listed only when alpd has a store. |
 | `extension.methods` | `extension.register` / `extension.unregister` and `extension.invoke` (§3). |
+| `schedule` | `schedule.create/list/get/cancel`: one-shot root continuations; only with a store and home (ALPD §71). |
 | `task` | `task.list`, `task.create`, `task.update`, `task.gate.resolve` (§15.2). Every alpd lists it. |
 | `team` | `team.list` (§15.4). Listed when alpd serves its user's home (alpd always does; an embedded server only when given `home`). |
 | `library` | `library.list/get/save/delete/duplicate/rename`, `library.skills.set`, `library.models` (§15.3). Same condition as `team`. |
@@ -877,3 +878,32 @@ may be sent back as `workflow`, `custom` included.
 
 The language the daemon user reads (ALPD §54): `language` null means unset, so `default` applies. `set` keeps every
 other key of `settings.json`; a broken file fails `1000 unreadable`.
+
+### Scheduled continuations (`schedule` capability)
+
+The local daemon advertises `schedule` only with a persistent store and ALP_HOME.
+All four methods are local-only; the remote gateway prohibits them.
+
+| Method | Params | Result |
+|---|---|---|
+| `schedule.create` | `{ projectRoot, sessionId, dueAt, prompt }` | `{ job }` |
+| `schedule.list` | `{ projectRoot, status? }` | `{ jobs }` |
+| `schedule.get` | `{ projectRoot, id }` | `{ job }` |
+| `schedule.cancel` | `{ projectRoot, id }` | `{ job }` |
+
+`projectRoot` is required and absolute for every method, compared as the canonical
+filesystem path. Wrong-project get/cancel behaves as not found. `dueAt` is an ISO
+timestamp with seconds and explicit Z/UTC offset; it is stored as UTC. The target
+must be a live root of that project. Prompt is nonblank, at most 8000 code points.
+IDs have shape `sch_` plus sixteen lowercase hex digits. Unknown status and invalid
+params return -32602; missing jobs/targets return 1001; cancelling a terminal job or
+one currently delivering returns 1004. List sorts by deadline then id.
+
+`ScheduleJob` includes id/projectRoot/sessionId/prompt/dueAt/status/attempts,
+createdAt/updatedAt and optional attemptedAt/lateByMs/deliveredAt/failedAt/cancelledAt/
+lastError `{ message, code? }`. Status is pending/delivered/failed/cancelled.
+Delivered acknowledges the prompt, not completion of the agent's work. Failed may
+mean execution is unknown: timeout does not cancel the outstanding runtime request;
+a late ACK updates lastError to delivery_accepted_late without retry or status change.
+See [scheduler semantics](../alp/schedules.md) and ALPD §71 for restart, bounded waits,
+missed deadlines, approval and receipt deduplication.

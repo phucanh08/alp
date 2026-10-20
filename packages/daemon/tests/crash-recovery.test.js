@@ -277,3 +277,37 @@ test('a timeline line cut short by a crash is dropped; cursors keep increasing a
   assert.equal(reset.reset, true);
   assert.equal(events[0].cursor, 1);
 });
+
+// A schedule must cross the same durable receipt boundary as session.prompt.
+// These kill the real daemon process while its job is still pending on disk.
+for (const point of ['prompt.after-receipt', 'prompt.after-completed']) {
+  test(`scheduler restart after ${point} never sends a second provider turn`, { skip, timeout: 45000 }, async t => {
+    const h = await harness(t);
+    const first = await h.start({ crashAt: point });
+    const { session } = await h.create(first);
+    const marker = `scheduled-crash-${point}`;
+    const { job } = await first.request('schedule.create', { projectRoot: h.project, sessionId: session.id, dueAt: new Date(Date.now() - 60000).toISOString(), prompt: marker });
+    await first.crashed();
+    const onDisk = JSON.parse(await readFile(path.join(h.home, 'schedules', `${job.id}.json`), 'utf8'));
+    assert.equal(onDisk.status, 'pending', 'the job completion was interrupted by a real process crash');
+    assert.equal(onDisk.attempts, 1);
+    const second = await h.start();
+    t.after(() => second.stop());
+    let after;
+    for (let i = 0; i < 800; i++) {
+      after = (await second.request('schedule.get', { id: job.id, projectRoot: h.project })).job;
+      if (after.status !== 'pending') break;
+      await sleep(25);
+    }
+    if (point === 'prompt.after-receipt') {
+      assert.equal(after.status, 'failed');
+      assert.equal(after.lastError.code, 'outcome_unknown');
+      assert.equal((await h.received(marker)).length, 0, 'pending receipt fails closed even when nothing was sent');
+    } else {
+      assert.equal(after.status, 'delivered');
+      assert.equal((await h.received(marker)).length, 1, 'completed receipt, not in-memory dedup, prevents the replay');
+    }
+    assert.equal(after.attemptedAt, onDisk.attemptedAt);
+    assert.equal(after.lateByMs, onDisk.lateByMs, 'restart preserves the exact receipt fingerprint');
+  });
+}

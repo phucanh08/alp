@@ -379,3 +379,19 @@ export function taskBrief(task: Task, writing: boolean) {
     'Your handoff moves this task to review for your requester to accept. List work you found outside the task under discovered; only main and the user create tasks.',
   ].join('\n');
 }
+
+/** Only the project's main root may schedule a future continuation. */
+export const SCHEDULE_TOOL = {
+  type: 'function', name: 'alp_schedule',
+  description: 'Create, list, inspect or cancel a one-shot continuation of this main/root session. create proposes the exact prompt and ISO time with UTC offset for user approval. Jobs wake an idle main without a user message; timer gates only unblock tasks, and assignment notes do not schedule a wake. Scheduling a quota-reset continuation never guarantees provider availability: recheck actual availability before delegating.',
+  inputSchema: {
+    type: 'object', properties: {
+      action: { type: 'string', enum: ['create', 'list', 'get', 'cancel'] },
+      dueAt: { type: 'string', description: 'For create: ISO timestamp with Z or an explicit UTC offset.' },
+      prompt: { type: 'string', description: 'For create: the exact continuation, at most 8000 characters.' },
+      requestId: { type: 'string', description: 'For create: stable id for this approval proposal; reuse only for an identical draft.' },
+      id: { type: 'string', description: 'For get/cancel: the scheduled job id.' },
+      status: { type: 'string', enum: ['pending', 'delivered', 'failed', 'cancelled'] },
+    }, required: ['action'], additionalProperties: false,
+  },
+};

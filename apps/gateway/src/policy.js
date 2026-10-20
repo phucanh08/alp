@@ -382,6 +382,10 @@ export const EXPOSURE = Object.freeze({
   'daemon.shutdown': { status: 'prohibited', scope: 'host', reason: 'Stops alpd.' },
   'extension.register': { status: 'prohibited', scope: 'host', reason: 'Would let a remote client serve methods every local client calls.' },
   'extension.unregister': { status: 'prohibited', scope: 'host', reason: 'Extension methods are never remote.' },
+  'schedule.create': { status: 'prohibited', scope: 'workspace', reason: 'A scheduled continuation opens a turn on a session without a user message, later than the request that made it; the gateway forwards nothing that fires after the request in v1.' },
+  'schedule.list': { status: 'prohibited', scope: 'workspace', reason: 'The jobs of the host name sessions the gateway does not check; as schedule.create, they are never remote in v1.' },
+  'schedule.get': { status: 'prohibited', scope: 'workspace', reason: 'As schedule.list: a job of the host is never remote in v1.' },
+  'schedule.cancel': { status: 'prohibited', scope: 'workspace', reason: 'As schedule.create: cancelling a job of the host is never remote in v1.' },
 });
 
 /** The exposure of a method, or undefined when the gateway does not know it at all. @param {string} method */
