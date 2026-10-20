@@ -2,7 +2,7 @@
 // Plugin and `alp web` acceptance on the saved tarballs: docs/alp/beta-scope.md §6.3 W1–W6 (rows R5, R6).
 // --live adds the plugin to the Paseo on this machine and needs a person for W3–W5; --fake checks
 // only what needs no Paseo and no model: W6's token gate on a throwaway ALP_HOME.
-import { cleanupFakeWeb } from './beta-web-lifecycle.mjs';
+import { cleanupFakeWeb, freeWebPort } from './beta-web-lifecycle.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -48,7 +48,7 @@ const paseo = (label, args) => run.exec(label, 'paseo', args, { env, cwd: projec
 const settingsFile = path.join(project, '.alp', 'settings.json');
 
 try {
-  if (opts.fake) writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ web: { port: 0, relay: { enabled: false } } }));
+  if (opts.fake) writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ web: { port: await freeWebPort(), relay: { enabled: false } } }));
   mkdirSync(project, { recursive: true });
   run.exec('git', 'git', ['init', '-q', '-b', 'main'], { cwd: project });
   run.exec('git', 'git', ['-c', 'user.name=ALP beta', '-c', 'user.email=alp-beta@localhost', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: project });

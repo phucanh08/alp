@@ -7,6 +7,7 @@ import { mkdtemp, mkdir, readFile, copyFile, writeFile, rm } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { validateUserSettings } from '../../packages/core/src/validation.js';
 const exec = promisify(execFile);
 const root = path.resolve(import.meta.dirname, '../..');
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -120,7 +121,9 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
       console.log(JSON.stringify({ scenario, ownedProcesses: pids.map(entry => ({ ...entry, alive: alive(entry.pid) })) }));
       assert.equal(await readFile(path.join(base, 'wrong-order'), 'utf8').catch(() => undefined), undefined, 'web must exit before daemon stop');
       const settings = JSON.parse(await readFile(scenario === 'package-startup-failure' ? path.join(base, 'package-settings.json') : path.join(pids[0].home, 'settings.json'), 'utf8'));
-      assert.equal(settings.web.port, 0);
+      // The CLI rejects any home whose settings fail this production check (web.port 1024–65535).
+      assert.doesNotThrow(() => validateUserSettings(settings, 'fixture settings.json'));
+      assert.ok(Number.isInteger(settings.web.port) && settings.web.port >= 1024 && settings.web.port <= 65535, `web.port ${settings.web.port}`);
       assert.equal(settings.web.relay.enabled, false);
     } finally {
       // Test failure must not reproduce the leak in the test runner itself.
