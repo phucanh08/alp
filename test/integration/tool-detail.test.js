@@ -93,7 +93,7 @@ test('alp acp shows typed calls to the editor: kinds, titles relative to the ses
   const item = (name, detail, extra = {}) => ({ kind: 'tool_call', id: 't', callId: 't', name, status: 'completed', detail, ...extra });
   const read = item('Read', { type: 'read', filePath: '/p/src/a.ts', content: 'const a = 1;', offset: 7, limit: 20 });
   assert.deepEqual([toolKind(read), toolTitle(read, '/p'), toolTitle(read, '/q'), toolOutput(read), toolInput(read), toolLocations(read)], [
-    'read', 'Read src/a.ts', 'Read /p/src/a.ts', [{ type: 'content', content: { type: 'text', text: 'const a = 1;' } }], { filePath: '/p/src/a.ts', offset: 7, limit: 20 }, [{ path: '/p/src/a.ts', line: 7 }],
+    'read', `Read ${path.join('src', 'a.ts')}`, 'Read /p/src/a.ts', [{ type: 'content', content: { type: 'text', text: 'const a = 1;' } }], { filePath: '/p/src/a.ts', offset: 7, limit: 20 }, [{ path: '/p/src/a.ts', line: 7 }],
   ]);
   const edit = item('Edit', { type: 'edit', filePath: '/p/a.ts', oldString: 'a = 1', newString: 'a = 2' });
   assert.deepEqual([toolKind(edit), toolOutput(edit)], ['edit', [{ type: 'diff', path: '/p/a.ts', oldText: 'a = 1', newText: 'a = 2' }]]);
