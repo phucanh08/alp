@@ -64,6 +64,14 @@
       },
       "types": "./dist/store.d.ts",
       "default": "./dist/store.js"
+    },
+    "./registry": {
+      "alp-source": {
+        "types": "./src/registry.ts",
+        "default": "./src/registry.ts"
+      },
+      "types": "./dist/registry.d.ts",
+      "default": "./dist/registry.js"
     }
   },
   "engines": {

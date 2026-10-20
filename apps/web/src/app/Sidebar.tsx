@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Archive, ChevronDown, ChevronRight, History, LogOut, MoreVertical, Pencil, Plus, RefreshCw, Search, Server, Settings, Settings2, X } from 'lucide-react';
+import { Archive, ChevronDown, ChevronRight, History, LogOut, MoreVertical, Pencil, Plus, Pin, RefreshCw, Search, Server, Settings, Settings2, X } from 'lucide-react';
 import { attentionReason, needsInput, type SessionSummary } from '../lib/controller.js';
 import { sessionBucket } from '../lib/attention.js';
 import { can } from '../lib/gateway.js';
@@ -170,7 +170,12 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavig
   const [query, setQuery] = React.useState('');
   const canWrite = can(principal ?? undefined, 'session.write');
   const online = connection.phase === 'open';
-  const workspaces = principal?.workspaces ?? [];
+  const registry = state.registry;
+  const [addingProject, setAddingProject] = React.useState(false);
+  const [projectPath, setProjectPath] = React.useState('');
+  const registered = (path: string) => registry.workspaces.filter(row => row.directory === path || principal?.workspaceRoots?.some(root => root.path === path && root.canonical === row.directory))
+    .sort((a, b) => Number(!!b.pinnedAt) - Number(!!a.pinnedAt) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  const workspaces = [...(principal?.workspaces ?? [])].sort((a, b) => Number(registered(b).some(row => !!row.pinnedAt)) - Number(registered(a).some(row => !!row.pinnedAt)));
   const needle = query.trim().toLowerCase();
   const shown = needle ? sessions.list.filter(session => sessionName(session).toLowerCase().includes(needle)) : sessions.list;
 
@@ -224,6 +229,18 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavig
             ]} />
         </div>
 
+        {connection.capabilities.includes('workspace.registry') ? <div className="px-2 pb-2 text-xs">
+          <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setAddingProject(value => !value)}>Add project</button>
+          {addingProject ? can(principal ?? undefined, 'workspace.write') ? <form className="mt-2 flex flex-col gap-2" onSubmit={event => { event.preventDefault(); if (projectPath) void controller.registerProject(projectPath); }}>
+            <label htmlFor="existing-project">Existing granted directory</label>
+            <select id="existing-project" value={projectPath} onChange={event => setProjectPath(event.target.value)} className="w-full rounded border border-border bg-background p-2">
+              <option value="">Choose a directory</option>{workspaces.map(path => <option key={path} value={path}>{path}</option>)}
+            </select>
+            <button type="submit" disabled={!projectPath || !online || registry.loading} className="rounded border border-border p-2">Register project</button>
+            <p className="text-muted-foreground">For another directory, ask the host owner to grant it locally first.</p>
+          </form> : <p role="status" className="mt-2 text-muted-foreground">Ask the host owner to add workspace.write to your credential. Another directory must be granted locally first.</p> : null}
+          {registry.error ? <p role="alert">{registry.error} <button type="button" onClick={() => void controller.refreshRegistry()}>Retry</button></p> : null}
+        </div> : null}
         {!workspaces.length ? (
           <div className="mt-1 px-2 py-3 text-sm">
             <p className="text-foreground">No workspaces</p>
@@ -232,11 +249,20 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavig
         ) : null}
 
         {workspaces.map(path => {
+          const sharedRows = registered(path);
           const expanded = path === workspace && (!collapsed || !!needle);
           return (
             <div key={path} className={cn(expanded && 'pb-3')}>
               <ProjectRow path={path} expanded={expanded} canWrite={canWrite && online}
                 onToggle={() => toggle(path)} onNewSession={() => startIn(path)} />
+              {sharedRows.map(shared => <div key={shared.id} className="flex items-center justify-between px-3 pb-1 text-xs text-muted-foreground" data-testid="shared-workspace-row" data-workspace-id={shared.id}>
+                <span>{shared.title || baseName(path)}</span>
+                <button type="button" aria-label={`${shared.pinnedAt ? 'Unpin' : 'Pin'} workspace ${shared.title || baseName(path)}`} aria-pressed={!!shared.pinnedAt} disabled={!online || registry.loading}
+                  title={!can(principal ?? undefined, 'workspace.write') ? 'Ask the host owner for workspace.write to change shared pins.' : 'Shared across clients'}
+                  onClick={() => void controller.pinWorkspace(shared.id, !shared.pinnedAt)} className="flex min-h-7 items-center gap-1 rounded px-1 hover:bg-sidebar-hover">
+                  <Pin aria-hidden className="size-3" />{shared.pinnedAt ? 'Pinned' : 'Pin'}
+                </button>
+              </div>)}
               {expanded ? (
                 <div>
                   {sessions.status === 'loading' && !sessions.list.length ? <div className="py-2 pl-4"><Spinner label="Loading sessions…" className="text-xs" /></div> : null}

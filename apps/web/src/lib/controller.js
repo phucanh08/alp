@@ -81,6 +81,7 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  *   workspace: string | null,
  *   catalog: Load & { teams: Team[], teamsKnown?: boolean, teamsUnavailable?: import('./new-session.js').TeamsUnavailable, modes: Mode[], models: Model[], defaultMode?: string },
  *   sessions: Load & { list: SessionSummary[] },
+ *   registry: { workspaces: import('@anhlp/alp-protocol').RegistryWorkspace[], revision: number, error?: string, loading?: boolean },
  *   history: Load & { list: SessionSummary[], query: string, nextCursor?: string, more?: 'loading' | 'error' },
  *   attention: Record<string, number>,
  *   turnAttention: Record<string, TurnAttention>,
@@ -184,6 +185,7 @@ export function initialState(gateway = '') {
     workspace: null,
     catalog: { status: 'idle', teams: [], modes: [], models: [] },
     sessions: { status: 'idle', list: [] },
+    registry: { workspaces: [], revision: 0 },
     history: { status: 'idle', list: [], query: '' },
     attention: {},
     turnAttention: {},
@@ -250,6 +252,7 @@ export class Controller {
   #creating = null;
   /** Replaced whenever the workspace or the connection changes; async results check it. */
   #context = {};
+  #registryContext = {};
   /** @type {ReturnType<typeof setInterval> | undefined} */ #taskTimer;
   /** @type {ReturnType<typeof setInterval> | undefined} */ #sessionTimer;
   /** @type {ReturnType<typeof setInterval> | undefined} */ #attentionTimer;
@@ -493,12 +496,14 @@ export class Controller {
    * @param {string | undefined} hostname the host's machine name from the hello, Paseo's host label (patch 0017)
    */
   #adopt(principal, capabilities, daemonVersion, hostname, limits) {
+    this.#registryContext = {};
     const current = this.#state.workspace;
     const workspace = current && grantedWorkspace(principal, current) ? current : principal.workspaces[0] ?? null;
     const changed = JSON.stringify(principal) !== JSON.stringify(this.#state.principal);
     if (workspace !== current) { this.#context = {}; this.#waiting = null; }
     this.#set(state => ({
       principal,
+      registry: changed ? initialState().registry : { ...state.registry, loading: false },
       connection: { ...state.connection, capabilities, ...(daemonVersion ? { daemonVersion } : {}), hostname, promptImageLimits: limits },
       ...(workspace !== state.workspace ? { workspace, selected: null, focus: null, tree: null, sessions: initialState().sessions, history: initialState().history, attention: {}, turnAttention: {}, tasks: { ...initialState().tasks, visible: state.tasks.visible } } : {}),
       ...(changed || workspace !== state.workspace ? { catalog: initialState().catalog } : {}),
@@ -507,6 +512,7 @@ export class Controller {
 
   #afterOpen() {
     this.#sync();
+    void this.refreshRegistry();
     if (this.#state.workspace) {
       void this.refreshSessions();
       void this.refreshAttention();
@@ -965,8 +971,43 @@ export class Controller {
     }
   }
 
+  async refreshRegistry() {
+    if (!this.hasCapability('workspace.registry') || !can(this.#state.principal ?? undefined, 'project.read') || this.#state.registry.loading) return;
+    const context = this.#registryContext;
+    const run = this.#run;
+    this.#set(state => ({ registry: { ...state.registry, loading: true } }));
+    try {
+      const workspaces = []; let cursor; let revision = 0;
+      do {
+        /** @type {import('@anhlp/alp-protocol').RpcMethodMap['workspace.list']['result']} */
+        const page = await this.#client().request('workspace.list', { limit: 500, ...(cursor ? { cursor } : {}) });
+        workspaces.push(...page.workspaces); revision = page.revision; cursor = page.nextCursor;
+      } while (cursor);
+      if (context === this.#registryContext && run === this.#run) this.#set({ registry: { workspaces, revision } });
+    } catch (error) {
+      if (context === this.#registryContext && run === this.#run) this.#set(state => ({ registry: { ...state.registry, loading: false, error: error instanceof Error ? error.message : String(error) } }));
+    }
+  }
+  /** @param {string} workspaceId @param {boolean} pinned */
+  async pinWorkspace(workspaceId, pinned) {
+    if (!can(this.#state.principal ?? undefined, 'workspace.write')) { this.#notify('error', 'Ask the host owner to add workspace.write to your credential to change shared pins.'); return; }
+    try {
+      await this.#client().request('workspace.update', { workspaceId, pinned, ifRevision: this.#state.registry.revision, requestId: globalThis.crypto.randomUUID() });
+      await this.refreshRegistry();
+    } catch (error) { this.#notify('error', `Pin was not saved. ${error instanceof Error ? error.message : String(error)} Refresh and try again.`); await this.refreshRegistry(); }
+  }
+  /** Register only a directory the credential already grants. @param {string} directory */
+  async registerProject(directory) {
+    if (!can(this.#state.principal ?? undefined, 'workspace.write')) { this.#notify('error', 'Ask the host owner to add workspace.write to your credential. To add another directory, the owner must grant it locally first.'); return; }
+    try {
+      await this.#client().request('project.register', { directory, ifRevision: this.#state.registry.revision, requestId: globalThis.crypto.randomUUID() });
+      await this.refreshRegistry();
+    } catch (error) { this.#notify('error', `Project was not added. ${error instanceof Error ? error.message : String(error)} Refresh and try again.`); await this.refreshRegistry(); }
+  }
+
   /** @param {{ quiet?: boolean }} [options] */
   async refreshSessions({ quiet = false } = {}) {
+    void this.refreshRegistry();
     const workspace = this.#state.workspace;
     if (!workspace) return;
     const context = this.#context;

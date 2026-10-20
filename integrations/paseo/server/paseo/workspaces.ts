@@ -1,6 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
-import { moveFile } from '@anhlp/alp-core/atomic';
+import { mkdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { deriveAgentStateBucket, getWorkspaceStateBucketPriority } from '@getpaseo/protocol/agent-state-bucket';
 import { normalizeWorkspaceLabelName, workspaceLabelKey, type WorkspaceLabelDefinition } from '@getpaseo/protocol/workspace-labels';
@@ -12,10 +11,10 @@ import { checkoutCache, type CheckoutFacts } from './git.js';
 /**
  * Paseo's projects and workspaces, kept by alpd (D31 step 6, ALPD §62). A project is a directory
  * the user opened; a workspace is a place in it where agents run, with the title, pin, labels and
- * archive the user gives it. ALP's sessions know only their directory, so the bridge keeps which
- * workspace each root belongs to, and puts a root it has not seen in the oldest open workspace of
- * its directory (making one if there is none). The ids are Paseo's (`prj_`, `wks_` and 16 hex),
- * stable across restarts in `<ALP home>/state/web-workspaces.json`.
+ * archive the user gives it. The daemon domain service owns metadata and root placement; this
+ * adapter prepares placement asynchronously and formats only committed snapshots. New roots use
+ * their directory's oldest open workspace unless explicitly assigned. Generated ids are Paseo's
+ * (`prj_`, `wks_` and 16 hex), retained in `<ALP home>/state/web-workspaces.json`.
  */
 
 type Inbound<T extends SessionInboundMessage['type']> = Extract<SessionInboundMessage, { type: T }>;
@@ -57,100 +56,47 @@ async function isDirectory(directory: string) {
   return (await stat(directory).catch(() => undefined))?.isDirectory() ?? false;
 }
 
-export function createWorkspaces({ home, broadcast, agents, inDevelopment, log = () => {} }: {
-  home?: string;
+export function createWorkspaces({ rpc, broadcast, agents, inDevelopment, log = () => {} }: {
+  rpc(method: string, params: any): Promise<any>;
   broadcast(message: Outbound): void;
   agents: () => AgentsView;
   inDevelopment: () => Promise<string>;
   log?: (message: string) => void;
 }) {
-  const file = home ? path.join(home, 'state', 'web-workspaces.json') : undefined;
   let registry: Registry = { projects: [], workspaces: [], sessions: {}, labels: { generation: hex(), seq: 0, catalog: [] } };
   const git = checkoutCache();
   /** What each client last heard, so only changes are sent. */
   const sentWorkspaces = new Map<string, string>();
   const sentProjects = new Map<string, string>();
-  let loaded: Promise<void> | undefined;
-  let saving: Promise<void> = Promise.resolve();
   let syncQueued = false;
   let gitTimer: NodeJS.Timeout | undefined;
-
-  function load() {
-    loaded ??= (async () => {
-      if (!file) return;
-      const text = await readFile(file, 'utf8').catch(() => undefined);
-      if (!text) return;
-      try {
-        const stored = JSON.parse(text) as Partial<Registry>;
-        registry = {
-          projects: stored.projects ?? [],
-          workspaces: (stored.workspaces ?? []).map(workspace => ({ ...workspace, labels: workspace.labels ?? [] })),
-          sessions: stored.sessions ?? {},
-          labels: stored.labels ?? registry.labels,
-        };
-      } catch (error: any) {
-        log(`web workspaces unreadable, starting afresh: ${error?.message ?? error}`);
-      }
-    })();
-    return loaded;
+  let ownerTail: Promise<unknown> = Promise.resolve();
+  // Only committed daemon snapshots are visible to descriptor/placement readers.
+  function load() { return rpc('registry.owner', {}).then(({ registry: value }) => { registry = value; }); }
+  function mutate(operation: string, args: any, requestId = hex()) {
+    const run = ownerTail.then(async () => {
+      const { registry: value, result } = await rpc('registry.owner', { operation, args, requestId });
+      registry = value;
+      return result;
+    });
+    ownerTail = run.catch(() => {});
+    return run;
   }
-
-  function save() {
-    if (!file) return saving;
-    const text = `${JSON.stringify(registry, null, 2)}\n`;
-    saving = saving.then(async () => {
-      await mkdir(path.dirname(file), { recursive: true });
-      const temporary = `${file}.${process.pid}.tmp`;
-      await writeFile(temporary, text);
-      await moveFile(temporary, file);
-    }).catch(error => log(`web workspaces not saved: ${error?.message ?? error}`));
-    return saving;
-  }
-
   const project = (id: string) => registry.projects.find(entry => entry.id === id);
   const workspace = (id: string) => registry.workspaces.find(entry => entry.id === id);
   const active = (entry: WorkspaceRecord) => !entry.archivedAt && !project(entry.projectId)?.removedAt;
 
-  function projectFor(root: string) {
-    const directory = path.resolve(root);
-    let entry = registry.projects.find(candidate => candidate.root === directory && !candidate.removedAt);
-    if (!entry) {
-      entry = { id: `prj_${hex()}`, root: directory, addedAt: now() };
-      registry.projects.push(entry);
-      void save();
-    }
-    return entry;
+  /** Placement is prepared asynchronously before any root snapshot is published. */
+  async function prepare(sessions: SessionSummary[]) {
+    if (sessions.length) await mutate('placement.prepare', { sessions: sessions.map(({ id, projectRoot, archived, updatedAt }) => ({ id, projectRoot, archived, updatedAt })) });
+    else await load();
   }
-
-  function newWorkspace(directory: string, projectId: string, fields: Partial<WorkspaceRecord> = {}) {
-    const entry: WorkspaceRecord = { id: `wks_${hex()}`, projectId, directory: path.resolve(directory), labels: [], createdAt: now(), ...fields };
-    registry.workspaces.push(entry);
-    void save();
-    return entry;
-  }
-
-  /** The workspace a root belongs to; a root not seen before goes to its directory's oldest open one. */
   function workspaceIdFor(session: SessionSummary) {
-    const mapped = registry.sessions[session.id] ? workspace(registry.sessions[session.id]) : undefined;
-    if (mapped) {
-      // A root someone works in again brings its workspace back.
-      if (mapped.archivedAt && !session.archived) { mapped.archivedAt = null; void save(); queueSync(); }
-      return mapped.id;
-    }
-    const directory = path.resolve(session.projectRoot);
-    const here = registry.workspaces.filter(entry => entry.directory === directory).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    const chosen = here.find(active) ?? (session.archived ? here.at(-1) : undefined)
-      ?? newWorkspace(directory, projectFor(directory).id, session.archived ? { archivedAt: session.updatedAt ?? now() } : {});
-    registry.sessions[session.id] = chosen.id;
-    void save();
-    return chosen.id;
+    const id = registry.sessions[session.id];
+    if (!id || !workspace(id)) throw new Error(`Placement not prepared for ${session.id}`);
+    return id;
   }
-
-  function assign(sessionId: string, workspaceId: string) {
-    if (registry.sessions[sessionId] === workspaceId) return;
-    registry.sessions[sessionId] = workspaceId;
-    void save();
-  }
+  async function assign(sessionId: string, workspaceId: string) { await mutate('placement.assign', { sessionId, workspaceId }); }
 
   function checkoutOf(directory: string): Placement['checkout'] {
     const facts = git.peek(directory);
@@ -295,29 +241,22 @@ export function createWorkspaces({ home, broadcast, agents, inDevelopment, log =
     };
   }
 
-  async function addProject(cwd: string) {
+  async function addProject(cwd: string, requestId?: string) {
     const directory = path.resolve(cwd);
     if (!path.isAbsolute(cwd) || !await isDirectory(directory)) throw new RequestError(`${cwd} is not a directory`, 'directory_not_found');
     await git.read(directory, true);
-    const entry = projectFor(directory);
+    // Owner add preserves the legacy empty-project behavior; remote register makes its default workspace.
+    const result = await mutate('project.add', { directory }, requestId);
     queueSync();
-    return entry;
+    return project(result.project.id)!;
   }
-
-  /** Archives a workspace: its roots are archived (and stop), and it leaves the sidebar. */
-  async function archiveWorkspace(entry: WorkspaceRecord) {
+  async function archiveWorkspace(entry: WorkspaceRecord, requestId?: string) {
     for (const session of rootsIn(entry.id)) await agents().archive(session.id);
-    entry.archivedAt = now();
-    entry.pinnedAt = null;
-    await save();
+    await mutate('workspace.update', { workspaceId: entry.id, archived: true }, requestId);
     queueSync();
-    return entry.archivedAt;
+    return workspace(entry.id)!.archivedAt ?? null;
   }
-
-  // Labels: one catalog, each change a new seq in the same generation, as Paseo's daemon keeps them.
-  function labelUpdate(payload: { kind: 'upsert'; label: WorkspaceLabelDefinition; previousName?: string } | { kind: 'remove'; name: string }) {
-    registry.labels.seq += 1;
-    void save();
+  function labelBroadcast(payload: any) {
     broadcast({ type: 'workspace.label.update', payload: { ...payload, generation: registry.labels.generation, seq: registry.labels.seq } } as Outbound);
   }
   const catalogEntry = (name: string) => registry.labels.catalog.find(label => workspaceLabelKey(label.name) === workspaceLabelKey(name));
@@ -347,7 +286,7 @@ export function createWorkspaces({ home, broadcast, agents, inDevelopment, log =
     async 'project.add.request'(request: Inbound<'project.add.request'>) {
       await load();
       try {
-        const entry = await addProject(request.cwd);
+        const entry = await addProject(request.cwd, request.requestId);
         return { type: 'project.add.response', payload: { requestId: request.requestId, project: projectDescriptor(entry), error: null } } satisfies Outbound;
       } catch (error) {
         return { type: 'project.add.response', payload: { requestId: request.requestId, project: null, error: message(error), errorCode: code(error) === 'directory_not_found' ? 'directory_not_found' : null } } satisfies Outbound;
@@ -374,10 +313,9 @@ export function createWorkspaces({ home, broadcast, agents, inDevelopment, log =
       await load();
       const entry = project(request.projectId);
       if (!entry || entry.removedAt) return { type: 'project.rename.response', payload: { requestId: request.requestId, projectId: request.projectId, accepted: false, customName: null, error: `No project ${request.projectId}` } } satisfies Outbound;
-      entry.customName = request.customName?.trim() || null;
-      await save();
+      await mutate('project.rename', { projectId: entry.id, customName: request.customName }, request.requestId);
       queueSync();
-      return { type: 'project.rename.response', payload: { requestId: request.requestId, projectId: entry.id, accepted: true, customName: entry.customName, error: null } } satisfies Outbound;
+      return { type: 'project.rename.response', payload: { requestId: request.requestId, projectId: entry.id, accepted: true, customName: project(entry.id)!.customName ?? null, error: null } } satisfies Outbound;
     },
 
     async 'project.remove.request'(request: Inbound<'project.remove.request'>) {
@@ -386,8 +324,7 @@ export function createWorkspaces({ home, broadcast, agents, inDevelopment, log =
       if (!entry || entry.removedAt) return { type: 'project.remove.response', payload: { requestId: request.requestId, projectId: request.projectId, accepted: false, removedWorkspaceIds: [], error: `No project ${request.projectId}` } } satisfies Outbound;
       const removed = registry.workspaces.filter(candidate => candidate.projectId === entry.id && active(candidate));
       for (const candidate of removed) await archiveWorkspace(candidate);
-      entry.removedAt = now();
-      await save();
+      await mutate('project.remove', { projectId: entry.id }, request.requestId);
       // A project without workspaces leaves by its own id, as Paseo's daemon sends it.
       if (!removed.length) broadcast({ type: 'workspace_update', payload: { kind: 'remove', id: entry.id, removedProjectId: entry.id } });
       sync();
@@ -397,10 +334,10 @@ export function createWorkspaces({ home, broadcast, agents, inDevelopment, log =
     async open_project_request(request: Inbound<'open_project_request'>) {
       await load();
       try {
-        const owner = await addProject(request.cwd);
+        const owner = await addProject(request.cwd, request.requestId);
         const directory = path.resolve(request.cwd);
-        const entry = registry.workspaces.filter(candidate => candidate.directory === directory && active(candidate)).sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]
-          ?? newWorkspace(directory, owner.id);
+        let entry = registry.workspaces.filter(candidate => candidate.directory === directory && active(candidate)).sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+        if (!entry) { const made = await mutate('workspace.create', { directory, projectId: owner.id }, request.requestId + ':workspace'); entry = workspace(made.workspace.id)!; }
         await git.read(directory);
         sync();
         return { type: 'open_project_response', payload: { requestId: request.requestId, workspace: descriptor(entry), error: null } } satisfies Outbound;
@@ -423,11 +360,8 @@ export function createWorkspaces({ home, broadcast, agents, inDevelopment, log =
         const directory = path.resolve(request.source.path);
         if (!await isDirectory(directory)) throw new RequestError(`${request.source.path} is not a directory`, 'directory_not_found');
         await git.read(directory);
-        const entry = newWorkspace(directory, owner.id, {
-          ...(request.workspaceId && !workspace(request.workspaceId) ? { id: request.workspaceId } : {}),
-          ...(request.title?.trim() ? { title: request.title.trim() } : {}),
-          ...(request.idempotencyKey ? { idempotencyKey: request.idempotencyKey } : {}),
-        });
+        const made = await mutate('workspace.create', { directory, projectId: owner.id, workspaceId: request.workspaceId, title: request.title, idempotencyKey: request.idempotencyKey }, request.requestId);
+        const entry = workspace(made.workspace.id)!;
         let agent: AgentSnapshotPayload | undefined;
         if (request.agent) {
           const { config, initialPrompt, clientMessageId } = request.agent;
@@ -444,10 +378,9 @@ export function createWorkspaces({ home, broadcast, agents, inDevelopment, log =
       await load();
       try {
         const entry = known(request.workspaceId);
-        entry.title = request.title?.trim() || null;
-        await save();
+        await mutate('workspace.update', { workspaceId: entry.id, title: request.title ?? null }, request.requestId);
         sync();
-        return { type: 'workspace.title.set.response', payload: { requestId: request.requestId, workspaceId: entry.id, accepted: true, title: entry.title, error: null } } satisfies Outbound;
+        return { type: 'workspace.title.set.response', payload: { requestId: request.requestId, workspaceId: entry.id, accepted: true, title: workspace(entry.id)!.title ?? null, error: null } } satisfies Outbound;
       } catch (error) {
         return { type: 'workspace.title.set.response', payload: { requestId: request.requestId, workspaceId: request.workspaceId, accepted: false, title: null, error: message(error) } } satisfies Outbound;
       }
@@ -457,10 +390,9 @@ export function createWorkspaces({ home, broadcast, agents, inDevelopment, log =
       await load();
       try {
         const entry = known(request.workspaceId);
-        entry.pinnedAt = request.pinned ? entry.pinnedAt ?? now() : null;
-        await save();
+        await mutate('workspace.update', { workspaceId: entry.id, pinned: request.pinned }, request.requestId);
         sync();
-        return { type: 'workspace.pin.set.response', payload: { requestId: request.requestId, workspaceId: entry.id, accepted: true, pinnedAt: entry.pinnedAt, error: null } } satisfies Outbound;
+        return { type: 'workspace.pin.set.response', payload: { requestId: request.requestId, workspaceId: entry.id, accepted: true, pinnedAt: workspace(entry.id)!.pinnedAt ?? null, error: null } } satisfies Outbound;
       } catch (error) {
         return { type: 'workspace.pin.set.response', payload: { requestId: request.requestId, workspaceId: request.workspaceId, accepted: false, pinnedAt: null, error: message(error) } } satisfies Outbound;
       }
@@ -469,7 +401,7 @@ export function createWorkspaces({ home, broadcast, agents, inDevelopment, log =
     async archive_workspace_request(request: Inbound<'archive_workspace_request'>) {
       await load();
       try {
-        const archivedAt = await archiveWorkspace(known(request.workspaceId));
+        const archivedAt = await archiveWorkspace(known(request.workspaceId), request.requestId);
         return { type: 'archive_workspace_response', payload: { requestId: request.requestId, workspaceId: request.workspaceId, archivedAt, error: null } } satisfies Outbound;
       } catch (error) {
         return { type: 'archive_workspace_response', payload: { requestId: request.requestId, workspaceId: request.workspaceId, archivedAt: null, error: message(error) } } satisfies Outbound;
@@ -522,48 +454,21 @@ export function createWorkspaces({ home, broadcast, agents, inDevelopment, log =
     },
 
     async 'workspace.label.assignment.set.request'(request: Inbound<'workspace.label.assignment.set.request'>) {
-      await load();
-      const entry = known(request.workspaceId);
-      const name = normalizeWorkspaceLabelName(request.label.name);
-      if (!name) throw new RequestError('A label needs a name', 'invalid_label');
-      let label = catalogEntry(name);
-      if (!label && request.assigned) {
-        label = { name, color: request.label.color };
-        registry.labels.catalog.push(label);
-        labelUpdate({ kind: 'upsert', label });
-      }
-      const key = workspaceLabelKey(name);
-      entry.labels = entry.labels.filter(existing => workspaceLabelKey(existing) !== key);
-      if (request.assigned && label) entry.labels.push(label.name);
-      await save();
+      await load(); const seq = registry.labels.seq;
+      await mutate('label.assign', { workspaceId: request.workspaceId, label: request.label, assigned: request.assigned }, request.requestId);
+      const label = catalogEntry(normalizeWorkspaceLabelName(request.label.name)) ?? request.label;
+      if (registry.labels.seq !== seq) labelBroadcast({ kind: 'upsert', label });
       sync();
-      return { type: 'workspace.label.assignment.set.response', payload: { requestId: request.requestId, label: label ?? { name, color: request.label.color }, workspaceLabels: entry.labels } } satisfies Outbound;
+      return { type: 'workspace.label.assignment.set.response', payload: { requestId: request.requestId, label, workspaceLabels: known(request.workspaceId).labels } } satisfies Outbound;
     },
-
     async 'workspace.label.update.request'(request: Inbound<'workspace.label.update.request'>) {
-      await load();
-      const label = catalogEntry(request.name);
-      if (!label) throw new RequestError(`No label ${request.name}`, 'label_not_found');
-      const previousName = label.name;
-      const newName = request.newName !== undefined ? normalizeWorkspaceLabelName(request.newName) : previousName;
-      if (!newName) throw new RequestError('A label needs a name', 'invalid_label');
-      const taken = catalogEntry(newName);
-      if (taken && taken !== label) throw new RequestError(`There is already a label ${taken.name}`, 'label_name_taken');
-      label.name = newName;
-      if (request.color) label.color = request.color;
-      let affected = 0;
-      for (const entry of registry.workspaces) {
-        const index = entry.labels.findIndex(existing => workspaceLabelKey(existing) === workspaceLabelKey(previousName));
-        if (index < 0) continue;
-        entry.labels[index] = newName;
-        affected += 1;
-      }
-      labelUpdate({ kind: 'upsert', label: { ...label }, ...(previousName !== newName ? { previousName } : {}) });
-      await save();
-      sync();
-      return { type: 'workspace.label.update.response', payload: { requestId: request.requestId, label: { ...label }, affectedWorkspaceCount: affected } } satisfies Outbound;
+      await load(); const previousName = catalogEntry(request.name)?.name;
+      const affectedWorkspaceCount = registry.workspaces.filter(w => w.labels.some(n => workspaceLabelKey(n) === workspaceLabelKey(request.name))).length;
+      await mutate('label.update', { name: request.name, newName: request.newName, color: request.color }, request.requestId);
+      const label = catalogEntry(request.newName ?? request.name)!;
+      labelBroadcast({ kind: 'upsert', label, ...(previousName !== label.name ? { previousName } : {}) }); sync();
+      return { type: 'workspace.label.update.response', payload: { requestId: request.requestId, label, affectedWorkspaceCount } } satisfies Outbound;
     },
-
     async 'workspace.label.delete.inspect.request'(request: Inbound<'workspace.label.delete.inspect.request'>) {
       await load();
       const key = workspaceLabelKey(request.name);
@@ -574,16 +479,9 @@ export function createWorkspaces({ home, broadcast, agents, inDevelopment, log =
       await load();
       const label = catalogEntry(request.name);
       if (!label) throw new RequestError(`No label ${request.name}`, 'label_not_found');
-      const key = workspaceLabelKey(label.name);
-      registry.labels.catalog = registry.labels.catalog.filter(entry => entry !== label);
-      let affected = 0;
-      for (const entry of registry.workspaces) {
-        const kept = entry.labels.filter(existing => workspaceLabelKey(existing) !== key);
-        if (kept.length !== entry.labels.length) { entry.labels = kept; affected += 1; }
-      }
-      labelUpdate({ kind: 'remove', name: label.name });
-      await save();
-      sync();
+      const affected = registry.workspaces.filter(w => w.labels.some(n => workspaceLabelKey(n) === workspaceLabelKey(request.name))).length;
+      await mutate('label.delete', { name: request.name }, request.requestId);
+      labelBroadcast({ kind: 'remove', name: label.name }); sync();
       return { type: 'workspace.label.delete.response', payload: { requestId: request.requestId, affectedWorkspaceCount: affected } } satisfies Outbound;
     },
   };
@@ -602,6 +500,7 @@ export function createWorkspaces({ home, broadcast, agents, inDevelopment, log =
       workspacePinning: true, workspaceMarkUnread: true, workspaceLabels: true,
     },
     load,
+    prepare,
     workspaceIdFor,
     placement,
     assign,
@@ -614,7 +513,7 @@ export function createWorkspaces({ home, broadcast, agents, inDevelopment, log =
     },
     close() {
       if (gitTimer) clearInterval(gitTimer);
-      return saving;
+      return ownerTail;
     },
   };
 }

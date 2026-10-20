@@ -61,7 +61,7 @@ async function setup(t, relay = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-relay-'));
   const home = path.join(directory, 'home');
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false, libraryDir: home });
-  const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test' });
+  const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test', home });
   let web;
   const gateway = createPaseoBridge({ clientFactory: async (onEvent) => {
     const client = daemon.local();

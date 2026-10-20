@@ -4361,6 +4361,190 @@
     "after": 0,
     "generation": "g"
    }
+  },
+  {
+   "name": "project.list params",
+   "check": "params",
+   "method": "project.list",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "project.list result",
+   "check": "result",
+   "method": "project.list",
+   "valid": true,
+   "value": {
+    "projects": [
+     {
+      "id": "prj_0000000000000001",
+      "root": "/workspace",
+      "addedAt": "2026-10-20T00:00:00Z"
+     }
+    ],
+    "total": 1,
+    "revision": 1,
+    "nextCursor": null
+   }
+  },
+  {
+   "name": "workspace.list params",
+   "check": "params",
+   "method": "workspace.list",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "workspace.list result",
+   "check": "result",
+   "method": "workspace.list",
+   "valid": true,
+   "value": {
+    "workspaces": [
+     {
+      "id": "wks_0000000000000001",
+      "projectId": "prj_0000000000000001",
+      "directory": "/workspace",
+      "labels": [],
+      "createdAt": "2026-10-20T00:00:00Z"
+     }
+    ],
+    "total": 1,
+    "revision": 1,
+    "nextCursor": null
+   }
+  },
+  {
+   "name": "workspace.get params",
+   "check": "params",
+   "method": "workspace.get",
+   "valid": true,
+   "value": {
+    "workspaceId": "wks_0000000000000001"
+   }
+  },
+  {
+   "name": "workspace.get result",
+   "check": "result",
+   "method": "workspace.get",
+   "valid": true,
+   "value": {
+    "workspace": {
+     "id": "wks_0000000000000001",
+     "projectId": "prj_0000000000000001",
+     "directory": "/workspace",
+     "labels": [],
+     "createdAt": "2026-10-20T00:00:00Z"
+    },
+    "revision": 1
+   }
+  },
+  {
+   "name": "project.register params",
+   "check": "params",
+   "method": "project.register",
+   "valid": true,
+   "value": {
+    "directory": "/workspace",
+    "requestId": "add",
+    "ifRevision": 0
+   }
+  },
+  {
+   "name": "project.register result",
+   "check": "result",
+   "method": "project.register",
+   "valid": true,
+   "value": {
+    "project": {
+     "id": "prj_0000000000000001",
+     "root": "/workspace",
+     "addedAt": "2026-10-20T00:00:00Z"
+    },
+    "revision": 1
+   }
+  },
+  {
+   "name": "project.remove params",
+   "check": "params",
+   "method": "project.remove",
+   "valid": true,
+   "value": {
+    "projectId": "prj_0000000000000001",
+    "requestId": "remove",
+    "ifRevision": 1
+   }
+  },
+  {
+   "name": "project.remove result",
+   "check": "result",
+   "method": "project.remove",
+   "valid": true,
+   "value": {
+    "project": {
+     "id": "prj_0000000000000001",
+     "root": "/workspace",
+     "addedAt": "2026-10-20T00:00:00Z"
+    },
+    "revision": 2
+   }
+  },
+  {
+   "name": "workspace.update params",
+   "check": "params",
+   "method": "workspace.update",
+   "valid": true,
+   "value": {
+    "workspaceId": "wks_0000000000000001",
+    "pinned": true,
+    "requestId": "pin",
+    "ifRevision": 1
+   }
+  },
+  {
+   "name": "workspace.update result",
+   "check": "result",
+   "method": "workspace.update",
+   "valid": true,
+   "value": {
+    "workspace": {
+     "id": "wks_0000000000000001",
+     "projectId": "prj_0000000000000001",
+     "directory": "/workspace",
+     "labels": [],
+     "createdAt": "2026-10-20T00:00:00Z",
+     "pinnedAt": "2026-10-20T00:00:00Z"
+    },
+    "revision": 2
+   }
+  },
+  {
+   "name": "registry.owner params",
+   "check": "params",
+   "method": "registry.owner",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "registry.owner result",
+   "check": "result",
+   "method": "registry.owner",
+   "valid": true,
+   "value": {
+    "registry": {}
+   }
+  },
+  {
+   "name": "workspaceId resolves host cwd",
+   "check": "params",
+   "method": "session.create",
+   "valid": true,
+   "value": {
+    "workspaceId": "wks_0000000000000001",
+    "spec": {
+     "persist": true
+    }
+   }
   }
  ]
 }

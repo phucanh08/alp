@@ -25,3 +25,4 @@ export { createLineDecoder, utf8Length } from './rpc/framing.js';
 export { MAX_TIMER_MS, timerDelay } from './rpc/timers.js';
 export { hello } from './rpc/handshake.js';
 export { backoffDelay, createReconnectingClient, retryable } from './rpc/reconnect.js';
+export { workspaceRegistry } from './rpc/registry.js';

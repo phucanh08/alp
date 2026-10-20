@@ -2471,6 +2471,104 @@
         "updatedAt"
       ],
       "additionalProperties": true
+    },
+    "registryProject": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "customName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "addedAt": {
+          "type": "string"
+        },
+        "removedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "canonical": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "root",
+        "addedAt"
+      ],
+      "additionalProperties": false
+    },
+    "registryWorkspace": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "directory": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pinnedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "archivedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "canonical": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "projectId",
+        "directory",
+        "labels",
+        "createdAt"
+      ],
+      "additionalProperties": false
     }
   }
 }

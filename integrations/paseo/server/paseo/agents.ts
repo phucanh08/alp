@@ -31,7 +31,8 @@ export type Directory = {
   load(): Promise<void>;
   workspaceIdFor(session: SessionSummary): string;
   placement(session: SessionSummary): Placement;
-  assign(sessionId: string, workspaceId: string): void;
+  assign(sessionId: string, workspaceId: string): Promise<void>;
+  prepare(sessions: SessionSummary[]): Promise<void>;
   changed(): void;
 };
 
@@ -226,6 +227,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
   async function refresh() {
     if (!alp) return;
     const { sessions } = await alp.request<{ sessions: SessionSummary[] }>('session.list', { rootsOnly: true, includeClosed: true, includeArchived: true });
+    await directory.prepare(sessions);
     const seen = new Set<string>();
     for (const session of sessions) {
       seen.add(session.id);
@@ -529,8 +531,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     const { config } = input;
     if (config.provider !== PROVIDER) throw new Error(`ALP runs its own teams; ${config.provider} is not one of them`);
     const sessionId = `web-${randomUUID()}`;
-    if (input.workspaceId) directory.assign(sessionId, input.workspaceId);
-    await alp!.request('session.create', { sessionId, spec: { cwd: config.cwd, persist: true, ...(config.model ? { workflow: config.model } : {}), ...(config.modeId ? { mode: config.modeId } : {}) } });
+    await alp!.request('session.create', { sessionId, ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}), spec: { cwd: config.cwd, persist: true, ...(config.model ? { workflow: config.model } : {}), ...(config.modeId ? { mode: config.modeId } : {}) } });
     if (config.title) await alp!.request('session.rename', { sessionId, title: config.title });
     await refresh();
     await ensureTimeline(sessionId);
@@ -838,12 +839,13 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
         defaultModeId: preview.mode,
       };
     },
+    request: (method: string, params: any) => { if (!alp) return Promise.reject(new Error('ALP daemon is not connected')); return alp.request(method, params); },
     features: { providersSnapshot: true, providerSubagents: true, projectedSubagentTimeline: true, providerSubagentNesting: true },
     start() {
       started ??= (async () => {
         try {
-          await directory.load();
           await connectAgentClient();
+          await directory.load();
           await refresh();
           scheduleRefresh();
         } catch (error) {
