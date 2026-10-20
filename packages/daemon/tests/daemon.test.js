@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { realpath as realpathOf } from 'node:fs/promises';
 import { initProject } from '@anhlp/alp-core/init';
+import { createTask } from '@anhlp/alp-core/tasks';
 import { connect, daemonPaths, ensureDaemon, findDaemonEntry, readLock, PROTOCOL_VERSION } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
@@ -400,6 +401,44 @@ test('a resumed untitled root whose thread began outside ALP is named after its 
   assert.equal((await second.client.request('session.get', { sessionId: session.id })).session.title, 'Refactor the parser');
 });
 
+// Issue #120 follow-up: ALP's own input names where its prompt is, so a user's prompt that begins
+// as ALP's mail does, or an image alone, is never read as mail or as the task digest.
+test('a user prompt that begins as ALP mail does, or is an image alone, is read where ALP put it', async t => {
+  const { directory, project } = await durableProject(t);
+  await createTask(project, { title: 'Ship it', priority: 1 }, 'user');
+  const runtimes = [];
+  const first = await durable(t, directory, project, runtimes);
+  const { session } = await first.client.request('session.create', { spec: { cwd: project, persist: true } });
+  const ended = count => until(() => first.events.filter(e => e.event.type === 'turn.ended').length === count);
+  await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'web-1', content: [{ type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' }] });
+  runtimes[0].finish();
+  await ended(1);
+  const pasted = 'ALP mail from other agents. (pasted) why did this arrive?';
+  await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'web-2', content: text(pasted) });
+  runtimes[0].finish();
+  await ended(2);
+  const inputs = runtimes[0].calls.filter(call => call.method === 'turn/start').map(call => call.params);
+  assert.equal(inputs.length, 2);
+  for (const params of inputs) assert.ok(params.input.some(part => part.type === 'text' && part.text.startsWith('Project tasks')), 'the task digest comes before the prompt');
+  await first.stop();
+  await untitled(directory, session.id);
+
+  // Each message as Codex keeps the input ALP sent; once more without the empty text part, as a runtime may leave it out.
+  const native = (id, params, keep = () => true) => ({ type: 'userMessage', id, clientId: params.clientUserMessageId, content: params.input.filter(keep) });
+  const turns = [
+    { id: 'n1', items: [native('u1', inputs[0])] },
+    { id: 'n2', items: [native('u2', inputs[0], part => !(part.type === 'text' && part.text === ''))] },
+    { id: 'n3', items: [native('u3', inputs[1])] },
+  ];
+  const second = await durable(t, directory, project, runtimes, { turns });
+  await second.client.request('session.create', { sessionId: session.id, spec: { cwd: project }, history: 'replay' });
+  await until(() => second.events.filter(e => e.event.type === 'item' && e.event.item.kind === 'user_message').length === 3);
+  const users = second.events.filter(e => e.event.type === 'item' && e.event.item.kind === 'user_message').map(e => e.event.item);
+  assert.deepEqual(users.map(item => [item.text, item.origin, item.images]), [['', 'user', 1], ['', 'user', 1], [pasted, 'user', undefined]]);
+  await until(async () => (await second.client.request('session.get', { sessionId: session.id })).session.title !== undefined);
+  assert.equal((await second.client.request('session.get', { sessionId: session.id })).session.title, pasted, 'named after the user\'s words, never the digest');
+});
+
 // An acknowledgement whose write is still on its way when the root ends another turn must not hide
 // the newer attention from the clients (review finding M1, issue #120).
 test('an acknowledgement racing a new turn end leaves the newer attention with every client', async t => {
@@ -429,6 +468,74 @@ test('an acknowledgement racing a new turn end leaves the newer attention with e
   assert.equal(told.at(-1)?.reason, 'error', 'the clear that landed late does not hide the newer attention');
   const { attention } = await first.client.request('question.watch', { projectRoot: project, attention: true });
   assert.deepEqual(attention.map(entry => entry.attention.reason), ['error']);
+});
+
+/**
+ * A root whose turn finished, watched for attention, then acknowledged with a record write held
+ * until `release` and failing then (issue #120 follow-up): whatever happens meanwhile decides what
+ * stays.
+ */
+async function failingAck(t) {
+  const { directory, project } = await durableProject(t);
+  const runtimes = [];
+  const first = await durable(t, directory, project, runtimes);
+  const { session } = await first.client.request('session.create', { spec: { cwd: project, persist: true } });
+  const told = [];
+  first.client.onEvent(envelope => { if (envelope.event.type === 'attention') told.push(envelope.event.attention ?? null); });
+  await first.client.request('question.watch', { projectRoot: project, attention: true });
+  await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Work') });
+  runtimes[0].finish();
+  await until(() => told.length === 1);
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const put = first.store.put.bind(first.store);
+  let writes = 0;
+  first.store.put = record => { const failing = writes++ === 0; return held.then(() => failing ? Promise.reject(new Error('disk full')) : put(record)); };
+  const ack = first.client.request('session.attention.clear', { sessionId: session.id, at: told[0].at });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const attention = async () => (await first.client.request('question.watch', { projectRoot: project, attention: true })).attention.map(entry => [entry.sessionId, entry.attention.reason]);
+  return { first, runtimes, session, told, ack, release, attention };
+}
+
+test('an acknowledgement whose write fails keeps the attention and tells nobody of a clear', async t => {
+  const { session, told, ack, release, attention } = await failingAck(t);
+  release();
+  await assert.rejects(ack);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(told.map(entry => entry?.reason ?? null), ['finished'], 'never told of a clear that did not happen');
+  assert.deepEqual(await attention(), [[session.id, 'finished']]);
+});
+
+test('an acknowledgement whose write fails after a new turn failed keeps the new error attention', async t => {
+  const { first, runtimes, session, told, ack, release, attention } = await failingAck(t);
+  await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm2', content: text('Again') });
+  runtimes[0].notification('turn/completed', { threadId: runtimes[0].threadId, turn: { id: runtimes[0].turnId, status: 'failed', error: { message: 'boom' } } });
+  await until(() => told.at(-1)?.reason === 'error');
+  release();
+  await assert.rejects(ack);
+  assert.deepEqual(await attention(), [[session.id, 'error']]);
+});
+
+test('an acknowledgement whose write fails after a new turn started leaves no attention', async t => {
+  const { first, runtimes, session, ack, release, attention } = await failingAck(t);
+  await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm2', content: text('Again') });
+  await until(() => first.events.filter(e => e.sessionId === session.id && e.event.type === 'turn.started').length === 2);
+  release();
+  await assert.rejects(ack);
+  assert.deepEqual(await attention(), [], 'the turn that started ended the old attention');
+  runtimes[0].finish();
+  await until(async () => (await attention()).length === 1);
+});
+
+test('an acknowledgement whose write fails while the root is archived leaves no attention once it is back', async t => {
+  const { first, session, ack, release, attention } = await failingAck(t);
+  const archiving = first.client.request('session.archive', { sessionId: session.id });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  release();
+  await assert.rejects(ack);
+  await archiving;
+  await first.client.request('session.archive', { sessionId: session.id, archived: false });
+  assert.deepEqual(await attention(), [], 'archiving ended it');
 });
 
 test('sessions survive a daemon restart and resume with their history', async t => {

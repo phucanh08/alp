@@ -218,6 +218,42 @@ test('shared attention: a look on one page clears it on the other, through the h
   assert.equal(attentionReason(one.state(), 'ses_b'), undefined);
 });
 
+// Review finding (issue #120 follow-up): an acknowledgement the host could not write leaves the
+// attention with every other client, so the page that looked shows it again instead of diverging.
+test('shared attention: an acknowledgement the host refuses shows the attention again, unless the host told of the root since', async t => {
+  const one = setup(t);
+  one.host.capabilities.push(...SHARED);
+  one.host.seed('ses_a', { title: 'Alpha' });
+  one.host.seed('ses_b', { title: 'Bee' });
+  const two = page(t, one.host);
+  await connected(one);
+  await connected(two);
+  await until(() => watchCalls(one.host).length >= 2, 'both watch');
+  one.controller.setPresence({ visible: false, focused: false });
+  two.controller.setPresence({ visible: false, focused: false });
+  one.host.startTurn('ses_b');
+  one.host.endTurn('ses_b', 'failed', { message: 'quota exceeded' });
+  await until(() => attentionReason(one.state(), 'ses_b') === 'error' && attentionReason(two.state(), 'ses_b') === 'error', 'both ask');
+  one.host.intercept.set('session.attention.clear', (_params, _connection, { fail }) => { fail(1000, 'Could not save the attention of ses_b'); return 'handled'; });
+  one.controller.selectSession('ses_b');
+  assert.equal(attentionReason(one.state(), 'ses_b'), undefined, 'forgotten at once, as Paseo');
+  await until(() => attentionReason(one.state(), 'ses_b') === 'error', 'asks again: the host still keeps it');
+  assert.equal(one.state().turnAttention.ses_b.message, 'quota exceeded');
+  assert.equal(attentionReason(two.state(), 'ses_b'), 'error');
+  assert.equal(one.host.calls.filter(call => call.method === 'session.attention.clear').length, 1, 'not asked over and over');
+  // Held, then refused after the host told of a new turn: what the host told stands.
+  one.controller.selectSession('ses_a');
+  let refuse;
+  one.host.intercept.set('session.attention.clear', (_params, _connection, { fail }) => new Promise(resolve => { refuse = () => { fail(1000, 'Could not save'); resolve('handled'); }; }));
+  one.controller.selectSession('ses_b');
+  await until(() => refuse, 'acknowledging');
+  one.host.startTurn('ses_b');
+  await until(() => attentionReason(two.state(), 'ses_b') !== 'error', 'the new turn ended it');
+  refuse();
+  await settle();
+  assert.equal(one.state().turnAttention.ses_b, undefined, 'not brought back over the newer word of the host');
+});
+
 test('shared attention: a turn that ended while the page was disconnected asks once it is back', async t => {
   const w = setup(t);
   w.host.capabilities.push(...SHARED);

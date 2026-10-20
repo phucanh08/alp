@@ -636,8 +636,11 @@ connection lasts, alpd sends it every `question` and `question.resolved` event o
   it, persists that without changing the root's `updatedAt`, tells the watchers, and answers
   `{ cleared: true }`; `{ cleared: false }` when it had none or, with `at`, when its attention is not
   the one set at `at` (a look at an older ending never hides a newer one). A session alpd does not
-  know answers `1001`. apps/web acknowledges when the user opens, focuses or writes to the root, or
-  when an ending arrives on the root in front of them.
+  know answers `1001`. When the write fails it answers `persistence_failed`, tells nobody, and the
+  root keeps its attention unless a turn of the root started or ended, or the root was archived,
+  while the write was on its way. apps/web acknowledges when the user opens, focuses or writes to
+  the root, or when an ending arrives on the root in front of them; when the host refuses, the page
+  shows the attention again and acknowledges it on the next look or watch read.
 
 The gateway forwards it with no `projectRoot` (and `turns: true` when the client sent it), filters the
 answer as `question.list`'s, and lets each event out only if its session's tree lies in the grant and,

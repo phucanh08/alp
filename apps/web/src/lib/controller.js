@@ -268,6 +268,8 @@ export class Controller {
    * @type {Array<[string, any]> | null}
    */
   #attentionLog = null;
+  /** The acknowledgement of each root on its way to the host; what the host tells of the root since drops it. @type {Map<string, object>} */
+  #acks = new Map();
   /** Latest question.list and History reads: an older answer that lands later is dropped. */
   #attentionRead = 0;
   #historyRead = 0;
@@ -627,7 +629,7 @@ export class Controller {
     // Live events of the root itself (a replay is buffered above and never counts).
     const type = envelope.event?.type;
     if (envelope.sessionId === root && type === 'turn.ended') this.#turnEnded(root, envelope.event);
-    else if (envelope.sessionId === root && type === 'turn.started') this.#forgetAttention(root);
+    else if (envelope.sessionId === root && type === 'turn.started') { this.#acks.delete(root); this.#forgetAttention(root); }
   }
 
   /** Whether the host keeps turn attention for every client (docs/protocol/alp-json-rpc-v1.md §12.2). */
@@ -639,21 +641,41 @@ export class Controller {
    * @param {string} root @param {any} attention
    */
   #hostAttention(root, attention) {
+    // What the host tells now outdates what this page acknowledged before.
+    this.#acks.delete(root);
     const entry = hostEntry(attention);
     if (!entry) { this.#forgetAttention(root); return; }
-    if (this.#seen(root)) { this.#forgetAttention(root); this.#acknowledge(root, entry.hostAt); return; }
+    if (this.#seen(root)) { this.#forgetAttention(root); this.#acknowledge(root, entry); return; }
     if (this.#state.history.list.some(row => row.id === root && row.archived)) return;
     if (this.#state.turnAttention[root]?.hostAt === entry.hostAt) return;
     this.#set(state => ({ turnAttention: { ...state.turnAttention, [root]: entry } }));
   }
 
-  /** Tells the host the user looked at a root's attention; quiet, the next watch read repairs a miss. @param {string} root @param {string | undefined} hostAt */
-  #acknowledge(root, hostAt) {
+  /**
+   * Tells the host the user looked at a root's attention. When the host could not keep that, the
+   * page shows the attention again, as every other client still does, unless the host told of the
+   * root since; it is not acknowledged again until the next look or watch read, so a host that
+   * cannot write is not asked over and over.
+   * @param {string} root @param {TurnAttention} entry
+   */
+  #acknowledge(root, entry) {
     if (!this.#sharedAttention || this.#state.connection.phase !== 'open') return;
+    const ack = {};
+    const context = this.#context;
+    this.#acks.set(root, ack);
+    const failed = () => {
+      if (this.#acks.get(root) !== ack) return;
+      this.#acks.delete(root);
+      if (context !== this.#context || this.#state.turnAttention[root]) return;
+      if (this.#state.history.list.some(row => row.id === root && row.archived)) return;
+      this.#set(state => ({ turnAttention: { ...state.turnAttention, [root]: entry } }));
+    };
     try {
-      void this.#client().request('session.attention.clear', { sessionId: root, ...(hostAt ? { at: hostAt } : {}) }).catch(() => {});
+      void this.#client().request('session.attention.clear', { sessionId: root, ...(entry.hostAt ? { at: entry.hostAt } : {}) })
+        .then(() => { if (this.#acks.get(root) === ack) this.#acks.delete(root); }, failed);
     } catch {
       // No client now: the next watch read shows it again, and a look clears it then.
+      failed();
     }
   }
 
@@ -716,7 +738,7 @@ export class Controller {
     const entry = root ? this.#state.turnAttention[root] : undefined;
     if (!root || !entry) return;
     this.#forgetAttention(root);
-    this.#acknowledge(root, entry.hostAt);
+    this.#acknowledge(root, entry);
   }
 
   /**
@@ -997,7 +1019,7 @@ export class Controller {
     for (const [root, attention] of host) {
       const entry = hostEntry(attention);
       if (!entry || this.#state.history.list.some(row => row.id === root && row.archived)) continue;
-      if (this.#seen(root)) { this.#acknowledge(root, entry.hostAt); continue; }
+      if (this.#seen(root)) { this.#acknowledge(root, entry); continue; }
       // The same ending keeps its local time, so it is not notified again.
       const known = this.#state.turnAttention[root];
       turnAttention[root] = known?.hostAt === entry.hostAt ? known : entry;

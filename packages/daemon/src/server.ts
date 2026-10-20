@@ -322,9 +322,12 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     }
   }
 
-  /** How many times each root's attention was set or cleared by something other than an acknowledgement. */
-  const attentionChanges = new Map<string, number>();
-  const attentionChanged = (root: string) => attentionChanges.set(root, (attentionChanges.get(root) ?? 0) + 1);
+  /**
+   * The acknowledgement of each root whose write is on its way. Whatever else can change a root's
+   * attention (a turn of the root starting or ending, archiving) drops it, so a failed write brings
+   * the attention back only when nothing changed it meanwhile; it lives no longer than the write.
+   */
+  const pendingAcks = new Map<string, object>();
 
   /** The attention of the roots of `projectRoot` (every project when absent): archived roots never ask. */
   function attentionOf(projectRoot?: string) {
@@ -436,7 +439,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       const before = records.get(root)?.attention;
       named = track(sessionId, root, event);
       const after = records.get(root)?.attention;
-      if (after !== before) { attentionChanged(root); tellAttention(root, after); }
+      // A root's turn starting or ending decides its attention, even when it was already none.
+      if (sessionId === root && (event.type === 'turn.started' || event.type === 'turn.ended')) pendingAcks.delete(root);
+      if (after !== before) tellAttention(root, after);
     }
     for (const connection of attached.get(root) ?? []) deliver(connection, envelope);
     if (event.type === 'question' || event.type === 'question.resolved') tellWatchers(root, envelope);
@@ -965,14 +970,17 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       const attention = record.attention;
       if (!attention || (at !== undefined && attention.at !== at)) return { cleared: false };
       // Not a change of the session: its place in session.list stays.
-      const changes = attentionChanges.get(record.id) ?? 0;
+      const ack = {};
+      pendingAcks.set(record.id, ack);
       record.attention = undefined;
       try { await store?.put(record); }
       catch (error) {
-        // Brought back only if its attention did not change meanwhile: a turn that started since ended it anyway.
-        if ((attentionChanges.get(record.id) ?? 0) === changes) record.attention = attention;
+        // Brought back only if nothing decided its attention meanwhile: a turn that started since, or
+        // archiving, ended it anyway. Nobody was told of the clear, so nobody is told of this.
+        if (pendingAcks.get(record.id) === ack && !record.attention) record.attention = attention;
         throw persistenceFailed(`the attention of ${record.id}`, error);
       }
+      finally { if (pendingAcks.get(record.id) === ack) pendingAcks.delete(record.id); }
       // What holds now: a turn that ended while the write was on its way set a newer one, which stays.
       tellAttention(record.id, record.attention);
       return { cleared: true };
@@ -1201,11 +1209,12 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       const record = rootRecord(sessionId);
       if (archived && runtime.snapshot(record.id)) await runtime.close(record.id);
       const before = { archived: record.archived, attention: record.attention };
-      // An archived root never asks for attention.
+      // An archived root never asks for attention, nor does an acknowledgement on its way bring one back.
       Object.assign(record, { archived: archived === true ? true : undefined }, archived === true ? { attention: undefined } : {});
+      if (archived === true) pendingAcks.delete(record.id);
       try { await store?.put(record); }
       catch (error) { Object.assign(record, before); throw persistenceFailed(`the archive state of ${record.id}`, error); }
-      if (before.attention && !record.attention) { attentionChanged(record.id); tellAttention(record.id, undefined); }
+      if (before.attention && !record.attention) tellAttention(record.id, undefined);
       return { session: summary(record.id) };
     },
 
