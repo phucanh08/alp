@@ -24,13 +24,13 @@ Số mục (§) có thể được code và test tham chiếu; giữ ổn địn
 | Sessions | Liệt kê, tạo (team, permissions, model, title), mở, đổi tên, archive. Mỗi agent của cây (main và assignment) là một tab. |
 | Chat | Prompt + stream, tool call, todo, notice; trả lời câu hỏi theo luồng chọn rồi Submit của Paseo (Other thay lựa chọn, Enter gửi, Dismiss), thẻ câu hỏi nằm trong stream; interrupt; steer khi agent đang chạy; hàng đợi (§4.3). |
 | Tasks | Liệt kê (poll), tạo, mở chi tiết trong tab lớn, đóng, mở lại, duyệt human gate. Mọi thay đổi gửi `ifRev`. |
-| Settings | Bố cục như `alp web` cũ: App (General, Appearance, Sidebar, Chat, Terminal, Editor, Diagnostics, About) và Host (Overview, Projects, Connections, Templates, Agents, Skills, Hooks, MCP servers, Providers…). Library chỉ hiện tên, nguồn, mô tả. Mục chưa hỗ trợ ghi rõ "not available in this beta". |
+| Settings | Bố cục như `alp web` cũ: App (General, Appearance, Sidebar, Chat, Terminal, Editor, Diagnostics, About) và Host (Overview, Projects, Connections, Templates, Agents, Skills, Hooks, MCP servers, Providers…). Library xem nội dung đã redaction: file Markdown dưới dạng text, cấu hình dưới dạng JSON. Instruction agents/skills riêng của project sửa được với explicit `library.write` (#118). Mục chưa hỗ trợ ghi rõ "not available in this beta". |
 | Workspace | Phím tắt như Paseo (dialog Shortcuts), History với session đã archive và Unarchive, attention trên mọi session (`question.list`), menu chuột phải của tab, kéo đổi thứ tự tab, tab giữ qua reload, sidebar và dock kéo đổi độ rộng, command center (⌘K), trạng thái trên favicon và title, notification của trình duyệt khi session chờ trả lời. |
 | New session | Màn hình như tab new agent của Paseo: tin đầu tiên, chọn team/model/thinking/permissions, `session.preview`, nhớ lựa chọn lần trước (§4.2). |
 | Phục hồi | Reconnect có backoff, resume theo cursor, reload trang, gateway hoặc alpd khởi động lại (§5). |
 
 Không có trong beta (app ghi rõ, không fallback sang Paseo hay app nhúng): CRUD workspace, git và
-file (tab Changes, Diff, Files chỉ có giao diện), xem/sửa nội dung library, thêm/kiểm tra provider,
+file (tab Changes, Diff, Files chỉ có giao diện), sửa library của host hoặc cấu hình thực thi, thêm/kiểm tra provider,
 usage, đổi ngôn ngữ agent, terminal (tab Terminal chỉ có giao diện), plugin, pair device.
 
 ## 2. Cài đặt, chạy, build
@@ -272,8 +272,11 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
   giây.
 - Children/delegation chỉ có unit test. Fake provider của E2E không delegate.
 - Chưa chạy smoke với provider thật. Toàn bộ kết quả trên là fake provider.
-- Library chỉ có tên, nguồn, mô tả, `usedBy`. `library.get` bị gateway DENY (secret) và không mở
-  lại.
+- Library qua gateway mở nội dung đã redaction bằng `library.get` với `project.read`
+  trong workspace được cấp: file Markdown hiển thị dưới dạng text, cấu hình dưới dạng JSON,
+  secret hiển thị là `‹hidden on the host›`. Ghi chỉ dành cho instruction agents/skills riêng của project
+  với explicit `library.write` và daemon `library.project.write` (#118); library của host,
+  entry kế thừa, cấu hình thực thi và Test vẫn không sửa/chạy qua đây.
 - Ngôn ngữ app chỉ có tiếng Anh. Ngôn ngữ agent chỉ đọc.
 - Theme chỉ có System/Light/Dark; chưa có font, cỡ chữ, theme khác của Paseo.
 - Chưa có split pane.

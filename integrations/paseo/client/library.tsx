@@ -55,7 +55,7 @@ export const LANGUAGES = [
   { label: 'Deutsch', value: 'German' }, { label: 'Español', value: 'Spanish' },
 ];
 /** librarySkills: for agents, the skills the library gives it by name (role-skills.json). */
-type Entry = { kind: Kind; name: string; source: string; overrides?: string; content: Content; revision: string | null; usedBy: string[]; librarySkills?: string[] };
+type Entry = { kind: Kind; name: string; source: string; overrides?: string; content: Content; revision: string | null; usedBy: string[]; librarySkills?: string[]; secrets?: string[] };
 /** `readOnly`: the library can only be looked at from here (ALP remote mode), and why. */
 type Where = { projectRoot: string | null; library: string; readOnly?: { reason: string; unlisted?: string } } | null;
 
@@ -189,7 +189,7 @@ type WorkspaceProps = {
 };
 
 /** The aside's groups: General (the library only), Organisation, Capabilities and Runtimes, each kind with its entries. */
-export function navGroups(scope: Scope, lists: Lists, readOnly = false): NavGroup[] {
+export function navGroups(scope: Scope, lists: Lists): NavGroup[] {
   const groups: NavGroup[] = scope === 'library' ? [{ key: 'General', label: 'General', items: [{ key: 'language', label: 'Language', icon: 'Languages' }] }] : [];
   for (const item of shownIn(scope)) {
     let group = groups.find(candidate => candidate.label === item.group);
@@ -197,8 +197,7 @@ export function navGroups(scope: Scope, lists: Lists, readOnly = false): NavGrou
     const rows = lists[item.kind];
     group.items.push({
       key: item.kind, label: item.title, icon: item.icon, ...(rows ? { count: rows.length } : {}),
-      // A read-only library's entries cannot be opened, so the aside lists kinds only.
-      children: readOnly ? [] : (rows ?? []).map(row => ({ key: row.name, label: row.name, tone: sourceTone(row.source) })),
+      children: (rows ?? []).map(row => ({ key: row.name, label: row.name, tone: sourceTone(row.source) })),
     });
   }
   return groups;
@@ -209,7 +208,7 @@ export function LibraryWorkspace({ theme, compact, scope, where, lists, error, s
   const styles = useMemo(() => makeStyles(theme, compact), [theme, compact]);
   const title = scope === 'library' ? 'ALP library' : 'ALP project';
   const subtitle = scope === 'library' ? where?.library : where?.projectRoot ?? undefined;
-  const groups = navGroups(scope, lists, !!where?.readOnly);
+  const groups = navGroups(scope, lists);
   const onSelect = (kind: string, name?: string) => actions.select(kind === 'language' ? { kind } : { kind: kind as Kind, ...(name ? { name } : {}) });
   if (scope === 'project' && where?.readOnly?.unlisted) {
     return <View style={styles.screen}><Text style={styles.muted}>{where.readOnly.unlisted}</Text></View>;
@@ -221,6 +220,23 @@ export function LibraryWorkspace({ theme, compact, scope, where, lists, error, s
     return <LanguageSettings theme={theme} compact={compact} language={language ?? null} error={error} actions={actions} layout={{ title, subtitle, groups, onSelect, initialCollapsed, embedded }} styles={styles} />;
   }
   const kind = kindOf(selection.kind);
+  if (where?.readOnly && (selection.name || selection.creating)) {
+    // A selection can change before its async get resolves; never label the previous entry as the new one.
+    const viewed = !where.readOnly.unlisted && entry && entry.name === selection.name && entry.kind === selection.kind ? entry : null;
+    return <SideNavLayout theme={theme} compact={compact} title={title} subtitle={subtitle} groups={groups} active={{ item: selection.kind, ...(selection.name ? { child: selection.name } : {}) }} onSelect={onSelect} initialCollapsed={initialCollapsed} embedded={embedded}
+      breadcrumb={[kind.title, selection.name ?? 'Read only']}
+      badges={viewed ? <Pill theme={theme} label={sourceLabel(viewed.source)} tone={sourceTone(viewed.source)} /> : null}
+      actions={<Button theme={theme} icon="ArrowLeft" label={`All ${kind.title.toLowerCase()}`} onPress={() => actions.select({ kind: selection.kind })} />}>
+      <Text style={styles.muted}>{where.readOnly.reason}</Text>
+      {error || where.readOnly.unlisted ? <Text style={styles.muted}>{error ?? where.readOnly.unlisted}</Text> : selection.creating ? <Text style={styles.muted}>Create entries on the ALP host.</Text> : !viewed ? <Text style={styles.muted}>Loading…</Text> : <>
+        {viewed.overrides ? <Text style={styles.small}>Overrides {sourceLabel(viewed.overrides)}.</Text> : null}
+        {viewed.usedBy.length ? <Text style={styles.small}>Used by {viewed.usedBy.join(', ')}.</Text> : null}
+        {viewed.librarySkills?.length ? <Text style={styles.small}>Library skills: {viewed.librarySkills.join(', ')}.</Text> : null}
+        {viewed.secrets?.length ? <Text style={styles.muted}>Secrets hidden: {viewed.secrets.join(', ')}. Secret markers stand for values kept on the ALP host.</Text> : null}
+        <Text selectable style={styles.small}>{JSON.stringify(viewed.content, null, 2)}</Text>
+      </>}
+    </SideNavLayout>;
+  }
   if (selection.name || selection.creating) {
     return <EntryEditor key={`${selection.kind}/${selection.name ?? 'new'}/${entry?.revision ?? 'new'}/${(entry?.librarySkills ?? []).join(',')}`} theme={theme} compact={compact} scope={scope} kind={selection.kind} entry={selection.creating ? null : entry}
       lists={lists} actions={actions} layout={{ title, subtitle, groups, onSelect, initialCollapsed, embedded }} />;
@@ -306,7 +322,7 @@ export function KindOverview({ theme, compact, scope, kind, rows, error, where, 
         <View style={styles.table}>
           {shown.map((row, index) => (
             <View key={row.name} style={[styles.tableRow, index ? styles.tableRowRule : null]}>
-              <Pressable accessibilityRole={readOnly ? undefined : 'button'} accessibilityLabel={`${readOnly ? '' : 'Open '}${one} ${row.name}`} disabled={!!readOnly} onPress={() => actions.select({ kind, name: row.name })} style={styles.rowMain}>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Open ${one} ${row.name}`} onPress={() => actions.select({ kind, name: row.name })} style={styles.rowMain}>
                 <View style={styles.rowTitle}>
                   <Text style={styles.name}>{row.name}</Text>
                   <Pill theme={theme} label={sourceLabel(row.source)} tone={sourceTone(row.source)} />

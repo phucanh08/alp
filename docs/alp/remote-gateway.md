@@ -893,7 +893,7 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
    - map `alp.tasks.*` → `task.*`, team models → `team.list` + `library.models`, ngôn ngữ →
      `settings.language.get`;
    - màn Library qua remote: danh sách (`library.list`) và nội dung đã redaction (`library.get`,
-     §5.7), chỉ đọc. Plugin Paseo ở remote mode hiện vẫn tự từ chối `alp.library.get`;
+     §5.7), chỉ đọc. Plugin Paseo ở remote mode mở nội dung JSON chỉ đọc qua `alp.library.get`; không có form sửa hoặc Test;
    - với `principal.modes`: chỉ bật prompt/message/answer cho tree trong các mode đó (§5.5); xử lý
      `1003 mode` (`data.sessionId`);
    - xử lý close code §6.3;

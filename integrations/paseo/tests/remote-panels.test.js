@@ -56,7 +56,7 @@ test('the library list and language say they are read-only; with no workspace, w
   const call = async (name, input) => { const { contract, handler } = handlers.get(name); return contract.output.parse(await handler(contract.input.parse(input))); };
   const listed = await call('alp.library.list', { directory: '/w', kind: 'agents' });
   assert.deepEqual(listed.entries.map(entry => entry.name), ['main']);
-  assert.match(listed.readOnly.reason, /not opened or changed/);
+  assert.match(listed.readOnly.reason, /viewed here with secrets hidden/);
   assert.equal(listed.readOnly.unlisted, undefined);
   const none = await call('alp.library.list', { kind: 'agents' });
   assert.deepEqual(none.entries, []);
@@ -84,6 +84,8 @@ test('one library entry is read through the gateway, read only, with its secrets
   for (const [name, input] of [
     ['alp.library.save', { directory: '/w', kind: 'skills', name: 'x', scope: 'project', content: {} }],
     ['alp.library.delete', { directory: '/w', kind: 'skills', name: 'x', scope: 'project' }],
+    ['alp.library.duplicate', { directory: '/w', kind: 'skills', from: 'x', to: 'y', scope: 'project' }],
+    ['alp.library.rename', { directory: '/w', kind: 'skills', from: 'x', to: 'y', scope: 'project' }],
     ['alp.library.test', { directory: '/w', kind: 'hooks', name: 'x' }],
     ['alp.library.skills', { agent: 'main', skills: [] }],
     ['alp.settings.language.set', { language: 'English' }],

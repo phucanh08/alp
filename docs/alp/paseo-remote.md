@@ -122,10 +122,10 @@ Paseo UI ─▶ Paseo daemon ─▶ plugin (remote) ─▶ @anhlp/alp-client/por
 |---|---|
 | Tasks: list/add/close/reopen/accept, duyệt human gate | ✅ `task.list`, `task.create`, `task.update`, `task.gate.resolve` |
 | Tasks pill của session | ✅ (từ item todo, như local) |
-| Settings ALP: danh sách entry | ✅ `library.list` (chỉ tên/mô tả, gateway lọc field). Màn hình ở chế độ chỉ xem: ẩn New/Duplicate/Override/Use library, dòng không mở được, hiện lý do. Không mở workspace nào → không có entry và nói cần mở workspace được cấp (không còn "Loading…" treo) |
+| Settings ALP: danh sách entry | ✅ `library.list` (chỉ tên/mô tả, gateway lọc field). Màn hình ở chế độ chỉ xem: ẩn New/Duplicate/Override/Use library, mở được dòng và mục điều hướng để xem nội dung đã redaction; không có form sửa, Save, Remove hay Test, hiện lý do. Không mở workspace nào → không có entry và nói cần mở workspace được cấp (không còn "Loading…" treo) |
 | Settings ALP: danh sách model | ✅ `library.models` |
 | Ngôn ngữ (đọc) | ✅ `settings.language.get`; hiện giá trị và lý do, không có ô chọn |
-| Xem nội dung entry (`library.get`) | ❌ Unavailable: gateway chặn vì nội dung có thể chứa token MCP, lệnh hook, args provider |
+| Xem nội dung entry (`library.get`) | ✅ `project.read` trong workspace được cấp; nội dung JSON chỉ đọc, secret là marker và có danh sách JSON Pointer. Gateway giữ đường dẫn host và field ngoài contract. |
 | Lưu/xóa/nhân bản/đổi tên entry, gán skills, đổi ngôn ngữ | ❌ Unavailable: làm trên ALP host |
 | Nút Test (MCP/hook/provider) | ❌ Unavailable: sẽ chạy lệnh trên host |
 | Usage | ❌ Unavailable: account-wide trên host (`alp usage`) |
@@ -182,7 +182,7 @@ Ký hiệu: ✅ có qua remote, có test; ◐ một phần; ❌ unavailable (UI 
 | F09 | Subagents | ✅ | cùng projection như local (event của tree) |
 | F10 | Tasks panel | ✅ | `task.*`; add/list/close trong integration test |
 | F11 | Tasks pill | ✅ | như local |
-| F12 | Library list/get/save/… | ◐ | list + models; get/save/delete/duplicate/rename/skills ❌ |
+| F12 | Library list/get/save/… | ◐ | list + models + get (chỉ đọc, đã redaction); save/delete/duplicate/rename/skills ❌ |
 | F13 | Sync team settings | ❌ | ghi library không có qua remote |
 | F14 | Nút Test | ❌ | chạy lệnh trên host |
 | F15 | Danh sách model | ✅ | `library.models` |
@@ -232,7 +232,7 @@ models".
 ## 9. Không hỗ trợ / giới hạn còn lại
 
 - H2 (web bridge) chỉ chạy trên ALP host.
-- Workspace registry, git, files, provider probe, usage, nội dung và ghi library, đổi ngôn ngữ:
+- Workspace registry, git, files, provider probe, usage, ghi library, đổi ngôn ngữ:
   không qua remote (UI báo `Unavailable in ALP remote mode`).
 - MCP servers/env/system prompt của Paseo không gửi sang host.
 - `cwd` phải bằng đúng một workspace được cấp; thư mục con không được.
