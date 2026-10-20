@@ -305,7 +305,7 @@ test('a reconnected bridge re-attaches roots with a fresh epoch and streams with
 
   const agents = [];
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(agents), supervisor: false, libraryDir: home });
-  const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test' });
+  const daemon = createDaemonServer({ runtime, home, socketPath: '', version: 'test' });
   const attachCalls = [];
   const connections = [];
   let factoryCalls = 0;
