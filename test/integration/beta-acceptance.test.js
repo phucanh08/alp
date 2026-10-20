@@ -6,7 +6,7 @@ import path from 'node:path';
 import { follow, interruptTurn, Run } from '../../scripts/beta-acceptance-lib.mjs';
 
 // Real child stdout, including multiple envelopes in one chunk, rather than a mocked next().
-async function fixture(t, events, { hold = false, afterInterrupt, resistTermination = false } = {}) {
+async function fixture(t, events, { hold = false, afterInterrupt, resistTermination = false, startupDelay = 0 } = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'alp-c5-'));
   const script = path.join(dir, 'stream.cjs');
   const trigger = path.join(dir, 'interrupt');
@@ -14,9 +14,15 @@ async function fixture(t, events, { hold = false, afterInterrupt, resistTerminat
     if (!fs.existsSync(${JSON.stringify(trigger)})) return;
     clearInterval(timer); console.log(${JSON.stringify(JSON.stringify(end(afterInterrupt)))});
   }, 5); setTimeout(() => { clearInterval(timer); }, 2000).unref();` : hold ? 'setTimeout(() => {}, 1000);' : '';
-  writeFileSync(script, `${resistTermination ? "process.on('SIGTERM', () => {});" : ''}console.log(${JSON.stringify(events.map(e => JSON.stringify(e)).join('\n'))});${tail}`);
+  const gate = path.join(dir, 'ready');
+  const startup = startupDelay ? `const fsGate = require('node:fs'); const gateTimer = setInterval(() => {
+    if (!fsGate.existsSync(${JSON.stringify(gate)})) return;
+    clearInterval(gateTimer); emit();
+  }, 5);` : 'emit();';
+  writeFileSync(script, `${resistTermination ? "process.on('SIGTERM', () => {});" : ''}function emit() { console.log(${JSON.stringify(events.map(e => JSON.stringify(e)).join('\n'))});${tail} } ${startup}`);
   const stream = follow({ log() {} }, 'fixture', ['run'], { alp: script, cwd: dir, env: process.env });
-  t.after(async () => { stream.child.kill(); await stream.exit.catch(() => {}); rmSync(dir, { recursive: true, force: true }); });
+  const release = startupDelay ? setTimeout(() => writeFileSync(gate, 'ready'), startupDelay) : undefined;
+  t.after(async () => { clearTimeout(release); stream.child.kill(); await stream.exit.catch(() => {}); rmSync(dir, { recursive: true, force: true }); });
   stream.interrupt = () => writeFileSync(trigger, 'interrupt');
   return stream;
 }
@@ -72,7 +78,10 @@ for (const state of ['completed', 'failed']) test(`C5 ${state} after dispatch fa
 });
 
 test('C5 live completion without output stays pending and stops viewer', async t => {
-  const stream = await fixture(t, [opened, started, end('completed')], { hold: true });
+  const stream = await fixture(t, [opened, started, end('completed')], { hold: true, startupDelay: 250 });
+  // Child startup is independent of C5's behavior budget. Deliberately gate the
+  // fixture beyond 200 ms so this also covers a contended combined test run.
+  await stream.next(e => e.event.type === 'turn.started', 'fixture ready', 2000);
   const result = await interruptTurn(stream, () => assert.fail('must not interrupt'), { timeout: 200, waitForOutput: true });
   assert.equal(result.status, 'pending');
   assert.ok(stream.child.exitCode !== null || stream.child.signalCode !== null);
