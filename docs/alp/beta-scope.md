@@ -270,8 +270,10 @@ macOS Node 24, Linux Node 22.12+.
 
 **Chuẩn bị** (mỗi máy R1–R6):
 - Node đúng dòng §6.1 (`node -v`, `npm -v` ghi lại). Codex và/hoặc Claude Code đã đăng nhập.
-- Dùng user OS riêng, hoặc chép `~/.alp` ra chỗ khác khi alpd đã dừng, vì Paseo đọc `ALP_HOME`
-  mặc định.
+- Nếu đang điều khiển release từ ALP chạy trong Paseo, giữ nguyên daemon/session điều khiển.
+  Mở terminal riêng cho acceptance, dùng **cả `PASEO_HOME` mới và `ALP_HOME` mới, tách nhau**;
+  chỉ đổi `PASEO_HOME` vẫn có thể trỏ plugin về alpd đang điều khiển release. Không dừng/copy
+  home mặc định để chuẩn bị gate. User OS riêng cũng phải dùng các home dành riêng cho lần chạy.
 - Chép nguyên thư mục `$OUT` của §7.2 (8 tarball, `SHA256SUMS`, `release-manifest.json`) sang
   `/tmp/alp-beta/packs`, rồi kiểm: `shasum -a 256 -c SHA256SUMS` (macOS) hoặc `sha256sum -c SHA256SUMS`
   (Linux).
@@ -279,6 +281,42 @@ macOS Node 24, Linux Node 22.12+.
   `npm run release:consumer -- /tmp/alp-beta/packs`. Script cài đúng 8 tarball đã lưu, so
   `integrity`/`resolved` (`file:`) trong lockfile với manifest, chạy `tarball-consumer` và
   `package-smoke` với `--packs`, rồi kiểm lại SHA-256 sau khi chạy. Bước này không thay các dòng R.
+
+**Paseo riêng cho release đang được ALP/Paseo điều khiển (R5/R6):**
+
+Sau khi cài tarball và đặt PATH tới consumer ở dưới, tạo một lần trong terminal acceptance:
+
+```sh
+RUN_ROOT=$(mktemp -d /tmp/alp-beta-hosted.XXXXXX)
+export PASEO_HOME="$RUN_ROOT/paseo" ALP_HOME="$RUN_ROOT/alp"
+mkdir -m 700 "$PASEO_HOME" "$ALP_HOME"
+printf '%s\n' '{"web":{"port":0,"relay":{"enabled":false}}}' > "$ALP_HOME/settings.json"
+paseo daemon run --help
+paseo daemon config set --help
+paseo plugin --help
+paseo daemon config set daemon.listen 127.0.0.1:6868 --string --home "$PASEO_HOME"
+paseo daemon config set daemon.relay.enabled false --home "$PASEO_HOME"
+paseo daemon config set pluginsEnabled true --home "$PASEO_HOME"
+paseo daemon run --home "$PASEO_HOME" > "$RUN_ROOT/paseo.log" 2>&1 &
+PASEO_PID=$!
+```
+
+- Chọn cổng loopback còn trống thay cho `6868` nếu cần; không dùng cổng của Paseo điều khiển.
+  `web.port: 0` cấp cổng web riêng. Kiểm đường dẫn home, log, lock và cổng trước khi chạy R5/R6;
+  trong app thêm host `127.0.0.1:6868` của daemon thử nghiệm.
+- [Local] Paseo 0.11.x `daemon run --help` có `--home`, `daemon config set --help` có
+  `--home`/`--string`, `plugin --help` có `--home` và alias `install|add`. Cổng đặt qua
+  `daemon.listen` trong config, không giả định `daemon run --port` tồn tại. Kiểm lại help của
+  binary đang dùng; source CLI chọn `PASEO_HOME` khi không có `--home`/`--host`.
+- Chạy harness trong cùng terminal, cùng hai biến home; các lệnh plugin tay thêm
+  `--home "$PASEO_HOME"`. Không để `PASEO_HOST` kế thừa chọn daemon khác; bỏ biến đó trong
+  terminal acceptance trước khi chạy harness. Không đổi môi trường của session điều khiển.
+- Live harness giữ daemon/plugin để người chạy hoàn tất bước manual. Khi xong, đóng session thử,
+  gỡ plugin bằng `paseo plugin remove alp-provider --home "$PASEO_HOME"`, dừng và chờ PID
+  `$PASEO_PID` do terminal này tạo. Nếu có web integration riêng, ghi PID từ `web.json` và
+  `integrations/web.lock` **của `ALP_HOME` mới này**, dừng/chờ integration trước, rồi
+  `alp daemon stop` với đúng `ALP_HOME`; xác nhận các PID đã hết trước khi xóa fixture.
+  Giữ lại log/evidence. Không dùng PID lịch sử, `pkill`, `killall`, hoặc xóa home/worktree người dùng.
 
 **Harness (tùy chọn, chưa commit; agent T10):** chạy các bước C1–C9, W1–W6 và R7 bằng script, trên
 đúng thư mục đã lưu (`PACKS=/tmp/alp-release/v0.0.0-beta.1`, không pack lại):
@@ -306,7 +344,9 @@ macOS Node 24, Linux Node 22.12+.
   - CLI dùng `ALP_HOME` mới dưới `--work`, không chạm `~/.alp`;
   - web `--live` dùng `ALP_HOME` của Paseo. Nếu đó là `~/.alp`, script từ chối, trừ khi thêm
     `--use-default-home` (chỉ dùng sau khi đã dừng alpd và sao lưu);
-  - gỡ plugin sau khi chạy: `paseo plugin remove alp-provider`.
+  - gỡ plugin sau khi chạy: `paseo plugin remove alp-provider --home "$PASEO_HOME"`;
+    dọn theo thứ tự và quyền sở hữu trong hướng dẫn hosted ở trên. Fake harness tự dừng/chờ
+    integration trước alpd, cả khi setup hay W6 lỗi; live vẫn cần người chạy dọn sau bước manual.
 - [Local] Rehearsal `--fake` trên artifact rehearsal (`5c474f8`, checkout bẩn), Windows, Node 26.8.1:
   - CLI: 8 pass; C6, C7 skip vì cần model thật; Ctrl-C không thử trên Windows;
   - web: W6 pass.
@@ -519,7 +559,12 @@ npm run release:pack -- --out "$OUT"
 ### 7.3 Gate trên artifact
 
 - **P4.**
+  - Nếu ALP/Paseo đang điều khiển release, chuẩn bị terminal và hai home riêng theo §6.3
+    trước mọi acceptance có startup; giữ daemon điều khiển chạy. Build/pack dùng clone §7.2;
+    R5/R6 dùng Paseo có `PASEO_HOME` riêng và alpd có `ALP_HOME` riêng, cổng riêng.
   - Chạy A5, rồi R1–R6 trên các tarball của §7.2; R7 và H2 trên `RELEASE_SHA`.
+    Ghi home/log/cổng và PID do lần chạy tạo vào evidence; sau gate dọn/chờ đúng PID đó theo §6.3,
+    kể cả khi fail hoặc startup lỗi. Không lấy PID từ ghi chú lịch sử làm quyền dừng process.
   - Điền §6.4. Mọi dòng "Chặn: Có" phải pass. Dòng nào TBD chưa có người chạy thì gate chưa qua.
     `npm run release:gate -- "$OUT" release-evidence.json --phase publish` phải exit 0.
   - Kiểm registry trước khi publish:

@@ -2,6 +2,7 @@
 // Plugin and `alp web` acceptance on the saved tarballs: docs/alp/beta-scope.md §6.3 W1–W6 (rows R5, R6).
 // --live adds the plugin to the Paseo on this machine and needs a person for W3–W5; --fake checks
 // only what needs no Paseo and no model: W6's token gate on a throwaway ALP_HOME.
+import { cleanupFakeWeb } from './beta-web-lifecycle.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -46,15 +47,15 @@ const cli = (label, args) => run.exec(label, process.execPath, [alp, ...args], {
 const paseo = (label, args) => run.exec(label, 'paseo', args, { env, cwd: project });
 const settingsFile = path.join(project, '.alp', 'settings.json');
 
-mkdirSync(project, { recursive: true });
-run.exec('git', 'git', ['init', '-q', '-b', 'main'], { cwd: project });
-run.exec('git', 'git', ['-c', 'user.name=ALP beta', '-c', 'user.email=alp-beta@localhost', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: project });
-if (cli('setup', ['init']).status !== 0 || cli('setup', ['setup', '--runtime', provider]).status !== 0) {
-  run.record('setup', 'fail', 'alp init / alp setup failed');
-  process.exit(run.summary());
-}
-
 try {
+  if (opts.fake) writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ web: { port: 0, relay: { enabled: false } } }));
+  mkdirSync(project, { recursive: true });
+  run.exec('git', 'git', ['init', '-q', '-b', 'main'], { cwd: project });
+  run.exec('git', 'git', ['-c', 'user.name=ALP beta', '-c', 'user.email=alp-beta@localhost', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: project });
+  if (cli('setup', ['init']).status !== 0 || cli('setup', ['setup', '--runtime', provider]).status !== 0) {
+    throw new Error('alp init / alp setup failed');
+  }
+
   if (opts.live) {
     await run.step('W1', 'alp daemon start; paseo plugin add <absolute path>', async () => {
       if (cli('W1', ['daemon', 'start']).status !== 0) throw new Error('alp daemon start failed');
@@ -121,11 +122,12 @@ try {
         'the project and the W3 session show; asking and answering and the Tasks panel work');
     }
   });
+} catch (error) {
+  run.record('acceptance', 'fail', error.message);
 } finally {
   if (opts.fake) {
-    cli('cleanup', ['daemon', 'stop']);
-    // `alp web` starts the integration detached; it outlives alpd, so the throwaway one is stopped by its lock.
-    try { process.kill(JSON.parse(readFileSync(path.join(home, 'integrations', 'web.lock'), 'utf8')).pid); } catch {}
+    try { await cleanupFakeWeb(home, () => cli('cleanup', ['daemon', 'stop'])); }
+    catch (error) { run.record('cleanup', 'fail', error.message); }
   }
   else console.log('\nalpd and the plugin stay as Paseo uses them. To undo W1: paseo plugin remove alp-provider');
 }
