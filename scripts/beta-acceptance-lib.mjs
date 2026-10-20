@@ -200,7 +200,15 @@ export function follow(run, label, args, { env, cwd, alp }) {
     }
   });
   child.stderr.on('data', chunk => { stderr += chunk; run.log(label, `[stderr] ${String(chunk).trimEnd()}`); });
-  const closed = new Promise(resolve => child.on('close', code => resolve(code)));
+  let finished = false;
+  const closed = new Promise(resolve => child.on('close', code => {
+    finished = true;
+    for (const wait of [...waiting]) wait.reject(new Error(`alp ${args[0]} exited before ${wait.what}`));
+    resolve(code);
+  }));
+  child.on('error', error => {
+    for (const wait of [...waiting]) wait.reject(error);
+  });
   // No step waits forever: a run still going after `ms` is stopped and its step fails.
   const ms = Number(process.env.ALP_ACCEPT_TIMEOUT_MS) || 20 * 60_000;
   let timer;
@@ -208,20 +216,67 @@ export function follow(run, label, args, { env, cwd, alp }) {
   exit.catch(() => {});
   return {
     child, envelopes, exit, stderr: () => stderr,
+    async stop({ graceMs = 1000, forceMs = 1000 } = {}) {
+      const closesWithin = async ms => {
+        let deadline;
+        try { return await Promise.race([closed.then(() => true), new Promise(resolve => { deadline = setTimeout(() => resolve(false), ms); })]); }
+        finally { clearTimeout(deadline); }
+      };
+      if (finished) return;
+      child.kill();
+      if (await closesWithin(graceMs)) return;
+      child.kill('SIGKILL');
+      if (await closesWithin(forceMs)) return;
+      // A descendant may retain the pipes even after this viewer dies. Do not let
+      // its inherited handles or the overall follow timer keep acceptance alive.
+      child.stdout.destroy();
+      child.stderr.destroy();
+      clearTimeout(timer);
+      for (const wait of [...waiting]) wait.reject(new Error('alp viewer did not close after forced termination'));
+      throw new Error('alp viewer did not close after forced termination');
+    },
     get rootId() { return envelopes.find(envelope => envelope.event?.type === 'session.opened' && !envelope.event.session?.parentId)?.sessionId; },
     /** Waits for an envelope matching `test`, or fails after `ms`. */
     next(test, what, ms = 10 * 60_000) {
       const found = envelopes.find(test);
       if (found) return Promise.resolve(found);
+      if (finished) return Promise.reject(new Error(`alp ${args[0]} exited before ${what}`));
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error(`no ${what} within ${Math.round(ms / 1000)} s`)), ms);
-        waiting.push({ test, resolve: envelope => { clearTimeout(timer); resolve(envelope); } });
-        closed.then(() => setTimeout(() => reject(new Error(`alp ${args[0]} exited before ${what}`)), 50));
+        const settle = (done, value) => {
+          clearTimeout(timer);
+          const index = waiting.indexOf(wait);
+          if (index >= 0) waiting.splice(index, 1);
+          done(value);
+        };
+        const wait = { test, what, resolve: value => settle(resolve, value), reject: error => settle(reject, error) };
+        const timer = setTimeout(() => wait.reject(new Error(`no ${what} within ${Math.round(ms / 1000)} s`)), ms);
+        waiting.push(wait);
       });
     },
     /** The final assistant text of each root turn, for a person to read. */
     answers() { return envelopes.filter(envelope => envelope.sessionId === this.rootId && envelope.event?.type === 'item' && envelope.event.item?.kind === 'assistant_message').map(envelope => envelope.event.item.text); },
   };
+}
+
+/** Exercise C5 against the initial root turn. */
+export async function interruptTurn(stream, interrupt, { timeout = 10 * 60_000, waitForOutput = false } = {}) {
+  try {
+    const started = await stream.next(e => e.sessionId === stream.rootId && e.event?.type === 'turn.started' && e.event.origin === 'user', 'the root user turn', timeout);
+    const terminal = e => e.sessionId === started.sessionId && e.event?.type === 'turn.ended' && e.event.turnId === started.event.turnId;
+    // Live: wait for model output or termination, not a fixed delay. The fake Codex [hold]
+    // deliberately emits no output, so its rehearsal interrupts at turn.started.
+    if (waitForOutput) await stream.next(e => terminal(e) || (e.sessionId === started.sessionId && e.event?.type === 'item' && ['assistant_message', 'tool_call'].includes(e.event.item?.kind)), 'root output or termination', timeout);
+    const before = stream.envelopes.find(terminal);
+    if (before) {
+      if (before.event.state === 'completed') return { status: 'pending', state: 'completed', turnId: started.event.turnId };
+      throw new Error(`root turn ended ${before.event.state} before interrupt`);
+    }
+    await interrupt();
+    const stopped = await stream.next(terminal, 'the interrupted root turn', timeout);
+    // After dispatch, completion is a failure: do not retry away a possibly ignored interrupt.
+    if (stopped.event.state !== 'canceled') throw new Error(`after interrupt the root turn ended ${stopped.event.state}`);
+    return { status: 'canceled', state: 'canceled', turnId: started.event.turnId, code: await stream.exit };
+  } finally { await stream.stop(); }
 }
 
 /** Asks a person a yes/no question on a terminal; without one the step stays pending. */
