@@ -78,3 +78,25 @@ for (const archived of [true, false]) test(`unmapped missing ${archived ? 'archi
  await createRegistry(home).mutate('placement.prepare',{sessions:[{id:'old',projectRoot,archived,status:'closed'}]},{requestId:'again'});
  assert.deepEqual(await createRegistry(home).snapshot(),after);
 });
+
+for (const archived of [true, false]) test(`historical ${archived ? 'archived' : 'closed'} existing alias resolves until actually retargeted`, async t => {
+ const {home,root,directory}=await setup(t);const alias=path.join(root,'history-alias');await symlink(directory,alias,'dir');const r=createRegistry(home);
+ await r.mutate('placement.prepare',{sessions:[{id:'history',projectRoot:alias,archived,status:'closed'}]},{requestId:'history'});
+ const before=await r.snapshot();const id=before.sessions.history;
+ assert.equal(await r.resolve(id,undefined,true),await realpath(directory));
+ const restarted=createRegistry(home);assert.equal(await restarted.resolve(id,undefined,true),await realpath(directory));
+ const other=path.join(root,'other');await mkdir(other);await rm(alias);await symlink(other,alias,'dir');
+ await restarted.mutate('placement.prepare',{sessions:[{id:'history',projectRoot:alias,archived,status:'closed'}]},{requestId:'retarget'});
+ assert.deepEqual(await restarted.snapshot(),before);
+ await assert.rejects(restarted.resolve(id,undefined,true),{data:{reason:'identity_changed'}});
+});
+
+for (const archived of [true, false]) test(`historical ${archived ? 'archived' : 'closed'} missing identity remains unknown when directory appears`, async t => {
+ const {home,root,directory}=await setup(t);const alias=path.join(root,'future-alias');const r=createRegistry(home);
+ await r.mutate('placement.prepare',{sessions:[{id:'history',projectRoot:alias,archived,status:'closed'}]},{requestId:'history'});
+ const before=await r.snapshot();assert.equal(before.workspaces[0].canonical,undefined);assert.equal(before.projects[0].canonical,undefined);
+ await symlink(directory,alias,'dir');const restarted=createRegistry(home);
+ assert.equal(await restarted.resolve(before.sessions.history,undefined,true),await realpath(directory));
+ // No past identity was observed: resolving checks today's path without inventing one in persisted history.
+ assert.deepEqual(await restarted.snapshot(),before);
+});

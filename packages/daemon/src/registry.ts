@@ -80,13 +80,13 @@ export function createRegistry(home: string, options: { write?: typeof writeFile
   const project = (r: Registry, id: string) => r.projects.find(p => p.id === id) ?? fail('not_found', 'No project', 1001);
   const workspace = (r: Registry, id: string) => r.workspaces.find(w => w.id === id) ?? fail('not_found', 'No workspace', 1001);
   const live = (r: Registry, w: WorkspaceRecord) => !w.archivedAt && !project(r, w.projectId).removedAt;
-  function register(r: Registry, directory: string, canonical: string) {
-    let p = r.projects.find(p => !p.removedAt && (p.canonical ?? p.root) === canonical);
-    if (!p) { p = { id: `prj_${hex()}`, root: directory, canonical, addedAt: now() }; r.projects.push(p); }
+  function register(r: Registry, directory: string, canonical?: string) {
+    let p = r.projects.find(p => !p.removedAt && (p.canonical ?? path.resolve(p.root)) === (canonical ?? path.resolve(directory)));
+    if (!p) { p = { id: `prj_${hex()}`, root: directory, ...(canonical === undefined ? {} : { canonical }), addedAt: now() }; r.projects.push(p); }
     return p;
   }
-  function makeWorkspace(r: Registry, p: ProjectRecord, directory: string, canonical: string, fields: Partial<WorkspaceRecord> = {}) {
-    const w: WorkspaceRecord = { id: `wks_${hex()}`, projectId: p.id, directory, canonical, labels: [], createdAt: now(), ...fields }; r.workspaces.push(w); return w;
+  function makeWorkspace(r: Registry, p: ProjectRecord, directory: string, canonical: string | undefined, fields: Partial<WorkspaceRecord> = {}) {
+    const w: WorkspaceRecord = { id: `wks_${hex()}`, projectId: p.id, directory, ...(canonical === undefined ? {} : { canonical }), labels: [], createdAt: now(), ...fields }; r.workspaces.push(w); return w;
   }
   async function action(r: Registry, method: string, a: any): Promise<any> {
     switch (method) {
@@ -127,11 +127,12 @@ export function createRegistry(home: string, options: { write?: typeof writeFile
           }
           if (typeof s.projectRoot !== 'string' || !path.isAbsolute(s.projectRoot)) fail('directory_not_found', 'An absolute directory is required', -32602);
           const lexical = path.resolve(s.projectRoot);
-          const canonical = historical ? lexical : await identity(s.projectRoot).catch((error: any) => {
-            if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return lexical;
+          // A lexical fallback is placement metadata, never proof of canonical identity.
+          const canonical = await identity(s.projectRoot).catch((error: any) => {
+            if (historical || error.code === 'ENOENT' || error.code === 'ENOTDIR') return undefined;
             throw error;
           });
-          const here = r.workspaces.filter(w => historical ? path.resolve(w.directory) === canonical : (w.canonical ?? w.directory) === canonical).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+          const here = r.workspaces.filter(w => canonical === undefined ? path.resolve(w.directory) === lexical : (w.canonical ?? w.directory) === canonical).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
           w = here.find(w => live(r, w)) ?? (s.archived ? here.at(-1) : undefined) ?? makeWorkspace(r, register(r, s.projectRoot, canonical), s.projectRoot, canonical, s.archived ? { archivedAt: s.updatedAt ?? now() } : {});
           place(r, s.id, w.id);
         }
