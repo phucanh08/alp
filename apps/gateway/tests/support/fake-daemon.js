@@ -15,7 +15,7 @@ const error = (code, message, data) => ({ code, message, ...(data ? { data } : {
 /**
  * @param {{ sessions?: object[], questions?: object[], capabilities?: string[] }} [fixture]
  */
-export function fakeDaemon({ sessions = [], questions = [], capabilities = ['attach.after', 'extension.methods', 'prompt.receipts', 'task', 'team', 'library', 'library.project.write', 'settings.language', 'session.list.page', 'question.watch', 'question.watch.turns', 'workspace.files', 'workspace.files.read'] } = {}) {
+export function fakeDaemon({ sessions = [], questions = [], capabilities = ['attach.after', 'extension.methods', 'prompt.receipts', 'task', 'team', 'library', 'library.project.write', 'settings.language', 'session.list.page', 'question.watch', 'question.watch.turns', 'session.attention', 'workspace.files', 'workspace.files.read'] } = {}) {
   const state = {
     /** @type {Map<string, any>} */ sessions: new Map(sessions.map(session => [session.id, session])),
     questions: [...questions],
@@ -44,6 +44,12 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
   /** Keeps an event in its tree's timeline and sends it to the connections attached to the tree. */
   function emit(sessionId, event, { keep = true } = {}) {
     const root = rootOf(sessionId);
+    // A root's attention: never kept, sent to every connection watching attention (alpd's tellAttention).
+    if (event.type === 'attention') {
+      const envelope = { sessionId: root, epoch: 'attention', seq: 0, ts: new Date().toISOString(), event };
+      for (const link of state.links) if (link.watching?.attention && (link.watching.projectRoot === undefined || state.sessions.get(root)?.projectRoot === link.watching.projectRoot)) link.send({ jsonrpc: '2.0', method: 'event', params: envelope });
+      return envelope;
+    }
     const timeline = state.timelines.get(root) ?? [];
     const envelope = { sessionId, epoch: 'e1', seq: timeline.length + 1, ts: new Date().toISOString(), event, ...(keep ? { cursor: timeline.length + 1 } : {}) };
     if (keep) timeline.push(envelope);
@@ -113,9 +119,22 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
     'session.rename': ({ sessionId, title }) => { const found = state.sessions.get(sessionId); found.title = title; return { session: found }; },
     'session.archive': ({ sessionId, archived = true }) => { const found = state.sessions.get(sessionId); found.archived = archived; return { session: found }; },
     'question.list': ({ projectRoot }) => ({ questions: state.questions.filter(question => projectRoot === undefined || state.sessions.get(question.rootId)?.projectRoot === projectRoot) }),
-    'question.watch': ({ projectRoot, turns }, link) => {
-      link.watching = { projectRoot, turns: turns === true };
-      return { questions: state.questions.filter(question => projectRoot === undefined || state.sessions.get(question.rootId)?.projectRoot === projectRoot) };
+    'question.watch': ({ projectRoot, turns, attention }, link) => {
+      link.watching = { projectRoot, turns: turns === true, attention: attention === true };
+      const inProject = id => projectRoot === undefined || state.sessions.get(id)?.projectRoot === projectRoot;
+      return {
+        questions: state.questions.filter(question => inProject(question.rootId)),
+        ...(attention === true ? { attention: [...state.sessions.values()].filter(session => session.attention && !session.parentId && inProject(session.id)).map(session => ({ sessionId: session.id, attention: session.attention })) } : {}),
+      };
+    },
+    // As alpd: clears a root's attention, tells the connections watching attention.
+    'session.attention.clear': ({ sessionId, at }) => {
+      const found = state.sessions.get(sessionId);
+      if (!found) throw error(1001, `No session ${sessionId}`);
+      if (!found.attention || (at !== undefined && found.attention.at !== at)) return { cleared: false };
+      delete found.attention;
+      for (const link of state.links) if (link.watching?.attention) link.send({ jsonrpc: '2.0', method: 'event', params: { sessionId, epoch: 'attention', seq: 0, ts: new Date().toISOString(), event: { type: 'attention' } } });
+      return { cleared: true };
     },
     'question.answer': ({ questionId }) => {
       const matches = state.questions.filter(question => question.id === questionId || question.id.startsWith(questionId));

@@ -25,6 +25,7 @@
     "session.list.page": "session.list accepts `limit`, `cursor` and `query` and answers `nextCursor` while more sessions follow; without them it answers every session as before.",
     "question.watch": "question.watch: the connection is told of `question` and `question.resolved` in every tree (of a projectRoot when given), attached or not.",
     "question.watch.turns": "question.watch accepts `turns`: the connection is also told of `turn.ended` of every root in the trees it watches.",
+    "session.attention": "question.watch accepts `attention`: its answer holds each watched root's finished or error attention, kept by alpd for every client, and the connection is told when one is set or cleared (an `attention` event); session.attention.clear acknowledges one.",
     "workspace.files": "workspace.files.search: files under a directory whose relative path matches a query; read-only, names only, links never followed.",
     "workspace.files.read": "workspace.files.list and workspace.files.read: the entries of a directory and the content of a UTF-8 text file (at most 1 MiB) under a directory; read-only, links never followed, .git, .env* and key or credential files refused, .gitignore'd paths hidden unless asked.",
     "prompt.images": "session.prompt takes inline image parts { type: \"image\", mimeType, data } (base64, no paths or URLs) within the image limits; a session snapshot says whether its runtime takes them in promptImages.",
@@ -1174,6 +1175,9 @@
           },
           "turns": {
             "type": "boolean"
+          },
+          "attention": {
+            "type": "boolean"
           }
         },
         "required": [],
@@ -1187,10 +1191,67 @@
             "items": {
               "$ref": "#/$defs/question"
             }
+          },
+          "attention": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sessionId": {
+                  "type": "string"
+                },
+                "attention": {
+                  "$ref": "#/$defs/attention"
+                }
+              },
+              "required": [
+                "sessionId",
+                "attention"
+              ],
+              "additionalProperties": true
+            }
           }
         },
         "required": [
           "questions"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "session.attention.clear": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "idempotent": true,
+        "capability": "session.attention"
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "cleared": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cleared"
         ],
         "additionalProperties": true
       }
@@ -2953,6 +3014,31 @@
       ],
       "additionalProperties": true
     },
+    "attention": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "enum": [
+            "finished",
+            "error"
+          ]
+        },
+        "at": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "at"
+      ],
+      "additionalProperties": true
+    },
     "spec": {
       "type": "object",
       "properties": {
@@ -3499,6 +3585,21 @@
             "reason"
           ],
           "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "attention"
+            },
+            "attention": {
+              "$ref": "#/$defs/attention"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": true
         }
       ]
     },
@@ -3525,7 +3626,8 @@
               "question",
               "question.resolved",
               "pin",
-              "unpin"
+              "unpin",
+              "attention"
             ]
           }
         }
@@ -3555,6 +3657,14 @@
             "images": {
               "type": "integer",
               "minimum": 1
+            },
+            "origin": {
+              "enum": [
+                "user",
+                "wake",
+                "assignment",
+                "runtime"
+              ]
             }
           },
           "required": [
@@ -4146,6 +4256,9 @@
         },
         "archived": {
           "type": "boolean"
+        },
+        "attention": {
+          "$ref": "#/$defs/attention"
         },
         "lastError": {
           "type": "object",

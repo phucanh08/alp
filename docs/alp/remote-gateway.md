@@ -45,7 +45,7 @@ Số mục (§) được code tham chiếu; giữ ổn định.
     secret nhưng là thông tin host: client nào đã qua xác thực và hello cũng thấy, như Paseo;
   - `capabilities` = capability alpd liệt kê ∩ `{attach.after, prompt.receipts, task, team,
     library, settings.language, session.list.page, question.watch, question.watch.turns,
-    workspace.files, workspace.files.read, prompt.images, library.project.write}`.
+    session.attention, workspace.files, workspace.files.read, prompt.images, library.project.write}`.
   - Không có `pid` và không bao giờ có `extension.methods`.
   - Trong `library` và `settings.language`, các method ghi trả `-32601 not_exposed` (§5.4).
     `library.get` đọc được, có redaction (§5.4, §5.7).
@@ -335,7 +335,8 @@ Cột Test dùng các mã sau:
 | `session.release` | — | session | session.read | exposed | P S |
 | `session.preview` | — | `spec.cwd` + allowlist spec | session.read | exposed | P S |
 | `question.list` | — | result lọc theo tree | session.read | exposed | P S R |
-| `question.watch` | `question.watch` (`question.watch.turns` cho `turns`) | result lọc theo tree; event (`question`, `question.resolved`, `turn.ended` của root) lọc theo session, và theo workspace đã nêu | session.read | exposed | P S R E I |
+| `question.watch` | `question.watch` (`question.watch.turns` cho `turns`, `session.attention` cho `attention`) | result (`questions`, `attention`) lọc theo tree; event (`question`, `question.resolved`, `turn.ended` của root, `attention`) lọc theo session, và theo workspace đã nêu; `message` của attention qua safeErrorText như lỗi của `turn.ended` | session.read | exposed | P S R E I |
+| `session.attention.clear` | `session.attention` | session; báo đã xem attention của root cho mọi client. Là mutation nhưng chỉ cần session.read: một cái nhìn là đọc, như `session.release` | session.read | exposed | P S |
 | `workspace.files.search` | `workspace.files` | `projectRoot` thuộc grant, gửi alpd bản canonical; alpd không đi theo symlink; path trả về phải tương đối thuần | project.read | exposed | P S R I |
 | `workspace.files.list` | `workspace.files.read` | `projectRoot` thuộc grant, gửi bản canonical; `path` tương đối thuần, không bị chặn (gateway kiểm tra trước alpd); entry trả về phải là con trực tiếp của `path`, tương đối thuần, không bị chặn; lỗi alpd thay bằng câu cố định (§5.10) | files.read | exposed | P S R I |
 | `workspace.files.read` | `workspace.files.read` | như `workspace.files.list`; answer phải đúng `path` đã hỏi và ≤ 1 MiB; lỗi alpd thay bằng câu cố định (§5.10) | files.read | exposed | P S R I |

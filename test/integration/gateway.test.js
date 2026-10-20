@@ -154,7 +154,7 @@ test('a remote client works through the gateway across reconnects and restarts o
 
   // Handshake through the gateway: alpd's capabilities, never extension methods.
   const greeting = await hello(client, { name: 'e2e', version: '0' });
-  assert.deepEqual(greeting.capabilities.sort(), ['attach.after', 'library', 'library.project.write', 'prompt.images', 'prompt.receipts', 'question.watch', 'question.watch.turns', 'session.list.page', 'settings.language', 'task', 'team', 'workspace.files', 'workspace.files.read']);
+  assert.deepEqual(greeting.capabilities.sort(), ['attach.after', 'library', 'library.project.write', 'prompt.images', 'prompt.receipts', 'question.watch', 'question.watch.turns', 'session.attention', 'session.list.page', 'settings.language', 'task', 'team', 'workspace.files', 'workspace.files.read']);
   assert.ok(!greeting.capabilities.includes('extension.methods'));
   assert.equal(greeting.pid, undefined);
   assert.equal(greeting.hostname, hostname(), 'alpd\'s machine name, as Paseo labels a host');
@@ -488,13 +488,13 @@ test('question.watch turns and workspace.files.search stay in the grant on a rea
   await hello(watcher);
   const heard = [];
   watcher.onEvent(envelope => heard.push(envelope));
-  await watcher.request('question.watch', { projectRoot: w.projects.a, turns: true });
+  await watcher.request('question.watch', { projectRoot: w.projects.a, turns: true, attention: true });
   const intruder = new AlpRpcClient(await w.open(w.tokens.bob));
   t.after(() => intruder.close());
   await hello(intruder);
   const leaked = [];
   intruder.onEvent(envelope => leaked.push(envelope));
-  await intruder.request('question.watch', { turns: true });
+  await intruder.request('question.watch', { turns: true, attention: true });
 
   const { session } = await owner.request('session.create', { spec: { cwd: w.projects.a, persist: true, model: MODEL }, history: 'skip' });
   await owner.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('hello') });
@@ -503,6 +503,16 @@ test('question.watch turns and workspace.files.search stay in the grant on a rea
   assert.equal(turn.sessionId, session.id);
   assert.equal(turn.cursor, undefined);
   assert.equal(turn.event.state, 'completed');
+  // Issue #120: the host keeps the attention for every client of the grant, and a reader's look clears it.
+  await until(() => heard.some(envelope => envelope.event.type === 'attention' && envelope.event.attention), 'the attention of a');
+  const viewer = new AlpRpcClient(await w.open(w.tokens.reader));
+  t.after(() => viewer.close());
+  await hello(viewer);
+  const { attention } = await viewer.request('question.watch', { projectRoot: w.projects.a, attention: true });
+  assert.deepEqual(attention.map(entry => [entry.sessionId, entry.attention.reason]), [[session.id, 'finished']], 'a client that came later reads it');
+  assert.deepEqual((await intruder.request('question.watch', { attention: true })).attention, [], 'not another credential\'s');
+  assert.deepEqual(await viewer.request('session.attention.clear', { sessionId: session.id, at: attention[0].attention.at }), { cleared: true });
+  await until(() => heard.some(envelope => envelope.event.type === 'attention' && !envelope.event.attention), 'cleared for the other client');
   await sleep(200);
   assert.deepEqual(leaked, [], 'another credential hears nothing of a');
 
@@ -510,9 +520,6 @@ test('question.watch turns and workspace.files.search stay in the grant on a rea
   assert.deepEqual(files, ['src/server.ts'], 'b\'s file behind the link is not listed');
   await assert.rejects(owner.request('workspace.files.search', { projectRoot: w.projects.b }), error => error.code === 1003);
   await assert.rejects(intruder.request('workspace.files.search', { projectRoot: w.projects.a }), error => error.code === 1003);
-  const viewer = new AlpRpcClient(await w.open(w.tokens.reader));
-  t.after(() => viewer.close());
-  await hello(viewer);
   assert.deepEqual((await viewer.request('workspace.files.search', { projectRoot: w.projects.a, query: 'server.ts' })).files, [{ path: 'src/server.ts' }]);
 });
 

@@ -71,7 +71,7 @@ export class FakeHost {
     const messages = new Set();
     const closes = new Set();
     let ended = false;
-    const connection = { attached: new Set(), watching: undefined, watchTurns: false, transport: undefined, deliver: undefined, end: undefined };
+    const connection = { attached: new Set(), watching: undefined, watchTurns: false, watchAttention: false, transport: undefined, deliver: undefined, end: undefined };
     const end = close => {
       if (ended) return;
       ended = true;
@@ -151,11 +151,31 @@ export class FakeHost {
     return root.children.get(sessionId);
   }
 
+  /**
+   * With session.attention, as alpd: a root's attention kept for every client, told (no cursor) to
+   * the connections watching attention in its project, attached or not.
+   */
+  #setAttention(root, attention) {
+    if (!this.capabilities.includes('session.attention') || (!root.summary.attention && !attention)) return;
+    if (attention) root.summary.attention = attention; else delete root.summary.attention;
+    const envelope = { sessionId: root.id, epoch: 'attention', seq: 0, ts: new Date().toISOString(), event: { type: 'attention', ...(attention ? { attention } : {}) } };
+    for (const connection of this.connections) {
+      if (!connection.watchAttention) continue;
+      if (connection.watching !== null && connection.watching !== root.spec.cwd) continue;
+      this.#send(connection, { method: 'event', params: envelope });
+    }
+  }
+
   /** Appends a kept event to a root's timeline and sends it to its viewers. */
   #emit(root, sessionId, event, { kept = true } = {}) {
     const envelope = { sessionId, epoch: this.epoch, seq: root.timeline.length + 1, ts: new Date().toISOString(), event, ...(kept ? { cursor: ++root.cursor } : {}) };
     if (kept) root.timeline.push(envelope);
     for (const connection of root.viewers) this.#send(connection, { method: 'event', params: envelope });
+    if (sessionId === root.id && event.type === 'turn.started') this.#setAttention(root, undefined);
+    if (sessionId === root.id && event.type === 'turn.ended') {
+      const at = new Date(Date.now() + (this.attentionSkewMs ?? 0)).toISOString();
+      this.#setAttention(root, event.state === 'canceled' ? undefined : { reason: event.state === 'completed' ? 'finished' : 'error', at, turnId: event.turnId, ...(event.state === 'failed' && event.error?.message ? { message: event.error.message } : {}) });
+    }
     // question.watch { turns: true }: a root's turn end goes, without its cursor, to the watchers
     // of its project that are not attached to its tree.
     if (event.type === 'turn.ended' && sessionId === root.id) {
@@ -271,7 +291,8 @@ export class FakeHost {
       case 'settings.language.get': return { language: null, applies: 'Vietnamese', default: 'Vietnamese' };
       case 'session.list': {
         const words = String(params.query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
-        let sessions = [...this.roots.values()].filter(root => (!params.projectRoot || root.spec.cwd === params.projectRoot) && (params.includeArchived || !root.summary.archived)).map(root => ({ ...root.summary, busy: !!root.running }));
+        // A root `unlisted` is one session.list does not show yet (created a moment ago elsewhere).
+        let sessions = [...this.roots.values()].filter(root => !root.unlisted && (!params.projectRoot || root.spec.cwd === params.projectRoot) && (params.includeArchived || !root.summary.archived)).map(root => ({ ...root.summary, busy: !!root.running }));
         // With session.list.page: newest first, the query, then a page; the cursor is a position here.
         if (!this.capabilities.includes('session.list.page')) return { sessions };
         sessions = sessions.filter(session => words.every(word => `${session.title ?? ''}\n${session.id}`.toLowerCase().includes(word)))
@@ -387,6 +408,7 @@ export class FakeHost {
         const root = this.roots.get(params.sessionId);
         if (params.archived === false) { delete root.summary.archived; return { session: root.summary }; }
         root.summary.archived = true;
+        this.#setAttention(root, undefined);
         this.close(root.id);
         return { session: root.summary };
       }
@@ -397,8 +419,20 @@ export class FakeHost {
       case 'question.watch': {
         connection.watching = params.projectRoot ?? null;
         connection.watchTurns = this.capabilities.includes('question.watch.turns') && params.turns === true;
+        const shared = this.capabilities.includes('session.attention') && params.attention === true;
+        connection.watchAttention = shared;
         const questions = [...this.questions.values()].filter(question => !params.projectRoot || this.roots.get(question.rootId)?.spec.cwd === params.projectRoot);
-        return { questions: structuredClone(questions) };
+        const attention = [...this.roots.values()].filter(root => root.summary.attention && (!params.projectRoot || root.spec.cwd === params.projectRoot)).map(root => ({ sessionId: root.id, attention: structuredClone(root.summary.attention) }));
+        return { questions: structuredClone(questions), ...(shared ? { attention } : {}) };
+      }
+      case 'session.attention.clear': {
+        if (!this.capabilities.includes('session.attention')) throw Object.assign(new Error('unknown method session.attention.clear'), { code: -32601 });
+        const root = this.roots.get(params.sessionId);
+        if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
+        const attention = root.summary.attention;
+        if (!attention || (params.at !== undefined && attention.at !== params.at)) return { cleared: false };
+        this.#setAttention(root, undefined);
+        return { cleared: true };
       }
       case 'question.answer': {
         const question = this.questions.get(params.questionId);

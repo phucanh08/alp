@@ -60,6 +60,7 @@ const OUT_OF_SCOPE = {
   'session.log': () => [{ sessionId: 'sb-c' }, 1001],
   'session.attach': () => [{ sessionId: 'sb', after: 0 }, 1001],
   'session.release': () => [{ sessionId: 'sb' }, 1001],
+  'session.attention.clear': () => [{ sessionId: 'sb' }, 1001],
   'session.preview': ({ b }) => [{ spec: { cwd: b } }, 1003, 'outside_workspace'],
   'question.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
   'question.watch': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
@@ -95,7 +96,7 @@ const OUT_OF_SCOPE = {
 const IN_SCOPE = ({ a }) => ({
   'catalog.get': {}, 'library.models': {}, 'settings.language.get': {},
   'session.list': {}, 'session.get': { sessionId: 'sa' }, 'session.status': { sessionId: 'sa' }, 'session.log': { sessionId: 'sa' },
-  'session.attach': { sessionId: 'sa' }, 'session.release': { sessionId: 'sa' }, 'session.preview': { spec: { cwd: a } },
+  'session.attach': { sessionId: 'sa' }, 'session.release': { sessionId: 'sa' }, 'session.attention.clear': { sessionId: 'sa' }, 'session.preview': { spec: { cwd: a } },
   'question.list': {}, 'question.watch': {}, 'board.list': { projectRoot: a }, 'workspace.files.search': { projectRoot: a },
   'workspace.files.list': { projectRoot: a }, 'workspace.files.read': { projectRoot: a, path: 'README.md' },
   'session.create': { spec: { cwd: a } }, 'session.prompt': { sessionId: 'sa', clientMessageId: 'm', content: text },
@@ -133,7 +134,8 @@ test('the exposure matrix agrees with the daemon\'s x-alp annotations', t => {
   if (!annotated.length) return t.skip('this schema has no x-alp annotations');
   // Deliberate differences: session.release detaches this client and may close an idle root nobody
   // watches, which a reader's disconnect does as well.
-  const readerMutations = new Set(['session.release']);
+  // session.attention.clear acknowledges a turn end for every viewer, as a reader's look at it does.
+  const readerMutations = new Set(['session.release', 'session.attention.clear']);
   // session.create's exec risk (spec.env, stdio spec.mcpServers) is removed by the spec allow-list,
   // which 'session.create: spec fields are allow-listed' below proves.
   // Host-level reads the gateway exposes on purpose: static catalogues and the user's language.
@@ -359,6 +361,55 @@ test('question.watch with turns: roots\' turn ends of the grant, of the workspac
   await new Promise(resolve => setTimeout(resolve, 30));
   assert.deepEqual(got, [['sa', 'canceled']]);
   void b;
+});
+
+test('session.attention: question.watch answers and tells the grant\'s attention only, cleared by a reader', async t => {
+  const { daemon, sdk, a } = await world(t);
+  const at = '2026-10-20T00:00:00.000Z';
+  daemon.state.sessions.get('sa').attention = { reason: 'error', at, turnId: 't1', message: `failed in ${a}/src` };
+  daemon.state.sessions.get('sb').attention = { reason: 'finished', at };
+  daemon.state.sessions.get('mix').attention = { reason: 'finished', at };
+  const { client } = await sdk('reader');
+  assert.ok((await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('session.attention'));
+  const heard = [];
+  client.onEvent(envelope => heard.push([envelope.sessionId, envelope.event.type, envelope.event.attention?.reason ?? null, envelope.cursor !== undefined]));
+  // Without attention: alpd is not asked for it, and nothing is answered.
+  assert.equal((await client.request('question.watch', { projectRoot: a })).attention, undefined);
+  assert.deepEqual(daemon.calls('question.watch').at(-1).params, {});
+  const watched = await client.request('question.watch', { projectRoot: a, attention: true });
+  assert.deepEqual(daemon.calls('question.watch').at(-1).params, { attention: true }, 'attention and nothing else reach alpd');
+  assert.deepEqual(watched.attention.map(entry => [entry.sessionId, entry.attention.reason]), [['sa', 'error']], 'only the grant\'s, of the workspace named');
+  assert.ok(!watched.attention[0].attention.message.includes(a), 'a host path in the message is hidden as in turn.ended');
+  daemon.emit('sb', { type: 'attention', attention: { reason: 'finished', at } });
+  daemon.emit('mix', { type: 'attention', attention: { reason: 'finished', at } });
+  daemon.emit('sa', { type: 'attention', attention: { reason: 'finished', at } });
+  await until(() => heard.length === 1, 'the attention of a');
+  // A reader acknowledges it: its look clears it for every client.
+  assert.deepEqual(await client.request('session.attention.clear', { sessionId: 'sa', at }), { cleared: true });
+  await until(() => heard.length === 2, 'the clearing');
+  await assert.rejects(client.request('session.attention.clear', { sessionId: 'sb' }), error => error.code === 1001);
+  assert.equal(daemon.state.sessions.get('sb').attention.reason, 'finished', 'outside the grant: untouched');
+  assert.deepEqual(heard, [['sa', 'attention', 'finished', false], ['sa', 'attention', null, false]]);
+  // The allow-list stays exact: unknown params never reach alpd, an unknown method nowhere.
+  await client.request('question.watch', { projectRoot: a, attention: true, turns: false, everything: true, sessionId: 'sb' });
+  assert.deepEqual(daemon.calls('question.watch').at(-1).params, { attention: true });
+  await client.request('session.attention.clear', { sessionId: 'sa', at, force: true, sessionIds: ['sb'] });
+  assert.deepEqual(daemon.calls('session.attention.clear').at(-1).params, { sessionId: 'sa', at });
+  const mark = daemon.calls().length;
+  for (const method of ['session.attention.set', 'session.attention', 'attention.clear']) await assert.rejects(client.request(method, { sessionId: 'sa' }), error => error.code === -32601, method);
+  assert.deepEqual(daemon.calls().slice(mark), [], 'nothing reached alpd');
+});
+
+test('session.attention through a gateway to an alpd without it: not offered, and the watch works as before', async t => {
+  const daemon = fakeDaemon({ capabilities: ['question.watch', 'question.watch.turns'], sessions: [summary('sa', process.cwd(), { attention: { reason: 'finished', at: '2026-10-20T00:00:00.000Z' } })] });
+  // As an alpd before session.attention: it ignores the param it does not know and has no such method.
+  daemon.state.handlers['question.watch'] = () => ({ questions: [] });
+  daemon.state.handlers['session.attention.clear'] = () => { throw { code: -32601, message: 'Unknown method session.attention.clear' }; };
+  const { sdk } = await startGateway(t, { daemon, credentials: { reader: { workspaces: [process.cwd()], permissions: ['session.read'] } } });
+  const { client } = await sdk('reader');
+  assert.ok(!(await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('session.attention'));
+  assert.deepEqual(await client.request('question.watch', { attention: true }), { questions: [] });
+  await assert.rejects(client.request('session.attention.clear', { sessionId: 'sa' }), error => error.code === -32601);
 });
 
 test('workspace.files.search: a granted workspace only, sent as its canonical path, needing project.read, answered paths kept relative', async t => {

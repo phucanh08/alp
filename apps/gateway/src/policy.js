@@ -33,7 +33,7 @@ export const DEFAULT_PERMISSIONS = Object.freeze(['session.read', 'session.write
  * Within `library` and `settings.language` some methods stay unexposed and answer -32601
  * `not_exposed` (docs/alp/remote-gateway.md §5.4).
  */
-export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages]);
+export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages]);
 
 /** The codes of docs/protocol/alp-json-rpc-v1.md §5.1 the gateway answers its own refusals with; `data.reason` says why. */
 export const GATEWAY_ERROR = Object.freeze({ forbidden: ERROR.forbidden, unavailable: ERROR.unavailable });
@@ -341,7 +341,8 @@ export const EXPOSURE = Object.freeze({
   'session.release': { status: 'exposed', permission: 'session.read', scope: 'session', params: ['sessionId'], tests: ['permission', 'session-scope'] },
   'session.preview': { status: 'exposed', permission: 'session.read', scope: 'workspace: spec.cwd names a granted workspace; spec fields allow-listed', params: ['spec'], tests: ['permission', 'spec-scope'] },
   'question.list': { status: 'exposed', permission: 'session.read', scope: 'result: questions whose tree lies in a granted workspace; projectRoot must name one', params: ['projectRoot'], tests: ['permission', 'workspace-param', 'result-filter'] },
-  'question.watch': { status: 'exposed', permission: 'session.read', scope: 'result: as question.list; then question events, and with turns (question.watch.turns) roots\' turn.ended, filtered per envelope, and to the workspace projectRoot names', capability: CAPABILITY.questionWatch, params: ['projectRoot', 'turns'], tests: ['permission', 'workspace-param', 'result-filter', 'event-filter'] },
+  'question.watch': { status: 'exposed', permission: 'session.read', scope: 'result: as question.list; then question events, and with turns (question.watch.turns) roots\' turn.ended, with attention (session.attention) roots\' attention in the answer and its changes, filtered per envelope, and to the workspace projectRoot names', capability: CAPABILITY.questionWatch, params: ['projectRoot', 'turns', 'attention'], tests: ['permission', 'workspace-param', 'result-filter', 'event-filter'] },
+  'session.attention.clear': { status: 'exposed', permission: 'session.read', scope: 'session: acknowledges a root\'s attention for every client, as a look at it does; a reader may', capability: CAPABILITY.sessionAttention, params: ['sessionId', 'at'], tests: ['permission', 'session-scope'] },
   'board.list': { status: 'exposed', permission: 'session.read', scope: 'workspace: projectRoot names a granted workspace', params: ['projectRoot'], tests: ['permission', 'workspace-param'] },
 
   'session.create': { status: 'exposed', permission: 'session.write', scope: 'workspace: spec.cwd names a granted workspace and is replaced by its canonical path; an existing sessionId must be in scope; the created root is checked again', params: ['sessionId', 'spec', 'history', 'delegation', 'resume'], tests: ['permission', 'spec-scope', 'session-scope'] },
