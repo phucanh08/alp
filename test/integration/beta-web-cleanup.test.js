@@ -99,7 +99,7 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
               if (result.status !== 0) throw new Error('fixture launch failed');
             }
             fs.writeFileSync(path.join(process.env.FIXTURE_BASE, 'package-home'), options.env.ALP_HOME);
-            fs.copyFileSync(path.join(options.env.ALP_HOME, 'settings.json'), path.join(process.env.FIXTURE_BASE, 'package-settings.json')); 
+            fs.copyFileSync(path.join(options.env.ALP_HOME, 'settings.json'), path.join(process.env.FIXTURE_BASE, 'package-settings.json'));
             return { status: 1, stdout: '', stderr: 'injected failure after web lock publication' };
           }
           if (args[1] === 'daemon' && args[2] === 'stop') {
