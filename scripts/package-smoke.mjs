@@ -2,6 +2,7 @@
 // Verify packed modules without repository source, workspace links, or a provider login.
 // `--packs <release directory>` (scripts/release-pack.mjs) installs that release's saved tarballs,
 // after checking them against its SHA256SUMS, instead of packing the workspaces.
+import { cleanupFakeWeb } from './beta-web-lifecycle.mjs';
 import { spawnSync } from 'node:child_process';
 import { spawnCommand } from './spawn-command.mjs';
 import { releaseArtifacts } from './release-lib.mjs';
@@ -20,6 +21,8 @@ function run(command, args, options = {}) {
 const env = { ...process.env, ALP_HOME: path.join(directory, 'home') };
 let cli;
 try {
+  await mkdir(env.ALP_HOME, { recursive: true, mode: 0o700 });
+  await writeFile(path.join(env.ALP_HOME, 'settings.json'), JSON.stringify({ web: { port: 0, relay: { enabled: false } } }));
   const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
   const dependencies = {};
   const workspaceNames = [];
@@ -109,11 +112,8 @@ void frame; void observe;
   if (!/relay is off/i.test(paired)) throw new Error(`alp web pair --off did not report the relay off: ${paired}`);
   console.log(`Standalone installation verified: ${imports.length} module APIs, Paseo server, ACP, CLI and daemon lifecycle, plus the legacy @anhlp/alp distribution and the separately installed web integration.`);
 } finally {
-  if (cli) spawnSync(process.execPath, [cli, 'daemon', 'stop'], { cwd: directory, env, stdio: 'ignore', timeout: 20_000 });
-  // The web integration is a separate process; stop it before removing its temporary home.
-  try {
-    const integration = JSON.parse(await readFile(path.join(env.ALP_HOME, 'integrations', 'web.lock'), 'utf8'));
-    if (integration?.pid) process.kill(integration.pid);
-  } catch {}
+  await cleanupFakeWeb(env.ALP_HOME, () => {
+    if (cli) spawnSync(process.execPath, [cli, 'daemon', 'stop'], { cwd: directory, env, stdio: 'ignore', timeout: 20_000 });
+  });
   await rm(directory, { recursive: true, force: true });
 }
