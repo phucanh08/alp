@@ -117,9 +117,21 @@ export function createRegistry(home: string, options: { write?: typeof writeFile
         for (const s of a.sessions) {
           const mapped = placementOf(r, s.id);
           let w = mapped ? workspace(r, mapped) : undefined;
-          if (w) { const canonical = await identity(s.projectRoot); if (canonical !== await identity(w.directory)) fail('cwd_mismatch', 'Session placement and cwd disagree', 1003); if (!s.archived && w.archivedAt) w.archivedAt = null; continue; }
-          const canonical = await identity(s.projectRoot);
-          const here = r.workspaces.filter(w => (w.canonical ?? w.directory) === canonical).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+          const historical = s.archived || s.status === 'closed' || s.status === 'error';
+          // Preparation projects saved roots, including history and processes whose cwd
+          // was deleted. It does not authorize execution: resolve still checks live identity.
+          // A saved mapping must never be rebound through a retargeted directory alias.
+          if (w) {
+            if (!historical && w.archivedAt) w.archivedAt = null;
+            continue;
+          }
+          if (typeof s.projectRoot !== 'string' || !path.isAbsolute(s.projectRoot)) fail('directory_not_found', 'An absolute directory is required', -32602);
+          const lexical = path.resolve(s.projectRoot);
+          const canonical = historical ? lexical : await identity(s.projectRoot).catch((error: any) => {
+            if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return lexical;
+            throw error;
+          });
+          const here = r.workspaces.filter(w => historical ? path.resolve(w.directory) === canonical : (w.canonical ?? w.directory) === canonical).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
           w = here.find(w => live(r, w)) ?? (s.archived ? here.at(-1) : undefined) ?? makeWorkspace(r, register(r, s.projectRoot, canonical), s.projectRoot, canonical, s.archived ? { archivedAt: s.updatedAt ?? now() } : {});
           place(r, s.id, w.id);
         }

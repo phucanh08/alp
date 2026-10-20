@@ -1,5 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { createRegistry } from '@anhlp/alp-daemon/registry';
+import { createWorkspaces } from '../server/dist/paseo/workspaces.js';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { AgentSnapshotPayloadSchema, AgentStreamMessageSchema } from '@getpaseo/protocol/messages';
@@ -392,4 +397,38 @@ test('root snapshots wait for committed placement preparation', async () => {
     release(); await started;
     assert.ok(sent.some(message => message.type === 'agent_update'));
   } finally { release(); agents.close(); }
+});
+
+for (const historical of ['archived', 'closed', 'error', 'running']) test(`bridge starts with a live root and mapped/unmapped missing ${historical} roots`, async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'alp-bridge-history-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const home = path.join(root, 'home'); const live = path.join(root, 'live'); const missing = path.join(root, 'deleted');
+  await mkdir(live); await mkdir(missing);
+  const registry = createRegistry(home);
+  await registry.mutate('placement.prepare', { sessions: [{ id: 'mapped', projectRoot: missing }] }, { requestId: 'seed' });
+  const original = await registry.snapshot(); await rm(missing, { recursive: true });
+  const base = { status: 'idle', agent: 'main', runtime: 'codex', model: 'm', mode: 'read-only', workflow: { mode: 'custom' }, updatedAt: '2026-01-01T00:00:00Z' };
+  const past = historical === 'archived' ? { archived: true } : { status: historical };
+  const sessions = [{ ...base, id: 'live', projectRoot: live }, { ...base, ...past, id: 'mapped', projectRoot: missing }, { ...base, ...past, id: 'unmapped', projectRoot: path.join(root, 'never-existed') }];
+  const sent = []; let agents;
+  const workspaces = createWorkspaces({
+    rpc: async (method, params) => {
+      assert.equal(method, 'registry.owner');
+      const result = params.operation ? await registry.mutate(params.operation, params.args, { requestId: params.requestId }) : undefined;
+      return { registry: await registry.snapshot(), result };
+    },
+    broadcast: message => sent.push(message), agents: () => agents.view, inDevelopment: async () => 'unavailable',
+  });
+  agents = createAgents({ directory: workspaces, broadcast: message => sent.push(message), clientFactory: async () => fakeConnection({ onRequest(method, params) {
+    if (method === 'session.list') { assert.equal(params.includeClosed, true); assert.equal(params.includeArchived, true); return { sessions }; }
+    if (method === 'question.list') return { questions: [] };
+    return {};
+  } }) });
+  try {
+    await agents.start();
+    assert.deepEqual(sent.filter(m => m.type === 'agent_update' && m.payload.kind === 'upsert').map(m => m.payload.agent.id).sort(), ['live', 'mapped', 'unmapped']);
+    assert.deepEqual(agents.view.roots().map(s => s.id).sort(), ['live', 'mapped', 'unmapped']);
+    const after = await registry.snapshot(); assert.equal(after.sessions.mapped, original.sessions.mapped);
+    assert.ok(after.sessions.unmapped); assert.ok(after.sessions.live);
+  } finally { agents.close(); await workspaces.close(); }
 });

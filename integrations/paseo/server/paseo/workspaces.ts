@@ -88,7 +88,7 @@ export function createWorkspaces({ rpc, broadcast, agents, inDevelopment, log = 
 
   /** Placement is prepared asynchronously before any root snapshot is published. */
   async function prepare(sessions: SessionSummary[]) {
-    if (sessions.length) await mutate('placement.prepare', { sessions: sessions.map(({ id, projectRoot, archived, updatedAt }) => ({ id, projectRoot, archived, updatedAt })) });
+    if (sessions.length) await mutate('placement.prepare', { sessions: sessions.map(({ id, projectRoot, archived, status, updatedAt }) => ({ id, projectRoot, archived, status, updatedAt })) });
     else await load();
   }
   function workspaceIdFor(session: SessionSummary) {

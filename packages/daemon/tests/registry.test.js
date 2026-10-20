@@ -49,3 +49,32 @@ test('scoped remove checks archived foreign legacy workspace before replay or an
 test('valid session IDs that resemble Object keys retain explicit placement',async t=>{
  const {home,directory}=await setup(t);const r=createRegistry(home);await r.mutate('placement.prepare',{sessions:[{id:'__proto__',projectRoot:directory},{id:'constructor',projectRoot:directory}]},{requestId:'place'});const s=await r.snapshot();for(const id of ['__proto__','constructor']){assert.ok(Object.hasOwn(s.sessions,id));assert.equal(s.sessions[id],s.workspaces[0].id);}assert.deepEqual((await createRegistry(home).snapshot()).sessions,s.sessions);
 });
+
+for (const status of ['archived', 'closed', 'error', 'running']) test(`historical ${status} missing roots retain mapped placement and persist unmapped placement`, async t => {
+ const {home,directory,root}=await setup(t);const r=createRegistry(home);
+ await r.mutate('placement.prepare',{sessions:[{id:'mapped',projectRoot:directory}]},{requestId:'seed'});
+ const before=await r.snapshot(); await rm(directory,{recursive:true});
+ const archived=status==='archived';
+ const sessions=[{id:'mapped',projectRoot:directory,archived,status},{id:'unmapped',projectRoot:path.join(root,'never-existed'),archived,status}];
+ await r.mutate('placement.prepare',{sessions},{requestId:'historical'});
+ const after=await r.snapshot();assert.equal(after.sessions.mapped,before.sessions.mapped);assert.deepEqual(after.workspaces[0],before.workspaces[0]);
+ assert.ok(after.sessions.unmapped);assert.equal(after.workspaces.find(w=>w.id===after.sessions.unmapped).directory,sessions[1].projectRoot);
+ const restarted=createRegistry(home);await restarted.mutate('placement.prepare',{sessions},{requestId:'restart'});assert.deepEqual(await restarted.snapshot(),after);
+ await assert.rejects(restarted.resolve(after.sessions.mapped));await assert.rejects(restarted.resolve(after.sessions.unmapped,undefined,true));
+});
+
+test('live mapped aliases cannot silently rebind to a different canonical target', async t => {
+ const {home,directory,root}=await setup(t);const alias=path.join(root,'alias');await symlink(directory,alias,'dir');const r=createRegistry(home);
+ await r.mutate('placement.prepare',{sessions:[{id:'live',projectRoot:alias}]},{requestId:'seed'});const before=await r.snapshot();
+ const other=path.join(root,'other');await mkdir(other);await rm(alias);await symlink(other,alias,'dir');
+ await r.mutate('placement.prepare',{sessions:[{id:'live',projectRoot:alias}]},{requestId:'retarget'});assert.deepEqual(await r.snapshot(),before);
+ await assert.rejects(r.resolve(before.sessions.live),{data:{reason:'identity_changed'}});
+});
+
+for (const archived of [true, false]) test(`unmapped missing ${archived ? 'archived' : 'closed'} root is discoverable without live identity`, async t => {
+ const {home,root}=await setup(t);const r=createRegistry(home);const projectRoot=path.join(root,'missing');
+ await r.mutate('placement.prepare',{sessions:[{id:'old',projectRoot,archived,status:'closed'}]},{requestId:'discover'});
+ const after=await r.snapshot();assert.equal(after.workspaces[0].directory,projectRoot);assert.equal(after.sessions.old,after.workspaces[0].id);
+ await createRegistry(home).mutate('placement.prepare',{sessions:[{id:'old',projectRoot,archived,status:'closed'}]},{requestId:'again'});
+ assert.deepEqual(await createRegistry(home).snapshot(),after);
+});
