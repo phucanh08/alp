@@ -1861,10 +1861,6 @@ export class Controller {
     if (!root) return;
     this.#set(state => ({ busy: { ...state.busy, interrupt: true } }));
     try {
-      // The composer offers Stop while a message is still being sent. alpd persists
-      // its receipt before entering the runtime queue, so an immediate interrupt
-      // could otherwise overtake that prompt and find no turn to cancel.
-      await this.#inflight.get(root)?.catch(() => {});
       await this.#client().request('session.interrupt', { sessionId: root });
     } catch (error) {
       this.#notify('error', describe(error).message);

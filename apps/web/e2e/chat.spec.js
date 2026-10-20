@@ -44,6 +44,8 @@ test('composer: focus key, a quick second message steers, Escape interrupts, mod
   await composer(page).press('ControlOrMeta+Enter');
   await expect(page.getByTestId('queued-message')).toContainText('Queued right away');
   await expect(page.getByTestId('pending-message')).toHaveCount(0);
+  // Stop is also offered while sending; this scenario needs an actual running turn.
+  await expect(page.getByTestId('working')).toBeVisible();
   await page.getByRole('button', { name: 'Interrupt agent' }).click();
   await expect(page.getByText('Stopped.')).toHaveCount(1);
   await expect(assistant(page).last()).toContainText('Echo: Queued right away');
@@ -51,6 +53,7 @@ test('composer: focus key, a quick second message steers, Escape interrupts, mod
 
   // Escape in the box interrupts a running turn.
   await send(page, 'Another long job [hold]');
+  await expect(page.getByTestId('working')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Interrupt agent' })).toBeVisible();
   await composer(page).focus();
   await page.keyboard.press('Escape');
