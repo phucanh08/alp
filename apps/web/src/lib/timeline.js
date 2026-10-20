@@ -73,6 +73,7 @@ export function project(state, envelope) {
   const id = envelope.sessionId;
   const ts = typeof envelope.ts === 'string' ? envelope.ts : '';
   const event = /** @type {any} */ (envelope.event);
+  if (event.type === 'item' && !next.sessions[id]) next = { ...next, sessions: { ...next.sessions, [id]: { id } }, order: next.order.includes(id) ? next.order : [...next.order, id] };
   const mark = () => `${id}:${event.type}:${envelope.cursor ?? `${envelope.epoch}:${envelope.seq}`}`;
   switch (event.type) {
     case 'session.opened':
@@ -209,4 +210,28 @@ export function deliveredPrompts(state) {
   const ids = new Set();
   for (const entry of state.entries) if (entry.item.kind === 'user_message' && typeof (/** @type {any} */ (entry.item)).clientMessageId === 'string') ids.add(/** @type {any} */ (entry.item).clientMessageId);
   return ids;
+}
+
+/** Oversized history records have an explicit visible placeholder and stable cursor identity.
+ * @param {any} item @param {string} root
+ * @returns {Envelope}
+ */
+export function historyEnvelope(item, root) {
+  return item.oversized ? { sessionId: root, epoch: 'history', seq: item.cursor, cursor: item.cursor, ts: '', event: { type: 'item', item: { kind: 'notice', id: `oversized:${item.cursor}`, level: 'warning', text: `History event ${item.cursor} is too large to display (${item.oversized.bytes} bytes).` } } } : item;
+}
+
+/** Prepend older snapshots, keeping the newer version of every stable item and all live state.
+ * @param {Projection} current @param {any[]} items @returns {Projection}
+ */
+export function prependHistory(current, items) {
+  let older = emptyProjection(current.rootId);
+  for (const item of items) older = project(older, historyEnvelope(item, current.rootId));
+  const entries = older.entries.slice();
+  const positions = { ...older.positions };
+  for (const entry of current.entries) {
+    const at = positions[entry.key];
+    if (at !== undefined) entries[at] = entry;
+    else { positions[entry.key] = entries.length; entries.push(entry); }
+  }
+  return { ...current, entries, positions, sessions: { ...older.sessions, ...current.sessions }, order: [...new Set([...older.order, ...current.order])] };
 }

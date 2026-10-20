@@ -3,7 +3,7 @@
 // announced afresh, a closed root that stays known.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyAttach, deliveredPrompts, emptyProjection, entriesOf, members, project, promptTurnOver } from '../src/lib/timeline.js';
+import { applyAttach, prependHistory, historyEnvelope, deliveredPrompts, emptyProjection, entriesOf, members, project, promptTurnOver } from '../src/lib/timeline.js';
 
 const env = (cursor, event, sessionId = 'r') => ({ sessionId, epoch: 'e', seq: cursor ?? 0, ts: '2026-10-16T00:00:00.000Z', event, ...(cursor === undefined ? {} : { cursor }) });
 const item = (cursor, id, text, sessionId = 'r') => env(cursor, { type: 'item', item: { kind: 'assistant_message', id, text } }, sessionId);
@@ -130,4 +130,22 @@ test('a message\'s turn is over only once it started and ended; accepted before 
   let crashed = project(project(emptyProjection('r'), env(1, { type: 'prompt.accepted', clientMessageId: 'm4', result: 'turn', turnId: 't9' })), env(2, { type: 'turn.started', turnId: 't9', origin: 'user' }));
   crashed = applyAttach(crashed, { session: { id: 'r', status: 'idle', busy: false } }, []);
   assert.equal(promptTurnOver(crashed, 'm4'), true);
+});
+
+test('older pages merge item fragments without replacing newer snapshots or live state', () => {
+  let state = emptyProjection('r');
+  for (const envelope of [item(500, 'x', 'latest'), item(600, 'y', 'newer')]) state = project(state, envelope);
+  state = prependHistory(state, [item(1, 'old', 'first'), item(20, 'x', 'partial')]);
+  assert.deepEqual(state.entries.map(row => row.item.text), ['first', 'latest', 'newer']);
+  assert.equal(state.cursor, 600);
+  state = prependHistory(state, [item(1, 'old', 'first')]);
+  assert.equal(state.entries.length, 3);
+  state = project(state, historyEnvelope({ cursor: 601, oversized: { bytes: 900000 } }, 'r'));
+  assert.match(state.entries.at(-1).item.text, /900000 bytes/);
+});
+
+test('a child item in a bounded tail remains reachable before its older opening is loaded', () => {
+  const state = project(emptyProjection('r'), item(600, 'child-item', 'child tail', 'child'));
+  assert.ok(members(state).some(member => member.id === 'child'));
+  assert.equal(entriesOf(state, 'child')[0].item.text, 'child tail');
 });

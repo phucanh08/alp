@@ -1,3 +1,4 @@
+import { HistoryError } from './history.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { appendFile, chmod, mkdir, readFile, unlink, lstat, rename } from 'node:fs/promises';
 import net from 'node:net';
@@ -280,7 +281,15 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }) : undefined;
   restored = store ? restore() : Promise.resolve();
 
-  const deliver = (connection: Connection, envelope: Envelope) => connection.send({ jsonrpc: '2.0', method: 'event', params: envelope });
+  const deliver = (connection: Connection, envelope: Envelope) => {
+    const message = { jsonrpc: '2.0', method: 'event', params: envelope };
+    // Stable events too large for transport still advance the replay position explicitly.
+    const bytes = frameBytes(message);
+    if (bytes > 512 * 1024 && envelope.cursor !== undefined) message.params = {
+      ...envelope, event: { type: 'item', item: { kind: 'notice', id: `oversized:${envelope.cursor}`, level: 'warning', text: `History event ${envelope.cursor} is too large to display (${bytes} bytes).` } },
+    };
+    connection.send(message);
+  };
   /** Connections that called question.watch, with the projectRoot they asked for and whether they want roots' turn ends and attention. */
   const watchers = new Map<Connection, { projectRoot?: string; turns: boolean; attention: boolean }>();
 
@@ -1118,7 +1127,15 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
      * events are replayed (ALPD §66); a cursor this tree never reached answers `reset: true`
      * with the whole timeline. The replay and the live events that follow are in cursor order.
      */
-    async 'session.attach'(connection, { sessionId, replay = true, after }) {
+    async 'session.history'(_connection, { sessionId, before, limit, maxBytes }) {
+      known(sessionId);
+      if (!store) throw new RpcError(1005, 'Durable history unavailable');
+      const root = rootOf.get(sessionId) ?? records.get(sessionId)?.rootId ?? sessionId;
+      try { return await store.history(root, sessionId, { before, limit, maxBytes }); }
+      catch (error) { if (error instanceof HistoryError) throw new RpcError(error.reason === 'stale_cursor' ? 1004 : -32602, error.message, { reason: error.reason }); throw error; }
+    },
+
+    async 'session.attach'(connection, { sessionId, replay = true, after, generation }) {
       if (after !== undefined && (!Number.isSafeInteger(after) || after < 0)) throw new RpcError(-32602, 'after must be a cursor');
       const found = known(sessionId);
       const root = rootOf.get(sessionId) ?? records.get(sessionId)?.rootId ?? sessionId;
@@ -1129,9 +1146,20 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         const covered = !!memory?.length && (memory[0].cursor ?? 1) <= (after ?? 0) + 1;
         if (!covered) stored = store ? await store.timeline(root) : memory ?? [];
       }
+      if (generation !== undefined) {
+        const checkpoint = await store?.history(root, sessionId, { limit: 1 });
+        if (checkpoint?.generation !== generation) throw new RpcError(1004, 'History generation changed', { reason: 'stale_cursor' });
+      }
       // From here to the return nothing awaits, so no live event slips between replay and attach.
       const live = logs.get(root) ?? [];
       const tip = Math.max(cursors.get(root) ?? 0, stored.at(-1)?.cursor ?? 0, live.at(-1)?.cursor ?? 0);
+      if (generation !== undefined && replay) {
+        const covered = Math.max(after ?? 0, stored.at(-1)?.cursor ?? 0);
+        const next = live.find(envelope => (envelope.cursor ?? 0) > covered)?.cursor;
+        if ((next !== undefined && next > covered + 1) || (next === undefined && tip > covered)) {
+          throw new RpcError(1005, 'History advanced beyond replay coverage; retry attach', { reason: 'history_gap' });
+        }
+      }
       // Without a store the in-memory log keeps only the latest events: a cursor before them cannot continue either.
       const first = replay ? [...stored, ...live].find(envelope => envelope.cursor !== undefined)?.cursor : undefined;
       const reset = after !== undefined && (after > tip || (replay && after < tip && (first === undefined || first > after + 1)));
@@ -1381,7 +1409,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...operations.capabilities];
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {

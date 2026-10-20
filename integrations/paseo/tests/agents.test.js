@@ -307,3 +307,69 @@ test('an attach that a later one replaced leaves the later timeline alone when i
     assert.deepEqual(problems, []);
   } finally { agents.close(); }
 });
+
+test('durable backward pages rebuild split snapshots at stable source positions and attach at fixed generation watermark', async () => {
+  const session = { id: 'root-history', status: 'idle', projectRoot: '/', agent: 'main', title: 'root', runtime: 'codex', model: 'm', mode: 'read-only', workflow: { mode: 'custom' }, createdAt: '', updatedAt: '' };
+  const envelopes = Array.from({ length: 650 }, (_, i) => ({ sessionId: session.id, epoch: 'old', seq: i + 1, cursor: i + 1, ts: '2026-10-20T00:00:00Z', event: { type: 'item', item: { kind: 'assistant_message', id: i === 449 || i === 450 ? 'split' : `m${i}`, text: i === 449 ? 'hello' : i === 450 ? 'hello world' : `text ${i}` } } }));
+  const child = { ...session, id: 'history-child', parentId: session.id, status: 'closed', agent: 'peer' };
+  envelopes[0] = { ...envelopes[0], sessionId: child.id, event: { type: 'session.opened', session: child, cwd: '/', effective: { model: 'm', thinking: 'low' } } };
+  envelopes[500] = { ...envelopes[500], sessionId: child.id };
+  const calls = [];
+  let emit;
+  const clientFactory = async listener => {
+    emit = listener;
+    const connection = fakeConnection({ onRequest(method, params) {
+      calls.push({ method, params });
+      if (method === 'session.list') return { sessions: [session] };
+      if (method === 'session.get') return { session: child };
+      if (method === 'question.list') return { questions: [] };
+      if (method === 'session.history') {
+        const end = params.before ? Number(params.before) : 650;
+        const start = Math.max(0, end - 200);
+        return { generation: 'durable', items: envelopes.slice(start, end), hasOlder: start > 0, ...(start ? { olderCursor: String(start) } : {}), tipCursor: 650 };
+      }
+      return {};
+    } });
+    connection.capabilities = ['session.history'];
+    return connection;
+  };
+  const agents = createAgents({ clientFactory, broadcast() {}, directory });
+  try {
+    await agents.start();
+    const fetch = (extra = {}) => agents.handlers.fetch_agent_timeline_request({ type: 'fetch_agent_timeline_request', requestId: 'r', agentId: session.id, ...extra }).then(reply => reply.payload);
+    const first = await fetch();
+    assert.equal(first.entries.length, 199);
+    const childFetch = () => agents.handlers['agent.provider_subagents.timeline.get.request']({ type: 'agent.provider_subagents.timeline.get.request', requestId: 'c', parentAgentId: session.id, subagentId: child.id, limit: 0 }).then(reply => reply.payload);
+    const childPage = await childFetch();
+    assert.equal(childPage.error, null);
+    assert.equal(childPage.rows.length, 1);
+    assert.equal(childPage.rows[0].item.text, 'text 500');
+    assert.equal(childPage.rows[0].seqEnd, 501);
+    assert.equal(first.hasOlder, true);
+    const attach = calls.find(call => call.method === 'session.attach');
+    assert.deepEqual(attach.params, { sessionId: session.id, replay: true, after: 650, generation: 'durable' });
+    const before = await fetch({ direction: 'before', cursor: first.startCursor });
+    assert.equal(before.error, null);
+    assert.ok(before.entries.every(entry => entry.seqStart < first.startCursor.seq));
+    const boundary = before.entries.find(entry => entry.item.messageId === 'split');
+    assert.ok(boundary, 'the crossing projected item is explicitly returned for update');
+    assert.equal(boundary.seqStart, 450);
+    assert.equal(boundary.seqEnd, 451);
+    assert.equal(boundary.item.text, 'hello world');
+    assert.equal(before.epoch, first.epoch);
+    const continued = await fetch({ direction: 'after', cursor: first.endCursor });
+    assert.equal(continued.reset, false, 'an existing cursor remains valid after prepending');
+    assert.equal(continued.entries.length, 0);
+    const merged = await fetch({ limit: 0 });
+    const split = merged.entries.filter(entry => entry.item.messageId === 'split');
+    assert.equal(split.length, 1);
+    assert.equal(split[0].item.text, 'hello world');
+    const childAgain = await childFetch();
+    assert.equal(childAgain.rows.length, 1, 'child source snapshot remains once after older-page rebuild');
+    assert.equal(childAgain.rows[0].seqEnd, 501);
+    assert.equal(childAgain.epoch, childPage.epoch);
+    emit(envelopes.at(-1));
+    const again = await fetch({ limit: 0 });
+    assert.equal(again.entries.length, merged.entries.length, 'stable cursor replay is deduplicated');
+  } finally { agents.close(); }
+});

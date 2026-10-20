@@ -166,17 +166,17 @@ export class InMemoryAgentTimelineStore {
   append(
     agentId: string,
     item: AgentTimelineItem,
-    options?: { timestamp?: string; providerMessageId?: string; turnId?: string },
+    options?: { timestamp?: string; providerMessageId?: string; turnId?: string; seq?: number },
   ): AgentTimelineRow {
     const state = this.requireState(agentId);
     const row: AgentTimelineRow = {
-      seq: state.nextSeq,
+      seq: options?.seq ?? state.nextSeq,
       timestamp: options?.timestamp ?? new Date().toISOString(),
       item,
       ...(options?.turnId ? { turnId: options.turnId } : {}),
       ...(options?.providerMessageId ? { providerMessageId: options.providerMessageId } : {}),
     };
-    state.nextSeq += 1;
+    state.nextSeq = Math.max(state.nextSeq, row.seq + 1);
     if (state.minSeq === 0) state.minSeq = row.seq;
     state.projection.append(row);
     return cloneRow(row);

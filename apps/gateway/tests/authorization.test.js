@@ -15,7 +15,7 @@ import { hostLabel, projectLibraryContent, promptImageLimits } from '../src/poli
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway, until } from './support/harness.js';
 
-async function world(t, { modes } = {}) {
+async function world(t, { modes, maxFrame } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-authz-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const a = path.join(directory, 'a');
@@ -36,7 +36,7 @@ async function world(t, { modes } = {}) {
       { id: 'q-b-222', sessionId: 'sb', rootId: 'sb', agent: 'main', body: 'b?', askedAt: '2026-10-15T00:00:00.000Z' },
     ],
   });
-  const gw = await startGateway(t, { daemon, credentials: {
+  const gw = await startGateway(t, { daemon, ...(maxFrame ? { config: { limits: { maxFrame } } } : {}), credentials: {
     alice: { workspaces: [a], permissions: ['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write'], ...(modes ? { modes } : {}) },
     reader: { workspaces: [a], permissions: ['session.read'] },
     sessions: { workspaces: [a], permissions: ['session.read', 'session.write'] },
@@ -58,6 +58,7 @@ const OUT_OF_SCOPE = {
   'session.get': () => [{ sessionId: 'sb' }, 1001],
   'session.status': () => [{ sessionId: 'mix' }, 1001],
   'session.log': () => [{ sessionId: 'sb-c' }, 1001],
+  'session.history': () => [{ sessionId: 'sb', before: 'malicious' }, 1001],
   'session.attach': () => [{ sessionId: 'sb', after: 0 }, 1001],
   'session.release': () => [{ sessionId: 'sb' }, 1001],
   'session.attention.clear': () => [{ sessionId: 'sb' }, 1001],
@@ -96,7 +97,7 @@ const OUT_OF_SCOPE = {
 const IN_SCOPE = ({ a }) => ({
   'catalog.get': {}, 'library.models': {}, 'settings.language.get': {},
   'session.list': {}, 'session.get': { sessionId: 'sa' }, 'session.status': { sessionId: 'sa' }, 'session.log': { sessionId: 'sa' },
-  'session.attach': { sessionId: 'sa' }, 'session.release': { sessionId: 'sa' }, 'session.attention.clear': { sessionId: 'sa' }, 'session.preview': { spec: { cwd: a } },
+  'session.history': { sessionId: 'sa' }, 'session.attach': { sessionId: 'sa' }, 'session.release': { sessionId: 'sa' }, 'session.attention.clear': { sessionId: 'sa' }, 'session.preview': { spec: { cwd: a } },
   'question.list': {}, 'question.watch': {}, 'board.list': { projectRoot: a }, 'workspace.files.search': { projectRoot: a },
   'workspace.files.list': { projectRoot: a }, 'workspace.files.read': { projectRoot: a, path: 'README.md' },
   'session.create': { spec: { cwd: a } }, 'session.prompt': { sessionId: 'sa', clientMessageId: 'm', content: text },
@@ -1054,4 +1055,25 @@ test('library viewer requires project.read and a granted workspace; no write gra
   await assert.rejects(client.request('library.save', { ...params, scope: 'project', content: { body: 'Attempted write' } }), e => e.code === 1003 && e.data.permission === 'library.write');
   assert.deepEqual(reached(daemon, deniedMark, 'library.get'), []);
   assert.deepEqual(reached(daemon, deniedMark, 'library.save'), []);
+});
+
+test('history authorizes before cursor forwarding and replaces untrusted byte budgets', async t => {
+  const { daemon, sdk } = await world(t, { maxFrame: 8192 });
+  daemon.state.handlers['session.history'] = params => ({ generation: 'g', items: [], hasOlder: false, tipCursor: 0 });
+  const { client: reader } = await sdk('reader');
+  await reader.request('session.history', { sessionId: 'sa', maxBytes: 524288, before: 'opaque' });
+  const call = daemon.calls().find(call => call.method === 'session.history');
+  assert.equal(call.params.before, 'opaque');
+  assert.equal(call.params.maxBytes, 4096);
+  const mark = daemon.calls().length;
+  await assert.rejects(reader.request('session.history', { sessionId: 'sb', before: 'broken' }), error => error.code === 1001);
+  assert.equal(reached(daemon, mark, 'session.history').length, 0);
+  const events = [];
+  reader.onEvent(event => events.push(event));
+  await reader.request('session.attach', { sessionId: 'sa', replay: false });
+  daemon.emit('sa', { type: 'item', item: { kind: 'notice', id: 'huge', level: 'info', text: 'x'.repeat(70000) } });
+  await until(() => events.length > 0);
+  assert.match(events[0].event.item.text, /too large/);
+  assert.equal(events[0].cursor, 1);
+  assert.ok(Buffer.byteLength(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: events[0] })) < 8192);
 });

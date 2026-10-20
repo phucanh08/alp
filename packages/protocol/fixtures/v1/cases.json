@@ -4311,6 +4311,56 @@
    "method": "session.attention.clear",
    "valid": false,
    "value": {}
+  },
+  {
+   "name": "history params",
+   "check": "params",
+   "method": "session.history",
+   "valid": true,
+   "value": {
+    "sessionId": "r",
+    "limit": 200
+   }
+  },
+  {
+   "name": "history oversized result",
+   "check": "result",
+   "method": "session.history",
+   "valid": true,
+   "value": {
+    "generation": "g",
+    "items": [
+     {
+      "cursor": 2,
+      "oversized": {
+       "bytes": 800000
+      }
+     }
+    ],
+    "hasOlder": false,
+    "tipCursor": 2
+   }
+  },
+  {
+   "name": "history limit refuses unbounded page",
+   "check": "params",
+   "method": "session.history",
+   "valid": false,
+   "value": {
+    "sessionId": "r",
+    "limit": 501
+   }
+  },
+  {
+   "name": "generation-bound attach",
+   "check": "params",
+   "method": "session.attach",
+   "valid": true,
+   "value": {
+    "sessionId": "r",
+    "after": 0,
+    "generation": "g"
+   }
   }
  ]
 }

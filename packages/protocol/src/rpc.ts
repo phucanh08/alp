@@ -12,11 +12,15 @@ export type RpcResponse = { jsonrpc: '2.0'; id: RpcId } & ({ result: unknown; er
 export type EventNotification = { jsonrpc: '2.0'; method: 'event'; params: Envelope };
 
 /** Names a daemon may list in its daemon.hello result (schema/methods-v1.json `capabilities`). */
-export type Capability = 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
+export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
+export type HistoryPage = { generation: string; items: HistoryItem[]; olderCursor?: string; hasOlder: boolean; tipCursor: number };
+
+export type Capability = 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
   | 'hello_required' | 'protocol_version' | 'invalid_params' | 'invalid_id' | 'batch_unsupported' | 'frame_too_large'
+  | 'invalid_cursor' | 'stale_cursor' | 'history_gap'
   | 'response_too_large' | 'persistence_failed' | 'outcome_unknown' | 'key_conflict'
   // Project, task and library methods (docs/protocol/alp-json-rpc-v1.md §5.3).
   | 'invalid_path' | 'invalid_scope' | 'invalid_entry' | 'secret_marker' | 'not_alp_project' | 'unknown_task' | 'not_found'
@@ -67,7 +71,8 @@ export type RpcMethodMap = {
     result: { session: SessionSnapshot; attached: boolean; resumed?: true; durable?: boolean };
   };
   'session.preview': { params: { spec: SessionSpec }; result: { preview: SessionPreview } };
-  'session.attach': { params: { sessionId: string; replay?: boolean; after?: number }; result: { session: SessionSummary; cursor: number; reset?: true } };
+  'session.history': { params: { sessionId: string; before?: string; limit?: number; maxBytes?: number }; result: HistoryPage };
+  'session.attach': { params: { sessionId: string; replay?: boolean; after?: number; generation?: string }; result: { session: SessionSummary; cursor: number; reset?: true } };
   'session.release': { params: { sessionId: string }; result: { closed: boolean } };
   'session.prompt': {
     params: { sessionId: string; clientMessageId: string; delivery?: 'auto' | 'steer'; content: PromptContent };

@@ -178,6 +178,8 @@ export async function releaseDaemonLock(home) {
  * CLI, alpd's tests and the Paseo plugin use.
  */
 export class AlpClient extends AlpRpcClient {
+  /** Host features captured by connect's handshake. @type {readonly string[]} */
+  capabilities = [];
   /**
    * @param {import('node:net').Socket} socket a connected or connecting socket; the client owns it
    * @param {import('./rpc/client.js').AlpRpcClientOptions & import('./ipc.js').SocketTransportOptions} [options]
@@ -217,7 +219,8 @@ export async function connectSocket(socketPath, options) {
 export async function connect(socketPath, client = { name: 'alp', version: '0' }, options = {}) {
   const connection = new AlpClient(await openSocket(socketPath), options);
   try {
-    await hello(connection, client);
+    const greeting = await hello(connection, client);
+    connection.capabilities = Object.freeze(Array.isArray(greeting.capabilities) ? greeting.capabilities.filter(value => typeof value === 'string') : []);
   } catch (error) {
     connection.close();
     throw error;

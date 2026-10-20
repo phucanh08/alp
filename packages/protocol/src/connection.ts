@@ -6,4 +6,6 @@ export type DaemonConnection = {
   close(): void;
   /** True once the connection is gone; socket clients report it, in-process ones may not. */
   readonly closed?: boolean;
+  /** Features captured by the Node client handshake; absent on older adapters. */
+  readonly capabilities?: readonly string[];
 };
