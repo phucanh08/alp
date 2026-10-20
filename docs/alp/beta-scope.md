@@ -290,7 +290,8 @@ Sau khi cài tarball và đặt PATH tới consumer ở dưới, tạo một l�
 RUN_ROOT=$(mktemp -d /tmp/alp-beta-hosted.XXXXXX)
 export PASEO_HOME="$RUN_ROOT/paseo" ALP_HOME="$RUN_ROOT/alp"
 mkdir -m 700 "$PASEO_HOME" "$ALP_HOME"
-printf '%s\n' '{"web":{"port":0,"relay":{"enabled":false}}}' > "$ALP_HOME/settings.json"
+WEB_PORT=$(node -e "const s=require('net').createServer().listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})")
+printf '{"web":{"port":%s,"relay":{"enabled":false}}}\n' "${WEB_PORT:?không lấy được cổng trống}" > "$ALP_HOME/settings.json"
 paseo daemon run --help
 paseo daemon config set --help
 paseo plugin --help
@@ -302,7 +303,8 @@ PASEO_PID=$!
 ```
 
 - Chọn cổng loopback còn trống thay cho `6868` nếu cần; không dùng cổng của Paseo điều khiển.
-  `web.port: 0` cấp cổng web riêng. Kiểm đường dẫn home, log, lock và cổng trước khi chạy R5/R6;
+  `WEB_PORT` là cổng loopback còn trống lúc tạo (`web.port` chỉ nhận 1024–65535, không nhận `0`),
+  cấp cổng web riêng. Kiểm đường dẫn home, log, lock và cổng trước khi chạy R5/R6;
   trong app thêm host `127.0.0.1:6868` của daemon thử nghiệm.
 - [Local] Paseo 0.11.x `daemon run --help` có `--home`, `daemon config set --help` có
   `--home`/`--string`, `plugin --help` có `--home` và alias `install|add`. Cổng đặt qua

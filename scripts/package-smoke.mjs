@@ -2,7 +2,7 @@
 // Verify packed modules without repository source, workspace links, or a provider login.
 // `--packs <release directory>` (scripts/release-pack.mjs) installs that release's saved tarballs,
 // after checking them against its SHA256SUMS, instead of packing the workspaces.
-import { cleanupFakeWeb } from './beta-web-lifecycle.mjs';
+import { cleanupFakeWeb, freeWebPort } from './beta-web-lifecycle.mjs';
 import { spawnSync } from 'node:child_process';
 import { spawnCommand } from './spawn-command.mjs';
 import { releaseArtifacts } from './release-lib.mjs';
@@ -22,7 +22,7 @@ const env = { ...process.env, ALP_HOME: path.join(directory, 'home') };
 let cli;
 try {
   await mkdir(env.ALP_HOME, { recursive: true, mode: 0o700 });
-  await writeFile(path.join(env.ALP_HOME, 'settings.json'), JSON.stringify({ web: { port: 0, relay: { enabled: false } } }));
+  await writeFile(path.join(env.ALP_HOME, 'settings.json'), JSON.stringify({ web: { port: await freeWebPort(), relay: { enabled: false } } }));
   const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
   const dependencies = {};
   const workspaceNames = [];

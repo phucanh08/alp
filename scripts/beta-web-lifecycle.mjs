@@ -1,7 +1,21 @@
 // Only for the acceptance runner's newly-created fake home. Live Paseo owns its lifecycle.
 import { readFile } from 'node:fs/promises';
+import net from 'node:net';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+
+/** A loopback port free right now, within the range the user settings accept for web.port (1024–65535). */
+export async function freeWebPort() {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const port = await new Promise((resolve, reject) => {
+      const server = net.createServer();
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => { const { port } = server.address(); server.close(() => resolve(port)); });
+    });
+    if (port >= 1024 && port <= 65535) return port;
+  }
+  throw new Error('no free loopback port from 1024 to 65535');
+}
 
 async function metadata(home, file) {
   try { return JSON.parse(await readFile(path.join(home, file), 'utf8')); }
