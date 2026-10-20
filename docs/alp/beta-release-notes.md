@@ -63,11 +63,14 @@ In the published packages:
 - **Paseo plugin:** a session removed and added back re-attaches; usage reaches Paseo; diffs
   that start with `+++` show correctly (PR #138, #117). In remote mode the settings open library
   entries in a read-only viewer (PR #161, #147).
+- **alpd library and workspace files** (PR #140, #118): `library.save`, `delete`, `duplicate` and
+  `rename` take a `policy`, and alpd refuses project-data library writes it cannot keep safe
+  (`library_policy`); workspace search honours `.gitignore`.
 - **Docs:** registering `alp web` from a plugin that Paseo installed from `npm:` is not
   supported; use the npm-installed CLI (PR #162, #154).
 
-In the repository only: `@anhlp/alp-gateway` credential grants and project library access
-(PR #140), and test and CI fixes (PRs #131, #136, #156, #159, #163).
+In the repository only: `@anhlp/alp-gateway` credential grants and the client limits that use
+the above (PR #140), and test and CI fixes (PRs #131, #136, #156, #159, #163).
 
 ## Support
 

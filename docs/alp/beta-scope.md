@@ -1,5 +1,8 @@
-# Phạm vi beta (`0.0.0-beta.1`, `0.0.0-beta.2`)
+# Phạm vi beta (`0.0.0-beta.1`, `0.0.0-beta.2`, `0.0.1-beta.3`)
 
+> **Beta.3 (`0.0.1-beta.3`):** phạm vi, gate, kế hoạch publish và acceptance ở **§12**, dùng lại
+> quy trình của §7 và §11.
+>
 > **Beta.2 (`0.0.0-beta.2`):** phạm vi, gate, kế hoạch publish và acceptance ở **§11**. §1–§10 là
 > quy trình và kết quả của beta.1, giữ nguyên làm lịch sử; §11 dùng lại quy trình đó với version
 > mới và ghi chỗ khác.
