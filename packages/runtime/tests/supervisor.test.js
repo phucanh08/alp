@@ -217,6 +217,42 @@ async function approvedSkill(runtime, pending, reply) {
   } finally { off(); }
 }
 
+for (const form of ['bare', 'dated', 'bullet-dated']) for (const whitespace of [false, true]) test(`skill approval matches ${form} lessons across user and project files (whitespace=${whitespace})`, async t => {
+  const { root, library, runtime, runtimes, prompt } = await setup(t);
+  await runtime.open('root', { cwd: root });
+  await until(() => runtimes.length === 2);
+  await prompt('m1', 'Work');
+  const main = runtimes[0];
+  const files = [path.join(root, '.alp/lessons.md'), path.join(library, 'lessons.md')];
+  for (const scope of ['project', 'user']) {
+    await main.call('alp_lesson', { scope, lesson: 'Run the check first.' });
+    await main.call('alp_lesson', { scope, lesson: 'Keep this unrelated rule.' });
+    await main.call('alp_lesson', { scope, lesson: 'Run the check first. Then report.' });
+  }
+  // Stored whitespace and date differ from the submitted representation.
+  if (whitespace) for (const file of files) await writeFile(file, (await readFile(file, 'utf8')).replace('Run the check first.', 'Run  the\tcheck first.'));
+  const before = await Promise.all(files.map(file => readFile(file, 'utf8')));
+  const input = form === 'bare' ? 'Run the check first.' : `${form === 'bullet-dated' ? '- ' : ''}2020-01-02: Run the check first.`;
+  const draft = { name: 'check-first', description: 'Run checks before reporting.', body: '# Check first', roles: ['main', 'peer'], lessons: [input, input, '2020-01-02: Missing rule.'] };
+  if (whitespace) draft.lessons.push('Run the check first.', '2020-01-02: Run the check first.', '- 2020-01-02: Run the check first.');
+  const rejected = await approvedSkill(runtime, main.call('alp_skill', draft), 'Reject');
+  assert.equal(rejected.result.saved, false);
+  assert.deepEqual(await Promise.all(files.map(file => readFile(file, 'utf8'))), before);
+  await assert.rejects(readFile(path.join(library, 'skills/check-first/SKILL.md')), { code: 'ENOENT' });
+  const { result } = await approvedSkill(runtime, main.call('alp_skill', { ...draft, requestId: 'approve' }), 'Approve');
+  assert.equal(result.approved, true);
+  assert.equal(result.saved, path.join(library, 'skills/check-first/SKILL.md'));
+  assert.deepEqual(result.lessonsRemoved, ['Run the check first.']);
+  assert.deepEqual(result.lessonsNotFound, ['Missing rule.']);
+  for (const file of files) {
+    const after = await readFile(file, 'utf8');
+    assert.equal(after, before[files.indexOf(file)].split('\n').filter(line => !line.endsWith(whitespace ? 'Run  the\tcheck first.' : 'Run the check first.')).join('\n'));
+  }
+  assert.match(await readFile(result.saved, 'utf8'), /# Check first/);
+  const roles = JSON.parse(await readFile(path.join(library, 'role-skills.json'), 'utf8'));
+  for (const role of draft.roles) assert.ok(roles[role].includes(draft.name));
+});
+
 test('main distills lessons into a skill scoped to the roles it picks, saved only after the user approves', async t => {
   const { root, library, runtime, runtimes, prompt } = await setup(t);
   await runtime.open('root', { cwd: root });
@@ -226,7 +262,7 @@ test('main distills lessons into a skill scoped to the roles it picks, saved onl
   await prompt('m1', 'Work');
   const lessons = ['Run the command before reporting its result.', 'Quote the exit code in the handoff.', 'Keep briefs short.'];
   for (const lesson of lessons) await main.call('alp_lesson', { scope: lesson.startsWith('Keep') ? 'user' : 'project', lesson });
-  const skill = { name: 'verify-claims', description: 'Use before reporting any check: run it and quote what it printed.', body: '# Verify claims\n\n1. Run the check.\n2. Quote its output.', roles: ['main', 'peer', 'oracle'], lessons: lessons.slice(0, 2) };
+  const skill = { name: 'verify-claims', description: 'Use before reporting any check: run it and quote what it printed.', body: '# Verify claims\n\n1. Run the check.\n2. Quote its output.', roles: ['main', 'peer', 'oracle'], lessons: [...lessons.slice(0, 2), `2020-01-02: ${lessons[0]}`, `- 2020-01-02: ${lessons[1]}`] };
   assert.match((await main.call('alp_skill', { ...skill, roles: ['main', 'tester'] })).error, /Unknown roles: tester/);
   assert.equal(runtime.questions().length, 0);
 
@@ -246,6 +282,7 @@ test('main distills lessons into a skill scoped to the roles it picks, saved onl
   assert.equal(question.body, rejected.question.body, 'the user sees the whole skill each time');
   assert.deepEqual([result.status, result.approved, result.saved], ['resolved', true, path.join(library, 'skills', 'verify-claims', 'SKILL.md')]);
   assert.deepEqual(result.lessonsRemoved.sort(), lessons.slice(0, 2).sort());
+  assert.equal(result.lessonsNotFound, undefined, 'duplicate representations do not report missing lessons');
   assert.match(await readFile(path.join(library, 'skills/verify-claims/SKILL.md'), 'utf8'), /^---\nname: verify-claims\n[\s\S]*1\. Run the check\./);
   const roles = JSON.parse(await readFile(path.join(library, 'role-skills.json'), 'utf8'));
   for (const role of ['main', 'peer', 'oracle']) assert.ok(roles[role].includes('verify-claims'), role);
