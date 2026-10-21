@@ -4545,6 +4545,117 @@
      "persist": true
     }
    }
+  },
+  {
+   "name": "registry.worktree params",
+   "check": "params",
+   "method": "registry.worktree",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "registry.worktree result",
+   "check": "result",
+   "method": "registry.worktree",
+   "valid": true,
+   "value": {
+    "mappings": [],
+    "workspaces": []
+   }
+  },
+  {
+   "name": "workspace.worktree.options params",
+   "check": "params",
+   "method": "workspace.worktree.options",
+   "valid": true,
+   "value": {
+    "workspaceId": "wks_0000000000000001"
+   }
+  },
+  {
+   "name": "workspace.worktree.options result",
+   "check": "result",
+   "method": "workspace.worktree.options",
+   "valid": true,
+   "value": {
+    "mappingIds": [
+     "approved"
+    ]
+   }
+  },
+  {
+   "name": "workspace.worktree.create params",
+   "check": "params",
+   "method": "workspace.worktree.create",
+   "valid": true,
+   "value": {
+    "workspaceId": "wks_0000000000000001",
+    "mappingId": "approved",
+    "requestId": "create",
+    "ifRevision": 1
+   }
+  },
+  {
+   "name": "workspace.worktree.create result",
+   "check": "result",
+   "method": "workspace.worktree.create",
+   "valid": true,
+   "value": {
+    "workspace": {
+     "id": "wks_0000000000000002",
+     "projectId": "prj_0000000000000001",
+     "directory": "/managed/wks_0000000000000002",
+     "labels": [],
+     "createdAt": "2026-10-21T00:00:00Z",
+     "managedWorktree": true,
+     "branch": "alp/workspace/wks_0000000000000002"
+    },
+    "revision": 2
+   }
+  },
+  {
+   "name": "workspace.worktree.remove params",
+   "check": "params",
+   "method": "workspace.worktree.remove",
+   "valid": true,
+   "value": {
+    "workspaceId": "wks_0000000000000002",
+    "requestId": "remove",
+    "ifRevision": 2
+   }
+  },
+  {
+   "name": "workspace.worktree.remove result",
+   "check": "result",
+   "method": "workspace.worktree.remove",
+   "valid": true,
+   "value": {
+    "workspace": {
+     "id": "wks_0000000000000002",
+     "projectId": "prj_0000000000000001",
+     "directory": "/managed/wks_0000000000000002",
+     "labels": [],
+     "createdAt": "2026-10-21T00:00:00Z",
+     "managedWorktree": true,
+     "branch": "alp/workspace/wks_0000000000000002"
+    },
+    "revision": 3,
+    "filesRemoved": true,
+    "branchRetained": true
+   }
+  },
+  {
+   "name": "worktree create rejects arbitrary destination",
+   "check": "params",
+   "method": "workspace.worktree.create",
+   "valid": false,
+   "value": {
+    "workspaceId": "wks_0000000000000001",
+    "mappingId": "approved",
+    "requestId": "create",
+    "ifRevision": 1,
+    "directory": "/outside"
+   }
   }
  ]
 }

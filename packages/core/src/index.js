@@ -29,3 +29,4 @@ export * as user_settings from './user-settings.js';
 export * as validation from './validation.js';
 export * as verify from './verify.js';
 export * as workflow from './workflow.js';
+export * as user_worktree from './user-worktree.js';

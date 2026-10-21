@@ -20,7 +20,7 @@ import { CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS } from '@anhlp/alp-protoc
  * its read; `files.read` implies nothing and nothing implies it. Host administration has no remote
  * permission in v1.
  */
-export const PERMISSIONS = Object.freeze(['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write', 'workspace.write']);
+export const PERMISSIONS = Object.freeze(['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write', 'workspace.write', 'workspace.manage']);
 
 /**
  * What `alp-gateway credential create` grants without --permission: session and project read/write;
@@ -33,7 +33,7 @@ export const DEFAULT_PERMISSIONS = Object.freeze(['session.read', 'session.write
  * Within `library` and `settings.language` some methods stay unexposed and answer -32601
  * `not_exposed` (docs/alp/remote-gateway.md §5.4).
  */
-export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.workspaceRegistry, CAPABILITY.sessionHistory, CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages]);
+export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.workspaceRegistry, CAPABILITY.workspaceWorktree, CAPABILITY.sessionHistory, CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages]);
 
 /** The codes of docs/protocol/alp-json-rpc-v1.md §5.1 the gateway answers its own refusals with; `data.reason` says why. */
 export const GATEWAY_ERROR = Object.freeze({ forbidden: ERROR.forbidden, unavailable: ERROR.unavailable });
@@ -319,7 +319,7 @@ export function isModelId(value) {
  *   exposed until a contract or policy makes its scope checkable; prohibited: never remote in v1.
  * @typedef {{
  *   status: ExposureStatus,
- *   permission?: 'session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write',
+ *   permission?: 'session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage',
  *   scope: string,
  *   capability?: string,
  *   params?: readonly string[],
@@ -346,6 +346,10 @@ export const EXPOSURE = Object.freeze({
   'session.attention.clear': { status: 'exposed', permission: 'session.read', scope: 'session: acknowledges a root\'s attention for every client, as a look at it does; a reader may', capability: CAPABILITY.sessionAttention, params: ['sessionId', 'at'], tests: ['permission', 'session-scope'] },
   'board.list': { status: 'exposed', permission: 'session.read', scope: 'workspace: projectRoot names a granted workspace', params: ['projectRoot'], tests: ['permission', 'workspace-param'] },
 
+  'registry.worktree': { status: 'prohibited', scope: 'host', reason: 'host-only mapping and committed grant provenance' },
+  'workspace.worktree.options': { status: 'exposed', permission: 'workspace.manage', scope: 'exact source grant and explicit host mapping IDs', params: ['workspaceId'], tests: ['permission', 'registry-scope'] },
+  'workspace.worktree.create': { status: 'exposed', permission: 'workspace.manage', scope: 'exact source grant and explicit host destination mapping; generated destination only', params: ['workspaceId','mappingId','requestId','ifRevision'], tests: ['permission', 'registry-scope'] },
+  'workspace.worktree.remove': { status: 'exposed', permission: 'workspace.manage', scope: 'creator-bound committed exact managed checkout provenance; current source and mapping rights', params: ['workspaceId','requestId','ifRevision'], tests: ['permission', 'registry-scope'] },
   'registry.owner': { status: 'prohibited', scope: 'host', reason: 'owner-only registry metadata and placement operations' },
   'project.list': { status: 'exposed', permission: 'project.read', scope: 'exact canonical grants filtered before paging and counts', params: ['cursor', 'limit'], tests: ['permission', 'registry-scope'] },
   'workspace.list': { status: 'exposed', permission: 'project.read', scope: 'workspace directory exact grant filtered before paging and counts', params: ['cursor', 'limit'], tests: ['permission', 'registry-scope'] },

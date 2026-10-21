@@ -1,5 +1,6 @@
 import { realpath as fsRealpath } from 'node:fs/promises';
 import { createRegistry, RegistryError } from './registry.js';
+import { createWorkspaceWorktrees } from './worktrees.js';
 import { HistoryError } from './history.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { appendFile, chmod, mkdir, readFile, unlink, lstat, rename } from 'node:fs/promises';
@@ -631,6 +632,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     let openedOnce = false;
     const open = () => { if (openedOnce) return; openedOnce = true; opened?.(); };
     try {
+      if (worktrees && record.spec?.cwd) await worktrees.assertAvailable(record.spec.cwd);
       const stored = await treeLog(record.id);
       seen(record.id, stored);
       logs.set(record.id, [...stored]);
@@ -871,6 +873,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     // The reason of an earlier failure is not true while the session opens again.
     recoveryErrors.delete(record.id);
     try {
+      if (worktrees) await worktrees.assertAvailable(record.spec.cwd);
       const stored = await treeLog(record.id);
       seen(record.id, stored);
       logs.set(record.id, [...stored]);
@@ -896,6 +899,11 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
 
   /** Projects, tasks, library and settings (docs/protocol/alp-json-rpc-v1.md §15); a team save syncs the projects sessions ran in. */
   const registry = home ? createRegistry(home) : undefined;
+  const worktrees = home && registry && process.platform !== 'win32' ? createWorkspaceWorktrees(home, registry, async (directory, run) => {
+    if (!runtime.withWorkspaceMutation) throw new RegistryError(1005, 'Runtime cannot prove safe worktree removal', { reason: 'guard_unavailable' });
+    try { return await runtime.withWorkspaceMutation(directory, run); } catch (error: any) { if (error?.data?.reason) throw new RegistryError(1004, 'Workspace is in use or has retained assignment results', error.data); throw error; }
+  }, async directory => { if (!runtime.registerWorkspace) throw new RegistryError(1005, 'Runtime cannot register safe workspace ownership', { reason: 'guard_unavailable' }); await runtime.registerWorkspace(directory); }) : undefined;
+  const workspaceDescriptor = async (w: any) => worktrees ? worktrees.describe(w) : w;
   const operations = createOperations({ home, templates, knownProjects: () => new Set([...records.values()].flatMap(record => record.session?.projectRoot ? [record.session.projectRoot] : [])) });
   const extensionOwners = new Map<string, Connection>();
   const handlers: Record<string, (connection: Connection, params: any) => Promise<unknown> | unknown> = {
@@ -1078,12 +1086,16 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       const { receipts: _receipts, ...metadata } = await registry!.snapshot();
       return { ...(result ? { result } : {}), registry: metadata };
     }),
+    'registry.worktree': (_c, p) => registryCall(() => worktrees!.grants(p)),
+    'workspace.worktree.options': (_c, p) => registryCall(async () => { const w = (await registry!.snapshot()).workspaces.find(w => w.id === p.workspaceId); if (!w) throw new RegistryError(1001, 'No workspace', { reason: 'not_found' }); const grants = await worktrees!.grants(p); return { mappingIds: grants.mappings.filter(m => m.source === (w.canonical ?? w.directory)).map(m => m.id) }; }),
+    'workspace.worktree.create': (_c, p) => registryCall(async () => { const result = await worktrees!.mutate('create', p, p); return { ...result, workspace: await workspaceDescriptor(result.workspace) }; }),
+    'workspace.worktree.remove': (_c, p) => registryCall(async () => { const result = await worktrees!.mutate('remove', p, p); return { ...result, workspace: await workspaceDescriptor(result.workspace) }; }),
     'project.list': (_c, p) => registryList('projects', p),
     'workspace.list': (_c, p) => registryList('workspaces', p),
     'workspace.get': (_c, p) => registryCall(async () => {
       await registry!.resolve(p.workspaceId, undefined, true);
       const r = await registry!.snapshot();
-      return { workspace: { ...r.workspaces.find(w => w.id === p.workspaceId), revision: r.revision }, revision: r.revision };
+      return { workspace: { ...await workspaceDescriptor(r.workspaces.find(w => w.id === p.workspaceId)), revision: r.revision }, revision: r.revision };
     }),
     'project.register': (_c, p) => registryMutation('project.register', p),
     'project.remove': (_c, p) => registryMutation('project.remove', p),
@@ -1099,6 +1111,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         if (prior && prior !== workspaceId) throw new RpcError(ERROR.conflict, 'Session belongs to another workspace', { reason: 'workspace_mismatch' });
       }
       if (!spec || typeof spec !== 'object' || typeof spec.cwd !== 'string') throw new RpcError(-32602, 'spec.cwd is required');
+      if (worktrees) await registryCall(() => worktrees.assertAvailable(spec.cwd));
       if (sessionId !== undefined && (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId))) throw new RpcError(-32602, 'Invalid session id');
       if (history !== 'replay' && history !== 'skip') throw new RpcError(-32602, 'history must be replay or skip');
       const id = sessionId ?? `ses_${randomBytes(8).toString('hex')}`;
@@ -1417,12 +1430,13 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     if (!Number.isSafeInteger(offset) || offset < 0) throw new RpcError(-32602, 'Invalid registry cursor');
     const limit = params.limit ?? 100;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new RpcError(-32602, 'Invalid registry limit');
-    return { [kind]: entries.slice(offset, offset + limit).map(e => ({ ...e, revision: r.revision })), revision: r.revision, total: entries.length, nextCursor: offset + limit < entries.length ? String(offset + limit) : null };
+    return { [kind]: await Promise.all(entries.slice(offset, offset + limit).map(async e => ({ ...(kind === 'workspaces' ? await workspaceDescriptor(e) : e), revision: r.revision }))), revision: r.revision, total: entries.length, nextCursor: offset + limit < entries.length ? String(offset + limit) : null };
   });
   const registryMutation = (method: string, p: any) => registryCall(async () => {
     if (!Number.isSafeInteger(p.ifRevision) || p.ifRevision < 0) throw new RpcError(-32602, 'ifRevision is required');
     const { requestId, ifRevision, authorizedRoots, ...args } = p;
-    return registry!.mutate(method, args, { requestId, ifRevision, allowedRoots: authorizedRoots });
+    const result = await registry!.mutate(method, args, { requestId, ifRevision, allowedRoots: authorizedRoots });
+    return result.workspace ? { ...result, workspace: await workspaceDescriptor(result.workspace) } : result;
   });
   runtime.bindSchedules?.(async (action, params) => handlers[`schedule.${action}`](undefined as any, params));
   for (const [method, handler] of Object.entries(operations.handlers)) handlers[method] = (_connection, params) => handler(params);
@@ -1483,7 +1497,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry'] : []), ...operations.capabilities];
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry'] : []), ...(worktrees ? ['workspace.worktree'] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {

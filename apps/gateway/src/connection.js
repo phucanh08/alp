@@ -224,6 +224,10 @@ function pick(params, keys) {
 export class ClientConnection {
   /** @type {import('ws').WebSocket} */ #ws;
   /** @type {import('./credentials.js').Grant} */ #grant;
+  /** @type {import('./credentials.js').Workspace[]} */ #baseWorkspaces = [];
+  /** @type {any[]} */ #managedWorkspaces = [];
+  /** @type {Promise<void> | undefined} */ #refreshingWorktrees;
+  /** @type {Promise<unknown>} */ #eventTail = Promise.resolve();
   /** @type {ConnectionLimits} */ #limits;
   /** @type {import('@anhlp/alp-core/log').Logger} */ #log;
   /** @type {Upstream['client'] | undefined} */ #up;
@@ -262,7 +266,8 @@ export class ClientConnection {
     this.id = id;
     this.principal = grant.id;
     this.#ws = ws;
-    this.#grant = grant;
+    this.#grant = { ...grant, workspaces: [...grant.workspaces] };
+    this.#baseWorkspaces = [...grant.workspaces];
     this.#limits = limits;
     this.#log = logger;
     this.#onClosed = onClosed;
@@ -290,7 +295,7 @@ export class ClientConnection {
     this.#daemonHello = hello;
     const listed = Array.isArray(hello.capabilities) ? hello.capabilities : [];
     this.#capabilities = FORWARDED_CAPABILITIES.filter(capability => listed.includes(capability));
-    client.onEvent(envelope => this.#event(envelope));
+    client.onEvent(envelope => { if (!this.#capabilities.includes('workspace.worktree') || !this.#grant.permissions.has('workspace.manage')) { this.#event(envelope); return; } this.#eventTail = this.#eventTail.then(async () => { await this.#refreshWorktrees(); this.#event(envelope); }).catch(() => { this.close(CLOSE_CODE.internal, 'Workspace authority unavailable; reconnect'); }); });
     client.onClose(error => this.#upstreamClosed(error));
   }
 
@@ -534,6 +539,7 @@ export class ClientConnection {
     }
     if (!this.#helloed && this.#helloing) await this.#helloing;
     if (!this.#helloed) throw new GatewayError(ERROR.protocol, 'daemon.hello is required first', { reason: 'hello_required' });
+    await this.#refreshWorktrees();
     const exposure = exposureOf(method);
     if (!exposure) throw new GatewayError(RPC_ERROR.methodNotFound, `Unknown method '${method}'`);
     if (exposure.status !== 'exposed' || !exposure.permission) throw new GatewayError(RPC_ERROR.methodNotFound, `${method} is not available through the gateway`, { reason: GATEWAY_REASON.notExposed });
@@ -542,7 +548,9 @@ export class ClientConnection {
     if (!this.#grant.permissions.has(exposure.permission)) throw forbidden(`This credential lacks ${exposure.permission}`, GATEWAY_REASON.grant, { permission: exposure.permission });
     const handler = Object.hasOwn(this.#handlers, method) ? this.#handlers[method] : undefined;
     if (!handler) throw new GatewayError(RPC_ERROR.methodNotFound, `${method} is not available through the gateway`, { reason: GATEWAY_REASON.notExposed });
-    return handler(pick(params, exposure.params ?? []));
+    const result = await handler(pick(params, exposure.params ?? []));
+    await this.#eventTail;
+    return result;
   }
 
   /** The gateway's own handshake, answered once its handshake with alpd is done. @param {Record<string, any>} params */
@@ -811,8 +819,33 @@ export class ClientConnection {
     return { ...rest, sessions: kept, ...(cursor === undefined ? {} : { nextCursor: cursor }) };
   }
 
+  #worktreeContext() { return { principalId: this.#grant.id, principalEpoch: this.#grant.scopeId ?? this.#grant.fingerprint, mappingIds: this.#grant.worktreeMappings ?? [], authorizedRoots: this.#baseWorkspaces.map(w => w.canonical) }; }
+  async #refreshWorktrees() {
+    if (!this.#capabilities.includes('workspace.worktree') || !this.#grant.permissions.has('workspace.manage')) return;
+    if (this.#refreshingWorktrees) return this.#refreshingWorktrees;
+    this.#refreshingWorktrees = (async () => {
+      const roots = [];
+      for (const w of this.#baseWorkspaces) if (await registryRealpath(w.path).catch(() => undefined) === w.canonical) roots.push(w.canonical);
+      const result = await this.#registryCall('registry.worktree', { ...this.#worktreeContext(), authorizedRoots: roots });
+      this.#managedWorkspaces = Array.isArray(result.workspaces) ? result.workspaces : [];
+      const effective = [...this.#baseWorkspaces];
+      for (const w of this.#managedWorkspaces) {
+        if (w.archivedAt || w.worktree?.removedAt || typeof w.directory !== 'string' || w.canonical !== w.directory || w.worktree?.principalId !== this.#grant.id || w.worktree?.grantEpoch !== (this.#grant.scopeId ?? this.#grant.fingerprint)) continue;
+        if (await registryRealpath(w.directory).catch(() => undefined) !== w.directory) continue;
+        effective.push({path:w.directory,canonical:w.directory});
+      }
+      if (JSON.stringify(effective) !== JSON.stringify(this.#grant.workspaces)) { this.#sessions.clear(); this.#outside.clear(); }
+      this.#grant.workspaces = effective;
+    })().finally(() => { this.#refreshingWorktrees = undefined; });
+    return this.#refreshingWorktrees;
+  }
+
   /** Fixed error text keeps host registry/migration paths out of remote failures. @param {string} method @param {any} params */
-  #registryCall(method, params) { return this.#call(method, params).catch(error => { throw opaqueDaemonError(error, 'Workspace metadata could not be read or saved. Refresh and retry; ask the host owner if it persists.'); }); }
+  #registryCall(method, params) { return this.#call(method, params).catch(error => {
+    const reason=/** @type {any} */ (error)?.data?.reason;
+    const messages={workspace_dirty:'Preserve dirty, ignored, hidden-index or submodule data before removing this checkout.',workspace_busy:'Close active sessions and wait for opening work before removal.',workspace_claimed:'Release workspace claims before removal.',workspace_leased:'An assignment holds this checkout; finish it before removal.',workspace_assignment_result:'Merge or preserve retained assignment results before removal; ask the host owner if ownership evidence needs repair.',workspace_history:'Saved sessions still reference this checkout. Retain its files; this operation does not delete history.',reconciliation_required:'Retry the original worktree request with its original requestId and revision before another mutation.',outside_workspace:'The host has not granted this source and destination mapping to this credential.',mapping_invalid:'Ask the host owner to repair the private worktree destination configuration.'};
+    throw opaqueDaemonError(error, /** @type {Record<string,string>} */ (messages)[reason] ?? 'Workspace metadata could not be read or saved. Refresh and retry; ask the host owner if it persists.');
+  }); }
   /** Live identity check: a retargeted granted symlink never follows its new target.
    * @param {unknown} directory */
   async #registryDirectory(directory) {
@@ -829,7 +862,7 @@ export class ClientConnection {
   /** Explicit remote projection: owner canonical/placement/receipts never cross this boundary.
    * @param {any} entry @param {'project'|'workspace'} kind */
   #registryProjection(entry, kind) {
-    const fields = kind === 'project' ? ['id', 'root', 'customName', 'addedAt', 'removedAt', 'revision'] : ['id', 'projectId', 'directory', 'title', 'pinnedAt', 'archivedAt', 'labels', 'createdAt', 'revision'];
+    const fields = kind === 'project' ? ['id', 'root', 'customName', 'addedAt', 'removedAt', 'revision'] : ['id', 'projectId', 'directory', 'title', 'pinnedAt', 'archivedAt', 'labels', 'createdAt', 'revision', 'branch', 'managedWorktree'];
     return Object.fromEntries(fields.filter(key => Object.hasOwn(entry, key)).map(key => [key, entry[key]]));
   }
   /** @param {string} workspaceId */
@@ -853,6 +886,22 @@ export class ClientConnection {
 
   /** @type {Record<string, (params: Record<string, any>) => Promise<unknown>>} */
   #handlers = {
+    'workspace.worktree.options': async params => {
+      await this.#registryWorkspace(params.workspaceId);
+      return this.#registryCall('workspace.worktree.options', {...params,...this.#worktreeContext()});
+    },
+    'workspace.worktree.create': async params => {
+      await this.#registryWorkspace(params.workspaceId);
+      const result = await this.#registryCall('workspace.worktree.create', {...params,...this.#worktreeContext(),requestId:this.#registryRequestId(params.requestId)});
+      await this.#refreshWorktrees();
+      return {...result,workspace:this.#registryProjection(result.workspace,'workspace')};
+    },
+    'workspace.worktree.remove': async params => {
+      if (!this.#managedWorkspaces.some(w => w.id === params.workspaceId)) throw forbidden('Only this credential’s managed user worktrees may be removed',GATEWAY_REASON.outsideWorkspace);
+      const result = await this.#registryCall('workspace.worktree.remove', {...params,...this.#worktreeContext(),requestId:this.#registryRequestId(params.requestId)});
+      await this.#refreshWorktrees();
+      return {...result,workspace:this.#registryProjection(result.workspace,'workspace')};
+    },
     'project.list': params => this.#registryList('project', params),
     'workspace.list': params => this.#registryList('workspace', params),
     'workspace.get': async params => {
