@@ -98,7 +98,7 @@ export async function migrateState(home, { by = 'alp', migrations = MIGRATIONS, 
         throw new AlpError('STATE_MIGRATION_ROLLBACK_FAILED', `state migration ${step.name} failed (${error?.message ?? error}) and putting the state back from ${backup} failed too (${rollback?.message ?? rollback}); the next start tries the migration again. See docs/alp/data-recovery.md`, { cause: error });
       }
       await rm(migrationFile(home), { force: true });
-      throw new AlpError('STATE_MIGRATION_FAILED', `state migration ${step.name} (schema ${step.from} → ${step.to}) failed: ${error?.message ?? error}; the state was put back from ${backup} and is unchanged. See docs/alp/data-recovery.md`, { cause: error });
+      throw new AlpError('STATE_MIGRATION_FAILED', `state migration ${step.name} (schema ${step.from} → ${step.to}) failed: ${error?.message ?? error}; data was restored from ${backup} with workspace authority checks. See docs/alp/data-recovery.md`, { cause: error });
     }
     await writeStateSchema(home, step.to, by);
     await rm(migrationFile(home), { force: true });
