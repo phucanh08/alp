@@ -2,6 +2,12 @@
  * and ifRevision to reconcile a timeout by repeating the identical request. @param {{request<T = any>(method: string, params?: unknown): Promise<T>}} client */
 export function workspaceRegistry(client) {
   return {
+    /** @param {string} workspaceId @returns {Promise<import('@anhlp/alp-protocol').RpcMethodMap['workspace.worktree.options']['result']>} */
+    worktreeOptions: workspaceId => client.request('workspace.worktree.options', { workspaceId }),
+    /** @param {import('@anhlp/alp-protocol').RpcMethodMap['workspace.worktree.create']['params']} params @returns {Promise<import('@anhlp/alp-protocol').RpcMethodMap['workspace.worktree.create']['result']>} */
+    createWorktree: params => client.request('workspace.worktree.create', params),
+    /** @param {import('@anhlp/alp-protocol').RpcMethodMap['workspace.worktree.remove']['params']} params @returns {Promise<import('@anhlp/alp-protocol').RpcMethodMap['workspace.worktree.remove']['result']>} */
+    removeWorktree: params => client.request('workspace.worktree.remove', params),
     /** @param {import('@anhlp/alp-protocol').RpcMethodMap['project.list']['params']} [params] @returns {Promise<import('@anhlp/alp-protocol').RpcMethodMap['project.list']['result']>} */
     projects: (params = {}) => client.request('project.list', params),
     /** @param {import('@anhlp/alp-protocol').RpcMethodMap['workspace.list']['params']} [params] @returns {Promise<import('@anhlp/alp-protocol').RpcMethodMap['workspace.list']['result']>} */

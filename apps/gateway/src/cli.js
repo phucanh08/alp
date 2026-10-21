@@ -27,6 +27,7 @@ Usage:
   alp-gateway credential revoke ID
 
 Permissions: ${PERMISSIONS.join(', ')} (default: ${DEFAULT_PERMISSIONS.join(', ')}).
+workspace.manage requires explicit --permission and --worktree-mapping ID (host-approved destination).
 workspace.write (register pregranted projects and change shared workspace metadata) requires explicit --permission.
 files.read (list directories and read text files of the workspaces) is never a default: name it with
 --permission for each credential that may read file contents. A token is printed once; only its hash is kept.
@@ -81,13 +82,13 @@ async function credential(/** @type {string[]} */ args) {
   const [action, ...rest] = args;
   const home = gatewayHome();
   if (action === 'create') {
-    const { values } = parseArgs({ args: rest, options: { label: { type: 'string' }, workspace: { type: 'string', multiple: true }, permission: { type: 'string', multiple: true }, mode: { type: 'string', multiple: true }, 'expires-in-days': { type: 'string' }, json: { type: 'boolean' } } });
+    const { values } = parseArgs({ args: rest, options: { label: { type: 'string' }, workspace: { type: 'string', multiple: true }, permission: { type: 'string', multiple: true }, 'worktree-mapping': { type: 'string', multiple: true }, mode: { type: 'string', multiple: true }, 'expires-in-days': { type: 'string' }, json: { type: 'boolean' } } });
     if (!values.label || !values.workspace?.length) fail('credential create needs --label and at least one --workspace');
     const days = values['expires-in-days'] === undefined ? undefined : Number(values['expires-in-days']);
     if (days !== undefined && !(days > 0)) fail('--expires-in-days must be a positive number');
     const permissions = (values.permission ?? [...DEFAULT_PERMISSIONS]).flatMap(entry => entry.split(',')).map(entry => entry.trim()).filter(Boolean);
     const { credential: created, token } = await createCredential(home, {
-      label: /** @type {string} */ (values.label), workspaces: /** @type {string[]} */ (values.workspace), permissions,
+      label: /** @type {string} */ (values.label), workspaces: /** @type {string[]} */ (values.workspace), permissions, worktreeMappings: values['worktree-mapping'] ?? [],
       ...(values.mode ? { modes: values.mode } : {}),
       ...(days ? { expiresAt: new Date(Date.now() + days * 86_400_000).toISOString() } : {}),
     });
@@ -107,12 +108,13 @@ async function credential(/** @type {string[]} */ args) {
     return;
   }
   if (action === 'reissue' || action === 'edit') {
-    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { label: { type: 'string' }, workspace: { type: 'string', multiple: true }, permission: { type: 'string', multiple: true }, mode: { type: 'string', multiple: true }, 'expires-in-days': { type: 'string' }, json: { type: 'boolean' } } });
+    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { label: { type: 'string' }, workspace: { type: 'string', multiple: true }, permission: { type: 'string', multiple: true }, 'worktree-mapping': { type: 'string', multiple: true }, mode: { type: 'string', multiple: true }, 'expires-in-days': { type: 'string' }, json: { type: 'boolean' } } });
     if (positionals.length !== 1) fail(`credential ${action} needs one credential id`);
     const days = values['expires-in-days'] === undefined ? undefined : Number(values['expires-in-days']);
     if (days !== undefined && (!Number.isFinite(days) || !(days > 0))) fail('--expires-in-days must be a positive finite number');
     const { credential: issued, token } = await reissueCredential(home, positionals[0], {
       ...(values.label !== undefined ? { label: values.label } : {}),
+      ...(values['worktree-mapping'] !== undefined ? { worktreeMappings: values['worktree-mapping'] } : {}),
       ...(values.workspace !== undefined ? { workspaces: values.workspace } : {}),
       ...(values.permission !== undefined ? { permissions: values.permission.flatMap(entry => entry.split(',')).map(entry => entry.trim()).filter(Boolean) } : {}),
       ...(values.mode !== undefined ? { modes: values.mode } : {}),

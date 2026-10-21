@@ -2559,6 +2559,15 @@
         },
         "idempotencyKey": {
           "type": "string"
+        },
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "managedWorktree": {
+          "type": "boolean"
         }
       },
       "required": [

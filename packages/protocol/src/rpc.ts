@@ -15,7 +15,7 @@ export type EventNotification = { jsonrpc: '2.0'; method: 'event'; params: Envel
 export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
 export type HistoryPage = { generation: string; items: HistoryItem[]; olderCursor?: string; hasOlder: boolean; tipCursor: number };
 
-export type Capability = 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
+export type Capability = 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -37,10 +37,14 @@ type Empty = Record<string, never>;
  * properties this map does not name: clients ignore them.
  */
 export type RegistryProject = { id: string; root: string; canonical?: string; customName?: string | null; addedAt: string; removedAt?: string | null; revision?: number };
-export type RegistryWorkspace = { id: string; projectId: string; directory: string; canonical?: string; title?: string | null; pinnedAt?: string | null; archivedAt?: string | null; labels: string[]; createdAt: string; revision?: number; idempotencyKey?: string };
+export type RegistryWorkspace = { branch?: string | null; managedWorktree?: boolean; id: string; projectId: string; directory: string; canonical?: string; title?: string | null; pinnedAt?: string | null; archivedAt?: string | null; labels: string[]; createdAt: string; revision?: number; idempotencyKey?: string };
 export type RegistryMutation = { requestId: string; ifRevision: number };
 export type RegistryPage = { revision: number; total: number; nextCursor: string | null };
 export type RpcMethodMap = {
+  'workspace.worktree.options': { params: { workspaceId: string }; result: { mappingIds: string[] } };
+  'workspace.worktree.create': { params: RegistryMutation & { workspaceId: string; mappingId: string }; result: { workspace: RegistryWorkspace; revision: number } };
+  'workspace.worktree.remove': { params: RegistryMutation & { workspaceId: string }; result: { workspace: RegistryWorkspace; revision: number; filesRemoved: true; branchRetained: true } };
+  'registry.worktree': { params: { principalId?: string; principalEpoch?: string; mappingIds?: string[]; authorizedRoots?: string[] }; result: { mappings: Array<{id:string;source:string}>; workspaces: unknown[] } };
   'project.list': { params: { cursor?: string; limit?: number; projectRoots?: string[] }; result: RegistryPage & { projects: RegistryProject[] } };
   'workspace.list': { params: { cursor?: string; limit?: number; projectRoots?: string[] }; result: RegistryPage & { workspaces: RegistryWorkspace[] } };
   'workspace.get': { params: { workspaceId: string }; result: { workspace: RegistryWorkspace; revision: number } };

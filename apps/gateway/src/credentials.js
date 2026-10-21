@@ -28,11 +28,11 @@ const MODE = /^[a-z][a-z0-9-]{0,63}$/;
  *   names a workspace by either string, exactly.
  * @typedef {{
  *   id: string, label: string, hash: string, workspaces: Workspace[], permissions: string[],
- *   modes?: string[], createdAt: string, rotatedAt?: string, expiresAt?: string, revokedAt?: string,
+ *   worktreeMappings?: string[], scopeId?: string, modes?: string[], createdAt: string, rotatedAt?: string, expiresAt?: string, revokedAt?: string,
  * }} StoredCredential
  * @typedef {{
  *   id: string, label: string, workspaces: Workspace[], permissions: Set<string>,
- *   modes?: Set<string>, expiresAt?: number, secretHash: string, fingerprint: string,
+ *   worktreeMappings?: string[], scopeId?: string, modes?: Set<string>, expiresAt?: number, secretHash: string, fingerprint: string,
  * }} Grant
  */
 
@@ -132,6 +132,12 @@ function checkPermissions(permissions) {
   return PERMISSIONS.filter(permission => granted.has(permission));
 }
 
+/** Host-only named mappings; never paths. @param {unknown} value @returns {string[]} */
+function checkMappings(value) {
+ if (!Array.isArray(value) || value.some(id => typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(id))) throw new Error('worktreeMappings must list host mapping IDs');
+ return [...new Set(value)];
+}
+
 /** @param {unknown} modes */
 function checkModes(modes) {
   if (modes === undefined) return undefined;
@@ -142,9 +148,9 @@ function checkModes(modes) {
 /**
  * Creates a credential and returns its token, which is not stored and cannot be shown again.
  * @param {string} home
- * @param {{ label: string, workspaces: string[], permissions: string[], modes?: string[], expiresAt?: string, now?: Date }} options
+ * @param {{ label: string, workspaces: string[], permissions: string[], worktreeMappings?: string[], modes?: string[], expiresAt?: string, now?: Date }} options
  */
-export async function createCredential(home, { label, workspaces, permissions, modes, expiresAt, now = new Date() }) {
+export async function createCredential(home, { label, workspaces, permissions, worktreeMappings = [], modes, expiresAt, now = new Date() }) {
   if (typeof label !== 'string' || !label.trim() || label.length > 100) throw new Error('A credential needs a label of 1 to 100 characters');
   if (expiresAt !== undefined && !(Date.parse(expiresAt) > now.getTime())) throw new Error('expiresAt must be a future ISO 8601 time');
   const data = await readCredentials(home);
@@ -156,6 +162,7 @@ export async function createCredential(home, { label, workspaces, permissions, m
     hash: digest(token.secret),
     workspaces: await resolveWorkspaces(workspaces),
     permissions: checkPermissions(permissions),
+    worktreeMappings: checkMappings(worktreeMappings), scopeId: randomBytes(16).toString('hex'),
     ...(checkModes(modes) ? { modes: checkModes(modes) } : {}),
     createdAt: now.toISOString(),
     ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
@@ -191,9 +198,9 @@ export async function rotateCredential(home, id, { now = new Date() } = {}) {
  * Locally replaces named grant fields and reissues the secret, keeping the device id.
  * Omitted fields retain their grants; supplied lists replace rather than append.
  * @param {string} home @param {string} id
- * @param {{ label?: string, workspaces?: string[], permissions?: string[], modes?: string[], expiresAt?: string, now?: Date }} [options]
+ * @param {{ label?: string, workspaces?: string[], permissions?: string[], worktreeMappings?: string[], modes?: string[], expiresAt?: string, now?: Date }} [options]
  */
-export async function reissueCredential(home, id, { label, workspaces, permissions, modes, expiresAt, now = new Date() } = {}) {
+export async function reissueCredential(home, id, { label, workspaces, permissions, worktreeMappings, modes, expiresAt, now = new Date() } = {}) {
   const data = await readCredentials(home);
   const credential = find(data, id);
   if (credential.revokedAt) throw new Error(`Credential ${id} is revoked; create a new one`);
@@ -201,6 +208,8 @@ export async function reissueCredential(home, id, { label, workspaces, permissio
   if (expiresAt !== undefined && !(Date.parse(expiresAt) > now.getTime())) throw new Error('expiresAt must be a future ISO 8601 time');
   const replacement = {
     ...(label !== undefined ? { label: label.trim() } : {}),
+    scopeId: randomBytes(16).toString('hex'),
+    ...(worktreeMappings !== undefined ? { worktreeMappings: checkMappings(worktreeMappings) } : {}),
     ...(workspaces !== undefined ? { workspaces: await resolveWorkspaces(workspaces) } : {}),
     ...(permissions !== undefined ? { permissions: checkPermissions(permissions) } : {}),
     ...(modes !== undefined ? { modes: checkModes(modes) } : {}),
@@ -234,15 +243,18 @@ function grantOf(stored, now) {
   const workspaces = Array.isArray(stored.workspaces) ? stored.workspaces.filter(entry => typeof entry?.path === 'string' && typeof entry?.canonical === 'string' && path.isAbsolute(entry.path) && path.isAbsolute(entry.canonical)) : [];
   const permissions = Array.isArray(stored.permissions) ? stored.permissions.filter(permission => PERMISSIONS.includes(permission)) : [];
   if (!workspaces.length || !permissions.length || typeof stored.hash !== 'string' || !/^[a-f0-9]{64}$/.test(stored.hash)) return undefined;
+  let mappingIds; try { mappingIds = checkMappings(stored.worktreeMappings ?? []); } catch { return undefined; }
+  if (stored.scopeId !== undefined && (typeof stored.scopeId !== 'string' || !/^[a-f0-9]{32}$/.test(stored.scopeId))) return undefined;
   return /** @type {Grant} */ ({
     id: stored.id,
     label: String(stored.label ?? ''),
     workspaces: workspaces.map(({ path: given, canonical }) => ({ path: given, canonical })),
     permissions: new Set(permissions),
+    worktreeMappings: mappingIds, scopeId: stored.scopeId ?? digest(JSON.stringify([workspaces, permissions, stored.worktreeMappings ?? []])),
     ...(Array.isArray(stored.modes) ? { modes: new Set(stored.modes.filter(mode => typeof mode === 'string')) } : {}),
     ...(expiresAt !== undefined ? { expiresAt } : {}),
     secretHash: stored.hash,
-    fingerprint: JSON.stringify([workspaces, permissions, stored.modes ?? null, stored.expiresAt ?? null]),
+    fingerprint: JSON.stringify([workspaces, permissions, stored.modes ?? null, stored.expiresAt ?? null, stored.worktreeMappings ?? [], stored.scopeId ?? null]),
   });
 }
 

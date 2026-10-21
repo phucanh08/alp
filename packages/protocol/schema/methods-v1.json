@@ -32,7 +32,8 @@
     "library.project.write": "library save/delete/duplicate/rename accept policy project-data: only project-only pure-data agents and skills, no executable configuration, sidecars or library/built-in collisions.",
     "schedule": "schedule.create/list/get/cancel: one-shot continuations of a root session. alpd opens the turn by itself when the time comes; a job that comes due late says how late it is, and a job that cannot run says why.",
     "session.history": "Durable bounded backward envelope pages, persisted generation and numeric attach watermark.",
-    "workspace.registry": "Daemon-owned project/workspace registry, durable pins, revision CAS and requestId replay."
+    "workspace.registry": "Daemon-owned project/workspace registry, durable pins, revision CAS and requestId replay.",
+    "workspace.worktree": "Host-approved managed user worktrees; opt-in workspace.manage and named destination mappings."
   },
   "methods": {
     "assignment.recall": {
@@ -3240,6 +3241,251 @@
         "capability": "workspace.registry",
         "idempotent": false
       }
+    },
+    "workspace.worktree.create": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "principalId": {
+            "type": "string"
+          },
+          "mappingIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "ifRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "mappingId": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "principalEpoch": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "requestId",
+          "ifRevision",
+          "mappingId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "workspace": {
+            "$ref": "#/$defs/registryWorkspace"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "filesRemoved": {
+            "type": "boolean"
+          },
+          "branchRetained": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "workspace",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "project"
+        },
+        "capability": "workspace.worktree",
+        "idempotent": true
+      }
+    },
+    "workspace.worktree.remove": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "principalId": {
+            "type": "string"
+          },
+          "mappingIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "ifRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "principalEpoch": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "requestId",
+          "ifRevision"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "workspace": {
+            "$ref": "#/$defs/registryWorkspace"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "filesRemoved": {
+            "type": "boolean"
+          },
+          "branchRetained": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "workspace",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "project"
+        },
+        "capability": "workspace.worktree",
+        "idempotent": true
+      }
+    },
+    "workspace.worktree.options": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "principalId": {
+            "type": "string"
+          },
+          "mappingIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "principalEpoch": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "mappingIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "mappingIds"
+        ],
+        "additionalProperties": false
+      },
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project"
+        },
+        "capability": "workspace.worktree",
+        "idempotent": true
+      }
+    },
+    "registry.worktree": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "principalId": {
+            "type": "string"
+          },
+          "mappingIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "principalEpoch": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "host"
+        },
+        "capability": "workspace.worktree"
+      }
     }
   },
   "$defs": {
@@ -5787,6 +6033,15 @@
         },
         "idempotencyKey": {
           "type": "string"
+        },
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "managedWorktree": {
+          "type": "boolean"
         }
       },
       "required": [

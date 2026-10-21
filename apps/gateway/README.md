@@ -42,3 +42,45 @@ and prompt-authority boundary in the linked remote gateway documentation.
 The hello publishes effective `promptImageLimits` when image capability is available. The web
 client honors these limits, including gateways configured with a smaller `limits.maxFrame`.
 Workspace search applies the same hardened Git ignore checks as listing and reading.
+
+### Managed user worktrees
+
+`workspace.manage` is opt-in and implies no other permission. On macOS/Linux hosts with
+`/usr/bin/git`, the owner can create a private (`0600`) `<ALP_HOME>/worktree-destinations.json`:
+
+```json
+{"version":1,"mappings":[{"id":"personal","source":"/canonical/repo","commonDir":"/canonical/repo/.git","parent":"/canonical/private-user-worktrees"}]}
+```
+
+All paths must already exist and be canonical. The destination parent must belong to the
+owner, be private (`0700`), and be separate from source, Git storage, and ALP assignment/copy
+cleanup directories. For a linked source worktree, use its actual Git common directory.
+The file is host configuration; no remote RPC can create or change a mapping.
+
+Issue a credential with the exact source `--workspace`, `--permission workspace.manage`,
+`--worktree-mapping personal`, and the read/session permissions it needs. In the web sidebar,
+register the source project, then choose **Create worktree** and an approved destination.
+Creation checks out committed HEAD with a generated directory and branch; it does not copy
+uncommitted changes, execute setup hooks, or accept paths, branch names, revisions or Git arguments.
+Only that credential's current scope receives the exact committed generated checkout. A shared
+Git common directory never authorizes parents or siblings. Changing credential scope invalidates
+its old derived grants; rotating only the token secret preserves scope. Mapping/source revocation
+and identity changes suppress derived access on the next request or event and on reconnect.
+
+**Remove worktree → Delete checkout files** removes a managed user checkout from disk and
+archives its registry row. Its Git branch remains. Project removal/workspace archive are metadata
+operations and do not delete files. Dirty/ignored files, hidden index state, submodules, locks,
+active/opening sessions, claims, leases, recoverable assignments and retained results refuse deletion.
+Saved session placement also refuses deletion: retain the checkout while that placement exists.
+This feature has no history-deletion RPC. Deletion never clears history automatically. Shared
+writer result ownership is retained conservatively; older workspaces without authoritative birth
+tracking need an audited migration before deletion. Assignment worktrees are never adopted.
+
+Mutations carry `requestId` and `ifRevision`. Keep both unchanged after a timeout and retry the
+same operation: the existing registry persists a prepared intent before Git, then publishes workspace,
+creator/scope-bound grant provenance and receipt atomically. A failed save is an error, never success.
+Restart/retry reconciles the original generated identity. Ambiguous or edited partial checkouts remain
+quarantined for owner reconciliation; no reset/force/recursive cleanup occurs during recovery.
+This provides the daemon's existing process-crash persistence, not a power-loss durability guarantee.
+Windows does not advertise this capability. A cwd/grant is not an OS sandbox against another process
+running as the same host user.

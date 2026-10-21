@@ -53,6 +53,8 @@ const reached = (daemon, mark, method) => daemon.calls().slice(mark).filter(call
 // the method under test must not.
 const text = [{ type: 'text', text: 'hi' }];
 const OUT_OF_SCOPE = {
+  'workspace.worktree.options': null, 'workspace.worktree.create': null, 'workspace.worktree.remove': null, // worktrees.test.js checks exact derived grants and mutation scope
+
   'project.list': null, 'workspace.list': null, 'workspace.get': null, 'project.register': null, 'project.remove': null, 'workspace.update': null, // registry.test.js checks scoped rows and every mutation
 
   'catalog.get': null, // global: the static catalogue of models and modes
@@ -97,6 +99,7 @@ const OUT_OF_SCOPE = {
 
 /** Schema-valid params in scope for every exposed method, for permission checks. */
 const IN_SCOPE = ({ a }) => ({
+  'workspace.worktree.options': {workspaceId:'wks_a'}, 'workspace.worktree.create': {workspaceId:'wks_a',mappingId:'approved',requestId:'r',ifRevision:0}, 'workspace.worktree.remove': {workspaceId:'wks_a',requestId:'r',ifRevision:0},
   'project.list': {}, 'workspace.list': {}, 'workspace.get': { workspaceId: 'wks_a' },
   'project.register': { directory: a, ifRevision: 0, requestId: 'r' },
   'project.remove': { projectId: 'prj_a', ifRevision: 0, requestId: 'r' },
@@ -158,7 +161,7 @@ test('the exposure matrix agrees with the daemon\'s x-alp annotations', t => {
     // A risk the gateway removes itself is allowed, with the test that proves it.
     const mitigated = method.startsWith('library.') && exposure.permission === 'library.write' ? /^exec-config/ : { 'session.create': /^exec: spec\.env and stdio spec\.mcpServers/ }[method];
     assert.ok(!risks.some(risk => /admin|exec/.test(risk) && !mitigated?.test(risk)), `${method}: an administrative or code-executing method is exposed`);
-    if (effect === 'mutation' && !readerMutations.has(method)) assert.match(exposure.permission ?? '', /\.write$/, `${method} writes and needs a write permission`);
+    if (effect === 'mutation' && !readerMutations.has(method)) assert.match(exposure.permission ?? '', /(?:\.write$|^workspace\.manage$)/, `${method} writes and needs a write permission`);
     // The resource the daemon names is the one the gateway checks.
     if (scope?.param === 'projectRoot') assert.ok(exposure.params?.includes('projectRoot'), `${method} forwards projectRoot`);
     if (scope?.param === 'sessionId') assert.ok(exposure.params?.includes('sessionId'), `${method} forwards sessionId`);

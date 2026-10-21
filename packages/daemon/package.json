@@ -72,6 +72,14 @@
       },
       "types": "./dist/registry.d.ts",
       "default": "./dist/registry.js"
+    },
+    "./worktrees": {
+      "alp-source": {
+        "types": "./src/worktrees.ts",
+        "default": "./src/worktrees.ts"
+      },
+      "types": "./dist/worktrees.d.ts",
+      "default": "./dist/worktrees.js"
     }
   },
   "engines": {
