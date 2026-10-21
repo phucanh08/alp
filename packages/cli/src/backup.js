@@ -123,5 +123,5 @@ export async function restoreCommand(args) {
   for (const { root, reason } of result.skipped) console.log(`  skipped ${root}: ${reason}`);
   for (const warning of result.warnings) console.log(`  note: ${warning}`);
   if (result.stateSchema !== null && result.stateSchema !== undefined) console.log('  sessions that were working when the backup was made wait for you; alpd continues none by itself');
-  if (result.safety) console.log(`the data it replaced is in ${result.safety}; alp restore ${result.safety} puts it back`);
+  if (result.safety) console.log(`the data it replaced is in ${result.safety}; alp restore ${result.safety} restores that data with the same workspace authority checks`);
 }

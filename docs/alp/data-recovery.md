@@ -8,9 +8,9 @@ long ALP keeps it, and what to do when something goes wrong. The design is in
 
 ## What ALP keeps, and what a backup holds
 
-A backup holds the **units** below. A restore makes each unit match the backup exactly: a
-file or directory the backup holds is put back, and one the backup recorded as absent is
-removed. Nothing outside these units is read or changed.
+A backup holds the **units** below. A restore replaces these units with the archived data,
+including removing entries recorded as absent, with the workspace authority exceptions
+described under [Restoring](#restoring). Nothing outside these units is read or changed.
 
 | Where | Unit | What it is |
 |---|---|---|
@@ -18,6 +18,8 @@ removed. Nothing outside these units is read or changed.
 | | `sessions/` | one record per session: status, title, the native thread it resumes, its spec |
 | | `timeline/` | every event of each session tree, with its replay cursor |
 | | `receipts/` | one receipt per delivered prompt, so a retried prompt is never sent twice |
+| | `assignment-results.json`, `assignment-results.json.initialized` | retained assignment owners and checkout birth records; restore keeps owners and clears births |
+| | `worktree-destinations.json` | host destination mappings; restored only as inactive evidence |
 | | `recall.json`, `pause.json`, `trust.json`, `web-workspaces.json` | finished assignments you can recall, pauses, trusted projects, Paseo workspaces |
 | `$ALP_HOME` | `settings.json`, `library.json`, `role-skills.json`, `lessons.md` | your settings and your library's bookkeeping |
 | | `agents/`, `skills/`, `teams/`, `hooks/`, `mcp/`, `providers/`, `formulas/` | your library |
@@ -110,7 +112,8 @@ A restore runs in four steps, and your current data stays safe through each of t
    [Downgrades](#downgrades)). The journal exists from the first staged file on, so even
    a restore killed while it unpacks leaves nothing behind.
 2. **It saves what it replaces** in `$ALP_HOME/backups/pre-restore-<time>.alpbackup`.
-   `alp restore` of that file undoes the restore. ALP keeps the newest five of these.
+   `alp restore` of that file restores the saved data with the same workspace authority
+   checks described below. ALP keeps the newest five of these.
 3. **It swaps under a journal.** `$ALP_HOME/restore-journal.json` lists every swap. ALP
    moves the current units aside, moves the staged ones in, then marks the journal
    committed.
@@ -119,8 +122,18 @@ A restore runs in four steps, and your current data stays safe through each of t
 If something fails before the commit, ALP moves everything back and reports
 `RESTORE_FAILED`. If the process dies part way (a kill, a crash, a power cut), the next
 `alp restore` or the next alpd start settles the journal before doing anything else. Before
-the commit, that means a roll back to the data you had. After it, it means finishing the
-clean-up. `alp doctor` shows a restore that was cut short.
+the commit, that means an exact rollback to the data and authority you had. After it, it
+means finishing the clean-up. `alp doctor` shows a restore that was cut short.
+
+A successful workspace restore preserves assignment owners from both the backup and the
+current state, including owners recorded after the backup. It clears checkout birth
+certifications, so old targets need audited adoption before mutation or deletion. Archived
+host destination mappings are kept only as private evidence in
+`state/worktree-destinations.quarantined.json`; active mappings need explicit host
+reapproval. Historical checkout grants stay revoked even after reapproval (the registry's
+`grantEpoch` values are rotated). These rules also apply when replaying a pre-restore or
+pre-migration backup, including automatic recovery after a failed migration. Settings-only
+restores do not change workspace authority.
 
 After a restore:
 
@@ -156,7 +169,8 @@ the step again over what it left, against the same backup.
 
 **Failed** (the step reported an error): alpd puts the state back from that backup, removes
 the journal and does not start. Its log says `ALP_STATE_MIGRATION_FAILED`, with the cause
-and the backup's path. The state is as it was before the upgrade. Fix the cause (usually
+and the backup's path. The saved data is restored with the workspace authority checks
+described above; previous mutation permissions are not reinstated. Fix the cause (usually
 disk space or permissions) and start alpd again, or go back to the previous ALP version.
 
 ## Downgrades
@@ -174,8 +188,9 @@ ALP never converts newer data back to an older format. To go back to an older AL
 - **Take the data from before the upgrade:** with the older ALP, run
   `alp restore --replace-newer $ALP_HOME/backups/pre-migrate-v<old>-v<new>-….alpbackup`.
   It saves the newer state to a `pre-restore-*` backup first (only the newer ALP can
-  restore that one), then puts back the state from before the upgrade. Work done after the
-  upgrade is not in the restored state.
+  restore that one), then restores the saved data with the workspace authority checks
+  described above. Work done after the upgrade is not in the restored sessions and tasks;
+  assignment ownership evidence is retained.
 
 Versions before 0.11 do not read `schema.json`, and have no `alp restore`. Schema 2 differs from schema 1 only in
 having explicit cursors, which those versions already read, so going back to them works.
@@ -209,8 +224,9 @@ that version or a newer one (`npm i -g @anhlp/alp@<version>`), or see
 format. Restore a backup (`alp restore FILE`), which replaces it. If you know the state was
 written by this version, you can instead write `{"schema": 2}` into the file yourself.
 
-**`ALP_STATE_MIGRATION_FAILED`.** The state was put back as it was before the upgrade. The
-log names the cause and the pre-migration backup. Free space, or fix permissions on
+**`ALP_STATE_MIGRATION_FAILED`.** The pre-migration data was restored with the workspace
+authority checks described above. The log names the cause and the pre-migration backup.
+Free space, or fix permissions on
 `$ALP_HOME/state`, and start alpd again.
 
 **`ALP_STATE_MIGRATION_ROLLBACK_FAILED`.** The step failed, and putting the state back
@@ -228,13 +244,16 @@ the `.restore-<id>` directories and `restore-journal.json`. The automatic
 `pre-restore-*.alpbackup` holds that same data.
 
 **A restore was cut short** (`alp doctor`: `restore`). Nothing to do: the next
-`alp restore` or alpd start moves the earlier data back.
+`alp restore` or alpd start rolls back an uncommitted restore, or finishes cleanup if it
+already committed.
 
 **A migration was cut short** (`alp doctor`: `migration`). Nothing to do: the next alpd
 start continues it.
 
 **You restored the wrong backup.** `alp restore $ALP_HOME/backups/pre-restore-<time>.alpbackup`
-puts back what it replaced.
+restores the saved data with the same workspace authority checks: owners remain, but old
+checkout birth certifications and historical grants do not return. Reapprove host mappings
+and arrange audited adoption before mutating or deleting old targets.
 
 **Sessions or tasks deleted by mistake.**
 
