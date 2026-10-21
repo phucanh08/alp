@@ -143,14 +143,20 @@ test('mapping evidence is private and inert even with stale paths; each failed s
     assert.equal(await readFile(f.file, 'utf8'), beforeLedger);
     assert.equal(await readFile(f.file + '.initialized', 'utf8'), '1\n');
   }
+  const quarantine = path.join(f.home, 'state', 'worktree-destinations.quarantined.json');
+  await writeFile(quarantine, 'prior quarantine evidence', { mode: 0o600 });
   const restored = await backup.restoreBackup({ home: f.home, file: archive });
   assert.ok(restored.warnings.some(w => w.includes('explicit host approval')));
   assert.deepEqual(await worktreeMappings(f.home), []);
-  const quarantine = path.join(f.home, 'state', 'worktree-destinations.quarantined.json');
   assert.equal(await readFile(quarantine, 'utf8'), evidence);
   if (process.platform !== 'win32') assert.equal((await stat(quarantine)).mode & 0o777, 0o600);
   // The safety archive preserves originals, but replaying it is another sanitized restore.
   assert.ok((await backup.verifyBackup(restored.safety)).units.includes('worktree-destinations.json'));
+  const { gunzipSync } = await import('node:zlib');
+  const records = gunzipSync(await readFile(restored.safety)).toString().trimEnd().split('\n').map(JSON.parse);
+  const evidenceIndex = records.findIndex(entry => entry.t === 'file' && entry.path === 'state/worktree-destinations.quarantined.json');
+  assert.ok(evidenceIndex > 0, 'safety archive must retain replaced quarantine evidence');
+  assert.equal(Buffer.from(records[evidenceIndex + 1].b, 'base64').toString(), 'prior quarantine evidence');
   await backup.restoreBackup({ home: f.home, file: restored.safety, safety: false });
   assert.deepEqual(await worktreeMappings(f.home), []);
   const settings = path.join(f.root, 'settings.alpbackup');

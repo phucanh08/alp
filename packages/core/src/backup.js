@@ -592,7 +592,7 @@ export async function restoreBackup({ home, file, projects = true, safety = true
   let safetyFile;
   if (safety) {
     try {
-      safetyFile = await automaticBackup(home, 'pre-restore', { units: [...new Set([...header.units.map(unit => unit.path), ...homeUnits.map(unit => unit.path)])].filter(unit => HOME_UNITS.includes(unit)), projects: roots, by });
+      safetyFile = await automaticBackup(home, 'pre-restore', { units: [...new Set([...header.units.map(unit => unit.path), ...homeUnits.map(unit => unit.path)])].filter(unit => HOME_UNITS.includes(unit) || unit === QUARANTINED_DESTINATIONS), projects: roots, by });
     } catch (error) {
       await abandon();
       throw new AlpError('RESTORE_SAFETY_BACKUP_FAILED', `could not save the current data before restoring (${error?.message ?? error}); nothing was changed`, { cause: error });
