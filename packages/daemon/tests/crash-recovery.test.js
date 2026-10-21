@@ -9,7 +9,7 @@ import { openSync, closeSync } from 'node:fs';
 import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
 import { connect, readLock } from '@anhlp/alp-client';
 
@@ -249,9 +249,35 @@ test('a timeline line cut short by a crash is dropped; cursors keep increasing a
   // As a crash in the middle of an append leaves it.
   await appendFile(h.timelineFile(session.id), '{"sessionId":"' + session.id + '","epoch":"x","seq":99,"ev');
 
-  const second = await h.start();
+  // Hold a real append after its first 15 bytes. repairTail still runs on the original
+  // torn line; only the following append is split, as a filesystem write may be.
+  const gate = path.join(h.home, 'append-gate');
+  const preload = path.join(h.home, 'split-append.mjs');
+  await writeFile(preload, `
+    import fs from 'node:fs/promises';
+    import { syncBuiltinESMExports } from 'node:module';
+    const append = fs.appendFile;
+    let held = false;
+    fs.appendFile = async (file, data, options) => {
+      if (!held && String(file).endsWith('.jsonl') && String(file).includes('/timeline/')
+          && JSON.parse(data).event.type === 'session.updated' && JSON.parse(data).event.session.parked) {
+        held = true;
+        await append(file, data.slice(0, 15), options);
+        await fs.writeFile(${JSON.stringify(gate + '.ready')}, '');
+        while (!await fs.stat(${JSON.stringify(gate + '.release')}).then(() => true, () => false))
+          await new Promise(resolve => setTimeout(resolve, 10));
+        return append(file, data.slice(15), options);
+      }
+      return append(file, data, options);
+    };
+    syncBuiltinESMExports();
+  `);
+  const second = await h.start({ env: { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${JSON.stringify(pathToFileURL(preload).href)}` } });
   t.after(() => second.stop());
   await until(async () => (await second.request('session.list', { includeClosed: true })).sessions.find(row => row.id === session.id)?.parked, 'the root to reopen parked');
+  await until(() => readFile(gate + '.ready').then(() => true, () => false), 'the post-repair append to pause');
+  const heldTail = (await readFile(h.timelineFile(session.id), 'utf8')).split('\n').at(-1);
+  assert.equal(heldTail, ('{"sessionId":"' + session.id).slice(0, 15), 'attach may observe memory before this append finishes');
   // A client that saw everything up to `seen` gets only what came after, in order, the interruption included.
   const { cursor } = await second.request('session.attach', { sessionId: session.id, after: seen });
   const replayed = second.events.filter(e => e.sessionId === session.id);
@@ -261,21 +287,28 @@ test('a timeline line cut short by a crash is dropped; cursors keep increasing a
   assert.ok(replayed.some(e => e.event.type === 'item' && e.event.item.text === 'kilo [hold]'));
   assert.equal(cursor, replayed.at(-1).cursor);
 
-  // Every line of the timeline is whole again, and its cursors strictly increase.
-  const lines = (await readFile(h.timelineFile(session.id), 'utf8')).split('\n');
-  assert.equal(lines.at(-1), '');
-  const cursors = lines.filter(Boolean).map(line => JSON.parse(line).cursor);
-  for (let i = 1; i < cursors.length; i++) assert.ok(cursors[i] > cursors[i - 1], `cursor ${cursors[i]} after ${cursors[i - 1]}`);
-  assert.match(await readFile(h.logFile, 'utf8'), /removed a timeline line cut short/);
-
   // A cursor this tree never reached: the whole timeline, marked as a reset.
   const other = await connect((await readLock(h.home)).socket, { name: 'late', version: '0' });
   t.after(() => other.close());
   const events = [];
   other.onEvent(envelope => events.push(envelope));
-  const reset = await other.request('session.attach', { sessionId: session.id, after: cursors.at(-1) + 1000 });
+  const reset = await other.request('session.attach', { sessionId: session.id, after: cursor + 1000 });
   assert.equal(reset.reset, true);
   assert.equal(events[0].cursor, 1);
+
+  // attach replays memory; it does not promise queued appends have reached disk.
+  // Release the partial write, then use graceful shutdown's store.flush boundary.
+  await writeFile(gate + '.release', '');
+  await second.stop();
+  // Every line of the timeline is whole again, and its cursors strictly increase.
+  const lines = (await readFile(h.timelineFile(session.id), 'utf8')).split('\n');
+  assert.equal(lines.at(-1), '');
+  const persisted = lines.filter(Boolean).map(line => JSON.parse(line));
+  const cursors = persisted.map(envelope => envelope.cursor);
+  assert.ok(cursors.includes(cursor), 'the replay tip, including the held append, reached disk');
+  assert.ok(persisted.some(e => e.event.type === 'session.updated' && e.event.session.parked));
+  for (let i = 1; i < cursors.length; i++) assert.ok(cursors[i] > cursors[i - 1], `cursor ${cursors[i]} after ${cursors[i - 1]}`);
+  assert.match(await readFile(h.logFile, 'utf8'), /removed a timeline line cut short/);
 });
 
 // A schedule must cross the same durable receipt boundary as session.prompt.
