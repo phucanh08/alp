@@ -34,7 +34,12 @@ export const BACKUP_FORMAT = 1;
 export const BACKUP_EXTENSION = '.alpbackup';
 
 /** alpd's state: sessions, their timelines and receipts, and the runtime's durable state. */
-export const STATE_UNITS = ['state/schema.json', 'state/sessions', 'state/timeline', 'state/receipts', 'state/recall.json', 'state/pause.json', 'state/trust.json', 'state/web-workspaces.json'];
+const RESULT_LEDGER = 'state/assignment-results.json';
+const RESULT_MARKER = `${RESULT_LEDGER}.initialized`;
+const DESTINATIONS = 'worktree-destinations.json';
+// Evidence only: the daemon never loads mapping authority from this path.
+const QUARANTINED_DESTINATIONS = 'state/worktree-destinations.quarantined.json';
+export const STATE_UNITS = [RESULT_LEDGER, RESULT_MARKER, 'state/schema.json', 'state/sessions', 'state/timeline', 'state/receipts', 'state/recall.json', 'state/pause.json', 'state/trust.json', 'state/web-workspaces.json'];
 /**
  * Live work (running assignments alpd continues after a restart) and the journal of an
  * unfinished migration are never backed up: a restore of the state removes them, so restored
@@ -43,7 +48,7 @@ export const STATE_UNITS = ['state/schema.json', 'state/sessions', 'state/timeli
 export const CLEARED_UNITS = ['state/live.json', 'state/migration.json'];
 /** Everything a backup of $ALP_HOME holds: the state, the user's settings and library, boards and assignment logs. */
 export const HOME_UNITS = [
-  ...STATE_UNITS,
+  ...STATE_UNITS, DESTINATIONS,
   'settings.json', 'library.json', 'role-skills.json', 'lessons.md',
   'agents', 'skills', 'teams', 'hooks', 'mcp', 'providers', 'formulas',
   'boards', 'runs',
@@ -397,6 +402,94 @@ async function holdTaskLocks(roots, work) {
 }
 
 /**
+ * Restore ownership evidence, never checkout birth certification or host authority.
+ * Paths in an archive cannot establish the identity of an old or moved checkout. Keep
+ * every retained owner (including work after the snapshot), but require audited adoption
+ * for old targets. The host must explicitly approve mappings again; archived bytes are
+ * kept privately as evidence only. All replacements join the ordinary rollback journal.
+ */
+async function prepareWorkspaceRestore(home, root, units, warnings) {
+  const relevant = [RESULT_LEDGER, RESULT_MARKER, DESTINATIONS, 'state/sessions', 'state/web-workspaces.json'];
+  // Only the transform may stage quarantine; archive-declared copies are never activated.
+  const restorable = units.filter(unit => unit.path !== QUARANTINED_DESTINATIONS);
+  if (!units.some(unit => relevant.includes(unit.path))) return restorable;
+  for (const base of [home, root]) {
+    const info = await lstat(path.join(base, 'state')).catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
+    if (info && !info.isDirectory()) throw invalid('workspace state must be a real directory');
+  }
+  const result = restorable.filter(unit => ![RESULT_LEDGER, RESULT_MARKER, DESTINATIONS, 'state/web-workspaces.json'].includes(unit.path));
+  async function regular(base, unit, declared) {
+    if (declared && declared.kind === 'absent') return undefined;
+    const file = path.join(base, unit);
+    const info = await lstat(file).catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
+    if (!info) {
+      if (declared) throw invalid(`${unit} is declared but missing from the backup`);
+      return undefined;
+    }
+    if (!info.isFile()) throw invalid(`${unit} must be a regular file for a workspace restore`);
+    return readFile(file, 'utf8');
+  }
+  const incoming = async unit => {
+    const declared = units.find(entry => entry.path === unit);
+    return declared ? regular(root, unit, declared) : undefined;
+  };
+  const owners = new Map();
+  let hasLedger = false;
+  for (const text of [await incoming(RESULT_LEDGER), await regular(home, RESULT_LEDGER)]) {
+    if (text === undefined) continue;
+    let value;
+    try { value = JSON.parse(text); } catch { throw invalid('assignment result ledger is not readable JSON; repair it before restoring'); }
+    const absolute = value => typeof value === 'string' && path.isAbsolute(value);
+    if (value?.version !== 1 || !Array.isArray(value.workspaces) || !value.workspaces.every(absolute) ||
+        !Array.isArray(value.results) || !value.results.every(entry => entry && typeof entry.assignmentId === 'string' &&
+          absolute(entry.checkout) && (entry.worktree === undefined || absolute(entry.worktree))))
+      throw invalid('assignment result ledger has an unsupported or invalid shape');
+    hasLedger = true;
+    for (const entry of value.results) {
+      const owner = { assignmentId: entry.assignmentId, checkout: entry.checkout, ...(entry.worktree === undefined ? {} : { worktree: entry.worktree }) };
+      const previous = owners.get(owner.assignmentId);
+      if (previous && JSON.stringify(previous) !== JSON.stringify(owner)) throw invalid('assignment result ownership conflicts with current data; reconcile it before restoring');
+      owners.set(owner.assignmentId, owner);
+    }
+  }
+  const markers = [await incoming(RESULT_MARKER), await regular(home, RESULT_MARKER)];
+  if (markers.some(text => text !== undefined && text !== '1\n')) throw invalid('assignment result initialized marker is invalid');
+  await mkdir(path.join(root, 'state'), { recursive: true, mode: 0o700 });
+  if (hasLedger) await writeAtomic(path.join(root, RESULT_LEDGER), JSON.stringify({ version: 1, workspaces: [], results: [...owners.values()] }) + '\n');
+  result.push({ path: RESULT_LEDGER, kind: hasLedger ? 'file' : 'absent' });
+  const initialized = markers.some(text => text !== undefined);
+  if (initialized) await writeAtomic(path.join(root, RESULT_MARKER), '1\n');
+  result.push({ path: RESULT_MARKER, kind: initialized ? 'file' : 'absent' });
+  const mappings = await incoming(DESTINATIONS);
+  if (mappings !== undefined) {
+    await writeAtomic(path.join(root, QUARANTINED_DESTINATIONS), mappings);
+    result.push({ path: QUARANTINED_DESTINATIONS, kind: 'file' });
+  }
+  result.push({ path: DESTINATIONS, kind: 'absent' });
+  const registryUnit = 'state/web-workspaces.json';
+  const registryDeclaration = units.find(unit => unit.path === registryUnit);
+  const registryText = registryDeclaration ? await incoming(registryUnit) : await regular(home, registryUnit);
+  if (registryText !== undefined) {
+    let registry;
+    try { registry = JSON.parse(registryText); } catch { throw invalid('workspace registry is not readable JSON; repair it before restoring'); }
+    // Reapproval of the same mapping ID must not reactivate historical token grants.
+    // Rotate epochs in rows, pending native intents and cached receipt results alike.
+    const epoch = `restore-${randomBytes(16).toString('hex')}`;
+    let revoked = false;
+    const revoke = value => {
+      if (!value || typeof value !== 'object') return;
+      if (Object.hasOwn(value, 'grantEpoch')) { value.grantEpoch = epoch; revoked = true; }
+      for (const child of Object.values(value)) revoke(child);
+    };
+    revoke(registry);
+    await writeAtomic(path.join(root, registryUnit), revoked ? JSON.stringify(registry) + '\n' : registryText);
+    result.push({ path: registryUnit, kind: 'file' });
+  } else if (registryDeclaration) result.push({ path: registryUnit, kind: 'absent' });
+  if (hasLedger || initialized || mappings !== undefined || await exists(path.join(home, DESTINATIONS))) warnings.push('Workspace restore retains assignment owners but clears checkout birth certification; old targets require an audited migration. Worktree destination mappings are inactive and require explicit host approval; archived mapping evidence is in state/worktree-destinations.quarantined.json. Historical checkout grants remain revoked after reapproval.');
+  return result;
+}
+
+/**
  * Restores a backup over `home` and, with `projects`, over the projects it holds whose
  * roots exist. The current data is checked first: a home in a state schema newer than
  * this ALP knows is refused unless `replaceNewer` says to replace it (it is saved first).
@@ -419,6 +512,7 @@ export async function restoreBackup({ home, file, projects = true, safety = true
   const warnings = [];
   const areaBase = area => area === 'home' ? home : header.projects[Number(area.slice(8))].root;
   const directories = [];
+  let homeUnits;
   // The journal exists from the first staged file on, so a crash at any point leaves nothing behind.
   const journal = { version: 1, id, file: path.resolve(file), by, startedAt: new Date().toISOString(), phase: 'staging', units: [], staging: [], created: [], locks: [] };
   const record = () => writeAtomic(journalFile(home), JSON.stringify(journal) + '\n');
@@ -452,6 +546,7 @@ export async function restoreBackup({ home, file, projects = true, safety = true
         };
       },
     });
+    homeUnits = await prepareWorkspaceRestore(home, staging.get('home'), header.units, warnings);
     // Directory modes last, deepest first, once nothing more is written into them.
     for (const [directory, mode] of directories.reverse()) if (Number.isSafeInteger(mode)) await chmod(directory, mode & 0o777 | 0o700).catch(() => {});
   } catch (error) {
@@ -472,8 +567,8 @@ export async function restoreBackup({ home, file, projects = true, safety = true
   const plan = [];
   for (const [area, root] of staging) {
     const base = areaBase(area);
-    const units = area === 'home' ? header.units : header.projects[Number(area.slice(8))].units;
-    const known = area === 'home' ? HOME_UNITS : PROJECT_UNITS;
+    const units = area === 'home' ? homeUnits : header.projects[Number(area.slice(8))].units;
+    const known = area === 'home' ? [...HOME_UNITS, QUARANTINED_DESTINATIONS] : PROJECT_UNITS;
     for (const unit of units) {
       if (!known.includes(unit.path)) { warnings.push(`${unit.path} is not a unit this ALP restores; left as it is`); continue; }
       const target = path.join(base, ...unit.path.split('/'));
@@ -497,7 +592,7 @@ export async function restoreBackup({ home, file, projects = true, safety = true
   let safetyFile;
   if (safety) {
     try {
-      safetyFile = await automaticBackup(home, 'pre-restore', { units: header.units.map(unit => unit.path).filter(unit => HOME_UNITS.includes(unit)), projects: roots, by });
+      safetyFile = await automaticBackup(home, 'pre-restore', { units: [...new Set([...header.units.map(unit => unit.path), ...homeUnits.map(unit => unit.path)])].filter(unit => HOME_UNITS.includes(unit)), projects: roots, by });
     } catch (error) {
       await abandon();
       throw new AlpError('RESTORE_SAFETY_BACKUP_FAILED', `could not save the current data before restoring (${error?.message ?? error}); nothing was changed`, { cause: error });

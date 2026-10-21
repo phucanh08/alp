@@ -216,6 +216,7 @@ export function createWorkspaceWorktrees(
           await approved(context, intent.source, intent.mappingId);
           if (
             intent.principalId !== actor ||
+            intent.grantEpoch !== (context.principalEpoch ?? 'owner') ||
             intent.directory !== path.join(mapping.parent, intent.id) ||
             intent.commonDir !== mapping.commonDir
           )
