@@ -129,7 +129,10 @@ test('alp backup and alp restore round-trip sessions, receipts, timelines, tasks
   await assert.rejects(h.alp('restore', file), /alpd is running.*--stop/s);
   const restored = await h.alp('restore', file, '--stop');
   assert.match(restored, /restored .*all\.alpbackup/);
-  assert.match(restored, /alp restore .*pre-restore-.*puts it back/);
+  const safetyFiles = (await readdir(path.join(h.home, 'backups'))).filter(name => /^pre-restore-.*\.alpbackup$/.test(name));
+  assert.equal(safetyFiles.length, 1);
+  const safety = path.join(h.home, 'backups', safetyFiles[0]);
+  assert.ok(restored.split('\n').includes(`the data it replaced is in ${safety}; alp restore ${safety} restores that data with the same workspace authority checks`));
   await until(async () => { const lock = await readLock(h.home); return lockAlive(lock) && lock.ready && lock.pid !== second.pid; }, 'alpd to start again');
 
   const third = await (async () => {
