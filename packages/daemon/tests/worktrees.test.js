@@ -253,3 +253,67 @@ test('committed derived grant refresh spawns no Git and rejects changed administ
     syncBuiltinESMExports();
   }
 });
+
+test('restore quarantines host mappings and cannot revive derived grants after same-ID reapproval', async t => {
+  const { backup } = await import('@anhlp/alp-core');
+  const { createAlpRuntime } = await import('@anhlp/alp-runtime');
+  const f = await fixture(t);
+  const mapping = await readFile(path.join(f.home, 'worktree-destinations.json'));
+  const ledgerFile = home => path.join(home, 'state', 'assignment-results.json');
+  const runtime = createAlpRuntime({ assignmentResultFile: ledgerFile(f.home) });
+  const registry = createRegistry(f.home);
+  await registry.mutate('project.register', { directory: f.source }, { requestId: 'register' });
+  const source = (await registry.snapshot()).workspaces[0];
+  const context = { principalId: 'token-owner', principalEpoch: 'credential-epoch', mappingIds: ['approved'], authorizedRoots: [f.source] };
+  const service = createWorkspaceWorktrees(f.home, registry, (dir, run) => runtime.withWorkspaceMutation(dir, run), dir => runtime.registerWorkspace(dir));
+  const created = await service.mutate('create', { workspaceId: source.id, mappingId: 'approved', ifRevision: 1, requestId: 'create' }, context);
+  assert.equal((await service.grants(context)).workspaces.length, 1);
+  const ledger = JSON.parse(await readFile(ledgerFile(f.home), 'utf8'));
+  ledger.results.push({ assignmentId: 'retained', checkout: created.workspace.directory });
+  await writeFile(ledgerFile(f.home), JSON.stringify(ledger));
+  await runtime.shutdown();
+  const archive = path.join(f.root, 'restore.alpbackup');
+  await backup.createBackup({ home: f.home, out: archive });
+  for (const home of [f.home, path.join(f.root, 'fresh')]) {
+    await mkdir(home, { recursive: true });
+    await backup.restoreBackup({ home, file: archive, safety: false });
+    const restarted = createAlpRuntime({ assignmentResultFile: ledgerFile(home) });
+    const restoredRegistry = createRegistry(home);
+    const restoredService = createWorkspaceWorktrees(home, restoredRegistry, (dir, run) => restarted.withWorkspaceMutation(dir, run), dir => restarted.registerWorkspace(dir));
+    try {
+      assert.deepEqual(await restoredService.grants(context), { mappings: [], workspaces: [] });
+      // Explicit host approval of the same mapping permits new work, but cannot restore old grants.
+      await writeFile(path.join(home, 'worktree-destinations.json'), mapping, { mode: 0o600 });
+      assert.equal((await restoredService.grants(context)).workspaces.length, 0);
+      await assert.rejects(restoredService.mutate('remove', { workspaceId: created.workspace.id, ifRevision: 2, requestId: 'remove' }, context), e => e.data.reason === 'not_managed');
+      await assert.rejects(restarted.withWorkspaceMutation(created.workspace.directory, async () => assert.fail('restored ownership allowed removal')), e => e.data.reason === 'workspace_assignment_result');
+      await access(path.join(created.workspace.directory, 'file'));
+    } finally { await restarted.shutdown(); }
+  }
+});
+
+test('restored pending native create remains unreconciled by its historical credential', async t => {
+  const { backup } = await import('@anhlp/alp-core');
+  const f = await fixture(t);
+  const mapping = await readFile(path.join(f.home, 'worktree-destinations.json'));
+  let writes = 0;
+  const registry = createRegistry(f.home, { write: async (...args) => {
+    if (++writes === 3) throw new Error('stop commit');
+    return writeFile(...args);
+  } });
+  await registry.mutate('project.register', { directory: f.source }, { requestId: 'register' });
+  const source = (await registry.snapshot()).workspaces[0];
+  const context = { principalId: 'token', principalEpoch: 'epoch', mappingIds: ['approved'], authorizedRoots: [f.source] };
+  const request = { workspaceId: source.id, mappingId: 'approved', ifRevision: 1, requestId: 'pending' };
+  await assert.rejects(createWorkspaceWorktrees(f.home, registry, (_dir, run) => run(), async () => {}).mutate('create', request, context), /stop commit/);
+  const pending = Object.values((await registry.snapshot()).worktreeJournal)[0].intent;
+  const archive = path.join(f.root, 'pending.alpbackup');
+  await backup.createBackup({ home: f.home, out: archive });
+  await backup.restoreBackup({ home: f.home, file: archive, safety: false });
+  await writeFile(path.join(f.home, 'worktree-destinations.json'), mapping, { mode: 0o600 });
+  const restoredRegistry = createRegistry(f.home);
+  const service = createWorkspaceWorktrees(f.home, restoredRegistry, (_dir, run) => run(), async () => assert.fail('restored intent registered a target'));
+  await assert.rejects(service.mutate('create', request, context), e => e.data?.reason === 'identity_changed');
+  assert.equal((await restoredRegistry.snapshot()).workspaces.length, 1);
+  await access(path.join(pending.directory, 'file'));
+});
