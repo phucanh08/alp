@@ -3721,31 +3721,31 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
               return path.join(canonical(parent), path.basename(value));
             }
           };
-          const inside = (value: string | undefined) => {
+          const overlaps = (value: string | undefined) => {
             if (value === undefined) return false;
             if (typeof value !== 'string' || !value) refuseMutation('workspace_assignment_result', 'Invalid assignment path; repair runtime persistence before removing the workspace');
             if (!path.isAbsolute(value)) refuseMutation('workspace_assignment_result', 'Assignment path is not absolute; inspect runtime persistence before removing the workspace');
-            const relative = path.relative(target, canonical(value));
-            return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+            const owner = canonical(value);
+            const contains = (parent: string, child: string) => {
+              const relative = path.relative(parent, child);
+              return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+            };
+            return contains(target, owner) || contains(owner, target);
           };
-          for (const entry of resultLedger!.results) if (inside(entry.checkout) || inside(entry.worktree)) refuseMutation('workspace_assignment_result', `Resolve permanent assignment result ${entry.assignmentId} before removing ${directory}`);
+          for (const entry of resultLedger!.results) if (overlaps(entry.checkout) || overlaps(entry.worktree)) refuseMutation('workspace_assignment_result', `Resolve permanent assignment result ${entry.assignmentId} before removing ${directory}`);
           for (const [project, pins] of loadedBoards) for (const pin of pins) {
-            if (pin.kind === 'claim' && live(pin) && pin.paths?.some(value => {
-              const claimed = canonical(path.resolve(project, value));
-              const relative = path.relative(claimed, target);
-              return inside(claimed) || relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
-            })) refuseMutation('workspace_claimed', `Release claim ${pin.id} before removing ${directory}`);
+            if (pin.kind === 'claim' && live(pin) && pin.paths?.some(value => overlaps(path.resolve(project, value)))) refuseMutation('workspace_claimed', `Release claim ${pin.id} before removing ${directory}`);
           }
-          for (const [checkout, holder] of leases) if (inside(checkout)) refuseMutation('workspace_leased', `Assignment ${holder.assignment} holds a write lease in ${directory}`);
+          for (const [checkout, holder] of leases) if (overlaps(checkout)) refuseMutation('workspace_leased', `Assignment ${holder.assignment} holds a write lease in ${directory}`);
           for (const [id, session] of sessions) {
             for (const assignment of session.assignments.values()) {
-              if (inside(assignment.worktree?.path) || inside(assignment.worktree?.checkout) || inside(assignment.copy?.path) || inside(assignment.copy?.checkout) || inside(assignment.writeCheckout) || inside(assignment.lease)) refuseMutation('workspace_assignment_result', `Resolve assignment ${assignment.id} before removing ${directory}`);
+              if (overlaps(assignment.worktree?.path) || overlaps(assignment.worktree?.checkout) || overlaps(assignment.copy?.path) || overlaps(assignment.copy?.checkout) || overlaps(assignment.writeCheckout) || overlaps(assignment.lease)) refuseMutation('workspace_assignment_result', `Resolve assignment ${assignment.id} before removing ${directory}`);
             }
-            for (const [assignmentId, pending] of session.worktrees) if (inside(pending.worktree.path) || inside(pending.worktree.checkout) || inside(pending.worktree.workdir)) refuseMutation('workspace_assignment_result', `Merge or preserve assignment ${assignmentId} before removing ${directory}`);
-            if (!session.closed && (inside(session.mapping.workdir) || inside(session.spec.writeRoot))) refuseMutation('workspace_busy', `Close session ${id} before removing ${directory}`);
+            for (const [assignmentId, pending] of session.worktrees) if (overlaps(pending.worktree.path) || overlaps(pending.worktree.checkout) || overlaps(pending.worktree.workdir)) refuseMutation('workspace_assignment_result', `Merge or preserve assignment ${assignmentId} before removing ${directory}`);
+            if (!session.closed && (overlaps(session.mapping.workdir) || overlaps(session.spec.writeRoot))) refuseMutation('workspace_busy', `Close session ${id} before removing ${directory}`);
           }
           const checkLive = (entry: LiveEntry) => {
-            if (inside(entry.spec.workdir ?? entry.project) || inside(entry.spec.writeRoot) || inside(entry.copyOf) || inside(entry.lease) || inside(entry.worktree?.path) || inside(entry.worktree?.checkout) || inside(entry.worktree?.workdir)) refuseMutation('workspace_assignment_result', `Resolve recoverable assignment ${entry.assignmentId} before removing ${directory}`);
+            if (overlaps(entry.spec.workdir ?? entry.project) || overlaps(entry.spec.writeRoot) || overlaps(entry.copyOf) || overlaps(entry.lease) || overlaps(entry.worktree?.path) || overlaps(entry.worktree?.checkout) || overlaps(entry.worktree?.workdir)) refuseMutation('workspace_assignment_result', `Resolve recoverable assignment ${entry.assignmentId} before removing ${directory}`);
           };
           for (const entry of inFlight.all()) checkLive(entry);
           for (const entry of inherited) checkLive(entry);
@@ -3761,10 +3761,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
               if (entry.worktree !== undefined && (!entry.worktree || !['path', 'checkout', 'workdir'].every(key => typeof entry.worktree[key] === 'string'))) refuseMutation('workspace_assignment_result', `Invalid worktree result in ${file}`);
               if (entry.shared !== undefined && (!entry.shared || typeof entry.shared !== 'object' || Array.isArray(entry.shared))) refuseMutation('workspace_assignment_result', `Invalid shared result in ${file}`);
               if (kind === 'live') checkLive(entry);
-              else if (inside(entry.cwd) || inside(entry.shared?.writeRoot)) refuseMutation('workspace_assignment_result', `Preserve retained assignment ${entry.assignmentId} before removing ${directory}`);
+              else if (overlaps(entry.cwd) || overlaps(entry.shared?.writeRoot)) refuseMutation('workspace_assignment_result', `Preserve retained assignment ${entry.assignmentId} before removing ${directory}`);
             }
           }
-          for (const entry of await recalls.all()) if (inside(entry.cwd) || inside(entry.shared?.writeRoot)) refuseMutation('workspace_assignment_result', `Preserve retained assignment ${entry.assignmentId} before removing ${directory}`);
+          for (const entry of await recalls.all()) if (overlaps(entry.cwd) || overlaps(entry.shared?.writeRoot)) refuseMutation('workspace_assignment_result', `Preserve retained assignment ${entry.assignmentId} before removing ${directory}`);
           return await run();
       }).finally(() => { workspaceMutation = false; });
     },
