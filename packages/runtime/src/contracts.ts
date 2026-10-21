@@ -78,6 +78,8 @@ export type RuntimeOptions = {
 
   /** Where finished assignments' native threads are recorded for alp_recall. Omitted keeps the record in memory. */
   recallFile?: string;
+  /** Permanent assignment ownership; unlike recall, results never expire. */
+  assignmentResultFile?: string;
 
   /** Where pauses are kept across restarts. Omitted keeps them in memory. */
   pauseFile?: string;
@@ -115,6 +117,10 @@ export type AlpRuntime = {
   /** The daemon supplies its persistent schedule operations; standalone runtimes have none. */
   bindSchedules?: (handler: ScheduleHandler | undefined) => void;
   onEvent(listener: (envelope: Envelope) => void): () => void;
+  /** Certifies a brand-new generated checkout; never use to adopt an existing workspace. */
+  registerWorkspace(directory: string): Promise<void>;
+  /** Reserves runtime admission while an external checkout mutation runs. */
+  withWorkspaceMutation<T>(directory: string, run: () => Promise<T>): Promise<T>;
   /** Opens a root session under a client-chosen id. */
   open(sessionId: string, spec: SessionSpec, options?: OpenOptions): Promise<SessionSnapshot>;
   /** What a new root would run as, before it opens, and the teams it may choose (ALPD §60). */

@@ -1,3 +1,4 @@
+import { createAssignmentResults } from './assignment-results.js';
 import { constants as fsConstants } from 'node:fs';
 import type { Session, Assignment, Waiter } from './session-state.js';
 import { errorData, plainObject, toolResult } from './tool-results.js';
@@ -143,6 +144,16 @@ const isolationOf = (args: { isolation?: string }) => args.isolation ?? 'shared'
 
 const log = createLogger({ component: 'runtime' });
 
+export type WorkspaceMutationReason = 'workspace_busy' | 'workspace_claimed' | 'workspace_leased' | 'workspace_assignment_result';
+export class WorkspaceMutationError extends Error {
+  readonly data: { reason: WorkspaceMutationReason };
+  constructor(reason: WorkspaceMutationReason, message: string) {
+    super(message);
+    this.name = 'WorkspaceMutationError';
+    this.data = { reason };
+  }
+}
+
 export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   const sessions = new Map<string, Session>();
   /** What ALP writes for the user of a session, in their language (ALPD §54). */
@@ -166,6 +177,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   const epoch = randomUUID();
   /** Finished assignments whose native threads alp_recall can question. */
   const recalls = createRecallBook(options.recallFile);
+  const assignmentResults = createAssignmentResults(options.assignmentResultFile);
   /** Running assignments, so the next alpd continues them (ALPD §31). */
   const inFlight = createLiveBook(options.liveFile);
   /** Those an earlier alpd left running; recover() takes them once their root is open again. */
@@ -191,6 +203,15 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   const copyRoot = options.copyDir ?? path.join(os.tmpdir(), 'alp-copies');
   const sequences = new Map<string, number>();
 
+  let workspaceMutation = false;
+  let admitting = 0;
+  const refuseMutation = (reason: WorkspaceMutationReason, message: string): never => { throw new WorkspaceMutationError(reason, message); };
+  // Admission registers synchronously, before resolving configuration or creating copies.
+  async function admission<T>(run: () => Promise<T>): Promise<T> {
+    if (workspaceMutation) refuseMutation('workspace_busy', 'A workspace mutation is in progress; retry after it finishes');
+    admitting++;
+    try { return await run(); } finally { admitting--; }
+  }
   let closed = false;
   let queue = Promise.resolve();
 
@@ -2073,7 +2094,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   }
 
   const { settleWorktree, worktreeTool, inCheckout, verifyIn, verificationResult, noteVerification, continuedBrief, verifyTool } = createWorktreeDomain({
-    options, leases, rootOf, lineage, runLog, runHooks, touchTask,
+    options, leases, rootOf, lineage, runLog, runHooks, touchTask, releaseResult: assignmentId => assignmentResults.remove(assignmentId),
   });
 
   /**
@@ -2112,7 +2133,22 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       parent.assignments.delete(assignment.id);
       return;
     }
-    // Removed before anything else, so a crash while finishing never runs finished work again.
+    // Ownership must reach durable storage before recovery evidence can disappear.
+    const resultChild = sessions.get(assignment.id);
+    try {
+      if (assignment.worktree || writes(assignment.mode)) await assignmentResults.put({
+        assignmentId: assignment.id,
+        checkout: assignment.worktree?.checkout ?? assignment.writeCheckout ?? resultChild?.mapping.workdir ?? parent.mapping.workdir,
+        ...(assignment.worktree ? { worktree: assignment.worktree.path } : {}),
+      });
+    } catch (failure) {
+      // Keep both the assignment and its recovery evidence; never close away unrecorded ownership.
+      assignment.finished = false;
+      log.error('could not persist assignment result ownership', { assignmentId: assignment.id, error: failure });
+      post(parentId, { kind: 'note', from: assignment.agent, assignment: assignment.id, passive: true, body: `Assignment result ownership could not be saved: ${errorData(failure).message}. Restore the assignment result ledger before completing or removing this workspace.` });
+      return;
+    }
+    // A crash while finishing never runs finished work again.
     void inFlight.remove(assignment.id);
     const child = sessions.get(assignment.id);
     if (child && state === 'failed' && child.active) terminal(assignment.id, child, 'failed', error);
@@ -2462,10 +2498,19 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     });
   }
 
-  async function runDelegation(
+  async function runDelegation(sessionId: string, session: Session, params: any): Promise<unknown> {
+    if (workspaceMutation) refuseMutation('workspace_busy', 'A workspace mutation is in progress; retry after it finishes');
+    admitting++;
+    let released = false;
+    const release = () => { if (!released) { released = true; admitting--; } };
+    try { return await runDelegationAdmitted(sessionId, session, params, release); }
+    finally { release(); }
+  }
+  async function runDelegationAdmitted(
     sessionId: string,
     session: Session,
     params: any,
+    admitted: () => void,
   ): Promise<unknown> {
     const args = params.arguments;
 
@@ -2695,6 +2740,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       ...(task ? { taskId: task.id } : {}),
     });
     try {
+      // Persist ownership before native checkout creation or child execution. Recovery books may be lost.
+      if (writes(childMode)) await assignmentResults.put({ assignmentId: childId, checkout });
       if (task) {
         const started = await startTask(project, task.id, { agent: args.agent, assignment: childId, pid: process.pid, pidStartedAt: OWN_START, epoch }, session.mapping.agent.name);
         assignment.taskId = started.id;
@@ -2709,8 +2756,12 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
           if (continued) session.worktrees.set(args.continueFrom, continued);
           throw error;
         }
+        await assignmentResults.put({ assignmentId: childId, checkout: assignment.worktree.checkout, worktree: assignment.worktree.path });
         // The new branch holds the earlier change, so its worktree and branch can go.
-        if (continued) await removeWorktree(continued.worktree, { deleteBranch: true }).catch(() => {});
+        if (continued) {
+          await removeWorktree(continued.worktree, { deleteBranch: true });
+          await assignmentResults.remove(args.continueFrom);
+        }
         runLog(rootId, { event: 'worktree.created', assignmentId: childId, branch: assignment.worktree.branch, base: assignment.worktree.base, ...(continued ? { continuedFrom: args.continueFrom } : {}) });
       } else if (sharedWriter) {
         assignment.fingerprint = await checkoutFingerprint(checkout).catch(() => undefined);
@@ -2737,6 +2788,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         mode: childMode,
       };
       await openSession(childId, childSpec, 'skip', session.delegation);
+      admitted();
 
       const child = sessions.get(childId);
       if (child) void runHooks(childId, child, 'assignment.start', { assignment: childId, brief: clip(args.task, 2000) }, args.taskId);
@@ -2841,6 +2893,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   }
 
   async function openSession(sessionId: string, spec: SessionSpec, history: 'replay' | 'skip', delegation = true): Promise<SessionSnapshot> {
+    return admission(() => openSessionAdmitted(sessionId, spec, history, delegation));
+  }
+  async function openSessionAdmitted(sessionId: string, spec: SessionSpec, history: 'replay' | 'skip', delegation = true): Promise<SessionSnapshot> {
     if (sessions.has(sessionId)) {
       throw new Error(
         'Session is already open',
@@ -3255,6 +3310,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
   /** An assignment an earlier alpd left running that cannot continue: its task goes back to open, its work stays on its branch. */
   async function abandonEntry(entry: LiveEntry, reason: string) {
+    if (entry.worktree || writes(entry.mode)) await assignmentResults.put({
+      assignmentId: entry.assignmentId,
+      checkout: entry.worktree?.checkout ?? entry.lease ?? entry.spec.writeRoot ?? entry.spec.workdir ?? entry.project,
+      ...(entry.worktree ? { worktree: entry.worktree.path } : {}),
+    });
     await inFlight.remove(entry.assignmentId);
     const parent = sessions.get(entry.parentId);
     let task: Record<string, unknown> | undefined;
@@ -3638,6 +3698,76 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   if (options.recallFile) void forgetExpired();
 
   return {
+    registerWorkspace: directory => enqueue(async () => {
+      try { await assignmentResults.register(await realpath(directory)); }
+      catch (error) { refuseMutation('workspace_assignment_result', error instanceof Error ? error.message : 'Cannot register workspace result ownership'); }
+    }),
+    withWorkspaceMutation: <T>(directory: string, run: () => Promise<T>): Promise<T> => {
+      // Reserve before enqueue/await: in-flight admission causes refusal, future admission cannot start.
+      if (workspaceMutation || admitting) return Promise.reject(new WorkspaceMutationError('workspace_busy', 'A session or assignment is opening; retry after it finishes'));
+      workspaceMutation = true;
+      return enqueue(async () => {
+          const target = await realpath(directory).catch(() => refuseMutation('workspace_busy', `Cannot resolve workspace ${directory}; inspect its directory before removing it`));
+          let resultLedger: Awaited<ReturnType<typeof assignmentResults.inspect>>;
+          try { resultLedger = await assignmentResults.inspect(); }
+          catch (error) { refuseMutation('workspace_assignment_result', error instanceof Error ? error.message : 'Cannot inspect permanent assignment results'); }
+          if (!resultLedger!.workspaces.includes(target)) refuseMutation('workspace_assignment_result', 'Workspace predates authoritative assignment tracking; an audited migration is required before removal');
+          const canonical = (value: string): string => {
+            try { return realpathSync(value); }
+            catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== 'ENOENT') refuseMutation('workspace_assignment_result', `Cannot resolve assignment path ${value}; inspect it before removing the workspace`);
+              const parent = path.dirname(value);
+              if (parent === value) throw error;
+              return path.join(canonical(parent), path.basename(value));
+            }
+          };
+          const inside = (value: string | undefined) => {
+            if (value === undefined) return false;
+            if (typeof value !== 'string' || !value) refuseMutation('workspace_assignment_result', 'Invalid assignment path; repair runtime persistence before removing the workspace');
+            if (!path.isAbsolute(value)) refuseMutation('workspace_assignment_result', 'Assignment path is not absolute; inspect runtime persistence before removing the workspace');
+            const relative = path.relative(target, canonical(value));
+            return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+          };
+          for (const entry of resultLedger!.results) if (inside(entry.checkout) || inside(entry.worktree)) refuseMutation('workspace_assignment_result', `Resolve permanent assignment result ${entry.assignmentId} before removing ${directory}`);
+          for (const [project, pins] of loadedBoards) for (const pin of pins) {
+            if (pin.kind === 'claim' && live(pin) && pin.paths?.some(value => {
+              const claimed = canonical(path.resolve(project, value));
+              const relative = path.relative(claimed, target);
+              return inside(claimed) || relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+            })) refuseMutation('workspace_claimed', `Release claim ${pin.id} before removing ${directory}`);
+          }
+          for (const [checkout, holder] of leases) if (inside(checkout)) refuseMutation('workspace_leased', `Assignment ${holder.assignment} holds a write lease in ${directory}`);
+          for (const [id, session] of sessions) {
+            for (const assignment of session.assignments.values()) {
+              if (inside(assignment.worktree?.path) || inside(assignment.worktree?.checkout) || inside(assignment.copy?.path) || inside(assignment.copy?.checkout) || inside(assignment.writeCheckout) || inside(assignment.lease)) refuseMutation('workspace_assignment_result', `Resolve assignment ${assignment.id} before removing ${directory}`);
+            }
+            for (const [assignmentId, pending] of session.worktrees) if (inside(pending.worktree.path) || inside(pending.worktree.checkout) || inside(pending.worktree.workdir)) refuseMutation('workspace_assignment_result', `Merge or preserve assignment ${assignmentId} before removing ${directory}`);
+            if (!session.closed && (inside(session.mapping.workdir) || inside(session.spec.writeRoot))) refuseMutation('workspace_busy', `Close session ${id} before removing ${directory}`);
+          }
+          const checkLive = (entry: LiveEntry) => {
+            if (inside(entry.spec.workdir ?? entry.project) || inside(entry.spec.writeRoot) || inside(entry.copyOf) || inside(entry.lease) || inside(entry.worktree?.path) || inside(entry.worktree?.checkout) || inside(entry.worktree?.workdir)) refuseMutation('workspace_assignment_result', `Resolve recoverable assignment ${entry.assignmentId} before removing ${directory}`);
+          };
+          for (const entry of inFlight.all()) checkLive(entry);
+          for (const entry of inherited) checkLive(entry);
+          // Read disk strictly: the normal books intentionally tolerate damaged records.
+          for (const [file, kind] of [[options.liveFile, 'live'], [options.recallFile, 'recall']] as const) {
+            if (!file) continue;
+            let entries: unknown;
+            try { entries = JSON.parse(await readFile(file, 'utf8')); }
+            catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw new WorkspaceMutationError('workspace_assignment_result', `Cannot inspect ${file}; repair assignment persistence before removing the workspace`); }
+            if (!Array.isArray(entries)) refuseMutation('workspace_assignment_result', `Invalid assignment book ${file}`);
+            for (const entry of entries as any[]) {
+              if (!entry || typeof entry.assignmentId !== 'string' || (kind === 'live' ? !entry.spec || typeof entry.spec !== 'object' || Array.isArray(entry.spec) || typeof entry.project !== 'string' : typeof entry.cwd !== 'string')) refuseMutation('workspace_assignment_result', `Invalid assignment record in ${file}`);
+              if (entry.worktree !== undefined && (!entry.worktree || !['path', 'checkout', 'workdir'].every(key => typeof entry.worktree[key] === 'string'))) refuseMutation('workspace_assignment_result', `Invalid worktree result in ${file}`);
+              if (entry.shared !== undefined && (!entry.shared || typeof entry.shared !== 'object' || Array.isArray(entry.shared))) refuseMutation('workspace_assignment_result', `Invalid shared result in ${file}`);
+              if (kind === 'live') checkLive(entry);
+              else if (inside(entry.cwd) || inside(entry.shared?.writeRoot)) refuseMutation('workspace_assignment_result', `Preserve retained assignment ${entry.assignmentId} before removing ${directory}`);
+            }
+          }
+          for (const entry of await recalls.all()) if (inside(entry.cwd) || inside(entry.shared?.writeRoot)) refuseMutation('workspace_assignment_result', `Preserve retained assignment ${entry.assignmentId} before removing ${directory}`);
+          return await run();
+      }).finally(() => { workspaceMutation = false; });
+    },
     bindSchedules(handler: ScheduleHandler | undefined) { scheduleHandler = handler; },
     onEvent(listener) {
       listeners.add(listener);

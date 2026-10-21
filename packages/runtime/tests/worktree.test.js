@@ -56,7 +56,8 @@ async function setup(t) {
   git(project, '-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'init');
   const runtimes = [];
   const worktreeDir = path.join(directory, 'worktrees');
-  const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), worktreeDir, runLogDir: path.join(directory, 'runs') });
+  const assignmentResultFile = path.join(directory, 'assignment-results.json');
+  const runtime = createAlpRuntime({ assignmentResultFile, transport: fakeTransport(runtimes), worktreeDir, runLogDir: path.join(directory, 'runs') });
   t.after(() => runtime.shutdown());
   // After hooks run in the order they are added: remove the files only once that has stopped.
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -67,7 +68,7 @@ async function setup(t) {
     return harness;
   };
   const branches = () => git(project, 'branch', '--list', 'alp/*');
-  return { directory, project, runtime, runtimes, worktreeDir, open, branches };
+  return { directory, project, runtime, runtimes, worktreeDir, open, branches, assignmentResultFile };
 }
 
 const isolated = (task, extra = {}) => ({ agent: 'peer', task, mode: 'workspace-write', isolation: 'worktree', wait: false, ...extra });
@@ -83,7 +84,7 @@ async function results(harness, count) {
 }
 
 test('writing peers run in parallel worktrees and their changes merge into the checkout', async t => {
-  const { project, runtimes, worktreeDir, open, branches } = await setup(t);
+  const { project, runtimes, worktreeDir, open, branches, assignmentResultFile } = await setup(t);
   // Uncommitted work of the requester is part of the peers' starting point.
   await writeFile(path.join(project, 'shared.txt'), 'one\ntwo\nthree\nfour\n');
   const main = await open('root');
@@ -109,6 +110,9 @@ test('writing peers run in parallel worktrees and their changes merge into the c
     assert.equal(result.worktree.files.length, 1, JSON.stringify(result.worktree));
     assert.match(result.worktree.branch, /^alp\//);
   }
+  const owners = JSON.parse(await readFile(assignmentResultFile, 'utf8')).results;
+  assert.equal(owners.length, 2);
+  assert.ok(owners.every(owner => owner.checkout === project && owner.worktree.startsWith(worktreeDir)));
   assert.equal(existsSync(path.join(project, 'a.txt')), false, 'nothing reaches the checkout before a merge');
   // Models may merge in parallel, and repeat a call; each change applies once.
   const merges = await Promise.all([
@@ -122,10 +126,11 @@ test('writing peers run in parallel worktrees and their changes merge into the c
   assert.equal(await readFile(path.join(project, 'shared.txt'), 'utf8'), 'one\ntwo\nthree\nfour\n');
   assert.equal(branches(), '');
   assert.deepEqual(await readdir(worktreeDir), []);
+  assert.deepEqual(JSON.parse(await readFile(assignmentResultFile, 'utf8')).results, []);
 });
 
 test('a conflicting change is applied with markers and keeps its branch; discard deletes one', async t => {
-  const { project, runtimes, open, branches } = await setup(t);
+  const { project, runtimes, open, branches, assignmentResultFile } = await setup(t);
   const main = await open('root');
   await main.call('alp_delegate', isolated('Edit line two'), 'd1');
   await main.call('alp_delegate', isolated('Write c.txt'), 'd2');
@@ -151,6 +156,7 @@ test('a conflicting change is applied with markers and keeps its branch; discard
   assert.equal(existsSync(path.join(project, 'c.txt')), false);
   const again = await main.call('alp_merge', { assignmentId: extra.sessionId }, 'merge-again');
   assert.match(again.error, /No unmerged worktree change/);
+  assert.deepEqual(JSON.parse(await readFile(assignmentResultFile, 'utf8')).results.map(owner => owner.assignmentId), [edit.sessionId]);
 });
 
 test('worktrees are for writers, and only isolated or read-only peers run beside others', async t => {
