@@ -157,3 +157,31 @@ test('unfinished writers remain owned if recovery books disappear before their f
   await assert.rejects(runtime.withWorkspaceMutation(target,async()=>assert.fail('unfinished owner lost with recovery books')),error=>error.data.reason==='workspace_assignment_result');
  }finally{await runtime.shutdown();await rm(root,{recursive:true,force:true});}
 });
+
+test('ancestor ownership refuses mutation while boundary siblings remain independent', async () => {
+  const { createAssignmentResults } = await import('../dist/assignment-results.js');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'alp-overlap-owner-'));
+  const target = path.join(root, 'checkout');
+  const sibling = path.join(root, 'checkout-other');
+  await mkdir(target); await mkdir(sibling);
+  const assignmentResultFile = path.join(root, 'results.json');
+  const liveFile = path.join(root, 'live.json'), recallFile = path.join(root, 'recall.json');
+  const runtime = createAlpRuntime({ assignmentResultFile, liveFile, recallFile });
+  try {
+    await runtime.registerWorkspace(target);
+    const ledger = createAssignmentResults(assignmentResultFile);
+    for (const checkout of [root, target, path.join(target, 'missing-child')]) {
+      await ledger.put({ assignmentId: 'owner', checkout });
+      await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('overlapping retained owner')), error => error.data.reason === 'workspace_assignment_result');
+      await ledger.remove('owner');
+    }
+    await ledger.put({ assignmentId: 'sibling', checkout: sibling });
+    assert.equal(await runtime.withWorkspaceMutation(target, async () => 'independent'), 'independent');
+    await ledger.remove('sibling');
+    await writeFile(liveFile, JSON.stringify([{ assignmentId: 'ancestor-live', project: sibling, spec: { writeRoot: root } }]));
+    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('ancestor live scope')), error => error.data.reason === 'workspace_assignment_result');
+    await writeFile(liveFile, '[]');
+    await writeFile(recallFile, JSON.stringify([{ assignmentId: 'ancestor-recall', cwd: sibling, shared: { writeRoot: root } }]));
+    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('ancestor recall scope')), error => error.data.reason === 'workspace_assignment_result');
+  } finally { await runtime.shutdown(); await rm(root, { recursive: true, force: true }); }
+});
