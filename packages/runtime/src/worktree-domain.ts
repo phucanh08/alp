@@ -12,6 +12,7 @@ import type { Session, Assignment } from './session-state.js';
 
 type WorktreeContext = {
   options: RuntimeOptions;
+  releaseResult(assignmentId: string): Promise<void>;
   leases: Map<string, { assignment: string; agent: string }>;
   rootOf(sessionId: string): string;
   lineage(sessionId: string): string[];
@@ -21,7 +22,7 @@ type WorktreeContext = {
 };
 
 /** Checkout mutation and verification retain one shared queue per checkout. */
-export function createWorktreeDomain({ options, leases, rootOf, lineage, runLog, runHooks, touchTask }: WorktreeContext) {
+export function createWorktreeDomain({ options, leases, releaseResult, rootOf, lineage, runLog, runHooks, touchTask }: WorktreeContext) {
   const merging = new Map<string, Promise<unknown>>();
 
   /** Commits a finished isolated assignment's work and keeps it for the requester to merge. */
@@ -31,6 +32,7 @@ export function createWorktreeDomain({ options, leases, rootOf, lineage, runLog,
       const change = await commitWorktree(worktree, `alp: ${assignment.agent} assignment ${assignment.id}`);
       if (!change.files.length) {
         await removeWorktree(worktree, { deleteBranch: true });
+        await releaseResult(assignment.id);
         return { branch: worktree.branch, files: [], note: 'No changes; the worktree was removed' };
       }
       const described = { branch: worktree.branch, base: worktree.base, commit: change.commit, files: change.files, stat: change.stat };
@@ -60,6 +62,7 @@ export function createWorktreeDomain({ options, leases, rootOf, lineage, runLog,
     if (action === 'discard') {
       session.worktrees.delete(args.assignmentId);
       await removeWorktree(worktree, { deleteBranch: true });
+      await releaseResult(args.assignmentId);
       runLog(rootOf(sessionId), { event: 'worktree.discarded', assignmentId: args.assignmentId, branch: worktree.branch });
       return toolResult(true, { discarded: args.assignmentId, branch: worktree.branch });
     }
@@ -122,6 +125,7 @@ export function createWorktreeDomain({ options, leases, rootOf, lineage, runLog,
     }
     // A conflicted change keeps its branch for reference.
     await removeWorktree(worktree, { deleteBranch: merged.status !== 'conflicts' });
+    if (merged.status !== 'conflicts') await releaseResult(args.assignmentId);
     runLog(rootId, { event: 'worktree.merged', assignmentId: args.assignmentId, branch: worktree.branch, ...merged });
     // The checkout changed since the assignment started, so the worktree's check says little about the result: check the checkout too.
     let checked: Verification | undefined;
