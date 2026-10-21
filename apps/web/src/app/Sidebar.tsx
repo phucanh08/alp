@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { WorktreeActions } from './WorktreeActions';
 import { Archive, ChevronDown, ChevronRight, History, LogOut, MoreVertical, Pencil, Plus, Pin, RefreshCw, Search, Server, Settings, Settings2, X } from 'lucide-react';
 import { attentionReason, needsInput, type SessionSummary } from '../lib/controller.js';
 import { sessionBucket } from '../lib/attention.js';
@@ -175,7 +176,7 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavig
   const [projectPath, setProjectPath] = React.useState('');
   const registered = (path: string) => registry.workspaces.filter(row => row.directory === path || principal?.workspaceRoots?.some(root => root.path === path && root.canonical === row.directory))
     .sort((a, b) => Number(!!b.pinnedAt) - Number(!!a.pinnedAt) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
-  const workspaces = [...(principal?.workspaces ?? [])].sort((a, b) => Number(registered(b).some(row => !!row.pinnedAt)) - Number(registered(a).some(row => !!row.pinnedAt)));
+  const workspaces = [...new Set([...(principal?.workspaces ?? []), ...registry.workspaces.filter(w => w.managedWorktree).map(w => w.directory)])].sort((a, b) => Number(registered(b).some(row => !!row.pinnedAt)) - Number(registered(a).some(row => !!row.pinnedAt)));
   const needle = query.trim().toLowerCase();
   const shown = needle ? sessions.list.filter(session => sessionName(session).toLowerCase().includes(needle)) : sessions.list;
 
@@ -255,11 +256,12 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavig
             <div key={path} className={cn(expanded && 'pb-3')}>
               <ProjectRow path={path} expanded={expanded} canWrite={canWrite && online}
                 onToggle={() => toggle(path)} onNewSession={() => startIn(path)} />
-              {sharedRows.map(shared => <div key={shared.id} className="flex items-center justify-between px-3 pb-1 text-xs text-muted-foreground" data-testid="shared-workspace-row" data-workspace-id={shared.id}>
-                <span>{shared.title || baseName(path)}</span>
+              {sharedRows.map(shared => <div key={shared.id} className="flex items-center gap-2 px-3 pb-1 text-xs text-muted-foreground" data-testid="shared-workspace-row" data-workspace-id={shared.id}>
+                <span className="min-w-0 flex-1"><span className="block truncate" title={shared.title || baseName(path)}>{shared.title || baseName(path)}</span>{shared.branch !== undefined ? <span className="block truncate" title={shared.branch || 'Detached HEAD'} data-testid="workspace-branch">{shared.managedWorktree ? 'Worktree · ' : ''}{shared.branch || 'Detached HEAD'}</span> : null}</span>
+                {connection.capabilities.includes('workspace.worktree') && can(principal ?? undefined, 'workspace.manage') ? <WorktreeActions workspaceId={shared.id} managed={!!shared.managedWorktree} online={online} /> : null}
                 <button type="button" aria-label={`${shared.pinnedAt ? 'Unpin' : 'Pin'} workspace ${shared.title || baseName(path)}`} aria-pressed={!!shared.pinnedAt} disabled={!online || registry.loading}
                   title={!can(principal ?? undefined, 'workspace.write') ? 'Ask the host owner for workspace.write to change shared pins.' : 'Shared across clients'}
-                  onClick={() => void controller.pinWorkspace(shared.id, !shared.pinnedAt)} className="flex min-h-7 items-center gap-1 rounded px-1 hover:bg-sidebar-hover">
+                  onClick={() => void controller.pinWorkspace(shared.id, !shared.pinnedAt)} className="flex min-h-7 shrink-0 items-center gap-1 rounded px-1 hover:bg-sidebar-hover">
                   <Pin aria-hidden className="size-3" />{shared.pinnedAt ? 'Pinned' : 'Pin'}
                 </button>
               </div>)}

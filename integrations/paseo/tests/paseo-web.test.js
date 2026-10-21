@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -354,8 +354,8 @@ test('projects and workspaces are kept by alpd: add, create with an agent, title
   await client.next(frame => frame.message?.type === 'workspace_update' && frame.message.payload.workspace?.status === 'attention');
   const listed = (await ask(client, { type: 'fetch_agents_request', requestId: 'f1' })).payload.entries;
   assert.deepEqual(listed.map(entry => [entry.agent.workspaceId, entry.project.projectKey]), [[workspaceId, project.projectId]]);
-  // A worktree from the app is not in ALP yet.
-  assert.equal((await ask(client, { type: 'workspace.create.request', requestId: 'c2', source: { kind: 'worktree', cwd: root } })).payload.error, 'Tính năng đang phát triển');
+  // A worktree requires explicit host destination configuration.
+  assert.equal((await ask(client, { type: 'workspace.create.request', requestId: 'c2', source: { kind: 'worktree', cwd: root } })).payload.error, 'The host must approve exactly one destination mapping for this source.');
 
   const titled = await ask(client, { type: 'workspace.title.set.request', requestId: 't1', workspaceId, title: 'Docs' });
   assert.deepEqual([titled.payload.accepted, titled.payload.title], [true, 'Docs']);
@@ -655,4 +655,17 @@ test('failed bridge pin save returns accepted false, retains committed metadata,
   const retryClient = await connected();
   const retry = (await ask(retryClient, { type: 'workspace.pin.set.request', requestId: 'retry-pin', workspaceId, pinned: true })).payload;
   assert.equal(retry.accepted, true); assert.ok(retry.pinnedAt);
+});
+
+
+test('owner bridge creates only generated worktrees through a private host mapping and retries the same identity',async t=>{
+ const {connected,ask,root,home}=await setup(t);const source=await realpath(root);const parent=path.join(home,'user-checkouts');await mkdir(parent,{mode:0o700});
+ const native=(...args)=>execFileSync('/usr/bin/git',['-c','core.hooksPath=/dev/null',...args],{cwd:source,env:{PATH:'/usr/bin:/bin',GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_NOSYSTEM:'1'},encoding:'utf8'}).trim();
+ native('init','-q');await writeFile(path.join(source,'tracked'),'content');native('add','.');native('-c','user.name=Test','-c','user.email=test@localhost','commit','-qm','initial');
+ await writeFile(path.join(home,'worktree-destinations.json'),JSON.stringify({version:1,mappings:[{id:'bridge',source,commonDir:path.join(source,'.git'),parent:await realpath(parent)}]}),{mode:0o600});
+ const client=await connected();const opened=(await ask(client,{type:'open_project_request',requestId:'origin',cwd:root})).payload;assert.equal(opened.error,null);
+ const request={type:'workspace.create.request',requestId:'worktree-first',idempotencyKey:'worktree-once',source:{kind:'worktree',cwd:root}};
+ const made=(await ask(client,request)).payload;assert.equal(made.error,null);assert.equal(made.workspace.workspaceKind,'worktree');assert.match(made.workspace.gitRuntime.currentBranch,/^alp\/workspace\/wks_/);assert.equal((await ask(client,{...request,requestId:'worktree-retry'})).payload.workspace.id,made.workspace.id);
+ assert.equal(native('worktree','list','--porcelain').split('worktree ').length-1,2);
+ const denied=(await ask(client,{...request,requestId:'arbitrary-ref',source:{...request.source,branchName:'arbitrary'}})).payload;assert.ok(denied.error);assert.equal(native('worktree','list','--porcelain').split('worktree ').length-1,2);
 });
