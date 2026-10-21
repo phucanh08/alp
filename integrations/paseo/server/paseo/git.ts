@@ -1,3 +1,4 @@
+import { user_worktree } from '@anhlp/alp-core';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -24,6 +25,8 @@ export type CheckoutFacts =
   | { isGit: true; repoRoot: string; currentBranch: string | null; remoteUrl: string | null; isDirty: boolean };
 
 export async function checkoutFacts(cwd: string): Promise<CheckoutFacts> {
+  // Worktree management is POSIX-only; preserve the existing Windows read-only backend.
+  if (process.platform !== 'win32') { try { return await user_worktree.userWorktreeGit().checkoutFacts(cwd); } catch { return {isGit:false}; } }
   const repoRoot = await git(cwd, ['rev-parse', '--show-toplevel']).then(out => out.trim(), () => '');
   if (!repoRoot) return { isGit: false };
   const [branch, remoteUrl, status] = await Promise.all([

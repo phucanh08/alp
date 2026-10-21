@@ -70,7 +70,7 @@ async function stop(child) {
 /**
  * @param {{ webPort?: number, gatewayPort?: number, provider?: 'fake' | 'real', serveWeb?: boolean }} [options]
  */
-export async function startWorld({ webPort, gatewayPort, provider = 'fake', serveWeb = true } = {}) {
+export async function startWorld({ webPort, gatewayPort, provider = 'fake', serveWeb = true, worktrees = false } = {}) {
   for (const file of [ALPD, CLI]) if (!existsSync(file)) throw new Error(`${path.relative(REPOSITORY, file)} is missing: run npm run build:alp-web:e2e-deps (node scripts/build-workspace.mjs cli && node scripts/build-workspace.mjs daemon)`);
   if (serveWeb && !existsSync(path.join(WEB, 'dist/index.html'))) throw new Error('apps/web/dist is missing: run npm run build:alp-web');
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-web-e2e-'));
@@ -107,6 +107,15 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify(project === projects.custom ? { workflow: { supervisor: false } } : settings, null, 2));
   }
 
+  if (worktrees) {
+    const gitEnv={PATH:'/usr/bin:/bin',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'};
+    await run('/usr/bin/git', ['-c','core.hooksPath=/dev/null','init','-q'], {cwd:projects.main,env:gitEnv});
+    await run('/usr/bin/git', ['-c','core.hooksPath=/dev/null','add','.'], {cwd:projects.main,env:gitEnv});
+    await run('/usr/bin/git', ['-c','core.hooksPath=/dev/null','-c','user.name=Test','-c','user.email=test@localhost','commit','-qm','initial'], {cwd:projects.main,env:gitEnv});
+    const {realpath}=await import('node:fs/promises');const source=await realpath(projects.main);const parent=path.join(directory,'user-worktrees');await mkdir(parent,{mode:0o700});
+    await writeFile(path.join(home,'worktree-destinations.json'),JSON.stringify({version:1,mappings:[{id:'browser',source,commonDir:path.join(source,'.git'),parent:await realpath(parent)}]}),{mode:0o600});
+  }
+
   const logs = { alpd: path.join(directory, 'alpd.log'), gateway: path.join(directory, 'gateway.log') };
   let daemon;
   let socket = '';
@@ -129,6 +138,7 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
   };
   const created = {
     libraryWriter: await credential('library-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'project.read', '--permission', 'library.write']),
+    worktreeWriter: await credential('worktree-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'workspace.write', '--permission', 'workspace.manage','--worktree-mapping','browser']),
     registryWriter: await credential('registry-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'workspace.write']),
     owner: await credential('web-e2e', ['--workspace', projects.main]),
     viewer: await credential('viewer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'project.read']),

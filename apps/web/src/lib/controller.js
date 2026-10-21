@@ -253,6 +253,7 @@ export class Controller {
   /** Replaced whenever the workspace or the connection changes; async results check it. */
   #context = {};
   #registryContext = {};
+  /** @type {Map<string, any>} */ #worktreeRequests = new Map();
   /** @type {ReturnType<typeof setInterval> | undefined} */ #taskTimer;
   /** @type {ReturnType<typeof setInterval> | undefined} */ #sessionTimer;
   /** @type {ReturnType<typeof setInterval> | undefined} */ #attentionTimer;
@@ -949,7 +950,7 @@ export class Controller {
   /** @param {string | null} workspace */
   selectWorkspace(workspace) {
     const principal = this.#state.principal;
-    const chosen = workspace && grantedWorkspace(principal ?? undefined, workspace) ? workspace : null;
+    const chosen = workspace && (grantedWorkspace(principal ?? undefined, workspace) || this.#state.registry.workspaces.some(w => w.managedWorktree && w.directory === workspace)) ? workspace : null;
     if (chosen === this.#state.workspace) return;
     this.#context = {};
     this.#waiting = null;
@@ -996,6 +997,29 @@ export class Controller {
       await this.refreshRegistry();
     } catch (error) { this.#notify('error', `Pin was not saved. ${error instanceof Error ? error.message : String(error)} Refresh and try again.`); await this.refreshRegistry(); }
   }
+  /** @param {string} workspaceId @returns {Promise<string[]>} */
+  async worktreeOptions(workspaceId) {
+    const result = await this.#client().request('workspace.worktree.options', {workspaceId});
+    return result.mappingIds;
+  }
+  /** @param {'create'|'remove'} operation @param {string} workspaceId @param {string} [mappingId] */
+  async mutateWorktree(operation, workspaceId, mappingId) {
+    if (!this.hasCapability('workspace.worktree') || !can(this.#state.principal ?? undefined, 'workspace.manage')) return false;
+    const key = operation + ':' + workspaceId + ':' + (mappingId ?? '');
+    let params = this.#worktreeRequests.get(key);
+    if (!params) { params = {workspaceId,...(mappingId ? {mappingId}:{}),ifRevision:this.#state.registry.revision,requestId:globalThis.crypto.randomUUID()}; this.#worktreeRequests.set(key,params); }
+    try {
+      await this.#client().request('workspace.worktree.'+operation, params);
+      this.#worktreeRequests.delete(key);
+      await this.refreshRegistry();
+      return true;
+    } catch (error) {
+      if (/** @type {any} */ (error)?.data?.reason === 'stale_revision') this.#worktreeRequests.delete(key);
+      this.#notify('error', `Worktree ${operation} was not confirmed. ${error instanceof Error ? error.message : String(error)} Retry the same operation to reconcile its outcome.`);
+      await this.refreshRegistry(); return false;
+    }
+  }
+
   /** Register only a directory the credential already grants. @param {string} directory */
   async registerProject(directory) {
     if (!can(this.#state.principal ?? undefined, 'workspace.write')) { this.#notify('error', 'Ask the host owner to add workspace.write to your credential. To add another directory, the owner must grant it locally first.'); return; }
