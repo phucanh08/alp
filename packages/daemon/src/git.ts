@@ -320,10 +320,10 @@ function cursorScope(workspaceId: string, compare: GitCompare, relative: string 
 
 // ---- Parsing Git's answers ----
 
+/** An all-zero mode (no such side) or object id (the work tree, not hashed). */
 const ZERO = /^0+$/;
 const GITLINK = '160000';
 const SYMLINK = '120000';
-const NONE = /^0+$/;
 
 type Entry = {
   path: string; oldPath?: string; change: GitChange;
@@ -508,13 +508,11 @@ export type GitReaderOptions = {
   binary?: string;
   timeoutMs?: number;
   log?: (message: string, fields: Record<string, unknown>) => void;
-  /** Tests: called between steps where a racing writer could change the checkout. */
-  probe?: (step: 'listed') => Promise<void> | void;
 };
 
 type DiffParams = { workspaceId: string; compare: GitCompare; path?: string; cursor?: string };
 
-export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ.timeoutMs, log = () => {}, probe }: GitReaderOptions) {
+export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ.timeoutMs, log = () => {} }: GitReaderOptions) {
   const key = randomBytes(32);
   const mac = (scope: string) => createHmac('sha256', key).update(scope).digest('base64url').slice(0, 32);
 
@@ -750,7 +748,6 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
     const all = parseRaw(listed.stdout);
     const worktree = mode === 'uncommitted' || mode === 'unstaged';
     const untracked = worktree ? await untrackedOf(repo, relative, WORKSPACE_GIT.maxUntracked) : { found: [], hidden: 0, more: false };
-    await probe?.('listed');
 
     // The snapshot: HEAD (and the base), the index, the change list, the untracked files, and the
     // work tree files compared (their identity, size and times).
@@ -805,8 +802,8 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
   async function windowOf(repo: Repository, entries: Entry[], start: number, mode: GitCompare['mode']): Promise<{ entries: Planned[] }> {
     const candidates = entries.slice(start, start + GIT_READ.windowFiles).map((entry): Planned => {
       const special = entry.srcMode === GITLINK || entry.dstMode === GITLINK || entry.srcMode === SYMLINK || entry.dstMode === SYMLINK || entry.untracked || (entry.conflicted && mode === 'staged');
-      const old: Side = special || NONE.test(entry.srcMode) ? undefined : { oid: entry.srcOid };
-      const now: Side = special || NONE.test(entry.dstMode) ? undefined : ZERO.test(entry.dstOid) ? { file: entry.path } : { oid: entry.dstOid };
+      const old: Side = special || ZERO.test(entry.srcMode) ? undefined : { oid: entry.srcOid };
+      const now: Side = special || ZERO.test(entry.dstMode) ? undefined : ZERO.test(entry.dstOid) ? { file: entry.path } : { oid: entry.dstOid };
       return { ...entry, old, new: now, sizes: [0, 0] };
     });
     const oids = [...new Set(candidates.flatMap(entry => [entry.old, entry.new]).flatMap(side => side && 'oid' in side ? [side.oid] : []))];
@@ -837,11 +834,11 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
     return { entries: chosen };
   }
 
-  /** Blob contents by id (each at most GIT_READ.maxScanBytes, as batch-check sized them). */
-  async function blobs(repo: Repository, oids: string[]): Promise<Map<string, Buffer>> {
+  /** Blob contents by id, each at most GIT_READ.maxScanBytes as batch-check sized them (`bytes` in all). */
+  async function blobs(repo: Repository, oids: string[], bytes: number): Promise<Map<string, Buffer>> {
     const contents = new Map<string, Buffer>();
     if (!oids.length) return contents;
-    const { stdout } = await runGit(repo, ['cat-file', '--batch'], { stdin: `${oids.join('\n')}\n`, maxBytes: GIT_READ.windowBytes + oids.length * 200 + 1024 });
+    const { stdout } = await runGit(repo, ['cat-file', '--batch'], { stdin: `${oids.join('\n')}\n`, maxBytes: bytes + oids.length * 200 + 1024 });
     let at = 0;
     while (at < stdout.length) {
       const newline = stdout.indexOf(10, at);
@@ -864,8 +861,11 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
       file: { path: entry.path, ...(entry.oldPath ? { oldPath: entry.oldPath } : {}), change: entry.change, kind, additions: 0, deletions: 0, hunks: [], ...extra }, cost: cost + Buffer.byteLength(entry.path) + Buffer.byteLength(entry.oldPath ?? ''),
     });
     const readable = (size: number) => size <= GIT_READ.maxScanBytes;
-    const wanted = planned.flatMap(entry => [entry.old, entry.new]).flatMap((side, index) => side && 'oid' in side && readable(planned[Math.floor(index / 2)]!.sizes[index % 2]!) ? [side.oid] : []);
-    const contents = await blobs(repo, [...new Set(wanted)]);
+    const wanted = new Map<string, number>();
+    for (const entry of planned) {
+      for (const [side, size] of [[entry.old, entry.sizes[0]], [entry.new, entry.sizes[1]]] as const) if (side && 'oid' in side && readable(size)) wanted.set(side.oid, size);
+    }
+    const contents = await blobs(repo, [...wanted.keys()], [...wanted.values()].reduce((sum, size) => sum + size, 0));
     const results: Result[] = new Array(planned.length).fill(undefined);
     const patched: Array<{ index: number; entry: Planned; group: 'plain' | 'renamed' | 'ours' }> = [];
     for (const [index, entry] of planned.entries()) {
