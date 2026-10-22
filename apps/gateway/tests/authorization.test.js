@@ -83,6 +83,9 @@ const OUT_OF_SCOPE = {
   'session.rename': () => [{ sessionId: 'sb', title: 'mine now' }, 1001],
   'session.archive': () => [{ sessionId: 'sb' }, 1001],
   'session.message': () => [{ sessionId: 'sb', text: 'hello' }, 1001],
+  // conversation.test.js covers children (not_root), destinations, new ids and the principal context.
+  'session.fork': () => [{ sessionId: 'sb', requestId: 'r', ifGeneration: '0'.repeat(32), boundary: { throughTurnId: 't' } }, 1001],
+  'session.rewind': () => [{ sessionId: 'sb-c', requestId: 'r', ifGeneration: '0'.repeat(32), beforeTurnId: 't' }, 1001],
   'question.answer': () => [{ questionId: 'q-b-222', text: 'yes' }, 1001],
   'team.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
   'task.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
@@ -118,6 +121,7 @@ const IN_SCOPE = ({ a }) => ({
   'session.create': { spec: { cwd: a } }, 'session.prompt': { sessionId: 'sa', clientMessageId: 'm', content: text },
   'session.interrupt': { sessionId: 'sa' }, 'session.configure': { sessionId: 'sa' }, 'session.close': { sessionId: 'sa' },
   'session.rename': { sessionId: 'sa', title: 't' }, 'session.archive': { sessionId: 'sa' }, 'session.message': { sessionId: 'sa', text: 'x' },
+  'session.fork': { sessionId: 'sa', requestId: 'r', ifGeneration: '0'.repeat(32) }, 'session.rewind': { sessionId: 'sa', requestId: 'r', ifGeneration: '0'.repeat(32), beforeTurnId: 't' },
   'question.answer': { questionId: 'q-a-111', text: 'x' },
   'team.list': { projectRoot: a }, 'task.list': { projectRoot: a }, 'task.create': { projectRoot: a, title: 't' },
   'task.update': { projectRoot: a, id: 't-a000', action: 'close' }, 'task.gate.resolve': { projectRoot: a, id: 't-a000', gate: 'review' },

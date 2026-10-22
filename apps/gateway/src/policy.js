@@ -34,7 +34,7 @@ export const DEFAULT_PERMISSIONS = Object.freeze(['session.read', 'session.write
  * Within `library` and `settings.language` some methods stay unexposed and answer -32601
  * `not_exposed` (docs/alp/remote-gateway.md §5.4).
  */
-export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.workspaceRegistry, CAPABILITY.workspaceWorktree, CAPABILITY.sessionHistory, CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, CAPABILITY.workspaceGit, CAPABILITY.attachments]);
+export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.workspaceRegistry, CAPABILITY.workspaceWorktree, CAPABILITY.sessionHistory, CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, CAPABILITY.workspaceGit, CAPABILITY.attachments, CAPABILITY.sessionFork, CAPABILITY.sessionRewind]);
 
 /** The codes of docs/protocol/alp-json-rpc-v1.md §5.1 the gateway answers its own refusals with; `data.reason` says why. */
 export const GATEWAY_ERROR = Object.freeze({ forbidden: ERROR.forbidden, unavailable: ERROR.unavailable });
@@ -55,6 +55,7 @@ export const GATEWAY_REASON = Object.freeze({
   gatewayTimeout: 'gateway_timeout',
   daemonDisconnected: 'daemon_disconnected',
   notSent: 'not_sent',
+  notRoot: 'not_root',
 });
 
 /** session.create / session.preview spec fields a remote client may set; anything else is refused. */
@@ -146,6 +147,54 @@ export function projectUploadBegun(raw, maxChunkBytes) {
     ...(source.state === 'uploading' ? { expiresAt: source.expiresAt } : { attachmentId: source.attachmentId }),
   };
 }
+
+const GENERATION = /^[0-9a-f]{32}$/;
+const BRANCH_ID = /^br_[0-9a-f]{16}$/;
+const TURN_ID = (/** @type {unknown} */ value) => typeof value === 'string' && value.length > 0 && value.length <= 200 && !/[\p{Cc}\p{Cf}]/u.test(value);
+const SESSION_ID = (/** @type {unknown} */ value) => typeof value === 'string' && /^[\w.:-]{1,128}$/.test(value);
+
+/**
+ * A conversation branch (session.rewind's `branch`, a summary's `branches`) as a remote client may
+ * see it: the schema's four fields, each checked; undefined when any is not one alpd would answer.
+ * @param {unknown} raw
+ * @returns {import('@anhlp/alp-protocol').ConversationBranch | undefined}
+ */
+export function projectBranch(raw) {
+  if (!plain(raw)) return undefined;
+  const source = /** @type {Record<string, any>} */ (raw);
+  if (!BRANCH_ID.test(source.branchId ?? '') || !TURN_ID(source.beforeTurnId) || !count(source.turns) || !STAMP(source.at) || !source.at) return undefined;
+  return { branchId: source.branchId, beforeTurnId: source.beforeTurnId, turns: source.turns, at: source.at };
+}
+
+/**
+ * Where a fork came from as a remote client may see it: the schema's fields, each checked, and
+ * only when `visible(sessionId)` says the source is in the credential's grant. Otherwise undefined:
+ * the whole field is dropped (never a source id outside the grant, docs/alp/remote-gateway.md §5.15).
+ * @param {unknown} raw @param {(sessionId: string) => boolean} visible
+ * @returns {import('@anhlp/alp-protocol').ForkProvenance | undefined}
+ */
+export function projectForkedFrom(raw, visible) {
+  if (!plain(raw)) return undefined;
+  const source = /** @type {Record<string, any>} */ (raw);
+  if (!SESSION_ID(source.sessionId) || !['through', 'before', 'whole'].includes(source.boundary) || !STAMP(source.at) || !source.at) return undefined;
+  if ((source.turnId !== undefined && !TURN_ID(source.turnId)) || (source.branchId !== undefined && !BRANCH_ID.test(source.branchId))) return undefined;
+  if (!visible(source.sessionId)) return undefined;
+  return { sessionId: source.sessionId, ...(source.turnId !== undefined ? { turnId: source.turnId } : {}), boundary: source.boundary, ...(source.branchId !== undefined ? { branchId: source.branchId } : {}), at: source.at };
+}
+
+/**
+ * A summary's conversation support as a remote client may see it: two booleans and a known reason.
+ * @param {unknown} raw
+ */
+export function projectConversation(raw) {
+  if (!plain(raw)) return undefined;
+  const source = /** @type {Record<string, any>} */ (raw);
+  if (typeof source.fork !== 'boolean' || typeof source.rewind !== 'boolean') return undefined;
+  return { fork: source.fork, rewind: source.rewind, ...(['runtime_unsupported', 'not_persistent', 'not_root'].includes(source.reason) ? { reason: source.reason } : {}) };
+}
+
+/** A history generation alpd answers: 32 lowercase hex digits. @param {unknown} value */
+export const isGeneration = value => typeof value === 'string' && GENERATION.test(value);
 
 /**
  * Fields of list rows passed on; anything else alpd adds later is dropped until reviewed. Rows name
@@ -431,6 +480,8 @@ export const EXPOSURE = Object.freeze({
   'attachment.abort': { status: 'exposed', permission: 'attachments.write', alsoRequires: ['session.write'], scope: 'upload: as attachment.chunk', capability: CAPABILITY.attachments, params: ['uploadId'], tests: ['permission', 'binding'] },
   'attachment.get': { status: 'exposed', permission: 'attachments.write', alsoRequires: ['session.read'], scope: 'attachment: only this credential\'s own (alpd checks the binding as for chunks), so a credential without attachments.write has none to read; metadata only, never bytes or a path; projected by projectAttachment', capability: CAPABILITY.attachments, params: ['attachmentId'], tests: ['permission', 'binding', 'result-filter'] },
   'attachment.delete': { status: 'exposed', permission: 'attachments.write', alsoRequires: ['session.write'], scope: 'attachment: as attachment.get; alpd refuses a referenced one (1004 attachment_referenced), never evicts it', capability: CAPABILITY.attachments, params: ['attachmentId'], tests: ['permission', 'binding'] },
+  'session.fork': { status: 'exposed', permission: 'session.write', alsoRequires: ['session.read'], scope: 'session: sessionId a root in a granted workspace, looked up afresh (it reads that conversation, so session.read too); workspaceId, when given, a registry workspace whose directory a grant names exactly (as session.create), else the fork stays in the source\'s workspace; newSessionId, when given, never a session outside the grant. The principal context is the gateway\'s own, never the client\'s (alpd re-authorizes the source\'s attachments for it); requestId namespaced per credential; for a grant with modes, the modes of the source and its tree, looked up afresh, within them (as session.prompt: the fork inherits its configuration). Only conversation is copied, never a file. The created root is checked again (a root in the grant, and in the destination asked for) before it is answered; forkedFrom must name the checked source; a forkedFrom in any summary passes only when its source is in the grant (projectForkedFrom). alpd errors rewritten to fixed text keeping code, reason and a generation', capability: CAPABILITY.sessionFork, params: ['sessionId', 'requestId', 'ifGeneration', 'boundary', 'branchId', 'workspaceId', 'newSessionId', 'title'], tests: ['permission', 'session-scope', 'registry-scope', 'binding', 'result-filter', 'mode'] },
+  'session.rewind': { status: 'exposed', permission: 'session.write', scope: 'session: sessionId a root in a granted workspace, looked up afresh; for a grant with modes, the modes of the root and its tree, looked up afresh, within them (as session.prompt); conversation only under the same session id, no file is changed, the later turns stay a branch session.fork { branchId } recovers; requestId namespaced per credential; the answer must be that session, its branch and generation projected; alpd errors rewritten to fixed text keeping code, reason and a generation. history.reset reaches the root\'s attached connections as alpd sent it', capability: CAPABILITY.sessionRewind, params: ['sessionId', 'requestId', 'ifGeneration', 'beforeTurnId'], tests: ['permission', 'session-scope', 'result-filter', 'event-filter', 'mode'] },
   'session.interrupt': { status: 'exposed', permission: 'session.write', scope: 'session; stops: a root always, an assignment when its requesters\' modes are within the grant\'s', params: ['sessionId'], tests: ['permission', 'session-scope', 'mode'] },
   'session.configure': { status: 'exposed', permission: 'session.write', scope: 'session; mode within the grant\'s modes', params: ['sessionId', 'mode'], tests: ['permission', 'session-scope', 'mode'] },
   'session.close': { status: 'exposed', permission: 'session.write', scope: 'session; stops, as session.interrupt', params: ['sessionId'], tests: ['permission', 'session-scope', 'mode'] },

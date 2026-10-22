@@ -27,6 +27,12 @@ alp-gateway serve                                                           # 12
   `attachment.get` (metadata only) `attachments.write` and `session.read`. Never a default, implies
   nothing: `--permission session.read,session.write,attachments.write`. Each upload is bound by alpd
   to the credential, its grant epoch, the project and the session; no path or URL ever crosses.
+- Conversation fork and rewind (capabilities `session.fork`, `session.rewind`): `session.rewind`
+  needs `session.write`, `session.fork` `session.write` **and** `session.read` (it reads the source).
+  Only a root in the grant; a fork's destination `workspaceId` must be a granted workspace. Only the
+  conversation changes, **never a file**; a rewind keeps the later turns as a branch that
+  `session.fork { branchId }` recovers. A summary's `forkedFrom` is dropped when its source session
+  is outside the credential's grant.
 - `credential create --mode read-only` limits a credential to driving (prompt, message, answer)
   trees that run in the given modes, checked up to the root on every request.
 - Loopback by default. Put a TLS reverse proxy in front for remote clients (`deploy/Caddyfile`,
