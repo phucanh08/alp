@@ -33,7 +33,8 @@
     "schedule": "schedule.create/list/get/cancel: one-shot continuations of a root session. alpd opens the turn by itself when the time comes; a job that comes due late says how late it is, and a job that cannot run says why.",
     "session.history": "Durable bounded backward envelope pages, persisted generation and numeric attach watermark.",
     "workspace.registry": "Daemon-owned project/workspace registry, durable pins, revision CAS and requestId replay.",
-    "workspace.worktree": "Host-approved managed user worktrees; opt-in workspace.manage and named destination mappings."
+    "workspace.worktree": "Host-approved managed user worktrees; opt-in workspace.manage and named destination mappings.",
+    "workspace.git": "workspace.git.status and workspace.git.diff: a registered workspace's read-only Git status and structured diff hunks by workspaceId; enumerated comparisons only, bounded (1 MiB per file, 2 MiB per page, 200 untracked files) with an opaque snapshot and next cursor; blocked secret paths withheld on both sides of a rename; no Git mutation."
   },
   "methods": {
     "assignment.recall": {
@@ -3485,6 +3486,431 @@
           "kind": "host"
         },
         "capability": "workspace.worktree"
+      }
+    },
+    "workspace.git.status": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project"
+        },
+        "capability": "workspace.git",
+        "idempotent": true,
+        "risks": [
+          "lists the changed file paths, branch and remote of a workspace checkout"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "workspaceId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "enum": [
+              "repository",
+              "not_repository",
+              "unsupported"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "branch": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "detached": {
+            "type": "boolean"
+          },
+          "head": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upstream": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "ref": {
+                "type": "string"
+              },
+              "ahead": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "behind": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "ref",
+              "ahead",
+              "behind"
+            ],
+            "additionalProperties": false
+          },
+          "baseRef": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "aheadBehind": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "ahead": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "behind": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "ahead",
+              "behind"
+            ],
+            "additionalProperties": false
+          },
+          "hasRemote": {
+            "type": "boolean"
+          },
+          "remoteUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dirty": {
+            "type": "boolean"
+          },
+          "files": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "oldPath": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "change": {
+                  "enum": [
+                    "modified",
+                    "added",
+                    "deleted",
+                    "renamed",
+                    "copied",
+                    "typechange",
+                    "untracked",
+                    "conflicted"
+                  ]
+                },
+                "staged": {
+                  "type": "boolean"
+                },
+                "unstaged": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "path",
+                "change",
+                "staged",
+                "unstaged"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "hiddenCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "snapshot": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "state",
+          "branch",
+          "detached",
+          "head",
+          "upstream",
+          "baseRef",
+          "aheadBehind",
+          "hasRemote",
+          "remoteUrl",
+          "dirty",
+          "files",
+          "hiddenCount",
+          "truncated",
+          "snapshot"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "workspace.git.diff": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project"
+        },
+        "capability": "workspace.git",
+        "idempotent": true,
+        "risks": [
+          "returns changed file content of a workspace checkout as diff hunks, including deleted and historical lines"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "compare": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "enum": [
+                  "uncommitted",
+                  "staged",
+                  "unstaged",
+                  "base"
+                ]
+              },
+              "baseRef": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "ignoreWhitespace": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "mode"
+            ],
+            "additionalProperties": false
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "workspaceId",
+          "compare"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "compare": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "enum": [
+                  "uncommitted",
+                  "staged",
+                  "unstaged",
+                  "base"
+                ]
+              },
+              "baseRef": {
+                "type": "string"
+              },
+              "ignoreWhitespace": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "mode",
+              "ignoreWhitespace"
+            ],
+            "additionalProperties": false
+          },
+          "snapshot": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "oldPath": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "change": {
+                  "enum": [
+                    "modified",
+                    "added",
+                    "deleted",
+                    "renamed",
+                    "copied",
+                    "typechange",
+                    "untracked",
+                    "conflicted"
+                  ]
+                },
+                "kind": {
+                  "enum": [
+                    "text",
+                    "binary",
+                    "too_large",
+                    "withheld",
+                    "symlink",
+                    "submodule"
+                  ]
+                },
+                "additions": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "deletions": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "hunks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "oldStart": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "oldCount": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "newStart": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "newCount": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "context": {
+                        "type": "string"
+                      },
+                      "lines": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "enum": [
+                                "add",
+                                "remove",
+                                "context"
+                              ]
+                            },
+                            "content": {
+                              "type": "string"
+                            },
+                            "noNewline": {
+                              "const": true
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "content"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "oldStart",
+                      "oldCount",
+                      "newStart",
+                      "newCount",
+                      "lines"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "path",
+                "change",
+                "kind",
+                "additions",
+                "deletions",
+                "hunks"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "hiddenCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "nextCursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "compare",
+          "snapshot",
+          "files",
+          "hiddenCount",
+          "truncated"
+        ],
+        "additionalProperties": false
       }
     }
   },

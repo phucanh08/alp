@@ -4656,6 +4656,322 @@
     "ifRevision": 1,
     "directory": "/outside"
    }
+  },
+  {
+   "name": "workspace.git.status params",
+   "check": "params",
+   "method": "workspace.git.status",
+   "valid": true,
+   "value": {
+    "workspaceId": "wks_0123456789abcdef"
+   }
+  },
+  {
+   "name": "workspace.git.status without workspaceId",
+   "check": "params",
+   "method": "workspace.git.status",
+   "valid": false,
+   "value": {}
+  },
+  {
+   "name": "workspace.git.status with a host path",
+   "check": "params",
+   "method": "workspace.git.status",
+   "valid": false,
+   "value": {
+    "workspaceId": "wks_0123456789abcdef",
+    "projectRoot": "/work/project"
+   }
+  },
+  {
+   "name": "workspace.git.status result",
+   "check": "result",
+   "method": "workspace.git.status",
+   "valid": true,
+   "value": {
+    "state": "repository",
+    "branch": "feature/x",
+    "detached": false,
+    "head": "0123456789abcdef0123456789abcdef01234567",
+    "upstream": {
+     "ref": "origin/feature/x",
+     "ahead": 1,
+     "behind": 0
+    },
+    "baseRef": "main",
+    "aheadBehind": {
+     "ahead": 2,
+     "behind": 1
+    },
+    "hasRemote": true,
+    "remoteUrl": "https://github.com/example/project.git",
+    "dirty": true,
+    "files": [
+     {
+      "path": "src/a.ts",
+      "change": "modified",
+      "staged": false,
+      "unstaged": true
+     },
+     {
+      "path": "src/b.ts",
+      "oldPath": "src/old-b.ts",
+      "change": "renamed",
+      "staged": true,
+      "unstaged": false
+     },
+     {
+      "path": "notes.txt",
+      "change": "untracked",
+      "staged": false,
+      "unstaged": true
+     }
+    ],
+    "hiddenCount": 1,
+    "truncated": false,
+    "snapshot": "s1.abc"
+   }
+  },
+  {
+   "name": "workspace.git.status detached HEAD",
+   "check": "result",
+   "method": "workspace.git.status",
+   "valid": true,
+   "value": {
+    "state": "repository",
+    "branch": null,
+    "detached": true,
+    "head": "0123456789abcdef0123456789abcdef01234567",
+    "upstream": null,
+    "baseRef": "main",
+    "aheadBehind": null,
+    "hasRemote": false,
+    "remoteUrl": null,
+    "dirty": false,
+    "files": [],
+    "hiddenCount": 0,
+    "truncated": false,
+    "snapshot": "s1.def"
+   }
+  },
+  {
+   "name": "workspace.git.status not a repository",
+   "check": "result",
+   "method": "workspace.git.status",
+   "valid": true,
+   "value": {
+    "state": "not_repository",
+    "branch": null,
+    "detached": false,
+    "head": null,
+    "upstream": null,
+    "baseRef": null,
+    "aheadBehind": null,
+    "hasRemote": false,
+    "remoteUrl": null,
+    "dirty": false,
+    "files": [],
+    "hiddenCount": 0,
+    "truncated": false,
+    "snapshot": ""
+   }
+  },
+  {
+   "name": "workspace.git.status with a repository root",
+   "check": "result",
+   "method": "workspace.git.status",
+   "valid": false,
+   "value": {
+    "state": "repository",
+    "repoRoot": "/work/project",
+    "branch": "main",
+    "detached": false,
+    "head": null,
+    "upstream": null,
+    "baseRef": null,
+    "aheadBehind": null,
+    "hasRemote": false,
+    "remoteUrl": null,
+    "dirty": false,
+    "files": [],
+    "hiddenCount": 0,
+    "truncated": false,
+    "snapshot": ""
+   }
+  },
+  {
+   "name": "workspace.git.diff params",
+   "check": "params",
+   "method": "workspace.git.diff",
+   "valid": true,
+   "value": {
+    "workspaceId": "wks_0123456789abcdef",
+    "compare": {
+     "mode": "uncommitted"
+    }
+   }
+  },
+  {
+   "name": "workspace.git.diff one file against a base, next page",
+   "check": "params",
+   "method": "workspace.git.diff",
+   "valid": true,
+   "value": {
+    "workspaceId": "wks_0123456789abcdef",
+    "compare": {
+     "mode": "base",
+     "baseRef": "main",
+     "ignoreWhitespace": true
+    },
+    "path": "src/a.ts",
+    "cursor": "c1.abc"
+   }
+  },
+  {
+   "name": "workspace.git.diff with an arbitrary revision range",
+   "check": "params",
+   "method": "workspace.git.diff",
+   "valid": false,
+   "value": {
+    "workspaceId": "wks_0123456789abcdef",
+    "compare": {
+     "mode": "range",
+     "from": "HEAD~3"
+    }
+   }
+  },
+  {
+   "name": "workspace.git.diff with extra git arguments",
+   "check": "params",
+   "method": "workspace.git.diff",
+   "valid": false,
+   "value": {
+    "workspaceId": "wks_0123456789abcdef",
+    "compare": {
+     "mode": "uncommitted",
+     "args": [
+      "--ext-diff"
+     ]
+    }
+   }
+  },
+  {
+   "name": "workspace.git.diff without compare",
+   "check": "params",
+   "method": "workspace.git.diff",
+   "valid": false,
+   "value": {
+    "workspaceId": "wks_0123456789abcdef"
+   }
+  },
+  {
+   "name": "workspace.git.diff result",
+   "check": "result",
+   "method": "workspace.git.diff",
+   "valid": true,
+   "value": {
+    "compare": {
+     "mode": "uncommitted",
+     "ignoreWhitespace": false
+    },
+    "snapshot": "s1.abc",
+    "files": [
+     {
+      "path": "src/a.ts",
+      "change": "modified",
+      "kind": "text",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+       {
+        "oldStart": 1,
+        "oldCount": 2,
+        "newStart": 1,
+        "newCount": 2,
+        "context": "function main()",
+        "lines": [
+         {
+          "type": "context",
+          "content": "const a = 1;"
+         },
+         {
+          "type": "remove",
+          "content": "const b = 2;"
+         },
+         {
+          "type": "add",
+          "content": "const b = 3;",
+          "noNewline": true
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "path": "logo.png",
+      "change": "added",
+      "kind": "binary",
+      "additions": 0,
+      "deletions": 0,
+      "hunks": []
+     },
+     {
+      "path": "src/new.ts",
+      "oldPath": "src/old.ts",
+      "change": "renamed",
+      "kind": "too_large",
+      "additions": 0,
+      "deletions": 0,
+      "hunks": []
+     }
+    ],
+    "hiddenCount": 1,
+    "truncated": true,
+    "nextCursor": "c1.def"
+   }
+  },
+  {
+   "name": "workspace.git.diff empty result",
+   "check": "result",
+   "method": "workspace.git.diff",
+   "valid": true,
+   "value": {
+    "compare": {
+     "mode": "base",
+     "baseRef": "main",
+     "ignoreWhitespace": true
+    },
+    "snapshot": "s1.abc",
+    "files": [],
+    "hiddenCount": 0,
+    "truncated": false
+   }
+  },
+  {
+   "name": "workspace.git.diff result with a raw patch",
+   "check": "result",
+   "method": "workspace.git.diff",
+   "valid": false,
+   "value": {
+    "compare": {
+     "mode": "uncommitted",
+     "ignoreWhitespace": false
+    },
+    "snapshot": "s1.abc",
+    "files": [
+     {
+      "path": "src/a.ts",
+      "change": "modified",
+      "kind": "text",
+      "additions": 0,
+      "deletions": 0,
+      "hunks": [],
+      "patch": "diff --git a/src/a.ts b/src/a.ts"
+     }
+    ],
+    "hiddenCount": 0,
+    "truncated": false
+   }
   }
  ]
 }
