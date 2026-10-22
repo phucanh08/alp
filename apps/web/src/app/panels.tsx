@@ -6,21 +6,23 @@ import { StatusIndicator } from './status';
 import { useAppState } from './store';
 import { Tasks } from './TaskBoard';
 import { FilesPanel } from './FilesPanel';
+import { ChangesPanel, DiffPanel } from './GitPanels';
 import { useTabs } from './tabs';
 
 /*
- * The panels a tab can show, in the explorer dock or the center column, as Paseo's: Changes,
- * Terminal and Diff (Paseo's own; this beta shows them unavailable, the gateway has no git or
- * terminal access yet), Files (read-only, with files.read: FilesPanel), and ALP's Agents and Tasks. Picking an agent or a task opens it
- * in a tab of the center column.
+ * The panels a tab can show, in the explorer dock or the center column, as Paseo's: Changes and
+ * Diff (read only, with workspace.git and project.read; hunks need files.read: GitPanels),
+ * Terminal (unavailable in this beta, the gateway runs no terminals), Files (read-only, with
+ * files.read: FilesPanel), and ALP's Agents and Tasks. Picking an agent or a task opens it in a
+ * tab of the center column.
  */
 
 export type PanelKind = 'changes' | 'terminal' | 'diff' | 'files' | 'agents' | 'tasks';
 
 export const PANELS: Record<PanelKind, { label: string; icon: typeof Bot; unavailable?: string }> = {
-  changes: { label: 'Changes', icon: FileDiff, unavailable: "The gateway has no git access yet, so this panel cannot show the workspace's changes. Use git on the host." },
+  changes: { label: 'Changes', icon: FileDiff },
   terminal: { label: 'Terminal', icon: SquareTerminal, unavailable: 'The gateway does not run terminals yet. Open a terminal on the host.' },
-  diff: { label: 'Diff', icon: GitCompareArrows, unavailable: 'The gateway has no git access yet, so this panel cannot show a diff. Use git on the host.' },
+  diff: { label: 'Diff', icon: GitCompareArrows },
   files: { label: 'Files', icon: FolderTree },
   agents: { label: 'Agents', icon: Bot },
   tasks: { label: 'Tasks', icon: ListTodo },
@@ -75,8 +77,11 @@ function Unavailable({ kind }: { kind: PanelKind }) {
 
 /** A panel's content; `onPicked` runs after an agent or task was opened (an overlay closes). */
 export function PanelView({ kind, onPicked }: { kind: PanelKind; onPicked?: () => void }) {
+  const { openPanel } = useTabs();
   if (kind === 'agents') return <Agents onPicked={onPicked} />;
   if (kind === 'tasks') return <Tasks onPicked={onPicked} />;
   if (kind === 'files') return <FilesPanel onPicked={onPicked} />;
+  if (kind === 'changes') return <ChangesPanel onOpenDiff={() => { openPanel('diff'); onPicked?.(); }} />;
+  if (kind === 'diff') return <DiffPanel />;
   return <Unavailable kind={kind} />;
 }
