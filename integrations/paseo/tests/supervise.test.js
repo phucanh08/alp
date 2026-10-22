@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -116,6 +116,14 @@ test('a Paseo connection survives alpd going away: it reconnects, and the next p
   const runtimes = [];
   const daemons = [];
   const { socket } = daemonPaths(home);
+  // The provider starts alpd when its home has none. This test's alpd runs in-process, so any start
+  // is a fault: the provider gets an entry that records the start and fails, never a real alpd,
+  // which would outlive the test detached in this home (t-c5e7). The record outlives the home.
+  const record = await mkdtemp(path.join(tmpdir(), 'alp-relink-record-'));
+  const launches = path.join(record, 'launches.log');
+  const entry = path.join(record, 'alpd-stub.mjs');
+  await writeFile(entry, `import { appendFileSync } from 'node:fs';\nappendFileSync(${JSON.stringify(launches)}, JSON.stringify(process.argv.slice(2)) + '\\n');\nprocess.exit(1);\n`);
+  const launched = () => readFile(launches, 'utf8').then(text => text.split('\n').filter(Boolean), error => { if (error.code === 'ENOENT') return []; throw error; });
   // An alpd in this process over a durable store; its lock names this process.
   async function daemon() {
     const runtime = createAlpRuntime({ transport: fakeRuntime(runtimes) });
@@ -127,14 +135,29 @@ test('a Paseo connection survives alpd going away: it reconnects, and the next p
     daemons.push(handle);
     return handle;
   }
+  let conn;
+  // The connection closes before its alpd goes: one still open would reconnect and, once the home
+  // and its lock are gone, start an alpd there.
   t.after(async () => {
-    for (const handle of daemons) { await handle.server.close().catch(() => {}); await handle.runtime.shutdown(); }
-    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    try {
+      try { await conn?.close(); } finally {
+        try {
+          for (const handle of daemons) { await handle.server.close().catch(() => {}); await handle.runtime.shutdown(); }
+        } finally {
+          await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+          // A start already under way when the home went would make it again, and be recorded, within this pause.
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+      assert.deepEqual(await launched(), [], 'the provider started no alpd of its own');
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      await rm(record, { recursive: true, force: true });
+    }
   });
 
   const first = await daemon();
-  const conn = await createProvider({ home }).connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
-  t.after(() => conn.close());
+  conn = await createProvider({ home, daemonEntry: entry }).connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
   const events = [];
   conn.onEvent(event => events.push(event));
   const config = { cwd: root, env: {}, systemPrompt: '', mcpServers: {}, settings: {}, persist: true };
@@ -168,4 +191,6 @@ test('a Paseo connection survives alpd going away: it reconnects, and the next p
   await daemon();
   await sent;
   assert.equal(result('m3').type, 'turn');
+  // Each reconnect found this test's alpd under its lock; none started another.
+  assert.deepEqual(await launched(), []);
 });
