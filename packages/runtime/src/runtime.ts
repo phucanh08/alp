@@ -6,7 +6,8 @@ import { createLogger } from '@anhlp/alp-core/log';
 import { PROMPT_IMAGES, base64Bytes } from '@anhlp/alp-protocol';
 import { createBoardDomain } from './board-domain.js';
 import { createWorktreeDomain } from './worktree-domain.js';
-import { type RuntimeTransport, type RuntimeOptions, type OpenOptions, type PromptContent, type PromptInput, type AlpRuntime, type SessionPreview, type RecoveryOutcome, type Pause, type PauseState, type RecallAnswer, type ScheduleHandler } from './contracts.js';
+import { type RuntimeTransport, type RuntimeOptions, type OpenOptions, type PromptContent, type PromptInput, type AlpRuntime, type SessionPreview, type RecoveryOutcome, type Pause, type PauseState, type RecallAnswer, type ScheduleHandler, type BranchRequest, type NativeBinding, ConversationError } from './contracts.js';
+import { claudeCut, codexForkEnd, codexForkRefusal, pendingChain, type ChainEntry } from './conversation.js';
 export type { RuntimeTransport, RuntimeOptions, OpenOptions, PromptContent, PromptInput, AlpRuntime, SessionPreview, RecoveryOutcome, Pause, PauseState, RecallAnswer } from './contracts.js';
 export { DEFAULT_TEAM } from './contracts.js';
 import { verdictLine, parseHandoff, type Handoff } from './handoff.js';
@@ -1169,7 +1170,25 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   const label = (kind: RuntimeKind) => kind === 'claude' ? 'Claude' : kind === 'acp' ? 'ACP agent' : kind === 'antigravity' ? 'Antigravity' : 'Codex';
   const pauseOf = (kind: RuntimeKind) => paused.all ?? paused.runtimes[kind];
   /** Whether a session may not start a turn by itself now: parked, or on a paused runtime. */
-  const held = (session: Session) => !!session.parked || !!pauseOf(session.runtimeKind);
+  const held = (session: Session) => !!session.parked || !!pauseOf(session.runtimeKind) || (session.lifecycleHolds ?? 0) > 0;
+
+  /**
+   * Marks a session pending (its native process restarting) with a fresh `acknowledged` that resolves
+   * when the returned function clears it. Mail delivered meanwhile waits on that promise; with the old,
+   * already resolved one it would retry in a microtask loop and stall the process.
+   */
+  function beginPending(session: Session) {
+    let done!: () => void;
+    session.pending = true;
+    session.acknowledged = new Promise<void>(resolve => { done = resolve; });
+    let cleared = false;
+    return () => {
+      if (cleared) return;
+      cleared = true;
+      session.pending = false;
+      done();
+    };
+  }
   const describePause = (pause: Pause, kind?: RuntimeKind) =>
     `${kind ? label(kind) : 'ALP'} is paused (${pause.reason}${pause.by !== 'alpd' ? `, by ${pause.by}` : ''})${pause.resetsAt ? `; the limit resets ${pause.resetsAt}` : ''}`;
 
@@ -1879,6 +1898,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     // with the next one, but never wake an idle requester on their own.
     // Once none runs, what is left must still reach it, or a finished requester would never end.
     const waking = !session.assignments.size || session.mail.some(event => !event.deliveredTurn && !event.passive && !(event.kind === 'note' && event.assignment !== sessionId));
+    // A held idle session (a lifecycle operation, a pause, parked work) keeps its mail for the release.
+    if (!session.active && waking && held(session)) { session.wakeHeld = true; return; }
     if (session.pending) {
       void session.acknowledged.then(() => deliver(sessionId, session));
     } else if (session.active) {
@@ -1935,6 +1956,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     };
     const work = queue.then(async () => {
       if (closed || session.closed) return release();
+      // A hold taken after this wake was queued (a rewind) keeps the mail for its release.
+      if (held(session)) { release(); session.wakeHeld = true; return; }
       // Whatever ran first decides: a running turn gets the mail by steering, an interrupt holds it.
       if (session.wakeBlocked || session.active || session.pending) {
         release();
@@ -3028,6 +3051,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       const nativeConfig = await configOf(session);
       noteInstructions(sessionId, session, nativeConfig.developerInstructions);
 
+      // A Claude fork or rewind that has not had its first prompt yet is made from its base (§12.7).
+      const base = mapping.threadId ? spec.restore?.base : undefined;
+      if (base && runtimeKind !== 'claude') throw new Error(`A ${label(runtimeKind)} session has no base conversation; only Claude makes a fork on its first prompt`);
+      if (base) session.base = base;
       const result = mapping.threadId
         ? await runtime.request(
             'thread/resume',
@@ -3035,6 +3062,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
               ...nativeConfig,
               threadId:
                 mapping.threadId,
+              ...(base ? { base } : {}),
             },
           )
         : await runtime.request(
@@ -3204,28 +3232,209 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
     const old = session.runtime;
     void old.close().catch(() => {});
+    let finishPending = () => {};
     try {
       const transport = createTransport(options, session.runtimeKind, session.mapping.workdir, nativeEnvironment(options, session.mapping.env), session.mapping.acp, session.mapping.antigravity);
       session.runtime = transport;
-      session.pending = true;
+      finishPending = beginPending(session);
       wire(sessionId, session, transport);
       await transport.initialize();
       const config = await configOf(session);
-      if (session.closed) return void transport.close().catch(() => {});
-      await transport.request('thread/resume', { ...config, threadId: session.threadId });
-      if (session.closed) return void transport.close().catch(() => {});
-      session.pending = false;
+      if (session.closed) { finishPending(); return void transport.close().catch(() => {}); }
+      await transport.request('thread/resume', { ...config, threadId: session.threadId, ...(session.base ? { base: session.base } : {}) });
+      if (session.closed) { finishPending(); return void transport.close().catch(() => {}); }
       session.buffered = [];
+      finishPending();
       runLog(rootOf(sessionId), { event: 'session.revived', sessionId, agent: session.mapping.agent.name });
       if (session.parked && !pauseOf(session.runtimeKind)) {
         session.parked.prompt = `ALP restarted your ${harness} process after it stopped in the middle of your turn. Continue where you left off: your earlier work in this session and its files are intact.${session.parent ? ' Finish with alp_handoff as before.' : ''}`;
         continueParked(sessionId, session);
       }
     } catch (failure) {
-      session.pending = false;
+      finishPending();
       session.parked = undefined;
       runLog(rootOf(sessionId), { event: 'session.revive_failed', sessionId, agent: session.mapping.agent.name, error: errorData(failure).message });
       failSession(sessionId, session, error);
+    }
+  }
+
+  /**
+   * Why a root cannot have its native process restarted now, or undefined when it can: the seam that
+   * rebind (a rewind), a reload (G2: rebind(id, its own binding)) and a live model or team change (D)
+   * share. Its whole tree must be idle: an open root with no turn, opening or pending prompt, child,
+   * assignment, question to the user, unread or held mail, parked work, or review by its supervisor.
+   */
+  function restartRefusal(sessionId: string, session: Session | undefined): string | undefined {
+    if (!session || session.closed) return 'The session is not open';
+    if (session.parent || session.role === 'supervisor') return 'Only a root session can be restarted';
+    if (session.pending) return 'The session is still opening or restarting';
+    if (session.active) return 'A turn is running';
+    if (session.children.size || session.assignments.size) return 'Assignments are still running';
+    if ([...userQuestions.values()].some(pending => pending.question.rootId === sessionId)) return 'A question to the user waits for an answer';
+    // Mail a lifecycle hold keeps waits for its release, then reaches the session's new conversation.
+    if ((hasActiveMail(session) || session.wakeHeld) && !session.lifecycleHolds) return 'Mail waits for the session';
+    if (session.parked || session.parkReason) return 'The session is parked';
+    if (reviewing(session)) return 'The supervisor is reviewing the session';
+    return undefined;
+  }
+
+  /**
+   * Restarts a live session's native process on `binding` (ALPD §31, as revive does): the old process
+   * stops first, so no two processes ever hold the session's conversation, then a new one resumes
+   * `binding` and replaces it, keeping the session id, configuration and viewers. Throws, leaving the
+   * session without a process, when the new one cannot resume; the caller reopens or fails it. The
+   * caller checks restartRefusal and runs this in the operation queue. `verify`: a Claude conversation
+   * without a transcript (or base) is refused rather than left to Claude, which would refuse it at boot
+   * or start it empty; reopening the binding a session already ran on resumes it as revive does.
+   */
+  async function restartNative(sessionId: string, session: Session, binding: NativeBinding, verify = true) {
+    const old = session.runtime;
+    const finishPending = beginPending(session);
+    await old.close().catch(() => {});
+    const transport = createTransport(options, session.runtimeKind, session.mapping.workdir, nativeEnvironment(options, session.mapping.env), session.mapping.acp, session.mapping.antigravity);
+    // Not wired before it resumes: a failure now fails this restart, not the session.
+    let failure: unknown;
+    transport.onFailure(error => { failure ??= error; });
+    session.runtime = transport;
+    try {
+      await transport.initialize();
+      const config = await configOf(session);
+      noteInstructions(sessionId, session, config.developerInstructions);
+      if (session.closed) throw new Error('Session closed during restart');
+      const result = await transport.request('thread/resume', {
+        ...config, threadId: binding.threadId,
+        ...(binding.base ? { base: binding.base } : verify && session.runtimeKind === 'claude' ? { requireHistory: true } : {}),
+      });
+      if (failure) throw failure;
+      if (session.closed) throw new Error('Session closed during restart');
+      if (result?.thread?.id !== undefined && result.thread.id !== binding.threadId) throw new Error(`${label(session.runtimeKind)} resumed ${result.thread.id} instead of ${binding.threadId}`);
+    } catch (error) {
+      await transport.close().catch(() => {});
+      // Not pending any more: mail that waited runs again in the operation queue, after this restart's
+      // caller (which reopens or fails the session) is through.
+      finishPending();
+      throw error;
+    }
+    session.threadId = binding.threadId;
+    if (binding.base) session.base = binding.base;
+    else delete session.base;
+    session.buffered = [];
+    wire(sessionId, session, transport);
+    finishPending();
+  }
+
+  /** rebind(): moves an idle root to another native conversation, or reopens its own; see AlpRuntime.rebind. */
+  async function rebindSession(sessionId: string, binding: NativeBinding) {
+    const session = sessions.get(sessionId);
+    const refusal = restartRefusal(sessionId, session);
+    if (refusal) throw new ConversationError('session_busy', refusal);
+    if (!plainObject(binding, ['threadId', 'base']) || typeof binding.threadId !== 'string' || !binding.threadId ||
+      (binding.base !== undefined && (!plainObject(binding.base, ['threadId', 'at']) || typeof binding.base.threadId !== 'string' || !binding.base.threadId || (binding.base.at !== undefined && typeof binding.base.at !== 'string')))) {
+      throw new Error('A binding needs a threadId, and a base only with a threadId and an optional at');
+    }
+    if (binding.base && session!.runtimeKind !== 'claude') throw new ConversationError('runtime_unsupported', `A ${label(session!.runtimeKind)} session has no base conversation`);
+    const live = session!;
+    const previous: NativeBinding = { threadId: live.threadId, ...(live.base ? { base: live.base } : {}) };
+    try {
+      await restartNative(sessionId, live, binding);
+    } catch (error) {
+      runLog(rootOf(sessionId), { event: 'session.rebind_failed', sessionId, agent: live.mapping.agent.name, threadId: binding.threadId, error: errorData(error).message });
+      try {
+        if (live.closed) throw error;
+        await restartNative(sessionId, live, previous, false);
+      } catch (reopen) {
+        // Neither conversation opens: the session fails as a provider failure does.
+        live.pending = false;
+        if (!live.closed) failSession(sessionId, live, reopen);
+      }
+      if (error instanceof ConversationError) throw error;
+      throw new ConversationError('native_refused', `The conversation could not be opened: ${errorData(error).message}`, { outcomeUnknown: !!(error as { outcomeUnknown?: boolean })?.outcomeUnknown });
+    }
+    runLog(rootOf(sessionId), { event: 'session.rebound', sessionId, agent: live.mapping.agent.name, from: previous.threadId, threadId: binding.threadId });
+    const updated = snapshot(sessionId, live);
+    emit(sessionId, { type: 'session.updated', session: updated });
+    return updated;
+  }
+
+  /** branch(): makes the native conversation a fork or rewind continues; see AlpRuntime.branch. */
+  async function branchConversation(request: BranchRequest): Promise<NativeBinding> {
+    if (closed) throw new Error('Runtime is closed');
+    if (request.runtime !== 'codex' && request.runtime !== 'claude') throw new ConversationError('runtime_unsupported', `${label(request.runtime)} sessions cannot be forked or rewound`);
+    if (!Array.isArray(request.turns) || !request.turns.every(turn => typeof turn === 'string')) throw new Error('branch needs the source turns in order');
+    if (typeof request.source?.threadId !== 'string' || !request.source.threadId) throw new Error('branch needs the source thread');
+    if (typeof request.model !== 'string' || !request.model || !modes.some(candidate => candidate.id === request.mode)) throw new Error('branch needs the model and mode the branch keeps');
+    return request.runtime === 'codex' ? branchCodex(request) : branchClaude(request);
+  }
+
+  /**
+   * A Codex fork, persisted at once (thread/fork), in a short-lived app-server like recall's. The fork
+   * keeps the request's model and settings (Codex otherwise forks with its defaults) and is verified to
+   * end at the expected turn; one that does not is deleted. The source thread is never changed.
+   */
+  async function branchCodex(request: BranchRequest): Promise<NativeBinding> {
+    const end = codexForkEnd(request);
+    const cwd = request.targetCwd ?? request.cwd;
+    const mode = request.mode;
+    const transport = createTransport(options, 'codex', cwd, nativeEnvironment(options));
+    try {
+      try { await transport.initialize(); }
+      catch (error) { throw new ConversationError('native_refused', `Codex did not start: ${errorData(error).message}`); }
+      let forked: any;
+      try {
+        forked = await transport.request('thread/fork', {
+          threadId: request.source.threadId, ...end.params, ephemeral: false, excludeTurns: true, cwd,
+          model: request.model.replace(/^codex:/, ''),
+          sandbox: mode === 'full-access' ? 'danger-full-access' : nativeMode({ mode, copy: false }),
+          approvalPolicy: codexApproval({ mode, permissions: null }),
+        });
+      } catch (error) { throw codexForkRefusal(error); }
+      const id = forked?.thread?.id;
+      // Forked, but under an id ALP cannot read: it may exist, and nothing can be said of it.
+      if (typeof id !== 'string' || !id) throw new ConversationError('native_refused', 'Codex answered the fork without a thread id', { outcomeUnknown: true });
+      let problem: string | undefined;
+      try {
+        if (forked.thread.forkedFromId != null && forked.thread.forkedFromId !== request.source.threadId) problem = `it was forked from ${forked.thread.forkedFromId}`;
+        else {
+          const page = await transport.request('thread/turns/list', { threadId: id, limit: 1, sortDirection: 'desc' });
+          const last = page?.data?.[0];
+          if (last?.id !== end.last) problem = `it ends at ${last?.id ?? 'no turn'}, not ${end.last}`;
+          else if (last.status === 'inProgress') problem = `its last turn ${last.id} is still running`;
+        }
+      } catch (error) { problem = `it could not be read: ${errorData(error).message}`; }
+      if (!problem) return { threadId: id };
+      const deleted = await transport.request('thread/delete', { threadId: id }).then(() => true, () => false);
+      throw new ConversationError('native_refused', `The Codex fork ${id} could not be verified (${problem}); ${deleted ? 'it was deleted' : 'deleting it failed'}`, { outcomeUnknown: !deleted });
+    } finally {
+      await transport.close().catch(() => {});
+    }
+  }
+
+  /**
+   * A Claude branch, without touching Claude: the cut is validated against the transcript and returned
+   * as a binding whose first prompt makes the fork (resume + forkSession at `at`, under the new id).
+   * A source that is itself still a pending fork stands for its base cut at its own `at`.
+   */
+  async function branchClaude(request: BranchRequest): Promise<NativeBinding> {
+    const transport = createTransport(options, 'claude', request.cwd, nativeEnvironment(options));
+    try {
+      const read = async (threadId: string): Promise<ChainEntry[]> => {
+        const answer = await transport.request('thread/chain', { threadId, cwd: request.cwd });
+        if (!Array.isArray(answer?.entries)) throw new Error('Claude answered no transcript');
+        return answer.entries;
+      };
+      await transport.initialize();
+      let source = request.source.threadId;
+      let chain = await read(source);
+      if (!chain.length && request.source.base) {
+        source = request.source.base.threadId;
+        chain = pendingChain(request.source.base, await read(source));
+      }
+      return { threadId: randomUUID(), base: { threadId: source, at: claudeCut(chain, request) } };
+    } catch (error) {
+      if (error instanceof ConversationError) throw error;
+      throw new ConversationError('native_refused', `The Claude transcript could not be read: ${errorData(error).message}`);
+    } finally {
+      await transport.close().catch(() => {});
     }
   }
 
@@ -3806,6 +4015,25 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     interrupt: sessionId => enqueue(() => interruptSession(sessionId)),
 
     configure: (sessionId, changes) => enqueue(() => configureSession(sessionId, changes)),
+
+    branch: request => branchConversation(request),
+
+    rebind: (sessionId, binding) => enqueue(() => rebindSession(sessionId, binding)),
+
+    hold: sessionId => {
+      const session = sessions.get(sessionId);
+      if (!session || session.closed) return undefined;
+      session.lifecycleHolds = (session.lifecycleHolds ?? 0) + 1;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        session.lifecycleHolds = Math.max(0, (session.lifecycleHolds ?? 1) - 1);
+        if (session.lifecycleHolds || session.closed || session.parked || pauseOf(session.runtimeKind) || !session.wakeHeld) return;
+        session.wakeHeld = false;
+        deliver(sessionId, session);
+      };
+    },
 
     close: sessionId => enqueue(async () => {
       openOf(sessionId);
