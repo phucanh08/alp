@@ -24,6 +24,8 @@ import { createScheduleStore, projectKey } from './schedules.js';
 import { createAttachmentStore, type AttachmentRuntime, type AttachmentStoreOptions, type Principal } from './attachments.js';
 import type { RuntimeAttachment } from '@anhlp/alp-protocol/session';
 import { clientMessageId as scheduleMessageId, createScheduler, SCHEDULE_TICK_MS, type ScheduleDelivery } from './scheduler.js';
+import { createLifecycleJournal, LIFECYCLE_RETENTION_MS } from './lifecycle.js';
+import { createConversation } from './conversation.js';
 
 /**
  * alpd's JSON-RPC surface over one shared runtime (plans/reference/ALPD.md §3, §6, §14).
@@ -266,6 +268,67 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }) : undefined;
   // The runtime side of the seam (issue #121 branch J): a runtime that takes attachment parts reads them through this.
   (runtime as AlpRuntime & AttachmentRuntime).bindAttachments?.(attachments?.reader);
+  /**
+   * Gates of roots whose conversation a lifecycle operation changes (a rewind): prompts, scheduled
+   * deliveries and reopens of the root wait until it is through (§12.7).
+   */
+  const holds = new Map<string, { count: number; open: Promise<void>; release: () => void }>();
+  function holdPrompts(root: string) {
+    let gate = holds.get(root);
+    if (!gate) {
+      let release!: () => void;
+      const open = new Promise<void>(resolve => { release = resolve; });
+      gate = { count: 0, open, release };
+      holds.set(root, gate);
+    }
+    gate.count++;
+    const held = gate;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (--held.count === 0) { if (holds.get(root) === held) holds.delete(root); held.release(); }
+    };
+  }
+  /** Prompt deliveries in flight per root: a rewind refuses while one is on its way. */
+  const promptsInFlight = new Map<string, number>();
+  const rootIdOf = (sessionId: string) => rootOf.get(sessionId) ?? records.get(sessionId)?.rootId ?? sessionId;
+  /** Waits while the root's conversation is being changed, then counts a delivery in flight until `run` settles. */
+  async function gated<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+    const root = rootIdOf(sessionId);
+    while (holds.has(root)) await holds.get(root)!.open;
+    refuseFenced(root);
+    promptsInFlight.set(root, (promptsInFlight.get(root) ?? 0) + 1);
+    try { return await run(); }
+    finally {
+      const left = (promptsInFlight.get(root) ?? 1) - 1;
+      if (left > 0) promptsInFlight.set(root, left); else promptsInFlight.delete(root);
+    }
+  }
+  /** A root whose rewind is applied but not committed takes no prompt or reopen until that rewind is sent again. */
+  function fencedRoot(root: string): string | undefined { return conversation?.fenced(root); }
+  function refuseFenced(root: string) {
+    const requestId = fencedRoot(root);
+    if (requestId !== undefined) throw new RpcError(ERROR.conflict, `A rewind of this session is not finished; send session.rewind again with requestId ${requestId}`, { reason: 'session_busy' });
+  }
+  /** Forks and rewinds of Codex and Claude conversations (§12.7): with a store, through the lifecycle journal. */
+  const journal = store ? createLifecycleJournal(path.join(store.root, 'lifecycle')) : undefined;
+  const conversation: ReturnType<typeof createConversation> | undefined = store && journal ? createConversation({
+    runtime, store, journal, records, cursors, logs, treeLogLimit: TREE_LOG_LIMIT,
+    summary: id => summary(id), digest,
+    unsettled: (root): string | undefined => fencedRoot(root) ? 'a rewind of it is not finished; send that rewind again'
+      : recovering.has(root) ? 'it is being reopened after a restart'
+      : openingSessions.has(root) ? 'it is opening'
+        : promptsInFlight.get(root) ? 'a prompt is being delivered' : undefined,
+    holdPrompts,
+    broadcast: (root, envelope) => { for (const connection of attached.get(root) ?? []) deliver(connection, envelope); },
+    get registry() { return registry; },
+    get worktrees() { return worktrees; },
+    attachments,
+    crashPoint,
+    log: { warn: (message, fields) => log.warn(message, fields), info: (message, fields) => log.info(message, fields) },
+    startedAt,
+  }) : undefined;
   /** The daemon's own start-up; the scheduler waits for it before it delivers. */
   let restored: Promise<unknown> = Promise.resolve();
   /**
@@ -505,6 +568,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
    */
   async function restore() {
     await store!.pruneReceipts(RECEIPT_RETENTION_MS, { temporaries: true });
+    await journal?.prune(LIFECYCLE_RETENTION_MS, { temporaries: true }).catch(error => recoveryLog.warn('could not prune the lifecycle journal', { code: 'ALPD_LIFECYCLE_PRUNE_FAILED', error }));
     const loaded = await store!.list();
     await reconcileReceipts(loaded);
     const now = Date.now();
@@ -548,12 +612,16 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         }
       }
     }
+    // Forks and rewinds a crash cut off: finished from their journal, or settled unknown, before any tree reopens.
+    if (conversation) await conversation.recover().catch(error => recoveryLog.error('could not recover lifecycle operations', { code: 'ALPD_LIFECYCLE_RECOVERY_FAILED', error }));
     // Assignments whose tree cannot be reopened end now, and their tasks go back to open.
     const reopened = new Set(reopen.map(entry => entry.record.id));
     for (const rootId of new Set(runtime.recoverable().map(entry => entry.rootId))) {
       if (!reopened.has(rootId)) await runtime.abandon(rootId, 'its root session cannot be reopened').catch(() => {});
     }
     for (const { record, working } of reopen) {
+      // A root whose rewind could not be finished stays closed: it would reopen on the old conversation.
+      if (fencedRoot(record.id)) { recoveryLog.warn(`${record.id} is not reopened: a rewind of it is not finished`, { code: 'ALPD_REWIND_FENCED', sessionId: record.id }); continue; }
       // The session is opened again: a job that waits for it waits, it does not fail.
       markOpening(record.id);
       recovering.set(record.id, recoverTree(record, working, () => { clearOpening(record.id); }));
@@ -614,6 +682,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     try {
       await restored;
       await store.pruneReceipts(RECEIPT_RETENTION_MS, { temporaries: false });
+      await journal?.prune(LIFECYCLE_RETENTION_MS);
       await expire(trees(records.values()));
     } catch (error) {
       recoveryLog.warn('retention sweep failed', { code: 'ALP_RETENTION_FAILED', error });
@@ -672,7 +741,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       await runtime.open(record.id, {
         ...record.spec!,
         persist: true,
-        restore: { agent: session.agent, threadId: session.threadId, runtime: session.runtime, model: session.model, workflow: session.workflow },
+        restore: { agent: session.agent, threadId: session.threadId, runtime: session.runtime, model: session.model, workflow: session.workflow, ...(record.base ? { base: record.base } : {}) },
       }, { history: 'skip', delegation: record.delegation ?? true });
       // The session is open again: a job that waits for it may be delivered.
       open();
@@ -766,7 +835,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       return answer(done, { durable });
     };
     const previous = delivering.get(key) ?? Promise.resolve();
-    const result = previous.catch(() => {}).then(attempt);
+    const result = previous.catch(() => {}).then(() => gated(sessionId, attempt));
     delivering.set(key, result);
     void result.finally(() => { if (delivering.get(key) === result) delivering.delete(key); }).catch(() => {});
     return result;
@@ -832,7 +901,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     const session = live ?? record?.session;
     if (!session) return undefined;
     const status: SessionStatus = live ? (live.activeTurnId ? 'running' : 'idle') : record?.status === 'error' ? 'error' : 'closed';
-    return { ...session, ...(live ? {} : { busy: false, activeTurnId: undefined }), status, title: record?.title, ...(record?.archived ? { archived: true } : {}), ...(record?.attention && !record.archived ? { attention: record.attention } : {}), lastError: record?.lastError, createdAt: record?.createdAt, updatedAt: record?.updatedAt };
+    return { ...session, ...(live ? {} : { busy: false, activeTurnId: undefined }), status, title: record?.title, ...(record?.archived ? { archived: true } : {}), ...(record?.attention && !record.archived ? { attention: record.attention } : {}), lastError: record?.lastError, createdAt: record?.createdAt, updatedAt: record?.updatedAt, ...(record && conversation ? conversation.fields(record, session) : {}) };
   }
 
   /** The record of a root the user acts on. */
@@ -928,7 +997,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         ...(spec.mode !== undefined ? { mode: spec.mode } : {}),
         ...(spec.thinking !== undefined ? { thinking: spec.thinking } : {}),
         persist: true,
-        restore: { agent: session.agent, threadId: session.threadId, runtime: session.runtime, model: session.model, workflow: session.workflow },
+        restore: { agent: session.agent, threadId: session.threadId, runtime: session.runtime, model: session.model, workflow: session.workflow, ...(record.base ? { base: record.base } : {}) },
       }, { history: stored.length ? 'skip' : history, delegation: record.delegation ?? delegation });
       if (history === 'replay') replayHistory(connection, record.id, stored);
       return opened;
@@ -1182,6 +1251,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       const id = sessionId ?? `ses_${randomBytes(8).toString('hex')}`;
       // A root alpd is reopening after a restart: attach once it is open, rather than open it twice.
       await recovering.get(id);
+      // A root whose conversation is being rewound opens once the rewind is through, on its new conversation.
+      while (holds.has(id)) await holds.get(id)!.open;
+      refuseFenced(id);
       let reservedWorkspaceId: string | undefined;
       const reserve = async () => {
         if (!registry) return;
@@ -1285,7 +1357,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       }
       // Without a store the in-memory log keeps only the latest events: a cursor before them cannot continue either.
       const first = replay ? [...stored, ...live].find(envelope => envelope.cursor !== undefined)?.cursor : undefined;
-      const reset = after !== undefined && (after > tip || (replay && after < tip && (first === undefined || first > after + 1)));
+      // A cursor in history a rewind set aside starts over too: what the client holds after it is not this conversation.
+      const reset = after !== undefined && (after > tip || (replay && after < tip && (first === undefined || first > after + 1)) || !!conversation?.discarded(records.get(root), after));
       const from = reset ? 0 : after ?? 0;
       attach(connection, root);
       if (replay) {
@@ -1333,7 +1406,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         await runtime.prompt(sessionId, { clientMessageId, delivery, content: delivered });
       };
       if (!store) {
-        await send();
+        await gated(sessionId, send);
         return {};
       }
       if (!attached.length) return deliverOnce(sessionId, clientMessageId, digest({ delivery, content }), send);
@@ -1345,6 +1418,18 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         },
         abandon: key => attachments!.release(`prompt:${key}`),
       });
+    },
+
+    /** A new root from a root's conversation cut at a turn, or from a branch a rewind set aside (§12.7). */
+    async 'session.fork'(_connection, params) {
+      if (!conversation?.enabled) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd does not fork conversations (capability session.fork is not listed)');
+      return conversation.fork({ ...params, principal: principalOf(params) });
+    },
+
+    /** The root's conversation from before a turn on, same id; the later turns stay a recoverable branch, files untouched (§12.7). */
+    async 'session.rewind'(_connection, params) {
+      if (!conversation?.enabled) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd does not rewind conversations (capability session.rewind is not listed)');
+      return conversation.rewind(params);
     },
 
     async 'session.interrupt'(_connection, { sessionId }) {
@@ -1581,7 +1666,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...operations.capabilities];
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {
