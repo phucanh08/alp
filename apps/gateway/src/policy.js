@@ -560,10 +560,11 @@ function gitDiffFile(raw) {
  * A workspace.git.diff answer as a remote client may see it, before the gateway pages it: the
  * schema's fields only; files whose path or old path gitPath refuses left out and counted
  * (`hidden`), as are files that name neither side `path` when one was asked for (`foreign`). A
- * file's patch over WORKSPACE_GIT.maxFileBytes, the page's over maxTotalBytes, or any field of the
- * wrong shape refuses the whole answer: `{ refused }` says why, for the gateway's log.
+ * file whose content is over WORKSPACE_GIT.maxFileBytes, or past the page's maxTotalBytes, stays
+ * listed as too_large without hunks (`oversize`). Any field of the wrong shape refuses the whole
+ * answer: `{ refused }` says why, for the gateway's log.
  * @param {unknown} raw @param {{ path?: string }} [request]
- * @returns {{ page: import('@anhlp/alp-protocol').GitDiffPage, hidden: number, foreign: number } | { refused: 'shape' | 'file_size' | 'total_size' }}
+ * @returns {{ page: import('@anhlp/alp-protocol').GitDiffPage, hidden: number, foreign: number, oversize: number } | { refused: 'shape' }}
  */
 export function projectGitDiff(raw, { path } = {}) {
   if (!plain(raw)) return { refused: 'shape' };
@@ -574,6 +575,7 @@ export function projectGitDiff(raw, { path } = {}) {
   if (source.nextCursor !== undefined && (typeof source.nextCursor !== 'string' || !source.nextCursor || source.nextCursor.length > 1024)) return { refused: 'shape' };
   let hidden = 0;
   let foreign = 0;
+  let oversize = 0;
   let total = 0;
   /** @type {import('@anhlp/alp-protocol').GitDiffFile[]} */
   const files = [];
@@ -581,16 +583,18 @@ export function projectGitDiff(raw, { path } = {}) {
     const file = gitDiffFile(entry);
     if (file === undefined) return { refused: 'shape' };
     if (file === false) { hidden++; continue; }
-    const bytes = gitPatchBytes(file);
-    if (bytes > WORKSPACE_GIT.maxFileBytes) return { refused: 'file_size' };
-    total += bytes;
-    if (total > WORKSPACE_GIT.maxTotalBytes) return { refused: 'total_size' };
     if (path !== undefined && file.path !== path && file.oldPath !== path) { foreign++; continue; }
+    // Content over the per-file limit, or past the page's, is not passed on: the file stays listed
+    // as too_large without hunks (alpd measures the same decoded content, so this is a backstop).
+    const bytes = gitPatchBytes(file);
+    if (bytes > WORKSPACE_GIT.maxFileBytes || total + bytes > WORKSPACE_GIT.maxTotalBytes) { oversize++; files.push({ ...file, kind: 'too_large', hunks: [] }); continue; }
+    total += bytes;
     files.push(file);
   }
   return {
     hidden,
     foreign,
+    oversize,
     page: {
       compare: { mode: compare.mode, ...(compare.baseRef !== undefined ? { baseRef: compare.baseRef } : {}), ignoreWhitespace: compare.ignoreWhitespace },
       snapshot: source.snapshot,
