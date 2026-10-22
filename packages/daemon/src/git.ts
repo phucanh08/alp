@@ -530,11 +530,13 @@ export type GitReaderOptions = {
   binary?: string;
   timeoutMs?: number;
   log?: (message: string, fields: Record<string, unknown>) => void;
+  /** Tests only: called after a window's contents were scanned and before Git writes their patch, where a racing writer could change a file. */
+  probe?: (step: 'scanned') => Promise<void> | void;
 };
 
 type DiffParams = { workspaceId: string; compare: GitCompare; path?: string; cursor?: string };
 
-export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ.timeoutMs, log = () => {} }: GitReaderOptions) {
+export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ.timeoutMs, log = () => {}, probe }: GitReaderOptions) {
   const key = randomBytes(32);
   const mac = (scope: string) => createHmac('sha256', key).update(scope).digest('base64url').slice(0, 32);
 
@@ -890,6 +892,8 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
     const contents = await blobs(repo, [...wanted.keys()], [...wanted.values()].reduce((sum, size) => sum + size, 0));
     const results: Result[] = new Array(planned.length).fill(undefined);
     const patched: Array<{ index: number; entry: Planned; group: 'plain' | 'renamed' | 'ours' }> = [];
+    /** The digest of each work tree side as scanned: Git reads the file again for the patch. */
+    const scanned = new Map<string, string>();
     for (const [index, entry] of planned.entries()) {
       if (entry.srcMode === GITLINK || entry.dstMode === GITLINK) { results[index] = shown(entry, 'submodule'); continue; }
       if (entry.srcMode === SYMLINK || entry.dstMode === SYMLINK) { results[index] = shown(entry, 'symlink'); continue; }
@@ -904,6 +908,7 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
         try {
           const bytes = await readConfinedFile(repo.root, side.file.split('/'), side.file, GIT_READ.maxScanBytes);
           if (bytes === 'too_large') { results[index] = shown(entry, 'too_large'); refused = true; break; }
+          scanned.set(side.file, hash(bytes));
           sides.push(bytes);
         } catch {
           // A link on the way, a second name, a change while read, gone: not shown.
@@ -915,6 +920,7 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
       if (sides.some(likelyBinary)) { results[index] = shown(entry, 'binary'); continue; }
       patched.push({ index, entry, group: entry.conflicted ? 'ours' : entry.oldPath ? 'renamed' : 'plain' });
     }
+    if (patched.length) await probe?.('scanned');
     for (const group of ['plain', 'renamed', 'ours'] as const) {
       const members = patched.filter(item => item.group === group);
       // Command lines stay bounded: the paths go in chunks.
@@ -939,6 +945,9 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
           if (!item || seen.has(section.header)) failed('a patch section for no listed file');
           seen.add(section.header);
           if (section.bytes > WORKSPACE_GIT.maxFileBytes) { results[item!.index] = shown(item!.entry, 'too_large'); continue; }
+          // The scan above read the content; Git read it again for this patch. A work tree file
+          // that changed in between, or a patch that shows a key, is withheld.
+          if (holdsKey(Buffer.concat(section.chunks)) || !(await unchanged(repo, item!.entry, scanned))) { results[item!.index] = shown(item!.entry, 'withheld'); continue; }
           const parsed = parseSection(section);
           results[item!.index] = parsed.binary
             ? shown(item!.entry, 'binary')
@@ -948,6 +957,20 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
       }
     }
     return results;
+  }
+
+  /** Whether the entry's work tree side still has the content scanned before its patch (none: nothing to check). */
+  async function unchanged(repo: Repository, entry: Planned, scanned: Map<string, string>): Promise<boolean> {
+    const side = entry.new;
+    if (!side || !('file' in side)) return true;
+    const before = scanned.get(side.file);
+    if (before === undefined) return false;
+    try {
+      const bytes = await readConfinedFile(repo.root, side.file.split('/'), side.file, GIT_READ.maxScanBytes);
+      return bytes !== 'too_large' && hash(bytes) === before;
+    } catch {
+      return false;
+    }
   }
 
   async function untrackedFile(repo: Repository, entry: Entry, shown: (entry: Entry, kind: GitDiffFile['kind'], extra?: Partial<GitDiffFile>, cost?: number) => Result): Promise<Result> {
