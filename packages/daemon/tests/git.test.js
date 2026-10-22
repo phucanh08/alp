@@ -373,6 +373,28 @@ test('secrets: blocked paths on either side of a rename, deleted keys, private k
   assert.deepEqual(checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'base' }, path: 'renamed-from-env.txt' }), base).files, []);
 });
 
+test('a work tree file changed between the scan and its patch is withheld, never shown unscanned', { skip }, async t => {
+  const base = await sandbox(t);
+  const root = path.join(base, 'work');
+  const git = await repository(root);
+  await put(path.join(root, 'swap.txt'), 'first line\nsecond line\n');
+  await put(path.join(root, 'steady.txt'), 'steady\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'first');
+  await put(path.join(root, 'swap.txt'), 'first line\nchanged line\n');
+  await put(path.join(root, 'steady.txt'), 'steady and edited\n');
+  // The racing writer: after alpd scanned swap.txt (no key), before Git reads it for the patch.
+  let swaps = 0;
+  const reader = readerFor({ w: root }, { probe: async step => { if (step === 'scanned') { swaps++; await writeFile(path.join(root, 'swap.txt'), `first line\n${PEM}`); } } });
+  const page = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' } }), base);
+  assert.equal(swaps, 1);
+  const files = byPath(page.files);
+  assert.equal(files['swap.txt'].kind, 'withheld');
+  assert.deepEqual(files['swap.txt'].hunks, []);
+  assert.ok(!JSON.stringify(page).includes('PRIVATE KEY') && !JSON.stringify(page).includes('secretsecret'), 'the swapped-in key is never shown');
+  assert.equal(files['steady.txt'].kind, 'text', 'an unchanged file keeps its hunks');
+});
+
 test('kinds: text hunks, binary, too large, mode change, symlink, submodule, conflicts, whitespace', { skip }, async t => {
   const base = await sandbox(t);
   const inner = path.join(base, 'inner');
