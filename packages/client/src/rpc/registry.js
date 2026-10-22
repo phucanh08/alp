@@ -8,6 +8,10 @@ export function workspaceRegistry(client) {
     createWorktree: params => client.request('workspace.worktree.create', params),
     /** @param {import('@anhlp/alp-protocol').RpcMethodMap['workspace.worktree.remove']['params']} params @returns {Promise<import('@anhlp/alp-protocol').RpcMethodMap['workspace.worktree.remove']['result']>} */
     removeWorktree: params => client.request('workspace.worktree.remove', params),
+    /** Read-only Git status of a registry workspace (capability `workspace.git`, §12.5). @param {string} workspaceId @returns {Promise<import('@anhlp/alp-protocol').RpcMethodMap['workspace.git.status']['result']>} */
+    gitStatus: workspaceId => client.request('workspace.git.status', { workspaceId }),
+    /** One page of a read-only Git diff; pass `nextCursor` back as `cursor` with the same comparison and path. @param {import('@anhlp/alp-protocol').RpcMethodMap['workspace.git.diff']['params']} params @returns {Promise<import('@anhlp/alp-protocol').RpcMethodMap['workspace.git.diff']['result']>} */
+    gitDiff: params => client.request('workspace.git.diff', params),
     /** @param {import('@anhlp/alp-protocol').RpcMethodMap['project.list']['params']} [params] @returns {Promise<import('@anhlp/alp-protocol').RpcMethodMap['project.list']['result']>} */
     projects: (params = {}) => client.request('project.list', params),
     /** @param {import('@anhlp/alp-protocol').RpcMethodMap['workspace.list']['params']} [params] @returns {Promise<import('@anhlp/alp-protocol').RpcMethodMap['workspace.list']['result']>} */
