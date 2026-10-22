@@ -503,15 +503,20 @@ test("a checkout's branch, its changes as the Changes panel shows them, and its 
   assert.ok(teams.includes('pho'));
   assert.deepEqual([existsSync(path.join(repo, 'ALP.md')), existsSync(path.join(repo, '.alp'))], [false, false]);
 
+  // The checkout panels read a registry workspace through alpd (workspace.git): open it first.
+  assert.equal((await ask(client, { type: 'checkout_status_request', requestId: 'c0', cwd: repo })).payload.error.code, 'NOT_ALLOWED', 'not a workspace yet');
+  assert.equal((await ask(client, { type: 'open_project_request', requestId: 'o1', cwd: repo })).payload.error, null);
   const status = (await ask(client, { type: 'checkout_status_request', requestId: 'c1', cwd: repo })).payload;
   assert.deepEqual([status.isGit, status.currentBranch, status.isDirty, status.baseRef, status.hasRemote, status.error], [true, 'main', true, 'main', false, null]);
-  assert.equal(status.repoRoot, execFileSync('git', ['-C', repo, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim());
+  assert.equal(status.repoRoot, repo, 'the workspace directory, which is its top level');
   assert.equal((await ask(client, { type: 'checkout_status_request', requestId: 'c2', cwd: root })).payload.isGit, false);
 
   const diff = (await ask(client, { type: 'subscribe_checkout_diff_request', requestId: 'd1', subscriptionId: 'legacy:1', cwd: repo, compare: { mode: 'uncommitted' } })).payload;
   assert.equal(diff.subscriptionId, 'legacy:1');
   const byPath = Object.fromEntries(diff.files.map(file => [file.path, file]));
-  assert.deepEqual(Object.keys(byPath).sort(), ['README.md', 'blob.bin', 'dot.png', 'new.txt']);
+  // The untracked link is listed without its target (alpd never follows or shows one).
+  assert.deepEqual(Object.keys(byPath).sort(), ['README.md', 'blob.bin', 'dot.png', 'new.txt', 'outside']);
+  assert.deepEqual([byPath.outside.status, byPath.outside.hunks], ['binary', []]);
   assert.deepEqual([byPath['README.md'].additions, byPath['README.md'].deletions, byPath['README.md'].isNew], [1, 1, false]);
   assert.deepEqual(byPath['README.md'].hunks[0].lines.map(line => [line.type, line.content]), [['header', '@@ -1,3 +1,3 @@'], ['context', 'one'], ['remove', 'two'], ['add', '2'], ['context', 'three']]);
   assert.deepEqual([byPath['new.txt'].isNew, byPath['new.txt'].additions], [true, 1]);

@@ -1,16 +1,30 @@
-import { open, stat } from 'node:fs/promises';
+import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
+import type { GitDiffFile, GitDiffPage, GitStatus } from '@anhlp/alp-protocol';
 import type { ClientContext, Handler } from './gateway.js';
-import { checkoutFacts, git } from './git.js';
 
 /**
  * A checkout's git state and changes for the app (D31 step 8, ALPD §62): the branch, base and how
  * far apart they are for the header, and the Changes panel's diff, uncommitted or against the
  * base branch, pushed again when the checkout changes. Read-only: committing, pushing, pulling,
- * merging and switching branches answer "in development". The unified-diff parser is ported from
- * Paseo's daemon (packages/server/src/server/utils/diff-highlighter.ts, Copyright (c)
- * 2025-present Mohamed Boudra, Apache License 2.0), without its syntax highlighting.
+ * merging and switching branches answer "in development".
+ *
+ * The bridge runs no Git itself (issue #121, G1): it finds the registry workspace of the `cwd` it
+ * is asked about and asks alpd, whose `workspace.git.status` and `workspace.git.diff` run Git
+ * boxed in (docs/protocol/alp-json-rpc-v1.md §12.5), then answers in Paseo's shapes. A daemon
+ * without them (capability `workspace.git`) is answered with Paseo's error shape, never with a Git
+ * of the bridge's own. Where Paseo's view differs from what alpd shows, on purpose:
+ * - only a registry workspace's own directory, at its repository's top level, is a checkout: an
+ *   unknown directory, or one inside a repository, answers "not git" with an error;
+ * - `repoRoot` is the directory asked about (it is the top level), `mainRepoRoot` null;
+ * - a change to a blocked path (`.env`, keys, credentials, either side of a rename) is not listed;
+ *   a file holding a private key, a symbolic link and a submodule show no content (`binary`);
+ * - `remoteUrl` has no credentials, and is null for a local path remote;
+ * - `upstreamRef` is the full ref of alpd's short upstream (`origin/main` → refs/remotes/origin/main;
+ *   a name without a slash → refs/heads/<name>);
+ * - one diff answer holds alpd's first page (2 MiB of patch): past it, `diffTooLarge` says so and
+ *   the rest is not listed.
  */
 
 type Inbound<T extends SessionInboundMessage['type']> = Extract<SessionInboundMessage, { type: T }>;
@@ -21,207 +35,125 @@ type Status = StatusPayload extends infer P ? P extends unknown ? Omit<P, 'reque
 type DiffFile = Extract<Outbound, { type: 'checkout_diff_update' }>['payload']['files'][number];
 type Hunk = DiffFile['hunks'][number];
 type Compare = Inbound<'subscribe_checkout_diff_request'>['compare'];
+type CheckoutError = { code: 'NOT_GIT_REPO' | 'NOT_ALLOWED' | 'MERGE_CONFLICT' | 'UNKNOWN'; message: string };
+type Rpc = (method: string, params: any) => Promise<any>;
 
-const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
-/** Paseo's limits: one file's patch, and all of them. */
-const FILE_PATCH_BYTES = 1024 * 1024;
-const TOTAL_PATCH_BYTES = 2 * 1024 * 1024;
-const UNTRACKED_LIMIT = 200;
 const POLL_MS = 3_000;
+/** How long the directory → workspace answer is kept: polls do not read the registry every time. */
+const WORKSPACE_TTL_MS = 5_000;
 
-// --- Ported from Paseo's diff-highlighter.ts (parseDiff and its helpers) ---
+const notGit = (cwd: string, error: CheckoutError | null = null): Status => ({
+  cwd, error, isGit: false, isPaseoOwnedWorktree: false, repoRoot: null, currentBranch: null, isDirty: null, baseRef: null, aheadBehind: null, aheadOfOrigin: null, behindOfOrigin: null, hasRemote: false, remoteUrl: null,
+});
 
-function extractPathFromMetadata(lines: string[], prefix: '--- ' | '+++ '): string | null {
-  const line = lines.find(candidate => candidate.startsWith(prefix));
-  if (!line) return null;
-  const found = line.slice(prefix.length).replace(/\t.*$/, '').trimEnd();
-  return found === '/dev/null' ? null : found;
+/** alpd's refusal as Paseo's error: its message is fixed by alpd (no host path, no content). */
+function errorOf(error: any): CheckoutError {
+  const reason = error?.data?.reason;
+  if (error?.code === -32601) return { code: 'UNKNOWN', message: 'This ALP daemon cannot read Git state (workspace.git); restart it after upgrading' };
+  if (reason === 'not_repository') return { code: 'NOT_GIT_REPO', message: String(error?.message ?? 'Not a git repository') };
+  return { code: 'UNKNOWN', message: String(error?.message ?? error) };
 }
 
-function extractPathFromDiffHeader(lines: string[]): string {
-  const firstLine = lines[0] ?? '';
-  const prefixed = firstLine.match(/^a\/(.+) b\/(.+)$/);
-  if (prefixed) return prefixed[2];
-  const metadataPath = extractPathFromMetadata(lines, '+++ ') ?? extractPathFromMetadata(lines, '--- ');
-  if (metadataPath) return metadataPath.replace(/^[ab]\//, '');
-  return 'unknown';
-}
+class NotWorkspace extends Error {}
 
-const isMetadataLine = (line: string) => line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ') || line.startsWith('new file mode') || line.startsWith('deleted file mode');
-
-function parseHunkHeader(line: string): Hunk | null {
-  const match = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
-  if (!match) return null;
+/** A hunk as Paseo shows it: a header line as Git writes it, then its lines. */
+function hunkOf(hunk: GitDiffFile['hunks'][number]): Hunk {
+  const range = (start: number, count: number) => (count === 1 ? `${start}` : `${start},${count}`);
   return {
-    oldStart: parseInt(match[1], 10),
-    oldCount: parseInt(match[2] ?? '1', 10),
-    newStart: parseInt(match[3], 10),
-    newCount: parseInt(match[4] ?? '1', 10),
-    lines: [{ type: 'header', content: line.match(/^(@@ .+? @@)/)?.[1] ?? line }],
+    oldStart: hunk.oldStart, oldCount: hunk.oldCount, newStart: hunk.newStart, newCount: hunk.newCount,
+    lines: [{ type: 'header', content: `@@ -${range(hunk.oldStart, hunk.oldCount)} +${range(hunk.newStart, hunk.newCount)} @@` }, ...hunk.lines.map(line => ({ type: line.type, content: line.content }))],
   };
 }
 
-function parseSectionBody(lines: string[]) {
-  const hunks: Hunk[] = [];
-  let current: Hunk | null = null;
-  let additions = 0;
-  let deletions = 0;
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (isMetadataLine(line)) continue;
-    const next = parseHunkHeader(line);
-    if (next) { if (current) hunks.push(current); current = next; continue; }
-    if (!current) continue;
-    if (line.startsWith('+')) { current.lines.push({ type: 'add', content: line.slice(1) }); additions++; }
-    else if (line.startsWith('-')) { current.lines.push({ type: 'remove', content: line.slice(1) }); deletions++; }
-    else if (line.startsWith(' ')) current.lines.push({ type: 'context', content: line.slice(1) });
-    else if (line.length > 0 && !line.startsWith('\\')) current.lines.push({ type: 'context', content: line });
-  }
-  if (current) hunks.push(current);
-  return { hunks, additions, deletions };
-}
-
-export function parseDiff(diffText: string): DiffFile[] {
-  if (!diffText.trim()) return [];
-  const files: DiffFile[] = [];
-  for (const section of diffText.split(/^diff --git /m).filter(Boolean)) {
-    const lines = section.split('\n');
-    const isNew = section.includes('new file mode') || section.includes('--- /dev/null');
-    const isDeleted = section.includes('deleted file mode') || section.includes('+++ /dev/null');
-    const { hunks, additions, deletions } = parseSectionBody(lines);
-    // ALP: renames keep where they came from, and a binary file says so.
-    const renamedFrom = lines.find(line => line.startsWith('rename from '))?.slice('rename from '.length);
-    const binary = lines.some(line => line.startsWith('Binary files ') || line === 'GIT binary patch');
-    files.push({ path: extractPathFromDiffHeader(lines), ...(renamedFrom ? { oldPath: renamedFrom } : {}), isNew, isDeleted, additions, deletions, hunks, status: binary ? 'binary' : 'ok' });
-  }
-  return files;
-}
-
-// --- end of the port ---
-
-/** The base branch: origin's HEAD when there is one, else main or master. */
-async function defaultBase(repoRoot: string) {
-  const remoteHead = await git(repoRoot, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']).then(out => out.trim(), () => '');
-  if (remoteHead.startsWith('refs/remotes/origin/')) return remoteHead.slice('refs/remotes/origin/'.length);
-  const branches = (await git(repoRoot, ['branch', '--format=%(refname:short)']).catch(() => '')).split('\n').map(line => line.trim());
-  return branches.includes('main') ? 'main' : branches.includes('master') ? 'master' : null;
-}
-
-const exists = (repoRoot: string, ref: string) => git(repoRoot, ['rev-parse', '--verify', '--quiet', ref]).then(() => true, () => false);
-/** What a base branch is compared as: origin's copy when there is one. */
-const comparable = async (repoRoot: string, base: string) => await exists(repoRoot, `refs/remotes/origin/${base}`) ? `origin/${base}` : base;
-
-export async function checkoutStatus(cwd: string): Promise<Status> {
-  const facts = await checkoutFacts(cwd);
-  if (!facts.isGit) {
-    return { cwd, error: null, isGit: false, isPaseoOwnedWorktree: false, repoRoot: null, currentBranch: null, isDirty: null, baseRef: null, aheadBehind: null, aheadOfOrigin: null, behindOfOrigin: null, hasRemote: false, remoteUrl: null };
-  }
-  const { repoRoot, currentBranch } = facts;
-  const baseRef = await defaultBase(repoRoot);
-  let aheadBehind: { ahead: number; behind: number } | null = null;
-  if (baseRef && currentBranch && currentBranch !== baseRef) {
-    const counts = await git(repoRoot, ['rev-list', '--left-right', '--count', `${await comparable(repoRoot, baseRef)}...HEAD`]).then(out => out.trim().split(/\s+/).map(Number), () => undefined);
-    if (counts?.length === 2 && counts.every(Number.isFinite)) aheadBehind = { behind: counts[0], ahead: counts[1] };
-  }
-  let upstreamRef: string | null = null;
-  let aheadOfOrigin: number | null = null;
-  let behindOfOrigin: number | null = null;
-  if (currentBranch) {
-    const [upstream, track = ''] = (await git(repoRoot, ['for-each-ref', '--format=%(upstream)%00%(upstream:track,nobracket)', `refs/heads/${currentBranch}`]).catch(() => '')).trim().split('\0');
-    if (upstream && track !== 'gone') {
-      upstreamRef = upstream;
-      aheadOfOrigin = Number(track.match(/ahead (\d+)/)?.[1] ?? 0);
-      behindOfOrigin = Number(track.match(/behind (\d+)/)?.[1] ?? 0);
-    }
-  }
+export function fileOf(file: GitDiffFile): DiffFile {
+  const status = file.kind === 'text' ? 'ok' : file.kind === 'too_large' ? 'too_large' : 'binary';
   return {
-    cwd, error: null, isGit: true, isPaseoOwnedWorktree: false, repoRoot, mainRepoRoot: null, currentBranch, isDirty: facts.isDirty, baseRef,
-    aheadBehind, aheadOfOrigin, behindOfOrigin, hasRemote: facts.remoteUrl !== null, remoteUrl: facts.remoteUrl, upstreamRef,
+    path: file.path, ...(file.oldPath ? { oldPath: file.oldPath } : {}),
+    isNew: file.change === 'added' || file.change === 'untracked' || file.change === 'copied', isDeleted: file.change === 'deleted',
+    additions: file.additions, deletions: file.deletions, hunks: file.kind === 'text' ? file.hunks.map(hunkOf) : [], status,
   };
 }
 
-/** Whether a file looks binary: NUL bytes, or more than 30% control characters, in its first 16 KB. */
-async function looksBinary(file: string) {
-  const handle = await open(file, 'r');
-  try {
-    const { buffer, bytesRead } = await handle.read(Buffer.alloc(16 * 1024), 0, 16 * 1024, 0);
-    const head = buffer.subarray(0, bytesRead);
-    if (head.includes(0)) return true;
-    let control = 0;
-    for (const byte of head) if (byte < 9 || (byte > 13 && byte < 32)) control++;
-    return bytesRead > 0 && control / bytesRead > 0.3;
-  } finally {
-    await handle.close();
-  }
-}
-
-/** The checkout's changes as Paseo's Changes panel shows them, with paths from the repository's root. */
-export async function checkoutDiff(cwd: string, compare: Compare) {
-  const facts = await checkoutFacts(cwd);
-  if (!facts.isGit) return { files: [] as DiffFile[], error: { code: 'NOT_GIT_REPO' as const, message: `${cwd} is not a git repository` } };
-  const { repoRoot } = facts;
-  const whitespace = compare.ignoreWhitespace ? ['-w'] : [];
-  const head = await exists(repoRoot, 'HEAD') ? 'HEAD' : EMPTY_TREE;
-  let range: string[];
-  if (compare.mode === 'base') {
-    const base = compare.baseRef || await defaultBase(repoRoot);
-    if (!base) return { files: [], error: null };
-    const mergeBase = await git(repoRoot, ['merge-base', await comparable(repoRoot, base), 'HEAD']).then(out => out.trim(), () => '');
-    if (!mergeBase) return { files: [], error: null };
-    range = [mergeBase, 'HEAD'];
-  } else {
-    range = [head];
-  }
-  const text = await git(repoRoot, ['diff', '--no-color', '--no-ext-diff', '-M', ...whitespace, ...range], { maxBuffer: 256 * 1024 * 1024 });
-  let total = 0;
-  const files = splitSections(text).map(section => {
-    const [file] = parseDiff(section);
-    if (!file) return undefined;
-    if (section.length > FILE_PATCH_BYTES || total + section.length > TOTAL_PATCH_BYTES) return { ...file, hunks: [], status: 'too_large' as const };
-    total += section.length;
-    return file;
-  }).filter((file): file is DiffFile => !!file);
-  if (compare.mode !== 'base') {
-    const untracked = (await git(repoRoot, ['ls-files', '--others', '--exclude-standard', '-z']).catch(() => '')).split('\0').filter(Boolean);
-    for (const relative of untracked.slice(0, UNTRACKED_LIMIT)) {
-      const absolute = path.join(repoRoot, relative);
-      const info = await stat(absolute).catch(() => undefined);
-      if (!info?.isFile()) continue;
-      const lines = info.size > FILE_PATCH_BYTES ? 0 : await looksBinary(absolute).then(binary => binary ? -1 : 0, () => -1);
-      if (info.size > FILE_PATCH_BYTES || total > TOTAL_PATCH_BYTES) { files.push({ path: relative, isNew: true, isDeleted: false, additions: 0, deletions: 0, hunks: [], status: 'too_large' }); continue; }
-      if (lines < 0) { files.push({ path: relative, isNew: true, isDeleted: false, additions: 0, deletions: 0, hunks: [], status: 'binary' }); continue; }
-      const patch = await git(repoRoot, ['diff', '--no-color', '--no-ext-diff', '--no-index', '--', '/dev/null', relative], { okCodes: [1] }).catch(() => '');
-      total += patch.length;
-      const [file] = parseDiff(patch);
-      if (file) files.push({ ...file, path: relative, isNew: true });
-    }
-  }
-  return { files, error: null };
-}
-
-function splitSections(text: string) {
-  return text.split(/^(?=diff --git )/m).filter(section => section.startsWith('diff --git '));
+export function statusOf(cwd: string, status: GitStatus): Status {
+  if (status.state === 'not_repository') return notGit(cwd);
+  if (status.state !== 'repository') return notGit(cwd, { code: 'NOT_ALLOWED', message: 'ALP shows Git state only at a repository\'s top level' });
+  const upstream = status.upstream;
+  return {
+    cwd, error: null, isGit: true, isPaseoOwnedWorktree: false, repoRoot: cwd, mainRepoRoot: null, currentBranch: status.branch, isDirty: status.dirty, baseRef: status.baseRef,
+    aheadBehind: status.aheadBehind, aheadOfOrigin: upstream?.ahead ?? null, behindOfOrigin: upstream?.behind ?? null, hasRemote: status.hasRemote, remoteUrl: status.remoteUrl,
+    upstreamRef: upstream ? (upstream.ref.includes('/') ? `refs/remotes/${upstream.ref}` : `refs/heads/${upstream.ref}`) : null,
+  };
 }
 
 type Subscription = { client: ClientContext; subscriptionId: string; cwd: string; compare: Compare; last?: string };
 
-export function createCheckouts({ broadcast, log = () => {} }: { broadcast(message: Outbound): void; log?: (message: string) => void }) {
+export function createCheckouts({ broadcast, rpc, log = () => {} }: { broadcast(message: Outbound): void; rpc: Rpc; log?: (message: string) => void }) {
   const subscriptions = new Map<string, Subscription>();
   /** The status each directory last had, so a change goes to every client. */
   const statuses = new Map<string, string>();
+  const workspaces = new Map<string, { at: number; id: Promise<string> }>();
   let timer: NodeJS.Timeout | undefined;
 
-  async function payloadOf(subscription: Subscription) {
+  /** The live registry workspace whose directory `cwd` is (the oldest, as placement picks). */
+  async function lookup(cwd: string): Promise<string> {
+    if (!path.isAbsolute(cwd)) throw new NotWorkspace();
+    const { registry } = await rpc('registry.owner', {});
+    const removed = new Set((registry?.projects ?? []).filter((project: any) => project.removedAt).map((project: any) => project.id));
+    const live = (registry?.workspaces ?? []).filter((entry: any) => !entry.archivedAt && !removed.has(entry.projectId))
+      .sort((a: any, b: any) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    const lexical = path.resolve(cwd);
+    const exact = live.find((entry: any) => entry.directory === lexical || entry.canonical === lexical);
+    if (exact) return exact.id;
+    const real = await realpath(lexical).catch(() => undefined);
+    const found = real && live.find((entry: any) => (entry.canonical ?? entry.directory) === real);
+    if (!found) throw new NotWorkspace();
+    return found.id;
+  }
+  function workspaceOf(cwd: string): Promise<string> {
+    const kept = workspaces.get(cwd);
+    if (kept && Date.now() - kept.at < WORKSPACE_TTL_MS) return kept.id;
+    const id = lookup(cwd);
+    workspaces.set(cwd, { at: Date.now(), id });
+    id.catch(() => workspaces.delete(cwd));
+    return id;
+  }
+
+  async function checkoutStatus(cwd: string): Promise<Status> {
     try {
-      const { files, error } = await checkoutDiff(subscription.cwd, subscription.compare);
-      return { subscriptionId: subscription.subscriptionId, cwd: subscription.cwd, files, error };
+      const workspaceId = await workspaceOf(cwd);
+      return statusOf(cwd, await rpc('workspace.git.status', { workspaceId }));
     } catch (error: any) {
-      return { subscriptionId: subscription.subscriptionId, cwd: subscription.cwd, files: [], error: { code: 'UNKNOWN' as const, message: error?.message ?? String(error) } };
+      if (error instanceof NotWorkspace) return notGit(cwd, { code: 'NOT_ALLOWED', message: 'Not a workspace of this ALP daemon' });
+      return notGit(cwd, errorOf(error));
     }
+  }
+
+  async function checkoutDiff(cwd: string, compare: Compare): Promise<{ files: DiffFile[]; error: CheckoutError | null; diffTooLarge?: boolean }> {
+    let workspaceId: string;
+    try { workspaceId = await workspaceOf(cwd); } catch (error) {
+      if (error instanceof NotWorkspace) return { files: [], error: { code: 'NOT_ALLOWED', message: 'Not a workspace of this ALP daemon' } };
+      return { files: [], error: errorOf(error) };
+    }
+    const wanted = { mode: compare.mode, ...(compare.mode === 'base' && compare.baseRef ? { baseRef: compare.baseRef } : {}), ...(compare.ignoreWhitespace ? { ignoreWhitespace: true } : {}) };
+    let page: GitDiffPage;
+    try {
+      page = await rpc('workspace.git.diff', { workspaceId, compare: wanted });
+    } catch (error: any) {
+      // As before: a base branch that does not exist compares nothing.
+      if (error?.data?.reason === 'unknown_ref' || error?.data?.reason === 'invalid_compare') return { files: [], error: null };
+      return { files: [], error: errorOf(error) };
+    }
+    return { files: page.files.map(fileOf), error: null, ...(page.truncated ? { diffTooLarge: true } : {}) };
+  }
+
+  async function payloadOf(subscription: Subscription) {
+    const { files, error, diffTooLarge } = await checkoutDiff(subscription.cwd, subscription.compare);
+    return { subscriptionId: subscription.subscriptionId, cwd: subscription.cwd, files, error, ...(diffTooLarge ? { diffTooLarge } : {}) };
   }
 
   /** Reads each watched checkout again; what changed goes out. */
   async function poll(onlyCwd?: string) {
+    if (onlyCwd) workspaces.delete(onlyCwd);
     for (const subscription of [...subscriptions.values()]) {
       if (onlyCwd && subscription.cwd !== onlyCwd) continue;
       const payload = await payloadOf(subscription);
@@ -231,8 +163,7 @@ export function createCheckouts({ broadcast, log = () => {} }: { broadcast(messa
       subscription.client.emit({ type: 'checkout_diff_update', payload });
     }
     for (const cwd of new Set([...subscriptions.values()].map(subscription => subscription.cwd).concat(onlyCwd ? [onlyCwd] : []))) {
-      const status = await checkoutStatus(cwd).catch(() => undefined);
-      if (!status) continue;
+      const status = await checkoutStatus(cwd);
       const text = JSON.stringify(status);
       if (statuses.get(cwd) === text) continue;
       const known = statuses.has(cwd);
