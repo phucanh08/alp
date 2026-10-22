@@ -82,7 +82,7 @@ export function createPaseoBridge({ clientFactory, version, token, serverId, hom
   };
   const plugins = createPlugins({ log, usage: readUsage, home, projectDirectories: workspaces.projectDirectories });
   const usage = createUsage(readUsage);
-  const checkouts = createCheckouts({ broadcast, log });
+  const checkouts = createCheckouts({ broadcast, rpc: (method, params) => agents.request(method, params), log });
   const relay = createRelay({ home, serverId, attach: socket => gateway.attach(socket), initial: relaySettings, log: message => log?.(message) });
   const providers = createProviders({ home, broadcast, alpEntry: cwd => agents.providerEntry(cwd), log: message => log?.(message) });
   const daemonConfig = createDaemonConfig({ relay, providers, serverId, broadcast, inDevelopment, version, listen, startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString() });
