@@ -32,7 +32,9 @@ export function webAppDir(alpdFile: string, configured?: string) {
  * the app ask for something by itself, or change the protocol, stay off.
  */
 const ENTRY_POINTS = {
-  projectGithubClone: true, workspaceGithubRepositorySearch: true, agentDetach: true, agentForkContext: true, agentForkContextCursor: true,
+  // agentForkContext(Cursor) stay off: Paseo's fork is a text summary of the conversation sent as a new
+  // agent's first message, not a faithful fork. ALP's own fork (session.fork) is in apps/web (issue #121 C).
+  projectGithubClone: true, workspaceGithubRepositorySearch: true, agentDetach: true,
   providerRemoval: true, importSessionWorkspaceTarget: true, importSessionSearch: true, fsEntryOps: true, fsEntryDuplicate: true, workspaceSetupRun: true,
 };
 
@@ -88,6 +90,10 @@ export function createPaseoBridge({ clientFactory, version, token, serverId, hom
   const daemonConfig = createDaemonConfig({ relay, providers, serverId, broadcast, inDevelopment, version, listen, startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString() });
   Object.assign(handlers, quietHandlers, daemonConfig.handlers, providers.handlers, agents.handlers, workspaces.handlers, plugins.handlers, usage.handlers, checkouts.handlers, { directory_suggestions_request: directorySuggestions, file_explorer_request: fileExplorer });
   Object.assign(features, ENTRY_POINTS, daemonConfig.features, providers.features, agents.features, workspaces.features, plugins.features, usage.features, checkouts.features);
+  // agent.rewind.request in conversation mode. alpd (with its store) lists session.rewind on macOS and Linux,
+  // not on Windows; the hello is answered before the bridge reaches alpd, so the platform decides here, and
+  // each agent's supportsRewindConversation says whether that session's runtime rewinds.
+  features.rewind = process.platform !== 'win32';
   // web.pairing is registered with alpd by the integration process over its RPC extension.
 
   return Object.assign(gateway, {

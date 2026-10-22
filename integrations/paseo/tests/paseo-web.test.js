@@ -127,6 +127,10 @@ test('the socket wants the token at hello, then speaks Paseo: server_info, pongs
   // Paseo's buttons that only act on a click show, and answer "in development" until ALP has them.
   assert.equal(serverInfo.message.payload.features.projectAdd, true);
   assert.equal(serverInfo.message.payload.features.ownedSubscriptions, undefined);
+  // Rewind is ALP's conversation rewind (§12.7); Paseo's text-summary fork is not advertised (issue #121 C).
+  assert.equal(serverInfo.message.payload.features.rewind, process.platform !== 'win32');
+  assert.notEqual(serverInfo.message.payload.features.agentForkContext, true);
+  assert.notEqual(serverInfo.message.payload.features.agentForkContextCursor, true);
   // Voice and dictation say why they are off instead of waiting on an answer.
   assert.deepEqual(serverInfo.message.payload.capabilities.voice.dictation, { enabled: false, reason: 'Tính năng đang phát triển' });
   client.send({ type: 'ping' });
