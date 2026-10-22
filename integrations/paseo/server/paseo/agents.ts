@@ -154,7 +154,8 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       lastUserMessageAt: null,
       status,
       activeTurn: session.activeTurnId ? { turnId: session.activeTurnId, startedAt: null } : null,
-      capabilities,
+      // Rewind is real only where alpd rewinds this session's conversation (§12.7); files never (ALP restores none).
+      capabilities: { ...capabilities, supportsRewindConversation: rewinds(session), supportsRewindFiles: false, supportsRewindBoth: false },
       currentModeId: session.mode,
       availableModes,
       pendingPermissions: [...questions.values()].filter(question => question.rootId === session.id).map(permissionOf),
@@ -377,6 +378,10 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       }
       case 'session.opened': case 'session.updated': case 'session.closed': case 'session.failed':
         break;
+      // A rewind (by any client) replaced the root's conversation: its timeline starts over from alpd's history.
+      case 'history.reset':
+        if (!replaying.has(root)) { reattachRoot(root); void refresh().catch(() => {}); }
+        return;
       default:
         return;
     }
@@ -505,6 +510,31 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       childTimelines.delete(child.id);
       childDeltas.delete(child.id);
     }
+  }
+
+  /** Whether alpd rewinds this root's conversation now (capability session.rewind and the root's own support). */
+  function rewinds(session: SessionSummary) {
+    return !!alp?.capabilities?.includes('session.rewind') && session.conversation?.rewind === true;
+  }
+
+  /**
+   * The turn a Paseo user message started, and the history generation it was found in: alpd's history
+   * read backwards from its tail. A message steered into a running turn started none, so it is refused.
+   */
+  async function turnOfMessage(root: string, messageId: string) {
+    const clientMessageId = messageId.startsWith('user:') ? messageId.slice('user:'.length) : messageId;
+    let page = await alp!.request<HistoryPage>('session.history', { sessionId: root });
+    const generation = page.generation;
+    for (let pages = 0; pages < 100; pages++) {
+      for (const item of page.items) {
+        if ('oversized' in item || item.sessionId !== root || item.event.type !== 'prompt.accepted' || item.event.clientMessageId !== clientMessageId) continue;
+        if (item.event.result !== 'turn') throw new Error('This message was sent into a running turn; rewind to before the message that started it');
+        return { turnId: item.event.turnId, generation };
+      }
+      if (!page.hasOlder || !page.olderCursor) break;
+      page = await alp!.request<HistoryPage>('session.history', { sessionId: root, before: page.olderCursor });
+    }
+    throw new Error('ALP cannot find the turn this message started in the session\'s history');
   }
 
   function known(agentId: string) {
@@ -744,6 +774,28 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
           content: [{ type: 'text', text: message.text }],
         });
         attention.delete(session.id);
+        return reply(null);
+      } catch (error: any) {
+        return reply(error?.message ?? String(error));
+      }
+    },
+
+    /**
+     * Paseo's rewind, as ALP's session.rewind (docs/protocol/alp-json-rpc-v1.md §12.7): the conversation
+     * goes back to before the message, under the same agent; the later turns stay a recoverable branch.
+     * Files are never restored or changed, so the files and both modes are refused.
+     */
+    async 'agent.rewind.request'(message: Inbound<'agent.rewind.request'>) {
+      const reply = (error: string | null): Outbound => ({ type: 'agent.rewind.response', payload: { requestId: message.requestId, agentId: message.agentId, ok: !error, error } });
+      try {
+        await started;
+        if (message.mode !== 'conversation') return reply('ALP rewinds the conversation only; it never restores or changes files');
+        const session = known(message.agentId);
+        if (!rewinds(session)) return reply('This agent\'s conversation cannot be rewound');
+        const { turnId, generation } = await turnOfMessage(session.id, message.messageId);
+        await alp!.request('session.rewind', { sessionId: session.id, requestId: `paseo:${message.requestId}`, ifGeneration: generation, beforeTurnId: turnId });
+        reattachRoot(session.id);
+        void refresh().catch(() => {});
         return reply(null);
       } catch (error: any) {
         return reply(error?.message ?? String(error));
