@@ -1,4 +1,4 @@
-import type { RuntimeTransport } from './contracts.js';
+import type { NativeBase, RuntimeTransport } from './contracts.js';
 import type { RuntimeKind, SessionSpec, ResolvedSession } from './resolve.js';
 import type { MailEvent } from './mailbox.js';
 import type { Worktree, WorktreeChange, Copy } from './workspace.js';
@@ -11,6 +11,8 @@ export type Session = {
   runtime: RuntimeTransport;
   mapping: ResolvedSession;
   threadId: string;
+  /** Claude: the conversation threadId is made from on its first prompt, until then (a fork or rewind, §12.7). */
+  base?: NativeBase;
   active?: string;
   /** A continued turn accepts a simultaneous user auto prompt as steering. */
   resumedTurn?: string;
@@ -72,6 +74,8 @@ export type Session = {
   parkReason?: string;
   /** Mail arrived while its runtime was paused; it is delivered on resume. */
   wakeHeld?: boolean;
+  /** How many lifecycle operations (a rewind) hold its wakes now; mail waits until the last releases (AlpRuntime.hold). */
+  lifecycleHolds?: number;
   /** Permission questions to the user, one at a time. */
   permissionQueue?: Promise<unknown>;
 

@@ -24,6 +24,7 @@ type ClaudeQuery = AsyncGenerator<SDKMessage, void> & {
   interrupt(): Promise<unknown>;
   setPermissionMode(mode: 'default' | 'acceptEdits' | 'bypassPermissions'): Promise<void>;
   close(): void;
+  initializationResult?(): Promise<unknown>;
 };
 
 // Zod mirrors of the provider's dynamic tool schemas; the provider validates again.
@@ -340,6 +341,25 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
 export const claudeLimited = (info?: { status: string; overageStatus?: string }) =>
   info?.status === 'rejected' && info.overageStatus !== 'allowed' && info.overageStatus !== 'allowed_warning';
 
+/** How long a resume waits for Claude to start before it goes on (ClaudeTransport.booted). */
+const BOOT_MS = 15_000;
+
+/**
+ * A Claude session's main chain, read from its transcript by the Agent SDK: user and assistant entries
+ * in order, with their transcript uuids. Found under `dir`'s project, else in any project (a session
+ * resumed or forked from another directory). Empty when the session has no transcript yet.
+ */
+export async function claudeChain(sessionId: string, dir?: string): Promise<Array<{ uuid: string; type: 'user' | 'assistant'; toolResult?: boolean }>> {
+  const { getSessionMessages } = await import(CLAUDE_SDK);
+  let messages: any[] = dir ? await getSessionMessages(sessionId, { dir }) : [];
+  if (!messages.length) messages = await getSessionMessages(sessionId);
+  return messages.filter(message => (message.type === 'user' || message.type === 'assistant') && typeof message.uuid === 'string').map(message => {
+    const content = message.message?.content;
+    const toolResult = message.type === 'user' && Array.isArray(content) && content.length > 0 && content.every((block: any) => block?.type === 'tool_result');
+    return { uuid: message.uuid, type: message.type, ...(toolResult ? { toolResult: true } : {}) };
+  });
+}
+
 /** Maps Claude Agent SDK streaming sessions to the normalized runtime protocol. */
 export class ClaudeTransport {
   private listeners = new Set<Listener>();
@@ -367,6 +387,12 @@ export class ClaudeTransport {
   private compaction?: string;
   /** The plugin directory that loads the agent's skills, removed on close. */
   private skillDirectory?: string;
+  /** Whether a turn ran in this process; before one, an error result is a boot refusal. */
+  private turnsStarted = false;
+  /** Rejects when the process fails, for a resume that waits for Claude to start. */
+  private bootFailure?: Promise<never>;
+  private rejectBoot?: (error: Error) => void;
+  private bootError?: Error;
 
   constructor(
     private readonly command: string,
@@ -437,6 +463,8 @@ export class ClaudeTransport {
       return {};
     }
 
+    if (method === 'thread/chain') return { entries: await claudeChain(params.threadId, params.cwd ?? this.cwd) };
+
     if (method === 'thread/delete') {
       const { deleteSession } = await import(CLAUDE_SDK);
       await deleteSession(params.threadId, params.cwd ? { dir: params.cwd } : {});
@@ -445,11 +473,17 @@ export class ClaudeTransport {
 
     if (method === 'thread/start' || method === 'thread/resume' || method === 'thread/fork') {
       this.clearAssistantText();
-      this.config = params as NativeConfig;
+      const { base, requireHistory, ...config } = params as NativeConfig & { base?: { threadId: string; at?: string }; requireHistory?: boolean };
+      this.config = config as NativeConfig;
       this.threadId =
         method === 'thread/resume' ? params.threadId : randomUUID();
       // A fork resumes the thread's history under a new id, leaving the thread itself unchanged.
-      await this.start(method === 'thread/start' ? undefined : { resume: params.threadId, fork: method === 'thread/fork' });
+      const from = method === 'thread/start' ? undefined
+        : method === 'thread/resume' ? await this.resumeFrom(params.threadId, base, requireHistory)
+        : { resume: params.threadId, fork: true };
+      await this.start(from);
+      // A resume Claude refuses at boot (a missing session, a cut it cannot make) fails this request, not a later turn.
+      if (method === 'thread/resume' && (base || requireHistory)) await this.booted();
       return {
         thread: { id: this.threadId, turns: [] },
         cwd: this.cwd,
@@ -466,6 +500,7 @@ export class ClaudeTransport {
       if (method === 'turn/start') {
         this.clearAssistantText();
         this.activeTurn = turnId;
+        this.turnsStarted = true;
       }
       this.input.push({
         type: 'user',
@@ -474,7 +509,8 @@ export class ClaudeTransport {
           content: params.input.map(claudeContent),
         },
         parent_tool_use_id: null,
-        uuid: randomUUID(),
+        // A turn's prompt entry in the transcript carries the turn's id, so ALP can cut the conversation at it (§12.7).
+        uuid: method === 'turn/start' ? turnId : randomUUID(),
         session_id: this.threadId,
       });
       return method === 'turn/start' ? { turn: { id: turnId } } : {};
@@ -489,7 +525,42 @@ export class ClaudeTransport {
     throw new Error(`Unsupported Claude runtime operation '${method}'`);
   }
 
-  private async start(from?: { resume: string; fork: boolean }) {
+  /**
+   * How a resume starts. With a base, a session whose transcript does not exist yet is made from the
+   * base's conversation cut at `at` (a fork or rewind, §12.7): Claude writes it, under this session's
+   * id, only when its first prompt runs. Otherwise, the session's own transcript.
+   */
+  private async resumeFrom(threadId: string, base?: { threadId: string; at?: string }, requireHistory?: boolean) {
+    const own = base || requireHistory ? await claudeChain(threadId, this.config!.cwd) : [];
+    if (!base || own.length) {
+      if (requireHistory && !own.length) throw new Error(`Claude session ${threadId} not found`);
+      return { resume: threadId, fork: false };
+    }
+    const source = await claudeChain(base.threadId, this.config!.cwd);
+    if (!source.length) throw new Error(`Claude session ${base.threadId} not found`);
+    if (base.at && !source.some(entry => entry.uuid === base.at)) throw new Error(`Claude session ${base.threadId} has no entry ${base.at}`);
+    return { resume: base.threadId, fork: true, at: base.at };
+  }
+
+  /**
+   * Waits until Claude has started: its answer to the SDK's initialize request, or the failure that
+   * ends it first. Past BOOT_MS ALP goes on, as any resume does, and a later refusal fails the session.
+   */
+  private async booted() {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        this.query!.initializationResult?.().then(() => undefined, () => undefined),
+        this.bootFailure,
+        new Promise<void>(resolve => { timer = setTimeout(resolve, BOOT_MS); }),
+      ]);
+    } finally { clearTimeout(timer); }
+    // A refusal can arrive with the answer itself; let the stream deliver it.
+    await new Promise(resolve => setImmediate(resolve));
+    if (this.bootError) throw this.bootError;
+  }
+
+  private async start(from?: { resume: string; fork: boolean; at?: string }) {
     const { createSdkMcpServer, query, tool } = await import(CLAUDE_SDK);
     const config = this.config!;
     const mcpServers = this.convertMcp(config.mcpServers);
@@ -591,11 +662,13 @@ export class ClaudeTransport {
       persistSession: !config.ephemeral,
       promptSuggestions: false,
       includePartialMessages: true,
-      ...(from ? { resume: from.resume, ...(from.fork ? { forkSession: true, sessionId: this.threadId } : {}) } : { sessionId: this.threadId }),
+      ...(from ? { resume: from.resume, ...(from.fork ? { forkSession: true, sessionId: this.threadId } : {}), ...(from.at ? { resumeSessionAt: from.at } : {}) } : { sessionId: this.threadId }),
       // Explicit native path avoids SDK optional binaries inside Electron app.asar.
       pathToClaudeCodeExecutable: this.command,
     };
 
+    this.bootFailure = new Promise<never>((_, reject) => { this.rejectBoot = reject; });
+    this.bootFailure.catch(() => {});
     this.query = query({ prompt: this.input, options }) as ClaudeQuery;
     this.pump = this.consume(this.query).catch((error) => this.fail(error));
     void this.measureContext();
@@ -787,6 +860,12 @@ export class ClaudeTransport {
       return;
     }
 
+    // Before any turn, an error result is Claude refusing to start the session (a resume it rejected).
+    // The SDK then ends the stream with this error, which fails the transport as before.
+    if (message.type === 'result' && message.is_error && !this.activeTurn && !this.turnsStarted) {
+      this.refuseBoot(new Error(message.errors?.length ? message.errors.join('; ') : 'Claude refused to start the session'));
+      return;
+    }
     if (message.type === 'result') this.clearAssistantText();
     if (message.type === 'result' && this.activeTurn) {
       const turnId = this.activeTurn;
@@ -811,6 +890,11 @@ export class ClaudeTransport {
     }
   }
 
+  private refuseBoot(error: Error) {
+    this.bootError ??= error;
+    this.rejectBoot?.(error);
+  }
+
   private emit(method: string, params: any) {
     for (const listener of this.listeners) listener(method, params);
   }
@@ -830,6 +914,7 @@ export class ClaudeTransport {
     if (this.closed) return;
     this.clearAssistantText();
     const error = value instanceof Error ? value : new Error(String(value));
+    this.refuseBoot(error);
     for (const listener of this.failures) listener(error);
   }
 

@@ -108,8 +108,8 @@ export type RuntimeOptions = {
   github?: GitHubRunner;
 };
 
-import type { OpenOptions, PromptContent, PromptInput } from '@anhlp/alp-protocol/session';
-export type { OpenOptions, PromptContent, PromptInput } from '@anhlp/alp-protocol/session';
+import type { NativeBase, OpenOptions, PromptContent, PromptInput } from '@anhlp/alp-protocol/session';
+export type { NativeBase, OpenOptions, PromptContent, PromptInput } from '@anhlp/alp-protocol/session';
 
 export type ScheduleHandler = (action: 'create' | 'list' | 'get' | 'cancel', params: Record<string, unknown>) => Promise<unknown>;
 
@@ -163,7 +163,70 @@ export type AlpRuntime = {
   abandon(rootId: string, reason: string): Promise<RecoveryOutcome[]>;
   /** Closes everything; assignments still running stay in the live file, so the next alpd continues them. */
   shutdown(): Promise<void>;
+  /**
+   * Makes the native conversation a fork or rewind continues (docs/protocol/alp-json-rpc-v1.md §12.7): the
+   * source's conversation cut at a completed turn, persisted by the runtime and leaving the source
+   * unchanged. Touches no live session. Codex forks natively now (thread/fork); Claude validates the
+   * cut against the transcript and answers a binding the first prompt forks (NativeBinding.base).
+   * Refusals throw a ConversationError; one the runtime may or may not have acted on carries
+   * `outcomeUnknown: true`. Absent: the host cannot fork or rewind.
+   */
+  branch?(request: BranchRequest): Promise<NativeBinding>;
+  /**
+   * Moves an idle live root to another native conversation (a rewind), or reopens its own (a reload):
+   * its native process restarts and resumes `binding`, keeping the session id, its configuration and
+   * attached viewers. Refused (ConversationError session_busy) unless the whole tree is idle: no turn,
+   * pending prompt, child, assignment, question, mail or parked work. Emits session.updated.
+   * When the new binding cannot be opened, the old one is reopened and the error thrown; when neither
+   * opens, the session fails as a provider failure does.
+   */
+  rebind?(sessionId: string, binding: NativeBinding): Promise<SessionSnapshot>;
+  /**
+   * Holds the turns the runtime would start by itself on this session (mail wakes) while a lifecycle
+   * operation changes its conversation (a rewind, later a reload or live configure): mail stays queued
+   * and is delivered when the last hold is released, to whatever conversation the session runs then.
+   * rebind does not refuse for mail a hold keeps. Client prompts are not held here; alpd holds them.
+   * Undefined when the session is not open.
+   */
+  hold?(sessionId: string): (() => void) | undefined;
 };
+
+/** The native conversation a session continues: its thread, or for Claude one its first prompt makes from `base`. */
+export type NativeBinding = { threadId: string; base?: NativeBase };
+
+export type BranchRequest = {
+  runtime: RuntimeKind;
+  /** The conversation to branch: the source session's binding. */
+  source: NativeBinding;
+  /** Where the source session runs (Claude keeps its transcripts by this directory). */
+  cwd: string;
+  /** Where the branch will run; the source's cwd when absent. */
+  targetCwd?: string;
+  /** The configuration the branch keeps: Codex otherwise forks with its default model and settings. */
+  model: string;
+  thinking: string;
+  mode: string;
+  /**
+   * The cut, by ALP turn id (a Codex turn id; a Claude prompt uuid): keep through a completed turn, or
+   * everything before a turn. Absent: the whole conversation.
+   */
+  cutoff?: { throughTurnId: string } | { beforeTurnId: string };
+  /** The source root's turns in order, as ALP's timeline has them, for the cut's validation. */
+  turns: string[];
+};
+
+export type ConversationErrorReason = 'runtime_unsupported' | 'boundary_unmapped' | 'empty_prefix' | 'native_refused' | 'session_busy';
+/** A fork, rewind or rebind the runtime refused; `outcomeUnknown` when the native runtime may have acted. */
+export class ConversationError extends Error {
+  readonly data: { reason: ConversationErrorReason };
+  readonly outcomeUnknown: boolean;
+  constructor(reason: ConversationErrorReason, message: string, { outcomeUnknown = false } = {}) {
+    super(message);
+    this.name = 'ConversationError';
+    this.data = { reason };
+    this.outcomeUnknown = outcomeUnknown;
+  }
+}
 
 import type { SessionPreview } from '@anhlp/alp-protocol/session';
 export type { SessionPreview } from '@anhlp/alp-protocol/session';
