@@ -65,3 +65,14 @@ test('attachment helpers send their methods as given; upload chunks within the a
   const done = await attachments({ request: async method => method === 'attachment.begin' ? { uploadId: 'upl_1', state: 'committed', received: 3, size: 3, maxChunkBytes: 8, attachmentId: 'att_1' } : { attachment: { attachmentId: 'att_1' } } }).upload({ sessionId: 's', name: 'x', mimeType: 'text/plain', data: new Uint8Array(3), requestId: 'r', sha256: '0'.repeat(64) });
   assert.deepEqual(done, { attachmentId: 'att_1' });
 });
+
+test('conversation helpers send session.fork and session.rewind exactly as given (capabilities session.fork, session.rewind)', async () => {
+  const { conversation } = await import('@anhlp/alp-client/portable');
+  const sent = [];
+  const api = conversation({ request: async (method, params) => { sent.push([method, params]); return { method }; } });
+  const fork = { sessionId: 'ses_1', requestId: 'fork-1', ifGeneration: '0123456789abcdef0123456789abcdef', boundary: { throughTurnId: 'turn-1' }, workspaceId: 'wks_1', newSessionId: 'ses_f1', title: 'Try another way' };
+  const rewind = { sessionId: 'ses_1', requestId: 'rewind-1', ifGeneration: '0123456789abcdef0123456789abcdef', beforeTurnId: 'turn-2' };
+  assert.deepEqual(await api.fork(fork), { method: 'session.fork' });
+  assert.deepEqual(await api.rewind(rewind), { method: 'session.rewind' });
+  assert.deepEqual(sent, [['session.fork', fork], ['session.rewind', rewind]]);
+});
