@@ -34,7 +34,8 @@
     "session.history": "Durable bounded backward envelope pages, persisted generation and numeric attach watermark.",
     "workspace.registry": "Daemon-owned project/workspace registry, durable pins, revision CAS and requestId replay.",
     "workspace.worktree": "Host-approved managed user worktrees; opt-in workspace.manage and named destination mappings.",
-    "workspace.git": "workspace.git.status and workspace.git.diff: a registered workspace's read-only Git status and structured diff hunks by workspaceId; enumerated comparisons only, bounded (1 MiB per file, 2 MiB per page, 200 untracked files) with an opaque snapshot and next cursor; blocked secret paths withheld on both sides of a rename; no Git mutation."
+    "workspace.git": "workspace.git.status and workspace.git.diff: a registered workspace's read-only Git status and structured diff hunks by workspaceId; enumerated comparisons only, bounded (1 MiB per file, 2 MiB per page, 200 untracked files) with an opaque snapshot and next cursor; blocked secret paths withheld on both sides of a rename; no Git mutation.",
+    "attachments": "attachment.begin/chunk/commit/abort/get/delete: daemon-owned immutable non-image attachments by opaque id, uploaded in bounded chunks, and session.prompt content parts `{ type: \"attachment\", attachmentId }`; daemon.hello carries `attachmentLimits`. Listed only with a home and a store, on macOS and Linux."
   },
   "methods": {
     "assignment.recall": {
@@ -267,6 +268,65 @@
               "maxCount",
               "maxBytes",
               "maxTotalBytes"
+            ],
+            "additionalProperties": false
+          },
+          "attachmentLimits": {
+            "type": "object",
+            "description": "Effective attachment limits for this connection, when `attachments` is advertised. Byte limits count decoded bytes; times are milliseconds. An operator or a gateway may lower them, never raise them.",
+            "properties": {
+              "maxObjectBytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxPerPrompt": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxPromptBytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxChunkBytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxActiveUploads": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxPrincipalBytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxDaemonBytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "uploadTimeoutMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "unreferencedRetentionMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "releasedGraceMs": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "maxObjectBytes",
+              "maxPerPrompt",
+              "maxPromptBytes",
+              "maxChunkBytes",
+              "maxActiveUploads",
+              "maxPrincipalBytes",
+              "maxDaemonBytes",
+              "uploadTimeoutMs",
+              "unreferencedRetentionMs",
+              "releasedGraceMs"
             ],
             "additionalProperties": false
           }
@@ -2004,11 +2064,29 @@
                   "type": "object",
                   "properties": {
                     "type": {
+                      "const": "attachment"
+                    },
+                    "attachmentId": {
+                      "type": "string",
+                      "pattern": "^att_[0-9a-f]{32}$"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "attachmentId"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
                       "type": "string",
                       "not": {
                         "enum": [
                           "text",
-                          "image"
+                          "image",
+                          "attachment"
                         ]
                       }
                     }
@@ -2020,6 +2098,28 @@
                 }
               ]
             }
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the bound project must be one of them."
           }
         },
         "required": [
@@ -3909,6 +4009,436 @@
           "files",
           "hiddenCount",
           "truncated"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "attachment.begin": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "capability": "attachments",
+        "idempotent": "with requestId",
+        "risks": [
+          "reserves stored bytes of the daemon host for a file the client uploads"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "mimeType": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the bound project must be one of them."
+          }
+        },
+        "required": [
+          "sessionId",
+          "name",
+          "size",
+          "mimeType",
+          "requestId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "pattern": "^upl_[0-9a-f]{32}$"
+          },
+          "state": {
+            "enum": [
+              "uploading",
+              "committed"
+            ]
+          },
+          "received": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxChunkBytes": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "attachmentId": {
+            "type": "string",
+            "pattern": "^att_[0-9a-f]{32}$"
+          }
+        },
+        "required": [
+          "uploadId",
+          "state",
+          "received",
+          "size",
+          "maxChunkBytes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "attachment.chunk": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session"
+        },
+        "capability": "attachments",
+        "idempotent": "same offset and bytes",
+        "risks": [
+          "writes uploaded bytes to the daemon host"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "pattern": "^upl_[0-9a-f]{32}$"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "data": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 349528,
+            "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the bound project must be one of them."
+          }
+        },
+        "required": [
+          "uploadId",
+          "offset",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "received": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "received",
+          "size"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "attachment.commit": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session"
+        },
+        "capability": "attachments",
+        "idempotent": true
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "pattern": "^upl_[0-9a-f]{32}$"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the bound project must be one of them."
+          }
+        },
+        "required": [
+          "uploadId",
+          "sha256"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "attachment": {
+            "$ref": "#/$defs/attachment"
+          }
+        },
+        "required": [
+          "attachment"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "attachment.abort": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session"
+        },
+        "capability": "attachments",
+        "idempotent": false
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "pattern": "^upl_[0-9a-f]{32}$"
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the bound project must be one of them."
+          }
+        },
+        "required": [
+          "uploadId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "aborted": {
+            "const": true
+          }
+        },
+        "required": [
+          "aborted"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "attachment.get": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "session"
+        },
+        "capability": "attachments",
+        "idempotent": true
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "attachmentId": {
+            "type": "string",
+            "pattern": "^att_[0-9a-f]{32}$"
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the bound project must be one of them."
+          }
+        },
+        "required": [
+          "attachmentId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "attachment": {
+            "$ref": "#/$defs/attachment"
+          }
+        },
+        "required": [
+          "attachment"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "attachment.delete": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session"
+        },
+        "capability": "attachments",
+        "idempotent": false
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "attachmentId": {
+            "type": "string",
+            "pattern": "^att_[0-9a-f]{32}$"
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the bound project must be one of them."
+          }
+        },
+        "required": [
+          "attachmentId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "const": true
+          }
+        },
+        "required": [
+          "deleted"
         ],
         "additionalProperties": false
       }
@@ -6476,6 +7006,66 @@
         "directory",
         "labels",
         "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "attachment": {
+      "type": "object",
+      "description": "A committed attachment as clients see it: ids, display metadata and its digest, never a host path or URL.",
+      "properties": {
+        "attachmentId": {
+          "type": "string",
+          "pattern": "^att_[0-9a-f]{32}$"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 255
+        },
+        "detectedMimeType": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 255
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "committedAt": {
+          "type": "string"
+        },
+        "referenced": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "attachmentId",
+        "sessionId",
+        "name",
+        "mimeType",
+        "detectedMimeType",
+        "size",
+        "sha256",
+        "createdAt",
+        "committedAt",
+        "referenced"
       ],
       "additionalProperties": false
     }

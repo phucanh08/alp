@@ -4972,6 +4972,412 @@
     "hiddenCount": 0,
     "truncated": false
    }
+  },
+  {
+   "name": "attachment.begin params",
+   "check": "params",
+   "method": "attachment.begin",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_1",
+    "name": "report.pdf",
+    "size": 1024,
+    "mimeType": "application/pdf",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "requestId": "req-1"
+   }
+  },
+  {
+   "name": "attachment.begin params from a gateway with principal context",
+   "check": "params",
+   "method": "attachment.begin",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_1",
+    "name": "empty.txt",
+    "size": 0,
+    "mimeType": "text/plain",
+    "requestId": "req-2",
+    "principalId": "abcdef0123456789",
+    "principalEpoch": "0123456789abcdef0123456789abcdef",
+    "authorizedRoots": [
+     "/work/project"
+    ]
+   }
+  },
+  {
+   "name": "attachment.begin params naming a host path",
+   "check": "params",
+   "method": "attachment.begin",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "name": "report.pdf",
+    "size": 1024,
+    "mimeType": "application/pdf",
+    "requestId": "req-1",
+    "path": "/etc/passwd"
+   }
+  },
+  {
+   "name": "attachment.begin params with a URL instead of bytes",
+   "check": "params",
+   "method": "attachment.begin",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "name": "report.pdf",
+    "size": 1024,
+    "mimeType": "application/pdf",
+    "requestId": "req-1",
+    "url": "https://example.com/report.pdf"
+   }
+  },
+  {
+   "name": "attachment.begin params with a negative size",
+   "check": "params",
+   "method": "attachment.begin",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "name": "report.pdf",
+    "size": -1,
+    "mimeType": "application/pdf",
+    "requestId": "req-1"
+   }
+  },
+  {
+   "name": "attachment.begin params with a MIME type that is not type/subtype",
+   "check": "params",
+   "method": "attachment.begin",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "name": "report.pdf",
+    "size": 1,
+    "mimeType": "pdf; charset=x",
+    "requestId": "req-1"
+   }
+  },
+  {
+   "name": "attachment.begin result",
+   "check": "result",
+   "method": "attachment.begin",
+   "valid": true,
+   "value": {
+    "uploadId": "upl_0123456789abcdef0123456789abcdef",
+    "state": "uploading",
+    "received": 0,
+    "size": 1024,
+    "maxChunkBytes": 262144,
+    "expiresAt": "2026-10-22T01:00:00.000Z"
+   }
+  },
+  {
+   "name": "attachment.begin result of a repeated request already committed",
+   "check": "result",
+   "method": "attachment.begin",
+   "valid": true,
+   "value": {
+    "uploadId": "upl_0123456789abcdef0123456789abcdef",
+    "state": "committed",
+    "received": 1024,
+    "size": 1024,
+    "maxChunkBytes": 262144,
+    "attachmentId": "att_0123456789abcdef0123456789abcdef"
+   }
+  },
+  {
+   "name": "attachment.begin result with a host path",
+   "check": "result",
+   "method": "attachment.begin",
+   "valid": false,
+   "value": {
+    "uploadId": "upl_0123456789abcdef0123456789abcdef",
+    "state": "uploading",
+    "received": 0,
+    "size": 1024,
+    "maxChunkBytes": 262144,
+    "path": "/home/u/.alp/state/attachments/x/payload"
+   }
+  },
+  {
+   "name": "attachment.chunk params",
+   "check": "params",
+   "method": "attachment.chunk",
+   "valid": true,
+   "value": {
+    "uploadId": "upl_0123456789abcdef0123456789abcdef",
+    "offset": 0,
+    "data": "JVBERi0xLjQK"
+   }
+  },
+  {
+   "name": "attachment.chunk params with invalid base64",
+   "check": "params",
+   "method": "attachment.chunk",
+   "valid": false,
+   "value": {
+    "uploadId": "upl_0123456789abcdef0123456789abcdef",
+    "offset": 0,
+    "data": "not base64!"
+   }
+  },
+  {
+   "name": "attachment.chunk params with empty data",
+   "check": "params",
+   "method": "attachment.chunk",
+   "valid": false,
+   "value": {
+    "uploadId": "upl_0123456789abcdef0123456789abcdef",
+    "offset": 0,
+    "data": ""
+   }
+  },
+  {
+   "name": "attachment.chunk params with an id that is not an upload id",
+   "check": "params",
+   "method": "attachment.chunk",
+   "valid": false,
+   "value": {
+    "uploadId": "../x",
+    "offset": 0,
+    "data": "AAAA"
+   }
+  },
+  {
+   "name": "attachment.chunk result",
+   "check": "result",
+   "method": "attachment.chunk",
+   "valid": true,
+   "value": {
+    "received": 9,
+    "size": 1024
+   }
+  },
+  {
+   "name": "attachment.commit params",
+   "check": "params",
+   "method": "attachment.commit",
+   "valid": true,
+   "value": {
+    "uploadId": "upl_0123456789abcdef0123456789abcdef",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   }
+  },
+  {
+   "name": "attachment.commit params with an uppercase digest",
+   "check": "params",
+   "method": "attachment.commit",
+   "valid": false,
+   "value": {
+    "uploadId": "upl_0123456789abcdef0123456789abcdef",
+    "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+   }
+  },
+  {
+   "name": "attachment.commit result",
+   "check": "result",
+   "method": "attachment.commit",
+   "valid": true,
+   "value": {
+    "attachment": {
+     "attachmentId": "att_0123456789abcdef0123456789abcdef",
+     "sessionId": "ses_1",
+     "name": "report.pdf",
+     "mimeType": "application/pdf",
+     "detectedMimeType": "application/pdf",
+     "size": 1024,
+     "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "createdAt": "2026-10-22T00:00:00.000Z",
+     "committedAt": "2026-10-22T00:01:00.000Z",
+     "referenced": false
+    }
+   }
+  },
+  {
+   "name": "attachment.commit result with a storage path",
+   "check": "result",
+   "method": "attachment.commit",
+   "valid": false,
+   "value": {
+    "attachment": {
+     "attachmentId": "att_0123456789abcdef0123456789abcdef",
+     "sessionId": "ses_1",
+     "name": "report.pdf",
+     "mimeType": "application/pdf",
+     "detectedMimeType": "application/pdf",
+     "size": 1024,
+     "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "createdAt": "2026-10-22T00:00:00.000Z",
+     "committedAt": "2026-10-22T00:01:00.000Z",
+     "referenced": false,
+     "path": "/home/u/.alp/state/attachments/x/payload"
+    }
+   }
+  },
+  {
+   "name": "attachment.abort params",
+   "check": "params",
+   "method": "attachment.abort",
+   "valid": true,
+   "value": {
+    "uploadId": "upl_0123456789abcdef0123456789abcdef"
+   }
+  },
+  {
+   "name": "attachment.abort result",
+   "check": "result",
+   "method": "attachment.abort",
+   "valid": true,
+   "value": {
+    "aborted": true
+   }
+  },
+  {
+   "name": "attachment.get params",
+   "check": "params",
+   "method": "attachment.get",
+   "valid": true,
+   "value": {
+    "attachmentId": "att_0123456789abcdef0123456789abcdef"
+   }
+  },
+  {
+   "name": "attachment.get params with an upload id",
+   "check": "params",
+   "method": "attachment.get",
+   "valid": false,
+   "value": {
+    "attachmentId": "upl_0123456789abcdef0123456789abcdef"
+   }
+  },
+  {
+   "name": "attachment.get result of a referenced attachment",
+   "check": "result",
+   "method": "attachment.get",
+   "valid": true,
+   "value": {
+    "attachment": {
+     "attachmentId": "att_0123456789abcdef0123456789abcdef",
+     "sessionId": "ses_1",
+     "name": "report.pdf",
+     "mimeType": "application/pdf",
+     "detectedMimeType": "application/pdf",
+     "size": 1024,
+     "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "createdAt": "2026-10-22T00:00:00.000Z",
+     "committedAt": "2026-10-22T00:01:00.000Z",
+     "referenced": true
+    }
+   }
+  },
+  {
+   "name": "attachment.delete params",
+   "check": "params",
+   "method": "attachment.delete",
+   "valid": true,
+   "value": {
+    "attachmentId": "att_0123456789abcdef0123456789abcdef"
+   }
+  },
+  {
+   "name": "attachment.delete result",
+   "check": "result",
+   "method": "attachment.delete",
+   "valid": true,
+   "value": {
+    "deleted": true
+   }
+  },
+  {
+   "name": "session.prompt params with an attachment part",
+   "check": "params",
+   "method": "session.prompt",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_1",
+    "clientMessageId": "m-1",
+    "content": [
+     {
+      "type": "text",
+      "text": "Summarise this report"
+     },
+     {
+      "type": "attachment",
+      "attachmentId": "att_0123456789abcdef0123456789abcdef"
+     }
+    ]
+   }
+  },
+  {
+   "name": "session.prompt params with an attachment part naming a path",
+   "check": "params",
+   "method": "session.prompt",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "clientMessageId": "m-1",
+    "content": [
+     {
+      "type": "attachment",
+      "attachmentId": "att_0123456789abcdef0123456789abcdef",
+      "path": "/etc/passwd"
+     }
+    ]
+   }
+  },
+  {
+   "name": "session.prompt params with an attachment part without its id",
+   "check": "params",
+   "method": "session.prompt",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "clientMessageId": "m-1",
+    "content": [
+     {
+      "type": "attachment",
+      "url": "https://example.com/x.pdf"
+     }
+    ]
+   }
+  },
+  {
+   "name": "daemon.hello result with attachment limits",
+   "check": "result",
+   "method": "daemon.hello",
+   "valid": true,
+   "value": {
+    "protocolVersion": 1,
+    "capabilities": [
+     "attachments"
+    ],
+    "attachmentLimits": {
+     "maxObjectBytes": 20971520,
+     "maxPerPrompt": 8,
+     "maxPromptBytes": 41943040,
+     "maxChunkBytes": 262144,
+     "maxActiveUploads": 2,
+     "maxPrincipalBytes": 209715200,
+     "maxDaemonBytes": 1073741824,
+     "uploadTimeoutMs": 3600000,
+     "unreferencedRetentionMs": 86400000,
+     "releasedGraceMs": 604800000
+    }
+   }
+  },
+  {
+   "name": "daemon.hello result with partial attachment limits",
+   "check": "result",
+   "method": "daemon.hello",
+   "valid": false,
+   "value": {
+    "protocolVersion": 1,
+    "attachmentLimits": {
+     "maxObjectBytes": 20971520
+    }
+   }
   }
  ]
 }

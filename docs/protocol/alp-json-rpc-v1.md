@@ -163,6 +163,20 @@ runs before all of them pass**:
 | `in_use` | 1004 | a library entry others refer to cannot be renamed or removed |
 | `busy` | 1005 | the project's task lock stayed held by another writer for 5 s (an `alp` command, a backup) |
 | `unreadable` | 1000 | the daemon user's `settings.json` or `role-skills.json` is not valid |
+| `invalid_name` | -32602 | `attachment.begin`: no visible character left once control, format and path-separator characters are removed, or over 255 UTF-8 bytes (§12.6) |
+| `invalid_data` | -32602 | `attachment.chunk`: data that is not canonical base64 of at least one byte, or over `maxChunkBytes` decoded (§12.6) |
+| `attachment_too_large` | -32602 | `attachment.begin` over `maxObjectBytes`; a chunk past the declared size (§12.6) |
+| `attachment_limit` | -32602 | `session.prompt` with more than `maxPerPrompt` attachments or `maxPromptBytes` of them (§12.6) |
+| `offset_mismatch` | 1004 | `attachment.chunk` at an offset past what the upload holds; `data.received` says where to continue (§12.6) |
+| `chunk_conflict` | 1004 | `attachment.chunk` sent again at an offset with other bytes than those received (§12.6) |
+| `upload_incomplete` | 1004 | `attachment.commit` before every declared byte arrived; `data.received` (§12.6) |
+| `hash_mismatch` | 1004 | `attachment.commit`: the bytes stored do not have that SHA-256 (or the one begin declared); the upload is aborted (§12.6) |
+| `request_conflict` | 1004 | a registry mutation's `requestId` reused with another payload (§16); `attachment.begin` with a `requestId` this principal used for another upload (§12.6) |
+| `attachment_referenced` | 1004 | `attachment.delete` of an attachment a prompt (or fork) still references (§12.6) |
+| `upload_expired` | 1001 | a call of the upload's own principal after `uploadTimeoutMs`; anyone else gets `not_found` (§12.6) |
+| `quota_exceeded` | 1005 | `attachment.begin` over the active uploads, principal or daemon quota; `data.limit` names it (§12.6) |
+| `attachment_unavailable` | 1005 | the attachment store cannot be used, or a referenced object's bytes cannot be read now (§12.6) |
+| `attachment_unsupported` | 1005 | `session.prompt` with attachments to a session whose runtime cannot read them (today's runtimes), or an alpd without the store; nothing was sent or recorded (§12.6) |
 
 Errors thrown by an extension's owner travel unchanged (`code`, `message`, `data`). Errors inside
 events (`session.failed`, `prompt.failed`, `turn.ended`) are `AlpError { message, code? }` with string
@@ -188,6 +202,8 @@ The first request on every connection:
   a host by it). It is not an identity and grants nothing. The remote gateway passes it on after its own checks and
   never passes `pid` (docs/alp/remote-gateway.md §3). A daemon without it is valid; clients fall back to an address.
 - `params.capabilities` (optional string array, a sibling of `client`) is reserved for client capabilities; v1 daemons ignore it.
+- `attachmentLimits` (with capability `attachments`) are the effective attachment limits of this connection (§12.6); a
+  gateway may answer lower ones.
 
 ### 6.2 Capabilities
 
@@ -212,6 +228,7 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 | `workspace.files` | `workspace.files.search`: file names under a directory matching a query, read-only (§12.3). Every alpd lists it. |
 | `workspace.files.read` | `workspace.files.list` and `workspace.files.read`: a directory's entries and a UTF-8 text file's content (at most 1 MiB) under a directory, read-only, links never followed, blocked paths refused (§12.4). Every alpd lists it. |
 | `prompt.images` | `session.prompt` takes inline image parts (§10, Prompt content); a session snapshot's `promptImages: true` says its runtime takes them. Every alpd lists it. |
+| `attachments` | `attachment.begin/chunk/commit/abort/get/delete` and `session.prompt` parts `{ type: "attachment", attachmentId }`; hello carries `attachmentLimits` (§12.6). Listed when alpd has a home and a store, on macOS and Linux (not Windows). |
 
 alpd before this revision already had the first three without listing them; the others are new. A method whose
 capability a daemon does not list answers `-32601`. A client that must work with
@@ -529,6 +546,11 @@ fragments at stable source positions. Virtualization of already-loaded web rows 
   - The `user_message` item of such a prompt carries `images: <count>`; image data is never put in
     events, the timeline or the run log, so a replay shows the count, not the image.
   - The receipt's fingerprint covers the images: a repeat with another image is `key_conflict`.
+  - `{ type: "attachment", attachmentId }` (capability `attachments`) is a stored file **by id only**:
+    the schema refuses any other field. alpd resolves it for the caller's principal, project and this
+    session (§12.6), pins it before delivery, and the fingerprint covers the ordered ids and their
+    SHA-256. A session whose runtime cannot read attachments refuses the prompt `1005
+    attachment_unsupported` before any receipt: nothing is sent, dropped or turned into a path.
 - **`task.create` with `requestId`** is answered once per `(projectRoot, requestId)` for 10 minutes **within one alpd
   process**: a repeat with the same title and priority answers the first `{ id }` with `duplicate: true`, concurrent repeats
   wait for the first, other content fails `1004 key_conflict`, and a create that failed may be tried again. Nothing is
@@ -592,6 +614,12 @@ connection on the local socket acts as the owner.
 | `session.attention.clear` | acknowledges a root's attention for every client; told as an `attention` event (§12.2) | yes (a second call answers `cleared: false`) | -32602, 1001, `persistence_failed` | session.read (a look is a read) |
 | `workspace.files.search` | read: file names under `projectRoot` (§12.3) | yes | -32602, 1001 | project.read |
 | `workspace.files.list` / `workspace.files.read` | read: a directory's entries; a text file's content (§12.4) | yes | -32602, 1000, 1001, 1003 | files.read (never a default; docs/alp/remote-gateway.md §5.10) |
+| `attachment.begin` | reserves quota, creates an upload bound to the caller (§12.6) | with `requestId` (same params answer the same upload and what it holds) | -32602, 1001, 1004, 1005, `persistence_failed` | attachments.write + session.write |
+| `attachment.chunk` | writes decoded bytes at `offset` | yes (the same bytes at the same offset) | -32602, 1001, 1004, `persistence_failed` | attachments.write + session.write |
+| `attachment.commit` | verifies SHA-256, publishes the object | yes (same digest answers the same attachment) | 1001, 1004, `persistence_failed` | attachments.write + session.write |
+| `attachment.abort` | drops an upload and its reservation | no (second → 1001) | 1001 | attachments.write + session.write |
+| `attachment.get` | read: metadata only | yes | 1001 | attachments.write + session.read |
+| `attachment.delete` | deletes an unreferenced attachment | no (second → 1001) | 1001, 1004 `attachment_referenced` | attachments.write + session.write |
 | `question.answer` | answers or dismisses; a unique id prefix is accepted | no (second answer → 1001) | 1001, -32602 | session.write |
 | `session.create` | creates or resumes a root, attaches | no (an existing live root is attached: `attached: true`) | -32602, 1000, 1001, `persistence_failed` | session.write |
 | `session.preview` | read (no files written) | yes | -32602, 1000 | session.read |
@@ -895,9 +923,113 @@ The gateway exposes `workspace.git.status` with `project.read` and `workspace.gi
 `project.read` plus `files.read` (docs/alp/remote-gateway.md), for a workspace the credential's
 grant names exactly.
 
+### 12.6 Attachments (`attachment.*`)
+
+Capability `attachments` (issue #121, branch I). Daemon-owned immutable objects holding files a
+client uploads, referenced by opaque ids in `session.prompt`. alpd never accepts or returns a host
+path or URL for them, never downloads, extracts, executes or makes a file executable, and never
+uses a client's string as a storage path. Inline images (§10) are unchanged. alpd lists the
+capability when it has a home and a store (prompt receipts pin references), on macOS and Linux:
+it relies on `O_NOFOLLOW` and POSIX modes, so Windows is not supported and alpd does not serve the
+methods there (`-32601`).
+
+**Limits** (`ATTACHMENTS` in `@anhlp/alp-protocol`, advertised as `daemon.hello` `attachmentLimits`):
+`maxObjectBytes` 20 MiB; `maxPerPrompt` 8 and `maxPromptBytes` 40 MiB per prompt; `maxChunkBytes`
+256 KiB decoded, lowered to fit the frame (`attachmentChunkBytes`: `(maxFrame - 64 KiB) * 3/4`);
+`maxActiveUploads` 2 and `maxPrincipalBytes` 200 MiB per principal, `maxDaemonBytes` 1 GiB per
+daemon, retained references included; `uploadTimeoutMs` 1 h for an incomplete upload,
+`unreferencedRetentionMs` 24 h for a committed object nothing references, `releasedGraceMs` 7 days
+after its last reference was released. The operator may lower any of them in
+`<ALP_HOME>/attachments.json` (`{ "limits": { "<name>": n } }`); a higher value is ignored and logged
+(`ALP_ATTACHMENT_CONFIG`). A gateway may lower them further, never raise them.
+
+**Binding**: every call acts for a principal. A trusted gateway sets `principalId`, `principalEpoch`
+(its credential and grant epoch) and `authorizedRoots` (the canonical workspaces the grant covers now)
+on its own connection, as for `workspace.worktree` (§16); a local client leaves them out and acts as
+the owner. An upload is bound at `begin` to the principal and epoch, the canonical (real) path of its
+session's project, and the session. Every `chunk`, `commit`, `abort`, `get`, `delete` and prompt
+checks the whole binding again: the same principal and epoch, the project among `authorizedRoots`
+(when given), and the session still known to alpd in that project. An id that is unknown, or of
+another principal, epoch, project or session, answers exactly the same `1001 not_found`; nothing
+reveals that it exists.
+
+- `attachment.begin { sessionId, name, size, mimeType, sha256?, requestId }` → `{ uploadId, state,
+  received, size, maxChunkBytes, expiresAt? | attachmentId? }`. `name` is display metadata only: NFC,
+  control and format characters (NUL, bidi overrides, zero-width), line separators and `/` `\`
+  removed, trimmed, at most 255 UTF-8 bytes (`invalid_name` otherwise). `mimeType` is advisory (kept
+  lower case); alpd sniffs the first bytes at commit for display (`detectedMimeType`) and neither
+  chooses behaviour. `size` (0 allowed) is reserved against the quotas atomically: concurrent begins
+  cannot oversubscribe. `sha256`, when given, must match at commit. A repeat with the same
+  `requestId` and params (per principal and epoch) answers the same upload with what it holds now
+  (`received`), so a client resumes there; once committed it answers `state: "committed"` and the
+  `attachmentId`; other params are `1004 request_conflict`.
+- `attachment.chunk { uploadId, offset, data }` → `{ received, size }`. `data` is canonical base64
+  of 1 to `maxChunkBytes` bytes (`invalid_data`). `offset` must be at most `received`
+  (`1004 offset_mismatch` with `data.received` otherwise); bytes before `received` must equal those
+  stored (`1004 chunk_conflict`), the rest is appended; nothing past `size`
+  (`attachment_too_large`). A repeated chunk is therefore idempotent.
+- `attachment.commit { uploadId, sha256 }` → `{ attachment }`. alpd reads every stored byte back
+  through the checked file, compares its SHA-256 (`1004 upload_incomplete` before all bytes,
+  `1004 hash_mismatch` aborts the upload), then publishes the object by one atomic write of its
+  metadata; its payload becomes read-only. A repeat answers the same attachment.
+- `attachment.abort { uploadId }` → `{ aborted: true }`; `attachment.get { attachmentId }` →
+  `{ attachment }` (metadata only); `attachment.delete { attachmentId }` → `{ deleted: true }`, refused
+  `1004 attachment_referenced` while any reference holds it (never evicted).
+- An attachment is `{ attachmentId, sessionId, name, mimeType, detectedMimeType, size, sha256,
+  createdAt, committedAt, referenced }`.
+
+**Storage**: `<ALP_HOME>/state/attachments/` (0700), one directory per object named by its random id
+(0700) with an opaque `payload` (0600, 0400 once committed) and `meta.json`, and the reference index
+`refs.json`. Directories and files are created exclusively without following links; every open
+checks a regular file with one name whose device and inode are those recorded at creation, and the
+object directory's, so a payload or directory swapped for a link, a hard link or another file is
+refused (the upload is aborted, `1000 persistence_failed`), never followed. A failed write (a full
+disk) aborts the upload: nothing half written is published and the reservation is released. Errors
+name no host path.
+
+**References and retention**: a prompt pins its attachments (holder: its receipt key) durably in
+`refs.json` before the pending receipt and before delivery; a prompt the runtime refuses before it
+reaches the provider releases them; an `accepted`, `failed` or unknown outcome keeps them. Referenced
+objects survive expiry, `session.archive` and restarts, and count against quotas. An incomplete
+upload expires after `uploadTimeoutMs`; an unreferenced committed object is removed after
+`unreferencedRetentionMs`, a released one `releasedGraceMs` after its last reference went.
+Collection runs at start and while alpd runs.
+
+**Crash recovery** (process crashes; power loss is not claimed): at start alpd checks the store is a
+private directory of its user, removes temporary files, removes a directory without readable
+metadata (a begin cut short) once it is older than `uploadTimeoutMs`, expires incomplete uploads,
+and re-applies read-only to committed payloads. An unreadable `refs.json` is kept aside
+(`refs.json.corrupt-*`) and every committed object is treated as referenced: nothing is collected on
+a guess. A referenced object whose payload is missing or changed stays listed but a prompt with it
+answers `1005 attachment_unavailable`; alpd never claims it was delivered.
+
+**Seams** (not part of the wire contract):
+- *Runtime (issue #121 branch J)*: a runtime opts in with `takesAttachments(sessionId)` and receives
+  alpd's reader through `bindAttachments(reader)` (`AttachmentRuntime`/`AttachmentReader` in
+  `@anhlp/alp-daemon`). It then gets attachment parts as `{ type: "attachment", attachmentId, name,
+  mimeType, detectedMimeType, size, sha256 }` (`RuntimeAttachment`) and reads the verified bytes of a
+  pinned attachment with `reader.open(attachmentId, sessionId)`: a stream, never a path. Staging a
+  runtime-readable copy inside the session's sandbox is the runtime's work. Today no runtime opts in:
+  every prompt with attachments is refused `attachment_unsupported`.
+- *Fork (t-15b0.4, branch C)*: a fork re-authorizes the source session's attachments for the new
+  session and calls the store's `pin('fork:<newSessionId>', newSessionId, attachmentIds, 'fork')`;
+  references are per holder, so the source keeps its own.
+- *History deletion*: alpd has no session deletion today; `session.archive` keeps references. The
+  store's `releaseSessions(sessionIds)` releases every holder of those sessions (their objects then
+  stay `releasedGraceMs`); retention calls it when it removes a tree unused for 30 days (ALPD §68), and
+  a future explicit history/session deletion must call it too.
+
+The gateway exposes the methods with `attachments.write` and `session.write` (`get`:
+`attachments.write` and `session.read`), never a default (docs/alp/remote-gateway.md §5.14).
+
 ## 13. Compatibility notes for this revision
 
 **Additive** (old clients unaffected):
+- Capability `attachments` (§12.6): `attachment.begin/chunk/commit/abort/get/delete`, the
+  `session.prompt` part `{ type: "attachment", attachmentId }`, `daemon.hello` `attachmentLimits`,
+  `$defs.attachment`, exports `ATTACHMENTS`, `ATTACHMENT_CHUNK_OVERHEAD` and `attachmentChunkBytes`,
+  and the error reasons of §5.3 for them. A prompt without attachment parts has the same receipt
+  fingerprint as before.
 - Typed tool-call details (§8.6): `read`, `edit`, `write`, `search`, `fetch`, `sub_agent`, `plan` and
   `plain_text` beside `shell` and `unknown`, and any later detail type. A client that knew only `shell` and
   `unknown` needs a default branch for the rest; Claude's tools other than Bash, which were `shell` items

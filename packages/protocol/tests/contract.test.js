@@ -155,3 +155,24 @@ test('hello effective image limits and project-data policy are additive and vali
   assert.deepEqual(validateParams('library.save', { kind: 'skills', name: 'data', scope: 'project', content: { body: 'text' }, policy: 'project-data' }), []);
   assert.ok(validateParams('library.save', { kind: 'skills', name: 'data', scope: 'project', content: { body: 'text' }, policy: 'unknown' }).length);
 });
+
+test('attachment limits: chunks fit the frame they travel in, hello limits and prompt parts are validated (capability attachments)', async () => {
+  const { ATTACHMENTS, ATTACHMENT_CHUNK_OVERHEAD, attachmentChunkBytes } = await import('@anhlp/alp-protocol');
+  assert.equal(ATTACHMENTS.maxChunkBytes, 256 * 1024);
+  assert.equal(attachmentChunkBytes(), ATTACHMENTS.maxChunkBytes, 'alpd frames take a whole chunk');
+  // The gateway's default 4 MiB frame takes it too; a small frame lowers it so base64 and the request fit.
+  assert.equal(attachmentChunkBytes(4 * 1024 * 1024), ATTACHMENTS.maxChunkBytes);
+  const small = attachmentChunkBytes(256 * 1024);
+  assert.equal(small, Math.floor((256 * 1024 - ATTACHMENT_CHUNK_OVERHEAD) * 3 / 4));
+  assert.ok(Math.ceil(small / 3) * 4 + ATTACHMENT_CHUNK_OVERHEAD <= 256 * 1024);
+  assert.equal(attachmentChunkBytes(1024), 1, 'never zero');
+  // The schema's longest chunk data is the base64 of the largest chunk.
+  assert.equal(methods.methods['attachment.chunk'].params.properties.data.maxLength, Math.ceil(ATTACHMENTS.maxChunkBytes / 3) * 4);
+  assert.deepEqual(validateParams('session.prompt', { sessionId: 's', clientMessageId: 'm', content: [{ type: 'attachment', attachmentId: `att_${'a'.repeat(32)}` }] }), []);
+  for (const part of [{ type: 'attachment', attachmentId: `att_${'a'.repeat(32)}`, name: 'x' }, { type: 'attachment', attachmentId: '/etc/passwd' }, { type: 'attachment' }]) {
+    assert.ok(validateParams('session.prompt', { sessionId: 's', clientMessageId: 'm', content: [part] }).length, JSON.stringify(part));
+  }
+  const limits = Object.fromEntries(Object.entries(ATTACHMENTS).filter(([key]) => key !== 'maxNameBytes'));
+  assert.deepEqual(validateResult('daemon.hello', { protocolVersion: 1, attachmentLimits: limits }), []);
+  assert.ok(validateResult('daemon.hello', { protocolVersion: 1, attachmentLimits: { ...limits, maxChunkBytes: -1 } }).length);
+});

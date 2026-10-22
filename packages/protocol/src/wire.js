@@ -17,7 +17,7 @@ export const RPC_ERROR = Object.freeze({ parseError: -32700, invalidRequest: -32
  * Features a daemon lists in its daemon.hello result. A client uses a feature only when listed;
  * a daemon that lists none (one older than this list) has none of them. Unknown names are ignored.
  */
-export const CAPABILITY = Object.freeze({ attachAfter: 'attach.after', sessionHistory: 'session.history', workspaceRegistry: 'workspace.registry', workspaceWorktree: 'workspace.worktree', workspaceGit: 'workspace.git', promptReceipts: 'prompt.receipts', extensionMethods: 'extension.methods', team: 'team', task: 'task', library: 'library', libraryProjectWrite: 'library.project.write', settingsLanguage: 'settings.language', sessionListPage: 'session.list.page', questionWatch: 'question.watch', questionWatchTurns: 'question.watch.turns', sessionAttention: 'session.attention', workspaceFiles: 'workspace.files', workspaceFilesRead: 'workspace.files.read', promptImages: 'prompt.images', schedule: 'schedule' });
+export const CAPABILITY = Object.freeze({ attachAfter: 'attach.after', sessionHistory: 'session.history', workspaceRegistry: 'workspace.registry', workspaceWorktree: 'workspace.worktree', workspaceGit: 'workspace.git', promptReceipts: 'prompt.receipts', extensionMethods: 'extension.methods', team: 'team', task: 'task', library: 'library', libraryProjectWrite: 'library.project.write', settingsLanguage: 'settings.language', sessionListPage: 'session.list.page', questionWatch: 'question.watch', questionWatchTurns: 'question.watch.turns', sessionAttention: 'session.attention', workspaceFiles: 'workspace.files', workspaceFilesRead: 'workspace.files.read', promptImages: 'prompt.images', schedule: 'schedule', attachments: 'attachments' });
 /**
  * What alpd takes as images in one session.prompt (capability `prompt.images`): inline base64 of
  * these types only, never a path or URL; at most `maxCount` of them, each at most `maxBytes`
@@ -27,7 +27,7 @@ export const CAPABILITY = Object.freeze({ attachAfter: 'attach.after', sessionHi
 export const PROMPT_IMAGES = Object.freeze({ mimeTypes: Object.freeze(['image/png', 'image/jpeg', 'image/gif', 'image/webp']), maxCount: 8, maxBytes: 5 * 1024 * 1024, maxTotalBytes: 11 * 1024 * 1024 });
 /** Decoded bytes of base64 `data` (padding aware), without decoding it. @param {string} data */
 export const base64Bytes = data => Math.floor(data.length * 3 / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
-export const RPC_METHODS = Object.freeze(["assignment.recall", "board.list", "catalog.get", "daemon.hello", "daemon.pause", "daemon.pauses", "daemon.resume", "daemon.shutdown", "daemon.status", "daemon.usage", "extension.register", "extension.unregister", "library.delete", "library.duplicate", "library.get", "library.list", "library.models", "library.rename", "library.save", "library.skills.set", "project.list", "project.register", "project.remove", "question.answer", "question.list", "question.watch", "registry.owner", "schedule.cancel", "schedule.create", "schedule.get", "schedule.list", "session.archive", "session.attach", "session.attention.clear", "session.close", "session.configure", "session.create", "session.get", "session.history", "session.interrupt", "session.list", "session.log", "session.message", "session.preview", "session.prompt", "session.release", "session.rename", "session.status", "settings.language.get", "settings.language.set", "task.create", "task.gate.resolve", "task.list", "task.update", "team.list", "workspace.files.list", "workspace.files.read", "workspace.files.search", "workspace.get", "workspace.list", "workspace.update", "registry.worktree", "workspace.worktree.options", "workspace.worktree.create", "workspace.worktree.remove", "workspace.git.status", "workspace.git.diff"]);
+export const RPC_METHODS = Object.freeze(["assignment.recall", "board.list", "catalog.get", "daemon.hello", "daemon.pause", "daemon.pauses", "daemon.resume", "daemon.shutdown", "daemon.status", "daemon.usage", "extension.register", "extension.unregister", "library.delete", "library.duplicate", "library.get", "library.list", "library.models", "library.rename", "library.save", "library.skills.set", "project.list", "project.register", "project.remove", "question.answer", "question.list", "question.watch", "registry.owner", "schedule.cancel", "schedule.create", "schedule.get", "schedule.list", "session.archive", "session.attach", "session.attention.clear", "session.close", "session.configure", "session.create", "session.get", "session.history", "session.interrupt", "session.list", "session.log", "session.message", "session.preview", "session.prompt", "session.release", "session.rename", "session.status", "settings.language.get", "settings.language.set", "task.create", "task.gate.resolve", "task.list", "task.update", "team.list", "workspace.files.list", "workspace.files.read", "workspace.files.search", "workspace.get", "workspace.list", "workspace.update", "registry.worktree", "workspace.worktree.options", "workspace.worktree.create", "workspace.worktree.remove", "workspace.git.status", "workspace.git.diff", "attachment.begin", "attachment.chunk", "attachment.commit", "attachment.abort", "attachment.get", "attachment.delete"]);
 
 /**
  * Limits of workspace.files.list and workspace.files.read (capability `workspace.files.read`,
@@ -44,6 +44,42 @@ export const WORKSPACE_FILES = Object.freeze({ maxReadBytes: 1024 * 1024, maxLis
  * A gateway may lower them; never raise them.
  */
 export const WORKSPACE_GIT = Object.freeze({ maxFileBytes: 1024 * 1024, maxTotalBytes: 2 * 1024 * 1024, maxUntracked: 200, maxStatusFiles: 1000, maxRefLength: 255 });
+
+/**
+ * Limits of non-image attachments (capability `attachments`, docs/protocol/alp-json-rpc-v1.md
+ * §12.6): an object of at most `maxObjectBytes`; a prompt of at most `maxPerPrompt` attachments and
+ * `maxPromptBytes` together; chunks of at most `maxChunkBytes` decoded (lowered further by
+ * attachmentChunkBytes to fit a frame); `maxActiveUploads` incomplete uploads and
+ * `maxPrincipalBytes` stored per principal, `maxDaemonBytes` per daemon, retained references
+ * included. An incomplete upload expires after `uploadTimeoutMs`; an unreferenced committed object
+ * is purged after `unreferencedRetentionMs`, one whose references were all released after
+ * `releasedGraceMs`. A display name is at most `maxNameBytes` UTF-8 bytes. An operator or a gateway
+ * may lower them, never raise them; daemon.hello advertises the effective ones (`attachmentLimits`).
+ */
+export const ATTACHMENTS = Object.freeze({
+  maxObjectBytes: 20 * 1024 * 1024,
+  maxPerPrompt: 8,
+  maxPromptBytes: 40 * 1024 * 1024,
+  maxChunkBytes: 256 * 1024,
+  maxActiveUploads: 2,
+  maxPrincipalBytes: 200 * 1024 * 1024,
+  maxDaemonBytes: 1024 * 1024 * 1024,
+  uploadTimeoutMs: 60 * 60 * 1000,
+  unreferencedRetentionMs: 24 * 60 * 60 * 1000,
+  releasedGraceMs: 7 * 24 * 60 * 60 * 1000,
+  maxNameBytes: 255,
+});
+/** Room an attachment.chunk request needs besides its base64 data. */
+export const ATTACHMENT_CHUNK_OVERHEAD = 64 * 1024;
+/**
+ * The decoded bytes one attachment.chunk may carry over frames of at most `maxFrame` bytes:
+ * `maxChunkBytes`, lowered so its base64 and ATTACHMENT_CHUNK_OVERHEAD fit. At least 1 byte.
+ * @param {number} [maxFrame] @param {number} [maxChunkBytes]
+ */
+export function attachmentChunkBytes(maxFrame = MAX_FRAME, maxChunkBytes = ATTACHMENTS.maxChunkBytes) {
+  const fits = Math.floor((maxFrame - ATTACHMENT_CHUNK_OVERHEAD) * 3 / 4);
+  return Math.max(1, Math.min(maxChunkBytes, fits));
+}
 
 /** Directories whose whole content is refused: Git's, ALP's own configuration (its library overrides hold env values), and key and cloud-credential stores. */
 const BLOCKED_DIRECTORIES = new Set(['.git', '.alp', '.ssh', '.gnupg', '.aws', '.azure', '.kube', '.docker', 'gcloud']);

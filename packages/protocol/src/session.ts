@@ -41,8 +41,17 @@ export type OpenOptions = {
 
 /** An image inline in a prompt (capability `prompt.images`): base64 data, never a path or URL; limits in PROMPT_IMAGES. */
 export type PromptImage = { type: 'image'; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; data: string; name?: string };
-/** Text parts carry `text`; image parts (`type: 'image'`) carry PromptImage's fields. */
-export type PromptContent = Array<{ type: string; text?: string; mimeType?: string; data?: string; name?: string }>;
+/** A stored attachment in a prompt (capability `attachments`, §12.6): its opaque id only, never a path or URL. */
+export type PromptAttachment = { type: 'attachment'; attachmentId: string };
+/**
+ * What alpd hands a runtime for an attachment part once it validated and pinned it (§12.6, the
+ * runtime seam of issue #121 branch J): ids, display metadata and digest, never a host path. The
+ * runtime reads the bytes through the AttachmentReader alpd binds, and only for a session whose
+ * runtime declared it takes attachments.
+ */
+export type RuntimeAttachment = { type: 'attachment'; attachmentId: string; name: string; mimeType: string; detectedMimeType: string; size: number; sha256: string };
+/** Text parts carry `text`; image parts (`type: 'image'`) carry PromptImage's fields; attachment parts (`type: 'attachment'`) `attachmentId`. */
+export type PromptContent = Array<{ type: string; text?: string; mimeType?: string; data?: string; name?: string; attachmentId?: string }>;
 
 export type PromptInput = {
   clientMessageId: string;
