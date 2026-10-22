@@ -1,5 +1,5 @@
 import { createHistoryIndex } from './history.js';
-import { appendFile, mkdir, open, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { replaceFile } from './lock.js';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
@@ -7,6 +7,17 @@ import { createLogger } from '@anhlp/alp-core/log';
 import type { Envelope, SessionSnapshot, SessionSpec } from '@anhlp/alp-runtime/index';
 import type { SessionError, SessionStatus } from '@anhlp/alp-protocol/session';
 import type { TurnAttention } from '@anhlp/alp-protocol/events';
+import type { ConversationBranch, ForkProvenance, NativeBase } from '@anhlp/alp-protocol/session';
+
+/** A branch a rewind set aside (§12.7): its public description, the native conversation and where its timeline lies. */
+export type StoredBranch = ConversationBranch & {
+  /** The native conversation the root continued before the rewind: never deleted, so the branch stays recoverable. */
+  threadId: string;
+  base?: NativeBase;
+  /** The first discarded cursor, and the rewind's marker cursor (the branch holds what lay between). */
+  cut: number;
+  marker: number;
+};
 
 /**
  * alpd's durable state (plans/reference/ALPD.md §5, §66): one JSON record per session,
@@ -34,6 +45,12 @@ export type SessionRecord = {
   archived?: boolean;
   /** A root's last turn that ended unseen, until a client acknowledges it or another turn starts (Paseo's requiresAttention). */
   attention?: TurnAttention;
+  /** Claude: the conversation `session.threadId` is made from on its first prompt, after a fork or rewind (§12.7). */
+  base?: NativeBase;
+  /** Where this root was forked from (§12.7). */
+  forkedFrom?: ForkProvenance;
+  /** Branches rewinds set aside, oldest first (§12.7). */
+  branches?: StoredBranch[];
   createdAt: string;
   updatedAt: string;
 };
@@ -172,8 +189,12 @@ export function createStore(root: string) {
   }
 
   const receiptFile = (key: string) => path.join(receiptsDir, `${fileName(key)}.json`);
+  const branchFile = (rootId: string, branchId: string) => path.join(timelineDir, `${fileName(rootId)}.branch-${fileName(branchId)}.jsonl`);
 
   return {
+    /** The state directory this store keeps its files in. */
+    root,
+
     put(record: SessionRecord) {
       const file = path.join(sessionsDir, `${fileName(record.id)}.json`);
       const body = JSON.stringify(record);
@@ -280,6 +301,70 @@ export function createStore(root: string) {
       return index.page(sessionId, options);
     },
 
+    /**
+     * Rewinds a tree's timeline (§12.7), idempotently: the whole timeline moves to the branch file
+     * `<root>.branch-<id>.jsonl`, and the root's timeline becomes its lines before `cut`, the root's own
+     * session lifecycle lines after it (opened, updated, closed: not conversation), `marker`, and any line
+     * whose cursor follows the marker's, in cursor order. Runs in
+     * the tree's append queue, so no append lands in between. A crash leaves the old timeline, or the
+     * branch and the new one beside it (finished by the next call); the history index is rebuilt with a
+     * new generation, so every older history cursor is stale.
+     */
+    rewind(rootId: string, { cut, branchId, marker }: { cut: number; branchId: string; marker: Envelope }) {
+      const file = path.join(timelineDir, `${fileName(rootId)}.jsonl`);
+      const branch = branchFile(rootId, branchId);
+      const temporary = `${file}.rewind-${fileName(branchId)}.tmp`;
+      return queue(appends, rootId, `timeline rewind ${rootId}`, async () => {
+        const exists = (target: string) => stat(target).then(() => true, (error: any) => { if (error?.code === 'ENOENT') return false; throw error; });
+        if (!await exists(branch)) {
+          if (!repaired.has(rootId)) { await repairTail(file); repaired.add(rootId); }
+          const text = await readFile(file, 'utf8').catch((error: any) => { if (error?.code === 'ENOENT') return ''; throw error; });
+          const kept: Array<{ cursor: number; line: string }> = [];
+          const markerCursor = marker.cursor ?? Number.MAX_SAFE_INTEGER;
+          let cursor = 0;
+          for (const line of text.split('\n')) {
+            if (!line) continue;
+            let envelope: Envelope;
+            try { envelope = JSON.parse(line); } catch { continue; }
+            cursor = typeof envelope.cursor === 'number' && envelope.cursor > cursor ? envelope.cursor : cursor + 1;
+            const lifecycle = envelope.sessionId === rootId && ['session.opened', 'session.ready', 'session.updated', 'session.closed', 'session.failed'].includes(envelope.event?.type);
+            // Before the cut: the kept conversation. Between the cut and the marker: only the root's own
+            // lifecycle. After the marker (an event kept while the rewind waited for this queue): the new
+            // conversation's. A line kept past the cut carries its cursor, so cursors stay what clients saw.
+            if (cursor < cut) kept.push({ cursor, line });
+            else if (lifecycle || cursor > markerCursor) kept.push({ cursor, line: JSON.stringify({ ...envelope, cursor }) });
+          }
+          kept.push({ cursor: markerCursor, line: JSON.stringify(marker) });
+          kept.sort((a, b) => a.cursor - b.cursor);
+          await writeFile(temporary, `${kept.map(entry => entry.line).join('\n')}\n`, { mode: 0o600 });
+          if (await exists(file)) await rename(file, branch);
+          else await writeFile(branch, '', { mode: 0o600 });
+        }
+        if (await exists(temporary)) await rename(temporary, file);
+        await Promise.all(['.jsonl.idx', '.jsonl.history.json'].map(suffix => rm(path.join(timelineDir, `${fileName(rootId)}${suffix}`), { force: true })));
+        historyIndexes.delete(rootId);
+        repaired.add(rootId);
+      }, false, { rootId });
+    },
+
+    /** Writes a new tree's whole timeline at once (a fork's, §12.7); written again whole by a repeat. */
+    createTimeline(rootId: string, envelopes: Envelope[]) {
+      const file = path.join(timelineDir, `${fileName(rootId)}.jsonl`);
+      return queue(appends, rootId, `timeline ${rootId}`, async () => {
+        await writeAtomic(file, envelopes.map(envelope => `${JSON.stringify(envelope)}\n`).join(''));
+        await Promise.all(['.jsonl.idx', '.jsonl.history.json'].map(suffix => rm(path.join(timelineDir, `${fileName(rootId)}${suffix}`), { force: true })));
+        historyIndexes.delete(rootId);
+        repaired.add(rootId);
+      }, false, { rootId });
+    },
+
+    /** The timeline of a branch a rewind set aside; empty when it is not there. */
+    async branchTimeline(rootId: string, branchId: string): Promise<Envelope[]> {
+      await appends.get(rootId);
+      try { return parseTimeline(await readFile(branchFile(rootId, branchId), 'utf8'), path.basename(branchFile(rootId, branchId))); }
+      catch (error: any) { if (error?.code === 'ENOENT') return []; throw error; }
+    },
+
     async timeline(rootId: string): Promise<Envelope[]> {
       await appends.get(rootId);
       const name = `${fileName(rootId)}.jsonl`;
@@ -330,12 +415,14 @@ export function createStore(root: string) {
       return { ...health, ...(health.lastError ? { lastError: { ...health.lastError } } : {}) };
     },
 
-    /** Removes a whole tree: its records and its timeline. */
+    /** Removes a whole tree: its records, its timeline and the branches rewinds set aside. */
     async remove(rootId: string, ids: string[]) {
       await Promise.all([...ids.map(id => writes.get(id)), appends.get(rootId)]);
+      const branches = (await readdir(timelineDir).catch(() => [] as string[])).filter(name => name.startsWith(`${fileName(rootId)}.branch-`));
       await Promise.all([
         ...ids.map(id => rm(path.join(sessionsDir, `${fileName(id)}.json`), { force: true })),
         ...['.jsonl', '.jsonl.idx', '.jsonl.history.json'].map(suffix => rm(path.join(timelineDir, `${fileName(rootId)}${suffix}`), { force: true })),
+        ...branches.map(name => rm(path.join(timelineDir, name), { force: true })),
       ]);
       for (const id of ids) failed.delete(id);
       failed.delete(`timeline:${rootId}`);

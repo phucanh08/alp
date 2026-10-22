@@ -730,6 +730,25 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
       });
     },
 
+    /** The attachments these holders pin, as ids (a fork's kept prompts, §12.7); unknown holders hold none. */
+    async heldBy(holders: string[]) {
+      await recovered;
+      if (failure) return [];
+      const ids = new Set<string>();
+      for (const holder of holders) for (const id of refs.holders[holder]?.attachments ?? []) ids.add(`att_${id}`);
+      return [...ids];
+    },
+
+    /**
+     * Re-authorizes attachments for `principal` before another session pins them (a fork, §12.7): each
+     * must be committed and bound to this principal, its grant epoch and an authorized project, as every
+     * other call checks; otherwise refused as an unknown one.
+     */
+    async authorize(principal: Principal, attachmentIds: string[]) {
+      await recovered; usable();
+      for (const attachmentId of attachmentIds) await attachment(attachmentId, principal);
+    },
+
     /** Drops `holder`'s references (a prompt refused before it reached the runtime). */
     async release(holder: string) {
       await recovered; usable();

@@ -33,6 +33,22 @@
       "types": "./dist/attachments.d.ts",
       "default": "./dist/attachments.js"
     },
+    "./conversation": {
+      "alp-source": {
+        "types": "./src/conversation.ts",
+        "default": "./src/conversation.ts"
+      },
+      "types": "./dist/conversation.d.ts",
+      "default": "./dist/conversation.js"
+    },
+    "./lifecycle": {
+      "alp-source": {
+        "types": "./src/lifecycle.ts",
+        "default": "./src/lifecycle.ts"
+      },
+      "types": "./dist/lifecycle.d.ts",
+      "default": "./dist/lifecycle.js"
+    },
     "./files": {
       "alp-source": {
         "types": "./src/files.ts",
