@@ -327,8 +327,29 @@ async function readConfined(file: string, maxBytes: number, probe?: FileProbe): 
   }
 }
 
+/**
+ * The bytes of the file at `segments` under the real root `root`, confined as readWorkspaceFile
+ * confines a read (every directory on the way a real directory reached by name and the same after
+ * the read; the file a regular file with one name, opened without following a link, the same by
+ * handle and by name), or `too_large` past `maxBytes`. Throws FileAccessError `linked` or
+ * `not_found` (its message names only `relative`). No block list or .gitignore check: the caller
+ * decides what may be read (workspace.git.diff, docs/protocol/alp-json-rpc-v1.md §12.5).
+ */
+export async function readConfinedFile(root: string, segments: readonly string[], relative: string, maxBytes: number): Promise<Buffer | 'too_large'> {
+  const chain = await directoryChain(root, segments.slice(0, -1), relative);
+  let read: { bytes: Buffer } | undefined;
+  try {
+    read = await readConfined(path.join(root, ...segments), maxBytes);
+  } catch (error) {
+    if ((error as { linked?: boolean }).linked) throw linked(relative);
+    throw notFound(relative);
+  }
+  await sameChain(chain, relative);
+  return read === undefined ? 'too_large' : read.bytes;
+}
+
 /** Paseo's isLikelyBinary (file-explorer/service.ts at b63a325): a NUL byte, or over 30% control characters. */
-function likelyBinary(buffer: Buffer): boolean {
+export function likelyBinary(buffer: Buffer): boolean {
   if (!buffer.length) return false;
   let suspicious = 0;
   for (const byte of buffer) {
@@ -340,7 +361,7 @@ function likelyBinary(buffer: Buffer): boolean {
 
 // The BOM is kept: the content is the file's bytes, decoded.
 /** PEM, OpenSSH and PuTTY private-key headers: a file holding one is refused whatever its name. */
-const PRIVATE_KEY = /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|PuTTY-User-Key-File-\d+:/;
+export const PRIVATE_KEY = /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|PuTTY-User-Key-File-\d+:/;
 
 const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 

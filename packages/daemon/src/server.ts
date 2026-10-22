@@ -19,6 +19,7 @@ import type { ScheduleJob, TurnAttention } from '@anhlp/alp-protocol/index';
 import { RpcError } from './rpc-error.js';
 import { createOperations, type OperationsOptions } from './operations.js';
 import { FileAccessError, FilesError, listWorkspaceDirectory, readWorkspaceFile, searchWorkspaceFiles } from './files.js';
+import { createGitReader } from './git.js';
 import { createScheduleStore, projectKey } from './schedules.js';
 import { clientMessageId as scheduleMessageId, createScheduler, SCHEDULE_TICK_MS, type ScheduleDelivery } from './scheduler.js';
 
@@ -904,6 +905,12 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     try { return await runtime.withWorkspaceMutation(directory, run); } catch (error: any) { if (error?.data?.reason) throw new RegistryError(1004, 'Workspace is in use or has retained assignment results', error.data); throw error; }
   }, async directory => { if (!runtime.registerWorkspace) throw new RegistryError(1005, 'Runtime cannot register safe workspace ownership', { reason: 'guard_unavailable' }); await runtime.registerWorkspace(directory); }) : undefined;
   const workspaceDescriptor = async (w: any) => worktrees ? worktrees.describe(w) : w;
+  // workspace.git.status and workspace.git.diff (§12.5): read-only, by registry workspaceId.
+  const gitReader = registry ? createGitReader({ registry, log: (message, fields) => log.warn(message, { code: 'ALPD_GIT_READ_FAILED', ...fields }) }) : undefined;
+  const gitCall = <T>(run: (reader: NonNullable<typeof gitReader>) => Promise<T>) => {
+    if (!gitReader) throw new RpcError(ERROR.unavailable, 'Registry needs ALP_HOME');
+    return run(gitReader);
+  };
   const operations = createOperations({ home, templates, knownProjects: () => new Set([...records.values()].flatMap(record => record.session?.projectRoot ? [record.session.projectRoot] : [])) });
   const extensionOwners = new Map<string, Connection>();
   const handlers: Record<string, (connection: Connection, params: any) => Promise<unknown> | unknown> = {
@@ -1090,6 +1097,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     'workspace.worktree.options': (_c, p) => registryCall(async () => { const w = (await registry!.snapshot()).workspaces.find(w => w.id === p.workspaceId); if (!w) throw new RegistryError(1001, 'No workspace', { reason: 'not_found' }); const grants = await worktrees!.grants(p); return { mappingIds: grants.mappings.filter(m => m.source === (w.canonical ?? w.directory)).map(m => m.id) }; }),
     'workspace.worktree.create': (_c, p) => registryCall(async () => { const result = await worktrees!.mutate('create', p, p); return { ...result, workspace: await workspaceDescriptor(result.workspace) }; }),
     'workspace.worktree.remove': (_c, p) => registryCall(async () => { const result = await worktrees!.mutate('remove', p, p); return { ...result, workspace: await workspaceDescriptor(result.workspace) }; }),
+    'workspace.git.status': (_c, p) => gitCall(reader => reader.status(p.workspaceId)),
+    'workspace.git.diff': (_c, p) => gitCall(reader => reader.diff({ workspaceId: p.workspaceId, compare: p.compare, path: p.path, cursor: p.cursor })),
     'project.list': (_c, p) => registryList('projects', p),
     'workspace.list': (_c, p) => registryList('workspaces', p),
     'workspace.get': (_c, p) => registryCall(async () => {
@@ -1497,7 +1506,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry'] : []), ...(worktrees ? ['workspace.worktree'] : []), ...operations.capabilities];
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), ...(worktrees ? ['workspace.worktree'] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {

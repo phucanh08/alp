@@ -134,6 +134,16 @@ export function resolveGit(name = 'git', searchPath = process.env.PATH ?? proces
   return undefined;
 }
 
+/**
+ * The absolute entries of PATH outside `root` (insideRoot), for the environment of a Git alpd runs
+ * in a workspace: whatever Git itself starts is then never found in the workspace either.
+ */
+export function searchPathOutside(root: string, searchPath = process.env.PATH ?? process.env.Path ?? ''): string {
+  const box = rootOf(root);
+  if (!box) throw new IgnoreUnknown('the workspace cannot be examined');
+  return searchPath.split(path.delimiter).filter(directory => directory && path.isAbsolute(directory) && !insideRoot(directory, box)).join(path.delimiter);
+}
+
 /** Whether `root` or a directory above it holds a `.git` entry: Git saying "not a git repository" there is a broken repository, not none. */
 function hasGitEntry(root: string): boolean {
   for (let directory = root; ; directory = path.dirname(directory)) {
