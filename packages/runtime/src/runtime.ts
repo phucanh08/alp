@@ -1170,7 +1170,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   const label = (kind: RuntimeKind) => kind === 'claude' ? 'Claude' : kind === 'acp' ? 'ACP agent' : kind === 'antigravity' ? 'Antigravity' : 'Codex';
   const pauseOf = (kind: RuntimeKind) => paused.all ?? paused.runtimes[kind];
   /** Whether a session may not start a turn by itself now: parked, or on a paused runtime. */
-  const held = (session: Session) => !!session.parked || !!pauseOf(session.runtimeKind) || (session.lifecycleHolds ?? 0) > 0 || !!session.awaitingBrief;
+  const held = (session: Session) => !!session.parked || !!pauseOf(session.runtimeKind) || (session.lifecycleHolds ?? 0) > 0;
+  /** Whether mail may not wake a session now: it is held, or it is a new assignment whose brief has not started. */
+  const holdsWake = (session: Session) => held(session) || !!session.awaitingBrief;
 
   /**
    * Marks a session pending (its native process restarting) with a fresh `acknowledged` that resolves
@@ -1899,7 +1901,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     // Once none runs, what is left must still reach it, or a finished requester would never end.
     const waking = !session.assignments.size || session.mail.some(event => !event.deliveredTurn && !event.passive && !(event.kind === 'note' && event.assignment !== sessionId));
     // A held idle session (a lifecycle operation, a pause, parked work) keeps its mail for the release.
-    if (!session.active && waking && held(session)) { session.wakeHeld = true; return; }
+    if (!session.active && waking && holdsWake(session)) { session.wakeHeld = true; return; }
     if (session.pending) {
       void session.acknowledged.then(() => deliver(sessionId, session));
     } else if (session.active) {
@@ -1944,7 +1946,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   /** Queued behind client operations, so a wake never races a user prompt or an interrupt. */
   function autoWake(sessionId: string, session: Session) {
     // Its runtime is paused or it is parked: the mail waits for resume.
-    if (held(session)) { session.wakeHeld = true; return; }
+    if (holdsWake(session)) { session.wakeHeld = true; return; }
     // A check-in authorizes delivery of older mail too: the capped first batch
     // may not reach the check-in itself. Keep that authorization through queuing.
     const checkIn = session.mail.find(event => !event.deliveredTurn && event.kind === 'checkin');
@@ -1957,7 +1959,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const work = queue.then(async () => {
       if (closed || session.closed) return release();
       // A hold taken after this wake was queued (a rewind) keeps the mail for its release.
-      if (held(session)) { release(); session.wakeHeld = true; return; }
+      if (holdsWake(session)) { release(); session.wakeHeld = true; return; }
       // Whatever ran first decides: a running turn gets the mail by steering, an interrupt holds it.
       if (session.wakeBlocked || session.active || session.pending) {
         release();
@@ -2853,8 +2855,6 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       }
 
       // Mail held for the brief goes with it: startPrompt takes what waits.
-      child.awaitingBrief = false;
-      child.wakeHeld = false;
       await startPrompt(childId, {
         clientMessageId: `task-${childId}`,
         delivery: 'auto',
@@ -2869,6 +2869,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
           },
         ],
       }, 'assignment');
+      // Held until the brief's turn started: what came since steers it, or wakes the child if it ended.
+      // A brief that did not start leaves the hold; the child closes with its failed assignment.
+      child.awaitingBrief = false;
+      if (child.wakeHeld) { child.wakeHeld = false; deliver(childId, child); }
     } catch (error) {
       // A child that failed while starting may already have reported by mail; report once.
       session.mail = session.mail.filter(event => event.deliveredTurn || event.kind !== 'result' || event.assignment !== childId);
