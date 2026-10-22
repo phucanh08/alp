@@ -813,6 +813,82 @@ file links in chat.
 
 The gateway exposes both with the `files.read` permission only (docs/alp/remote-gateway.md §5.10).
 
+### 12.5 `workspace.git.status` and `workspace.git.diff`
+
+Capability `workspace.git` (issue #121, branch G1). The read-only part of Paseo's checkout panels
+(the branch header and the Changes/Diff panels), by registry `workspaceId` (§16). alpd only reads:
+no commit, push, pull, merge, checkout, switch, stash or any other Git mutation is offered or
+implied. alpd lists the capability when it has the workspace registry.
+
+- `workspace.git.status { workspaceId }` answers `{ state, reason?, branch, detached, head,
+  upstream, baseRef, aheadBehind, hasRemote, remoteUrl, dirty, files, hiddenCount, truncated,
+  snapshot }`. `state` is `repository`, `not_repository` (no Git checkout there) or `unsupported`
+  with a `reason` (`not_repository_root`: the workspace directory is inside a repository but is not
+  its top level; nothing outside the workspace is ever read or listed). `branch` is null when HEAD
+  is detached (`detached: true`) or the state is not `repository`; `head` is the commit id, null
+  before the first commit. `upstream` is the current branch's upstream (`ref` short, such as
+  `origin/main`, with `ahead`/`behind`), null when none or gone. `baseRef` is the default base
+  branch (origin's HEAD, else `main`, else `master`), `aheadBehind` the current branch against it
+  (null on the base branch itself, detached, or when unknown). `remoteUrl` is origin's URL without
+  user information, password, token, query or fragment; a local path or `file:` remote answers
+  `null` (with `hasRemote: true`). `files` are status rows `{ path, oldPath?, change, staged,
+  unstaged }`, `change` one of `modified`, `added`, `deleted`, `renamed`, `copied`, `typechange`,
+  `untracked`, `conflicted`; ignored files are never listed; at most 1000 rows
+  (`WORKSPACE_GIT.maxStatusFiles`), then `truncated: true`.
+- `workspace.git.diff { workspaceId, compare, path?, cursor? }` answers `{ compare, snapshot,
+  files, hiddenCount, truncated, nextCursor? }`. `compare.mode` is one of an enumerated list, never
+  a revision expression or Git argument: `uncommitted` (HEAD, or the empty tree before the first
+  commit, against the working tree, staged changes included, plus untracked files), `staged` (HEAD
+  against the index), `unstaged` (the index against the working tree, plus untracked files),
+  `base` (the merge base of the base branch and HEAD against HEAD: committed changes only).
+  `compare.baseRef` (base only, 1–255 characters) names a branch, resolved by alpd only as the full
+  ref `refs/remotes/origin/<name>` or `refs/heads/<name>` (that order); a name Git would not accept
+  as a branch (`git check-ref-format --branch`), or starting with `-`, is `-32602 invalid_compare`,
+  and an unknown one `1001 unknown_ref`. Without it, `baseRef` of the status. `ignoreWhitespace`
+  ignores whitespace changes. The answer's `compare` is the comparison done (`baseRef` resolved,
+  `ignoreWhitespace` explicit). `path` (relative, as §12.4) limits the answer to the file whose new
+  or old path it is (a rename comes with both sides); a blocked `path` is `1003 blocked_path`, an
+  unchanged one an empty `files`.
+- **Files**: `{ path, oldPath?, change, kind, additions, deletions, hunks }`. `kind` is `text`
+  (hunks given), `binary` (Git's binary detection, or a NUL or over 30% control characters as
+  §12.4), `too_large` (its patch over 1 MiB, `WORKSPACE_GIT.maxFileBytes`), `withheld` (content
+  that holds a private key, as §12.4, on either side), `symlink` (a link on either side: its target
+  is never shown) or `submodule` (a gitlink: no content, never recursed). Only `text` has hunks;
+  `additions`/`deletions` count its lines. A hunk is `{ oldStart, oldCount, newStart, newCount,
+  context?, lines }`, a line `{ type: 'add' | 'remove' | 'context', content, noNewline? }` (`noNewline`:
+  Git's "No newline at end of file" applies to it). An untracked file is `change: 'untracked'`, all
+  lines added; alpd reads it itself as §12.4 confines a read (no link, one name, a regular file), at
+  most 200 of them (`WORKSPACE_GIT.maxUntracked`) in a diff.
+- **Secrets**: a change whose path, or old path of a rename, is blocked (`blockedFilePath`, §12.4)
+  is left out of status rows and diffs entirely, path included, and counted in `hiddenCount`;
+  rename and copy detection never brings a blocked side's content into another file's hunks. A
+  deleted file's historical content is subject to the same rules as a current one.
+- **Pages**: one answer holds at most 2 MiB of patch (`WORKSPACE_GIT.maxTotalBytes`) and gives
+  `nextCursor` for the rest, with `truncated: true` (also set when untracked files beyond the limit
+  were left out). `snapshot` is an opaque token of the state compared (HEAD, index and the change
+  list); a `cursor` continues only the same workspace, comparison, `path` and snapshot: when the
+  checkout changed since, `1004 stale_snapshot` (start again without a cursor), a cursor that is
+  not one alpd gave `-32602 invalid_cursor`. A gateway may lower every limit, never raise it.
+- **Git, boxed in**: the workspace and its repository configuration are not trusted. alpd runs Git
+  found as §12.4 does (an absolute PATH entry outside the workspace, by its real path; never a `git`
+  in the workspace), with an argument list and no shell, in the workspace's real path, with no
+  inherited `GIT_*` variable, no system or global configuration, `GIT_OPTIONAL_LOCKS=0` (status
+  never writes the index), no prompts, and configuration overrides that run nothing the repository
+  names: no external diff (`--no-ext-diff`), no textconv (`--no-textconv`), no fsmonitor, no
+  hooks, no pager, every clean/smudge/process filter neutralized, no submodule recursion, no
+  network protocol. Paths are never options or pathspec magic (`--` and literal pathspecs). Each
+  call has a deadline (its Git processes' groups killed after it) and an output bound; Git processes
+  are limited per alpd. The workspace's real path must be the repository's top level; `.git` links
+  (worktrees) are checked as the registry's worktrees are.
+- **Errors**: unknown `workspaceId` `1001 not_found`; `workspace.git.diff` outside a repository
+  `1001 not_repository`; no Git found `1005 git_unavailable`; a Git failure, timeout or output over
+  its bound `1000 git_failed` with a fixed message (alpd logs the cause). Messages never name a host
+  path or repository content.
+
+The gateway exposes `workspace.git.status` with `project.read` and `workspace.git.diff` with
+`project.read` plus `files.read` (docs/alp/remote-gateway.md), for a workspace the credential's
+grant names exactly.
+
 ## 13. Compatibility notes for this revision
 
 **Additive** (old clients unaffected):
@@ -887,7 +963,7 @@ answers `-32601`. Each needs its own capability when implemented.
 | Gateway reasons of `1003 forbidden` (`grant`, `outside_workspace`, `spec_field`, `local_only`); `1005 unavailable` reasons `feature_disabled`, `maintenance`, `restoring` | P0 | The codes exist (§5.1, §15); a gateway adds its reasons. |
 | `session.create` spec allow-list for remote principals | P0 | Refuse `env`, stdio `mcpServers`, `workdir`, `writeRoot`, `copy*`, `restore`, `keepThread`. |
 | Project/workspace registry; `session.create.workspaceId` | Implemented (§16) | Versioned migration of `state/web-workspaces.json`; shared pins and scoped add of existing granted directories. Worktree creation/removal remains proposed. |
-| `workspace.git.status/diff` | P1 | Read-only; results must fit `MAX_FRAME` (cap or chunk). `workspace.files.search`, `workspace.files.list` and `workspace.files.read` are implemented (§12.3, §12.4). |
+| `workspace.git.status/diff` | Implemented (§12.5) | Read-only, by `workspaceId`, bounded with a snapshot and next cursor. `workspace.files.search`, `workspace.files.list` and `workspace.files.read` are implemented (§12.3, §12.4). |
 | `provider.list/refresh/diagnose/save/remove`, `library.test` | P1 | Probes spawn processes: separate `exec.probe` grant; timeouts; cancellation when the caller's connection closes needs the probes in `@anhlp/alp-client` to take an abort signal. |
 | `subscribe` / `unsubscribe` and notification `notify` | P1 | Old clients ignore unknown notifications (`AlpClient` handles only `event`). |
 | `host.directories.suggest`, `project.create_directory`, shared attention | P2 | Product decisions pending. Per-client attention for finished turns is `question.watch` `turns` (§12.2); attention shared between clients (acknowledged on one, cleared on all) is not. |

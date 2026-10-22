@@ -15,7 +15,7 @@ export type EventNotification = { jsonrpc: '2.0'; method: 'event'; params: Envel
 export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
 export type HistoryPage = { generation: string; items: HistoryItem[]; olderCursor?: string; hasOlder: boolean; tipCursor: number };
 
-export type Capability = 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
+export type Capability = 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -27,7 +27,9 @@ export type ErrorReason =
   | 'invalid_path' | 'invalid_scope' | 'invalid_entry' | 'secret_marker' | 'not_alp_project' | 'unknown_task' | 'not_found'
   | 'library_policy' | 'unsafe_path' | 'revision_conflict' | 'task_state' | 'in_use' | 'busy' | 'unreadable'
   // workspace.files.search (§12.3); workspace.files.list and read (§12.4).
-  | 'not_directory' | 'blocked_path' | 'ignored' | 'linked' | 'binary' | 'too_large';
+  | 'not_directory' | 'blocked_path' | 'ignored' | 'linked' | 'binary' | 'too_large'
+  // workspace.git.status and workspace.git.diff (§12.5).
+  | 'not_repository' | 'unknown_ref' | 'invalid_compare' | 'stale_snapshot' | 'git_unavailable' | 'git_failed';
 
 type Empty = Record<string, never>;
 
@@ -38,9 +40,27 @@ type Empty = Record<string, never>;
  */
 export type RegistryProject = { id: string; root: string; canonical?: string; customName?: string | null; addedAt: string; removedAt?: string | null; revision?: number };
 export type RegistryWorkspace = { branch?: string | null; managedWorktree?: boolean; id: string; projectId: string; directory: string; canonical?: string; title?: string | null; pinnedAt?: string | null; archivedAt?: string | null; labels: string[]; createdAt: string; revision?: number; idempotencyKey?: string };
+/** workspace.git.status and workspace.git.diff (capability `workspace.git`, §12.5): paths are relative to the workspace, never host paths. */
+export type GitChange = 'modified' | 'added' | 'deleted' | 'renamed' | 'copied' | 'typechange' | 'untracked' | 'conflicted';
+export type GitCompare = { mode: 'uncommitted' | 'staged' | 'unstaged' | 'base'; baseRef?: string; ignoreWhitespace?: boolean };
+export type GitStatusFile = { path: string; oldPath?: string; change: GitChange; staged: boolean; unstaged: boolean };
+export type GitStatus = {
+  state: 'repository' | 'not_repository' | 'unsupported'; reason?: string;
+  branch: string | null; detached: boolean; head: string | null;
+  upstream: { ref: string; ahead: number; behind: number } | null;
+  baseRef: string | null; aheadBehind: { ahead: number; behind: number } | null;
+  hasRemote: boolean; remoteUrl: string | null; dirty: boolean;
+  files: GitStatusFile[]; hiddenCount: number; truncated: boolean; snapshot: string;
+};
+export type GitDiffLine = { type: 'add' | 'remove' | 'context'; content: string; noNewline?: true };
+export type GitDiffHunk = { oldStart: number; oldCount: number; newStart: number; newCount: number; context?: string; lines: GitDiffLine[] };
+export type GitDiffFile = { path: string; oldPath?: string; change: GitChange; kind: 'text' | 'binary' | 'too_large' | 'withheld' | 'symlink' | 'submodule'; additions: number; deletions: number; hunks: GitDiffHunk[] };
+export type GitDiffPage = { compare: { mode: GitCompare['mode']; baseRef?: string; ignoreWhitespace: boolean }; snapshot: string; files: GitDiffFile[]; hiddenCount: number; truncated: boolean; nextCursor?: string };
 export type RegistryMutation = { requestId: string; ifRevision: number };
 export type RegistryPage = { revision: number; total: number; nextCursor: string | null };
 export type RpcMethodMap = {
+  'workspace.git.status': { params: { workspaceId: string }; result: GitStatus };
+  'workspace.git.diff': { params: { workspaceId: string; compare: GitCompare; path?: string; cursor?: string }; result: GitDiffPage };
   'workspace.worktree.options': { params: { workspaceId: string }; result: { mappingIds: string[] } };
   'workspace.worktree.create': { params: RegistryMutation & { workspaceId: string; mappingId: string }; result: { workspace: RegistryWorkspace; revision: number } };
   'workspace.worktree.remove': { params: RegistryMutation & { workspaceId: string }; result: { workspace: RegistryWorkspace; revision: number; filesRemoved: true; branchRetained: true } };
