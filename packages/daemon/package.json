@@ -33,6 +33,14 @@
       "types": "./dist/files.d.ts",
       "default": "./dist/files.js"
     },
+    "./git": {
+      "alp-source": {
+        "types": "./src/git.ts",
+        "default": "./src/git.ts"
+      },
+      "types": "./dist/git.d.ts",
+      "default": "./dist/git.js"
+    },
     "./lock": {
       "alp-source": {
         "types": "./src/lock.ts",
