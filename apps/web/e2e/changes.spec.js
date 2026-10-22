@@ -93,6 +93,10 @@ test('with files.read: the branch, the changed files with counts, hunks on deman
   await panel.getByTestId('git-refresh').click();
   await expect(file(panel, 'notes/later.md')).toBeVisible();
 
+  // Whitespace shown again (the empty state offers the other mode only then, as Paseo's).
+  await panel.getByTestId('git-whitespace').click();
+  await expect(panel.getByTestId('git-whitespace')).toHaveAttribute('aria-pressed', 'false');
+
   // Committed (against the base branch): nothing committed beyond main here.
   await panel.getByTestId('git-mode').selectOption('base');
   await expect(panel.getByTestId('git-empty')).toContainText('No changes to display');
