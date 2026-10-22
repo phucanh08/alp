@@ -19,6 +19,9 @@ alp-gateway serve                                                           # 12
   `files.read`, which lists a workspace's directories and reads its text files (at most 1 MiB;
   `.git`, `.env*`, `.alp`, key and credential files always refused, links never followed). It is
   never a default: `credential create --permission session.read,session.write,project.read,files.read`.
+- Git, read only (capability `workspace.git`): `workspace.git.status` (branch and changed files,
+  no content) with `project.read`; `workspace.git.diff` (hunks, which are file content) with
+  `project.read` **and** `files.read`. No commit, push, pull, merge or branch switch is remote.
 - `credential create --mode read-only` limits a credential to driving (prompt, message, answer)
   trees that run in the given modes, checked up to the root on every request.
 - Loopback by default. Put a TLS reverse proxy in front for remote clients (`deploy/Caddyfile`,

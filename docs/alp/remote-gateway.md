@@ -45,7 +45,8 @@ Số mục (§) được code tham chiếu; giữ ổn định.
     secret nhưng là thông tin host: client nào đã qua xác thực và hello cũng thấy, như Paseo;
   - `capabilities` = capability alpd liệt kê ∩ `{attach.after, prompt.receipts, task, team,
     library, settings.language, session.list.page, question.watch, question.watch.turns,
-    session.attention, workspace.files, workspace.files.read, prompt.images, library.project.write}`.
+    session.attention, workspace.files, workspace.files.read, prompt.images, library.project.write,
+    workspace.git}`.
   - Không có `pid` và không bao giờ có `extension.methods`.
   - Trong `library` và `settings.language`, các method ghi trả `-32601 not_exposed` (§5.4).
     `library.get` đọc được, có redaction (§5.4, §5.7).
@@ -148,7 +149,9 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
     Ghi instruction project cần quyền riêng `library.write` (policy #118);
   - `library.write`: project-only agents/skills theo policy `project-data`, bao hàm `project.read`;
   - `files.read`: xem danh sách thư mục và đọc nội dung file text của workspace
-    (`workspace.files.list`, `workspace.files.read`, §5.10).
+    (`workspace.files.list`, `workspace.files.read`, §5.10); cùng với `project.read`, xem nội dung
+    diff Git (`workspace.git.diff`, §5.13). Trạng thái Git (`workspace.git.status`: nhánh, danh sách
+    file thay đổi) chỉ cần `project.read`.
   Quyền write kéo theo quyền read cùng họ. `files.read` không kéo theo quyền nào và không quyền nào
   kéo theo nó. Không có `--permission`, CLI cấp bốn quyền `session.*` và `project.*`, **không bao
   giờ** cấp `files.read`: chủ máy phải ghi rõ `--permission files.read` cho từng credential được đọc
@@ -259,7 +262,8 @@ coi là `failed`.
 | 1003 | `host_scope` | `team.list`/`library.list`/`library.get` thiếu `projectRoot` |
 | 1003 | `spec_field` | trường `spec` không cho phép (`data.field`); agent/mode/thinking không phải tên đơn giản; `model` sai ngữ pháp model id (§5.3) |
 | 1003 | `content_type` | prompt có phần không phải `text` hay `image` |
-| 1003 | `blocked_path` | `workspace.files.list`/`read` với đường dẫn trong block list (`.git`, `.env*`, `.alp`, file khoá/credential); gateway từ chối trước alpd (§5.10) |
+| 1003 | `blocked_path` | `workspace.files.list`/`read` hay `workspace.git.diff` với đường dẫn trong block list (`.git`, `.env*`, `.alp`, file khoá/credential); gateway từ chối trước alpd (§5.10, §5.13) |
+| -32602 | `invalid_cursor` | `workspace.git.diff` với cursor trang mà connection này không cấp, hoặc cho phép so sánh khác (§5.13) |
 | 1003 | `image_limit` | ảnh trong prompt vượt giới hạn của gateway (§5.8; `data` nêu `maxCount`, `maxBytes`, `maxTotalBytes`) |
 | 1003 | `mode` | grant có `modes` và: create/configure chọn mode ngoài danh sách, create không chọn `spec.mode`, hoặc drive/stop một tree có session chạy mode ngoài danh sách (§5.5; `data.sessionId` là session đó) |
 | 1001 | — | session/question ngoài scope (giống không tồn tại); `session.status`/`log` trả tree khác tree đã kiểm tra |
@@ -340,6 +344,8 @@ Cột Test dùng các mã sau:
 | `workspace.files.search` | `workspace.files` | `projectRoot` thuộc grant, gửi alpd bản canonical; alpd không đi theo symlink; path trả về phải tương đối thuần | project.read | exposed | P S R I |
 | `workspace.files.list` | `workspace.files.read` | `projectRoot` thuộc grant, gửi bản canonical; `path` tương đối thuần, không bị chặn (gateway kiểm tra trước alpd); entry trả về phải là con trực tiếp của `path`, tương đối thuần, không bị chặn; lỗi alpd thay bằng câu cố định (§5.10) | files.read | exposed | P S R I |
 | `workspace.files.read` | `workspace.files.read` | như `workspace.files.list`; answer phải đúng `path` đã hỏi và ≤ 1 MiB; lỗi alpd thay bằng câu cố định (§5.10) | files.read | exposed | P S R I |
+| `workspace.git.status` | `workspace.git` | `workspaceId` của registry, thư mục khớp nguyên chuỗi grant (kể cả managed worktree); chỉ đọc; answer chiếu theo allow-list, dòng có path không tương đối thuần hay bị chặn bị bỏ và đếm vào `hiddenCount`, remote cục bộ → `null`; lỗi alpd thay bằng câu cố định (§5.13) | project.read | exposed | P S R I |
+| `workspace.git.diff` | `workspace.git` | như `workspace.git.status`; `compare` dựng lại từ `mode`, `baseRef`, `ignoreWhitespace`; `path` tương đối thuần, không bị chặn (kiểm tra trước alpd); file quá `WORKSPACE_GIT` → từ chối cả answer; trang cắt cho vừa frame (§5.13) | project.read + files.read | exposed | P S R I |
 | `board.list` | — | `projectRoot` thuộc grant | session.read | exposed | P S |
 | `session.create` | — | `spec.cwd` + allowlist; id có sẵn phải trong scope; kiểm lại kết quả | session.write | exposed | P S I |
 | `session.prompt` | `prompt.receipts`, `prompt.images` | session; `text` và ảnh inline trong giới hạn §5.8; **drive**: mode của session và mọi tổ tiên, tra mới | session.write | exposed | P S M I |
@@ -628,6 +634,44 @@ nó nằm dưới home của host; đường dẫn dính liền sau ký tự kh�
 để glob và JSON pointer (`src/**/*.ts`, `#/properties/x`) giữ nguyên; trích file dạng khác V8 trên cùng dòng đầu (YAML, TOML) không được nhận ra.
 Test sentinel: `apps/gateway/tests/authorization.test.js` (các test `t-d27c`).
 
+### 5.13 Git status và diff của workspace (issue #121, G1)
+
+Phần chỉ đọc của panel Changes/Diff của Paseo (protocol §12.5, capability `workspace.git`). Không có
+commit, push, pull, merge, checkout, switch, stash hay thao tác Git nào khác qua remote.
+
+- **Quyền**: `workspace.git.status` (nhánh, upstream, ahead/behind, danh sách file thay đổi, không có
+  nội dung) cần `project.read`. `workspace.git.diff` trả hunk, tức nội dung file (cả dòng đã xoá và
+  nội dung lịch sử), nên cần **cả** `project.read` và `files.read` (`alsoRequires` trong
+  `policy.js`; thiếu cái nào thì `1003 grant` nêu đúng `data.permission` đó, alpd không nhận gì).
+  `files.read` không bao giờ là mặc định (§4.2).
+- **Phạm vi**: `workspaceId` phải là workspace của registry mà thư mục khớp nguyên chuỗi một grant
+  (`#registryWorkspace`, như `workspace.get`; managed worktree của credential được tính). Không có
+  hay ngoài grant → `1003 outside_workspace`, method Git không chạy.
+- **Params**: schema từ chối key lạ (`-32602`), gateway vẫn chỉ gửi `workspaceId`, `compare`
+  (dựng lại từ `mode`, `baseRef`, `ignoreWhitespace`), `path`, `cursor`. `path` kiểm tra như §5.10:
+  không tương đối thuần → `-32602 invalid_path`, bị chặn → `1003 blocked_path`, trước alpd.
+- **Answer** (`projectGitStatus`, `projectGitDiff` trong `policy.js`): chỉ các field của schema, mỗi
+  field kiểm kiểu. Dòng status hay file diff có `path`/`oldPath` không tương đối thuần (tuyệt đối, ổ
+  đĩa, `\`, `.`/`..`) hoặc bị chặn bị bỏ, cộng vào `hiddenCount`, log `ALP_GATEWAY_FILE_OUT_OF_SCOPE`;
+  khi hỏi một `path`, file không có bên nào là `path` đó cũng bị bỏ. `remoteUrl` chỉ đi qua khi là URL
+  http(s)/ssh/git không có user, mật khẩu, query, fragment hoặc dạng `host:path`; đường dẫn cục bộ hay
+  `file:` → `null`. Kind khác `text` không mang hunk. Status tối đa `WORKSPACE_GIT.maxStatusFiles` dòng.
+- **Kích thước**: nội dung dòng của một file quá `WORKSPACE_GIT.maxFileBytes` (1 MiB) hoặc cả trang
+  quá `maxTotalBytes` (2 MiB), hay field sai kiểu → gateway từ chối cả answer (`1000 git_failed`, log
+  `ALP_GATEWAY_GIT_REFUSED`). Để vừa frame của client (`limits.maxFrame`, và nửa `maxBufferedBytes`),
+  gateway hạ giới hạn: một trang alpd quá lớn được cắt, phần còn lại tiếp tục bằng cursor của chính
+  connection (`alp-gateway-page:…`, tối đa 64 cái, mất khi đóng connection) — gateway hỏi lại alpd
+  đúng trang đó và bỏ qua phần đã gửi; snapshot đổi → `1004 stale_snapshot`; cursor không phải của
+  connection này hay cho so sánh khác → `-32602 invalid_cursor`. Một file không vừa một frame trả
+  `kind: too_large` không hunk (giữ số dòng thêm/xoá). Cursor của alpd đi qua nguyên vẹn.
+- **Lỗi**: chỉ mã và `data.reason` (`not_repository`, `unknown_ref`, `invalid_compare`,
+  `stale_snapshot`, `invalid_cursor`, `git_unavailable`, `git_failed`…) đi qua; message là câu cố định
+  (`GIT_REFUSALS` trong `connection.js`). Không có đường dẫn host hay text Git.
+- **Rủi ro còn lại**: diff cho thấy nội dung file đã xoá và lịch sử so với base, mà `workspace.files.read`
+  không cho xem; block list vẫn là mức sàn như §5.10. Tên nhánh, upstream và `baseRef` là metadata của
+  repo, đi qua như text (không ký tự điều khiển, ≤ 1024 ký tự).
+Test: `apps/gateway/tests/git.test.js`.
+
 ## 6. Streaming và recovery
 
 ### 6.1 Thuật toán client (theo contract §8.3)
@@ -826,6 +870,9 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
   xoá, tải file nhị phân hay xem ảnh. Block list là mức sàn, không bảo đảm file còn lại không có
   secret. `workspace.files.search`, `list` và `read` đều hỏi Git (`--no-index`:
   file đã track mà khớp luật cũng bị ẩn).
+- **Git qua remote chỉ đọc** (§5.13): status với `project.read`, diff với `project.read` +
+  `files.read`. Không có commit/push/pull/merge/switch; cursor trang mà gateway tự cắt chỉ sống trong
+  một connection.
 - **Nội dung library qua remote là bản đã redaction ở gateway** (§5.7), không phải contract của
   daemon: alpd vẫn chỉ redact giá trị `env`/`headers` (`x-alp.redacts`). Gateway không đoán secret
   bằng heuristic; nó ẩn cả field (mọi `args`, cả URL MCP, cả lệnh hook), nên client không thấy

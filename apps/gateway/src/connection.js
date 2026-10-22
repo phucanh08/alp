@@ -6,6 +6,7 @@ import { ERROR, PROTOCOL_VERSION, RPC_ERROR, WORKSPACE_FILES, base64Bytes, block
 import { validateParams } from '@anhlp/alp-protocol/contract';
 import { isAlpClientError } from '@anhlp/alp-client/portable';
 import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.js';
+import { projectGitDiff, projectGitStatus } from './policy.js';
 import { assertProjectDataContent } from '@anhlp/alp-core/library-edit';
 
 /**
@@ -172,6 +173,28 @@ const FILE_REFUSALS = Object.freeze({
   invalid_path: 'path must be a relative path inside the workspace, with / between names and no . or .. segment',
 });
 
+/**
+ * The message the client gets for each alpd refusal of workspace.git.status and diff
+ * (docs/protocol/alp-json-rpc-v1.md §12.5): fixed here, so no alpd text (a host path, a Git
+ * message quoting the repository) can pass. Code and reason pass on.
+ * @type {Readonly<Record<string, string>>}
+ */
+const GIT_REFUSALS = Object.freeze({
+  not_found: 'No such workspace on the daemon host',
+  not_repository: 'This workspace is not a Git repository',
+  unknown_ref: 'The base branch is not known in this repository',
+  invalid_compare: 'Choose a comparison of uncommitted, staged, unstaged or base, and a branch name Git accepts',
+  stale_snapshot: 'The checkout changed since this page; load the diff again from the start',
+  invalid_cursor: 'This cursor is not one this connection was given; load the diff again from the start',
+  git_unavailable: 'Git is not available on the daemon host',
+  git_failed: 'Git failed on the daemon host; the daemon log there may have details',
+  blocked_path: 'This path is never readable remotely: .git, .env files, ALP configuration and key or credential files are always refused',
+  invalid_path: 'path must be a relative path inside the workspace, with / between names and no . or .. segment',
+});
+/** Gateway cursors of a diff page split to fit the client's frame: per connection, at most this many kept. */
+const GIT_PAGE_PREFIX = 'alp-gateway-page:';
+const MAX_GIT_PAGES = 64;
+
 /** A file path a client may ask for: plainly relative (relativeFile), '/' separated. @param {unknown} file */
 const requestedFile = file => relativeFile(file) && !String(file).includes('\\');
 
@@ -253,6 +276,8 @@ export class ClientConnection {
   #strikes = 0;
   #alive = true;
   /** @type {Array<ReturnType<typeof setTimeout>>} */ #timers = [];
+  /** Diff pages the gateway split (workspace.git.diff): its cursor → what continues it. */
+  /** @type {Map<string, { key: string, cursor: string | undefined, skip: number, snapshot: string }>} */ #gitPages = new Map();
   /** @type {(connection: ClientConnection, code: number) => void} */ #onClosed;
 
   /**
@@ -546,6 +571,7 @@ export class ClientConnection {
     const issues = validateParams(method, params);
     if (issues?.length) throw new GatewayError(RPC_ERROR.invalidParams, `Invalid params: ${issues.map(issue => `${issue.path || 'params'} ${issue.message}`).join('; ')}`, { reason: 'invalid_params', issues });
     if (!this.#grant.permissions.has(exposure.permission)) throw forbidden(`This credential lacks ${exposure.permission}`, GATEWAY_REASON.grant, { permission: exposure.permission });
+    for (const permission of exposure.alsoRequires ?? []) if (!this.#grant.permissions.has(permission)) throw forbidden(`This credential lacks ${permission}`, GATEWAY_REASON.grant, { permission });
     const handler = Object.hasOwn(this.#handlers, method) ? this.#handlers[method] : undefined;
     if (!handler) throw new GatewayError(RPC_ERROR.methodNotFound, `${method} is not available through the gateway`, { reason: GATEWAY_REASON.notExposed });
     const result = await handler(pick(params, exposure.params ?? []));
@@ -668,6 +694,51 @@ export class ClientConnection {
   #fileError(error) {
     const reason = /** @type {any} */ (error)?.data?.reason;
     return opaqueDaemonError(error, typeof reason === 'string' && Object.hasOwn(FILE_REFUSALS, reason) ? FILE_REFUSALS[reason] : 'The file cannot be read on the daemon host');
+  }
+
+  /** alpd's refusal of a workspace.git call with the gateway's fixed text for its reason. @param {unknown} error */
+  #gitError(error) {
+    const reason = /** @type {any} */ (error)?.data?.reason;
+    return opaqueDaemonError(error, typeof reason === 'string' && Object.hasOwn(GIT_REFUSALS, reason) ? GIT_REFUSALS[reason] : 'The workspace\'s Git state cannot be read on the daemon host');
+  }
+
+  /** The bytes one answer may take: within the client's frame and the gateway's send buffer, with room for the envelope. */
+  #answerBudget() {
+    return Math.min(this.#limits.maxFrame ?? 4 * 1024 * 1024, Math.floor(this.#limits.maxBufferedBytes / 2)) - 64 * 1024;
+  }
+
+  /**
+   * A projected diff page cut to fit one frame: from file `skip`, files while they fit; a file
+   * that cannot fit alone answers kind too_large without hunks (this gateway lowers the per-file
+   * limit). The rest continues from a cursor of this connection, which asks alpd for the same page
+   * again (`cursor`, its snapshot checked there) and skips what was sent; hidden files are counted
+   * on the first part only.
+   * @param {import('@anhlp/alp-protocol').GitDiffPage} page @param {{ key: string, cursor: string | undefined, skip: number }} from
+   */
+  #gitPage(page, { key, cursor, skip }) {
+    const budget = this.#answerBudget();
+    const head = { compare: page.compare, snapshot: page.snapshot };
+    const hiddenCount = skip ? 0 : page.hiddenCount;
+    const fixed = Buffer.byteLength(JSON.stringify({ ...head, files: [], hiddenCount, truncated: true, nextCursor: 'x'.repeat(1024) })) + 256;
+    let used = fixed;
+    /** @type {import('@anhlp/alp-protocol').GitDiffFile[]} */
+    const files = [];
+    let index = skip;
+    for (; index < page.files.length; index++) {
+      let file = page.files[index];
+      let bytes = Buffer.byteLength(JSON.stringify(file)) + 1;
+      if (bytes > budget - fixed) { file = { ...file, kind: 'too_large', hunks: [] }; bytes = Buffer.byteLength(JSON.stringify(file)) + 1; }
+      if (files.length && used + bytes > budget) break;
+      files.push(file);
+      used += bytes;
+    }
+    if (index < page.files.length) {
+      const token = `${GIT_PAGE_PREFIX}${randomBytes(12).toString('base64url')}`;
+      if (this.#gitPages.size >= MAX_GIT_PAGES) this.#gitPages.delete(/** @type {string} */ (this.#gitPages.keys().next().value));
+      this.#gitPages.set(token, { key, cursor, skip: index, snapshot: page.snapshot });
+      return { ...head, files, hiddenCount, truncated: true, nextCursor: token };
+    }
+    return { ...head, files, hiddenCount, truncated: page.truncated, ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}) };
   }
 
   /** A projectRoot the gateway requires where alpd would fall back to host-level data. @param {unknown} projectRoot @param {string} method */
@@ -1207,6 +1278,53 @@ export class ClientConnection {
         throw new GatewayError(ERROR.failed, 'The daemon host answered a file the gateway does not pass on');
       }
       return { path: params.path, content, size: Buffer.byteLength(content, 'utf8'), ...(typeof result.modifiedAt === 'string' && result.modifiedAt.length <= 64 ? { modifiedAt: result.modifiedAt } : {}) };
+    },
+
+    // A workspace's Git state, read only (docs/protocol/alp-json-rpc-v1.md §12.5, issue #121 G1):
+    // the registry workspace must be one the grant names exactly (managed worktrees included); the
+    // answer leaves through projectGitStatus, so no field the gateway does not know, no path that
+    // is not plainly relative or is blocked, no local remote path.
+    'workspace.git.status': async params => {
+      await this.#registryWorkspace(params.workspaceId);
+      const result = await this.#call('workspace.git.status', { workspaceId: params.workspaceId }).catch(error => { throw this.#gitError(error); });
+      const projected = projectGitStatus(result);
+      if (!projected) {
+        this.#log.error('workspace.git.status answered something that is not a status; refused it', { code: 'ALP_GATEWAY_GIT_REFUSED' });
+        throw new GatewayError(ERROR.failed, 'The daemon host answered a Git status the gateway does not pass on', { reason: 'git_failed' });
+      }
+      if (projected.dropped) this.#log.error('workspace.git.status answered rows outside the workspace or blocked; dropped them', { code: 'ALP_GATEWAY_FILE_OUT_OF_SCOPE', dropped: projected.dropped });
+      const status = projected.status;
+      // Rows from the end until the answer fits one frame (paths of 4096 characters could pass it).
+      const budget = this.#answerBudget();
+      while (status.files.length && Buffer.byteLength(JSON.stringify(status)) > budget) { status.files.splice(Math.floor(status.files.length * 0.9)); status.truncated = true; }
+      return status;
+    },
+    // Hunks are file content: files.read as well as project.read (the exposure's alsoRequires). A
+    // path is refused before alpd as workspace.files paths are; compare is rebuilt from its three
+    // known fields; the answer leaves through projectGitDiff and is cut to the client's frame.
+    'workspace.git.diff': async params => {
+      if (params.path !== undefined) this.#checkFile(params.path);
+      const compare = pick(params.compare ?? {}, ['mode', 'baseRef', 'ignoreWhitespace']);
+      const key = JSON.stringify([params.workspaceId, compare.mode, compare.baseRef ?? null, compare.ignoreWhitespace === true, params.path ?? null]);
+      let cursor = params.cursor;
+      let skip = 0;
+      /** @type {string | undefined} */ let snapshot;
+      if (typeof cursor === 'string' && cursor.startsWith(GIT_PAGE_PREFIX)) {
+        const split = this.#gitPages.get(cursor);
+        if (!split || split.key !== key) throw new GatewayError(RPC_ERROR.invalidParams, GIT_REFUSALS.invalid_cursor, { reason: 'invalid_cursor' });
+        ({ cursor, skip, snapshot } = split);
+      }
+      await this.#registryWorkspace(params.workspaceId);
+      const result = await this.#call('workspace.git.diff', { workspaceId: params.workspaceId, compare, ...(params.path !== undefined ? { path: params.path } : {}), ...(cursor !== undefined ? { cursor } : {}) }).catch(error => { throw this.#gitError(error); });
+      const projected = projectGitDiff(result, { path: params.path });
+      if ('refused' in projected) {
+        this.#log.error('workspace.git.diff answered a page the gateway does not pass on; refused it', { code: 'ALP_GATEWAY_GIT_REFUSED', why: projected.refused });
+        throw new GatewayError(ERROR.failed, 'The daemon host answered a diff the gateway does not pass on', { reason: 'git_failed' });
+      }
+      if (projected.hidden || projected.foreign) this.#log.error('workspace.git.diff answered files outside the workspace, blocked or not asked for; dropped them', { code: 'ALP_GATEWAY_FILE_OUT_OF_SCOPE', hidden: projected.hidden, foreign: projected.foreign });
+      // The rest of a split page is the same alpd page only for the same snapshot.
+      if (snapshot !== undefined && projected.page.snapshot !== snapshot) throw new GatewayError(ERROR.conflict, GIT_REFUSALS.stale_snapshot, { reason: 'stale_snapshot' });
+      return this.#gitPage(projected.page, { key, cursor, skip });
     },
 
     // Project resources (docs/protocol/alp-json-rpc-v1.md §15): alpd never walks up from

@@ -56,6 +56,7 @@ const OUT_OF_SCOPE = {
   'workspace.worktree.options': null, 'workspace.worktree.create': null, 'workspace.worktree.remove': null, // worktrees.test.js checks exact derived grants and mutation scope
 
   'project.list': null, 'workspace.list': null, 'workspace.get': null, 'project.register': null, 'project.remove': null, 'workspace.update': null, // registry.test.js checks scoped rows and every mutation
+  'workspace.git.status': null, 'workspace.git.diff': null, // git.test.js checks registry scope, both permissions, paths and projection
 
   'catalog.get': null, // global: the static catalogue of models and modes
   'session.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
@@ -104,6 +105,7 @@ const IN_SCOPE = ({ a }) => ({
   'project.register': { directory: a, ifRevision: 0, requestId: 'r' },
   'project.remove': { projectId: 'prj_a', ifRevision: 0, requestId: 'r' },
   'workspace.update': { workspaceId: 'wks_a', pinned: true, ifRevision: 0, requestId: 'r' },
+  'workspace.git.status': { workspaceId: 'wks_a' }, 'workspace.git.diff': { workspaceId: 'wks_a', compare: { mode: 'uncommitted' } },
   'catalog.get': {}, 'library.models': {}, 'settings.language.get': {},
   'session.list': {}, 'session.get': { sessionId: 'sa' }, 'session.status': { sessionId: 'sa' }, 'session.log': { sessionId: 'sa' },
   'session.history': { sessionId: 'sa' }, 'session.attach': { sessionId: 'sa' }, 'session.release': { sessionId: 'sa' }, 'session.attention.clear': { sessionId: 'sa' }, 'session.preview': { spec: { cwd: a } },
