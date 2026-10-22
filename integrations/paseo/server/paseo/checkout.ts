@@ -23,7 +23,7 @@ import type { ClientContext, Handler } from './gateway.js';
  * - `remoteUrl` has no credentials, and is null for a local path remote;
  * - `upstreamRef` is the full ref of alpd's short upstream (`origin/main` → refs/remotes/origin/main;
  *   a name without a slash → refs/heads/<name>);
- * - one diff answer holds alpd's first page (2 MiB of patch): past it, `diffTooLarge` says so and
+ * - one diff answer holds alpd's first page (2 MiB as JSON): past it, `diffTooLarge` says so and
  *   the rest is not listed.
  */
 

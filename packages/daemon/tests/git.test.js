@@ -265,6 +265,8 @@ test('remote URLs lose credentials, queries and local paths; branch names are na
   assert.equal(scrubRemoteUrl('https://x-access-token:tok@github.com/a/b.git'), 'https://github.com/a/b.git');
   assert.equal(scrubRemoteUrl('ssh://git@github.com:22/a/b.git'), 'ssh://github.com:22/a/b.git');
   assert.equal(scrubRemoteUrl('git@github.com:a/b.git'), 'github.com:a/b.git');
+  assert.equal(scrubRemoteUrl('user:s3cret@github.com:a/b.git'), 'github.com:a/b.git', 'a password in scp-like user information');
+  assert.equal(scrubRemoteUrl('a@b:c@github.com:org/x.git'), 'github.com:org/x.git');
   assert.equal(scrubRemoteUrl('HTTPS://u@host/p?q=1#f'), 'https://host/p');
   for (const local of ['/srv/repo.git', '../repo', './repo', 'file:///srv/repo', 'file:/srv/repo', 'C:\\repo', 'c:/repo', '', null, 'ext::sh -c evil', 'a\nb']) assert.equal(scrubRemoteUrl(local), null, String(local));
   for (const good of ['main', 'feature/x', 'release-1.2', 'a.b']) assert.equal(validBranchName(good), true, good);
@@ -474,6 +476,42 @@ test('kinds: text hunks, binary, too large, mode change, symlink, submodule, con
   const whitespace = byPath(checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted', ignoreWhitespace: true } }), base).files)['spaces.txt'];
   assert.deepEqual(whitespace?.hunks ?? [], []);
   assert.equal(existsSync(marker), false, 'nothing ran inside the submodule');
+});
+
+test('what is sent is measured: short lines and non-UTF-8 text never take a page over its limit or the frame', { skip }, async t => {
+  const base = await sandbox(t);
+  const root = path.join(base, 'work');
+  const git = await repository(root);
+  await put(path.join(root, 'latin1.txt'), 'caf\xe9\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'first');
+  // 600 KB of 0xE9: text to Git and alpd, 1.8 MB once each byte is decoded as U+FFFD.
+  await writeFile(path.join(root, 'latin1.txt'), Buffer.alloc(600 * 1024, 0xe9));
+  // Two files of 500 000 empty lines: 0.5 MB each, about 14 MB each as {type, content} JSON.
+  await put(path.join(root, 'empty-a.txt'), '\n'.repeat(500_000));
+  await put(path.join(root, 'empty-b.txt'), '\n'.repeat(500_000));
+  await put(path.join(root, 'small.txt'), 'small\n');
+  const reader = readerFor({ w: root });
+  const pages = await allPages(reader, { workspaceId: 'w', compare: { mode: 'uncommitted' } }, base);
+  for (const page of pages) assert.ok(Buffer.byteLength(JSON.stringify(page)) <= WORKSPACE_GIT.maxTotalBytes, `a page of ${Buffer.byteLength(JSON.stringify(page))} bytes`);
+  const files = byPath(pages.flatMap(page => page.files));
+  assert.deepEqual(Object.keys(files).sort(), ['empty-a.txt', 'empty-b.txt', 'latin1.txt', 'small.txt']);
+  for (const name of ['latin1.txt', 'empty-a.txt', 'empty-b.txt']) { assert.equal(files[name].kind, 'too_large', name); assert.deepEqual(files[name].hunks, []); }
+  assert.equal(files['small.txt'].kind, 'text');
+});
+
+test('a filter driver added to the configuration while a read runs refuses the answer (fails closed)', { skip }, async t => {
+  const base = await sandbox(t);
+  const root = path.join(base, 'work');
+  const git = await repository(root);
+  await put(path.join(root, 'a.txt'), 'one\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'first');
+  await put(path.join(root, 'a.txt'), 'two\n');
+  const reader = readerFor({ w: root }, { probe: async () => { git('config', 'filter.late.clean', 'cat'); } });
+  assert.deepEqual(await refusal(reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' } }), base), { code: 1000, reason: 'git_failed' });
+  // The next read neutralizes the driver it now finds.
+  assert.equal(byPath(checked('workspace.git.diff', await readerFor({ w: root }).diff({ workspaceId: 'w', compare: { mode: 'uncommitted' } }), base).files)['a.txt'].kind, 'text');
 });
 
 test('pages: at most 2 MiB of patch each, every file once, a stale snapshot and a forged cursor refused', { skip }, async t => {
