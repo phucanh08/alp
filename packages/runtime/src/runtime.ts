@@ -3013,6 +3013,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       acknowledged: Promise.resolve(),
       worktrees: new Map(),
     };
+    // Pending until its thread exists: mail posted meanwhile waits for it, as in a restart.
+    const finishPending = beginPending(session);
 
     sessions.set(
       sessionId,
@@ -3083,8 +3085,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         );
       }
 
-      session.pending = false;
       session.buffered = [];
+      finishPending();
 
       emit(sessionId, {
         type: 'session.opened',
@@ -3122,6 +3124,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     } catch (error) {
       log.error(`${session.mapping.agent.name} could not start its ${session.runtimeKind} session`, { code: 'ALP_PROVIDER_START_FAILED', sessionId, rootId: rootOf(sessionId), agent: session.mapping.agent.name, provider: session.runtimeKind, error });
       session.closed = true;
+      // Closed first: mail that waited for the open finds the session gone and stops.
+      finishPending();
       sessions.delete(
         sessionId,
       );

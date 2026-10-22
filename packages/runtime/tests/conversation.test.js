@@ -437,3 +437,34 @@ test('mail that arrives while a rebind resumes waits for it without stalling the
     await until(() => !runtime.snapshot('root').busy);
   }
 });
+
+test('mail that arrives while a session first opens waits for it without stalling the process, opened or failed', async t => {
+  for (const fails of [false, true]) {
+    let gate;
+    const { root, runtime, runtimes } = await setup(t, async (transport, method) => {
+      if (method !== 'thread/start') return undefined;
+      await new Promise(resolve => { gate = resolve; });
+      if (fails) throw new Error('thread/start failed');
+      return undefined;
+    });
+    const opening = runtime.open('root', { cwd: root, persist: true });
+    await until(() => gate);
+    runtime.message('root', `A note while the session opens (${fails ? 'fails' : 'opens'})`);
+    // The event loop goes on: a timer fires while thread/start waits.
+    let fired = false;
+    setTimeout(() => { fired = true; }, 5);
+    await until(() => fired);
+    gate();
+    if (fails) {
+      await assert.rejects(opening, /thread\/start failed/);
+      await new Promise(resolve => setTimeout(resolve, 20));
+      assert.equal(runtimes[0].of('turn/start').length, 0, 'a session that did not open starts no turn');
+      continue;
+    }
+    await opening;
+    // The note wakes the session once it is open.
+    await until(() => runtimes[0].of('turn/start').length === 1);
+    runtimes[0].finish();
+    await until(() => !runtime.snapshot('root').busy);
+  }
+});
