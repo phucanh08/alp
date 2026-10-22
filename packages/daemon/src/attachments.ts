@@ -427,9 +427,15 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
     failure = error instanceof Error ? error : new Error(String(error));
     log?.warn('the attachment store cannot be used', { code: 'ALPD_ATTACHMENTS_UNUSABLE', error });
   });
+  let closed = false;
+  // Collection while alpd runs starts only once recovery has loaded every object: before that, an
+  // object directory not yet loaded would look like a leftover and be removed.
   if (options.sweepMs !== 0) {
-    sweeper = setInterval(() => void sweep().catch(error => log?.warn('attachment collection failed', { code: 'ALPD_ATTACHMENT_SWEEP_FAILED', error })), options.sweepMs ?? Math.min(15 * 60 * 1000, Math.max(1000, Math.floor(limits.uploadTimeoutMs / 4))));
-    sweeper.unref();
+    void recovered.then(() => {
+      if (closed || failure) return;
+      sweeper = setInterval(() => void sweep().catch(error => log?.warn('attachment collection failed', { code: 'ALPD_ATTACHMENT_SWEEP_FAILED', error })), options.sweepMs ?? Math.min(15 * 60 * 1000, Math.max(1000, Math.floor(limits.uploadTimeoutMs / 4))));
+      sweeper.unref();
+    });
   }
 
   const beginResult = (meta: Meta, received: number) => ({
@@ -459,7 +465,8 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
     limits,
     /** Settles when start-up recovery is done (or failed: the methods then answer 1005). */
     ready: () => recovered,
-    sweep,
+    /** One collection now, after start-up recovery (as the timer's). */
+    async sweep() { await recovered; return sweep(); },
 
     async begin(principal: Principal, params: { sessionId: string; name: string; size: number; mimeType: string; sha256?: string; requestId: string }) {
       await recovered; usable();
@@ -473,9 +480,12 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
       if (!project || (principal.roots !== undefined && !principal.roots.includes(project))) throw new RpcError(ERROR.notFound, 'No such session', { reason: 'not_found' });
       const requestKey = sha(['attachment.begin', principal.id, principal.epoch, params.requestId]);
       const fingerprint = sha([params.sessionId, name, params.size, mimeType, params.sha256 ?? null]);
-      while (beginning.has(requestKey)) await beginning.get(requestKey)!.catch(() => {});
-      const existing = [...objects.values()].find(meta => meta.requestKey === requestKey);
-      if (existing && existing.principalId === principal.id && existing.principalEpoch === principal.epoch) {
+      // One request key makes at most one upload: after any await here the checks run again, as a
+      // concurrent repeat may have begun it meanwhile.
+      for (;;) {
+        while (beginning.has(requestKey)) await beginning.get(requestKey)!.catch(() => {});
+        const existing = [...objects.values()].find(meta => meta.requestKey === requestKey);
+        if (!existing || existing.principalId !== principal.id || existing.principalEpoch !== principal.epoch) break;
         if (existing.fingerprint !== fingerprint) throw conflict('request_conflict', `requestId ${params.requestId} was used for another upload`);
         if (!await bound(existing, principal)) throw new RpcError(ERROR.notFound, 'No such session', { reason: 'not_found' });
         if (existing.state === 'committed') return beginResult(existing, existing.size);
@@ -484,9 +494,12 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
       }
       // Reserved here, before anything awaits: concurrent begins see each other's reservation.
       const at = now();
-      // Expired uploads release their reservation now; their files go after any call on them.
+      // Expired uploads release their reservation now, and so do this principal's uploads of an
+      // earlier grant epoch (a reissued credential): nobody can continue or abort those any more.
+      // Their files go after any call on them.
       for (const meta of [...objects.values()]) {
-        if (meta.state !== 'uploading' || Date.parse(meta.expiresAt) > at) continue;
+        if (meta.state !== 'uploading') continue;
+        if (Date.parse(meta.expiresAt) > at && !(meta.principalId === principal.id && meta.principalEpoch !== principal.epoch)) continue;
         objects.delete(meta.id);
         void withObject(meta.id, () => rm(dirOf(meta.id), { recursive: true, force: true })).catch(() => {});
       }
@@ -621,6 +634,9 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
           await discard(meta, 'hash mismatch');
           throw conflict('hash_mismatch', 'The bytes received do not have this SHA-256; the upload was aborted');
         }
+        // A begin may have released this upload meanwhile (expired, or of an earlier grant epoch):
+        // its files go after this call, and it is never published again.
+        if (objects.get(meta.id) !== meta) throw notFound('upload');
         const committed: Meta = { ...meta, state: 'committed', sha256: digest, detectedMimeType: sniffMimeType(head), committedAt: iso(now()) };
         crashPoint('attachment.commit.before-publish');
         try { await writeAtomic(metaOf(meta.id), JSON.stringify(committed)); }
@@ -629,6 +645,7 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
           await discard(meta, 'publish failed');
           throw persistence('the attachment; the upload was aborted and its space released');
         }
+        if (objects.get(meta.id) !== meta) throw notFound('upload');
         objects.set(meta.id, committed);
         crashPoint('attachment.commit.after-publish');
         // Read-only from now on; recovery repeats it after a crash in between.
@@ -772,7 +789,7 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
     /** The holders of the reference index, for tests. */
     holders: () => structuredClone(refs.holders),
 
-    close() { if (sweeper) clearInterval(sweeper); sweeper = undefined; },
+    close() { closed = true; if (sweeper) clearInterval(sweeper); sweeper = undefined; },
   };
 }
 

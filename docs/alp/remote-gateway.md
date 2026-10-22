@@ -717,7 +717,10 @@ xuống, giải nén, chạy file hay render HTML qua remote.
 - **Thu hồi giữa chừng**: `credential revoke` (hay `rotate`/`reissue`) đóng connection ngay (4401);
   token cũ không lấy được ticket, nên không chunk hay commit nào nữa tới alpd. Request đã chuyển tới
   alpd trước đó vẫn có thể xong. Upload dở hết hạn sau `uploadTimeoutMs` (1 giờ) và được thu hồi;
-  credential reissue là epoch khác nên không tiếp tục được upload cũ.
+  credential reissue là epoch khác nên không tiếp tục được upload cũ: `begin` đầu tiên của epoch mới
+  bỏ ngay các upload dở của epoch cũ (giải phóng quota). Attachment đã commit của epoch cũ vẫn tính
+  vào quota của principal tới khi được thu dọn (không tham chiếu: sau `unreferencedRetentionMs`) hoặc
+  được nhả tham chiếu.
 - **Runtime**: runtime hiện tại (Codex, Claude qua ALP) chưa đọc được attachment: prompt có attachment
   bị từ chối thật thà `1005 attachment_unsupported` trước khi gửi gì, file vẫn được giữ. Nhánh J
   (t-15b0.15) mở phần này.

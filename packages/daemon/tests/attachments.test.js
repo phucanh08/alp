@@ -608,3 +608,59 @@ test('the store alone: release by session (the deletion seam) starts the grace p
   await assert.rejects(store.get(owner, { attachmentId: attachment.attachmentId }), { code: 1001 });
   assert.equal(store.usage().bytes, 0);
 });
+
+/** A store alone on a fresh root (the session's project is the root's parent), closed after the test. */
+async function bareStore(t, options = {}) {
+  const root = options.root ?? path.join(await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-attach-store-'))), 'attachments');
+  if (!options.root) t.after(() => rm(path.dirname(root), { recursive: true, force: true }));
+  const store = createAttachmentStore({ root, sessionProject: () => path.dirname(root), sweepMs: 0, ...options, ...{ root } });
+  t.after(() => store.close());
+  return { root, store };
+}
+
+test('collection while alpd runs waits for start-up recovery: objects not yet loaded are never taken for leftovers', { skip }, async t => {
+  const { root, store } = await bareStore(t);
+  const owner = { id: 'owner', epoch: 'owner' };
+  const ids = [];
+  for (let i = 0; i < 200; i++) {
+    const begun = await store.begin(owner, { sessionId: 's1', name: `f${i}.txt`, size: 1, mimeType: 'text/plain', requestId: `r${i}` });
+    await store.chunk(owner, { uploadId: begun.uploadId, offset: 0, data: b64('x') });
+    ids.push((await store.commit(owner, { uploadId: begun.uploadId, sha256: sha('x') })).attachment.attachmentId);
+  }
+  store.close();
+  // Older than the upload timeout, well within their 24 h retention.
+  const old = new Date(Date.now() - ATTACHMENTS.uploadTimeoutMs - 60_000);
+  for (const id of ids) await utimes(path.join(root, id.slice(4)), old, old);
+  const { store: restarted } = await bareStore(t, { root, sweepMs: 1 });
+  await restarted.ready();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  await restarted.sweep();
+  const left = (await readdir(root)).filter(name => /^[0-9a-f]{32}$/.test(name));
+  assert.equal(left.length, ids.length, 'every committed object within its retention is kept');
+  for (const id of ids) assert.equal((await restarted.get(owner, { attachmentId: id })).attachment.size, 1);
+  assert.equal(restarted.usage().bytes, ids.length);
+});
+
+test('a begin of a newer grant epoch releases the principal\'s uploads of earlier epochs; concurrent repeats of an expired begin make one upload', { skip }, async t => {
+  const clock = { now: Date.now() };
+  const { store } = await bareStore(t, { now: () => clock.now });
+  const before = { id: 'pppppppppppppppp', epoch: 'e1' };
+  const after = { id: 'pppppppppppppppp', epoch: 'e2' };
+  const begin = (as, requestId, size = 4) => store.begin(as, { sessionId: 's1', name: 'a.bin', size, mimeType: 'application/octet-stream', requestId });
+  const stale = [await begin(before, 'a'), await begin(before, 'b')];
+  await assert.rejects(begin(before, 'c'), { code: 1005 }, 'the earlier epoch holds every active upload slot');
+  // The reissued credential (another epoch) is not locked out by uploads nobody can continue.
+  const fresh = await begin(after, 'a');
+  assert.notEqual(fresh.uploadId, stale[0].uploadId);
+  assert.deepEqual(store.usage(after.id), { bytes: 4, uploads: 1 });
+  for (const { uploadId } of stale) {
+    await assert.rejects(store.chunk(before, { uploadId, offset: 0, data: b64('abcd') }), { code: 1001 });
+    await assert.rejects(store.chunk(after, { uploadId, offset: 0, data: b64('abcd') }), { code: 1001 });
+  }
+  // An expired upload repeated twice at once is begun again once.
+  clock.now += ATTACHMENTS.uploadTimeoutMs + 1;
+  const [one, two] = await Promise.all([begin(after, 'a'), begin(after, 'a')]);
+  assert.equal(one.uploadId, two.uploadId);
+  assert.notEqual(one.uploadId, fresh.uploadId);
+  assert.deepEqual(store.usage(after.id), { bytes: 4, uploads: 1 });
+});

@@ -959,9 +959,12 @@ reveals that it exists.
   removed, trimmed, at most 255 UTF-8 bytes (`invalid_name` otherwise). `mimeType` is advisory (kept
   lower case); alpd sniffs the first bytes at commit for display (`detectedMimeType`) and neither
   chooses behaviour. `size` (0 allowed) is reserved against the quotas atomically: concurrent begins
-  cannot oversubscribe. `sha256`, when given, must match at commit. A repeat with the same
-  `requestId` and params (per principal and epoch) answers the same upload with what it holds now
-  (`received`), so a client resumes there; once committed it answers `state: "committed"` and the
+  cannot oversubscribe. Quotas count per principal across grant epochs: a begin of a newer epoch
+  releases that principal's uploads of earlier epochs at once (nobody can continue them), while its
+  committed objects of earlier epochs keep counting until they are collected or released. `sha256`,
+  when given, must match at commit. A repeat with the same `requestId` and params (per principal and
+  epoch) answers the same upload with what it holds now (`received`), so a client resumes there;
+  concurrent repeats make one upload; once committed it answers `state: "committed"` and the
   `attachmentId`; other params are `1004 request_conflict`.
 - `attachment.chunk { uploadId, offset, data }` → `{ received, size }`. `data` is canonical base64
   of 1 to `maxChunkBytes` bytes (`invalid_data`). `offset` must be at most `received`
@@ -993,7 +996,8 @@ reaches the provider releases them; an `accepted`, `failed` or unknown outcome k
 objects survive expiry, `session.archive` and restarts, and count against quotas. An incomplete
 upload expires after `uploadTimeoutMs`; an unreferenced committed object is removed after
 `unreferencedRetentionMs`, a released one `releasedGraceMs` after its last reference went.
-Collection runs at start and while alpd runs.
+Collection runs at start, at the end of start-up recovery, and then periodically while alpd runs
+(the timer starts only once recovery has loaded every object).
 
 **Crash recovery** (process crashes; power loss is not claimed): at start alpd checks the store is a
 private directory of its user, removes temporary files, removes a directory without readable
