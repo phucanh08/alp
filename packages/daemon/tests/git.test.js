@@ -295,6 +295,11 @@ test('not a repository, a subdirectory workspace, an unknown workspace, no Git',
 
   const noGit = readerFor({ w: root }, { binary: path.join(base, 'no-such-git') });
   assert.deepEqual(await refusal(noGit.status('w'), base), { code: 1005, reason: 'git_unavailable' });
+  // A Git too old for --end-of-options would answer HEAD as missing: refused, never misread.
+  const old = path.join(base, 'old-git');
+  await writeFile(old, `#!/bin/sh\nif [ "$*" != "\${*%--version}" ]; then echo 'git version 2.25.1'; exit 0; fi\nexit 1\n`);
+  await chmod(old, 0o755);
+  assert.deepEqual(await refusal(readerFor({ w: root }, { binary: old }).status('w'), base), { code: 1005, reason: 'git_unavailable' });
   // A planted git in the workspace is never the answer, even named absolutely.
   await writeFile(path.join(root, 'git'), '#!/bin/sh\nexit 0\n');
   await chmod(path.join(root, 'git'), 0o755);

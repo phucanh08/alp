@@ -66,6 +66,7 @@ const FIXED = Object.freeze({
   notRepository: 'The workspace is not a Git repository',
   notRoot: 'The workspace is not the top level of its Git repository',
   unavailable: 'No Git is available to alpd',
+  tooOld: 'The Git available to alpd is older than 2.31, which these reads need',
   failed: 'Git could not read the workspace',
   invalidCompare: 'compare.baseRef must name a branch',
   unknownRef: 'compare.baseRef names no branch of the repository',
@@ -184,6 +185,26 @@ function runGit(box: Box, args: string[], { stdin, okCodes = [0], maxBytes = GIT
   }));
 }
 
+/**
+ * The oldest Git these reads run: `rev-parse --end-of-options` (2.30) and GIT_CONFIG_COUNT (2.31).
+ * An older one would take `--end-of-options` as a revision and answer HEAD as missing: refused.
+ */
+const MINIMUM_GIT = [2, 31] as const;
+const versions = new Map<string, Promise<boolean>>();
+function recentEnough(box: Box): Promise<boolean> {
+  const known = versions.get(box.git);
+  if (known) return known;
+  const checked = runGit(box, ['--version'], { maxBytes: 4096 }).then(({ stdout }) => {
+    const found = /^git version (\d+)\.(\d+)/.exec(stdout.toString('utf8'));
+    if (!found) failed('unrecognized git --version');
+    const [major, minor] = [Number(found![1]), Number(found![2])];
+    return major > MINIMUM_GIT[0] || (major === MINIMUM_GIT[0] && minor >= MINIMUM_GIT[1]);
+  });
+  versions.set(box.git, checked);
+  checked.catch(() => versions.delete(box.git));
+  return checked;
+}
+
 // ---- The workspace and its repository ----
 
 type Located = { kind: 'not_repository' } | { kind: 'unsupported' } | { kind: 'repository'; root: string; gitDir: string };
@@ -235,6 +256,7 @@ type Repository = Box & { remoteUrl: string | null; emptyTree: string; gitDir: s
  */
 async function boxFor(located: Extract<Located, { kind: 'repository' }>, git: string, deadline: number): Promise<Repository | 'unsupported'> {
   const box: Box = { git, root: located.root, env: environment(located.root, located.gitDir), deadline, overrides: [] };
+  if (!(await recentEnough(box))) throw new RpcError(ERROR.unavailable, FIXED.tooOld, { reason: 'git_unavailable' });
   const { stdout } = await runGit(box, ['config', '--null', '--get-regexp', '^(remote\\.origin\\.url|core\\.worktree|extensions\\.objectformat|filter\\..+\\.(smudge|clean|process|required))$'], { okCodes: [0, 1] });
   let remoteUrl: string | null = null;
   let worktree: string | undefined;
