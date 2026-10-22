@@ -78,6 +78,9 @@ async function world(t) {
   // Reads a's files (files.read is never a default); bob reads b's.
   const files = await createCredential(gatewayHome, { label: 'files', workspaces: [projects.a], permissions: ['session.read', 'files.read'] });
   const bobFiles = await createCredential(gatewayHome, { label: 'bob-files', workspaces: [projects.b], permissions: ['files.read'] });
+  // Uploads attachments for a's sessions (attachments.write is never a default); bob's for b.
+  const uploader = await createCredential(gatewayHome, { label: 'uploader', workspaces: [projects.a], permissions: ['session.read', 'session.write', 'attachments.write'] });
+  const bobUploader = await createCredential(gatewayHome, { label: 'bob-uploader', workspaces: [projects.b], permissions: ['session.read', 'session.write', 'attachments.write'] });
   const lines = [];
   const logger = createGatewayLogger({ write: line => lines.push(line) });
   const store = new CredentialStore({ home: gatewayHome, logger, pollMs: 50 });
@@ -108,7 +111,7 @@ async function world(t) {
   const turnStarts = async () => (await readFile(journal, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.method === 'turn/start');
 
   return {
-    projects, home, tokens: { alice: alice.token, bob: bob.token, viewer: viewer.token, reader: reader.token, files: files.token, bobFiles: bobFiles.token }, ids: { alice: alice.credential.id }, gatewayHome, lines, open, turnStarts, journal: () => readFile(journal, 'utf8').catch(() => ''),
+    projects, home, tokens: { alice: alice.token, bob: bob.token, viewer: viewer.token, reader: reader.token, files: files.token, bobFiles: bobFiles.token, uploader: uploader.token, bobUploader: bobUploader.token }, ids: { alice: alice.credential.id, uploader: uploader.credential.id }, gatewayHome, lines, open, turnStarts, journal: () => readFile(journal, 'utf8').catch(() => ''),
     get base() { return base; }, get gateway() { return gateway; }, get socket() { return socket; },
     startDaemon, stopDaemon, startGateway,
     async stopGateway() { await gateway?.close(); gateway = undefined; },
@@ -154,7 +157,7 @@ test('a remote client works through the gateway across reconnects and restarts o
 
   // Handshake through the gateway: alpd's capabilities, never extension methods.
   const greeting = await hello(client, { name: 'e2e', version: '0' });
-  assert.deepEqual(greeting.capabilities.sort(), ['attach.after', 'library', 'library.project.write', 'prompt.images', 'prompt.receipts', 'question.watch', 'question.watch.turns', 'session.attention', 'session.history', 'session.list.page', 'settings.language', 'task', 'team', 'workspace.files', 'workspace.files.read', 'workspace.git', 'workspace.registry', ...(process.platform === 'win32' ? [] : ['workspace.worktree'])]);
+  assert.deepEqual(greeting.capabilities.sort(), ['attach.after', 'library', 'library.project.write', 'prompt.images', 'prompt.receipts', 'question.watch', 'question.watch.turns', 'session.attention', 'session.history', 'session.list.page', 'settings.language', 'task', 'team', 'workspace.files', 'workspace.files.read', 'workspace.git', 'workspace.registry', ...(process.platform === 'win32' ? [] : ['attachments', 'workspace.worktree'])].sort());
   assert.ok(!greeting.capabilities.includes('extension.methods'));
   assert.equal(greeting.pid, undefined);
   assert.equal(greeting.hostname, hostname(), 'alpd\'s machine name, as Paseo labels a host');
@@ -584,4 +587,56 @@ test('workspace.files.list and read stay in the grant and the block list on a re
   assert.deepEqual(await refusal(other, 'workspace.files.read', { projectRoot: w.projects.b, path: 'b.txt' }), [1003, 'linked']);
   await writeFile(path.join(w.projects.b, 'notes.md'), '# b');
   assert.equal((await other.request('workspace.files.read', { projectRoot: w.projects.b, path: 'notes.md' })).content, '# b');
+});
+
+test('attachments through the gateway on a real alpd: upload, commit, get; an honest refusal from today\'s runtime; binding, deletion and revocation', { skip, timeout: 60_000 }, async t => {
+  const w = await world(t);
+  const { createHash } = await import('node:crypto');
+  const { readdir, stat } = await import('node:fs/promises');
+  const client = new AlpRpcClient(await w.open(w.tokens.uploader));
+  t.after(() => client.close());
+  const greeting = await hello(client);
+  assert.ok(greeting.capabilities.includes('attachments'));
+  assert.equal(greeting.attachmentLimits.maxChunkBytes, 256 * 1024);
+  const { session } = await client.request('session.create', { spec: { cwd: w.projects.a, model: MODEL, persist: true } });
+  const data = Buffer.from('%PDF-1.4\n' + 'page '.repeat(70_000));
+  const sha256 = createHash('sha256').update(data).digest('hex');
+  const begun = await client.request('attachment.begin', { sessionId: session.id, name: '../Report\u202E.pdf', size: data.length, mimeType: 'application/pdf', sha256, requestId: 'r1' });
+  for (let offset = 0; offset < data.length; offset += greeting.attachmentLimits.maxChunkBytes) {
+    await client.request('attachment.chunk', { uploadId: begun.uploadId, offset, data: data.subarray(offset, offset + greeting.attachmentLimits.maxChunkBytes).toString('base64') });
+  }
+  const { attachment } = await client.request('attachment.commit', { uploadId: begun.uploadId, sha256 });
+  assert.deepEqual([attachment.name, attachment.size, attachment.sha256, attachment.detectedMimeType, attachment.referenced], ['..Report.pdf', data.length, sha256, 'application/pdf', false]);
+  assert.deepEqual((await client.request('attachment.get', { attachmentId: attachment.attachmentId })).attachment, attachment);
+  const seen = JSON.stringify([begun, attachment]);
+  for (const host of [w.home, w.projects.a]) assert.ok(!seen.includes(host), 'no host path');
+  // Stored by alpd under its own id, private, read-only.
+  const stored = path.join(w.home, 'state', 'attachments', attachment.attachmentId.slice(4));
+  assert.equal((await stat(path.join(stored, 'payload'))).mode & 0o777, 0o400);
+  assert.deepEqual(await readFile(path.join(stored, 'payload')), data);
+  // Today's runtimes cannot read attachments: refused before anything is sent, the file kept.
+  const refused = await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: [{ type: 'text', text: 'Summarise' }, { type: 'attachment', attachmentId: attachment.attachmentId }] }).catch(error => error);
+  assert.deepEqual([refused.code, refused.data?.reason], [1005, 'attachment_unsupported']);
+  assert.ok(!(await w.journal()).includes('Summarise'), 'nothing reached the provider');
+  // Another credential (another workspace, another principal) cannot see or use it: as an unknown id.
+  const bob = new AlpRpcClient(await w.open(w.tokens.bobUploader));
+  t.after(() => bob.close());
+  await hello(bob);
+  const foreign = await bob.request('attachment.get', { attachmentId: attachment.attachmentId }).catch(error => error);
+  const unknown = await bob.request('attachment.get', { attachmentId: `att_${'0'.repeat(32)}` }).catch(error => error);
+  assert.deepEqual([foreign.code, foreign.data, foreign.message], [unknown.code, unknown.data, unknown.message]);
+  assert.equal(foreign.code, 1001);
+  assert.equal((await bob.request('attachment.begin', { sessionId: session.id, name: 'x', size: 1, mimeType: 'text/plain', requestId: 'b' }).catch(error => error)).code, 1001, 'a session outside its grant');
+  assert.deepEqual(await client.request('attachment.delete', { attachmentId: attachment.attachmentId }), { deleted: true });
+  assert.ok(!(await readdir(path.join(w.home, 'state', 'attachments'))).includes(attachment.attachmentId.slice(4)));
+
+  // Revoked mid-upload: the connection ends, the token gets no ticket, no one else can finish it.
+  const pending = await client.request('attachment.begin', { sessionId: session.id, name: 'half.bin', size: 8, mimeType: 'application/octet-stream', requestId: 'r2' });
+  await client.request('attachment.chunk', { uploadId: pending.uploadId, offset: 0, data: Buffer.from('1234').toString('base64') });
+  const closed = new Promise(resolve => client.onClose(resolve));
+  await revokeCredential(w.gatewayHome, w.ids.uploader);
+  await closed;
+  await assert.rejects(w.open(w.tokens.uploader), /ticket refused: 401/);
+  const finish = await bob.request('attachment.commit', { uploadId: pending.uploadId, sha256 }).catch(error => error);
+  assert.equal(finish.code, 1001);
 });
