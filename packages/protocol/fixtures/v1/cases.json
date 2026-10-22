@@ -5378,6 +5378,393 @@
      "maxObjectBytes": 20971520
     }
    }
+  },
+  {
+   "name": "session.fork params through a turn",
+   "check": "params",
+   "method": "session.fork",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_1",
+    "requestId": "fork-1",
+    "ifGeneration": "0123456789abcdef0123456789abcdef",
+    "boundary": {
+     "throughTurnId": "turn-1"
+    }
+   }
+  },
+  {
+   "name": "session.fork params before a turn into a workspace, with a chosen id and title",
+   "check": "params",
+   "method": "session.fork",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_1",
+    "requestId": "fork-2",
+    "ifGeneration": "0123456789abcdef0123456789abcdef",
+    "boundary": {
+     "beforeTurnId": "turn-2"
+    },
+    "workspaceId": "wks_1",
+    "newSessionId": "ses_f1",
+    "title": "Try another way"
+   }
+  },
+  {
+   "name": "session.fork params restoring a rewound branch whole",
+   "check": "params",
+   "method": "session.fork",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_1",
+    "requestId": "fork-3",
+    "ifGeneration": "0123456789abcdef0123456789abcdef",
+    "branchId": "br_0123456789abcdef"
+   }
+  },
+  {
+   "name": "session.fork params with both cutoffs in one boundary",
+   "check": "params",
+   "method": "session.fork",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "requestId": "fork-4",
+    "ifGeneration": "0123456789abcdef0123456789abcdef",
+    "boundary": {
+     "throughTurnId": "turn-1",
+     "beforeTurnId": "turn-2"
+    }
+   }
+  },
+  {
+   "name": "session.fork params without a requestId",
+   "check": "params",
+   "method": "session.fork",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "ifGeneration": "0123456789abcdef0123456789abcdef",
+    "boundary": {
+     "throughTurnId": "turn-1"
+    }
+   }
+  },
+  {
+   "name": "session.fork params without the generation precondition",
+   "check": "params",
+   "method": "session.fork",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "requestId": "fork-5",
+    "boundary": {
+     "throughTurnId": "turn-1"
+    }
+   }
+  },
+  {
+   "name": "session.fork params naming a host path as destination",
+   "check": "params",
+   "method": "session.fork",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "requestId": "fork-6",
+    "ifGeneration": "0123456789abcdef0123456789abcdef",
+    "cwd": "/etc"
+   }
+  },
+  {
+   "name": "session.fork params with an invalid new session id",
+   "check": "params",
+   "method": "session.fork",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "requestId": "fork-7",
+    "ifGeneration": "0123456789abcdef0123456789abcdef",
+    "newSessionId": "a b"
+   }
+  },
+  {
+   "name": "session.fork result",
+   "check": "result",
+   "method": "session.fork",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_f1",
+     "projectRoot": "/work/app",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-5.5",
+     "mode": "workspace-write",
+     "thinking": "medium",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "threadId": "thread-2",
+     "persistent": true,
+     "busy": false,
+     "status": "closed",
+     "conversation": {
+      "fork": true,
+      "rewind": true
+     },
+     "title": "Plan (fork)",
+     "forkedFrom": {
+      "sessionId": "ses_1",
+      "turnId": "turn-1",
+      "boundary": "through",
+      "at": "2026-10-23T00:00:00.000Z"
+     }
+    },
+    "forkedFrom": {
+     "sessionId": "ses_1",
+     "turnId": "turn-1",
+     "boundary": "through",
+     "at": "2026-10-23T00:00:00.000Z"
+    }
+   }
+  },
+  {
+   "name": "session.fork result of a repeated request",
+   "check": "result",
+   "method": "session.fork",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_f1",
+     "projectRoot": "/work/app",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-5.5",
+     "mode": "workspace-write",
+     "thinking": "medium",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "threadId": "thread-2",
+     "persistent": true,
+     "busy": false,
+     "status": "closed",
+     "conversation": {
+      "fork": true,
+      "rewind": true
+     },
+     "forkedFrom": {
+      "sessionId": "ses_1",
+      "boundary": "whole",
+      "at": "2026-10-23T00:00:00.000Z",
+      "branchId": "br_0123456789abcdef"
+     }
+    },
+    "forkedFrom": {
+     "sessionId": "ses_1",
+     "boundary": "whole",
+     "branchId": "br_0123456789abcdef",
+     "at": "2026-10-23T00:00:00.000Z"
+    },
+    "duplicate": true
+   }
+  },
+  {
+   "name": "session.fork result with an unknown boundary kind",
+   "check": "result",
+   "method": "session.fork",
+   "valid": false,
+   "value": {
+    "session": {
+     "id": "ses_f1",
+     "projectRoot": "/work/app",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-5.5",
+     "mode": "workspace-write",
+     "thinking": "medium",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "threadId": "thread-2",
+     "persistent": true,
+     "busy": false,
+     "status": "closed",
+     "conversation": {
+      "fork": true,
+      "rewind": true
+     }
+    },
+    "forkedFrom": {
+     "sessionId": "ses_1",
+     "turnId": "turn-1",
+     "boundary": "after",
+     "at": "2026-10-23T00:00:00.000Z"
+    }
+   }
+  },
+  {
+   "name": "session.rewind params",
+   "check": "params",
+   "method": "session.rewind",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_1",
+    "requestId": "rewind-1",
+    "ifGeneration": "0123456789abcdef0123456789abcdef",
+    "beforeTurnId": "turn-2"
+   }
+  },
+  {
+   "name": "session.rewind params without a turn",
+   "check": "params",
+   "method": "session.rewind",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "requestId": "rewind-2",
+    "ifGeneration": "0123456789abcdef0123456789abcdef"
+   }
+  },
+  {
+   "name": "session.rewind params asking to restore files",
+   "check": "params",
+   "method": "session.rewind",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "requestId": "rewind-3",
+    "ifGeneration": "0123456789abcdef0123456789abcdef",
+    "beforeTurnId": "turn-2",
+    "mode": "both"
+   }
+  },
+  {
+   "name": "session.rewind params with a malformed generation",
+   "check": "params",
+   "method": "session.rewind",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "requestId": "rewind-4",
+    "ifGeneration": "g1",
+    "beforeTurnId": "turn-2"
+   }
+  },
+  {
+   "name": "session.rewind result",
+   "check": "result",
+   "method": "session.rewind",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_1",
+     "projectRoot": "/work/app",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-5.5",
+     "mode": "workspace-write",
+     "thinking": "medium",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "threadId": "thread-2",
+     "persistent": true,
+     "busy": false,
+     "status": "idle",
+     "conversation": {
+      "fork": true,
+      "rewind": true
+     },
+     "branches": [
+      {
+       "branchId": "br_0123456789abcdef",
+       "beforeTurnId": "turn-2",
+       "turns": 2,
+       "at": "2026-10-23T00:00:00.000Z"
+      }
+     ]
+    },
+    "generation": "fedcba9876543210fedcba9876543210",
+    "branch": {
+     "branchId": "br_0123456789abcdef",
+     "beforeTurnId": "turn-2",
+     "turns": 2,
+     "at": "2026-10-23T00:00:00.000Z"
+    }
+   }
+  },
+  {
+   "name": "session.rewind result without its branch",
+   "check": "result",
+   "method": "session.rewind",
+   "valid": false,
+   "value": {
+    "session": {
+     "id": "ses_1",
+     "projectRoot": "/work/app",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-5.5",
+     "mode": "workspace-write",
+     "thinking": "medium",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "threadId": "thread-2",
+     "persistent": true,
+     "busy": false,
+     "status": "closed",
+     "conversation": {
+      "fork": true,
+      "rewind": true
+     }
+    },
+    "generation": "fedcba9876543210fedcba9876543210"
+   }
+  },
+  {
+   "name": "history.reset envelope after a rewind",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_1",
+    "epoch": "e1",
+    "seq": 9,
+    "ts": "2026-10-23T00:00:00.000Z",
+    "event": {
+     "type": "history.reset",
+     "generation": "fedcba9876543210fedcba9876543210",
+     "reason": "rewind",
+     "branchId": "br_0123456789abcdef"
+    }
+   }
+  },
+  {
+   "name": "history.reset envelope without a generation",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "epoch": "e1",
+    "seq": 9,
+    "ts": "2026-10-23T00:00:00.000Z",
+    "event": {
+     "type": "history.reset",
+     "reason": "rewind",
+     "branchId": "br_0123456789abcdef"
+    }
+   }
   }
  ]
 }

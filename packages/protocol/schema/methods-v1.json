@@ -35,7 +35,9 @@
     "workspace.registry": "Daemon-owned project/workspace registry, durable pins, revision CAS and requestId replay.",
     "workspace.worktree": "Host-approved managed user worktrees; opt-in workspace.manage and named destination mappings.",
     "workspace.git": "workspace.git.status and workspace.git.diff: a registered workspace's read-only Git status and structured diff hunks by workspaceId; enumerated comparisons only, bounded (1 MiB per file, 2 MiB per page, 200 untracked files) with an opaque snapshot and next cursor; blocked secret paths withheld on both sides of a rename; no Git mutation.",
-    "attachments": "attachment.begin/chunk/commit/abort/get/delete: daemon-owned immutable non-image attachments by opaque id, uploaded in bounded chunks, and session.prompt content parts `{ type: \"attachment\", attachmentId }`; daemon.hello carries `attachmentLimits`. Listed only with a home and a store, on macOS and Linux."
+    "attachments": "attachment.begin/chunk/commit/abort/get/delete: daemon-owned immutable non-image attachments by opaque id, uploaded in bounded chunks, and session.prompt content parts `{ type: \"attachment\", attachmentId }`; daemon.hello carries `attachmentLimits`. Listed only with a home and a store, on macOS and Linux.",
+    "session.fork": "session.fork: a new root whose conversation is a root's up to a completed turn (or a branch a rewind set aside), by native fork of Codex and Claude sessions; files are never copied or changed. Listed with a store and a runtime that forks native conversations, on macOS and Linux (not Windows).",
+    "session.rewind": "session.rewind: a root's conversation from before a turn on, under the same session id; the later turns stay a recoverable branch, files are never changed, history generation advances (`history.reset` event). Same condition as session.fork."
   },
   "methods": {
     "assignment.recall": {
@@ -4442,6 +4444,205 @@
         ],
         "additionalProperties": false
       }
+    },
+    "session.fork": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "capability": "session.fork",
+        "idempotent": "with requestId",
+        "risks": [
+          "creates a new root session in the source workspace or a granted destination workspace; files are never copied, restored or changed"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "ifGeneration": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "boundary": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "throughTurnId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "throughTurnId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "beforeTurnId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "beforeTurnId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "branchId": {
+            "type": "string",
+            "pattern": "^br_[0-9a-f]{16}$"
+          },
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "newSessionId": {
+            "type": "string",
+            "pattern": "^[\\w.:-]{1,128}$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the bound project must be one of them."
+          }
+        },
+        "required": [
+          "sessionId",
+          "requestId",
+          "ifGeneration"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "session": {
+            "$ref": "#/$defs/sessionSummary"
+          },
+          "forkedFrom": {
+            "$ref": "#/$defs/forkProvenance"
+          },
+          "duplicate": {
+            "const": true
+          }
+        },
+        "required": [
+          "session",
+          "forkedFrom"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "session.rewind": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "capability": "session.rewind",
+        "idempotent": "with requestId",
+        "risks": [
+          "replaces the conversation the runtime continues from; the later turns stay recoverable and no file is changed"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "ifGeneration": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "beforeTurnId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "sessionId",
+          "requestId",
+          "ifGeneration",
+          "beforeTurnId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "session": {
+            "$ref": "#/$defs/sessionSummary"
+          },
+          "generation": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "branch": {
+            "$ref": "#/$defs/conversationBranch"
+          },
+          "duplicate": {
+            "const": true
+          }
+        },
+        "required": [
+          "session",
+          "generation",
+          "branch"
+        ],
+        "additionalProperties": true
+      }
     }
   },
   "$defs": {
@@ -5359,6 +5560,32 @@
             "type"
           ],
           "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "history.reset"
+            },
+            "generation": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "reason": {
+              "const": "rewind"
+            },
+            "branchId": {
+              "type": "string",
+              "pattern": "^br_[0-9a-f]{16}$"
+            }
+          },
+          "required": [
+            "type",
+            "generation",
+            "reason",
+            "branchId"
+          ],
+          "additionalProperties": true
         }
       ]
     },
@@ -5386,7 +5613,8 @@
               "question.resolved",
               "pin",
               "unpin",
-              "attention"
+              "attention",
+              "history.reset"
             ]
           }
         }
@@ -6039,6 +6267,39 @@
         },
         "updatedAt": {
           "type": "string"
+        },
+        "conversation": {
+          "type": "object",
+          "properties": {
+            "fork": {
+              "type": "boolean"
+            },
+            "rewind": {
+              "type": "boolean"
+            },
+            "reason": {
+              "enum": [
+                "runtime_unsupported",
+                "not_persistent",
+                "not_root"
+              ]
+            }
+          },
+          "required": [
+            "fork",
+            "rewind"
+          ],
+          "additionalProperties": true
+        },
+        "forkedFrom": {
+          "$ref": "#/$defs/forkProvenance"
+        },
+        "branches": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/conversationBranch"
+          }
         }
       },
       "required": [
@@ -7068,6 +7329,75 @@
         "referenced"
       ],
       "additionalProperties": false
+    },
+    "forkProvenance": {
+      "type": "object",
+      "description": "Where a fork came from (§12.7): the source root, and the turn its conversation was cut at.",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "turnId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "boundary": {
+          "enum": [
+            "through",
+            "before",
+            "whole"
+          ]
+        },
+        "branchId": {
+          "type": "string",
+          "pattern": "^br_[0-9a-f]{16}$"
+        },
+        "at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "sessionId",
+        "boundary",
+        "at"
+      ],
+      "additionalProperties": true
+    },
+    "conversationBranch": {
+      "type": "object",
+      "description": "Later turns a rewind set aside (§12.7): kept, never deleted, recoverable as a new session with session.fork { branchId }.",
+      "properties": {
+        "branchId": {
+          "type": "string",
+          "pattern": "^br_[0-9a-f]{16}$"
+        },
+        "beforeTurnId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "branchId",
+        "beforeTurnId",
+        "turns",
+        "at"
+      ],
+      "additionalProperties": true
     }
   }
 }

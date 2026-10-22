@@ -1,7 +1,7 @@
 /** Portable JSON-RPC structures; implementations and provider SDKs stay outside protocol. */
 import type { RuntimeKind, Pin } from './dto.js';
 import type { AlpError, Envelope, SessionSnapshot, TreeStatus, TurnAttention, UserQuestion } from './events.js';
-import type { PauseState, PromptContent, RecallAnswer, SessionPreview, SessionSpec, SessionSummary } from './session.js';
+import type { ConversationBranch, ForkProvenance, PauseState, PromptContent, RecallAnswer, SessionPreview, SessionSpec, SessionSummary } from './session.js';
 import type { EntryName, LanguageSetting, LibraryEntryRow, LibraryKind, LibraryScope, LibrarySource, TaskRow, TeamRow } from './dto.js';
 import type { ScheduleJob, ScheduleStatus } from './schedule.js';
 
@@ -15,7 +15,7 @@ export type EventNotification = { jsonrpc: '2.0'; method: 'event'; params: Envel
 export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
 export type HistoryPage = { generation: string; items: HistoryItem[]; olderCursor?: string; hasOlder: boolean; tipCursor: number };
 
-export type Capability = 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
+export type Capability = 'session.fork' | 'session.rewind' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -33,7 +33,10 @@ export type ErrorReason =
   // Attachments (§12.6).
   | 'invalid_name' | 'invalid_data' | 'attachment_too_large' | 'offset_mismatch' | 'chunk_conflict' | 'upload_incomplete'
   | 'hash_mismatch' | 'upload_expired' | 'quota_exceeded' | 'attachment_referenced' | 'attachment_limit'
-  | 'attachment_unavailable' | 'attachment_unsupported';
+  | 'attachment_unavailable' | 'attachment_unsupported'
+  // session.fork and session.rewind (§12.7).
+  | 'session_busy' | 'stale_generation' | 'turn_not_found' | 'turn_in_progress' | 'empty_prefix' | 'boundary_unmapped'
+  | 'runtime_unsupported' | 'native_refused' | 'branch_not_found' | 'attachment_forbidden';
 
 type Empty = Record<string, never>;
 
@@ -75,6 +78,8 @@ export type AttachmentLimits = {
   maxObjectBytes: number; maxPerPrompt: number; maxPromptBytes: number; maxChunkBytes: number; maxActiveUploads: number;
   maxPrincipalBytes: number; maxDaemonBytes: number; uploadTimeoutMs: number; unreferencedRetentionMs: number; releasedGraceMs: number;
 };
+/** Where a fork cuts the source conversation (§12.7): after a completed turn, or before a turn. */
+export type ForkBoundary = { throughTurnId: string } | { beforeTurnId: string };
 export type RegistryMutation = { requestId: string; ifRevision: number };
 export type RegistryPage = { revision: number; total: number; nextCursor: string | null };
 export type RpcMethodMap = {
@@ -145,6 +150,22 @@ export type RpcMethodMap = {
   'session.configure': { params: { sessionId: string; mode?: string }; result: { session: SessionSnapshot } };
   'session.close': { params: { sessionId: string }; result: Empty };
   'session.rename': { params: { sessionId: string; title: string }; result: { session: SessionSummary } };
+  /**
+   * A new root whose conversation is the source's up to a completed turn (capability `session.fork`, §12.7).
+   * Answered once per (sessionId, requestId): a repeat answers the first result with `duplicate: true`.
+   */
+  'session.fork': {
+    params: PrincipalContext & { sessionId: string; requestId: string; ifGeneration: string; boundary?: ForkBoundary; branchId?: string; workspaceId?: string; newSessionId?: string; title?: string };
+    result: { session: SessionSummary; forkedFrom: ForkProvenance; duplicate?: true };
+  };
+  /**
+   * The root's conversation from before a turn on, under the same session id; the later turns stay as a
+   * recoverable branch and no file is changed (capability `session.rewind`, §12.7).
+   */
+  'session.rewind': {
+    params: { sessionId: string; requestId: string; ifGeneration: string; beforeTurnId: string };
+    result: { session: SessionSummary; generation: string; branch: ConversationBranch; duplicate?: true };
+  };
   'session.archive': { params: { sessionId: string; archived?: boolean }; result: { session: SessionSummary } };
   'session.get': { params: { sessionId: string }; result: { session: SessionSummary } };
   /** `limit`, `cursor`, `query` and `projectRoots` with capability `session.list.page`: a page, and `nextCursor` while more follow. */

@@ -929,6 +929,32 @@
             "type"
           ],
           "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "history.reset"
+            },
+            "generation": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "reason": {
+              "const": "rewind"
+            },
+            "branchId": {
+              "type": "string",
+              "pattern": "^br_[0-9a-f]{16}$"
+            }
+          },
+          "required": [
+            "type",
+            "generation",
+            "reason",
+            "branchId"
+          ],
+          "additionalProperties": true
         }
       ]
     },
@@ -956,7 +982,8 @@
               "question.resolved",
               "pin",
               "unpin",
-              "attention"
+              "attention",
+              "history.reset"
             ]
           }
         }
@@ -1609,6 +1636,39 @@
         },
         "updatedAt": {
           "type": "string"
+        },
+        "conversation": {
+          "type": "object",
+          "properties": {
+            "fork": {
+              "type": "boolean"
+            },
+            "rewind": {
+              "type": "boolean"
+            },
+            "reason": {
+              "enum": [
+                "runtime_unsupported",
+                "not_persistent",
+                "not_root"
+              ]
+            }
+          },
+          "required": [
+            "fork",
+            "rewind"
+          ],
+          "additionalProperties": true
+        },
+        "forkedFrom": {
+          "$ref": "#/$defs/forkProvenance"
+        },
+        "branches": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/conversationBranch"
+          }
         }
       },
       "required": [
@@ -2638,6 +2698,75 @@
         "referenced"
       ],
       "additionalProperties": false
+    },
+    "forkProvenance": {
+      "type": "object",
+      "description": "Where a fork came from (§12.7): the source root, and the turn its conversation was cut at.",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "turnId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "boundary": {
+          "enum": [
+            "through",
+            "before",
+            "whole"
+          ]
+        },
+        "branchId": {
+          "type": "string",
+          "pattern": "^br_[0-9a-f]{16}$"
+        },
+        "at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "sessionId",
+        "boundary",
+        "at"
+      ],
+      "additionalProperties": true
+    },
+    "conversationBranch": {
+      "type": "object",
+      "description": "Later turns a rewind set aside (§12.7): kept, never deleted, recoverable as a new session with session.fork { branchId }.",
+      "properties": {
+        "branchId": {
+          "type": "string",
+          "pattern": "^br_[0-9a-f]{16}$"
+        },
+        "beforeTurnId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "branchId",
+        "beforeTurnId",
+        "turns",
+        "at"
+      ],
+      "additionalProperties": true
     }
   }
 }
