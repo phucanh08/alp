@@ -9,6 +9,7 @@ import { createAlpRuntime, reclaimCopies, reclaimWorktrees } from '@anhlp/alp-ru
 import { createDaemonServer } from './server.js';
 import { acquireLock, heartbeat, releaseLock, updateLock } from './lock.js';
 import { createStore } from './store.js';
+import { readAttachmentConfig } from './attachments.js';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { clearRestoredMarker, readRestoredMarker, recoverInterruptedRestore } from '@anhlp/alp-core/backup';
 import { migrateState } from '@anhlp/alp-core/migrations';
@@ -228,7 +229,10 @@ async function run(home: string) {
     })();
     return stopping;
   };
-  const server = createDaemonServer({ runtime, socketPath: socket, version: VERSION, store, runLogDir, previousExit: exit, home, templates, onShutdown: () => void shutdown() });
+  // The operator may lower the attachment limits (never raise them): <ALP_HOME>/attachments.json.
+  const attachmentConfig = await readAttachmentConfig(home);
+  for (const problem of attachmentConfig.problems) log.warn(problem, { code: 'ALP_ATTACHMENT_CONFIG' });
+  const server = createDaemonServer({ runtime, socketPath: socket, version: VERSION, store, runLogDir, previousExit: exit, home, templates, attachmentOptions: { limits: attachmentConfig.limits }, onShutdown: () => void shutdown() });
   const beat = setInterval(() => {
     void heartbeat(home).then(owned => { if (!owned) void shutdown(1); });
     const now = new Date();

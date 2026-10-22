@@ -21,6 +21,8 @@ import { createOperations, type OperationsOptions } from './operations.js';
 import { FileAccessError, FilesError, listWorkspaceDirectory, readWorkspaceFile, searchWorkspaceFiles } from './files.js';
 import { createGitReader } from './git.js';
 import { createScheduleStore, projectKey } from './schedules.js';
+import { createAttachmentStore, type AttachmentRuntime, type AttachmentStoreOptions, type Principal } from './attachments.js';
+import type { RuntimeAttachment } from '@anhlp/alp-protocol/session';
 import { clientMessageId as scheduleMessageId, createScheduler, SCHEDULE_TICK_MS, type ScheduleDelivery } from './scheduler.js';
 
 /**
@@ -87,6 +89,19 @@ const requestedProject = (projectRoot: unknown): string => {
   if (!path.isAbsolute(projectRoot)) throw new RpcError(RPC_ERROR.invalidParams, 'projectRoot must be an absolute path');
   return projectRoot;
 };
+
+/**
+ * Who an attachment call acts for: the principal context a trusted gateway puts on its own
+ * connection (its credential id and grant epoch, and the canonical workspaces it may use now), or
+ * the local owner, as workspace.worktree does (§12.6, §16).
+ */
+function principalOf(params: { principalId?: unknown; principalEpoch?: unknown; authorizedRoots?: unknown }): Principal {
+  return {
+    id: typeof params.principalId === 'string' ? params.principalId : 'owner',
+    epoch: typeof params.principalEpoch === 'string' ? params.principalEpoch : 'owner',
+    ...(Array.isArray(params.authorizedRoots) ? { roots: params.authorizedRoots.filter((root): root is string => typeof root === 'string') } : {}),
+  };
+}
 
 /** A stable hash of JSON data, independent of key order (as Paseo's receipts). */
 function digest(value: unknown) {
@@ -180,7 +195,7 @@ export type DaemonServer = {
  * shape so every viewer agrees; re-exported here to keep `@anhlp/alp-daemon/server`'s API. */
 export type { SessionSummary };
 
-export function createDaemonServer({ runtime, socketPath, version, onShutdown, store, runLogDir, previousExit, retentionSweepMs = RETENTION_SWEEP_MS, home, templates, scheduleTickMs = SCHEDULE_TICK_MS, scheduleDeliveryTimeoutMs }: {
+export function createDaemonServer({ runtime, socketPath, version, onShutdown, store, runLogDir, previousExit, retentionSweepMs = RETENTION_SWEEP_MS, home, templates, scheduleTickMs = SCHEDULE_TICK_MS, scheduleDeliveryTimeoutMs, attachmentOptions }: {
   runtime: AlpRuntime;
   socketPath: string;
   version: string;
@@ -201,6 +216,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   scheduleTickMs?: number;
   /** How long a job's delivery may take; tests shorten it. */
   scheduleDeliveryTimeoutMs?: number;
+  /** Lower attachment limits (an operator's, never higher than ATTACHMENTS) and test hooks. */
+  attachmentOptions?: Partial<Pick<AttachmentStoreOptions, 'limits' | 'now' | 'io' | 'sweepMs'>>;
 }): DaemonServer {
   const connections = new Set<Connection>();
   /** Root of every live session. */
@@ -236,6 +253,19 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     try { return await schedules.get(id, { projectRoot }); }
     catch (error) { throw scheduleFailed(error); }
   };
+  /**
+   * Non-image attachments (§12.6): with a home and a store (prompt receipts pin their references),
+   * never on Windows (no O_NOFOLLOW, no POSIX modes: not a supported platform for them).
+   */
+  const attachments = home && store && process.platform !== 'win32' ? createAttachmentStore({
+    root: path.join(home, 'state', 'attachments'),
+    sessionProject: sessionId => runtime.snapshot(sessionId)?.projectRoot ?? records.get(sessionId)?.session?.projectRoot,
+    crashPoint,
+    log: { warn: (message, fields) => log.warn(message, fields), info: (message, fields) => log.info(message, fields) },
+    ...attachmentOptions,
+  }) : undefined;
+  // The runtime side of the seam (issue #121 branch J): a runtime that takes attachment parts reads them through this.
+  (runtime as AlpRuntime & AttachmentRuntime).bindAttachments?.(attachments?.reader);
   /** The daemon's own start-up; the scheduler waits for it before it delivers. */
   let restored: Promise<unknown> = Promise.resolve();
   /**
@@ -569,6 +599,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       for (const id of ids) records.delete(id);
       cursors.delete(root);
       await store!.remove(root, ids);
+      // The history is gone: what its prompts pinned is released (kept releasedGraceMs more).
+      await attachments?.releaseSessions(ids).catch(error => recoveryLog.warn('could not release the attachments of removed sessions', { code: 'ALPD_ATTACHMENT_RELEASE_FAILED', error }));
       if (runLogDir) await unlink(path.join(runLogDir, `${root.replace(/[^\w.-]/g, '_')}.jsonl`)).catch(() => {});
       removed.add(root);
     }
@@ -665,7 +697,13 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
    * the first delivery did, with other content a conflict; a receipt left pending by a
    * crash, or a delivery the provider may or may not have received, is outcome_unknown.
    */
-  function deliverOnce(sessionId: string, clientMessageId: string, fingerprint: string, send: () => Promise<void>, { requireReceipt = false } = {}) {
+  function deliverOnce(sessionId: string, clientMessageId: string, fingerprint: string, send: () => Promise<void>, { requireReceipt = false, prepare, abandon }: {
+    requireReceipt?: boolean;
+    /** Before the pending receipt, once no receipt answers: refusals here record nothing; attachments are pinned here. */
+    prepare?: (key: string) => Promise<void>;
+    /** The prompt certainly did not reach the runtime: what prepare pinned may go. */
+    abandon?: (key: string) => Promise<void>;
+  } = {}) {
     const key = digest(['prompt', sessionId, clientMessageId]);
     const unknown = () => new RpcError(ERROR.conflict, `alpd cannot tell whether message ${clientMessageId} reached the agent; check the session, then send it again with a new id`, { reason: 'outcome_unknown' });
     const answer = (receipt: Receipt, extra: object = {}) => ({ outcome: receipt.outcome ?? 'accepted', ...(receipt.error ? { error: receipt.error } : {}), ...extra });
@@ -686,10 +724,15 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       if (requireReceipt) throw unknown();
       const receipt = (state: Receipt['state'], changes: Partial<Receipt> = {}): Receipt => ({ version: 1, sessionId, clientMessageId, fingerprint, state, ...changes, updatedAt: new Date().toISOString() });
       live(sessionId);
+      // Attachments are pinned before anything is sent: a crash from here on keeps them.
+      await prepare?.(key);
       crashPoint('prompt.before-receipt');
       // Nothing is sent unless the pending receipt is on disk: a crash from here on answers outcome_unknown.
       try { await store!.putReceipt(key, receipt('pending')); }
-      catch (error) { throw persistenceFailed(`message ${clientMessageId}; it was not sent`, error); }
+      catch (error) {
+        await abandon?.(key).catch(() => {});
+        throw persistenceFailed(`message ${clientMessageId}; it was not sent`, error);
+      }
       crashPoint('prompt.after-receipt');
       // The runtime reports how the provider answered as an event, before prompt() resolves.
       let reply: { outcome: 'accepted' | 'failed' | 'unknown'; error?: { message: string; code?: string } } = { outcome: 'accepted' };
@@ -703,6 +746,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       } catch (error) {
         // The runtime refused it before reaching the provider (the session closed meanwhile): not sent.
         await store!.removeReceipt(key).catch(() => {});
+        await abandon?.(key).catch(() => {});
         throw error;
       } finally {
         stop();
@@ -907,6 +951,10 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   const workspaceDescriptor = async (w: any) => worktrees ? worktrees.describe(w) : w;
   // workspace.git.status and workspace.git.diff (§12.5): read-only, by registry workspaceId.
   const gitReader = registry ? createGitReader({ registry, log: (message, fields) => log.warn(message, { code: 'ALPD_GIT_READ_FAILED', ...fields }) }) : undefined;
+  const attachmentCall = <T>(run: (store: NonNullable<typeof attachments>) => Promise<T>) => {
+    if (!attachments) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd does not store attachments (capability attachments is not listed)');
+    return run(attachments);
+  };
   const gitCall = <T>(run: (reader: NonNullable<typeof gitReader>) => Promise<T>) => {
     if (!gitReader) throw new RpcError(ERROR.unavailable, 'Registry needs ALP_HOME');
     return run(gitReader);
@@ -1110,6 +1158,14 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     'project.remove': (_c, p) => registryMutation('project.remove', p),
     'workspace.update': (_c, p) => registryMutation('workspace.update', p),
     'catalog.get': () => ({ models, modes, thinkingOptions, defaultModel: `codex:${DEFAULT_MODEL}` }),
+    // attachment.* (§12.6): each call acts for its principal context; without the store (no home or
+    // store, or Windows) alpd does not serve them, as for any method it does not know.
+    'attachment.begin': (_c, p) => attachmentCall(store => store.begin(principalOf(p), p)),
+    'attachment.chunk': (_c, p) => attachmentCall(store => store.chunk(principalOf(p), p)),
+    'attachment.commit': (_c, p) => attachmentCall(store => store.commit(principalOf(p), p)),
+    'attachment.abort': (_c, p) => attachmentCall(store => store.abort(principalOf(p), p)),
+    'attachment.get': (_c, p) => attachmentCall(store => store.get(principalOf(p), p)),
+    'attachment.delete': (_c, p) => attachmentCall(store => store.remove(principalOf(p), p)),
 
     async 'session.create'(connection, { sessionId, workspaceId, spec, history = 'skip', delegation = true, resume: resuming = false }) {
       if (workspaceId !== undefined) {
@@ -1247,7 +1303,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       return { closed: await reap(root) };
     },
 
-    async 'session.prompt'(_connection, { sessionId, clientMessageId, delivery = 'auto', content }) {
+    async 'session.prompt'(_connection, { sessionId, clientMessageId, delivery = 'auto', content, ...context }) {
       if (typeof clientMessageId !== 'string' || !Array.isArray(content)) throw new RpcError(-32602, 'clientMessageId and content are required');
       if (delivery !== 'auto' && delivery !== 'steer') throw new RpcError(-32602, 'delivery must be auto or steer');
       // Images are inline only (the schema refuses a path or URL); here their number and decoded size.
@@ -1260,16 +1316,35 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         if (bytes > PROMPT_IMAGES.maxBytes) throw new RpcError(-32602, `An image in a prompt is at most ${PROMPT_IMAGES.maxBytes} bytes`);
         if (total > PROMPT_IMAGES.maxTotalBytes) throw new RpcError(-32602, `The images of a prompt are at most ${PROMPT_IMAGES.maxTotalBytes} bytes together`);
       }
+      // Attachments (§12.6): resolved for this principal, project and session, in order. The runtime
+      // gets their descriptors (ids, names, digests), never a path; the fingerprint their digests.
+      const attached = content.filter((part: { type?: string }) => part?.type === 'attachment');
+      let resolved: RuntimeAttachment[] = [];
+      if (attached.length) {
+        if (!attachments || !store) throw new RpcError(ERROR.unavailable, 'This alpd does not store attachments', { reason: 'attachment_unsupported' });
+        resolved = await attachments.resolve(principalOf(context), sessionId, attached.map((part: { attachmentId?: unknown }) => part.attachmentId));
+      }
+      let index = 0;
+      const delivered: PromptContent = attached.length ? content.map((part: { type?: string }) => part?.type === 'attachment' ? resolved[index++] : part) : content;
+      const fingerprinted = attached.length ? content.map((part: any) => part?.type === 'attachment' ? { type: 'attachment', attachmentId: part.attachmentId, sha256: resolved.find(entry => entry.attachmentId === part.attachmentId)!.sha256 } : part) : content;
       const send = async () => {
         // Failures of an open session arrive as prompt.failed events; an unknown session has no watcher.
         live(sessionId);
-        await runtime.prompt(sessionId, { clientMessageId, delivery, content });
+        await runtime.prompt(sessionId, { clientMessageId, delivery, content: delivered });
       };
       if (!store) {
         await send();
         return {};
       }
-      return deliverOnce(sessionId, clientMessageId, digest({ delivery, content }), send);
+      if (!attached.length) return deliverOnce(sessionId, clientMessageId, digest({ delivery, content }), send);
+      return deliverOnce(sessionId, clientMessageId, digest({ delivery, content: fingerprinted }), send, {
+        prepare: async key => {
+          // Never dropped, never turned into a path: a runtime that cannot read them refuses the prompt here.
+          if (!(runtime as AlpRuntime & AttachmentRuntime).takesAttachments?.(sessionId)) throw new RpcError(ERROR.unavailable, 'This session\'s runtime cannot read attachments yet; they stay stored and the prompt was not sent', { reason: 'attachment_unsupported' });
+          await attachments!.pin(`prompt:${key}`, sessionId, resolved.map(entry => entry.attachmentId));
+        },
+        abandon: key => attachments!.release(`prompt:${key}`),
+      });
     },
 
     async 'session.interrupt'(_connection, { sessionId }) {
@@ -1506,7 +1581,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), ...(worktrees ? ['workspace.worktree'] : []), ...operations.capabilities];
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {
@@ -1557,7 +1632,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         const issues = validateParams(method, params)!;
         if (issues.length) throw invalidParams(issues);
         connection.helloed = true;
-        respond({ result: { protocolVersion: PROTOCOL_VERSION, daemonVersion: version, pid: process.pid, hostname: os.hostname(), capabilities } });
+        respond({ result: { protocolVersion: PROTOCOL_VERSION, daemonVersion: version, pid: process.pid, hostname: os.hostname(), capabilities, ...(attachments ? { attachmentLimits: attachments.limits } : {}) } });
         return;
       }
       if (!connection.helloed) throw new RpcError(ERROR.protocol, 'daemon.hello is required first', { reason: 'hello_required' });
@@ -1768,6 +1843,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     async close() {
       closing = true;
       if (sweeper) clearInterval(sweeper);
+      attachments?.close();
       // The tick that runs now is waited for: a delivery under way finishes, so its
       // receipt is written and the job is not left half delivered.
       await scheduler?.stop();

@@ -25,6 +25,14 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./attachments": {
+      "alp-source": {
+        "types": "./src/attachments.ts",
+        "default": "./src/attachments.ts"
+      },
+      "types": "./dist/attachments.d.ts",
+      "default": "./dist/attachments.js"
+    },
     "./files": {
       "alp-source": {
         "types": "./src/files.ts",
