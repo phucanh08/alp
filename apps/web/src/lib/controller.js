@@ -5,6 +5,7 @@ import { cleanListing, relativeFilePath } from './file-tree.js';
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
 import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
 import { newMessageId, newRequestId, newSessionId } from './ids.js';
+import { GIT_ERROR_MESSAGES, GitAccessError, describeGitError, gitAccess, gitCompare, gitRequestPath } from './git.js';
 import { fitImages, imageLimits, promptContent } from './attachments.js';
 import { applyAttach, historyEnvelope, prependHistory, deliveredPrompts, emptyProjection, members, project, promptTurnOver } from './timeline.js';
 import { normalizeModels, parsePreview } from './new-session.js';
@@ -1302,6 +1303,57 @@ export class Controller {
       size: typeof result?.size === 'number' && Number.isFinite(result.size) ? result.size : content.length,
       ...(typeof result?.modifiedAt === 'string' ? { modifiedAt: result.modifiedAt } : {}),
     };
+  }
+
+  // ---- Git (Paseo's Changes and Diff panels, read only; §12.5) ----------------------------------
+
+  /** What the Changes and Diff panels may show for the open workspace (lib/git.js gitAccess). */
+  get gitAccess() { return gitAccess(this.#state); }
+
+  /**
+   * The open workspace's Git status (workspace.git.status by its registry id): branch, upstream,
+   * changed files without content. Throws a GitAccessError, without a request when the host, the
+   * token or the registry cannot serve it.
+   * @returns {Promise<import('@anhlp/alp-protocol').GitStatus>}
+   */
+  async gitStatus() {
+    const access = gitAccess(this.#state);
+    if (!access.status) throw new GitAccessError({ message: access.message, reason: access.reason, sent: 'no', terminal: access.reason !== 'loading' });
+    let result;
+    try {
+      result = await this.#client().request('workspace.git.status', { workspaceId: access.workspaceId });
+    } catch (error) {
+      throw new GitAccessError(describeGitError(error));
+    }
+    if (!result || typeof result !== 'object' || typeof result.state !== 'string' || !Array.isArray(result.files)) throw new GitAccessError({ message: 'The host sent something this app does not understand.', sent: 'yes', terminal: false });
+    return result;
+  }
+
+  /**
+   * One page of the open workspace's diff (workspace.git.diff): `compare` as lib/git.js
+   * gitCompare builds it, `path` to focus one file, `cursor` the previous page's nextCursor with
+   * the same comparison and path. Needs files.read too (hunks are file content); a blocked or
+   * malformed path is refused here, without a request.
+   * @param {{ compare: { mode: string, baseRef?: string | null, ignoreWhitespace?: boolean }, path?: string, cursor?: string }} input
+   * @returns {Promise<import('@anhlp/alp-protocol').GitDiffPage>}
+   */
+  async gitDiff({ compare, path, cursor }) {
+    const access = gitAccess(this.#state);
+    if (!access.status) throw new GitAccessError({ message: access.message, reason: access.reason, sent: 'no', terminal: access.reason !== 'loading' });
+    if (!access.content) throw new GitAccessError({ message: /** @type {string} */ (access.contentMessage), reason: 'grant', sent: 'no', terminal: true });
+    const file = path === undefined ? undefined : gitRequestPath(path);
+    if (path !== undefined && !file) {
+      const reason = relativeFilePath(path) ? 'blocked_path' : 'invalid_path';
+      throw new GitAccessError({ message: GIT_ERROR_MESSAGES[reason], reason, sent: 'no', terminal: false });
+    }
+    let result;
+    try {
+      result = await this.#client().request('workspace.git.diff', { workspaceId: access.workspaceId, compare: gitCompare(compare), ...(file ? { path: file } : {}), ...(cursor ? { cursor } : {}) });
+    } catch (error) {
+      throw new GitAccessError(describeGitError(error));
+    }
+    if (!result || typeof result !== 'object' || typeof result.snapshot !== 'string' || !Array.isArray(result.files)) throw new GitAccessError({ message: 'The host sent something this app does not understand.', sent: 'yes', terminal: false });
+    return result;
   }
 
   /** Whether a root is archived, as far as the History read and this client's own actions know. @param {string | null | undefined} id */
