@@ -30,7 +30,9 @@ Permissions: ${PERMISSIONS.join(', ')} (default: ${DEFAULT_PERMISSIONS.join(', '
 workspace.manage requires explicit --permission and --worktree-mapping ID (host-approved destination).
 workspace.write (register pregranted projects and change shared workspace metadata) requires explicit --permission.
 files.read (list directories, read text files and, with project.read, Git diffs of the workspaces) is never a default: name it with
---permission for each credential that may read file contents. A token is printed once; only its hash is kept.
+--permission for each credential that may read file contents.
+attachments.write (upload files into alpd's attachment store and send them in prompts; used with session.write) is never a
+default and implies nothing: name it with --permission. A token is printed once; only its hash is kept.
 Files live in $ALP_GATEWAY_HOME, else $ALP_HOME/gateway. The gateway never starts alpd.`;
 
 const fail = (/** @type {string} */ message) => { console.error(message); process.exit(2); };

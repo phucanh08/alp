@@ -57,6 +57,7 @@ const OUT_OF_SCOPE = {
 
   'project.list': null, 'workspace.list': null, 'workspace.get': null, 'project.register': null, 'project.remove': null, 'workspace.update': null, // registry.test.js checks scoped rows and every mutation
   'workspace.git.status': null, 'workspace.git.diff': null, // git.test.js checks registry scope, both permissions, paths and projection
+  'attachment.begin': null, 'attachment.chunk': null, 'attachment.commit': null, 'attachment.abort': null, 'attachment.get': null, 'attachment.delete': null, // attachments.test.js checks the session scope, both permissions and the principal context; alpd's binding is tested against its store
 
   'catalog.get': null, // global: the static catalogue of models and modes
   'session.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
@@ -106,6 +107,9 @@ const IN_SCOPE = ({ a }) => ({
   'project.remove': { projectId: 'prj_a', ifRevision: 0, requestId: 'r' },
   'workspace.update': { workspaceId: 'wks_a', pinned: true, ifRevision: 0, requestId: 'r' },
   'workspace.git.status': { workspaceId: 'wks_a' }, 'workspace.git.diff': { workspaceId: 'wks_a', compare: { mode: 'uncommitted' } },
+  'attachment.begin': { sessionId: 'sa', name: 'a.txt', size: 1, mimeType: 'text/plain', requestId: 'r' }, 'attachment.chunk': { uploadId: `upl_${'1'.repeat(32)}`, offset: 0, data: 'AAAA' },
+  'attachment.commit': { uploadId: `upl_${'1'.repeat(32)}`, sha256: '0'.repeat(64) }, 'attachment.abort': { uploadId: `upl_${'1'.repeat(32)}` },
+  'attachment.get': { attachmentId: `att_${'1'.repeat(32)}` }, 'attachment.delete': { attachmentId: `att_${'1'.repeat(32)}` },
   'catalog.get': {}, 'library.models': {}, 'settings.language.get': {},
   'session.list': {}, 'session.get': { sessionId: 'sa' }, 'session.status': { sessionId: 'sa' }, 'session.log': { sessionId: 'sa' },
   'session.history': { sessionId: 'sa' }, 'session.attach': { sessionId: 'sa' }, 'session.release': { sessionId: 'sa' }, 'session.attention.clear': { sessionId: 'sa' }, 'session.preview': { spec: { cwd: a } },
@@ -187,8 +191,11 @@ test('a credential gets 1003 grant for every method its permissions do not cover
   const { daemon, sdk } = env;
   const valid = IN_SCOPE(env);
   for (const [label, held] of [['reader', ['session.read']], ['sessions', ['session.read', 'session.write']]]) {
-    const { client } = await sdk(label);
+    let { client } = await sdk(label);
+    let sent = 0;
     for (const method of exposed.filter(name => !held.includes(EXPOSURE[name].permission))) {
+      // One connection per batch: the rate limit is per connection.
+      if (++sent % 30 === 0) ({ client } = await sdk(label));
       const mark = daemon.calls().length;
       await assert.rejects(client.request(method, valid[method]), error => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === EXPOSURE[method].permission, `${label} ${method}`);
       assert.deepEqual(daemon.calls().slice(mark), [], `${label} ${method} reached alpd`);

@@ -1,5 +1,5 @@
 // @ts-check
-import { CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS, WORKSPACE_GIT, blockedFilePath } from '@anhlp/alp-protocol';
+import { ATTACHMENTS, CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS, WORKSPACE_GIT, attachmentChunkBytes, blockedFilePath } from '@anhlp/alp-protocol';
 
 /**
  * What the gateway lets a remote client call (docs/alp/remote-gateway.md §5): the method
@@ -17,10 +17,11 @@ import { CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS, WORKSPACE_GIT, blockedFi
  * Permissions a remote credential can hold: sessions, a project's other resources (tasks, teams,
  * project library entries), and the content of a workspace's files (`files.read`: listing
  * directories and reading text files, docs/alp/remote-gateway.md §5.10). A write permission implies
- * its read; `files.read` implies nothing and nothing implies it. Host administration has no remote
- * permission in v1.
+ * its read; `files.read` implies nothing and nothing implies it. `attachments.write` (uploading
+ * files into alpd's attachment store, §5.14) implies nothing either and is used together with
+ * session.write. Host administration has no remote permission in v1.
  */
-export const PERMISSIONS = Object.freeze(['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write', 'workspace.write', 'workspace.manage']);
+export const PERMISSIONS = Object.freeze(['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write', 'workspace.write', 'workspace.manage', 'attachments.write']);
 
 /**
  * What `alp-gateway credential create` grants without --permission: session and project read/write;
@@ -33,7 +34,7 @@ export const DEFAULT_PERMISSIONS = Object.freeze(['session.read', 'session.write
  * Within `library` and `settings.language` some methods stay unexposed and answer -32601
  * `not_exposed` (docs/alp/remote-gateway.md §5.4).
  */
-export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.workspaceRegistry, CAPABILITY.workspaceWorktree, CAPABILITY.sessionHistory, CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, CAPABILITY.workspaceGit]);
+export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.workspaceRegistry, CAPABILITY.workspaceWorktree, CAPABILITY.sessionHistory, CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, CAPABILITY.workspaceGit, CAPABILITY.attachments]);
 
 /** The codes of docs/protocol/alp-json-rpc-v1.md §5.1 the gateway answers its own refusals with; `data.reason` says why. */
 export const GATEWAY_ERROR = Object.freeze({ forbidden: ERROR.forbidden, unavailable: ERROR.unavailable });
@@ -61,10 +62,11 @@ export const GATEWAY_REASON = Object.freeze({
 export const SPEC_FIELDS = Object.freeze(['cwd', 'agent', 'model', 'mode', 'thinking', 'persist', 'workflow']);
 
 /**
- * Prompt content parts a remote client may send: text, and images inline as base64 (the schema
- * refuses any other field on an image, so never a host path or URL).
+ * Prompt content parts a remote client may send: text, images inline as base64 (the schema
+ * refuses any other field on an image, so never a host path or URL), and stored attachments by
+ * `attachmentId` alone (attachments.write; the schema refuses any other field).
  */
-export const CONTENT_TYPES = Object.freeze(['text', 'image']);
+export const CONTENT_TYPES = Object.freeze(['text', 'image', 'attachment']);
 
 /**
  * What one remote prompt may carry in images, below alpd's own PROMPT_IMAGES: so many, each of at
@@ -82,6 +84,67 @@ export function promptImageLimits(maxFrame = 4 * 1024 * 1024) {
   const fits = Math.max(0, Math.floor((maxFrame - 64 * 1024) * 3 / 4));
   const maxTotalBytes = Math.min(GATEWAY_PROMPT_IMAGES.maxTotalBytes, fits);
   return { maxCount: GATEWAY_PROMPT_IMAGES.maxCount, maxBytes: Math.min(GATEWAY_PROMPT_IMAGES.maxBytes, maxTotalBytes), maxTotalBytes };
+}
+
+/**
+ * The attachment limits a remote client gets (daemon.hello `attachmentLimits`): alpd's advertised
+ * ones, each a non-negative integer no higher than ATTACHMENTS (an unusable value is replaced by
+ * ATTACHMENTS'), the chunk also lowered to fit this gateway's frame. The gateway refuses a chunk
+ * over it before alpd; alpd enforces the rest.
+ * @param {unknown} advertised @param {number} [maxFrame]
+ */
+export function gatewayAttachmentLimits(advertised, maxFrame = 4 * 1024 * 1024) {
+  const source = /** @type {Record<string, unknown>} */ (advertised && typeof advertised === 'object' ? advertised : {});
+  /** @type {Record<string, number>} */
+  const limits = {};
+  for (const key of /** @type {const} */ (['maxObjectBytes', 'maxPerPrompt', 'maxPromptBytes', 'maxChunkBytes', 'maxActiveUploads', 'maxPrincipalBytes', 'maxDaemonBytes', 'uploadTimeoutMs', 'unreferencedRetentionMs', 'releasedGraceMs'])) {
+    const value = source[key];
+    limits[key] = typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? Math.min(value, ATTACHMENTS[key]) : ATTACHMENTS[key];
+  }
+  limits.maxChunkBytes = Math.min(limits.maxChunkBytes, attachmentChunkBytes(maxFrame));
+  return /** @type {import('@anhlp/alp-protocol').AttachmentLimits} */ (limits);
+}
+
+const UPLOAD_ID = /^upl_[0-9a-f]{32}$/;
+const ATTACHMENT_ID = /^att_[0-9a-f]{32}$/;
+const MIME = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/;
+const STAMP = (/** @type {unknown} */ value) => typeof value === 'string' && value.length <= 64 && !/[\p{Cc}\p{Cf}]/u.test(value);
+const bytes = (/** @type {unknown} */ value) => Number.isSafeInteger(value) && /** @type {number} */ (value) >= 0;
+
+/**
+ * An attachment as a remote client may see it: the schema's fields only, each checked (ids,
+ * a display name of at most 255 UTF-8 bytes without control, format or path-separator characters,
+ * MIME types, sizes, digest, times). Never a host path. Undefined when any field is not one alpd
+ * would answer: the answer is then refused.
+ * @param {unknown} raw
+ * @returns {import('@anhlp/alp-protocol').AttachmentInfo | undefined}
+ */
+export function projectAttachment(raw) {
+  if (!plain(raw)) return undefined;
+  const source = /** @type {Record<string, any>} */ (raw);
+  const name = source.name;
+  if (!ATTACHMENT_ID.test(source.attachmentId ?? '') || typeof source.sessionId !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(source.sessionId)) return undefined;
+  if (typeof name !== 'string' || !name || Buffer.byteLength(name, 'utf8') > 255 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\/\\]/u.test(name)) return undefined;
+  if (!MIME.test(source.mimeType ?? '') || !MIME.test(source.detectedMimeType ?? '') || !bytes(source.size) || !/^[0-9a-f]{64}$/.test(source.sha256 ?? '')) return undefined;
+  if (!STAMP(source.createdAt) || !STAMP(source.committedAt) || typeof source.referenced !== 'boolean') return undefined;
+  return { attachmentId: source.attachmentId, sessionId: source.sessionId, name, mimeType: source.mimeType, detectedMimeType: source.detectedMimeType, size: source.size, sha256: source.sha256, createdAt: source.createdAt, committedAt: source.committedAt, referenced: source.referenced };
+}
+
+/**
+ * An attachment.begin answer as a remote client may see it, its chunk size within `maxChunkBytes`;
+ * undefined when it is not one.
+ * @param {unknown} raw @param {number} maxChunkBytes
+ */
+export function projectUploadBegun(raw, maxChunkBytes) {
+  if (!plain(raw)) return undefined;
+  const source = /** @type {Record<string, any>} */ (raw);
+  if (!UPLOAD_ID.test(source.uploadId ?? '') || !['uploading', 'committed'].includes(source.state) || !bytes(source.received) || !bytes(source.size) || !Number.isSafeInteger(source.maxChunkBytes) || source.maxChunkBytes < 1) return undefined;
+  if (source.state === 'uploading' && !STAMP(source.expiresAt)) return undefined;
+  if (source.state === 'committed' && !ATTACHMENT_ID.test(source.attachmentId ?? '')) return undefined;
+  return {
+    uploadId: source.uploadId, state: source.state, received: source.received, size: source.size, maxChunkBytes: Math.min(source.maxChunkBytes, maxChunkBytes),
+    ...(source.state === 'uploading' ? { expiresAt: source.expiresAt } : { attachmentId: source.attachmentId }),
+  };
 }
 
 /**
@@ -321,8 +384,8 @@ export function isModelId(value) {
  *   with 1003 grant naming the first one missing, before anything reaches alpd).
  * @typedef {{
  *   status: ExposureStatus,
- *   permission?: 'session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage',
- *   alsoRequires?: readonly ('session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage')[],
+ *   permission?: 'session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage' | 'attachments.write',
+ *   alsoRequires?: readonly ('session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage' | 'attachments.write')[],
  *   scope: string,
  *   capability?: string,
  *   params?: readonly string[],
@@ -361,7 +424,13 @@ export const EXPOSURE = Object.freeze({
   'project.remove': { status: 'exposed', permission: 'workspace.write', scope: 'exact project grant plus every workspace directory; metadata only', params: ['projectId', 'ifRevision', 'requestId'], tests: ['permission', 'registry-scope'] },
   'workspace.update': { status: 'exposed', permission: 'workspace.write', scope: 'workspace directory exact canonical grant; no owner placement or labels', params: ['workspaceId', 'title', 'pinned', 'archived', 'ifRevision', 'requestId'], tests: ['permission', 'registry-scope'] },
   'session.create': { status: 'exposed', permission: 'session.write', scope: 'workspace: spec.cwd names a granted workspace and is replaced by its canonical path; an existing sessionId must be in scope; the created root is checked again', params: ['sessionId', 'workspaceId', 'spec', 'history', 'delegation', 'resume'], tests: ['permission', 'spec-scope', 'session-scope'] },
-  'session.prompt': { status: 'exposed', permission: 'session.write', scope: 'session; text, and inline images within GATEWAY_PROMPT_IMAGES; drives: the modes of the session and every ancestor, looked up afresh, within the grant\'s modes', capability: CAPABILITY.promptReceipts, params: ['sessionId', 'clientMessageId', 'delivery', 'content'], tests: ['permission', 'session-scope', 'content', 'mode'] },
+  'session.prompt': { status: 'exposed', permission: 'session.write', scope: 'session; text, inline images within GATEWAY_PROMPT_IMAGES, and attachments by attachmentId alone (attachments.write as well; alpd resolves them for this principal, grant epoch, an authorized project and this session, and refuses them 1005 attachment_unsupported where the runtime cannot read them); drives: the modes of the session and every ancestor, looked up afresh, within the grant\'s modes', capability: CAPABILITY.promptReceipts, params: ['sessionId', 'clientMessageId', 'delivery', 'content'], tests: ['permission', 'session-scope', 'content', 'mode', 'binding'] },
+  'attachment.begin': { status: 'exposed', permission: 'attachments.write', alsoRequires: ['session.write'], scope: 'session: sessionId in a granted workspace, looked up afresh; alpd binds the upload to this credential and its grant epoch, the session\'s canonical project (one of the grant\'s, sent as authorizedRoots) and the session. The principal context is the gateway\'s own, never the client\'s. Answer projected (projectUploadBegun); alpd errors rewritten to fixed text keeping code, reason and numeric data', capability: CAPABILITY.attachments, params: ['sessionId', 'name', 'size', 'mimeType', 'sha256', 'requestId'], tests: ['permission', 'session-scope', 'binding'] },
+  'attachment.chunk': { status: 'exposed', permission: 'attachments.write', alsoRequires: ['session.write'], scope: 'upload: alpd checks the binding (credential, grant epoch, authorized project, live session) on every chunk; an upload of anyone else answers as an unknown one. Decoded data at most the advertised maxChunkBytes, refused by the gateway before alpd (never buffered beyond one frame)', capability: CAPABILITY.attachments, params: ['uploadId', 'offset', 'data'], tests: ['permission', 'binding', 'chunk-limit'] },
+  'attachment.commit': { status: 'exposed', permission: 'attachments.write', alsoRequires: ['session.write'], scope: 'upload: as attachment.chunk; alpd verifies every byte against sha256 before it publishes; answer projected by projectAttachment (ids and display metadata, never a path)', capability: CAPABILITY.attachments, params: ['uploadId', 'sha256'], tests: ['permission', 'binding', 'result-filter'] },
+  'attachment.abort': { status: 'exposed', permission: 'attachments.write', alsoRequires: ['session.write'], scope: 'upload: as attachment.chunk', capability: CAPABILITY.attachments, params: ['uploadId'], tests: ['permission', 'binding'] },
+  'attachment.get': { status: 'exposed', permission: 'attachments.write', alsoRequires: ['session.read'], scope: 'attachment: only this credential\'s own (alpd checks the binding as for chunks), so a credential without attachments.write has none to read; metadata only, never bytes or a path; projected by projectAttachment', capability: CAPABILITY.attachments, params: ['attachmentId'], tests: ['permission', 'binding', 'result-filter'] },
+  'attachment.delete': { status: 'exposed', permission: 'attachments.write', alsoRequires: ['session.write'], scope: 'attachment: as attachment.get; alpd refuses a referenced one (1004 attachment_referenced), never evicts it', capability: CAPABILITY.attachments, params: ['attachmentId'], tests: ['permission', 'binding'] },
   'session.interrupt': { status: 'exposed', permission: 'session.write', scope: 'session; stops: a root always, an assignment when its requesters\' modes are within the grant\'s', params: ['sessionId'], tests: ['permission', 'session-scope', 'mode'] },
   'session.configure': { status: 'exposed', permission: 'session.write', scope: 'session; mode within the grant\'s modes', params: ['sessionId', 'mode'], tests: ['permission', 'session-scope', 'mode'] },
   'session.close': { status: 'exposed', permission: 'session.write', scope: 'session; stops, as session.interrupt', params: ['sessionId'], tests: ['permission', 'session-scope', 'mode'] },

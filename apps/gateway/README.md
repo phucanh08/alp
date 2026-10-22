@@ -22,6 +22,11 @@ alp-gateway serve                                                           # 12
 - Git, read only (capability `workspace.git`): `workspace.git.status` (branch and changed files,
   no content) with `project.read`; `workspace.git.diff` (hunks, which are file content) with
   `project.read` **and** `files.read`. No commit, push, pull, merge or branch switch is remote.
+- Attachments (capability `attachments`): uploading files into alpd's attachment store
+  (`attachment.begin/chunk/commit/abort/delete`) needs `attachments.write` **and** `session.write`;
+  `attachment.get` (metadata only) `attachments.write` and `session.read`. Never a default, implies
+  nothing: `--permission session.read,session.write,attachments.write`. Each upload is bound by alpd
+  to the credential, its grant epoch, the project and the session; no path or URL ever crosses.
 - `credential create --mode read-only` limits a credential to driving (prompt, message, answer)
   trees that run in the given modes, checked up to the root on every request.
 - Loopback by default. Put a TLS reverse proxy in front for remote clients (`deploy/Caddyfile`,
