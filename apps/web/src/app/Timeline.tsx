@@ -14,6 +14,8 @@ import { useTabs } from './tabs';
 import { CopyButton, Elapsed, Loader, formatDuration } from './chat/parts';
 import { ToolCallBody } from './chat/ToolCallDetail';
 import { diffStats, editDiff, presentToolCall, type ToolIcon } from '../lib/tool-calls.js';
+import { conversationMarker } from '../lib/conversation.js';
+import { ConversationMarker, ForkAction, RewindAction } from './Conversation';
 
 /**
  * One agent's conversation laid out as Paseo's agent stream: a centered 820px column, user
@@ -149,13 +151,14 @@ function ImagesChip({ count }: { count: number }) {
   );
 }
 
-function UserBubble({ text, ts, images }: { text: string; ts?: string; images?: number }) {
+function UserBubble({ text, ts, images, entryKey }: { text: string; ts?: string; images?: number; entryKey: string }) {
   return (
     <div className="group/user flex flex-col items-end">
       {images ? <ImagesChip count={images} /> : null}
       {text || !images ? <div className="min-w-0 max-w-full rounded-2xl rounded-tr-sm bg-bubble p-4 text-[15px] leading-[21px] text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid="user-message">{text}</div> : null}
       <div className="mt-2 flex h-6 items-center gap-2 opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100">
         <span className="text-[13px] text-muted-foreground">{clockTime(ts)}</span>
+        <RewindAction entryKey={entryKey} />
         <CopyButton text={() => text} label="Copy message" className="-mr-1" />
       </div>
     </div>
@@ -190,7 +193,7 @@ function EntryView({ entry, compactBottom }: { entry: Entry; compactBottom: bool
   const item = entry.item as any;
   switch (item.kind) {
     case 'user_message':
-      return <UserBubble text={item.text} ts={entry.ts} images={typeof item.images === 'number' && item.images > 0 ? item.images : undefined} />;
+      return <UserBubble entryKey={entry.key} text={item.text} ts={entry.ts} images={typeof item.images === 'number' && item.images > 0 ? item.images : undefined} />;
     case 'assistant_message':
       return (
         <div className={cn('pt-3', compactBottom ? 'pb-0' : 'pb-3')} data-testid="assistant-message">
@@ -202,6 +205,7 @@ function EntryView({ entry, compactBottom }: { entry: Entry; compactBottom: bool
     case 'todo':
       return <Todo item={item} />;
     case 'notice':
+      if (conversationMarker(item)) return <ConversationMarker item={item} />;
       return <Notice level={item.level === 'error' || item.level === 'warning' ? item.level : 'info'}>{item.text}</Notice>;
     case 'compaction':
       return (
@@ -250,7 +254,7 @@ function PendingView({ prompt, gap, onRetry, onDiscard }: { prompt: PendingPromp
 }
 
 /** Paseo's turn footer: copy the turn, "Worked for 12s" (the end time on hover). */
-function TurnFooter({ entries, startTs }: { entries: Entry[]; startTs?: string }) {
+function TurnFooter({ entries, startTs, userKeys }: { entries: Entry[]; startTs?: string; userKeys: string[] }) {
   const end = entries.at(-1)?.ts;
   const started = Date.parse(startTs ?? '');
   const ended = Date.parse(end ?? '');
@@ -262,6 +266,7 @@ function TurnFooter({ entries, startTs }: { entries: Entry[]; startTs?: string }
     <div className="mt-[13px] flex min-h-6 items-center self-start pb-8">
       <div className="flex h-6 items-center gap-2">
         <CopyButton text={text} label="Copy turn" className="-ml-1" />
+        <ForkAction userKeys={userKeys} />
         {primary ? (
           <span className="group/time relative text-[13px] text-muted-foreground" title={duration && time ? `Ended ${time}` : undefined}>
             <span className={cn(duration && time && 'group-hover/time:invisible')}>{primary}</span>
@@ -294,7 +299,7 @@ function gapBetween(above: Kind | null, below: Kind | null) {
 
 type Row =
   | { type: 'entry'; entry: Entry; gap: number; compactBottom: boolean }
-  | { type: 'footer'; key: string; entries: Entry[]; startTs?: string };
+  | { type: 'footer'; key: string; entries: Entry[]; startTs?: string; userKeys: string[] };
 
 /** Entries with a footer after each finished turn (a turn: what follows a user message). */
 function layout(entries: Entry[], running: boolean): Row[] {
@@ -303,18 +308,26 @@ function layout(entries: Entry[], running: boolean): Row[] {
   let startTs: string | undefined;
   let previous: Entry | undefined;
   const close = (key: string) => {
-    if (turn.some(entry => kindOf(entry) !== 'user')) rows.push({ type: 'footer', key, entries: turn.filter(entry => kindOf(entry) !== 'user'), startTs });
+    if (turn.some(entry => kindOf(entry) !== 'user')) rows.push({ type: 'footer', key, entries: turn.filter(entry => kindOf(entry) !== 'user'), startTs, userKeys: turn.filter(entry => kindOf(entry) === 'user').map(entry => entry.key) });
     turn = [];
   };
+  const marker = (entry: Entry | undefined) => !!entry && !!conversationMarker(entry.item);
   entries.forEach((entry, index) => {
     const kind = kindOf(entry);
+    // A fork or rewind marker stands between turns: the turn above ends (its footer first).
+    if (marker(entry)) {
+      close(`footer:${entry.key}`);
+      rows.push({ type: 'entry', entry, gap: 0, compactBottom: false });
+      previous = undefined;
+      return;
+    }
     if (kind === 'user' && turn.some(item => kindOf(item) !== 'user')) {
       close(`footer:${entry.key}`);
       previous = undefined;
     }
     if (kind === 'user' && kindOf(previous) !== 'user') startTs = entry.ts;
     const next = entries[index + 1];
-    const endsTurn = !next ? !running : kindOf(next) === 'user';
+    const endsTurn = !next ? !running : kindOf(next) === 'user' || marker(next);
     rows.push({
       type: 'entry',
       entry,
@@ -416,7 +429,7 @@ export function Timeline({ entries, prompts, agentOf, running, runningAgent, his
         {older?.hasOlder ? <div className="mb-4 flex flex-col items-center gap-2"><Button variant="ghost" disabled={older.loading} onClick={() => void loadOlder()}>{older.loading ? 'Loading…' : 'Load older messages'}</Button>{older.error ? <p role="alert" className="text-xs text-destructive">{older.error}</p> : null}</div> : null}
         {historyUnavailable ? <div className="mb-4"><Notice level="warning">Earlier history of this conversation is no longer available on the host.</Notice></div> : null}
         {!entries.length && !prompts.length ? <p className="py-12 text-center text-sm text-muted-foreground">{emptyText}</p> : null}
-        {rows.map(row => row.type === 'footer' ? <TurnFooter key={row.key} entries={row.entries} startTs={row.startTs} /> : (
+        {rows.map(row => row.type === 'footer' ? <TurnFooter key={row.key} entries={row.entries} startTs={row.startTs} userKeys={row.userKeys} /> : (
           <div key={row.entry.key} data-entry-key={row.entry.key} className="flex flex-col" style={row.gap ? { marginTop: row.gap } : undefined}>
             <EntryView entry={row.entry} compactBottom={row.compactBottom} />
           </div>

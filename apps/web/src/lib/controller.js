@@ -5,6 +5,7 @@ import { cleanListing, relativeFilePath } from './file-tree.js';
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
 import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
 import { newMessageId, newRequestId, newSessionId } from './ids.js';
+import { conversationGate, describeConversationError } from './conversation.js';
 import { GIT_ERROR_MESSAGES, GitAccessError, describeGitError, gitAccess, gitCompare, gitRequestPath } from './git.js';
 import { fitImages, imageLimits, promptContent } from './attachments.js';
 import { applyAttach, historyEnvelope, prependHistory, deliveredPrompts, emptyProjection, members, project, promptTurnOver } from './timeline.js';
@@ -239,6 +240,18 @@ export class Controller {
   #attached = null;
   /** @type {Map<string, { generation: string, olderCursor?: string, hasOlder: boolean, loading?: boolean, error?: string }>} */
   #older = new Map();
+  /**
+   * History resets of a root (a rewind, §12.7): how many this page has seen, and the generation the
+   * last one named. An attach that began before the latest reset reloads once it is done.
+   * @type {Map<string, number>}
+   */
+  #resets = new Map();
+  /** @type {Map<string, string>} */
+  #resetTo = new Map();
+  /** Worktrees made for a fork, by the fork's request id: a retry forks into the same one. @type {Map<string, { id: string, directory: string }>} */
+  #forkWorktrees = new Map();
+  /** The worktree.create params of a fork, by its request id, sent unchanged again on a retry. @type {Map<string, any>} */
+  #forkWorktreeRequests = new Map();
   #syncing = false;
   #retryingTeams = false;
   /** A first message whose start failed after the New session screen closed: the next one shows it again (memory only). */
@@ -635,6 +648,8 @@ export class Controller {
     if (!root) return;
     const tree = this.#trees.get(root);
     if (!tree) return;
+    // A rewind replaced the root's history (§12.7): never kept, never projected; the view reloads.
+    if (envelope.event?.type === 'history.reset' && envelope.sessionId === root) { this.#historyReset(root, envelope.event.generation); return; }
     if (tree.attaching) { tree.attaching.buffer.push(envelope); return; }
     tree.projection = project(tree.projection, envelope);
     this.#publishTree(root);
@@ -764,6 +779,7 @@ export class Controller {
     const operation = { buffer: /** @type {any[]} */ ([]) };
     tree.attaching = operation;
     this.#watching = root;
+    const resets = this.#resets.get(root) ?? 0;
     if (this.#state.selected === root) this.#set(state => ({ tree: { rootId: root, status: 'attaching', projection: tree.projection, ...(state.tree?.rootId === root && state.tree.error ? {} : {}) } }));
     try {
       if (this.hasCapability('session.history') && !this.#older.has(root)) {
@@ -782,6 +798,11 @@ export class Controller {
       tree.gone = null;
       tree.failed = null;
       this.#finishAttach(root, tree, response, operation.buffer);
+      // A reset seen while this attach read the old history: read it again.
+      if ((this.#resets.get(root) ?? 0) !== resets && this.#older.get(root)?.generation !== this.#resetTo.get(root)) {
+        this.#older.delete(root);
+        queueMicrotask(() => void this.#reloadTree(client, root));
+      }
     } catch (error) {
       if (/** @type {any} */ (error)?.data?.reason === 'stale_cursor' && staleRetries < 1 && this.#older.has(root)) {
         this.#older.delete(root); tree.projection = emptyProjection(root);
@@ -802,6 +823,38 @@ export class Controller {
     for (const id of tree.projection.order) this.#membership.set(id, root);
     if (response?.reset && !tree.projection.historyUnavailable) this.#notify('info', 'The host restarted this conversation\'s history; it was loaded again from the beginning.');
     this.#publishTree(root, 'attached');
+  }
+
+  /**
+   * The root's history was replaced (a rewind here or on another client, §12.7): the cached
+   * timeline and older pages are dropped and a fresh tail is read and attached with the new
+   * generation. The live event and this page's own rewind answer both call it; one reload is enough.
+   * @param {string} root @param {unknown} generation
+   */
+  #historyReset(root, generation) {
+    if (typeof generation !== 'string' || !generation) return;
+    if (this.#older.get(root)?.generation === generation || this.#resetTo.get(root) === generation) return;
+    this.#resetTo.set(root, generation);
+    this.#resets.set(root, (this.#resets.get(root) ?? 0) + 1);
+    this.#older.delete(root);
+    const tree = this.#trees.get(root);
+    // Messages whose turns ended are settled now, by the history that showed it: the new history
+    // may no longer hold them (a cut turn), and they must not make the root look busy.
+    if (tree) this.#turnsSettled(root, tree.projection);
+    const client = this.#attached?.root === root ? this.#attached.client : undefined;
+    // An attach on its way reloads by itself when it ends; a root not attached reads afresh when it is.
+    if (tree && client && !tree.attaching) void this.#reloadTree(client, root);
+  }
+
+  /** Reads a root's history again and attaches after it, on the connection it is attached on. @param {AlpRpcClient} client @param {string} root */
+  async #reloadTree(client, root) {
+    if (this.#attached?.client !== client || this.#attached.root !== root) return;
+    this.#older.delete(root);
+    try {
+      await this.#attachTree(client, root);
+    } catch (error) {
+      this.#attachFailed(client, root, error);
+    }
   }
 
   /** Load one older page; a failed page keeps its cursor so it can be retried. */
@@ -1628,6 +1681,177 @@ export class Controller {
       };
     });
     void this.refreshSessions({ quiet: true });
+  }
+
+  // ---- conversation fork and rewind (§12.7) ------------------------------------------------
+
+  /** The open root's summary as known here: its list row, then what its tree said since. @param {string} root */
+  #rootSummary(root) {
+    const listed = this.#state.sessions.list.find(row => row.id === root) ?? this.#state.history.list.find(row => row.id === root);
+    const projected = this.#trees.get(root)?.projection.sessions[root];
+    return /** @type {Partial<SessionSummary>} */ ({ ...(listed ?? {}), ...(projected ?? {}), ...(projected?.conversation ? {} : listed?.conversation ? { conversation: listed.conversation } : {}) });
+  }
+
+  /**
+   * Whether fork and rewind are offered for the open root now (lib/conversation.js
+   * conversationGate): the host's capability, the root's summary, the token, the history generation.
+   */
+  conversationGate(root = this.#state.tree?.rootId) {
+    const { principal, connection } = this.#state;
+    const tree = root ? this.#trees.get(root) : undefined;
+    const busy = !!root && !!tree && (this.rootBusy(root) || Object.keys(tree.projection.running).length > 0 || Object.keys(tree.projection.questions).length > 0);
+    return conversationGate({
+      capabilities: connection.capabilities,
+      canRead: can(principal ?? undefined, 'session.read'),
+      canWrite: can(principal ?? undefined, 'session.write'),
+      summary: root ? this.#rootSummary(root) : null,
+      busy,
+      generation: root ? this.#older.get(root)?.generation ?? null : null,
+      online: connection.phase === 'open',
+      driveBlock: root && root === this.#state.tree?.rootId ? this.driveBlock() : undefined,
+    });
+  }
+
+  /** The open root's summary (fork provenance, branches). @param {string} [root] */
+  rootSummary(root = this.#state.tree?.rootId) { return root ? this.#rootSummary(root) : {}; }
+
+  /** The history generation this view holds for a root (session.history), if any. @param {string} root */
+  historyGeneration(root) { return this.#older.get(root)?.generation; }
+
+  /** Puts a summary alpd answered into the list rows and the open tree. @param {any} session */
+  #adoptSummary(session) {
+    if (!session || typeof session.id !== 'string') return;
+    const id = session.id;
+    const update = (/** @type {SessionSummary} */ row) => row.id === id ? { ...row, ...session } : row;
+    this.#set(state => ({ sessions: { ...state.sessions, list: state.sessions.list.map(update) }, history: { ...state.history, list: state.history.list.map(update) } }));
+    const tree = this.#trees.get(id);
+    if (tree) {
+      tree.projection = { ...tree.projection, sessions: { ...tree.projection.sessions, [id]: { ...tree.projection.sessions[id], ...session, id } } };
+      this.#publishTree(id);
+    }
+  }
+
+  /** The open root, its generation and a client, for a fork or rewind. */
+  #conversationTarget() {
+    const root = this.#state.tree?.rootId ?? this.#state.selected;
+    if (!root) throw new ConfigurationError('Open a session first.');
+    const generation = this.#older.get(root)?.generation;
+    if (!generation) throw new ConfigurationError('The conversation is still loading. Try again in a moment.');
+    return { root, generation, client: this.#client() };
+  }
+
+  /** A refusal that says this view is behind the host: read the history again. @param {string} root @param {unknown} error */
+  #conversationRefused(root, error) {
+    if (!describeConversationError(error).reload) return;
+    const client = this.#attached?.root === root ? this.#attached.client : undefined;
+    this.#older.delete(root);
+    if (client) void this.#reloadTree(client, root);
+  }
+
+  /**
+   * session.rewind: the open root's conversation goes back to before `beforeTurnId` under the same
+   * session id; the later turns stay a branch (session.fork { branchId } restores it) and no file is
+   * changed. `requestId` is the user's action: the caller sends the same one again only when the
+   * answer was lost (describeConversationError().retrySame). The view then reloads the new history.
+   * @param {{ beforeTurnId: string, requestId: string }} input
+   */
+  async rewindConversation({ beforeTurnId, requestId }) {
+    const { root, generation, client } = this.#conversationTarget();
+    try {
+      /** @type {import('@anhlp/alp-protocol').RpcMethodMap['session.rewind']['result']} */
+      const result = await client.request('session.rewind', { sessionId: root, requestId, ifGeneration: generation, beforeTurnId }, { timeoutMs: this.#options.createTimeoutMs });
+      this.#adoptSummary(result.session);
+      this.#historyReset(root, result.generation);
+      void this.refreshSessions({ quiet: true });
+      return result;
+    } catch (error) {
+      this.#conversationRefused(root, error);
+      throw error;
+    }
+  }
+
+  /**
+   * session.fork: a new closed root whose conversation is the open root's through or before a turn
+   * (`boundary`), or a branch a rewind set aside (`branchId`), in this workspace or another registry
+   * workspace (`workspaceId`, whose `directory` the app then opens). Nothing is copied but the
+   * conversation. The fork is opened (selected; its first message resumes it).
+   * @param {{ requestId: string, boundary?: { throughTurnId: string } | { beforeTurnId: string }, branchId?: string, workspaceId?: string, directory?: string, title?: string }} input
+   */
+  async forkConversation({ requestId, boundary, branchId, workspaceId, directory, title }) {
+    const { root, generation, client } = this.#conversationTarget();
+    /** @type {import('@anhlp/alp-protocol').RpcMethodMap['session.fork']['result']} */
+    let result;
+    try {
+      result = await client.request('session.fork', {
+        sessionId: root, requestId, ifGeneration: generation,
+        ...(boundary ? { boundary } : {}), ...(branchId ? { branchId } : {}), ...(workspaceId ? { workspaceId } : {}), ...(title?.trim() ? { title: title.trim() } : {}),
+      }, { timeoutMs: this.#options.createTimeoutMs });
+    } catch (error) {
+      this.#conversationRefused(root, error);
+      throw error;
+    }
+    this.#openFork(result.session, directory);
+    return result;
+  }
+
+  /** Opens a fork alpd answered: in its workspace, listed at once, selected. @param {any} session @param {string} [directory] */
+  #openFork(session, directory) {
+    const id = session?.id;
+    if (typeof id !== 'string') return;
+    if (directory && directory !== this.#state.workspace) this.selectWorkspace(directory);
+    // Listed at once; the next session.list read (below) brings the host's row.
+    this.#set(state => ({ sessions: { ...state.sessions, list: [session, ...state.sessions.list.filter(row => row.id !== id)] } }));
+    this.selectSession(id);
+    void this.refreshSessions({ quiet: true });
+  }
+
+  /**
+   * The registry workspace of the open workspace a worktree can be made from (Create worktree),
+   * when the host and the token allow worktrees; else null.
+   */
+  worktreeForkSource() {
+    const { workspace, principal, registry } = this.#state;
+    if (!workspace || !this.hasCapability('workspace.worktree') || !this.hasCapability('workspace.registry') || !can(principal ?? undefined, 'workspace.manage')) return null;
+    const canonical = principal?.workspaceRoots?.find(root => root.path === workspace)?.canonical;
+    return registry.workspaces.find(row => !row.managedWorktree && !row.archivedAt && (row.directory === workspace || row.directory === canonical)) ?? null;
+  }
+
+  /**
+   * A fork into a new managed worktree: the worktree first (workspace.worktree.create, as Create
+   * worktree does; a retry under the same request id reuses it), then session.fork with its
+   * workspaceId. The worktree is a clean checkout of the committed HEAD: no file of this workspace
+   * is copied, and the conversation's past files are not restored.
+   * `worktreeKey` names the worktree for the whole attempt (the dialog): a fork refused after its
+   * worktree was made forks into that one next time, rather than making another.
+   * @param {{ requestId: string, worktreeKey?: string, mappingId: string, boundary?: { throughTurnId: string } | { beforeTurnId: string }, branchId?: string, title?: string }} input
+   */
+  async forkIntoWorktree({ requestId, worktreeKey = requestId, mappingId, boundary, branchId, title }) {
+    const source = this.worktreeForkSource();
+    if (!source) throw new ConfigurationError('Worktrees are not available for this workspace.');
+    let made = this.#forkWorktrees.get(worktreeKey);
+    if (!made) {
+      let params = this.#forkWorktreeRequests.get(worktreeKey);
+      if (!params) { params = { workspaceId: source.id, mappingId, ifRevision: this.#state.registry.revision, requestId: `${worktreeKey}:worktree` }; this.#forkWorktreeRequests.set(worktreeKey, params); }
+      /** @type {import('@anhlp/alp-protocol').RpcMethodMap['workspace.worktree.create']['result']} */
+      let created;
+      try {
+        created = await this.#client().request('workspace.worktree.create', params, { timeoutMs: this.#options.createTimeoutMs });
+      } catch (error) {
+        if (/** @type {any} */ (error)?.data?.reason === 'stale_revision' || describe(error).sent === 'yes') this.#forkWorktreeRequests.delete(worktreeKey);
+        throw error;
+      }
+      made = { id: created.workspace.id, directory: created.workspace.directory };
+      this.#forkWorktrees.set(worktreeKey, made);
+      this.#forkWorktreeRequests.delete(worktreeKey);
+      await this.refreshRegistry();
+    }
+    return this.forkConversation({ requestId, boundary, branchId, workspaceId: made.id, directory: made.directory, title });
+  }
+
+  /** The worktree destinations of the open workspace (Create worktree's). */
+  async worktreeForkDestinations() {
+    const source = this.worktreeForkSource();
+    return source ? this.worktreeOptions(source.id) : [];
   }
 
   // ---- prompts, questions, interrupt -------------------------------------------------------
