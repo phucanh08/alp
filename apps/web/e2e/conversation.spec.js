@@ -56,7 +56,7 @@ test('fork through a turn, rewind before one, reload, restore the branch, fork i
   expect(await ask(page, 'codeword ALPHA')).toBe('Echo: codeword ALPHA');
   expect(await ask(page, 'codeword BRAVO')).toBe('Echo: codeword BRAVO');
   const [source] = await hostSession('Codes');
-  expect(source?.conversation).toEqual({ fork: true, rewind: true });
+  expect(source?.conversation).toEqual({ fork: true, rewind: true, reload: true });
 
   await test.step('fork through the first turn opens a new session that does not see BRAVO', async () => {
     // The first turn's footer: Fork from here…

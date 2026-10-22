@@ -108,7 +108,7 @@ export function attachments(client) {
 
 /**
  * Typed conversation methods (capabilities `session.fork` and `session.rewind`, docs/protocol/
- * alp-json-rpc-v1.md §12.7). Both change the conversation only, never a file. Mutations are sent
+ * alp-json-rpc-v1.md §12.7; `session.reload` and `session.resumeCommand`, §12.8). Both change the conversation only, never a file. Mutations are sent
  * once: keep `requestId` (and `ifGeneration`) to repeat the identical request after a timeout, which
  * answers the first result with `duplicate: true`. After a rewind, attached clients get a
  * `history.reset` event: drop cached history, fetch a new tail and attach with its generation.
@@ -130,5 +130,18 @@ export function conversation(client) {
      * @param {Map['session.rewind']['params']} params @returns {Promise<Map['session.rewind']['result']>}
      */
     rewind: params => client.request('session.rewind', params),
+    /**
+     * Restarts a live root's native process on its own conversation and configuration at the idle
+     * barrier (capability `session.reload`, §12.8); id, history and receipts stay. Sent once: repeat
+     * the same `requestId` after a lost answer.
+     * @param {Map['session.reload']['params']} params @returns {Promise<Map['session.reload']['result']>}
+     */
+    reload: params => client.request('session.reload', params),
+    /**
+     * The ALP CLI command that follows the session in a terminal (capability `session.resumeCommand`,
+     * §12.8), built by alpd: for the clipboard only, never to run.
+     * @param {Map['session.resumeCommand']['params']} params @returns {Promise<Map['session.resumeCommand']['result']>}
+     */
+    resumeCommand: params => client.request('session.resumeCommand', params),
   };
 }

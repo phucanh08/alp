@@ -114,6 +114,54 @@ export function conversationGate({ capabilities, canRead, canWrite, summary, bus
   return { fork: one('fork'), rewind: one('rewind') };
 }
 
+/** Reload agent's tooltip: what restarts and what stays (§12.8). */
+export const RELOAD_NOTE = 'Restart the agent\'s process on the same conversation and settings, for example after a new sign-in. Its messages, history and files stay.';
+
+/** The words of a refusal of session.reload, by data.reason; other reasons as describeConversationError. */
+export const RELOAD_MESSAGES = Object.freeze(/** @type {Record<string, string>} */ ({
+  session_busy: 'The agent or one of its agents is still working. Wait until everything is idle, then reload.',
+  session_closed: 'The session is closed. Send it a message to open it again on its conversation.',
+  no_history: 'The agent has no conversation to keep yet. Send it a message first, or start a new session.',
+  native_refused: 'The agent could not be restarted on its conversation. The session was closed with its conversation kept; send it a message to open it again.',
+  runtime_unsupported: 'This session runs on a runtime the host cannot reload.',
+  not_root: 'Only the main agent of a session can be reloaded.',
+}));
+
+/** A refusal of session.reload for people. @param {unknown} error */
+export function describeReloadError(error) {
+  const described = describeConversationError(error);
+  const words = described.reason ? RELOAD_MESSAGES[described.reason] : undefined;
+  return words ? { ...described, message: words } : described;
+}
+
+/**
+ * Whether a session tab offers Reload agent and Copy resume command now (§12.8), and why not. An item
+ * is hidden without its capability (an older host); otherwise shown, disabled with a reason.
+ * @param {{ capabilities: string[], canRead: boolean, canWrite: boolean, summary?: Partial<SessionSummary> | null, root: boolean, closed?: boolean, busy?: boolean, generation?: string | null, online?: boolean, driveBlock?: string }} input
+ * @returns {{ reload: { shown: boolean, enabled: boolean, reason?: string }, resume: { shown: boolean, enabled: boolean, reason?: string } }}
+ */
+export function agentControlsGate({ capabilities, canRead, canWrite, summary, root, closed = false, busy = false, generation, online = true, driveBlock }) {
+  const off = (/** @type {string} */ reason) => ({ shown: true, enabled: false, reason });
+  const resume = !capabilities.includes('session.resumeCommand') ? { shown: false, enabled: false }
+    : !canRead ? off('Your access token cannot read this session.')
+      : !online ? off('Reconnecting…') : { shown: true, enabled: true };
+  /** @returns {{ shown: boolean, enabled: boolean, reason?: string }} */
+  const reload = () => {
+    if (!capabilities.includes('session.reload')) return { shown: false, enabled: false };
+    if (!root) return off(RELOAD_MESSAGES.not_root);
+    const conversation = summary?.conversation;
+    if (conversation?.reload !== true) return off(conversation?.reason === 'not_persistent' ? 'This session keeps no native conversation to reload.' : RELOAD_MESSAGES.runtime_unsupported);
+    if (!canWrite) return off('Your access token cannot reload agents (it needs session.write).');
+    if (driveBlock) return off(driveBlock);
+    if (closed) return off(RELOAD_MESSAGES.session_closed);
+    if (!capabilities.includes('session.history') || !generation) return off('The conversation is still loading.');
+    if (!online) return off('Reconnecting…');
+    if (busy) return off('Wait until main and its agents are idle.');
+    return { shown: true, enabled: true };
+  };
+  return { reload: reload(), resume };
+}
+
 /**
  * The root's turns as the timeline shows them: for each user message that started a turn, its turn
  * id, its place in the turn order, how many turns from it on a rewind would set aside, whether a

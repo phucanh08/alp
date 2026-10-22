@@ -5,7 +5,7 @@ import { cleanListing, relativeFilePath } from './file-tree.js';
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
 import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
 import { newMessageId, newRequestId, newSessionId } from './ids.js';
-import { conversationGate, describeConversationError } from './conversation.js';
+import { RELOAD_MESSAGES, agentControlsGate, conversationGate, describeConversationError, describeReloadError } from './conversation.js';
 import { GIT_ERROR_MESSAGES, GitAccessError, describeGitError, gitAccess, gitCompare, gitRequestPath } from './git.js';
 import { fitImages, imageLimits, promptContent } from './attachments.js';
 import { applyAttach, historyEnvelope, prependHistory, deliveredPrompts, emptyProjection, members, project, promptTurnOver } from './timeline.js';
@@ -1710,6 +1710,73 @@ export class Controller {
       online: connection.phase === 'open',
       driveBlock: root && root === this.#state.tree?.rootId ? this.driveBlock() : undefined,
     });
+  }
+
+  /**
+   * Reload agent and Copy resume command for a session's tab (§12.8, lib/conversation.js
+   * agentControlsGate): reload only for the open root, idle, within the token's modes.
+   * @param {string} sessionId
+   */
+  agentControls(sessionId) {
+    const { principal, connection } = this.#state;
+    const root = this.#state.tree?.rootId;
+    const tree = root ? this.#trees.get(root) : undefined;
+    const isRoot = !!root && sessionId === root;
+    const busy = isRoot && !!tree && (this.rootBusy(root) || Object.keys(tree.projection.running).length > 0 || Object.keys(tree.projection.questions).length > 0);
+    return agentControlsGate({
+      capabilities: connection.capabilities,
+      canRead: can(principal ?? undefined, 'session.read'),
+      canWrite: can(principal ?? undefined, 'session.write'),
+      summary: isRoot ? this.#rootSummary(root) : null,
+      root: isRoot,
+      closed: isRoot && !!tree?.projection.closed[root],
+      busy,
+      generation: isRoot ? this.#older.get(root)?.generation ?? null : null,
+      online: connection.phase === 'open',
+      driveBlock: isRoot ? this.driveBlock() : undefined,
+    });
+  }
+
+  /**
+   * Copy resume command: the ALP CLI command the host builds (session.resumeCommand) goes to the
+   * clipboard; it is never run here. A notice says what was copied, or why nothing was.
+   * @param {string} sessionId @param {(text: string) => Promise<void>} write the clipboard
+   */
+  async copyResumeCommand(sessionId, write) {
+    try {
+      /** @type {import('@anhlp/alp-protocol').RpcMethodMap['session.resumeCommand']['result']} */
+      const command = await this.#client().request('session.resumeCommand', { sessionId });
+      if (typeof command?.display !== 'string' || !command.display) throw new ConfigurationError('The host answered no command.');
+      await write(command.display);
+      this.#notify('info', `Copied the resume command: ${command.display}`);
+      return command;
+    } catch (error) {
+      this.#notify('error', `Could not copy the resume command: ${describe(error).message}`);
+      return undefined;
+    }
+  }
+
+  /**
+   * session.reload: the open root's native process restarts on its own conversation and settings at
+   * the idle barrier; its id, history and receipts stay (§12.8). `requestId` is the user's action.
+   * @param {{ sessionId: string, requestId: string }} input
+   */
+  async reloadAgent({ sessionId, requestId }) {
+    const { root, generation, client } = this.#conversationTarget();
+    if (sessionId !== root) throw new ConfigurationError(RELOAD_MESSAGES.not_root);
+    this.#notify('info', 'Reloading the agent…');
+    try {
+      /** @type {import('@anhlp/alp-protocol').RpcMethodMap['session.reload']['result']} */
+      const result = await client.request('session.reload', { sessionId: root, requestId, ifGeneration: generation }, { timeoutMs: this.#options.createTimeoutMs });
+      this.#adoptSummary(result.session);
+      void this.refreshSessions({ quiet: true });
+      this.#notify('info', 'Reloaded the agent: it restarted on the same conversation.');
+      return result;
+    } catch (error) {
+      this.#conversationRefused(root, error);
+      this.#notify('error', describeReloadError(error).message);
+      throw error;
+    }
   }
 
   /** The open root's summary (fork provenance, branches). @param {string} [root] */

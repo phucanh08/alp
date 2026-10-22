@@ -1136,11 +1136,56 @@ only as that binding. ACP and Antigravity: `runtime_unsupported`.
 { prepare, apply, commit })`), the prompt gate (`holdPrompts(root)`) with the idle barrier, and the
 runtime's `rebind(sessionId, binding)` (restart a root's native process on a binding at the idle
 barrier, keeping its id, configuration and viewers) are what a live model/team change and
-`session.reload` reuse.
+`session.reload` (§12.8) reuse.
 
 The gateway exposes `session.rewind` with `session.write` and `session.fork` with `session.write` and
 `session.read`; a grant limited to `modes` may fork or rewind only a root whose tree runs within them, as
 it may prompt it (docs/alp/remote-gateway.md §5.5, §5.15).
+
+### 12.8 Reload and resume command (`session.reload`, `session.resumeCommand`)
+
+Capability `session.reload`, listed by an alpd with a store whose runtime restarts a root on its own
+conversation (today: Codex and Claude, on macOS and Linux); capability `session.resumeCommand`, listed by
+an alpd with a store. A summary's `conversation.reload` says whether this root can be reloaded now (the
+same `reason`s as fork and rewind); a client offers Reload agent only where it is `true`.
+
+**`session.reload { sessionId, requestId, ifGeneration }`** → `{ session, duplicate? }`. The root's
+native process stops and a new one resumes **the conversation it runs now** (its thread, or a Claude
+root's pending fork binding), with the session's own configuration (agent, model, thinking, mode,
+instructions, tools), under the **same session id**. Its timeline, history generation, prompt receipts
+and attached viewers are not changed: it is `rebind(id, its own binding)` at the idle barrier (§12.7).
+What it refreshes is the process: a new sign-in, a provider binary that changed.
+- The root must be open (`1005 session_closed`: open it with `session.create { resume: true }`, which
+  resumes the same conversation) and idle with its whole tree as for a rewind (`1004 session_busy`);
+  prompts, scheduled deliveries, reopens and mail wakes that arrive meanwhile wait, then reach the new
+  process. `ifGeneration` is the history generation the client read (`1004 stale_generation`).
+- A root with no turn yet has no conversation to keep (a Claude root then has no transcript at all):
+  `1005 no_history`. An assignment is not a root (`-32602`); ACP and Antigravity are
+  `1005 runtime_unsupported`.
+- The new process must resume that very conversation: a Claude root is resumed only when its transcript
+  (or the base of its pending fork) exists, a Codex one only when Codex resumes the thread id; a thread
+  never is replaced by an empty one. When the new process cannot resume it the answer is
+  `1005 native_refused` and the root is **closed** with its binding kept: its next open resumes it.
+- Journaled as fork and rewind are (same `(sessionId, operation, requestId)` rules, `duplicate: true`
+  on a repeat, a recorded refusal answered again, `1004 outcome_unknown` for a restart alpd stopped in
+  the middle of, never sent again). Its commit changes nothing of alpd's own.
+
+**`session.resumeCommand { sessionId }`** → `{ argv, posix, windows, display, platform }`: the command
+that follows the session in a terminal on the daemon host, built by alpd from the session id only:
+`alp attach <sessionId>` (a closed session's attach says how to send it a message). `posix` is quoted
+for sh, bash and zsh, `windows` for cmd.exe (the shell npm's `alp.cmd` runs under; arguments quoted as
+the C runtime splits them, cmd.exe metacharacters escaped with `^`); `display` is the one of the host's
+`platform`. An argument with a control character is refused. It is for the clipboard only: a client
+never runs it. It never is a native runtime's command (`codex resume`, `claude --resume`), which
+would continue the thread outside ALP and lose its orchestration (mail, assignments, receipts), and it
+carries no credential, env (`ALP_HOME` included: a host whose alpd uses another home runs it with that
+home set), native storage path or private id. `quotePosix`, `quoteWindows`, `commandLine` and
+`resumeCommandOf` in `@anhlp/alp-protocol` build it.
+
+The gateway exposes `session.reload` with `session.write` (a root in the grant, looked up afresh; a
+grant limited to `modes` reloads only a root whose tree runs within them, as it may prompt it) and
+`session.resumeCommand` with `session.read`; it rebuilds the command from the id and passes it only when
+alpd answered the same (docs/alp/remote-gateway.md §5.15).
 
 ## 13. Compatibility notes for this revision
 

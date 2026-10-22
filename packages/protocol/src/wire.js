@@ -17,7 +17,7 @@ export const RPC_ERROR = Object.freeze({ parseError: -32700, invalidRequest: -32
  * Features a daemon lists in its daemon.hello result. A client uses a feature only when listed;
  * a daemon that lists none (one older than this list) has none of them. Unknown names are ignored.
  */
-export const CAPABILITY = Object.freeze({ attachAfter: 'attach.after', sessionHistory: 'session.history', workspaceRegistry: 'workspace.registry', workspaceWorktree: 'workspace.worktree', workspaceGit: 'workspace.git', promptReceipts: 'prompt.receipts', extensionMethods: 'extension.methods', team: 'team', task: 'task', library: 'library', libraryProjectWrite: 'library.project.write', settingsLanguage: 'settings.language', sessionListPage: 'session.list.page', questionWatch: 'question.watch', questionWatchTurns: 'question.watch.turns', sessionAttention: 'session.attention', workspaceFiles: 'workspace.files', workspaceFilesRead: 'workspace.files.read', promptImages: 'prompt.images', schedule: 'schedule', attachments: 'attachments', sessionFork: 'session.fork', sessionRewind: 'session.rewind' });
+export const CAPABILITY = Object.freeze({ attachAfter: 'attach.after', sessionHistory: 'session.history', workspaceRegistry: 'workspace.registry', workspaceWorktree: 'workspace.worktree', workspaceGit: 'workspace.git', promptReceipts: 'prompt.receipts', extensionMethods: 'extension.methods', team: 'team', task: 'task', library: 'library', libraryProjectWrite: 'library.project.write', settingsLanguage: 'settings.language', sessionListPage: 'session.list.page', questionWatch: 'question.watch', questionWatchTurns: 'question.watch.turns', sessionAttention: 'session.attention', workspaceFiles: 'workspace.files', workspaceFilesRead: 'workspace.files.read', promptImages: 'prompt.images', schedule: 'schedule', attachments: 'attachments', sessionFork: 'session.fork', sessionRewind: 'session.rewind' , sessionReload: 'session.reload', sessionResumeCommand: 'session.resumeCommand'});
 /**
  * What alpd takes as images in one session.prompt (capability `prompt.images`): inline base64 of
  * these types only, never a path or URL; at most `maxCount` of them, each at most `maxBytes`
@@ -27,7 +27,7 @@ export const CAPABILITY = Object.freeze({ attachAfter: 'attach.after', sessionHi
 export const PROMPT_IMAGES = Object.freeze({ mimeTypes: Object.freeze(['image/png', 'image/jpeg', 'image/gif', 'image/webp']), maxCount: 8, maxBytes: 5 * 1024 * 1024, maxTotalBytes: 11 * 1024 * 1024 });
 /** Decoded bytes of base64 `data` (padding aware), without decoding it. @param {string} data */
 export const base64Bytes = data => Math.floor(data.length * 3 / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
-export const RPC_METHODS = Object.freeze(["assignment.recall", "board.list", "catalog.get", "daemon.hello", "daemon.pause", "daemon.pauses", "daemon.resume", "daemon.shutdown", "daemon.status", "daemon.usage", "extension.register", "extension.unregister", "library.delete", "library.duplicate", "library.get", "library.list", "library.models", "library.rename", "library.save", "library.skills.set", "project.list", "project.register", "project.remove", "question.answer", "question.list", "question.watch", "registry.owner", "schedule.cancel", "schedule.create", "schedule.get", "schedule.list", "session.archive", "session.attach", "session.attention.clear", "session.close", "session.configure", "session.create", "session.get", "session.history", "session.interrupt", "session.list", "session.log", "session.message", "session.preview", "session.prompt", "session.release", "session.rename", "session.status", "settings.language.get", "settings.language.set", "task.create", "task.gate.resolve", "task.list", "task.update", "team.list", "workspace.files.list", "workspace.files.read", "workspace.files.search", "workspace.get", "workspace.list", "workspace.update", "registry.worktree", "workspace.worktree.options", "workspace.worktree.create", "workspace.worktree.remove", "workspace.git.status", "workspace.git.diff", "attachment.begin", "attachment.chunk", "attachment.commit", "attachment.abort", "attachment.get", "attachment.delete", "session.fork", "session.rewind"]);
+export const RPC_METHODS = Object.freeze(["assignment.recall", "attachment.abort", "attachment.begin", "attachment.chunk", "attachment.commit", "attachment.delete", "attachment.get", "board.list", "catalog.get", "daemon.hello", "daemon.pause", "daemon.pauses", "daemon.resume", "daemon.shutdown", "daemon.status", "daemon.usage", "extension.register", "extension.unregister", "library.delete", "library.duplicate", "library.get", "library.list", "library.models", "library.rename", "library.save", "library.skills.set", "project.list", "project.register", "project.remove", "question.answer", "question.list", "question.watch", "registry.owner", "registry.worktree", "schedule.cancel", "schedule.create", "schedule.get", "schedule.list", "session.archive", "session.attach", "session.attention.clear", "session.close", "session.configure", "session.create", "session.fork", "session.get", "session.history", "session.interrupt", "session.list", "session.log", "session.message", "session.preview", "session.prompt", "session.release", "session.reload", "session.rename", "session.resumeCommand", "session.rewind", "session.status", "settings.language.get", "settings.language.set", "task.create", "task.gate.resolve", "task.list", "task.update", "team.list", "workspace.files.list", "workspace.files.read", "workspace.files.search", "workspace.get", "workspace.git.diff", "workspace.git.status", "workspace.list", "workspace.update", "workspace.worktree.create", "workspace.worktree.options", "workspace.worktree.remove"]);
 
 /**
  * Limits of workspace.files.list and workspace.files.read (capability `workspace.files.read`,
@@ -130,3 +130,50 @@ export function blockedFilePath(relative) {
 export function encodeFrame(value) { return `${JSON.stringify(value)}\n`; }
 /** Parse one complete frame. Buffering and failure handling belong to the socket owner. @param {string} line @returns {unknown} */
 export function decodeFrame(line) { return JSON.parse(line); }
+
+/**
+ * The command lines of session.resumeCommand (docs/protocol/alp-json-rpc-v1.md §12.8), built from argv
+ * so that every argument reaches the program as it is: for a POSIX shell (sh, bash, zsh) and for
+ * Windows cmd.exe (the shell npm's `alp.cmd` runs under). An argument with a control character (a
+ * line break would run a pasted command early) is refused.
+ */
+const POSIX_SAFE = /^[A-Za-z0-9_@+:,./-]+$/;
+const WINDOWS_SAFE = /^[A-Za-z0-9_@+:./\\-]+$/;
+const assertArgument = (/** @type {unknown} */ arg) => {
+  if (typeof arg !== 'string') throw new TypeError('A command argument is a string');
+  if (/[\u0000-\u001f\u007f]/.test(arg)) throw new TypeError('A command argument has no control characters');
+  return arg;
+};
+/** One argument for a POSIX shell: as it is when nothing in it is special, else in single quotes. @param {string} arg */
+export function quotePosix(arg) {
+  const text = assertArgument(arg);
+  return text && POSIX_SAFE.test(text) ? text : `'${text.replace(/'/g, `'\\''`)}'`;
+}
+/**
+ * One argument for cmd.exe: as it is when nothing in it is special; else quoted as the C runtime
+ * splits a command line (backslashes before a quote or the end doubled, quotes escaped), then every
+ * cmd.exe metacharacter, the quotes too, escaped with ^ so cmd.exe interprets none of them.
+ * @param {string} arg
+ */
+export function quoteWindows(arg) {
+  const text = assertArgument(arg);
+  if (text && WINDOWS_SAFE.test(text)) return text;
+  const quoted = `"${text.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, '$1$1')}"`;
+  return quoted.replace(/([()\][%!^"`<>&|;, *?])/g, '^$1');
+}
+/** argv as one command line. @param {string[]} argv @param {'posix' | 'windows'} platform */
+export function commandLine(argv, platform) {
+  return argv.map(platform === 'windows' ? quoteWindows : quotePosix).join(' ');
+}
+/**
+ * session.resumeCommand's answer for a session: `alp attach <sessionId>`, which follows the session in
+ * a terminal (a closed one says how to send it a message). ALP keeps the orchestration, so it is never
+ * a native runtime's own resume command.
+ * @param {string} sessionId @param {'posix' | 'windows'} platform the daemon host's
+ */
+export function resumeCommandOf(sessionId, platform) {
+  const argv = ['alp', 'attach', sessionId];
+  const posix = commandLine(argv, 'posix');
+  const windows = commandLine(argv, 'windows');
+  return { argv, posix, windows, display: platform === 'windows' ? windows : posix, platform };
+}

@@ -556,3 +556,72 @@ test('mail held for a brief whose turn ends while it starts wakes the assignment
   await until(() => runtimes[1].calls.some(call => JSON.stringify(call.params).includes('LATE MAIL')));
   assert.doesNotMatch(JSON.stringify(runtimes[1].of('turn/start')[0]), /LATE MAIL/);
 });
+
+// ---- reload (§12.8): the same seam reopens a root's own conversation in a new process.
+
+test('reload restarts an idle root on its own conversation, keeping its id and configuration', async t => {
+  const { root, runtime, runtimes, of, prompt } = await setup(t);
+  await runtime.open('root', { cwd: root, persist: true, model: 'codex:gpt-5.5', thinking: 'high' });
+  await runtime.configure('root', { mode: 'read-only' });
+  await prompt('root', 'one');
+  runtimes[0].finish();
+  await until(() => !runtime.snapshot('root').busy);
+  const before = runtime.snapshot('root');
+  const snapshot = await runtime.reload('root');
+  assert.deepEqual(snapshot, before, 'same id, thread, model, thinking and mode');
+  assert.equal(snapshot.mode, 'read-only');
+  assert.deepEqual(of('root', 'session.updated').at(-1).session, snapshot);
+  assert.equal(runtimes[0].closed, true, 'the old process stopped');
+  const [resume] = runtimes[1].of('thread/resume');
+  assert.equal(resume.threadId, before.threadId);
+  const started = runtimes[0].of('thread/start')[0];
+  assert.equal(resume.model, started.model);
+  assert.equal(resume.sandbox, 'read-only', 'the mode the session was configured to, not the one it started with');
+  assert.equal(resume.developerInstructions, started.developerInstructions);
+  assert.equal(runtimes[1].of('thread/start').length, 0, 'no new thread');
+  await prompt('root', 'two');
+  assert.equal(runtimes[1].of('turn/start')[0].threadId, before.threadId);
+});
+
+test('reload of a Claude root resumes only a conversation that exists; otherwise it closes, never starting an empty one', async t => {
+  const transcripts = new Set(['N']);
+  const { root, runtime, runtimes, of } = await setup(t, (runtime, method, params) => {
+    if (method === 'thread/resume' && params.requireHistory && !transcripts.has(params.threadId)) throw new Error(`Claude session ${params.threadId} not found`);
+  });
+  await runtime.open('root', { cwd: root, persist: true, model: 'claude:sonnet', restore: { agent: 'main', threadId: 'N', runtime: 'claude', model: 'sonnet' } });
+  await until(() => !runtime.snapshot('root').busy);
+  await runtime.reload('root');
+  assert.deepEqual(runtimes[1].of('thread/resume')[0], { ...runtimes[1].of('thread/resume')[0], threadId: 'N', requireHistory: true });
+  // A pending fork (a base) reloads with its base.
+  const base = { threadId: 'S', at: 'a1' };
+  await runtime.rebind('root', { threadId: 'M', base });
+  await runtime.reload('root');
+  assert.deepEqual(runtimes[3].of('thread/resume')[0].base, base);
+  assert.equal(runtime.snapshot('root').threadId, 'M');
+  // A transcript that is gone: refused, the session closes with its binding, nothing is started.
+  await runtime.rebind('root', { threadId: 'N' });
+  transcripts.delete('N');
+  const error = await refused(runtime.reload('root'), 'native_refused', false);
+  assert.match(error.message, /not found/);
+  assert.equal(runtime.snapshot('root'), undefined);
+  assert.equal(of('root', 'session.closed').length, 1);
+  assert.equal(of('root', 'session.failed').length, 0);
+  assert.equal(runtimes.flatMap(r => r.of('thread/start')).length, 0, 'never an empty replacement thread');
+  assert.equal(runtimes.at(-1).closed, true);
+});
+
+test('reload refuses unless the whole tree is idle', async t => {
+  const { root, runtime, runtimes, of, prompt } = await setup(t, undefined, { autoResume: false, recoveryResume: false });
+  await refused(runtime.reload('nobody'), 'session_busy');
+  await runtime.open('root', { cwd: root, persist: true });
+  await prompt('root', 'one');
+  await refused(runtime.reload('root'), 'session_busy');
+  await runtimes[0].call('alp_delegate', { agent: 'lead', task: 'Work', wait: false });
+  await until(() => runtimes[1]?.of('turn/start').length);
+  const child = of('root', 'assignment')[0].assignment.id;
+  runtimes[0].finish();
+  await until(() => !runtime.snapshot('root').activeTurnId);
+  await refused(runtime.reload('root'), 'session_busy');
+  await refused(runtime.reload(child), 'session_busy');
+  assert.equal(runtimes.filter(r => r.of('thread/resume').length).length, 0, 'nothing restarted');
+});

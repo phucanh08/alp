@@ -1432,6 +1432,18 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       return conversation.rewind(params);
     },
 
+    /** Restarts a live root's native process on its own conversation at the idle barrier (§12.8). */
+    async 'session.reload'(_connection, params) {
+      if (!conversation?.reloads) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd does not reload sessions (capability session.reload is not listed)');
+      return conversation.reload(params);
+    },
+
+    /** The ALP CLI command that follows a session in a terminal, for the clipboard (§12.8). */
+    async 'session.resumeCommand'(_connection, { sessionId }) {
+      if (!conversation) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd has no resume command (capability session.resumeCommand is not listed)');
+      return conversation.resumeCommand(sessionId);
+    },
+
     async 'session.interrupt'(_connection, { sessionId }) {
       await runtime.interrupt(sessionId);
       return {};
@@ -1666,7 +1678,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...operations.capabilities];
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...(conversation?.reloads ? [CAPABILITY.sessionReload] : []), ...(conversation ? [CAPABILITY.sessionResumeCommand] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {

@@ -1,7 +1,7 @@
 /** Portable JSON-RPC structures; implementations and provider SDKs stay outside protocol. */
 import type { RuntimeKind, Pin } from './dto.js';
 import type { AlpError, Envelope, SessionSnapshot, TreeStatus, TurnAttention, UserQuestion } from './events.js';
-import type { ConversationBranch, ForkProvenance, PauseState, PromptContent, RecallAnswer, SessionPreview, SessionSpec, SessionSummary } from './session.js';
+import type { ConversationBranch, ForkProvenance, PauseState, PromptContent, RecallAnswer, ResumeCommand, SessionPreview, SessionSpec, SessionSummary } from './session.js';
 import type { EntryName, LanguageSetting, LibraryEntryRow, LibraryKind, LibraryScope, LibrarySource, TaskRow, TeamRow } from './dto.js';
 import type { ScheduleJob, ScheduleStatus } from './schedule.js';
 
@@ -15,7 +15,7 @@ export type EventNotification = { jsonrpc: '2.0'; method: 'event'; params: Envel
 export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
 export type HistoryPage = { generation: string; items: HistoryItem[]; olderCursor?: string; hasOlder: boolean; tipCursor: number };
 
-export type Capability = 'session.fork' | 'session.rewind' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
+export type Capability = 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -36,7 +36,9 @@ export type ErrorReason =
   | 'attachment_unavailable' | 'attachment_unsupported'
   // session.fork and session.rewind (§12.7).
   | 'session_busy' | 'stale_generation' | 'turn_not_found' | 'turn_in_progress' | 'empty_prefix' | 'boundary_unmapped'
-  | 'runtime_unsupported' | 'native_refused' | 'branch_not_found' | 'attachment_forbidden';
+  | 'runtime_unsupported' | 'native_refused' | 'branch_not_found' | 'attachment_forbidden'
+  // session.reload (§12.8).
+  | 'session_closed' | 'no_history';
 
 type Empty = Record<string, never>;
 
@@ -165,6 +167,23 @@ export type RpcMethodMap = {
   'session.rewind': {
     params: { sessionId: string; requestId: string; ifGeneration: string; beforeTurnId: string };
     result: { session: SessionSummary; generation: string; branch: ConversationBranch; duplicate?: true };
+  };
+  /**
+   * Restarts a live root's native process on its own conversation and configuration at the idle
+   * barrier, keeping its session id, history and receipts (capability `session.reload`, §12.8).
+   * Answered once per (sessionId, requestId): a repeat answers the first result with `duplicate: true`.
+   */
+  'session.reload': {
+    params: { sessionId: string; requestId: string; ifGeneration: string };
+    result: { session: SessionSummary; duplicate?: true };
+  };
+  /**
+   * The ALP CLI command that continues a session in a terminal, built by alpd (capability
+   * `session.resumeCommand`, §12.8): argv and its POSIX and Windows command lines, for the clipboard only.
+   */
+  'session.resumeCommand': {
+    params: { sessionId: string };
+    result: ResumeCommand;
   };
   'session.archive': { params: { sessionId: string; archived?: boolean }; result: { session: SessionSummary } };
   'session.get': { params: { sessionId: string }; result: { session: SessionSummary } };

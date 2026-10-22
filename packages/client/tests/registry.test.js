@@ -76,3 +76,13 @@ test('conversation helpers send session.fork and session.rewind exactly as given
   assert.deepEqual(await api.rewind(rewind), { method: 'session.rewind' });
   assert.deepEqual(sent, [['session.fork', fork], ['session.rewind', rewind]]);
 });
+
+test('conversation helpers send session.reload and session.resumeCommand exactly as given (§12.8)', async () => {
+  const { conversation } = await import('@anhlp/alp-client/portable');
+  const sent = [];
+  const api = conversation({ request: async (method, params) => { sent.push([method, params]); return { method }; } });
+  const reload = { sessionId: 'ses_1', requestId: 'reload-1', ifGeneration: '0123456789abcdef0123456789abcdef' };
+  assert.deepEqual(await api.reload(reload), { method: 'session.reload' });
+  assert.deepEqual(await api.resumeCommand({ sessionId: 'ses_1' }), { method: 'session.resumeCommand' });
+  assert.deepEqual(sent, [['session.reload', reload], ['session.resumeCommand', { sessionId: 'ses_1' }]]);
+});

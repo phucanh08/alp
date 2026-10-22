@@ -5765,6 +5765,216 @@
      "branchId": "br_0123456789abcdef"
     }
    }
+  },
+  {
+   "name": "session.reload params",
+   "check": "params",
+   "method": "session.reload",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_1",
+    "requestId": "reload-1",
+    "ifGeneration": "0123456789abcdef0123456789abcdef"
+   }
+  },
+  {
+   "name": "session.reload params without a generation",
+   "check": "params",
+   "method": "session.reload",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "requestId": "reload-2"
+   }
+  },
+  {
+   "name": "session.reload params naming another binding",
+   "check": "params",
+   "method": "session.reload",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "requestId": "reload-3",
+    "ifGeneration": "0123456789abcdef0123456789abcdef",
+    "threadId": "thread-9"
+   }
+  },
+  {
+   "name": "session.reload result",
+   "check": "result",
+   "method": "session.reload",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_1",
+     "projectRoot": "/work/app",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-5.5",
+     "mode": "workspace-write",
+     "thinking": "medium",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "threadId": "thread-2",
+     "persistent": true,
+     "busy": false,
+     "status": "idle",
+     "conversation": {
+      "fork": true,
+      "rewind": true,
+      "reload": true
+     },
+     "branches": [
+      {
+       "branchId": "br_0123456789abcdef",
+       "beforeTurnId": "turn-2",
+       "turns": 2,
+       "at": "2026-10-23T00:00:00.000Z"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "session.reload result of a repeat",
+   "check": "result",
+   "method": "session.reload",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_1",
+     "projectRoot": "/work/app",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-5.5",
+     "mode": "workspace-write",
+     "thinking": "medium",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "threadId": "thread-2",
+     "persistent": true,
+     "busy": false,
+     "status": "idle",
+     "conversation": {
+      "fork": true,
+      "rewind": true,
+      "reload": true
+     },
+     "branches": [
+      {
+       "branchId": "br_0123456789abcdef",
+       "beforeTurnId": "turn-2",
+       "turns": 2,
+       "at": "2026-10-23T00:00:00.000Z"
+      }
+     ]
+    },
+    "duplicate": true
+   }
+  },
+  {
+   "name": "session.reload result without its session",
+   "check": "result",
+   "method": "session.reload",
+   "valid": false,
+   "value": {
+    "duplicate": true
+   }
+  },
+  {
+   "name": "session.resumeCommand params",
+   "check": "params",
+   "method": "session.resumeCommand",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_1"
+   }
+  },
+  {
+   "name": "session.resumeCommand params asking for a native runtime",
+   "check": "params",
+   "method": "session.resumeCommand",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "runtime": "claude"
+   }
+  },
+  {
+   "name": "session.resumeCommand result",
+   "check": "result",
+   "method": "session.resumeCommand",
+   "valid": true,
+   "value": {
+    "argv": [
+     "alp",
+     "attach",
+     "ses_1"
+    ],
+    "posix": "alp attach ses_1",
+    "windows": "alp attach ses_1",
+    "display": "alp attach ses_1",
+    "platform": "posix"
+   }
+  },
+  {
+   "name": "session.resumeCommand result with an env field",
+   "check": "result",
+   "method": "session.resumeCommand",
+   "valid": false,
+   "value": {
+    "argv": [
+     "alp",
+     "attach",
+     "ses_1"
+    ],
+    "posix": "alp attach ses_1",
+    "windows": "alp attach ses_1",
+    "display": "alp attach ses_1",
+    "platform": "posix",
+    "env": {
+     "ALP_HOME": "/x"
+    }
+   }
+  },
+  {
+   "name": "session.resumeCommand result with a line break in an argument",
+   "check": "result",
+   "method": "session.resumeCommand",
+   "valid": false,
+   "value": {
+    "argv": [
+     "alp",
+     "attach",
+     "ses_1\nrm -rf ~"
+    ],
+    "posix": "alp attach 'ses_1'",
+    "windows": "alp attach ses_1",
+    "display": "alp attach ses_1",
+    "platform": "posix"
+   }
+  },
+  {
+   "name": "session.resumeCommand result without its Windows line",
+   "check": "result",
+   "method": "session.resumeCommand",
+   "valid": false,
+   "value": {
+    "argv": [
+     "alp",
+     "attach",
+     "ses_1"
+    ],
+    "posix": "alp attach ses_1",
+    "display": "alp attach ses_1",
+    "platform": "posix"
+   }
   }
  ]
 }

@@ -3369,6 +3369,30 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     return updated;
   }
 
+  /** reload(): restarts an idle root's native process on its own conversation; see AlpRuntime.reload. */
+  async function reloadSession(sessionId: string) {
+    const session = sessions.get(sessionId);
+    const refusal = restartRefusal(sessionId, session);
+    if (refusal) throw new ConversationError('session_busy', refusal);
+    const live = session!;
+    if (!live.threadId) throw new ConversationError('runtime_unsupported', 'This session keeps no native conversation to reload');
+    const binding: NativeBinding = { threadId: live.threadId, ...(live.base ? { base: live.base } : {}) };
+    try {
+      await restartNative(sessionId, live, binding);
+    } catch (error) {
+      runLog(rootOf(sessionId), { event: 'session.reload_failed', sessionId, agent: live.mapping.agent.name, threadId: binding.threadId, error: errorData(error).message });
+      // No process holds the conversation now, and none is started without it: the session closes,
+      // its record keeps the binding, and the next open resumes it.
+      if (!live.closed) await closeSession(sessionId).catch(() => {});
+      // Known either way: the session is closed now and its conversation was only read, never changed.
+      throw new ConversationError('native_refused', `The agent could not be restarted on its conversation: ${errorData(error).message}`);
+    }
+    runLog(rootOf(sessionId), { event: 'session.reloaded', sessionId, agent: live.mapping.agent.name, threadId: binding.threadId });
+    const updated = snapshot(sessionId, live);
+    emit(sessionId, { type: 'session.updated', session: updated });
+    return updated;
+  }
+
   /** branch(): makes the native conversation a fork or rewind continues; see AlpRuntime.branch. */
   async function branchConversation(request: BranchRequest): Promise<NativeBinding> {
     if (closed) throw new Error('Runtime is closed');
@@ -4032,6 +4056,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     branch: request => branchConversation(request),
 
     rebind: (sessionId, binding) => enqueue(() => rebindSession(sessionId, binding)),
+
+    reload: sessionId => enqueue(() => reloadSession(sessionId)),
 
     hold: sessionId => {
       const session = sessions.get(sessionId);

@@ -114,7 +114,12 @@ export type SessionSummary = SessionSnapshot & {
    * `session.fork` and `session.rewind`, §12.7). A single turn may still be refused: one in
    * progress, the first one, or one alpd cannot map to the runtime's own history.
    */
-  conversation?: { fork: boolean; rewind: boolean; reason?: 'runtime_unsupported' | 'not_persistent' | 'not_root' };
+  conversation?: {
+    fork: boolean; rewind: boolean;
+    /** Whether session.reload can restart this root's native process (capability `session.reload`, §12.8); the root must also be open and idle. */
+    reload?: boolean;
+    reason?: 'runtime_unsupported' | 'not_persistent' | 'not_root';
+  };
   /** The session this root was forked from (§12.7). */
   forkedFrom?: ForkProvenance;
   /** Conversation branches rewinds set aside, oldest first; each stays recoverable with session.fork { branchId } (§12.7). */
@@ -148,3 +153,10 @@ export type ConversationBranch = {
   turns: number;
   at: string;
 };
+
+/**
+ * The ALP CLI command that continues a session in a terminal (session.resumeCommand, §12.8): `argv`
+ * and the same command quoted for a POSIX shell and for Windows (cmd.exe). `display` is the one for
+ * the daemon host's own platform. Never a native runtime's command, credential, env or path.
+ */
+export type ResumeCommand = { argv: string[]; posix: string; windows: string; display: string; platform: 'posix' | 'windows' };

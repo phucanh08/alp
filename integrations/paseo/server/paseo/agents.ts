@@ -802,6 +802,33 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       }
     },
 
+    /**
+     * Paseo's Reload agent (refresh_agent_request): a live root restarts its native process on its own
+     * conversation and configuration (session.reload, §12.8), refused while it or its agents work; a
+     * closed one opens again on its conversation, as any message would open it; an archived one is
+     * unarchived first, as Paseo's refresh does. Then the timeline attaches again.
+     */
+    async refresh_agent_request(message: Inbound<'refresh_agent_request'>) {
+      await started;
+      let session = known(message.agentId);
+      if (session.archived) {
+        await alp!.request('session.archive', { sessionId: session.id, archived: false });
+        await refresh();
+        session = roots.get(session.id) ?? session;
+      }
+      if (session.status === 'idle' || session.status === 'running' || session.status === 'initializing') {
+        if (!alp!.capabilities?.includes('session.reload') || session.conversation?.reload !== true) throw Object.assign(new Error('ALP cannot reload this agent\'s runtime'), { code: 'agent_refresh_failed' });
+        const { generation } = await alp!.request<HistoryPage>('session.history', { sessionId: session.id, limit: 1 });
+        await alp!.request('session.reload', { sessionId: session.id, requestId: `paseo:${message.requestId ?? randomUUID()}`, ifGeneration: generation });
+      } else {
+        await open(session);
+      }
+      reattachRoot(session.id);
+      void refresh().catch(() => {});
+      if (!message.requestId) return;
+      return { type: 'status', payload: { status: 'agent_refreshed', agentId: session.id, requestId: message.requestId } } satisfies Outbound;
+    },
+
     async cancel_agent_request(message: Inbound<'cancel_agent_request'>) {
       const session = known(message.agentId);
       const failed = await alp!.request('session.interrupt', { sessionId: session.id }).then(() => null, (error: Error) => error.message);
