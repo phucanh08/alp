@@ -7,6 +7,7 @@ import { validateParams } from '@anhlp/alp-protocol/contract';
 import { isAlpClientError } from '@anhlp/alp-client/portable';
 import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.js';
 import { projectGitDiff, projectGitStatus, gatewayAttachmentLimits, projectAttachment, projectUploadBegun } from './policy.js';
+import { isGeneration, projectBranch, projectConversation, projectForkedFrom } from './policy.js';
 import { assertProjectDataContent } from '@anhlp/alp-core/library-edit';
 
 /**
@@ -216,6 +217,35 @@ const ATTACHMENT_REFUSALS = Object.freeze({
   request_conflict: 'This requestId was used for another upload',
   persistence_failed: 'The daemon host could not store the attachment; the upload was aborted',
 });
+/**
+ * The message the client gets for each alpd refusal of session.fork and session.rewind
+ * (docs/protocol/alp-json-rpc-v1.md §12.7, docs/alp/remote-gateway.md §5.15): fixed here, so no
+ * alpd or runtime text (a native thread's path, a CLI's stderr) can pass. Code and reason pass on,
+ * with a current generation and plain numbers (#conversationError).
+ * @type {Readonly<Record<string, string>>}
+ */
+const CONVERSATION_REFUSALS = Object.freeze({
+  not_found: 'No such session or turn for this credential',
+  session_busy: 'The session is running a turn; wait for it to end, then try again',
+  stale_generation: 'The conversation changed since it was read; read its history again and retry with the current generation',
+  turn_not_found: 'No such turn in this session\'s conversation',
+  turn_in_progress: 'This turn has not ended; a conversation is cut only at a completed turn',
+  empty_prefix: 'Nothing of the conversation would be kept before this turn',
+  boundary_unmapped: 'The daemon host cannot map this turn to the runtime\'s own history',
+  runtime_unsupported: 'This session\'s runtime cannot fork or rewind its conversation',
+  not_persistent: 'This session is not kept, so its conversation cannot be forked or rewound',
+  not_root: 'Only a root session\'s conversation can be forked or rewound',
+  native_refused: 'The runtime refused to fork or rewind this conversation; nothing was changed',
+  branch_not_found: 'No such set-aside branch in this session',
+  attachment_forbidden: 'The conversation references attachments this credential may not use',
+  key_conflict: 'This requestId was used for another request on this session',
+  outcome_unknown: 'The daemon host could not tell whether this completed; read the session before trying again',
+  workspace_mismatch: 'The session cannot be forked into this workspace',
+  persistence_failed: 'The daemon host could not store the change; nothing was changed',
+  request_conflict: 'A session with this newSessionId already exists',
+  invalid_params: 'The daemon host refused these parameters for this session',
+});
+
 /** Numbers and limit names of alpd's attachment errors a client acts on (where to resume, which quota). */
 const ATTACHMENT_ERROR_DATA = Object.freeze(['received', 'size', 'max', 'limit', 'maxPerPrompt', 'maxPromptBytes']);
 
@@ -287,6 +317,7 @@ export class ClientConnection {
   /** @type {string[]} */ #capabilities = [];
   /** @type {Map<string, Scoped>} */ #sessions = new Map();
   /** Sessions whose watched questions were found outside the grant. @type {Set<string>} */ #outside = new Set();
+  /** Fork sources (forkedFrom.sessionId) found outside the grant or gone: never named to the client. @type {Set<string>} */ #foreignSources = new Set();
   /** Roots this client attached (session.create, session.attach) and has not released. */
   /** @type {Set<string>} */ #attached = new Set();
   /** After question.watch: the workspace it named, or null for every one of the grant. */
@@ -544,13 +575,63 @@ export class ClientConnection {
    */
   #safeSession(session) {
     if (!session || typeof session !== 'object' || Array.isArray(session)) return session;
-    if (session.lastError === undefined && typeof session.parked !== 'string' && session.attention?.message === undefined) return session;
-    return {
+    const conversational = Object.hasOwn(session, 'conversation') || Object.hasOwn(session, 'forkedFrom') || Object.hasOwn(session, 'branches');
+    if (session.lastError === undefined && typeof session.parked !== 'string' && session.attention?.message === undefined && !conversational) return session;
+    const safe = {
       ...session,
       ...(session.lastError !== undefined ? { lastError: safeAlpError(session.lastError, this.#grant.workspaces, { home: HOME }) } : {}),
       ...(typeof session.parked === 'string' ? { parked: this.#safeText(session.parked) } : {}),
       ...(session.attention?.message !== undefined ? { attention: this.#safeAttention(session.attention) } : {}),
     };
+    return conversational ? this.#safeConversation(safe) : safe;
+  }
+
+  /**
+   * A summary's conversation fields as the client sees them (§12.7, docs/alp/remote-gateway.md
+   * §5.15), each projected to its schema's fields: `conversation`, `branches` (turn and branch ids
+   * only), and `forkedFrom` only when its source is a session this connection found in the grant
+   * (#seeForkSources looks it up first); otherwise the field is dropped, never a source id outside
+   * the grant. A field that is not one alpd would answer is dropped too.
+   * @param {Record<string, any>} session
+   */
+  #safeConversation(session) {
+    const { conversation, forkedFrom, branches, ...rest } = session;
+    const kept = projectConversation(conversation);
+    const source = projectForkedFrom(forkedFrom, id => this.#sessions.has(id));
+    const listed = Array.isArray(branches) ? branches.slice(0, 100).map(projectBranch).filter(branch => branch !== undefined) : undefined;
+    return { ...rest, ...(kept ? { conversation: kept } : {}), ...(source ? { forkedFrom: source } : {}), ...(listed ? { branches: listed } : {}) };
+  }
+
+  /**
+   * Looks up the fork sources these summaries name that this connection has not checked yet, so
+   * #safeConversation can tell. A source outside the grant, or gone, is remembered as such; one
+   * that could not be checked now is simply not shown. Never rejects.
+   * @param {unknown[]} sessions
+   */
+  async #seeForkSources(sessions) {
+    for (const session of sessions) {
+      const id = /** @type {any} */ (session)?.forkedFrom?.sessionId;
+      if (typeof id !== 'string' || this.#sessions.has(id) || this.#foreignSources.has(id)) continue;
+      try { await this.#resolve(id); }
+      catch (error) {
+        if (!(error instanceof NotInScope)) continue;
+        if (this.#foreignSources.size >= MAX_CACHED) this.#foreignSources.clear();
+        this.#foreignSources.add(id);
+      }
+    }
+  }
+
+  /** A fork source an event's summary names that is not checked yet, or undefined. @param {any} event */
+  #uncheckedSource(event) {
+    if (event?.type !== 'session.opened' && event?.type !== 'session.updated') return undefined;
+    const id = event.session?.forkedFrom?.sessionId;
+    return typeof id === 'string' && !this.#sessions.has(id) && !this.#foreignSources.has(id) ? id : undefined;
+  }
+
+  /** #safeResult once the fork sources its summaries name are checked. @param {any} result */
+  async #shownResult(result) {
+    if (result && typeof result === 'object') await this.#seeForkSources([result.session, ...(Array.isArray(result.sessions) ? result.sessions : [])]);
+    return this.#safeResult(result);
   }
 
   /** A root's attention, its failed turn's message through safeErrorText as turn.ended's error. @param {any} attention */
@@ -844,11 +925,28 @@ export class ClientConnection {
     return false;
   }
 
-  /** @param {import('@anhlp/alp-protocol').Envelope} envelope */
+  /**
+   * An event of alpd for this client. A summary naming a fork source not checked yet holds its
+   * place in the queue until the source is looked up (#seeForkSources), so order is kept.
+   * @param {import('@anhlp/alp-protocol').Envelope} envelope
+   */
   #event(envelope) {
     if (this.#closed) return;
-    const id = envelope?.sessionId;
-    if (typeof id !== 'string') return;
+    if (typeof envelope?.sessionId !== 'string') return;
+    if (this.#uncheckedSource(envelope.event) === undefined) return this.#deliver(envelope);
+    const fill = this.#slot();
+    this.#seeForkSources([/** @type {any} */ (envelope.event).session]).then(() => this.#deliver(envelope, fill));
+  }
+
+  /**
+   * An event out to the client when its session is in scope; into `fill`, a place already held in
+   * the queue, when given.
+   * @param {import('@anhlp/alp-protocol').Envelope} envelope @param {(frame: string | null) => void} [fill]
+   */
+  #deliver(envelope, fill) {
+    if (this.#closed) { fill?.(null); return; }
+    const id = envelope.sessionId;
+    const put = fill ?? ((/** @type {string} */ frame) => this.#push(frame));
     let safe = this.#safeEnvelope(envelope);
     let frame = JSON.stringify({ jsonrpc: '2.0', method: 'event', params: safe });
     const sourceBytes = Math.max(Buffer.byteLength(JSON.stringify(envelope)), Buffer.byteLength(frame));
@@ -858,22 +956,22 @@ export class ClientConnection {
     }
     const event = /** @type {any} */ (envelope.event);
     const known = this.#sessions.get(id);
-    if (known) { if (this.#wanted(envelope, known)) this.#push(frame); return; }
+    if (known) { if (this.#wanted(envelope, known)) put(frame); else fill?.(null); return; }
     // A child opening in a tree already in scope.
     const parent = event?.type === 'session.opened' && typeof event.session?.parentId === 'string' ? this.#sessions.get(event.session.parentId) : undefined;
     if (parent && workspaceOf(this.#grant, event.session.projectRoot)) {
       this.#remember(id, { root: parent.root, projectRoot: event.session.projectRoot, mode: event.session.mode });
-      return this.#push(frame);
+      return put(frame);
     }
     // question.watch brings every tree's questions (and roots' turn ends, with turns): a session
     // found outside the grant once is not looked up again (a session's workspace and tree never
     // change), and is not worth a warning.
     const copy = WATCHED.has(event?.type) && envelope.cursor === undefined;
-    if (copy && this.#outside.has(id)) return;
+    if (copy && this.#outside.has(id)) { fill?.(null); return; }
     // Otherwise the session is looked up before the event, or anything after it, goes out.
-    const fill = this.#slot();
-    this.#resolve(id).then(scoped => fill(this.#wanted(envelope, scoped) ? frame : null), error => {
-      fill(null);
+    const later = fill ?? this.#slot();
+    this.#resolve(id).then(scoped => later(this.#wanted(envelope, scoped) ? frame : null), error => {
+      later(null);
       if (error instanceof NotInScope && copy && error.why === 'outside') {
         if (this.#outside.size >= MAX_CACHED) this.#outside.clear();
         this.#outside.add(id);
@@ -956,6 +1054,46 @@ export class ClientConnection {
     throw new GatewayError(ERROR.failed, 'The daemon host answered an attachment the gateway does not pass on');
   }
 
+  /**
+   * alpd's refusal of session.fork or session.rewind: the gateway's fixed text for its reason (a
+   * generic one for a reason it does not know), its code and plain reason, a current generation and
+   * non-negative integers; nothing else, so no alpd or runtime text reaches the client.
+   * @param {unknown} caught
+   */
+  #conversationError(caught) {
+    const error = /** @type {any} */ (caught);
+    if (error instanceof GatewayError || isAlpClientError(error) || typeof error?.code !== 'number') return error;
+    const reason = typeof error.data?.reason === 'string' && /^[a-z_]{1,64}$/.test(error.data.reason) ? error.data.reason : undefined;
+    /** @type {Record<string, unknown>} */
+    const data = reason ? { reason } : {};
+    const source = error.data && typeof error.data === 'object' && !Array.isArray(error.data) ? error.data : {};
+    for (const [key, value] of Object.entries(source).slice(0, 16)) {
+      if (!/^[A-Za-z]{1,32}$/.test(key) || key === 'reason') continue;
+      if ((Number.isSafeInteger(value) && value >= 0) || (key === 'generation' && isGeneration(value))) data[key] = value;
+    }
+    const message = reason && Object.hasOwn(CONVERSATION_REFUSALS, reason) ? CONVERSATION_REFUSALS[reason] : 'The conversation could not be changed on the daemon host; the daemon log there may have details';
+    return new GatewayError(error.code, message, Object.keys(data).length ? data : undefined);
+  }
+
+  /**
+   * The root a fork or rewind names: in a granted workspace, looked up afresh, and a root (a child's
+   * conversation belongs to its requester's tree). Both drive the session's future conversation (a fork
+   * inherits its configuration), so a grant with `modes` must allow the mode of the root and its tree,
+   * looked up afresh, exactly as session.prompt checks it (#drive). @param {string} sessionId
+   */
+  async #conversationRoot(sessionId) {
+    const scoped = await this.#resolve(sessionId, { fresh: true });
+    if (scoped.root !== sessionId) throw forbidden(CONVERSATION_REFUSALS.not_root, GATEWAY_REASON.notRoot);
+    await this.#drive(sessionId);
+    return scoped;
+  }
+
+  /** An answer of session.fork or session.rewind the gateway does not pass on. @param {string} method @param {string} why */
+  #conversationRefused(method, why) {
+    this.#log.error(`${method} answered something the gateway does not pass on; refused it`, { code: 'ALP_GATEWAY_CONVERSATION_REFUSED', why });
+    return new GatewayError(ERROR.failed, `The daemon host answered ${method} with something the gateway does not pass on; read the session before trying again`, { reason: 'outcome_unknown' });
+  }
+
   #worktreeContext() { return { principalId: this.#grant.id, principalEpoch: this.#grant.scopeId ?? this.#grant.fingerprint, mappingIds: this.#grant.worktreeMappings ?? [], authorizedRoots: this.#baseWorkspaces.map(w => w.canonical) }; }
   async #refreshWorktrees() {
     if (!this.#capabilities.includes('workspace.worktree') || !this.#grant.permissions.has('workspace.manage')) return;
@@ -971,7 +1109,7 @@ export class ClientConnection {
         if (await registryRealpath(w.directory).catch(() => undefined) !== w.directory) continue;
         effective.push({path:w.directory,canonical:w.directory});
       }
-      if (JSON.stringify(effective) !== JSON.stringify(this.#grant.workspaces)) { this.#sessions.clear(); this.#outside.clear(); }
+      if (JSON.stringify(effective) !== JSON.stringify(this.#grant.workspaces)) { this.#sessions.clear(); this.#outside.clear(); this.#foreignSources.clear(); }
       this.#grant.workspaces = effective;
     })().finally(() => { this.#refreshingWorktrees = undefined; });
     return this.#refreshingWorktrees;
@@ -1093,14 +1231,14 @@ export class ClientConnection {
         // Too many to name: the whole list, unpaged, searched here, as before session.list.page.
         const { limit: _limit, query, ...whole } = rest;
         const words = typeof query === 'string' ? query.toLowerCase().split(/\s+/).filter(Boolean) : [];
-        return this.#safeResult(await this.#listPages(whole, async (session, listed) => (await keep(session, listed)) && words.every(word => `${session.title ?? ''}\n${session.id}`.toLowerCase().includes(word))));
+        return this.#shownResult(await this.#listPages(whole, async (session, listed) => (await keep(session, listed)) && words.every(word => `${session.title ?? ''}\n${session.id}`.toLowerCase().includes(word))));
       }
       const result = await this.#listPages({ ...rest, ...(cursor === undefined ? {} : { cursor }), projectRoots: roots }, keep);
-      const safe = this.#safeResult(result);
+      const safe = await this.#shownResult(result);
       return typeof safe.nextCursor === 'string' ? { ...safe, nextCursor: sealCursor(safe.nextCursor, this.#grant.id) } : safe;
     },
 
-    'session.get': async params => { await this.#resolve(params.sessionId); return this.#safeResult(await this.#call('session.get', params)); },
+    'session.get': async params => { await this.#resolve(params.sessionId); return this.#shownResult(await this.#call('session.get', params)); },
     // A tree has one workspace: alpd opens assignments and the supervisor with their requester's
     // projectRoot. A whole-tree answer is checked against it anyway, and refused if it spans more.
     'session.status': async params => {
@@ -1109,6 +1247,7 @@ export class ClientConnection {
       const status = result?.status;
       const sessions = Array.isArray(status?.sessions) ? status.sessions : [];
       if (status?.rootId !== scoped.root || sessions.some((/** @type {any} */ session) => !workspaceOf(this.#grant, session?.projectRoot))) throw this.#outOfTree(params.sessionId, 'session.status');
+      await this.#seeForkSources(sessions);
       return { ...result, status: { ...status, sessions: sessions.map((/** @type {any} */ session) => this.#safeSession(session)) } };
     },
     // The run log of the session's root: entries name no workspace, so the root is the check.
@@ -1129,6 +1268,7 @@ export class ClientConnection {
       const scoped = await this.#resolve(params.sessionId);
       const result = await this.#call('session.history', { sessionId: params.sessionId, ...(params.before !== undefined ? { before: params.before } : {}), ...(params.limit !== undefined ? { limit: params.limit } : {}), maxBytes: Math.min(512 * 1024, Math.floor((this.#limits.maxFrame ?? 512 * 1024) / 2)) });
       const items = [];
+      await this.#seeForkSources((result.items ?? []).map((/** @type {any} */ item) => item?.event?.type === 'session.opened' || item?.event?.type === 'session.updated' ? item.event.session : undefined));
       for (const item of result.items ?? []) {
         if (item.oversized) { items.push(item); continue; }
         const member = await this.#resolve(item.sessionId);
@@ -1143,7 +1283,7 @@ export class ClientConnection {
       // Before the call: the questions it announces come before its answer.
       const before = this.#attached.has(scoped.root);
       this.#attached.add(scoped.root);
-      try { return this.#safeResult(await this.#call('session.attach', params)); }
+      try { return await this.#shownResult(await this.#call('session.attach', params)); }
       catch (error) { if (!before) this.#attached.delete(scoped.root); throw error; }
     },
 
@@ -1199,7 +1339,7 @@ export class ClientConnection {
         throw forbidden(`Session ${sessionId} is not in a workspace this credential may use`, GATEWAY_REASON.outsideWorkspace);
       }
       this.#remember(created.id, { root: created.id, projectRoot: created.projectRoot, mode: created.mode });
-      return this.#safeResult(result);
+      return this.#shownResult(result);
     },
 
     'session.prompt': async params => {
@@ -1234,13 +1374,62 @@ export class ClientConnection {
       const result = await this.#call('session.configure', params).catch(error => { throw sessionFault(error, 'session.configure', params); });
       const scoped = this.#sessions.get(params.sessionId);
       if (scoped && typeof result?.session?.mode === 'string') scoped.mode = result.session.mode;
-      return this.#safeResult(result);
+      return this.#shownResult(result);
     },
 
     'session.interrupt': async params => { await this.#drive(params.sessionId, { stop: true }); return this.#call('session.interrupt', params); },
     'session.close': async params => { await this.#drive(params.sessionId, { stop: true }); return this.#call('session.close', params); },
-    'session.rename': async params => { await this.#resolve(params.sessionId); return this.#safeResult(await this.#call('session.rename', params)); },
-    'session.archive': async params => { await this.#resolve(params.sessionId); return this.#safeResult(await this.#call('session.archive', params)); },
+    'session.rename': async params => { await this.#resolve(params.sessionId); return this.#shownResult(await this.#call('session.rename', params)); },
+    'session.archive': async params => { await this.#resolve(params.sessionId); return this.#shownResult(await this.#call('session.archive', params)); },
+    // Conversation fork and rewind (docs/protocol/alp-json-rpc-v1.md §12.7, docs/alp/remote-gateway.md
+    // §5.15, issue #121 C): conversation only, never a file. The source is a root in the grant, looked
+    // up afresh; requestIds are this credential's own (namespaced, as registry mutations), so another
+    // credential's request is never answered as a duplicate of it; alpd's errors leave as fixed text.
+    'session.rewind': async params => {
+      await this.#conversationRoot(params.sessionId);
+      const result = await this.#call('session.rewind', { ...params, requestId: this.#registryRequestId(params.requestId) }).catch(error => { throw this.#conversationError(error); });
+      const session = result?.session;
+      const branch = projectBranch(result?.branch);
+      if (!session || session.id !== params.sessionId || session.parentId || !workspaceOf(this.#grant, session.projectRoot)) throw this.#conversationRefused('session.rewind', 'session');
+      if (!isGeneration(result.generation) || !branch) throw this.#conversationRefused('session.rewind', 'shape');
+      await this.#seeForkSources([session]);
+      return { session: this.#safeSession(session), generation: result.generation, branch, ...(result.duplicate === true ? { duplicate: true } : {}) };
+    },
+    // Reads the source's conversation (session.read too) and makes a closed root, resumable with
+    // session.create { sessionId, resume: true }. The destination is the source's workspace, or a
+    // registry workspace the grant names exactly; alpd gets this credential's principal context and
+    // re-authorizes the source's attachments for it. The created root is checked before it is answered.
+    'session.fork': async params => {
+      const scoped = await this.#conversationRoot(params.sessionId);
+      /** @type {import('./credentials.js').Workspace} */
+      let destination;
+      if (params.workspaceId !== undefined) destination = this.#workspace((await this.#registryWorkspace(params.workspaceId)).workspace.directory);
+      else destination = this.#workspace(scoped.projectRoot);
+      if (params.newSessionId !== undefined) {
+        // As session.create: an id already taken elsewhere is refused here, before alpd; one taken in
+        // the grant goes on (a repeated request answers it, or alpd refuses it).
+        try { await this.#resolve(params.newSessionId, { fresh: true }); }
+        catch (error) {
+          if (!(error instanceof NotInScope)) throw error;
+          if (error.why === 'outside') throw forbidden(`Session ${params.newSessionId} is not in a workspace this credential may use`, GATEWAY_REASON.outsideWorkspace);
+        }
+      }
+      const boundary = params.boundary === undefined ? undefined : typeof params.boundary.throughTurnId === 'string' ? { throughTurnId: params.boundary.throughTurnId } : { beforeTurnId: params.boundary.beforeTurnId };
+      const sent = { ...pick(params, ['sessionId', 'ifGeneration', 'branchId', 'workspaceId', 'newSessionId', 'title']), ...(boundary ? { boundary } : {}), requestId: this.#registryRequestId(params.requestId), ...this.#attachmentContext() };
+      const result = await this.#call('session.fork', sent).catch(error => { throw this.#conversationError(error); });
+      const created = result?.session;
+      const placed = created && typeof created === 'object' ? workspaceOf(this.#grant, created.projectRoot) : undefined;
+      if (!created || typeof created.id !== 'string' || created.id === params.sessionId || created.parentId || !placed || placed.canonical !== destination.canonical || (params.newSessionId !== undefined && created.id !== params.newSessionId)) {
+        this.#log.error('session.fork answered a session outside the grant or the destination asked for; refused it', { code: 'ALP_GATEWAY_FORK_OUT_OF_SCOPE' });
+        throw forbidden('The forked session is not in a workspace this credential may use', GATEWAY_REASON.outsideWorkspace);
+      }
+      const forkedFrom = projectForkedFrom(result.forkedFrom, id => id === params.sessionId);
+      if (!forkedFrom) throw this.#conversationRefused('session.fork', 'forkedFrom');
+      this.#remember(created.id, { root: created.id, projectRoot: created.projectRoot, mode: created.mode });
+      await this.#seeForkSources([created]);
+      return { session: this.#safeSession(created), forkedFrom, ...(result.duplicate === true ? { duplicate: true } : {}) };
+    },
+
     // Mail from the user wakes or steers the session, and an assignment's is passed to its requester.
     'session.message': async params => { await this.#drive(params.sessionId); return this.#call('session.message', params); },
 

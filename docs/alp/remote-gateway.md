@@ -157,6 +157,9 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
   - `attachments.write`: tải file lên kho attachment của alpd và gửi chúng trong prompt (§5.14). Dùng
     cùng `session.write` (`get` cùng `session.read`); không kéo theo quyền nào, không là mặc định:
     `--permission session.read,session.write,attachments.write`.
+  - `session.write` cũng cho phép fork và rewind **hội thoại** của một root (`session.fork` cần thêm
+    `session.read` vì nó đọc hội thoại nguồn; §5.15). Không có quyền riêng: cả hai không bao giờ đổi
+    file, chỉ đổi hội thoại mà runtime tiếp tục.
   Quyền write kéo theo quyền read cùng họ. `files.read` không kéo theo quyền nào và không quyền nào
   kéo theo nó. Không có `--permission`, CLI cấp bốn quyền `session.*` và `project.*`, **không bao
   giờ** cấp `files.read`: chủ máy phải ghi rõ `--permission files.read` cho từng credential được đọc
@@ -263,7 +266,7 @@ coi là `failed`.
 |---|---|---|
 | -32601 | `not_exposed` | method có nhưng không expose qua gateway |
 | 1003 | `grant` | credential thiếu permission (`data.permission`) |
-| 1003 | `outside_workspace` | `projectRoot`/`spec.cwd` không thuộc grant; `session.create` với id thuộc workspace khác |
+| 1003 | `outside_workspace` | `projectRoot`/`spec.cwd` không thuộc grant; `session.create` với id thuộc workspace khác; `session.fork` với `workspaceId`/`newSessionId` ngoài grant, hay alpd trả root mới ngoài grant hoặc ngoài đích đã hỏi (§5.15) |
 | 1003 | `host_scope` | `team.list`/`library.list`/`library.get` thiếu `projectRoot` |
 | 1003 | `spec_field` | trường `spec` không cho phép (`data.field`); agent/mode/thinking không phải tên đơn giản; `model` sai ngữ pháp model id (§5.3) |
 | 1003 | `content_type` | prompt có phần không phải `text`, `image` hay `attachment` (hoặc `attachment` khi alpd không có capability `attachments`) |
@@ -271,6 +274,7 @@ coi là `failed`.
 | 1003 | `blocked_path` | `workspace.files.list`/`read` hay `workspace.git.diff` với đường dẫn trong block list (`.git`, `.env*`, `.alp`, file khoá/credential); gateway từ chối trước alpd (§5.10, §5.13) |
 | -32602 | `invalid_cursor` | `workspace.git.diff` với cursor trang mà connection này không cấp, hoặc cho phép so sánh khác (§5.13) |
 | 1003 | `image_limit` | ảnh trong prompt vượt giới hạn của gateway (§5.8; `data` nêu `maxCount`, `maxBytes`, `maxTotalBytes`) |
+| 1003 | `not_root` | `session.fork`/`session.rewind` với một session con (assignment): chỉ hội thoại của root được fork hay rewind (§5.15) |
 | 1003 | `mode` | grant có `modes` và: create/configure chọn mode ngoài danh sách, create không chọn `spec.mode`, hoặc drive/stop một tree có session chạy mode ngoài danh sách (§5.5; `data.sessionId` là session đó) |
 | 1001 | — | session/question ngoài scope (giống không tồn tại); `session.status`/`log` trả tree khác tree đã kiểm tra |
 | 1005 | `rate_limited`, `too_many_pending` | vượt giới hạn của connection |
@@ -279,8 +283,8 @@ coi là `failed`.
 | 1000 | `daemon_disconnected` | mất kết nối alpd trước khi có trả lời; **kết quả chưa xác định** |
 
 Lỗi của chính alpd (`1001`, `1004 key_conflict`/`outcome_unknown`, `persistence_failed`…) được
-chuyển nguyên vẹn, trừ các method đọc file của host (§5.7, §5.10): ở đó chỉ mã và `data.reason` đi
-qua, message là câu cố định của gateway.
+chuyển nguyên vẹn, trừ các method đọc file của host (§5.7, §5.10) và fork/rewind hội thoại (§5.15):
+ở đó chỉ mã và `data.reason` (cùng số liệu an toàn) đi qua, message là câu cố định của gateway.
 
 ### 5.3 `session.create` / `session.preview`
 
@@ -367,6 +371,8 @@ Cột Test dùng các mã sau:
 | `session.rename` | — | session | session.write | exposed | P S |
 | `session.archive` | — | session | session.write | exposed | P S |
 | `session.message` | — | session; **drive** (đánh thức hoặc steer; của assignment thì requester được báo) | session.write | exposed | P S M I |
+| `session.fork` | `session.fork` | root nguồn thuộc grant (tra mới; con → `1003 not_root`); `workspaceId` đích là registry workspace mà grant nêu đúng thư mục, không có thì ở workspace của nguồn; `newSessionId` không thuộc workspace khác; context principal do gateway đặt; `requestId` theo credential; root mới được kiểm lại trước khi trả; `forkedFrom` chỉ khi nguồn thuộc grant (§5.15). Không đổi file | session.write + session.read | exposed | P S R I |
+| `session.rewind` | `session.rewind` | root thuộc grant (tra mới); chỉ 4 param; cùng session id, không đổi file, các turn sau thành branch phục hồi được bằng `session.fork { branchId }`; answer chiếu (§5.15); `history.reset` tới connection đang attach | session.write | exposed | P S R E |
 | `question.answer` | — | id đầy đủ, tree trong scope; **drive** session đang hỏi (cả `dismiss`) | session.write | exposed | P S M I |
 | `task.list` | `task` | `projectRoot` thuộc grant | project.read | exposed | P S I |
 | `task.create` | `task` | `projectRoot`; param danh tính bị bỏ. `requestId` chỉ dedupe trong một process alpd, 10 phút: sau `1000` hoặc restart thì đọc `task.list` trước khi gửi lại | project.write | exposed | P S I |
@@ -726,6 +732,59 @@ xuống, giải nén, chạy file hay render HTML qua remote.
   (t-15b0.15) mở phần này.
 Test: `apps/gateway/tests/attachments.test.js`, `test/integration/gateway.test.js` (alpd thật).
 
+### 5.15 Fork và rewind hội thoại (issue #121, C)
+
+Protocol §12.7, capability `session.fork` và `session.rewind` (gateway chỉ chuyển tiếp capability khi
+alpd liệt kê). Cả hai chỉ đổi **hội thoại** mà runtime tiếp tục: **không file nào bị đổi, chép hay
+khôi phục**. Rewind giữ nguyên session id; các turn bị bỏ qua thành một branch (`branches[]`), không
+bao giờ bị xoá, phục hồi được thành session mới bằng `session.fork { branchId }`.
+
+- **Quyền**: cả hai cần `session.write`; `session.fork` cần thêm `session.read` (`alsoRequires`) vì
+  nó đọc hội thoại nguồn. Không có quyền mới (CLI luôn kèm `session.read` với `session.write`; kiểm
+  `alsoRequires` là phòng thủ cho file credential sửa tay). Thiếu quyền → `1003 grant` nêu
+  `data.permission`, alpd không nhận gì. Grant có `modes` giới hạn fork/rewind như `session.prompt`
+  (kiểm **drive**, §5.5): mode của root nguồn và cả tree của nó, tra mới, phải nằm trong `modes` của
+  grant, vì cả hai lái hội thoại tương lai của session (fork thừa hưởng cấu hình của nguồn); ngoài đó →
+  `1003 mode` trước alpd. Grant `read-only` vì thế không fork hay rewind được một root full-access.
+- **Scope nguồn**: `sessionId` phải là **root** thuộc grant, tra mới ở mỗi request. Ngoài grant hay
+  không tồn tại → `1001`; session con (assignment) → `1003 not_root`. Cả hai trước alpd.
+- **Đích của fork**: không có `workspaceId` thì root mới ở workspace của nguồn. Có `workspaceId` thì
+  nó phải là registry workspace mà grant nêu đúng thư mục (như `session.create`, kiểm realpath);
+  ngoài grant → `1003 outside_workspace` trước alpd. `newSessionId` đang thuộc workspace khác →
+  `1003 outside_workspace` trước alpd (như `session.create` với id có sẵn); `title` chỉ qua schema.
+- **Principal**: gateway gửi `principalId`, `principalEpoch`, `authorizedRoots` của chính nó (như
+  attachment), không bao giờ của client (field đó của client bị bỏ ở `session.fork`; `session.rewind`
+  không có chúng trong schema nên bị `-32602`). alpd cấp lại quyền dùng attachment của nguồn cho
+  principal đó (`attachment_forbidden` nếu không được).
+- **requestId**: gateway đổi thành `gw:<sha256(credential, requestId)>` như mutation registry: gửi lại
+  đúng request thì được kết quả đầu (`duplicate: true`), còn credential khác dùng cùng `requestId` không
+  bao giờ nhận kết quả của credential này.
+- **Answer của fork**: root mới phải là root (không `parentId`), khác nguồn, thuộc grant và đúng đích
+  đã hỏi (và đúng `newSessionId` nếu có); nếu không → `1003 outside_workspace`, gateway ghi log
+  `ALP_GATEWAY_FORK_OUT_OF_SCOPE` và không trả gì về root đó (root mới đóng, không attach, nên không
+  có gì để release). `forkedFrom` của answer phải nêu đúng nguồn đã kiểm, nếu không → `1000
+  outcome_unknown` (đọc lại session trước khi thử lại).
+- **Answer của rewind**: `session` phải là đúng root đã kiểm, thuộc grant; `generation` 32 hex;
+  `branch` qua `projectBranch`. Sai → `1000 outcome_unknown`.
+- **Summary ở mọi nơi** (`session.get/list/attach/create/configure/rename/archive/status`, answer
+  fork/rewind, event `session.opened`/`session.updated`, item của `session.history`): `conversation`
+  chỉ giữ `fork`, `rewind`, `reason` đã biết; `branches[]` chỉ giữ `branchId`, `beforeTurnId`,
+  `turns`, `at` (mục sai bị bỏ); `forkedFrom` chỉ giữ field của schema và **chỉ khi session nguồn
+  thuộc grant**: gateway tra nguồn (một lần mỗi connection, nhớ cả kết quả ngoài grant); nguồn ngoài
+  grant, đã xoá hay không tra được → **bỏ cả field** (không bao giờ lộ id session ngoài grant; bỏ
+  thay vì từ chối để fork do client local tạo từ workspace khác vẫn xem được). Event cần tra nguồn
+  giữ chỗ trong hàng đợi nên thứ tự event không đổi.
+- **`history.reset`**: event live `{ type: 'history.reset', generation, reason: 'rewind', branchId }`
+  không có cursor, alpd chỉ gửi tới connection đang attach root; gateway chuyển nguyên vẹn sau kiểm
+  scope như mọi event. Client bỏ history đã cache, tải tail mới và attach lại với `generation` mới.
+- **Lỗi**: message cố định theo `data.reason` (`CONVERSATION_REFUSALS` trong `connection.js`:
+  `session_busy`, `stale_generation`, `turn_not_found`, `turn_in_progress`, `empty_prefix`,
+  `boundary_unmapped`, `runtime_unsupported`, `native_refused`, `branch_not_found`,
+  `attachment_forbidden`, `key_conflict`, `outcome_unknown`, `workspace_mismatch`…; reason lạ giữ
+  reason với câu chung). Chỉ mã, `reason`, `generation` (32 hex) và số nguyên không âm đi qua; không
+  text của alpd hay runtime (đường dẫn thread native, stderr của CLI).
+Test: `apps/gateway/tests/conversation.test.js`.
+
 ## 6. Streaming và recovery
 
 ### 6.1 Thuật toán client (theo contract §8.3)
@@ -905,6 +964,7 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
 | `apps/gateway/tests/credentials.test.js` | `npm test --workspace=@anhlp/alp-gateway`; lane core | hash, token in một lần, xoay/thu hồi/hết hạn, file không private → fail closed, ticket một lần/TTL/Origin, log không có secret |
 | `apps/gateway/tests/gateway.test.js` | như trên (fake daemon) | healthz/readyz theo alpd, ticket flow, CORS, Host/DNS rebinding, proxy tin cậy, chặn bind không TLS, các kiểm tra §5.2, binary 4003, quá lớn 1009, hello timeout 4408, rate/pending, slow consumer 4431 không ảnh hưởng client khác, hai client đồng thời, revoke/rotate 4401, mất alpd 4503 + request chờ `daemon_disconnected` không gửi lại, alpd không chạy, tắt gateway 1001 không hủy gì |
 | `apps/gateway/tests/authorization.test.js` | như trên | matrix đủ, mọi method không expose → -32601 không tới alpd (kể cả ghi library), credential thiếu permission → 1003 `grant` cho **mọi** method ngoài quyền của nó, **mọi method expose có ca vượt scope** (không tới alpd), tasks/teams/library trong project, host scope bị chặn, param danh tính bị bỏ, đường dẫn chỉ khớp tuyệt đối, param lạ bị bỏ, lọc list, `question.answer` không nhận prefix, allowlist spec và tên agent, ngữ pháp model id (ACP `acp:<provider>/<model>`, id có `[1m]`; id sai bị từ chối), gateway đặt id root, race create ngoài scope → release, chỉ prompt text, giới hạn mode khi create/configure, lọc event có giữ thứ tự, replay đứng trước response attach, đối chiếu `x-alp`; `library.get` qua `projectLibraryContent` cho cả sáu kind (sentinel ở mọi field có thể chứa secret, field lạ, kiểu sai, pointer cần escape, kind lạ), kết quả chỉ giữ `LIBRARY_ENTRY_FIELDS`, param lạ bị bỏ, các method ghi library → -32601 không tới alpd; `hostname` của hello qua `hostLabel` (ký tự điều khiển, quá dài → bỏ); dòng library/team/model chỉ giữ field liệt kê, lỗi team không nêu đường dẫn; `session.status`/`log` trả tree khác → 1001 |
+| `apps/gateway/tests/conversation.test.js` | như trên (fake daemon) | `session.fork`/`session.rewind`: matrix và capability; thiếu `session.write`/`session.read` → 1003 trước alpd; nguồn ngoài grant, session con, đích và `newSessionId` ngoài grant, param lạ → từ chối trước alpd; context principal và `requestId` của gateway thắng của client; root mới ngoài grant/đích, nguồn khác → không trả; `forkedFrom` có nguồn ngoài grant bị bỏ trong get/list/event/history (giữ thứ tự event); `branches`/`conversation` chiếu; `history.reset` tới connection attach nguyên vẹn; lỗi alpd thành câu cố định; grant `modes` chỉ fork/rewind được root có tree chạy trong đó, tra mới (`1003 mode` trước alpd) |
 | `apps/gateway/tests/modes.test.js` | như trên | grant `read-only`: prompt, message, answer, dismiss một session full-access → `1003 mode` trước alpd; assignment read-only trong tree full-access cũng bị từ chối; mode đổi bởi client local có hiệu lực ngay (tra lại tới root); trong grant thì drive được; credential không có `modes` không bị giới hạn; dừng root luôn được, dừng assignment của requester full-access bị từ chối; get/status/log/attach/rename/archive/release không bị giới hạn; hạ mode bằng configure được, nâng thì không |
 | `test/integration/gateway.test.js` | `node scripts/test.mjs integration`; lane paseo | **alpd thật + fake Codex** qua SDK WebSocket: handshake, create, prompt, stream; client rớt mà turn vẫn chạy; gateway restart trong lúc turn kết thúc → nhận `turn.ended` bằng replay; alpd restart → 4503, readyz 503→200, resume và prompt tiếp; cursor 1..n không trùng, không thiếu, không reset; mỗi prompt tới provider đúng một lần; credential khác không thấy, attach, prompt hay nhận event; event `usage` và `session.get().session.usage` tới đúng credential của session, credential khác không nhận, `daemon.usage` vẫn -32601; `task.create/list/update`, `team.list`, `settings.language.get` qua gateway; hello có `hostname` = `os.hostname()`; credential khác không đọc/ghi được tasks của project; `library.get` của built-in `main` đọc được, projectRoot ngoài grant → 1003; `library.save` without `library.write` → 1003 grant; revoke → 4401. **Mode**: credential `read-only`, session full-access do client local tạo: message lúc rảnh (wake), lúc turn chạy (steer), prompt, answer và dismiss một câu hỏi `alp_ask` thật đều → `1003 mode`, câu hỏi vẫn chờ, không marker nào tới provider; dừng root vẫn được; tree read-only của chính nó thì message đánh thức (marker tới provider) và answer cho turn chạy tiếp. **Secret**: MCP (userinfo, query, header, args, env), hook và provider có sentinel; alpd trả chúng cho client local, còn credential `project.read` qua gateway: `library.get` trả các field đó là marker (nội dung đúng từng field), `library.list` (5 kind), `team.list`, `library.models` không chứa sentinel hay đường dẫn library; model `acp:custom/vendor-model` từ `library.models` qua được `session.preview` |
 | `scripts/gateway-smoke.mjs` | `npm run test:gateway:smoke`; lane packages | cài từ tarball protocol/core/client/gateway vào project rỗng, **không có Paseo hay React**; chạy `alp-gateway` đã cài với alpd thật: credential, serve, readyz, ticket, create và prompt, `task.create`/`task.list` qua SDK đã cài, `daemon.shutdown` bị chặn, log không có token |
@@ -927,6 +987,9 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
 - **Git qua remote chỉ đọc** (§5.13): status với `project.read`, diff với `project.read` +
   `files.read`. Không có commit/push/pull/merge/switch; cursor trang mà gateway tự cắt chỉ sống trong
   một connection.
+- **Fork/rewind qua remote** (§5.15): chỉ hội thoại của root, không bao giờ file; `forkedFrom` của
+  fork có nguồn ngoài grant bị bỏ hẳn. Mỗi lần nguồn được tra là một `session.get` tới alpd (một lần
+  mỗi connection cho mỗi nguồn).
 - **Attachment qua remote** (§5.14): chỉ tải lên, xem metadata và xoá file của chính credential;
   không tải xuống. Runtime hiện tại chưa đọc được attachment (`attachment_unsupported`) cho tới
   nhánh J. Thu hồi credential không huỷ request đã chuyển tới alpd trước đó.
