@@ -383,6 +383,12 @@ test('kinds: text hunks, binary, too large, mode change, symlink, submodule, con
   await put(path.join(root, 'run.sh'), 'echo hi\n');
   await put(path.join(root, 'spaces.txt'), 'a b\n');
   await put(path.join(root, 'conflict.txt'), 'base\n');
+  // Over the window's budget, under the scan bound: read alone, its small change shown.
+  const large = Array.from({ length: 100_000 }, (_, i) => `row ${i} of a large but ordinary text file`).join('\n') + '\n';
+  await put(path.join(root, 'large.txt'), large);
+  const odd = 'odd \t"name"\\ ü.txt';
+  await put(path.join(root, odd), 'before\n');
+  await put(path.join(root, 'from \t"q".txt'), 'renamed content line one\nline two\nline three\n');
   git('add', '.');
   git('-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', inner, 'vendor/inner');
   git('commit', '-q', '-m', 'first');
@@ -397,6 +403,9 @@ test('kinds: text hunks, binary, too large, mode change, symlink, submodule, con
   await put(path.join(root, 'image.bin'), Buffer.from([0, 9, 9, 9, 0]));
   await put(path.join(root, 'big.txt'), Array.from({ length: 30_000 }, (_, i) => `a fairly long line number ${i} to grow the patch`).join('\n'));
   await chmod(path.join(root, 'run.sh'), 0o755);
+  await put(path.join(root, 'large.txt'), large.replace('row 50000 of', 'ROW 50000 OF'));
+  await put(path.join(root, odd), 'after\n');
+  git('mv', 'from \t"q".txt', 'to ü "q".txt');
   await put(path.join(root, 'spaces.txt'), 'a  b\n');
   // The submodule moves to a new commit; inside it a trap that must never run.
   const subRoot = path.join(root, 'vendor', 'inner');
@@ -424,6 +433,10 @@ test('kinds: text hunks, binary, too large, mode change, symlink, submodule, con
   assert.equal(files['big.txt'].kind, 'too_large');
   assert.deepEqual([files['run.sh'].kind, files['run.sh'].hunks], ['text', []], 'a mode change only');
   assert.equal(files['vendor/inner'].kind, 'submodule');
+  assert.ok(large.length > GIT_READ.windowBytes && large.length < GIT_READ.maxScanBytes);
+  assert.deepEqual([files['large.txt'].kind, files['large.txt'].additions, files['large.txt'].deletions], ['text', 1, 1]);
+  assert.deepEqual(files[odd].hunks[0].lines.map(line => [line.type, line.content]), [['remove', 'before'], ['add', 'after']], 'a quoted header is matched');
+  assert.deepEqual([files['to ü "q".txt'].oldPath, files['to ü "q".txt'].change, files['to ü "q".txt'].kind], ['from \t"q".txt', 'renamed', 'text']);
   assert.ok(files['conflict.txt'].hunks.length > 0);
   for (const file of page.files) if (file.kind !== 'text') assert.deepEqual([file.hunks, file.additions, file.deletions], [[], 0, 0], file.path);
   const unstaged = byPath(checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'unstaged' } }), base).files);
