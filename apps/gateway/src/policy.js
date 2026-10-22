@@ -1,5 +1,5 @@
 // @ts-check
-import { CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS } from '@anhlp/alp-protocol';
+import { CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS, WORKSPACE_GIT, blockedFilePath } from '@anhlp/alp-protocol';
 
 /**
  * What the gateway lets a remote client call (docs/alp/remote-gateway.md §5): the method
@@ -33,7 +33,7 @@ export const DEFAULT_PERMISSIONS = Object.freeze(['session.read', 'session.write
  * Within `library` and `settings.language` some methods stay unexposed and answer -32601
  * `not_exposed` (docs/alp/remote-gateway.md §5.4).
  */
-export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.workspaceRegistry, CAPABILITY.workspaceWorktree, CAPABILITY.sessionHistory, CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages]);
+export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.workspaceRegistry, CAPABILITY.workspaceWorktree, CAPABILITY.sessionHistory, CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, CAPABILITY.workspaceGit]);
 
 /** The codes of docs/protocol/alp-json-rpc-v1.md §5.1 the gateway answers its own refusals with; `data.reason` says why. */
 export const GATEWAY_ERROR = Object.freeze({ forbidden: ERROR.forbidden, unavailable: ERROR.unavailable });
@@ -317,9 +317,12 @@ export function isModelId(value) {
  * @typedef {'gateway' | 'exposed' | 'denied' | 'prohibited'} ExposureStatus
  *   gateway: answered by the gateway itself; exposed: forwarded after the checks; denied: not
  *   exposed until a contract or policy makes its scope checkable; prohibited: never remote in v1.
+ *   alsoRequires: permissions the grant must hold besides `permission` (each checked, refused
+ *   with 1003 grant naming the first one missing, before anything reaches alpd).
  * @typedef {{
  *   status: ExposureStatus,
  *   permission?: 'session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage',
+ *   alsoRequires?: readonly ('session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage')[],
  *   scope: string,
  *   capability?: string,
  *   params?: readonly string[],
@@ -371,6 +374,8 @@ export const EXPOSURE = Object.freeze({
   'workspace.files.search': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot names a granted workspace and is sent as its canonical path; alpd lists file names under it only (no link followed, no contents); answered paths must be relative without . or .. segments, others dropped', capability: CAPABILITY.workspaceFiles, params: ['projectRoot', 'query', 'limit'], tests: ['permission', 'workspace-param', 'result-filter'] },
   'workspace.files.list': { status: 'exposed', permission: 'files.read', scope: 'workspace: projectRoot names a granted workspace and is sent as its canonical path; path relative, no . or .. segment, never a blocked one (blockedFilePath, refused by the gateway before alpd); alpd lists regular files and directories under it, no link followed; answered entries must be direct children of path, plainly relative and not blocked, others dropped; alpd errors rewritten to fixed text', capability: CAPABILITY.workspaceFilesRead, params: ['projectRoot', 'path', 'includeIgnored'], tests: ['permission', 'workspace-param', 'result-filter', 'path-filter'] },
   'workspace.files.read': { status: 'exposed', permission: 'files.read', scope: 'workspace: as workspace.files.list; alpd reads one UTF-8 text file of at most WORKSPACE_FILES.maxReadBytes, no link or hard link; the answer must name the requested path and fit the limit, else refused; alpd errors rewritten to fixed text', capability: CAPABILITY.workspaceFilesRead, params: ['projectRoot', 'path', 'includeIgnored'], tests: ['permission', 'workspace-param', 'result-filter', 'path-filter'] },
+  'workspace.git.status': { status: 'exposed', permission: 'project.read', scope: 'workspace: workspaceId names a registry workspace whose directory a grant names exactly (#registryWorkspace, managed worktrees included); read only, never a Git mutation; answer projected by projectGitStatus: listed fields only, rows whose path or old path is not plainly relative or is blocked dropped and counted hidden, a local remote URL answered null; alpd errors rewritten to fixed text', capability: CAPABILITY.workspaceGit, params: ['workspaceId'], tests: ['permission', 'registry-scope', 'result-filter'] },
+  'workspace.git.diff': { status: 'exposed', permission: 'project.read', alsoRequires: ['files.read'], scope: 'workspace: as workspace.git.status; hunks are file content, so files.read too (never a default); compare re-projected to mode, baseRef, ignoreWhitespace; path relative and not blocked, refused by the gateway before alpd; answer projected by projectGitDiff: files of other paths, non-relative or blocked ones dropped (counted hidden), each file\'s patch and the page within WORKSPACE_GIT or the answer refused, pages split to fit the client\'s frame (sealed gateway cursors); alpd errors rewritten to fixed text', capability: CAPABILITY.workspaceGit, params: ['workspaceId', 'compare', 'path', 'cursor'], tests: ['permission', 'registry-scope', 'result-filter', 'path-filter'] },
   'task.list': { status: 'exposed', permission: 'project.read', scope: 'workspace: projectRoot', capability: CAPABILITY.task, params: ['projectRoot'], tests: ['permission', 'workspace-param'] },
   'task.create': { status: 'exposed', permission: 'project.write', scope: 'workspace: projectRoot; requestId dedupes within one alpd process for 10 minutes only, so read task.list before retrying after 1000 or a restart', capability: CAPABILITY.task, params: ['projectRoot', 'title', 'priority', 'requestId'], tests: ['permission', 'workspace-param'] },
   'task.update': { status: 'exposed', permission: 'project.write', scope: 'workspace: projectRoot', capability: CAPABILITY.task, params: ['projectRoot', 'id', 'action', 'note', 'ifRev'], tests: ['permission', 'workspace-param'] },
@@ -419,4 +424,180 @@ export function unclassified(methods = RPC_METHODS) {
 export function workspaceOf(grant, value) {
   if (typeof value !== 'string') return undefined;
   return grant.workspaces.find(workspace => workspace.path === value || workspace.canonical === value);
+}
+
+// ---- workspace.git.status and workspace.git.diff (docs/protocol/alp-json-rpc-v1.md §12.5) ----
+
+const GIT_CHANGES = new Set(['modified', 'added', 'deleted', 'renamed', 'copied', 'typechange', 'untracked', 'conflicted']);
+const GIT_KINDS = new Set(['text', 'binary', 'too_large', 'withheld', 'symlink', 'submodule']);
+const GIT_MODES = new Set(['uncommitted', 'staged', 'unstaged', 'base']);
+const GIT_LINE_TYPES = new Set(['add', 'remove', 'context']);
+const count = (/** @type {unknown} */ value) => Number.isSafeInteger(value) && /** @type {number} */ (value) >= 0;
+/** A ref or branch name as text a client may see: 1–1024 characters, no control or format characters. */
+const refName = (/** @type {unknown} */ value) => typeof value === 'string' && value.length > 0 && value.length <= 1024 && !/[\p{Cc}\p{Cf}]/u.test(value);
+
+/**
+ * A path a Git answer may name: plainly relative to the workspace ('/' between names, no root,
+ * drive, backslash, `.`, `..` or empty segment, no NUL, at most 4096 code points) and not one
+ * blockedFilePath names. Anything else never leaves the gateway.
+ * @param {unknown} value
+ */
+export function gitPath(value) {
+  if (typeof value !== 'string' || !value || value.length > 8192 || [...value].length > 4096 || /[\0\\]/.test(value)) return false;
+  if (value.startsWith('/') || /^[A-Za-z]:/.test(value)) return false;
+  if (!value.split('/').every(segment => segment !== '' && segment !== '.' && segment !== '..')) return false;
+  return !blockedFilePath(value);
+}
+
+/**
+ * origin's URL as a remote client may see it: an http(s), ssh or git URL without user name,
+ * password, query or fragment, or scp-like `host:path` (a host of two characters or more, so never
+ * a Windows drive), at most 2048 characters without whitespace. A local path, a `file:` URL or
+ * anything else answers null, as alpd answers a local remote.
+ * @param {unknown} value
+ */
+export function gitRemoteUrl(value) {
+  if (typeof value !== 'string' || !value || value.length > 2048 || /[\s\p{Cc}\p{Cf}]/u.test(value)) return null;
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)) {
+    let url;
+    try { url = new URL(value); } catch { return null; }
+    if (!['https:', 'http:', 'ssh:', 'git:'].includes(url.protocol) || !url.hostname || url.username || url.password || url.search || url.hash) return null;
+    return value;
+  }
+  // scp-like: host:path, never user@host (alpd removes user information) and never a path.
+  return /^[A-Za-z0-9][A-Za-z0-9.-]+:(?!\/\/)[^@]*$/.test(value) && !value.includes('\\') ? value : null;
+}
+
+/**
+ * The bytes of patch content a diff file carries (its lines' text, UTF-8), which is never more
+ * than the patch alpd measured against WORKSPACE_GIT.
+ * @param {{ hunks: Array<{ lines: Array<{ content: string }> }> }} file
+ */
+export function gitPatchBytes(file) {
+  let bytes = 0;
+  for (const hunk of file.hunks) for (const line of hunk.lines) bytes += Buffer.byteLength(line.content, 'utf8');
+  return bytes;
+}
+
+/**
+ * A workspace.git.status answer as a remote client may see it: the schema's fields only, each
+ * checked; a row whose path or old path gitPath refuses is left out and counted in hiddenCount
+ * (`dropped` says how many, for the gateway's log); at most WORKSPACE_GIT.maxStatusFiles rows.
+ * Returns undefined for an answer that is not a status at all.
+ * @param {unknown} raw
+ * @returns {{ status: import('@anhlp/alp-protocol').GitStatus, dropped: number } | undefined}
+ */
+export function projectGitStatus(raw) {
+  if (!plain(raw)) return undefined;
+  const source = /** @type {Record<string, any>} */ (raw);
+  if (!['repository', 'not_repository', 'unsupported'].includes(source.state) || typeof source.snapshot !== 'string' || source.snapshot.length > 1024) return undefined;
+  let dropped = 0;
+  let truncated = source.truncated === true;
+  /** @type {import('@anhlp/alp-protocol').GitStatusFile[]} */
+  const files = [];
+  for (const row of Array.isArray(source.files) ? source.files : []) {
+    const kept = plain(row) && gitPath(row.path) && (row.oldPath === undefined || gitPath(row.oldPath)) && GIT_CHANGES.has(row.change);
+    if (!kept) { dropped++; continue; }
+    if (files.length >= WORKSPACE_GIT.maxStatusFiles) { truncated = true; continue; }
+    files.push({ path: row.path, ...(row.oldPath !== undefined ? { oldPath: row.oldPath } : {}), change: row.change, staged: row.staged === true, unstaged: row.unstaged === true });
+  }
+  const upstream = plain(source.upstream) && refName(source.upstream.ref) && count(source.upstream.ahead) && count(source.upstream.behind) ? { ref: source.upstream.ref, ahead: source.upstream.ahead, behind: source.upstream.behind } : null;
+  const aheadBehind = plain(source.aheadBehind) && count(source.aheadBehind.ahead) && count(source.aheadBehind.behind) ? { ahead: source.aheadBehind.ahead, behind: source.aheadBehind.behind } : null;
+  const repository = source.state === 'repository';
+  return {
+    dropped,
+    status: {
+      state: source.state,
+      ...(!repository && typeof source.reason === 'string' && /^[a-z_]{1,64}$/.test(source.reason) ? { reason: source.reason } : {}),
+      branch: repository && refName(source.branch) ? source.branch : null,
+      detached: source.detached === true,
+      head: typeof source.head === 'string' && /^[0-9a-f]{7,64}$/.test(source.head) ? source.head : null,
+      upstream,
+      baseRef: refName(source.baseRef) ? source.baseRef : null,
+      aheadBehind,
+      hasRemote: source.hasRemote === true,
+      remoteUrl: gitRemoteUrl(source.remoteUrl),
+      dirty: source.dirty === true,
+      files,
+      hiddenCount: (count(source.hiddenCount) ? source.hiddenCount : 0) + dropped,
+      truncated,
+      snapshot: source.snapshot,
+    },
+  };
+}
+
+/**
+ * One file of a workspace.git.diff answer, checked field by field; undefined when its shape is
+ * not the schema's (the whole answer is then refused), `false` when a path is refused by gitPath
+ * (it is left out and counted hidden).
+ * @param {unknown} raw
+ * @returns {import('@anhlp/alp-protocol').GitDiffFile | false | undefined}
+ */
+function gitDiffFile(raw) {
+  if (!plain(raw)) return undefined;
+  const source = /** @type {Record<string, any>} */ (raw);
+  if (!gitPath(source.path) || (source.oldPath !== undefined && !gitPath(source.oldPath))) return false;
+  if (!GIT_CHANGES.has(source.change) || !GIT_KINDS.has(source.kind) || !count(source.additions) || !count(source.deletions) || !Array.isArray(source.hunks)) return undefined;
+  /** @type {import('@anhlp/alp-protocol').GitDiffHunk[]} */
+  const hunks = [];
+  if (source.kind === 'text') {
+    for (const hunk of source.hunks) {
+      if (!plain(hunk) || !count(hunk.oldStart) || !count(hunk.oldCount) || !count(hunk.newStart) || !count(hunk.newCount) || !Array.isArray(hunk.lines)) return undefined;
+      if (hunk.context !== undefined && (typeof hunk.context !== 'string' || hunk.context.length > 4096)) return undefined;
+      /** @type {import('@anhlp/alp-protocol').GitDiffLine[]} */
+      const lines = [];
+      for (const line of hunk.lines) {
+        if (!plain(line) || !GIT_LINE_TYPES.has(line.type) || typeof line.content !== 'string') return undefined;
+        lines.push({ type: line.type, content: line.content, ...(line.noNewline === true ? { noNewline: true } : {}) });
+      }
+      hunks.push({ oldStart: hunk.oldStart, oldCount: hunk.oldCount, newStart: hunk.newStart, newCount: hunk.newCount, ...(hunk.context !== undefined ? { context: hunk.context } : {}), lines });
+    }
+  }
+  return { path: source.path, ...(source.oldPath !== undefined ? { oldPath: source.oldPath } : {}), change: source.change, kind: source.kind, additions: source.additions, deletions: source.deletions, hunks };
+}
+
+/**
+ * A workspace.git.diff answer as a remote client may see it, before the gateway pages it: the
+ * schema's fields only; files whose path or old path gitPath refuses left out and counted
+ * (`hidden`), as are files that name neither side `path` when one was asked for (`foreign`). A
+ * file's patch over WORKSPACE_GIT.maxFileBytes, the page's over maxTotalBytes, or any field of the
+ * wrong shape refuses the whole answer: `{ refused }` says why, for the gateway's log.
+ * @param {unknown} raw @param {{ path?: string }} [request]
+ * @returns {{ page: import('@anhlp/alp-protocol').GitDiffPage, hidden: number, foreign: number } | { refused: 'shape' | 'file_size' | 'total_size' }}
+ */
+export function projectGitDiff(raw, { path } = {}) {
+  if (!plain(raw)) return { refused: 'shape' };
+  const source = /** @type {Record<string, any>} */ (raw);
+  const compare = source.compare;
+  if (!plain(compare) || !GIT_MODES.has(compare.mode) || typeof compare.ignoreWhitespace !== 'boolean' || (compare.baseRef !== undefined && !refName(compare.baseRef))) return { refused: 'shape' };
+  if (typeof source.snapshot !== 'string' || source.snapshot.length > 1024 || !Array.isArray(source.files)) return { refused: 'shape' };
+  if (source.nextCursor !== undefined && (typeof source.nextCursor !== 'string' || !source.nextCursor || source.nextCursor.length > 1024)) return { refused: 'shape' };
+  let hidden = 0;
+  let foreign = 0;
+  let total = 0;
+  /** @type {import('@anhlp/alp-protocol').GitDiffFile[]} */
+  const files = [];
+  for (const entry of source.files) {
+    const file = gitDiffFile(entry);
+    if (file === undefined) return { refused: 'shape' };
+    if (file === false) { hidden++; continue; }
+    const bytes = gitPatchBytes(file);
+    if (bytes > WORKSPACE_GIT.maxFileBytes) return { refused: 'file_size' };
+    total += bytes;
+    if (total > WORKSPACE_GIT.maxTotalBytes) return { refused: 'total_size' };
+    if (path !== undefined && file.path !== path && file.oldPath !== path) { foreign++; continue; }
+    files.push(file);
+  }
+  return {
+    hidden,
+    foreign,
+    page: {
+      compare: { mode: compare.mode, ...(compare.baseRef !== undefined ? { baseRef: compare.baseRef } : {}), ignoreWhitespace: compare.ignoreWhitespace },
+      snapshot: source.snapshot,
+      files,
+      hiddenCount: (count(source.hiddenCount) ? source.hiddenCount : 0) + hidden,
+      truncated: source.truncated === true,
+      ...(source.nextCursor !== undefined ? { nextCursor: source.nextCursor } : {}),
+    },
+  };
 }
