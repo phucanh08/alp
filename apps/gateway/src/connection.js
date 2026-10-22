@@ -1321,6 +1321,7 @@ export class ClientConnection {
         this.#log.error('workspace.git.diff answered a page the gateway does not pass on; refused it', { code: 'ALP_GATEWAY_GIT_REFUSED', why: projected.refused });
         throw new GatewayError(ERROR.failed, 'The daemon host answered a diff the gateway does not pass on', { reason: 'git_failed' });
       }
+      if (projected.oversize) this.#log.error('workspace.git.diff answered content over the gateway\'s limits; passed those files on as too_large', { code: 'ALP_GATEWAY_GIT_OVERSIZE', oversize: projected.oversize });
       if (projected.hidden || projected.foreign) this.#log.error('workspace.git.diff answered files outside the workspace, blocked or not asked for; dropped them', { code: 'ALP_GATEWAY_FILE_OUT_OF_SCOPE', hidden: projected.hidden, foreign: projected.foreign });
       // The rest of a split page is the same alpd page only for the same snapshot.
       if (snapshot !== undefined && projected.page.snapshot !== snapshot) throw new GatewayError(ERROR.conflict, GIT_REFUSALS.stale_snapshot, { reason: 'stale_snapshot' });

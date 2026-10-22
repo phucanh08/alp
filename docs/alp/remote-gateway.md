@@ -656,9 +656,10 @@ commit, push, pull, merge, checkout, switch, stash hay thao tác Git nào khác 
   khi hỏi một `path`, file không có bên nào là `path` đó cũng bị bỏ. `remoteUrl` chỉ đi qua khi là URL
   http(s)/ssh/git không có user, mật khẩu, query, fragment hoặc dạng `host:path`; đường dẫn cục bộ hay
   `file:` → `null`. Kind khác `text` không mang hunk. Status tối đa `WORKSPACE_GIT.maxStatusFiles` dòng.
-- **Kích thước**: nội dung dòng của một file quá `WORKSPACE_GIT.maxFileBytes` (1 MiB) hoặc cả trang
-  quá `maxTotalBytes` (2 MiB), hay field sai kiểu → gateway từ chối cả answer (`1000 git_failed`, log
-  `ALP_GATEWAY_GIT_REFUSED`). Để vừa frame của client (`limits.maxFrame`, và nửa `maxBufferedBytes`),
+- **Kích thước**: nội dung dòng của một file quá `WORKSPACE_GIT.maxFileBytes` (1 MiB), hoặc vượt
+  `maxTotalBytes` (2 MiB) của cả trang, → file đó vẫn được liệt kê nhưng thành `too_large`, không có
+  hunk (log `ALP_GATEWAY_GIT_OVERSIZE`); alpd đo cùng nội dung đã giải mã nên đây là lớp chặn dự
+  phòng. Field sai kiểu → gateway từ chối cả answer (`1000 git_failed`, log `ALP_GATEWAY_GIT_REFUSED`). Để vừa frame của client (`limits.maxFrame`, và nửa `maxBufferedBytes`),
   gateway hạ giới hạn: một trang alpd quá lớn được cắt, phần còn lại tiếp tục bằng cursor của chính
   connection (`alp-gateway-page:…`, tối đa 64 cái, mất khi đóng connection) — gateway hỏi lại alpd
   đúng trang đó và bỏ qua phần đã gửi; snapshot đổi → `1004 stale_snapshot`; cursor không phải của

@@ -2,7 +2,7 @@
 // §12.5, docs/alp/remote-gateway.md §5.13, issue #121 G1): read only, by a registry workspace the
 // grant names exactly; status with project.read, diff with project.read and files.read; paths
 // refused before alpd; answers projected field by field, blocked or non-relative paths dropped
-// and counted hidden, oversize answers refused, pages cut to the client's frame. Every refusal is
+// and counted hidden, oversize files passed on as too_large, pages cut to the client's frame. Every refusal is
 // checked to have caused no request of the method at alpd.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -192,13 +192,30 @@ test('diff: fields allow-listed, blocked or out-of-scope files dropped and count
   assert.deepEqual(focused.files.map(file => file.path), ['src/app.ts', 'src/moved.ts']);
 });
 
-test('diff: a patch over the per-file or page limit, or a field of the wrong shape, refuses the answer', async t => {
+test('diff: content over the per-file or page limit is passed on as too_large; a field of the wrong shape refuses the answer', async t => {
   const { daemon, sdk, canonicalA } = await world(t);
   const { client } = await sdk('reader');
   const big = n => ({ ...textFile('big.txt'), hunks: [{ oldStart: 0, oldCount: 0, newStart: 1, newCount: 1, lines: [line('add', 'x'.repeat(n))] }] });
+  // Decoded non-UTF-8 text: each invalid byte became U+FFFD (3 bytes), so content outgrew Git's bytes.
+  const replaced = { ...textFile('latin1.txt'), hunks: [{ oldStart: 0, oldCount: 0, newStart: 1, newCount: 1, lines: [line('add', '\uFFFD'.repeat(400 * 1024))] }] };
+  for (const [label, answer, kinds] of [
+    ['file over maxFileBytes', diff([big(WORKSPACE_GIT.maxFileBytes + 1)]), ['too_large']],
+    ['decoded content over maxFileBytes', diff([replaced, { ...textFile('b.ts') }]), ['too_large', 'text']],
+    ['page over maxTotalBytes', diff([{ ...big(WORKSPACE_GIT.maxFileBytes), path: 'a.txt' }, { ...big(WORKSPACE_GIT.maxFileBytes), path: 'b.txt' }, { ...big(10), path: 'c.txt' }]), ['text', 'text', 'too_large']],
+  ]) {
+    daemon.state.handlers['workspace.git.diff'] = () => answer;
+    const page = await client.request('workspace.git.diff', { workspaceId: 'wks_a', compare: { mode: 'uncommitted' } }).catch(error => assert.fail(`${label}: ${error.message}`));
+    const files = [];
+    let cursor;
+    for (let current = page; ; current = await client.request('workspace.git.diff', { workspaceId: 'wks_a', compare: { mode: 'uncommitted' }, cursor })) {
+      files.push(...current.files);
+      cursor = current.nextCursor;
+      if (!cursor) break;
+    }
+    assert.deepEqual(files.map(file => file.kind), kinds, label);
+    for (const file of files) if (file.kind === 'too_large') assert.deepEqual(file.hunks, [], label);
+  }
   for (const [label, answer] of [
-    ['file over maxFileBytes', diff([big(WORKSPACE_GIT.maxFileBytes + 1)])],
-    ['page over maxTotalBytes', diff([{ ...big(WORKSPACE_GIT.maxFileBytes), path: 'a.txt' }, { ...big(WORKSPACE_GIT.maxFileBytes), path: 'b.txt' }, { ...big(10), path: 'c.txt' }])],
     ['a line of an unknown type', diff([{ ...textFile('a.ts'), hunks: [{ oldStart: 1, oldCount: 1, newStart: 1, newCount: 1, lines: [{ type: 'header', content: canonicalA }] }] }])],
     ['an unknown kind', diff([{ ...textFile('a.ts'), kind: 'host_file' }])],
     ['no snapshot', { ...diff([]), snapshot: undefined }],
