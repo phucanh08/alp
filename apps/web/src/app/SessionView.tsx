@@ -1,3 +1,4 @@
+import * as React from 'react';
 import type { ReactNode } from 'react';
 import { ArrowLeft, Bot, ChevronDown, CircleAlert, MessageSquarePlus, RotateCcw, Shield, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { Menu } from '../components/ui/menu';
@@ -15,6 +16,8 @@ import { QuestionCard } from './QuestionCard';
 import { Timeline } from './Timeline';
 import { useAppState, useController } from './store';
 import { useTabs } from './tabs';
+import { ConversationContext, ForkDialog, RewindDialog, type TurnInfo } from './Conversation';
+import { turnsByMessage } from '../lib/conversation.js';
 
 /** What the center shows with no tab open (Paseo's new-tab launcher, for sessions). */
 export function Empty({ onNewSession }: { onNewSession: () => void }) {
@@ -69,6 +72,13 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const controller = useController();
   const { openAgent } = useTabs();
   const { tree, prompts, queued, busy, sessions, connection, preferences, catalog, principal } = useAppState();
+  // Fork and rewind (§12.7): the turn a dialog asks about, and the text a rewind puts back in the composer.
+  const [rewinding, setRewinding] = React.useState<TurnInfo | null>(null);
+  const [forking, setForking] = React.useState<string | null>(null);
+  const [refill, setRefill] = React.useState<{ id: number; text: string } | undefined>(undefined);
+  const projectionForTurns = tree?.projection;
+  const hasOlder = !!tree?.older?.hasOlder;
+  const turns = React.useMemo(() => projectionForTurns ? turnsByMessage(projectionForTurns, { hasOlder }) : new Map<string, TurnInfo>(), [projectionForTurns, hasOlder]);
   if (!tree) return null;
   const projection = tree.projection;
   const root = tree.rootId;
@@ -116,6 +126,13 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   // The tasks this session's tree worked on: the latest todo of the main agent's timeline.
   const todo = viewing === root ? [...entries].reverse().find(entry => (entry.item as any).kind === 'todo') : undefined;
   const worked = ((todo?.item as any)?.items ?? []) as Array<{ id: string; text: string; status: string }>;
+  const gate = controller.conversationGate(root);
+  const conversation = viewing === root && (gate.fork.shown || gate.rewind.shown) ? {
+    root, fork: gate.fork, rewind: gate.rewind, turns,
+    askRewind: (key: string) => { const turn = turns.get(key); if (turn) setRewinding(turn); },
+    askFork: (turnId: string) => setForking(turnId),
+  } : null;
+  const title = rootSession?.title ?? listed?.title ?? 'Session';
   const questionCards = questions.length ? questions.map(question => (
     <QuestionCard key={question.id} question={question} busy={!!busy[`question:${question.id}`]} blocked={blocked}
       onAnswer={text => void controller.answerQuestion(question.id, { text })} onDecline={() => void controller.answerQuestion(question.id, { dismiss: true })} />
@@ -131,6 +148,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
       {loading && !entries.length ? (
         <div className="flex flex-1 items-center justify-center"><Spinner label={connection.phase === 'open' ? 'Loading conversation…' : 'Waiting for the connection…'} /></div>
       ) : (
+        <ConversationContext.Provider value={conversation}>
         <Timeline
           entries={entries}
           prompts={viewing === root ? pending : []}
@@ -145,7 +163,10 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
           emptyText={viewing === root ? (closed ? 'Nothing here yet.' : 'Send a message to start.') : 'This agent has not written anything yet.'}
           tail={questionCards}
         />
+        </ConversationContext.Provider>
       )}
+      <RewindDialog turn={rewinding} onClose={() => setRewinding(null)} onDone={text => { setRewinding(null); if (text) setRefill({ id: Date.now(), text }); }} />
+      <ForkDialog turnId={forking} title={title} onClose={() => setForking(null)} />
       {loading && !entries.length && questionCards ? (
         <div className="px-3 pb-3 md:px-4"><div className="mx-auto flex w-full max-w-[820px] flex-col gap-2 px-2">{questionCards}</div></div>
       ) : null}
@@ -157,6 +178,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             images={rootSession?.promptImages === true && connection.capabilities.includes('prompt.images') && !!connection.promptImageLimits?.maxBytes}
             imageLimits={connection.promptImageLimits}
             imagesUnavailable={`${agentOf(root)} runs on ${rootSession?.runtime ?? 'a runtime'} here, which takes no images.`}
+            addText={refill}
             onSend={(text, images) => controller.sendPrompt(text, undefined, images)}
             onQueue={text => controller.queuePrompt(text)}
             onStop={() => void controller.interrupt()}

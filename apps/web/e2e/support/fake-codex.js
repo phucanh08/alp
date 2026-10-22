@@ -16,9 +16,16 @@
 //   [tools]     all five of the above in one turn, in that order; each of these turns then answers "Tools done."
 //   [usage:N]   first report token usage as Codex does: N tokens in a 258,400-token window, N-1000 of
 //               them input (half cached) and 1000 output (thread/tokenUsage/updated)
+//   [codewords] answer "Codewords: <W1> <W2>…", the words that followed "codeword" in the earlier
+//               turns of THIS thread's history (or "Codewords: none"): a fork or rewind that cut a
+//               turn away shows here, because the next reply cannot see it
 // A steer (turn/steer) joins the running turn; one holding [finish] ends it with a reply.
+// Each thread's turns ({ id, status, text }) persist in $FAKE_CODEX_STATE (a JSON file shared by
+// every fake process of one host: alpd forks in a short-lived app-server), so thread/resume,
+// thread/fork { lastTurnId | beforeTurnId } (a new thread with the kept turns, same ids, and
+// forkedFromId), thread/turns/list { limit, sortDirection } and thread/delete work as Codex's.
 // Images in a turn's input (data URLs) are journaled as { mimeType, bytes } and echoed as "(+N images)".
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const journal = process.env.FAKE_CODEX_JOURNAL;
@@ -33,6 +40,23 @@ let turns = 0;
 const active = new Map();
 /** alp_ask calls waiting for alpd's answer: request id → the turn that asked. */
 const asking = new Map();
+
+/** Every thread's turns: in $FAKE_CODEX_STATE when set (else next to the journal), else in memory. */
+const stateFile = process.env.FAKE_CODEX_STATE ?? (journal ? `${journal}.threads.json` : undefined);
+const memory = {};
+const loadThreads = () => { if (!stateFile) return memory; try { return JSON.parse(readFileSync(stateFile, 'utf8')); } catch { return {}; } };
+const saveThreads = all => {
+  if (!stateFile) { Object.assign(memory, all); return; }
+  const temporary = `${stateFile}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify(all));
+  renameSync(temporary, stateFile);
+};
+/** Changes one thread's record (created empty when unknown) and saves every thread. */
+const updateThread = (threadId, change) => { const all = loadThreads(); all[threadId] = change(all[threadId] ?? { turns: [] }); saveThreads(all); return all[threadId]; };
+const setTurnStatus = (threadId, turnId, status) => updateThread(threadId, thread => ({ ...thread, turns: thread.turns.map(turn => turn.id === turnId ? { ...turn, status } : turn) }));
+/** The words after "codeword" in a thread's turns other than `except`. */
+const codewords = (threadId, except) => (loadThreads()[threadId]?.turns ?? []).filter(turn => turn.id !== except)
+  .flatMap(turn => [...String(turn.text ?? '').matchAll(/\bcodeword\s+([A-Za-z0-9_-]+)/gi)].map(match => match[1]));
 
 record({ method: 'spawn' });
 process.on('SIGTERM', () => process.exit(0));
@@ -64,6 +88,7 @@ async function stream(threadId, turnId, text, pause = 30) {
 function complete(threadId, turnId) {
   if (!live(threadId, turnId)) return;
   active.delete(threadId);
+  setTurnStatus(threadId, turnId, 'completed');
   send({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'completed' } } });
 }
 
@@ -121,6 +146,11 @@ async function run(threadId, turnId, text) {
     return;
   }
   if (text.includes('[hold]')) return;
+  if (text.includes('[codewords]')) {
+    const words = codewords(threadId, turnId);
+    if (await stream(threadId, turnId, `Codewords: ${words.length ? words.join(' ') : 'none'}`)) complete(threadId, turnId);
+    return;
+  }
   const slow = text.includes('[slow]');
   if (await stream(threadId, turnId, `Echo: ${prompt.replace(/\s*\[(slow)\]\s*/g, ' ').trim()}`, slow ? 700 : 30)) complete(threadId, turnId);
 }
@@ -156,15 +186,53 @@ lines.on('line', line => {
     case 'thread/start': {
       const threadId = `thread-${process.pid}-${++threads}`;
       if (typeof params?.cwd === 'string') cwds.set(threadId, params.cwd);
+      updateThread(threadId, () => ({ turns: [] }));
       return reply({ thread: { id: threadId } });
     }
-    case 'thread/resume':
+    case 'thread/resume': {
       if (typeof params?.cwd === 'string') cwds.set(params.threadId, params.cwd);
-      return reply({ thread: { id: params.threadId } });
+      const known = loadThreads()[params.threadId];
+      if (!known) updateThread(params.threadId, thread => thread);
+      return reply({ thread: { id: params.threadId, ...(known?.forkedFromId ? { forkedFromId: known.forkedFromId } : {}) } });
+    }
+    case 'thread/fork': {
+      // Codex's experimental cut: through lastTurnId (inclusive) or before beforeTurnId (exclusive).
+      const all = loadThreads();
+      const source = all[params?.threadId];
+      if (!source) return send({ id, error: { code: -32600, message: `thread not found: ${params?.threadId}` } });
+      let kept = source.turns;
+      const cut = params.lastTurnId ?? params.beforeTurnId;
+      if (cut) {
+        const index = source.turns.findIndex(turn => turn.id === cut);
+        if (index < 0) return send({ id, error: { code: -32600, message: `turn not found: ${cut}` } });
+        kept = source.turns.slice(0, params.lastTurnId ? index + 1 : index);
+      }
+      const running = kept.find(turn => turn.status === 'inProgress');
+      if (running) return send({ id, error: { code: -32600, message: `${running.id} identifies an in-progress turn` } });
+      const threadId = `thread-${process.pid}-${++threads}`;
+      all[threadId] = { turns: kept.map(turn => ({ ...turn })), forkedFromId: params.threadId };
+      saveThreads(all);
+      if (typeof params?.cwd === 'string') cwds.set(threadId, params.cwd);
+      record({ method: 'thread/forked', threadId, from: params.threadId, turns: kept.map(turn => turn.id), ...(params.ephemeral ? { ephemeral: true } : {}) });
+      return reply({ thread: { id: threadId, forkedFromId: params.threadId } });
+    }
+    case 'thread/turns/list': {
+      const thread = loadThreads()[params?.threadId];
+      if (!thread) return send({ id, error: { code: -32600, message: `thread not found: ${params?.threadId}` } });
+      const ordered = params.sortDirection === 'desc' ? [...thread.turns].reverse() : thread.turns;
+      return reply({ data: ordered.slice(0, typeof params.limit === 'number' ? params.limit : ordered.length).map(turn => ({ id: turn.id, status: turn.status })), nextCursor: null });
+    }
+    case 'thread/delete': {
+      const all = loadThreads();
+      delete all[params?.threadId];
+      saveThreads(all);
+      return reply({});
+    }
     case 'turn/start': {
       const turnId = `turn-${process.pid}-${++turns}`;
       reply({ turn: { id: turnId } });
       active.set(params.threadId, turnId);
+      updateThread(params.threadId, thread => ({ ...thread, turns: [...thread.turns, { id: turnId, status: 'inProgress', text: lastLine(text) }] }));
       void run(params.threadId, turnId, images.length ? `${text} (+${images.length} image${images.length === 1 ? '' : 's'})` : text);
       return;
     }
@@ -180,6 +248,7 @@ lines.on('line', line => {
       reply({});
       const turnId = active.get(params.threadId) ?? params.turnId;
       active.delete(params.threadId);
+      if (turnId) setTurnStatus(params.threadId, turnId, 'interrupted');
       send({ method: 'turn/completed', params: { threadId: params.threadId, turn: { id: turnId, status: 'interrupted' } } });
       return;
     }

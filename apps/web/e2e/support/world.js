@@ -88,7 +88,7 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
   delete env.ALP_GATEWAY_TOKEN;
   // Fake runs never reach a real model: Codex is the fake, and the other runtimes point at a
   // program that does not exist, so a session that lands on them fails loudly instead.
-  const runtimeBins = provider === 'fake' ? { ALP_CODEX_BIN: FAKE_CODEX, FAKE_CODEX_JOURNAL: journal, ALP_CLAUDE_BIN: path.join(directory, 'no-real-claude'), ALP_ANTIGRAVITY_BIN: path.join(directory, 'no-real-antigravity') } : {};
+  const runtimeBins = provider === 'fake' ? { ALP_CODEX_BIN: FAKE_CODEX, FAKE_CODEX_JOURNAL: journal, FAKE_CODEX_STATE: path.join(directory, 'codex-threads.json'), ALP_CLAUDE_BIN: path.join(directory, 'no-real-claude'), ALP_ANTIGRAVITY_BIN: path.join(directory, 'no-real-antigravity') } : {};
   Object.assign(env, runtimeBins);
   chmodSync(FAKE_CODEX, 0o755);
 

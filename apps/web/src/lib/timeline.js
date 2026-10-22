@@ -29,16 +29,19 @@
  *   running: Record<string, string>,
  *   closed: Record<string, boolean>,
  *   questions: Record<string, UserQuestion>,
- *   prompts: Record<string, { state: 'accepted' | 'failed', error?: string, turnId?: string }>,
+ *   prompts: Record<string, { state: 'accepted' | 'failed', error?: string, turnId?: string, result?: 'turn' | 'steer' }>,
  *   turns: Record<string, 'running' | 'ended'>,
+ *   turnOrder: string[],
  *   historyUnavailable: boolean,
  *   reset: number,
  * }} Projection
+ *   turnOrder: the root's own turns in the order they began (prompt.accepted { result: 'turn' } or
+ *   turn.started), the turns fork and rewind name (§12.7).
  */
 
 /** @param {string} rootId @returns {Projection} */
 export function emptyProjection(rootId) {
-  return { rootId, cursor: 0, entries: [], positions: {}, sessions: {}, order: [], running: {}, closed: {}, questions: {}, prompts: {}, turns: {}, historyUnavailable: false, reset: 0 };
+  return { rootId, cursor: 0, entries: [], positions: {}, sessions: {}, order: [], running: {}, closed: {}, questions: {}, prompts: {}, turns: {}, turnOrder: [], historyUnavailable: false, reset: 0 };
 }
 
 /** @param {Projection} state @param {Entry} entry @returns {Projection} */
@@ -59,6 +62,13 @@ const without = (record, key) => {
   delete next[key];
   return next;
 };
+
+/** The root's turn order with `turnId` added (once). @param {Projection} state @param {unknown} turnId */
+function beginTurn(state, turnId) {
+  if (typeof turnId !== 'string' || !turnId) return state;
+  const order = state.turnOrder ?? [];
+  return order.includes(turnId) ? state : { ...state, turnOrder: [...order, turnId] };
+}
 
 /**
  * Applies one envelope. Unknown event types and item kinds are ignored (§7).
@@ -100,11 +110,16 @@ export function project(state, envelope) {
     }
     case 'session.failed':
       return upsert(next, { key: mark(), sessionId: id, ts, item: { kind: 'session_event', id: mark(), level: 'error', text: event.error?.message ? `The session failed: ${event.error.message}` : 'The session failed.' } });
-    case 'prompt.accepted':
-      return typeof event.clientMessageId === 'string' ? { ...next, prompts: { ...next.prompts, [event.clientMessageId]: { state: 'accepted', ...(typeof event.turnId === 'string' ? { turnId: event.turnId } : {}) } } } : next;
+    case 'prompt.accepted': {
+      if (typeof event.clientMessageId !== 'string') return next;
+      const result = event.result === 'turn' || event.result === 'steer' ? event.result : undefined;
+      next = { ...next, prompts: { ...next.prompts, [event.clientMessageId]: { state: 'accepted', ...(typeof event.turnId === 'string' ? { turnId: event.turnId } : {}), ...(result ? { result } : {}) } } };
+      return result === 'turn' && id === next.rootId ? beginTurn(next, event.turnId) : next;
+    }
     case 'prompt.failed':
       return typeof event.clientMessageId === 'string' ? { ...next, prompts: { ...next.prompts, [event.clientMessageId]: { state: 'failed', ...(event.error?.message ? { error: event.error.message } : {}) } } } : next;
     case 'turn.started': {
+      if (id === next.rootId) next = beginTurn(next, event.turnId);
       const previous = next.sessions[id];
       const turns = next.turns[event.turnId] === 'ended' ? next.turns : { ...next.turns, [String(event.turnId)]: /** @type {const} */ ('running') };
       return { ...next, turns, running: { ...next.running, [id]: String(event.turnId) }, ...(previous ? { sessions: { ...next.sessions, [id]: { ...previous, status: 'running', busy: true } } } : {}) };
@@ -235,5 +250,11 @@ export function prependHistory(current, items) {
   }
   const sessions = { ...older.sessions };
   for (const [id, session] of Object.entries(current.sessions)) sessions[id] = { ...sessions[id], ...session };
-  return { ...current, entries, positions, sessions, order: [...new Set([...older.order, ...current.order])] };
+  // The older page's prompt outcomes and turns name the turns of its user messages (fork and rewind).
+  return {
+    ...current, entries, positions, sessions, order: [...new Set([...older.order, ...current.order])],
+    prompts: { ...older.prompts, ...current.prompts },
+    turns: { ...older.turns, ...current.turns },
+    turnOrder: [...new Set([...older.turnOrder, ...(current.turnOrder ?? [])])],
+  };
 }

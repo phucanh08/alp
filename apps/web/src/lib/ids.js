@@ -13,3 +13,5 @@ export const newSessionId = () => `web_${randomHex(16)}`;
 export const newMessageId = () => `web-msg-${randomHex(20)}`;
 /** A task.create dedupe key (§10). */
 export const newRequestId = () => `web-task-${randomHex(16)}`;
+/** A session.fork / session.rewind idempotency key (§12.7): one per user action, sent again only for a lost answer. */
+export const newConversationRequestId = () => `web-conv-${randomHex(16)}`;

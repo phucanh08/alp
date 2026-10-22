@@ -141,7 +141,7 @@ export class FakeHost {
   }
 
   #newRoot(id, spec) {
-    const root = { id, cursor: 0, timeline: [], live: true, viewers: new Set(), spec, children: new Map(), running: undefined, turns: 0, summary: { id, projectRoot: spec.cwd, agent: 'main', runtime: 'codex', model: 'm', mode: spec.mode ?? 'full-access', thinking: 'low', workflow: { mode: 'pho', maxPeers: 2, supervisor: false }, threadId: `t-${id}`, persistent: true, busy: false, status: 'idle', createdAt: new Date(Date.now() - 1000).toISOString(), updatedAt: new Date().toISOString() } };
+    const root = { id, cursor: 0, timeline: [], generation: `gen-${id}-1`, branches: [], live: true, viewers: new Set(), spec, children: new Map(), running: undefined, turns: 0, summary: { id, projectRoot: spec.cwd, agent: 'main', runtime: 'codex', model: 'm', mode: spec.mode ?? 'full-access', thinking: 'low', workflow: { mode: 'pho', maxPeers: 2, supervisor: false }, threadId: `t-${id}`, persistent: true, busy: false, status: 'idle', createdAt: new Date(Date.now() - 1000).toISOString(), updatedAt: new Date().toISOString() } };
     this.roots.set(id, root);
     return root;
   }
@@ -276,6 +276,89 @@ export class FakeHost {
     this.#emit(root, rootId, { type: 'turn.ended', turnId, state: 'completed' });
   }
 
+  /** The root's turns in timeline order, each with the cursor its first line has (§12.7). */
+  #turns(root) {
+    const prompts = new Map();
+    const turns = [];
+    for (const envelope of root.timeline) {
+      if (envelope.sessionId !== root.id) continue;
+      const event = envelope.event;
+      if (event.type === 'item' && event.item.kind === 'user_message' && event.item.clientMessageId) prompts.set(event.item.clientMessageId, envelope.cursor);
+      else if ((event.type === 'prompt.accepted' && event.result === 'turn') || event.type === 'turn.started') {
+        if (turns.some(turn => turn.id === event.turnId)) continue;
+        turns.push({ id: event.turnId, start: event.type === 'prompt.accepted' ? Math.min(prompts.get(event.clientMessageId) ?? envelope.cursor, envelope.cursor) : envelope.cursor });
+      } else if (event.type === 'turn.ended') { const turn = turns.find(candidate => candidate.id === event.turnId); if (turn) turn.ended = true; }
+    }
+    return turns;
+  }
+
+  /** A journaled answer per (session, operation, requestId), as alpd's lifecycle journal. */
+  #journaled(key, fingerprint, run) {
+    this.lifecycle ??= new Map();
+    const known = this.lifecycle.get(key);
+    if (known) {
+      if (known.fingerprint !== fingerprint) throw Object.assign(new Error('key conflict'), { code: 1004, data: { reason: 'key_conflict' } });
+      return { ...known.result, duplicate: true };
+    }
+    const result = run();
+    this.lifecycle.set(key, { fingerprint, result });
+    return result;
+  }
+
+  #rewind(params) {
+    const root = this.roots.get(params.sessionId);
+    if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
+    return this.#journaled(`${root.id}:rewind:${params.requestId}`, params.beforeTurnId, () => {
+      if (root.running) throw Object.assign(new Error('busy'), { code: 1004, data: { reason: 'session_busy' } });
+      if (params.ifGeneration !== root.generation) throw Object.assign(new Error('stale'), { code: 1004, data: { reason: 'stale_generation' } });
+      const turns = this.#turns(root);
+      const index = turns.findIndex(turn => turn.id === params.beforeTurnId);
+      if (index < 0) throw Object.assign(new Error('no turn'), { code: 1001, data: { reason: 'turn_not_found' } });
+      if (index === 0) throw Object.assign(new Error('first'), { code: 1005, data: { reason: 'empty_prefix' } });
+      const branchId = `br_${root.branches.length + 1}`;
+      const branch = { branchId, beforeTurnId: params.beforeTurnId, turns: turns.length - index, at: new Date().toISOString() };
+      root.setAside = [...(root.setAside ?? []), { branchId, timeline: root.timeline.slice() }];
+      root.branches.push(branch);
+      root.summary.branches = root.branches.slice();
+      root.generation = `gen-${root.id}-${root.branches.length + 1}`;
+      const marker = { sessionId: root.id, epoch: `rewind-${branchId}`, seq: 0, ts: branch.at, cursor: ++root.cursor, event: { type: 'item', item: { kind: 'notice', id: `rewind:${branchId}`, level: 'info', text: `Conversation rewound to before a message: ${branch.turns} later turns moved to a recoverable branch. Files were not changed.` } } };
+      root.timeline = [...root.timeline.filter(envelope => envelope.cursor < turns[index].start), marker];
+      for (const connection of root.viewers) {
+        this.#send(connection, { method: 'event', params: { sessionId: root.id, epoch: `rewind-${branchId}`, seq: 0, ts: branch.at, event: { type: 'history.reset', generation: root.generation, reason: 'rewind', branchId } } });
+        this.#send(connection, { method: 'event', params: marker });
+      }
+      return { session: { ...root.summary }, generation: root.generation, branch };
+    });
+  }
+
+  #fork(params) {
+    const root = this.roots.get(params.sessionId);
+    if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
+    return this.#journaled(`${root.id}:fork:${params.requestId}`, JSON.stringify([params.boundary ?? null, params.branchId ?? null, params.workspaceId ?? null, params.title ?? null]), () => {
+      if (params.ifGeneration !== root.generation) throw Object.assign(new Error('stale'), { code: 1004, data: { reason: 'stale_generation' } });
+      const source = params.branchId ? root.setAside?.find(entry => entry.branchId === params.branchId)?.timeline : root.timeline;
+      if (!source) throw Object.assign(new Error('no branch'), { code: 1001, data: { reason: 'branch_not_found' } });
+      const turns = this.#turns({ ...root, timeline: source });
+      let cut = Infinity;
+      if (params.boundary?.throughTurnId) {
+        const index = turns.findIndex(turn => turn.id === params.boundary.throughTurnId);
+        if (index < 0) throw Object.assign(new Error('no turn'), { code: 1001, data: { reason: 'turn_not_found' } });
+        if (!turns[index].ended) throw Object.assign(new Error('running'), { code: 1004, data: { reason: 'turn_in_progress' } });
+        cut = turns[index + 1]?.start ?? Infinity;
+      }
+      this.forks = (this.forks ?? 0) + 1;
+      const id = `ses_fork_${this.forks}`;
+      const fork = this.#newRoot(id, { cwd: params.workspaceId ? `/w/${params.workspaceId}` : root.spec.cwd, mode: root.spec.mode });
+      const forkedFrom = { sessionId: root.id, ...(params.boundary?.throughTurnId ? { turnId: params.boundary.throughTurnId, boundary: 'through' } : { boundary: 'whole' }), ...(params.branchId ? { branchId: params.branchId } : {}), at: new Date().toISOString() };
+      fork.timeline = source.filter(envelope => envelope.sessionId === root.id && envelope.cursor < cut).map(envelope => ({ ...envelope, sessionId: id }));
+      fork.cursor = fork.timeline.at(-1)?.cursor ?? 0;
+      fork.timeline.push({ sessionId: id, epoch: 'fork', seq: 0, ts: forkedFrom.at, cursor: ++fork.cursor, event: { type: 'item', item: { kind: 'notice', id: `fork:${id}`, level: 'info', text: 'Forked.' } } });
+      fork.live = false;
+      Object.assign(fork.summary, { status: 'closed', forkedFrom, conversation: root.summary.conversation, ...(params.title ? { title: params.title } : {}) });
+      return { session: { ...fork.summary }, forkedFrom };
+    });
+  }
+
   async #run(connection, method, params, requestId) {
     switch (method) {
       case 'daemon.hello': return { protocolVersion: 1, daemonVersion: '0.10.0', capabilities: this.capabilities };
@@ -322,6 +405,7 @@ export class FakeHost {
       case 'session.attach': {
         const root = this.roots.get(params.sessionId);
         if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
+        if (params.generation !== undefined && params.generation !== root.generation) throw Object.assign(new Error('stale cursor'), { code: 1004, data: { reason: 'stale_cursor' } });
         const after = params.after ?? 0;
         const tip = root.cursor;
         const reset = params.after !== undefined && after > tip;
@@ -331,6 +415,15 @@ export class FakeHost {
         for (const question of this.questions.values()) if (question.rootId === root.id) this.#send(connection, { method: 'event', params: { sessionId: question.sessionId, epoch: 'announce', seq: 0, ts: question.askedAt, event: { type: 'question', question } } });
         return { session: { ...root.summary, busy: !!root.running }, cursor: tip, ...(reset ? { reset: true } : {}) };
       }
+      case 'session.history': {
+        // The whole stored timeline as one page (capability session.history, §8.7).
+        if (!this.capabilities.includes('session.history')) throw Object.assign(new Error('unknown method session.history'), { code: -32601 });
+        const root = this.roots.get(params.sessionId);
+        if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
+        return { generation: root.generation, items: structuredClone(root.timeline), hasOlder: false, tipCursor: root.cursor };
+      }
+      case 'session.rewind': return this.#rewind(params);
+      case 'session.fork': return this.#fork(params);
       case 'session.release': {
         const root = this.roots.get(params.sessionId);
         if (!root) return { closed: false };
