@@ -246,7 +246,7 @@ function environment(root: string, gitDir: string): NodeJS.ProcessEnv {
 
 const EMPTY_TREE = { sha1: '4b825dc642cb6eb9a060e54bf8d69288fbee4904', sha256: '6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321' };
 
-type Repository = Box & { remoteUrl: string | null; emptyTree: string; gitDir: string };
+type Repository = Box & { remoteUrl: string | null; emptyTree: string; gitDir: string; config: string };
 
 /**
  * The box for a located repository: the configuration overrides that neutralize every filter it
@@ -254,10 +254,23 @@ type Repository = Box & { remoteUrl: string | null; emptyTree: string; gitDir: s
  * configured elsewhere than the workspace, refuses (unsupported or failed), never runs Git
  * without the overrides.
  */
+/** The configuration a box is built from: origin, the work tree, the object format and every filter driver. */
+const CONFIG_READ = ['config', '--null', '--get-regexp', '^(remote\\.origin\\.url|core\\.worktree|extensions\\.objectformat|filter\\..+\\.(smudge|clean|process|required))$'];
+
+/**
+ * Every Git process of a call reads the repository's configuration again. A filter driver (or
+ * work tree) added while the call ran was not neutralized: the answer is refused (fails closed).
+ */
+async function sameConfig(repo: Repository): Promise<void> {
+  // Read as the box's first read was: without the overrides (`-c` entries are listed as configuration).
+  const { stdout } = await runGit({ ...repo, overrides: [] }, CONFIG_READ, { okCodes: [0, 1] });
+  if (hash(stdout) !== repo.config) failed('the repository configuration changed during the read');
+}
+
 async function boxFor(located: Extract<Located, { kind: 'repository' }>, git: string, deadline: number): Promise<Repository | 'unsupported'> {
   const box: Box = { git, root: located.root, env: environment(located.root, located.gitDir), deadline, overrides: [] };
   if (!(await recentEnough(box))) throw new RpcError(ERROR.unavailable, FIXED.tooOld, { reason: 'git_unavailable' });
-  const { stdout } = await runGit(box, ['config', '--null', '--get-regexp', '^(remote\\.origin\\.url|core\\.worktree|extensions\\.objectformat|filter\\..+\\.(smudge|clean|process|required))$'], { okCodes: [0, 1] });
+  const { stdout } = await runGit(box, CONFIG_READ, { okCodes: [0, 1] });
   let remoteUrl: string | null = null;
   let worktree: string | undefined;
   let format = 'sha1';
@@ -283,7 +296,7 @@ async function boxFor(located: Extract<Located, { kind: 'repository' }>, git: st
   }
   const emptyTree = format === 'sha256' ? EMPTY_TREE.sha256 : format === 'sha1' ? EMPTY_TREE.sha1 : failed('unknown object format');
   box.overrides = [...neutral].sort().flatMap(key => ['-c', `${key}=${key.endsWith('.required') ? 'false' : ''}`]);
-  return { ...box, remoteUrl, emptyTree, gitDir: located.gitDir };
+  return { ...box, remoteUrl, emptyTree, gitDir: located.gitDir, config: hash(stdout) };
 }
 
 // ---- Names, URLs, snapshots, cursors ----
@@ -312,8 +325,11 @@ export function scrubRemoteUrl(url: string | null): string | null {
     return host ? `${protocol}://${host}${scheme[3]}` : null;
   }
   if (/^file:/i.test(value)) return null;
-  // scp-like `[user@]host:path`: a colon before any slash, and not a Windows drive letter.
-  const scp = /^(?:[^@/:]*@)?([^@/:]+):(.*)$/.exec(value);
+  // scp-like `[user[:password]@]host:path`: a colon before any slash, and not a Windows drive
+  // letter. User information is everything up to the last '@' before the first slash.
+  const slash = value.indexOf('/');
+  const at = (slash < 0 ? value : value.slice(0, slash)).lastIndexOf('@');
+  const scp = /^([^@/:]+):(.*)$/.exec(at < 0 ? value : value.slice(at + 1));
   if (scp && scp[1]!.length > 1 && !scp[2]!.startsWith('\\')) return `${scp[1]}:${scp[2]}`;
   return null;
 }
@@ -522,6 +538,26 @@ function addedHunks(text: string): { hunks: GitDiffHunk[]; additions: number } {
 
 const holdsKey = (bytes: Buffer) => PRIVATE_KEY.test(bytes.toString('latin1'));
 
+/**
+ * A file as it is answered, and what it costs a page: its JSON size. The limits hold for what is
+ * sent, not for Git's bytes: decoding replaces each invalid UTF-8 byte with U+FFFD (three bytes),
+ * and every line adds its JSON structure. Text whose decoded content is over
+ * WORKSPACE_GIT.maxFileBytes, or whose answer alone would be over maxTotalBytes, is too_large.
+ */
+function sized(file: GitDiffFile): { file: GitDiffFile; cost: number } {
+  const cost = (value: GitDiffFile) => Buffer.byteLength(JSON.stringify(value)) + 1;
+  if (file.kind !== 'text') return { file, cost: cost(file) };
+  let content = 0;
+  for (const hunk of file.hunks) for (const line of hunk.lines) content += Buffer.byteLength(line.content, 'utf8');
+  const bytes = cost(file);
+  if (content <= WORKSPACE_GIT.maxFileBytes && bytes <= PAGE_BYTES) return { file, cost: bytes };
+  const large: GitDiffFile = { ...file, kind: 'too_large', hunks: [] };
+  return { file: large, cost: cost(large) };
+}
+
+/** What one page's files may take as JSON: WORKSPACE_GIT.maxTotalBytes, less room for the rest of the answer. */
+const PAGE_BYTES = WORKSPACE_GIT.maxTotalBytes - 16 * 1024;
+
 // ---- The service ----
 
 export type GitReaderOptions = {
@@ -683,6 +719,7 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
       }
     }
     digest.update(await statMark(path.join(repo.gitDir, 'index')));
+    await sameConfig(repo);
     return {
       state: 'repository', branch: current, detached, head, upstream, baseRef, aheadBehind, hasRemote: repo.remoteUrl !== null,
       remoteUrl: scrubRemoteUrl(repo.remoteUrl), dirty, files, hiddenCount, truncated, snapshot: `s1.${digest.digest('hex').slice(0, 40)}`,
@@ -805,13 +842,14 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
       for (let index = 0; index < results.length; index++) {
         const result = results[index];
         if (result === undefined) continue; // no content change (a file only touched)
-        const cost = 256 + result.cost;
-        if (files.length && used + cost > WORKSPACE_GIT.maxTotalBytes) { next = start + index; break; }
+        const cost = result.cost;
+        if (files.length && used + cost > PAGE_BYTES) { next = start + index; break; }
         used += cost;
         files.push(result.file);
       }
       start += window.entries.length;
     }
+    await sameConfig(repo);
     const nextCursor = next === undefined ? undefined : (() => {
       const nextBody = { offset: next, snapshot };
       return `c1.${next}.${snapshot}.${mac(cursorScope(workspaceId, compare, relative, nextBody))}`;
@@ -881,9 +919,7 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
   type Result = { file: GitDiffFile; cost: number } | undefined;
 
   async function diffWindow(repo: Repository, planned: Planned[], mode: GitCompare['mode'], range: string[], diffFlags: string[], ignoreWhitespace: boolean): Promise<Result[]> {
-    const shown = (entry: Entry, kind: GitDiffFile['kind'], extra: Partial<GitDiffFile> = {}, cost = 0): Result => ({
-      file: { path: entry.path, ...(entry.oldPath ? { oldPath: entry.oldPath } : {}), change: entry.change, kind, additions: 0, deletions: 0, hunks: [], ...extra }, cost: cost + Buffer.byteLength(entry.path) + Buffer.byteLength(entry.oldPath ?? ''),
-    });
+    const shown = (entry: Entry, kind: GitDiffFile['kind'], extra: Partial<GitDiffFile> = {}, _cost = 0): Result => sized({ path: entry.path, ...(entry.oldPath ? { oldPath: entry.oldPath } : {}), change: entry.change, kind, additions: 0, deletions: 0, hunks: [], ...extra });
     const readable = (size: number) => size <= GIT_READ.maxScanBytes;
     const wanted = new Map<string, number>();
     for (const entry of planned) {

@@ -851,7 +851,8 @@ implied. alpd lists the capability when it has the workspace registry.
   unchanged one an empty `files`.
 - **Files**: `{ path, oldPath?, change, kind, additions, deletions, hunks }`. `kind` is `text`
   (hunks given), `binary` (Git's binary detection, or a NUL or over 30% control characters as
-  §12.4), `too_large` (its patch over 1 MiB, `WORKSPACE_GIT.maxFileBytes`), `withheld` (content
+  §12.4), `too_large` (its patch, or its lines' content as sent, decoded as UTF-8, over 1 MiB,
+  `WORKSPACE_GIT.maxFileBytes`, or the file's JSON alone over a page), `withheld` (content
   that holds a private key, as §12.4, on either side), `symlink` (a link on either side: its target
   is never shown) or `submodule` (a gitlink: no content, never recursed). Only `text` has hunks;
   `additions`/`deletions` count its lines. A hunk is `{ oldStart, oldCount, newStart, newCount,
@@ -863,7 +864,8 @@ implied. alpd lists the capability when it has the workspace registry.
   is left out of status rows and diffs entirely, path included, and counted in `hiddenCount`;
   rename and copy detection never brings a blocked side's content into another file's hunks. A
   deleted file's historical content is subject to the same rules as a current one.
-- **Pages**: one answer holds at most 2 MiB of patch (`WORKSPACE_GIT.maxTotalBytes`) and gives
+- **Pages**: one answer's files take at most 2 MiB as JSON (`WORKSPACE_GIT.maxTotalBytes`, measured
+  as sent: invalid UTF-8 bytes are sent as U+FFFD and every line adds its structure) and it gives
   `nextCursor` for the rest, with `truncated: true` (also set when untracked files beyond the limit
   were left out). `snapshot` is an opaque token of the state compared (HEAD, index and the change
   list); a `cursor` continues only the same workspace, comparison, `path` and snapshot: when the
@@ -877,8 +879,12 @@ implied. alpd lists the capability when it has the workspace registry.
   names: no external diff (`--no-ext-diff`), no textconv (`--no-textconv`), no fsmonitor, no
   hooks, no pager, every clean/smudge/process filter neutralized, no submodule recursion, no
   network protocol. Paths are never options or pathspec magic (`--` and literal pathspecs). Each
-  call has a deadline (its Git processes' groups killed after it) and an output bound; Git processes
-  are limited per alpd. The workspace's real path must be the repository's top level; `.git` links
+  call has a deadline (its Git processes' groups killed after it; on Windows, where no process group
+  exists, only `git.exe` itself: Windows is not a supported platform for this method) and an output
+  bound; Git processes are limited per alpd. The filter drivers are read once per call and every
+  Git process of the call reads the configuration again, so the configuration is read once more at
+  the end: a driver added meanwhile refuses the answer (`1000 git_failed`); it may have run, which
+  takes write access to the repository's `.git` (that writer can run programs as the user anyway). The workspace's real path must be the repository's top level; `.git` links
   (worktrees) are checked as the registry's worktrees are.
 - **Errors**: unknown `workspaceId` `1001 not_found`; `workspace.git.diff` outside a repository
   `1001 not_repository`; no Git found `1005 git_unavailable`; a Git failure, timeout or output over
