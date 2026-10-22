@@ -468,3 +468,26 @@ test('mail that arrives while a session first opens waits for it without stallin
     await until(() => !runtime.snapshot('root').busy);
   }
 });
+
+test('mail that reaches an assignment while it first opens rides with its brief, in one turn', async t => {
+  let gate;
+  const { root, runtime, runtimes, of, prompt } = await setup(t, async (transport, method) => {
+    if (method === 'thread/start' && transport.index === 1) await new Promise(resolve => { gate = resolve; });
+    return undefined;
+  });
+  await runtime.open('root', { cwd: root, persist: true });
+  await prompt('root', 'one');
+  const delegating = runtimes[0].call('alp_delegate', { agent: 'lead', task: 'THE BRIEF', wait: false });
+  await until(() => gate);
+  const child = of('root', 'assignment')[0].assignment.id;
+  await runtimes[0].call('alp_send', { to: child, kind: 'note', body: 'EARLY MAIL' });
+  gate();
+  await delegating;
+  await until(() => runtimes[1].of('turn/start').length);
+  // Nothing else starts: a second turn would overlap the brief's.
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const turns = runtimes[1].of('turn/start').map(params => JSON.stringify(params));
+  assert.equal(turns.length, 1, turns.join('\n'));
+  assert.match(turns[0], /THE BRIEF/);
+  assert.match(turns[0], /EARLY MAIL/);
+});

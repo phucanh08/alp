@@ -1170,7 +1170,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   const label = (kind: RuntimeKind) => kind === 'claude' ? 'Claude' : kind === 'acp' ? 'ACP agent' : kind === 'antigravity' ? 'Antigravity' : 'Codex';
   const pauseOf = (kind: RuntimeKind) => paused.all ?? paused.runtimes[kind];
   /** Whether a session may not start a turn by itself now: parked, or on a paused runtime. */
-  const held = (session: Session) => !!session.parked || !!pauseOf(session.runtimeKind) || (session.lifecycleHolds ?? 0) > 0;
+  const held = (session: Session) => !!session.parked || !!pauseOf(session.runtimeKind) || (session.lifecycleHolds ?? 0) > 0 || !!session.awaitingBrief;
 
   /**
    * Marks a session pending (its native process restarting) with a fresh `acknowledged` that resolves
@@ -2852,6 +2852,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         addPin(childId, child, pins, { kind: 'claim', body: `Task ${task.id}: ${task.title}`, paths: task.paths, task: task.id });
       }
 
+      // Mail held for the brief goes with it: startPrompt takes what waits.
+      child.awaitingBrief = false;
+      child.wakeHeld = false;
       await startPrompt(childId, {
         clientMessageId: `task-${childId}`,
         delivery: 'auto',
@@ -2994,6 +2997,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         ? sessions.get(context.parent)?.mapping.agent.name
         : undefined,
       ...(context?.role ? { role: context.role } : {}),
+      // A new assignment's first turn is its brief; mail that comes sooner waits for it.
+      ...(context && !context.role && !context.recovered ? { awaitingBrief: true } : {}),
       journal: [],
       tasks: [],
 
