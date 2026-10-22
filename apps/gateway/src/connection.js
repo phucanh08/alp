@@ -6,7 +6,7 @@ import { ERROR, PROTOCOL_VERSION, RPC_ERROR, WORKSPACE_FILES, base64Bytes, block
 import { validateParams } from '@anhlp/alp-protocol/contract';
 import { isAlpClientError } from '@anhlp/alp-client/portable';
 import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.js';
-import { projectGitDiff, projectGitStatus } from './policy.js';
+import { projectGitDiff, projectGitStatus, gatewayAttachmentLimits, projectAttachment, projectUploadBegun } from './policy.js';
 import { assertProjectDataContent } from '@anhlp/alp-core/library-edit';
 
 /**
@@ -191,6 +191,34 @@ const GIT_REFUSALS = Object.freeze({
   blocked_path: 'This path is never readable remotely: .git, .env files, ALP configuration and key or credential files are always refused',
   invalid_path: 'path must be a relative path inside the workspace, with / between names and no . or .. segment',
 });
+/**
+ * The message the client gets for each alpd refusal of an attachment call (docs/protocol/
+ * alp-json-rpc-v1.md §12.6): fixed here, so no alpd text (its store's path, a file system error)
+ * can pass. Code, reason and ATTACHMENT_ERROR_DATA pass on.
+ * @type {Readonly<Record<string, string>>}
+ */
+const ATTACHMENT_REFUSALS = Object.freeze({
+  not_found: 'No such upload or attachment for this credential',
+  upload_expired: 'This upload expired before it was committed; begin it again',
+  invalid_name: 'The file name needs a visible character and at most 255 UTF-8 bytes once control characters and path separators are removed',
+  invalid_data: 'A chunk must be canonical base64 of at least one byte and at most maxChunkBytes decoded',
+  invalid_params: 'The request does not match the attachment contract',
+  attachment_too_large: 'The upload is larger than this daemon host keeps, or the chunk goes beyond its declared size',
+  offset_mismatch: 'The chunk does not continue what the upload holds; send it at `received`',
+  chunk_conflict: 'Bytes at this offset were already received with other content',
+  upload_incomplete: 'Not every byte of the upload has arrived yet',
+  hash_mismatch: 'The bytes received do not have this SHA-256; the upload was aborted',
+  quota_exceeded: 'The attachment quota is used up; commit, abort or delete an upload first',
+  attachment_referenced: 'A prompt still references this attachment; it is kept',
+  attachment_limit: 'The prompt carries more attachments, or more bytes of them, than the daemon host takes',
+  attachment_unavailable: 'The attachment store of the daemon host cannot be used now',
+  attachment_unsupported: 'This session\'s runtime cannot read attachments yet; they stay stored and the prompt was not sent',
+  request_conflict: 'This requestId was used for another upload',
+  persistence_failed: 'The daemon host could not store the attachment; the upload was aborted',
+});
+/** Numbers and limit names of alpd's attachment errors a client acts on (where to resume, which quota). */
+const ATTACHMENT_ERROR_DATA = Object.freeze(['received', 'size', 'max', 'limit', 'maxPerPrompt', 'maxPromptBytes']);
+
 /** Gateway cursors of a diff page split to fit the client's frame: per connection, at most this many kept. */
 const GIT_PAGE_PREFIX = 'alp-gateway-page:';
 const MAX_GIT_PAGES = 64;
@@ -279,6 +307,8 @@ export class ClientConnection {
   /** Diff pages the gateway split (workspace.git.diff): its cursor → what continues it. */
   /** @type {Map<string, { key: string, cursor: string | undefined, skip: number, snapshot: string }>} */ #gitPages = new Map();
   /** @type {(connection: ClientConnection, code: number) => void} */ #onClosed;
+  /** Effective attachment limits of this connection (gatewayAttachmentLimits), once alpd said hello. */
+  /** @type {import('@anhlp/alp-protocol').AttachmentLimits} */ #attachmentLimits = gatewayAttachmentLimits(undefined);
 
   /**
    * @param {{
@@ -320,6 +350,7 @@ export class ClientConnection {
     this.#daemonHello = hello;
     const listed = Array.isArray(hello.capabilities) ? hello.capabilities : [];
     this.#capabilities = FORWARDED_CAPABILITIES.filter(capability => listed.includes(capability));
+    this.#attachmentLimits = gatewayAttachmentLimits(hello.attachmentLimits, this.#limits.maxFrame);
     client.onEvent(envelope => { if (!this.#capabilities.includes('workspace.worktree') || !this.#grant.permissions.has('workspace.manage')) { this.#event(envelope); return; } this.#eventTail = this.#eventTail.then(async () => { await this.#refreshWorktrees(); this.#event(envelope); }).catch(() => { this.close(CLOSE_CODE.internal, 'Workspace authority unavailable; reconnect'); }); });
     client.onClose(error => this.#upstreamClosed(error));
   }
@@ -592,6 +623,7 @@ export class ClientConnection {
       ...(hostLabel(this.#daemonHello.hostname) ? { hostname: hostLabel(this.#daemonHello.hostname) } : {}),
       capabilities: [...this.#capabilities],
       ...(this.#capabilities.includes('prompt.images') ? { promptImageLimits: promptImageLimits(this.#limits.maxFrame) } : {}),
+      ...(this.#capabilities.includes('attachments') ? { attachmentLimits: { ...this.#attachmentLimits } } : {}),
     };
   }
 
@@ -890,6 +922,40 @@ export class ClientConnection {
     return { ...rest, sessions: kept, ...(cursor === undefined ? {} : { nextCursor: cursor }) };
   }
 
+  /**
+   * Who an attachment call acts for, as alpd binds uploads (§12.6): this credential, its grant
+   * epoch (a reissued grant is another one) and the canonical workspaces it may use now. Never
+   * anything the client sent.
+   */
+  #attachmentContext() { return { principalId: this.#grant.id, principalEpoch: this.#grant.scopeId ?? this.#grant.fingerprint, authorizedRoots: [...new Set(this.#grant.workspaces.map(workspace => workspace.canonical))] }; }
+
+  /** alpd's refusal of an attachment call: the gateway's fixed text, its code, reason and ATTACHMENT_ERROR_DATA only. @param {unknown} caught */
+  #attachmentError(caught) {
+    const error = /** @type {any} */ (caught);
+    if (error instanceof GatewayError || isAlpClientError(error) || typeof error?.code !== 'number') return error;
+    const reason = typeof error.data?.reason === 'string' && Object.hasOwn(ATTACHMENT_REFUSALS, error.data.reason) ? error.data.reason : undefined;
+    /** @type {Record<string, unknown>} */
+    const data = reason ? { reason } : {};
+    for (const key of ATTACHMENT_ERROR_DATA) {
+      const value = error.data?.[key];
+      if ((Number.isSafeInteger(value) && value >= 0) || (key === 'limit' && typeof value === 'string' && /^[a-z_]{1,32}$/.test(value))) data[key] = value;
+    }
+    return new GatewayError(error.code, reason ? ATTACHMENT_REFUSALS[reason] : 'The attachment request failed on the daemon host', Object.keys(data).length ? data : undefined);
+  }
+
+  /** One attachment call to alpd with this credential's context; alpd's refusal rewritten. @param {string} method @param {Record<string, unknown>} params */
+  #attachmentCall(method, params) {
+    return this.#call(method, { ...params, ...this.#attachmentContext() }).catch(error => { throw this.#attachmentError(error); });
+  }
+
+  /** An attachment answer the gateway passes on, or a refusal. @param {unknown} raw @param {string} method */
+  #attachmentAnswer(raw, method) {
+    const attachment = projectAttachment(/** @type {any} */ (raw)?.attachment);
+    if (attachment) return { attachment };
+    this.#log.error(`${method} answered an attachment the gateway does not pass on; refused it`, { code: 'ALP_GATEWAY_ATTACHMENT_REFUSED' });
+    throw new GatewayError(ERROR.failed, 'The daemon host answered an attachment the gateway does not pass on');
+  }
+
   #worktreeContext() { return { principalId: this.#grant.id, principalEpoch: this.#grant.scopeId ?? this.#grant.fingerprint, mappingIds: this.#grant.worktreeMappings ?? [], authorizedRoots: this.#baseWorkspaces.map(w => w.canonical) }; }
   async #refreshWorktrees() {
     if (!this.#capabilities.includes('workspace.worktree') || !this.#grant.permissions.has('workspace.manage')) return;
@@ -1137,12 +1203,16 @@ export class ClientConnection {
     },
 
     'session.prompt': async params => {
+      // Attachment parts are the credential's own uploads: attachments.write as well, before anything else.
+      const attaches = params.content.some((/** @type {any} */ part) => part?.type === 'attachment');
+      if (attaches && !this.#grant.permissions.has('attachments.write')) throw forbidden('This credential lacks attachments.write', GATEWAY_REASON.grant, { permission: 'attachments.write' });
       await this.#drive(params.sessionId);
       let count = 0;
       let total = 0;
       const limits = promptImageLimits(this.#limits.maxFrame);
       for (const part of params.content) {
         if (!CONTENT_TYPES.includes(part?.type)) throw forbidden(`Prompt content of type ${JSON.stringify(part?.type)} cannot be sent through the gateway`, GATEWAY_REASON.contentType, { allowed: [...CONTENT_TYPES] });
+        if (part.type === 'attachment' && !this.#capabilities.includes('attachments')) throw forbidden('The daemon host does not store attachments', GATEWAY_REASON.contentType, { allowed: CONTENT_TYPES.filter(type => type !== 'attachment') });
         if (part.type !== 'image') continue;
         // The schema let only { type, mimeType, data, name } through: inline data, no path or URL.
         const bytes = base64Bytes(part.data);
@@ -1152,8 +1222,9 @@ export class ClientConnection {
         if (bytes > limits.maxBytes) throw forbidden(`An image through the gateway is at most ${limits.maxBytes} bytes`, GATEWAY_REASON.imageLimit, limits);
         if (total > limits.maxTotalBytes) throw forbidden(`The images of one prompt through the gateway are at most ${limits.maxTotalBytes} bytes together`, GATEWAY_REASON.imageLimit, limits);
       }
-      // A receipt's error is the provider's or the runtime's text (t-d27c).
-      const result = await this.#call('session.prompt', params);
+      // A receipt's error is the provider's or the runtime's text (t-d27c). alpd resolves attachment
+      // parts for this credential's context only (the schema let only { type, attachmentId } through).
+      const result = await this.#call('session.prompt', attaches ? { ...params, ...this.#attachmentContext() } : params);
       return result && typeof result === 'object' && result.error !== undefined ? { ...result, error: safeAlpError(result.error, this.#grant.workspaces, { home: HOME }) } : result;
     },
 
@@ -1327,6 +1398,28 @@ export class ClientConnection {
       if (snapshot !== undefined && projected.page.snapshot !== snapshot) throw new GatewayError(ERROR.conflict, GIT_REFUSALS.stale_snapshot, { reason: 'stale_snapshot' });
       return this.#gitPage(projected.page, { key, cursor, skip });
     },
+
+    // Attachments (docs/protocol/alp-json-rpc-v1.md §12.6, issue #121 I): begin checks the session
+    // against the grant afresh; every call carries this credential's context, so alpd checks the
+    // binding (credential, grant epoch, authorized project, live session) again and answers an
+    // upload of anyone else as an unknown one. Chunks over the advertised size never reach alpd.
+    'attachment.begin': async params => {
+      await this.#resolve(params.sessionId, { fresh: true });
+      const begun = projectUploadBegun(await this.#attachmentCall('attachment.begin', params), this.#attachmentLimits.maxChunkBytes);
+      if (begun) return begun;
+      this.#log.error('attachment.begin answered an upload the gateway does not pass on; refused it', { code: 'ALP_GATEWAY_ATTACHMENT_REFUSED' });
+      throw new GatewayError(ERROR.failed, 'The daemon host answered an upload the gateway does not pass on');
+    },
+    'attachment.chunk': async params => {
+      if (base64Bytes(params.data) > this.#attachmentLimits.maxChunkBytes) throw new GatewayError(RPC_ERROR.invalidParams, `A chunk carries at most ${this.#attachmentLimits.maxChunkBytes} decoded bytes through this gateway`, { reason: 'invalid_data', max: this.#attachmentLimits.maxChunkBytes });
+      const result = await this.#attachmentCall('attachment.chunk', params);
+      if (!Number.isSafeInteger(result?.received) || !Number.isSafeInteger(result?.size)) throw new GatewayError(ERROR.failed, 'The daemon host answered a chunk the gateway does not pass on');
+      return { received: result.received, size: result.size };
+    },
+    'attachment.commit': async params => this.#attachmentAnswer(await this.#attachmentCall('attachment.commit', params), 'attachment.commit'),
+    'attachment.abort': async params => { await this.#attachmentCall('attachment.abort', params); return { aborted: true }; },
+    'attachment.get': async params => this.#attachmentAnswer(await this.#attachmentCall('attachment.get', params), 'attachment.get'),
+    'attachment.delete': async params => { await this.#attachmentCall('attachment.delete', params); return { deleted: true }; },
 
     // Project resources (docs/protocol/alp-json-rpc-v1.md §15): alpd never walks up from
     // projectRoot, so the exact string the grant lists is the whole check. Writes are recorded by

@@ -46,7 +46,9 @@ Số mục (§) được code tham chiếu; giữ ổn định.
   - `capabilities` = capability alpd liệt kê ∩ `{attach.after, prompt.receipts, task, team,
     library, settings.language, session.list.page, question.watch, question.watch.turns,
     session.attention, workspace.files, workspace.files.read, prompt.images, library.project.write,
-    workspace.git}`.
+    workspace.git, attachments}`.
+  - `attachmentLimits` khi có `attachments`: giới hạn alpd quảng bá, mỗi số không vượt `ATTACHMENTS`,
+    `maxChunkBytes` hạ thêm cho vừa `limits.maxFrame` của gateway (`gatewayAttachmentLimits`, §5.14).
   - Không có `pid` và không bao giờ có `extension.methods`.
   - Trong `library` và `settings.language`, các method ghi trả `-32601 not_exposed` (§5.4).
     `library.get` đọc được, có redaction (§5.4, §5.7).
@@ -151,7 +153,10 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
   - `files.read`: xem danh sách thư mục và đọc nội dung file text của workspace
     (`workspace.files.list`, `workspace.files.read`, §5.10); cùng với `project.read`, xem nội dung
     diff Git (`workspace.git.diff`, §5.13). Trạng thái Git (`workspace.git.status`: nhánh, danh sách
-    file thay đổi) chỉ cần `project.read`.
+    file thay đổi) chỉ cần `project.read`;
+  - `attachments.write`: tải file lên kho attachment của alpd và gửi chúng trong prompt (§5.14). Dùng
+    cùng `session.write` (`get` cùng `session.read`); không kéo theo quyền nào, không là mặc định:
+    `--permission session.read,session.write,attachments.write`.
   Quyền write kéo theo quyền read cùng họ. `files.read` không kéo theo quyền nào và không quyền nào
   kéo theo nó. Không có `--permission`, CLI cấp bốn quyền `session.*` và `project.*`, **không bao
   giờ** cấp `files.read`: chủ máy phải ghi rõ `--permission files.read` cho từng credential được đọc
@@ -261,7 +266,8 @@ coi là `failed`.
 | 1003 | `outside_workspace` | `projectRoot`/`spec.cwd` không thuộc grant; `session.create` với id thuộc workspace khác |
 | 1003 | `host_scope` | `team.list`/`library.list`/`library.get` thiếu `projectRoot` |
 | 1003 | `spec_field` | trường `spec` không cho phép (`data.field`); agent/mode/thinking không phải tên đơn giản; `model` sai ngữ pháp model id (§5.3) |
-| 1003 | `content_type` | prompt có phần không phải `text` hay `image` |
+| 1003 | `content_type` | prompt có phần không phải `text`, `image` hay `attachment` (hoặc `attachment` khi alpd không có capability `attachments`) |
+| -32602 | `invalid_data` | `attachment.chunk` có dữ liệu giải mã quá `attachmentLimits.maxChunkBytes`; gateway từ chối trước alpd (§5.14) |
 | 1003 | `blocked_path` | `workspace.files.list`/`read` hay `workspace.git.diff` với đường dẫn trong block list (`.git`, `.env*`, `.alp`, file khoá/credential); gateway từ chối trước alpd (§5.10, §5.13) |
 | -32602 | `invalid_cursor` | `workspace.git.diff` với cursor trang mà connection này không cấp, hoặc cho phép so sánh khác (§5.13) |
 | 1003 | `image_limit` | ảnh trong prompt vượt giới hạn của gateway (§5.8; `data` nêu `maxCount`, `maxBytes`, `maxTotalBytes`) |
@@ -348,7 +354,13 @@ Cột Test dùng các mã sau:
 | `workspace.git.diff` | `workspace.git` | như `workspace.git.status`; `compare` dựng lại từ `mode`, `baseRef`, `ignoreWhitespace`; `path` tương đối thuần, không bị chặn (kiểm tra trước alpd); file quá `WORKSPACE_GIT` → từ chối cả answer; trang cắt cho vừa frame (§5.13) | project.read + files.read | exposed | P S R I |
 | `board.list` | — | `projectRoot` thuộc grant | session.read | exposed | P S |
 | `session.create` | — | `spec.cwd` + allowlist; id có sẵn phải trong scope; kiểm lại kết quả | session.write | exposed | P S I |
-| `session.prompt` | `prompt.receipts`, `prompt.images` | session; `text` và ảnh inline trong giới hạn §5.8; **drive**: mode của session và mọi tổ tiên, tra mới | session.write | exposed | P S M I |
+| `session.prompt` | `prompt.receipts`, `prompt.images`, `attachments` | session; `text`, ảnh inline trong giới hạn §5.8 và attachment chỉ bằng `attachmentId` (cần thêm `attachments.write`; alpd giải theo principal, epoch, project được phép và đúng session; runtime chưa đọc được thì `1005 attachment_unsupported`, §5.14); **drive**: mode của session và mọi tổ tiên, tra mới | session.write | exposed | P S M I |
+| `attachment.begin` | `attachments` | `sessionId` thuộc grant (tra mới); alpd gắn upload với credential, grant epoch, project canonical (một trong `authorizedRoots`) và session; context principal do gateway đặt, không bao giờ của client; answer chiếu theo allow-list (§5.14) | attachments.write + session.write | exposed | P S R I |
+| `attachment.chunk` | `attachments` | upload: alpd kiểm lại binding mỗi chunk, upload của người khác trả như id không tồn tại; dữ liệu ≤ `maxChunkBytes` (gateway kiểm trước alpd) | attachments.write + session.write | exposed | P S I |
+| `attachment.commit` | `attachments` | như `attachment.chunk`; alpd kiểm SHA-256 mọi byte rồi mới công bố; answer chiếu `projectAttachment` | attachments.write + session.write | exposed | P S R I |
+| `attachment.abort` | `attachments` | như `attachment.chunk` | attachments.write + session.write | exposed | P S |
+| `attachment.get` | `attachments` | chỉ attachment của chính credential (alpd kiểm binding); chỉ metadata, không byte, không path | attachments.write + session.read | exposed | P S R I |
+| `attachment.delete` | `attachments` | như `attachment.get`; attachment còn được tham chiếu → `1004 attachment_referenced` | attachments.write + session.write | exposed | P S I |
 | `session.interrupt` | — | session; **stop**: root luôn được; assignment khi mode các requester trong grant | session.write | exposed | P S M I |
 | `session.configure` | — | session; mode mới trong grant | session.write | exposed | P S M |
 | `session.close` | — | session; **stop** như `interrupt` | session.write | exposed | P S M |
@@ -673,6 +685,44 @@ commit, push, pull, merge, checkout, switch, stash hay thao tác Git nào khác 
   repo, đi qua như text (không ký tự điều khiển, ≤ 1024 ký tự).
 Test: `apps/gateway/tests/git.test.js`.
 
+### 5.14 Attachment không phải ảnh (issue #121, I)
+
+Kho object bất biến của alpd (protocol §12.6, capability `attachments`): client tải file theo chunk
+bằng id mờ, rồi gửi `{ type: 'attachment', attachmentId }` trong `session.prompt`. Không có tải
+xuống, giải nén, chạy file hay render HTML qua remote.
+
+- **Quyền**: `attachments.write` (không mặc định, không kéo theo gì) **và** `session.write` cho
+  `begin`, `chunk`, `commit`, `abort`, `delete`; `attachments.write` và `session.read` cho `get`
+  (`alsoRequires`). `get` chỉ trả attachment của chính credential, nên credential không có
+  `attachments.write` cũng không có gì để đọc. Prompt có phần `attachment` cần thêm
+  `attachments.write` (`1003 grant`, trước alpd). Thiếu quyền → `1003 grant` nêu đúng
+  `data.permission`, alpd không nhận gì.
+- **Binding**: gateway gửi kèm mọi lời gọi `principalId` (id credential), `principalEpoch` (scope của
+  grant: `credential reissue` tạo epoch mới) và `authorizedRoots` (workspace canonical của grant);
+  field cùng tên của client bị bỏ (không có trong `params` của matrix). alpd gắn upload với
+  principal + epoch, project canonical và session; mỗi `chunk`, `commit`, `get`, `delete` và prompt
+  kiểm lại cả binding, và id của principal, epoch, project hay session khác trả **giống hệt** id
+  không tồn tại (`1001 not_found`). `begin` còn kiểm session thuộc grant ngay ở gateway (tra mới):
+  ngoài grant → `1001` như session không tồn tại.
+- **Giới hạn**: `attachmentLimits` trong hello (§3). Chunk quá `maxChunkBytes` giải mã → `-32602
+  invalid_data` trước alpd; frame vẫn bị chặn bởi `limits.maxFrame`, rate và `maxPending` như mọi
+  request (không buffer vô hạn). Quota (2 upload đang dở, 200 MiB mỗi principal, 1 GiB mỗi daemon,
+  tính cả object còn được tham chiếu) do alpd giữ: `1005 quota_exceeded` với `data.limit`.
+- **Answer**: `projectUploadBegun`, `projectAttachment` trong `policy.js` chỉ giữ field của schema,
+  kiểm từng field (id, tên hiển thị ≤ 255 byte không ký tự điều khiển hay dấu phân cách đường dẫn,
+  MIME, kích thước, SHA-256, thời điểm); không bao giờ có đường dẫn host. Field sai → `1000`.
+- **Lỗi**: message cố định theo `data.reason` (`ATTACHMENT_REFUSALS` trong `connection.js`); chỉ mã,
+  `reason` và số liệu client cần để tiếp tục (`received`, `size`, `max`, `limit`, `maxPerPrompt`,
+  `maxPromptBytes`) đi qua. Không đường dẫn kho, không text lỗi hệ thống.
+- **Thu hồi giữa chừng**: `credential revoke` (hay `rotate`/`reissue`) đóng connection ngay (4401);
+  token cũ không lấy được ticket, nên không chunk hay commit nào nữa tới alpd. Request đã chuyển tới
+  alpd trước đó vẫn có thể xong. Upload dở hết hạn sau `uploadTimeoutMs` (1 giờ) và được thu hồi;
+  credential reissue là epoch khác nên không tiếp tục được upload cũ.
+- **Runtime**: runtime hiện tại (Codex, Claude qua ALP) chưa đọc được attachment: prompt có attachment
+  bị từ chối thật thà `1005 attachment_unsupported` trước khi gửi gì, file vẫn được giữ. Nhánh J
+  (t-15b0.15) mở phần này.
+Test: `apps/gateway/tests/attachments.test.js`, `test/integration/gateway.test.js` (alpd thật).
+
 ## 6. Streaming và recovery
 
 ### 6.1 Thuật toán client (theo contract §8.3)
@@ -874,6 +924,9 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
 - **Git qua remote chỉ đọc** (§5.13): status với `project.read`, diff với `project.read` +
   `files.read`. Không có commit/push/pull/merge/switch; cursor trang mà gateway tự cắt chỉ sống trong
   một connection.
+- **Attachment qua remote** (§5.14): chỉ tải lên, xem metadata và xoá file của chính credential;
+  không tải xuống. Runtime hiện tại chưa đọc được attachment (`attachment_unsupported`) cho tới
+  nhánh J. Thu hồi credential không huỷ request đã chuyển tới alpd trước đó.
 - **Nội dung library qua remote là bản đã redaction ở gateway** (§5.7), không phải contract của
   daemon: alpd vẫn chỉ redact giá trị `env`/`headers` (`x-alp.redacts`). Gateway không đoán secret
   bằng heuristic; nó ẩn cả field (mọi `args`, cả URL MCP, cả lệnh hook), nên client không thấy
