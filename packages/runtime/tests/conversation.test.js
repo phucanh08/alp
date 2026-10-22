@@ -491,3 +491,68 @@ test('mail that reaches an assignment while it first opens rides with its brief,
   assert.match(turns[0], /THE BRIEF/);
   assert.match(turns[0], /EARLY MAIL/);
 });
+
+test('an assignment whose brief does not start runs no turn on the mail that waited for it', async t => {
+  let gate;
+  const { root, runtime, runtimes, of, prompt } = await setup(t, async (transport, method) => {
+    if (transport.index !== 1) return undefined;
+    if (method === 'thread/start') await new Promise(resolve => { gate = resolve; });
+    if (method === 'turn/start') throw new Error('turn start refused');
+    return undefined;
+  });
+  await runtime.open('root', { cwd: root, persist: true });
+  await prompt('root', 'one');
+  const delegating = runtimes[0].call('alp_delegate', { agent: 'lead', task: 'THE BRIEF', wait: false });
+  await until(() => gate);
+  const child = of('root', 'assignment')[0].assignment.id;
+  await runtimes[0].call('alp_send', { to: child, kind: 'note', body: 'EARLY MAIL' });
+  gate();
+  const result = await delegating;
+  assert.match(JSON.stringify(result), /turn start refused/);
+  await until(() => runtimes[1].closed);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(runtimes[1].of('turn/start').length, 1, 'only the brief was tried');
+});
+
+test('mail that reaches an assignment while its brief starts steers the brief turn once it runs', async t => {
+  let gate;
+  const { root, runtime, runtimes, of, prompt } = await setup(t, async (transport, method) => {
+    if (transport.index === 1 && method === 'turn/start') await new Promise(resolve => { gate = resolve; });
+    return undefined;
+  });
+  await runtime.open('root', { cwd: root, persist: true });
+  await prompt('root', 'one');
+  const delegating = runtimes[0].call('alp_delegate', { agent: 'lead', task: 'THE BRIEF', wait: false });
+  await until(() => gate);
+  const child = of('root', 'assignment')[0].assignment.id;
+  await runtimes[0].call('alp_send', { to: child, kind: 'note', body: 'LATE MAIL' });
+  gate();
+  await delegating;
+  await until(() => runtimes[1].calls.some(call => call.method !== 'turn/start' && JSON.stringify(call.params).includes('LATE MAIL')));
+  assert.equal(runtimes[1].of('turn/start').length, 1);
+  assert.doesNotMatch(JSON.stringify(runtimes[1].of('turn/start')[0]), /LATE MAIL/);
+});
+
+test('mail held for a brief whose turn ends while it starts wakes the assignment after it', async t => {
+  let gate;
+  const { root, runtime, runtimes, of, prompt } = await setup(t, async (transport, method, params) => {
+    if (transport.index !== 1 || method !== 'turn/start' || transport.of('turn/start').length > 1) return undefined;
+    await new Promise(resolve => { gate = resolve; });
+    // The turn starts and ends before its start returns: its notifications are replayed after it.
+    transport.turnId = 'brief-turn';
+    transport.notification('turn/started', { threadId: params.threadId, turn: { id: 'brief-turn' } });
+    transport.notification('item/completed', { threadId: params.threadId, item: { type: 'agentMessage', id: 'brief-output', text: 'done' } });
+    transport.notification('turn/completed', { threadId: params.threadId, turn: { id: 'brief-turn', status: 'completed' } });
+    return { turn: { id: 'brief-turn' } };
+  });
+  await runtime.open('root', { cwd: root, persist: true });
+  await prompt('root', 'one');
+  const delegating = runtimes[0].call('alp_delegate', { agent: 'lead', task: 'THE BRIEF', wait: false });
+  await until(() => gate);
+  const child = of('root', 'assignment')[0].assignment.id;
+  await runtimes[0].call('alp_send', { to: child, kind: 'note', body: 'LATE MAIL' });
+  gate();
+  await delegating;
+  await until(() => runtimes[1].calls.some(call => JSON.stringify(call.params).includes('LATE MAIL')));
+  assert.doesNotMatch(JSON.stringify(runtimes[1].of('turn/start')[0]), /LATE MAIL/);
+});
