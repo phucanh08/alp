@@ -105,3 +105,30 @@ export function attachments(client) {
   };
   return api;
 }
+
+/**
+ * Typed conversation methods (capabilities `session.fork` and `session.rewind`, docs/protocol/
+ * alp-json-rpc-v1.md §12.7). Both change the conversation only, never a file. Mutations are sent
+ * once: keep `requestId` (and `ifGeneration`) to repeat the identical request after a timeout, which
+ * answers the first result with `duplicate: true`. After a rewind, attached clients get a
+ * `history.reset` event: drop cached history, fetch a new tail and attach with its generation.
+ * @param {{request<T = any>(method: string, params?: unknown): Promise<T>}} client
+ */
+export function conversation(client) {
+  /** @typedef {import('@anhlp/alp-protocol').RpcMethodMap} Map */
+  return {
+    /**
+     * A new closed root whose conversation is the source root's through or before a turn (`boundary`),
+     * or a branch a rewind set aside (`branchId`); resume it with session.create { sessionId, resume: true }.
+     * Principal fields are set by a trusted gateway on its own connection, never by a remote client.
+     * @param {Map['session.fork']['params']} params @returns {Promise<Map['session.fork']['result']>}
+     */
+    fork: params => client.request('session.fork', params),
+    /**
+     * Continues the root's conversation from before `beforeTurnId` under the same session id; the
+     * later turns stay a branch (`branch.branchId`) that `fork({ branchId })` recovers.
+     * @param {Map['session.rewind']['params']} params @returns {Promise<Map['session.rewind']['result']>}
+     */
+    rewind: params => client.request('session.rewind', params),
+  };
+}
