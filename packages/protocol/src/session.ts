@@ -22,7 +22,11 @@ export type SessionSpec = {
   persist?: boolean;
   /** Keep the native thread on disk though the session cannot be resumed: an assignment, which alp_recall may question later. */
   keepThread?: boolean;
-  restore?: { agent: string; threadId: string; runtime?: string; model?: string; workflow?: { mode: string; maxPeers: number; supervisor?: boolean } };
+  restore?: {
+    agent: string; threadId: string; runtime?: string; model?: string; workflow?: { mode: string; maxPeers: number; supervisor?: boolean };
+    /** Claude: `threadId` does not exist yet and is made from this conversation on its first prompt (a fork or rewind, §12.7). */
+    base?: NativeBase;
+  };
   /** Where the native harness works, when not the project root: an assignment's git worktree. ALP files are still read from cwd. */
   workdir?: string;
   /** Explicit shared-assignment write scope; workdir points here while ALP uses cwd for its project. */
@@ -105,4 +109,42 @@ export type SessionSummary = SessionSnapshot & {
   lastError?: SessionError;
   createdAt?: string;
   updatedAt?: string;
+  /**
+   * Whether alpd can fork or rewind this session's conversation now, and why not (capabilities
+   * `session.fork` and `session.rewind`, §12.7). A single turn may still be refused: one in
+   * progress, the first one, or one alpd cannot map to the runtime's own history.
+   */
+  conversation?: { fork: boolean; rewind: boolean; reason?: 'runtime_unsupported' | 'not_persistent' | 'not_root' };
+  /** The session this root was forked from (§12.7). */
+  forkedFrom?: ForkProvenance;
+  /** Conversation branches rewinds set aside, oldest first; each stays recoverable with session.fork { branchId } (§12.7). */
+  branches?: ConversationBranch[];
+};
+
+/**
+ * A Claude conversation ALP has bound a session to but the runtime has not written yet (§12.7): the
+ * first prompt resumes `threadId` as a new session, keeping its history through the entry `at` (all of
+ * it when absent). Internal to alpd and its runtime; never accepted from a remote client.
+ */
+export type NativeBase = { threadId: string; at?: string };
+
+/** Where a fork came from (§12.7): the source root, and the turn its conversation was cut at. */
+export type ForkProvenance = {
+  sessionId: string;
+  /** The cut: through this turn, or before it; absent when the whole conversation was taken. */
+  turnId?: string;
+  boundary: 'through' | 'before' | 'whole';
+  /** Set when the fork restored a branch a rewind set aside. */
+  branchId?: string;
+  at: string;
+};
+
+/** The later turns of a conversation a rewind set aside (§12.7): kept, never deleted, recoverable as a new session. */
+export type ConversationBranch = {
+  branchId: string;
+  /** The turn the rewind went back to before; it and every later turn are in the branch. */
+  beforeTurnId: string;
+  /** How many turns the branch holds past the kept conversation. */
+  turns: number;
+  at: string;
 };

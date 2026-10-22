@@ -175,7 +175,13 @@ export type AlpEvent =
   | { type: 'pin'; pin: Pin }
   | { type: 'unpin'; pinId: string; reason: 'unpinned' | 'session_ended' }
   /** A root's attention set, or cleared when absent: sent only to `question.watch { attention: true }` connections, never kept. */
-  | { type: 'attention'; attention?: TurnAttention };
+  | { type: 'attention'; attention?: TurnAttention }
+  /**
+   * The root's conversation was rewound (capability `session.rewind`, §12.7): history pages and cursors of
+   * the earlier generation are stale. Sent to attached connections only, never kept: drop the cached
+   * history, fetch a new tail and attach again with this generation.
+   */
+  | { type: 'history.reset'; generation: string; reason: 'rewind'; branchId: string };
 
 export type Envelope = {
   sessionId: string;

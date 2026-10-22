@@ -141,9 +141,9 @@ runs before all of them pass**:
 | `batch_unsupported` | -32600 | a batch |
 | `frame_too_large` | -32600 | an oversized message on a message transport |
 | `response_too_large` | 1000 | a result over the frame limit |
-| `persistence_failed` | 1000 | `session.create`, `session.prompt`, `session.rename`, `session.archive` when the store cannot write |
-| `outcome_unknown` | 1004 | `session.prompt`: the daemon cannot tell whether the provider received the prompt (§10) |
-| `key_conflict` | 1004 | `session.prompt`: the `clientMessageId` was used with other content; `task.create`: the `requestId` was used for another task |
+| `persistence_failed` | 1000 | `session.create`, `session.prompt`, `session.rename`, `session.archive` when the store cannot write; `session.fork`/`session.rewind` when the journal or the commit cannot be written (§12.7) |
+| `outcome_unknown` | 1004 | `session.prompt`: the daemon cannot tell whether the provider received the prompt (§10); `session.fork`/`session.rewind`: whether the runtime made the fork (§12.7) |
+| `key_conflict` | 1004 | `session.prompt`: the `clientMessageId` was used with other content; `task.create`: the `requestId` was used for another task; `session.fork`/`session.rewind`: the `requestId` was used with other parameters (§12.7) |
 | `invalid_path` | -32602 | `projectRoot` is not an absolute, normalized path (§15.1, §12.3); a `workspace.files` `path` that is not plainly relative (§12.4) |
 | `invalid_scope` | -32602 | a library `scope` the entry cannot live in: `project` without `projectRoot`, providers outside the library |
 | `invalid_entry` | -32602 | library content core refuses: unknown fields, a bad MCP server, hook, provider or team, a name it refers to that does not exist |
@@ -177,6 +177,16 @@ runs before all of them pass**:
 | `quota_exceeded` | 1005 | `attachment.begin` over the active uploads, principal or daemon quota; `data.limit` names it (§12.6) |
 | `attachment_unavailable` | 1005 | the attachment store cannot be used, or a referenced object's bytes cannot be read now (§12.6) |
 | `attachment_unsupported` | 1005 | `session.prompt` with attachments to a session whose runtime cannot read them (today's runtimes), or an alpd without the store; nothing was sent or recorded (§12.6) |
+| `session_busy` | 1004 | `session.rewind`: the root's tree is not idle (a turn, prompt delivery, child, assignment, question, mail or parked work) (§12.7) |
+| `stale_generation` | 1004 | `session.fork`/`session.rewind`: `ifGeneration` is not the root's current history generation (§12.7) |
+| `turn_not_found` | 1001 | `session.fork`/`session.rewind`: no such turn in this generation (or branch) (§12.7) |
+| `turn_in_progress` | 1004 | `session.fork`/`session.rewind`: a turn the cut keeps (or, for a rewind, any turn) has not ended (§12.7) |
+| `empty_prefix` | 1005 | `session.fork`/`session.rewind`: nothing would be kept (before the first turn) (§12.7) |
+| `boundary_unmapped` | 1005 | `session.fork`/`session.rewind`: the runtime cannot map the cut to its own history (§12.7) |
+| `runtime_unsupported` | 1005 | `session.fork`/`session.rewind`: the session's runtime cannot fork or rewind (ACP, Antigravity, no native thread) (§12.7) |
+| `native_refused` | 1005 | `session.fork`/`session.rewind`: the native runtime refused, or its fork could not be verified; recorded and answered again (§12.7) |
+| `branch_not_found` | 1001 | `session.fork { branchId }`: no such branch of this root (§12.7) |
+| `attachment_forbidden` | 1003 | `session.fork`: the kept prompts reference attachments the caller's principal may not use (§12.7) |
 
 Errors thrown by an extension's owner travel unchanged (`code`, `message`, `data`). Errors inside
 events (`session.failed`, `prompt.failed`, `turn.ended`) are `AlpError { message, code? }` with string
@@ -229,6 +239,8 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 | `workspace.files.read` | `workspace.files.list` and `workspace.files.read`: a directory's entries and a UTF-8 text file's content (at most 1 MiB) under a directory, read-only, links never followed, blocked paths refused (§12.4). Every alpd lists it. |
 | `prompt.images` | `session.prompt` takes inline image parts (§10, Prompt content); a session snapshot's `promptImages: true` says its runtime takes them. Every alpd lists it. |
 | `attachments` | `attachment.begin/chunk/commit/abort/get/delete` and `session.prompt` parts `{ type: "attachment", attachmentId }`; hello carries `attachmentLimits` (§12.6). Listed when alpd has a home and a store, on macOS and Linux (not Windows). |
+| `session.fork` | `session.fork`: a new root from a root's conversation cut at a turn, or from a branch a rewind set aside; files are never copied or changed (§12.7). Listed with a store and a runtime that forks native conversations, on macOS and Linux (not Windows). |
+| `session.rewind` | `session.rewind`: a root's conversation from before a turn, same id, later turns kept as a recoverable branch, files never changed; the `history.reset` event (§12.7). Same condition as `session.fork`. |
 
 alpd before this revision already had the first three without listing them; the others are new. A method whose
 capability a daemon does not list answers `-32601`. A client that must work with
@@ -1015,8 +1027,8 @@ answers `1005 attachment_unavailable`; alpd never claims it was delivered.
   pinned attachment with `reader.open(attachmentId, sessionId)`: a stream, never a path. Staging a
   runtime-readable copy inside the session's sandbox is the runtime's work. Today no runtime opts in:
   every prompt with attachments is refused `attachment_unsupported`.
-- *Fork (t-15b0.4, branch C)*: a fork re-authorizes the source session's attachments for the new
-  session and calls the store's `pin('fork:<newSessionId>', newSessionId, attachmentIds, 'fork')`;
+- *Fork (§12.7)*: a fork re-authorizes the attachments the kept prompts pinned for the caller's
+  principal and pins them with `pin('fork:<newSessionId>', newSessionId, attachmentIds, 'fork')`;
   references are per holder, so the source keeps its own.
 - *History deletion*: alpd has no session deletion today; `session.archive` keeps references. The
   store's `releaseSessions(sessionIds)` releases every holder of those sessions (their objects then
@@ -1026,9 +1038,118 @@ answers `1005 attachment_unavailable`; alpd never claims it was delivered.
 The gateway exposes the methods with `attachments.write` and `session.write` (`get`:
 `attachments.write` and `session.read`), never a default (docs/alp/remote-gateway.md §5.14).
 
+### 12.7 Conversation fork and rewind (`session.fork`, `session.rewind`)
+
+Capabilities `session.fork` and `session.rewind`, listed by an alpd with a store whose runtime forks
+native conversations (today: Codex and Claude, on macOS and Linux). Both change **only the
+conversation**: no file is copied, restored or changed, and no checkpoint is taken. A session
+summary's `conversation { fork, rewind, reason? }` says whether this root supports them now;
+`reason` is `runtime_unsupported` (ACP, Antigravity, a runtime without native forks), `not_persistent`
+(no native thread kept) or `not_root` (an assignment's conversation belongs to its requester's tree).
+A client offers neither control where `conversation` is absent or false.
+
+A **turn** of a root is what its timeline holds: `prompt.accepted { result: "turn" }` or
+`turn.started`, from the turn's `user_message` on, to its `turn.ended`. Turn ids are the public ids
+of those events. A cut keeps the timeline's lines before the first line of the turn cut away.
+
+**`session.rewind { sessionId, requestId, ifGeneration, beforeTurnId }`** → `{ session, generation,
+branch, duplicate? }`. The root continues its conversation from **before** `beforeTurnId`, under the
+**same session id**:
+- The root must be idle with its whole tree: no turn, pending prompt, child, assignment, question,
+  mail, parked work or prompt delivery in flight; otherwise `1004 session_busy`. Prompts, scheduled
+  deliveries and reopens of the root that arrive meanwhile wait for the rewind, then reach the new
+  conversation (a job's receipt still keeps it from being delivered twice); mail the runtime would wake
+  the root with waits too, then reaches the new conversation.
+- `ifGeneration` is the history generation the client read (`session.history`): another one is
+  `1004 stale_generation`. `beforeTurnId` must be a turn of this generation (`1001 turn_not_found`),
+  not the first (`1005 empty_prefix`: start a new session instead), and every turn must have ended
+  (`1004 turn_in_progress`).
+- The runtime makes the cut conversation natively (Codex `thread/fork { beforeTurnId }`; Claude a fork of
+  the transcript at the last entry before that turn, made on the next prompt); the old native
+  conversation is **kept, never deleted or reverted**. A cut the runtime cannot map to its own history
+  is `1005 boundary_unmapped` (a Claude turn ALP did not start, or one from before this revision); other
+  native refusals are `1005 native_refused`.
+- alpd then moves the root's whole timeline to a **branch** and keeps, as the root's timeline, the lines
+  before the cut, the root's own session lifecycle lines after it, a marker item
+  `{ kind: "notice", id: "rewind:<branchId>" }`, and any line whose cursor follows the marker's, in cursor
+  order. The history **generation advances**: every older
+  history cursor answers `1004 stale_cursor`, and `session.attach { after }` with a cursor in the
+  set-aside range answers `reset: true` with the whole timeline. Connections attached to the tree get a
+  live `history.reset { generation, reason: "rewind", branchId }` event (never kept) and the marker:
+  drop the cached history, fetch a new tail and attach with the new generation. A live root restarts its
+  native process on the new conversation (`session.updated` carries its `threadId`).
+- Prompt receipts are **never deleted**: a `clientMessageId` of a set-aside turn still answers
+  `duplicate: true` and is never delivered again, and delivered scheduled jobs are not delivered again.
+- `branch { branchId, beforeTurnId, turns, at }` describes what was set aside; the summary's
+  `branches` lists them (oldest first). A branch stays recoverable: `session.fork { branchId }`.
+
+**`session.fork { sessionId, requestId, ifGeneration, boundary?, branchId?, workspaceId?,
+newSessionId?, title? }`** → `{ session, forkedFrom, duplicate? }`. A **new closed root** whose
+conversation is the source's cut at `boundary`:
+- `{ throughTurnId }` keeps that turn and every earlier one (each must have ended); `{ beforeTurnId }`
+  keeps the turns before it (not the first turn); absent keeps the whole conversation (no turn may be
+  running). The source may be working on a later turn, which the fork does not keep; a fork that keeps
+  the source's latest turn holds the live source's prompts and wakes until the runtime has read it
+  (`1004 session_busy` while it is opening, reopening or receiving a prompt). The source is never changed.
+- `branchId` forks a branch a rewind set aside instead of the current conversation (its turn ids;
+  `1001 branch_not_found` otherwise) — how a discarded branch is recovered.
+- `workspaceId` (capability `workspace.registry`) runs the fork in another registered workspace of the
+  same project, such as a worktree a client made first with `workspace.worktree.create`; without it the
+  fork runs in the source's directory. Its files are that directory's current files, not the
+  conversation's past ones. `newSessionId` chooses the new id (`1004 request_conflict` when taken).
+  `title` names it; without one it is "<source title> (fork)" in the source's directory and "Fork of a
+  session" in another workspace, whose viewers may not see the source.
+- The new root's timeline is the source root's conversation events before the cut (assignments'
+  own events are not copied) and a marker `{ kind: "notice", id: "fork:<id>" }` that names no source
+  (a viewer of the fork may not see its source); its summary carries
+  `forkedFrom { sessionId, turnId?, boundary, branchId?, at }`. It is placed in the registry like a
+  created session. Attachments the kept prompts pinned are re-authorized for the caller's principal
+  (§12.6) and pinned for the fork (`1003 attachment_forbidden` when the caller may not use one).
+- Open it with `session.create { sessionId, resume: true }`. Nothing is shared with the source
+  afterwards: no assignments, mail, questions, board claims or receipts.
+
+**Idempotency and recovery.** Both are answered once per `(sessionId, operation, requestId)` through a
+durable **lifecycle journal** (`<ALP_HOME>/state/lifecycle`): a repeat with the same parameters answers
+the first result with `duplicate: true` (after a restart too); other parameters under the same
+`requestId` are `1004 key_conflict`. Refusals before the native step (invalid, busy, stale, unknown
+turn) record nothing. A native refusal is recorded and answered again. When the runtime may or may not
+have acted (its process died or timed out mid-request, or alpd stopped during the native step) the
+answer is `1004 outcome_unknown`, now and on every repeat, and the native step is **never sent again**:
+the binding stays on the old conversation; check the session and use a new `requestId`. A native step
+that answered but whose commit alpd could not write (`1000 persistence_failed`) is finished by the next
+repeat or at the next start, from the journal; until then a rewound root takes no prompt or reopen
+(`1004 session_busy`, naming the `requestId` to send again) and a live one is closed. Completion
+survives a crash of alpd, not a power loss (no fsync, as the rest of the store). Settled journal entries
+(committed, failed, unknown) are kept 7 days from their last write, as prompt receipts are (§10);
+afterwards the same `requestId` is a new request.
+
+**Native behaviour (evidence: docs/alp/issue-121-native-evidence.md).** Codex 0.162.1: `thread/fork` with
+`beforeTurnId`/`lastTurnId` (experimental API, which ALP opts into), model, sandbox and approval passed
+explicitly; the fork is verified to end at the expected turn or deleted and refused. Kept turns keep
+their ids. A Codex thread with persisted forks cannot be deleted natively before them. Claude (Agent
+SDK 0.3.292, CLI 2.1.304): ALP's turn id is the prompt's transcript uuid; a fork or rewind binds the
+session to a new id made on its first prompt by `resume` + `forkSession` + `resumeSessionAt` (the
+transcript's last entry before the cut, checked by alpd), so until then the new conversation exists
+only as that binding. ACP and Antigravity: `runtime_unsupported`.
+
+**Seams.** The journal (`createLifecycle(journal).run({ resource, operation, requestId, fingerprint },
+{ prepare, apply, commit })`), the prompt gate (`holdPrompts(root)`) with the idle barrier, and the
+runtime's `rebind(sessionId, binding)` (restart a root's native process on a binding at the idle
+barrier, keeping its id, configuration and viewers) are what a live model/team change and
+`session.reload` reuse.
+
+The gateway exposes `session.rewind` with `session.write` and `session.fork` with `session.write` and
+`session.read`; a grant limited to `modes` may fork or rewind only a root whose tree runs within them, as
+it may prompt it (docs/alp/remote-gateway.md §5.5, §5.15).
+
 ## 13. Compatibility notes for this revision
 
 **Additive** (old clients unaffected):
+- Capabilities `session.fork` and `session.rewind` (§12.7): the two methods, `$defs.forkProvenance` and
+  `$defs.conversationBranch`, the summary fields `conversation`, `forkedFrom` and `branches`, the live
+  `history.reset` event (an unknown event to old clients), `SessionSpec.restore.base` (internal), and the
+  error reasons of §5.3 for them. A rewind answers an old client's `session.attach { after }` inside the
+  set-aside history with `reset: true`.
 - Capability `attachments` (§12.6): `attachment.begin/chunk/commit/abort/get/delete`, the
   `session.prompt` part `{ type: "attachment", attachmentId }`, `daemon.hello` `attachmentLimits`,
   `$defs.attachment`, exports `ATTACHMENTS`, `ATTACHMENT_CHUNK_OVERHEAD` and `attachmentChunkBytes`,
