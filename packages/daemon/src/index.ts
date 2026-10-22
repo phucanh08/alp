@@ -7,3 +7,5 @@ export { createScheduleStore, PROMPT_CHARS, SCHEDULE_ID, SCHEDULE_VERSION } from
 export type { ScheduleRecord, ScheduleStore } from './schedules.js';
 export { createScheduler, duration, renderPrompt, SCHEDULE_GRACE_MS, SCHEDULE_TICK_MS } from './scheduler.js';
 export type { ScheduleDelivery, Scheduler } from './scheduler.js';
+export { attachmentLimits, attachmentName, createAttachmentStore, readAttachmentConfig, sniffMimeType } from './attachments.js';
+export type { AttachmentReader, AttachmentRuntime, AttachmentStore, Principal } from './attachments.js';
