@@ -56,7 +56,7 @@ async function setup(t) {
   const stops = [];
   t.after(async () => { for (const stop of stops.reverse()) await stop(); await rm(directory, { recursive: true, force: true }); });
   const state = path.join(directory, 'state');
-  const native = { branches: [], rebinds: [], next: 0, branch: undefined, rebind: undefined };
+  const native = { branches: [], rebinds: [], reloads: [], next: 0, branch: undefined, rebind: undefined, reload: undefined };
   let count = 0;
   async function start() {
     const runtime = createAlpRuntime({ supervisor: false, transport: fakeTransport(transports), runLogDir: path.join(directory, 'runs') });
@@ -69,6 +69,12 @@ async function setup(t) {
       native.rebinds.push({ sessionId, binding });
       if (native.rebind) return native.rebind(sessionId, binding);
       return runtime.snapshot(sessionId);
+    };
+    // The runtime's own reload (restarting a fake process), or a scripted one.
+    const reload = runtime.reload;
+    runtime.reload = async sessionId => {
+      native.reloads.push(sessionId);
+      return native.reload ? native.reload(sessionId, reload) : reload(sessionId);
     };
     const store = createStore(state);
     const socketPath = daemonPaths(path.join(directory, `d${count++}`)).socket;
@@ -133,7 +139,7 @@ test('rewind: same id, the later turns become a recoverable branch, history gene
   assert.ok(hello.capabilities.includes('session.fork') && hello.capabilities.includes('session.rewind'));
   const [first, second, third] = await conversation(d, 'r1', ['one', 'two', 'three']);
   const before = await d.request('session.get', { sessionId: 'r1' });
-  assert.deepEqual(before.session.conversation, { fork: true, rewind: true });
+  assert.deepEqual(before.session.conversation, { fork: true, rewind: true, reload: true });
   const threadBefore = before.session.threadId;
   const oldPage = await d.request('session.history', { sessionId: 'r1', limit: 2 });
   const generation = oldPage.generation;
@@ -522,4 +528,162 @@ test('a fork that does not keep the latest turn holds nothing: prompts to the so
   assert.equal(transport.calls.filter(call => call.method === 'turn/start').length, starts + 1);
   release();
   assert.equal((await forking).forkedFrom.boundary, 'before');
+});
+
+// ---- session.reload and session.resumeCommand (§12.8)
+
+test('reload: the same id, thread, history and receipts in a new process; a repeat answers duplicate without a second restart', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  const hello = await d.request('daemon.hello', { protocolVersion: 1 });
+  assert.ok(hello.capabilities.includes('session.reload') && hello.capabilities.includes('session.resumeCommand'));
+  await conversation(d, 'rl', ['one', 'two']);
+  const before = (await d.request('session.get', { sessionId: 'rl' })).session;
+  assert.equal(before.conversation.reload, true);
+  const generation = await generationOf(d, 'rl');
+  const history = await d.request('session.history', { sessionId: 'rl', limit: 50 });
+  const processes = world.transports.length;
+  const result = await d.request('session.reload', { sessionId: 'rl', requestId: 'reload-1', ifGeneration: generation });
+  validateResult('session.reload', result);
+  assert.equal(result.duplicate, undefined);
+  assert.equal(result.session.id, 'rl');
+  assert.equal(result.session.threadId, before.threadId);
+  for (const key of ['model', 'mode', 'thinking', 'agent', 'runtime', 'projectRoot']) assert.equal(result.session[key], before[key], key);
+  assert.equal(world.transports.length, processes + 1, 'one new native process');
+  assert.deepEqual(world.transports.at(-1).calls.filter(call => call.method.startsWith('thread/')).map(call => [call.method, call.params.threadId]), [['thread/resume', before.threadId]]);
+  // History is untouched: same generation, same envelopes.
+  assert.equal(await generationOf(d, 'rl'), generation);
+  const after = await d.request('session.history', { sessionId: 'rl', limit: 50 });
+  assert.deepEqual(after.items.slice(0, history.items.length), history.items, 'the earlier history is unchanged');
+  // A repeat answers the first result, restarts nothing.
+  const repeat = await d.request('session.reload', { sessionId: 'rl', requestId: 'reload-1', ifGeneration: generation });
+  assert.equal(repeat.duplicate, true);
+  assert.equal(world.native.reloads.length, 1);
+  assert.equal(world.transports.length, processes + 1);
+  // Receipts stay: an earlier clientMessageId is a duplicate, never delivered again.
+  const again = await d.request('session.prompt', { sessionId: 'rl', clientMessageId: 'rl-m0', content: [{ type: 'text', text: 'one' }] });
+  assert.equal(again.duplicate, true);
+  // The next prompt continues the same conversation in the new process.
+  const transport = world.transports.at(-1);
+  await d.request('session.prompt', { sessionId: 'rl', clientMessageId: 'rl-m2', content: [{ type: 'text', text: 'three' }] });
+  await until(() => transport.calls.some(call => call.method === 'turn/start'), 'turn in the new process');
+  assert.equal(transport.calls.find(call => call.method === 'turn/start').params.threadId, before.threadId);
+  // The generation is the precondition of the first request only (as for a rewind): a repeat answers its result.
+  assert.equal((await d.request('session.reload', { sessionId: 'rl', requestId: 'reload-1', ifGeneration: 'f'.repeat(32) })).duplicate, true);
+  assert.equal(world.native.reloads.length, 1);
+});
+
+test('reload refusals record nothing: stale view, no conversation yet, a busy tree, a closed root, an assignment', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  // Never prompted: no conversation to keep (a Claude root would have no transcript).
+  await d.request('session.create', { sessionId: 'fresh', spec: { cwd: d.project, persist: true } });
+  await assert.rejects(d.request('session.reload', { sessionId: 'fresh', requestId: 'x1', ifGeneration: await generationOf(d, 'fresh') }), rpcError(1005, 'no_history'));
+  await conversation(d, 'rb', ['one']);
+  const generation = await generationOf(d, 'rb');
+  await assert.rejects(d.request('session.reload', { sessionId: 'rb', requestId: 'x2', ifGeneration: 'f'.repeat(32) }), rpcError(1004, 'stale_generation'));
+  await assert.rejects(d.request('session.reload', { sessionId: 'missing', requestId: 'x3', ifGeneration: generation }), rpcError(1001, 'not_found'));
+  // A running turn.
+  const transport = world.transports.at(-1);
+  await d.request('session.prompt', { sessionId: 'rb', clientMessageId: 'rb-busy', content: [{ type: 'text', text: 'busy' }] });
+  await until(() => transport.turnId === 'turn-0-2' || transport.calls.filter(call => call.method === 'turn/start').length === 2, 'second turn');
+  await assert.rejects(d.request('session.reload', { sessionId: 'rb', requestId: 'x4', ifGeneration: generation }), rpcError(1004, 'session_busy'));
+  transport.finish();
+  await until(async () => !(await d.request('session.get', { sessionId: 'rb' })).session.activeTurnId, 'turn ended');
+  assert.equal(world.native.reloads.length, 0, 'no refusal reached the runtime');
+  // The same requestId goes through once the root is idle: nothing was recorded.
+  const now = await generationOf(d, 'rb');
+  await d.request('session.reload', { sessionId: 'rb', requestId: 'x4', ifGeneration: now });
+  assert.equal(world.native.reloads.length, 1);
+  // A closed root is opened, not reloaded.
+  await d.request('session.close', { sessionId: 'rb' });
+  await assert.rejects(d.request('session.reload', { sessionId: 'rb', requestId: 'x5', ifGeneration: now }), rpcError(1005, 'session_closed'));
+  // resumeCommand: the CLI attach of that id; nothing else.
+  const command = await d.request('session.resumeCommand', { sessionId: 'rb' });
+  validateResult('session.resumeCommand', command);
+  assert.deepEqual(command.argv, ['alp', 'attach', 'rb']);
+  assert.equal(command.display, 'alp attach rb');
+  assert.ok(!JSON.stringify(command).includes(d.project) && !JSON.stringify(command).includes(world.directory), 'no path');
+  await assert.rejects(d.request('session.resumeCommand', { sessionId: 'nobody' }), rpcError(1001, 'not_found'));
+});
+
+test('a reload whose new process cannot resume answers native_refused; the root is closed with its conversation and reopens on it', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'rf', ['one']);
+  const { threadId } = (await d.request('session.get', { sessionId: 'rf' })).session;
+  const generation = await generationOf(d, 'rf');
+  world.transports.at(-1);
+  const failing = world.transports.length;
+  world.native.reload = (sessionId, reload) => {
+    // The next process refuses to resume, as a Claude CLI does for a missing transcript.
+    const index = world.transports.length;
+    const watch = setInterval(() => {
+      const next = world.transports[index];
+      if (!next || next.patched) return;
+      next.patched = true;
+      const request = next.request.bind(next);
+      next.request = async (method, params) => { if (method === 'thread/resume') throw new Error(`no rollout found for thread id ${params.threadId}`); return request(method, params); };
+    }, 0);
+    return reload(sessionId).finally(() => clearInterval(watch));
+  };
+  // Patch synchronously too: the transport is made inside the runtime's queue.
+  const original = world.transports.push;
+  world.transports.push = function (transport) {
+    const request = transport.request.bind(transport);
+    if (this.length === failing) transport.request = async (method, params) => { if (method === 'thread/resume') throw new Error(`no rollout found for thread id ${params.threadId}`); return request(method, params); };
+    return original.call(this, transport);
+  };
+  await assert.rejects(d.request('session.reload', { sessionId: 'rf', requestId: 'f1', ifGeneration: generation }), rpcError(1005, 'native_refused'));
+  world.transports.push = original;
+  world.native.reload = undefined;
+  await until(async () => (await d.request('session.get', { sessionId: 'rf' })).session.status === 'closed', 'closed');
+  const closed = (await d.request('session.get', { sessionId: 'rf' })).session;
+  assert.equal(closed.threadId, threadId, 'the binding is kept');
+  assert.equal(world.transports.slice(failing).flatMap(tr => tr.calls).filter(call => call.method === 'thread/start').length, 0, 'never an empty replacement thread');
+  // The refusal is the answer of a repeat; a new requestId on the reopened root reloads it.
+  await assert.rejects(d.request('session.reload', { sessionId: 'rf', requestId: 'f1', ifGeneration: generation }), rpcError(1005, 'native_refused'));
+  await d.request('session.create', { sessionId: 'rf', spec: { cwd: d.project }, resume: true });
+  const reopened = world.transports.at(-1);
+  assert.deepEqual(reopened.calls.filter(call => call.method.startsWith('thread/')).map(call => [call.method, call.params.threadId]), [['thread/resume', threadId]]);
+  const result = await d.request('session.reload', { sessionId: 'rf', requestId: 'f2', ifGeneration: await generationOf(d, 'rf') });
+  assert.equal(result.session.threadId, threadId);
+});
+
+test('a reload in flight when alpd stops is outcome_unknown after the restart, never sent again', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'ru', ['one']);
+  const generation = await generationOf(d, 'ru');
+  world.native.reload = () => new Promise(() => {});
+  const lost = d.request('session.reload', { sessionId: 'ru', requestId: 'u1', ifGeneration: generation }).catch(error => error);
+  await until(() => world.native.reloads.length === 1, 'native step in flight');
+  await d.stop();
+  await lost;
+  world.native.reload = undefined;
+  const restarted = { ...await world.start(), ...world };
+  await assert.rejects(restarted.request('session.reload', { sessionId: 'ru', requestId: 'u1', ifGeneration: generation }), rpcError(1004, 'outcome_unknown'));
+  assert.equal(world.native.reloads.length, 1);
+});
+
+test('a prompt sent during a reload waits for it, then reaches the new process', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'rw', ['one']);
+  const generation = await generationOf(d, 'rw');
+  let finish;
+  const gate = new Promise(resolve => { finish = resolve; });
+  world.native.reload = async (sessionId, reload) => { await gate; return reload(sessionId); };
+  const reloading = d.request('session.reload', { sessionId: 'rw', requestId: 'w1', ifGeneration: generation });
+  await until(() => world.native.reloads.length === 1, 'reload started');
+  const old = world.transports.at(-1);
+  const prompt = d.request('session.prompt', { sessionId: 'rw', clientMessageId: 'rw-late', content: [{ type: 'text', text: 'late' }] });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(old.calls.filter(call => call.method === 'turn/start').length, 1, 'the prompt waits');
+  finish();
+  await reloading;
+  await prompt;
+  const fresh = world.transports.at(-1);
+  assert.notEqual(fresh, old);
+  await until(() => fresh.calls.some(call => call.method === 'turn/start'), 'delivered to the new process');
 });

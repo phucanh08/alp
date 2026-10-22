@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AlpClientError, AlpRpcError } from '@anhlp/alp-client/portable';
 import { Controller } from '../src/lib/controller.js';
-import { allTurnsEnded, branchTurns, conversationGate, conversationMarker, describeConversationError, turnsByMessage } from '../src/lib/conversation.js';
+import { RELOAD_MESSAGES, agentControlsGate, allTurnsEnded, branchTurns, conversationGate, conversationMarker, describeConversationError, describeReloadError, turnsByMessage } from '../src/lib/conversation.js';
 import { emptyProjection, entriesOf, project, prependHistory } from '../src/lib/timeline.js';
 import { FakeHost, until } from './support/fake-host.js';
 
@@ -318,4 +318,74 @@ test('a fork into a worktree reuses the worktree it made for that destination af
   await controller.forkIntoWorktree({ requestId: 'f3', worktreeKey: 'dialog:m2', mappingId: 'm2', boundary: { throughTurnId: alpha.turnId } });
   assert.equal(created.length, 2);
   assert.equal(created[1].mappingId, 'm2');
+});
+
+// ---- Reload agent and Copy resume command (§12.8) -------------------------------------------
+
+test('tab controls: hidden without the capability; reload only for an idle open root the token may drive', () => {
+  const base = { capabilities: ['session.history', 'session.reload', 'session.resumeCommand'], canRead: true, canWrite: true, summary: { conversation: { fork: true, rewind: true, reload: true } }, root: true, generation: 'g' };
+  assert.deepEqual(agentControlsGate(base), { reload: { shown: true, enabled: true }, resume: { shown: true, enabled: true } });
+  assert.deepEqual(agentControlsGate({ ...base, capabilities: ['session.history'] }), { reload: { shown: false, enabled: false }, resume: { shown: false, enabled: false } });
+  const reason = input => agentControlsGate({ ...base, ...input }).reload;
+  assert.deepEqual(reason({ root: false }), { shown: true, enabled: false, reason: RELOAD_MESSAGES.not_root });
+  assert.equal(reason({ summary: { conversation: { fork: false, rewind: false, reload: false, reason: 'runtime_unsupported' } } }).enabled, false);
+  assert.match(reason({ canWrite: false }).reason, /session\.write/);
+  assert.equal(reason({ driveBlock: 'Not in your modes' }).reason, 'Not in your modes');
+  assert.equal(reason({ closed: true }).reason, RELOAD_MESSAGES.session_closed);
+  assert.match(reason({ busy: true }).reason, /idle/);
+  assert.match(reason({ generation: null }).reason, /loading/);
+  assert.match(reason({ online: false }).reason, /Reconnecting/);
+  assert.match(agentControlsGate({ ...base, canRead: false }).resume.reason, /cannot read/);
+  // Refusals read as reload's own words.
+  assert.equal(describeReloadError(new AlpRpcError({ code: 1005, message: 'x', data: { reason: 'native_refused' } })).message, RELOAD_MESSAGES.native_refused);
+  assert.equal(describeReloadError(new AlpRpcError({ code: 1004, message: 'x', data: { reason: 'session_busy' } })).message, RELOAD_MESSAGES.session_busy);
+});
+
+test('Reload agent sends the held generation once per request id; history and the session stay; refusals notify', async t => {
+  const { host, make } = setup(t);
+  host.capabilities.push('session.reload', 'session.resumeCommand');
+  host.seed('ses_a', { title: 'Codes' });
+  host.root('ses_a').summary.conversation = { fork: true, rewind: true, reload: true };
+  const controller = make();
+  await open(controller, 'ses_a');
+  await say(controller, 'codeword ALPHA');
+  assert.deepEqual(controller.agentControls('ses_a'), { reload: { shown: true, enabled: true }, resume: { shown: true, enabled: true } });
+  const before = texts(controller);
+  const result = await controller.reloadAgent({ sessionId: 'ses_a', requestId: 'rl1' });
+  assert.equal(result.session.id, 'ses_a');
+  assert.deepEqual(host.calls.find(call => call.method === 'session.reload').params, { sessionId: 'ses_a', requestId: 'rl1', ifGeneration: 'gen-ses_a-1' });
+  assert.match(controller.getState().notice.text, /Reloaded/);
+  assert.deepEqual(texts(controller), before, 'the conversation shown stays');
+  assert.equal(controller.getState().selected, 'ses_a');
+  assert.equal(controller.historyGeneration('ses_a'), 'gen-ses_a-1', 'the generation does not change');
+  assert.equal((await controller.reloadAgent({ sessionId: 'ses_a', requestId: 'rl1' })).duplicate, true);
+  assert.equal(host.reloads, 1);
+  // A refusal: a notice in reload's words, the error to the caller.
+  host.reloadError = new AlpRpcError({ code: 1005, message: 'The agent could not be restarted: /secret/path', data: { reason: 'native_refused' } });
+  await assert.rejects(controller.reloadAgent({ sessionId: 'ses_a', requestId: 'rl2' }));
+  assert.equal(controller.getState().notice.level, 'error');
+  assert.equal(controller.getState().notice.text, RELOAD_MESSAGES.native_refused);
+  host.reloadError = undefined;
+  // Not the main agent: refused here, nothing sent.
+  const sent = host.count('session.reload');
+  await assert.rejects(controller.reloadAgent({ sessionId: 'ses_other', requestId: 'rl3' }), /main agent/);
+  assert.equal(host.count('session.reload'), sent);
+});
+
+test('Copy resume command writes the host\'s command to the clipboard only, and says what it copied', async t => {
+  const { host, make } = setup(t);
+  host.capabilities.push('session.reload', 'session.resumeCommand');
+  host.seed('ses_a', { title: 'Codes' });
+  const controller = make();
+  await open(controller, 'ses_a');
+  const written = [];
+  const command = await controller.copyResumeCommand('ses_a', async text => { written.push(text); });
+  assert.deepEqual(command.argv, ['alp', 'attach', 'ses_a']);
+  assert.deepEqual(written, ['alp attach ses_a']);
+  assert.match(controller.getState().notice.text, /Copied the resume command: alp attach ses_a/);
+  // A clipboard the browser refuses: nothing copied, a notice says so.
+  assert.equal(await controller.copyResumeCommand('ses_a', async () => { throw new Error('denied'); }), undefined);
+  assert.equal(controller.getState().notice.level, 'error');
+  assert.equal(await controller.copyResumeCommand('ses_missing', async text => { written.push(text); }), undefined);
+  assert.equal(written.length, 1);
 });

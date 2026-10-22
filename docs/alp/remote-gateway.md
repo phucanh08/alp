@@ -160,6 +160,9 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
   - `session.write` cũng cho phép fork và rewind **hội thoại** của một root (`session.fork` cần thêm
     `session.read` vì nó đọc hội thoại nguồn; §5.15). Không có quyền riêng: cả hai không bao giờ đổi
     file, chỉ đổi hội thoại mà runtime tiếp tục.
+    `session.write` cũng cho phép reload một root (`session.reload`: khởi động lại process native trên
+    chính hội thoại và cấu hình của nó; §5.16). `session.resumeCommand` (lệnh `alp attach <id>` để copy)
+    chỉ cần `session.read`.
   Quyền write kéo theo quyền read cùng họ. `files.read` không kéo theo quyền nào và không quyền nào
   kéo theo nó. Không có `--permission`, CLI cấp bốn quyền `session.*` và `project.*`, **không bao
   giờ** cấp `files.read`: chủ máy phải ghi rõ `--permission files.read` cho từng credential được đọc
@@ -373,6 +376,8 @@ Cột Test dùng các mã sau:
 | `session.message` | — | session; **drive** (đánh thức hoặc steer; của assignment thì requester được báo) | session.write | exposed | P S M I |
 | `session.fork` | `session.fork` | root nguồn thuộc grant (tra mới; con → `1003 not_root`); `workspaceId` đích là registry workspace mà grant nêu đúng thư mục, không có thì ở workspace của nguồn; `newSessionId` không thuộc workspace khác; context principal do gateway đặt; `requestId` theo credential; root mới được kiểm lại trước khi trả; `forkedFrom` chỉ khi nguồn thuộc grant (§5.15). Không đổi file | session.write + session.read | exposed | P S R I |
 | `session.rewind` | `session.rewind` | root thuộc grant (tra mới); chỉ 4 param; cùng session id, không đổi file, các turn sau thành branch phục hồi được bằng `session.fork { branchId }`; answer chiếu (§5.15); `history.reset` tới connection đang attach | session.write | exposed | P S R E |
+| `session.reload` | `session.reload` | root thuộc grant (tra mới; con → `1003 not_root`); grant có `modes` chỉ reload root mà cả tree chạy trong các mode đó (như prompt); chỉ 3 param; `requestId` theo credential; answer phải là đúng root đó, chiếu; lỗi alpd thành câu cố định giữ code và reason (§5.16) | session.write | exposed | P S R M |
+| `session.resumeCommand` | `session.resumeCommand` | session (root của tree và chính nó) thuộc grant; gateway dựng lại lệnh từ session id (`resumeCommandOf`) và chỉ trả khi alpd trả đúng như vậy: không path, env, credential hay lệnh của runtime native (§5.16) | session.read | exposed | P S R |
 | `question.answer` | — | id đầy đủ, tree trong scope; **drive** session đang hỏi (cả `dismiss`) | session.write | exposed | P S M I |
 | `task.list` | `task` | `projectRoot` thuộc grant | project.read | exposed | P S I |
 | `task.create` | `task` | `projectRoot`; param danh tính bị bỏ. `requestId` chỉ dedupe trong một process alpd, 10 phút: sau `1000` hoặc restart thì đọc `task.list` trước khi gửi lại | project.write | exposed | P S I |
@@ -784,6 +789,26 @@ bao giờ bị xoá, phục hồi được thành session mới bằng `session.
   reason với câu chung). Chỉ mã, `reason`, `generation` (32 hex) và số nguyên không âm đi qua; không
   text của alpd hay runtime (đường dẫn thread native, stderr của CLI).
 Test: `apps/gateway/tests/conversation.test.js`.
+
+### 5.16 Reload agent và lệnh resume (issue #121, G2)
+
+`session.reload { sessionId, requestId, ifGeneration }` (docs/protocol/alp-json-rpc-v1.md §12.8) khởi
+động lại process native của một root trên **chính hội thoại** nó đang chạy, với cấu hình của nó, cùng
+session id; timeline, history generation, receipt và viewer không đổi. Gateway: cần `session.write`; root
+thuộc grant, tra mới mỗi lần (session con → `1003 not_root`); grant giới hạn `modes` chỉ reload root mà
+cả tree nằm trong các mode đó, như `session.prompt` (`1003 mode`); `requestId` được namespace theo
+credential như fork/rewind; answer phải là đúng root đó, được chiếu như mọi summary (`conversation.reload`
+đi qua `projectConversation`). Lỗi của alpd (`session_busy`, `session_closed`, `no_history`,
+`native_refused`, `runtime_unsupported`, `stale_generation`, `outcome_unknown`…) tới client thành câu cố
+định của gateway giữ code và reason: không stderr, đường dẫn hay thread id nào của runtime lọt ra.
+
+`session.resumeCommand { sessionId }` trả `{ argv, posix, windows, display, platform }` của lệnh
+`alp attach <sessionId>`; chỉ để copy vào clipboard, client không bao giờ chạy nó. Cần `session.read`,
+session trong grant. Gateway dựng lại lệnh từ session id đã kiểm (`resumeCommandOf` của
+`@anhlp/alp-protocol`, theo `platform` mà alpd trả, chỉ `posix` hoặc `windows`) và chỉ trả khi câu trả lời
+của alpd đúng y như vậy; khác đi (lệnh `codex resume`/`claude --resume`, thêm `env`, `ALP_HOME`, đường
+dẫn) là `1000`, có log `ALP_GATEWAY_RESUME_COMMAND_REFUSED`. Lệnh không mang `ALP_HOME`: host có alpd chạy
+với home khác thì người dùng tự đặt home đó khi chạy.
 
 ## 6. Streaming và recovery
 

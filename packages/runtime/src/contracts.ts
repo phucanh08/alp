@@ -182,6 +182,15 @@ export type AlpRuntime = {
    */
   rebind?(sessionId: string, binding: NativeBinding): Promise<SessionSnapshot>;
   /**
+   * Restarts an idle live root's native process on the conversation it runs now (a reload, §12.8):
+   * the same binding, the session's own configuration, id and viewers. Refused as rebind is. The new
+   * process must resume that very conversation (a Claude one is refused unless its transcript, or its
+   * base, exists), never an empty one in its place; when it cannot, the session closes with its
+   * conversation kept (a later open resumes it) and a ConversationError native_refused is thrown.
+   * Emits session.updated.
+   */
+  reload?(sessionId: string): Promise<SessionSnapshot>;
+  /**
    * Holds the turns the runtime would start by itself on this session (mail wakes) while a lifecycle
    * operation changes its conversation (a rewind, later a reload or live configure): mail stays queued
    * and is delivered when the last hold is released, to whatever conversation the session runs then.

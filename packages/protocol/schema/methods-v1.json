@@ -37,7 +37,9 @@
     "workspace.git": "workspace.git.status and workspace.git.diff: a registered workspace's read-only Git status and structured diff hunks by workspaceId; enumerated comparisons only, bounded (1 MiB per file, 2 MiB per page, 200 untracked files) with an opaque snapshot and next cursor; blocked secret paths withheld on both sides of a rename; no Git mutation.",
     "attachments": "attachment.begin/chunk/commit/abort/get/delete: daemon-owned immutable non-image attachments by opaque id, uploaded in bounded chunks, and session.prompt content parts `{ type: \"attachment\", attachmentId }`; daemon.hello carries `attachmentLimits`. Listed only with a home and a store, on macOS and Linux.",
     "session.fork": "session.fork: a new root whose conversation is a root's up to a completed turn (or a branch a rewind set aside), by native fork of Codex and Claude sessions; files are never copied or changed. Listed with a store and a runtime that forks native conversations, on macOS and Linux (not Windows).",
-    "session.rewind": "session.rewind: a root's conversation from before a turn on, under the same session id; the later turns stay a recoverable branch, files are never changed, history generation advances (`history.reset` event). Same condition as session.fork."
+    "session.rewind": "session.rewind: a root's conversation from before a turn on, under the same session id; the later turns stay a recoverable branch, files are never changed, history generation advances (`history.reset` event). Same condition as session.fork.",
+    "session.reload": "session.reload: restarts a live root's native process on its own conversation and configuration at the idle barrier (no turn, child, question, mail or parked work), keeping its session id, history and receipts; through the lifecycle journal. Same condition as session.fork.",
+    "session.resumeCommand": "session.resumeCommand: the ALP CLI command (`alp attach <sessionId>`) that follows a session in a terminal, as argv and POSIX and Windows (cmd.exe) command lines built by alpd; for the clipboard only, never run, never a native runtime's command, credential, env or path."
   },
   "methods": {
     "assignment.recall": {
@@ -4643,6 +4645,130 @@
         ],
         "additionalProperties": true
       }
+    },
+    "session.reload": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "capability": "session.reload",
+        "idempotent": "with requestId",
+        "risks": [
+          "restarts the root's native process; its conversation, configuration, history and receipts are kept"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "ifGeneration": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          }
+        },
+        "required": [
+          "sessionId",
+          "requestId",
+          "ifGeneration"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "session": {
+            "$ref": "#/$defs/sessionSummary"
+          },
+          "duplicate": {
+            "const": true
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "session.resumeCommand": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "capability": "session.resumeCommand",
+        "idempotent": true
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "argv": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            }
+          },
+          "posix": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "windows": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "display": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "platform": {
+            "enum": [
+              "posix",
+              "windows"
+            ]
+          }
+        },
+        "required": [
+          "argv",
+          "posix",
+          "windows",
+          "display",
+          "platform"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "$defs": {
@@ -6276,6 +6402,10 @@
             },
             "rewind": {
               "type": "boolean"
+            },
+            "reload": {
+              "type": "boolean",
+              "description": "Whether session.reload can restart this root's native process (§12.8); the root must also be open and idle."
             },
             "reason": {
               "enum": [

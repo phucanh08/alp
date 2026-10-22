@@ -2,7 +2,7 @@ import { realpath as registryRealpath, stat as registryStat } from 'node:fs/prom
 // @ts-check
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
 import { homedir } from 'node:os';
-import { ERROR, PROTOCOL_VERSION, RPC_ERROR, WORKSPACE_FILES, base64Bytes, blockedFilePath } from '@anhlp/alp-protocol';
+import { ERROR, PROTOCOL_VERSION, RPC_ERROR, WORKSPACE_FILES, base64Bytes, blockedFilePath, resumeCommandOf } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 import { isAlpClientError } from '@anhlp/alp-client/portable';
 import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.js';
@@ -216,6 +216,19 @@ const ATTACHMENT_REFUSALS = Object.freeze({
   attachment_unsupported: 'This session\'s runtime cannot read attachments yet; they stay stored and the prompt was not sent',
   request_conflict: 'This requestId was used for another upload',
   persistence_failed: 'The daemon host could not store the attachment; the upload was aborted',
+});
+/**
+ * The message the client gets for each alpd refusal of session.reload (§12.8): fixed as for fork and
+ * rewind (no runtime stderr or path passes), with reload's own words where they differ.
+ * @type {Readonly<Record<string, string>>}
+ */
+const RELOAD_REFUSALS = Object.freeze({
+  session_busy: 'The session or one of its agents is working; wait until everything is idle, then try again',
+  session_closed: 'The session is not open; open it and its agent starts on its conversation',
+  no_history: 'The agent has no conversation to keep yet; send it a message first, or start a new session',
+  runtime_unsupported: 'This session\'s runtime cannot be reloaded by the daemon host',
+  not_root: 'Only a root session can be reloaded',
+  native_refused: 'The agent could not be restarted on its conversation; the session is closed with its conversation kept and opens again with the next message',
 });
 /**
  * The message the client gets for each alpd refusal of session.fork and session.rewind
@@ -1060,7 +1073,7 @@ export class ClientConnection {
    * non-negative integers; nothing else, so no alpd or runtime text reaches the client.
    * @param {unknown} caught
    */
-  #conversationError(caught) {
+  #conversationError(caught, refusals = CONVERSATION_REFUSALS) {
     const error = /** @type {any} */ (caught);
     if (error instanceof GatewayError || isAlpClientError(error) || typeof error?.code !== 'number') return error;
     const reason = typeof error.data?.reason === 'string' && /^[a-z_]{1,64}$/.test(error.data.reason) ? error.data.reason : undefined;
@@ -1071,7 +1084,9 @@ export class ClientConnection {
       if (!/^[A-Za-z]{1,32}$/.test(key) || key === 'reason') continue;
       if ((Number.isSafeInteger(value) && value >= 0) || (key === 'generation' && isGeneration(value))) data[key] = value;
     }
-    const message = reason && Object.hasOwn(CONVERSATION_REFUSALS, reason) ? CONVERSATION_REFUSALS[reason] : 'The conversation could not be changed on the daemon host; the daemon log there may have details';
+    const message = reason && Object.hasOwn(refusals, reason) ? refusals[reason]
+      : reason && Object.hasOwn(CONVERSATION_REFUSALS, reason) ? CONVERSATION_REFUSALS[reason]
+        : 'The conversation could not be changed on the daemon host; the daemon log there may have details';
     return new GatewayError(error.code, message, Object.keys(data).length ? data : undefined);
   }
 
@@ -1394,6 +1409,32 @@ export class ClientConnection {
       if (!isGeneration(result.generation) || !branch) throw this.#conversationRefused('session.rewind', 'shape');
       await this.#seeForkSources([session]);
       return { session: this.#safeSession(session), generation: result.generation, branch, ...(result.duplicate === true ? { duplicate: true } : {}) };
+    },
+    // Reload (§12.8, issue #121 G2): the root's native process restarts on its own conversation. A
+    // root in the grant, looked up afresh, driven within the grant's modes as session.prompt is.
+    'session.reload': async params => {
+      await this.#resolve(params.sessionId, { fresh: true }).then(scoped => { if (scoped.root !== params.sessionId) throw forbidden(RELOAD_REFUSALS.not_root, GATEWAY_REASON.notRoot); });
+      await this.#drive(params.sessionId);
+      const result = await this.#call('session.reload', { ...params, requestId: this.#registryRequestId(params.requestId) }).catch(error => { throw this.#conversationError(error, RELOAD_REFUSALS); });
+      const session = result?.session;
+      if (!session || session.id !== params.sessionId || session.parentId || !workspaceOf(this.#grant, session.projectRoot)) throw this.#conversationRefused('session.reload', 'session');
+      await this.#seeForkSources([session]);
+      return { session: this.#safeSession(session), ...(result.duplicate === true ? { duplicate: true } : {}) };
+    },
+    // The ALP CLI command for the clipboard: rebuilt here from the id, passed on only when alpd's is the same.
+    'session.resumeCommand': async params => {
+      await this.#resolve(params.sessionId);
+      const result = await this.#call('session.resumeCommand', params);
+      const platform = result?.platform === 'windows' ? 'windows' : 'posix';
+      const expected = resumeCommandOf(params.sessionId, platform);
+      const same = result && typeof result === 'object' && Object.keys(result).length === Object.keys(expected).length
+        && Array.isArray(result.argv) && JSON.stringify(result.argv) === JSON.stringify(expected.argv)
+        && ['posix', 'windows', 'display', 'platform'].every(key => result[key] === expected[key]);
+      if (!same) {
+        this.#log.error('session.resumeCommand answered a command the gateway does not pass on; refused it', { code: 'ALP_GATEWAY_RESUME_COMMAND_REFUSED' });
+        throw new GatewayError(ERROR.failed, 'The daemon host answered a resume command the gateway does not pass on');
+      }
+      return expected;
     },
     // Reads the source's conversation (session.read too) and makes a closed root, resumable with
     // session.create { sessionId, resume: true }. The destination is the source's workspace, or a

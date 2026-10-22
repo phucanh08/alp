@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ArrowLeftToLine, ArrowRightToLine, Bot, CircleAlert, CircleDot, Columns2, Copy, CopyX, Ellipsis, FileText, ListTodo, Maximize, Minimize, PanelLeft, PanelRight, Pencil, Plus, Rows2, ShieldAlert, SquarePen, Archive, X } from 'lucide-react';
+import { ArrowLeftToLine, ArrowRightToLine, Bot, CircleAlert, CircleDot, Columns2, Copy, CopyX, Ellipsis, FileText, ListTodo, Maximize, Minimize, PanelLeft, PanelRight, Pencil, Plus, RotateCw, Rows2, ShieldAlert, SquarePen, Archive, X } from 'lucide-react';
 import type { SessionSummary } from '../lib/controller.js';
 import { can } from '../lib/gateway.js';
 import { ContextMenu, Menu, type MenuItem } from '../components/ui/menu';
@@ -9,6 +9,8 @@ import { MAIN_PANE, MIN_SPLIT_SIZE, dropPosition, paneIds, type GroupNode, type 
 import { isMacPlatform, shortcutLabel } from '../lib/shortcuts.js';
 import { baseName, sessionName } from '../lib/format';
 import { cn } from '../lib/utils';
+import { RELOAD_NOTE } from '../lib/conversation.js';
+import { newConversationRequestId } from '../lib/ids.js';
 import { PANELS, PanelView, type PanelKind } from './panels';
 import { NewSessionScreen } from './NewSession';
 import { ChatPanel, Empty } from './SessionView';
@@ -17,7 +19,7 @@ import { TabChip } from './TabChip';
 import { PaneContext } from './pane';
 import { TaskDetail } from './TaskDetail';
 import { FileView } from './FileView';
-import { useAppState } from './store';
+import { useAppState, useController } from './store';
 import { tabKey, useTabs, type Tab } from './tabs';
 
 const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-ring';
@@ -130,6 +132,7 @@ function WorkspaceTabChip({ tab, active, onSelect, onClose, onMenu, dragging, wr
 function useTabMenuItems(paneId: string, onRename: (session: SessionSummary) => void, whole = false) {
   const { tabs: all, byPane, close, closeOthers } = useTabs();
   const { selected, sessions, tree, principal } = useAppState();
+  const controller = useController();
   const canWrite = can(principal ?? undefined, 'session.write');
   const tabs = whole ? all : byPane[paneId] ?? [];
   const row = whole ? all : undefined;
@@ -139,6 +142,13 @@ function useTabMenuItems(paneId: string, onRename: (session: SessionSummary) => 
     const none = (which: 'left' | 'right' | 'others') => closeRange(tabs, tab, which, selected).length === 0;
     const items: MenuItem[] = [];
     const copy = (text: string) => { void navigator.clipboard?.writeText(text).catch(() => undefined); };
+    // Copy resume command and Reload agent (§12.8): the host builds the command (ALP's CLI, never a
+    // native runtime's) and it only goes to the clipboard; reload restarts the main agent's process.
+    const controls = tab.kind === 'agent' ? controller.agentControls(tab.id) : undefined;
+    if (tab.kind === 'agent' && controls?.resume.shown) {
+      items.push({ id: 'copy-resume-command', label: 'Copy resume command', icon: <Copy aria-hidden />, disabled: !controls.resume.enabled, title: controls.resume.reason, testId: `${base}-copy-resume-command`,
+        onSelect: () => { void controller.copyResumeCommand(tab.id, text => navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('The browser gives no clipboard here.'))); } });
+    }
     if (tab.kind === 'agent') {
       items.push({ id: 'copy-agent-id', label: 'Copy agent id', icon: <Copy aria-hidden />, hint: tab.id.slice(0, 7), testId: `${base}-copy-agent-id`, onSelect: () => copy(tab.id) });
       // Rename names the session (its main agent's tab); ALP has no rename for a team member.
@@ -156,6 +166,8 @@ function useTabMenuItems(paneId: string, onRename: (session: SessionSummary) => 
       { id: 'close-left', label: 'Close to the left', icon: <ArrowLeftToLine aria-hidden />, disabled: none('left'), testId: `${base}-close-left`, onSelect: () => closeOthers(tab, 'left', row) },
       { id: 'close-right', label: 'Close to the right', icon: <ArrowRightToLine aria-hidden />, disabled: none('right'), testId: `${base}-close-right`, onSelect: () => closeOthers(tab, 'right', row) },
       { id: 'close-others', label: 'Close other tabs', icon: <CopyX aria-hidden />, disabled: none('others'), testId: `${base}-close-others`, onSelect: () => closeOthers(tab, 'others', row) },
+      ...(controls?.reload.shown ? [{ id: 'reload-agent', label: 'Reload agent', icon: <RotateCw aria-hidden />, disabled: !controls.reload.enabled, title: controls.reload.reason ?? RELOAD_NOTE, testId: `${base}-reload-agent`,
+        onSelect: () => { void controller.reloadAgent({ sessionId: tab.id, requestId: newConversationRequestId() }).catch(() => undefined); } } satisfies MenuItem] : []),
       { id: 'close', label: 'Close', icon: <X aria-hidden />, testId: `${base}-close`, onSelect: () => close(tab) },
     ];
     // Paseo puts a divider under Rename.

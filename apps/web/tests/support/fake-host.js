@@ -305,6 +305,21 @@ export class FakeHost {
     return result;
   }
 
+  /** session.reload (§12.8): a live idle root restarts; its timeline, receipts and generation stay. */
+  #reload(params) {
+    if (!this.capabilities.includes('session.reload')) throw Object.assign(new Error('unknown method session.reload'), { code: -32601 });
+    const root = this.roots.get(params.sessionId);
+    if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
+    return this.#journaled(`${root.id}:reload:${params.requestId}`, 'reload', () => {
+      if (this.reloadError) throw this.reloadError;
+      if (root.running) throw Object.assign(new Error('busy'), { code: 1004, data: { reason: 'session_busy' } });
+      if (params.ifGeneration !== root.generation) throw Object.assign(new Error('stale'), { code: 1004, data: { reason: 'stale_generation' } });
+      if (!root.live) throw Object.assign(new Error('closed'), { code: 1005, data: { reason: 'session_closed' } });
+      this.reloads = (this.reloads ?? 0) + 1;
+      return { session: { ...root.summary } };
+    });
+  }
+
   #rewind(params) {
     const root = this.roots.get(params.sessionId);
     if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
@@ -423,6 +438,13 @@ export class FakeHost {
         return { generation: root.generation, items: structuredClone(root.timeline), hasOlder: false, tipCursor: root.cursor };
       }
       case 'session.rewind': return this.#rewind(params);
+      case 'session.reload': return this.#reload(params);
+      case 'session.resumeCommand': {
+        if (!this.capabilities.includes('session.resumeCommand')) throw Object.assign(new Error('unknown method session.resumeCommand'), { code: -32601 });
+        if (!this.roots.has(params.sessionId) && ![...this.roots.values()].some(root => root.children?.some?.(child => child.id === params.sessionId))) throw Object.assign(new Error('no such session'), { code: 1001 });
+        const line = `alp attach ${params.sessionId}`;
+        return { argv: ['alp', 'attach', params.sessionId], posix: line, windows: line, display: line, platform: 'posix' };
+      }
       case 'session.fork': return this.#fork(params);
       case 'session.release': {
         const root = this.roots.get(params.sessionId);

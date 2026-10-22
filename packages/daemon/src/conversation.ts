@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import path from 'node:path';
-import { ERROR, RPC_ERROR } from '@anhlp/alp-protocol';
+import { ERROR, RPC_ERROR, resumeCommandOf } from '@anhlp/alp-protocol';
 import type { AlpRuntime, Envelope, NativeBinding, SessionSnapshot } from '@anhlp/alp-runtime/index';
 import type { ConversationBranch, ForkProvenance, SessionSummary } from '@anhlp/alp-protocol/session';
 import type { RpcMethodMap } from '@anhlp/alp-protocol/rpc';
@@ -98,6 +98,8 @@ export type ConversationContext = {
 
 type ForkParams = RpcMethodMap['session.fork']['params'];
 type RewindParams = RpcMethodMap['session.rewind']['params'];
+type ReloadParams = RpcMethodMap['session.reload']['params'];
+type ReloadPlan = { root: string; threadId: string; at: string };
 
 type RewindPlan = {
   root: string; beforeTurnId: string; cut: number; branchId: string; turns: number; at: string;
@@ -130,13 +132,16 @@ export function createConversation(ctx: ConversationContext) {
   const lifecycle = createLifecycle(journal, { crashPoint: ctx.crashPoint });
   // Proven on macOS and Linux only (issue #121 closure scope); Windows does not list the capabilities.
   const enabled = typeof runtime.branch === 'function' && typeof runtime.rebind === 'function' && process.platform !== 'win32';
+  /** session.reload (§12.8): a runtime that restarts a root on its own conversation, on macOS and Linux. */
+  const reloads = typeof runtime.reload === 'function' && process.platform !== 'win32';
 
   /** A root alpd can fork or rewind, or the reason it cannot. */
   function support(record: SessionRecord, session: SessionSnapshot | undefined): SessionSummary['conversation'] {
-    if (record.rootId !== record.id || session?.parentId) return { fork: false, rewind: false, reason: 'not_root' };
-    if (!session || !SUPPORTED.has(session.runtime) || !enabled) return { fork: false, rewind: false, reason: 'runtime_unsupported' };
-    if (!session.persistent || !session.threadId || !record.spec) return { fork: false, rewind: false, reason: 'not_persistent' };
-    return { fork: true, rewind: true };
+    const no = { fork: false, rewind: false, ...(reloads ? { reload: false } : {}) };
+    if (record.rootId !== record.id || session?.parentId) return { ...no, reason: 'not_root' };
+    if (!session || !SUPPORTED.has(session.runtime) || (!enabled && !reloads)) return { ...no, reason: 'runtime_unsupported' };
+    if (!session.persistent || !session.threadId || !record.spec) return { ...no, reason: 'not_persistent' };
+    return { fork: enabled, rewind: enabled, ...(reloads ? { reload: true } : {}), ...(enabled ? {} : { reason: 'runtime_unsupported' as const }) };
   }
 
   /** The record of a root alpd may fork or rewind, refused with the reason otherwise. */
@@ -293,6 +298,78 @@ export function createConversation(ctx: ConversationContext) {
       ctx.log.warn(`could not move ${plan.root} to its rewound conversation; closing it`, { code: 'ALPD_REWIND_REBIND_FAILED', sessionId: plan.root, error });
       await runtime.close(plan.root).catch(() => {});
     }
+  }
+
+  // ------------------------------------------------------------------ reload
+
+  /**
+   * session.reload (§12.8): the live root's native process restarts on the conversation it runs now,
+   * with its own configuration, at the idle barrier a rewind waits for; its id, timeline and receipts
+   * are not touched. Journaled as fork and rewind are; the native step is never sent twice. A root
+   * with no turn yet has no conversation to keep (a Claude one has no transcript): refused, as is a
+   * closed root (session.create { resume: true } opens it).
+   */
+  async function reload(params: ReloadParams) {
+    const { sessionId, requestId, ifGeneration } = params;
+    const fingerprint = ctx.digest({ reload: sessionId });
+    const release = ctx.holdPrompts(sessionId);
+    let releaseWakes: (() => void) | undefined;
+    try {
+      const { result, duplicate } = await lifecycle.run<ReloadPlan, { threadId: string }, RpcMethodMap['session.reload']['result']>(
+        { resource: sessionId, operation: 'reload', requestId, fingerprint }, {
+          async prepare() {
+            const record = records.get(sessionId);
+            if (!record) throw new RpcError(ERROR.notFound, `No session ${sessionId}`, { reason: 'not_found' });
+            const live = runtime.snapshot(sessionId);
+            const allowed = support(record, live ?? record.session);
+            if (allowed?.reason === 'not_root') throw new RpcError(RPC_ERROR.invalidParams, 'Only a root session can be reloaded; an assignment restarts with its requester', { reason: 'invalid_params' });
+            if (!allowed?.reload) throw new RpcError(ERROR.unavailable, allowed?.reason === 'not_persistent' ? 'This session keeps no native conversation to reload' : `alpd cannot reload a ${(live ?? record.session)?.runtime ?? 'session'} session`, { reason: 'runtime_unsupported' });
+            const unsettled = ctx.unsettled(sessionId);
+            if (unsettled) throw busy(sessionId, unsettled);
+            if (!live) throw new RpcError(ERROR.unavailable, 'The session is not open; open it (session.create { resume: true }) and its agent starts on its conversation', { reason: 'session_closed' });
+            if (live.busy) throw busy(sessionId, 'a turn, child, assignment, mail or parked work is in progress');
+            if (runtime.questions().some(question => question.rootId === sessionId)) throw busy(sessionId, 'a question waits for an answer');
+            await checkGeneration(sessionId, ifGeneration);
+            const turns = turnsOf(await store.timeline(sessionId), sessionId);
+            if (!turns.length) throw new RpcError(ERROR.unavailable, 'The agent has no conversation to keep yet; send it a message first, or start a new session', { reason: 'no_history' });
+            const running = turns.find(turn => turn.state === undefined);
+            if (running) throw inProgress(running.id);
+            // From here to the restart the runtime starts no turn of its own on the root (mail waits).
+            releaseWakes = runtime.hold?.(sessionId);
+            return { root: sessionId, threadId: live.threadId!, at: new Date().toISOString() };
+          },
+          async apply(plan) {
+            try {
+              const session = await runtime.reload!(plan.root);
+              return { threadId: session.threadId! };
+            } catch (error) { throw refusal(error); }
+          },
+          commit: commitReload,
+          repeat: entry => ({ session: ctx.summary(entry.plan.root) ?? entry.result!.session }),
+        });
+      return { ...result, session: ctx.summary(sessionId) ?? result.session, ...(duplicate ? { duplicate: true as const } : {}) };
+    } finally {
+      releaseWakes?.();
+      release();
+    }
+  }
+
+  /** alpd's side of a reload: nothing to write, its conversation and record are unchanged (idempotent). */
+  async function commitReload(entry: LifecycleEntry<ReloadPlan, { threadId: string }>) {
+    const plan = entry.plan;
+    const record = records.get(plan.root);
+    if (!record?.session) throw new Error(`session ${plan.root} is gone`);
+    return { session: ctx.summary(plan.root)! };
+  }
+
+  /**
+   * session.resumeCommand (§12.8): the ALP CLI command that follows this session in a terminal on the
+   * daemon host. Built here, from the session id only: no native runtime command (ALP's orchestration,
+   * mail and assignments would be lost), credential, env or path.
+   */
+  function resumeCommand(sessionId: string) {
+    if (!records.has(sessionId) && !runtime.snapshot(sessionId)) throw new RpcError(ERROR.notFound, `No session ${sessionId}`, { reason: 'not_found' });
+    return resumeCommandOf(sessionId, process.platform === 'win32' ? 'windows' : 'posix');
   }
 
   // ------------------------------------------------------------------ fork
@@ -480,9 +557,10 @@ export function createConversation(ctx: ConversationContext) {
 
   return {
     enabled,
-    /** The fields session summaries carry for a record (§12.7). */
+    reloads,
+    /** The fields session summaries carry for a record (§12.7, §12.8). */
     fields(record: SessionRecord, session: SessionSnapshot | undefined): Partial<SessionSummary> {
-      if (!enabled) return {};
+      if (!enabled) return reloads ? { conversation: support(record, session) } : {};
       return {
         conversation: support(record, session),
         ...(record.forkedFrom ? { forkedFrom: record.forkedFrom } : {}),
@@ -495,11 +573,13 @@ export function createConversation(ctx: ConversationContext) {
     },
     fork,
     rewind,
+    reload,
+    resumeCommand,
     /** The requestId of a rewind whose commit is unfinished for this root: prompts and reopens wait for it. */
     fenced: (root: string) => fences.get(root),
     /** At start, before requests: finish or settle what a crash left (lifecycle.recover); a rewind left applied fences its root. */
     async recover() {
-      const unfinished = await lifecycle.recover({ rewind: entry => commitRewind(entry as LifecycleEntry<RewindPlan, NativeBinding>), fork: entry => commitFork(entry as LifecycleEntry<ForkPlan, NativeBinding>) },
+      const unfinished = await lifecycle.recover({ rewind: entry => commitRewind(entry as LifecycleEntry<RewindPlan, NativeBinding>), fork: entry => commitFork(entry as LifecycleEntry<ForkPlan, NativeBinding>), reload: entry => commitReload(entry as LifecycleEntry<ReloadPlan, { threadId: string }>) },
         (message, fields) => ctx.log.warn(message, fields));
       for (const entry of unfinished) if (entry.operation === 'rewind') fences.set(entry.resource, entry.requestId);
     },

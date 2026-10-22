@@ -1646,6 +1646,10 @@
             "rewind": {
               "type": "boolean"
             },
+            "reload": {
+              "type": "boolean",
+              "description": "Whether session.reload can restart this root's native process (§12.8); the root must also be open and idle."
+            },
             "reason": {
               "enum": [
                 "runtime_unsupported",
