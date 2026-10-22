@@ -15,7 +15,7 @@ export type EventNotification = { jsonrpc: '2.0'; method: 'event'; params: Envel
 export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
 export type HistoryPage = { generation: string; items: HistoryItem[]; olderCursor?: string; hasOlder: boolean; tipCursor: number };
 
-export type Capability = 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
+export type Capability = 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -29,7 +29,11 @@ export type ErrorReason =
   // workspace.files.search (§12.3); workspace.files.list and read (§12.4).
   | 'not_directory' | 'blocked_path' | 'ignored' | 'linked' | 'binary' | 'too_large'
   // workspace.git.status and workspace.git.diff (§12.5).
-  | 'not_repository' | 'unknown_ref' | 'invalid_compare' | 'stale_snapshot' | 'git_unavailable' | 'git_failed';
+  | 'not_repository' | 'unknown_ref' | 'invalid_compare' | 'stale_snapshot' | 'git_unavailable' | 'git_failed'
+  // Attachments (§12.6).
+  | 'invalid_name' | 'invalid_data' | 'attachment_too_large' | 'offset_mismatch' | 'chunk_conflict' | 'upload_incomplete'
+  | 'hash_mismatch' | 'upload_expired' | 'quota_exceeded' | 'attachment_referenced' | 'attachment_limit'
+  | 'attachment_unavailable' | 'attachment_unsupported';
 
 type Empty = Record<string, never>;
 
@@ -56,9 +60,30 @@ export type GitDiffLine = { type: 'add' | 'remove' | 'context'; content: string;
 export type GitDiffHunk = { oldStart: number; oldCount: number; newStart: number; newCount: number; context?: string; lines: GitDiffLine[] };
 export type GitDiffFile = { path: string; oldPath?: string; change: GitChange; kind: 'text' | 'binary' | 'too_large' | 'withheld' | 'symlink' | 'submodule'; additions: number; deletions: number; hunks: GitDiffHunk[] };
 export type GitDiffPage = { compare: { mode: GitCompare['mode']; baseRef?: string; ignoreWhitespace: boolean }; snapshot: string; files: GitDiffFile[]; hiddenCount: number; truncated: boolean; nextCursor?: string };
+/**
+ * Capability `attachments` (§12.6). Principal context is set only by a trusted gateway on its own
+ * connection; a local client leaves it out and acts as the owner.
+ */
+export type PrincipalContext = { principalId?: string; principalEpoch?: string; authorizedRoots?: string[] };
+/** A committed attachment as clients see it: ids and display metadata, never a host path or URL. */
+export type AttachmentInfo = {
+  attachmentId: string; sessionId: string; name: string; mimeType: string; detectedMimeType: string;
+  size: number; sha256: string; createdAt: string; committedAt: string; referenced: boolean;
+};
+/** Effective attachment limits a daemon.hello advertises with capability `attachments`. */
+export type AttachmentLimits = {
+  maxObjectBytes: number; maxPerPrompt: number; maxPromptBytes: number; maxChunkBytes: number; maxActiveUploads: number;
+  maxPrincipalBytes: number; maxDaemonBytes: number; uploadTimeoutMs: number; unreferencedRetentionMs: number; releasedGraceMs: number;
+};
 export type RegistryMutation = { requestId: string; ifRevision: number };
 export type RegistryPage = { revision: number; total: number; nextCursor: string | null };
 export type RpcMethodMap = {
+  'attachment.begin': { params: PrincipalContext & { sessionId: string; name: string; size: number; mimeType: string; sha256?: string; requestId: string }; result: { uploadId: string; state: 'uploading' | 'committed'; received: number; size: number; maxChunkBytes: number; expiresAt?: string; attachmentId?: string } };
+  'attachment.chunk': { params: PrincipalContext & { uploadId: string; offset: number; data: string }; result: { received: number; size: number } };
+  'attachment.commit': { params: PrincipalContext & { uploadId: string; sha256: string }; result: { attachment: AttachmentInfo } };
+  'attachment.abort': { params: PrincipalContext & { uploadId: string }; result: { aborted: true } };
+  'attachment.get': { params: PrincipalContext & { attachmentId: string }; result: { attachment: AttachmentInfo } };
+  'attachment.delete': { params: PrincipalContext & { attachmentId: string }; result: { deleted: true } };
   'workspace.git.status': { params: { workspaceId: string }; result: GitStatus };
   'workspace.git.diff': { params: { workspaceId: string; compare: GitCompare; path?: string; cursor?: string }; result: GitDiffPage };
   'workspace.worktree.options': { params: { workspaceId: string }; result: { mappingIds: string[] } };
@@ -73,7 +98,7 @@ export type RpcMethodMap = {
   'workspace.update': { params: RegistryMutation & { workspaceId: string; title?: string | null; pinned?: boolean; archived?: boolean }; result: { workspace: RegistryWorkspace; revision: number } };
   'registry.owner': { params: { operation?: string; args?: Record<string, unknown>; requestId?: string; ifRevision?: number }; result: { registry: Record<string, unknown> } };
 
-  'daemon.hello': { params: { protocolVersion: 1; client?: { name: string; version: string }; capabilities?: string[] }; result: { protocolVersion: 1; daemonVersion?: string; pid?: number; /** The daemon host's machine name (os.hostname()), a label for clients. */ hostname?: string; promptImageLimits?: { maxCount: number; maxBytes: number; maxTotalBytes: number }; capabilities?: string[] } };
+  'daemon.hello': { params: { protocolVersion: 1; client?: { name: string; version: string }; capabilities?: string[] }; result: { protocolVersion: 1; daemonVersion?: string; pid?: number; /** The daemon host's machine name (os.hostname()), a label for clients. */ hostname?: string; promptImageLimits?: { maxCount: number; maxBytes: number; maxTotalBytes: number }; attachmentLimits?: AttachmentLimits; capabilities?: string[] } };
   'daemon.status': {
     params: Empty;
     result: {
@@ -112,7 +137,7 @@ export type RpcMethodMap = {
   'session.attach': { params: { sessionId: string; replay?: boolean; after?: number; generation?: string }; result: { session: SessionSummary; cursor: number; reset?: true } };
   'session.release': { params: { sessionId: string }; result: { closed: boolean } };
   'session.prompt': {
-    params: { sessionId: string; clientMessageId: string; delivery?: 'auto' | 'steer'; content: PromptContent };
+    params: PrincipalContext & { sessionId: string; clientMessageId: string; delivery?: 'auto' | 'steer'; content: PromptContent };
     /** `{}` from a daemon without prompt.receipts. */
     result: { outcome?: 'accepted' | 'failed'; error?: AlpError; duplicate?: boolean; durable?: boolean };
   };

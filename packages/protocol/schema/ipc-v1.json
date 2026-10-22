@@ -2578,6 +2578,66 @@
         "createdAt"
       ],
       "additionalProperties": false
+    },
+    "attachment": {
+      "type": "object",
+      "description": "A committed attachment as clients see it: ids, display metadata and its digest, never a host path or URL.",
+      "properties": {
+        "attachmentId": {
+          "type": "string",
+          "pattern": "^att_[0-9a-f]{32}$"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "mimeType": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 255
+        },
+        "detectedMimeType": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 255
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "committedAt": {
+          "type": "string"
+        },
+        "referenced": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "attachmentId",
+        "sessionId",
+        "name",
+        "mimeType",
+        "detectedMimeType",
+        "size",
+        "sha256",
+        "createdAt",
+        "committedAt",
+        "referenced"
+      ],
+      "additionalProperties": false
     }
   }
 }
