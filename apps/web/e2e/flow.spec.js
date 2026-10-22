@@ -90,7 +90,7 @@ test('create, stream, tool call, questions, stop, rename', async ({ page }) => {
   await expect(page.getByRole('heading', { level: 1, name: 'Release 1.0' })).toBeVisible();
   await expect(page.getByTestId('session-row')).toContainText('Release 1.0');
 
-  // The dock opens on Paseo's Changes (unavailable in this beta) and Files; + adds Agents, which lists main.
+  // The dock opens on Paseo's Changes (unavailable here: no Git on the host, or the workspace is not registered) and Files; + adds Agents, which lists main.
   const dock = page.getByRole('complementary', { name: 'Explorer' });
   await expect(dock.getByRole('tab')).toHaveText(['Changes', 'Files']);
   await expect(dock.getByTestId('panel-unavailable-changes')).toBeVisible();
