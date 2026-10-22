@@ -59,7 +59,7 @@ test('split panes: split, focus, drag between panes and to an edge, resize, maxi
   await expect(paneTabs(page, 'pane-1')).toHaveText(['New session']);
   await expect(pane(page, 'pane-1').getByTestId('new-session-screen')).toBeVisible();
   // Both panes show their tab in front: Diff on the left still.
-  await expect(pane(page, 'main').getByTestId('panel-unavailable-diff')).toBeVisible();
+  await expect(pane(page, 'main').getByTestId('changes-not-git')).toHaveAttribute('data-reason', 'not_repository');
   const left = await pane(page, 'main').boundingBox();
   const right = await pane(page, 'pane-1').boundingBox();
   expect(Math.abs(left.width - right.width)).toBeLessThan(4);
