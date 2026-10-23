@@ -4018,9 +4018,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (!attachmentRoutes(session).includes('file.path') || !stager || !attachmentReader) {
         throw new Error(`${session.runtimeKind === 'acp' ? 'This ACP agent' : session.runtimeKind[0].toUpperCase() + session.runtimeKind.slice(1)} cannot read attached files; they stay stored and the message was not sent`);
       }
-      if (!stagingWarned.has(sessionId) && stagingExposure(stager.root, [session.mapping.workdir])) {
+      // Told once per session, when it first stages, never at alpd's start (its log stays quiet until there is something to say).
+      if (!stagingWarned.has(sessionId)) {
         stagingWarned.add(sessionId);
-        log.warn('the attachment staging directory is inside this session\'s workspace: a sandboxed tool there could change a staged copy before it is read; keep ALP_HOME outside workspaces', { code: 'ALP_ATTACHMENT_STAGE_EXPOSED', sessionId });
+        const exposed = stagingExposure(stager.root, [session.mapping.workdir, os.tmpdir(), '/tmp']);
+        if (exposed) log.warn(`the attachment staging directory is inside ${exposed === session.mapping.workdir ? 'this session\'s workspace' : 'the temp directory'}, which sandboxed sessions may write: a tool could change a staged copy before it is read; keep ALP_HOME outside both (default ~/.alp)`, { code: 'ALP_ATTACHMENT_STAGE_EXPOSED', sessionId });
       }
       for (const part of attachmentParts) {
         const attachment = runtimeAttachment(part);
