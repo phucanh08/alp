@@ -37,15 +37,33 @@ export function attachmentRefusal(attachments: unknown): string | undefined {
 /** The answer to Paseo's file.upload.request: ALP takes no uploads through this connection. */
 export const uploadRefused = 'ALP does not take files uploaded through this app yet; nothing was uploaded.';
 
-/** session.prompt content of a message; throws (nothing is sent) when it carries attachments. */
+export type MessagePart = { type: 'text'; text: string } | { type: 'image'; mimeType: string; data: string };
+
+/**
+ * session.prompt content of a message; throws (nothing is sent) when it carries attachments, or
+ * images that are not a list of inline base64 data with their type.
+ */
 export function messageContent(text: string | undefined, images: unknown, attachments: unknown) {
   const refusal = attachmentRefusal(attachments);
   if (refusal) throw new Error(refusal);
-  const parts: Array<{ type: 'text'; text: string } | { type: 'image'; mimeType: string; data: string }> = [];
+  if (images !== undefined && images !== null && !Array.isArray(images)) throw new Error('The images of this message are not a list; nothing was sent');
+  const parts: MessagePart[] = [];
   if (text !== undefined && (text.trim() || !Array.isArray(images) || images.length === 0)) parts.push({ type: 'text', text });
   for (const image of Array.isArray(images) ? images as PaseoImage[] : []) {
     if (typeof image?.data !== 'string' || typeof image?.mimeType !== 'string') throw new Error('An image of this message is not inline base64 with its type; nothing was sent');
     parts.push({ type: 'image', mimeType: image.mimeType, data: image.data });
   }
   return parts;
+}
+
+/**
+ * The content of a new agent's first message (create_agent_request, a new workspace's agent), or
+ * undefined when it has none: its trimmed prompt, then its images. Built before the agent or its
+ * workspace is made, so what the facade can tell is wrong (attachments, malformed images) is
+ * refused before anything exists; alpd's own refusal of the prompt comes only after.
+ */
+export function firstMessage(prompt: string | undefined, images: unknown, attachments: unknown): MessagePart[] | undefined {
+  const text = prompt?.trim() || undefined;
+  const content = messageContent(text, images, attachments);
+  return content.length ? content : undefined;
 }

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rename, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -345,6 +346,21 @@ test('projects and workspaces are kept by alpd: add, create with an agent, title
   assert.equal((await ask(client, { type: 'project.add.request', requestId: 'p2', cwd: root })).payload.project.projectId, project.projectId);
   assert.deepEqual((await ask(client, { type: 'project.list.request', requestId: 'l1' })).payload.projects.map(entry => entry.projectId), [project.projectId]);
   assert.deepEqual((await ask(client, { type: 'fetch_workspaces_request', requestId: 'w1' })).payload.emptyProjects.map(entry => entry.projectId), [project.projectId]);
+
+  // A first agent whose message ALP cannot send (attachments, a malformed image) is refused before
+  // the workspace is made.
+  const refusedAgents = [
+    [{ attachments: [{ type: 'uploaded_file', id: `upload_${randomUUID()}`, fileName: 'plan.pdf', mimeType: 'application/pdf', size: 3, path: '/Users/someone/.paseo/uploads/x/plan.pdf' }] }, /ALP cannot send files \("plan\.pdf"\)/],
+    [{ images: [{ data: 'iVBORw0KGgo=' }] }, /not inline base64 with its type/],
+  ];
+  for (const [extra, pattern] of refusedAgents) {
+    const refused = (await ask(client, { type: 'workspace.create.request', requestId: `c0-${randomUUID()}`, source: { kind: 'directory', path: root, projectId: project.projectId }, agent: { config: { provider: 'alp', cwd: root }, initialPrompt: 'Hello', labels: {}, ...extra } })).payload;
+    assert.equal(refused.workspace, null);
+    assert.match(refused.error, pattern);
+    assert.ok(!refused.error.includes('/Users/someone'));
+  }
+  assert.deepEqual((await ask(client, { type: 'fetch_workspaces_request', requestId: 'w1b' })).payload.entries, [], 'no workspace was made');
+  assert.equal(agents.length, 0, 'no agent was made');
 
   // A workspace made with its first agent: the agent runs in it.
   const made = (await ask(client, { type: 'workspace.create.request', requestId: 'c1', source: { kind: 'directory', path: root, projectId: project.projectId }, agent: { config: { provider: 'alp', cwd: root }, initialPrompt: 'Hello', labels: {} } })).payload;

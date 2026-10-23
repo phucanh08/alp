@@ -3,7 +3,7 @@ import { mkdir, stat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { deriveAgentStateBucket, getWorkspaceStateBucketPriority } from '@getpaseo/protocol/agent-state-bucket';
 import { normalizeWorkspaceLabelName, workspaceLabelKey, type WorkspaceLabelDefinition } from '@getpaseo/protocol/workspace-labels';
-import { attachmentRefusal } from './prompt-content.js';
+import { firstMessage } from './prompt-content.js';
 import type { AgentSnapshotPayload, SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
 import type { SessionSummary } from '@anhlp/alp-protocol/session';
 import type { Handler } from './gateway.js';
@@ -374,9 +374,9 @@ export function createWorkspaces({ rpc, broadcast, agents, inDevelopment, log = 
       const again = request.idempotencyKey ? registry.workspaces.find(entry => entry.idempotencyKey === request.idempotencyKey) : undefined;
       if (again) return reply({ workspace: descriptor(again) });
       try {
-        // A first agent whose message carries what ALP cannot send is refused before the workspace is made.
-        const refusal = attachmentRefusal(request.agent?.attachments);
-        if (refusal) throw new RequestError(refusal);
+        // A first agent whose message carries what ALP cannot send (attachments, malformed images) is
+        // refused before the workspace is made; agents().create builds the same message again.
+        if (request.agent) firstMessage(request.agent.initialPrompt, request.agent.images, request.agent.attachments);
         const owner = request.source.projectId ? project(request.source.projectId) : await addProject(request.source.path);
         if (!owner || owner.removedAt) throw new RequestError(`No project ${request.source.projectId}`);
         const directory = path.resolve(request.source.path);

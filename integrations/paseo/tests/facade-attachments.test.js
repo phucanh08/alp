@@ -94,3 +94,14 @@ test('a new agent whose first message failed is reported as a failure', async t 
   assert.equal(reply.payload.status, 'agent_create_failed');
   assert.match(reply.payload.error, /its first message failed: Antigravity takes no images/);
 });
+
+test('a new agent whose first message has malformed images is refused before it is created', async t => {
+  const { agents, calls } = await facade(t);
+  for (const images of [[{ data: 'iVBORw0KGgo=' }], [{ mimeType: 'image/png', data: 7 }], { data: 'iVBORw0KGgo=', mimeType: 'image/png' }]) {
+    const reply = await agents.handlers.create_agent_request({ type: 'create_agent_request', requestId: 'c1', config: { provider: 'alp', cwd: '/w' }, initialPrompt: 'look', images }, { clientId: 'c', emit: () => {} });
+    assert.equal(reply.payload.status, 'agent_create_failed');
+    assert.match(reply.payload.error, /nothing was sent/);
+    assert.doesNotMatch(reply.payload.error, /created the agent/);
+  }
+  assert.ok(!calls.some(call => call.method === 'session.create' || call.method === 'session.prompt'), 'nothing was created or sent');
+});
