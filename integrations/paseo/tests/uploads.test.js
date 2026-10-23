@@ -127,11 +127,12 @@ test('the reader refuses anything that is not exactly one of Paseo\'s uploads', 
  * upload, or the committed object), chunks appended at `received`, commit checks the SHA-256.
  * `fail` lets a test make one method throw.
  */
-function fakeAlpd({ limits = {}, capabilities = ['attachments', 'prompt.images'], fail = () => undefined } = {}) {
+function fakeAlpd({ limits = {}, capabilities = ['attachments', 'prompt.images'], handshake = true, hello, fail = () => undefined } = {}) {
   const uploads = new Map();
   const objects = new Map();
   const connection = {
-    capabilities,
+    // handshake: false is an adapter without handshake capabilities; the provider asks daemon.hello.
+    ...(handshake ? { capabilities } : {}),
     requests: [],
     closed: false,
     onEvent: () => () => {},
@@ -144,7 +145,7 @@ function fakeAlpd({ limits = {}, capabilities = ['attachments', 'prompt.images']
       const failure = fail(method, params, connection);
       if (failure) throw failure;
       switch (method) {
-        case 'daemon.hello': return { protocolVersion: 1, capabilities, attachmentLimits: { maxObjectBytes: 1024, maxPerPrompt: 8, maxPromptBytes: 4096, maxChunkBytes: 4, ...limits } };
+        case 'daemon.hello': return hello ?? { protocolVersion: 1, capabilities, attachmentLimits: { maxObjectBytes: 1024, maxPerPrompt: 8, maxPromptBytes: 4096, maxChunkBytes: 4, ...limits } };
         case 'session.create': return { session: { id: params.sessionId } };
         case 'attachment.begin': {
           let upload = uploads.get(params.requestId);
@@ -302,4 +303,56 @@ test('refusals happen before anything is sent and name files, never host paths',
   await check(fakeAlpd({ limits: { maxPerPrompt: 1 } }), [file, other], /at most 1/);
   await check(fakeAlpd({ limits: { maxPromptBytes: 5 } }), [file, other], /together they are larger/);
   await check(fakeAlpd({ limits: { maxObjectBytes: 2 } }), [file], /ALP cannot attach "a\.txt": it is larger than ALP takes \(2 bytes\)/);
+  // Every file is read and checked before any upload: a refused later file leaves no object behind.
+  await check(fakeAlpd(), [file, { type: 'text', text: 'x' }, { ...other, size: 7 }], /ALP cannot attach "b\.txt": /);
+  await check(fakeAlpd(), [file, { ...other, path: path.join(fixture.outside, 'secret.txt') }], /ALP cannot attach "b\.txt": it is not a file uploaded/);
+});
+
+test('the provider fails closed on what alpd offers: capability and attachmentLimits from daemon.hello', { skip: !posix }, async t => {
+  const fixture = await paseoFixture(t);
+  const file = await fixture.upload('a.txt', 'aaa');
+  const refused = async (alpd, pattern) => {
+    const { prompt, failures } = await providerOver(t, alpd, { home: fixture.home });
+    await prompt(`m-${randomUUID()}`, [file]);
+    assert.equal(failures().length, 1);
+    assert.match(failures()[0].result.error.message, pattern);
+    assert.ok(!failures()[0].result.error.message.includes(fixture.root));
+    assert.equal(alpd.sent('attachment.begin').length, 0, 'nothing is uploaded');
+    assert.equal(alpd.sent('session.prompt').length, 0, 'nothing is sent');
+  };
+  const LIMITS = { maxObjectBytes: 1024, maxPerPrompt: 8, maxPromptBytes: 4096, maxChunkBytes: 4 };
+  const noLimits = /ALP cannot attach "a\.txt": this alpd names no valid attachment limits/;
+  // No attachmentLimits, or limits that are not safe non-negative integers, or zero counts: no files.
+  await refused(fakeAlpd({ hello: { protocolVersion: 1, capabilities: ['attachments'] } }), noLimits);
+  await refused(fakeAlpd({ hello: { protocolVersion: 1, capabilities: ['attachments'], attachmentLimits: [] } }), noLimits);
+  for (const bad of [{ maxPerPrompt: 0 }, { maxPromptBytes: 0 }, { maxChunkBytes: 0 }, { maxObjectBytes: -1 }, { maxPerPrompt: 1.5 }, { maxChunkBytes: '4' }, { maxObjectBytes: 2 ** 60 }, { maxPerPrompt: undefined }]) {
+    await refused(fakeAlpd({ limits: bad }), noLimits);
+  }
+  // A connection without handshake capabilities: the hello's list decides.
+  await refused(fakeAlpd({ handshake: false, capabilities: ['prompt.images'] }), /this alpd does not take file attachments/);
+  await refused(fakeAlpd({ handshake: false, hello: { protocolVersion: 1, attachmentLimits: LIMITS } }), /this alpd does not take file attachments/);
+  {
+    const alpd = fakeAlpd({ handshake: false });
+    const { prompt, failures } = await providerOver(t, alpd, { home: fixture.home });
+    await prompt('m-listed', [file]);
+    assert.deepEqual(failures(), []);
+    assert.deepEqual(alpd.sent('session.prompt')[0].params.content, [{ type: 'attachment', attachmentId: 'att-1' }]);
+  }
+  // A failed hello refuses the files, and is asked again for the next prompt.
+  {
+    let helloFails = 1;
+    const alpd = fakeAlpd({ fail: method => method === 'daemon.hello' && helloFails-- > 0 ? new Error('hello went wrong') : undefined });
+    const { prompt, failures } = await providerOver(t, alpd, { home: fixture.home });
+    await prompt('m-1', [file]);
+    assert.equal(failures().length, 1);
+    assert.match(failures()[0].result.error.message, /ALP cannot attach "a\.txt": alpd did not say whether it takes file attachments/);
+    assert.equal(alpd.sent('attachment.begin').length, 0);
+    await prompt('m-1', [file]);
+    assert.equal(failures().length, 1);
+    assert.equal(alpd.sent('daemon.hello').length, 2);
+    assert.equal(alpd.sent('session.prompt').length, 1);
+    // Answered once, the offer is kept for the connection.
+    await prompt('m-2', [file]);
+    assert.equal(alpd.sent('daemon.hello').length, 2);
+  }
 });
