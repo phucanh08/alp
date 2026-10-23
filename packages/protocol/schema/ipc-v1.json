@@ -567,24 +567,49 @@
       ]
     },
     "notification": {
-      "type": "object",
-      "properties": {
-        "jsonrpc": {
-          "const": "2.0"
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "event"
+            },
+            "params": {
+              "$ref": "#/$defs/envelope"
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
         },
-        "method": {
-          "const": "event"
-        },
-        "params": {
-          "$ref": "#/$defs/envelope"
+        {
+          "type": "object",
+          "description": "A terminal's output, exit or detach (capability terminal, §12.10).",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "terminal.event"
+            },
+            "params": {
+              "$ref": "#/$defs/terminalEvent"
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
         }
-      },
-      "required": [
-        "jsonrpc",
-        "method",
-        "params"
-      ],
-      "additionalProperties": true
+      ]
     },
     "knownEvent": {
       "oneOf": [
@@ -3048,6 +3073,199 @@
         "restarted"
       ],
       "additionalProperties": true
+    },
+    "terminal": {
+      "type": "object",
+      "description": "A terminal as clients see it: ids, size and state, never a process id, shell path or host path.",
+      "properties": {
+        "terminalId": {
+          "type": "string",
+          "pattern": "^term_[0-9a-f]{32}$"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "cols": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 500
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "state": {
+          "enum": [
+            "running",
+            "exited"
+          ]
+        },
+        "attached": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastActivityAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "exitCode": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "signal": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "endReason": {
+          "enum": [
+            "exited",
+            "closed",
+            "idle",
+            "lifetime",
+            "detached",
+            "revoked",
+            "disabled",
+            "shutdown"
+          ]
+        }
+      },
+      "required": [
+        "terminalId",
+        "workspaceId",
+        "title",
+        "cols",
+        "rows",
+        "state",
+        "attached",
+        "createdAt",
+        "lastActivityAt",
+        "expiresAt"
+      ],
+      "additionalProperties": false
+    },
+    "terminalEvent": {
+      "description": "params of a terminal.event notification (§12.10): sent only to the connection attached to the terminal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "terminalId": {
+              "type": "string",
+              "pattern": "^term_[0-9a-f]{32}$"
+            },
+            "type": {
+              "const": "output"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "data": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 65536
+            }
+          },
+          "required": [
+            "terminalId",
+            "type",
+            "seq",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "terminalId": {
+              "type": "string",
+              "pattern": "^term_[0-9a-f]{32}$"
+            },
+            "type": {
+              "const": "exit"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "exitCode": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "signal": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "exited",
+                "closed",
+                "idle",
+                "lifetime",
+                "detached",
+                "revoked",
+                "disabled",
+                "shutdown"
+              ]
+            }
+          },
+          "required": [
+            "terminalId",
+            "type",
+            "seq",
+            "exitCode",
+            "signal",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "terminalId": {
+              "type": "string",
+              "pattern": "^term_[0-9a-f]{32}$"
+            },
+            "type": {
+              "const": "detached"
+            },
+            "reason": {
+              "enum": [
+                "replaced",
+                "slow_consumer"
+              ]
+            }
+          },
+          "required": [
+            "terminalId",
+            "type",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      ]
     }
   }
 }

@@ -191,6 +191,12 @@ runs before all of them pass**:
 | `agent_mismatch` | 1005 | `session.configure`: a team whose main agent is not the session's agent; `data.action: "session.create"` (§12.9) |
 | `permission_escalation` | 1003 | `session.configure`: the change would run the session with more permissions (a mode beyond its profile, a higher mode) or a hook or stdio MCP server it did not run (§12.9) |
 | `team_not_found` | 1001 | `session.configure`: no team of that id for the project (§12.9) |
+| `terminal_disabled` | 1005 | `terminal.*`: the host has not opted in (`<ALP_HOME>/terminal.json` `allowRemoteTerminal`), or turned it off (§12.10) |
+| `terminal_unsupported` | 1005 | `terminal.*` on Windows, or where the PTY module does not load (§12.10) |
+| `terminal_limit` | 1005 | `terminal.create` over `maxPerPrincipal` or `maxPerDaemon`; `data.limit` names it (§12.10) |
+| `not_attached` | 1004 | `terminal.input`/`terminal.resize` from a connection that has not attached the terminal (§12.10) |
+| `terminal_exited` | 1004 | `terminal.input`/`terminal.resize` to a terminal whose shell ended (§12.10) |
+| `input_too_large` | -32602 | `terminal.input` over `maxInputBytes` UTF-8 bytes (§12.10) |
 
 Errors thrown by an extension's owner travel unchanged (`code`, `message`, `data`). Errors inside
 events (`session.failed`, `prompt.failed`, `turn.ended`) are `AlpError { message, code? }` with string
@@ -1318,9 +1324,105 @@ credential also holds the opt-in `session.team.write`, and `session.configure.pr
 `session.read`; it projects both answers and replaces alpd's messages with fixed ones per `reason`
 (docs/alp/remote-gateway.md §5.17).
 
+### 12.10 Terminal (`terminal.*`)
+
+Capability `terminal` (issue #121, branch H). A real pseudo-terminal (PTY) on the daemon host,
+running a shell **as the account that runs alpd**. A workspace only chooses where the shell starts
+and which terminals a principal sees: **a cwd is not a sandbox**. The shell can read and write
+everything that account can, start any program, and use the network. alpd never accepts a shell
+path, command, argument, environment or process id from a client, and never returns a process id
+or host path.
+
+**Host switch.** alpd serves terminals only when the host owner opted in, in the owner-private file
+`<ALP_HOME>/terminal.json` (a regular file of the daemon user, no group or other permission bits;
+anything else counts as off): `{ "version": 1, "allowRemoteTerminal": true, "limits"?: { ... } }`.
+The default is off. `alp terminal allow` writes it (after stating what it grants) and
+`alp terminal deny` turns it off; `alp terminal status` shows it. No RPC can change it, a backup never
+carries it, and a gateway credential cannot imply it. alpd reads the file again at every
+`terminal.create` and `terminal.attach` and at least every 5 s: once it is off (or unusable) every
+terminal is killed (`exit` reason `disabled`) and new ones are refused (`1005 terminal_disabled`).
+`daemon.hello` lists capability `terminal` with `terminalLimits` only while the switch is on, on
+macOS and Linux, and when the PTY module (`node-pty`, an optional dependency) loads. Windows is not
+supported (`1005 terminal_unsupported`; the capability is never listed there).
+
+**Limits** (`TERMINAL` in `@anhlp/alp-protocol`, advertised as `daemon.hello` `terminalLimits`):
+`maxPerPrincipal` 4 and `maxPerDaemon` 16 running terminals; `maxInputBytes` 64 KiB (UTF-8) per
+`terminal.input`; output events of at most `maxOutputFrameBytes` 64 KiB of data; a replay ring of
+`replayBytes` 1 MiB per terminal; `idleMs` 30 min without input or output and `maxLifetimeMs` 8 h end a
+terminal; `reconnectMs` 60 s for a detached terminal to be attached again; `cols` 2–500, `rows` 1–200.
+The operator may lower any of them in `terminal.json` `limits` (a higher value is ignored and logged,
+`ALPD_TERMINAL_CONFIG`); a gateway may lower them further, never raise them.
+
+**Binding.** Every call acts for a principal, as attachments do (§12.6): a trusted gateway sets
+`principalId`, `principalEpoch` and `authorizedRoots` on its own connection; a local client leaves them
+out and acts as the owner. A terminal is bound at create to its principal and epoch and to the
+workspace (whose canonical directory must be one of `authorizedRoots`, when given). Every other call
+checks the whole binding again; an id that is unknown, or of another principal, epoch or root,
+answers the same `1001 not_found`. Terminal ids are opaque (`term_` and 32 hex digits).
+
+- `terminal.create { workspaceId, cols, rows, requestId }` → `{ terminal }`. alpd starts the
+  approved shell (the daemon user's `$SHELL` when it is an absolute path listed in `/etc/shells`, else
+  `/bin/sh`) as an interactive login-free shell in the workspace's directory, with alpd's environment
+  minus `ALP_*` and `npm_*` variables, plus `TERM=xterm-256color`, `COLORTERM=truecolor` and
+  `ALP_TERMINAL=1`. The workspace must be in the registry and its directory must exist
+  (`1001 not_found`); outside `authorizedRoots` is `1003 outside_workspace`. Over a limit:
+  `1005 terminal_limit` with `data.limit` `principal` or `daemon`. A repeat with the same `requestId`
+  (per principal and epoch) answers the same terminal while it runs. Nothing is attached yet: the
+  creator attaches next; a terminal nobody attaches within `reconnectMs` is killed.
+- `terminal.list { workspaceId? }` → `{ terminals }`: the caller's own terminals (running, and exited
+  ones kept for `reconnectMs` so a client can read their end), newest first.
+- `terminal.attach { terminalId, after? }` → `{ terminal, nextSeq, gap? }`. This connection becomes the
+  terminal's only stream: another one attached before is detached (`detached` reason `replaced`).
+  alpd first sends, as `terminal.event` notifications, every output event with `seq > after`
+  (`after` 0 or absent: from the start) still in the replay ring, and the `exit` event if the terminal
+  ended, then answers. When the ring no longer holds `after + 1`, `gap` is
+  `{ fromSeq, toSeq }`: the events lost (the client shows that output is missing). Input is
+  never replayed. `nextSeq` is the `seq` the next event will carry.
+- `terminal.input { terminalId, data }` → `{ bytes }`. Only from the attached connection
+  (`1004 not_attached`), to a running terminal (`1004 terminal_exited`); `data` is at most
+  `maxInputBytes` UTF-8 bytes (`-32602 input_too_large`). alpd writes it to the PTY as it is (Ctrl-C
+  is `\u0003`); it never logs or records it.
+- `terminal.resize { terminalId, cols, rows }` → `{ cols, rows }`: from the attached connection.
+- `terminal.close { terminalId }` → `{ closed: true }`: kills the terminal (below); an exited one is
+  forgotten. A repeat answers `1001 not_found`.
+- `terminal.revoke { principalId }` → `{ closed }`: kills every terminal of that principal, any epoch,
+  and answers how many. A gateway calls it when a credential is revoked, rotated, expired or its grant
+  changes; it never exposes the method.
+
+**Events.** `terminal.event` notifications go only to the attached connection, in order:
+`{ terminalId, type: "output", seq, data }` (`data` UTF-8 text, at most `maxOutputFrameBytes`),
+`{ terminalId, type: "exit", seq, exitCode, signal, reason }` with `reason` `exited` (the shell ended),
+`closed`, `idle`, `lifetime`, `detached` (not attached again in time), `revoked`, `disabled` or
+`shutdown`, and `{ terminalId, type: "detached", reason }` with `reason` `replaced` or
+`slow_consumer`. `seq` counts a terminal's output and exit events from 1. A connection that does not
+read (more than 2 MiB of terminal events waiting on its socket) is detached with `slow_consumer`; it
+attaches again with `after` = the last `seq` it got and sees a `gap` if the ring moved on. When a
+connection closes, its terminals stay running for `reconnectMs` for an attach of the same principal
+and epoch.
+
+**Ending a terminal** (close, revoke, idle, lifetime, detach timeout, switch off, alpd shutdown) sends
+`SIGHUP` to its process group, then after 1 s `SIGKILL` to every process still in the terminal's
+process tree: the shell's descendants, every process in their process groups and, on Linux, its
+session. A program that deliberately leaves both (a new session and a re-parented, double-forked
+daemon) outlives the terminal, as with any terminal; alpd does not track it. If alpd itself dies the
+kernel hangs up the PTY. **Audit**: alpd logs each terminal's lifecycle (`ALPD_TERMINAL_*`: created,
+attached, detached, ended with its reason) with the principal, terminal id and workspace id; never
+input, output or the environment.
+
+The gateway exposes the methods only with the opt-in permission `terminal.exec` (never a default,
+implied by nothing, `session.write` included), for workspaces in the grant, and forwards
+`terminal.event` notifications only for terminals the connection attached (docs/alp/remote-gateway.md
+§5.18).
+
 ## 13. Compatibility notes for this revision
 
 **Additive** (old clients unaffected):
+- Capability `terminal` (§12.10): `terminal.create`, `terminal.list`, `terminal.attach`, `terminal.input`,
+  `terminal.resize`, `terminal.close`, `terminal.revoke`, the `terminal.event` notification (a second
+  notification method besides `event`, sent only to a connection that attached a terminal),
+  `daemon.hello` `terminalLimits`, `$defs.terminal`, `$defs.terminalEvent`, and the error reasons
+  `terminal_disabled`, `terminal_unsupported`, `terminal_limit`, `not_attached`, `terminal_exited` and
+  `input_too_large`.
 - Capability `session.configure.live` (§12.9): `session.configure` `model`, `thinking`, `team`,
   `requestId`, `ifGeneration` and its `configured` and `duplicate` answer fields, `session.configure.preview`,
   `$defs.effectiveConfig`, `$defs.configurePreview`, `$defs.configureOutcome`, the summary field

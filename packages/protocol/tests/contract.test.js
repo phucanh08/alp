@@ -128,7 +128,7 @@ test('every valid golden value type-checks against the TypeScript projection', {
 });
 
 test('every method carries x-alp: its effect, the resource scope a gateway authorizes and, when gated, a declared capability', () => {
-  const kinds = new Set(['connection', 'host', 'project', 'library-or-project', 'session', 'question']);
+  const kinds = new Set(['connection', 'host', 'project', 'library-or-project', 'session', 'question', 'terminal']);
   for (const [name, method] of Object.entries(methods.methods)) {
     const annotation = method['x-alp'];
     assert.ok(annotation, `${name} has no x-alp`);
@@ -175,4 +175,28 @@ test('attachment limits: chunks fit the frame they travel in, hello limits and p
   const limits = Object.fromEntries(Object.entries(ATTACHMENTS).filter(([key]) => key !== 'maxNameBytes'));
   assert.deepEqual(validateResult('daemon.hello', { protocolVersion: 1, attachmentLimits: limits }), []);
   assert.ok(validateResult('daemon.hello', { protocolVersion: 1, attachmentLimits: { ...limits, maxChunkBytes: -1 } }).length);
+});
+
+test('terminal limits: the schema bounds are TERMINAL\'s, hello limits are validated, no client chooses the process (capability terminal)', async () => {
+  const { TERMINAL, TERMINAL_LIMIT_KEYS, isTerminalId } = await import('@anhlp/alp-protocol');
+  assert.ok(CAPABILITIES.includes('terminal'));
+  const create = methods.methods['terminal.create'].params;
+  assert.equal(create.properties.cols.minimum, TERMINAL.minCols);
+  assert.equal(create.properties.cols.maximum, TERMINAL.maxCols);
+  assert.equal(create.properties.rows.minimum, TERMINAL.minRows);
+  assert.equal(create.properties.rows.maximum, TERMINAL.maxRows);
+  // Code points bound the schema; alpd counts UTF-8 bytes against the same number.
+  assert.equal(methods.methods['terminal.input'].params.properties.data.maxLength, TERMINAL.maxInputBytes);
+  assert.equal(methods.$defs.terminalEvent.oneOf[0].properties.data.maxLength, TERMINAL.maxOutputFrameBytes);
+  assert.deepEqual(methods.methods['daemon.hello'].result.properties.terminalLimits.required, [...TERMINAL_LIMIT_KEYS]);
+  const limits = Object.fromEntries(TERMINAL_LIMIT_KEYS.map(key => [key, TERMINAL[key]]));
+  assert.deepEqual(validateResult('daemon.hello', { protocolVersion: 1, terminalLimits: limits }), []);
+  assert.ok(validateResult('daemon.hello', { protocolVersion: 1, terminalLimits: { ...limits, extra: 1 } }).length);
+  // The host picks the shell, its arguments, environment and directory: none is a parameter.
+  for (const field of ['shell', 'command', 'args', 'env', 'cwd', 'pid']) {
+    assert.ok(validateParams('terminal.create', { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r', [field]: 'x' }).length, field);
+  }
+  for (const method of ['terminal.attach', 'terminal.input', 'terminal.resize', 'terminal.close']) assert.equal(methods.methods[method]['x-alp'].scope.kind, 'terminal', method);
+  assert.ok(isTerminalId(`term_${'a'.repeat(32)}`));
+  for (const id of ['term_', `term_${'A'.repeat(32)}`, '../term', 42]) assert.ok(!isTerminalId(id), String(id));
 });

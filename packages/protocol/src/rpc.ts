@@ -10,12 +10,31 @@ export type RpcErrorData = { code: number; message: string; data?: unknown };
 export type RpcRequest = { jsonrpc: '2.0'; id?: RpcId; method: string; params?: Record<string, unknown> };
 export type RpcResponse = { jsonrpc: '2.0'; id: RpcId } & ({ result: unknown; error?: never } | { error: RpcErrorData; result?: never });
 export type EventNotification = { jsonrpc: '2.0'; method: 'event'; params: Envelope };
+/** Why a terminal ended (§12.10). */
+export type TerminalEndReason = 'exited' | 'closed' | 'idle' | 'lifetime' | 'detached' | 'revoked' | 'disabled' | 'shutdown';
+/** A terminal as clients see it (capability `terminal`, §12.10): never a process id, shell path or host path. */
+export type TerminalInfo = {
+  terminalId: string; workspaceId: string; title: string; cols: number; rows: number; state: 'running' | 'exited';
+  attached: boolean; createdAt: string; lastActivityAt: string; expiresAt: string;
+  exitCode?: number | null; signal?: number | null; endReason?: TerminalEndReason;
+};
+/** Effective terminal limits a daemon.hello advertises with capability `terminal`. */
+export type TerminalLimits = {
+  maxPerPrincipal: number; maxPerDaemon: number; maxInputBytes: number; maxOutputFrameBytes: number;
+  replayBytes: number; idleMs: number; maxLifetimeMs: number; reconnectMs: number;
+};
+/** params of a terminal.event notification, sent only to the connection attached to the terminal. */
+export type TerminalEvent =
+  | { terminalId: string; type: 'output'; seq: number; data: string }
+  | { terminalId: string; type: 'exit'; seq: number; exitCode: number | null; signal: number | null; reason: TerminalEndReason }
+  | { terminalId: string; type: 'detached'; reason: 'replaced' | 'slow_consumer' };
+export type TerminalNotification = { jsonrpc: '2.0'; method: 'terminal.event'; params: TerminalEvent };
 
 /** Names a daemon may list in its daemon.hello result (schema/methods-v1.json `capabilities`). */
 export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
 export type HistoryPage = { generation: string; items: HistoryItem[]; olderCursor?: string; hasOlder: boolean; tipCursor: number };
 
-export type Capability = 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.configure.live' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
+export type Capability = 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.configure.live' | 'terminal' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -40,7 +59,9 @@ export type ErrorReason =
   // session.reload (§12.8).
   | 'session_closed' | 'no_history'
   // session.configure with model, thinking or team (§12.9).
-  | 'runtime_mismatch' | 'agent_mismatch' | 'permission_escalation' | 'team_not_found';
+  | 'runtime_mismatch' | 'agent_mismatch' | 'permission_escalation' | 'team_not_found'
+  // Terminal (§12.10).
+  | 'terminal_disabled' | 'terminal_unsupported' | 'terminal_limit' | 'not_attached' | 'terminal_exited' | 'input_too_large';
 
 type Empty = Record<string, never>;
 
@@ -87,6 +108,13 @@ export type ForkBoundary = { throughTurnId: string } | { beforeTurnId: string };
 export type RegistryMutation = { requestId: string; ifRevision: number };
 export type RegistryPage = { revision: number; total: number; nextCursor: string | null };
 export type RpcMethodMap = {
+  'terminal.create': { params: PrincipalContext & { workspaceId: string; cols: number; rows: number; requestId: string }; result: { terminal: TerminalInfo } };
+  'terminal.list': { params: PrincipalContext & { workspaceId?: string }; result: { terminals: TerminalInfo[] } };
+  'terminal.attach': { params: PrincipalContext & { terminalId: string; after?: number }; result: { terminal: TerminalInfo; nextSeq: number; gap?: { fromSeq: number; toSeq: number } } };
+  'terminal.input': { params: PrincipalContext & { terminalId: string; data: string }; result: { bytes: number } };
+  'terminal.resize': { params: PrincipalContext & { terminalId: string; cols: number; rows: number }; result: { cols: number; rows: number } };
+  'terminal.close': { params: PrincipalContext & { terminalId: string }; result: { closed: true } };
+  'terminal.revoke': { params: { principalId: string }; result: { closed: number } };
   'attachment.begin': { params: PrincipalContext & { sessionId: string; name: string; size: number; mimeType: string; sha256?: string; requestId: string }; result: { uploadId: string; state: 'uploading' | 'committed'; received: number; size: number; maxChunkBytes: number; expiresAt?: string; attachmentId?: string } };
   'attachment.chunk': { params: PrincipalContext & { uploadId: string; offset: number; data: string }; result: { received: number; size: number } };
   'attachment.commit': { params: PrincipalContext & { uploadId: string; sha256: string }; result: { attachment: AttachmentInfo } };
@@ -107,7 +135,7 @@ export type RpcMethodMap = {
   'workspace.update': { params: RegistryMutation & { workspaceId: string; title?: string | null; pinned?: boolean; archived?: boolean }; result: { workspace: RegistryWorkspace; revision: number } };
   'registry.owner': { params: { operation?: string; args?: Record<string, unknown>; requestId?: string; ifRevision?: number }; result: { registry: Record<string, unknown> } };
 
-  'daemon.hello': { params: { protocolVersion: 1; client?: { name: string; version: string }; capabilities?: string[] }; result: { protocolVersion: 1; daemonVersion?: string; pid?: number; /** The daemon host's machine name (os.hostname()), a label for clients. */ hostname?: string; promptImageLimits?: { maxCount: number; maxBytes: number; maxTotalBytes: number }; attachmentLimits?: AttachmentLimits; capabilities?: string[] } };
+  'daemon.hello': { params: { protocolVersion: 1; client?: { name: string; version: string }; capabilities?: string[] }; result: { protocolVersion: 1; daemonVersion?: string; pid?: number; /** The daemon host's machine name (os.hostname()), a label for clients. */ hostname?: string; promptImageLimits?: { maxCount: number; maxBytes: number; maxTotalBytes: number }; attachmentLimits?: AttachmentLimits; terminalLimits?: TerminalLimits; capabilities?: string[] } };
   'daemon.status': {
     params: Empty;
     result: {

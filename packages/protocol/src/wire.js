@@ -17,7 +17,7 @@ export const RPC_ERROR = Object.freeze({ parseError: -32700, invalidRequest: -32
  * Features a daemon lists in its daemon.hello result. A client uses a feature only when listed;
  * a daemon that lists none (one older than this list) has none of them. Unknown names are ignored.
  */
-export const CAPABILITY = Object.freeze({ attachAfter: 'attach.after', sessionHistory: 'session.history', workspaceRegistry: 'workspace.registry', workspaceWorktree: 'workspace.worktree', workspaceGit: 'workspace.git', promptReceipts: 'prompt.receipts', extensionMethods: 'extension.methods', team: 'team', task: 'task', library: 'library', libraryProjectWrite: 'library.project.write', settingsLanguage: 'settings.language', sessionListPage: 'session.list.page', questionWatch: 'question.watch', questionWatchTurns: 'question.watch.turns', sessionAttention: 'session.attention', workspaceFiles: 'workspace.files', workspaceFilesRead: 'workspace.files.read', promptImages: 'prompt.images', schedule: 'schedule', attachments: 'attachments', sessionFork: 'session.fork', sessionRewind: 'session.rewind' , sessionReload: 'session.reload', sessionResumeCommand: 'session.resumeCommand', sessionConfigureLive: 'session.configure.live'});
+export const CAPABILITY = Object.freeze({ attachAfter: 'attach.after', sessionHistory: 'session.history', workspaceRegistry: 'workspace.registry', workspaceWorktree: 'workspace.worktree', workspaceGit: 'workspace.git', promptReceipts: 'prompt.receipts', extensionMethods: 'extension.methods', team: 'team', task: 'task', library: 'library', libraryProjectWrite: 'library.project.write', settingsLanguage: 'settings.language', sessionListPage: 'session.list.page', questionWatch: 'question.watch', questionWatchTurns: 'question.watch.turns', sessionAttention: 'session.attention', workspaceFiles: 'workspace.files', workspaceFilesRead: 'workspace.files.read', promptImages: 'prompt.images', schedule: 'schedule', attachments: 'attachments', sessionFork: 'session.fork', sessionRewind: 'session.rewind' , sessionReload: 'session.reload', sessionResumeCommand: 'session.resumeCommand', sessionConfigureLive: 'session.configure.live', terminal: 'terminal' });
 /**
  * What alpd takes as images in one session.prompt (capability `prompt.images`): inline base64 of
  * these types only, never a path or URL; at most `maxCount` of them, each at most `maxBytes`
@@ -27,7 +27,7 @@ export const CAPABILITY = Object.freeze({ attachAfter: 'attach.after', sessionHi
 export const PROMPT_IMAGES = Object.freeze({ mimeTypes: Object.freeze(['image/png', 'image/jpeg', 'image/gif', 'image/webp']), maxCount: 8, maxBytes: 5 * 1024 * 1024, maxTotalBytes: 11 * 1024 * 1024 });
 /** Decoded bytes of base64 `data` (padding aware), without decoding it. @param {string} data */
 export const base64Bytes = data => Math.floor(data.length * 3 / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
-export const RPC_METHODS = Object.freeze(["assignment.recall", "attachment.abort", "attachment.begin", "attachment.chunk", "attachment.commit", "attachment.delete", "attachment.get", "board.list", "catalog.get", "daemon.hello", "daemon.pause", "daemon.pauses", "daemon.resume", "daemon.shutdown", "daemon.status", "daemon.usage", "extension.register", "extension.unregister", "library.delete", "library.duplicate", "library.get", "library.list", "library.models", "library.rename", "library.save", "library.skills.set", "project.list", "project.register", "project.remove", "question.answer", "question.list", "question.watch", "registry.owner", "registry.worktree", "schedule.cancel", "schedule.create", "schedule.get", "schedule.list", "session.archive", "session.attach", "session.attention.clear", "session.close", "session.configure", "session.configure.preview", "session.create", "session.fork", "session.get", "session.history", "session.interrupt", "session.list", "session.log", "session.message", "session.preview", "session.prompt", "session.release", "session.reload", "session.rename", "session.resumeCommand", "session.rewind", "session.status", "settings.language.get", "settings.language.set", "task.create", "task.gate.resolve", "task.list", "task.update", "team.list", "workspace.files.list", "workspace.files.read", "workspace.files.search", "workspace.get", "workspace.git.diff", "workspace.git.status", "workspace.list", "workspace.update", "workspace.worktree.create", "workspace.worktree.options", "workspace.worktree.remove"]);
+export const RPC_METHODS = Object.freeze(["assignment.recall", "attachment.abort", "attachment.begin", "attachment.chunk", "attachment.commit", "attachment.delete", "attachment.get", "board.list", "catalog.get", "daemon.hello", "daemon.pause", "daemon.pauses", "daemon.resume", "daemon.shutdown", "daemon.status", "daemon.usage", "extension.register", "extension.unregister", "library.delete", "library.duplicate", "library.get", "library.list", "library.models", "library.rename", "library.save", "library.skills.set", "project.list", "project.register", "project.remove", "question.answer", "question.list", "question.watch", "registry.owner", "registry.worktree", "schedule.cancel", "schedule.create", "schedule.get", "schedule.list", "session.archive", "session.attach", "session.attention.clear", "session.close", "session.configure", "session.configure.preview", "session.create", "session.fork", "session.get", "session.history", "session.interrupt", "session.list", "session.log", "session.message", "session.preview", "session.prompt", "session.release", "session.reload", "session.rename", "session.resumeCommand", "session.rewind", "session.status", "settings.language.get", "settings.language.set", "task.create", "task.gate.resolve", "task.list", "task.update", "team.list", "terminal.attach", "terminal.close", "terminal.create", "terminal.input", "terminal.list", "terminal.resize", "terminal.revoke", "workspace.files.list", "workspace.files.read", "workspace.files.search", "workspace.get", "workspace.git.diff", "workspace.git.status", "workspace.list", "workspace.update", "workspace.worktree.create", "workspace.worktree.options", "workspace.worktree.remove"]);
 
 /**
  * Limits of workspace.files.list and workspace.files.read (capability `workspace.files.read`,
@@ -69,6 +69,34 @@ export const ATTACHMENTS = Object.freeze({
   releasedGraceMs: 7 * 24 * 60 * 60 * 1000,
   maxNameBytes: 255,
 });
+/**
+ * Limits of terminals (capability `terminal`, docs/protocol/alp-json-rpc-v1.md §12.10): at most
+ * `maxPerPrincipal` running terminals per principal and `maxPerDaemon` per daemon; a
+ * terminal.input of at most `maxInputBytes` UTF-8 bytes; output events of at most
+ * `maxOutputFrameBytes` bytes of data; `replayBytes` of output kept per terminal for attach; a
+ * terminal ends after `idleMs` without input or output, after `maxLifetimeMs` in any case, and
+ * `reconnectMs` after its stream detached unless attached again. Sizes are `minCols`..`maxCols`
+ * columns and `minRows`..`maxRows` rows. An operator or a gateway may lower the first eight, never
+ * raise them; daemon.hello advertises the effective ones (`terminalLimits`).
+ */
+export const TERMINAL = Object.freeze({
+  maxPerPrincipal: 4,
+  maxPerDaemon: 16,
+  maxInputBytes: 64 * 1024,
+  maxOutputFrameBytes: 64 * 1024,
+  replayBytes: 1024 * 1024,
+  idleMs: 30 * 60 * 1000,
+  maxLifetimeMs: 8 * 60 * 60 * 1000,
+  reconnectMs: 60 * 1000,
+  minCols: 2,
+  maxCols: 500,
+  minRows: 1,
+  maxRows: 200,
+});
+/** The TERMINAL limits a daemon.hello `terminalLimits` carries (the size bounds are fixed). */
+export const TERMINAL_LIMIT_KEYS = Object.freeze(['maxPerPrincipal', 'maxPerDaemon', 'maxInputBytes', 'maxOutputFrameBytes', 'replayBytes', 'idleMs', 'maxLifetimeMs', 'reconnectMs']);
+/** An opaque terminal id (§12.10). @param {unknown} id */
+export const isTerminalId = id => typeof id === 'string' && /^term_[0-9a-f]{32}$/.test(id);
 /** Room an attachment.chunk request needs besides its base64 data. */
 export const ATTACHMENT_CHUNK_OVERHEAD = 64 * 1024;
 /**

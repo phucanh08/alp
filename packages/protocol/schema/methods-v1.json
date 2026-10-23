@@ -40,7 +40,8 @@
     "session.rewind": "session.rewind: a root's conversation from before a turn on, under the same session id; the later turns stay a recoverable branch, files are never changed, history generation advances (`history.reset` event). Same condition as session.fork.",
     "session.reload": "session.reload: restarts a live root's native process on its own conversation and configuration at the idle barrier (no turn, child, question, mail or parked work), keeping its session id, history and receipts; through the lifecycle journal. Listed with a store and a runtime that restarts a root on its own conversation, on macOS and Linux (not Windows).",
     "session.resumeCommand": "session.resumeCommand: the ALP CLI command (`alp attach <sessionId>`) that follows a session in a terminal, as argv and POSIX and Windows (cmd.exe) command lines built by alpd; for the clipboard only, never run, never a native runtime's command, credential, env or path.",
-    "session.configure.live": "session.configure takes model, thinking and team (with requestId and ifGeneration) besides mode, and session.configure.preview answers the configuration a change would run with: a live root's model, effort or team changes at the idle barrier (no turn, child, question, mail or parked work) through a controlled restart of its native process on the same conversation; the effective configuration is written only after the runtime took it, through the lifecycle journal (§12.9). Never another runtime and never more permissions. Listed with a store and a runtime that restarts a root with a new configuration, on macOS and Linux (not Windows)."
+    "session.configure.live": "session.configure takes model, thinking and team (with requestId and ifGeneration) besides mode, and session.configure.preview answers the configuration a change would run with: a live root's model, effort or team changes at the idle barrier (no turn, child, question, mail or parked work) through a controlled restart of its native process on the same conversation; the effective configuration is written only after the runtime took it, through the lifecycle journal (§12.9). Never another runtime and never more permissions. Listed with a store and a runtime that restarts a root with a new configuration, on macOS and Linux (not Windows).",
+    "terminal": "terminal.create/list/attach/input/resize/close/revoke and terminal.event notifications: a real PTY shell on the daemon host as the daemon's account (a cwd is not a sandbox), served only when the host owner opted in (<ALP_HOME>/terminal.json allowRemoteTerminal) on macOS and Linux."
   },
   "methods": {
     "assignment.recall": {
@@ -332,6 +333,55 @@
               "uploadTimeoutMs",
               "unreferencedRetentionMs",
               "releasedGraceMs"
+            ],
+            "additionalProperties": false
+          },
+          "terminalLimits": {
+            "type": "object",
+            "description": "Effective terminal limits for this connection, when `terminal` is advertised. Byte limits count UTF-8 bytes; times are milliseconds. An operator or a gateway may lower them, never raise them.",
+            "properties": {
+              "maxPerPrincipal": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxPerDaemon": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxInputBytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxOutputFrameBytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "replayBytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "idleMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxLifetimeMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reconnectMs": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "maxPerPrincipal",
+              "maxPerDaemon",
+              "maxInputBytes",
+              "maxOutputFrameBytes",
+              "replayBytes",
+              "idleMs",
+              "maxLifetimeMs",
+              "reconnectMs"
             ],
             "additionalProperties": false
           }
@@ -4890,6 +4940,476 @@
         ],
         "additionalProperties": false
       }
+    },
+    "terminal.create": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "project"
+        },
+        "capability": "terminal",
+        "idempotent": false,
+        "risks": [
+          "starts a shell on the daemon host as the daemon's account: host-level execution, not confined to the workspace"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "cols": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 500
+          },
+          "rows": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the terminal's workspace must be one of them."
+          }
+        },
+        "required": [
+          "workspaceId",
+          "cols",
+          "rows",
+          "requestId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "terminal": {
+            "$ref": "#/$defs/terminal"
+          }
+        },
+        "required": [
+          "terminal"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "terminal.list": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project"
+        },
+        "capability": "terminal",
+        "idempotent": true
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the terminal's workspace must be one of them."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "terminals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/terminal"
+            }
+          }
+        },
+        "required": [
+          "terminals"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "terminal.attach": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "terminal",
+          "param": "terminalId"
+        },
+        "capability": "terminal",
+        "idempotent": true,
+        "risks": [
+          "streams the terminal's output, which may show anything the shell printed"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "terminalId": {
+            "type": "string",
+            "pattern": "^term_[0-9a-f]{32}$"
+          },
+          "after": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the terminal's workspace must be one of them."
+          }
+        },
+        "required": [
+          "terminalId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "terminal": {
+            "$ref": "#/$defs/terminal"
+          },
+          "nextSeq": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "gap": {
+            "type": "object",
+            "properties": {
+              "fromSeq": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "toSeq": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "fromSeq",
+              "toSeq"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "terminal",
+          "nextSeq"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "terminal.input": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "terminal",
+          "param": "terminalId"
+        },
+        "capability": "terminal",
+        "idempotent": false,
+        "risks": [
+          "types into a host shell: runs any command as the daemon's account"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "terminalId": {
+            "type": "string",
+            "pattern": "^term_[0-9a-f]{32}$"
+          },
+          "data": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65536
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the terminal's workspace must be one of them."
+          }
+        },
+        "required": [
+          "terminalId",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "bytes": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "bytes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "terminal.resize": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "terminal",
+          "param": "terminalId"
+        },
+        "capability": "terminal",
+        "idempotent": true
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "terminalId": {
+            "type": "string",
+            "pattern": "^term_[0-9a-f]{32}$"
+          },
+          "cols": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 500
+          },
+          "rows": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the terminal's workspace must be one of them."
+          }
+        },
+        "required": [
+          "terminalId",
+          "cols",
+          "rows"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "cols": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 500
+          },
+          "rows": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [
+          "cols",
+          "rows"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "terminal.close": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "terminal",
+          "param": "terminalId"
+        },
+        "capability": "terminal",
+        "idempotent": false
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "terminalId": {
+            "type": "string",
+            "pattern": "^term_[0-9a-f]{32}$"
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the terminal's workspace must be one of them."
+          }
+        },
+        "required": [
+          "terminalId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "closed": {
+            "const": true
+          }
+        },
+        "required": [
+          "closed"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "terminal.revoke": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "host"
+        },
+        "capability": "terminal",
+        "idempotent": true,
+        "risks": [
+          "kills every terminal of a principal; for a trusted gateway, never exposed"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "principalId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "closed": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "closed"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "$defs": {
@@ -5445,24 +5965,49 @@
       ]
     },
     "notification": {
-      "type": "object",
-      "properties": {
-        "jsonrpc": {
-          "const": "2.0"
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "event"
+            },
+            "params": {
+              "$ref": "#/$defs/envelope"
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
         },
-        "method": {
-          "const": "event"
-        },
-        "params": {
-          "$ref": "#/$defs/envelope"
+        {
+          "type": "object",
+          "description": "A terminal's output, exit or detach (capability terminal, §12.10).",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "terminal.event"
+            },
+            "params": {
+              "$ref": "#/$defs/terminalEvent"
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
         }
-      },
-      "required": [
-        "jsonrpc",
-        "method",
-        "params"
-      ],
-      "additionalProperties": true
+      ]
     },
     "knownEvent": {
       "oneOf": [
@@ -7926,6 +8471,199 @@
         "restarted"
       ],
       "additionalProperties": true
+    },
+    "terminal": {
+      "type": "object",
+      "description": "A terminal as clients see it: ids, size and state, never a process id, shell path or host path.",
+      "properties": {
+        "terminalId": {
+          "type": "string",
+          "pattern": "^term_[0-9a-f]{32}$"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "cols": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 500
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "state": {
+          "enum": [
+            "running",
+            "exited"
+          ]
+        },
+        "attached": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastActivityAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "exitCode": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "signal": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "endReason": {
+          "enum": [
+            "exited",
+            "closed",
+            "idle",
+            "lifetime",
+            "detached",
+            "revoked",
+            "disabled",
+            "shutdown"
+          ]
+        }
+      },
+      "required": [
+        "terminalId",
+        "workspaceId",
+        "title",
+        "cols",
+        "rows",
+        "state",
+        "attached",
+        "createdAt",
+        "lastActivityAt",
+        "expiresAt"
+      ],
+      "additionalProperties": false
+    },
+    "terminalEvent": {
+      "description": "params of a terminal.event notification (§12.10): sent only to the connection attached to the terminal.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "terminalId": {
+              "type": "string",
+              "pattern": "^term_[0-9a-f]{32}$"
+            },
+            "type": {
+              "const": "output"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "data": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 65536
+            }
+          },
+          "required": [
+            "terminalId",
+            "type",
+            "seq",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "terminalId": {
+              "type": "string",
+              "pattern": "^term_[0-9a-f]{32}$"
+            },
+            "type": {
+              "const": "exit"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "exitCode": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "signal": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "exited",
+                "closed",
+                "idle",
+                "lifetime",
+                "detached",
+                "revoked",
+                "disabled",
+                "shutdown"
+              ]
+            }
+          },
+          "required": [
+            "terminalId",
+            "type",
+            "seq",
+            "exitCode",
+            "signal",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "terminalId": {
+              "type": "string",
+              "pattern": "^term_[0-9a-f]{32}$"
+            },
+            "type": {
+              "const": "detached"
+            },
+            "reason": {
+              "enum": [
+                "replaced",
+                "slow_consumer"
+              ]
+            }
+          },
+          "required": [
+            "terminalId",
+            "type",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      ]
     }
   }
 }
