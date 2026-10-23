@@ -154,6 +154,8 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     sessionsOnly: await credential('sessions-only', ['--workspace', projects.main, '--permission', 'session.read']),
     // File reading (files.read) is never a default: only this credential has it, the owner does not.
     filesReader: await credential('files-reader', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'files.read']),
+    // Uploading files into alpd's attachment store (attachments.write, #121 J) is never a default either.
+    fileWriter: await credential('file-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'attachments.write']),
   };
   const tokens = Object.fromEntries(Object.entries(created).map(([name, entry]) => [name, entry.token]));
   const credentialIds = Object.fromEntries(Object.entries(created).map(([name, entry]) => [name, entry.credential.id]));
@@ -201,10 +203,33 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     return found;
   };
 
+  /** The objects of alpd's attachment store (§12.6): each directory's metadata (state, session, size, sha256). */
+  const storedAttachments = async () => {
+    const folder = path.join(home, 'state', 'attachments');
+    const entries = await readdir(folder, { withFileTypes: true }).catch(() => []);
+    const found = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const meta = await readJson(path.join(folder, entry.name, 'meta.json'));
+      found.push({ id: entry.name, state: meta?.state, sessionId: meta?.sessionId, name: meta?.name, size: meta?.size, sha256: meta?.sha256 ?? meta?.declaredSha256 });
+    }
+    return found;
+  };
+  /** The prompt receipts alpd keeps for a session (§10): one per clientMessageId it took. */
+  const promptReceipts = async sessionId => {
+    const folder = path.join(home, 'state', 'receipts');
+    const found = [];
+    for (const name of (await readdir(folder).catch(() => [])).filter(file => file.endsWith('.json'))) {
+      const receipt = await readJson(path.join(folder, name));
+      if (!sessionId || receipt?.sessionId === sessionId) found.push(receipt);
+    }
+    return found;
+  };
+
   const turnStarts = async () => (await readFile(journal, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.method === 'turn/start');
 
   return {
-    directory, home, projects, tokens, credentialIds, logs, journal, turnStarts, nonFakeSessions,
+    directory, home, projects, tokens, credentialIds, logs, journal, turnStarts, nonFakeSessions, storedAttachments, promptReceipts,
     /** The runtime programs alpd was given (fake runs: the fake Codex, missing Claude/Antigravity). */
     runtimeBins,
     webUrl: webOrigin,
