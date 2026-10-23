@@ -219,10 +219,13 @@ test('on: features follow the switch; turning Paseo off ends every stream and cl
   assert.deepEqual((await world.call(client, { type: 'list_terminals_request', requestId: 'l1' })).payload.terminals, []);
   assert.equal(world.terminals.features.workspaceTerminals, false);
   assert.deepEqual(client.json('terminal_stream_exit').map(entry => entry.payload), [{ terminalId: terminal.id, error: TERMINALS_OFF }]);
+  await tick();
+  // The shell it held is closed in alpd at once, not left for alpd's reconnect time; then the connection goes.
+  assert.deepEqual(world.alpd.terminalCalls().slice(before).map(call => [call.method, call.params.terminalId]), [['terminal.close', terminal.id]]);
   assert.ok(world.alpd.conns.every(conn => conn.closed), 'the terminals connection is closed');
   await world.call(client, { type: 'terminal_input', terminalId: terminal.id, message: { type: 'input', data: 'x' } });
   await tick();
-  assert.equal(world.alpd.terminalCalls().length, before, 'nothing more reaches alpd');
+  assert.equal(world.alpd.terminalCalls().length, before + 1, 'nothing more reaches alpd');
 });
 
 test('turning Paseo off ends a stream that only prints, without any request', async t => {
