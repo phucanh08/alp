@@ -14,6 +14,7 @@ import { searchTimeline } from './chat-search.js';
 import { TimelineDeltas } from './timeline-items.js';
 import { InMemoryAgentTimelineStore } from './timeline-store.js';
 import { agentUsage } from '../session-usage.js';
+import { attachmentRefusal, messageContent, uploadRefused } from './prompt-content.js';
 
 /**
  * ALP's roots as Paseo's agents (D31 step 3, ALPD §62). Each root session is one agent of the
@@ -574,13 +575,19 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
   async function create(input: Omit<CreateAgentInput, 'workspaceId'> & { workspaceId?: string }) {
     const { config } = input;
     if (config.provider !== PROVIDER) throw new Error(`ALP runs its own teams; ${config.provider} is not one of them`);
+    // Refused before anything is made: an agent is never created without what its first message carried.
+    const refusal = attachmentRefusal(input.attachments);
+    if (refusal) throw new Error(refusal);
     const sessionId = `web-${randomUUID()}`;
     await alp!.request('session.create', { sessionId, ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}), spec: { cwd: config.cwd, persist: true, ...(config.model ? { workflow: config.model } : {}), ...(config.modeId ? { mode: config.modeId } : {}) } });
     if (config.title) await alp!.request('session.rename', { sessionId, title: config.title });
     await refresh();
     await ensureTimeline(sessionId);
     const prompt = input.initialPrompt?.trim();
-    if (prompt) await alp!.request('session.prompt', { sessionId, clientMessageId: input.clientMessageId ?? randomUUID(), content: [{ type: 'text', text: prompt }] });
+    if (prompt || (Array.isArray(input.images) && input.images.length > 0)) {
+      const answer = await alp!.request('session.prompt', { sessionId, clientMessageId: input.clientMessageId ?? randomUUID(), content: messageContent(prompt || undefined, input.images, undefined) });
+      if (answer?.outcome === 'failed') throw new Error(`ALP created the agent, but its first message failed: ${answer.error?.message ?? 'unknown error'}`);
+    }
     return agentOf(known(sessionId));
   }
 
@@ -765,28 +772,42 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       try {
         await started;
         const workspaceId = message.workspaceId;
-        const agent = await create({ config, ...(workspaceId ? { workspaceId } : {}), ...(message.initialPrompt ? { initialPrompt: message.initialPrompt } : {}), ...(message.clientMessageId ? { clientMessageId: message.clientMessageId } : {}) });
+        const agent = await create({ config, ...(workspaceId ? { workspaceId } : {}), ...(message.initialPrompt ? { initialPrompt: message.initialPrompt } : {}), ...(message.clientMessageId ? { clientMessageId: message.clientMessageId } : {}), ...(message.images ? { images: message.images } : {}), ...(message.attachments ? { attachments: message.attachments } : {}) });
         client.emit({ type: 'status', payload: { status: 'agent_created', requestId: message.requestId, agentId: agent.id, agent } });
       } catch (error) {
         return fail(error);
       }
     },
 
+    /**
+     * Paseo's file upload (file.upload.request, then binary file frames, which the gateway ignores):
+     * refused at once, so the app says so when the file is attached, not when the message is sent.
+     * Paseo uploads before a message names the agent, and alpd binds an upload to its session when it
+     * begins (§12.6); see prompt-content.ts.
+     */
+    'file.upload.request'(message: Inbound<'file.upload.request'>) {
+      return { type: 'file.upload.response', payload: { requestId: message.requestId, file: null, error: uploadRefused } } satisfies Outbound;
+    },
+
     async send_agent_message_request(message: Inbound<'send_agent_message_request'>) {
       const reply = (error: string | null): Outbound => ({ type: 'send_agent_message_response', payload: { requestId: message.requestId, agentId: message.agentId, accepted: !error, error } });
       try {
+        // What the message carries is checked first: a message is never sent without its images or attachments.
+        const content = messageContent(message.text, message.images, message.attachments);
         const session = known(message.agentId);
         await open(session);
         await ensureTimeline(session.id);
         const running = session.status === 'running' || session.busy;
         // Paseo's interrupt stops the turn and starts a new one; its steer (the default) goes into the turn.
         if (running && message.activeTurnBehavior === 'interrupt') await alp!.request('session.interrupt', { sessionId: session.id });
-        await alp!.request('session.prompt', {
+        const answer = await alp!.request('session.prompt', {
           sessionId: session.id,
           clientMessageId: message.messageId ?? randomUUID(),
           delivery: running && message.activeTurnBehavior !== 'interrupt' ? 'steer' : 'auto',
-          content: [{ type: 'text', text: message.text }],
+          content,
         });
+        // alpd answered the prompt's outcome (prompt.receipts, §10): a failed one is not accepted.
+        if (answer?.outcome === 'failed') return reply(answer.error?.message ?? 'ALP could not deliver the message');
         attention.delete(session.id);
         return reply(null);
       } catch (error: any) {

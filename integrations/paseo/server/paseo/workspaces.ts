@@ -3,6 +3,7 @@ import { mkdir, stat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { deriveAgentStateBucket, getWorkspaceStateBucketPriority } from '@getpaseo/protocol/agent-state-bucket';
 import { normalizeWorkspaceLabelName, workspaceLabelKey, type WorkspaceLabelDefinition } from '@getpaseo/protocol/workspace-labels';
+import { attachmentRefusal } from './prompt-content.js';
 import type { AgentSnapshotPayload, SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
 import type { SessionSummary } from '@anhlp/alp-protocol/session';
 import type { Handler } from './gateway.js';
@@ -43,7 +44,8 @@ export type AgentsView = {
   clearAttention(sessionIds: string[]): string[];
   create(input: CreateAgentInput): Promise<AgentSnapshotPayload>;
 };
-export type CreateAgentInput = { config: { provider: string; cwd: string; model?: string | null; modeId?: string | null; title?: string | null }; workspaceId: string; initialPrompt?: string; clientMessageId?: string };
+/** `images` and `attachments` are Paseo's (send_agent_message's); see prompt-content.ts for what ALP takes of them. */
+export type CreateAgentInput = { config: { provider: string; cwd: string; model?: string | null; modeId?: string | null; title?: string | null }; workspaceId: string; initialPrompt?: string; clientMessageId?: string; images?: unknown[]; attachments?: unknown[] };
 
 const hex = () => randomBytes(8).toString('hex');
 const now = () => new Date().toISOString();
@@ -372,6 +374,9 @@ export function createWorkspaces({ rpc, broadcast, agents, inDevelopment, log = 
       const again = request.idempotencyKey ? registry.workspaces.find(entry => entry.idempotencyKey === request.idempotencyKey) : undefined;
       if (again) return reply({ workspace: descriptor(again) });
       try {
+        // A first agent whose message carries what ALP cannot send is refused before the workspace is made.
+        const refusal = attachmentRefusal(request.agent?.attachments);
+        if (refusal) throw new RequestError(refusal);
         const owner = request.source.projectId ? project(request.source.projectId) : await addProject(request.source.path);
         if (!owner || owner.removedAt) throw new RequestError(`No project ${request.source.projectId}`);
         const directory = path.resolve(request.source.path);
@@ -381,8 +386,8 @@ export function createWorkspaces({ rpc, broadcast, agents, inDevelopment, log = 
         const entry = workspace(made.workspace.id)!;
         let agent: AgentSnapshotPayload | undefined;
         if (request.agent) {
-          const { config, initialPrompt, clientMessageId } = request.agent;
-          agent = await agents().create({ config: { ...config, cwd: directory }, workspaceId: entry.id, ...(initialPrompt ? { initialPrompt } : {}), ...(clientMessageId ? { clientMessageId } : {}) });
+          const { config, initialPrompt, clientMessageId, images, attachments } = request.agent;
+          agent = await agents().create({ config: { ...config, cwd: directory }, workspaceId: entry.id, ...(initialPrompt ? { initialPrompt } : {}), ...(clientMessageId ? { clientMessageId } : {}), ...(images ? { images } : {}), ...(attachments ? { attachments } : {}) });
         }
         sync();
         return reply({ workspace: descriptor(entry), ...(agent ? { agent } : {}) });
