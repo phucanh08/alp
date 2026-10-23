@@ -1,3 +1,4 @@
+import * as React from 'react';
 import { Bot, FileDiff, FolderTree, GitCompareArrows, ListTodo, SquareTerminal } from 'lucide-react';
 import { members } from '../lib/timeline.js';
 import { modeLabel } from '../lib/format';
@@ -12,16 +13,19 @@ import { useTabs } from './tabs';
 /*
  * The panels a tab can show, in the explorer dock or the center column, as Paseo's: Changes and
  * Diff (read only, with workspace.git and project.read; hunks need files.read: GitPanels),
- * Terminal (unavailable in this beta, the gateway runs no terminals), Files (read-only, with
- * files.read: FilesPanel), and ALP's Agents and Tasks. Picking an agent or a task opens it in a
+ * Terminal (a real shell on the daemon host, with the host's switch and terminal.exec: TerminalPanel;
+ * a center tab only, so closing its tab ends its shell), Files (read-only, with files.read: FilesPanel), and ALP's Agents and Tasks. Picking an agent or a task opens it in a
  * tab of the center column.
  */
+
+// xterm.js is loaded only when a Terminal tab opens: a chunk of its own, not the app's bundle.
+const TerminalPanel = React.lazy(() => import('./TerminalPanel').then(module => ({ default: module.TerminalPanel })));
 
 export type PanelKind = 'changes' | 'terminal' | 'diff' | 'files' | 'agents' | 'tasks';
 
 export const PANELS: Record<PanelKind, { label: string; icon: typeof Bot; unavailable?: string }> = {
   changes: { label: 'Changes', icon: FileDiff },
-  terminal: { label: 'Terminal', icon: SquareTerminal, unavailable: 'The gateway does not run terminals yet. Open a terminal on the host.' },
+  terminal: { label: 'Terminal', icon: SquareTerminal },
   diff: { label: 'Diff', icon: GitCompareArrows },
   files: { label: 'Files', icon: FolderTree },
   agents: { label: 'Agents', icon: Bot },
@@ -83,5 +87,6 @@ export function PanelView({ kind, onPicked }: { kind: PanelKind; onPicked?: () =
   if (kind === 'files') return <FilesPanel onPicked={onPicked} />;
   if (kind === 'changes') return <ChangesPanel onOpenDiff={() => { openPanel('diff'); onPicked?.(); }} />;
   if (kind === 'diff') return <DiffPanel />;
+  if (kind === 'terminal') return <React.Suspense fallback={<p className="px-4 py-6 text-sm text-muted-foreground">Loading the terminal…</p>}><TerminalPanel /></React.Suspense>;
   return <Unavailable kind={kind} />;
 }

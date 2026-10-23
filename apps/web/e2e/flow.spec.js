@@ -97,12 +97,15 @@ test('create, stream, tool call, questions, stop, rename', async ({ page }) => {
   await openDockPanel(page, 'agents', 'Agents');
   await expect(page.getByTestId('agent-row').first()).toContainText('main');
 
-  // The center + menu: Agent, Paseo's Terminal and Diff, then ALP's panels; Terminal opens a tab.
+  // The center + menu: Agent, Paseo's Terminal and Diff, then ALP's panels; Terminal opens a tab,
+  // which this host (terminals not allowed) and token (no terminal.exec) refuse: no terminal at all.
   await page.getByRole('button', { name: 'New tab' }).click();
   await expect(page.getByRole('menuitem')).toHaveText(['Agent', 'Terminal', 'Diff', 'Tasks', 'Agents']);
   await page.getByRole('menuitem', { name: 'Terminal' }).click();
   await expect(page.getByRole('tab', { name: 'Terminal' })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('main').getByTestId('panel-unavailable-terminal')).toBeVisible();
+  await expect(page.getByRole('main').getByTestId('terminal-refused')).toContainText('The host has not allowed remote terminals (its owner runs: alp terminal allow --yes)');
+  await expect(page.getByRole('main').getByTestId('terminal-refused')).toContainText('Your access token cannot open terminals (it needs terminal.exec)');
+  await expect(page.getByTestId('terminal-screen')).toHaveCount(0);
   await page.getByRole('tab', { name: 'Terminal' }).press('Delete');
 
   // The token is in no storage, URL or gateway log line.

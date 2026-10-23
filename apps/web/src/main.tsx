@@ -14,7 +14,8 @@ function browserStorage(): PreferenceStorage | undefined {
 // One controller for the page's life. It holds the access token in memory only; closing or
 // reloading the tab forgets it. Only the app's preferences go to localStorage (lib/preferences.js).
 const controller = new Controller({ storage: browserStorage() });
-window.addEventListener('pagehide', () => controller.disconnect());
+// A terminal outlives a reload: the host keeps it for a minute and the page attaches it again.
+window.addEventListener('pagehide', () => controller.disconnect({ keepTerminals: true }));
 // Another tab changed the preferences: follow it.
 window.addEventListener('storage', event => { if (event.key === PREFERENCES_KEY || event.key === null) controller.reloadPreferences(); });
 

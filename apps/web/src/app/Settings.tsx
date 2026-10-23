@@ -425,7 +425,7 @@ function PageContent({ page }: { page: Page }) {
     case 'appearance': return <Appearance />;
     case 'sidebar': return <Unavailable what="Arranging the sidebar" why="This beta's sidebar has a fixed layout: New session, then the workspaces and their sessions." />;
     case 'chat': return <Unavailable what="Chat display settings" why="Reasoning, tool calls and the chat outline show as Paseo's defaults; tool calls expand on click." />;
-    case 'terminal': return <Unavailable what="Terminal" why="The gateway does not run terminals." />;
+    case 'terminal': return <Unavailable what="Terminal settings" why="Terminals open from the + menu (Terminal) with a fixed font and colors. A terminal is a shell on the daemon host as the account that runs alpd; the workspace is not a sandbox." />;
     case 'editor': return <Unavailable what="Editor" why="The gateway has no file access, so this app has no editor." />;
     case 'diagnostics': return <Unavailable what="App diagnostics" why="Collecting host, provider and log details runs on the host: use alp doctor there. Connection details are under Host › Connections." />;
     case 'about': return <About />;
@@ -447,7 +447,7 @@ function PageContent({ page }: { page: Page }) {
     case 'metadata': return <Unavailable what="Metadata generation" why="A host setting the gateway does not expose." />;
     case 'workspaces': return <Unavailable what="Workspace settings" why="The gateway has no file or git access, so workspaces and worktrees are managed on the host." />;
     case 'usage': return <Unavailable what="Usage and limits" why="Account-wide on the host; check with alp usage there." />;
-    case 'terminals': return <Unavailable what="Terminals" why="The gateway does not run terminals." />;
+    case 'terminals': return <Unavailable what="Changing the host's terminal switch" why="Only the host's owner turns remote terminals on or off, on the host: alp terminal allow --yes, alp terminal deny, alp terminal status. An access token also needs terminal.exec." />;
     case 'plugins': return <Unavailable what="Plugins" why="Installing plugins changes the host; not offered remotely." />;
   }
 }

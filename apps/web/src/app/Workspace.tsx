@@ -352,7 +352,7 @@ export function TabContent({ paneId = MAIN_PANE, onNewSession }: { paneId?: stri
   if (active?.kind === 'task') return <TaskDetail id={active.id} />;
   // Keyed by the workspace too: the same path in another workspace is another file.
   if (active?.kind === 'file') return <FileView key={`${workspace ?? ''}\n${active.id}`} path={active.id} />;
-  if (active?.kind === 'panel') return <div className="min-h-0 flex-1 overflow-y-auto"><PanelView kind={active.id} /></div>;
+  if (active?.kind === 'panel') return <div className={cn('min-h-0 flex-1', active.id === 'terminal' ? 'overflow-hidden' : 'overflow-y-auto')}><PanelView kind={active.id} /></div>;
   if (active?.kind === 'agent' && tree) return <ChatPanel key={active.id} sessionId={active.id} />;
   return <Empty onNewSession={onNewSession} />;
 }
