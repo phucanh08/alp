@@ -30,8 +30,9 @@ function fakeTransport(transports) {
       async close() {},
       async request(method, params) {
         this.calls.push({ method, params });
-        if (method === 'thread/resume') { this.threadId = params.threadId; return { thread: { id: params.threadId } }; }
-        if (method.startsWith('thread/')) return { thread: { id: this.threadId } };
+        // As Codex: the model a thread resumes or starts with is in the answer (ThreadResumeResponse.model).
+        if (method === 'thread/resume') { this.threadId = params.threadId; return { thread: { id: params.threadId }, model: params.model }; }
+        if (method.startsWith('thread/')) return { thread: { id: this.threadId }, model: params?.model };
         if (method === 'turn/start') { await this.hold; this.turnId = `turn-${index}-${++turns}`; return { turn: { id: this.turnId } }; }
         if (method === 'turn/interrupt') { queueMicrotask(() => this.notification('turn/completed', { threadId: this.threadId, turn: { id: params.turnId, status: 'interrupted' } })); return {}; }
         return {};
@@ -304,4 +305,48 @@ test('configure of a root with no turn yet starts its conversation anew with the
   const mode = await d.request('session.configure', { sessionId: 'c7', mode: 'read-only' });
   assert.equal(mode.session.mode, 'read-only');
   assert.equal(mode.configured, undefined);
+});
+
+test('a configure that never reached the runtime before alpd stopped stays unknown, and the record keeps its old configuration (a mode-only change too)', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'c8', ['one']);
+  const before = (await d.request('session.get', { sessionId: 'c8' })).session;
+  assert.equal(before.mode, 'full-access');
+  // model names the current one, so only the mode changes; the runtime never hears of it.
+  world.native.configure = () => new Promise(() => {});
+  const params = { sessionId: 'c8', model: 'gpt-5.6-sol', mode: 'read-only', requestId: 'm-1', ifGeneration: await generationOf(d, 'c8') };
+  const lost = d.request('session.configure', params).catch(error => error);
+  await until(() => world.native.configures.length === 1, 'native step in flight');
+  await d.stop();
+  await lost;
+  world.native.configure = undefined;
+  const e = { ...await world.start(), ...world };
+  await assert.rejects(e.request('session.configure', params), rpcError(1004, 'outcome_unknown'));
+  const [entry] = await journalOf(e.state);
+  assert.equal(entry.state, 'unknown');
+  assert.deepEqual([entry.plan.previous.mode, entry.plan.proposed.mode], ['full-access', 'read-only']);
+  await e.request('session.create', { sessionId: 'c8', spec: { cwd: e.project }, resume: true });
+  const session = (await e.request('session.get', { sessionId: 'c8' })).session;
+  assert.equal(session.mode, 'full-access', 'never a mode the runtime did not take');
+  assert.equal(session.model, 'gpt-5.6-sol');
+  assert.equal(threadCalls(world.transports.at(-1)).at(-1).params.sandbox, 'danger-full-access');
+});
+
+test('configure: Codex must say which model it continued with; without it nothing is taken', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'c9', ['one']);
+  // The next process answers thread/resume without a model (as no Codex does: it is a required field).
+  const index = world.transports.length;
+  const push = world.transports.push;
+  world.transports.push = function (transport) {
+    if (this.length === index) { const request = transport.request.bind(transport); transport.request = async (method, params) => { const answer = await request(method, params); if (method === 'thread/resume') delete answer.model; return answer; }; }
+    return push.call(this, transport);
+  };
+  await assert.rejects(d.request('session.configure', { sessionId: 'c9', model: 'gpt-6.1-sol', requestId: 'e1', ifGeneration: await generationOf(d, 'c9') }), rpcError(1005, 'native_refused'));
+  world.transports.push = push;
+  const session = (await d.request('session.get', { sessionId: 'c9' })).session;
+  assert.equal(session.model, 'gpt-5.6-sol');
+  assert.equal(threadCalls(world.transports.at(-1)).at(-1).params.model, 'gpt-5.6-sol', 'the old configuration restarted');
 });

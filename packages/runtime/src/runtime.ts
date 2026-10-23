@@ -3501,6 +3501,25 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     return plan;
   }
 
+  /**
+   * Whether the root's native runtime holds a conversation for it (Codex: a turn of its thread; Claude: a
+   * transcript entry). A runtime that cannot say is taken to hold none only when it refuses the question
+   * (a Codex thread with no rollout); its answer is otherwise trusted over alpd's timeline.
+   */
+  async function nativeHistory(session: Session) {
+    if (!session.threadId) return false;
+    if (session.base) return true;
+    if (session.runtimeKind === 'codex') {
+      const page = await session.runtime.request('thread/turns/list', { threadId: session.threadId, limit: 1, sortDirection: 'desc' }).catch(() => undefined);
+      return Array.isArray(page?.data) && page.data.length > 0;
+    }
+    if (session.runtimeKind === 'claude') {
+      const chain = await session.runtime.request('thread/chain', { threadId: session.threadId, cwd: session.mapping.workdir }).catch(() => undefined);
+      return Array.isArray(chain?.entries) && chain.entries.length > 0;
+    }
+    return true;
+  }
+
   /** previewConfigure(): see AlpRuntime.previewConfigure. */
   async function previewConfigureSession(sessionId: string, changes: ConfigureChanges): Promise<ConfigurePreview> {
     const session = sessions.get(sessionId);
@@ -3527,6 +3546,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const live = session!;
     const plan = await planConfigure(live, changes ?? {});
     if (plan.refusal) throw new ConversationError(plan.refusal.reason, plan.refusal.message);
+    // alpd's timeline says the root has no turn yet; the runtime must agree before a new conversation
+    // replaces its own (a conversation it holds is resumed, never left behind).
+    const starts = fresh && !(plan.changes.length && await nativeHistory(live));
     // Its files were read meanwhile: the tree must still be idle.
     const after = restartRefusal(sessionId, live);
     if (after) throw new ConversationError('session_busy', after);
@@ -3538,21 +3560,21 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       runLog(rootOf(sessionId), { event: 'session.configured', sessionId, agent, changes: plan.changes, mode: plan.shape.mapping.mode });
       return { session: snapshot(sessionId, live), effective: { ...plan.proposed, instructionsSha: plan.current.instructionsSha }, status: 'applied', restarted: false };
     }
-    if (!fresh && !live.threadId) throw new ConversationError('runtime_unsupported', 'This session keeps no native conversation to continue');
-    const binding: NativeBinding | undefined = fresh ? undefined : { threadId: live.threadId, ...(live.base ? { base: live.base } : {}) };
+    if (!starts && !live.threadId) throw new ConversationError('runtime_unsupported', 'This session keeps no native conversation to continue');
+    const binding: NativeBinding | undefined = starts ? undefined : { threadId: live.threadId, ...(live.base ? { base: live.base } : {}) };
     const from = { model: live.mapping.model, thinking: live.mapping.thinking, team: live.mapping.workflow.mode, mode: live.mapping.mode };
     const to = { model: plan.shape.mapping.model, thinking: plan.shape.mapping.thinking, team: plan.shape.mapping.workflow.mode, mode: plan.shape.mapping.mode };
     let native: any;
     try {
       native = await restartNative(sessionId, live, binding, true, plan.shape);
-      // The runtime's own word on what it took: Codex answers the model it resumed the thread with.
-      if (live.runtimeKind === 'codex' && typeof native?.model === 'string' && native.model !== to.model) throw new ConversationError('native_refused', `Codex continued the conversation with ${native.model}, not ${to.model}`);
+      // The runtime's own word on what it took: Codex answers the model it resumed (or started) the thread with.
+      if (live.runtimeKind === 'codex' && native?.model !== to.model) throw new ConversationError('native_refused', typeof native?.model === 'string' ? `Codex continued the conversation with ${native.model}, not ${to.model}` : `Codex did not say which model it continued the conversation with, so ${to.model} is not taken`);
     } catch (error) {
       runLog(rootOf(sessionId), { event: 'session.configure_failed', sessionId, agent, from, to, error: errorData(error).message });
       // The session keeps its configuration: a process with it restarts on the same conversation.
       try {
         if (live.closed) throw error;
-        await restartNative(sessionId, live, fresh ? undefined : binding, false);
+        await restartNative(sessionId, live, binding, false);
       } catch (reopen) {
         // Neither starts: the session fails as a provider failure does; its record keeps the old configuration.
         live.pending = false;

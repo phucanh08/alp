@@ -188,7 +188,7 @@ lines.on('line', line => {
       const threadId = `thread-${process.pid}-${++threads}`;
       if (typeof params?.cwd === 'string') cwds.set(threadId, params.cwd);
       updateThread(threadId, () => ({ turns: [] }));
-      return reply({ thread: { id: threadId } });
+      return reply({ thread: { id: threadId }, ...(typeof params?.model === 'string' ? { model: params.model } : {}) });
     }
     case 'thread/resume': {
       if (typeof params?.cwd === 'string') cwds.set(params.threadId, params.cwd);
