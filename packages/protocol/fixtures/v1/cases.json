@@ -6443,6 +6443,163 @@
      "teams": []
     }
    }
+  },
+  {
+   "name": "session.get result of a session whose runtime reads attached files by path",
+   "check": "result",
+   "method": "session.get",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_fixture",
+     "projectRoot": "/work/project",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "low",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "teamLabel": "Phở",
+     "threadId": "thread-1",
+     "persistent": true,
+     "busy": false,
+     "status": "idle",
+     "title": "Sửa lỗi 😀",
+     "createdAt": "2026-10-15T00:00:00.000Z",
+     "updatedAt": "2026-10-15T00:00:00.000Z",
+     "promptImages": true,
+     "promptAttachments": [
+      "file.path"
+     ]
+    }
+   }
+  },
+  {
+   "name": "session.get result with an unknown attachment route",
+   "check": "result",
+   "method": "session.get",
+   "valid": false,
+   "value": {
+    "session": {
+     "id": "ses_fixture",
+     "projectRoot": "/work/project",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "low",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "teamLabel": "Phở",
+     "threadId": "thread-1",
+     "persistent": true,
+     "busy": false,
+     "status": "idle",
+     "title": "Sửa lỗi 😀",
+     "createdAt": "2026-10-15T00:00:00.000Z",
+     "updatedAt": "2026-10-15T00:00:00.000Z",
+     "promptImages": true,
+     "promptAttachments": [
+      "host.path"
+     ]
+    }
+   }
+  },
+  {
+   "name": "item user_message with attachments by id and display name",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 4,
+    "cursor": 13,
+    "ts": "2026-10-23T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "user_message",
+      "id": "user:m-3",
+      "text": "Đọc tệp này",
+      "clientMessageId": "m-3",
+      "origin": "user",
+      "attachments": [
+       {
+        "attachmentId": "att_0123456789abcdef0123456789abcdef",
+        "name": "report.pdf",
+        "mimeType": "application/pdf",
+        "size": 2048
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "item user_message whose attachment names a host path",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 4,
+    "cursor": 13,
+    "ts": "2026-10-23T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "user_message",
+      "id": "user:m-4",
+      "text": "x",
+      "clientMessageId": "m-4",
+      "attachments": [
+       {
+        "attachmentId": "att_0123456789abcdef0123456789abcdef",
+        "name": "report.pdf",
+        "mimeType": "application/pdf",
+        "size": 2048,
+        "path": "/home/u/.alp/state/staged/att_0123456789abcdef0123456789abcdef.pdf"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "item user_message with an attachment id that is not one",
+   "check": "envelope",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 4,
+    "cursor": 13,
+    "ts": "2026-10-23T00:00:00.000Z",
+    "event": {
+     "type": "item",
+     "item": {
+      "kind": "user_message",
+      "id": "user:m-5",
+      "text": "x",
+      "clientMessageId": "m-5",
+      "attachments": [
+       {
+        "attachmentId": "../payload",
+        "name": "report.pdf",
+        "mimeType": "application/pdf",
+        "size": 2048
+       }
+      ]
+     }
+    }
+   }
   }
  ]
 }
