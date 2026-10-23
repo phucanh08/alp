@@ -138,13 +138,13 @@ test('the socket wants the token at hello, then speaks Paseo: server_info, pongs
   await client.next(frame => frame.type === 'pong');
   session(client, { type: 'ping', requestId: 'p1', clientSentAt: 5 });
   assert.equal((await client.next(frame => frame.message?.type === 'pong')).message.payload.clientSentAt, 5);
-  session(client, { type: 'create_terminal_request', requestId: 'r1', cwd: '/' });
+  session(client, { type: 'capture_terminal_request', requestId: 'r1', terminalId: 'term_x' });
   const refused = await client.next(frame => frame.message?.type === 'rpc_error');
   // The app shows the text as it is, in the user's language: Vietnamese unless settings say.
-  assert.deepEqual(refused.message.payload, { requestId: 'r1', requestType: 'create_terminal_request', error: 'Tính năng đang phát triển', code: 'not_implemented' });
+  assert.deepEqual(refused.message.payload, { requestId: 'r1', requestType: 'capture_terminal_request', error: 'Tính năng đang phát triển', code: 'not_implemented' });
   await mkdir(home, { recursive: true });
   await writeFile(path.join(home, 'settings.json'), JSON.stringify({ language: 'English' }));
-  session(client, { type: 'create_terminal_request', requestId: 'r2', cwd: '/' });
+  session(client, { type: 'capture_terminal_request', requestId: 'r2', terminalId: 'term_x' });
   assert.equal((await client.next(frame => frame.message?.payload?.requestId === 'r2')).message.payload.error, 'This feature is in development');
 });
 
@@ -164,6 +164,10 @@ test('what the app reads by itself gets the empty answer of a daemon without tha
   assert.equal((await ask(client, { type: 'checkout_pr_status_request', requestId: 'c2', cwd: root })).payload.authState, 'no_remote');
   assert.deepEqual((await ask(client, { type: 'list_terminals_request', requestId: 't1', cwd: root })).payload.terminals, []);
   assert.equal((await ask(client, { type: 'subscribe_terminals_request', requestId: 't2', cwd: root })).type, 'terminals_changed');
+  // Terminals are off on this host (no terminal.json): create says how the owner turns them on.
+  const created = (await ask(client, { type: 'create_terminal_request', requestId: 't3', cwd: root })).payload;
+  assert.equal(created.terminal, null);
+  assert.match(created.error, /alp terminal allow --paseo --yes.*not a sandbox/);
   assert.equal((await ask(client, { type: 'workspace_setup_status_request', requestId: 'w1', workspaceId: root })).payload.snapshot, null);
   assert.equal((await ask(client, { type: 'get_daemon_config_request', requestId: 'd1' })).payload.config.pluginsEnabled, true);
   assert.deepEqual((await ask(client, { type: 'list_provider_features_request', requestId: 'p1', draftConfig: { provider: 'alp', cwd: root } })).payload.features, []);
