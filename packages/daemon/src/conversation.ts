@@ -243,6 +243,10 @@ export function createConversation(ctx: ConversationContext) {
             const live = runtime.snapshot(sessionId);
             if (live?.busy) throw busy(sessionId, 'a turn, child, assignment, mail or parked work is in progress');
             if (runtime.questions().some(question => question.rootId === sessionId)) throw busy(sessionId, 'a question waits for an answer');
+            // Taken in the same tick as the idle check: from here to the rebind the runtime starts no turn of
+            // its own on the root (mail waits). A wake during the reads below would otherwise start a turn
+            // that the cut, read from a timeline without it, runs over.
+            releaseWakes = runtime.hold?.(sessionId);
             await checkGeneration(sessionId, ifGeneration);
             const turns = turnsOf(await store.timeline(sessionId), sessionId);
             const index = turns.findIndex(turn => turn.id === beforeTurnId);
@@ -250,8 +254,9 @@ export function createConversation(ctx: ConversationContext) {
             if (index === 0) throw emptyPrefix();
             const running = turns.find(turn => turn.state === undefined);
             if (running) throw inProgress(running.id);
-            // From here to the rebind the runtime starts no turn of its own on the root (mail waits).
-            releaseWakes = runtime.hold?.(sessionId);
+            // Held mail may wait (rebind does not refuse for it); a turn or question that began anyway may not.
+            const now = runtime.snapshot(sessionId);
+            if (now?.activeTurnId || runtime.questions().some(question => question.rootId === sessionId)) throw busy(sessionId, 'a turn or question began meanwhile');
             return {
               root: sessionId, beforeTurnId, cut: turns[index].start, branchId: `br_${randomBytes(8).toString('hex')}`, turns: turns.length - index,
               at: new Date().toISOString(), previous: bindingOf(record), cwd: record.spec!.cwd, turnIds: turns.map(turn => turn.id),
@@ -635,10 +640,13 @@ export function createConversation(ctx: ConversationContext) {
             const unsettled = ctx.unsettled(sessionId);
             if (unsettled) throw busy(sessionId, unsettled);
             if (runtime.snapshot(sessionId)?.activeTurnId) throw inProgress();
+            // Taken in the same tick as the idle check, before the read below: a wake during that read would
+            // otherwise start a turn the cut, read from a timeline without it, does not see.
+            releaseWakes = runtime.hold?.(sessionId);
             // A turn that started and ended before the hold: the cut no longer keeps the latest turn.
             const now = turnsOf(await timelineOf(sessionId, branch), sessionId);
             if (now.length !== turns.length || now.some((turn, index) => turn.id !== turns[index].id)) throw busy(sessionId, 'its conversation changed while the fork was prepared');
-            releaseWakes = runtime.hold?.(sessionId);
+            if (runtime.snapshot(sessionId)?.activeTurnId) throw busy(sessionId, 'a turn began meanwhile');
           }
           const latestTurn = turns.at(-1)?.id;
           const cutoff: ForkPlan['cutoff'] = kind === 'through' ? { throughTurnId: turnId! } : kind === 'before' ? { beforeTurnId: turnId! } : latestTurn ? { throughTurnId: latestTurn } : undefined;
