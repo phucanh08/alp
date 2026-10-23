@@ -436,5 +436,13 @@ cases.push({"name":"terminal.event exit notification","check":"message","valid":
 cases.push({"name":"terminal.event detached notification","check":"message","valid":true,"value":{"jsonrpc":"2.0","method":"terminal.event","params":{"terminalId":"term_0123456789abcdef0123456789abcdef","type":"detached","reason":"slow_consumer"}}});
 cases.push({"name":"terminal.event output without a seq","check":"message","valid":false,"value":{"jsonrpc":"2.0","method":"terminal.event","params":{"terminalId":"term_0123456789abcdef0123456789abcdef","type":"output","data":"x"}}});
 cases.push({"name":"terminal.event exit with an unknown reason","check":"message","valid":false,"value":{"jsonrpc":"2.0","method":"terminal.event","params":{"terminalId":"term_0123456789abcdef0123456789abcdef","type":"exit","seq":2,"exitCode":0,"signal":null,"reason":"crashed"}}});
+
+// Conditional Stop is additive; keep the legacy interrupt golden values above unchanged.
+cases.push({"name":"conditional interrupt params","check":"params","method":"session.interrupt","valid":true,"value":{"sessionId":"ses_fixture","turnId":"turn-1"}});
+cases.push({"name":"conditional interrupt with an empty turn","check":"params","method":"session.interrupt","valid":false,"value":{"sessionId":"ses_fixture","turnId":""}});
+cases.push({"name":"conditional interrupt with a non-string turn","check":"params","method":"session.interrupt","valid":false,"value":{"sessionId":"ses_fixture","turnId":42}});
+cases.push({"name":"conditional interrupt canceled the target","check":"result","method":"session.interrupt","valid":true,"value":{"interrupted":true}});
+cases.push({"name":"conditional interrupt left another turn untouched","check":"result","method":"session.interrupt","valid":true,"value":{"interrupted":false}});
+cases.push({"name":"conditional interrupt with a non-boolean answer","check":"result","method":"session.interrupt","valid":false,"value":{"interrupted":"yes"}});
 writeFileSync(out, JSON.stringify({ $comment: 'Golden v1 values (docs/protocol/alp-json-rpc-v1.md §11). check: message (one frame), envelope, params or result of `method`. Every valid case must pass schema/methods-v1.json and the TypeScript projection in src/; every invalid one must fail the schema; `projection: false` marks values the closed TypeScript unions deliberately leave out. Implementations in any language can load this file.', cases }, null, 1) + '\n');
 console.log(cases.length);

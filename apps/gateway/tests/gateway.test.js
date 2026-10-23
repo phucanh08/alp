@@ -276,3 +276,21 @@ test('typed tool-call details reach a reader of the tree unchanged, later detail
   assert.deepEqual(seen.map(envelope => envelope.event.item), items);
   assert.ok(seen.every(envelope => envelope.sessionId === 's1'));
 });
+
+test('conditional interrupt forwards its identity and answer only to a capable daemon', async t => {
+  for (const capable of [false, true]) {
+    const w = await setup(t, { sessions: [['s1', 'a']], fixture: { capabilities: ['attach.after', ...(capable ? ['session.interrupt.turn'] : [])] } });
+    w.daemon.state.handlers['session.interrupt'] = () => ({ interrupted: false });
+    const { call } = await w.rawSession('alice');
+    const greeting = await call('daemon.hello', { protocolVersion: 1 });
+    assert.equal(greeting.result.capabilities.includes('session.interrupt.turn'), capable);
+    const response = await call('session.interrupt', { sessionId: 's1', turnId: 'original' });
+    if (capable) {
+      assert.deepEqual(response.result, { interrupted: false });
+      assert.deepEqual(w.daemon.calls('session.interrupt').at(-1).params, { sessionId: 's1', turnId: 'original' });
+    } else {
+      assert.equal(response.error.data.reason, 'capability');
+      assert.equal(w.daemon.calls('session.interrupt').length, 0);
+    }
+  }
+});

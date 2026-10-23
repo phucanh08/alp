@@ -291,3 +291,33 @@ test('root implementation budget preserves a separate finite advisor budget acro
   main.finish(); await runtime.prompt('root', prompt('second', 'Continue'));
   assert.equal(decode(await main.call('alp_delegate', { agent: 'reviewer', task: 'Review' })).status, 'running');
 });
+
+test('conditional interrupt compares turn identity inside admission, after earlier queued work', async t => {
+  const { root, runtime, runtimes } = await setup(t);
+  await runtime.open('root', { cwd: root });
+  await runtime.prompt('root', prompt('first', 'first'));
+  const agent = runtimes[0];
+  const first = runtime.snapshot('root').activeTurnId;
+  const request = agent.request.bind(agent);
+  let release, entered;
+  const gate = new Promise(resolve => { release = resolve; });
+  const waiting = new Promise(resolve => { entered = resolve; });
+  agent.request = async (method, params) => {
+    if (method === 'turn/steer') { entered(); await gate; }
+    return request(method, params);
+  };
+  const steering = runtime.prompt('root', { ...prompt('steer', 'hold admission'), delivery: 'steer' });
+  await waiting;
+  // Provider completion, a later prompt and Stop all queue behind the held steer. At click the
+  // old turn is still active; by Stop's admission the later turn is active and must survive.
+  agent.finish('first completed');
+  const next = runtime.prompt('root', prompt('next', 'unrelated'));
+  const stopping = runtime.interruptTurn('root', first);
+  agent.turnId = 'later-turn';
+  release();
+  await steering;
+  await next;
+  assert.equal(await stopping, false);
+  assert.equal(runtime.snapshot('root').activeTurnId, 'later-turn');
+  assert.equal(agent.calls.filter(call => call.method === 'turn/interrupt').length, 0);
+});

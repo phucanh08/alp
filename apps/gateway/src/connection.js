@@ -1491,7 +1491,11 @@ export class ClientConnection {
       return { preview };
     },
 
-    'session.interrupt': async params => { await this.#drive(params.sessionId, { stop: true }); return this.#call('session.interrupt', params); },
+    'session.interrupt': async params => {
+      if (params.turnId !== undefined && !this.#capabilities.includes(CAPABILITY.sessionInterruptTurn)) throw new GatewayError(GATEWAY_ERROR.unavailable, 'The daemon cannot safely interrupt a specific turn', { reason: 'capability', capability: CAPABILITY.sessionInterruptTurn });
+      await this.#drive(params.sessionId, { stop: true });
+      return this.#call('session.interrupt', params);
+    },
     'session.close': async params => { await this.#drive(params.sessionId, { stop: true }); return this.#call('session.close', params); },
     'session.rename': async params => { await this.#resolve(params.sessionId); return this.#shownResult(await this.#call('session.rename', params)); },
     'session.archive': async params => { await this.#resolve(params.sessionId); return this.#shownResult(await this.#call('session.archive', params)); },
