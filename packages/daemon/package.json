@@ -33,6 +33,14 @@
       "types": "./dist/attachments.d.ts",
       "default": "./dist/attachments.js"
     },
+    "./terminals": {
+      "alp-source": {
+        "types": "./src/terminals.ts",
+        "default": "./src/terminals.ts"
+      },
+      "types": "./dist/terminals.d.ts",
+      "default": "./dist/terminals.js"
+    },
     "./conversation": {
       "alp-source": {
         "types": "./src/conversation.ts",
@@ -146,5 +154,8 @@
   "homepage": "https://github.com/phucanh08/alp/tree/main/packages/daemon#readme",
   "bugs": {
     "url": "https://github.com/phucanh08/alp/issues"
+  },
+  "optionalDependencies": {
+    "node-pty": "1.2.0-beta.15"
   }
 }

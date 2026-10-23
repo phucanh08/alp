@@ -41,7 +41,7 @@ async function compile(name) {
   await emitDeclarations(directory, files);
   // Canonical executable bundles carry their resources and run without the repository.
   if (name === 'daemon' || name === 'cli') {
-    record(path.join(directory, 'dist/alpd.js'), await build({ absWorkingDir: ROOT, entryPoints: ['packages/daemon/src/main.ts'], outfile: path.join(directory, 'dist/alpd.js'), bundle: true, format: 'esm', platform: 'node', target: 'node20', conditions: sourceConditions, external: ['@anthropic-ai/claude-agent-sdk'], plugins, banner: requireShim, define: { __ALP_VERSION__: JSON.stringify(manifest.version) }, metafile: true }));
+    record(path.join(directory, 'dist/alpd.js'), await build({ absWorkingDir: ROOT, entryPoints: ['packages/daemon/src/main.ts'], outfile: path.join(directory, 'dist/alpd.js'), bundle: true, format: 'esm', platform: 'node', target: 'node20', conditions: sourceConditions, external: ['@anthropic-ai/claude-agent-sdk', 'node-pty'], plugins, banner: requireShim, define: { __ALP_VERSION__: JSON.stringify(manifest.version) }, metafile: true }));
   }
   if (name === 'cli') {
     record(path.join(directory, 'dist/acp.js'), await build({ absWorkingDir: ROOT, entryPoints: ['packages/cli/src/acp/main.ts'], outfile: path.join(directory, 'dist/acp.js'), bundle: true, format: 'esm', platform: 'node', target: 'node20', conditions: sourceConditions, define: { __ALP_VERSION__: JSON.stringify(manifest.version) }, metafile: true }));
