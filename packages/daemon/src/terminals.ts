@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { access, lstat, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -34,7 +35,8 @@ export type PtyProcess = {
   onExit(listener: (event: { exitCode: number; signal?: number }) => void): Disposable;
 };
 export type PtySpawn = (file: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: Record<string, string> }) => PtyProcess;
-export type ProcessRow = { pid: number; ppid: number; pgid: number; sid?: number; tty?: string; elapsedMs: number };
+/** One process: ids, (Linux) session, controlling tty, age, and the terminal markers in its environment. */
+export type ProcessRow = { pid: number; ppid: number; pgid: number; sid?: number; tty?: string; elapsedMs: number; markers?: string[] };
 type Log = { info(message: string, fields?: Record<string, unknown>): void; warn(message: string, fields?: Record<string, unknown>): void };
 
 export type TerminalServiceOptions = {
@@ -78,8 +80,12 @@ type Terminal = {
   nextSeq: number;
   sink?: TerminalSink;
   detachedAt?: number;
-  /** Process groups seen in this terminal's tree: killed with it even after the shell is gone. */
-  groups: Set<number>;
+  /**
+   * A random value in the environment of every process the terminal starts (ALP_TERMINAL_ID): it
+   * finds a job that left the shell's tree (double fork, re-parented, shell already gone) without
+   * remembering any process or group id that could be reused.
+   */
+  marker: string;
   ending?: TerminalEndReason;
   exit?: { seq: number; exitCode: number | null; signal: number | null; reason: TerminalEndReason; at: number };
   disposables: Disposable[];
@@ -138,22 +144,34 @@ function elapsed(text: string) {
   return (((Number(days) * 24 + h) * 60 + m) * 60 + s) * 1000;
 }
 
-/** The process table: pid, parent, group, (Linux) session and age. */
+const MARKER = /(?:^|\s)ALP_TERMINAL_ID=(atm_[0-9a-f]{32})(?=\s|$)/g;
+const markersOf = (text: string) => [...text.matchAll(MARKER)].map(match => match[1]!);
+
+/**
+ * The process table: pid, parent, group, (Linux) session, controlling tty, age, and the terminal
+ * markers in each process's environment (macOS: `ps -E`, this user's processes only; Linux:
+ * /proc/<pid>/environ, readable for this user's processes).
+ */
 export function psProcesses(platform: NodeJS.Platform = process.platform): () => Promise<ProcessRow[]> {
   const linux = platform === 'linux';
-  const columns = linux ? 'pid=,ppid=,pgid=,sid=,tty=,etime=' : 'pid=,ppid=,pgid=,tty=,etime=';
+  const columns = linux ? 'pid=,ppid=,pgid=,sid=,tty=,etime=' : 'pid=,ppid=,pgid=,tty=,etime=,command=';
+  const args = linux ? ['-A', '-o', columns] : ['-A', '-E', '-ww', '-o', columns];
   return () => new Promise(resolve => {
-    execFile('ps', ['-A', '-o', columns], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } }, (error, stdout) => {
+    execFile('ps', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } }, (error, stdout) => {
       if (error) { resolve([]); return; }
       const rows: ProcessRow[] = [];
       for (const line of stdout.split('\n')) {
-        const cells = line.trim().split(/\s+/);
-        if (cells.length < (linux ? 6 : 5)) continue;
+        const trimmed = line.trim();
+        const cells = trimmed.split(/\s+/);
+        if (cells.length < 5) continue;
         const [pid, ppid, pgid] = cells.slice(0, 3).map(Number) as [number, number, number];
+        if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(ppid) || !Number.isSafeInteger(pgid)) continue;
         const sid = linux ? Number(cells[3]) : undefined;
         const tty = cells[linux ? 4 : 3]!;
-        if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(ppid) || !Number.isSafeInteger(pgid)) continue;
-        rows.push({ pid, ppid, pgid, ...(sid !== undefined ? { sid } : {}), ...(/^[?-]+$/.test(tty) ? {} : { tty }), elapsedMs: elapsed(cells[linux ? 5 : 4]!) });
+        let markers: string[] = [];
+        if (linux) { try { markers = markersOf(readFileSync(`/proc/${pid}/environ`, 'utf8').replace(/\0/g, ' ')); } catch {} }
+        else markers = markersOf(trimmed);
+        rows.push({ pid, ppid, pgid, ...(sid !== undefined && Number.isSafeInteger(sid) ? { sid } : {}), ...(/^[?-]+$/.test(tty) ? {} : { tty }), elapsedMs: elapsed(cells[linux ? 5 : 4]!), ...(markers.length ? { markers } : {}) });
       }
       resolve(rows);
     });
@@ -289,30 +307,33 @@ export function createTerminalService(options: TerminalServiceOptions) {
     }
   }
 
-  /** Every process of a terminal's tree still running: never alpd's own group, never older than the terminal. */
+  /**
+   * Every process of a terminal still running, identified afresh from the process table, never from
+   * a remembered pid or group id (one that may have been reused):
+   * - its marker in the environment (any process the terminal started, wherever it went);
+   * - while the shell runs: the shell itself and every process whose controlling terminal is its PTY;
+   * - on Linux, its session (a session id is not reused while the session has members);
+   * then their descendants, and every member of their process groups (a live group's id is not
+   * reused either). Never alpd itself or its group, never a process older than the terminal.
+   */
   async function tree(terminal: Terminal): Promise<ProcessRow[]> {
     const rows = await listProcesses();
     const age = now() - terminal.createdAt + 2_000;
     const own = rows.find(row => row.pid === process.pid);
+    const running = !terminal.exit;
     const children = new Map<number, ProcessRow[]>();
     for (const row of rows) children.set(row.ppid, [...(children.get(row.ppid) ?? []), row]);
     const found = new Map<number, ProcessRow>();
-    const shell = rows.find(row => row.pid === terminal.pid);
-    const queue = shell ? [shell] : [];
+    for (const row of rows) {
+      if (row.markers?.includes(terminal.marker) || (row.sid !== undefined && row.sid === terminal.pid) || (running && (row.pid === terminal.pid || (terminal.tty && row.tty === terminal.tty)))) found.set(row.pid, row);
+    }
+    const queue = [...found.values()];
     while (queue.length) {
       const row = queue.pop()!;
-      if (found.has(row.pid)) continue;
-      found.set(row.pid, row);
-      queue.push(...(children.get(row.pid) ?? []));
+      for (const child of children.get(row.pid) ?? []) if (!found.has(child.pid)) { found.set(child.pid, child); queue.push(child); }
     }
-    // While its PTY is open, a process whose controlling terminal it is belongs to it, double-forked
-    // or not (macOS has no session id in ps). Once closed the device name may be reused: never then.
-    if (!terminal.exit && terminal.tty) for (const row of rows) if (row.tty === terminal.tty) found.set(row.pid, row);
-    for (const row of found.values()) terminal.groups.add(row.pgid);
-    terminal.groups.add(terminal.pid);
-    for (const row of rows) {
-      if (terminal.groups.has(row.pgid) || (row.sid !== undefined && row.sid === terminal.pid)) found.set(row.pid, row);
-    }
+    const groups = new Set([...found.values()].map(row => row.pgid));
+    for (const row of rows) if (groups.has(row.pgid)) found.set(row.pid, row);
     return [...found.values()].filter(row => row.pid > 1 && row.pid !== process.pid && (!own || row.pgid !== own.pgid) && row.elapsedMs <= age);
   }
 
@@ -361,8 +382,13 @@ export function createTerminalService(options: TerminalServiceOptions) {
     if (!terminal.exit) exited(terminal, null, null);
   }
 
+  let sweeping = false;
   async function sweep() {
-    if (closed) return;
+    if (closed || sweeping) return;
+    sweeping = true;
+    try { await sweepOnce(); } finally { sweeping = false; }
+  }
+  async function sweepOnce() {
     const current = await state().catch(() => undefined);
     if (!current) return;
     const { limits } = current;
@@ -375,8 +401,6 @@ export function createTerminalService(options: TerminalServiceOptions) {
       if (at >= terminal.expiresAt) void end(terminal, 'lifetime');
       else if (at - terminal.lastActivityAt >= limits.idleMs) void end(terminal, 'idle');
       else if (!terminal.sink && terminal.detachedAt !== undefined && at - terminal.detachedAt >= limits.reconnectMs) void end(terminal, 'detached');
-      // Remembers the process groups of its jobs, to kill them even after the shell is gone.
-      else await tree(terminal).catch(() => undefined);
     }
   }
   const timer = setInterval(() => void sweep().catch(() => {}), options.sweepMs ?? SWEEP_MS);
@@ -392,10 +416,10 @@ export function createTerminalService(options: TerminalServiceOptions) {
     return '/bin/sh';
   }
 
-  function environment() {
+  function environment(marker: string) {
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) if (value !== undefined && !PRIVATE_ENV.test(key)) env[key] = value;
-    return { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor', ALP_TERMINAL: '1' };
+    return { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor', ALP_TERMINAL: '1', ALP_TERMINAL_ID: marker };
   }
 
   const running = (filter: (terminal: Terminal) => boolean) => [...terminals.values()].filter(terminal => !terminal.exit && filter(terminal)).length;
@@ -411,35 +435,32 @@ export function createTerminalService(options: TerminalServiceOptions) {
     async create(principal: TerminalPrincipal, params: { workspaceId: string; cols: number; rows: number; requestId: string }): Promise<{ terminal: TerminalInfo }> {
       const limits = await ready();
       const requestKey = JSON.stringify([principal.id, principal.epoch, params.requestId]);
-      const repeated = requests.get(requestKey);
-      if (repeated) {
-        const terminal = terminals.get(repeated);
-        if (terminal && !terminal.exit) {
-          if (terminal.workspaceId !== params.workspaceId) throw new RpcError(ERROR.conflict, 'This requestId created another terminal', { reason: 'request_conflict' });
-          return { terminal: info(terminal) };
-        }
-      }
       let root: string;
       try { root = await resolveWorkspace(params.workspaceId); } catch (error: any) {
         if (typeof error?.code === 'number' && error.code !== ERROR.failed) throw new RpcError(error.code === ERROR.forbidden ? ERROR.forbidden : ERROR.notFound, error.code === ERROR.forbidden ? 'The workspace directory changed' : 'No workspace with this workspaceId', { reason: error.data?.reason ?? 'not_found' });
         throw error;
       }
       if (!within(principal, root)) throw new RpcError(ERROR.forbidden, 'The workspace is outside this grant', { reason: 'outside_workspace' });
+      const file = await shell();
+      // From here to the spawn nothing awaits: the requestId, both limits and the new terminal are
+      // checked and recorded in one step, so concurrent creates cannot pass the same check.
+      if (closed) throw new RpcError(ERROR.unavailable, 'alpd is shutting down', { reason: 'terminal_unsupported' });
+      const repeated = terminals.get(requests.get(requestKey) ?? '');
+      if (repeated && !repeated.exit) {
+        if (repeated.workspaceId !== params.workspaceId) throw new RpcError(ERROR.conflict, 'This requestId created another terminal', { reason: 'request_conflict' });
+        return { terminal: info(repeated) };
+      }
       if (running(terminal => terminal.principal.id === principal.id) >= limits.maxPerPrincipal) throw new RpcError(ERROR.unavailable, `At most ${limits.maxPerPrincipal} terminals run per principal`, { reason: 'terminal_limit', limit: 'principal' });
       if (running(() => true) >= limits.maxPerDaemon) throw new RpcError(ERROR.unavailable, `At most ${limits.maxPerDaemon} terminals run on this host`, { reason: 'terminal_limit', limit: 'daemon' });
-      // Another create may have taken the slot while this one resolved its workspace.
-      const again = requests.get(requestKey);
-      if (again && terminals.get(again) && !terminals.get(again)!.exit) return { terminal: info(terminals.get(again)!) };
-      const file = await shell();
-      if (closed) throw new RpcError(ERROR.unavailable, 'alpd is shutting down', { reason: 'terminal_unsupported' });
       const at = now();
-      const process_ = pty()!(file, [], { name: 'xterm-256color', cols: params.cols, rows: params.rows, cwd: root, env: environment() });
+      const marker = `atm_${randomBytes(16).toString('hex')}`;
+      const process_ = pty()!(file, [], { name: 'xterm-256color', cols: params.cols, rows: params.rows, cwd: root, env: environment(marker) });
       const terminal: Terminal = {
         id: `term_${randomBytes(16).toString('hex')}`, principal: { id: principal.id, epoch: principal.epoch }, workspaceId: params.workspaceId,
         root, title: path.basename(file).slice(0, 64), cols: params.cols, rows: params.rows, pty: process_, pid: process_.pid,
         ...(typeof process_.ptsName === 'string' && process_.ptsName.startsWith('/dev/') ? { tty: process_.ptsName.slice('/dev/'.length) } : {}),
         createdAt: at, lastActivityAt: at, expiresAt: at + limits.maxLifetimeMs, requestKey, ring: [], ringBytes: 0, nextSeq: 1,
-        detachedAt: at, groups: new Set([process_.pid]), disposables: [],
+        detachedAt: at, marker, disposables: [],
       };
       terminals.set(terminal.id, terminal);
       requests.set(requestKey, terminal.id);
