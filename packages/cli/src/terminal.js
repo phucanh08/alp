@@ -58,7 +58,7 @@ export async function terminalCommand(args, { home = alpHome(), out = console.lo
     if (paseo) {
       const allowed = current.private && current.value?.allowRemoteTerminal === true;
       await write(home, { version: 1, allowRemoteTerminal: allowed, ...limits });
-      out(json ? JSON.stringify({ allowRemoteTerminal: allowed, allowPaseoTerminal: false }) : 'Paseo app devices can no longer open terminals on this host.');
+      out(json ? JSON.stringify({ allowRemoteTerminal: allowed, allowPaseoTerminal: false }) : 'Paseo app devices can no longer open terminals on this host; the bridge ends the terminals it holds.');
       return;
     }
     await write(home, { version: 1, allowRemoteTerminal: false, ...limits });

@@ -363,10 +363,17 @@ export function createTerminals({
   function forget(target: Stream) {
     if (streams.get(target.id) === target && target.state === 'detached' && !target.subs.size) streams.delete(target.id);
   }
+  /**
+   * Terminals are off for Paseo: every stream ends, and every shell the bridge holds is closed in
+   * alpd (best effort) before its connection goes, so none keeps running for alpd's reconnect time.
+   */
   function shutdown(error: string) {
+    const closing = [...streams.values()].map(target => target.conn?.request('terminal.close', { terminalId: target.id })
+      .catch((failure: any) => log(`terminals: close ${target.id} failed: ${failure?.message ?? failure}`)));
     for (const target of [...streams.values()]) end(target, error);
     pendingSizes.clear();
-    drop(live);
+    const connection = live;
+    void Promise.allSettled(closing).then(() => drop(connection));
     changed();
   }
 
