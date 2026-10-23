@@ -329,13 +329,19 @@ export function createConversation(ctx: ConversationContext) {
             if (!live) throw new RpcError(ERROR.unavailable, 'The session is not open; open it (session.create { resume: true }) and its agent starts on its conversation', { reason: 'session_closed' });
             if (live.busy) throw busy(sessionId, 'a turn, child, assignment, mail or parked work is in progress');
             if (runtime.questions().some(question => question.rootId === sessionId)) throw busy(sessionId, 'a question waits for an answer');
+            // Taken in the same tick as the idle check: from here to the restart the runtime starts no turn of
+            // its own on the root (mail waits, then reaches the new process). A wake during the reads below
+            // would otherwise make the restart refuse busy after `prepared`, journaling a transient refusal.
+            releaseWakes = runtime.hold?.(sessionId);
             await checkGeneration(sessionId, ifGeneration);
             const turns = turnsOf(await store.timeline(sessionId), sessionId);
             if (!turns.length) throw new RpcError(ERROR.unavailable, 'The agent has no conversation to keep yet; send it a message first, or start a new session', { reason: 'no_history' });
             const running = turns.find(turn => turn.state === undefined);
             if (running) throw inProgress(running.id);
-            // From here to the restart the runtime starts no turn of its own on the root (mail waits).
-            releaseWakes = runtime.hold?.(sessionId);
+            // Held mail may wait (restartRefusal lets it); a turn or question that began anyway may not.
+            const now = runtime.snapshot(sessionId);
+            if (!now) throw new RpcError(ERROR.unavailable, 'The session closed; open it (session.create { resume: true }) and its agent starts on its conversation', { reason: 'session_closed' });
+            if (now.activeTurnId || runtime.questions().some(question => question.rootId === sessionId)) throw busy(sessionId, 'a turn or question began meanwhile');
             return { root: sessionId, threadId: live.threadId!, at: new Date().toISOString() };
           },
           async apply(plan) {

@@ -241,6 +241,8 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 | `attachments` | `attachment.begin/chunk/commit/abort/get/delete` and `session.prompt` parts `{ type: "attachment", attachmentId }`; hello carries `attachmentLimits` (§12.6). Listed when alpd has a home and a store, on macOS and Linux (not Windows). |
 | `session.fork` | `session.fork`: a new root from a root's conversation cut at a turn, or from a branch a rewind set aside; files are never copied or changed (§12.7). Listed with a store and a runtime that forks native conversations, on macOS and Linux (not Windows). |
 | `session.rewind` | `session.rewind`: a root's conversation from before a turn, same id, later turns kept as a recoverable branch, files never changed; the `history.reset` event (§12.7). Same condition as `session.fork`. |
+| `session.reload` | `session.reload`: a live root's native process restarts on its own conversation and configuration, same id, history and receipts (§12.8). Listed with a store and a runtime that restarts a root on its own conversation, on macOS and Linux (not Windows). |
+| `session.resumeCommand` | `session.resumeCommand`: the `alp attach <sessionId>` command for the clipboard, as argv and POSIX/cmd.exe lines (§12.8). Listed with a store. |
 
 alpd before this revision already had the first three without listing them; the others are new. A method whose
 capability a daemon does not list answers `-32601`. A client that must work with
@@ -1146,8 +1148,9 @@ it may prompt it (docs/alp/remote-gateway.md §5.5, §5.15).
 
 Capability `session.reload`, listed by an alpd with a store whose runtime restarts a root on its own
 conversation (today: Codex and Claude, on macOS and Linux); capability `session.resumeCommand`, listed by
-an alpd with a store. A summary's `conversation.reload` says whether this root can be reloaded now (the
-same `reason`s as fork and rewind); a client offers Reload agent only where it is `true`.
+an alpd with a store. A summary's `conversation.reload` says whether this root's runtime can reload it
+(the same `reason`s as fork and rewind); the root must also be open and idle, and have a turn, when the
+request comes (below). A client offers Reload agent only where it is `true`.
 
 **`session.reload { sessionId, requestId, ifGeneration }`** → `{ session, duplicate? }`. The root's
 native process stops and a new one resumes **the conversation it runs now** (its thread, or a Claude
@@ -1173,9 +1176,11 @@ What it refreshes is the process: a new sign-in, a provider binary that changed.
 **`session.resumeCommand { sessionId }`** → `{ argv, posix, windows, display, platform }`: the command
 that follows the session in a terminal on the daemon host, built by alpd from the session id only:
 `alp attach <sessionId>` (a closed session's attach says how to send it a message). `posix` is quoted
-for sh, bash and zsh, `windows` for cmd.exe (the shell npm's `alp.cmd` runs under; arguments quoted as
-the C runtime splits them, cmd.exe metacharacters escaped with `^`); `display` is the one of the host's
-`platform`. An argument with a control character is refused. It is for the clipboard only: a client
+for sh, bash and zsh, `windows` for cmd.exe, typed at its prompt and then read again by npm's `alp.cmd`
+shim (`%*`): an argument in double quotes as the C runtime splits them, its cmd.exe metacharacters
+escaped with `^`; `display` is the one of the host's `platform`. The session id must match
+`[A-Za-z0-9_.:-]{1,128}` (it always stays bare). For the helpers, an argument with a control character
+is refused, and for cmd.exe one with `"`, `%` or `!` too: no escaping keeps those through both parses. It is for the clipboard only: a client
 never runs it. It never is a native runtime's command (`codex resume`, `claude --resume`), which
 would continue the thread outside ALP and lose its orchestration (mail, assignments, receipts), and it
 carries no credential, env (`ALP_HOME` included: a host whose alpd uses another home runs it with that

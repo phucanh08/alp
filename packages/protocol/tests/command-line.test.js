@@ -1,6 +1,7 @@
 // session.resumeCommand's command lines (docs/protocol/alp-json-rpc-v1.md §12.8): every argument must
 // reach the program as it is. POSIX lines run through a real /bin/sh; Windows lines through a reference
-// of what cmd.exe and then the C runtime do with a command line (cmd.exe is not on this host).
+// of what cmd.exe at its prompt, then the `%*` of npm's alp.cmd shim read again by cmd.exe, then the C
+// runtime do with a command line (cmd.exe is not on this host).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -34,6 +35,23 @@ function viaCmd(line) {
   return out;
 }
 
+/**
+ * The shim's second reading of `%*` (a batch line): a `"` toggles quoting, and outside quotes a bare
+ * metacharacter would be interpreted, which fails here; `%` and `!` would expand anywhere.
+ */
+function viaShim(line) {
+  let quoted = false;
+  for (const ch of line) {
+    assert.ok(ch !== '%' && ch !== '!', `${ch} would expand in ${line}`);
+    if (ch === '"') { quoted = !quoted; continue; }
+    assert.ok(quoted || !'&|<>()^'.includes(ch), `bare cmd.exe metacharacter ${ch} in the shim's ${line}`);
+  }
+  assert.ok(!quoted, `unterminated quote in the shim's ${line}`);
+  return line;
+}
+const WINDOWS_REFUSED = /["%!]/;
+const WINDOWS_HOSTILE = HOSTILE.filter(arg => !WINDOWS_REFUSED.test(arg));
+
 /** How the Microsoft C runtime (CommandLineToArgvW) splits a command line into argv. */
 function msvcrtArgv(line) {
   const argv = [];
@@ -66,9 +84,18 @@ test('POSIX: each hostile argument reaches the program unchanged through /bin/sh
   assert.deepEqual(viaSh(commandLine(HOSTILE, 'posix')), HOSTILE);
 });
 
-test('Windows: each hostile argument reaches the program unchanged through cmd.exe and the C runtime', () => {
-  for (const arg of HOSTILE) assert.deepEqual(msvcrtArgv(viaCmd(quoteWindows(arg))), [arg], `${JSON.stringify(arg)} as ${quoteWindows(arg)}`);
-  assert.deepEqual(msvcrtArgv(viaCmd(commandLine(HOSTILE, 'windows'))), HOSTILE);
+test('Windows: each hostile argument reaches the program unchanged through cmd.exe, the alp.cmd shim and the C runtime', () => {
+  assert.ok(WINDOWS_HOSTILE.length > 30);
+  for (const arg of WINDOWS_HOSTILE) assert.deepEqual(msvcrtArgv(viaShim(viaCmd(quoteWindows(arg)))), [arg], `${JSON.stringify(arg)} as ${quoteWindows(arg)}`);
+  assert.deepEqual(msvcrtArgv(viaShim(viaCmd(commandLine(WINDOWS_HOSTILE, 'windows')))), WINDOWS_HOSTILE);
+});
+
+test('Windows: an argument with ", % or ! is refused; no escaping survives both cmd.exe parses', () => {
+  // a"&calc would leave &calc outside the shim's quotes; %PATH% and !X! expand in either parse.
+  for (const arg of HOSTILE.filter(arg => WINDOWS_REFUSED.test(arg)).concat(['a"&calc', '!X!', '%%'])) {
+    assert.throws(() => quoteWindows(arg), /has no ", % or !/, JSON.stringify(arg));
+    assert.doesNotThrow(() => quotePosix(arg));
+  }
 });
 
 test('arguments are left bare only when nothing in them is special', () => {
@@ -77,8 +104,9 @@ test('arguments are left bare only when nothing in them is special', () => {
   assert.equal(quotePosix('with space'), "'with space'");
   assert.equal(quotePosix("it's"), "'it'\\''s'");
   assert.equal(quoteWindows('with space'), '^"with^ space^"');
-  assert.equal(quoteWindows('a"b'), '^"a\\^"b^"');
-  assert.equal(quoteWindows('%PATH%&calc'), '^"^%PATH^%^&calc^"');
+  assert.equal(quoteWindows('a&b|c'), '^"a^&b^|c^"');
+  assert.equal(quoteWindows('trail\\'), 'trail\\');
+  assert.equal(quoteWindows('C:\\Program Files\\'), '^"C:\\Program^ Files\\\\^"');
   assert.equal(quotePosix(''), "''");
   assert.equal(quoteWindows(''), '^"^"');
 });
@@ -100,4 +128,6 @@ test('resumeCommandOf is the ALP CLI attach, never a native runtime command', ()
   const odd = resumeCommandOf('A.b:c-d_9', 'posix');
   assert.equal(odd.posix, 'alp attach A.b:c-d_9');
   assert.equal(odd.windows, 'alp attach A.b:c-d_9');
+  // Anything else is not a session id, whatever quoting could do with it.
+  for (const id of ['', 'a b', 'a"b', '%X%', 'x'.repeat(129), 'a/b', /** @type {any} */ (7)]) assert.throws(() => resumeCommandOf(id, 'posix'), /session id/, String(id));
 });
