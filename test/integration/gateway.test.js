@@ -765,7 +765,9 @@ test('terminals through the gateway on a real alpd with a real PTY: host switch,
   await until(() => jobs.every(pid => !alive(pid)), 'the revoked terminal\'s processes gone');
   // The gateway's own terminal.revoke finishes (alpd logs it once the tree's kill grace is over);
   // then nothing of that credential is left running: a second revoke finds none.
-  await until(async () => (await readFile(path.join(path.dirname(w.home), 'alpd.log'), 'utf8')).includes(`"code":"ALPD_TERMINAL_REVOKED","msg":"revoked the terminals of a principal","principal":"${exec.credential.id}"`), 'the gateway revoked the credential\'s terminals');
+  await until(async () => (await readFile(path.join(path.dirname(w.home), 'alpd.log'), 'utf8')).split('\n').some(line => {
+    try { const record = JSON.parse(line); return record.code === 'ALPD_TERMINAL_REVOKED' && record.principal === exec.credential.id; } catch { return false; }
+  }), 'the gateway revoked the credential\'s terminals');
   assert.deepEqual(await owner.request('terminal.revoke', { principalId: exec.credential.id }), { closed: 0 });
 
   // alpd's shutdown ends the rest.
