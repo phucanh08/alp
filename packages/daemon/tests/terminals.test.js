@@ -463,3 +463,32 @@ test('a job started just before the shell exits on its own is killed, with no sw
   await until(() => term.viewer.events.some(event => event.type === 'exit'), 'the exit');
   await until(() => !execFileSync('ps', ['-A', '-o', 'command='], { encoding: 'utf8' }).split('\n').some(line => line.trim() === 'sleep 995'), 'the job killed after the exit');
 });
+
+test('the process table parser: commands with spaces, a marker in the environment only, escaped newlines (macOS ps)', { skip: process.platform !== 'darwin' && 'the macOS ps format' }, async t => {
+  const { psProcesses } = await import('@anhlp/alp-daemon/terminals');
+  const bin = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-fake-ps-')));
+  t.after(() => rm(bin, { recursive: true, force: true }));
+  const marker = `atm_${'a'.repeat(32)}`;
+  // Two passes: with -E (command line, then the environment) and the command line alone.
+  const withEnv = [
+    `  101     1   101 ttys001     00:05 /bin/zsh -l HOME=/x ALP_TERMINAL_ID=${marker} TERM=xterm`,
+    `  102     1   102 ??          01:00 grep ALP_TERMINAL_ID=${marker} HOME=/x`,
+    `  103     1   103 ??       1-02:03:04 node server.js --flag=ALP_TERMINAL_ID=${marker} HOME=/x`,
+    `  104     1   104 ??          00:01 sleep 9 X=a\\012123 456 789 ALP_TERMINAL_ID=${marker}`,
+  ].join('\n');
+  const plain = ['  101 /bin/zsh -l', `  102 grep ALP_TERMINAL_ID=${marker}`, `  103 node server.js --flag=ALP_TERMINAL_ID=${marker}`, '  104 sleep 9'].join('\n');
+  await writeFile(path.join(bin, 'ps'), `#!/bin/sh\ncase "$*" in *-E*) cat <<'EOF_'\n${withEnv}\nEOF_\n;; *) cat <<'EOF_'\n${plain}\nEOF_\n;; esac\n`, { mode: 0o755 });
+  const saved = process.env.PATH;
+  process.env.PATH = `${bin}:${saved}`;
+  t.after(() => { process.env.PATH = saved; });
+  const rows = await psProcesses('darwin')();
+  const byPid = new Map(rows.map(row => [row.pid, row]));
+  assert.deepEqual(byPid.get(101).markers, [marker]);
+  assert.equal(byPid.get(101).tty, 'ttys001');
+  assert.equal(byPid.get(101).elapsedMs, 5_000);
+  assert.equal(byPid.get(102).markers, undefined, 'a marker in the arguments does not count');
+  assert.equal(byPid.get(103).markers, undefined);
+  assert.equal(byPid.get(103).elapsedMs, ((26 * 60 + 3) * 60 + 4) * 1000);
+  assert.deepEqual(byPid.get(104).markers, [marker], 'an escaped newline is one line');
+  assert.equal(rows.length, 4, 'no forged row');
+});

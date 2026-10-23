@@ -372,8 +372,11 @@ export function createTerminals({
       .catch((failure: any) => log(`terminals: close ${target.id} failed: ${failure?.message ?? failure}`)));
     for (const target of [...streams.values()]) end(target, error);
     pendingSizes.clear();
+    // The connection is no longer the bridge's from now on: a new stream opens another one.
     const connection = live;
-    void Promise.allSettled(closing).then(() => drop(connection));
+    if (connection) { live = undefined; conn = undefined; }
+    const settled = Promise.allSettled(closing);
+    void Promise.race([settled, new Promise(resolve => setTimeout(resolve, 5_000).unref?.())]).then(() => { try { connection?.close(); } catch {} });
     changed();
   }
 
