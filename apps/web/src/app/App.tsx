@@ -39,6 +39,7 @@ function useMedia(query: string) {
 
 function Notice() {
   const controller = useController();
+  const { openDraft } = useTabs();
   const { notice } = useAppState();
   React.useEffect(() => {
     if (!notice) return;
@@ -51,6 +52,7 @@ function Notice() {
       notice.level === 'error' ? 'border-destructive/40 bg-[var(--notice-error)] text-destructive' : 'border-border bg-popover text-foreground')}>
       {notice.level === 'error' ? <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" /> : <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-info" />}
       <span className="min-w-0 flex-1">{notice.text}</span>
+      {notice.action === 'new-session' ? <Button size="sm" variant="secondary" className="h-7 shrink-0 text-xs" onClick={() => { controller.dismissNotice(); openDraft(); }}>New session</Button> : null}
       <Button size="icon-sm" variant="ghost" aria-label="Dismiss" onClick={() => controller.dismissNotice()}><X aria-hidden /></Button>
     </div>
   );

@@ -38,7 +38,7 @@ test('Copy resume command copies the host\'s ALP command; Reload agent restarts 
   expect(await ask(page, 'codeword DELTA')).toBe('Echo: codeword DELTA');
   const { sessions } = await host('session.list', { rootsOnly: true });
   const session = sessions.find(row => row.title === 'Reload me');
-  expect(session.conversation).toEqual({ fork: true, rewind: true, reload: true });
+  expect(session.conversation).toEqual({ fork: true, rewind: true, reload: true, configure: true });
   const historyBefore = await host('session.history', { sessionId: session.id, limit: 200 });
 
   // Paseo's menu order: Copy resume command first, Reload agent just above Close.

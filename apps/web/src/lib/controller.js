@@ -4,12 +4,13 @@ import { AuthenticationError, ConfigurationError, CreateOutcomeUnknownError, FIL
 import { cleanListing, relativeFilePath } from './file-tree.js';
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
 import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
-import { newMessageId, newRequestId, newSessionId } from './ids.js';
+import { newConversationRequestId, newMessageId, newRequestId, newSessionId } from './ids.js';
 import { RELOAD_MESSAGES, agentControlsGate, conversationGate, describeConversationError, describeReloadError } from './conversation.js';
 import { GIT_ERROR_MESSAGES, GitAccessError, describeGitError, gitAccess, gitCompare, gitRequestPath } from './git.js';
 import { fitImages, imageLimits, promptContent } from './attachments.js';
 import { applyAttach, historyEnvelope, prependHistory, deliveredPrompts, emptyProjection, members, project, promptTurnOver } from './timeline.js';
-import { normalizeModels, parsePreview } from './new-session.js';
+import { effortLabel, normalizeModels, parsePreview } from './new-session.js';
+import { CONFIGURE_LIVE, CONFIGURE_MESSAGES, NEW_SESSION_REFUSALS, configuredNotice, configuredSummary, describeConfigureError, liveConfigureGate } from './configure.js';
 import { loadPreferences, parsePreferences, rememberChoices, savePreferences } from './preferences.js';
 
 /**
@@ -95,7 +96,7 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  *   busy: Record<string, boolean>,
  *   tasks: Load & { visible: boolean, rows: any[], revision?: string, unreadable: number, creates: TaskCreate[], busy: Record<string, boolean>, message?: { level: 'info' | 'error', text: string } },
  *   settings: Load & { language?: { language: string | null, applies: string, default: string }, models: Model[] },
- *   notice: { id: number, level: 'info' | 'error', text: string } | null,
+ *   notice: { id: number, level: 'info' | 'error', text: string, action?: 'new-session' } | null,
  *   preferences: import('./preferences.js').Preferences,
  * }} State
  */
@@ -352,8 +353,8 @@ export class Controller {
     });
   }
 
-  /** @param {'info' | 'error'} level @param {string} text */
-  #notify(level, text) { this.#set({ notice: { id: ++this.#noticeId, level, text } }); }
+  /** @param {'info' | 'error'} level @param {string} text @param {{ action?: 'new-session' }} [extra] what the notice offers to do */
+  #notify(level, text, extra) { this.#set({ notice: { id: ++this.#noticeId, level, text, ...(extra?.action ? { action: extra.action } : {}) } }); }
 
   dismissNotice() { this.#set({ notice: null }); }
 
@@ -2079,6 +2080,103 @@ export class Controller {
       this.#notify('error', describe(error).message);
     } finally {
       this.#set(state => ({ busy: { ...state.busy, mode: false } }));
+    }
+  }
+
+  /**
+   * Whether the open root's model, thinking and team can be changed now (lib/configure.js
+   * liveConfigureGate): the host's capability, the root's summary, the token, an idle tree.
+   */
+  liveConfigure() {
+    const { principal, connection, busy: flags } = this.#state;
+    const root = this.#state.tree?.rootId;
+    const tree = root ? this.#trees.get(root) : undefined;
+    const busy = !!root && !!tree && (this.rootBusy(root) || Object.keys(tree.projection.running).length > 0 || Object.keys(tree.projection.questions).length > 0);
+    return liveConfigureGate({
+      capabilities: connection.capabilities,
+      canWrite: can(principal ?? undefined, 'session.write'),
+      canTeam: can(principal ?? undefined, 'session.team.write'),
+      summary: root ? this.#rootSummary(root) : null,
+      closed: !!root && !!tree?.projection.closed[root],
+      busy,
+      configuring: !!flags.configure || !!flags.mode,
+      generation: root ? this.#older.get(root)?.generation ?? null : null,
+      online: connection.phase === 'open',
+      driveBlock: root ? this.driveBlock() : undefined,
+    });
+  }
+
+  /**
+   * session.configure.preview: what a change of the open root would run it with and whether the host
+   * would take it now (reads only). Undefined when the host or the token cannot say.
+   * @param {import('./configure.js').LiveChange} [change]
+   * @returns {Promise<import('@anhlp/alp-protocol/session').ConfigurePreview | undefined>}
+   */
+  async previewConfigure(change = {}) {
+    const root = this.#state.tree?.rootId;
+    if (!root || !this.hasCapability(CONFIGURE_LIVE) || !can(this.#state.principal ?? undefined, 'session.read')) return undefined;
+    /** @type {import('@anhlp/alp-protocol').RpcMethodMap['session.configure.preview']['result']} */
+    const result = await this.#client().request('session.configure.preview', { sessionId: root, ...change }, { timeoutMs: this.#options.requestTimeoutMs });
+    return result?.preview && typeof result.preview === 'object' ? result.preview : undefined;
+  }
+
+  /** The request id of a live configure whose answer was lost, kept for the same change only. @type {{ key: string, requestId: string } | undefined} */
+  #configureRetry;
+
+  /**
+   * Changes the open root's model, thinking or team (session.configure, §12.9): one change at a
+   * time, at the idle barrier, with a fresh requestId (the same one again only after a lost answer)
+   * and the history generation this view holds. The labels then show what the host answered it runs
+   * with; a refusal changes nothing here and a notice says why (a new session when a mismatch is the
+   * way on). A team change is previewed first, so a refusal shows before anything restarts.
+   * @param {import('./configure.js').LiveChange} change
+   */
+  async configureLive(change) {
+    const root = this.#state.tree?.rootId;
+    const asked = Object.fromEntries(Object.entries(change).filter(([key, value]) => ['model', 'thinking', 'team'].includes(key) && typeof value === 'string' && value));
+    if (!root || !Object.keys(asked).length) return undefined;
+    if (this.#state.busy.configure) return undefined;
+    const gate = this.liveConfigure();
+    const control = asked.team ? gate.team : asked.model ? gate.model : gate.thinking;
+    if (!gate.shown || !control.enabled) { this.#notify('error', control.reason ?? gate.reason ?? 'This change is not available now.'); return undefined; }
+    this.#set(state => ({ busy: { ...state.busy, configure: true } }));
+    const key = JSON.stringify([root, asked]);
+    try {
+      if (asked.team) {
+        const preview = await this.previewConfigure(asked).catch(() => undefined);
+        if (preview && !preview.allowed) {
+          const reason = preview.reason ?? 'runtime_unsupported';
+          this.#notify('error', CONFIGURE_MESSAGES[reason] ?? preview.message ?? 'The host would not take this change.', NEW_SESSION_REFUSALS.has(reason) ? { action: 'new-session' } : undefined);
+          return undefined;
+        }
+      }
+      const { generation, client } = this.#conversationTarget();
+      const requestId = this.#configureRetry?.key === key ? this.#configureRetry.requestId : newConversationRequestId();
+      this.#configureRetry = undefined;
+      /** @type {import('@anhlp/alp-protocol').RpcMethodMap['session.configure']['result']} */
+      let result;
+      try {
+        result = await client.request('session.configure', { sessionId: root, ...asked, requestId, ifGeneration: generation }, { timeoutMs: this.#options.createTimeoutMs });
+      } catch (error) {
+        const described = describeConfigureError(error);
+        if (described.retrySame) this.#configureRetry = { key, requestId };
+        this.#conversationRefused(root, error);
+        this.#notify('error', described.message, described.newSession ? { action: 'new-session' } : undefined);
+        return undefined;
+      }
+      const configured = result?.configured;
+      this.#adoptSummary(configuredSummary(result.session, configured?.effective));
+      void this.refreshSessions({ quiet: true });
+      if (configured) {
+        const label = this.#state.catalog.models.find(row => row.id === `${configured.effective.runtime}:${configured.effective.model}`)?.label;
+        this.#notify('info', configuredNotice(configured, effortLabel, label));
+      }
+      return result;
+    } catch (error) {
+      this.#notify('error', describeConfigureError(error).message);
+      return undefined;
+    } finally {
+      this.#set(state => ({ busy: { ...state.busy, configure: false } }));
     }
   }
 
