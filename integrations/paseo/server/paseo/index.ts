@@ -8,6 +8,7 @@ import { createAgents } from './agents.js';
 import { createPaseoGateway, type Handler } from './gateway.js';
 import { quietHandlers } from './quiet.js';
 import { createCheckouts } from './checkout.js';
+import { createTerminals } from './terminals.js';
 import { directorySuggestions, fileExplorer } from './files.js';
 import { createPlugins } from './plugins.js';
 import { createUsage } from './usage.js';
@@ -62,9 +63,11 @@ export function createPaseoBridge({ clientFactory, version, token, serverId, hom
   const inDevelopment = async () => words(await userLanguage(home)).inDevelopment;
   const gateway = createPaseoGateway({
     token, serverId, version, handlers, features, log, inDevelopment,
+    // workspaceTerminals follows the host's switch (terminal.json), read again at most every 5 s.
+    beforeServerInfo: async () => { await terminals.refresh(); features.workspaceTerminals = terminals.features.workspaceTerminals; },
     onClient: client => {
       void agents.start().then(() => workspaces.start()).catch(error => log?.(`agents failed to start: ${error?.message ?? error}`));
-      return () => checkouts.drop(client);
+      return () => { checkouts.drop(client); terminals.drop(client); };
     },
   });
   const broadcast = (message: Parameters<typeof gateway.broadcast>[0]) => gateway.broadcast(message);
@@ -85,11 +88,16 @@ export function createPaseoBridge({ clientFactory, version, token, serverId, hom
   const plugins = createPlugins({ log, usage: readUsage, home, projectDirectories: workspaces.projectDirectories });
   const usage = createUsage(readUsage);
   const checkouts = createCheckouts({ broadcast, rpc: (method, params) => agents.request(method, params), log });
+  // Terminals use their own connection to alpd (one attach per terminal, fanned out to every client).
+  const terminals = createTerminals({
+    home: home ?? alpHome(), log, inDevelopment,
+    ...(clientFactory ? { connect: () => clientFactory(() => {}) } : {}),
+  });
   const relay = createRelay({ home, serverId, attach: socket => gateway.attach(socket), initial: relaySettings, log: message => log?.(message) });
   const providers = createProviders({ home, broadcast, alpEntry: cwd => agents.providerEntry(cwd), log: message => log?.(message) });
   const daemonConfig = createDaemonConfig({ relay, providers, serverId, broadcast, inDevelopment, version, listen, startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString() });
-  Object.assign(handlers, quietHandlers, daemonConfig.handlers, providers.handlers, agents.handlers, workspaces.handlers, plugins.handlers, usage.handlers, checkouts.handlers, { directory_suggestions_request: directorySuggestions, file_explorer_request: fileExplorer });
-  Object.assign(features, ENTRY_POINTS, daemonConfig.features, providers.features, agents.features, workspaces.features, plugins.features, usage.features, checkouts.features);
+  Object.assign(handlers, quietHandlers, daemonConfig.handlers, providers.handlers, agents.handlers, workspaces.handlers, plugins.handlers, usage.handlers, checkouts.handlers, terminals.handlers, { directory_suggestions_request: directorySuggestions, file_explorer_request: fileExplorer });
+  Object.assign(features, ENTRY_POINTS, daemonConfig.features, providers.features, agents.features, workspaces.features, plugins.features, usage.features, checkouts.features, terminals.features);
   // agent.rewind.request in conversation mode. alpd (with its store) lists session.rewind on macOS and Linux,
   // not on Windows; the hello is answered before the bridge reaches alpd, so the platform decides here, and
   // each agent's supportsRewindConversation says whether that session's runtime rewinds.
@@ -98,7 +106,7 @@ export function createPaseoBridge({ clientFactory, version, token, serverId, hom
 
   return Object.assign(gateway, {
     relay,
-    close: () => { agents.close(); checkouts.close(); void relay.stop(); return workspaces.close(); },
+    close: () => { agents.close(); checkouts.close(); terminals.close(); void relay.stop(); return workspaces.close(); },
     scripts: { '/alp-plugins.js': plugins.script },
   });
 }
