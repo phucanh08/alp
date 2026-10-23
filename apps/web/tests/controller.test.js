@@ -1085,3 +1085,159 @@ test('credential-wide registry load survives workspace switch and subsequent sha
   assert.equal(w.state().registry.workspaces[0].pinnedAt, 'pin');
   assert.ok(reads >= 2);
 });
+
+for (const reconnect of [false, true]) test(`Stop retains a delayed prompt identity through timeout${reconnect ? ' and replay' : ''}`, async t => {
+  const w = setup(t, {}, { requestTimeoutMs: 50 });
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  w.host.intercept.set('session.prompt', async () => { await gate; });
+  const sending = w.controller.sendPrompt('delayed [hold]');
+  await until(() => w.host.count('session.prompt') === 1, 'prompt waiting before receipt');
+  const id = w.host.calls.find(call => call.method === 'session.prompt').params.clientMessageId;
+  await sending;
+  assert.equal(w.state().prompts.find(prompt => prompt.id === id)?.status, 'unknown');
+  let settled = false;
+  const stopping = w.controller.interrupt().then(() => { settled = true; });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const premature = settled;
+  if (reconnect) {
+    // Keep the session live as another viewer would, and lose the first link.
+    w.host.intercept.set('session.release', () => 'handled');
+    w.host.drop();
+    w.host.root('ses_a').live = true;
+    await until(() => w.host.opens >= 2 && attached(w.state) && w.state().connection.phase === 'open', 'reconnected');
+  }
+  release();
+  await until(() => w.host.root('ses_a').turns === 1, 'target starts');
+  assert.equal(premature, false, 'Stop stays pending until the target is resolved');
+  await stopping;
+  await until(() => !w.host.root('ses_a').running, 'target stopped');
+  assert.equal(w.host.calls.filter(call => call.method === 'session.prompt').length, 1, 'no automatic prompt resend');
+});
+
+test('Stop keeps outcome_unknown unresolved, then resolves only the matching accepted turn', async t => {
+  const w = setup(t, {}, { requestTimeoutMs: 50 });
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  let answerUnknown;
+  w.host.intercept.set('session.prompt', (params, _link, { fail }) => {
+    w.host.emit('ses_a', 'ses_a', { type: 'prompt.failed', clientMessageId: params.clientMessageId, error: { code: 'outcome_unknown', message: 'provider answer lost' } });
+    answerUnknown = () => fail(1004, 'unknown', { reason: 'outcome_unknown' });
+    return 'handled';
+  });
+  const sending = w.controller.sendPrompt('unknown');
+  await until(() => w.state().prompts[0]?.status === 'unknown', 'unknown event projected');
+  assert.match(w.state().prompts[0].error, /host cannot tell whether/);
+  assert.doesNotMatch(w.state().prompts[0].error, /did not take/);
+  answerUnknown();
+  await sending;
+  const id = w.host.calls.find(call => call.method === 'session.prompt').params.clientMessageId;
+  assert.equal(w.state().tree.projection.prompts[id].errorCode, 'outcome_unknown');
+  assert.equal(w.state().prompts[0].status, 'unknown');
+  assert.doesNotMatch(w.state().prompts[0].error, /did not take/);
+  assert.equal(w.controller.rootBusy(), true, 'Stop remains accessible for an unknown message');
+  let settled = false;
+  const stopping = w.controller.interrupt().then(() => { settled = true; });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(settled, false);
+  assert.equal(w.host.count('session.interrupt'), 0, 'idle is no proof of cancellation');
+  w.host.startTurn('ses_a');
+  const turnId = w.host.root('ses_a').running;
+  w.host.emit('ses_a', 'ses_a', { type: 'prompt.accepted', clientMessageId: id, turnId, result: 'turn' });
+  await stopping;
+  assert.deepEqual(w.host.calls.find(call => call.method === 'session.interrupt').params, { sessionId: 'ses_a', turnId });
+});
+
+test('a definitive refusal resolves Stop without interrupting another turn', async t => {
+  const w = setup(t);
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  let refuse;
+  w.host.intercept.set('session.prompt', (_params, _link, { answer }) => { refuse = () => answer({ outcome: 'failed', error: { message: 'refused' } }); return 'handled'; });
+  const sending = w.controller.sendPrompt('refused');
+  await until(() => !!refuse, 'prompt pending');
+  const stopping = w.controller.interrupt();
+  refuse();
+  await sending;
+  await stopping;
+  assert.equal(w.state().busy.interrupt, false);
+  assert.equal(w.host.count('session.interrupt'), 0);
+});
+
+test('an older host visibly refuses targeted Stop without sending a legacy interrupt', async t => {
+  const w = setup(t);
+  w.host.capabilities = w.host.capabilities.filter(cap => cap !== 'session.interrupt.turn');
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  await w.controller.sendPrompt('work [hold]');
+  await w.controller.interrupt();
+  assert.equal(w.host.count('session.interrupt'), 0);
+  assert.match(w.state().notice.text, /cannot safely stop/);
+  assert.ok(w.host.root('ses_a').running);
+});
+
+test('unanswered conditional Stop retries are bounded and manual retry retains the original turn', async t => {
+  const w = setup(t, {}, { requestTimeoutMs: 20 });
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  await w.controller.sendPrompt('work [hold]');
+  const turnId = w.host.root('ses_a').running;
+  w.host.intercept.set('session.interrupt', () => 'handled');
+  const stopping = w.controller.interrupt();
+  await until(() => w.host.count('session.interrupt') === 3 && w.state().busy.interrupt === false, 'bounded attempts');
+  assert.ok(w.host.calls.filter(call => call.method === 'session.interrupt').every(call => call.params.turnId === turnId));
+  assert.equal(w.controller.rootBusy(), true);
+  w.host.emit('ses_a', 'ses_a', { type: 'session.ready' });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(w.state().busy.interrupt, false, 'unrelated events do not disable manual retry');
+  w.host.intercept.delete('session.interrupt');
+  await w.controller.interrupt();
+  await stopping;
+  assert.equal(w.host.count('session.interrupt'), 4);
+});
+
+test('Stop keeps a submitted identity after a user message and an empty-history reconnect', async t => {
+  const w = setup(t, {}, { requestTimeoutMs: 50 });
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  let id;
+  w.host.intercept.set('session.prompt', params => {
+    id = params.clientMessageId;
+    w.host.emit('ses_a', 'ses_a', { type: 'item', item: { kind: 'user_message', id: 'early-user', clientMessageId: id, text: 'early user message' } });
+    return 'handled'; // The prompt answer and accepted identity are still unknown.
+  });
+  await w.controller.sendPrompt('unknown');
+  assert.equal(w.state().prompts.length, 0, 'user message removed the pending UI entry');
+  w.host.intercept.set('session.attach', (_params, link, { answer }) => {
+    const root = w.host.root('ses_a');
+    root.live = true;
+    root.viewers.add(link);
+    link.attached.add('ses_a');
+    answer({ session: { ...root.summary, busy: false }, cursor: root.cursor, reset: true });
+    return 'handled';
+  });
+  w.host.drop();
+  await until(() => w.host.opens > 1 && attached(w.state) && w.state().tree.projection.historyUnavailable, 'empty-history replay');
+  assert.equal(w.controller.rootBusy(), true, 'unknown identity survives queue idle heuristics');
+  const stopping = w.controller.interrupt();
+  assert.equal(w.state().busy.interrupt, true);
+  assert.equal(w.host.count('session.interrupt'), 0);
+  w.host.startTurn('ses_a');
+  w.host.emit('ses_a', 'ses_a', { type: 'prompt.accepted', clientMessageId: id, result: 'turn', turnId: w.host.root('ses_a').running });
+  await stopping;
+  assert.equal(w.host.count('session.interrupt'), 1);
+});

@@ -444,3 +444,20 @@ test('attachment_unavailable from alpd itself re-uploads the file it names; a no
   assert.equal(world.store.begins.length, 3, 'nothing uploaded again');
   assert.deepEqual(prompts(world.host).at(-1).content.filter(part => part.type === 'attachment'), [{ type: 'attachment', attachmentId: 'att_1' }, { type: 'attachment', attachmentId: 'att_3' }]);
 });
+
+test('Stop during a local upload cancels the message before session.prompt can leave', async t => {
+  const world = hostWithStore();
+  const controller = await connected(t, world);
+  world.store.holdChunk = 1;
+  const { added } = await readFiles([], [file('blob.bin', BINARY)], LIMITS);
+  const sending = controller.sendPrompt('cancel upload', undefined, [], added);
+  await until(() => world.store.held, 'upload held');
+  await controller.interrupt();
+  world.store.held();
+  await sending;
+  await controller.abandonedUploads();
+  assert.equal(world.host.count('session.prompt'), 0);
+  assert.equal(world.host.count('session.interrupt'), 0);
+  assert.equal(controller.getState().prompts.length, 0);
+  assert.match(controller.getState().notice.text, /canceled before sending/);
+});
