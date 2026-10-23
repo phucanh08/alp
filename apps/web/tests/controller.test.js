@@ -1379,6 +1379,116 @@ for (const ending of ['reselect', 'failed-reselect', 'refused-access', 'disconne
   await sending;
 });
 
+test('retained Stop child membership survives deselection without contaminating the selected tree', async t => {
+  let recover = false, opens = 0, releasePrompt;
+  const gate = new Promise(resolve => { releasePrompt = resolve; });
+  t.after(() => releasePrompt());
+  let w;
+  w = setup(t, {}, { requestTimeoutMs: 50, open: async args => {
+    if (++opens > 1 && !recover) throw new Error('auxiliary unavailable');
+    return w.host.open(args);
+  } });
+  w.host.seed('ses_a'); w.host.seed('ses_b');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'original attached');
+  w.host.intercept.set('session.prompt', async () => { await gate; });
+  const sending = w.controller.sendPrompt('receipt [hold]');
+  await until(() => w.host.count('session.prompt') === 1, 'receipt gate');
+  const stopping = w.controller.interrupt();
+  w.controller.selectSession(null);
+  await until(() => opens >= 3, 'observer retry while deselected');
+  w.host.openChild('ses_a', 'child_a');
+  w.host.emit('ses_a', 'grandchild_a', { type: 'session.opened', session: { id: 'grandchild_a', parentId: 'child_a', agent: 'peer', status: 'running' } });
+  await new Promise(resolve => setImmediate(resolve));
+  w.controller.selectSession('ses_b');
+  await until(() => w.state().tree?.rootId === 'ses_b' && attached(w.state), 'unrelated root attached');
+  w.host.openChild('ses_b', 'child_b');
+  for (const id of ['ses_a', 'child_a', 'grandchild_a', 'unidentified_a']) {
+    w.host.emit('ses_a', id, { type: 'item', item: { kind: 'assistant_message', id: `item-${id}`, text: `background ${id}` } });
+    w.host.emit('ses_a', id, { type: 'session.closed' });
+  }
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(!w.state().tree.projection.entries.some(entry => ['ses_a', 'child_a', 'grandchild_a', 'unidentified_a'].includes(entry.sessionId)), 'retained root and its children never enter selected projection');
+  w.host.emit('ses_b', 'child_b', { type: 'item', item: { kind: 'assistant_message', id: 'selected-child', text: 'selected child' } });
+  await until(() => w.state().tree.projection.entries.some(entry => entry.sessionId === 'child_b'), 'selected child still projected');
+  assert.ok(!w.state().tree.projection.entries.some(entry => ['ses_a', 'child_a', 'grandchild_a', 'unidentified_a'].includes(entry.sessionId)), 'retained root and its children never enter selected projection');
+  assert.equal(w.state().tree.projection.closed.child_b, undefined, 'background lifecycle cannot close selected child');
+  recover = true;
+  releasePrompt();
+  await sending; await stopping;
+});
+
+test('two retained roots cannot hide a history-known selected child before its attach answer', async t => {
+  let recover = false, opens = 0, releasePrompt;
+  const gate = new Promise(resolve => { releasePrompt = resolve; });
+  t.after(() => releasePrompt());
+  let w;
+  w = setup(t, {}, { requestTimeoutMs: 50, open: async args => {
+    if (++opens > 1 && !recover) throw new Error('auxiliary unavailable');
+    return w.host.open(args);
+  } });
+  w.host.capabilities.push('session.history');
+  for (const root of ['ses_a', 'ses_b', 'ses_c']) w.host.seed(root);
+  w.host.openChild('ses_b', 'historical_b');
+  await connected(w);
+  w.host.intercept.set('session.prompt', async () => { await gate; });
+  const sending = [], stopping = [];
+  for (const root of ['ses_a', 'ses_c']) {
+    w.controller.selectSession(root);
+    await until(() => w.state().tree?.rootId === root && attached(w.state), 'receipt root attached');
+    sending.push(w.controller.sendPrompt('receipt [hold]'));
+    await until(() => w.host.count('session.prompt') === sending.length, 'receipt gate');
+    stopping.push(w.controller.interrupt());
+  }
+  w.host.intercept.set('session.attach', (params, link, { answer }) => {
+    if (params.sessionId !== 'ses_b') return;
+    const root = w.host.root('ses_b');
+    root.live = true; root.viewers.add(link); link.attached.add('ses_b');
+    for (const id of ['ses_a', 'ses_c']) w.host.emit(id, `unknown_${id}`, { type: 'item', item: { kind: 'assistant_message', id: `collision_${id}`, text: 'background cursor collision' } });
+    w.host.emit('ses_b', 'historical_b', { type: 'item', item: { kind: 'assistant_message', id: 'known-before-answer', text: 'selected history child' } });
+    answer({ session: { ...root.summary }, cursor: root.cursor });
+    return 'handled';
+  });
+  w.controller.selectSession('ses_b');
+  await until(() => w.state().tree?.rootId === 'ses_b' && attached(w.state), 'selected attached');
+  assert.ok(w.state().tree.projection.entries.some(entry => entry.item.id === 'known-before-answer'), 'history identifies selected child before attach answer');
+  assert.ok(!w.state().tree.projection.entries.some(entry => entry.item.id?.startsWith('collision_')), 'root-local cursors cannot mix retained timelines');
+  assert.equal(w.host.root('ses_a').viewers.size, 1);
+  assert.equal(w.host.root('ses_c').viewers.size, 1);
+  recover = true; releasePrompt();
+  await Promise.all(sending); await Promise.all(stopping);
+});
+
+for (const gap of ['release pending', 'attach timed out']) test(`unidentified background events fail closed after ${gap}`, async t => {
+  const w = setup(t, {}, { requestTimeoutMs: 50, releaseTimeoutMs: 50 });
+  w.host.seed('ses_a'); w.host.seed('ses_b');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'original attached');
+  if (gap === 'release pending') {
+    await w.controller.sendPrompt('running [hold]');
+    w.host.intercept.set('session.release', params => params.sessionId === 'ses_a' ? 'handled' : undefined);
+    const stopping = w.controller.interrupt();
+    w.controller.selectSession('ses_b');
+    await stopping;
+  } else {
+    w.host.intercept.set('session.attach', params => params.sessionId === 'ses_a' ? 'handled' : undefined);
+    w.controller.retryAttach();
+    await until(() => w.state().tree?.status === 'error', 'attach timed out while host keeps subscription');
+    w.controller.selectSession('ses_b');
+  }
+  await until(() => w.state().tree?.rootId === 'ses_b' && attached(w.state), 'other root attached');
+  w.host.emit('ses_a', 'unknown_old_child', { type: 'item', item: { kind: 'assistant_message', id: 'unknown-old', text: 'unattributed background' } });
+  w.host.emit('ses_b', 'unproven_parent_child', { type: 'session.opened', session: { id: 'unproven_parent_child', parentId: 'unknown_parent', agent: 'peer', status: 'running' } });
+  w.host.emit('ses_b', 'unproven_parent_child', { type: 'item', item: { kind: 'assistant_message', id: 'unproven-parent', text: 'no known root' } });
+  w.host.openChild('ses_b', 'selected_known_child');
+  w.host.emit('ses_b', 'selected_known_child', { type: 'item', item: { kind: 'assistant_message', id: 'selected-known', text: 'known child' } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(!w.state().tree.projection.entries.some(entry => ['unknown-old', 'unproven-parent'].includes(entry.item.id)), 'unknown identity is never guessed from selection');
+  assert.ok(w.state().tree.projection.entries.some(entry => entry.item.id === 'selected-known'), 'known selected child remains visible');
+});
+
 test('navigation waits for the Stop observer to own a pre-receipt root before releasing the selected viewer', async t => {
   let releaseObserver, releasePrompt;
   const observerGate = new Promise(resolve => { releaseObserver = resolve; });
