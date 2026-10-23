@@ -376,6 +376,8 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
     setTasks(current => current.filter(id => !keys.has(`task:${id}`)));
     setFiles(current => current.filter(id => !keys.has(`file:${id}`)));
     setPanels(current => current.filter(id => !keys.has(`panel:${id}`)));
+    // Closing the Terminal tab ends its shell on the host (terminal.close, #121 H).
+    if (keys.has('panel:terminal')) void controller.closeTerminal();
     if (keys.has(tabKey(DRAFT_TAB))) setDraft(false);
     setLaunchers(current => current.filter(id => !keys.has(`launcher:${id}`)));
     setPanes(current => ({ ...current, actives: Object.fromEntries(ids.flatMap(id => after[id] ? [[id, tabKey(after[id] as Tab)]] : [])) }));

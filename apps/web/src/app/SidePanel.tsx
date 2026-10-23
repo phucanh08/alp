@@ -12,8 +12,11 @@ import { TabChip } from './TabChip';
 
 const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset';
 
-/** What the dock's + offers, in Paseo's order for the dock, then ALP's panels. */
-const DOCK_LAUNCH: PanelKind[] = ['changes', 'terminal', 'diff', 'files', 'agents', 'tasks'];
+/**
+ * What the dock's + offers, in Paseo's order for the dock, then ALP's panels. Not Terminal: a
+ * terminal is a shell on the host owned by one center tab, which ends it when it closes (#121 H).
+ */
+const DOCK_LAUNCH: PanelKind[] = ['changes', 'diff', 'files', 'agents', 'tasks'];
 
 /*
  * The dock's tabs. The state lives above the dock (App) so hiding the dock keeps its tabs.
