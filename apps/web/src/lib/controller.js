@@ -1103,13 +1103,7 @@ export class Controller {
       // retry indefinitely; that must not prevent reads of another root on this healthy link.
       this.#attached = null;
       if (this.#watching === have.root) this.#watching = null;
-      const observer = this.#stops.get(have.root)?.observer;
-      if (observer && observer.state !== 'stopped') {
-        this.#stopLeases.set(have.root, have);
-        void observer.ready().catch(() => {}).then(() => this.#releaseStopLease(have.root, have));
-      } else {
-        await client.request('session.release', { sessionId: have.root }, { timeoutMs: this.#options.releaseTimeoutMs }).catch(() => {});
-      }
+      await this.#handoffViewer(have);
       return true;
     }
     if (!want || want === this.#creating || this.#attached?.root === want) return false;
@@ -1133,14 +1127,25 @@ export class Controller {
     } catch (error) {
       // A failed re-selection still needs its receipt fence until observer ownership is safe.
       if (retained && client === this.#run?.alp?.client) {
-        this.#stopLeases.set(want, retained);
-        const observer = this.#stops.get(want)?.observer;
-        if (observer && observer.state !== 'stopped') {
-          void observer.ready().catch(() => {}).then(() => this.#releaseStopLease(want, retained));
-        } else this.#releaseStopLease(want, retained);
+        await this.#handoffViewer(retained);
       }
       this.#attachFailed(client, want, error);
       return false;
+    }
+  }
+
+  /** Release a main viewer only after transferring any pending Stop receipt fence.
+   * @param {{ client: AlpRpcClient, root: string }} viewer
+   */
+  async #handoffViewer(viewer) {
+    const observer = this.#stops.get(viewer.root)?.observer;
+    if (observer && observer.state !== 'stopped') {
+      this.#stopLeases.set(viewer.root, viewer);
+      void observer.ready().catch(() => {}).then(() => this.#releaseStopLease(viewer.root, viewer));
+    } else {
+      // A failed re-selection may have restored a lease after its observer stopped.
+      this.#stopLeases.delete(viewer.root);
+      await viewer.client.request('session.release', { sessionId: viewer.root }, { timeoutMs: this.#options.releaseTimeoutMs }).catch(() => {});
     }
   }
 
@@ -1745,7 +1750,7 @@ export class Controller {
       if (previous && previous.client === client) {
         this.#attached = null;
         this.#watching = null;
-        await client.request('session.release', { sessionId: previous.root }, { timeoutMs: this.#options.releaseTimeoutMs }).catch(() => {});
+        await this.#handoffViewer(previous);
       }
       const tree = this.#ensureTree(id);
       const operation = { buffer: /** @type {any[]} */ ([]) };
