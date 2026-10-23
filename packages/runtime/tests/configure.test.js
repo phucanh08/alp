@@ -297,3 +297,24 @@ test('a Claude root restarts on its transcript and logs the model Claude Code re
   assert.equal(observed.model, 'claude-opus-5-5');
   assert.equal(observed.configured, 'claude-opus-5-5');
 });
+
+test('a root alpd says has no turn is resumed when the runtime holds turns, started anew only when it says it holds none, refused when it cannot say', async t => {
+  let answer = { data: [{ id: 'turn-x' }] };
+  const { runtime, runtimes, root } = await setup(t, (fake, method) => {
+    if (method !== 'thread/turns/list') return undefined;
+    if (answer instanceof Error) throw answer;
+    return answer;
+  });
+  await runtime.open('root', { cwd: root, persist: true, model: 'codex:gpt-5.6-sol' });
+  const before = runtime.snapshot('root');
+  await runtime.reconfigure('root', { model: 'gpt-6.1-sol' }, { fresh: true });
+  assert.deepEqual(runtimes[1].calls.filter(call => call.method.startsWith('thread/') && call.method !== 'thread/turns/list').map(call => [call.method, call.params.threadId]), [['thread/resume', before.threadId]]);
+  answer = new Error('thread t is not materialized yet; thread/turns/list is unavailable before first user message');
+  await runtime.reconfigure('root', { model: 'gpt-6-sol' }, { fresh: true });
+  assert.equal(runtimes[2].of('thread/start').length, 1, 'Codex holds none: a new conversation');
+  const current = runtime.snapshot('root');
+  answer = new Error('Runtime request timed out: thread/turns/list');
+  await refused(runtime.reconfigure('root', { model: 'gpt-6.1-sol' }, { fresh: true }), 'native_refused');
+  assert.equal(runtimes.length, 3, 'nothing restarted');
+  assert.deepEqual(runtime.snapshot('root'), current);
+});

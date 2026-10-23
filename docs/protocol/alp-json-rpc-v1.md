@@ -1246,8 +1246,10 @@ required (`-32602`), and:
 - Journaled as reload is (§12.7: `(sessionId, "configure", requestId)`, `duplicate: true` on a repeat,
   another payload `1004 key_conflict`, a recorded refusal answered again, refusals before `prepared`
   record nothing). A configure alpd stopped in the middle of is `1004 outcome_unknown` and never sent
-  again; at the next start alpd reconciles the session's record with what the runtime announced (the
-  fields the change changes, the mode included), so it runs with all of the new configuration or none.
+  again; at the next start, for the fields that change changed (the mode included) and only when the
+  session's snapshot (written from the runtime's `session.updated`) already shows them, alpd makes the
+  record's spec agree with that snapshot, so the root reopens with all of what the runtime ran or none,
+  and an old unknown entry never undoes a later change.
 
 `configured.status` is `applied` or `unchanged` (the configuration asked for is the one it runs);
 `effective` is the `EffectiveConfig` it runs with now (below); `restarted` whether its process restarted.

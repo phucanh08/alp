@@ -3503,19 +3503,28 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
   /**
    * Whether the root's native runtime holds a conversation for it (Codex: a turn of its thread; Claude: a
-   * transcript entry). A runtime that cannot say is taken to hold none only when it refuses the question
-   * (a Codex thread with no rollout); its answer is otherwise trusted over alpd's timeline.
+   * transcript entry). Codex's answer for a thread before its first message ("not materialized yet", "no
+   * rollout found") means none; any other failure to say is refused, never taken as none, so a held
+   * conversation is never left for an empty one.
    */
   async function nativeHistory(session: Session) {
     if (!session.threadId) return false;
     if (session.base) return true;
+    const unknown = (error: unknown) => new ConversationError('native_refused', `${label(session.runtimeKind)} could not say whether it holds this session's conversation: ${errorData(error).message}`);
     if (session.runtimeKind === 'codex') {
-      const page = await session.runtime.request('thread/turns/list', { threadId: session.threadId, limit: 1, sortDirection: 'desc' }).catch(() => undefined);
-      return Array.isArray(page?.data) && page.data.length > 0;
+      try {
+        const page = await session.runtime.request('thread/turns/list', { threadId: session.threadId, limit: 1, sortDirection: 'desc' });
+        return Array.isArray(page?.data) && page.data.length > 0;
+      } catch (error) {
+        if (/not materialized|no rollout found/i.test(errorData(error).message)) return false;
+        throw unknown(error);
+      }
     }
     if (session.runtimeKind === 'claude') {
-      const chain = await session.runtime.request('thread/chain', { threadId: session.threadId, cwd: session.mapping.workdir }).catch(() => undefined);
-      return Array.isArray(chain?.entries) && chain.entries.length > 0;
+      try {
+        const chain = await session.runtime.request('thread/chain', { threadId: session.threadId, cwd: session.mapping.workdir });
+        return Array.isArray(chain?.entries) && chain.entries.length > 0;
+      } catch (error) { throw unknown(error); }
     }
     return true;
   }

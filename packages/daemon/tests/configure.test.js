@@ -4,7 +4,7 @@
 // fake processes are real ALP code; packages/runtime tests prove the restart, test/e2e the real runs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
@@ -349,4 +349,56 @@ test('configure: Codex must say which model it continued with; without it nothin
   const session = (await d.request('session.get', { sessionId: 'c9' })).session;
   assert.equal(session.model, 'gpt-5.6-sol');
   assert.equal(threadCalls(world.transports.at(-1)).at(-1).params.model, 'gpt-5.6-sol', 'the old configuration restarted');
+});
+
+test('an unknown configure the runtime took is reconciled once into agreement, and never undoes a later configure at a later start', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'c10', ['one']);
+  // A: the runtime takes model and team, then alpd stops before its commit.
+  world.native.configure = async (sessionId, changes, options, reconfigure) => { await reconfigure(sessionId, changes, options); return new Promise(() => {}); };
+  const lost = d.request('session.configure', { sessionId: 'c10', model: 'gpt-6.1-sol', team: 'cafe', requestId: 'A', ifGeneration: await generationOf(d, 'c10') }).catch(error => error);
+  await until(async () => (await d.request('session.get', { sessionId: 'c10' })).session.model === 'gpt-6.1-sol', 'runtime took A');
+  await d.stop();
+  await lost;
+  world.native.configure = undefined;
+  const e = { ...await world.start(), ...world };
+  await e.request('session.create', { sessionId: 'c10', spec: { cwd: e.project }, resume: true });
+  // B, committed later: a lower mode and another effort.
+  const b = await e.request('session.configure', { sessionId: 'c10', thinking: 'high', mode: 'read-only', requestId: 'B', ifGeneration: await generationOf(e, 'c10') });
+  assert.deepEqual([b.session.mode, b.session.thinking, b.session.model, b.session.workflow.mode], ['read-only', 'high', 'gpt-6.1-sol', 'cafe']);
+  await e.request('session.close', { sessionId: 'c10' });
+  await e.stop();
+  // A is still unknown in the journal at this start; B's mode and effort must survive it.
+  const f = { ...await world.start(), ...world };
+  assert.ok((await journalOf(f.state)).some(entry => entry.requestId.endsWith('A') && entry.state === 'unknown'));
+  await f.request('session.create', { sessionId: 'c10', spec: { cwd: f.project }, resume: true });
+  const session = (await f.request('session.get', { sessionId: 'c10' })).session;
+  assert.deepEqual([session.mode, session.thinking, session.model, session.workflow.mode], ['read-only', 'high', 'gpt-6.1-sol', 'cafe']);
+  const resume = threadCalls(world.transports.at(-1)).at(-1).params;
+  assert.equal(resume.sandbox, 'read-only', 'never back to the wider mode A ran with');
+  assert.equal(resume.thinking, 'high');
+});
+
+test('when the runtime took a configure but the journal could not record it, the answer is outcome_unknown and the record runs with what the runtime runs', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'c11', ['one']);
+  const lifecycle = path.join(d.state, 'lifecycle');
+  world.native.configure = async (sessionId, changes, options, reconfigure) => {
+    const done = await reconfigure(sessionId, changes, options);
+    await chmod(lifecycle, 0o500);
+    return done;
+  };
+  try {
+    await assert.rejects(d.request('session.configure', { sessionId: 'c11', model: 'gpt-6.1-sol', team: 'cafe', requestId: 'J', ifGeneration: await generationOf(d, 'c11') }), rpcError(1004, 'outcome_unknown'));
+  } finally { await chmod(lifecycle, 0o700); world.native.configure = undefined; }
+  const live = (await d.request('session.get', { sessionId: 'c11' })).session;
+  assert.deepEqual([live.model, live.workflow.mode], ['gpt-6.1-sol', 'cafe']);
+  // A reopen before alpd restarts resumes with it (the team guard does not trip).
+  await d.request('session.close', { sessionId: 'c11' });
+  await d.request('session.create', { sessionId: 'c11', spec: { cwd: d.project }, resume: true });
+  const resume = threadCalls(world.transports.at(-1)).at(-1).params;
+  assert.equal(resume.model, 'gpt-6.1-sol');
+  assert.match(resume.developerInstructions, /Profile: cafe/);
 });
