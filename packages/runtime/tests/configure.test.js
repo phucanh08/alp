@@ -247,6 +247,59 @@ test('a team change resolves the new team\'s delegation and replaces the supervi
   assert.ok(of(supervisorBefore.id, 'session.closed').length >= 1);
 });
 
+test('after a team change, the next delegation follows the new team; an earlier assignment keeps its own', async t => {
+  const { runtime, runtimes, prompt, root, runLog } = await setup(t);
+  // A tool call's answer as the model reads it; each call has its own id (a repeated id answers from the cache).
+  let calls = 0;
+  const tool = async (fake, name, args) => {
+    const result = await fake.serverRequest('item/tool/call', { threadId: fake.lastThread(), turnId: fake.turnId, callId: `${name}-${++calls}`, namespace: null, tool: name, arguments: args });
+    return { success: result.success, ...JSON.parse(result.contentItems[0].text) };
+  };
+  await runtime.open('root', { cwd: root, persist: true, model: 'codex:gpt-5.6-sol', thinking: 'medium' });
+  await prompt('root', 'one');
+  // On Phở, main delegates to peer.
+  const first = await tool(runtimes[0], 'alp_delegate', { agent: 'peer', task: 'Work on Phở', mode: 'read-only', wait: false });
+  assert.ok(first.assignmentId, JSON.stringify(first));
+  await until(() => runtimes[1]?.of('turn/start').length);
+  const [phoStart] = runtimes[1].of('thread/start');
+  assert.match(phoStart.developerInstructions, /Profile: pho; fixed for this session/);
+  await tool(runtimes[1], 'alp_handoff', { outcome: 'complete', summary: 'Done on Phở' });
+  runtimes[1].finish();
+  await tool(runtimes[0], 'alp_wait', { assignments: [first.assignmentId] });
+  runtimes[0].finish();
+  await until(() => !runtime.snapshot('root').busy);
+
+  const result = await runtime.reconfigure('root', { team: 'cafe' });
+  assert.equal(result.session.workflow.mode, 'cafe');
+  const main = runtimes.find(fake => fake.of('thread/resume').some(call => call.threadId === result.session.threadId));
+  await prompt('root', 'two');
+  await until(() => main.of('turn/start').length);
+
+  // Cafe's main delegates to lead, not to peer.
+  const refusedPeer = await tool(main, 'alp_delegate', { agent: 'peer', task: 'Work on Cafe', mode: 'read-only', wait: false });
+  assert.equal(refusedPeer.assignmentId, undefined, JSON.stringify(refusedPeer));
+  assert.ok(refusedPeer.error, JSON.stringify(refusedPeer));
+  const before = runtimes.length;
+  const second = await tool(main, 'alp_delegate', { agent: 'lead', task: 'Lead on Cafe', mode: 'read-only', wait: false });
+  assert.ok(second.assignmentId, JSON.stringify(second));
+  await until(() => runtimes.length > before && runtimes.at(-1).of('turn/start').length);
+  const lead = runtimes.at(-1);
+  const [cafeStart] = lead.of('thread/start');
+  assert.match(cafeStart.developerInstructions, /Profile: cafe; fixed for this session/);
+  assert.match(cafeStart.developerInstructions, /assign bounded work to: peer, oracle, reviewer/);
+  assert.equal(runtime.snapshot(second.assignmentId).workflow.mode, 'cafe');
+  const started = (await runLog('root')).filter(entry => entry.event === 'assignment.started').map(entry => [entry.assignmentId, entry.agent]);
+  assert.deepEqual(started, [[first.assignmentId, 'peer'], [second.assignmentId, 'lead']]);
+  // The earlier assignment ran with Phở's instructions; nothing restarted it. Its record: packages/daemon/tests/configure.test.js.
+  assert.equal(runtimes[1].of('thread/start').length, 1);
+  assert.equal(runtimes[1].of('thread/resume').length, 0);
+  await tool(lead, 'alp_handoff', { outcome: 'complete', summary: 'Done on Cafe' });
+  lead.finish();
+  await tool(main, 'alp_wait', { assignments: [second.assignmentId] });
+  main.finish();
+  await until(() => !runtime.snapshot('root').busy);
+});
+
 test('a team change that would not keep the session\'s agent as main is refused', async t => {
   const { runtime, root } = await setup(t);
   await mkdir(path.join(root, '.alp/teams/solo'), { recursive: true });
