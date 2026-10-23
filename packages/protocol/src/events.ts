@@ -8,6 +8,8 @@ export type AlpError = { message: string; code?: string };
 export type TimelineItem =
   | {
     kind: 'user_message'; id: string; text: string; clientMessageId?: string; /** How many images the message carried; their data is not replayed. */ images?: number;
+    /** Files attached to the message (capability `attachments`, §12.6): ids, display names, types and sizes, never a host path. */
+    attachments?: Array<{ attachmentId: string; name: string; mimeType: string; size: number }>;
     /** Who wrote it: the user, or ALP itself (mail, a brief, a resume); absent when the runtime cannot tell. Only the user's words name a root (ALPD §15). */
     origin?: TurnOrigin;
   }
@@ -103,6 +105,11 @@ export type SessionSnapshot = {
   instructionsSha?: string;
   /** The session's runtime takes images in session.prompt (capability `prompt.images`); absent means it does not. */
   promptImages?: boolean;
+  /**
+   * How the session's runtime can use files attached in session.prompt (§12.6): `file.path` (its tools
+   * read a staged read-only copy), `document.native`, `text.extract`. Absent: it takes no attachment parts.
+   */
+  promptAttachments?: Array<'file.path' | 'document.native' | 'text.extract'>;
   /** The latest usage the session's runtime reported (ALPD §57); absent before its first report. */
   usage?: SessionUsage;
 };
