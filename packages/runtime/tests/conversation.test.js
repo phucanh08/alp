@@ -406,6 +406,39 @@ test('a lifecycle hold keeps mail from waking the root; rebind is not refused fo
   assert.equal(now.of('turn/start')[0].threadId, 'fork-1');
 });
 
+test('starting: a mail wake whose turn/start is in flight has no turn id yet but is starting; a hold taken then does not stop it', async t => {
+  let gate;
+  const { root, runtime, runtimes, prompt } = await setup(t, async (transport, method) => {
+    if (method === 'turn/start' && gate) await gate.promise;
+    return undefined;
+  });
+  assert.equal(runtime.starting('nobody'), false);
+  await runtime.open('root', { cwd: root, persist: true });
+  await prompt('root', 'one');
+  runtimes[0].finish();
+  await until(() => !runtime.snapshot('root').busy);
+  assert.equal(runtime.starting('root'), false, 'idle');
+  let open;
+  gate = { promise: new Promise(resolve => { open = resolve; }) };
+  let release;
+  // Opened however the checks end: a turn/start left waiting would keep the runtime from shutting down.
+  try {
+    runtime.message('root', 'A note that wakes the root');
+    await until(() => runtimes[0].of('turn/start').length === 2);
+    assert.equal(runtime.snapshot('root').activeTurnId, undefined, 'no turn id yet');
+    assert.equal(runtime.starting('root'), true, 'the wake is starting its turn');
+    // A lifecycle hold keeps later wakes back; it cannot call back one already sent.
+    release = runtime.hold('root');
+    assert.equal(runtime.starting('root'), true);
+  } finally { gate = undefined; open(); }
+  await until(() => runtime.snapshot('root').activeTurnId);
+  assert.equal(runtime.starting('root'), false, 'started: the turn has its id');
+  release();
+  runtimes[0].finish();
+  await until(() => !runtime.snapshot('root').busy);
+  assert.equal(runtime.starting('root'), false);
+});
+
 test('mail that arrives while a rebind resumes waits for it without stalling the process, held or not', async t => {
   let gate;
   const { root, runtime, runtimes, prompt } = await setup(t, async (transport, method, params) => {

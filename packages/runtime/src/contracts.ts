@@ -212,6 +212,13 @@ export type AlpRuntime = {
    */
   hold?(sessionId: string): (() => void) | undefined;
   /**
+   * Whether an open session may begin a turn it has no id for yet: its turn/start (a prompt or a mail
+   * wake) is on its way to the native runtime, or its native process is opening or restarting. Such a
+   * turn shows in `activeTurnId` only once the runtime answers, and a hold taken meanwhile does not
+   * stop it. False when the session is not open.
+   */
+  starting?(sessionId: string): boolean;
+  /**
    * What a live root would run with after a change of model, thinking, team or mode (§12.9), and whether
    * reconfigure would take it now; reads only. `teams` are the teams the host defines for its project.
    */

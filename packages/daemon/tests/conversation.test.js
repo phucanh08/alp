@@ -831,3 +831,104 @@ test('a turn that began during prepare anyway (a runtime whose hold keeps nothin
   assert.equal(world.native.branches.length, 2);
   assert.equal(world.native.rebinds.length, 1);
 });
+
+/** Makes the next turn/start of `transport` wait until the returned function is called. */
+function gateStart(transport) {
+  let open;
+  transport.hold = new Promise(resolve => { open = resolve; });
+  return () => { transport.hold = undefined; open(); };
+}
+
+test('a whole fork refuses while a mail wake of the source is starting its turn (turn/start sent, no turn id yet); the runtime reads nothing', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  const [first, second] = await conversation(d, 'fs', ['one', 'two']);
+  const transport = world.transports.at(-1);
+  const starts = transport.calls.filter(call => call.method === 'turn/start').length;
+  const open = gateStart(transport);
+  const fork = { sessionId: 'fs', requestId: 'fs1' };
+  // Opened however the checks end: a turn/start left waiting would keep the runtime from shutting down.
+  try {
+    await d.request('session.message', { sessionId: 'fs', text: 'mail before the fork' });
+    await until(() => transport.calls.filter(call => call.method === 'turn/start').length === starts + 1, 'the wake sent turn/start');
+    assert.equal(d.runtime.snapshot('fs').activeTurnId, undefined, 'no turn id yet');
+    await assert.rejects(d.request('session.fork', { ...fork, ifGeneration: await generationOf(d, 'fs') }), rpcError(1004, 'turn_in_progress'));
+    assert.equal(world.native.branches.length, 0, 'the runtime read nothing while the wake turn started');
+  } finally { open(); }
+  // The refusal recorded nothing: once the wake turn ends, the same request goes through and keeps it.
+  await until(() => d.runtime.snapshot('fs')?.activeTurnId, 'the wake turn started');
+  const wake = transport.turnId;
+  transport.finish('woken');
+  await until(async () => !(await d.request('session.get', { sessionId: 'fs' })).session.activeTurnId, 'the wake turn ended');
+  const forked = await d.request('session.fork', { ...fork, ifGeneration: await generationOf(d, 'fs') });
+  assert.equal(forked.duplicate, undefined);
+  assert.equal(forked.forkedFrom.boundary, 'whole');
+  assert.deepEqual(world.native.branches.map(request => request.turns), [[first, second, wake]]);
+});
+
+test('a wake still starting its turn when prepare ends (a runtime whose hold keeps nothing back) is refused busy before prepared: rewind, whole fork, reload', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  const transports = {};
+  const [, second] = await conversation(d, 'rp', ['one', 'two']);
+  transports.rp = world.transports.at(-1);
+  await conversation(d, 'fp', ['one', 'two']);
+  transports.fp = world.transports.at(-1);
+  await conversation(d, 'lp', ['one']);
+  transports.lp = world.transports.at(-1);
+  d.runtime.hold = () => undefined;
+  // The nth read of a root during prepare answers the store as it began; before it resolves, mail wakes
+  // the root and the wake's turn/start is sent, but not answered, so it has no turn id yet.
+  const timeline = d.store.timeline.bind(d.store);
+  const opens = new Map();
+  const counts = new Map();
+  const wakeAt = { rp: 1, fp: 2, lp: 1 };
+  d.store.timeline = async sessionId => {
+    const read = await timeline(sessionId);
+    counts.set(sessionId, (counts.get(sessionId) ?? 0) + 1);
+    if (!(sessionId in wakeAt) || opens.has(sessionId) || counts.get(sessionId) < wakeAt[sessionId]) return read;
+    const transport = transports[sessionId];
+    const starts = transport.calls.filter(call => call.method === 'turn/start').length;
+    opens.set(sessionId, gateStart(transport));
+    await d.request('session.message', { sessionId, text: `mail during ${sessionId}` });
+    await until(() => transport.calls.filter(call => call.method === 'turn/start').length === starts + 1, `the wake of ${sessionId} sent turn/start`);
+    return read;
+  };
+  const cases = [
+    { root: 'rp', method: 'session.rewind', params: { sessionId: 'rp', requestId: 'rp1', beforeTurnId: second } },
+    { root: 'fp', method: 'session.fork', params: { sessionId: 'fp', requestId: 'fp1' } },
+    { root: 'lp', method: 'session.reload', params: { sessionId: 'lp', requestId: 'lp1' } },
+  ];
+  // One root at a time: the runtime runs its operations, a wake's turn/start among them, one after another.
+  // While a wake waits, a reload that got past prepare answers at once: the runtime's own would queue
+  // behind the waiting turn/start. Opened however the checks end: a turn/start left waiting would keep the
+  // runtime from shutting down.
+  world.native.reload = async () => { throw new Error('the reload reached the runtime while a wake started its turn'); };
+  try {
+    for (const { root, method, params } of cases) {
+      try {
+        await assert.rejects(d.request(method, { ...params, ifGeneration: await generationOf(d, root) }), rpcError(1004, 'session_busy'), method);
+        assert.ok(opens.has(root), `the mail went out during the ${method} prepare`);
+        assert.equal(d.runtime.snapshot(root).activeTurnId, undefined, `the wake of ${root} has no turn id when refused`);
+      } finally { opens.get(root)?.(); }
+      await until(() => d.runtime.snapshot(root)?.activeTurnId, `the wake turn of ${root} started`);
+      transports[root].finish('woken');
+      await until(async () => !(await d.request('session.get', { sessionId: root })).session.activeTurnId, `the wake turn of ${root} ended`);
+    }
+    assert.equal(world.native.branches.length, 0, 'the runtime cut nothing');
+    assert.equal(world.native.reloads.length, 0, 'nothing restarted');
+  } finally {
+    d.store.timeline = timeline;
+    world.native.reload = undefined;
+    for (const open of opens.values()) open();
+  }
+  // The refusals recorded nothing: the same requests go through now.
+  const answers = [];
+  for (const { root, method, params } of cases) answers.push(await d.request(method, { ...params, ifGeneration: await generationOf(d, root) }));
+  assert.equal(answers[0].duplicate, undefined);
+  assert.equal(answers[1].forkedFrom.boundary, 'whole');
+  assert.equal(answers[2].duplicate, undefined);
+  assert.equal(world.native.branches.length, 2);
+  assert.equal(world.native.rebinds.length, 1);
+  assert.equal(world.native.reloads.length, 1);
+});
