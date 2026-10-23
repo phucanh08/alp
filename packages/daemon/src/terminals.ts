@@ -348,11 +348,11 @@ export function createTerminalService(options: TerminalServiceOptions) {
   function reap(terminal: Terminal) {
     terminal.reaped ??= (async () => {
       signal(await tree(terminal), 'SIGHUP');
-      await new Promise(resolve => setTimeout(resolve, killGraceMs).unref?.());
+      await new Promise(resolve => setTimeout(resolve, killGraceMs));
       const left = await tree(terminal);
       signal(left, 'SIGKILL');
       if (left.length) {
-        await new Promise(resolve => setTimeout(resolve, 100).unref?.());
+        await new Promise(resolve => setTimeout(resolve, 100));
         signal(await tree(terminal), 'SIGKILL');
       }
     })().catch(error => log.warn('could not end every process of a terminal', { code: 'ALPD_TERMINAL_REAP_FAILED', terminalId: terminal.id, error }));
