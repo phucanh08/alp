@@ -661,3 +661,125 @@ test('attachments through the gateway on a real alpd: upload, commit, get; the C
   const finish = await bob.request('attachment.commit', { uploadId: pending.uploadId, sha256 }).catch(error => error);
   assert.equal(finish.code, 1001);
 });
+
+test('terminals through the gateway on a real alpd with a real PTY: host switch, terminal.exec, scope, reconnect, revocation and cleanup', { skip: !['darwin', 'linux'].includes(process.platform) && 'terminals are served on macOS and Linux only', timeout: 90_000 }, async t => {
+  // A predictable shell for alpd (it picks $SHELL when /etc/shells lists it, else /bin/sh).
+  const saved = { SHELL: process.env.SHELL, PS1: process.env.PS1, ENV: process.env.ENV };
+  Object.assign(process.env, { SHELL: '/bin/sh', PS1: 'PROMPT$ ', ENV: '' });
+  t.after(() => { for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  const w = await world(t);
+  const { execFileSync } = await import('node:child_process');
+  const { chmod } = await import('node:fs/promises');
+  const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const sleepers = pattern => execFileSync('ps', ['-A', '-o', 'pid=,command='], { encoding: 'utf8' }).split('\n').filter(line => pattern.test(line)).map(line => Number(line.trim().split(/\s+/)[0]));
+  const exec = await createCredential(w.gatewayHome, { label: 'exec', workspaces: [w.projects.a], permissions: ['terminal.exec'] });
+  const bobExec = await createCredential(w.gatewayHome, { label: 'bob-exec', workspaces: [w.projects.b], permissions: ['terminal.exec'] });
+  await sleep(150);
+  // The registry workspace of a, registered by the owner.
+  const owner = new AlpRpcClient(await connectSocket(w.socket));
+  t.after(() => owner.close());
+  await hello(owner);
+  const listed = await owner.request('workspace.list', {});
+  const { realpath } = await import('node:fs/promises');
+  const canonical = await realpath(w.projects.a);
+  let workspace = listed.workspaces.find(entry => entry.directory === canonical || entry.directory === w.projects.a);
+  if (!workspace) {
+    await owner.request('project.register', { directory: w.projects.a, ifRevision: listed.revision, requestId: 'terminal-a' });
+    workspace = (await owner.request('workspace.list', {})).workspaces.find(entry => entry.directory === canonical || entry.directory === w.projects.a);
+  }
+  const create = { workspaceId: workspace.id, cols: 80, rows: 24 };
+  const connect = async token => {
+    const client = new AlpRpcClient(await w.open(token));
+    t.after(() => client.close());
+    const events = [];
+    client.onNotification((method, params) => { if (method === 'terminal.event') events.push(params); });
+    const greeting = await hello(client);
+    return { client, events, greeting, text: id => events.filter(event => event.terminalId === id && event.type === 'output').map(event => event.data).join('') };
+  };
+
+  // Off by default: no capability, a refusal, no shell.
+  const before = await connect(exec.token);
+  assert.ok(!before.greeting.capabilities.includes('terminal'));
+  const off = await before.client.request('terminal.create', { ...create, requestId: 'off' }).catch(error => error);
+  assert.deepEqual([off.code, off.data?.reason], [1005, 'terminal_disabled']);
+  // The host owner opts in.
+  await writeFile(path.join(w.home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
+  await chmod(path.join(w.home, 'terminal.json'), 0o600);
+  const term = await connect(exec.token);
+  assert.ok(term.greeting.capabilities.includes('terminal'));
+  assert.equal(term.greeting.terminalLimits.maxPerPrincipal, 4);
+  // Without terminal.exec, and outside the grant: refused before alpd.
+  const alice = await connect(w.tokens.alice);
+  const noExec = await alice.client.request('terminal.create', { ...create, requestId: 'a' }).catch(error => error);
+  assert.deepEqual([noExec.code, noExec.data?.reason, noExec.data?.permission], [1003, 'grant', 'terminal.exec']);
+  const bob = await connect(bobExec.token);
+  const outside = await bob.client.request('terminal.create', { ...create, requestId: 'b' }).catch(error => error);
+  assert.deepEqual([outside.code, outside.data?.reason], [1003, 'outside_workspace']);
+
+  // A real shell: prompt, interactive read, Ctrl-C, resize.
+  const { terminal } = await term.client.request('terminal.create', { ...create, requestId: 't1' });
+  const id = terminal.terminalId;
+  assert.ok(!JSON.stringify(terminal).includes(w.projects.a), 'no host path');
+  await term.client.request('terminal.attach', { terminalId: id });
+  await until(() => /PROMPT\$ $/.test(term.text(id)), 'the prompt');
+  const type = (client, data) => client.request('terminal.input', { terminalId: id, data });
+  await type(term.client, 'printf "name? "; read N; echo "hi [$N]"\r');
+  await until(() => term.text(id).includes('name? '), 'the question');
+  await type(term.client, 'alp\r');
+  await until(() => term.text(id).includes('hi [alp]'), 'the answer');
+  await type(term.client, 'sleep 30 && echo NOT-$((1))\r');
+  await sleep(300);
+  await type(term.client, '\u0003');
+  await type(term.client, 'echo after-$((40+2))\r');
+  await until(() => term.text(id).includes('after-42'), 'the shell after Ctrl-C');
+  assert.ok(!term.text(id).includes('NOT-1'));
+  assert.deepEqual(await term.client.request('terminal.resize', { terminalId: id, cols: 100, rows: 30 }), { cols: 100, rows: 30 });
+  await type(term.client, 'stty size\r');
+  await until(() => term.text(id).includes('30 100'), 'stty size');
+  // Another principal cannot see or touch it.
+  const foreign = await bob.client.request('terminal.attach', { terminalId: id }).catch(error => error);
+  assert.equal(foreign.code, 1001);
+  assert.deepEqual((await bob.client.request('terminal.list', {})).terminals, []);
+  assert.ok(!bob.events.length, 'no event of another credential\'s terminal');
+
+  // Disconnect and reconnect: the terminal kept running; the output after the last seq only.
+  const last = Math.max(...term.events.map(event => event.seq ?? 0));
+  await type(term.client, 'sleep 1 ; echo while-away-$((5*5))\r');
+  term.client.close();
+  await sleep(1500);
+  const back = await connect(exec.token);
+  const resumed = await back.client.request('terminal.attach', { terminalId: id, after: last });
+  assert.equal(resumed.terminal.state, 'running');
+  await until(() => back.text(id).includes('while-away-25'), 'output produced while away');
+  assert.ok(!back.text(id).includes('hi [alp]'), 'nothing before the last seq');
+  await back.client.request('terminal.input', { terminalId: id, data: 'sleep 1000 & echo job-$((2+2))\r' });
+  await until(() => back.text(id).includes('job-4'), 'the background job');
+  await sleep(200);
+  const jobs = sleepers(/ sleep 1000$/);
+  assert.equal(jobs.length, 1);
+
+  // Revocation: the connection closes and the shell and its job die.
+  const closed = new Promise(resolve => back.client.onClose(resolve));
+  await revokeCredential(w.gatewayHome, exec.credential.id);
+  await closed;
+  await until(() => jobs.every(pid => !alive(pid)), 'the revoked terminal\'s processes gone');
+  // Nothing of that credential is left running: the gateway's revoke already ended and forgot it.
+  assert.deepEqual(await owner.request('terminal.revoke', { principalId: exec.credential.id }), { closed: 0 });
+
+  // alpd's shutdown ends the rest.
+  const other = await createCredential(w.gatewayHome, { label: 'exec-2', workspaces: [w.projects.a], permissions: ['terminal.exec'] });
+  await sleep(150);
+  const second = await connect(other.token);
+  const { terminal: t2 } = await second.client.request('terminal.create', { ...create, requestId: 't2' });
+  await second.client.request('terminal.attach', { terminalId: t2.terminalId });
+  await second.client.request('terminal.input', { terminalId: t2.terminalId, data: 'sleep 1001 & echo started\r' });
+  await until(() => second.text(t2.terminalId).includes('started'), 'the second job');
+  await sleep(200);
+  const more = sleepers(/ sleep 1001$/);
+  assert.equal(more.length, 1);
+  await w.stopDaemon();
+  await until(() => more.every(pid => !alive(pid)), 'nothing survives alpd');
+  const log = await readFile(path.join(path.dirname(w.home), 'alpd.log'), 'utf8');
+  for (const code of ['ALPD_TERMINAL_CREATED', 'ALPD_TERMINAL_ATTACHED', 'ALPD_TERMINAL_ENDED']) assert.ok(log.includes(code), code);
+  assert.ok(!log.includes('hi [') && !log.includes('read N'), 'no keystroke or output in alpd\'s log');
+});
