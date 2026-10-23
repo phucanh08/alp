@@ -1,5 +1,5 @@
 // @ts-check
-import { attachments as attachmentApi, createReconnectingClient, hello, isAlpClientError } from '@anhlp/alp-client/portable';
+import { attachments as attachmentApi, createReconnectingClient, hello, isAlpClientError, sha256Hex } from '@anhlp/alp-client/portable';
 import { AuthenticationError, ConfigurationError, CreateOutcomeUnknownError, FILE_MESSAGES, FileAccessError, describe, describeFileError, endsRoot } from './errors.js';
 import { cleanListing, relativeFilePath } from './file-tree.js';
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
@@ -7,7 +7,7 @@ import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
 import { newConversationRequestId, newMessageId, newRequestId, newSessionId } from './ids.js';
 import { RELOAD_MESSAGES, agentControlsGate, conversationGate, describeConversationError, describeReloadError } from './conversation.js';
 import { GIT_ERROR_MESSAGES, GitAccessError, describeGitError, gitAccess, gitCompare, gitRequestPath } from './git.js';
-import { NO_FILES, fileLimits, fileRefusal, fitFiles, fitImages, imageLimits, messageContent, uploadRequestId } from './attachments.js';
+import { NO_FILES, abortUpload, fileLimits, fileRefusal, fitFiles, fitImages, imageLimits, messageContent, uploadRequestId } from './attachments.js';
 import { applyAttach, historyEnvelope, prependHistory, deliveredPrompts, emptyProjection, members, project, promptTurnOver } from './timeline.js';
 import { effortLabel, normalizeModels, parsePreview } from './new-session.js';
 import { CONFIGURE_LIVE, CONFIGURE_MESSAGES, NEW_SESSION_REFUSALS, configuredNotice, configuredSummary, describeConfigureError, liveConfigureGate } from './configure.js';
@@ -60,8 +60,11 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  *   asked for a new id (outcome_unknown).
  *   files (#121 J) are uploaded under `uploadKey` (the first clientMessageId, kept when the message
  *   is sent again under a new one) before session.prompt; each keeps its attachmentId once
- *   committed, so nothing is uploaded twice for the same message. resumeUpload counts the times an
- *   upload a dropped connection interrupted is continued by itself once the connection is back.
+ *   committed, so nothing is uploaded twice for the same message (unless the host lost the object:
+ *   a prompt refused not_found or attachment_unavailable uploads it afresh on Retry). resumeUpload
+ *   counts the times an upload a dropped connection interrupted is continued by itself once the
+ *   connection is back. A discarded message's uploads that were begun and not committed are
+ *   aborted, best effort.
  * @typedef {{ reason: 'finished' | 'error', at: number, turnId?: string, message?: string, hostAt?: string }} TurnAttention
  *   Paseo's requiresAttention with its reason, for a root whose turn ended while the user did not
  *   see it: completed is finished, failed is error. Cleared when the user opens or focuses it,
@@ -228,6 +231,14 @@ export function initialState(gateway = '') {
  */
 
 /** A file of a message could not be uploaded (#121 J): which, and the failure. */
+/** A message was discarded while its files were uploading: its upload stops, nothing is sent. */
+class DiscardedError extends Error {
+  constructor() {
+    super('The message was discarded.');
+    this.name = 'DiscardedError';
+  }
+}
+
 class UploadError extends Error {
   /** @param {string} fileName @param {Failure} failure @param {boolean} dropped the connection went away under it */
   constructor(fileName, failure, dropped) {
@@ -2065,9 +2076,26 @@ export class Controller {
    * message's session; each upload's requestId is the message's and the file's (uploadRequestId),
    * so a repeat continues what the host holds and a committed file answers its attachment. The
    * message's entry shows each file's progress. Answers the files with their attachment ids.
+   * Stops once the message is discarded (no further file is begun; a running one stops after its
+   * chunk), throwing DiscardedError.
    * @param {AlpRpcClient} client @param {PendingPrompt} prompt
    */
-  async #upload(client, prompt) {
+  #upload(client, prompt) {
+    const running = this.#uploadFiles(client, prompt);
+    this.#uploading.set(prompt.id, running);
+    const settled = () => { if (this.#uploading.get(prompt.id) === running) this.#uploading.delete(prompt.id); };
+    running.then(settled, settled);
+    return running;
+  }
+
+  /** The upload of each message whose files are being uploaded now, by its id. @type {Map<string, Promise<unknown>>} */
+  #uploading = new Map();
+
+  /** Whether a message is still pending (not discarded nor done). @param {string} id */
+  #pending(id) { return this.#state.prompts.some(entry => entry.id === id); }
+
+  /** @param {AlpRpcClient} client @param {PendingPrompt} prompt */
+  async #uploadFiles(client, prompt) {
     const files = prompt.files ?? [];
     const key = prompt.uploadKey ?? prompt.id;
     const limits = this.#state.connection.attachmentLimits ?? NO_FILES;
@@ -2077,17 +2105,23 @@ export class Controller {
     const done = [...files];
     for (const [slot, file] of files.entries()) {
       if (file.attachmentId) continue;
-      mark(slot, { error: undefined, received: file.received ?? 0 });
+      if (!this.#pending(prompt.id)) throw new DiscardedError();
+      mark(slot, { error: undefined, received: file.received ?? 0, started: true });
       try {
         const attachment = await api.upload({
           sessionId: prompt.rootId, name: file.name, mimeType: file.mimeType, data: file.data,
-          requestId: uploadRequestId(key, slot), maxChunkBytes: limits.maxChunkBytes,
-          onProgress: received => mark(slot, { received }),
+          requestId: uploadRequestId(key, slot, file.attempt), maxChunkBytes: limits.maxChunkBytes,
+          onProgress: received => {
+            // Thrown out of the SDK's chunk loop: a discarded message's upload goes no further.
+            if (!this.#pending(prompt.id)) throw new DiscardedError();
+            mark(slot, { received });
+          },
         });
         if (typeof attachment?.attachmentId !== 'string') throw new Error(`The host did not answer an attachment for ${file.name}.`);
         done[slot] = { ...file, attachmentId: attachment.attachmentId, received: file.size, error: undefined };
         mark(slot, { attachmentId: attachment.attachmentId, received: file.size, error: undefined });
       } catch (error) {
+        if (error instanceof DiscardedError || !this.#pending(prompt.id)) throw new DiscardedError();
         const failure = describe(error);
         mark(slot, { error: failure.message });
         throw new UploadError(file.name, failure, isAlpClientError(error) && ['closed', 'disconnected', 'send_failed'].includes(error.reason));
@@ -2304,6 +2338,8 @@ export class Controller {
         const refused = this.#filesRefusal(prompt.rootId, files);
         if (refused) throw new ConfigurationError(refused);
         files = await this.#upload(client, prompt);
+        // Discarded while its files were uploading: it is not sent.
+        if (!this.#pending(prompt.id)) return;
       }
       const result = await client.request('session.prompt', { sessionId: prompt.rootId, clientMessageId: prompt.id, delivery: prompt.delivery, content: messageContent(prompt.text, prompt.images, files) }, { timeoutMs: this.#options.requestTimeoutMs });
       if (result?.outcome === 'failed') {
@@ -2318,6 +2354,7 @@ export class Controller {
     } catch (error) {
       // The timeline may already show it (the answer was lost, the message was not): then it is done.
       if (this.#isDelivered(prompt)) return this.#dropPrompt(prompt.id);
+      if (error instanceof DiscardedError) return;
       if (error instanceof UploadError) {
         // Nothing reached the agent: the same message may go again. A dropped connection continues
         // the upload by itself once it is back; a refusal waits for the user, with its reason.
@@ -2327,12 +2364,41 @@ export class Controller {
         return;
       }
       const failure = describe(error);
+      if (prompt.files?.length && (failure.reason === 'attachment_unavailable' || failure.code === 1001)) await this.#forgetLost(prompt, error);
       if (failure.sent === 'no') update({ status: 'failed', error: failure.message, retrySameId: true });
       else if (failure.sent === 'yes' && failure.reason !== 'outcome_unknown') update({ status: 'failed', error: failure.message, retrySameId: false });
       else update({ status: 'unknown', error: failure.message, retrySameId: failure.reason !== 'outcome_unknown' });
     } finally {
       this.#requesting.delete(prompt.id);
     }
+  }
+
+  /**
+   * After session.prompt was refused because the host no longer has (not_found) or cannot read
+   * (attachment_unavailable) a committed file of `prompt`: those files lose their attachment id and
+   * get a new attempt (a requestId of their own), so Retry uploads them afresh. attachment_unavailable
+   * names the file (data.attachmentId) or, without it, means all of them; for not_found, attachment.get
+   * tells which are gone (a not_found about something else leaves them as they are).
+   * @param {PendingPrompt} prompt @param {unknown} error
+   */
+  async #forgetLost(prompt, error) {
+    const data = /** @type {any} */ (error)?.data;
+    // As the entry is now: the upload put the attachment ids there.
+    const current = this.#state.prompts.find(entry => entry.id === prompt.id);
+    const committed = (current?.files ?? []).filter(file => typeof file.attachmentId === 'string');
+    /** @type {Set<string>} */
+    let lost;
+    if (data?.reason === 'attachment_unavailable') {
+      const named = committed.filter(file => file.attachmentId === data?.attachmentId);
+      lost = new Set((named.length ? named : committed).map(file => /** @type {string} */ (file.attachmentId)));
+    } else {
+      let api;
+      try { api = attachmentApi(this.#client()); } catch { return; }
+      const gone = await Promise.all(committed.map(file => api.get(/** @type {string} */ (file.attachmentId)).then(() => false, caught => describe(caught).code === 1001)));
+      lost = new Set(committed.filter((_file, index) => gone[index]).map(file => /** @type {string} */ (file.attachmentId)));
+    }
+    if (!lost.size) return;
+    this.#set(state => ({ prompts: state.prompts.map(entry => entry.id === prompt.id && entry.files ? { ...entry, files: entry.files.map(file => file.attachmentId && lost.has(file.attachmentId) ? { ...file, attachmentId: undefined, received: 0, started: false, attempt: (file.attempt ?? 0) + 1 } : file) } : entry) }));
   }
 
   /** Messages of ours whose delivery (wake, then session.prompt) has started and not been answered. @type {Set<string>} */
@@ -2380,12 +2446,38 @@ export class Controller {
     this.#taken.delete(id);
   }
 
-  /** Drops a message the user gave up on; the queue no longer waits for its turn. @param {string} id */
+  /**
+   * Drops a message the user gave up on; the queue no longer waits for its turn. Its uploads that
+   * were begun and not committed are aborted once its running upload stopped (best effort), so
+   * they do not hold the host's active-upload slots until they expire; committed objects stay.
+   * @param {string} id
+   */
   discardPrompt(id) {
     const prompt = this.#state.prompts.find(entry => entry.id === id);
     if (prompt) this.#forget(prompt.rootId, id);
     this.#dropPrompt(id);
+    if (prompt) this.#abandonUploads(prompt);
   }
+
+  /** @param {PendingPrompt} prompt as it was when discarded */
+  #abandonUploads(prompt) {
+    const begun = (prompt.files ?? []).map((file, slot) => ({ file, slot })).filter(({ file }) => file.started && !file.attachmentId);
+    if (!begun.length) return;
+    const key = prompt.uploadKey ?? prompt.id;
+    const running = this.#uploading.get(prompt.id) ?? Promise.resolve();
+    this.#abandoning = this.#abandoning.then(() => running.catch(() => {})).then(async () => {
+      let client;
+      try { client = this.#client(); } catch { return; }
+      const api = attachmentApi(client);
+      for (const { file, slot } of begun) await abortUpload(api, { sessionId: prompt.rootId, file, requestId: uploadRequestId(key, slot, file.attempt), digest: sha256Hex });
+    });
+  }
+
+  /** The aborts of discarded messages' uploads, one after another (tests wait on it). @type {Promise<void>} */
+  #abandoning = Promise.resolve();
+
+  /** Settles once the uploads of messages discarded so far were aborted (or could not be). */
+  abandonedUploads() { return this.#abandoning; }
 
   /**
    * Messages of ours whose turn is not known to be over, per root, with the tree's reset count

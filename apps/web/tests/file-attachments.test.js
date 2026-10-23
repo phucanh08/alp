@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { Controller } from '../src/lib/controller.js';
-import { NO_FILES, fileLimits, fileName, fileRefusal, fileSize, fileType, fitFiles, messageContent, messageFiles, readFiles, uploadRequestId } from '../src/lib/attachments.js';
+import { NO_FILES, abortUpload, fileLimits, fileName, fileRefusal, fileSize, fileType, fitFiles, messageContent, messageFiles, readFiles, uploadRequestId } from '../src/lib/attachments.js';
 import { describe as describeError } from '../src/lib/errors.js';
 import { FakeHost, until } from './support/fake-host.js';
 
@@ -95,7 +95,7 @@ function hostWithStore({ promptAttachments = ['file.path'], permissions = ['sess
   const host = new FakeHost({ principal: { id: 'p1', label: 'tests', permissions, workspaces: ['/w/a'], workspaceRoots: [{ path: '/w/a', canonical: '/w/a' }] } });
   if (capable) host.capabilities.push('attachments');
   host.intercept.set('daemon.hello', (_params, _connection, { answer }) => { answer({ protocolVersion: 1, capabilities: host.capabilities, ...(capable ? { attachmentLimits: { ...LIMITS, maxActiveUploads: 2 } } : {}) }); return 'handled'; });
-  const store = { uploads: new Map(), objects: new Map(), begins: [], dropOnChunk: 0, chunks: 0 };
+  const store = { uploads: new Map(), objects: new Map(), begins: [], aborts: [], dropOnChunk: 0, failOnChunk: 0, holdChunk: 0, held: undefined, chunks: 0 };
   host.intercept.set('attachment.begin', (params, _connection, { answer, fail }) => {
     store.begins.push(params);
     if (!host.roots.has(params.sessionId)) { fail(1001, 'No such upload or attachment for this credential', { reason: 'not_found' }); return 'handled'; }
@@ -109,10 +109,13 @@ function hostWithStore({ promptAttachments = ['file.path'], permissions = ['sess
     const data = Buffer.from(params.data, 'base64');
     assert.ok(data.length <= LIMITS.maxChunkBytes, 'chunks keep to the hello limit');
     if (params.offset > upload.bytes.length) { fail(1004, 'offset', { reason: 'offset_mismatch', received: upload.bytes.length }); return 'handled'; }
+    if (store.failOnChunk && store.chunks + 1 === store.failOnChunk) { store.chunks += 1; fail(1005, 'The attachment store of the daemon host cannot be used now', { reason: 'attachment_unavailable' }); return 'handled'; }
     upload.bytes = Buffer.concat([upload.bytes.subarray(0, params.offset), data]);
     store.chunks += 1;
     // The chunk is kept, but the connection drops before the answer leaves.
     if (store.dropOnChunk && store.chunks === store.dropOnChunk) { host.drop(); return 'handled'; }
+    // The answer waits until the test lets it go.
+    if (store.holdChunk && store.chunks === store.holdChunk) { store.held = () => answer({ received: upload.bytes.length, size: upload.params.size }); return 'handled'; }
     answer({ received: upload.bytes.length, size: upload.params.size });
     return 'handled';
   });
@@ -125,7 +128,21 @@ function hostWithStore({ promptAttachments = ['file.path'], permissions = ['sess
     answer({ attachment });
     return 'handled';
   });
-  host.intercept.set('attachment.get', (params, _connection, { answer }) => { const { bytes: _bytes, ...attachment } = store.objects.get(params.attachmentId); answer({ attachment }); return 'handled'; });
+  host.intercept.set('attachment.get', (params, _connection, { answer, fail }) => {
+    const stored = store.objects.get(params.attachmentId);
+    if (!stored) { fail(1001, 'No such upload or attachment for this credential', { reason: 'not_found' }); return 'handled'; }
+    const { bytes: _bytes, ...attachment } = stored;
+    answer({ attachment });
+    return 'handled';
+  });
+  host.intercept.set('attachment.abort', (params, _connection, { answer, fail }) => {
+    store.aborts.push(params.uploadId);
+    const [requestId, upload] = [...store.uploads.entries()].find(([, entry]) => entry.uploadId === params.uploadId) ?? [];
+    if (!upload || upload.attachmentId) { fail(1001, 'No such upload or attachment for this credential', { reason: 'not_found' }); return 'handled'; }
+    store.uploads.delete(requestId);
+    answer({ aborted: true });
+    return 'handled';
+  });
   return { host, store, promptAttachments };
 }
 
@@ -271,4 +288,140 @@ test('a new session whose runtime cannot read files keeps the first message fail
   assert.match(kept.error, /cannot read attached files/);
   assert.equal(world.store.begins.length, 0);
   assert.equal(world.host.count('session.prompt'), 0);
+});
+
+test('readFiles skips a file the browser cannot read, with its reason, and reads the rest', async () => {
+  const unreadable = { name: 'gone.txt', type: 'text/plain', size: 2, arrayBuffer: () => Promise.reject(new DOMException('The file was removed', 'NotReadableError')) };
+  const read = await readFiles([], [file('a.bin', [1, 2]), unreadable, file('b.bin', [3])], LIMITS);
+  assert.deepEqual(read.added.map(entry => entry.name), ['a.bin', 'b.bin']);
+  assert.equal(read.error, 'Could not read gone.txt.');
+});
+
+test('uploadRequestId changes only with a fresh attempt', () => {
+  assert.equal(uploadRequestId('web-msg-1', 0, 0), 'web-msg-1:file-0');
+  assert.equal(uploadRequestId('web-msg-1', 0, 1), 'web-msg-1:file-0.1');
+  assert.notEqual(uploadRequestId('web-msg-1', 0, 1), uploadRequestId('web-msg-1', 0));
+});
+
+test('abortUpload aborts an upload in progress, leaves a committed one and never throws', async () => {
+  const calls = [];
+  const api = state => ({ begin: async params => { calls.push(['begin', params.requestId, params.sha256]); return { uploadId: 'upl_1', state, ...(state === 'committed' ? { attachmentId: 'att_1' } : {}) }; }, abort: async uploadId => { calls.push(['abort', uploadId]); return { aborted: true }; } });
+  const upload = { sessionId: 'ses_a', file: { name: 'a', mimeType: 'text/plain', data: Uint8Array.of(1) }, requestId: 'k:file-0', digest: async () => 'd' };
+  assert.equal(await abortUpload(api('uploading'), upload), true);
+  assert.equal(await abortUpload(api('committed'), upload), false);
+  assert.deepEqual(calls, [['begin', 'k:file-0', 'd'], ['abort', 'upl_1'], ['begin', 'k:file-0', 'd']]);
+  assert.equal(await abortUpload({ begin: async () => { throw new Error('closed'); }, abort: async () => {} }, upload), false);
+});
+
+test('discarding a message whose upload failed half-way aborts that upload; a committed file stays', async t => {
+  const world = hostWithStore();
+  const controller = await connected(t, world);
+  // notes.txt (2 bytes) commits in one chunk; blob.bin's second chunk is refused.
+  world.store.failOnChunk = 3;
+  const { added } = await readFiles([], [file('notes.txt', [104, 105], 'text/plain'), file('blob.bin', BINARY), file('never.bin', [1])], LIMITS);
+  await controller.sendPrompt('give up', undefined, [], added);
+  const [failed] = controller.getState().prompts;
+  assert.equal(failed.status, 'failed');
+  assert.match(failed.error, /Could not upload blob\.bin/);
+  assert.equal(world.store.begins.length, 2, 'never.bin was not begun');
+  controller.discardPrompt(failed.id);
+  await controller.abandonedUploads();
+  const blob = `${failed.id}:file-1`;
+  assert.deepEqual(world.store.begins.map(begin => begin.requestId), [`${failed.id}:file-0`, blob, blob], 'begun again under its requestId, to learn the upload');
+  assert.equal(world.store.begins[2].sha256, sha(Buffer.from(BINARY)));
+  assert.deepEqual(world.store.aborts, ['upl_2']);
+  assert.ok(!world.store.uploads.has(blob), 'the half upload is gone');
+  assert.equal(world.store.objects.size, 1, 'the committed file is not aborted');
+  assert.equal(world.host.count('session.prompt'), 0);
+  assert.equal(controller.getState().prompts.length, 0);
+});
+
+test('discarding a message while its file uploads stops the upload, aborts it and sends nothing', async t => {
+  const world = hostWithStore();
+  const controller = await connected(t, world);
+  world.store.holdChunk = 1;
+  const { added } = await readFiles([], [file('blob.bin', BINARY), file('later.bin', [1, 2])], LIMITS);
+  const sending = controller.sendPrompt('stop', undefined, [], added);
+  await until(() => world.store.held, 'the first chunk is waiting for its answer');
+  const [pending] = controller.getState().prompts;
+  assert.equal(pending.status, 'sending');
+  controller.discardPrompt(pending.id);
+  world.store.held();
+  await sending;
+  await controller.abandonedUploads();
+  assert.equal(world.store.chunks, 1, 'no chunk after the discard');
+  assert.deepEqual(world.store.begins.map(begin => begin.requestId), [`${pending.id}:file-0`, `${pending.id}:file-0`], 'later.bin never begun; blob.bin begun again to abort it');
+  assert.deepEqual(world.store.aborts, ['upl_1']);
+  assert.equal(world.store.uploads.size, 0);
+  assert.equal(world.store.objects.size, 0);
+  assert.equal(world.host.count('session.prompt'), 0);
+  assert.equal(controller.getState().prompts.length, 0);
+});
+
+test('a prompt refused because the host lost a file uploads that file afresh on Retry', async t => {
+  const world = hostWithStore();
+  let refusal = { code: 1001, message: 'No such upload or attachment for this credential', data: { reason: 'not_found' } };
+  world.host.intercept.set('session.prompt', (_params, _connection, { fail }) => {
+    if (!refusal) return undefined;
+    const { code, message, data } = refusal;
+    refusal = undefined;
+    fail(code, message, data);
+    return 'handled';
+  });
+  const controller = await connected(t, world);
+  const { added } = await readFiles([], [file('kept.txt', [107], 'text/plain'), file('lost.bin', BINARY)], LIMITS);
+  // lost.bin's object goes away (alpd collected or lost it) before the prompt names it.
+  const commit = world.host.intercept.get('attachment.commit');
+  world.host.intercept.set('attachment.commit', (params, connection, tools) => {
+    const verdict = commit(params, connection, tools);
+    const upload = [...world.store.uploads.values()].find(entry => entry.uploadId === params.uploadId);
+    if (upload.params.name === 'lost.bin' && world.store.begins.length === 2) { world.store.objects.delete(upload.attachmentId); world.store.uploads.delete(upload.params.requestId); }
+    return verdict;
+  });
+  await controller.sendPrompt('both', undefined, [], added);
+  const [failed] = controller.getState().prompts;
+  assert.equal(failed.status, 'failed');
+  assert.match(failed.error, /Not found on the host/);
+  assert.equal(failed.files[0].attachmentId, 'att_1', 'the file the host still has keeps its attachment');
+  assert.equal(failed.files[1].attachmentId, undefined, 'the lost one is to be uploaded again');
+  assert.equal(failed.files[1].attempt, 1);
+  await controller.retryPrompt(failed.id);
+  await until(() => !controller.getState().prompts.length, 'delivered');
+  assert.deepEqual(world.store.begins.map(begin => begin.requestId), [`${failed.id}:file-0`, `${failed.id}:file-1`, `${failed.id}:file-1.1`], 'only the lost file, under a requestId of its own');
+  const sent = prompts(world.host);
+  const fresh = world.store.uploads.get(`${failed.id}:file-1.1`).attachmentId;
+  assert.ok(world.store.objects.has(fresh), 'a new object');
+  assert.deepEqual(sent.at(-1).content, [{ type: 'text', text: 'both' }, { type: 'attachment', attachmentId: 'att_1' }, { type: 'attachment', attachmentId: fresh }]);
+  assert.equal(world.host.receipts.size, 1);
+});
+
+test('attachment_unavailable re-uploads the file it names; a not_found about the session keeps the files', async t => {
+  const world = hostWithStore();
+  /** @type {any[]} */
+  const refusals = [
+    { code: 1005, message: 'The attachment store of the daemon host cannot be used now', data: { reason: 'attachment_unavailable', attachmentId: 'att_2' } },
+    { code: 1001, message: 'No such session', data: { reason: 'not_found' } },
+  ];
+  world.host.intercept.set('session.prompt', (_params, _connection, { fail }) => {
+    const refusal = refusals.shift();
+    if (!refusal) return undefined;
+    fail(refusal.code, refusal.message, refusal.data);
+    return 'handled';
+  });
+  const controller = await connected(t, world);
+  const { added } = await readFiles([], [file('a.txt', [97], 'text/plain'), file('b.txt', [98], 'text/plain')], LIMITS);
+  await controller.sendPrompt('two', undefined, [], added);
+  let [failed] = controller.getState().prompts;
+  assert.match(failed.error, /cannot be used now/);
+  assert.deepEqual(failed.files.map(entry => [entry.attachmentId, entry.attempt ?? 0]), [['att_1', 0], [undefined, 1]]);
+  await controller.retryPrompt(failed.id);
+  [failed] = controller.getState().prompts;
+  assert.equal(failed.status, 'failed');
+  assert.match(failed.error, /Not found/);
+  assert.deepEqual(failed.files.map(entry => entry.attachmentId), ['att_1', 'att_3'], 'both still stored: kept');
+  assert.equal(world.store.begins.length, 3);
+  await controller.retryPrompt(failed.id);
+  await until(() => !controller.getState().prompts.length, 'delivered');
+  assert.equal(world.store.begins.length, 3, 'nothing uploaded again');
+  assert.deepEqual(prompts(world.host).at(-1).content.filter(part => part.type === 'attachment'), [{ type: 'attachment', attachmentId: 'att_1' }, { type: 'attachment', attachmentId: 'att_3' }]);
 });
