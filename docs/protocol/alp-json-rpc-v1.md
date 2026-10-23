@@ -1406,11 +1406,13 @@ processes are identified afresh from the process table at that moment, never fro
 process group id (which may have been reused): every process whose environment holds the terminal's own
 random `ALP_TERMINAL_ID` (set in the shell's environment, so inherited by everything it starts, wherever
 it went), and, while the shell still runs, the shell and every process whose controlling terminal is its
-PTY; on Linux also its session; then their descendants and the members of their live process groups.
+PTY; on Linux also its session, after the shell has gone too (unless a process younger than the
+terminal now has the shell's pid); then their descendants and the members of their live process groups.
 Never alpd or its process group, never a process older than the terminal. A program that clears its
 environment and leaves the shell's process tree outlives the terminal once the shell has gone (on Linux
 it must also leave the session, for example `env -i setsid …`), as with any terminal; alpd does not track
-it. The marker is matched in a process's environment only, never in its arguments. If alpd itself dies the kernel hangs up the PTY. **Audit**: alpd logs each terminal's lifecycle (`ALPD_TERMINAL_*`: created,
+it. The marker is matched as one entry of a process's environment only, never in its arguments (on
+macOS, where `ps` does not delimit the entries, anywhere after the command line). If alpd itself dies the kernel hangs up the PTY. **Audit**: alpd logs each terminal's lifecycle (`ALPD_TERMINAL_*`: created,
 attached, detached, ended with its reason) with the principal, terminal id and workspace id; never
 input, output or the environment.
 

@@ -146,6 +146,7 @@ function elapsed(text: string) {
 
 const MARKER = /(?:^|\s)ALP_TERMINAL_ID=(atm_[0-9a-f]{32})(?=\s|$)/g;
 const markersOf = (text: string) => [...text.matchAll(MARKER)].map(match => match[1]!);
+const ENTRY = /^ALP_TERMINAL_ID=(atm_[0-9a-f]{32})$/;
 
 /**
  * The process table: pid, parent, group, (Linux) session, controlling tty, age, and the terminal
@@ -154,8 +155,10 @@ const markersOf = (text: string) => [...text.matchAll(MARKER)].map(match => matc
  */
 export function psProcesses(platform: NodeJS.Platform = process.platform): () => Promise<ProcessRow[]> {
   const linux = platform === 'linux';
+  // At most 10 s, even for a ps that cannot be killed at once (Linux: stuck reading a hung /proc entry).
   const run = (args: string[]) => new Promise<string | undefined>(resolve => {
-    execFile('ps', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, timeout: 10_000, env: { ...process.env, LC_ALL: 'C' } }, (error, stdout) => resolve(error ? undefined : stdout));
+    const child = execFile('ps', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, killSignal: 'SIGKILL', env: { ...process.env, LC_ALL: 'C' } }, (error, stdout) => { clearTimeout(timer); resolve(error ? undefined : stdout); });
+    const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(undefined); }, 10_000);
   });
   return async () => {
     const columns = linux ? 'pid=,ppid=,pgid=,sid=,tty=,etime=' : 'pid=,ppid=,pgid=,tty=,etime=,command=';
@@ -177,9 +180,11 @@ export function psProcesses(platform: NodeJS.Platform = process.platform): () =>
       const sid = linux ? Number(cells[3]) : undefined;
       const tty = cells[linux ? 4 : 3]!;
       let markers: string[] = [];
-      if (linux) { try { markers = markersOf(readFileSync(`/proc/${pid}/environ`, 'utf8').replace(/\0/g, ' ')); } catch {} }
+      // Linux: one entry of the environment, never a marker inside another variable's value.
+      if (linux) { try { markers = readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').flatMap(entry => ENTRY.exec(entry)?.[1] ?? []); } catch {} }
       else {
-        const full = /^\s*(?:\S+\s+){5}(.*)$/.exec(line)?.[1] ?? '';
+        // Exactly one space after etime: a command line may itself start with spaces.
+        const full = /^\s*(?:\S+\s+){4}\S+ (.*)$/.exec(line)?.[1] ?? '';
         const command = commands.get(pid);
         // The environment is what follows the command line; when the two passes disagree, none.
         if (command !== undefined && full.startsWith(command)) markers = markersOf(full.slice(command.length));
@@ -332,21 +337,26 @@ export function createTerminalService(options: TerminalServiceOptions) {
     // Whether the shell runs is decided before the snapshot, never after it.
     const running = !terminal.exit;
     const rows = await listProcesses();
-    const age = now() - terminal.createdAt + 2_000;
+    const lifetime = now() - terminal.createdAt;
+    const age = lifetime + 2_000;
     const own = rows.find(row => row.pid === process.pid);
     const children = new Map<number, ProcessRow[]>();
     for (const row of rows) children.set(row.ppid, [...(children.get(row.ppid) ?? []), row]);
     const found = new Map<number, ProcessRow>();
     for (const row of rows) if (row.markers?.includes(terminal.marker)) found.set(row.pid, row);
+    // The process with the shell's pid is our shell only when it is as old as the terminal (etime
+    // counts whole seconds): a younger one got the pid again after our shell had gone.
+    const holder = rows.find(row => row.pid === terminal.pid);
+    const ours = !holder || holder.elapsedMs >= lifetime - 2_000;
+    const shell = running && ours ? holder : undefined;
+    if (shell) found.set(shell.pid, shell);
     // The PTY's device name counts only while the shell, in this very snapshot, still has it as its
     // terminal: once node-pty closed it the name may already be another PTY's.
-    const shell = running ? rows.find(row => row.pid === terminal.pid) : undefined;
-    if (shell) found.set(shell.pid, shell);
     const tty = shell && terminal.tty && shell.tty === terminal.tty ? terminal.tty : undefined;
-    // Linux: the session, while its leader is our live shell or a marked process is still in it.
-    const sessions = new Set([...found.values()].map(row => row.sid).filter(sid => sid !== undefined));
+    // Linux: the session, also once the shell has gone. A pid is not given out again while it is a
+    // live process's session id, so it is still ours unless a younger process holds the shell's pid.
     for (const row of rows) {
-      if ((tty && row.tty === tty) || (row.sid !== undefined && row.sid === terminal.pid && (shell || sessions.has(row.sid)))) found.set(row.pid, row);
+      if ((tty && row.tty === tty) || (row.sid !== undefined && row.sid === terminal.pid && ours)) found.set(row.pid, row);
     }
     const queue = [...found.values()];
     while (queue.length) {

@@ -385,12 +385,12 @@ test('a socket client: the stream survives a disconnect only for the same princi
 });
 
 /** A spawner that runs nothing: a fake PTY whose exit the test drives. */
-function fakePty() {
+function fakePty({ ptsName } = {}) {
   let next = 70_000;
   const made = [];
   const spawn = (_file, _args, options) => {
     const exits = new Set();
-    const pty = { pid: next++, env: options.env, write() {}, resize() {}, kill() { queueMicrotask(() => { for (const listener of exits) listener({ exitCode: 0, signal: 1 }); }); }, onData: () => ({ dispose() {} }), onExit: listener => { exits.add(listener); return { dispose: () => exits.delete(listener) }; } };
+    const pty = { pid: next++, ...(ptsName ? { ptsName } : {}), env: options.env, write() {}, resize() {}, kill() { queueMicrotask(() => { for (const listener of exits) listener({ exitCode: 0, signal: 1 }); }); }, onData: () => ({ dispose() {} }), onExit: listener => { exits.add(listener); return { dispose: () => exits.delete(listener) }; } };
     made.push(pty);
     return pty;
   };
@@ -438,6 +438,69 @@ test('ending a terminal never kills by a remembered or reused id: only processes
   assert.deepEqual(killed, [], 'an exited shell\'s pid is not trusted');
 });
 
+test('after the shell has gone its Linux session still counts; a younger holder of its pid, or of its PTY name, never does', { skip }, async t => {
+  const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-term-linux-')));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(path.join(directory, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
+  const { spawn, made } = fakePty({ ptsName: '/dev/pts/9' });
+  let clock = 1_000_000_000;
+  let table = [];
+  const service = createTerminalService({ home: directory, resolveWorkspace: async () => directory, log: { info() {}, warn() {} }, spawn, processes: async () => table, sweepMs: 60_000, killGraceMs: 10, platform: 'linux', now: () => clock });
+  t.after(() => service.shutdown());
+  const owner = { id: 'owner', epoch: 'owner' };
+  const killed = [];
+  const realKill = process.kill;
+  process.kill = (pid, signal) => { if (pid >= 70_000) { killed.push([pid, signal]); return true; } return realKill.call(process, pid, signal); };
+  t.after(() => { process.kill = realKill; });
+  const hits = () => new Set(killed.map(([pid]) => pid));
+  const close = async () => { const { terminals } = await service.list(owner, {}); for (const terminal of terminals.filter(row => row.state === 'running')) await service.close(owner, { terminalId: terminal.terminalId }); };
+
+  // The shell exits on its own; a job that cleared its environment and ignores SIGHUP stays in its
+  // session, its parent gone: the SIGKILL pass after the grace still finds it by the session.
+  await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r1' });
+  const first = made[0];
+  clock += 60_000;
+  table = [{ pid: 80_101, ppid: 1, pgid: 80_101, sid: first.pid, elapsedMs: 30_000 }];
+  first.kill();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.deepEqual(killed.filter(([pid]) => pid === 80_101).map(([, signal]) => signal).slice(0, 2), ['SIGHUP', 'SIGKILL'], JSON.stringify(killed));
+
+  // A process younger than the terminal holds the shell's pid and leads a session of its own: neither
+  // it nor that session is ours.
+  killed.length = 0;
+  await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r2' });
+  const second = made[1];
+  clock += 60_000;
+  table = [
+    { pid: second.pid, ppid: 1, pgid: second.pid, sid: second.pid, elapsedMs: 5_000 },
+    { pid: 80_201, ppid: 1, pgid: 80_201, sid: second.pid, elapsedMs: 4_000 },
+  ];
+  await close();
+  assert.deepEqual(killed, [], 'a reused shell pid and its session are never ours');
+
+  // The PTY's name counts only while the shell row of the same snapshot still has it.
+  await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r3' });
+  const third = made[2];
+  clock += 1_000;
+  table = [
+    { pid: third.pid, ppid: process.pid, pgid: third.pid, sid: third.pid, elapsedMs: 1_000 },
+    { pid: 80_301, ppid: 1, pgid: 80_301, sid: 80_301, tty: 'pts/9', elapsedMs: 500 },
+  ];
+  await close();
+  assert.ok(hits().has(third.pid), JSON.stringify(killed));
+  assert.ok(!hits().has(80_301), 'a PTY name the shell no longer has may be another terminal\'s');
+  killed.length = 0;
+  await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r4' });
+  const fourth = made[3];
+  clock += 1_000;
+  table = [
+    { pid: fourth.pid, ppid: process.pid, pgid: fourth.pid, sid: fourth.pid, tty: 'pts/9', elapsedMs: 1_000 },
+    { pid: 80_401, ppid: 1, pgid: 80_401, sid: 80_401, tty: 'pts/9', elapsedMs: 500 },
+  ];
+  await close();
+  assert.ok(hits().has(fourth.pid) && hits().has(80_401), JSON.stringify(killed));
+});
+
 test('concurrent creates cannot pass the limits or duplicate a requestId', { skip }, async t => {
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-term-race-')));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -474,9 +537,10 @@ test('the process table parser: commands with spaces, a marker in the environmen
     `  101     1   101 ttys001     00:05 /bin/zsh -l HOME=/x ALP_TERMINAL_ID=${marker} TERM=xterm`,
     `  102     1   102 ??          01:00 grep ALP_TERMINAL_ID=${marker} HOME=/x`,
     `  103     1   103 ??       1-02:03:04 node server.js --flag=ALP_TERMINAL_ID=${marker} HOME=/x`,
-    `  104     1   104 ??          00:01 sleep 9 X=a\\012123 456 789 ALP_TERMINAL_ID=${marker}`,
+    `  104     1   104 ??          00:01 sleep 9 X=a\\012  999     1   999 ??          00:01 x ALP_TERMINAL_ID=${marker}`,
+    `  105     1   105 ??          00:01   spaced arg HOME=/x ALP_TERMINAL_ID=${marker}`,
   ].join('\n');
-  const plain = ['  101 /bin/zsh -l', `  102 grep ALP_TERMINAL_ID=${marker}`, `  103 node server.js --flag=ALP_TERMINAL_ID=${marker}`, '  104 sleep 9'].join('\n');
+  const plain = ['  101 /bin/zsh -l', `  102 grep ALP_TERMINAL_ID=${marker}`, `  103 node server.js --flag=ALP_TERMINAL_ID=${marker}`, '  104 sleep 9', '  105   spaced arg'].join('\n');
   await writeFile(path.join(bin, 'ps'), `#!/bin/sh\ncase "$*" in *-E*) cat <<'EOF_'\n${withEnv}\nEOF_\n;; *) cat <<'EOF_'\n${plain}\nEOF_\n;; esac\n`, { mode: 0o755 });
   const saved = process.env.PATH;
   process.env.PATH = `${bin}:${saved}`;
@@ -490,5 +554,6 @@ test('the process table parser: commands with spaces, a marker in the environmen
   assert.equal(byPid.get(103).markers, undefined);
   assert.equal(byPid.get(103).elapsedMs, ((26 * 60 + 3) * 60 + 4) * 1000);
   assert.deepEqual(byPid.get(104).markers, [marker], 'an escaped newline is one line');
-  assert.equal(rows.length, 4, 'no forged row');
+  assert.deepEqual(byPid.get(105).markers, [marker], 'a command line that starts with spaces');
+  assert.equal(rows.length, 5, 'no forged row');
 });
