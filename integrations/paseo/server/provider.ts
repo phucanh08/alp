@@ -8,6 +8,7 @@ import { daemonHeld, startDaemon } from '@anhlp/alp-client/supervise';
 import type { ProviderRegistration } from './compat.js';
 import { models as runtimeModels, modes, teamModels, templates, toSessionSpec } from './mapping.js';
 import { createAlpProvider, type ProviderBackend } from './provider-core.js';
+import { createUploadReader } from './uploads.js';
 
 /**
  * The local and embedded provider (ALP's compatibility mode): alpd on this machine, found through
@@ -27,6 +28,8 @@ type Options = Omit<RuntimeOptions, 'templates'> & {
   home?: string;
   /** The daemon script to start; defaults to alpd.js next to this bundle. */
   daemonEntry?: string;
+  /** Paseo's home, whose uploads a prompt may attach (uploads.ts); defaults to where Paseo keeps it (PASEO_HOME or ~/.paseo). */
+  paseoHome?: string;
 };
 
 declare const __ALP_DAEMON_ENTRY__: string | undefined;
@@ -43,7 +46,7 @@ export function daemonEntry(explicit?: string) {
 }
 
 async function openBackend(options: Options): Promise<ProviderBackend> {
-  const { home, daemonEntry: entry, embedded: inProcess, ...runtimeOptions } = options;
+  const { home, daemonEntry: entry, embedded: inProcess, paseoHome: _paseoHome, ...runtimeOptions } = options;
   if (inProcess || runtimeOptions.transport) {
     const runtime = createAlpRuntime({ ...runtimeOptions, templates });
     const server = createDaemonServer({ runtime, socketPath: '', version: 'embedded' });
@@ -72,5 +75,7 @@ export function createProvider(options: Options = {}): ProviderRegistration {
     // a lost connection, so a request it never answered is sent again once it is back.
     cursors: false,
     repeatAfterRelink: true,
+    // Paseo's daemon runs on this machine and stored the file: it is read from Paseo's uploads only.
+    readUpload: createUploadReader(options.paseoHome === undefined ? {} : { home: () => path.resolve(options.paseoHome!) }),
   });
 }

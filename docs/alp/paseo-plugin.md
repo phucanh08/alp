@@ -179,7 +179,8 @@ How the pills stay current:
 | Approval | `never`; interactive approval and per-tool policy are not advertised and are rejected |
 | Persistence | Paseo stores a version 2 handle naming the alpd session, its agent and project root; alpd keeps the native thread, workflow snapshot and timeline, and resumes them on reopen. Version 1 handles (native thread in Paseo) are adopted on open. Roots started outside Paseo, for example with `alp run`, appear in Paseo's import list with their children |
 | Refresh | Close then resume; reread ALP files and current launch config. Cross-project or cross-agent resume fails |
-| Prompt | Text only; one result per message ID; duplicate IDs in the live session do not re-execute |
+| Prompt | Text and files uploaded to Paseo; one result per message ID; duplicate IDs in the live session do not re-execute |
+| Uploaded files | Each `uploaded_file` part becomes an ALP attachment in its place (`{ type: "attachment", attachmentId }`, [protocol §12.6](../protocol/alp-json-rpc-v1.md)): the provider reads the file Paseo's daemon stored and uploads it into alpd's store for the session under a requestId of the message ID and part index, so the same message sent again (retry, reconnect) reuses one stored object. Only a file exactly at `<paseoHome>/uploads/upload_<uuid>/<name>` is read (`server/uploads.ts`): `<paseoHome>` is resolved as Paseo resolves it (`PASEO_HOME`, else `~/.paseo`), the directories below it must be real directories of this user, the file is opened without following links and must be a regular file of this user with one link and exactly its declared size, within alpd's `attachmentLimits`; anything else is refused naming the file, never its host path. A runtime that cannot read attachments answers `1005 attachment_unsupported`, shown as the message's failure. The remote entry reads no file on this machine and refuses uploaded files |
 | Steering/cancel | Codex `turn/steer` and `turn/interrupt`; terminal events are deduplicated |
 | Close | Graceful stdin shutdown, bounded forced shutdown fallback for the owned process |
 
@@ -187,7 +188,7 @@ After first-session initialization, ALP configuration files are read-only to the
 
 ## Prototype limits
 
-- Hooks, interactive permissions, images, structured commands, output schemas, live model/thinking changes, session listing, and revert are not supported or advertised.
+- Hooks, interactive permissions, images (`prompt.image`), structured commands, output schemas, live model/thinking changes, session listing, and revert are not supported or advertised.
 - Delegated child sessions are supported through `alp_delegate` and the public `session.subsession` contract. See [team workflow](team-workflow.md) for routing, migration, lifecycle, and limits. Start a new main session after enabling delegation in an older project: old native threads may have no registered delegation tool.
 - Live timeline mapping covers assistant text, shell commands, dynamic delegation calls and compactions (Paseo's compaction row; a failed one is a warning); other native tool item types are not yet rendered. This is not a complete Codex UI replacement.
 - Replay uses the history returned by `thread/resume`; exhaustive pagination of very large native histories is not implemented.
