@@ -186,7 +186,7 @@ test('session.prompt takes inline images within the limits and passes them to th
     await until(() => events.some(e => e.event.type === 'prompt.failed' && e.event.clientMessageId === id));
     assert.match(events.find(e => e.event.type === 'prompt.failed' && e.event.clientMessageId === id).event.error.message, pattern);
   };
-  await failed('p3', [{ type: 'localImage', path: '/etc/passwd' }], /Only text and image prompts/);
+  await failed('p3', [{ type: 'localImage', path: '/etc/passwd' }], /Only text, image and attachment prompts/);
   await refused('p4', [{ ...png, mimeType: 'image/svg+xml' }], /content/);
   await refused('p5', Array.from({ length: 9 }, () => png), /at most 8 images/);
   await refused('p6', [{ ...png, data: 'A'.repeat(6990508) }], /at most 5242880 bytes/);

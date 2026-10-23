@@ -264,6 +264,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     sessionProject: sessionId => runtime.snapshot(sessionId)?.projectRoot ?? records.get(sessionId)?.session?.projectRoot,
     crashPoint,
     log: { warn: (message, fields) => log.warn(message, fields), info: (message, fields) => log.info(message, fields) },
+    // A collected object's staged copy goes with it.
+    onDiscard: attachmentId => (runtime as AlpRuntime & AttachmentRuntime).dropAttachment?.(attachmentId),
     ...attachmentOptions,
   }) : undefined;
   // The runtime side of the seam (issue #121 branch J): a runtime that takes attachment parts reads them through this.

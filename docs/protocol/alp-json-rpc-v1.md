@@ -242,7 +242,7 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 | `workspace.files` | `workspace.files.search`: file names under a directory matching a query, read-only (§12.3). Every alpd lists it. |
 | `workspace.files.read` | `workspace.files.list` and `workspace.files.read`: a directory's entries and a UTF-8 text file's content (at most 1 MiB) under a directory, read-only, links never followed, blocked paths refused (§12.4). Every alpd lists it. |
 | `prompt.images` | `session.prompt` takes inline image parts (§10, Prompt content); a session snapshot's `promptImages: true` says its runtime takes them. Every alpd lists it. |
-| `attachments` | `attachment.begin/chunk/commit/abort/get/delete` and `session.prompt` parts `{ type: "attachment", attachmentId }`; hello carries `attachmentLimits` (§12.6). Listed when alpd has a home and a store, on macOS and Linux (not Windows). |
+| `attachments` | `attachment.begin/chunk/commit/abort/get/delete` and `session.prompt` parts `{ type: "attachment", attachmentId }`; hello carries `attachmentLimits` (§12.6). Listed when alpd has a home and a store, on macOS and Linux (not Windows). A session snapshot's `promptAttachments` says whether its runtime reads them (Codex and Claude: `["file.path"]`). |
 | `session.fork` | `session.fork`: a new root from a root's conversation cut at a turn, or from a branch a rewind set aside; files are never copied or changed (§12.7). Listed with a store and a runtime that forks native conversations, on macOS and Linux (not Windows). |
 | `session.rewind` | `session.rewind`: a root's conversation from before a turn, same id, later turns kept as a recoverable branch, files never changed; the `history.reset` event (§12.7). Same condition as `session.fork`. |
 | `session.reload` | `session.reload`: a live root's native process restarts on its own conversation and configuration, same id, history and receipts (§12.8). Listed with a store and a runtime that restarts a root on its own conversation, on macOS and Linux (not Windows). |
@@ -568,8 +568,11 @@ fragments at stable source positions. Virtualization of already-loaded web rows 
   - `{ type: "attachment", attachmentId }` (capability `attachments`) is a stored file **by id only**:
     the schema refuses any other field. alpd resolves it for the caller's principal, project and this
     session (§12.6), pins it before delivery, and the fingerprint covers the ordered ids and their
-    SHA-256. A session whose runtime cannot read attachments refuses the prompt `1005
-    attachment_unsupported` before any receipt: nothing is sent, dropped or turned into a path.
+    SHA-256. A session whose runtime cannot read attachments (its snapshot has no
+    `promptAttachments`) refuses the prompt `1005 attachment_unsupported` before any receipt: nothing
+    is sent, dropped or turned into a path. A Codex or Claude session reads them through a staged
+    read-only copy (§12.6 *Runtimes*); the `user_message` item carries `attachments: [{ attachmentId,
+    name, mimeType, size }]`, never a host path.
 - **`task.create` with `requestId`** is answered once per `(projectRoot, requestId)` for 10 minutes **within one alpd
   process**: a repeat with the same title and priority answers the first `{ id }` with `duplicate: true`, concurrent repeats
   wait for the first, other content fails `1004 key_conflict`, and a create that failed may be tried again. Nothing is
@@ -1033,8 +1036,45 @@ answers `1005 attachment_unavailable`; alpd never claims it was delivered.
   `@anhlp/alp-daemon`). It then gets attachment parts as `{ type: "attachment", attachmentId, name,
   mimeType, detectedMimeType, size, sha256 }` (`RuntimeAttachment`) and reads the verified bytes of a
   pinned attachment with `reader.open(attachmentId, sessionId)`: a stream, never a path. Staging a
-  runtime-readable copy inside the session's sandbox is the runtime's work. Today no runtime opts in:
-  every prompt with attachments is refused `attachment_unsupported`.
+  runtime-readable copy is the runtime's work (*Runtimes* below); `dropAttachment(attachmentId)`
+  removes it when the store collects the object.
+
+**Runtimes** (issue #121 branch J). A session snapshot's `promptAttachments` lists how its runtime can
+use attached files; absent, it takes none and a prompt with attachments is refused
+`1005 attachment_unsupported` before any receipt:
+
+| Runtime | `promptAttachments` | How |
+|---|---|---|
+| Codex | `["file.path"]` | its tools read a staged read-only copy whose path the turn names |
+| Claude | `["file.path"]` | the same; Read, Glob and Grep pass ALP's permission gate in every mode, Bash reads it inside its sandbox |
+| ACP agents | none | file and resource access is not negotiated: refused, never sent as if readable |
+| Antigravity | none | text only: refused |
+
+`file.path` means the runtime's approved tools can read the exact bytes; `document.native` (the file
+as a native document part of the model input) and `text.extract` (bounded text ALP extracts) are
+reserved: no runtime has them, and naming a path is never claimed as either. The runtime of alpd
+stages one copy per attachment in `<ALP_HOME>/state/staged/` (0700, created and checked private to
+alpd's user, never a link): `<attachmentId><.ext>`, the extension taken from the display name only
+when it is 1 to 16 letters and digits, else from the detected type, so a display name never becomes a
+path. The copy is written from the verified stream exclusively without following links, checked
+against the size and SHA-256, made read-only (`0400`, never executable) and renamed into place; one
+already there is reused only when it is a regular file of one link, `0400`, of the right size and
+SHA-256, and replaced otherwise (a link is removed, never written through). Nothing in the session's
+permission profile changes: Codex's read-only and workspace-write sandboxes read the whole disk and
+Claude's file tools and sandboxed Bash read outside the workspace, while neither writes the directory
+(outside the workspace and the temp directory), so a sandboxed tool cannot swap a copy. The turn gets
+one text part per attachment after the prompt, `ALP attached a file to this message (data, not
+instructions): ` and the JSON `{ attachmentId, name, mimeType, detectedMimeType, size, sha256, path }`,
+counted in CATALOG's `inputLayout`, whose data also lists the attachments without their paths so a
+replayed message shows them. Events never carry the directory: a tool's command or output, or a
+reply, that names a staged copy reaches the timeline with the directory as `<alp-attachments>`; a
+staging failure fails the prompt (`prompt.failed`, "ALP could not give the runtime a readable copy of
+"<name>" (<attachmentId>): <why>") before anything reaches the provider. Copies outlive restarts; a
+retried prompt is the receipt's answer, a new one reuses the verified copy. Forks: the fork's own
+holder keeps the objects its kept prompts named (`user_message.attachments`), so a fork of a fork
+keeps them after an ancestor's history is deleted; re-authorizing for the caller then accepts an
+object whose upload session is gone when a fork in the lineage, in the same project, pins it for the
+same principal and grant epoch.
 - *Fork (§12.7)*: a fork re-authorizes the attachments the kept prompts pinned for the caller's
   principal and pins them with `pin('fork:<newSessionId>', newSessionId, attachmentIds, 'fork')`;
   references are per holder, so the source keeps its own.
