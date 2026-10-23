@@ -701,15 +701,15 @@ export class Controller {
   /** The root an envelope belongs to when it is the watched tree's, else undefined. @param {any} envelope */
   #route(envelope) {
     const sessionId = envelope?.sessionId;
-    if (typeof sessionId !== 'string' || !this.#watching) return undefined;
+    if (typeof sessionId !== 'string') return undefined;
     let root = this.#membership.get(sessionId);
     if (!root) {
       const parent = envelope.event?.type === 'session.opened' ? envelope.event.session?.parentId : undefined;
       root = (typeof parent === 'string' && this.#membership.get(parent)) || undefined;
-      // One tree is attached at a time, so an unknown session is one of its own (a child whose
-      // opening came before the cursor this view started from).
-      root ??= this.#watching;
-      this.#membership.set(sessionId, root);
+      // Learn parentage even while deselected: retained receipt subscriptions still emit.
+      // Selection cannot establish an unknown session's root: another subscription may remain
+      // after a release/attach timeout. Only parentage and known history establish membership.
+      if (root) this.#membership.set(sessionId, root);
     }
     return root === this.#watching ? root : undefined;
   }
@@ -916,6 +916,9 @@ export class Controller {
         if (tree.attaching !== operation) return;
         tree.projection = emptyProjection(root);
         for (const item of page.items) tree.projection = project(tree.projection, historyEnvelope(item, root));
+        // Replay can emit existing children's events before the attach answer, without another
+        // session.opened. Establish their identities from history before routing that replay.
+        for (const id of tree.projection.order) this.#membership.set(id, root);
         tree.projection = { ...tree.projection, cursor: page.tipCursor };
         this.#older.set(root, { generation: page.generation, olderCursor: page.olderCursor, hasOlder: page.hasOlder });
       }
