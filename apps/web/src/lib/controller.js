@@ -6,12 +6,13 @@ import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
 import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
 import { newConversationRequestId, newMessageId, newRequestId, newSessionId } from './ids.js';
 import { RELOAD_MESSAGES, agentControlsGate, conversationGate, describeConversationError, describeReloadError } from './conversation.js';
-import { GIT_ERROR_MESSAGES, GitAccessError, describeGitError, gitAccess, gitCompare, gitRequestPath } from './git.js';
+import { GIT_ERROR_MESSAGES, GitAccessError, describeGitError, gitAccess, gitCompare, gitRequestPath, registryWorkspaceOf } from './git.js';
 import { NO_FILES, abortUpload, fileLimits, fileRefusal, fitFiles, fitImages, imageLimits, messageContent, uploadRequestId } from './attachments.js';
 import { applyAttach, historyEnvelope, prependHistory, deliveredPrompts, emptyProjection, members, project, promptTurnOver } from './timeline.js';
 import { effortLabel, normalizeModels, parsePreview } from './new-session.js';
 import { CONFIGURE_LIVE, CONFIGURE_MESSAGES, NEW_SESSION_REFUSALS, configuredNotice, configuredSummary, describeConfigureError, liveConfigureGate } from './configure.js';
 import { loadPreferences, parsePreferences, rememberChoices, savePreferences } from './preferences.js';
+import { TerminalSession, terminalGate, terminalLimits } from './terminal.js';
 
 /**
  * Everything the web app knows and does, without React: one connection to alpd through the
@@ -87,7 +88,7 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  *   older?: { generation: string, olderCursor?: string, hasOlder: boolean, loading?: boolean, error?: string },
  * }} TreeView
  * @typedef {{
- *   connection: { phase: Phase, gateway: string, attempt: number, error?: Failure, daemonVersion?: string, hostname?: string, promptImageLimits?: ReturnType<typeof imageLimits>, attachmentLimits?: import('./attachments.js').FileLimits, capabilities: string[] },
+ *   connection: { phase: Phase, gateway: string, attempt: number, error?: Failure, daemonVersion?: string, hostname?: string, promptImageLimits?: ReturnType<typeof imageLimits>, attachmentLimits?: import('./attachments.js').FileLimits, terminalLimits?: import('@anhlp/alp-protocol').TerminalLimits, capabilities: string[] },
  *   principal: Principal | null,
  *   workspace: string | null,
  *   catalog: Load & { teams: Team[], teamsKnown?: boolean, teamsUnavailable?: import('./new-session.js').TeamsUnavailable, modes: Mode[], models: Model[], defaultMode?: string },
@@ -188,6 +189,11 @@ function historyRows(result, sort) {
   return sort ? rows.sort((/** @type {any} */ a, /** @type {any} */ b) => String(b.updatedAt ?? b.createdAt ?? '').localeCompare(String(a.updatedAt ?? a.createdAt ?? ''))) : rows;
 }
 
+/** The page's sessionStorage, when it has a usable one. */
+function sessionStorageOf() {
+  try { return globalThis.sessionStorage ?? undefined; } catch { return undefined; }
+}
+
 /** @returns {State} */
 export function initialState(gateway = '') {
   return {
@@ -227,7 +233,11 @@ export function initialState(gateway = '') {
  *   releaseTimeoutMs?: number,
  *   busyUnseenMs?: number,
  *   storage?: import('./preferences.js').PreferenceStorage,
+ *   terminalStorage?: import('./terminal.js').TerminalStorage | null,
+ *   terminalOptions?: Partial<import('./terminal.js').TerminalOptions>,
  * }} ControllerOptions
+ *   terminalStorage: where a terminal tab keeps its terminal's id for the page (sessionStorage), so a
+ *   reload attaches the same terminal again.
  */
 
 /** A message was discarded while its files were uploading: its upload stops, nothing is sent. */
@@ -329,6 +339,8 @@ export class Controller {
    */
   #presence = { visible: true, focused: true };
   #noticeId = 0;
+  /** The Terminal tab's terminal of each registry workspace (#121 H), for this connection. @type {Map<string, TerminalSession>} */
+  #terminals = new Map();
 
   /** @param {ControllerOptions} [options] */
   constructor(options = {}) {
@@ -431,6 +443,7 @@ export class Controller {
       onConnect: (client, context) => this.#onConnect(run, client, /** @type {AbortSignal} */ (context.signal)),
       onDisconnect: () => {
         if (this.#run !== run) return;
+        for (const terminal of this.#terminals.values()) terminal.disconnected();
         this.#attached = null;
         this.#watching = null;
         for (const tree of this.#trees.values()) tree.attaching = null;
@@ -442,11 +455,20 @@ export class Controller {
     });
     run.alp = alp;
     alp.onEvent(envelope => { if (this.#run === run && this.#onQuestionEvent(envelope)) this.#onEnvelope(envelope); });
+    alp.onNotification((method, params) => {
+      if (this.#run !== run || method !== 'terminal.event') return;
+      for (const terminal of this.#terminals.values()) terminal.event(params);
+    });
     alp.onState((state, error) => { if (this.#run === run) this.#onState(run, state, error); });
   }
 
-  /** Ends the connection and forgets the token and everything the host sent. */
-  disconnect() {
+  /**
+   * Ends the connection and forgets the token and everything the host sent. Its terminals end too
+   * (terminal.close), except when the page is going away (`keepTerminals`, a reload): the host keeps
+   * them for reconnectMs, and the reloaded page attaches them again.
+   * @param {{ keepTerminals?: boolean }} [options]
+   */
+  disconnect({ keepTerminals = false } = {}) {
     const run = this.#run;
     this.#run = null;
     this.#token = '';
@@ -466,7 +488,9 @@ export class Controller {
     this.#generation += 1;
     this.#context = {};
     this.#waiting = null;
-    if (run?.alp) run.alp.stop();
+    const ending = this.#endTerminals(keepTerminals ? null : run);
+    // The old connection stays up only for its terminals' close requests (a second at most).
+    if (run?.alp) { const alp = run.alp; if (ending) void ending.then(() => alp.stop()); else alp.stop(); }
     if (run) this.#set({ ...initialState(this.#state.connection.gateway), preferences: this.#state.preferences });
   }
 
@@ -516,7 +540,7 @@ export class Controller {
     const capabilities = Array.isArray(greeting?.capabilities) ? greeting.capabilities.filter((/** @type {unknown} */ name) => typeof name === 'string') : [];
     const missing = REQUIRED_CAPABILITIES.filter(name => !capabilities.includes(name));
     if (missing.length) throw new ConfigurationError(`The host behind this gateway is too old for this app (it lacks ${missing.join(', ')}). Update ALP on the host.`);
-    this.#adopt(/** @type {Principal} */ (run.principal), capabilities, typeof greeting?.daemonVersion === 'string' ? greeting.daemonVersion : undefined, hostName(greeting?.hostname), imageLimits(greeting?.promptImageLimits, capabilities.includes('prompt.images')), fileLimits(greeting?.attachmentLimits, capabilities.includes('attachments')));
+    this.#adopt(/** @type {Principal} */ (run.principal), capabilities, typeof greeting?.daemonVersion === 'string' ? greeting.daemonVersion : undefined, hostName(greeting?.hostname), imageLimits(greeting?.promptImageLimits, capabilities.includes('prompt.images')), fileLimits(greeting?.attachmentLimits, capabilities.includes('attachments')), capabilities.includes('terminal') ? terminalLimits(greeting?.terminalLimits) : undefined);
     this.#attached = null;
     this.#watching = null;
     const root = this.#state.selected;
@@ -539,8 +563,9 @@ export class Controller {
    * @param {ReturnType<typeof imageLimits>} limits
    * @param {string | undefined} hostname the host's machine name from the hello, Paseo's host label (patch 0017)
    * @param {import('./attachments.js').FileLimits} [files] the hello's attachmentLimits (#121 J)
+   * @param {import('@anhlp/alp-protocol').TerminalLimits} [terminals] the hello's terminalLimits (#121 H)
    */
-  #adopt(principal, capabilities, daemonVersion, hostname, limits, files = { ...NO_FILES }) {
+  #adopt(principal, capabilities, daemonVersion, hostname, limits, files = { ...NO_FILES }, terminals = undefined) {
     this.#registryContext = {};
     const current = this.#state.workspace;
     const workspace = current && grantedWorkspace(principal, current) ? current : principal.workspaces[0] ?? null;
@@ -549,13 +574,14 @@ export class Controller {
     this.#set(state => ({
       principal,
       registry: changed ? initialState().registry : { ...state.registry, loading: false },
-      connection: { ...state.connection, capabilities, ...(daemonVersion ? { daemonVersion } : {}), hostname, promptImageLimits: limits, attachmentLimits: files },
+      connection: { ...state.connection, capabilities, ...(daemonVersion ? { daemonVersion } : {}), hostname, promptImageLimits: limits, attachmentLimits: files, terminalLimits: terminals },
       ...(workspace !== state.workspace ? { workspace, selected: null, focus: null, tree: null, sessions: initialState().sessions, history: initialState().history, attention: {}, turnAttention: {}, tasks: { ...initialState().tasks, visible: state.tasks.visible } } : {}),
       ...(changed || workspace !== state.workspace ? { catalog: initialState().catalog } : {}),
     }));
   }
 
   #afterOpen() {
+    for (const terminal of this.#terminals.values()) terminal.connected();
     this.#sync();
     this.#resumeUploads();
     void this.refreshRegistry();
@@ -586,6 +612,66 @@ export class Controller {
 
   /** @param {string} capability */
   hasCapability(capability) { return this.#state.connection.capabilities.includes(capability); }
+
+  // ---- terminals (#121 H) --------------------------------------------------------------------
+
+  /**
+   * Whether the Terminal tab can offer a terminal in the open workspace (the host's switch, the
+   * token's terminal.exec, a registry workspace), as lib/terminal.js terminalGate.
+   */
+  terminalGate() { return terminalGate(this.#state); }
+
+  /**
+   * The Terminal tab's terminal of a registry workspace on this connection: made (not started)
+   * the first time. Only when the gate allows it.
+   * @param {string} workspaceId
+   */
+  terminal(workspaceId) {
+    let terminal = this.#terminals.get(workspaceId);
+    if (terminal) return terminal;
+    const gate = this.terminalGate();
+    if (!gate.ok || gate.workspaceId !== workspaceId) throw new ConfigurationError(gate.ok ? 'That workspace is not the open one.' : gate.messages.join(' '));
+    const storage = this.#options.terminalStorage === undefined ? sessionStorageOf() : this.#options.terminalStorage ?? undefined;
+    terminal = new TerminalSession({
+      workspaceId,
+      request: (method, params) => this.#client().request(method, params, { timeoutMs: this.#options.requestTimeoutMs }),
+      limits: this.#state.connection.terminalLimits ?? terminalLimits(undefined),
+      ...(storage ? { storage, storageKey: `alp-web.terminal|${this.#state.connection.gateway}|${this.#state.principal?.id ?? ''}|${workspaceId}` } : {}),
+      ...this.#options.terminalOptions,
+    });
+    this.#terminals.set(workspaceId, terminal);
+    return terminal;
+  }
+
+  /**
+   * The Terminal tab of a workspace (the open one by default) closed: its terminal ends on the host
+   * (terminal.close).
+   * @param {string} [workspaceId]
+   */
+  closeTerminal(workspaceId = registryWorkspaceOf(this.#state)?.id) {
+    const terminal = workspaceId ? this.#terminals.get(workspaceId) : undefined;
+    if (!workspaceId || !terminal) return Promise.resolve();
+    this.#terminals.delete(workspaceId);
+    return terminal.close();
+  }
+
+  /**
+   * Disconnecting ends this page's terminals, best effort: their terminal.close requests, answered
+   * (or given up after a second) before the old connection closes. One the request does not reach
+   * ends when the host's reattach time runs out. Undefined when there is nothing to wait for.
+   * @param {{ alp?: ReconnectingClient } | null} run
+   */
+  #endTerminals(run) {
+    const client = run?.alp?.state === 'open' ? run.alp.client : undefined;
+    const closing = [];
+    for (const terminal of this.#terminals.values()) {
+      const { terminalId, status } = terminal.getState();
+      terminal.dispose();
+      if (client && terminalId && status !== 'gone' && status !== 'closed') closing.push(client.request('terminal.close', { terminalId }, { timeoutMs: 1_000 }).catch(() => {}));
+    }
+    this.#terminals.clear();
+    return closing.length ? Promise.allSettled(closing) : undefined;
+  }
 
   // ---- events and trees --------------------------------------------------------------------
 
