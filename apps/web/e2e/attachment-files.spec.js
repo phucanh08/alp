@@ -3,10 +3,12 @@
 // alpd's attachment store, what the runtime read (the fake Codex echoes each staged file's SHA-256
 // and length), and one stored object and one receipt across a connection dropped mid-upload.
 //
-// Which runtime reads attachment parts is alpd's to say (a session's `promptAttachments`). Until a
-// host's Codex runtime does, alpd refuses such a prompt (1005 attachment_unsupported) after the
-// upload: the refusal tests show that honestly, with the snapshot field put in on the wire so the
-// app tries; the success test then skips itself (set ALP_WEB_E2E_REQUIRE_FILES=1 to fail instead).
+// Which runtime reads attachment parts is alpd's to say (a session's `promptAttachments`); the fake
+// Codex session lists ['file.path'], as Codex does. A runtime that does not is shown two ways: the
+// snapshot field taken out on the wire (the app refuses before uploading), and session.prompt
+// answered with the gateway's own 1005 attachment_unsupported frame after a real upload (as alpd
+// answers for ACP or Antigravity; its own refusal is covered by the daemon's tests), so the app's
+// handling of that answer is checked on every run.
 import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -23,26 +25,28 @@ const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 /** 3000 bytes of every value, NULs included: a file no text path could carry. */
 const BINARY = Buffer.from(Array.from({ length: 3000 }, (_, index) => (index * 7) % 256));
 const TEXT = Buffer.from('hello\nworld\n');
+/** The gateway's text for alpd's 1005 attachment_unsupported (apps/gateway/src/connection.js ATTACHMENT_REFUSALS). */
+const ATTACHMENT_UNSUPPORTED = 'This session\'s runtime cannot read attachments yet; they stay stored and the prompt was not sent';
 const RUNTIME_REFUSAL = /cannot read attachments yet; they stay stored and the prompt was not sent/;
 
 /**
  * Watches the app's gateway WebSocket. `snapshot`: 'keep' passes frames as they are; 'strip'
- * removes `promptAttachments` from every session row (the runtime reads no files); 'add' puts
- * ['file.path'] in rows without it (so the app tries and alpd answers). `native` tells whether
- * alpd itself listed promptAttachments for a session. `dropOnChunk` closes the page's socket right
- * after the first attachment.chunk went out, before its answer.
+ * removes `promptAttachments` from every session row (the runtime reads no files). `native` tells
+ * whether alpd itself listed promptAttachments for a session. `refuseAttachments` answers every
+ * session.prompt carrying an attachment part with the gateway's 1005 attachment_unsupported error
+ * frame instead of passing it on (`refused` counts them). `dropOnChunk` closes the page's socket
+ * right after the first attachment.chunk went out, before its answer.
  * @param {import('@playwright/test').Page} page
- * @param {{ snapshot?: 'keep' | 'strip' | 'add', dropOnChunk?: boolean }} [options]
+ * @param {{ snapshot?: 'keep' | 'strip', refuseAttachments?: boolean, dropOnChunk?: boolean }} [options]
  */
-async function watchGateway(page, { snapshot = 'keep', dropOnChunk = false } = {}) {
-  const seen = { native: false, sockets: 0, begins: /** @type {any[]} */ ([]), dropped: false };
+async function watchGateway(page, { snapshot = 'keep', refuseAttachments = false, dropOnChunk = false } = {}) {
+  const seen = { native: false, sockets: 0, begins: /** @type {any[]} */ ([]), dropped: false, refused: 0 };
   const rewrite = value => {
     if (Array.isArray(value)) { value.forEach(rewrite); return; }
     if (!value || typeof value !== 'object') return;
     if (typeof value.id === 'string' && typeof value.runtime === 'string') {
       if (Array.isArray(value.promptAttachments) && value.promptAttachments.length) seen.native = true;
       if (snapshot === 'strip') delete value.promptAttachments;
-      if (snapshot === 'add' && !value.promptAttachments) value.promptAttachments = ['file.path'];
     }
     for (const inner of Object.values(value)) rewrite(inner);
   };
@@ -55,6 +59,11 @@ async function watchGateway(page, { snapshot = 'keep', dropOnChunk = false } = {
       let request;
       try { request = JSON.parse(String(message)); } catch {}
       if (request?.method === 'attachment.begin') seen.begins.push(request.params);
+      if (refuseAttachments && request?.method === 'session.prompt' && request.params?.content?.some(part => part?.type === 'attachment')) {
+        seen.refused += 1;
+        ws.send(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: 1005, message: ATTACHMENT_UNSUPPORTED, data: { reason: 'attachment_unsupported' } } }));
+        return;
+      }
       server.send(message);
       if (dropOnChunk && !seen.dropped && request?.method === 'attachment.chunk') {
         seen.dropped = true;
@@ -65,11 +74,10 @@ async function watchGateway(page, { snapshot = 'keep', dropOnChunk = false } = {
     });
     server.onMessage(message => {
       if (closed) return;
-      if (snapshot === 'keep' && seen.native) { ws.send(message); return; }
       let frame;
       try { frame = JSON.parse(String(message)); } catch { ws.send(message); return; }
       rewrite(frame);
-      ws.send(JSON.stringify(frame));
+      ws.send(snapshot === 'keep' ? message : JSON.stringify(frame));
     });
   });
   return seen;
@@ -111,11 +119,10 @@ test('files a token or a runtime cannot take are refused before anything is uplo
   await other.close();
 });
 
-test('alpd refusing the prompt (attachment_unsupported) is shown, never as sent; Retry uploads nothing again', async ({ page }) => {
-  const seen = await watchGateway(page, { snapshot: 'add' });
+test('a prompt refused attachment_unsupported is shown, never as sent; Retry uploads nothing again', async ({ page }) => {
+  const seen = await watchGateway(page, { refuseAttachments: true });
   await connect(page, world, world.tokens.fileWriter);
   await newSession(page, 'Files the runtime refuses');
-  test.skip(seen.native, 'This host\'s Codex runtime reads attachment parts: the success test covers it.');
   const input = page.getByTestId('composer-attach-input');
   await input.setInputFiles([{ name: 'notes.txt', mimeType: 'text/plain', buffer: TEXT }, { name: 'extra.txt', mimeType: 'text/plain', buffer: TEXT }]);
   const chips = page.getByTestId('composer-file');
@@ -136,9 +143,12 @@ test('alpd refusing the prompt (attachment_unsupported) is shown, never as sent;
   const stored = (await world.storedAttachments()).filter(entry => entry.name === 'notes.txt' && entry.sessionId === seen.begins[0]?.sessionId);
   expect(stored).toEqual([expect.objectContaining({ state: 'committed', size: TEXT.length, sha256: sha256(TEXT) })]);
   expect(await world.promptReceipts(seen.begins[0].sessionId)).toEqual([]);
+  expect(seen.refused).toBe(1);
 
   await pending.getByRole('button', { name: 'Retry' }).click();
+  await expect.poll(() => seen.refused).toBe(2);
   await expect(pending.getByRole('alert')).toContainText(RUNTIME_REFUSAL);
+  await expect(page.getByTestId('user-message')).toHaveCount(0);
   expect(seen.begins).toHaveLength(1);
   expect((await world.storedAttachments()).filter(entry => entry.sessionId === seen.begins[0].sessionId)).toHaveLength(1);
   await pending.getByRole('button', { name: 'Discard' }).click();
@@ -149,7 +159,8 @@ test('a dropped and a picked file reach the runtime byte for byte; the timeline 
   const seen = await watchGateway(page);
   await connect(page, world, world.tokens.fileWriter);
   await newSession(page, 'Read my files');
-  test.skip(!seen.native && process.env.ALP_WEB_E2E_REQUIRE_FILES !== '1', 'Waits for the runtime integration (#121 J): this host\'s Codex runtime does not list promptAttachments yet.');
+  // alpd itself says the fake Codex session reads files: nothing on the wire was changed.
+  expect(seen.native).toBe(true);
   await expect(page.getByRole('button', { name: 'Attach files' })).toBeVisible();
   await dropFiles(page, [{ name: 'blob.bin', type: 'application/octet-stream', buffer: BINARY }]);
   await page.getByTestId('composer-attach-input').setInputFiles([{ name: 'notes.txt', mimeType: 'text/plain', buffer: TEXT }]);
@@ -179,8 +190,8 @@ test('a dropped and a picked file reach the runtime byte for byte; the timeline 
   for (const hidden of [world.home, home, path.join(world.home, 'state', 'staged'), path.join(home, 'state', 'staged')]) expect(html).not.toContain(hidden);
 });
 
-test('a connection dropped mid-upload continues the same upload: one object, at most one receipt', async ({ page }) => {
-  const seen = await watchGateway(page, { snapshot: 'add', dropOnChunk: true });
+test('a connection dropped mid-upload continues the same upload: one object, one receipt', async ({ page }) => {
+  const seen = await watchGateway(page, { dropOnChunk: true });
   await connect(page, world, world.tokens.fileWriter);
   await newSession(page, 'Upload across a drop');
   // Over three chunks (256 KiB each through the gateway), so the drop comes mid-upload.
@@ -188,13 +199,9 @@ test('a connection dropped mid-upload continues the same upload: one object, at 
   await page.getByTestId('composer-attach-input').setInputFiles([{ name: 'big.bin', mimeType: 'application/octet-stream', buffer: big }]);
   await composer(page).fill('Read the big file');
   await composer(page).press('Enter');
-  if (seen.native) {
-    await expect(assistant(page).last()).toContainText(`file big.bin: sha256 ${sha256(big)}, ${big.length} bytes`, { timeout: 60_000 });
-    await expect(page.getByTestId('user-message-file')).toContainText('big.bin');
-  } else {
-    await expect(page.getByTestId('pending-message').getByRole('alert')).toContainText(RUNTIME_REFUSAL, { timeout: 60_000 });
-    await expect(page.getByTestId('user-message')).toHaveCount(0);
-  }
+  await expect(assistant(page).last()).toContainText(`file big.bin: sha256 ${sha256(big)}, ${big.length} bytes`, { timeout: 60_000 });
+  await expect(page.getByTestId('user-message-file')).toContainText('big.bin');
+  expect(seen.native).toBe(true);
   expect(seen.dropped).toBe(true);
   expect(seen.sockets).toBeGreaterThanOrEqual(2);
   // Begun again on the new connection under the same requestId: the same upload, continued.
@@ -203,5 +210,5 @@ test('a connection dropped mid-upload continues the same upload: one object, at 
   const sessionId = seen.begins[0].sessionId;
   const stored = (await world.storedAttachments()).filter(entry => entry.sessionId === sessionId);
   expect(stored).toEqual([expect.objectContaining({ name: 'big.bin', state: 'committed', size: big.length, sha256: sha256(big) })]);
-  expect(await world.promptReceipts(sessionId)).toHaveLength(seen.native ? 1 : 0);
+  expect(await world.promptReceipts(sessionId)).toHaveLength(1);
 });
