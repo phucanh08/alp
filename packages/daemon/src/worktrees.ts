@@ -89,7 +89,12 @@ export function createWorkspaceWorktrees(
       const { worktree, ...row } = w;
       let branch: string | null = null;
       try {
-        branch = (await user_worktree.repositoryIdentity(w.directory)).branch;
+        // The registry keeps the directory as given (it may pass through a symlink, e.g. /var on
+        // macOS) and its realpath as canonical; read the checkout only where that identity still
+        // holds. A record with no canonical identity is read only at its own, already canonical, path.
+        const canonical = await realpath(w.directory);
+        if (canonical === (w.canonical ?? w.directory))
+          branch = (await user_worktree.repositoryIdentity(canonical)).branch;
       } catch {}
       return { ...row, branch, ...(worktree ? { managedWorktree: true } : {}) };
     },

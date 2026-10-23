@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm, realpath, access } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, realpath, access, symlink } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -316,4 +316,34 @@ test('restored pending native create remains unreconciled by its historical cred
   await assert.rejects(service.mutate('create', request, context), e => e.data?.reason === 'identity_changed');
   assert.equal((await restoredRegistry.snapshot()).workspaces.length, 1);
   await access(path.join(pending.directory, 'file'));
+});
+
+test('describe reports the branch of a workspace registered through a symlinked path, and none once its identity moves', async t => {
+  const f = await fixture(t);
+  // A /var -> /private/var style alias: the registry keeps the path as given and its realpath as canonical.
+  const alias = path.join(f.root, 'alias');
+  const moved = path.join(f.root, 'moved');
+  await symlink(f.root, alias);
+  const registry = createRegistry(f.home);
+  await registry.mutate('project.register', { directory: path.join(alias, 'repo') }, { requestId: 'register' });
+  const w = (await registry.snapshot()).workspaces[0];
+  assert.equal(w.directory, path.join(alias, 'repo'));
+  assert.equal(w.canonical, f.source);
+  const service = createWorkspaceWorktrees(f.home, registry, async (_d, run) => run(), async () => {});
+  const branch = git(f.source, 'symbolic-ref', '--short', 'HEAD');
+  assert.equal((await service.describe(w)).branch, branch);
+  // A record with no recorded canonical identity is read only at a path that is canonical itself.
+  const { canonical: _, ...legacy } = w;
+  assert.equal((await service.describe(legacy)).branch, null);
+  assert.equal((await service.describe({ ...legacy, directory: f.source })).branch, branch);
+  // A detached checkout still reports no branch.
+  git(f.source, 'checkout', '-q', '--detach');
+  assert.equal((await service.describe(w)).branch, null);
+  git(f.source, 'checkout', '-q', branch);
+  // Retargeting the alias to another repository must not show that repository's branch.
+  await mkdir(path.join(moved, 'repo'), { recursive: true });
+  git(path.join(moved, 'repo'), 'init', '-q', '-b', 'elsewhere');
+  await rm(alias);
+  await symlink(moved, alias);
+  assert.equal((await service.describe(w)).branch, null);
 });
