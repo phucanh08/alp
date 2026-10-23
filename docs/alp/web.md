@@ -29,8 +29,8 @@ Số mục (§) có thể được code và test tham chiếu; giữ ổn địn
 | New session | Màn hình như tab new agent của Paseo: tin đầu tiên, chọn team/model/thinking/permissions, `session.preview`, nhớ lựa chọn lần trước (§4.2). |
 | Phục hồi | Reconnect có backoff, resume theo cursor, reload trang, gateway hoặc alpd khởi động lại (§5). |
 
-Không có trong beta (app ghi rõ, không fallback sang Paseo hay app nhúng): CRUD workspace, git và
-file (tab Changes, Diff, Files chỉ có giao diện), sửa library của host hoặc cấu hình thực thi, thêm/kiểm tra provider,
+Không có trong beta (app ghi rõ, không fallback sang Paseo hay app nhúng): CRUD workspace, ghi git
+(commit, push, pull, đổi nhánh) và sửa file, sửa library của host hoặc cấu hình thực thi, thêm/kiểm tra provider,
 usage, đổi ngôn ngữ agent, plugin, pair device.
 
 Terminal (#121 H, §12.10): tab Terminal chạy shell thật trên máy chạy alpd, **bằng tài khoản chạy
@@ -188,8 +188,9 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
   `[output lost: …]`; `exit` hiện "Process exited (code N / reason)" và tắt nhập; client khác
   attach thì hiện "Opened in another client" với nút Reattach. Disconnect kết thúc terminal của
   trang; reload hay đóng tab thì host giữ terminal 60 s để attach lại. Mỗi workspace một terminal.
-- Changes, Diff, Files mới có giao diện: panel ghi "not available in this beta" vì
-  gateway chưa có git, file. Backend là việc riêng.
+- Changes và Diff đọc Git của workspace qua gateway, chỉ đọc (`workspace.git.status`/`diff`, #121 G1;
+  nội dung diff cần thêm `files.read`); Files liệt kê và đọc file text (`workspace.files.*`, cần
+  `files.read`). Không commit, push hay sửa file.
 - Panel Tasks liệt kê task và có form tạo task.
 - Bấm một task mở **tab chi tiết** ở cột giữa, gồm:
   - mô tả, handoff, closed;

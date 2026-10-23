@@ -1338,8 +1338,8 @@ or host path.
 anything else counts as off): `{ "version": 1, "allowRemoteTerminal": true, "limits"?: { ... } }`.
 The default is off. `alp terminal allow` writes it (after stating what it grants) and
 `alp terminal deny` turns it off; `alp terminal status` shows it. No RPC can change it, a backup never
-carries it, and a gateway credential cannot imply it. alpd reads the file again at every
-`terminal.create` and `terminal.attach` and at least every 5 s: once it is off (or unusable) every
+carries it, and a gateway credential cannot imply it. alpd reads the file again at every `terminal.*`
+call and at least every 5 s: once it is off (or unusable) every
 terminal is killed (`exit` reason `disabled`) and new ones are refused (`1005 terminal_disabled`).
 `daemon.hello` lists capability `terminal` with `terminalLimits` only while the switch is on, on
 macOS and Linux, and when the PTY module (`node-pty`, an optional dependency) loads. Windows is not
@@ -1401,11 +1401,15 @@ connection closes, its terminals stay running for `reconnectMs` for an attach of
 and epoch.
 
 **Ending a terminal** (close, revoke, idle, lifetime, detach timeout, switch off, alpd shutdown) sends
-`SIGHUP` to its process group, then after 1 s `SIGKILL` to every process still in the terminal's
-process tree: the shell's descendants, every process in their process groups and, on Linux, its
-session. A program that deliberately leaves both (a new session and a re-parented, double-forked
-daemon) outlives the terminal, as with any terminal; alpd does not track it. If alpd itself dies the
-kernel hangs up the PTY. **Audit**: alpd logs each terminal's lifecycle (`ALPD_TERMINAL_*`: created,
+`SIGHUP` to every process of the terminal, then after 1 s `SIGKILL` to every one still running. Its
+processes are identified afresh from the process table at that moment, never from a remembered pid or
+process group id (which may have been reused): every process whose environment holds the terminal's own
+random `ALP_TERMINAL_ID` (set in the shell's environment, so inherited by everything it starts, wherever
+it went), and, while the shell still runs, the shell and every process whose controlling terminal is its
+PTY; on Linux also its session; then their descendants and the members of their live process groups.
+Never alpd or its process group, never a process older than the terminal. A program that both clears its
+environment and leaves the session (for example `env -i setsid …`) outlives the terminal, as with any
+terminal; alpd does not track it. If alpd itself dies the kernel hangs up the PTY. **Audit**: alpd logs each terminal's lifecycle (`ALPD_TERMINAL_*`: created,
 attached, detached, ended with its reason) with the principal, terminal id and workspace id; never
 input, output or the environment.
 
