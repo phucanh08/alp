@@ -148,7 +148,10 @@ export const NO_FILES = Object.freeze({ maxObjectBytes: 0, maxPerPrompt: 0, maxP
 /**
  * One file attached to a message: its bytes until uploaded, then also its attachment id.
  * `received` counts the bytes the host holds while it uploads; `error` says why it did not.
- * @typedef {{ id: string, type: 'file', name: string, mimeType: string, size: number, data: Uint8Array, attachmentId?: string, received?: number, error?: string }} FileAttachment
+ * `started`: an upload of it was begun (it may hold one of the host's active-upload slots until
+ * committed or aborted). `attempt` counts fresh uploads after the host lost a committed one (its
+ * requestId changes with it, uploadRequestId).
+ * @typedef {{ id: string, type: 'file', name: string, mimeType: string, size: number, data: Uint8Array, attachmentId?: string, received?: number, error?: string, started?: boolean, attempt?: number }} FileAttachment
  */
 
 const LIMIT_KEYS = /** @type {const} */ (['maxObjectBytes', 'maxPerPrompt', 'maxPromptBytes', 'maxChunkBytes']);
@@ -240,7 +243,8 @@ let files = 0;
 
 /**
  * Reads the files that would fit next to `current`: each is read only once it is known to fit.
- * Answers the files read and, when one was left out, why (the first reason).
+ * Answers the files read and, when one was left out, why (the first reason). A file the browser
+ * cannot read (removed, no permission) is left out with its reason; the rest are still read.
  * @param {ReadonlyArray<FileAttachment>} current
  * @param {ArrayLike<{ name?: string, type?: string, size: number, arrayBuffer: () => Promise<ArrayBuffer> }>} picked
  * @param {FileLimits} limits
@@ -254,7 +258,9 @@ export async function readFiles(current, picked, limits) {
     const name = fileName(file.name);
     const refuse = fileLimitRefusal([...current, ...added], name, file.size, limits);
     if (refuse) { error ??= refuse; continue; }
-    const data = new Uint8Array(await file.arrayBuffer());
+    let data;
+    try { data = new Uint8Array(await file.arrayBuffer()); }
+    catch { error ??= `Could not read ${name}.`; continue; }
     // The size is what was read: a file that changed since it was picked is sent as it is now.
     added.push({ id: `file-${++files}`, type: 'file', name, mimeType: fileType(file), size: data.length, data });
   }
@@ -281,9 +287,30 @@ export function fitFiles(current, added, limits) {
  * The upload requestId of a message's file: the message's first clientMessageId (`key`, kept when
  * the message is sent again under a new one) and the file's place in it. The same file of the same
  * message always resumes the same upload, and a committed one answers its attachment again.
- * @param {string} key @param {number} slot
+ * `attempt` (0 first) is raised only when the host no longer has the committed object (a prompt
+ * refused not_found or attachment_unavailable): a fresh upload, under a requestId of its own.
+ * @param {string} key @param {number} slot @param {number} [attempt]
  */
-export const uploadRequestId = (key, slot) => `${key}:file-${slot}`;
+export const uploadRequestId = (key, slot, attempt = 0) => `${key}:file-${slot}${attempt ? `.${attempt}` : ''}`;
+
+/**
+ * Aborts, best effort, the upload of `file` begun under `requestId` and not committed, so it does
+ * not hold one of the host's active-upload slots until it expires: begin again with the same
+ * requestId answers the upload's id (§12.6), then attachment.abort. A committed object is left as
+ * it is (alpd collects an unreferenced one). Never throws; answers whether it aborted.
+ * @param {{ begin: (params: any) => Promise<any>, abort: (uploadId: string) => Promise<any> }} api
+ * @param {{ sessionId: string, file: Pick<FileAttachment, 'name' | 'mimeType' | 'data'>, requestId: string, digest: (data: Uint8Array) => Promise<string> }} upload
+ */
+export async function abortUpload(api, { sessionId, file, requestId, digest }) {
+  try {
+    const begun = await api.begin({ sessionId, name: file.name, size: file.data.length, mimeType: file.mimeType, sha256: await digest(file.data), requestId });
+    if (begun?.state !== 'uploading' || typeof begun.uploadId !== 'string') return false;
+    await api.abort(begun.uploadId);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The prompt parts of a message: its text (when any), then its images inline, then its files by
