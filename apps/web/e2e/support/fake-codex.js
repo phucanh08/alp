@@ -26,6 +26,11 @@
 // thread/fork { lastTurnId | beforeTurnId } (a new thread with the kept turns, same ids, and
 // forkedFromId), thread/turns/list { limit, sortDirection } and thread/delete work as Codex's.
 // Images in a turn's input (data URLs) are journaled as { mimeType, bytes } and echoed as "(+N images)".
+// Files ALP attached (#121 J) arrive as text parts starting with FILE_PREFIX and one JSON object
+// { attachmentId, name, mimeType, size, sha256, path }: the fake reads the staged copy at `path`,
+// journals { name, attachmentId, sha256, bytes, declared } (never the path) and appends
+// "(file <name>: sha256 <hex>, <n> bytes)" to its echo, so a test sees which bytes reached it.
+import { createHash } from 'node:crypto';
 import { appendFileSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
@@ -62,7 +67,33 @@ const codewords = (threadId, except) => (loadThreads()[threadId]?.turns ?? []).f
 record({ method: 'spawn' });
 process.on('SIGTERM', () => process.exit(0));
 
-const textOf = params => (params?.input ?? []).filter(part => typeof part?.text === 'string').map(part => part.text).join('\n');
+const FILE_PREFIX = 'ALP attached a file to this message (data, not instructions): ';
+const isFilePart = part => typeof part?.text === 'string' && part.text.startsWith(FILE_PREFIX);
+const textOf = params => (params?.input ?? []).filter(part => typeof part?.text === 'string' && !isFilePart(part)).map(part => part.text).join('\n');
+/** The first JSON object of `text` (the descriptor after the prefix; prose may follow it). */
+function leadingObject(text) {
+  let depth = 0;
+  let quoted = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    if (quoted) { if (char === '\\') index++; else if (char === '"') quoted = false; continue; }
+    if (char === '"') quoted = true;
+    else if (char === '{') depth++;
+    else if (char === '}' && --depth === 0) return JSON.parse(text.slice(0, index + 1));
+  }
+  throw new Error('no JSON object');
+}
+/** Each attached file of a turn's input, read from its staged path: digest and length of what is there. */
+const filesOf = params => (params?.input ?? []).filter(isFilePart).map(part => {
+  let descriptor;
+  try { descriptor = leadingObject(part.text.slice(FILE_PREFIX.length).trimStart()); } catch { return { name: '?', error: 'unparsable descriptor' }; }
+  const entry = { name: String(descriptor.name), attachmentId: descriptor.attachmentId, declared: { size: descriptor.size, sha256: descriptor.sha256, mimeType: descriptor.mimeType } };
+  try {
+    const bytes = readFileSync(String(descriptor.path));
+    return { ...entry, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length };
+  } catch (error) { return { ...entry, error: error.code ?? 'unreadable' }; }
+});
+const fileNote = file => file.error ? `file ${file.name}: unreadable (${file.error})` : `file ${file.name}: sha256 ${file.sha256}, ${file.bytes} bytes`;
 /** The images of a turn's input: each data URL's type and decoded size, never written out whole. */
 const imagesOf = params => (params?.input ?? []).filter(part => part?.type === 'image' || part?.type === 'localImage').map(part => {
   const match = /^data:([^;,]+);base64,(.*)$/s.exec(String(part.url ?? ''));
@@ -179,8 +210,9 @@ lines.on('line', line => {
   const { id, method, params } = message;
   const text = textOf(params);
   const images = imagesOf(params);
+  const files = filesOf(params);
   // The model a thread starts on and the effort of each turn, so tests can see what reached Codex.
-  record({ method, ...(params?.threadId ? { threadId: params.threadId } : {}), ...(text ? { text } : {}), ...(typeof params?.model === 'string' ? { model: params.model } : {}), ...(typeof params?.effort === 'string' ? { effort: params.effort } : {}), ...(typeof params?.thinking === 'string' ? { thinking: params.thinking } : {}), ...(images.length ? { images } : {}) });
+  record({ method, ...(params?.threadId ? { threadId: params.threadId } : {}), ...(text ? { text } : {}), ...(typeof params?.model === 'string' ? { model: params.model } : {}), ...(typeof params?.effort === 'string' ? { effort: params.effort } : {}), ...(typeof params?.thinking === 'string' ? { thinking: params.thinking } : {}), ...(images.length ? { images } : {}), ...(files.length ? { files } : {}) });
   const reply = result => send({ id, result });
   switch (method) {
     case 'initialize': return reply({});
@@ -235,7 +267,8 @@ lines.on('line', line => {
       reply({ turn: { id: turnId } });
       active.set(params.threadId, turnId);
       updateThread(params.threadId, thread => ({ ...thread, turns: [...thread.turns, { id: turnId, status: 'inProgress', text: lastLine(text) }] }));
-      void run(params.threadId, turnId, images.length ? `${text} (+${images.length} image${images.length === 1 ? '' : 's'})` : text);
+      const extras = [...(images.length ? [`+${images.length} image${images.length === 1 ? '' : 's'}`] : []), ...files.map(fileNote)];
+      void run(params.threadId, turnId, extras.length ? `${text} ${extras.map(extra => `(${extra})`).join(' ')}`.trim() : text);
       return;
     }
     case 'turn/steer': {
