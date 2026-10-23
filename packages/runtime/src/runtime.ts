@@ -3564,7 +3564,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     live.mapping = plan.shape.mapping;
     live.graph = plan.shape.graph;
     live.spec = plan.shape.spec;
-    runLog(rootOf(sessionId), { event: 'session.configured', sessionId, agent, changes: plan.changes, from, to, threadId: live.threadId, native: { model: native?.model, reasoningEffort: native?.reasoningEffort } });
+    // Only Codex answers what it resumed with (its effort applies from the next turn/start); Claude's answer is ALP's own echo.
+    const answered = live.runtimeKind === 'codex' ? { ...(typeof native?.model === 'string' ? { model: native.model } : {}), ...(typeof native?.reasoningEffort === 'string' ? { reasoningEffort: native.reasoningEffort } : {}) } : undefined;
+    runLog(rootOf(sessionId), { event: 'session.configured', sessionId, agent, changes: plan.changes, from, to, threadId: live.threadId, ...(answered ? { native: answered } : {}) });
     if (plan.changes.includes('team')) {
       // The old team's supervisor ends at this boundary (it reviews nothing: restartRefusal saw to it);
       // the new team's, if it has one, starts beside the root as at open.
@@ -3576,7 +3578,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     emit(sessionId, { type: 'session.updated', session: updated });
     return {
       session: updated, effective: { ...plan.proposed, ...(live.instructionsSha ? { instructionsSha: live.instructionsSha } : {}) }, status: 'applied', restarted: true,
-      native: { ...(typeof native?.model === 'string' ? { model: native.model } : {}), ...(typeof native?.reasoningEffort === 'string' ? { reasoningEffort: native.reasoningEffort } : {}) },
+      ...(answered ? { native: answered } : {}),
     };
   }
 

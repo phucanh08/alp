@@ -163,6 +163,11 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
     `session.write` cũng cho phép reload một root (`session.reload`: khởi động lại process native trên
     chính hội thoại và cấu hình của nó; §5.16). `session.resumeCommand` (lệnh `alp attach <id>` để copy)
     chỉ cần `session.read`.
+    `session.write` cũng cho phép đổi **model và effort** của một root đang sống (`session.configure`
+    với `model`/`thinking`, trong các mode của grant; §5.17).
+  - `session.team.write`: đổi **team** của một root đang sống (`session.configure { team }`, §5.17).
+    Dùng cùng `session.write`; không kéo theo quyền nào, không bao giờ là mặc định:
+    `--permission session.read,session.write,session.team.write`.
   Quyền write kéo theo quyền read cùng họ. `files.read` không kéo theo quyền nào và không quyền nào
   kéo theo nó. Không có `--permission`, CLI cấp bốn quyền `session.*` và `project.*`, **không bao
   giờ** cấp `files.read`: chủ máy phải ghi rõ `--permission files.read` cho từng credential được đọc
@@ -369,7 +374,8 @@ Cột Test dùng các mã sau:
 | `attachment.get` | `attachments` | chỉ attachment của chính credential (alpd kiểm binding); chỉ metadata, không byte, không path | attachments.write + session.read | exposed | P S R I |
 | `attachment.delete` | `attachments` | như `attachment.get`; attachment còn được tham chiếu → `1004 attachment_referenced` | attachments.write + session.write | exposed | P S I |
 | `session.interrupt` | — | session; **stop**: root luôn được; assignment khi mode các requester trong grant | session.write | exposed | P S M I |
-| `session.configure` | — | session; mode mới trong grant | session.write | exposed | P S M |
+| `session.configure` | — (mode); `session.configure.live` (model, thinking, team) | session; mode mới trong grant. Với `model`/`thinking`/`team`: root thuộc grant (tra mới; con → `1003 not_root`), grant có `modes` chỉ đổi root mà cả tree chạy trong các mode đó và mode mà preview nói nó sẽ chạy cũng phải trong đó; `team` cần thêm `session.team.write`; `requestId` theo credential; answer và `configured` được chiếu; lỗi alpd thành câu cố định giữ code, reason và `action` (§5.17) | session.write (team: + session.team.write) | exposed | P S R M I |
+| `session.configure.preview` | `session.configure.live` | root thuộc grant (tra mới); chỉ đọc; answer chiếu `projectConfigurePreview` (tên, boolean, số đếm; MCP chỉ tên và loại, không lệnh hay đường dẫn; message cố định theo reason) | session.read | exposed | P S R |
 | `session.close` | — | session; **stop** như `interrupt` | session.write | exposed | P S M |
 | `session.rename` | — | session | session.write | exposed | P S |
 | `session.archive` | — | session | session.write | exposed | P S |
@@ -809,6 +815,37 @@ session trong grant. Gateway dựng lại lệnh từ session id đã kiểm (`r
 của alpd đúng y như vậy; khác đi (lệnh `codex resume`/`claude --resume`, thêm `env`, `ALP_HOME`, đường
 dẫn) là `1000`, có log `ALP_GATEWAY_RESUME_COMMAND_REFUSED`. Lệnh không mang `ALP_HOME`: host có alpd chạy
 với home khác thì người dùng tự đặt home đó khi chạy.
+
+### 5.17 Đổi model, effort hoặc team của phiên đang sống (issue #121, D)
+
+`session.configure { sessionId, model?, thinking?, team?, mode?, requestId, ifGeneration }`
+(docs/protocol/alp-json-rpc-v1.md §12.9, capability `session.configure.live`) đổi cấu hình của một root
+**ở ranh giới idle của cả cây**, bằng cách khởi động lại process native **trên chính hội thoại**, cùng
+session id; alpd chỉ ghi cấu hình mới sau khi runtime đã nhận (Codex phải trả lại đúng model), nếu không
+thì giữ cấu hình cũ và trả `1005 native_refused`. Không bao giờ chuyển sang runtime khác
+(`1005 runtime_mismatch`, `data.action: "session.create"`: tạo phiên mới) và không bao giờ thêm quyền
+(`1003 permission_escalation`: mode vượt profile hoặc cao hơn, hook hay MCP stdio mới).
+
+Gateway:
+- `model`/`thinking`: cần `session.write`; root thuộc grant, tra mới mỗi lần (con → `1003 not_root`);
+  grant giới hạn `modes` chỉ đổi root mà cả tree chạy trong các mode đó, như `session.prompt`
+  (`1003 mode`), và gateway hỏi `session.configure.preview` trước: mode mà alpd sẽ chạy sau thay đổi
+  cũng phải thuộc grant, nên một thay đổi không bao giờ đưa session ra ngoài credential.
+- `team`: cần thêm `session.team.write` (opt-in, không mặc định, không kéo theo quyền nào; thiếu →
+  `1003 grant` nêu `permission`), trước khi alpd biết tới request. Team chỉ là **id** của team mà host
+  định nghĩa (built-in, library, project); client không gửi được đường dẫn hay cấu hình nào.
+- `requestId` được namespace theo credential như fork/rewind/reload; param lạ bị bỏ, không tới alpd.
+- Answer phải là đúng root đó; summary chiếu như mọi summary (`conversation.configure` qua
+  `projectConversation`), `configured` qua `projectConfigured` (`effective`: tên, boolean, số đếm; MCP
+  chỉ `{ name, kind }`, không lệnh, đường dẫn hay instruction).
+- Lỗi alpd (`session_busy`, `session_closed`, `runtime_mismatch`, `agent_mismatch`,
+  `permission_escalation`, `team_not_found`, `native_refused`, `stale_generation`, `key_conflict`,
+  `outcome_unknown`…) tới client thành câu cố định giữ code, reason và `action: "session.create"`.
+
+`session.configure.preview { sessionId, model?, thinking?, team?, mode? }` chỉ đọc, cần `session.read`,
+root thuộc grant: trả cấu hình hiện tại và cấu hình sau thay đổi, những gì đổi, có phải khởi động lại
+không, alpd có nhận **bây giờ** không và vì sao, cùng danh sách team; message là câu cố định theo
+reason. `session.configure` chỉ đổi mode thì giữ nguyên hành vi cũ (§5.x bảng trên).
 
 ## 6. Streaming và recovery
 

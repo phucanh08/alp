@@ -27,6 +27,12 @@ alp-gateway serve                                                           # 12
   `attachment.get` (metadata only) `attachments.write` and `session.read`. Never a default, implies
   nothing: `--permission session.read,session.write,attachments.write`. Each upload is bound by alpd
   to the credential, its grant epoch, the project and the session; no path or URL ever crosses.
+- Live configure (capability `session.configure.live`): `session.configure` with `model` or
+  `thinking` needs `session.write` within the grant's modes (the mode the change would run with too);
+  with `team` also `session.team.write`, never a default and implying nothing:
+  `--permission session.read,session.write,session.team.write`. The root's native process restarts on
+  the same conversation at the idle barrier; never another runtime, never more permissions.
+  `session.configure.preview` (read only) needs `session.read`.
 - Conversation fork and rewind (capabilities `session.fork`, `session.rewind`): `session.rewind`
   needs `session.write`, `session.fork` `session.write` **and** `session.read` (it reads the source).
   Only a root in the grant; a fork's destination `workspaceId` must be a granted workspace. Only the

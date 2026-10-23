@@ -177,7 +177,7 @@ runs before all of them pass**:
 | `quota_exceeded` | 1005 | `attachment.begin` over the active uploads, principal or daemon quota; `data.limit` names it (§12.6) |
 | `attachment_unavailable` | 1005 | the attachment store cannot be used, or a referenced object's bytes cannot be read now (§12.6) |
 | `attachment_unsupported` | 1005 | `session.prompt` with attachments to a session whose runtime cannot read them (today's runtimes), or an alpd without the store; nothing was sent or recorded (§12.6) |
-| `session_busy` | 1004 | `session.rewind`: the root's tree is not idle (a turn, prompt delivery, child, assignment, question, mail or parked work) (§12.7) |
+| `session_busy` | 1004 | `session.rewind`, `session.reload`, a live `session.configure`: the root's tree is not idle (a turn, prompt delivery, child, assignment, question, mail or parked work) (§12.7–§12.9) |
 | `stale_generation` | 1004 | `session.fork`/`session.rewind`: `ifGeneration` is not the root's current history generation (§12.7) |
 | `turn_not_found` | 1001 | `session.fork`/`session.rewind`: no such turn in this generation (or branch) (§12.7) |
 | `turn_in_progress` | 1004 | `session.fork`/`session.rewind`: a turn the cut keeps (or, for a rewind, any turn) has not ended (§12.7) |
@@ -187,6 +187,10 @@ runs before all of them pass**:
 | `native_refused` | 1005 | `session.fork`/`session.rewind`: the native runtime refused, or its fork could not be verified; recorded and answered again (§12.7) |
 | `branch_not_found` | 1001 | `session.fork { branchId }`: no such branch of this root (§12.7) |
 | `attachment_forbidden` | 1003 | `session.fork`: the kept prompts reference attachments the caller's principal may not use (§12.7) |
+| `runtime_mismatch` | 1005 | `session.configure`: a model of another runtime than the session's; `data.action: "session.create"` (start a new session with it) (§12.9) |
+| `agent_mismatch` | 1005 | `session.configure`: a team whose main agent is not the session's agent; `data.action: "session.create"` (§12.9) |
+| `permission_escalation` | 1003 | `session.configure`: the change would run the session with more permissions (a mode beyond its profile, a higher mode) or a hook or stdio MCP server it did not run (§12.9) |
+| `team_not_found` | 1001 | `session.configure`: no team of that id for the project (§12.9) |
 
 Errors thrown by an extension's owner travel unchanged (`code`, `message`, `data`). Errors inside
 events (`session.failed`, `prompt.failed`, `turn.ended`) are `AlpError { message, code? }` with string
@@ -243,6 +247,7 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 | `session.rewind` | `session.rewind`: a root's conversation from before a turn, same id, later turns kept as a recoverable branch, files never changed; the `history.reset` event (§12.7). Same condition as `session.fork`. |
 | `session.reload` | `session.reload`: a live root's native process restarts on its own conversation and configuration, same id, history and receipts (§12.8). Listed with a store and a runtime that restarts a root on its own conversation, on macOS and Linux (not Windows). |
 | `session.resumeCommand` | `session.resumeCommand`: the `alp attach <sessionId>` command for the clipboard, as argv and POSIX/cmd.exe lines (§12.8). Listed with a store. |
+| `session.configure.live` | `session.configure` also takes `model`, `thinking` and `team` (with `requestId` and `ifGeneration`): a live root's configuration changes at the idle barrier through a restart on the same conversation, written only after the runtime took it; `session.configure.preview` (§12.9). Listed with a store and a runtime that restarts a root with a new configuration, on macOS and Linux (not Windows). |
 
 alpd before this revision already had the first three without listing them; the others are new. A method whose
 capability a daemon does not list answers `-32601`. A client that must work with
@@ -641,7 +646,8 @@ connection on the local socket acts as the owner.
 | `session.release` | detaches; may close an idle root | yes | — | session.read |
 | `session.prompt` | starts or steers a turn | with receipts (§10) | 1001, 1004, `persistence_failed` | session.write |
 | `session.interrupt` | cancels the running turn, closes child sessions | yes | 1001 | session.write |
-| `session.configure` | changes mode | yes (same mode) | 1000, 1001 | session.write |
+| `session.configure` | changes mode; with `session.configure.live`, a live root's model, effort or team (§12.9) | mode: yes (same mode); model/thinking/team: with `requestId` (§12.9) | 1000, 1001; with model/thinking/team -32602, 1001 `team_not_found`, 1003 `permission_escalation`, 1004, 1005 (§12.9) | session.write (team: + `session.team.write` through the gateway) |
+| `session.configure.preview` | read: what a change would run a live root with (§12.9) | yes | -32602, 1001, 1005 `session_closed` | session.read |
 | `session.close` | closes | no (second → 1001) | 1001 | session.write |
 | `session.rename` | renames a root; announced as `session.updated` (§8.1) | yes | -32602, 1001, `persistence_failed` | session.write |
 | `session.archive` | archives/unarchives a root, closes it | yes | -32602, 1001, `persistence_failed` | session.write |
@@ -1192,9 +1198,82 @@ grant limited to `modes` reloads only a root whose tree runs within them, as it 
 `session.resumeCommand` with `session.read`; it rebuilds the command from the id and passes it only when
 alpd answered the same (docs/alp/remote-gateway.md §5.15).
 
+### 12.9 Live configure (`session.configure` model/thinking/team, `session.configure.preview`)
+
+Capability `session.configure.live`, listed by an alpd with a store whose runtime restarts a root with a
+new configuration (today: Codex and Claude, on macOS and Linux; ACP and Antigravity are
+`1005 runtime_unsupported`). A summary's `conversation.configure` says whether this root's runtime can
+change it (the same `reason`s as fork, rewind and reload); the root must also be open and idle when the
+request comes. "Live" means the **same session id and conversation**, with the new configuration from the
+idle boundary on: a running turn is never interrupted, and nothing is shown as changed before it is.
+
+**`session.configure { sessionId, model?, thinking?, team?, mode?, requestId, ifGeneration }`** →
+`{ session, configured: { status, requested, effective, restarted }, duplicate? }`. Mode alone keeps the
+old method and its old answer (no `requestId`, no restart). With `model`, `thinking` or `team`, both
+`requestId` and `ifGeneration` (the history generation the client read, `1004 stale_generation`) are
+required (`-32602`), and:
+- `model` is native or prefixed with the session's own runtime (`codex:`, `claude:`); one the host offers
+  (ALP's catalog, `library.models`, or a model the project's settings give an agent of the team), else
+  `-32602`. A model of **another runtime is never a migration**: `1005 runtime_mismatch` with
+  `data.action: "session.create"` (start a new session with it). `thinking` must be an effort the model
+  takes (`-32602`); a model change keeps the session's effort while the new model takes it, else the
+  model's default. `team` is a team id the host defines for the project (built-in, library or project;
+  `1001 team_not_found`); a team whose main agent is not the session's agent is `1005 agent_mismatch`.
+  A team change keeps the model unless one is asked for too.
+- **Never more permissions**: a `mode` beyond the agent's permission profile, a team or effort change
+  that would raise the mode the session runs with, or a configuration that brings a hook or a stdio MCP
+  server the session did not run (an executable resource) is `1003 permission_escalation`.
+- The **whole tree must be idle** as for a reload (§12.8): no turn, child, assignment, question, mail,
+  parked work or supervisor review (`1004 session_busy`); prompts, scheduled deliveries, reopens and mail
+  wakes that arrive meanwhile wait, then reach the restarted process. A closed root is
+  `1005 session_closed` (open it first).
+- The root's native process restarts **with the new configuration on the same conversation** (Codex:
+  `thread/resume` of the same thread with the new model and effort, and every later `turn/start` names
+  both; Claude: the query restarts on the same transcript). The configuration is taken — written to the
+  session and its record, announced as `session.updated` — **only once the runtime took it**: Codex must
+  answer the model asked for. Otherwise the old configuration restarts on the same conversation and the
+  answer is `1005 native_refused`; nothing changed. A root with no turn yet starts a new, empty
+  conversation with it (there is none to keep).
+- A new team governs future delegations (its delegation graph, members' models and house rules); the
+  root's supervisor is replaced at the boundary by the new team's, if it has one. Assignments that ran
+  keep the team and model they started with.
+- The record keeps the effective model, effort, team and mode: a close and reopen, or a restart of alpd,
+  resumes with them.
+- Journaled as reload is (§12.7: `(sessionId, "configure", requestId)`, `duplicate: true` on a repeat,
+  another payload `1004 key_conflict`, a recorded refusal answered again, refusals before `prepared`
+  record nothing). A configure alpd stopped in the middle of is `1004 outcome_unknown` and never sent
+  again; at the next start alpd reconciles the session's record with what the runtime announced, so it
+  runs with all of the new configuration or none.
+
+`configured.status` is `applied` or `unchanged` (the configuration asked for is the one it runs);
+`effective` is the `EffectiveConfig` it runs with now (below); `restarted` whether its process restarted.
+
+**`session.configure.preview { sessionId, model?, thinking?, team?, mode? }`** → `{ preview: { current,
+proposed, changes, restart, allowed, reason?, message?, teams } }`, reading only (no file is written):
+the configuration the open root runs with and the one the change would resolve to, which of
+`model`/`thinking`/`team`/`mode` differ, whether applying it restarts the process, whether
+`session.configure` would take it **now** and why not (`reason`: `session_busy`, `session_closed`,
+`not_root`, `not_persistent`, `runtime_unsupported`, `runtime_mismatch`, `agent_mismatch`,
+`permission_escalation`, `team_not_found`, `invalid_params`), and the teams the host defines for the
+project. An `EffectiveConfig` is `{ team, teamLabel?, agent, runtime, model, thinking, mode,
+permissionProfile?, supervisor, maxPeers?, delegates, tools, mcpServers: [{ name, kind }], hooks,
+instructionsSha? }`: names, booleans and counts, never a path, command, credential or the instructions.
+
+The gateway exposes `session.configure` with model or thinking under `session.write` (a root in the
+grant, looked up afresh; a grant limited to `modes` drives only a root whose tree runs within them, and
+the mode the preview says the change would run with must be one of them too), with `team` only when the
+credential also holds the opt-in `session.team.write`, and `session.configure.preview` under
+`session.read`; it projects both answers and replaces alpd's messages with fixed ones per `reason`
+(docs/alp/remote-gateway.md §5.17).
+
 ## 13. Compatibility notes for this revision
 
 **Additive** (old clients unaffected):
+- Capability `session.configure.live` (§12.9): `session.configure` `model`, `thinking`, `team`,
+  `requestId`, `ifGeneration` and its `configured` and `duplicate` answer fields, `session.configure.preview`,
+  `$defs.effectiveConfig`, `$defs.configurePreview`, `$defs.configureOutcome`, the summary field
+  `conversation.configure`, and the error reasons `runtime_mismatch`, `agent_mismatch`,
+  `permission_escalation` and `team_not_found`. Mode-only `session.configure` is unchanged.
 - Capabilities `session.fork` and `session.rewind` (§12.7): the two methods, `$defs.forkProvenance` and
   `$defs.conversationBranch`, the summary fields `conversation`, `forkedFrom` and `branches`, the live
   `history.reset` event (an unknown event to old clients), `SessionSpec.restore.base` (internal), and the

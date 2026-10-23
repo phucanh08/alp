@@ -149,6 +149,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       cwd: session.projectRoot,
       workspaceId: directory.workspaceIdFor(session),
       model: modelOf(session),
+      thinkingOptionId: session.thinking,
       createdAt: session.createdAt ?? updatedAt,
       updatedAt,
       lastUserMessageAt: null,
@@ -549,6 +550,19 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     await alp!.request('session.create', { sessionId: session.id, spec: { cwd: session.projectRoot }, resume: true });
   }
 
+  /**
+   * A live change of a root's model, effort or team (session.configure, §12.9): the root is opened first
+   * when closed (configure needs it running), then changed with the bridge's own requestId under the
+   * conversation's current generation. alpd refuses what it cannot apply now; nothing is half applied.
+   */
+  async function configureLive(session: SessionSummary, changes: { model?: string; thinking?: string; team?: string }, requestId?: string) {
+    if (!alp!.capabilities?.includes('session.configure.live')) throw new Error('This ALP daemon cannot change a running agent\'s team or model; start a new agent');
+    if (session.conversation?.configure !== true) throw new Error('ALP cannot change this agent\'s team or model while it runs; start a new agent');
+    await open(session);
+    const { generation } = await alp!.request<HistoryPage>('session.history', { sessionId: session.id, limit: 1 });
+    await alp!.request('session.configure', { sessionId: session.id, ...changes, requestId: `paseo:${requestId ?? randomUUID()}`, ifGeneration: generation });
+  }
+
   async function teams(cwd?: string) {
     // Host settings have no project; the daemon library settings are not project settings.
     if (!cwd) return { teams: (await listTeams(undefined, { library: home })).filter(team => !team.error).map(team => ({ id: team.id, label: team.label ?? team.id, ...(team.description ? { description: team.description } : {}) })), team: 'pho', mode: 'workspace-write' };
@@ -849,6 +863,42 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       try {
         const session = known(message.agentId);
         if (typeof message.name === 'string' && message.name.trim()) await alp!.request('session.rename', { sessionId: session.id, title: message.name });
+        await refresh();
+        return reply(null);
+      } catch (error: any) {
+        return reply(error?.message ?? String(error));
+      }
+    },
+
+    /**
+     * Paseo's model picker on an existing agent (set_agent_model_request): an ALP root's "model" is its
+     * team (a custom root's, its runtime:model), so the choice is session.configure { team } (or
+     * { model }) on the live root, at the idle barrier through a restart on the same conversation
+     * (§12.9). Refused while it or its agents work, for another runtime or more permissions; the agent
+     * keeps what it ran with then, and the answer says why.
+     */
+    async set_agent_model_request(message: Inbound<'set_agent_model_request'>) {
+      const reply = (error: string | null): Outbound => ({ type: 'set_agent_model_response', payload: { requestId: message.requestId, agentId: message.agentId, accepted: !error, error } });
+      try {
+        const session = known(message.agentId);
+        if (!message.modelId) throw new Error(session.workflow.mode === 'custom' ? 'Choose a model' : 'Choose a team');
+        if (message.modelId === modelOf(session)) return reply(null);
+        await configureLive(session, session.workflow.mode === 'custom' ? { model: message.modelId } : { team: message.modelId }, message.requestId);
+        await refresh();
+        return reply(null);
+      } catch (error: any) {
+        return reply(error?.message ?? String(error));
+      }
+    },
+
+    /** Paseo's thinking picker on an existing agent: session.configure { thinking } on the live root (§12.9). */
+    async set_agent_thinking_request(message: Inbound<'set_agent_thinking_request'>) {
+      const reply = (error: string | null): Outbound => ({ type: 'set_agent_thinking_response', payload: { requestId: message.requestId, agentId: message.agentId, accepted: !error, error } });
+      try {
+        const session = known(message.agentId);
+        if (!message.thinkingOptionId) throw new Error('ALP runs an agent at a named effort; choose one');
+        if (message.thinkingOptionId === session.thinking) return reply(null);
+        await configureLive(session, { thinking: message.thinkingOptionId }, message.requestId);
         await refresh();
         return reply(null);
       } catch (error: any) {
