@@ -283,7 +283,8 @@ test('create: exactly a live registry workspace\'s directory, ALP\'s shell only;
   const chosen = await world.create(client, { cwd: '/w/a', workspaceId: 'ws-a2', size: { cols: 1000, rows: 0 } });
   assert.equal(chosen.terminal.workspaceId, 'ws-a2');
   const creates = world.alpd.calls.filter(call => call.method === 'terminal.create').map(call => call.params);
-  assert.deepEqual(creates[0], { workspaceId: 'ws-a', cols: 80, rows: 24, requestId: 'paseo:c1' });
+  assert.deepEqual({ ...creates[0], requestId: undefined }, { workspaceId: 'ws-a', cols: 80, rows: 24, requestId: undefined });
+  assert.match(creates[0].requestId, /^paseo:[0-9a-f]{64}$/, 'namespaced per client');
   assert.deepEqual([creates[1].cols, creates[1].rows], [500, 1], 'sizes are clamped to alpd\'s bounds');
   // Attached right away, so the terminal outlives a client that went away (alpd kills an unattached one).
   assert.deepEqual(world.alpd.methods().filter(method => method.startsWith('terminal.')), ['terminal.create', 'terminal.attach', 'terminal.create', 'terminal.attach']);
@@ -692,4 +693,17 @@ test('real: create, type, see the output; a new client gets a Restore holding it
   assert.equal(killed.success, true);
   await until(() => second.json.some(message => message.type === 'terminal_stream_exit' && message.payload.terminalId === id), 'terminal_stream_exit');
   await until(() => [...seen].every(pid => !alive(pid)), 'every process of the terminal gone after kill', 8000);
+});
+
+test('a create requestId is namespaced per Paseo client: two devices never share a terminal by reusing one', async t => {
+  const world = await setup(t);
+  const one = fakeClient('device-1');
+  const two = fakeClient('device-2');
+  const a = await world.call(one, { type: 'create_terminal_request', requestId: 'same', cwd: '/w/a' });
+  const b = await world.call(two, { type: 'create_terminal_request', requestId: 'same', cwd: '/w/a' });
+  const ids = world.alpd.terminalCalls().filter(call => call.method === 'terminal.create').map(call => call.params.requestId);
+  assert.equal(ids.length, 2);
+  assert.notEqual(ids[0], ids[1]);
+  assert.ok(ids.every(id => id.length <= 128 && !id.includes('device')), 'bounded, no client id in clear');
+  assert.notEqual(a.payload.terminal.id, b.payload.terminal.id);
 });
