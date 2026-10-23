@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
 import { openSync, writeSync } from 'node:fs';
 import { mkdir, open, readFile, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import templates from 'alp:templates';
 import { alpHome, daemonPaths, assertPrivateDirectory, PROTOCOL_VERSION, withDaemonLifecycle } from '@anhlp/alp-client/index';
-import { attachmentStageDir, createAlpRuntime, reclaimCopies, reclaimWorktrees } from '@anhlp/alp-runtime/index';
+import { attachmentStageDir, createAlpRuntime, reclaimCopies, reclaimWorktrees, stagingExposure } from '@anhlp/alp-runtime/index';
 import { createDaemonServer } from './server.js';
 import { acquireLock, heartbeat, releaseLock, updateLock } from './lock.js';
 import { createStore } from './store.js';
@@ -206,6 +207,10 @@ async function run(home: string) {
   // Requested starts lift the existing hold before launching. Never erase a stop
   // published while this daemon was starting.
   const settings = await userSettings(home);
+  // Staged attachment copies live in ALP_HOME (§12.6): sandboxed sessions write the temp directory.
+  if (process.platform !== 'win32' && stagingExposure(attachmentStageDir(home), [os.tmpdir(), '/tmp'])) {
+    log.warn('ALP_HOME is inside the temp directory, which sandboxed sessions may write: a tool could change a staged attachment copy before it is read; keep ALP_HOME outside it (default ~/.alp)', { code: 'ALP_HOME_IN_TMP' });
+  }
   const runtime = createAlpRuntime({
     templates, runLogDir, worktreeDir, copyDir, boardDir: path.join(home, 'boards'), libraryDir: home,
     // Read-only copies of attached files for the sessions' tools (§12.6); not on Windows, as the store.

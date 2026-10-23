@@ -34,3 +34,14 @@ test('copies are named by id and a plain extension only', () => {
   assert.equal(stagedName({ ...attachment, name: 'a.$(x)', detectedMimeType: 'application/pdf' }), `${attachment.attachmentId}.pdf`);
   assert.equal(stagedName({ ...attachment, name: 'noext', detectedMimeType: 'application/octet-stream' }), attachment.attachmentId);
 });
+
+test('stagingExposure finds a writable directory holding the staging directory, even before it exists', async t => {
+  const { stagingExposure } = await import('@anhlp/alp-runtime/attachments');
+  const base = await mkdtemp(path.join(tmpdir(), 'alp-exposure-'));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const workspace = path.join(base, 'project');
+  assert.equal(stagingExposure(path.join(workspace, '.alp-home', 'state', 'staged'), [workspace]), workspace);
+  assert.equal(stagingExposure(path.join(base, 'home', 'state', 'staged'), [workspace]), undefined);
+  assert.equal(stagingExposure(path.join(base, 'home', 'state', 'staged'), [path.join(base, 'proj')]), undefined, 'a sibling that merely starts alike is not a parent');
+  assert.equal(stagingExposure(path.join(base, 'h', 'state', 'staged'), [tmpdir()]), tmpdir());
+});

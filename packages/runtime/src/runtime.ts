@@ -5,7 +5,7 @@ import { errorData, plainObject, toolResult } from './tool-results.js';
 import { createLogger } from '@anhlp/alp-core/log';
 import { PROMPT_IMAGES, base64Bytes } from '@anhlp/alp-protocol';
 import { createBoardDomain } from './board-domain.js';
-import { ATTACHMENT_ROUTES, STAGED_PATH, attachmentPart, createAttachmentStager, runtimeAttachment, type AttachmentReader, type AttachmentRoute } from './attachments.js';
+import { ATTACHMENT_ROUTES, STAGED_PATH, attachmentPart, createAttachmentStager, runtimeAttachment, stagingExposure, type AttachmentReader, type AttachmentRoute } from './attachments.js';
 import type { RuntimeAttachment } from '@anhlp/alp-protocol/session';
 import { createWorktreeDomain } from './worktree-domain.js';
 import { type RuntimeTransport, type RuntimeOptions, type OpenOptions, type PromptContent, type PromptInput, type AlpRuntime, type SessionPreview, type RecoveryOutcome, type Pause, type PauseState, type RecallAnswer, type ScheduleHandler, type BranchRequest, type NativeBinding, type ConfigurePreview, type ConfigureResult, type ConversationErrorReason, ConversationError } from './contracts.js';
@@ -220,6 +220,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   /** Non-image attachments (§12.6): staged copies when alpd gave a directory, read from alpd's reader once it binds one. */
   const stager = options.attachmentStageDir ? createAttachmentStager(options.attachmentStageDir) : undefined;
   let attachmentReader: AttachmentReader | undefined;
+  /** Sessions already warned that the staging directory is inside their workspace. */
+  const stagingWarned = new Set<string>();
   if (stager) void stager.sweep();
   const sequences = new Map<string, number>();
 
@@ -4015,6 +4017,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (attachmentParts.length) {
       if (!attachmentRoutes(session).includes('file.path') || !stager || !attachmentReader) {
         throw new Error(`${session.runtimeKind === 'acp' ? 'This ACP agent' : session.runtimeKind[0].toUpperCase() + session.runtimeKind.slice(1)} cannot read attached files; they stay stored and the message was not sent`);
+      }
+      if (!stagingWarned.has(sessionId) && stagingExposure(stager.root, [session.mapping.workdir])) {
+        stagingWarned.add(sessionId);
+        log.warn('the attachment staging directory is inside this session\'s workspace: a sandboxed tool there could change a staged copy before it is read; keep ALP_HOME outside workspaces', { code: 'ALP_ATTACHMENT_STAGE_EXPOSED', sessionId });
       }
       for (const part of attachmentParts) {
         const attachment = runtimeAttachment(part);
