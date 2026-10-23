@@ -1,5 +1,5 @@
 // @ts-check
-import { createReconnectingClient, hello } from '@anhlp/alp-client/portable';
+import { attachments as attachmentApi, createReconnectingClient, hello, isAlpClientError } from '@anhlp/alp-client/portable';
 import { AuthenticationError, ConfigurationError, CreateOutcomeUnknownError, FILE_MESSAGES, FileAccessError, describe, describeFileError, endsRoot } from './errors.js';
 import { cleanListing, relativeFilePath } from './file-tree.js';
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
@@ -7,7 +7,7 @@ import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
 import { newConversationRequestId, newMessageId, newRequestId, newSessionId } from './ids.js';
 import { RELOAD_MESSAGES, agentControlsGate, conversationGate, describeConversationError, describeReloadError } from './conversation.js';
 import { GIT_ERROR_MESSAGES, GitAccessError, describeGitError, gitAccess, gitCompare, gitRequestPath } from './git.js';
-import { fitImages, imageLimits, promptContent } from './attachments.js';
+import { NO_FILES, fileLimits, fileRefusal, fitFiles, fitImages, imageLimits, messageContent, uploadRequestId } from './attachments.js';
 import { applyAttach, historyEnvelope, prependHistory, deliveredPrompts, emptyProjection, members, project, promptTurnOver } from './timeline.js';
 import { effortLabel, normalizeModels, parsePreview } from './new-session.js';
 import { CONFIGURE_LIVE, CONFIGURE_MESSAGES, NEW_SESSION_REFUSALS, configuredNotice, configuredSummary, describeConfigureError, liveConfigureGate } from './configure.js';
@@ -52,11 +52,16 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  * @typedef {{
  *   id: string, rootId: string, text: string, delivery: 'auto' | 'steer',
  *   images?: import('./attachments.js').ImageAttachment[],
+ *   files?: import('./attachments.js').FileAttachment[], uploadKey?: string, resumeUpload?: number,
  *   status: 'sending' | 'failed' | 'unknown', error?: string, retrySameId: boolean, accepted?: boolean, at: number,
  * }} PendingPrompt
  *   failed: did not reach the host, or the runtime refused it. unknown: may have; retrySameId says
  *   whether resending under the same clientMessageId is safe (receipts dedupe it, §10) or the host
  *   asked for a new id (outcome_unknown).
+ *   files (#121 J) are uploaded under `uploadKey` (the first clientMessageId, kept when the message
+ *   is sent again under a new one) before session.prompt; each keeps its attachmentId once
+ *   committed, so nothing is uploaded twice for the same message. resumeUpload counts the times an
+ *   upload a dropped connection interrupted is continued by itself once the connection is back.
  * @typedef {{ reason: 'finished' | 'error', at: number, turnId?: string, message?: string, hostAt?: string }} TurnAttention
  *   Paseo's requiresAttention with its reason, for a root whose turn ended while the user did not
  *   see it: completed is finished, failed is error. Cleared when the user opens or focuses it,
@@ -79,7 +84,7 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  *   older?: { generation: string, olderCursor?: string, hasOlder: boolean, loading?: boolean, error?: string },
  * }} TreeView
  * @typedef {{
- *   connection: { phase: Phase, gateway: string, attempt: number, error?: Failure, daemonVersion?: string, hostname?: string, promptImageLimits?: ReturnType<typeof imageLimits>, capabilities: string[] },
+ *   connection: { phase: Phase, gateway: string, attempt: number, error?: Failure, daemonVersion?: string, hostname?: string, promptImageLimits?: ReturnType<typeof imageLimits>, attachmentLimits?: import('./attachments.js').FileLimits, capabilities: string[] },
  *   principal: Principal | null,
  *   workspace: string | null,
  *   catalog: Load & { teams: Team[], teamsKnown?: boolean, teamsUnavailable?: import('./new-session.js').TeamsUnavailable, modes: Mode[], models: Model[], defaultMode?: string },
@@ -221,6 +226,18 @@ export function initialState(gateway = '') {
  *   storage?: import('./preferences.js').PreferenceStorage,
  * }} ControllerOptions
  */
+
+/** A file of a message could not be uploaded (#121 J): which, and the failure. */
+class UploadError extends Error {
+  /** @param {string} fileName @param {Failure} failure @param {boolean} dropped the connection went away under it */
+  constructor(fileName, failure, dropped) {
+    super(failure.message);
+    this.name = 'UploadError';
+    this.fileName = fileName;
+    this.failure = failure;
+    this.dropped = dropped;
+  }
+}
 
 export class Controller {
   /** @type {State} */ #state;
@@ -488,7 +505,7 @@ export class Controller {
     const capabilities = Array.isArray(greeting?.capabilities) ? greeting.capabilities.filter((/** @type {unknown} */ name) => typeof name === 'string') : [];
     const missing = REQUIRED_CAPABILITIES.filter(name => !capabilities.includes(name));
     if (missing.length) throw new ConfigurationError(`The host behind this gateway is too old for this app (it lacks ${missing.join(', ')}). Update ALP on the host.`);
-    this.#adopt(/** @type {Principal} */ (run.principal), capabilities, typeof greeting?.daemonVersion === 'string' ? greeting.daemonVersion : undefined, hostName(greeting?.hostname), imageLimits(greeting?.promptImageLimits, capabilities.includes('prompt.images')));
+    this.#adopt(/** @type {Principal} */ (run.principal), capabilities, typeof greeting?.daemonVersion === 'string' ? greeting.daemonVersion : undefined, hostName(greeting?.hostname), imageLimits(greeting?.promptImageLimits, capabilities.includes('prompt.images')), fileLimits(greeting?.attachmentLimits, capabilities.includes('attachments')));
     this.#attached = null;
     this.#watching = null;
     const root = this.#state.selected;
@@ -510,8 +527,9 @@ export class Controller {
    * @param {Principal} principal @param {string[]} capabilities @param {string | undefined} daemonVersion
    * @param {ReturnType<typeof imageLimits>} limits
    * @param {string | undefined} hostname the host's machine name from the hello, Paseo's host label (patch 0017)
+   * @param {import('./attachments.js').FileLimits} [files] the hello's attachmentLimits (#121 J)
    */
-  #adopt(principal, capabilities, daemonVersion, hostname, limits) {
+  #adopt(principal, capabilities, daemonVersion, hostname, limits, files = { ...NO_FILES }) {
     this.#registryContext = {};
     const current = this.#state.workspace;
     const workspace = current && grantedWorkspace(principal, current) ? current : principal.workspaces[0] ?? null;
@@ -520,7 +538,7 @@ export class Controller {
     this.#set(state => ({
       principal,
       registry: changed ? initialState().registry : { ...state.registry, loading: false },
-      connection: { ...state.connection, capabilities, ...(daemonVersion ? { daemonVersion } : {}), hostname, promptImageLimits: limits },
+      connection: { ...state.connection, capabilities, ...(daemonVersion ? { daemonVersion } : {}), hostname, promptImageLimits: limits, attachmentLimits: files },
       ...(workspace !== state.workspace ? { workspace, selected: null, focus: null, tree: null, sessions: initialState().sessions, history: initialState().history, attention: {}, turnAttention: {}, tasks: { ...initialState().tasks, visible: state.tasks.visible } } : {}),
       ...(changed || workspace !== state.workspace ? { catalog: initialState().catalog } : {}),
     }));
@@ -528,6 +546,7 @@ export class Controller {
 
   #afterOpen() {
     this.#sync();
+    this.#resumeUploads();
     void this.refreshRegistry();
     if (this.#state.workspace) {
       void this.refreshSessions();
@@ -1547,9 +1566,12 @@ export class Controller {
    * A first message (Paseo's initial prompt) is sent once attached, through the same path as
    * the composer's (receipts, retry). A title given is set before it; without one alpd names the
    * session after that message, as Paseo does, and announces it (session.updated).
-   * @param {{ team?: string, mode?: string, model?: string, thinking?: string, title?: string, prompt?: string }} input
+   * Files of the first message (#121 J) were held here: they are uploaded only once the session
+   * exists, under its id, never a guessed one; a runtime that cannot read them leaves the message
+   * failed with the reason, never sent without them.
+   * @param {{ team?: string, mode?: string, model?: string, thinking?: string, title?: string, prompt?: string, files?: import('./attachments.js').FileAttachment[] }} input
    */
-  async createSession({ team, mode, model, thinking, title, prompt } = {}) {
+  async createSession({ team, mode, model, thinking, title, prompt, files = [] } = {}) {
     const workspace = this.#state.workspace;
     if (!workspace) throw new ConfigurationError('Choose a workspace first.');
     // One create at a time: a second Enter or click while one is starting must not make a second
@@ -1620,10 +1642,10 @@ export class Controller {
       }
       if (title?.trim()) await this.renameSession(id, title.trim()).catch(() => {});
       this.#rememberNewSession({ team, mode, model, thinking });
-      if (prompt?.trim()) {
+      if (prompt?.trim() || files.length) {
         // Sent like a composer message: a failure stays in the timeline with Retry, never
         // resent by itself.
-        void this.sendPrompt(prompt, id).catch(error => this.#notify('error', describe(error).message));
+        void this.sendPrompt(prompt ?? '', id, [], files, { keepRefused: true }).catch(error => this.#notify('error', describe(error).message));
       }
       void this.refreshSessions({ quiet: true });
       return id;
@@ -1984,20 +2006,106 @@ export class Controller {
    * carries a fresh clientMessageId; the host answers it at most once (§10).
    * @param {string} text @param {string | null} [root] the selected root by default
    * @param {import('./attachments.js').ImageAttachment[]} [images] sent inline after the text (t-7679.11)
+   * @param {import('./attachments.js').FileAttachment[]} [files] uploaded under this session, then
+   *   named by attachment id (#121 J)
+   * @param {{ keepRefused?: boolean }} [options] keepRefused: files this session cannot take make a
+   *   failed message (Retry, Discard) instead of a throw, for a first message whose session was
+   *   only just created (the New session screen has nowhere else to keep it)
    */
-  async sendPrompt(text, root = this.#state.selected, images = []) {
+  async sendPrompt(text, root = this.#state.selected, images = [], files = [], { keepRefused = false } = {}) {
     const body = String(text ?? '');
-    if (!root || (!body.trim() && !images.length)) return;
+    if (!root || (!body.trim() && !images.length && !files.length)) return;
     const blocked = this.driveBlock();
     if (blocked) throw new ConfigurationError(blocked);
     const fitted = fitImages([], images, this.#state.connection.promptImageLimits);
     if (fitted.error) throw new ConfigurationError(fitted.error);
+    const refused = files.length ? this.#filesRefusal(root, files) : null;
+    if (refused && !keepRefused) throw new ConfigurationError(refused);
+    const id = newMessageId();
     /** @type {PendingPrompt} */
-    const prompt = { id: newMessageId(), rootId: root, text: body, ...(images.length ? { images } : {}), delivery: this.rootBusy(root) ? 'steer' : 'auto', status: 'sending', retrySameId: true, at: Date.now() };
+    const prompt = { id, rootId: root, text: body, ...(images.length ? { images } : {}), ...(files.length ? { files: files.map(file => ({ ...file, received: 0, error: undefined })), uploadKey: id } : {}), delivery: this.rootBusy(root) ? 'steer' : 'auto', status: 'sending', retrySameId: true, at: Date.now() };
     this.clearAttention(root);
+    if (refused) {
+      // Kept as a message that failed before it left, as any other: Retry checks again.
+      this.#set(state => ({ prompts: [...state.prompts, { ...prompt, status: 'failed', error: refused }] }));
+      this.#awaitTurn(prompt);
+      return;
+    }
     this.#set(state => ({ prompts: [...state.prompts, prompt] }));
     this.#awaitTurn(prompt);
     await this.#deliverInTurn(prompt);
+  }
+
+  /**
+   * Why files cannot go with a message to `root` (or a session not created yet, when null), or
+   * null: the host's capability, the token's grant, the connection's limits and the runtime of
+   * the root (its snapshot's promptAttachments), as fileRefusal says.
+   * @param {string | null} [root]
+   */
+  fileGate(root = this.#state.selected) {
+    const { connection, principal } = this.#state;
+    const snapshot = root ? (this.#trees.get(root)?.projection.sessions[root] ?? this.#state.sessions.list.find(row => row.id === root)) : undefined;
+    return fileRefusal({
+      capable: connection.capabilities.includes('attachments'),
+      permitted: can(principal ?? undefined, 'attachments.write'),
+      writable: can(principal ?? undefined, 'session.write'),
+      limits: connection.attachmentLimits,
+      session: /** @type {any} */ (snapshot),
+      known: !!root,
+    });
+  }
+
+  /** fileGate, then the limits for these files. @param {string} root @param {ReadonlyArray<import('./attachments.js').FileAttachment>} files */
+  #filesRefusal(root, files) {
+    return this.fileGate(root) ?? fitFiles([], files, this.#state.connection.attachmentLimits ?? NO_FILES).error;
+  }
+
+  /**
+   * Uploads the files of a message that are not uploaded yet, one after another, under the
+   * message's session; each upload's requestId is the message's and the file's (uploadRequestId),
+   * so a repeat continues what the host holds and a committed file answers its attachment. The
+   * message's entry shows each file's progress. Answers the files with their attachment ids.
+   * @param {AlpRpcClient} client @param {PendingPrompt} prompt
+   */
+  async #upload(client, prompt) {
+    const files = prompt.files ?? [];
+    const key = prompt.uploadKey ?? prompt.id;
+    const limits = this.#state.connection.attachmentLimits ?? NO_FILES;
+    /** @param {number} slot @param {Partial<import('./attachments.js').FileAttachment>} change */
+    const mark = (slot, change) => this.#set(state => ({ prompts: state.prompts.map(entry => entry.id === prompt.id && entry.files ? { ...entry, files: entry.files.map((file, index) => index === slot ? { ...file, ...change } : file) } : entry) }));
+    const api = attachmentApi(client);
+    const done = [...files];
+    for (const [slot, file] of files.entries()) {
+      if (file.attachmentId) continue;
+      mark(slot, { error: undefined, received: file.received ?? 0 });
+      try {
+        const attachment = await api.upload({
+          sessionId: prompt.rootId, name: file.name, mimeType: file.mimeType, data: file.data,
+          requestId: uploadRequestId(key, slot), maxChunkBytes: limits.maxChunkBytes,
+          onProgress: received => mark(slot, { received }),
+        });
+        if (typeof attachment?.attachmentId !== 'string') throw new Error(`The host did not answer an attachment for ${file.name}.`);
+        done[slot] = { ...file, attachmentId: attachment.attachmentId, received: file.size, error: undefined };
+        mark(slot, { attachmentId: attachment.attachmentId, received: file.size, error: undefined });
+      } catch (error) {
+        const failure = describe(error);
+        mark(slot, { error: failure.message });
+        throw new UploadError(file.name, failure, isAlpClientError(error) && ['closed', 'disconnected', 'send_failed'].includes(error.reason));
+      }
+    }
+    return done;
+  }
+
+  /**
+   * Messages whose upload a dropped connection interrupted continue by themselves once the
+   * connection is back (the same uploads, from what the host holds), at most three times each;
+   * nothing of theirs reached the agent yet.
+   */
+  #resumeUploads() {
+    for (const prompt of this.#state.prompts) {
+      if (prompt.status !== 'failed' || !prompt.resumeUpload || prompt.resumeUpload > 3) continue;
+      void this.retryPrompt(prompt.id, { resume: true }).catch(() => {});
+    }
   }
 
   /**
@@ -2190,7 +2298,14 @@ export class Controller {
       if (this.#state.selected === prompt.rootId) await this.#wake(client, prompt.rootId);
       const fitted = fitImages([], prompt.images ?? [], this.#state.connection.promptImageLimits);
       if (fitted.error) throw new ConfigurationError(fitted.error);
-      const result = await client.request('session.prompt', { sessionId: prompt.rootId, clientMessageId: prompt.id, delivery: prompt.delivery, content: promptContent(prompt.text, prompt.images) }, { timeoutMs: this.#options.requestTimeoutMs });
+      let files = prompt.files ?? [];
+      if (files.length) {
+        // Checked again: the token, the limits or the session's runtime may have changed since.
+        const refused = this.#filesRefusal(prompt.rootId, files);
+        if (refused) throw new ConfigurationError(refused);
+        files = await this.#upload(client, prompt);
+      }
+      const result = await client.request('session.prompt', { sessionId: prompt.rootId, clientMessageId: prompt.id, delivery: prompt.delivery, content: messageContent(prompt.text, prompt.images, files) }, { timeoutMs: this.#options.requestTimeoutMs });
       if (result?.outcome === 'failed') {
         update({ status: 'failed', error: result.error?.message ? `The agent did not take the message: ${result.error.message}` : 'The agent did not take the message.', retrySameId: false });
         return;
@@ -2203,6 +2318,14 @@ export class Controller {
     } catch (error) {
       // The timeline may already show it (the answer was lost, the message was not): then it is done.
       if (this.#isDelivered(prompt)) return this.#dropPrompt(prompt.id);
+      if (error instanceof UploadError) {
+        // Nothing reached the agent: the same message may go again. A dropped connection continues
+        // the upload by itself once it is back; a refusal waits for the user, with its reason.
+        const interrupted = error.dropped;
+        const resumes = this.#state.prompts.find(entry => entry.id === prompt.id)?.resumeUpload ?? 0;
+        update({ status: 'failed', error: `Could not upload ${error.fileName}: ${error.failure.message}${interrupted ? ' The upload continues when the connection is back.' : ''}`, retrySameId: true, resumeUpload: interrupted ? resumes + 1 : 0 });
+        return;
+      }
       const failure = describe(error);
       if (failure.sent === 'no') update({ status: 'failed', error: failure.message, retrySameId: true });
       else if (failure.sent === 'yes' && failure.reason !== 'outcome_unknown') update({ status: 'failed', error: failure.message, retrySameId: false });
@@ -2229,15 +2352,19 @@ export class Controller {
    * same clientMessageId and delivery where that is safe (receipts answer a repeat with the first
    * outcome, §10); under a new id when the host said it cannot know (outcome_unknown) or the
    * runtime refused the message.
-   * @param {string} id
+   * Its files keep the uploads they have (uploadKey stays the first id): a committed one is not
+   * uploaded again, an interrupted one continues.
+   * @param {string} id @param {{ resume?: boolean }} [options] resume: a reconnect continues an
+   *   interrupted upload (the count of such resumes is kept), not the user
    */
-  async retryPrompt(id) {
+  async retryPrompt(id, { resume = false } = {}) {
     const prompt = this.#state.prompts.find(entry => entry.id === id);
     if (!prompt || prompt.status === 'sending') return;
+    const resumes = resume ? prompt.resumeUpload : 0;
     /** @type {PendingPrompt} */
     const next = prompt.retrySameId
-      ? { ...prompt, status: 'sending', error: undefined, accepted: false }
-      : { ...prompt, id: newMessageId(), delivery: this.rootBusy(prompt.rootId, prompt.id) ? 'steer' : 'auto', status: 'sending', error: undefined, retrySameId: true, accepted: false };
+      ? { ...prompt, status: 'sending', error: undefined, accepted: false, resumeUpload: resumes }
+      : { ...prompt, id: newMessageId(), delivery: this.rootBusy(prompt.rootId, prompt.id) ? 'steer' : 'auto', status: 'sending', error: undefined, retrySameId: true, accepted: false, resumeUpload: resumes, ...(prompt.files?.length ? { uploadKey: prompt.uploadKey ?? prompt.id } : {}) };
     this.#set(state => ({ prompts: state.prompts.map(entry => entry.id === id ? next : entry) }));
     // The same id repeats the first request (receipts); a new one is a new message, in turn.
     if (next.id === prompt.id) return this.#deliver(next);

@@ -155,6 +155,8 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const questions = Object.values(projection.questions);
   const blocked = controller.driveBlock();
   const pending = prompts.filter(prompt => prompt.rootId === root);
+  // Files other than images (#121 J): why they cannot go to this root, or null.
+  const fileGate = controller.fileGate(root);
 
   if (tree.status === 'gone') {
     return (
@@ -239,8 +241,11 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             images={rootSession?.promptImages === true && connection.capabilities.includes('prompt.images') && !!connection.promptImageLimits?.maxBytes}
             imageLimits={connection.promptImageLimits}
             imagesUnavailable={`${agentOf(root)} runs on ${rootSession?.runtime ?? 'a runtime'} here, which takes no images.`}
+            files={!fileGate}
+            fileLimits={connection.attachmentLimits}
+            filesUnavailable={fileGate ?? undefined}
             addText={refill}
-            onSend={(text, images) => controller.sendPrompt(text, undefined, images)}
+            onSend={(text, images, files) => controller.sendPrompt(text, undefined, images, files)}
             onQueue={text => controller.queuePrompt(text)}
             onStop={() => void controller.interrupt()}
             queued={queued.filter(item => item.rootId === root)}

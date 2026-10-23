@@ -1,12 +1,12 @@
 import * as React from 'react';
-import { Ban, Bot, Brain, Eye, Image as ImageIcon, ChevronDown, ChevronRight, CircleAlert, Info, ListChecks, Pencil, RotateCcw, Scissors, Search, SquareTerminal, Trash2, TriangleAlert, Wrench } from 'lucide-react';
+import { Ban, Bot, Brain, Eye, FileText, Image as ImageIcon, ChevronDown, ChevronRight, CircleAlert, Info, ListChecks, Pencil, RotateCcw, Scissors, Search, SquareTerminal, Trash2, TriangleAlert, Wrench } from 'lucide-react';
 import type { Entry } from '../lib/timeline.js';
 import type { PendingPrompt } from '../lib/controller.js';
 import { Button } from '../components/ui/button';
 import { clockTime } from '../lib/format';
 import { can } from '../lib/gateway.js';
 import { cn } from '../lib/utils';
-import { previewUrl } from '../lib/attachments.js';
+import { fileSize, messageFiles, previewUrl } from '../lib/attachments.js';
 import { FileLinkContext, RichText, type FileLinks } from './RichText';
 import { parseFileLink } from '../lib/file-links.js';
 import { useAppState } from './store';
@@ -151,11 +151,32 @@ function ImagesChip({ count }: { count: number }) {
   );
 }
 
-function UserBubble({ text, ts, images, entryKey }: { text: string; ts?: string; images?: number; entryKey: string }) {
+/**
+ * The files a message carried (#121 J): a chip each with its name and size, from the timeline's
+ * `attachments` (ids and display names only; never a path). While it uploads, its progress.
+ */
+function FileChips({ files, testId }: { files: Array<{ key: string; name: string; size: number; progress?: string; failed?: boolean }>; testId: string }) {
+  return (
+    <ul aria-label="Attached files" className="mb-2 flex max-w-full flex-wrap justify-end gap-2">
+      {files.map(file => (
+        <li key={file.key} data-testid={testId} className={cn('flex h-8 max-w-[18rem] items-center gap-1.5 rounded-full bg-muted px-2.5 text-[13px] text-muted-foreground', file.failed && 'text-destructive')}>
+          <FileText aria-hidden className="size-3.5 shrink-0" />
+          <span className="min-w-0 truncate text-foreground" title={file.name}>{file.name}</span>
+          <span className="shrink-0">{fileSize(file.size)}</span>
+          {file.progress ? <span className="shrink-0" data-testid="file-progress">{file.progress}</span> : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function UserBubble({ text, ts, images, files = [], entryKey }: { text: string; ts?: string; images?: number; files?: Array<{ attachmentId: string; name: string; size: number }>; entryKey: string }) {
+  const bare = !images && !files.length;
   return (
     <div className="group/user flex flex-col items-end">
       {images ? <ImagesChip count={images} /> : null}
-      {text || !images ? <div className="min-w-0 max-w-full rounded-2xl rounded-tr-sm bg-bubble p-4 text-[15px] leading-[21px] text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid="user-message">{text}</div> : null}
+      {files.length ? <FileChips testId="user-message-file" files={files.map(file => ({ key: file.attachmentId, name: file.name, size: file.size }))} /> : null}
+      {text || bare ? <div className="min-w-0 max-w-full rounded-2xl rounded-tr-sm bg-bubble p-4 text-[15px] leading-[21px] text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]" data-testid="user-message">{text}</div> : null}
       <div className="mt-2 flex h-6 items-center gap-2 opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100">
         <span className="text-[13px] text-muted-foreground">{clockTime(ts)}</span>
         <RewindAction entryKey={entryKey} />
@@ -193,7 +214,7 @@ function EntryView({ entry, compactBottom }: { entry: Entry; compactBottom: bool
   const item = entry.item as any;
   switch (item.kind) {
     case 'user_message':
-      return <UserBubble entryKey={entry.key} text={item.text} ts={entry.ts} images={typeof item.images === 'number' && item.images > 0 ? item.images : undefined} />;
+      return <UserBubble entryKey={entry.key} text={item.text} ts={entry.ts} images={typeof item.images === 'number' && item.images > 0 ? item.images : undefined} files={messageFiles(item.attachments)} />;
     case 'assistant_message':
       return (
         <div className={cn('pt-3', compactBottom ? 'pb-0' : 'pb-3')} data-testid="assistant-message">
@@ -232,7 +253,13 @@ function PendingView({ prompt, gap, onRetry, onDiscard }: { prompt: PendingPromp
           {prompt.images.map(image => <img key={image.id} src={previewUrl(image)} alt={image.name} title={image.name} className="size-16 rounded-lg border border-border object-cover" />)}
         </div>
       ) : null}
-      {prompt.text || !prompt.images?.length ? (
+      {prompt.files?.length ? (
+        <FileChips testId="pending-file" files={prompt.files.map((file, index) => ({
+          key: `${index}`, name: file.name, size: file.size, failed: !!file.error,
+          progress: file.attachmentId ? 'Uploaded' : file.error ? 'Not uploaded' : prompt.status === 'sending' ? `${file.size ? Math.floor(((file.received ?? 0) / file.size) * 100) : 0}%` : undefined,
+        }))} />
+      ) : null}
+      {prompt.text || (!prompt.images?.length && !prompt.files?.length) ? (
         <div className={cn('min-w-0 max-w-full rounded-2xl rounded-tr-sm p-4 text-[15px] leading-[21px] whitespace-pre-wrap [overflow-wrap:anywhere]',
           prompt.status === 'sending' ? 'bg-bubble opacity-70' : prompt.status === 'failed' ? 'border border-destructive/40 bg-destructive/5' : 'border border-warning/40 bg-warning/5')}>
           {prompt.text}
