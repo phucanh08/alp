@@ -932,3 +932,36 @@ test('a wake still starting its turn when prepare ends (a runtime whose hold kee
   assert.equal(world.native.rebinds.length, 1);
   assert.equal(world.native.reloads.length, 1);
 });
+
+test('a parked source resumed while a whole fork reads it stays parked until the fork ends, then continues; no turn of it begins while the runtime reads', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  const [first, second] = await conversation(d, 'pf', ['one', 'two']);
+  const transport = world.transports.at(-1);
+  const kind = d.runtime.snapshot('pf').runtime;
+  // A root parked while its runtime is paused (as alpd's recovery parks one); a whole fork may read it.
+  d.runtime.pause({ runtime: kind });
+  await d.runtime.recover('pf', { parkedRoot: 'alpd restarted' });
+  assert.ok(d.runtime.snapshot('pf').parked, 'the source is parked');
+  const starts = transport.calls.filter(call => call.method === 'turn/start').length;
+  let release;
+  let during;
+  world.native.branch = request => new Promise(resolve => { release = () => resolve({ threadId: 'thread-fork-parked', turns: request.turns }); });
+  const forking = d.request('session.fork', { sessionId: 'pf', requestId: 'pf1', ifGeneration: await generationOf(d, 'pf') });
+  // Released however the checks end, so the fork and the runtime can finish.
+  try {
+    await until(() => release, 'the runtime reads the source');
+    // The runtime is resumed while the fork reads: unheld, the parked source continues in a new turn here.
+    d.runtime.resume({ runtime: kind });
+    await within(500, () => transport.calls.filter(call => call.method === 'turn/start').length > starts);
+    during = { starts: transport.calls.filter(call => call.method === 'turn/start').length, parked: !!d.runtime.snapshot('pf').parked };
+  } finally { release?.(); }
+  const result = await forking;
+  assert.equal(result.forkedFrom.boundary, 'whole');
+  assert.deepEqual(world.native.branches.map(request => request.turns), [[first, second]]);
+  assert.deepEqual(during, { starts, parked: true }, 'the source stayed parked while the runtime read it');
+  // Not dropped: once the fork lets go of the source, it continues where it stopped.
+  await until(() => transport.calls.filter(call => call.method === 'turn/start').length === starts + 1, 'the source continues after the fork');
+  assert.match(JSON.stringify(transport.calls.filter(call => call.method === 'turn/start').at(-1).params), /ALP resumed this session/);
+  assert.equal(d.runtime.snapshot('pf').parked, undefined);
+});

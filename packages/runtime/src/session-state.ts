@@ -76,6 +76,8 @@ export type Session = {
   wakeHeld?: boolean;
   /** How many lifecycle operations (a rewind) hold its wakes now; mail waits until the last releases (AlpRuntime.hold). */
   lifecycleHolds?: number;
+  /** Its parked work was to continue during a lifecycle hold; it continues when the last hold releases. */
+  resumeHeld?: boolean;
   /** An assignment opened but not yet sent its brief: mail waits and rides with the brief's turn. */
   awaitingBrief?: boolean;
   /** Permission questions to the user, one at a time. */

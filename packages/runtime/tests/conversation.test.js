@@ -439,6 +439,41 @@ test('starting: a mail wake whose turn/start is in flight has no turn id yet but
   assert.equal(runtime.starting('root'), false);
 });
 
+test('a parked root resumed during a lifecycle hold stays parked until the hold ends, then continues; a pause at that moment keeps it parked', async t => {
+  const { root, runtime, runtimes, prompt } = await setup(t);
+  await runtime.open('root', { cwd: root, persist: true });
+  await prompt('root', 'one');
+  runtimes[0].finish();
+  await until(() => !runtime.snapshot('root').busy);
+  const kind = runtime.snapshot('root').runtime;
+  const resumes = () => runtimes[0].of('turn/start').filter(params => JSON.stringify(params).includes('ALP resumed this session')).length;
+  for (const pausedAtRelease of [true, false]) {
+    runtime.pause({ runtime: kind });
+    await runtime.recover('root', { parkedRoot: 'alpd restarted' });
+    assert.ok(runtime.snapshot('root').parked);
+    const before = resumes();
+    const release = runtime.hold('root');
+    runtime.resume({ runtime: kind });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(resumes(), before, 'no turn while held');
+    assert.ok(runtime.snapshot('root').parked, 'still parked while held');
+    if (pausedAtRelease) {
+      // Paused again before the hold ends: the root stays parked, and the next resume continues it.
+      runtime.pause({ runtime: kind });
+      release();
+      await new Promise(resolve => setTimeout(resolve, 30));
+      assert.equal(resumes(), before, 'no turn while paused');
+      assert.ok(runtime.snapshot('root').parked, 'still parked while paused');
+      runtime.resume({ runtime: kind });
+    } else release();
+    await until(() => resumes() === before + 1);
+    assert.equal(runtime.snapshot('root').parked, undefined);
+    await until(() => runtime.snapshot('root').activeTurnId);
+    runtimes[0].finish();
+    await until(() => !runtime.snapshot('root').busy);
+  }
+});
+
 test('mail that arrives while a rebind resumes waits for it without stalling the process, held or not', async t => {
   let gate;
   const { root, runtime, runtimes, prompt } = await setup(t, async (transport, method, params) => {

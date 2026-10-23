@@ -1391,6 +1391,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   function continueParked(sessionId: string, session: Session) {
     void enqueue(async () => {
       if (session.closed || session.active || session.pending || !session.parked || pauseOf(session.runtimeKind)) return;
+      // A lifecycle operation (a fork or rewind reading the conversation) holds the session: the work stays
+      // parked and continues when the last hold releases, as held mail does.
+      if (session.lifecycleHolds) { session.resumeHeld = true; return; }
       const parked = session.parked;
       const { reason, prompt } = parked;
       session.parked = undefined;
@@ -4364,7 +4367,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         if (released) return;
         released = true;
         session.lifecycleHolds = Math.max(0, (session.lifecycleHolds ?? 1) - 1);
-        if (session.lifecycleHolds || session.closed || session.parked || pauseOf(session.runtimeKind) || !session.wakeHeld) return;
+        if (session.lifecycleHolds || session.closed) return;
+        // Parked work a resume reached during the hold continues now; paused again, it waits for that resume.
+        if (session.resumeHeld) {
+          session.resumeHeld = false;
+          if (session.parked) return continueParked(sessionId, session);
+        }
+        if (session.parked || pauseOf(session.runtimeKind) || !session.wakeHeld) return;
         session.wakeHeld = false;
         deliver(sessionId, session);
       };
