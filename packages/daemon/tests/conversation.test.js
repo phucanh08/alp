@@ -715,3 +715,110 @@ test('mail that wakes the root while a reload reads its history waits for the ne
   assert.notEqual(fresh, old);
   await until(() => fresh.calls.some(call => call.method === 'turn/start'), 'the mail wakes the new process');
 });
+
+test('mail that wakes the root while a rewind reads its timeline waits for the rebind; the cut is not run over by a wake turn', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  const [, second] = await conversation(d, 'rw', ['one', 'two']);
+  const generation = await generationOf(d, 'rw');
+  const transport = world.transports.at(-1);
+  const starts = transport.calls.filter(call => call.method === 'turn/start').length;
+  // The read answers what the store held when it began; a session.message from another client lands before
+  // it resolves, between the idle check and the end of prepare.
+  const timeline = d.store.timeline.bind(d.store);
+  let sent = false;
+  d.store.timeline = async sessionId => {
+    if (sessionId !== 'rw' || sent) return timeline(sessionId);
+    sent = true;
+    const read = await timeline(sessionId);
+    await d.request('session.message', { sessionId: 'rw', text: 'mail during rewind' });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    return read;
+  };
+  let during;
+  world.native.branch = () => {
+    during = { starts: transport.calls.filter(call => call.method === 'turn/start').length, active: d.runtime.snapshot('rw')?.activeTurnId };
+    return { threadId: 'thread-after-wake' };
+  };
+  const result = await d.request('session.rewind', { sessionId: 'rw', requestId: 'rw1', ifGeneration: generation, beforeTurnId: second });
+  d.store.timeline = timeline;
+  assert.ok(sent, 'the mail went out during prepare');
+  assert.equal(result.session.id, 'rw');
+  assert.deepEqual(during, { starts, active: undefined }, 'no wake turn while the runtime cut the conversation');
+  assert.equal(world.native.rebinds.length, 1);
+  await until(() => transport.calls.filter(call => call.method === 'turn/start').length === starts + 1, 'the mail wakes the root after the rebind');
+});
+
+test('mail that wakes the source while a whole fork re-reads its timeline waits for the fork; the cut is not run over by a wake turn', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  const [first, second] = await conversation(d, 'fw', ['one', 'two']);
+  const generation = await generationOf(d, 'fw');
+  const transport = world.transports.at(-1);
+  const starts = transport.calls.filter(call => call.method === 'turn/start').length;
+  // The second read is the one after the prompt hold; the mail lands before it resolves.
+  const timeline = d.store.timeline.bind(d.store);
+  let reads = 0;
+  let sent = false;
+  d.store.timeline = async sessionId => {
+    if (sessionId !== 'fw' || sent || ++reads < 2) return timeline(sessionId);
+    sent = true;
+    const read = await timeline(sessionId);
+    await d.request('session.message', { sessionId: 'fw', text: 'mail during fork' });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    return read;
+  };
+  let during;
+  world.native.branch = request => {
+    during = { starts: transport.calls.filter(call => call.method === 'turn/start').length, active: d.runtime.snapshot('fw')?.activeTurnId, turns: request.turns };
+    return { threadId: 'thread-fork-wake' };
+  };
+  const result = await d.request('session.fork', { sessionId: 'fw', requestId: 'fw1', ifGeneration: generation });
+  d.store.timeline = timeline;
+  assert.ok(sent, 'the mail went out during prepare');
+  assert.equal(result.forkedFrom.boundary, 'whole');
+  assert.deepEqual(during, { starts, active: undefined, turns: [first, second] }, 'no wake turn while the runtime read the source');
+  await until(() => transport.calls.filter(call => call.method === 'turn/start').length === starts + 1, 'the mail wakes the source after the fork');
+});
+
+test('a turn that began during prepare anyway (a runtime whose hold keeps nothing back) is refused busy before prepared; the same request goes through later', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  const [, second] = await conversation(d, 'rh', ['one', 'two']);
+  await conversation(d, 'fh', ['one', 'two']);
+  d.runtime.hold = () => undefined;
+  // The nth read of a root during prepare answers the store as it began; mail wakes the root before it resolves.
+  const timeline = d.store.timeline.bind(d.store);
+  const woken = new Set();
+  const counts = new Map();
+  const wakeAt = { rh: 1, fh: 2 };
+  d.store.timeline = async sessionId => {
+    const read = await timeline(sessionId);
+    counts.set(sessionId, (counts.get(sessionId) ?? 0) + 1);
+    if (!(sessionId in wakeAt) || woken.has(sessionId) || counts.get(sessionId) < wakeAt[sessionId]) return read;
+    woken.add(sessionId);
+    await d.request('session.message', { sessionId, text: `mail during ${sessionId}` });
+    await until(() => d.runtime.snapshot(sessionId)?.activeTurnId, `the wake turn of ${sessionId} started`);
+    return read;
+  };
+  const rewind = { sessionId: 'rh', requestId: 'rh1', beforeTurnId: second };
+  await assert.rejects(d.request('session.rewind', { ...rewind, ifGeneration: await generationOf(d, 'rh') }), rpcError(1004, 'session_busy'));
+  const fork = { sessionId: 'fh', requestId: 'fh1' };
+  await assert.rejects(d.request('session.fork', { ...fork, ifGeneration: await generationOf(d, 'fh') }), rpcError(1004, 'session_busy'));
+  d.store.timeline = timeline;
+  assert.deepEqual([...woken], ['rh', 'fh']);
+  assert.equal(world.native.branches.length, 0, 'the runtime cut nothing');
+  // The refusals recorded nothing: once the wake turns end, the same requests go through.
+  for (const root of ['rh', 'fh']) {
+    const transport = world.transports.find(candidate => candidate.turnId === d.runtime.snapshot(root).activeTurnId);
+    transport.finish('woken');
+    await until(async () => !(await d.request('session.get', { sessionId: root })).session.activeTurnId, `the wake turn of ${root} ended`);
+  }
+  const rewound = await d.request('session.rewind', { ...rewind, ifGeneration: await generationOf(d, 'rh') });
+  assert.equal(rewound.duplicate, undefined);
+  const forked = await d.request('session.fork', { ...fork, ifGeneration: await generationOf(d, 'fh') });
+  assert.equal(forked.duplicate, undefined);
+  assert.equal(forked.forkedFrom.boundary, 'whole');
+  assert.equal(world.native.branches.length, 2);
+  assert.equal(world.native.rebinds.length, 1);
+});
