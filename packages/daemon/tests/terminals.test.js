@@ -342,8 +342,8 @@ test('lifetime, slow consumers and an audit log without keystrokes (the service 
   await service.attach(owner, slow, { terminalId: terminal.terminalId });
   await until(() => sent.some(message => message.params?.type === 'output'), 'output');
   // The socket backs up: the output of this input detaches the stream (slow_consumer); the terminal runs on.
+  await service.input(owner, slow, { terminalId: terminal.terminalId, data: 'echo hunter2-PASSWORD; sleep 0.2; echo more\r' });
   slow.socket.writableLength = 10_000;
-  await service.input(owner, slow, { terminalId: terminal.terminalId, data: 'echo hunter2-PASSWORD\r' });
   await until(() => sent.some(message => message.params?.type === 'detached' && message.params.reason === 'slow_consumer'), 'slow consumer');
   assert.ok(alive(pid));
   // Lifetime ends it.
@@ -382,4 +382,84 @@ test('a socket client: the stream survives a disconnect only for the same princi
   await until(() => second.text().includes('sock-9'), 'output after reconnect');
   await second.client.request('terminal.close', { terminalId: terminal.terminalId, ...alice });
   await until(() => second.events.some(event => event.type === 'exit' && event.reason === 'closed'), 'closed');
+});
+
+/** A spawner that runs nothing: a fake PTY whose exit the test drives. */
+function fakePty() {
+  let next = 70_000;
+  const made = [];
+  const spawn = (_file, _args, options) => {
+    const exits = new Set();
+    const pty = { pid: next++, env: options.env, write() {}, resize() {}, kill() { queueMicrotask(() => { for (const listener of exits) listener({ exitCode: 0, signal: 1 }); }); }, onData: () => ({ dispose() {} }), onExit: listener => { exits.add(listener); return { dispose: () => exits.delete(listener) }; } };
+    made.push(pty);
+    return pty;
+  };
+  return { spawn, made };
+}
+
+test('ending a terminal never kills by a remembered or reused id: only processes identified now (marker, live shell and PTY, live groups)', { skip }, async t => {
+  const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-term-ids-')));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(path.join(directory, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
+  const { spawn, made } = fakePty();
+  let table = [];
+  const service = createTerminalService({ home: directory, resolveWorkspace: async () => directory, log: { info() {}, warn() {} }, spawn, processes: async () => table, sweepMs: 60_000, killGraceMs: 10, platform: 'darwin' });
+  t.after(() => service.shutdown());
+  const owner = { id: 'owner', epoch: 'owner' };
+  await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r' });
+  const shell = made[0];
+  const marker = shell.env.ALP_TERMINAL_ID;
+  assert.match(marker, /^atm_[0-9a-f]{32}$/);
+  // Probe processes that are never really signalled: ids far above any live pid would throw ESRCH,
+  // so the test records the kill calls instead.
+  const killed = [];
+  const realKill = process.kill;
+  process.kill = (pid, signal) => { if (pid >= 70_000) { killed.push([pid, signal]); return true; } return realKill.call(process, pid, signal); };
+  t.after(() => { process.kill = realKill; });
+  table = [
+    { pid: shell.pid, ppid: process.pid, pgid: shell.pid, elapsedMs: 0 },
+    { pid: 80_001, ppid: 1, pgid: 80_001, elapsedMs: 0, markers: [marker] }, // a double-forked job: found by its marker
+    { pid: 80_002, ppid: 1, pgid: 80_001, elapsedMs: 0 }, // in that job's live group
+    { pid: 80_003, ppid: 1, pgid: 75_000, elapsedMs: 0 }, // a stranger in a group id the shell's jobs once had
+    { pid: 80_004, ppid: 1, pgid: 80_004, elapsedMs: 0, markers: ['atm_' + '0'.repeat(32)] }, // another terminal's job
+  ];
+  const { terminals } = await service.list(owner, {});
+  await service.close(owner, { terminalId: terminals[0].terminalId });
+  const hit = new Set(killed.map(([pid]) => pid));
+  assert.ok(hit.has(shell.pid) && hit.has(80_001) && hit.has(80_002), JSON.stringify(killed));
+  assert.ok(!hit.has(80_003) && !hit.has(80_004), 'never a stranger or another terminal\'s process');
+  // After the shell exited, neither its pid nor anything else is killed by id alone.
+  killed.length = 0;
+  await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r2' });
+  const second = made[1];
+  table = [{ pid: second.pid, ppid: 1, pgid: second.pid, elapsedMs: 0 }]; // the pid, reused by a stranger after the exit
+  second.kill();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.deepEqual(killed, [], 'an exited shell\'s pid is not trusted');
+});
+
+test('concurrent creates cannot pass the limits or duplicate a requestId', { skip }, async t => {
+  const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-term-race-')));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(path.join(directory, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true, limits: { maxPerPrincipal: 1 } }), { mode: 0o600 });
+  const { spawn, made } = fakePty();
+  const service = createTerminalService({ home: directory, resolveWorkspace: async () => { await new Promise(resolve => setTimeout(resolve, 5)); return directory; }, log: { info() {}, warn() {} }, spawn, processes: async () => [], sweepMs: 60_000, killGraceMs: 10, platform: 'darwin' });
+  t.after(() => service.shutdown());
+  const owner = { id: 'owner', epoch: 'owner' };
+  const outcomes = await Promise.allSettled(Array.from({ length: 5 }, (_, i) => service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: `r${i}` })));
+  assert.equal(outcomes.filter(outcome => outcome.status === 'fulfilled').length, 1);
+  assert.ok(outcomes.filter(outcome => outcome.status === 'rejected').every(outcome => outcome.reason.data.reason === 'terminal_limit'));
+  assert.equal(made.length, 1);
+  const bob = { id: 'bob', epoch: 'e' };
+  const same = await Promise.all([1, 2, 3].map(() => service.create(bob, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'one' })));
+  assert.equal(new Set(same.map(result => result.terminal.terminalId)).size, 1);
+  assert.equal(made.length, 2);
+});
+
+test('a job started just before the shell exits on its own is killed, with no sweep to help', { skip }, async t => {
+  const world = await setup(t, { terminalOptions: { sweepMs: 600_000 } });
+  const term = await open(world);
+  await term.type('sleep 995 & exit\r');
+  await until(() => term.viewer.events.some(event => event.type === 'exit'), 'the exit');
+  await until(() => !execFileSync('ps', ['-A', '-o', 'command='], { encoding: 'utf8' }).split('\n').some(line => line.trim() === 'sleep 995'), 'the job killed after the exit');
 });
