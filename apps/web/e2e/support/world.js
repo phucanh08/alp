@@ -7,7 +7,7 @@ import { alpHome } from '@anhlp/alp-client';
 import { spawn, execFile } from 'node:child_process';
 import { once } from 'node:events';
 import { chmodSync, closeSync, existsSync, openSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
@@ -68,9 +68,12 @@ async function stop(child) {
 }
 
 /**
- * @param {{ webPort?: number, gatewayPort?: number, provider?: 'fake' | 'real', serveWeb?: boolean }} [options]
+ * @param {{ webPort?: number, gatewayPort?: number, provider?: 'fake' | 'real', serveWeb?: boolean, worktrees?: boolean, terminal?: boolean }} [options]
+ *   terminal (#121 H): the host's owner allows remote terminals (alp terminal allow --yes writes
+ *   <home>/terminal.json, 0600) before alpd starts, alpd's shell is /bin/sh, and the credential
+ *   `terminal` holds terminal.exec.
  */
-export async function startWorld({ webPort, gatewayPort, provider = 'fake', serveWeb = true, worktrees = false } = {}) {
+export async function startWorld({ webPort, gatewayPort, provider = 'fake', serveWeb = true, worktrees = false, terminal = false } = {}) {
   for (const file of [ALPD, CLI]) if (!existsSync(file)) throw new Error(`${path.relative(REPOSITORY, file)} is missing: run npm run build:alp-web:e2e-deps (node scripts/build-workspace.mjs cli && node scripts/build-workspace.mjs daemon)`);
   if (serveWeb && !existsSync(path.join(WEB, 'dist/index.html'))) throw new Error('apps/web/dist is missing: run npm run build:alp-web');
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-web-e2e-'));
@@ -116,6 +119,14 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     await writeFile(path.join(home,'worktree-destinations.json'),JSON.stringify({version:1,mappings:[{id:'browser',source,commonDir:path.join(source,'.git'),parent:await realpath(parent)}]}),{mode:0o600});
   }
 
+  if (terminal) {
+    // A fixed, plain shell for deterministic output: alpd takes $SHELL when /etc/shells lists it.
+    env.SHELL = '/bin/sh';
+    await run(process.execPath, [CLI, 'terminal', 'allow', '--yes'], { env });
+    const mode = (await stat(path.join(home, 'terminal.json'))).mode & 0o777;
+    assert.equal(mode, 0o600, `terminal.json mode ${mode.toString(8)}`);
+  }
+
   const logs = { alpd: path.join(directory, 'alpd.log'), gateway: path.join(directory, 'gateway.log') };
   let daemon;
   let socket = '';
@@ -156,6 +167,8 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     filesReader: await credential('files-reader', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'files.read']),
     // Uploading files into alpd's attachment store (attachments.write, #121 J) is never a default either.
     fileWriter: await credential('file-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'attachments.write']),
+    // A real shell on the host (terminal.exec, #121 H) is never a default either: only with `terminal`.
+    ...(terminal ? { terminal: await credential('terminal', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'project.read', '--permission', 'terminal.exec']) } : {}),
   };
   const tokens = Object.fromEntries(Object.entries(created).map(([name, entry]) => [name, entry.token]));
   const credentialIds = Object.fromEntries(Object.entries(created).map(([name, entry]) => [name, entry.credential.id]));
@@ -235,6 +248,8 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     webUrl: webOrigin,
     gatewayUrl: `http://127.0.0.1:${gatewayPort}`,
     get socket() { return socket; },
+    /** alpd's process id now (a restart changes it), to find what it started. */
+    get daemonPid() { return daemon?.pid; },
     /** Runs the alp CLI on the host as its owner would. */
     alp: async (...args) => (await run(process.execPath, [CLI, ...args], { env, cwd: projects.main })).stdout,
     /** Runs alp-gateway's CLI on the host (credential list/revoke/rotate). */
