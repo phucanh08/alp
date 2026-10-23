@@ -11,7 +11,6 @@ import {
   type ProviderTimelineItem,
 } from './compat.js';
 import { randomUUID } from 'node:crypto';
-import { ATTACHMENTS } from '@anhlp/alp-protocol';
 import type { AttachmentLimits, DaemonConnection, Envelope, SessionSnapshot, TimelineItem } from '@anhlp/alp-protocol';
 import { attachments } from '@anhlp/alp-client/portable';
 import { alpdSessionOf, configModels, DEFAULT_TEAM, handleFor, MODES } from './mapping-wire.js';
@@ -107,6 +106,25 @@ export function endsRoot(error: unknown) {
 
 /** How long a request waits for alpd to come back before it fails. */
 const RELINK_WAIT_MS = 20_000;
+
+/** The attachment limits the provider uses: those it checks before a byte moves, from daemon.hello. */
+type PromptFileLimits = Pick<AttachmentLimits, 'maxObjectBytes' | 'maxPerPrompt' | 'maxPromptBytes' | 'maxChunkBytes'>;
+type AttachmentOffer = { capable: boolean; limits?: PromptFileLimits };
+const LIMIT_KEYS = ['maxObjectBytes', 'maxPerPrompt', 'maxPromptBytes', 'maxChunkBytes'] as const;
+
+/**
+ * daemon.hello's `attachmentLimits` (§6.1), or undefined when they are missing or malformed: every
+ * limit a safe non-negative integer, and the count, prompt and chunk bytes non-zero. Fails closed,
+ * as the web's fileLimits does: no protocol default stands in for what alpd did not say.
+ */
+export function attachmentLimitsOf(offered: unknown): PromptFileLimits | undefined {
+  if (!offered || typeof offered !== 'object' || Array.isArray(offered)) return undefined;
+  const value = offered as Record<string, unknown>;
+  if (!LIMIT_KEYS.every(key => Number.isSafeInteger(value[key]) && (value[key] as number) >= 0)) return undefined;
+  const [maxObjectBytes, maxPerPrompt, maxPromptBytes, maxChunkBytes] = LIMIT_KEYS.map(key => value[key] as number);
+  if (!maxPerPrompt || !maxPromptBytes || !maxChunkBytes) return undefined;
+  return { maxObjectBytes: Math.min(maxObjectBytes, maxPromptBytes), maxPerPrompt, maxPromptBytes, maxChunkBytes };
+}
 
 const errorData = (error: unknown) => ({
   message: error instanceof Error ? error.message : String(error),
@@ -448,25 +466,41 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
 
       wire(client);
 
-      /** The effective attachment limits of a connection (daemon.hello, §6.1; repeating it answers the same), else the protocol's. */
-      const limitsOf = new WeakMap<DaemonConnection, Promise<AttachmentLimits>>();
-      function attachmentLimits(connection: DaemonConnection) {
-        let limits = limitsOf.get(connection);
-        if (!limits) {
-          limits = connection.request('daemon.hello', { protocolVersion: 1, client: { name: 'alp-paseo', version: '1' } })
-            .then((hello: any) => ({ ...ATTACHMENTS, ...(hello?.attachmentLimits ?? {}) }), () => ({ ...ATTACHMENTS }));
-          limitsOf.set(connection, limits);
+      /**
+       * What a connection offers for attachments, from its daemon.hello answer (§6.1; repeating it
+       * answers the same): whether it lists capability `attachments` (the connection's handshake
+       * capabilities when it has them, else that answer's) and its effective `attachmentLimits`.
+       * Fails closed like the web's fileLimits: no answer, no capability, or limits missing or not
+       * safe non-negative integers (counts, prompt and chunk bytes non-zero) mean no files. A failed
+       * hello is not kept, so the next prompt asks again.
+       */
+      const offers = new WeakMap<DaemonConnection, Promise<AttachmentOffer>>();
+      function attachmentOffer(connection: DaemonConnection) {
+        let offer = offers.get(connection);
+        if (!offer) {
+          offer = connection.request('daemon.hello', { protocolVersion: 1, client: { name: 'alp-paseo', version: '1' } })
+            .then((hello: any) => {
+              const listed = connection.capabilities ?? (Array.isArray(hello?.capabilities) ? hello.capabilities : []);
+              return { capable: listed.includes('attachments'), limits: attachmentLimitsOf(hello?.attachmentLimits) };
+            });
+          offers.set(connection, offer);
+          offer.catch(() => { if (offers.get(connection) === offer) offers.delete(connection); });
         }
-        return limits;
+        return offer;
       }
 
       /**
        * A prompt's content for alpd: each `uploaded_file` part becomes an attachment part in its place
-       * (§12.6), every other part (text, inline images) is passed on as it was. The file Paseo's daemon
-       * stored is read (strategy.readUpload, confined to Paseo's uploads) and uploaded into alpd's store
-       * for this session under a requestId of this prompt and part, so the same prompt sent again
-       * resumes or reuses the same upload and object. Every check that can fail before any byte moves
-       * (reader, capability, count and sizes) runs first; refusals name files, never host paths.
+       * (§12.6), every other part (text, inline images) is passed on as it was. The files Paseo's
+       * daemon stored are read (strategy.readUpload, confined to Paseo's uploads) and uploaded into
+       * alpd's store for this session under a requestId of this prompt and part, so the same prompt
+       * sent again resumes or reuses the same upload and object. Every check that can refuse a file
+       * runs before any byte moves: reader, capability, limits, count and declared sizes, then every
+       * file is read and checked (each at most maxObjectBytes, all at most maxPromptBytes, so memory
+       * stays bounded by one message) before the first upload begins. Only alpd itself can still fail
+       * an upload after an earlier one committed; that object is unreferenced, is reused by the same
+       * prompt sent again, and alpd's retention removes it otherwise. Refusals name files, never host
+       * paths.
        */
       async function promptContent<Part extends { type: string }>(sessionId: string, clientMessageId: string, content: Part[]) {
         const files = content.filter(part => part.type === 'uploaded_file') as unknown as UploadedFile[];
@@ -474,20 +508,36 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
         const names = files.map(file => displayName(file.fileName)).join(', ');
         if (!strategy.readUpload) throw new Error(`ALP cannot attach ${names}: files uploaded to Paseo are not sent to this ALP host`);
         const connection = client;
-        if (connection.capabilities && !connection.capabilities.includes('attachments')) throw new Error(`ALP cannot attach ${names}: this alpd does not take file attachments`);
-        const limits = await attachmentLimits(connection);
+        let offer: AttachmentOffer;
+        try {
+          offer = await attachmentOffer(connection);
+        } catch (error) {
+          throw new Error(`ALP cannot attach ${names}: alpd did not say whether it takes file attachments (${errorData(error).message})`);
+        }
+        if (!offer.capable) throw new Error(`ALP cannot attach ${names}: this alpd does not take file attachments`);
+        const { limits } = offer;
+        if (!limits) throw new Error(`ALP cannot attach ${names}: this alpd names no valid attachment limits`);
         if (files.length > limits.maxPerPrompt) throw new Error(`ALP cannot attach ${files.length} files to one message; at most ${limits.maxPerPrompt}`);
         const declared = files.reduce((sum, file) => sum + (Number.isSafeInteger(file.size) && file.size > 0 ? file.size : 0), 0);
         if (declared > limits.maxPromptBytes) throw new Error(`ALP cannot attach ${names}: together they are larger than one message takes (${limits.maxPromptBytes} bytes)`);
+        // Read and check every file before uploading any, so a refused file leaves nothing in alpd.
+        const read = new Map<number, Uint8Array>();
+        let total = 0;
+        for (const [index, part] of content.entries()) {
+          if (part.type !== 'uploaded_file') continue;
+          const data = await strategy.readUpload(part as unknown as UploadedFile, limits.maxObjectBytes);
+          total += data.byteLength;
+          if (total > limits.maxPromptBytes) throw new Error(`ALP cannot attach ${names}: together they are larger than one message takes (${limits.maxPromptBytes} bytes)`);
+          read.set(index, data);
+        }
         const store = attachments(connection);
         const parts: Array<Part | { type: 'attachment'; attachmentId: string }> = [];
         for (const [index, part] of content.entries()) {
           if (part.type !== 'uploaded_file') { parts.push(part); continue; }
           const file = part as unknown as UploadedFile;
-          const data = await strategy.readUpload(file, limits.maxObjectBytes);
           let attachment;
           try {
-            attachment = await store.upload({ sessionId, name: storedName(file.fileName), mimeType: mimeOf(file.mimeType), data, requestId: uploadRequestId(sessionId, clientMessageId, index), maxChunkBytes: limits.maxChunkBytes });
+            attachment = await store.upload({ sessionId, name: storedName(file.fileName), mimeType: mimeOf(file.mimeType), data: read.get(index)!, requestId: uploadRequestId(sessionId, clientMessageId, index), maxChunkBytes: limits.maxChunkBytes });
           } catch (error) {
             // alpd's errors name no host path (§12.6); the file is named by its display name.
             throw Object.assign(new Error(`ALP could not attach ${displayName(file.fileName)}: ${errorData(error).message}`), { code: (error as { code?: unknown })?.code, data: (error as { data?: unknown })?.data });
