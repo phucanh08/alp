@@ -157,7 +157,7 @@ test('a remote client works through the gateway across reconnects and restarts o
 
   // Handshake through the gateway: alpd's capabilities, never extension methods.
   const greeting = await hello(client, { name: 'e2e', version: '0' });
-  assert.deepEqual(greeting.capabilities.sort(), ['attach.after', 'library', 'library.project.write', 'prompt.images', 'prompt.receipts', 'question.watch', 'question.watch.turns', 'session.attention', 'session.history', 'session.list.page', 'session.resumeCommand', 'settings.language', 'task', 'team', 'workspace.files', 'workspace.files.read', 'workspace.git', 'workspace.registry', ...(process.platform === 'win32' ? [] : ['attachments', 'session.fork', 'session.reload', 'session.rewind', 'workspace.worktree'])].sort());
+  assert.deepEqual(greeting.capabilities.sort(), ['attach.after', 'library', 'library.project.write', 'prompt.images', 'prompt.receipts', 'question.watch', 'question.watch.turns', 'session.attention', 'session.history', 'session.list.page', 'session.resumeCommand', 'settings.language', 'task', 'team', 'workspace.files', 'workspace.files.read', 'workspace.git', 'workspace.registry', ...(process.platform === 'win32' ? [] : ['attachments', 'session.configure.live', 'session.fork', 'session.reload', 'session.rewind', 'workspace.worktree'])].sort());
   assert.ok(!greeting.capabilities.includes('extension.methods'));
   assert.equal(greeting.pid, undefined);
   assert.equal(greeting.hostname, hostname(), 'alpd\'s machine name, as Paseo labels a host');
