@@ -235,6 +235,8 @@ models".
 - Workspace registry, git, files, provider probe, usage, ghi library, đổi ngôn ngữ:
   không qua remote (UI báo `Unavailable in ALP remote mode`).
 - MCP servers/env/system prompt của Paseo không gửi sang host.
+- File tải lên Paseo (`uploaded_file`) không gửi sang host: entry remote không đọc file nào trên máy
+  này, nên tin nhắn có file bị từ chối với lỗi nêu tên file (ảnh inline vẫn gửi như trước).
 - `cwd` phải bằng đúng một workspace được cấp; thư mục con không được.
 - Không có `subscribe`: Tasks panel poll.
 - `task.create` chỉ dedup trong một process alpd; library revision đổi sau restart.

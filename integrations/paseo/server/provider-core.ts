@@ -11,11 +11,14 @@ import {
   type ProviderTimelineItem,
 } from './compat.js';
 import { randomUUID } from 'node:crypto';
-import type { DaemonConnection, Envelope, SessionSnapshot, TimelineItem } from '@anhlp/alp-protocol';
+import { ATTACHMENTS } from '@anhlp/alp-protocol';
+import type { AttachmentLimits, DaemonConnection, Envelope, SessionSnapshot, TimelineItem } from '@anhlp/alp-protocol';
+import { attachments } from '@anhlp/alp-client/portable';
 import { alpdSessionOf, configModels, DEFAULT_TEAM, handleFor, MODES } from './mapping-wire.js';
 import { sessionTasks } from './session-tasks.js';
 import { paseoDetail } from './tool-detail.js';
 import { agentUsage } from './session-usage.js';
+import { displayName, mimeOf, storedName, uploadRequestId, type UploadedFile } from './upload-names.js';
 
 /**
  * Paseo is a viewer of alpd: this provider translates Paseo inputs into daemon calls and daemon
@@ -79,6 +82,12 @@ export type ProviderStrategy = {
    * gateway refused the credential). The sessions then fail with it instead of waiting forever.
    */
   finalLinkError?(error: unknown): boolean;
+  /**
+   * The bytes of a file Paseo's daemon received through its file upload (uploads.ts), at most
+   * `maxBytes`, refusing anything that is not one of Paseo's uploads. Without it (remote: nothing on
+   * this machine is read) a prompt with an uploaded file fails and nothing is sent.
+   */
+  readUpload?(file: UploadedFile, maxBytes: number): Promise<Uint8Array>;
 };
 
 /** JSON-RPC codes that settle a root's fate on reattach: gone (1001), refused (1003), malformed. */
@@ -439,6 +448,55 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
 
       wire(client);
 
+      /** The effective attachment limits of a connection (daemon.hello, §6.1; repeating it answers the same), else the protocol's. */
+      const limitsOf = new WeakMap<DaemonConnection, Promise<AttachmentLimits>>();
+      function attachmentLimits(connection: DaemonConnection) {
+        let limits = limitsOf.get(connection);
+        if (!limits) {
+          limits = connection.request('daemon.hello', { protocolVersion: 1, client: { name: 'alp-paseo', version: '1' } })
+            .then((hello: any) => ({ ...ATTACHMENTS, ...(hello?.attachmentLimits ?? {}) }), () => ({ ...ATTACHMENTS }));
+          limitsOf.set(connection, limits);
+        }
+        return limits;
+      }
+
+      /**
+       * A prompt's content for alpd: each `uploaded_file` part becomes an attachment part in its place
+       * (§12.6), every other part (text, inline images) is passed on as it was. The file Paseo's daemon
+       * stored is read (strategy.readUpload, confined to Paseo's uploads) and uploaded into alpd's store
+       * for this session under a requestId of this prompt and part, so the same prompt sent again
+       * resumes or reuses the same upload and object. Every check that can fail before any byte moves
+       * (reader, capability, count and sizes) runs first; refusals name files, never host paths.
+       */
+      async function promptContent<Part extends { type: string }>(sessionId: string, clientMessageId: string, content: Part[]) {
+        const files = content.filter(part => part.type === 'uploaded_file') as unknown as UploadedFile[];
+        if (!files.length) return content;
+        const names = files.map(file => displayName(file.fileName)).join(', ');
+        if (!strategy.readUpload) throw new Error(`ALP cannot attach ${names}: files uploaded to Paseo are not sent to this ALP host`);
+        const connection = client;
+        if (connection.capabilities && !connection.capabilities.includes('attachments')) throw new Error(`ALP cannot attach ${names}: this alpd does not take file attachments`);
+        const limits = await attachmentLimits(connection);
+        if (files.length > limits.maxPerPrompt) throw new Error(`ALP cannot attach ${files.length} files to one message; at most ${limits.maxPerPrompt}`);
+        const declared = files.reduce((sum, file) => sum + (Number.isSafeInteger(file.size) && file.size > 0 ? file.size : 0), 0);
+        if (declared > limits.maxPromptBytes) throw new Error(`ALP cannot attach ${names}: together they are larger than one message takes (${limits.maxPromptBytes} bytes)`);
+        const store = attachments(connection);
+        const parts: Array<Part | { type: 'attachment'; attachmentId: string }> = [];
+        for (const [index, part] of content.entries()) {
+          if (part.type !== 'uploaded_file') { parts.push(part); continue; }
+          const file = part as unknown as UploadedFile;
+          const data = await strategy.readUpload(file, limits.maxObjectBytes);
+          let attachment;
+          try {
+            attachment = await store.upload({ sessionId, name: storedName(file.fileName), mimeType: mimeOf(file.mimeType), data, requestId: uploadRequestId(sessionId, clientMessageId, index), maxChunkBytes: limits.maxChunkBytes });
+          } catch (error) {
+            // alpd's errors name no host path (§12.6); the file is named by its display name.
+            throw Object.assign(new Error(`ALP could not attach ${displayName(file.fileName)}: ${errorData(error).message}`), { code: (error as { code?: unknown })?.code, data: (error as { data?: unknown })?.data });
+          }
+          parts.push({ type: 'attachment', attachmentId: attachment.attachmentId });
+        }
+        return parts;
+      }
+
       async function handle(input: ProviderInput) {
         requireProviderCapabilities(
           capabilities,
@@ -526,11 +584,12 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
         if (input.type === 'session.prompt') {
           const { prompt } = input;
           await wake(input.sessionId);
+          const sessionId = toAlpd(input.sessionId);
           await client.request('session.prompt', {
-            sessionId: toAlpd(input.sessionId),
+            sessionId,
             clientMessageId: prompt.clientMessageId,
             delivery: prompt.delivery === 'steer' ? 'steer' : 'auto',
-            content: prompt.input.type === 'message' ? prompt.input.content : [{ type: prompt.input.type }],
+            content: prompt.input.type === 'message' ? await promptContent(sessionId, prompt.clientMessageId, prompt.input.content) : [{ type: prompt.input.type }],
           });
           return;
         }
