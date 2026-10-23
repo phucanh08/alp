@@ -113,6 +113,13 @@ async function conversation(d, sessionId, texts) {
   return turns;
 }
 
+/** Waits up to `ms` for `check`, without failing: a race test gives a wake the time it needs to start, if it can. */
+async function within(ms, check) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { if (await check()) return true; await new Promise(resolve => setTimeout(resolve, 5)); }
+  return false;
+}
+
 const generationOf = async (d, sessionId) => (await d.request('session.history', { sessionId, limit: 1 })).generation;
 const rpcError = (code, reason) => error => error.code === code && error.data?.reason === reason;
 
@@ -732,7 +739,8 @@ test('mail that wakes the root while a rewind reads its timeline waits for the r
     sent = true;
     const read = await timeline(sessionId);
     await d.request('session.message', { sessionId: 'rw', text: 'mail during rewind' });
-    await new Promise(resolve => setTimeout(resolve, 30));
+    // Unheld, the wake starts a turn here; held, none starts, and the wait ends at its bound.
+    await within(500, () => d.runtime.snapshot('rw')?.activeTurnId);
     return read;
   };
   let during;
@@ -765,7 +773,8 @@ test('mail that wakes the source while a whole fork re-reads its timeline waits 
     sent = true;
     const read = await timeline(sessionId);
     await d.request('session.message', { sessionId: 'fw', text: 'mail during fork' });
-    await new Promise(resolve => setTimeout(resolve, 30));
+    // Unheld, the wake starts a turn here; held, none starts, and the wait ends at its bound.
+    await within(500, () => d.runtime.snapshot('fw')?.activeTurnId);
     return read;
   };
   let during;
