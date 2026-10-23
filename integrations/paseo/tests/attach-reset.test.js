@@ -302,11 +302,12 @@ test('team members that open while the bridge holds a root\'s events keep theirs
   ];
   const later = say(8, 'c1', 'assistant_message', 'later');
   const shapes = {
-    // A first attach: alpd replays what follows the page, then live events come after its answer.
-    first(listener, params) { for (const envelope of after) if (envelope.cursor > params.after) listener(envelope); setTimeout(() => listener(later), 0); },
+    // A first attach: alpd replays what follows the page, then live events come after its answer, whose
+    // cursor (the tip when it attached) is below theirs (§8.3).
+    first(listener, params) { for (const envelope of after) if (envelope.cursor > params.after) listener(envelope); setTimeout(() => listener(later), 0); return 7; },
     // An attached connection (a re-read): live events come in cursor order while alpd's attach awaits its
     // store, then its replay brings them again.
-    attached(listener, params) { for (const envelope of [...after, later]) listener(envelope); for (const envelope of [...after, later]) if (envelope.cursor > params.after) listener(envelope); },
+    attached(listener, params) { for (const envelope of [...after, later]) listener(envelope); for (const envelope of [...after, later]) if (envelope.cursor > params.after) listener(envelope); return 8; },
   };
   for (const [name, deliver] of Object.entries(shapes)) {
     let listener = () => {};
@@ -317,7 +318,7 @@ test('team members that open while the bridge holds a root\'s events keep theirs
         if (method === 'session.list') return { sessions: [root] };
         if (method === 'question.list') return { questions: [] };
         if (method === 'session.history') return { generation: 'a'.repeat(32), hasOlder: false, tipCursor: 1, items: [say(1, 'r1', 'user_message', 'one')] };
-        if (method === 'session.attach') { deliver(listener, params); return { session: root, cursor: 8 }; }
+        if (method === 'session.attach') return { session: root, cursor: deliver(listener, params) };
         throw new Error(`unexpected request ${method}`);
       },
     };
