@@ -60,6 +60,7 @@ const OUT_OF_SCOPE = {
   'workspace.git.status': null, 'workspace.git.diff': null, // git.test.js checks registry scope, both permissions, paths and projection
   'attachment.begin': null, 'attachment.chunk': null, 'attachment.commit': null, 'attachment.abort': null, 'attachment.get': null, 'attachment.delete': null, // attachments.test.js checks the session scope, both permissions and the principal context; alpd's binding is tested against its store
 
+  'terminal.create': null, 'terminal.list': null, 'terminal.attach': null, 'terminal.input': null, 'terminal.resize': null, 'terminal.close': null, // terminal.test.js checks terminal.exec, the registry scope, the principal context and event filtering; alpd's binding is tested against real PTYs
   'catalog.get': null, // global: the static catalogue of models and modes
   'session.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
   'session.get': () => [{ sessionId: 'sb' }, 1001],
@@ -118,6 +119,8 @@ const IN_SCOPE = ({ a }) => ({
   'attachment.begin': { sessionId: 'sa', name: 'a.txt', size: 1, mimeType: 'text/plain', requestId: 'r' }, 'attachment.chunk': { uploadId: `upl_${'1'.repeat(32)}`, offset: 0, data: 'AAAA' },
   'attachment.commit': { uploadId: `upl_${'1'.repeat(32)}`, sha256: '0'.repeat(64) }, 'attachment.abort': { uploadId: `upl_${'1'.repeat(32)}` },
   'attachment.get': { attachmentId: `att_${'1'.repeat(32)}` }, 'attachment.delete': { attachmentId: `att_${'1'.repeat(32)}` },
+  'terminal.create': { workspaceId: 'wks_a', cols: 80, rows: 24, requestId: 'r' }, 'terminal.list': {}, 'terminal.attach': { terminalId: `term_${'1'.repeat(32)}` },
+  'terminal.input': { terminalId: `term_${'1'.repeat(32)}`, data: 'x' }, 'terminal.resize': { terminalId: `term_${'1'.repeat(32)}`, cols: 80, rows: 24 }, 'terminal.close': { terminalId: `term_${'1'.repeat(32)}` },
   'catalog.get': {}, 'library.models': {}, 'settings.language.get': {},
   'session.list': {}, 'session.get': { sessionId: 'sa' }, 'session.status': { sessionId: 'sa' }, 'session.log': { sessionId: 'sa' },
   'session.history': { sessionId: 'sa' }, 'session.attach': { sessionId: 'sa' }, 'session.release': { sessionId: 'sa' }, 'session.attention.clear': { sessionId: 'sa' }, 'session.preview': { spec: { cwd: a } },
@@ -176,9 +179,11 @@ test('the exposure matrix agrees with the daemon\'s x-alp annotations', t => {
     assert.ok(scope?.kind !== 'library-or-project' || exposure.permission === 'library.write', `${method}: can write the host library`);
     assert.ok(!(scope?.kind === 'connection' && effect === 'mutation'), `${method}: a connection-level mutation is exposed`);
     // A risk the gateway removes itself is allowed, with the test that proves it.
-    const mitigated = method.startsWith('library.') && exposure.permission === 'library.write' ? /^exec-config/ : { 'session.create': /^exec: spec\.env and stdio spec\.mcpServers/ }[method];
+    // Terminals execute on purpose (the user's decision of 2026-10-20, issue #121 H): only with the
+    // opt-in terminal.exec, which nothing implies, and the host owner's own switch.
+    const mitigated = method.startsWith('library.') && exposure.permission === 'library.write' ? /^exec-config/ : method.startsWith('terminal.') && exposure.permission === 'terminal.exec' ? /execution|runs any command/ : { 'session.create': /^exec: spec\.env and stdio spec\.mcpServers/ }[method];
     assert.ok(!risks.some(risk => /admin|exec/.test(risk) && !mitigated?.test(risk)), `${method}: an administrative or code-executing method is exposed`);
-    if (effect === 'mutation' && !readerMutations.has(method)) assert.match(exposure.permission ?? '', /(?:\.write$|^workspace\.manage$)/, `${method} writes and needs a write permission`);
+    if (effect === 'mutation' && !readerMutations.has(method)) assert.match(exposure.permission ?? '', /(?:\.write$|^workspace\.manage$|^terminal\.exec$)/, `${method} writes and needs a write permission`);
     // The resource the daemon names is the one the gateway checks.
     if (scope?.param === 'projectRoot') assert.ok(exposure.params?.includes('projectRoot'), `${method} forwards projectRoot`);
     if (scope?.param === 'sessionId') assert.ok(exposure.params?.includes('sessionId'), `${method} forwards sessionId`);

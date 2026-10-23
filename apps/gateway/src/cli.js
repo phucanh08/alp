@@ -7,7 +7,7 @@ import { alpHome, connectSocket, daemonPaths } from '@anhlp/alp-client';
 import { resolveConfig } from './config.js';
 import { CredentialStore, createCredential, gatewayHome, listCredentials, reissueCredential, revokeCredential, rotateCredential } from './credentials.js';
 import { createGatewayLogger } from './log.js';
-import { DEFAULT_PERMISSIONS, PERMISSIONS } from './policy.js';
+import { DEFAULT_PERMISSIONS, PERMISSIONS, TERMINAL_EXEC_WARNING } from './policy.js';
 import { createGateway } from './server.js';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -35,11 +35,15 @@ attachments.write (upload files into alpd's attachment store and send them in pr
 default and implies nothing: name it with --permission.
 session.team.write (change the team of a live root session; used with session.write) is never a default and implies
 nothing: name it with --permission. session.write alone changes a live root's model and effort within --mode.
+terminal.exec (open a real shell on the daemon host as the account that runs alpd: every file that account can read
+or write, any program, the network) is never a default and implies nothing: name it with --permission. A workspace
+only picks where the shell starts; it is NOT a sandbox. alpd also needs its owner's own switch: alp terminal allow.
 session.write also forks and rewinds a root's conversation (session.fork needs session.read too); only the
 conversation changes, never a file. A token is printed once; only its hash is kept.
 Files live in $ALP_GATEWAY_HOME, else $ALP_HOME/gateway. The gateway never starts alpd.`;
 
 const fail = (/** @type {string} */ message) => { console.error(message); process.exit(2); };
+
 
 async function serve(/** @type {string[]} */ args) {
   const { values } = parseArgs({
@@ -100,6 +104,7 @@ async function credential(/** @type {string[]} */ args) {
     });
     if (values.json) console.log(JSON.stringify({ credential: created, token }));
     else console.log(`Created credential ${created.id} (${created.label}).\nToken, shown once; keep it in the client's secure storage:\n\n  ${token}\n`);
+    if (permissions.includes('terminal.exec')) console.error(TERMINAL_EXEC_WARNING);
     return;
   }
   if (action === 'list') {
@@ -128,6 +133,7 @@ async function credential(/** @type {string[]} */ args) {
     });
     if (values.json) console.log(JSON.stringify({ credential: issued, token }));
     else console.log(`Reissued ${issued.id}; the old token no longer works and its connections close after the gateway reloads.\nNew token, shown once:\n\n  ${token}\n`);
+    if (issued.permissions?.includes('terminal.exec')) console.error(TERMINAL_EXEC_WARNING);
     return;
   }
   if (action === 'rotate') {

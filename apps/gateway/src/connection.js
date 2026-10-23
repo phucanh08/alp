@@ -8,6 +8,7 @@ import { isAlpClientError } from '@anhlp/alp-client/portable';
 import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.js';
 import { projectGitDiff, projectGitStatus, gatewayAttachmentLimits, projectAttachment, projectUploadBegun } from './policy.js';
 import { CONFIGURE_REASONS, isGeneration, projectBranch, projectConfigured, projectConfigurePreview, projectConversation, projectForkedFrom } from './policy.js';
+import { TERMINAL_REFUSALS, gatewayTerminalLimits, projectTerminal, projectTerminalEvent } from './policy.js';
 import { assertProjectDataContent } from '@anhlp/alp-core/library-edit';
 
 /**
@@ -353,6 +354,8 @@ export class ClientConnection {
   /** @type {(connection: ClientConnection, code: number) => void} */ #onClosed;
   /** Effective attachment limits of this connection (gatewayAttachmentLimits), once alpd said hello. */
   /** @type {import('@anhlp/alp-protocol').AttachmentLimits} */ #attachmentLimits = gatewayAttachmentLimits(undefined);
+  /** @type {import('@anhlp/alp-protocol').TerminalLimits} */ #terminalLimits = gatewayTerminalLimits(undefined);
+  /** Terminals this connection attached: only their terminal.event notifications leave (§5.18). @type {Set<string>} */ #terminals = new Set();
 
   /**
    * @param {{
@@ -395,6 +398,8 @@ export class ClientConnection {
     const listed = Array.isArray(hello.capabilities) ? hello.capabilities : [];
     this.#capabilities = FORWARDED_CAPABILITIES.filter(capability => listed.includes(capability));
     this.#attachmentLimits = gatewayAttachmentLimits(hello.attachmentLimits, this.#limits.maxFrame);
+    this.#terminalLimits = gatewayTerminalLimits(hello.terminalLimits, this.#limits.maxFrame);
+    client.onNotification((method, params) => { if (method === 'terminal.event') this.#terminalEvent(params); });
     client.onEvent(envelope => { if (!this.#capabilities.includes('workspace.worktree') || !this.#grant.permissions.has('workspace.manage')) { this.#event(envelope); return; } this.#eventTail = this.#eventTail.then(async () => { await this.#refreshWorktrees(); this.#event(envelope); }).catch(() => { this.close(CLOSE_CODE.internal, 'Workspace authority unavailable; reconnect'); }); });
     client.onClose(error => this.#upstreamClosed(error));
   }
@@ -718,6 +723,7 @@ export class ClientConnection {
       capabilities: [...this.#capabilities],
       ...(this.#capabilities.includes('prompt.images') ? { promptImageLimits: promptImageLimits(this.#limits.maxFrame) } : {}),
       ...(this.#capabilities.includes('attachments') ? { attachmentLimits: { ...this.#attachmentLimits } } : {}),
+      ...(this.#capabilities.includes('terminal') ? { terminalLimits: { ...this.#terminalLimits } } : {}),
     };
   }
 
@@ -1052,6 +1058,47 @@ export class ClientConnection {
       if ((Number.isSafeInteger(value) && value >= 0) || (key === 'limit' && typeof value === 'string' && /^[a-z_]{1,32}$/.test(value))) data[key] = value;
     }
     return new GatewayError(error.code, reason ? ATTACHMENT_REFUSALS[reason] : 'The attachment request failed on the daemon host', Object.keys(data).length ? data : undefined);
+  }
+
+  /**
+   * A terminal's output, exit or detach from alpd (§5.18): only for a terminal this connection
+   * attached, while the credential holds terminal.exec, in the schema's shape. Into the one ordered
+   * queue at once, so an attach's replay still leaves before its answer.
+   * @param {unknown} raw
+   */
+  #terminalEvent(raw) {
+    if (this.#closed) return;
+    const event = projectTerminalEvent(raw, this.#terminalLimits.maxOutputFrameBytes);
+    if (!event || !this.#terminals.has(event.terminalId) || !this.#grant.permissions.has('terminal.exec')) {
+      this.#log.warn('dropped a terminal event this connection may not get', { code: 'ALP_GATEWAY_EVENT_OUT_OF_SCOPE' });
+      return;
+    }
+    if (event.type === 'detached') this.#terminals.delete(event.terminalId);
+    this.#push(JSON.stringify({ jsonrpc: '2.0', method: 'terminal.event', params: event }));
+  }
+
+  /** alpd's refusal of a terminal call: a fixed text per known reason, its code and reason, `limit` only. @param {unknown} caught */
+  #terminalError(caught) {
+    const error = /** @type {any} */ (caught);
+    if (error instanceof GatewayError || isAlpClientError(error) || typeof error?.code !== 'number') return error;
+    const reason = typeof error.data?.reason === 'string' && Object.hasOwn(TERMINAL_REFUSALS, error.data.reason) ? error.data.reason : undefined;
+    /** @type {Record<string, unknown>} */
+    const data = reason ? { reason } : {};
+    if (reason === 'terminal_limit' && (error.data.limit === 'principal' || error.data.limit === 'daemon')) data.limit = error.data.limit;
+    return new GatewayError(error.code, reason ? TERMINAL_REFUSALS[/** @type {keyof typeof TERMINAL_REFUSALS} */ (reason)] : 'The terminal request failed on the daemon host', Object.keys(data).length ? data : undefined);
+  }
+
+  /** One terminal call to alpd with this credential's context (as attachments bind it); alpd's refusal rewritten. @param {string} method @param {Record<string, unknown>} params */
+  #terminalCall(method, params) {
+    return this.#call(method, { ...params, ...this.#attachmentContext() }).catch(error => { throw this.#terminalError(error); });
+  }
+
+  /** A terminal answer the gateway passes on, or a refusal. @param {unknown} raw @param {string} method */
+  #terminalAnswer(raw, method) {
+    const terminal = projectTerminal(raw);
+    if (terminal) return terminal;
+    this.#log.error(`${method} answered a terminal the gateway does not pass on; refused it`, { code: 'ALP_GATEWAY_TERMINAL_REFUSED' });
+    throw new GatewayError(ERROR.failed, 'The daemon host answered a terminal the gateway does not pass on');
   }
 
   /** One attachment call to alpd with this credential's context; alpd's refusal rewritten. @param {string} method @param {Record<string, unknown>} params */
@@ -1673,6 +1720,51 @@ export class ClientConnection {
     // against the grant afresh; every call carries this credential's context, so alpd checks the
     // binding (credential, grant epoch, authorized project, live session) again and answers an
     // upload of anyone else as an unknown one. Chunks over the advertised size never reach alpd.
+    // Terminals (docs/protocol/alp-json-rpc-v1.md §12.10, issue #121 H): a shell as the daemon's
+    // account, only with terminal.exec (checked before any handler) and alpd's own host switch. The
+    // workspace must be one a grant names exactly; alpd binds every terminal to this credential, its
+    // grant epoch and the grant's workspaces, so another credential's terminal is not found.
+    'terminal.create': async params => {
+      await this.#registryWorkspace(params.workspaceId);
+      const result = /** @type {any} */ (await this.#terminalCall('terminal.create', params));
+      return { terminal: this.#terminalAnswer(result?.terminal, 'terminal.create') };
+    },
+    'terminal.list': async params => {
+      if (params.workspaceId !== undefined) await this.#registryWorkspace(params.workspaceId);
+      const result = /** @type {any} */ (await this.#terminalCall('terminal.list', params));
+      if (!Array.isArray(result?.terminals)) throw new GatewayError(ERROR.failed, 'The daemon host answered a list the gateway does not pass on');
+      return { terminals: result.terminals.map((/** @type {unknown} */ entry) => this.#terminalAnswer(entry, 'terminal.list')) };
+    },
+    'terminal.attach': async params => {
+      // Its replay arrives before the answer: the terminal is this connection's from now on.
+      const known = this.#terminals.has(params.terminalId);
+      this.#terminals.add(params.terminalId);
+      try {
+        const result = /** @type {any} */ (await this.#terminalCall('terminal.attach', params));
+        const gap = result?.gap;
+        if (!Number.isSafeInteger(result?.nextSeq) || result.nextSeq < 1 || (gap !== undefined && !(Number.isSafeInteger(gap?.fromSeq) && Number.isSafeInteger(gap?.toSeq) && gap.fromSeq >= 1 && gap.toSeq >= gap.fromSeq))) throw new GatewayError(ERROR.failed, 'The daemon host answered an attach the gateway does not pass on');
+        return { terminal: this.#terminalAnswer(result.terminal, 'terminal.attach'), nextSeq: result.nextSeq, ...(gap ? { gap: { fromSeq: gap.fromSeq, toSeq: gap.toSeq } } : {}) };
+      } catch (error) {
+        if (!known) this.#terminals.delete(params.terminalId);
+        throw error;
+      }
+    },
+    'terminal.input': async params => {
+      if (Buffer.byteLength(params.data) > this.#terminalLimits.maxInputBytes) throw new GatewayError(RPC_ERROR.invalidParams, TERMINAL_REFUSALS.input_too_large, { reason: 'input_too_large', max: this.#terminalLimits.maxInputBytes });
+      const result = /** @type {any} */ (await this.#terminalCall('terminal.input', params));
+      if (!Number.isSafeInteger(result?.bytes)) throw new GatewayError(ERROR.failed, 'The daemon host answered input the gateway does not pass on');
+      return { bytes: result.bytes };
+    },
+    'terminal.resize': async params => {
+      const result = /** @type {any} */ (await this.#terminalCall('terminal.resize', params));
+      if (!Number.isSafeInteger(result?.cols) || !Number.isSafeInteger(result?.rows)) throw new GatewayError(ERROR.failed, 'The daemon host answered a resize the gateway does not pass on');
+      return { cols: result.cols, rows: result.rows };
+    },
+    'terminal.close': async params => {
+      await this.#terminalCall('terminal.close', params);
+      this.#terminals.delete(params.terminalId);
+      return { closed: true };
+    },
     'attachment.begin': async params => {
       await this.#resolve(params.sessionId, { fresh: true });
       const begun = projectUploadBegun(await this.#attachmentCall('attachment.begin', params), this.#attachmentLimits.maxChunkBytes);
