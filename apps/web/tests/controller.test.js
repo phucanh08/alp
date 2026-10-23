@@ -1284,6 +1284,101 @@ for (const navigation of ['session', 'deselect', 'workspace']) for (const reconn
   });
 }
 
+test('auxiliary Stop reconnect failures do not block another selected root or release the receipt fence', async t => {
+  let recover = false, opens = 0, releasePrompt;
+  const promptGate = new Promise(resolve => { releasePrompt = resolve; });
+  t.after(() => releasePrompt());
+  let w;
+  w = setup(t, {}, { requestTimeoutMs: 50, open: async args => {
+    if (++opens > 1 && !recover) throw new Error('auxiliary temporarily unavailable');
+    return w.host.open(args);
+  } });
+  w.host.seed('ses_a'); w.host.seed('ses_b');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'original attached');
+  w.host.intercept.set('session.prompt', async () => { await promptGate; });
+  const sending = w.controller.sendPrompt('pre-receipt [hold]');
+  await until(() => w.host.count('session.prompt') === 1, 'receipt gate');
+  const stopping = w.controller.interrupt();
+  w.controller.selectSession('ses_b');
+  await until(() => opens >= 3, 'auxiliary retry');
+  assert.equal(w.state().connection.phase, 'open', 'main remains healthy');
+  await until(() => w.state().tree?.rootId === 'ses_b' && attached(w.state), 'other root attaches while auxiliary unavailable');
+  assert.equal(w.host.root('ses_a').viewers.size, 1, 'old main subscription fences receipt');
+  assert.equal(w.host.calls.filter(c => c.method === 'session.release' && c.params.sessionId === 'ses_a').length, 0);
+  recover = true;
+  await until(() => w.host.calls.filter(c => c.method === 'session.attach' && c.params.sessionId === 'ses_a').length === 2, 'observer owns original');
+  await until(() => w.host.root('ses_a').viewers.size === 1, 'old main subscription released');
+  releasePrompt();
+  await sending; await stopping;
+  assert.equal(w.host.root('ses_a').running, undefined);
+  await until(() => ![...w.host.connections].some(link => link.attached.has('ses_a')), 'original subscriptions cleaned');
+});
+
+for (const ending of ['reselect', 'failed-reselect', 'refused-access', 'disconnect']) test(`retained receipt subscription cleanup after ${ending} during observer retry`, async t => {
+  let recover = false, opens = 0, releasePrompt;
+  const promptGate = new Promise(resolve => { releasePrompt = resolve; });
+  t.after(() => releasePrompt());
+  let w;
+  w = setup(t, {}, { requestTimeoutMs: 50, open: async args => {
+    if (++opens > 1 && !recover) throw new Error('auxiliary unavailable');
+    const link = await w.host.open(args);
+    if (opens > 1 && ending === 'refused-access') link.principal.id = 'changed';
+    return link;
+  } });
+  w.host.seed('ses_a'); w.host.seed('ses_b');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'original attached');
+  w.host.intercept.set('session.prompt', async () => { await promptGate; });
+  const sending = w.controller.sendPrompt('receipt [hold]');
+  await until(() => w.host.count('session.prompt') === 1, 'receipt gate');
+  let settled = false;
+  const stopping = w.controller.interrupt().then(() => { settled = true; });
+  w.controller.selectSession('ses_b');
+  await until(() => w.state().tree?.rootId === 'ses_b' && attached(w.state), 'new selection attaches');
+  if (ending === 'failed-reselect') {
+    w.host.intercept.set('session.attach', (_params, _link, { fail }) => { fail(1000, 'Temporary attach refusal'); return 'handled'; });
+    w.controller.selectSession('ses_a');
+    await until(() => w.state().tree?.status === 'error', 'reselect refused');
+    assert.equal(w.host.root('ses_a').viewers.size, 1, 'failed reselect preserves receipt fence');
+    w.host.intercept.delete('session.attach');
+    w.controller.selectSession('ses_b');
+    await until(() => w.state().tree?.rootId === 'ses_b' && attached(w.state), 'other root still usable');
+    recover = true;
+    await until(() => w.host.calls.filter(c => c.method === 'session.attach' && c.params.sessionId === 'ses_a').length >= 3, 'observer recovers');
+    releasePrompt();
+    await sending; await stopping;
+    await until(() => w.host.root('ses_a').viewers.size === 0, 'recovered observer and lease cleaned');
+  } else if (ending === 'disconnect') {
+    w.controller.disconnect();
+    await until(() => w.host.connections.size === 0, 'all connections closed');
+    await stopping;
+  } else if (ending === 'refused-access') {
+    w.controller.selectSession(null);
+    recover = true;
+    await until(() => /Stop is unresolved/.test(w.state().notice?.text ?? ''), 'access refusal visible');
+    await until(() => w.host.root('ses_a').viewers.size === 0, 'retained lease released on terminal refusal');
+    assert.equal(settled, false, 'refusal does not acknowledge cancellation');
+    assert.equal(w.host.count('session.interrupt'), 0);
+  } else {
+    w.controller.selectWorkspace('/w/b');
+    w.controller.selectWorkspace('/w/a');
+    w.controller.selectSession('ses_a');
+    await until(() => w.state().tree?.rootId === 'ses_a' && attached(w.state), 'original reselected');
+    recover = true;
+    await until(() => w.host.root('ses_a').viewers.size === 2, 'observer handoff cannot release reselected subscription');
+    releasePrompt();
+    await sending; await stopping;
+    await until(() => w.host.root('ses_a').viewers.size === 1, 'only selected subscription remains');
+    assert.equal(w.state().tree.rootId, 'ses_a');
+    assert.equal(w.host.root('ses_a').running, undefined);
+  }
+  releasePrompt();
+  await sending;
+});
+
 test('navigation waits for the Stop observer to own a pre-receipt root before releasing the selected viewer', async t => {
   let releaseObserver, releasePrompt;
   const observerGate = new Promise(resolve => { releaseObserver = resolve; });

@@ -280,6 +280,8 @@ export class Controller {
   #watching = null;
   /** The root attached on a client, so a switch knows what to release. @type {{ client: AlpRpcClient, root: string } | null} */
   #attached = null;
+  /** Old main subscriptions fencing receipt admission until a Stop observer owns them. @type {Map<string, { client: AlpRpcClient, root: string }>} */
+  #stopLeases = new Map();
   /** @type {Map<string, { generation: string, olderCursor?: string, hasOlder: boolean, loading?: boolean, error?: string }>} */
   #older = new Map();
   /**
@@ -448,6 +450,7 @@ export class Controller {
         if (this.#run !== run) return;
         for (const terminal of this.#terminals.values()) terminal.disconnected();
         this.#attached = null;
+        this.#stopLeases.clear();
         this.#watching = null;
         for (const tree of this.#trees.values()) tree.attaching = null;
       },
@@ -483,6 +486,7 @@ export class Controller {
     this.#sentAt.clear();
     this.#taken.clear();
     this.#inflight.clear();
+    this.#stopLeases.clear();
     const stops = [...this.#stops.values()];
     this.#stops.clear();
     for (const intent of stops) { clearTimeout(intent.retry); intent.observer?.stop(); intent.done(); }
@@ -1087,13 +1091,17 @@ export class Controller {
     if (this.#attached && this.#attached.client !== client) this.#attached = null;
     const have = this.#attached;
     if (have && have.root !== want) {
-      // Hand the last subscription to the Stop observer before releasing this viewer. The
-      // receipt may still be pending, so releasing an idle root first could reap its session.
-      const observer = this.#stops.get(have.root)?.observer;
-      if (observer) await observer.ready().catch(() => {});
+      // Keep the receipt fence independently of the selected viewer. An auxiliary link may
+      // retry indefinitely; that must not prevent reads of another root on this healthy link.
       this.#attached = null;
       if (this.#watching === have.root) this.#watching = null;
-      await client.request('session.release', { sessionId: have.root }, { timeoutMs: this.#options.releaseTimeoutMs }).catch(() => {});
+      const observer = this.#stops.get(have.root)?.observer;
+      if (observer && observer.state !== 'stopped') {
+        this.#stopLeases.set(have.root, have);
+        void observer.ready().catch(() => {}).then(() => this.#releaseStopLease(have.root, have));
+      } else {
+        await client.request('session.release', { sessionId: have.root }, { timeoutMs: this.#options.releaseTimeoutMs }).catch(() => {});
+      }
       return true;
     }
     if (!want || want === this.#creating || this.#attached?.root === want) return false;
@@ -1107,14 +1115,34 @@ export class Controller {
       this.#set({ tree: { rootId: want, status: 'error', error: tree.failed, projection: tree.projection } });
       return false;
     }
+    const retained = this.#stopLeases.get(want);
     try {
+      // Reclaim a retained subscription before any delayed observer handoff can release it.
+      this.#stopLeases.delete(want);
       await this.#attachTree(client, want);
       this.#attached = { client, root: want };
       return this.#state.selected !== want;
     } catch (error) {
+      // A failed re-selection still needs its receipt fence until observer ownership is safe.
+      if (retained && client === this.#run?.alp?.client) {
+        this.#stopLeases.set(want, retained);
+        const observer = this.#stops.get(want)?.observer;
+        if (observer && observer.state !== 'stopped') {
+          void observer.ready().catch(() => {}).then(() => this.#releaseStopLease(want, retained));
+        } else this.#releaseStopLease(want, retained);
+      }
       this.#attachFailed(client, want, error);
       return false;
     }
+  }
+
+  /** @param {string} root @param {{ client: AlpRpcClient, root: string }} [expected] */
+  #releaseStopLease(root, expected) {
+    const lease = this.#stopLeases.get(root);
+    if (!lease || (expected && lease !== expected)) return;
+    this.#stopLeases.delete(root);
+    if (this.#run?.alp?.client !== lease.client) return;
+    void lease.client.request('session.release', { sessionId: root }, { timeoutMs: this.#options.releaseTimeoutMs }).catch(() => {});
   }
 
   /**
@@ -2817,6 +2845,7 @@ export class Controller {
         opened = true;
         this.#pumpStop(root);
       } else if (state === 'stopped') {
+        this.#releaseStopLease(root);
         intent.exhausted = true;
         if (this.#state.selected === root) this.#set(state => ({ busy: { ...state.busy, interrupt: false } }));
         this.#notify('error', `Stop is unresolved: ${describe(error).message}`);
@@ -2829,6 +2858,7 @@ export class Controller {
     const intent = this.#stops.get(root);
     if (!intent) return;
     this.#stops.delete(root);
+    this.#releaseStopLease(root);
     clearTimeout(intent.retry);
     intent.observer?.stop();
     intent.done();
