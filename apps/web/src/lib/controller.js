@@ -14,6 +14,8 @@ import { CONFIGURE_LIVE, CONFIGURE_MESSAGES, NEW_SESSION_REFUSALS, configuredNot
 import { loadPreferences, parsePreferences, rememberChoices, savePreferences } from './preferences.js';
 import { TerminalSession, terminalGate, terminalLimits } from './terminal.js';
 
+/** @typedef {{ messageId?: string, turnId?: string, observer?: ReconnectingClient, observed?: Projection, sending?: boolean, warned?: boolean, exhausted?: boolean, attempts?: number, retry?: ReturnType<typeof setTimeout>, done: () => void, promise: Promise<void> }} StopIntent */
+
 /**
  * Everything the web app knows and does, without React: one connection to alpd through the
  * gateway, the workspace and session the user chose, and each request's fate. The UI renders
@@ -481,8 +483,9 @@ export class Controller {
     this.#sentAt.clear();
     this.#taken.clear();
     this.#inflight.clear();
-    for (const intent of this.#stops.values()) { clearTimeout(intent.retry); intent.done(); }
+    const stops = [...this.#stops.values()];
     this.#stops.clear();
+    for (const intent of stops) { clearTimeout(intent.retry); intent.observer?.stop(); intent.done(); }
     this.#stopCandidates.clear();
     this.#requesting.clear();
     if (this.#busyTimer !== undefined) { clearTimeout(this.#busyTimer); this.#busyTimer = undefined; }
@@ -1012,7 +1015,7 @@ export class Controller {
 
   /** @param {string} root @param {TreeView['status']} [status] */
   #publishTree(root, status) {
-    if (this.#state.selected !== root) return;
+    if (this.#state.selected !== root) { this.#pumpStop(root); return; }
     const tree = this.#trees.get(root);
     if (!tree) return;
     // A pending message is done once its user message is in the timeline, whatever its request
@@ -1084,6 +1087,10 @@ export class Controller {
     if (this.#attached && this.#attached.client !== client) this.#attached = null;
     const have = this.#attached;
     if (have && have.root !== want) {
+      // Hand the last subscription to the Stop observer before releasing this viewer. The
+      // receipt may still be pending, so releasing an idle root first could reap its session.
+      const observer = this.#stops.get(have.root)?.observer;
+      if (observer) await observer.ready().catch(() => {});
       this.#attached = null;
       if (this.#watching === have.root) this.#watching = null;
       await client.request('session.release', { sessionId: have.root }, { timeoutMs: this.#options.releaseTimeoutMs }).catch(() => {});
@@ -2709,7 +2716,7 @@ export class Controller {
   #stopCandidates = new Map();
 
   /** Stop intents survive request timeouts and reconnects; each keeps the identity captured at click. */
-  /** @type {Map<string, { messageId?: string, turnId?: string, sending?: boolean, warned?: boolean, exhausted?: boolean, attempts?: number, retry?: ReturnType<typeof setTimeout>, done: () => void, promise: Promise<void> }>} */
+  /** @type {Map<string, StopIntent>} */
   #stops = new Map();
 
   /** Stops only the selected turn, or the turn belonging to the message still on its way. */
@@ -2720,6 +2727,7 @@ export class Controller {
     if (existing) {
       existing.attempts = 0;
       existing.exhausted = false;
+      if (existing.observer?.state === 'stopped') this.#observeStop(root, existing);
       this.#pumpStop(root);
       return existing.promise;
     }
@@ -2744,11 +2752,76 @@ export class Controller {
     }
     let done = () => {};
     const promise = new Promise(resolve => { done = () => resolve(undefined); });
-    this.#stops.set(root, { ...(turnId ? { turnId } : { messageId }), done, promise });
+    const intent = { ...(turnId ? { turnId } : { messageId }), done, promise };
+    this.#stops.set(root, intent);
+    this.#observeStop(root, intent);
     this.#set(state => ({ busy: { ...state.busy, interrupt: true } }));
     if (!turnId) this.#notify('info', STOP_WAITING);
     this.#pumpStop(root);
     return promise;
+  }
+
+  /**
+   * A read-only attachment owned by this Stop, independent of the selected tree and workspace.
+   * Its connection carries one root only; child envelopes cannot enter the selected projection.
+   * @param {string} root @param {StopIntent} intent
+   */
+  #observeStop(root, intent) {
+    const run = this.#run;
+    const principal = this.#state.principal?.id;
+    const { open, backoff, stableMs, requestTimeoutMs } = this.#options;
+    const gateway = this.#state.connection.gateway;
+    const token = this.#token;
+    let buffer = /** @type {any[] | null} */ (null);
+    let opened = false;
+    intent.observed ??= this.#trees.get(root)?.projection ?? emptyProjection(root);
+    const current = () => this.#run === run && this.#stops.get(root) === intent;
+    const observer = createReconnectingClient({
+      connect: async ({ signal }) => {
+        const link = await open({ url: gateway, token, signal: /** @type {AbortSignal} */ (signal) });
+        if (!current()) { link.transport.close(); throw new ConfigurationError('This Stop is no longer waiting.'); }
+        if (link.principal.id !== principal || !can(link.principal, 'session.read') || !can(link.principal, 'session.write')) {
+          link.transport.close();
+          throw new AuthenticationError('Stop access changed. Reconnect with the original access before trying again.');
+        }
+        return link.transport;
+      },
+      onConnect: async (client, { signal }) => {
+        const greeting = await hello(client, CLIENT, { signal, timeoutMs: requestTimeoutMs });
+        const capabilities = Array.isArray(greeting.capabilities) ? greeting.capabilities : [];
+        if (!capabilities.includes('session.interrupt.turn') || !capabilities.includes('attach.after')) throw new ConfigurationError('This host cannot safely observe and stop a specific turn.');
+        buffer = [];
+        // No wake or create: attachment is authoritative scope validation and starts no work.
+        const response = await client.request('session.attach', { sessionId: root, after: intent.observed?.cursor ?? 0 }, { signal, timeoutMs: requestTimeoutMs });
+        if (!current()) return;
+        intent.observed = applyAttach(intent.observed ?? emptyProjection(root), response, buffer);
+        intent.observed = { ...intent.observed, cursor: Math.max(intent.observed.cursor, response.cursor ?? 0) };
+        buffer = null;
+        this.#pumpStop(root);
+      },
+      onDisconnect: () => { buffer = null; },
+      shouldRetry: error => !describe(error).terminal && !endsRoot(error),
+      backoff, stableMs, client: { timeoutMs: requestTimeoutMs },
+    });
+    intent.observer = observer;
+    observer.onEvent(envelope => {
+      if (!current() || envelope.sessionId !== root) return;
+      if (buffer) { buffer.push(envelope); return; }
+      intent.observed = project(intent.observed ?? emptyProjection(root), envelope);
+      this.#pumpStop(root);
+    });
+    observer.onState((state, error) => {
+      if (!current()) return;
+      if (state === 'open') {
+        if (opened) { intent.attempts = 0; intent.exhausted = false; }
+        opened = true;
+        this.#pumpStop(root);
+      } else if (state === 'stopped') {
+        intent.exhausted = true;
+        if (this.#state.selected === root) this.#set(state => ({ busy: { ...state.busy, interrupt: false } }));
+        this.#notify('error', `Stop is unresolved: ${describe(error).message}`);
+      }
+    });
   }
 
   /** @param {string} root */
@@ -2757,6 +2830,7 @@ export class Controller {
     if (!intent) return;
     this.#stops.delete(root);
     clearTimeout(intent.retry);
+    intent.observer?.stop();
     intent.done();
     if (this.#state.notice?.text === STOP_WAITING) this.#set({ notice: null });
     if (this.#state.selected === root) this.#set(state => ({ busy: { ...state.busy, interrupt: false } }));
@@ -2774,16 +2848,19 @@ export class Controller {
   #pumpStop(root) {
     const intent = this.#stops.get(root);
     if (!intent) return;
-    const projection = this.#trees.get(root)?.projection;
-    const outcome = intent.messageId ? projection?.prompts[intent.messageId] : undefined;
+    const cached = this.#trees.get(root)?.projection;
+    const projections = [intent.observed, cached].filter((/** @type {Projection | undefined} */ entry) => !!entry).sort((a, b) => (b?.cursor ?? 0) - (a?.cursor ?? 0));
+    const outcome = intent.messageId ? projections.map(entry => entry?.prompts[/** @type {string} */ (intent.messageId)]).find(Boolean) : undefined;
     if (outcome?.state === 'failed' && outcome.errorCode !== 'outcome_unknown') {
       this.#refusedStop(root, /** @type {string} */ (intent.messageId));
       return;
     }
     if (!intent.turnId && outcome?.state === 'accepted' && outcome.turnId) intent.turnId = outcome.turnId;
-    if (intent.turnId && projection?.turns[intent.turnId] === 'ended') { this.#finishStop(root); return; }
-    if (!intent.turnId || intent.sending || intent.exhausted || this.#state.connection.phase !== 'open') return;
-    if (!this.hasCapability('session.interrupt.turn')) {
+    if (intent.turnId && projections.some(entry => entry?.turns[/** @type {string} */ (intent.turnId)] === 'ended')) { this.#finishStop(root); return; }
+    const observerClient = intent.observer?.state === 'open' ? intent.observer.client : undefined;
+    const client = observerClient ?? (this.#state.connection.phase === 'open' ? this.#run?.alp?.client : undefined);
+    if (!intent.turnId || intent.sending || intent.exhausted || intent.observer?.state === 'stopped' || !client) return;
+    if (!observerClient && !this.hasCapability('session.interrupt.turn')) {
       if (!intent.warned) { intent.warned = true; this.#notify('error', 'Stop is still waiting: this host cannot safely stop a specific turn.'); }
       return;
     }
@@ -2791,7 +2868,7 @@ export class Controller {
     intent.sending = true;
     intent.attempts = (intent.attempts ?? 0) + 1;
     if (this.#state.selected === root) this.#set(state => ({ busy: { ...state.busy, interrupt: true } }));
-    void this.#client().request('session.interrupt', { sessionId: root, turnId: intent.turnId }, { timeoutMs: this.#options.requestTimeoutMs }).then(result => {
+    void client.request('session.interrupt', { sessionId: root, turnId: intent.turnId }, { timeoutMs: this.#options.requestTimeoutMs }).then(result => {
       // Both answers resolve this exact target. A false answer changes no later turn.
       if (this.#stops.get(root) === intent && typeof result?.interrupted === 'boolean') this.#finishStop(root);
     }, error => {

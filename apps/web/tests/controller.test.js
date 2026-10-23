@@ -1241,3 +1241,116 @@ test('Stop keeps a submitted identity after a user message and an empty-history 
   await stopping;
   assert.equal(w.host.count('session.interrupt'), 1);
 });
+
+for (const navigation of ['session', 'deselect', 'workspace']) for (const reconnect of [false, true]) {
+  test(`retained Stop follows the original root after ${navigation}, reconnect=${reconnect}`, { timeout: 5_000 }, async t => {
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    t.after(() => release());
+    const w = setup(t, { promptTiming: { gate, answer: 'after' } }, { requestTimeoutMs: 50 });
+    w.host.seed('ses_a');
+    w.host.seed('ses_b');
+    await connected(w);
+    w.controller.selectSession('ses_a');
+    await until(() => attached(w.state), 'original attached');
+    const sending = w.controller.sendPrompt('original [hold]');
+    await until(() => !!w.host.root('ses_a').running && w.state().prompts.length === 0, 'provider active before acceptance reaches viewer');
+    const stopping = w.controller.interrupt();
+    if (navigation === 'session') w.controller.selectSession('ses_b');
+    else if (navigation === 'deselect') w.controller.selectSession(null);
+    else w.controller.selectWorkspace('/w/b');
+    if (navigation === 'session') {
+      await until(() => w.state().tree?.rootId === 'ses_b' && attached(w.state), 'other root attached');
+      w.host.startTurn('ses_b');
+      w.host.openChild('ses_a', 'ses_a_child');
+      w.host.emit('ses_a', 'ses_a_child', { type: 'item', item: { kind: 'assistant_message', id: 'background', text: 'background child output' } });
+    }
+    if (reconnect) {
+      w.host.drop();
+      await until(() => w.state().connection.phase === 'open' && (navigation !== 'session' || (w.state().tree?.rootId === 'ses_b' && attached(w.state))), 'main connection reopened');
+    }
+    release();
+    await sending;
+    await until(() => !w.host.root('ses_a').running, 'original target canceled despite navigation');
+    await stopping;
+    assert.equal(w.host.calls.filter(call => call.method === 'session.interrupt').length, 1);
+    assert.equal(w.host.calls.find(call => call.method === 'session.interrupt').params.sessionId, 'ses_a');
+    if (navigation === 'session') {
+      assert.ok(w.host.root('ses_b').running, 'selected unrelated turn is untouched');
+      assert.equal(w.state().tree.rootId, 'ses_b');
+      assert.ok(!w.state().tree.projection.entries.some(entry => entry.sessionId === 'ses_a' || entry.sessionId === 'ses_a_child'), 'background output never reaches selected projection');
+    }
+    await until(() => ![...w.host.connections].some(link => link.attached.has('ses_a')), 'Stop observation released');
+  });
+}
+
+test('navigation waits for the Stop observer to own a pre-receipt root before releasing the selected viewer', async t => {
+  let releaseObserver, releasePrompt;
+  const observerGate = new Promise(resolve => { releaseObserver = resolve; });
+  const promptGate = new Promise(resolve => { releasePrompt = resolve; });
+  t.after(() => { releaseObserver(); releasePrompt(); });
+  let opens = 0, observerOpening = false;
+  let w;
+  w = setup(t, {}, { requestTimeoutMs: 50, open: async args => {
+    if (++opens > 1) { observerOpening = true; await observerGate; }
+    return w.host.open(args);
+  } });
+  w.host.seed('ses_a');
+  w.host.seed('ses_b');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'original attached');
+  w.host.intercept.set('session.prompt', async () => { await promptGate; });
+  const sending = w.controller.sendPrompt('pre-receipt [hold]');
+  await until(() => w.host.count('session.prompt') === 1, 'prompt at receipt gate');
+  const stopping = w.controller.interrupt();
+  w.controller.selectSession('ses_b');
+  await until(() => observerOpening, 'observer starts opening');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(w.host.count('session.release'), 0, 'original subscription is fenced');
+  assert.equal(w.host.root('ses_a').live, true, 'idle target was not reaped');
+  releaseObserver();
+  await until(() => w.state().tree?.rootId === 'ses_b' && attached(w.state), 'other root attached after handoff');
+  assert.equal(w.host.root('ses_a').viewers.size, 1, 'observer now owns original root');
+  releasePrompt();
+  await sending;
+  await stopping;
+  assert.equal(w.host.root('ses_a').running, undefined);
+});
+
+for (const refusal of ['principal', 'capability']) test(`a Stop observer with changed ${refusal} leaves cancellation visibly unresolved`, async t => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  let opens = 0;
+  let w;
+  w = setup(t, { promptTiming: { gate, answer: 'after' } }, { requestTimeoutMs: 50, open: async args => {
+    const link = await w.host.open(args);
+    if (++opens > 1 && refusal === 'principal') link.principal.id = 'different-principal';
+    return link;
+  } });
+  if (refusal === 'capability') {
+    let greetings = 0;
+    w.host.intercept.set('daemon.hello', (_params, _link, { answer }) => {
+      if (++greetings === 1) return;
+      answer({ protocolVersion: 1, capabilities: ['attach.after', 'prompt.receipts'] });
+      return 'handled';
+    });
+  }
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  const sending = w.controller.sendPrompt('unknown [hold]');
+  await until(() => !!w.host.root('ses_a').running && !w.state().prompts.length, 'provider active before acceptance');
+  let settled = false;
+  void w.controller.interrupt().then(() => { settled = true; });
+  await until(() => /Stop is unresolved/.test(w.state().notice?.text ?? ''), 'observer refusal shown');
+  release();
+  await sending;
+  assert.equal(settled, false);
+  assert.equal(w.host.count('session.interrupt'), 0, 'changed authority never causes a cancellation');
+  assert.ok(w.host.root('ses_a').running);
+  w.controller.disconnect();
+  await until(() => w.host.connections.size === 0, 'both connections closed');
+});
