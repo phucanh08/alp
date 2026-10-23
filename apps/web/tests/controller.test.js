@@ -1538,6 +1538,39 @@ test('wake indexes resumed history children before replay reaches the attach ans
   assert.ok(w.state().tree.projection.entries.some(entry => entry.item.id === 'resumed-before-answer'), 'resumed history identifies child before replay');
 });
 
+test('New session preserves a pending Stop receipt fence while its auxiliary link retries', async t => {
+  let recover = false, opens = 0, releasePrompt;
+  const gate = new Promise(resolve => { releasePrompt = resolve; });
+  t.after(() => releasePrompt());
+  let w;
+  w = setup(t, {}, { requestTimeoutMs: 50, open: async args => {
+    if (++opens > 1 && !recover) throw new Error('auxiliary unavailable');
+    return w.host.open(args);
+  } });
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'original attached');
+  w.host.intercept.set('session.prompt', async () => { await gate; });
+  const sending = w.controller.sendPrompt('receipt [hold]');
+  await until(() => w.host.count('session.prompt') === 1, 'receipt gate');
+  const stopping = w.controller.interrupt();
+  const created = await w.controller.createSession({});
+  assert.equal(w.state().selected, created, 'new session opens despite auxiliary failure');
+  assert.equal(w.state().tree.status, 'attached');
+  assert.equal(w.host.root('ses_a').live, true, 'New session must preserve the pending receipt fence');
+  assert.equal(w.host.root('ses_a').viewers.size, 1);
+  w.host.startTurn(created);
+  recover = true;
+  await until(() => w.host.calls.filter(call => call.method === 'session.attach' && call.params.sessionId === 'ses_a').length >= 2, 'observer owns original');
+  releasePrompt();
+  await sending; await stopping;
+  assert.equal(w.host.root('ses_a').running, undefined);
+  assert.ok(w.host.root(created).running, 'new session turn remains untouched');
+  assert.ok(w.host.calls.filter(call => call.method === 'session.interrupt').every(call => call.params.sessionId === 'ses_a'));
+  await until(() => w.host.root('ses_a').viewers.size === 0, 'old receipt observation cleaned');
+});
+
 test('navigation waits for the Stop observer to own a pre-receipt root before releasing the selected viewer', async t => {
   let releaseObserver, releasePrompt;
   const observerGate = new Promise(resolve => { releaseObserver = resolve; });
