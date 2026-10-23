@@ -193,6 +193,61 @@ test('configure: a team change runs the new team from the same conversation, and
   assert.match(threadCalls(world.transports.at(-1))[0].params.developerInstructions, /Profile: cafe/);
 });
 
+test('configure: after a team change the next assignment runs on the new team; an earlier assignment\'s record keeps its own', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  let calls = 0;
+  // A tool call of the transport's current turn, as the model makes it.
+  const tool = async (transport, name, args) => {
+    const result = await transport.serverRequest('item/tool/call', { threadId: transport.threadId, turnId: transport.turnId, callId: `${name}-${++calls}`, namespace: null, tool: name, arguments: args });
+    return { success: result.success, ...JSON.parse(result.contentItems[0].text) };
+  };
+  /** One turn of the root that delegates `agent` and waits for its handoff. */
+  const delegatedTurn = async (index, agent) => {
+    const main = world.transports.at(-1);
+    await d.request('session.prompt', { sessionId: 'c3', clientMessageId: `c3-m${index}`, content: [{ type: 'text', text: `delegate ${agent}` }] });
+    await until(() => main.turnId && main.calls.some(call => call.method === 'turn/start' && JSON.stringify(call.params.input).includes(`delegate ${agent}`)), 'turn started');
+    const refused = agent === 'lead' ? await tool(main, 'alp_delegate', { agent: 'peer', task: 'Not on this team', mode: 'read-only', wait: false }) : undefined;
+    const count = world.transports.length;
+    const started = await tool(main, 'alp_delegate', { agent, task: `Work as ${agent}`, mode: 'read-only', wait: false });
+    assert.ok(started.assignmentId, JSON.stringify(started));
+    await until(() => world.transports.length > count && world.transports.at(-1).turnId, 'assignment turn started');
+    const child = world.transports.at(-1);
+    await tool(child, 'alp_handoff', { outcome: 'complete', summary: `Done as ${agent}` });
+    child.finish();
+    await tool(main, 'alp_wait', { assignments: [started.assignmentId] });
+    main.finish();
+    await until(async () => !(await d.request('session.get', { sessionId: 'c3' })).session.busy, 'tree idle');
+    return { assignmentId: started.assignmentId, child, refused };
+  };
+  await d.request('session.create', { sessionId: 'c3', spec: { cwd: d.project, persist: true, model: 'codex:gpt-5.6-sol', thinking: 'medium' } });
+  const pho = await delegatedTurn(0, 'peer');
+  assert.match(threadCalls(pho.child)[0].params.developerInstructions, /Profile: pho; fixed for this session/);
+  const result = await d.request('session.configure', { sessionId: 'c3', team: 'cafe', requestId: 'cfg-team-delegation', ifGeneration: await generationOf(d, 'c3') });
+  assert.equal(result.session.workflow.mode, 'cafe');
+  const cafe = await delegatedTurn(1, 'lead');
+  assert.equal(cafe.refused.success, false, 'Cafe\'s main does not delegate to peer');
+  assert.match(cafe.refused.error, /unauthorized target/);
+  assert.match(threadCalls(cafe.child)[0].params.developerInstructions, /Profile: cafe; fixed for this session/);
+  const records = async () => {
+    const earlier = (await d.request('session.get', { sessionId: pho.assignmentId })).session;
+    const later = (await d.request('session.get', { sessionId: cafe.assignmentId })).session;
+    return { earlier, later };
+  };
+  const { earlier, later } = await records();
+  assert.equal(earlier.parentId, 'c3');
+  assert.equal(earlier.agent, 'peer');
+  assert.equal(earlier.workflow.mode, 'pho', 'the earlier assignment keeps the team it ran on');
+  assert.equal(later.agent, 'lead');
+  assert.equal(later.workflow.mode, 'cafe');
+  // And after a restart of alpd, from its store.
+  await d.stop();
+  const again = { ...await world.start(), ...world };
+  assert.equal((await again.request('session.get', { sessionId: pho.assignmentId })).session.workflow.mode, 'pho');
+  assert.equal((await again.request('session.get', { sessionId: cafe.assignmentId })).session.workflow.mode, 'cafe');
+  assert.equal((await again.request('session.get', { sessionId: 'c3' })).session.workflow.mode, 'cafe');
+});
+
 test('configure refusals record nothing and change nothing: stale view, a running turn, a question, another runtime, more permissions, an unknown team', async t => {
   const world = await setup(t);
   const d = { ...await world.start(), ...world };
