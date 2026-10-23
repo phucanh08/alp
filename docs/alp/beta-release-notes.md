@@ -1,3 +1,14 @@
+# Unreleased (next beta)
+
+- **Remote terminals** (issue #121 H, off by default): a real PTY shell on the host, as the account
+  that runs alpd (a workspace is not a sandbox), for the web app through `alp-gateway` (credential
+  permission `terminal.exec`, never a default) and, separately opted in, Paseo app devices. Turn on
+  with `alp terminal allow --yes` ([beta-install.md](beta-install.md#remote-terminals-optional-off-by-default)).
+- **New optional dependency** `node-pty@1.2.0-beta.15` (MIT, Microsoft, exact pin) in `@anhlp/alp`,
+  `-cli`, `-daemon` and `@anhlp/alp-paseo`: prebuilt binaries in its tarball, loaded only for a
+  terminal, about 27 MB unpacked. It is optional, so an install where it fails still works, without
+  terminals. Windows is not supported.
+
 # ALP 0.0.1-beta.3 — release notes
 
 > Published 2026-10-20 on the npm tags `beta` and `latest` as the GitHub prerelease

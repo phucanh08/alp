@@ -168,6 +168,11 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
   - `session.team.write`: đổi **team** của một root đang sống (`session.configure { team }`, §5.17).
     Dùng cùng `session.write`; không kéo theo quyền nào, không bao giờ là mặc định:
     `--permission session.read,session.write,session.team.write`.
+  - `terminal.exec`: mở **terminal thật** (một shell) trên máy chạy alpd, **với quyền của tài khoản
+    chạy alpd**: mọi file tài khoản đó đọc/ghi được, mọi chương trình, mạng (§5.18). Workspace chỉ chọn
+    thư mục shell bắt đầu; **không phải sandbox**. Không bao giờ là mặc định, không kéo theo quyền nào và
+    không quyền nào kéo theo nó (kể cả `session.write`): `--permission terminal.exec`. alpd còn cần công
+    tắc riêng của chủ máy (`alp terminal allow --yes`). CLI in cảnh báo này khi cấp hoặc cấp lại quyền.
   Quyền write kéo theo quyền read cùng họ. `files.read` không kéo theo quyền nào và không quyền nào
   kéo theo nó. Không có `--permission`, CLI cấp bốn quyền `session.*` và `project.*`, **không bao
   giờ** cấp `files.read`: chủ máy phải ghi rõ `--permission files.read` cho từng credential được đọc
@@ -373,6 +378,13 @@ Cột Test dùng các mã sau:
 | `attachment.abort` | `attachments` | như `attachment.chunk` | attachments.write + session.write | exposed | P S |
 | `attachment.get` | `attachments` | chỉ attachment của chính credential (alpd kiểm binding); chỉ metadata, không byte, không path | attachments.write + session.read | exposed | P S R I |
 | `attachment.delete` | `attachments` | như `attachment.get`; attachment còn được tham chiếu → `1004 attachment_referenced` | attachments.write + session.write | exposed | P S I |
+| `terminal.create` | `terminal` | workspace: `workspaceId` của registry mà grant nêu chính xác (tra mới); alpd chọn shell, env, thư mục; gắn terminal với credential, grant epoch và `authorizedRoots`; không pid/đường dẫn trong answer (§5.18) | terminal.exec | exposed | P R B |
+| `terminal.list` | `terminal` | chỉ terminal của chính credential, epoch và roots (alpd lọc); `workspaceId` kiểm như create | terminal.exec | exposed | P B |
+| `terminal.attach` | `terminal` | terminal của chính credential (alpd kiểm binding); chỉ `terminal.event` của terminal đã attach trên kết nối này, chiếu theo schema | terminal.exec | exposed | P B |
+| `terminal.input` | `terminal` | như attach, từ đúng kết nối đã attach; ≤ `maxInputBytes`; không log | terminal.exec | exposed | P B |
+| `terminal.resize` | `terminal` | như `terminal.input` | terminal.exec | exposed | P B |
+| `terminal.close` | `terminal` | như attach | terminal.exec | exposed | P B |
+| `terminal.revoke` | `terminal` | gateway tự gọi khi credential đổi; không bao giờ expose | — | prohibited | — |
 | `session.interrupt` | — | session; **stop**: root luôn được; assignment khi mode các requester trong grant | session.write | exposed | P S M I |
 | `session.configure` | — (mode); `session.configure.live` (model, thinking, team) | session; mode mới trong grant. Với `model`/`thinking`/`team`: root thuộc grant (tra mới; con → `1003 not_root`), grant có `modes` chỉ đổi root mà cả tree chạy trong các mode đó và mode mà preview nói nó sẽ chạy cũng phải trong đó; `team` cần thêm `session.team.write`; `requestId` theo credential; answer và `configured` được chiếu; lỗi alpd thành câu cố định giữ code, reason và `action` (§5.17) | session.write (team: + session.team.write) | exposed | P S R M I |
 | `session.configure.preview` | `session.configure.live` | root thuộc grant (tra mới); chỉ đọc; answer chiếu `projectConfigurePreview` (tên, boolean, số đếm; MCP chỉ tên và loại, không lệnh hay đường dẫn; message cố định theo reason) | session.read | exposed | P S R |
@@ -849,6 +861,47 @@ Gateway:
 root thuộc grant: trả cấu hình hiện tại và cấu hình sau thay đổi, những gì đổi, có phải khởi động lại
 không, alpd có nhận **bây giờ** không và vì sao, cùng danh sách team; message là câu cố định theo
 reason. `session.configure` chỉ đổi mode thì giữ nguyên hành vi cũ (§5.x bảng trên).
+
+### 5.18 Terminal (issue #121, H)
+
+Quyết định của người dùng (2026-10-20): terminal chạy trên host **như tài khoản chạy alpd**, chỉ bật khi
+**cả hai** điều kiện: chủ máy bật `allowRemoteTerminal` (mặc định tắt) **và** credential có quyền riêng
+`terminal.exec`. **Cwd không phải sandbox**; quyền này không bao giờ suy ra từ `session.write`.
+Contract: docs/protocol/alp-json-rpc-v1.md §12.10.
+
+- **Công tắc của chủ máy**: `<ALP_HOME>/terminal.json` `{ "version": 1, "allowRemoteTerminal": true }`,
+  file thường của chính user chạy alpd, không có quyền group/other (không thì coi như tắt). Ghi bằng
+  `alp terminal allow --yes` (in rõ quyền mà nó cấp), tắt bằng `alp terminal deny`; `alp terminal status`.
+  Không RPC nào sửa nó, backup không mang nó. alpd đọc lại ít nhất mỗi 5 giây: tắt → mọi terminal bị
+  kết thúc (`exit` reason `disabled`). Chỉ khi bật (macOS, Linux, module `node-pty` nạp được) alpd mới
+  liệt kê capability `terminal` và `terminalLimits`; gateway chuyển tiếp chúng.
+- **Quyền**: mọi method `terminal.*` cần `terminal.exec` (thiếu → `1003 grant`, trước alpd).
+  `terminal.create` và `terminal.list { workspaceId }` cần workspace registry mà grant nêu chính xác (tra
+  mới, `1003 outside_workspace`). Client không gửi được shell, lệnh, args, env, cwd hay pid (schema từ
+  chối); principal context (`principalId`, `principalEpoch`, `authorizedRoots`) do gateway đặt, thứ client
+  gửi bị bỏ. alpd gắn terminal với credential, grant epoch và workspace; terminal của người khác, epoch
+  khác hay ngoài roots đều trả `1001 not_found` như id không tồn tại.
+- **Luồng**: `terminal.attach` phát lại output (`terminal.event`) trước câu trả lời; gateway chỉ chuyển
+  `terminal.event` của terminal mà chính kết nối này đã attach, chiếu theo schema (`projectTerminalEvent`),
+  trong cùng hàng đợi có thứ tự. `terminal.input` ≤ `maxInputBytes` (gateway kiểm trước alpd), chỉ từ kết
+  nối đã attach; không bao giờ ghi log. Output event ≤ `maxOutputFrameBytes`, hạ xuống cho vừa frame.
+  Client chậm: gateway đóng 4431, alpd tách luồng; client attach lại với `after` = seq cuối và thấy `gap`
+  nếu ring 1 MiB đã trôi. Mất kết nối: terminal chạy tiếp 60 giây chờ attach lại của cùng credential và
+  epoch; input không bao giờ phát lại.
+- **Thu hồi**: credential bị thu hồi, xoay, hết hạn **hoặc đổi grant** → gateway đóng kết nối và gọi
+  `terminal.revoke { principalId }` trên kết nối riêng của nó tới alpd: mọi terminal của credential bị
+  kết thúc ngay, cả cây process (process group, job nền, process double-fork còn giữ terminal). Nếu lúc
+  đó không hỏi được alpd, alpd tự kết thúc chúng khi hết 60 giây chờ attach lại. `terminal.revoke`
+  không bao giờ được expose cho client.
+- **Giới hạn** (`TERMINAL`, alpd quảng bá `terminalLimits`; chủ máy hạ được trong `terminal.json` `limits`,
+  gateway chỉ hạ): 4 terminal mỗi credential, 16 mỗi daemon, input 64 KiB mỗi lần, output 64 KiB mỗi
+  event, ring phát lại 1 MiB, 30 phút không hoạt động, tối đa 8 giờ, 60 giây chờ attach lại.
+- **Audit**: alpd ghi vòng đời (`ALPD_TERMINAL_CREATED/ATTACHED/DETACHED/ENDED/REVOKED`) với credential,
+  terminal id và workspace id; không bao giờ ghi phím gõ, output hay env.
+- **Paseo app**: thiết bị Paseo ghép qua relay là owner và không có `terminal.exec`, nên bridge chỉ mở
+  terminal khi `terminal.json` có thêm `"allowPaseoTerminal": true` (`alp terminal allow --paseo --yes`).
+- **Không hỗ trợ**: Windows (capability không bao giờ được liệt kê); chụp màn hình phía server, đổi tên
+  terminal, lệnh hay profile do client chọn.
 
 ## 6. Streaming và recovery
 
