@@ -154,28 +154,40 @@ const markersOf = (text: string) => [...text.matchAll(MARKER)].map(match => matc
  */
 export function psProcesses(platform: NodeJS.Platform = process.platform): () => Promise<ProcessRow[]> {
   const linux = platform === 'linux';
-  const columns = linux ? 'pid=,ppid=,pgid=,sid=,tty=,etime=' : 'pid=,ppid=,pgid=,tty=,etime=,command=';
-  const args = linux ? ['-A', '-o', columns] : ['-A', '-E', '-ww', '-o', columns];
-  return () => new Promise(resolve => {
-    execFile('ps', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } }, (error, stdout) => {
-      if (error) { resolve([]); return; }
-      const rows: ProcessRow[] = [];
-      for (const line of stdout.split('\n')) {
-        const trimmed = line.trim();
-        const cells = trimmed.split(/\s+/);
-        if (cells.length < 5) continue;
-        const [pid, ppid, pgid] = cells.slice(0, 3).map(Number) as [number, number, number];
-        if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(ppid) || !Number.isSafeInteger(pgid)) continue;
-        const sid = linux ? Number(cells[3]) : undefined;
-        const tty = cells[linux ? 4 : 3]!;
-        let markers: string[] = [];
-        if (linux) { try { markers = markersOf(readFileSync(`/proc/${pid}/environ`, 'utf8').replace(/\0/g, ' ')); } catch {} }
-        else markers = markersOf(trimmed);
-        rows.push({ pid, ppid, pgid, ...(sid !== undefined && Number.isSafeInteger(sid) ? { sid } : {}), ...(/^[?-]+$/.test(tty) ? {} : { tty }), elapsedMs: elapsed(cells[linux ? 5 : 4]!), ...(markers.length ? { markers } : {}) });
-      }
-      resolve(rows);
-    });
+  const run = (args: string[]) => new Promise<string | undefined>(resolve => {
+    execFile('ps', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, timeout: 10_000, env: { ...process.env, LC_ALL: 'C' } }, (error, stdout) => resolve(error ? undefined : stdout));
   });
+  return async () => {
+    const columns = linux ? 'pid=,ppid=,pgid=,sid=,tty=,etime=' : 'pid=,ppid=,pgid=,tty=,etime=,command=';
+    // macOS: `ps -E` appends the environment to the command line (escaping newlines as \012); the
+    // command line alone, from a second pass, is cut off first so a marker in arguments never counts.
+    const [stdout, plain] = await Promise.all([run(linux ? ['-A', '-o', columns] : ['-A', '-E', '-ww', '-o', columns]), linux ? undefined : run(['-A', '-ww', '-o', 'pid=,command='])]);
+    if (stdout === undefined) return [];
+    const commands = new Map<number, string>();
+    for (const line of plain?.split('\n') ?? []) {
+      const match = /^\s*(\d+) (.*)$/.exec(line);
+      if (match) commands.set(Number(match[1]), match[2]!);
+    }
+    const rows: ProcessRow[] = [];
+    for (const line of stdout.split('\n')) {
+      const cells = line.trim().split(/\s+/);
+      if (cells.length < 5) continue;
+      const [pid, ppid, pgid] = cells.slice(0, 3).map(Number) as [number, number, number];
+      if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(ppid) || !Number.isSafeInteger(pgid)) continue;
+      const sid = linux ? Number(cells[3]) : undefined;
+      const tty = cells[linux ? 4 : 3]!;
+      let markers: string[] = [];
+      if (linux) { try { markers = markersOf(readFileSync(`/proc/${pid}/environ`, 'utf8').replace(/\0/g, ' ')); } catch {} }
+      else {
+        const full = /^\s*(?:\S+\s+){5}(.*)$/.exec(line)?.[1] ?? '';
+        const command = commands.get(pid);
+        // The environment is what follows the command line; when the two passes disagree, none.
+        if (command !== undefined && full.startsWith(command)) markers = markersOf(full.slice(command.length));
+      }
+      rows.push({ pid, ppid, pgid, ...(sid !== undefined && Number.isSafeInteger(sid) ? { sid } : {}), ...(/^[?-]+$/.test(tty) ? {} : { tty }), elapsedMs: elapsed(cells[linux ? 5 : 4]!), ...(markers.length ? { markers } : {}) });
+    }
+    return rows;
+  };
 }
 
 /** Splits output into frames of at most `max` UTF-8 bytes, never inside a character. */
@@ -317,15 +329,24 @@ export function createTerminalService(options: TerminalServiceOptions) {
    * reused either). Never alpd itself or its group, never a process older than the terminal.
    */
   async function tree(terminal: Terminal): Promise<ProcessRow[]> {
+    // Whether the shell runs is decided before the snapshot, never after it.
+    const running = !terminal.exit;
     const rows = await listProcesses();
     const age = now() - terminal.createdAt + 2_000;
     const own = rows.find(row => row.pid === process.pid);
-    const running = !terminal.exit;
     const children = new Map<number, ProcessRow[]>();
     for (const row of rows) children.set(row.ppid, [...(children.get(row.ppid) ?? []), row]);
     const found = new Map<number, ProcessRow>();
+    for (const row of rows) if (row.markers?.includes(terminal.marker)) found.set(row.pid, row);
+    // The PTY's device name counts only while the shell, in this very snapshot, still has it as its
+    // terminal: once node-pty closed it the name may already be another PTY's.
+    const shell = running ? rows.find(row => row.pid === terminal.pid) : undefined;
+    if (shell) found.set(shell.pid, shell);
+    const tty = shell && terminal.tty && shell.tty === terminal.tty ? terminal.tty : undefined;
+    // Linux: the session, while its leader is our live shell or a marked process is still in it.
+    const sessions = new Set([...found.values()].map(row => row.sid).filter(sid => sid !== undefined));
     for (const row of rows) {
-      if (row.markers?.includes(terminal.marker) || (row.sid !== undefined && row.sid === terminal.pid) || (running && (row.pid === terminal.pid || (terminal.tty && row.tty === terminal.tty)))) found.set(row.pid, row);
+      if ((tty && row.tty === tty) || (row.sid !== undefined && row.sid === terminal.pid && (shell || sessions.has(row.sid)))) found.set(row.pid, row);
     }
     const queue = [...found.values()];
     while (queue.length) {

@@ -355,6 +355,7 @@ export class ClientConnection {
   /** Effective attachment limits of this connection (gatewayAttachmentLimits), once alpd said hello. */
   /** @type {import('@anhlp/alp-protocol').AttachmentLimits} */ #attachmentLimits = gatewayAttachmentLimits(undefined);
   /** @type {import('@anhlp/alp-protocol').TerminalLimits} */ #terminalLimits = gatewayTerminalLimits(undefined);
+  /** alpd's terminal output events do not fit this gateway's frames: terminal.* is refused. */ #terminalFramesTooSmall = false;
   /** Terminals this connection attached: only their terminal.event notifications leave (§5.18). @type {Set<string>} */ #terminals = new Set();
 
   /**
@@ -403,6 +404,7 @@ export class ClientConnection {
     const daemonFrames = /** @type {any} */ (hello.terminalLimits)?.maxOutputFrameBytes;
     if (this.#capabilities.includes('terminal') && !(Number.isSafeInteger(daemonFrames) && daemonFrames <= this.#terminalLimits.maxOutputFrameBytes)) {
       this.#capabilities = this.#capabilities.filter(capability => capability !== 'terminal');
+      this.#terminalFramesTooSmall = true;
       this.#log.warn('alpd\'s terminal output does not fit this gateway\'s frame limit; terminals are not forwarded', { code: 'ALP_GATEWAY_TERMINAL_FRAME' });
     }
     client.onNotification((method, params) => { if (method === 'terminal.event') this.#terminalEvent(params); });
@@ -708,6 +710,9 @@ export class ClientConnection {
     if (issues?.length) throw new GatewayError(RPC_ERROR.invalidParams, `Invalid params: ${issues.map(issue => `${issue.path || 'params'} ${issue.message}`).join('; ')}`, { reason: 'invalid_params', issues });
     if (!this.#grant.permissions.has(exposure.permission)) throw forbidden(`This credential lacks ${exposure.permission}`, GATEWAY_REASON.grant, { permission: exposure.permission });
     for (const permission of exposure.alsoRequires ?? []) if (!this.#grant.permissions.has(permission)) throw forbidden(`This credential lacks ${permission}`, GATEWAY_REASON.grant, { permission });
+    // No terminals where alpd's output would not fit this gateway's frames. (Otherwise alpd answers
+    // itself: its switch may have been turned on after this connection's hello.)
+    if (exposure.capability === CAPABILITY.terminal && this.#terminalFramesTooSmall) throw new GatewayError(GATEWAY_ERROR.unavailable, TERMINAL_REFUSALS.terminal_unsupported, { reason: 'terminal_unsupported' });
     const handler = Object.hasOwn(this.#handlers, method) ? this.#handlers[method] : undefined;
     if (!handler) throw new GatewayError(RPC_ERROR.methodNotFound, `${method} is not available through the gateway`, { reason: GATEWAY_REASON.notExposed });
     const result = await handler(pick(params, exposure.params ?? []));

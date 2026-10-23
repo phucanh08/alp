@@ -175,7 +175,12 @@ test('the credential CLI says what terminal.exec grants where it is granted', as
 
 test('a gateway frame too small for alpd\'s output events forwards no terminals (fail closed)', async t => {
   const env = await world(t, { config: { limits: { maxFrame: 256 * 1024 } } });
-  const { hello } = await env.sdk('exec');
+  const { client, hello } = await env.sdk('exec');
   assert.ok(!hello.capabilities.includes('terminal'));
   assert.equal(hello.terminalLimits, undefined);
+  // A client that ignores the hello is refused before alpd too.
+  const mark = env.daemon.calls().length;
+  await assert.rejects(client.request('terminal.create', { workspaceId: 'wks_a', cols: 80, rows: 24, requestId: 'r' }), error => error.code === 1005 && error.data?.reason === 'terminal_unsupported');
+  await assert.rejects(client.request('terminal.attach', { terminalId: T1 }), error => error.code === 1005);
+  assert.deepEqual(terminalCalls(env.daemon, mark), []);
 });
