@@ -6,7 +6,10 @@ import os from 'node:os';
  */
 export interface FrameSocket {
   readonly readyState: number;
-  send(data: string): unknown;
+  /** Bytes queued and not yet sent; a ws WebSocket and a relay socket both report it. */
+  readonly bufferedAmount?: number;
+  /** A string is a text frame; bytes are a binary frame (a terminal's stream, ALPD §62). */
+  send(data: string | Uint8Array): unknown;
   close(code?: number, reason?: string): void;
   on(event: 'message' | 'close' | 'error', listener: (...args: any[]) => void): unknown;
 }
@@ -38,6 +41,10 @@ export type ClientContext = {
   clientId: string;
   /** Sends one session message to this client. */
   emit(message: Outbound): void;
+  /** Sends one binary frame, as Paseo's terminal stream does ([opcode, slot, payload]). */
+  emitBinary(bytes: Uint8Array): void;
+  /** Bytes waiting on this client's socket, so a slow client can be left behind and resynced. */
+  buffered(): number;
 };
 
 /** A request handler: returns the reply, or emits by itself and returns nothing. */
@@ -50,6 +57,8 @@ export type GatewayOptions = {
   handlers: Record<string, Handler>;
   /** What the app may light up; anything absent stays hidden or answers "in development". */
   features: Record<string, boolean>;
+  /** Runs before each server_info, so features that follow the host (terminals) are current. */
+  beforeServerInfo?: () => Promise<unknown>;
   onClient?(client: ClientContext): () => void;
   /** The text of a not_implemented answer, in the user's language. */
   inDevelopment?: () => string | Promise<string>;
@@ -72,6 +81,7 @@ export function createPaseoGateway(options: GatewayOptions) {
   async function serverInfo() {
     // Voice and dictation say why they are off, so the app shows it instead of waiting on them.
     const off = { enabled: false, reason: await inDevelopment() };
+    try { await options.beforeServerInfo?.(); } catch (error: any) { log(`paseo server_info: ${error?.message ?? error}`); }
     return {
       type: 'status',
       payload: {
@@ -89,12 +99,14 @@ export function createPaseoGateway(options: GatewayOptions) {
   function attach(ws: FrameSocket, { bearer }: { bearer?: string } = {}) {
     let client: ClientContext | undefined;
     let detach: (() => void) | undefined;
-    const send = (frame: unknown) => {
+    const write = (data: string | Uint8Array) => {
       if (ws.readyState !== OPEN) return;
       // A relay socket's send fails as a promise when the device has gone; its close event follows.
-      const sent: any = ws.send(JSON.stringify(frame));
+      let sent: any;
+      try { sent = ws.send(data); } catch { return; }
       if (sent && typeof sent.catch === 'function') sent.catch(() => {});
     };
+    const send = (frame: unknown) => write(JSON.stringify(frame));
     const close = (code: number, reason: string) => { try { ws.close(code, reason); } catch {} };
     const timer = setTimeout(() => { if (!client) close(CLOSE_AUTH_FAILED, 'Hello timed out'); }, HELLO_TIMEOUT_MS);
     const bearerOk = bearer !== undefined && same(bearer.slice(BEARER_PREFIX.length), options.token());
@@ -111,7 +123,12 @@ export function createPaseoGateway(options: GatewayOptions) {
       if (!bearerOk && !same(password!, options.token())) return reject('incorrect_password');
       clearTimeout(timer);
       if (!client) {
-        client = { clientId: message.clientId.trim(), emit: outbound => send({ type: 'session', message: outbound }) };
+        client = {
+          clientId: message.clientId.trim(),
+          emit: outbound => send({ type: 'session', message: outbound }),
+          emitBinary: bytes => write(bytes),
+          buffered: () => (typeof ws.bufferedAmount === 'number' ? ws.bufferedAmount : 0),
+        };
         clients.add(client);
         detach = options.onClient?.(client);
       }
