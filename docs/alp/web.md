@@ -20,8 +20,8 @@ Số mục (§) có thể được code và test tham chiếu; giữ ổn địn
 | Có | Chi tiết |
 |---|---|
 | Kết nối | HTTPS, hoặc HTTP chỉ trên loopback (`127.0.0.1`, `localhost`, SSH tunnel). Token dán tay, chỉ giữ trong bộ nhớ của tab. |
-| Projects | Các workspace mà credential cấp (`principal.workspaces`). Không thêm, không xóa. |
-| Sessions | Liệt kê, tạo (team, permissions, model, title), mở, đổi tên, archive. Mỗi agent của cây (main và assignment) là một tab. |
+| Projects | Các workspace mà credential cấp (`principal.workspaces`), cùng registry chung của host (`workspace.registry`, protocol §16, #121): **Add project** chỉ đăng ký một thư mục đã được cấp sẵn (`workspace.write`; không duyệt thư mục của host, không cấp thêm quyền), pin chung giữa các client và giữ qua restart, worktree tạo/xóa theo mapping chủ host đã duyệt (`workspace.manage`, chỉ macOS/Linux). Web chưa có nút bỏ project (`project.remove` của protocol chỉ bỏ đăng ký, không xóa file). |
+| Sessions | Liệt kê, tạo (team, permissions, model, title), mở, đổi tên, archive. Mỗi agent của cây (main và assignment) là một tab. Trên Codex và Claude (#121): fork và rewind chỉ hội thoại (§12.7, không đổi file), đổi team/model/thinking khi session đang sống (§12.9, đổi team cần thêm `session.team.write`), Reload agent và Copy resume command trong menu tab (§12.8), tải lịch sử cũ hơn (`session.history`, §8.7), đính kèm file không phải ảnh (§12.6, cần `attachments.write`). |
 | Chat | Prompt + stream, tool call, todo, notice; trả lời câu hỏi theo luồng chọn rồi Submit của Paseo (Other thay lựa chọn, Enter gửi, Dismiss), thẻ câu hỏi nằm trong stream; interrupt; steer khi agent đang chạy; hàng đợi (§4.3). |
 | Tasks | Liệt kê (poll), tạo, mở chi tiết trong tab lớn, đóng, mở lại, duyệt human gate. Mọi thay đổi gửi `ifRev`. |
 | Settings | Bố cục như `alp web` cũ: App (General, Appearance, Sidebar, Chat, Terminal, Editor, Diagnostics, About) và Host (Overview, Projects, Connections, Templates, Agents, Skills, Hooks, MCP servers, Providers…). Library xem nội dung đã redaction: file Markdown dưới dạng text, cấu hình dưới dạng JSON. Instruction agents/skills riêng của project sửa được với explicit `library.write` (#118). Mục chưa hỗ trợ ghi rõ "not available in this beta". |
@@ -29,8 +29,8 @@ Số mục (§) có thể được code và test tham chiếu; giữ ổn địn
 | New session | Màn hình như tab new agent của Paseo: tin đầu tiên, chọn team/model/thinking/permissions, `session.preview`, nhớ lựa chọn lần trước (§4.2). |
 | Phục hồi | Reconnect có backoff, resume theo cursor, reload trang, gateway hoặc alpd khởi động lại (§5). |
 
-Không có trong beta (app ghi rõ, không fallback sang Paseo hay app nhúng): CRUD workspace, ghi git
-(commit, push, pull, đổi nhánh) và sửa file, sửa library của host hoặc cấu hình thực thi, thêm/kiểm tra provider,
+Không có trong beta (app ghi rõ, không fallback sang Paseo hay app nhúng): duyệt hoặc tạo thư mục trên
+host, ghi git (commit, push, pull, đổi nhánh) và sửa file, sửa library của host hoặc cấu hình thực thi, thêm/kiểm tra provider,
 usage, đổi ngôn ngữ agent, plugin, pair device.
 
 Terminal (#121 H, §12.10): tab Terminal chạy shell thật trên máy chạy alpd, **bằng tài khoản chạy
@@ -286,7 +286,7 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
 - Chỉ một cây session được attach tại một thời điểm. Session khác cập nhật qua poll list mỗi 15
   giây.
 - Children/delegation chỉ có unit test. Fake provider của E2E không delegate.
-- Chưa chạy smoke với provider thật. Toàn bộ kết quả trên là fake provider.
+- E2E thường dùng fake provider. Riêng `e2e/attachment-files-real.spec.js` (opt-in, không chạy trong CI) gửi file qua trình duyệt tới Codex và Claude thật; các lần chạy thật khác của #121 là script `test/e2e/*-real-e2e.mjs` không qua trình duyệt ([issue-121-acceptance.md](issue-121-acceptance.md)).
 - Library qua gateway mở nội dung đã redaction bằng `library.get` với `project.read`
   trong workspace được cấp: file Markdown hiển thị dưới dạng text, cấu hình dưới dạng JSON,
   secret hiển thị là `‹hidden on the host›`. Ghi chỉ dành cho instruction agents/skills riêng của project
@@ -294,7 +294,7 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
   entry kế thừa, cấu hình thực thi và Test vẫn không sửa/chạy qua đây.
 - Ngôn ngữ app chỉ có tiếng Anh. Ngôn ngữ agent chỉ đọc.
 - Theme chỉ có System/Light/Dark; chưa có font, cỡ chữ, theme khác của Paseo.
-- Chưa có split pane.
+- Split pane đã có (t-7679.9); xem paseo-parity.md.
 - Danh sách đầy đủ phần đã làm và còn thiếu so với Paseo web: [apps/web/docs/paseo-parity.md](../../apps/web/docs/paseo-parity.md).
 - `npm audit` báo 21 lỗ hổng có sẵn từ trước (chuỗi react-native/jest và ajv của workspace khác).
   Package web không thêm lỗ hổng nào. Không chạy `npm audit fix --force`.

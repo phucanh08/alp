@@ -1515,7 +1515,7 @@ answers `-32601`. Each needs its own capability when implemented.
 | Principal on connections; `accept(send, { principal })` | P0 | Authentication stays outside `daemon.hello` (gateway). Hello result would add `principal { kind, grants }`. |
 | Gateway reasons of `1003 forbidden` (`grant`, `outside_workspace`, `spec_field`, `local_only`); `1005 unavailable` reasons `feature_disabled`, `maintenance`, `restoring` | P0 | The codes exist (§5.1, §15); a gateway adds its reasons. |
 | `session.create` spec allow-list for remote principals | P0 | Refuse `env`, stdio `mcpServers`, `workdir`, `writeRoot`, `copy*`, `restore`, `keepThread`. |
-| Project/workspace registry; `session.create.workspaceId` | Implemented (§16) | Versioned migration of `state/web-workspaces.json`; shared pins and scoped add of existing granted directories. Worktree creation/removal remains proposed. |
+| Project/workspace registry; `session.create.workspaceId` | Implemented (§16) | Versioned migration of `state/web-workspaces.json`; shared pins and scoped add of existing granted directories. Managed worktree creation/removal is implemented too (`workspace.worktree.*`, §16; macOS/Linux only). |
 | `workspace.git.status/diff` | Implemented (§12.5) | Read-only, by `workspaceId`, bounded with a snapshot and next cursor. `workspace.files.search`, `workspace.files.list` and `workspace.files.read` are implemented (§12.3, §12.4). |
 | `provider.list/refresh/diagnose/save/remove`, `library.test` | P1 | Probes spawn processes: separate `exec.probe` grant; timeouts; cancellation when the caller's connection closes needs the probes in `@anhlp/alp-client` to take an abort signal. |
 | `subscribe` / `unsubscribe` and notification `notify` | P1 | Old clients ignore unknown notifications (`AlpClient` handles only `event`). |
@@ -1641,6 +1641,18 @@ process-crash persistence; this does not promise power-loss durability.
 | `workspace.list` | `cursor?`, `limit?` (1–500) | `workspaces`, `revision`, `total`, `nextCursor` |
 | `workspace.get` | `workspaceId` | `workspace`, `revision`; archived records remain addressable |
 | `workspace.update` | `workspaceId`, `title?`, `pinned?`, `archived?`, `ifRevision`, `requestId` | `workspace`, `revision` |
+
+Managed user worktrees (capability `workspace.worktree`; alpd does not list it on Windows):
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `workspace.worktree.options` | `workspaceId` | `mappingIds`: the host owner's destination mappings (`<ALP_HOME>/worktree-destinations.json`) whose source is exactly this workspace's canonical directory |
+| `workspace.worktree.create` | `workspaceId`, `mappingId`, `ifRevision`, `requestId` | `workspace` (the new managed checkout, under the mapping's destination parent with a generated name), `revision` |
+| `workspace.worktree.remove` | `workspaceId`, `ifRevision`, `requestId` | `workspace`, `revision`, `filesRemoved: true`, `branchRetained: true`; refuses (1004/1003) while a saved or active session references the checkout (`workspace_history`), when it holds dirty, untracked, ignored, hidden-index or submodule data (`workspace_dirty`), or when its identity changed; never deletes the branch or history |
+
+The registry journals each worktree mutation before Git runs, so a retry after a crash finishes it once.
+A gateway credential needs `workspace.manage` and the mapping ID in its grant; a created checkout is
+granted to its creator only (apps/gateway/README.md, "Managed user worktrees").
 
 `revision` is a registry-wide integer. Mutations are serialized copy-on-write and publish only
 after replacement succeeds. A failed save throws with no committed revision or metadata change.
