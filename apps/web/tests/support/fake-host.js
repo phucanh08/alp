@@ -24,6 +24,8 @@ export class FakeHost {
     this.refuse = undefined;
     /** method → handler(params, connection) run before the default; return undefined to go on. */
     this.intercept = new Map();
+    /** Methods whose next answer is lost: run, then the asking connection drops. @type {Set<string>} */
+    this.loseAnswer = new Set();
     this.receipts = new Map();
     this.tasks = [];
     this.taskRev = 0;
@@ -119,6 +121,8 @@ export class FakeHost {
     }
     try {
       const result = await this.#run(connection, method, params, id);
+      // Taken, but this connection drops before the answer leaves (a lost answer).
+      if (this.loseAnswer?.delete(method)) { connection.end({ code: 1006, error: new Error('dropped') }); return; }
       if (result === undefined) return;
       answer(result);
     } catch (error) {
@@ -320,6 +324,76 @@ export class FakeHost {
     });
   }
 
+  /** Teams a live configure may switch to (§12.9): id → { label, agent, runtime }. */
+  configureTeams = { pho: { label: 'Phở', agent: 'main' }, cafe: { label: 'Cafe', agent: 'main' }, solo: { label: 'Solo', agent: 'builder' } };
+  /** Models the host offers a live root, per runtime, with the efforts each takes. */
+  configureModels = { codex: { m: ['low', 'high'], 'gpt-5.6-sol': ['low', 'medium', 'high'] }, claude: { 'claude-haiku-4-5': [] } };
+
+  /** What a change would run a live root with, or a refusal reason (§12.9). */
+  #resolveConfigure(root, params) {
+    const summary = root.summary;
+    const current = { team: summary.workflow.mode, teamLabel: summary.teamLabel ?? this.configureTeams[summary.workflow.mode]?.label, agent: summary.agent, runtime: summary.runtime, model: summary.model, thinking: summary.thinking, mode: summary.mode, supervisor: false, maxPeers: 2, delegates: [], tools: [], mcpServers: [], hooks: 0 };
+    const proposed = { ...current };
+    let refusal;
+    if (params.model !== undefined) {
+      const match = /^(codex|claude|acp|antigravity)[:/](.*)$/.exec(params.model);
+      if (match && match[1] !== summary.runtime) refusal = 'runtime_mismatch';
+      else if (!this.configureModels[summary.runtime]?.[match ? match[2] : params.model]) refusal = 'invalid_params';
+      else proposed.model = match ? match[2] : params.model;
+    }
+    if (!refusal && params.team !== undefined) {
+      const team = this.configureTeams[params.team];
+      if (!team) refusal = 'team_not_found';
+      else if (team.agent !== summary.agent) refusal = 'agent_mismatch';
+      else Object.assign(proposed, { team: params.team, teamLabel: team.label });
+    }
+    const efforts = this.configureModels[summary.runtime]?.[proposed.model] ?? [];
+    if (!refusal && params.thinking !== undefined) {
+      if (!efforts.includes(params.thinking)) refusal = 'invalid_params';
+      else proposed.thinking = params.thinking;
+    } else if (!refusal && !efforts.includes(proposed.thinking)) proposed.thinking = efforts[0] ?? proposed.thinking;
+    const changes = ['model', 'thinking', 'team', 'mode'].filter(key => current[key] !== proposed[key]);
+    return { current, proposed, changes, refusal };
+  }
+
+  #configurePreview(params) {
+    if (!this.capabilities.includes('session.configure.live')) throw Object.assign(new Error('unknown method session.configure.preview'), { code: -32601 });
+    const root = this.roots.get(params.sessionId);
+    if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
+    if (!root.live) throw Object.assign(new Error('closed'), { code: 1005, data: { reason: 'session_closed' } });
+    const { current, proposed, changes, refusal } = this.#resolveConfigure(root, params);
+    const busy = !refusal && changes.length && root.running ? 'session_busy' : undefined;
+    const reason = refusal ?? busy;
+    return { preview: { current, proposed, changes, restart: changes.some(change => change !== 'mode'), allowed: !reason, ...(reason ? { reason, message: `fixed ${reason}` } : {}), teams: Object.entries(this.configureTeams).map(([id, team]) => ({ id, label: team.label })) } };
+  }
+
+  /** session.configure with model, thinking or team (§12.9): a live idle root restarts with them, journaled per requestId. */
+  #configureLive(params) {
+    if (!this.capabilities.includes('session.configure.live')) throw Object.assign(new Error('mode only'), { code: 1005, data: { reason: 'capability' } });
+    if (typeof params.requestId !== 'string' || typeof params.ifGeneration !== 'string') throw Object.assign(new Error('needs requestId and ifGeneration'), { code: -32602, data: { reason: 'invalid_params' } });
+    if (params.team !== undefined && !this.principal.permissions.includes('session.team.write')) throw Object.assign(new Error('This credential lacks session.team.write'), { code: 1003, data: { reason: 'grant', permission: 'session.team.write' } });
+    const root = this.roots.get(params.sessionId);
+    if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
+    const { requestId: _requestId, ifGeneration: _generation, sessionId: _sessionId, ...asked } = params;
+    return this.#journaled(`${root.id}:configure:${params.requestId}`, JSON.stringify(asked), () => {
+      if (this.configureError) throw this.configureError;
+      if (!root.live) throw Object.assign(new Error('closed'), { code: 1005, data: { reason: 'session_closed' } });
+      if (root.running || this.questions.size) throw Object.assign(new Error('busy'), { code: 1004, data: { reason: 'session_busy' } });
+      if (params.ifGeneration !== root.generation) throw Object.assign(new Error('stale'), { code: 1004, data: { reason: 'stale_generation' } });
+      const { proposed, changes, refusal } = this.#resolveConfigure(root, params);
+      if (refusal === 'runtime_mismatch' || refusal === 'agent_mismatch') throw Object.assign(new Error(`refused: ${refusal} /secret/path`), { code: 1005, data: { reason: refusal, action: 'session.create' } });
+      if (refusal === 'team_not_found') throw Object.assign(new Error('no team'), { code: 1001, data: { reason: refusal } });
+      if (refusal) throw Object.assign(new Error('invalid'), { code: -32602, data: { reason: refusal } });
+      this.configures = (this.configures ?? 0) + 1;
+      if (changes.length) {
+        Object.assign(root.summary, { model: proposed.model, thinking: proposed.thinking, teamLabel: proposed.teamLabel, workflow: { ...root.summary.workflow, mode: proposed.team } });
+        const { status: _status, createdAt: _created, updatedAt: _updated, archived: _archived, ...snapshot } = root.summary;
+        this.#emit(root, root.id, { type: 'session.updated', session: snapshot });
+      }
+      return { session: { ...root.summary }, configured: { status: changes.length ? 'applied' : 'unchanged', requested: asked, effective: proposed, restarted: changes.length > 0 } };
+    });
+  }
+
   #rewind(params) {
     const root = this.roots.get(params.sessionId);
     if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
@@ -506,7 +580,9 @@ export class FakeHost {
         }
         return {};
       }
+      case 'session.configure.preview': return this.#configurePreview(params);
       case 'session.configure': {
+        if (params.model !== undefined || params.thinking !== undefined || params.team !== undefined) return this.#configureLive(params);
         const root = this.roots.get(params.sessionId);
         if (!root?.live) throw Object.assign(new Error(`ALP session ${params.sessionId} is not open`), { code: 1001 });
         if (params.mode) root.summary.mode = params.mode;

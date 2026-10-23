@@ -1,6 +1,6 @@
 import * as React from 'react';
 import type { ReactNode } from 'react';
-import { ArrowLeft, Bot, ChevronDown, CircleAlert, MessageSquarePlus, RotateCcw, Shield, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Brain, ChevronDown, CircleAlert, Cpu, MessageSquarePlus, RotateCcw, Shield, ShieldAlert, ShieldCheck, Users } from 'lucide-react';
 import { Menu } from '../components/ui/menu';
 import { cn } from '../lib/utils';
 import { TasksPill } from './chat/tracks';
@@ -9,6 +9,8 @@ import { entriesOf } from '../lib/timeline.js';
 import { Button } from '../components/ui/button';
 import { Spinner } from '../components/ui/spinner';
 import { modeLabel } from '../lib/format';
+import { liveModels } from '../lib/configure.js';
+import { effortLabel, effortOptions } from '../lib/new-session.js';
 import { Composer } from './Composer';
 import { ContextMeter } from './ContextMeter';
 import { ArchivedCallout } from './History';
@@ -67,6 +69,65 @@ export function ModeControl({ mode, modes, disabled, locked, onSelect }: { mode:
   );
 }
 
+const menuTrigger = cn(controlClass, 'outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-expanded:bg-muted aria-expanded:text-foreground disabled:pointer-events-none disabled:opacity-60');
+
+/**
+ * The open root's team, model and thinking as Paseo's composer toolbar shows them, as menus when the
+ * host changes them on a live session (session.configure.live, §12.9). The labels are what the host
+ * says the root runs with (its summary, session.updated, the configure answer), never a choice before
+ * the host took it; a menu is disabled, with the reason as its tooltip, when a change is not possible
+ * now. Models are the session's runtime's only: another runtime needs a new session.
+ */
+function LiveAgentControls({ team, teamId, model, thinking, runtime }: { team?: string; teamId?: string; model?: string; thinking?: string; runtime?: string }) {
+  const controller = useController();
+  const { catalog, busy } = useAppState();
+  const gate = controller.liveConfigure();
+  const { same, current, others } = liveModels(catalog.models, { runtime, model });
+  const modelLabel = current?.label ?? model;
+  const thinkingLabel = thinking ? effortLabel(thinking) : undefined;
+  const efforts = effortOptions(current);
+  const working = !!busy.configure;
+  const hint = (control: { enabled: boolean; reason?: string }, what: string) => control.enabled ? what : `${what}. ${control.reason ?? gate.reason ?? ''}`.trim();
+  // A disabled trigger takes no pointer: its reason is the tooltip of what holds it.
+  // Always wrapped, so a menu keeps its state when it is enabled or disabled.
+  const held = (control: { enabled: boolean }, what: string, menu: ReactNode) => <span className="inline-flex min-w-0" title={control.enabled && !working ? undefined : working ? `${what}. Applying the last change…` : hint(control, what)}>{menu}</span>;
+  if (!gate.shown) {
+    // An older host: read-only, as set when the session started.
+    return <>
+      {team ? <Control icon={<Users aria-hidden />} label={team} title={`Team: ${team}. ${gate.reason}`} /> : null}
+      {modelLabel ? <Control icon={<Cpu aria-hidden />} label={modelLabel} title={`Main agent's model: ${modelLabel}. ${gate.reason}`} /> : null}
+      {thinkingLabel ? <Control icon={<Brain aria-hidden />} label={thinkingLabel} title={`Thinking: ${thinkingLabel}. ${gate.reason}`} /> : null}
+    </>;
+  }
+  const teams = catalog.teams.length ? catalog.teams : teamId ? [{ id: teamId, label: team ?? teamId }] : [];
+  const teamListed = !teamId || teams.some(entry => entry.id === teamId);
+  return <>
+    {team || teamId ? held(gate.team, `Team: ${team ?? teamId}`, (
+      <Menu label="Team" title={hint(gate.team, `Team: ${team ?? teamId}`)} align="start" disabled={!gate.team.enabled || working} testId="session-team" triggerClassName={menuTrigger}
+        trigger={<><Users aria-hidden /><span className="truncate" data-testid="team-label">{team ?? teamId}</span><ChevronDown aria-hidden className="!size-3 opacity-70" /></>}
+        items={[
+          ...(teamListed ? [] : [{ id: teamId!, label: team ?? teamId!, checked: true, onSelect: () => {} }]),
+          ...teams.map(entry => ({ id: entry.id, label: entry.label, checked: entry.id === teamId, ...(entry.id === teamId ? {} : { title: 'Restarts main on the same conversation with this team' }), onSelect: () => { if (entry.id !== teamId) void controller.configureLive({ team: entry.id }); } })),
+        ]} />
+    )) : null}
+    {modelLabel ? held(same.length ? gate.model : { enabled: false }, `Main agent's model: ${modelLabel}`, (
+      <Menu label="Model" title={hint(gate.model, `Main agent's model: ${modelLabel}`)} align="start" disabled={!gate.model.enabled || working || !same.length} testId="session-model" triggerClassName={menuTrigger}
+        trigger={<><Cpu aria-hidden /><span className="truncate" data-testid="model-label">{modelLabel}</span><ChevronDown aria-hidden className="!size-3 opacity-70" /></>}
+        items={[
+          ...same.map(entry => ({ id: entry.id, label: entry.label, checked: entry.id === current?.id, onSelect: () => { if (entry.id !== current?.id) void controller.configureLive({ model: entry.id }); } })),
+          ...(others ? [{ id: 'other-runtimes', label: 'Other runtimes: start a new session', disabled: true, group: true, title: 'A session keeps its runtime. To use another runtime\'s model, start a new session with it.', onSelect: () => {} }] : []),
+        ]} />
+    )) : null}
+    {thinkingLabel ? (
+      efforts.length ? held(gate.thinking, `Thinking: ${thinkingLabel}`, (
+        <Menu label="Thinking" title={hint(gate.thinking, `Thinking: ${thinkingLabel}`)} align="start" disabled={!gate.thinking.enabled || working} testId="session-thinking" triggerClassName={menuTrigger}
+          trigger={<><Brain aria-hidden /><span className="truncate" data-testid="session-thinking-label">{thinkingLabel}</span><ChevronDown aria-hidden className="!size-3 opacity-70" /></>}
+          items={efforts.map(entry => ({ id: entry.id, label: entry.label, checked: entry.id === thinking, onSelect: () => { if (entry.id !== thinking) void controller.configureLive({ thinking: entry.id }); } }))} />
+      )) : <Control icon={<Brain aria-hidden />} label={thinkingLabel} title={`Thinking: ${thinkingLabel}`} />
+    ) : null}
+  </>;
+}
+
 /** One agent's conversation: the timeline, its questions and, for the main agent, the composer. */
 export function ChatPanel({ sessionId }: { sessionId: string }) {
   const controller = useController();
@@ -112,7 +173,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const entries = entriesOf(projection, viewing);
   const team = rootSession?.teamLabel ?? listed?.teamLabel;
   const mode = rootSession?.mode ?? listed?.mode;
-  const model = rootSession?.model;
+  const model = rootSession?.model ?? listed?.model;
   const canWrite = can(principal ?? undefined, 'session.write');
   const modes = catalog.modes.length ? catalog.modes : mode ? [{ id: mode }] : [];
   // The host changes permissions only between turns, with no child session running.
@@ -194,8 +255,8 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             onCycleMode={canCycle ? cycleMode : undefined}
             tracks={<TasksPill worked={worked} />}
             controls={<>
-              {team ? <Control icon={<Bot aria-hidden />} label={team} title={`Team, set when the session started${model ? ` · main runs ${model}` : ''}`} /> : null}
-              {mode ? <ModeControl mode={mode} modes={modes} locked={modeLocked} disabled={!!busy.mode || !!blocked || !canWrite || connection.phase !== 'open' || modeLocked} onSelect={next => void controller.configureMode(next)} /> : null}
+              <LiveAgentControls team={team} teamId={rootSession?.workflow?.mode ?? listed?.workflow?.mode} model={model} thinking={rootSession?.thinking ?? listed?.thinking} runtime={rootSession?.runtime ?? listed?.runtime} />
+              {mode ? <ModeControl mode={mode} modes={modes} locked={modeLocked} disabled={!!busy.mode || !!busy.configure || !!blocked || !canWrite || connection.phase !== 'open' || modeLocked} onSelect={next => void controller.configureMode(next)} /> : null}
             </>}
           />
         </>

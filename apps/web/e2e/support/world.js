@@ -141,6 +141,8 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     worktreeWriter: await credential('worktree-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'workspace.write', '--permission', 'workspace.manage','--worktree-mapping','browser']),
     registryWriter: await credential('registry-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'workspace.write']),
     owner: await credential('web-e2e', ['--workspace', projects.main]),
+    // Changing a live session's team (session.team.write) is never a default: only this credential has it.
+    teamWriter: await credential('team-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'project.write', '--permission', 'session.team.write']),
     viewer: await credential('viewer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'project.read']),
     readOnlyMode: await credential('read-only-mode', ['--workspace', projects.main, '--mode', 'read-only']),
     other: await credential('other', ['--workspace', projects.other]),
