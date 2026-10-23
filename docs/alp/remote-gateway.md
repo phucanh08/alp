@@ -366,7 +366,7 @@ Cột Test dùng các mã sau:
 | `workspace.git.diff` | `workspace.git` | như `workspace.git.status`; `compare` dựng lại từ `mode`, `baseRef`, `ignoreWhitespace`; `path` tương đối thuần, không bị chặn (kiểm tra trước alpd); file quá `WORKSPACE_GIT` → từ chối cả answer; trang cắt cho vừa frame (§5.13) | project.read + files.read | exposed | P S R I |
 | `board.list` | — | `projectRoot` thuộc grant | session.read | exposed | P S |
 | `session.create` | — | `spec.cwd` + allowlist; id có sẵn phải trong scope; kiểm lại kết quả | session.write | exposed | P S I |
-| `session.prompt` | `prompt.receipts`, `prompt.images`, `attachments` | session; `text`, ảnh inline trong giới hạn §5.8 và attachment chỉ bằng `attachmentId` (cần thêm `attachments.write`; alpd giải theo principal, epoch, project được phép và đúng session; runtime chưa đọc được thì `1005 attachment_unsupported`, §5.14); **drive**: mode của session và mọi tổ tiên, tra mới | session.write | exposed | P S M I |
+| `session.prompt` | `prompt.receipts`, `prompt.images`, `attachments` | session; `text`, ảnh inline trong giới hạn §5.8 và attachment chỉ bằng `attachmentId` (cần thêm `attachments.write`; alpd giải theo principal, epoch, project được phép và đúng session; runtime không đọc được (snapshot không có `promptAttachments`) thì `1005 attachment_unsupported`, §5.14); **drive**: mode của session và mọi tổ tiên, tra mới | session.write | exposed | P S M I |
 | `attachment.begin` | `attachments` | `sessionId` thuộc grant (tra mới); alpd gắn upload với credential, grant epoch, project canonical (một trong `authorizedRoots`) và session; context principal do gateway đặt, không bao giờ của client; answer chiếu theo allow-list (§5.14) | attachments.write + session.write | exposed | P S R I |
 | `attachment.chunk` | `attachments` | upload: alpd kiểm lại binding mỗi chunk, upload của người khác trả như id không tồn tại; dữ liệu ≤ `maxChunkBytes` (gateway kiểm trước alpd) | attachments.write + session.write | exposed | P S I |
 | `attachment.commit` | `attachments` | như `attachment.chunk`; alpd kiểm SHA-256 mọi byte rồi mới công bố; answer chiếu `projectAttachment` | attachments.write + session.write | exposed | P S R I |
@@ -738,9 +738,12 @@ xuống, giải nén, chạy file hay render HTML qua remote.
   bỏ ngay các upload dở của epoch cũ (giải phóng quota). Attachment đã commit của epoch cũ vẫn tính
   vào quota của principal tới khi được thu dọn (không tham chiếu: sau `unreferencedRetentionMs`) hoặc
   được nhả tham chiếu.
-- **Runtime**: runtime hiện tại (Codex, Claude qua ALP) chưa đọc được attachment: prompt có attachment
-  bị từ chối thật thà `1005 attachment_unsupported` trước khi gửi gì, file vẫn được giữ. Nhánh J
-  (t-15b0.15) mở phần này.
+- **Runtime** (nhánh J, t-15b0.15): Codex và Claude đọc attachment qua bản sao chỉ-đọc alpd stage
+  trong `<ALP_HOME>/state/staged` (snapshot `promptAttachments: ["file.path"]`, alp-json-rpc-v1 §12.6
+  *Runtimes*); ACP và Antigravity không đọc được: prompt có attachment bị từ chối thật thà
+  `1005 attachment_unsupported` trước khi gửi gì, file vẫn được giữ. `user_message.attachments` chỉ
+  mang id, tên hiển thị, kiểu và kích thước; mọi event runtime phát ra hiện thư mục stage là
+  `<alp-attachments>`, nên client remote không thấy đường dẫn host của bản sao.
 Test: `apps/gateway/tests/attachments.test.js`, `test/integration/gateway.test.js` (alpd thật).
 
 ### 5.15 Fork và rewind hội thoại (issue #121, C)
@@ -1053,8 +1056,8 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
   fork có nguồn ngoài grant bị bỏ hẳn. Mỗi lần nguồn được tra là một `session.get` tới alpd (một lần
   mỗi connection cho mỗi nguồn).
 - **Attachment qua remote** (§5.14): chỉ tải lên, xem metadata và xoá file của chính credential;
-  không tải xuống. Runtime hiện tại chưa đọc được attachment (`attachment_unsupported`) cho tới
-  nhánh J. Thu hồi credential không huỷ request đã chuyển tới alpd trước đó.
+  không tải xuống. Codex và Claude đọc được attachment (nhánh J); ACP và Antigravity trả
+  `attachment_unsupported`. Thu hồi credential không huỷ request đã chuyển tới alpd trước đó.
 - **Nội dung library qua remote là bản đã redaction ở gateway** (§5.7), không phải contract của
   daemon: alpd vẫn chỉ redact giá trị `env`/`headers` (`x-alp.redacts`). Gateway không đoán secret
   bằng heuristic; nó ẩn cả field (mọi `args`, cả URL MCP, cả lệnh hook), nên client không thấy
