@@ -31,7 +31,13 @@ Số mục (§) có thể được code và test tham chiếu; giữ ổn địn
 
 Không có trong beta (app ghi rõ, không fallback sang Paseo hay app nhúng): CRUD workspace, git và
 file (tab Changes, Diff, Files chỉ có giao diện), sửa library của host hoặc cấu hình thực thi, thêm/kiểm tra provider,
-usage, đổi ngôn ngữ agent, terminal (tab Terminal chỉ có giao diện), plugin, pair device.
+usage, đổi ngôn ngữ agent, plugin, pair device.
+
+Terminal (#121 H, §12.10): tab Terminal chạy shell thật trên máy chạy alpd, **bằng tài khoản chạy
+alpd; workspace không phải sandbox** (shell đọc/ghi được mọi thứ tài khoản đó đọc/ghi được và dùng
+được mạng); panel ghi rõ điều này lần đầu mở trong phiên trang và luôn có một dòng header. Chỉ có khi
+chủ host đã chạy `alp terminal allow --yes` và token có `terminal.exec` (không bao giờ là mặc định);
+thiếu thì panel ghi lý do và không mở terminal.
 
 ## 2. Cài đặt, chạy, build
 
@@ -169,13 +175,21 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
 
 - Dock bên phải theo explorer dock của Paseo bản mới:
   - các panel mở thành tab đóng được; mặc định là Changes và Files;
-  - nút **+** mở tab "New tab" với danh sách Changes, Terminal, Diff, Files, Agents, Tasks. Chọn
+  - nút **+** mở tab "New tab" với danh sách Changes, Diff, Files, Agents, Tasks (không có Terminal:
+    terminal thuộc tab giữa, đóng tab là kết thúc shell). Chọn
     một mục thì tab New tab thành panel đó; panel đã mở thì được đưa lên trước;
   - tab của dock giữ nguyên khi ẩn/hiện dock và qua reload (`alp-web:layout`).
 - Nút **+** của hàng tab giữa là menu New tab như Paseo: Agent (tạo session), Terminal, Diff, rồi
   Tasks, Agents. Panel mở thành tab ở cột giữa, theo workspace như task tab.
-- Changes, Terminal, Diff, Files mới có giao diện: panel ghi "not available in this beta" vì
-  gateway chưa có git, file, terminal. Backend là việc riêng.
+- Terminal (xterm.js): mở tab là tạo terminal trong workspace (registry workspace) rồi attach;
+  phím gõ gửi theo lô, đúng thứ tự, mỗi lần ≤ `maxInputBytes`; đổi kích thước gửi `terminal.resize`
+  sau debounce; đóng tab gửi `terminal.close`. Reload trang hoặc mất socket thì attach lại với
+  `after` = seq cuối đã thấy (id terminal giữ trong sessionStorage của tab); output mất hiện
+  `[output lost: …]`; `exit` hiện "Process exited (code N / reason)" và tắt nhập; client khác
+  attach thì hiện "Opened in another client" với nút Reattach. Disconnect kết thúc terminal của
+  trang; reload hay đóng tab thì host giữ terminal 60 s để attach lại. Mỗi workspace một terminal.
+- Changes, Diff, Files mới có giao diện: panel ghi "not available in this beta" vì
+  gateway chưa có git, file. Backend là việc riêng.
 - Panel Tasks liệt kê task và có form tạo task.
 - Bấm một task mở **tab chi tiết** ở cột giữa, gồm:
   - mô tả, handoff, closed;
