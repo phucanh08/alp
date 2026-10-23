@@ -965,3 +965,44 @@ test('a parked source resumed while a whole fork reads it stays parked until the
   assert.match(JSON.stringify(transport.calls.filter(call => call.method === 'turn/start').at(-1).params), /ALP resumed this session/);
   assert.equal(d.runtime.snapshot('pf').parked, undefined);
 });
+
+for (const operation of ['fork', 'rewind', 'reload']) {
+  test(`${operation} unknown startup never replays over a later rewind or changes its generation`, async t => {
+    const world = await setup(t);
+    let d = { ...await world.start(), ...world };
+    const [, second] = await conversation(d, 'unknown-root', ['one', 'two']);
+    const originalGeneration = await generationOf(d, 'unknown-root');
+    const params = { sessionId: 'unknown-root', requestId: 'unknown-old', ifGeneration: originalGeneration,
+      ...(operation === 'rewind' ? { beforeTurnId: second } : operation === 'fork' ? { newSessionId: 'unknown-fork' } : {}) };
+    const unknown = async () => { throw Object.assign(new Error('answer lost'), { outcomeUnknown: true }); };
+    if (operation === 'reload') world.native.reload = unknown;
+    else world.native.branch = unknown;
+    await assert.rejects(d.request(`session.${operation}`, params), rpcError(1004, 'outcome_unknown'));
+    world.native.reload = world.native.branch = undefined;
+    // A later confirmed mutation is authoritative even before the unknown is first seen at startup.
+    const later = await d.request('session.rewind', { sessionId: 'unknown-root', requestId: 'later', ifGeneration: originalGeneration, beforeTurnId: second });
+    const expectedThread = world.native.rebinds.at(-1).binding.threadId;
+    await d.request('session.close', { sessionId: 'unknown-root' });
+    const history = await d.request('session.history', { sessionId: 'unknown-root' });
+    const calls = { branches: world.native.branches.length, reloads: world.native.reloads.length, rebinds: world.native.rebinds.length };
+    await d.stop();
+    let seen;
+    for (let restart = 0; restart < 3; restart++) {
+      d = { ...await world.start(), ...world };
+      const current = (await d.request('session.get', { sessionId: 'unknown-root' })).session;
+      assert.equal(current.threadId, expectedThread);
+      assert.deepEqual(current.branches, later.session.branches);
+      assert.deepEqual(await d.request('session.history', { sessionId: 'unknown-root' }), history);
+      await assert.rejects(d.request(`session.${operation}`, params), rpcError(1004, 'outcome_unknown'));
+      const entries = await Promise.all((await readdir(path.join(world.state, 'lifecycle'))).filter(name => name.endsWith('.json')).map(async name => JSON.parse(await readFile(path.join(world.state, 'lifecycle', name), 'utf8'))));
+      const entry = entries.find(entry => entry.requestId === 'unknown-old');
+      assert.equal(entry.state, 'unknown');
+      assert.equal(typeof entry.recoverySeenAt, 'string');
+      if (seen) assert.deepEqual(entry, seen, 'observed only on first startup');
+      seen = entry;
+      if (operation === 'fork') await assert.rejects(d.request('session.get', { sessionId: 'unknown-fork' }), /Session is not open/);
+      assert.deepEqual({ branches: world.native.branches.length, reloads: world.native.reloads.length, rebinds: world.native.rebinds.length }, calls);
+      await d.stop();
+    }
+  });
+}

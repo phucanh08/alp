@@ -3611,7 +3611,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   }
 
   /** reconfigure(): see AlpRuntime.reconfigure. */
-  async function reconfigureSession(sessionId: string, changes: ConfigureChanges, { fresh = false }: { fresh?: boolean } = {}): Promise<ConfigureResult> {
+  async function reconfigureSession(sessionId: string, changes: ConfigureChanges, { fresh = false, onApplied }: { fresh?: boolean; onApplied?: (result: ConfigureResult) => Promise<void> } = {}): Promise<ConfigureResult> {
+    // Native apply has already succeeded when this runs. A host persistence failure must not enter
+    // the native-refusal rollback path, nor claim that nothing happened.
+    async function persist(result: ConfigureResult) {
+      try { await onApplied?.(result); }
+      catch (error) { throw new ConversationError('native_refused', `The runtime took the configuration but the host could not record it: ${errorData(error).message}`, { outcomeUnknown: true }); }
+    }
     const session = sessions.get(sessionId);
     const busy = restartRefusal(sessionId, session);
     if (busy) throw new ConversationError(session && (session.parent || session.role === 'supervisor') ? 'not_root' : 'session_busy', busy);
@@ -3628,7 +3634,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const agent = live.mapping.agent.name;
     if (plan.changes.every(change => change === 'mode')) {
       // Permissions alone change as session.configure { mode } changes them, without a restart.
-      await configureSession(sessionId, { mode: plan.shape.mapping.mode });
+      await configureSession(sessionId, { mode: plan.shape.mapping.mode }, updated => persist({ session: updated, effective: { ...plan.proposed, instructionsSha: plan.current.instructionsSha }, status: 'applied', restarted: false }));
       runLog(rootOf(sessionId), { event: 'session.configured', sessionId, agent, changes: plan.changes, mode: plan.shape.mapping.mode });
       return { session: snapshot(sessionId, live), effective: { ...plan.proposed, instructionsSha: plan.current.instructionsSha }, status: 'applied', restarted: false };
     }
@@ -3669,11 +3675,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (supervises(live)) void enqueue(() => openSupervisor(sessionId));
     }
     const updated = snapshot(sessionId, live);
-    emit(sessionId, { type: 'session.updated', session: updated });
-    return {
+    const result: ConfigureResult = {
       session: updated, effective: { ...plan.proposed, ...(live.instructionsSha ? { instructionsSha: live.instructionsSha } : {}) }, status: 'applied', restarted: true,
       ...(answered ? { native: answered } : {}),
     };
+    await persist(result);
+    emit(sessionId, { type: 'session.updated', session: updated });
+    return result;
   }
 
   /** branch(): makes the native conversation a fork or rewind continues; see AlpRuntime.branch. */
@@ -3941,7 +3949,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     return session;
   }
 
-  async function configureSession(sessionId: string, changes: { mode?: string }) {
+  async function configureSession(sessionId: string, changes: { mode?: string }, beforeUpdated?: (session: SessionSnapshot) => Promise<void>) {
     const session = openOf(sessionId);
     if (session.active || session.pending || session.children.size) throw new Error('Wait for the current turn and child sessions to finish before changing permissions');
     const mode = changes.mode ?? session.mapping.mode;
@@ -3957,6 +3965,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     session.mapping.mode = mode;
     session.spec = { ...session.spec, mode };
     const updated = snapshot(sessionId, session);
+    if (beforeUpdated) await beforeUpdated(updated);
     emit(sessionId, { type: 'session.updated', session: updated });
     return updated;
   }

@@ -1298,10 +1298,16 @@ required (`-32602`), and:
 - Journaled as reload is (§12.7: `(sessionId, "configure", requestId)`, `duplicate: true` on a repeat,
   another payload `1004 key_conflict`, a recorded refusal answered again, refusals before `prepared`
   record nothing). A configure alpd stopped in the middle of is `1004 outcome_unknown` and never sent
-  again; at the next start, for the fields that change changed (the mode included) and only when the
-  session's snapshot (written from the runtime's `session.updated`) already shows them, alpd makes the
-  record's spec agree with that snapshot, so the root reopens with all of what the runtime ran or none,
-  and an old unknown entry never undoes a later change.
+  again. When the runtime applies a configure, alpd persists its effective configuration before the
+  runtime publishes the successful `session.updated`, so losing the answer does not require guessing
+  from a snapshot at startup. A failure to persist after native apply stays `outcome_unknown`; it does
+  not roll back the runtime or claim a known refusal.
+- At startup, prepared operations become unknown and all unknown operations (configure, fork, rewind
+  and reload) receive a durable `recoverySeenAt` observation once. They remain unknown for repeats and
+  audit: startup never replays their native step, commits them, or infers persistence from matching
+  snapshot values. The observation refreshes journal retention once; later starts do not refresh it.
+  Historical unknown configures have no safe causal evidence for repairing a spec/snapshot disagreement;
+  inspect the session and send an explicit configure with a new requestId to choose its configuration.
 
 `configured.status` is `applied` or `unchanged` (the configuration asked for is the one it runs);
 `effective` is the `EffectiveConfig` it runs with now (below); `restarted` whether its process restarted.

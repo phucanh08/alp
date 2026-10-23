@@ -371,3 +371,47 @@ test('a root alpd says has no turn is resumed when the runtime holds turns, star
   assert.equal(runtimes.length, 3, 'nothing restarted');
   assert.deepEqual(runtime.snapshot('root'), current);
 });
+
+for (const changes of [{ model: 'gpt-6.1-sol', thinking: 'high' }, { mode: 'read-only' }]) {
+  const label = changes.mode ? 'mode only' : 'native restart';
+  test(`reconfigure ${label} awaits causal persistence before publishing the applied snapshot`, async t => {
+    const { runtime, of } = await idleRoot(t);
+    const before = of('root', 'session.updated').length;
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    let taken;
+    let calls = 0;
+    const applying = runtime.reconfigure('root', changes, { onApplied: async result => { calls++; taken = result; await gate; } });
+    try {
+      // Completing without entering the hook is a deterministic failure on the old implementation.
+      await Promise.race([applying.then(() => assert.fail('reconfigure bypassed persistence')), until(() => taken)]);
+      assert.equal(of('root', 'session.updated').length, before, 'no successful update before persistence');
+      assert.equal(taken.status, 'applied');
+      assert.equal(taken.restarted, !changes.mode);
+    } finally { release(); }
+
+    const result = await applying;
+    assert.deepEqual(result, taken);
+    assert.equal(calls, 1);
+    assert.deepEqual(of('root', 'session.updated').at(-1).session, taken.session);
+  });
+
+  test(`reconfigure ${label} persistence failure stays unknown after native apply, with no rollback`, async t => {
+    const { runtime, runtimes, of } = await idleRoot(t);
+    const before = of('root', 'session.updated').length;
+    const error = await runtime.reconfigure('root', changes, { onApplied: async () => { throw new Error('disk full'); } }).then(() => assert.fail('must report unknown'), error => error);
+    assert.equal(error.outcomeUnknown, true);
+    assert.equal(of('root', 'session.updated').length, before, 'no successful update after failed persistence');
+    const current = runtime.snapshot('root');
+    for (const [field, value] of Object.entries(changes)) assert.equal(current[field], value, 'runtime keeps the configuration it already took');
+    assert.equal(runtimes.length, changes.mode ? 1 : 2, 'no rollback restart');
+  });
+}
+
+test('unchanged and refused configures never call the applied persistence hook', async t => {
+  const { runtime, runtimes } = await idleRoot(t);
+  const onApplied = async () => assert.fail('no applied change to persist');
+  assert.equal((await runtime.reconfigure('root', { model: 'gpt-5.6-sol' }, { onApplied })).status, 'unchanged');
+  await refused(runtime.reconfigure('root', { model: 'not-a-model' }, { onApplied }), 'invalid_params');
+  assert.equal(runtimes.length, 1);
+});
