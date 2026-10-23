@@ -26,6 +26,7 @@ import type { RuntimeAttachment } from '@anhlp/alp-protocol/session';
 import { clientMessageId as scheduleMessageId, createScheduler, SCHEDULE_TICK_MS, type ScheduleDelivery } from './scheduler.js';
 import { createLifecycleJournal, LIFECYCLE_RETENTION_MS } from './lifecycle.js';
 import { createConversation } from './conversation.js';
+import { createTerminalService, type TerminalServiceOptions } from './terminals.js';
 
 /**
  * alpd's JSON-RPC surface over one shared runtime (plans/reference/ALPD.md §3, §6, §14).
@@ -197,7 +198,7 @@ export type DaemonServer = {
  * shape so every viewer agrees; re-exported here to keep `@anhlp/alp-daemon/server`'s API. */
 export type { SessionSummary };
 
-export function createDaemonServer({ runtime, socketPath, version, onShutdown, store, runLogDir, previousExit, retentionSweepMs = RETENTION_SWEEP_MS, home, templates, scheduleTickMs = SCHEDULE_TICK_MS, scheduleDeliveryTimeoutMs, attachmentOptions }: {
+export function createDaemonServer({ runtime, socketPath, version, onShutdown, store, runLogDir, previousExit, retentionSweepMs = RETENTION_SWEEP_MS, home, templates, scheduleTickMs = SCHEDULE_TICK_MS, scheduleDeliveryTimeoutMs, attachmentOptions, terminalOptions }: {
   runtime: AlpRuntime;
   socketPath: string;
   version: string;
@@ -220,6 +221,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   scheduleDeliveryTimeoutMs?: number;
   /** Lower attachment limits (an operator's, never higher than ATTACHMENTS) and test hooks. */
   attachmentOptions?: Partial<Pick<AttachmentStoreOptions, 'limits' | 'now' | 'io' | 'sweepMs'>>;
+  /** Lower terminal limits (never higher than TERMINAL or the operator's) and test hooks. */
+  terminalOptions?: Partial<Pick<TerminalServiceOptions, 'limits' | 'now' | 'spawn' | 'processes' | 'sweepMs' | 'killGraceMs' | 'maxBufferedBytes' | 'platform'>>;
 }): DaemonServer {
   const connections = new Set<Connection>();
   /** Root of every live session. */
@@ -1022,6 +1025,18 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   const workspaceDescriptor = async (w: any) => worktrees ? worktrees.describe(w) : w;
   // workspace.git.status and workspace.git.diff (§12.5): read-only, by registry workspaceId.
   const gitReader = registry ? createGitReader({ registry, log: (message, fields) => log.warn(message, { code: 'ALPD_GIT_READ_FAILED', ...fields }) }) : undefined;
+  // Terminals (§12.10): a real PTY shell as the daemon's account, only while the host opted in
+  // (<ALP_HOME>/terminal.json); bound to the caller's principal and the workspace's directory.
+  const terminals = home && registry ? createTerminalService({
+    home,
+    resolveWorkspace: workspaceId => registry.resolve(workspaceId),
+    log: { warn: (message, fields) => log.warn(message, fields), info: (message, fields) => log.info(message, fields) },
+    ...terminalOptions,
+  }) : undefined;
+  const terminalCall = <T>(run: (service: NonNullable<typeof terminals>) => Promise<T>) => {
+    if (!terminals) throw new RpcError(ERROR.unavailable, 'This alpd has no home: it serves no terminals', { reason: 'terminal_unsupported' });
+    return run(terminals);
+  };
   const attachmentCall = <T>(run: (store: NonNullable<typeof attachments>) => Promise<T>) => {
     if (!attachments) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd does not store attachments (capability attachments is not listed)');
     return run(attachments);
@@ -1231,6 +1246,15 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     'catalog.get': () => ({ models, modes, thinkingOptions, defaultModel: `codex:${DEFAULT_MODEL}` }),
     // attachment.* (§12.6): each call acts for its principal context; without the store (no home or
     // store, or Windows) alpd does not serve them, as for any method it does not know.
+    // terminal.* (§12.10): each call acts for its principal context; input, resize and the stream
+    // belong to the connection that attached the terminal.
+    'terminal.create': (_c, p) => terminalCall(service => service.create(principalOf(p), p)),
+    'terminal.list': (_c, p) => terminalCall(service => service.list(principalOf(p), p)),
+    'terminal.attach': (c, p) => terminalCall(service => service.attach(principalOf(p), c, p)),
+    'terminal.input': (c, p) => terminalCall(service => service.input(principalOf(p), c, p)),
+    'terminal.resize': (c, p) => terminalCall(service => service.resize(principalOf(p), c, p)),
+    'terminal.close': (_c, p) => terminalCall(service => service.close(principalOf(p), p)),
+    'terminal.revoke': (_c, p) => terminalCall(service => service.revoke(p.principalId)),
     'attachment.begin': (_c, p) => attachmentCall(store => store.begin(principalOf(p), p)),
     'attachment.chunk': (_c, p) => attachmentCall(store => store.chunk(principalOf(p), p)),
     'attachment.commit': (_c, p) => attachmentCall(store => store.commit(principalOf(p), p)),
@@ -1746,7 +1770,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         const issues = validateParams(method, params)!;
         if (issues.length) throw invalidParams(issues);
         connection.helloed = true;
-        respond({ result: { protocolVersion: PROTOCOL_VERSION, daemonVersion: version, pid: process.pid, hostname: os.hostname(), capabilities, ...(attachments ? { attachmentLimits: attachments.limits } : {}) } });
+        // Terminals are listed only while the host's switch is on (and the PTY module loads).
+        const terminalLimits = await terminals?.advertised();
+        respond({ result: { protocolVersion: PROTOCOL_VERSION, daemonVersion: version, pid: process.pid, hostname: os.hostname(), capabilities: terminalLimits ? [...capabilities, CAPABILITY.terminal] : capabilities, ...(attachments ? { attachmentLimits: attachments.limits } : {}), ...(terminalLimits ? { terminalLimits } : {}) } });
         return;
       }
       if (!connection.helloed) throw new RpcError(ERROR.protocol, 'daemon.hello is required first', { reason: 'hello_required' });
@@ -1783,6 +1809,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     }
     connections.delete(connection);
     watchers.delete(connection);
+    terminals?.disconnect(connection);
     for (const root of [...connection.roots]) {
       detach(connection, root);
       void reap(root);
@@ -1893,6 +1920,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
 
     local() {
       const events = new Set<(envelope: Envelope) => void>();
+      const notifications = new Set<(method: string, params: any) => void>();
       const closes = new Set<(error: Error) => void>();
       const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
       let sequence = 0;
@@ -1905,6 +1933,11 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         send(message: any) {
           if (message.method === 'event') {
             for (const listener of events) listener(message.params);
+            return;
+          }
+          // Other notifications (terminal.event, §12.10) carry a method and no id.
+          if (typeof message.method === 'string' && message.id === undefined) {
+            for (const listener of notifications) listener(message.method, message.params);
             return;
           }
           const waiter = pending.get(message.id);
@@ -1925,6 +1958,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
           });
         },
         onEvent(listener) { events.add(listener); return () => events.delete(listener); },
+        onNotification(listener) { notifications.add(listener); return () => notifications.delete(listener); },
         onClose(listener) { closes.add(listener); return () => closes.delete(listener); },
         close() {
           if (ended) return;
@@ -1958,6 +1992,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       closing = true;
       if (sweeper) clearInterval(sweeper);
       attachments?.close();
+      // Every terminal ends with alpd, its whole process tree killed.
+      await terminals?.shutdown();
       // The tick that runs now is waited for: a delivery under way finishes, so its
       // receipt is written and the job is not left half delivered.
       await scheduler?.stop();

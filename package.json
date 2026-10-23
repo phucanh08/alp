@@ -122,5 +122,8 @@
     "apps/gateway",
     "integrations/paseo",
     "apps/web"
-  ]
+  ],
+  "optionalDependencies": {
+    "node-pty": "1.2.0-beta.15"
+  }
 }

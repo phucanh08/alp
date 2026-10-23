@@ -30,11 +30,11 @@ export async function buildCore({ log = console.log } = {}) {
   const metafiles = [];
   const record = (outfile, result) => { metafiles.push(result.metafile); return recordBundle(entries, outfile, result); };
 
-  record('dist/runtime/index.js', await build({ entryPoints: ['packages/runtime/src/index.ts'], outfile: 'dist/runtime/index.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', banner: requireShim, external: ['@anthropic-ai/claude-agent-sdk'] }));
-  record('dist/daemon/index.js', await build({ entryPoints: ['packages/daemon/src/index.ts'], outfile: 'dist/daemon/index.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', banner: requireShim, external: ['@anthropic-ai/claude-agent-sdk'] }));
+  record('dist/runtime/index.js', await build({ entryPoints: ['packages/runtime/src/index.ts'], outfile: 'dist/runtime/index.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', banner: requireShim, external: ['@anthropic-ai/claude-agent-sdk', 'node-pty'] }));
+  record('dist/daemon/index.js', await build({ entryPoints: ['packages/daemon/src/index.ts'], outfile: 'dist/daemon/index.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', banner: requireShim, external: ['@anthropic-ai/claude-agent-sdk', 'node-pty'] }));
   record('dist/acp.js', await build({ entryPoints: ['packages/cli/src/acp/main.ts'], outfile: 'dist/acp.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', define: { __ALP_VERSION__: JSON.stringify(version) } }));
   record('dist/acp/agent.js', await build({ entryPoints: ['packages/cli/src/acp/agent.ts'], outfile: 'dist/acp/agent.js', bundle: true, format: 'esm', platform: 'node', target: 'node20' }));
-  record('dist/alpd.js', await build({ entryPoints: ['packages/daemon/src/main.ts'], outfile: 'dist/alpd.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', external: ['@anthropic-ai/claude-agent-sdk'], define: { __ALP_VERSION__: JSON.stringify(version) }, banner: requireShim }));
+  record('dist/alpd.js', await build({ entryPoints: ['packages/daemon/src/main.ts'], outfile: 'dist/alpd.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', external: ['@anthropic-ai/claude-agent-sdk', 'node-pty'], define: { __ALP_VERSION__: JSON.stringify(version) }, banner: requireShim }));
 
   await writeBuildManifest(path.join(root, 'dist/build-manifest.json'), { version, entries });
   // The root package ships dist/alpd.js and dist/acp.js, which inline third-party packages.

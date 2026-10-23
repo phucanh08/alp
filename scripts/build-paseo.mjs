@@ -51,7 +51,7 @@ await build({ entryPoints: ['integrations/paseo/server/main.ts'], outfile: 'inte
 // alpd next to the plugin bundle, so an installed plugin can start it. Identical to the neutral core
 // alpd (the daemon never imports the plugin), built with templates only.
 const { version } = JSON.parse(await readFile('package.json', 'utf8'));
-const pluginAlpd = await build({ entryPoints: ['packages/daemon/src/main.ts'], outfile: 'integrations/paseo/server/dist/alpd.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', external: ['@anthropic-ai/claude-agent-sdk'], plugins: embeddedTemplates, define: { __ALP_VERSION__: JSON.stringify(version) }, banner: requireShim, metafile: true });
+const pluginAlpd = await build({ entryPoints: ['packages/daemon/src/main.ts'], outfile: 'integrations/paseo/server/dist/alpd.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', external: ['@anthropic-ai/claude-agent-sdk', 'node-pty'], plugins: embeddedTemplates, define: { __ALP_VERSION__: JSON.stringify(version) }, banner: requireShim, metafile: true });
 // alpd is a core bundle even here: it must not reach the plugin or the Paseo SDK in either direction.
 assertCoreInputs(pluginAlpd.metafile, 'integrations/paseo/server/dist/alpd.js');
 
