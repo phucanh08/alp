@@ -186,7 +186,7 @@ test('a tool command, its output or a reply that names a staged copy reaches the
   const [part] = attachmentParts(turnStarts(world.transports)[0].params.input);
   const real = await realpath(part.path);
   transport.notification('item/completed', { threadId: transport.threadId, item: { type: 'commandExecution', id: 'cmd-1', command: `shasum -a 256 ${part.path}`, cwd: world.project, status: 'completed', exitCode: 0, aggregatedOutput: `${sha('masked')}  ${real}\n` } });
-  transport.finish(`The file at ${part.path} has SHA-256 ${sha('masked')}. Not the copy: ${world.stageRoot}-old/x.`);
+  transport.finish(`The file at ${part.path} has SHA-256 ${sha('masked')}. Not the copy: ${world.stageRoot}-old/x. The copies are in ${world.stageRoot}.`);
   await until(async () => !(await d.request('session.get', { sessionId: 'rm' })).session.activeTurnId, 'turn ended');
   const history = JSON.stringify(await d.request('session.history', { sessionId: 'rm' }));
   assert.ok(!history.includes(`${world.stageRoot}/`) && !history.includes(`${path.dirname(real)}/`), 'no spelling of the staging directory in history');
@@ -194,6 +194,7 @@ test('a tool command, its output or a reply that names a staged copy reaches the
   assert.ok(history.includes(`<alp-attachments>/${path.basename(part.path)}`), 'the copy shows under the mask with its id');
   assert.ok(history.includes(sha('masked')));
   assert.ok(history.includes(`${world.stageRoot}-old/x`), 'a longer name that merely starts like the directory is left alone');
+  assert.ok(history.includes('The copies are in <alp-attachments>.'), 'the directory at the end of a sentence is masked too');
 });
 
 test('retry, restart and reconnect keep one object and one staged copy; a tampered copy is replaced, never followed', { skip }, async t => {
@@ -340,7 +341,7 @@ test('a fork of a fork keeps the attachments of its kept prompts after the first
   d = await world.start();
   const generation1 = (await d.request('session.history', { sessionId: 'fork1', limit: 1 })).generation;
   // Another principal, the owner's under another grant epoch, or a grant without the project may not carry it on.
-  for (const [requestId, as] of [['fb', { principalId: 'bbbbbbbbbbbbbbbb', principalEpoch: 'e1' }], ['fe', { principalId: 'owner', principalEpoch: 'other-epoch' }], ['fr', { authorizedRoots: [path.join(world.directory, 'elsewhere')] }]]) {
+  for (const [requestId, as] of [['fb', { principalId: 'bbbbbbbbbbbbbbbb', principalEpoch: 'owner' }], ['fbe', { principalId: 'bbbbbbbbbbbbbbbb', principalEpoch: 'e1' }], ['fe', { principalId: 'owner', principalEpoch: 'other-epoch' }], ['fr', { authorizedRoots: [path.join(world.directory, 'elsewhere')] }]]) {
     await assert.rejects(d.request('session.fork', { sessionId: 'fork1', requestId, ifGeneration: generation1, boundary: { throughTurnId: fileTurn }, ...as }), error => error.code === 1003 && error.data?.reason === 'attachment_forbidden', requestId);
   }
   // A fork cut before the message that carried it holds nothing.

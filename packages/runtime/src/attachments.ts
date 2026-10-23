@@ -151,7 +151,9 @@ export function createAttachmentStager(root: string) {
       spell(await realpath(root));
     })().catch(error => { ready = undefined; throw error; });
     await ready;
-    const info = await lstat(root);
+    let info = await lstat(root).catch((error: NodeJS.ErrnoException) => { if (error?.code === 'ENOENT') return undefined; throw error; });
+    // Removed while alpd runs (a cleanup of state/staged): made again, private, as at first use.
+    if (!info) { await mkdir(root, { recursive: true, mode: 0o700 }); info = await lstat(root); }
     if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('the staging directory is not a directory');
     if (typeof process.getuid === 'function' && info.uid !== process.getuid()) throw new Error('the staging directory belongs to another user');
     if (info.mode & 0o077) await chmod(root, 0o700);

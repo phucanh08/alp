@@ -45,3 +45,15 @@ test('stagingExposure finds a writable directory holding the staging directory, 
   assert.equal(stagingExposure(path.join(base, 'home', 'state', 'staged'), [path.join(base, 'proj')]), undefined, 'a sibling that merely starts alike is not a parent');
   assert.equal(stagingExposure(path.join(base, 'h', 'state', 'staged'), [tmpdir()]), tmpdir());
 });
+
+test('a staging directory removed while alpd runs is made again at the next stage', { skip }, async t => {
+  const root = path.join(await mkdtemp(path.join(tmpdir(), 'alp-stager-')), 'staged');
+  t.after(() => rm(path.dirname(root), { recursive: true, force: true }));
+  const stager = createAttachmentStager(root);
+  const reader = { async open() { return { stream: Readable.from([bytes]), attachment }; } };
+  await stager.stage(reader, attachment, 's1');
+  await rm(root, { recursive: true, force: true });
+  const again = await stager.stage(reader, attachment, 's1');
+  assert.equal(path.dirname(again), root);
+  assert.deepEqual(await readdir(root), [path.basename(again)]);
+});
