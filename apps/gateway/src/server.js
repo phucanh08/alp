@@ -228,6 +228,11 @@ export function createGateway({ config, store, openTransport, logger, version, m
         else connection.close(CLOSE_CODE.grantChanged, 'credential grant changed');
       }
       logger.info(`credential ${change}; closed its connections`, { code: 'ALP_GATEWAY_CREDENTIAL_CHANGED', principal });
+      // Its terminals end now too, whatever changed (§5.18): a shell never outlives the grant it was opened under.
+      void monitor?.revokeTerminals(principal).then(outcome => {
+        if (outcome.revoked) { if (outcome.closed) logger.info('ended the terminals of a changed credential', { code: 'ALP_GATEWAY_TERMINALS_REVOKED', principal, closed: outcome.closed }); }
+        else logger.warn('could not end the terminals of a changed credential now; alpd ends them when their reconnect time runs out', { code: 'ALP_GATEWAY_TERMINALS_REVOKE_FAILED', principal });
+      });
     }
   });
 

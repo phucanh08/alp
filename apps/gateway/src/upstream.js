@@ -70,6 +70,21 @@ export function daemonMonitor({ openTransport, version, intervalMs = 5_000, logg
   return {
     get state() { return state; },
     check,
+    /**
+     * Ends every terminal of a credential at once (terminal.revoke, docs/protocol/alp-json-rpc-v1.md
+     * §12.10): a revoked, rotated, expired or regranted credential keeps no shell. When alpd cannot be
+     * asked now, its own detach timeout ends them once their connections have closed.
+     * @param {string} principalId
+     */
+    async revokeTerminals(principalId) {
+      if (connection.state !== 'open') return { revoked: false };
+      try {
+        const result = await connection.request('terminal.revoke', { principalId }, { timeoutMs: 5_000 });
+        return { revoked: true, closed: Number.isSafeInteger(result?.closed) ? result.closed : 0 };
+      } catch (error) {
+        return { revoked: false, error };
+      }
+    },
     stop() { clearInterval(timer); connection.stop(); },
   };
 }

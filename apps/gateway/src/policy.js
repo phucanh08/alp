@@ -1,5 +1,5 @@
 // @ts-check
-import { ATTACHMENTS, CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS, WORKSPACE_GIT, attachmentChunkBytes, blockedFilePath } from '@anhlp/alp-protocol';
+import { ATTACHMENTS, CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS, TERMINAL, TERMINAL_LIMIT_KEYS, WORKSPACE_GIT, attachmentChunkBytes, blockedFilePath, isTerminalId } from '@anhlp/alp-protocol';
 
 /**
  * What the gateway lets a remote client call (docs/alp/remote-gateway.md §5): the method
@@ -20,14 +20,22 @@ import { ATTACHMENTS, CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS, WORKSPACE_G
  * its read; `files.read` implies nothing and nothing implies it. `attachments.write` (uploading
  * files into alpd's attachment store, §5.14) implies nothing either and is used together with
  * session.write. `session.team.write` (changing a live root's team, §5.17) implies nothing and is
- * used together with session.write. Host administration has no remote permission in v1.
+ * used together with session.write. `terminal.exec` (a real shell on the daemon host as the
+ * daemon's account, §5.18) implies nothing and nothing implies it, session.write included; alpd
+ * also needs the host owner's own switch (`alp terminal allow`). A workspace only picks where the
+ * shell starts: it is not a sandbox. Host administration has no remote permission in v1.
  */
-export const PERMISSIONS = Object.freeze(['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write', 'workspace.write', 'workspace.manage', 'attachments.write', 'session.team.write']);
+export const PERMISSIONS = Object.freeze(['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write', 'workspace.write', 'workspace.manage', 'attachments.write', 'session.team.write', 'terminal.exec']);
 
 /**
  * What `alp-gateway credential create` grants without --permission: session and project read/write;
  * files.read and library.write require explicit owner opt-in.
  */
+/** What a credential with terminal.exec can do, said where it is granted (docs/alp/remote-gateway.md §5.18). */
+export const TERMINAL_EXEC_WARNING = `Warning: this credential holds terminal.exec. Whoever has its token can run any command on the
+daemon host as the account that runs alpd (its files, programs and network), in any granted workspace;
+a workspace is NOT a sandbox. Terminals open only while the host owner allows them (alp terminal allow).`;
+
 export const DEFAULT_PERMISSIONS = Object.freeze(['session.read', 'session.write', 'project.read', 'project.write']);
 
 /**
@@ -35,7 +43,7 @@ export const DEFAULT_PERMISSIONS = Object.freeze(['session.read', 'session.write
  * Within `library` and `settings.language` some methods stay unexposed and answer -32601
  * `not_exposed` (docs/alp/remote-gateway.md §5.4).
  */
-export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.workspaceRegistry, CAPABILITY.workspaceWorktree, CAPABILITY.sessionHistory, CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, CAPABILITY.workspaceGit, CAPABILITY.attachments, CAPABILITY.sessionFork, CAPABILITY.sessionRewind, CAPABILITY.sessionReload, CAPABILITY.sessionResumeCommand, CAPABILITY.sessionConfigureLive]);
+export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.workspaceRegistry, CAPABILITY.workspaceWorktree, CAPABILITY.sessionHistory, CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, CAPABILITY.workspaceGit, CAPABILITY.attachments, CAPABILITY.sessionFork, CAPABILITY.sessionRewind, CAPABILITY.sessionReload, CAPABILITY.sessionResumeCommand, CAPABILITY.sessionConfigureLive, CAPABILITY.terminal]);
 
 /** The codes of docs/protocol/alp-json-rpc-v1.md §5.1 the gateway answers its own refusals with; `data.reason` says why. */
 export const GATEWAY_ERROR = Object.freeze({ forbidden: ERROR.forbidden, unavailable: ERROR.unavailable });
@@ -106,6 +114,85 @@ export function gatewayAttachmentLimits(advertised, maxFrame = 4 * 1024 * 1024) 
   limits.maxChunkBytes = Math.min(limits.maxChunkBytes, attachmentChunkBytes(maxFrame));
   return /** @type {import('@anhlp/alp-protocol').AttachmentLimits} */ (limits);
 }
+
+/**
+ * The terminal limits of this gateway (§5.18): alpd's advertised ones, never above TERMINAL; an
+ * output event must fit a client's frame with room for its envelope.
+ * @param {unknown} advertised @param {number} [maxFrame]
+ * @returns {import('@anhlp/alp-protocol').TerminalLimits}
+ */
+export function gatewayTerminalLimits(advertised, maxFrame = 4 * 1024 * 1024) {
+  const source = /** @type {Record<string, unknown>} */ (advertised && typeof advertised === 'object' ? advertised : {});
+  /** @type {Record<string, number>} */
+  const limits = {};
+  for (const key of TERMINAL_LIMIT_KEYS) {
+    const value = source[key];
+    const max = /** @type {number} */ (TERMINAL[/** @type {keyof typeof TERMINAL} */ (key)]);
+    limits[key] = typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? Math.min(value, max) : max;
+  }
+  // A JSON-escaped output frame may take up to 6 bytes per byte of data.
+  limits.maxOutputFrameBytes = Math.max(1, Math.min(limits.maxOutputFrameBytes, Math.floor((maxFrame - 1024) / 6)));
+  return /** @type {any} */ (limits);
+}
+
+const TERMINAL_END = new Set(['exited', 'closed', 'idle', 'lifetime', 'detached', 'revoked', 'disabled', 'shutdown']);
+const TERMINAL_STAMP = (/** @type {unknown} */ value) => typeof value === 'string' && value.length <= 64 && !Number.isNaN(Date.parse(value));
+const integerOrNull = (/** @type {unknown} */ value) => value === null || Number.isSafeInteger(value);
+
+/**
+ * A terminal as a remote client may see it: the schema's fields only, each checked. Never a process
+ * id, shell path or host path; undefined when alpd answered anything else (the answer is refused).
+ * @param {any} raw
+ */
+export function projectTerminal(raw) {
+  if (!raw || typeof raw !== 'object' || !isTerminalId(raw.terminalId) || typeof raw.workspaceId !== 'string' || !raw.workspaceId || raw.workspaceId.length > 200) return undefined;
+  if (typeof raw.title !== 'string' || raw.title.length > 64 || /[\p{Cc}\p{Cf}/\\]/u.test(raw.title)) return undefined;
+  if (![raw.cols, raw.rows].every(value => Number.isSafeInteger(value)) || raw.cols < TERMINAL.minCols || raw.cols > TERMINAL.maxCols || raw.rows < TERMINAL.minRows || raw.rows > TERMINAL.maxRows) return undefined;
+  if (raw.state !== 'running' && raw.state !== 'exited') return undefined;
+  if (typeof raw.attached !== 'boolean' || ![raw.createdAt, raw.lastActivityAt, raw.expiresAt].every(TERMINAL_STAMP)) return undefined;
+  /** @type {Record<string, unknown>} */
+  const terminal = { terminalId: raw.terminalId, workspaceId: raw.workspaceId, title: raw.title, cols: raw.cols, rows: raw.rows, state: raw.state, attached: raw.attached, createdAt: raw.createdAt, lastActivityAt: raw.lastActivityAt, expiresAt: raw.expiresAt };
+  if (raw.exitCode !== undefined) { if (!integerOrNull(raw.exitCode)) return undefined; terminal.exitCode = raw.exitCode; }
+  if (raw.signal !== undefined) { if (!integerOrNull(raw.signal)) return undefined; terminal.signal = raw.signal; }
+  if (raw.endReason !== undefined) { if (!TERMINAL_END.has(raw.endReason)) return undefined; terminal.endReason = raw.endReason; }
+  return /** @type {import('@anhlp/alp-protocol').TerminalInfo} */ (/** @type {unknown} */ (terminal));
+}
+
+/**
+ * A terminal.event a remote client may get: output, exit or detached, the schema's fields only.
+ * @param {any} raw @param {number} maxOutputFrameBytes
+ */
+export function projectTerminalEvent(raw, maxOutputFrameBytes) {
+  if (!raw || typeof raw !== 'object' || !isTerminalId(raw.terminalId)) return undefined;
+  if (raw.type === 'output') {
+    if (!Number.isSafeInteger(raw.seq) || raw.seq < 1 || typeof raw.data !== 'string' || !raw.data || Buffer.byteLength(raw.data) > maxOutputFrameBytes) return undefined;
+    return { terminalId: raw.terminalId, type: 'output', seq: raw.seq, data: raw.data };
+  }
+  if (raw.type === 'exit') {
+    if (!Number.isSafeInteger(raw.seq) || raw.seq < 1 || !integerOrNull(raw.exitCode) || !integerOrNull(raw.signal) || !TERMINAL_END.has(raw.reason)) return undefined;
+    return { terminalId: raw.terminalId, type: 'exit', seq: raw.seq, exitCode: raw.exitCode, signal: raw.signal, reason: raw.reason };
+  }
+  if (raw.type === 'detached') {
+    if (raw.reason !== 'replaced' && raw.reason !== 'slow_consumer') return undefined;
+    return { terminalId: raw.terminalId, type: 'detached', reason: raw.reason };
+  }
+  return undefined;
+}
+
+/** alpd's terminal refusals the gateway passes on, each with its own fixed text. */
+export const TERMINAL_REFUSALS = Object.freeze({
+  not_found: 'No such terminal',
+  terminal_disabled: 'The daemon host has not allowed remote terminals (its owner runs alp terminal allow)',
+  terminal_unsupported: 'Terminals are not available on the daemon host',
+  terminal_limit: 'Too many terminals are open',
+  not_attached: 'Attach the terminal on this connection first',
+  terminal_exited: 'The terminal has ended',
+  input_too_large: 'Too much input at once',
+  outside_workspace: 'The workspace is outside this credential\'s grant',
+  request_conflict: 'This requestId created another terminal',
+  identity_changed: 'The workspace directory changed',
+  invalid_params: 'Invalid params',
+});
 
 const UPLOAD_ID = /^upl_[0-9a-f]{32}$/;
 const ATTACHMENT_ID = /^att_[0-9a-f]{32}$/;
@@ -513,8 +600,8 @@ export function isModelId(value) {
  *   with 1003 grant naming the first one missing, before anything reaches alpd).
  * @typedef {{
  *   status: ExposureStatus,
- *   permission?: 'session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage' | 'attachments.write' | 'session.team.write',
- *   alsoRequires?: readonly ('session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage' | 'attachments.write' | 'session.team.write')[],
+ *   permission?: 'session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage' | 'attachments.write' | 'session.team.write' | 'terminal.exec',
+ *   alsoRequires?: readonly ('session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage' | 'attachments.write' | 'session.team.write' | 'terminal.exec')[],
  *   scope: string,
  *   capability?: string,
  *   params?: readonly string[],
@@ -554,6 +641,15 @@ export const EXPOSURE = Object.freeze({
   'workspace.update': { status: 'exposed', permission: 'workspace.write', scope: 'workspace directory exact canonical grant; no owner placement or labels', params: ['workspaceId', 'title', 'pinned', 'archived', 'ifRevision', 'requestId'], tests: ['permission', 'registry-scope'] },
   'session.create': { status: 'exposed', permission: 'session.write', scope: 'workspace: spec.cwd names a granted workspace and is replaced by its canonical path; an existing sessionId must be in scope; the created root is checked again', params: ['sessionId', 'workspaceId', 'spec', 'history', 'delegation', 'resume'], tests: ['permission', 'spec-scope', 'session-scope'] },
   'session.prompt': { status: 'exposed', permission: 'session.write', scope: 'session; text, inline images within GATEWAY_PROMPT_IMAGES, and attachments by attachmentId alone (attachments.write as well; alpd resolves them for this principal, grant epoch, an authorized project and this session, and refuses them 1005 attachment_unsupported where the runtime cannot read them); drives: the modes of the session and every ancestor, looked up afresh, within the grant\'s modes', capability: CAPABILITY.promptReceipts, params: ['sessionId', 'clientMessageId', 'delivery', 'content'], tests: ['permission', 'session-scope', 'content', 'mode', 'binding'] },
+  // Terminals (§5.18, docs/protocol/alp-json-rpc-v1.md §12.10): a real shell as the daemon's account,
+  // only with the opt-in terminal.exec and the host owner's own switch; a workspace is not a sandbox.
+  'terminal.create': { status: 'exposed', permission: 'terminal.exec', scope: 'workspace: workspaceId a registry workspace whose directory a grant names exactly, looked up afresh; alpd binds the terminal to this credential, its grant epoch and the grant\'s canonical workspaces (authorizedRoots), and picks the shell, its environment and directory itself (no shell, command, args, env, cwd or pid is a param); answer projected by projectTerminal', capability: CAPABILITY.terminal, params: ['workspaceId', 'cols', 'rows', 'requestId'], tests: ['permission', 'registry-scope', 'binding'] },
+  'terminal.list': { status: 'exposed', permission: 'terminal.exec', scope: 'principal: only this credential\'s own terminals of its grant epoch and canonical workspaces (alpd filters); a workspaceId given is checked as for terminal.create', capability: CAPABILITY.terminal, params: ['workspaceId'], tests: ['permission', 'binding'] },
+  'terminal.attach': { status: 'exposed', permission: 'terminal.exec', scope: 'terminal: alpd checks the binding (credential, grant epoch, authorized workspace); terminal.event notifications of attached terminals only, re-checked and projected (projectTerminalEvent)', capability: CAPABILITY.terminal, params: ['terminalId', 'after'], tests: ['permission', 'binding'] },
+  'terminal.input': { status: 'exposed', permission: 'terminal.exec', scope: 'terminal: as terminal.attach, from the connection that attached it; never logged', capability: CAPABILITY.terminal, params: ['terminalId', 'data'], tests: ['permission', 'binding'] },
+  'terminal.resize': { status: 'exposed', permission: 'terminal.exec', scope: 'terminal: as terminal.input', capability: CAPABILITY.terminal, params: ['terminalId', 'cols', 'rows'], tests: ['permission', 'binding'] },
+  'terminal.close': { status: 'exposed', permission: 'terminal.exec', scope: 'terminal: as terminal.attach', capability: CAPABILITY.terminal, params: ['terminalId'], tests: ['permission', 'binding'] },
+  'terminal.revoke': { status: 'prohibited', scope: 'host', reason: 'the gateway itself calls it on its own connection when a credential is revoked, rotated, expired or regranted' },
   'attachment.begin': { status: 'exposed', permission: 'attachments.write', alsoRequires: ['session.write'], scope: 'session: sessionId in a granted workspace, looked up afresh; alpd binds the upload to this credential and its grant epoch, the session\'s canonical project (one of the grant\'s, sent as authorizedRoots) and the session. The principal context is the gateway\'s own, never the client\'s. Answer projected (projectUploadBegun); alpd errors rewritten to fixed text keeping code, reason and numeric data', capability: CAPABILITY.attachments, params: ['sessionId', 'name', 'size', 'mimeType', 'sha256', 'requestId'], tests: ['permission', 'session-scope', 'binding'] },
   'attachment.chunk': { status: 'exposed', permission: 'attachments.write', alsoRequires: ['session.write'], scope: 'upload: alpd checks the binding (credential, grant epoch, authorized project, live session) on every chunk; an upload of anyone else answers as an unknown one. Decoded data at most the advertised maxChunkBytes, refused by the gateway before alpd (never buffered beyond one frame)', capability: CAPABILITY.attachments, params: ['uploadId', 'offset', 'data'], tests: ['permission', 'binding', 'chunk-limit'] },
   'attachment.commit': { status: 'exposed', permission: 'attachments.write', alsoRequires: ['session.write'], scope: 'upload: as attachment.chunk; alpd verifies every byte against sha256 before it publishes; answer projected by projectAttachment (ids and display metadata, never a path)', capability: CAPABILITY.attachments, params: ['uploadId', 'sha256'], tests: ['permission', 'binding', 'result-filter'] },

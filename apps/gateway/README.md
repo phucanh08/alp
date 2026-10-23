@@ -27,6 +27,12 @@ alp-gateway serve                                                           # 12
   `attachment.get` (metadata only) `attachments.write` and `session.read`. Never a default, implies
   nothing: `--permission session.read,session.write,attachments.write`. Each upload is bound by alpd
   to the credential, its grant epoch, the project and the session; no path or URL ever crosses.
+- Terminals (capability `terminal`, docs/alp/remote-gateway.md §5.18): a real shell on the daemon host
+  **as the account that runs alpd**; a workspace only picks where it starts and is **not a sandbox**.
+  Every `terminal.*` method needs the opt-in `terminal.exec` (never a default, implied by nothing,
+  `session.write` included), and alpd serves terminals only after its owner runs `alp terminal allow --yes`.
+  Terminals are bound to the credential and its grant epoch; a revoked, rotated, expired or regranted
+  credential's terminals are killed at once (`terminal.revoke`, never exposed).
 - Live configure (capability `session.configure.live`): `session.configure` with `model` or
   `thinking` needs `session.write` within the grant's modes (the mode the change would run with too);
   with `team` also `session.team.write`, never a default and implying nothing:

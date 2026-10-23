@@ -85,7 +85,7 @@ test('the matrix: session.write (fork also session.read), no new permission, for
     for (const field of ['principalId', 'principalEpoch', 'authorizedRoots', 'cwd', 'spec', 'mode']) assert.ok(!EXPOSURE[method].params.includes(field), `${method} ${field}`);
   }
   assert.ok(FORWARDED_CAPABILITIES.includes('session.fork') && FORWARDED_CAPABILITIES.includes('session.rewind'));
-  assert.deepEqual(PERMISSIONS, ['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write', 'workspace.write', 'workspace.manage', 'attachments.write', 'session.team.write']);
+  assert.deepEqual(PERMISSIONS, ['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write', 'workspace.write', 'workspace.manage', 'attachments.write', 'session.team.write', 'terminal.exec']);
   assert.deepEqual(DEFAULT_PERMISSIONS, ['session.read', 'session.write', 'project.read', 'project.write']);
 });
 
