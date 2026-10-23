@@ -21,7 +21,7 @@ const T2 = `term_${'2'.repeat(32)}`;
 const LIMITS = Object.fromEntries(['maxPerPrincipal', 'maxPerDaemon', 'maxInputBytes', 'maxOutputFrameBytes', 'replayBytes', 'idleMs', 'maxLifetimeMs', 'reconnectMs'].map(key => [key, TERMINAL[key]]));
 const info = (id = T1, extra = {}) => ({ terminalId: id, workspaceId: 'wks_a', title: 'zsh', cols: 80, rows: 24, state: 'running', attached: false, createdAt: '2026-10-23T00:00:00.000Z', lastActivityAt: '2026-10-23T00:00:00.000Z', expiresAt: '2026-10-23T08:00:00.000Z', ...extra });
 
-async function world(t, { capabilities = ['terminal', 'workspace.registry'] } = {}) {
+async function world(t, { capabilities = ['terminal', 'workspace.registry'], config } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-term-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const a = path.join(directory, 'a');
@@ -50,7 +50,7 @@ async function world(t, { capabilities = ['terminal', 'workspace.registry'] } = 
     writer: { workspaces: [a], permissions: ['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write', 'workspace.write', 'attachments.write', 'session.team.write'] },
     defaults: { workspaces: [a] },
   };
-  const gw = await startGateway(t, { daemon, credentials });
+  const gw = await startGateway(t, { daemon, credentials, ...(config ? { config } : {}) });
   return { daemon, a, b, ca, cb, ...gw };
 }
 
@@ -171,4 +171,11 @@ test('the credential CLI says what terminal.exec grants where it is granted', as
   const plain = await run('credential', 'create', '--label', 'plain', '--workspace', workspace, '--json');
   assert.ok(!JSON.parse(plain.stdout).credential.permissions.includes('terminal.exec'), 'never a default');
   assert.equal(plain.stderr, '');
+});
+
+test('a gateway frame too small for alpd\'s output events forwards no terminals (fail closed)', async t => {
+  const env = await world(t, { config: { limits: { maxFrame: 256 * 1024 } } });
+  const { hello } = await env.sdk('exec');
+  assert.ok(!hello.capabilities.includes('terminal'));
+  assert.equal(hello.terminalLimits, undefined);
 });

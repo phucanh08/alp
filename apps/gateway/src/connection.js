@@ -399,6 +399,12 @@ export class ClientConnection {
     this.#capabilities = FORWARDED_CAPABILITIES.filter(capability => listed.includes(capability));
     this.#attachmentLimits = gatewayAttachmentLimits(hello.attachmentLimits, this.#limits.maxFrame);
     this.#terminalLimits = gatewayTerminalLimits(hello.terminalLimits, this.#limits.maxFrame);
+    // A frame too small for alpd's output events would drop output: no terminals through this gateway then.
+    const daemonFrames = /** @type {any} */ (hello.terminalLimits)?.maxOutputFrameBytes;
+    if (this.#capabilities.includes('terminal') && !(Number.isSafeInteger(daemonFrames) && daemonFrames <= this.#terminalLimits.maxOutputFrameBytes)) {
+      this.#capabilities = this.#capabilities.filter(capability => capability !== 'terminal');
+      this.#log.warn('alpd\'s terminal output does not fit this gateway\'s frame limit; terminals are not forwarded', { code: 'ALP_GATEWAY_TERMINAL_FRAME' });
+    }
     client.onNotification((method, params) => { if (method === 'terminal.event') this.#terminalEvent(params); });
     client.onEvent(envelope => { if (!this.#capabilities.includes('workspace.worktree') || !this.#grant.permissions.has('workspace.manage')) { this.#event(envelope); return; } this.#eventTail = this.#eventTail.then(async () => { await this.#refreshWorktrees(); this.#event(envelope); }).catch(() => { this.close(CLOSE_CODE.internal, 'Workspace authority unavailable; reconnect'); }); });
     client.onClose(error => this.#upstreamClosed(error));
