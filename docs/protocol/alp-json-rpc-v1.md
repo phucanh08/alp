@@ -1647,7 +1647,7 @@ Managed user worktrees (capability `workspace.worktree`; alpd does not list it o
 | Method | Params | Result |
 | --- | --- | --- |
 | `workspace.worktree.options` | `workspaceId` | `mappingIds`: the host owner's destination mappings (`<ALP_HOME>/worktree-destinations.json`) whose source is exactly this workspace's canonical directory and that the caller may use (a gateway credential: only the mapping IDs in its grant) |
-| `workspace.worktree.create` | `workspaceId`, `mappingId`, `ifRevision`, `requestId` | `workspace` (the new managed checkout, under the mapping's destination parent with a generated name), `revision` |
+| `workspace.worktree.create` | `workspaceId`, `mappingId`, `ifRevision`, `requestId` | `workspace` (the new managed checkout, under the mapping's destination parent with a generated name), `revision`; refuses a mapping the caller may not use (1003 `outside_workspace`) or a changed source (1003 `identity_changed`); a creation that cannot be confirmed answers 1005 `outcome_unknown` |
 | `workspace.worktree.remove` | `workspaceId`, `ifRevision`, `requestId` | `workspace`, `revision`, `filesRemoved: true`, `branchRetained: true`; refuses (1004/1003) while a saved or active session references the checkout (`workspace_history`), when it holds dirty, untracked, ignored, hidden-index or submodule data (`workspace_dirty`), or when its identity changed (1003 `identity_changed`); only the principal and grant epoch that created it may remove it (1003 `not_managed`); an interrupted removal that cannot be confirmed answers 1005 `outcome_unknown`; never deletes the branch or history |
 
 The registry journals each worktree mutation before Git runs, so a retry after a crash finishes it once.
