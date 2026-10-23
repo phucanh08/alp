@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { startWorld } from './support/world.js';
 import { connect } from './support/app.js';
 import { connect as hostConnect } from '@anhlp/alp-client';
+import { execFileSync } from 'node:child_process';
 let world;
 test.beforeAll(async () => {
   world = await startWorld({ worktrees: true });
@@ -13,12 +14,27 @@ test('gateway browser creates approved worktree, shows branch after restart, del
   page,
   browser
 }) => {
+  // The host owner registers the project by its path as given: on macOS the temp dir is
+  // /var/..., really /private/var/..., so the record's directory is not its canonical path.
+  const local = await hostConnect(world.socket);
+  try {
+    const { revision } = await local.request('workspace.list', {});
+    await local.request('project.register', { directory: world.projects.main, requestId: 'lexical', ifRevision: revision });
+  } finally {
+    local.close();
+  }
   await connect(page, world, world.tokens.worktreeWriter);
   await page.getByRole('button', { name: 'Add project', exact: true }).click();
   await page.getByLabel('Existing granted directory').selectOption(world.projects.main);
   await page.getByRole('button', { name: 'Register project', exact: true }).click();
   const source = page.getByTestId('shared-workspace-row').filter({ hasText: 'shop' });
   await expect(source).toHaveCount(1);
+  // The sidebar shows the checkout's branch, not "Detached HEAD", for that non-canonical record.
+  const sourceBranch = execFileSync('/usr/bin/git', ['symbolic-ref', '--short', 'HEAD'], {
+    cwd: world.projects.main,
+    encoding: 'utf8'
+  }).trim();
+  await expect(source.getByTestId('workspace-branch')).toHaveText(sourceBranch);
   await source.getByRole('button', { name: 'Create worktree', exact: true }).click();
   await page
     .getByRole('dialog', { name: 'Create managed worktree' })
@@ -54,7 +70,6 @@ test('gateway browser creates approved worktree, shows branch after restart, del
   await expect(generated).toHaveCount(0);
   const { access } = await import('node:fs/promises');
   await expect(access(directory)).rejects.toThrow();
-  const { execFileSync } = await import('node:child_process');
   expect(
     execFileSync('/usr/bin/git', ['rev-parse', `refs/heads/${branch}`], {
       cwd: world.projects.main,
