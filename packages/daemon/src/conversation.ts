@@ -212,6 +212,12 @@ export function createConversation(ctx: ConversationContext) {
 
   const turnNotFound = (turnId: string) => new RpcError(ERROR.notFound, `No turn ${turnId} in this conversation`, { reason: 'turn_not_found' });
   const inProgress = (turnId?: string) => new RpcError(ERROR.conflict, turnId ? `Turn ${turnId} has not ended` : 'A turn of this conversation has not ended', { reason: 'turn_in_progress' });
+  /**
+   * A turn of the session runs, or one is starting that has no id yet: its turn/start (a mail wake) is on
+   * its way, or its process is restarting. A lifecycle hold keeps later wakes back, but not one already
+   * sent, so every idle check of a lifecycle prepare asks both.
+   */
+  const begun = (sessionId: string) => !!runtime.snapshot(sessionId)?.activeTurnId || !!runtime.starting?.(sessionId);
   const emptyPrefix = () => new RpcError(ERROR.unavailable, 'Nothing comes before the first turn; start a new session instead', { reason: 'empty_prefix' });
 
   /** The timeline a fork or rewind reads: the root's, or a branch's. */
@@ -255,8 +261,7 @@ export function createConversation(ctx: ConversationContext) {
             const running = turns.find(turn => turn.state === undefined);
             if (running) throw inProgress(running.id);
             // Held mail may wait (rebind does not refuse for it); a turn or question that began anyway may not.
-            const now = runtime.snapshot(sessionId);
-            if (now?.activeTurnId || runtime.questions().some(question => question.rootId === sessionId)) throw busy(sessionId, 'a turn or question began meanwhile');
+            if (begun(sessionId) || runtime.questions().some(question => question.rootId === sessionId)) throw busy(sessionId, 'a turn or question began meanwhile');
             return {
               root: sessionId, beforeTurnId, cut: turns[index].start, branchId: `br_${randomBytes(8).toString('hex')}`, turns: turns.length - index,
               at: new Date().toISOString(), previous: bindingOf(record), cwd: record.spec!.cwd, turnIds: turns.map(turn => turn.id),
@@ -386,7 +391,7 @@ export function createConversation(ctx: ConversationContext) {
             // Held mail may wait (restartRefusal lets it); a turn or question that began anyway may not.
             const now = runtime.snapshot(sessionId);
             if (!now) throw new RpcError(ERROR.unavailable, 'The session closed; open it (session.create { resume: true }) and its agent starts on its conversation', { reason: 'session_closed' });
-            if (now.activeTurnId || runtime.questions().some(question => question.rootId === sessionId)) throw busy(sessionId, 'a turn or question began meanwhile');
+            if (begun(sessionId) || runtime.questions().some(question => question.rootId === sessionId)) throw busy(sessionId, 'a turn or question began meanwhile');
             return { root: sessionId, threadId: live.threadId!, at: new Date().toISOString() };
           },
           async apply(plan) {
@@ -475,7 +480,7 @@ export function createConversation(ctx: ConversationContext) {
             if (!preview.allowed) throw configureRefusal({ data: { reason: preview.reason }, message: preview.message ?? 'The change was refused' });
             const now = runtime.snapshot(sessionId);
             if (!now) throw new RpcError(ERROR.unavailable, 'The session closed; open it (session.create { resume: true }), then change its configuration', { reason: 'session_closed' });
-            if (now.activeTurnId || runtime.questions().some(question => question.rootId === sessionId)) throw busy(sessionId, 'a turn or question began meanwhile');
+            if (begun(sessionId) || runtime.questions().some(question => question.rootId === sessionId)) throw busy(sessionId, 'a turn or question began meanwhile');
             return { root: sessionId, requested, fresh: !turns.length && !record.base, previous: preview.current, proposed: preview.proposed, at: new Date().toISOString() };
           },
           async apply(plan) {
@@ -639,7 +644,7 @@ export function createConversation(ctx: ConversationContext) {
             release = ctx.holdPrompts(sessionId);
             const unsettled = ctx.unsettled(sessionId);
             if (unsettled) throw busy(sessionId, unsettled);
-            if (runtime.snapshot(sessionId)?.activeTurnId) throw inProgress();
+            if (begun(sessionId)) throw inProgress();
             // Taken in the same tick as the idle check, before the read below: a wake during that read would
             // otherwise start a turn the cut, read from a timeline without it, does not see.
             releaseWakes = runtime.hold?.(sessionId);
@@ -654,7 +659,7 @@ export function createConversation(ctx: ConversationContext) {
           const cwd = await destinationOf(record, workspaceId);
           const attachmentIds = await reauthorize(sessionId, log, cut, principal);
           // Last, after every read of prepare: held mail may wait; a turn that began anyway may not.
-          if (latest && runtime.snapshot(sessionId)?.activeTurnId) throw busy(sessionId, 'a turn began meanwhile');
+          if (latest && begun(sessionId)) throw busy(sessionId, 'a turn began meanwhile');
           return {
             source: sessionId, newSessionId: id, ...(branchId ? { branchId } : {}), cut, boundary: kind, ...(turnId ? { turnId } : {}),
             cwd, ...(workspaceId ? { workspaceId } : {}), title: title ?? defaultForkTitle(record.title, cwd === record.spec!.cwd), at: new Date().toISOString(), attachmentIds,

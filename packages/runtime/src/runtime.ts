@@ -4350,6 +4350,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     reconfigure: (sessionId, changes, options) => enqueue(() => reconfigureSession(sessionId, changes, options)),
 
+    starting: sessionId => {
+      const session = sessions.get(sessionId);
+      return !!session && !session.closed && !!session.pending;
+    },
+
     hold: sessionId => {
       const session = sessions.get(sessionId);
       if (!session || session.closed) return undefined;

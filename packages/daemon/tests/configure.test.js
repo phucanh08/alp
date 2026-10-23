@@ -227,6 +227,47 @@ test('configure refusals record nothing and change nothing: stale view, a runnin
   await assert.rejects(ask({ model: 'gpt-6.1-sol', requestId: 'r8', ifGeneration: await generationOf(d, 'c3') }), rpcError(1005, 'session_closed'));
 });
 
+test('a wake still starting its turn when configure prepare ends (a runtime whose hold keeps nothing back) is refused busy before prepared; the same request goes through later', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'cp', ['one']);
+  const transport = world.transports.at(-1);
+  d.runtime.hold = () => undefined;
+  // The preview answers what the runtime held when it began; before it resolves, mail wakes the root and
+  // the wake's turn/start is sent, but not answered, so it has no turn id yet.
+  const preview = d.runtime.previewConfigure.bind(d.runtime);
+  let open;
+  d.runtime.previewConfigure = async (sessionId, changes) => {
+    const answer = await preview(sessionId, changes);
+    if (open) return answer;
+    const starts = transport.calls.filter(call => call.method === 'turn/start').length;
+    let resolve;
+    transport.hold = new Promise(done => { resolve = done; });
+    open = () => { transport.hold = undefined; resolve(); };
+    await d.request('session.message', { sessionId: 'cp', text: 'mail during configure' });
+    await until(() => transport.calls.filter(call => call.method === 'turn/start').length === starts + 1, 'the wake sent turn/start');
+    return answer;
+  };
+  const change = { sessionId: 'cp', model: 'gpt-6.1-sol', requestId: 'cp1' };
+  // While the wake waits, a configure that got past prepare answers at once: the runtime's own would queue
+  // behind the waiting turn/start. Opened however the checks end: a turn/start left waiting would keep the
+  // runtime from shutting down.
+  world.native.configure = async () => { throw new Error('the configure reached the runtime while a wake started its turn'); };
+  try {
+    await assert.rejects(d.request('session.configure', { ...change, ifGeneration: await generationOf(d, 'cp') }), rpcError(1004, 'session_busy'));
+    assert.ok(open, 'the mail went out during prepare');
+    assert.equal(d.runtime.snapshot('cp').activeTurnId, undefined, 'the wake has no turn id when refused');
+    assert.equal(world.native.configures.length, 0, 'the refusal never reached the runtime');
+    assert.deepEqual(await journalFiles(d.state), [], 'nothing journaled');
+  } finally { world.native.configure = undefined; open?.(); }
+  await until(() => d.runtime.snapshot('cp')?.activeTurnId, 'the wake turn started');
+  transport.finish('woken');
+  await until(async () => !(await d.request('session.get', { sessionId: 'cp' })).session.activeTurnId, 'the wake turn ended');
+  const result = await d.request('session.configure', { ...change, ifGeneration: await generationOf(d, 'cp') });
+  assert.equal(result.session.model, 'gpt-6.1-sol');
+  assert.equal(world.native.configures.length, 1);
+});
+
 test('configure: a native refusal keeps the old configuration and is the answer of every repeat; a new requestId may try again', async t => {
   const world = await setup(t);
   const d = { ...await world.start(), ...world };
