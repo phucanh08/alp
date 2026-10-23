@@ -39,6 +39,8 @@ export type Directory = {
 
 export const PROVIDER = 'alp';
 const POLL_MS = 2_000;
+/** Reads of a root's history before its attach gives up when alpd keeps answering that the read is stale. */
+const ATTACH_ATTEMPTS = 3;
 
 type Inbound<T extends SessionInboundMessage['type']> = Extract<SessionInboundMessage, { type: T }>;
 type Outbound = SessionOutboundMessage;
@@ -121,6 +123,19 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
   const epochs = new Map<string, string>();
   /** Roots whose history is being replayed into their timeline; nothing of it is broadcast. */
   const replaying = new Set<string>();
+  /**
+   * The events of roots whose history is being read and attached, held from the read until the
+   * attach's answer: alpd may send an attached connection live events meanwhile, before the replay
+   * of earlier ones. They apply after the answer, in cursor order and once (as apps/web applyAttach).
+   */
+  const holding = new Map<string, Envelope[]>();
+  /** Tree members a held root opened during its hold, not known yet: their events are the root's to hold. */
+  const heldMembers = new Map<string, string>();
+  const heldRootOf = (sessionId: string) => rootOf(sessionId) ?? heldMembers.get(sessionId);
+  function release(root: string) {
+    holding.delete(root);
+    for (const [member, owner] of heldMembers) if (owner === root) heldMembers.delete(member);
+  }
   const attaching = new Map<string, Promise<void>>();
   const turns = new Map<string, string>();
   /** Paseo's attention: a finished turn the user has not looked at yet. */
@@ -319,6 +334,12 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
   }
 
   function onEvent(envelope: Envelope, historyRoot?: string) {
+    if (!historyRoot && holding.size && envelope.event.type !== 'question' && envelope.event.type !== 'question.resolved') {
+      const opened = envelope.event.type === 'session.opened' ? envelope.event.session.parentId : undefined;
+      const owner = heldRootOf(envelope.sessionId) ?? (opened ? heldRootOf(opened) : undefined) ?? envelope.sessionId;
+      const held = holding.get(owner);
+      if (held) { if (opened && !rootOf(envelope.sessionId)) heldMembers.set(envelope.sessionId, owner); held.push(envelope); return; }
+    }
     sourceCursor = envelope.cursor;
     const cached = durable.get(historyRoot ?? rootOf(envelope.sessionId) ?? envelope.sessionId);
     if (cached && envelope.cursor !== undefined) {
@@ -401,25 +422,55 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       const connection = alp;
       if (!connection) return Promise.reject(new Error('ALP daemon is not connected'));
       pending = (async () => {
-        timelines.initialize(root);
-        deltas.set(root, new TimelineDeltas());
-        epochs.delete(root);
-        replaying.add(root);
         // An attach a later one replaced (a reconnect, a root removed and back) leaves the later one's state alone.
         const current = () => attaching.get(root) === pending;
         try {
-          let page: HistoryPage | undefined;
-          try { if (connection.capabilities?.includes('session.history')) page = await connection.request('session.history', { sessionId: root }); }
-          catch (error: any) { if (error.code !== -32601 && error.code !== 1005) throw error; }
-          if (page) {
-            durable.set(root, { page, events: new Map() });
-            await seedHistoryChildren(connection, root, page.items);
-            for (const item of page.items) { const event = historyEvent(root, item); if (event.event.type !== 'question' && event.event.type !== 'question.resolved') onEvent(event, root); }
+          for (let attempt = 1; ; attempt++) {
+            timelines.initialize(root);
+            deltas.set(root, new TimelineDeltas());
+            durable.delete(root);
+            epochs.delete(root);
+            if (attempt > 1) {
+              turns.delete(root);
+              for (const child of children.values()) if (child.root === root) { childTimelines.initialize(child.id); childDeltas.set(child.id, new TimelineDeltas()); }
+            }
+            replaying.add(root);
+            const held: Envelope[] = [];
+            release(root);
+            holding.set(root, held);
+            let page: HistoryPage | undefined;
+            try { if (connection.capabilities?.includes('session.history')) page = await connection.request('session.history', { sessionId: root }); }
+            catch (error: any) { if (error.code !== -32601 && error.code !== 1005) throw error; }
+            if (page) {
+              durable.set(root, { page, events: new Map() });
+              await seedHistoryChildren(connection, root, page.items);
+              for (const item of page.items) { const event = historyEvent(root, item); if (event.event.type !== 'question' && event.event.type !== 'question.resolved') onEvent(event, root); }
+            }
+            let answer: { reset?: true } | undefined;
+            try { answer = await connection.request('session.attach', { sessionId: root, replay: true, ...(page ? { after: page.tipCursor, generation: page.generation } : {}) }); }
+            catch (error: any) {
+              // The history read is no longer alpd's (a rewind between the read and the attach): read it again.
+              if (page && error?.code === 1004 && error?.data?.reason === 'stale_cursor' && attempt < ATTACH_ATTEMPTS && current()) continue;
+              throw error;
+            }
+            if (holding.get(root) === held) release(root);
+            // alpd replayed the whole timeline from its start over the page it no longer holds, or a rewind
+            // told of a newer history before the answer: read it again.
+            if (page && (answer?.reset || held.some(envelope => envelope.event.type === 'history.reset' && envelope.event.generation !== page.generation))) {
+              if (attempt < ATTACH_ATTEMPTS && current()) continue;
+              throw new Error('The agent\'s history kept changing while it was read; try again');
+            }
+            if (!current()) return;
+            // What came after the page (the replay and live events) in cursor order, each once by its cursor
+            // (durable.events); then what has no cursor.
+            const later = held.filter(envelope => envelope.cursor !== undefined && (!page || envelope.cursor > page.tipCursor)).sort((a, b) => a.cursor! - b.cursor!);
+            for (const envelope of later) onEvent(envelope);
+            for (const envelope of held) if (envelope.cursor === undefined) onEvent(envelope);
+            return;
           }
-          await connection.request('session.attach', { sessionId: root, replay: true, ...(page ? { after: page.tipCursor, generation: page.generation } : {}) });
         }
         catch (error) { if (current()) timelines.delete(root); throw error; }
-        finally { if (current()) { replaying.delete(root); attaching.delete(root); } }
+        finally { if (current()) { replaying.delete(root); release(root); attaching.delete(root); } }
       })();
       attaching.set(root, pending);
     }
@@ -481,6 +532,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     attaching.delete(root);
     epochs.delete(root);
     replaying.delete(root);
+    release(root);
     turns.delete(root);
     for (const child of children.values()) {
       if (child.root !== root) continue;
@@ -503,6 +555,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     durable.delete(root);
     attaching.delete(root);
     replaying.delete(root);
+    release(root);
     epochs.delete(root);
     turns.delete(root);
     attention.delete(root);
