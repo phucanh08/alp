@@ -883,7 +883,12 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
         const session = known(message.agentId);
         if (!message.modelId) throw new Error(session.workflow.mode === 'custom' ? 'Choose a model' : 'Choose a team');
         if (message.modelId === modelOf(session)) return reply(null);
-        await configureLive(session, session.workflow.mode === 'custom' ? { model: message.modelId } : { team: message.modelId }, message.requestId);
+        // Paseo lists ALP's teams as the models of the provider: a team id changes the team; only a
+        // runtime-prefixed model (a custom root's own) changes the model.
+        const listed = (await teams(session.projectRoot)).teams.some(team => team.id === message.modelId);
+        const change = listed ? { team: message.modelId } : /^(codex|claude|acp|antigravity)[:/]/.test(message.modelId) ? { model: message.modelId } : undefined;
+        if (!change) throw new Error(`ALP has no team or model '${message.modelId}' for this agent`);
+        await configureLive(session, change, message.requestId);
         await refresh();
         return reply(null);
       } catch (error: any) {

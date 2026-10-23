@@ -28,6 +28,7 @@ function world({ sessions, capabilities = ['session.history', 'session.configure
       if (method === 'question.list') return { questions: [] };
       if (method === 'session.attach') return { session: sessions.find(session => session.id === params.sessionId), cursor: 0 };
       if (method === 'session.history') return { generation: GENERATION, hasOlder: false, tipCursor: 0, items: [] };
+      if (method === 'session.preview') return { preview: { teams: [{ id: 'pho', label: 'Phở' }, { id: 'cafe', label: 'Cafe' }], team: 'pho', mode: 'workspace-write' } };
       if (method === 'session.create') { const session = sessions.find(row => row.id === params.sessionId); session.status = 'idle'; return { session }; }
       if (method === 'session.configure') {
         if (configureError) throw configureError;
@@ -58,6 +59,12 @@ test('the model picker changes a team root\'s team, and a custom root\'s model; 
     assert.deepEqual(sent(calls, 'session.configure').at(-1), { sessionId: 'ses_a', thinking: 'high', requestId: 'paseo:req-2', ifGeneration: GENERATION });
     assert.equal((await setModel(agents, 'codex:gpt-6.1-sol', 'ses_c', 'req-3')).payload.accepted, true);
     assert.deepEqual(sent(calls, 'session.configure').at(-1), { sessionId: 'ses_c', model: 'codex:gpt-6.1-sol', requestId: 'paseo:req-3', ifGeneration: GENERATION });
+    // A custom root offered a team (Paseo lists teams as models) changes its team; an unknown id is not sent.
+    assert.equal((await setModel(agents, 'pho', 'ses_c', 'req-6')).payload.accepted, true);
+    assert.deepEqual(sent(calls, 'session.configure').at(-1), { sessionId: 'ses_c', team: 'pho', requestId: 'paseo:req-6', ifGeneration: GENERATION });
+    const unknown = await setModel(agents, 'nonesuch', 'ses_a', 'req-7');
+    assert.equal(unknown.payload.accepted, false);
+    assert.match(unknown.payload.error, /no team or model 'nonesuch'/);
     // The same choice again changes nothing.
     const before = sent(calls, 'session.configure').length;
     assert.equal((await setModel(agents, 'cafe', 'ses_a', 'req-4')).payload.accepted, true);

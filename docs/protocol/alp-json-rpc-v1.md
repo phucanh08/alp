@@ -1231,9 +1231,13 @@ required (`-32602`), and:
   `thread/resume` of the same thread with the new model and effort, and every later `turn/start` names
   both; Claude: the query restarts on the same transcript). The configuration is taken — written to the
   session and its record, announced as `session.updated` — **only once the runtime took it**: Codex must
-  answer the model asked for. Otherwise the old configuration restarts on the same conversation and the
-  answer is `1005 native_refused`; nothing changed. A root with no turn yet starts a new, empty
-  conversation with it (there is none to keep).
+  answer the model asked for (its resume answer always names one; one that names none or another is a
+  refusal; its effort applies from the next `turn/start`). Otherwise the old configuration restarts on
+  the same conversation and the answer is `1005 native_refused`; nothing changed. A root with no turn
+  yet starts a new, empty conversation with it (there is none to keep) — only when the runtime agrees
+  it holds none (Codex: no turn of its thread; Claude: no transcript entry); otherwise it is resumed.
+- If the runtime took the change but alpd could not journal it, the answer is `1004 outcome_unknown`
+  and the session's record still runs with what the runtime runs.
 - A new team governs future delegations (its delegation graph, members' models and house rules); the
   root's supervisor is replaced at the boundary by the new team's, if it has one. Assignments that ran
   keep the team and model they started with.
@@ -1242,8 +1246,8 @@ required (`-32602`), and:
 - Journaled as reload is (§12.7: `(sessionId, "configure", requestId)`, `duplicate: true` on a repeat,
   another payload `1004 key_conflict`, a recorded refusal answered again, refusals before `prepared`
   record nothing). A configure alpd stopped in the middle of is `1004 outcome_unknown` and never sent
-  again; at the next start alpd reconciles the session's record with what the runtime announced, so it
-  runs with all of the new configuration or none.
+  again; at the next start alpd reconciles the session's record with what the runtime announced (the
+  fields the change changes, the mode included), so it runs with all of the new configuration or none.
 
 `configured.status` is `applied` or `unchanged` (the configuration asked for is the one it runs);
 `effective` is the `EffectiveConfig` it runs with now (below); `restarted` whether its process restarted.

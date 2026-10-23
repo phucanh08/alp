@@ -160,6 +160,11 @@ function configureRefusal(error: any) {
   return refusal(error);
 }
 
+/** Which of model, thinking, team and mode differ between two effective configurations. */
+function configChanges(from: EffectiveConfig, to: EffectiveConfig) {
+  return (['model', 'thinking', 'team', 'mode'] as const).filter(field => from[field] !== to[field]);
+}
+
 export function createConversation(ctx: ConversationContext) {
   const { runtime, store, journal, records } = ctx;
   const lifecycle = createLifecycle(journal, { crashPoint: ctx.crashPoint });
@@ -435,6 +440,8 @@ export function createConversation(ctx: ConversationContext) {
     const fingerprint = ctx.digest({ configure: sessionId, ...requested });
     const release = ctx.holdPrompts(sessionId);
     let releaseWakes: (() => void) | undefined;
+    /** What the runtime took in this call, should the journal fail to record it (below). */
+    let taken: ConfigureNative | undefined;
     try {
       const { result, duplicate } = await lifecycle.run<ConfigurePlan, ConfigureNative, ConfigureAnswer>(
         { resource: sessionId, operation: 'configure', requestId, fingerprint }, {
@@ -469,13 +476,26 @@ export function createConversation(ctx: ConversationContext) {
           async apply(plan) {
             try {
               const done = await runtime.reconfigure!(plan.root, plan.requested, { fresh: plan.fresh });
-              return { status: done.status, restarted: done.restarted, effective: done.effective, threadId: done.session.threadId, workflow: done.session.workflow, ...(done.session.teamLabel ? { teamLabel: done.session.teamLabel } : {}), ...(done.native ? { native: done.native } : {}) };
+              taken = { status: done.status, restarted: done.restarted, effective: done.effective, threadId: done.session.threadId, workflow: done.session.workflow, ...(done.session.teamLabel ? { teamLabel: done.session.teamLabel } : {}), ...(done.native ? { native: done.native } : {}) };
+              return taken;
             } catch (error) { throw configureRefusal(error); }
           },
           commit: commitConfigure,
           repeat: entry => ({ session: ctx.summary(entry.plan.root) ?? entry.result!.session, configured: entry.result!.configured }),
         });
       return { ...result, session: ctx.summary(sessionId) ?? result.session, ...(duplicate ? { duplicate: true as const } : {}) };
+    } catch (error: any) {
+      // The runtime took it but the journal could not say so: the answer stays outcome_unknown, and the
+      // record still runs with what the runtime runs (a reopen before alpd's next start resumes with it).
+      if (taken?.status === 'applied' && error?.data?.reason === 'outcome_unknown') {
+        const record = records.get(sessionId);
+        if (record?.spec && record.session) {
+          writeConfiguration(record, taken.effective, { threadId: taken.threadId, workflow: taken.workflow, teamLabel: taken.teamLabel });
+          record.updatedAt = new Date().toISOString();
+          await store.put(record).catch(() => {});
+        }
+      }
+      throw error;
     } finally {
       releaseWakes?.();
       release();
@@ -523,11 +543,15 @@ export function createConversation(ctx: ConversationContext) {
       const plan = entry.plan as ConfigurePlan;
       const record = records.get(plan.root);
       const session = record?.session;
-      if (!record?.spec || !session || !plan.proposed) continue;
-      const shows = session.model === plan.proposed.model && session.thinking === plan.proposed.thinking && session.workflow?.mode === plan.proposed.team;
+      if (!record?.spec || !session || !plan.proposed || !plan.previous) continue;
+      // Only what the change changes says whether the runtime took it: an unchanged field matches either way.
+      const changed = configChanges(plan.previous, plan.proposed);
+      if (!changed.length) continue;
+      const shows = changed.every(field => field === 'team' ? session.workflow?.mode === plan.proposed.team : session[field] === plan.proposed[field]);
+      if (!shows) continue;
       const spec = record.spec;
-      const agrees = spec.thinking === plan.proposed.thinking && (plan.proposed.team === 'custom' || spec.workflow === plan.proposed.team);
-      if (!shows || agrees) continue;
+      const agrees = spec.thinking === plan.proposed.thinking && spec.mode === plan.proposed.mode && (plan.proposed.team === 'custom' || spec.workflow === plan.proposed.team);
+      if (agrees) continue;
       writeConfiguration(record, plan.proposed, {});
       record.updatedAt = new Date().toISOString();
       await store.put(record);
