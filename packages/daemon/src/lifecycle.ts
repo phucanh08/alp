@@ -34,6 +34,8 @@ export type LifecycleEntry<Plan = any, Native = any, Result = any> = {
   /** A digest of the request; another payload under the same requestId is a conflict. */
   fingerprint: string;
   state: LifecycleState;
+  /** Startup has observed this unknown outcome. It remains unknown for retries and audit. */
+  recoverySeenAt?: string;
   /** What prepare decided; everything commit needs, so a restart can roll the operation forward. */
   plan: Plan;
   native?: Native;
@@ -224,6 +226,7 @@ export function createLifecycle(journal: LifecycleJournal, { crashPoint = (_name
     serial,
     /**
      * At start, before any request: `prepared` becomes `unknown` (the native step is never sent again),
+     * and unknown outcomes are durably observed once, without claiming success or replaying a commit.
      * `applied` rolls forward through the operation's commit (left `applied` when that fails, to be
      * finished by a repeat or the next start; such entries are answered).
      */
@@ -231,9 +234,14 @@ export function createLifecycle(journal: LifecycleJournal, { crashPoint = (_name
       const entries = await journal.list((name, error) => log?.(`unreadable lifecycle entry ${name}`, { error }));
       const unfinished: LifecycleEntry[] = [];
       for (const entry of entries) {
-        if (entry.state === 'prepared') {
-          await journal.put({ ...entry, state: 'unknown' }).catch(() => {});
-          log?.(`${entry.operation} ${entry.requestId} of ${entry.resource} may or may not have reached the runtime`, { code: 'ALPD_LIFECYCLE_UNKNOWN', operation: entry.operation, resource: entry.resource });
+        if (entry.state === 'prepared' || (entry.state === 'unknown' && !entry.recoverySeenAt)) {
+          try {
+            await journal.put({ ...entry, state: 'unknown', recoverySeenAt: new Date().toISOString() });
+            log?.(`${entry.operation} ${entry.requestId} of ${entry.resource} may or may not have reached the runtime`, { code: 'ALPD_LIFECYCLE_UNKNOWN', operation: entry.operation, resource: entry.resource, requestId: entry.requestId });
+          } catch (error) {
+            // No commit or native step was attempted; the next start may retry the observation.
+            log?.(`could not record unknown ${entry.operation} ${entry.requestId} of ${entry.resource}`, { code: 'ALPD_LIFECYCLE_OBSERVE_FAILED', error });
+          }
         } else if (entry.state === 'applied') {
           const committer = commits[entry.operation];
           if (!committer) continue;

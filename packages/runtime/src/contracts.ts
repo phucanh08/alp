@@ -233,9 +233,12 @@ export type AlpRuntime = {
    * once the runtime took it (Codex echoes the model it resumed with); otherwise the old one is
    * restarted and a ConversationError thrown (`outcomeUnknown` when the runtime may have acted). A
    * new team also replaces the root's supervisor. Refused as rebind is while the tree is not idle.
-   * Emits session.updated.
+   * `onApplied` lets a host persist the configuration the runtime took before session.updated is
+   * emitted. It is awaited only for an applied change; its failure leaves the runtime configured
+   * and reports outcomeUnknown (never a rollback or a known native refusal).
+   * Emits session.updated after that persistence succeeds.
    */
-  reconfigure?(sessionId: string, changes: ConfigureChanges, options?: { fresh?: boolean }): Promise<ConfigureResult>;
+  reconfigure?(sessionId: string, changes: ConfigureChanges, options?: { fresh?: boolean; onApplied?: (result: ConfigureResult) => Promise<void> }): Promise<ConfigureResult>;
 };
 
 import type { ConfigureChanges, EffectiveConfig } from './configure.js';

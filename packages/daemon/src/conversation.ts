@@ -106,7 +106,7 @@ type ConfigurePlan = {
   root: string; requested: ConfigureChanges;
   /** No turn yet: the restart starts a new conversation, there is none to keep. */
   fresh: boolean;
-  /** What the root ran with, and what prepare resolved it would run with (a crash's reconciliation reads it). */
+  /** What the root ran with, and what prepare resolved it would run with (journal audit). */
   previous: EffectiveConfig; proposed: EffectiveConfig;
   at: string;
 };
@@ -158,11 +158,6 @@ function configureRefusal(error: any) {
   if (reason === 'invalid_params' || reason === 'not_root') return new RpcError(RPC_ERROR.invalidParams, message, { reason: 'invalid_params' });
   if (reason === 'session_busy' && /not open/.test(message)) return new RpcError(ERROR.unavailable, 'The session is not open; open it (session.create { resume: true }), then change its configuration', { reason: 'session_closed' });
   return refusal(error);
-}
-
-/** Which of model, thinking, team and mode differ between two effective configurations. */
-function configChanges(from: EffectiveConfig, to: EffectiveConfig) {
-  return (['model', 'thinking', 'team', 'mode'] as const).filter(field => from[field] !== to[field]);
 }
 
 export function createConversation(ctx: ConversationContext) {
@@ -450,8 +445,6 @@ export function createConversation(ctx: ConversationContext) {
     const fingerprint = ctx.digest({ configure: sessionId, ...requested });
     const release = ctx.holdPrompts(sessionId);
     let releaseWakes: (() => void) | undefined;
-    /** What the runtime took in this call, should the journal fail to record it (below). */
-    let taken: ConfigureNative | undefined;
     try {
       const { result, duplicate } = await lifecycle.run<ConfigurePlan, ConfigureNative, ConfigureAnswer>(
         { resource: sessionId, operation: 'configure', requestId, fingerprint }, {
@@ -485,27 +478,22 @@ export function createConversation(ctx: ConversationContext) {
           },
           async apply(plan) {
             try {
-              const done = await runtime.reconfigure!(plan.root, plan.requested, { fresh: plan.fresh });
-              taken = { status: done.status, restarted: done.restarted, effective: done.effective, threadId: done.session.threadId, workflow: done.session.workflow, ...(done.session.teamLabel ? { teamLabel: done.session.teamLabel } : {}), ...(done.native ? { native: done.native } : {}) };
-              return taken;
+              const done = await runtime.reconfigure!(plan.root, plan.requested, { fresh: plan.fresh, onApplied: async done => {
+                // This callback belongs to this exact runtime apply, before its successful update.
+                // Persist now so a lost answer needs no inference from a later snapshot at startup.
+                const record = records.get(plan.root);
+                if (!record?.spec || !record.session) throw new Error(`session ${plan.root} is gone`);
+                writeConfiguration(record, done.effective, done.session);
+                record.updatedAt = new Date().toISOString();
+                await store.put(record);
+              } });
+              return { status: done.status, restarted: done.restarted, effective: done.effective, threadId: done.session.threadId, workflow: done.session.workflow, ...(done.session.teamLabel ? { teamLabel: done.session.teamLabel } : {}), ...(done.native ? { native: done.native } : {}) };
             } catch (error) { throw configureRefusal(error); }
           },
           commit: commitConfigure,
           repeat: entry => ({ session: ctx.summary(entry.plan.root) ?? entry.result!.session, configured: entry.result!.configured }),
         });
       return { ...result, session: ctx.summary(sessionId) ?? result.session, ...(duplicate ? { duplicate: true as const } : {}) };
-    } catch (error: any) {
-      // The runtime took it but the journal could not say so: the answer stays outcome_unknown, and the
-      // record still runs with what the runtime runs (a reopen before alpd's next start resumes with it).
-      if (taken?.status === 'applied' && error?.data?.reason === 'outcome_unknown') {
-        const record = records.get(sessionId);
-        if (record?.spec && record.session) {
-          writeConfiguration(record, taken.effective, { threadId: taken.threadId, workflow: taken.workflow, teamLabel: taken.teamLabel });
-          record.updatedAt = new Date().toISOString();
-          await store.put(record).catch(() => {});
-        }
-      }
-      throw error;
     } finally {
       releaseWakes?.();
       release();
@@ -540,38 +528,6 @@ export function createConversation(ctx: ConversationContext) {
       ...(teamLabel ? { teamLabel } : {}),
       ...(session.threadId ? { threadId: session.threadId } : {}),
     };
-  }
-
-  /**
-   * At start: a configure whose outcome is unknown (a crash, or a journal that could not record what
-   * the runtime took) may have reached the runtime, whose session.updated then wrote the session's
-   * snapshot (model, effort, team, mode) but not its spec (what a reopen resolves effort, team and mode
-   * from). For the fields that configure changed, and only when the snapshot already shows its values,
-   * the spec is made to agree with the snapshot: never more than the snapshot says the root ran with,
-   * and never a field it did not change, so an old entry re-read at a later start (they are kept for
-   * the journal's retention) cannot undo what later changes did. Otherwise the record is left as it is.
-   */
-  async function reconcileConfigures() {
-    for (const entry of await journal.list()) {
-      if (entry.operation !== 'configure' || entry.state !== 'unknown') continue;
-      const plan = entry.plan as ConfigurePlan;
-      const record = records.get(plan.root);
-      const session = record?.session;
-      if (!record?.spec || !session || !plan.proposed || !plan.previous) continue;
-      const changed = configChanges(plan.previous, plan.proposed);
-      if (!changed.length) continue;
-      const shows = changed.every(field => field === 'team' ? session.workflow?.mode === plan.proposed.team : session[field] === plan.proposed[field]);
-      if (!shows) continue;
-      const spec = { ...record.spec };
-      if (changed.includes('thinking')) spec.thinking = session.thinking;
-      if (changed.includes('mode')) spec.mode = session.mode;
-      if (changed.includes('team') && session.workflow.mode !== 'custom') spec.workflow = session.workflow.mode;
-      if (spec.thinking === record.spec.thinking && spec.mode === record.spec.mode && spec.workflow === record.spec.workflow) continue;
-      record.spec = spec;
-      record.updatedAt = new Date().toISOString();
-      await store.put(record);
-      ctx.log.warn(`configure ${entry.requestId} of ${plan.root} was taken by the runtime before alpd could record it; its spec now agrees with what the session ran`, { code: 'ALPD_CONFIGURE_RECONCILED', sessionId: plan.root, fields: changed });
-    }
   }
 
   /** session.configure.preview (§12.9): what a change would run the live root with, and whether it would be taken now. */
@@ -819,7 +775,6 @@ export function createConversation(ctx: ConversationContext) {
       const unfinished = await lifecycle.recover({ rewind: entry => commitRewind(entry as LifecycleEntry<RewindPlan, NativeBinding>), fork: entry => commitFork(entry as LifecycleEntry<ForkPlan, NativeBinding>), reload: entry => commitReload(entry as LifecycleEntry<ReloadPlan, { threadId: string }>), configure: entry => commitConfigure(entry as LifecycleEntry<ConfigurePlan, ConfigureNative>) },
         (message, fields) => ctx.log.warn(message, fields));
       for (const entry of unfinished) if (entry.operation === 'rewind') fences.set(entry.resource, entry.requestId);
-      await reconcileConfigures().catch(error => ctx.log.warn('could not reconcile live configures a crash cut off', { code: 'ALPD_CONFIGURE_RECONCILE_FAILED', error }));
     },
     lifecycle,
   };
