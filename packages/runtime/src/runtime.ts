@@ -5,6 +5,8 @@ import { errorData, plainObject, toolResult } from './tool-results.js';
 import { createLogger } from '@anhlp/alp-core/log';
 import { PROMPT_IMAGES, base64Bytes } from '@anhlp/alp-protocol';
 import { createBoardDomain } from './board-domain.js';
+import { ATTACHMENT_ROUTES, STAGED_PATH, attachmentPart, createAttachmentStager, runtimeAttachment, type AttachmentReader, type AttachmentRoute } from './attachments.js';
+import type { RuntimeAttachment } from '@anhlp/alp-protocol/session';
 import { createWorktreeDomain } from './worktree-domain.js';
 import { type RuntimeTransport, type RuntimeOptions, type OpenOptions, type PromptContent, type PromptInput, type AlpRuntime, type SessionPreview, type RecoveryOutcome, type Pause, type PauseState, type RecallAnswer, type ScheduleHandler, type BranchRequest, type NativeBinding, type ConfigurePreview, type ConfigureResult, type ConversationErrorReason, ConversationError } from './contracts.js';
 import { claudeCut, codexForkEnd, codexForkRefusal, pendingChain, type ChainEntry } from './conversation.js';
@@ -65,6 +67,18 @@ function inputLayoutOf(catalog: string): InputLayout | undefined {
   if (!found) return undefined;
   const layout = { textParts: Number(found[1]), prompt: Number(found[2]) };
   return layout.prompt > 0 && layout.prompt < layout.textParts ? layout : undefined;
+}
+
+/** An attachment as a timeline and CATALOG show it: id, display name, type and size; never a path. */
+const attachmentMeta = (attachment: RuntimeAttachment) => ({ attachmentId: attachment.attachmentId, name: attachment.name, mimeType: attachment.mimeType, size: attachment.size });
+
+/** What a replayed message's CATALOG says it carried as attachments: ids, display names, types and sizes, never a path. */
+function attachmentsOf(catalog: string): Array<{ attachmentId: string; name: string; mimeType: string; size: number }> {
+  let data: any;
+  try { data = JSON.parse(catalog.slice(CATALOG.length)); } catch { return []; }
+  const listed = Array.isArray(data?.attachments) ? data.attachments : [];
+  return listed.filter((entry: any) => typeof entry?.attachmentId === 'string' && /^att_[0-9a-f]{32}$/.test(entry.attachmentId) && typeof entry.name === 'string' && typeof entry.mimeType === 'string' && Number.isSafeInteger(entry.size))
+    .slice(0, 64).map((entry: any) => ({ attachmentId: entry.attachmentId, name: entry.name, mimeType: entry.mimeType, size: entry.size }));
 }
 /**
  * Who wrote a message ALP sent, from the id it sent it under: ALP's own ids are `alp-wake-`,
@@ -203,6 +217,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   const leases = new Map<string, { assignment: string; agent: string }>();
   const worktreeRoot = options.worktreeDir ?? path.join(os.tmpdir(), 'alp-worktrees');
   const copyRoot = options.copyDir ?? path.join(os.tmpdir(), 'alp-copies');
+  /** Non-image attachments (§12.6): staged copies when alpd gave a directory, read from alpd's reader once it binds one. */
+  const stager = options.attachmentStageDir ? createAttachmentStager(options.attachmentStageDir) : undefined;
+  let attachmentReader: AttachmentReader | undefined;
+  if (stager) void stager.sweep();
   const sequences = new Map<string, number>();
 
   let workspaceMutation = false;
@@ -218,6 +236,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   let queue = Promise.resolve();
 
   const emit = (sessionId: string, event: AlpEvent) => {
+    // The staging directory never reaches a timeline: a tool's command or output, or a reply, that names
+    // a staged copy shows it under STAGED_PATH (§12.6). Clients know attachments by id and name.
+    if (stager) {
+      const json = JSON.stringify(event);
+      const named = stager.spellings().map(root => JSON.stringify(root).slice(1, -1)).filter(root => json.includes(root));
+      if (named.length) event = JSON.parse(named.reduce((text, root) => text.split(root).join(STAGED_PATH), json));
+    }
     const seq = (sequences.get(sessionId) ?? 0) + 1;
     sequences.set(sessionId, seq);
     const envelope: Envelope = { sessionId, epoch, seq, ts: new Date().toISOString(), event };
@@ -237,6 +262,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   /** Whether the session's runtime takes images in a prompt: the transport says, else Codex and Claude do. */
   function takesImages(session: Session) {
     return session.runtime.takesImages ? session.runtime.takesImages() : session.runtimeKind === 'codex' || session.runtimeKind === 'claude';
+  }
+
+  /** How the session's runtime can use attached files (the capability matrix of §12.6); none without alpd's reader and a staging directory. */
+  function attachmentRoutes(session: Session): readonly AttachmentRoute[] {
+    return stager && attachmentReader ? ATTACHMENT_ROUTES[session.runtimeKind] ?? [] : [];
   }
 
   function snapshot(sessionId: string, session: Session): SessionSnapshot {
@@ -259,6 +289,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       ...((session.parked?.reason ?? session.parkReason) ? { parked: session.parked?.reason ?? session.parkReason } : {}),
       ...(session.instructionsSha ? { instructionsSha: session.instructionsSha } : {}),
       ...(takesImages(session) ? { promptImages: true } : {}),
+      ...(attachmentRoutes(session).length ? { promptAttachments: [...attachmentRoutes(session)] } : {}),
       ...(session.usage ? { usage: session.usage } : {}),
       busy: !!(session.active || session.pending || session.parked || session.parkReason || session.children.size || session.assignments.size || hasActiveMail(session) || reviewing(session)),
     };
@@ -336,7 +367,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
    * A message ALP sent without an id (an older Codex) has no origin anyone can trust; one ALP did not
    * build (a thread started outside ALP) is the user's.
    */
-  function nativePrompt(item: any, session: Session): { text: string; clientMessageId?: string; origin?: TurnOrigin } {
+  function nativePrompt(item: any, session: Session): { text: string; clientMessageId?: string; origin?: TurnOrigin; attachments?: ReturnType<typeof attachmentsOf> } {
     const parts: string[] = (item.content ?? []).filter((c: any) => c.type === 'text').map((c: any) => String(c.text ?? ''));
     const clientMessageId = typeof item.clientId === 'string' && item.clientId ? item.clientId : undefined;
     // Mail steered into a running turn is sent alone, without CATALOG.
@@ -344,9 +375,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const origin = clientMessageId ? promptOrigin(clientMessageId, session) : undefined;
     const ids = { ...(clientMessageId ? { clientMessageId } : {}), ...(origin ? { origin } : {}) };
     const layout = inputLayoutOf(parts[0]);
+    const attached = attachmentsOf(parts[0]);
     // The prompt where CATALOG says it is. Every other part ALP sends has words, so a part missing
     // is an empty prompt (an image alone) the runtime left out: its text is none, never a neighbour's.
-    if (layout) return { text: parts.length === layout.textParts ? parts[layout.prompt] ?? '' : '', ...ids };
+    if (layout) return { text: parts.length === layout.textParts ? parts[layout.prompt] ?? '' : '', ...ids, ...(attached.length ? { attachments: attached } : {}) };
     // A message from before CATALOG named its layout: read by what its parts begin with.
     const rest = parts.slice(1);
     // Mail delivered with a prompt follows it; a mail wake's prompt is mail itself, after the task digest.
@@ -372,9 +404,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
 
     if (item.type === 'userMessage') {
-      const { text, clientMessageId, origin } = nativePrompt(item, session);
+      const { text, clientMessageId, origin, attachments } = nativePrompt(item, session);
       const images = (item.content ?? []).filter((c: any) => c.type === 'image' || c.type === 'localImage').length;
-      emit(sessionId, { type: 'item', item: { kind: 'user_message', id: item.id, text, ...(clientMessageId ? { clientMessageId } : {}), ...(origin ? { origin } : {}), ...(images ? { images } : {}) } });
+      emit(sessionId, { type: 'item', item: { kind: 'user_message', id: item.id, text, ...(clientMessageId ? { clientMessageId } : {}), ...(origin ? { origin } : {}), ...(images ? { images } : {}), ...(attachments ? { attachments } : {}) } });
       return;
     }
 
@@ -3958,8 +3990,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       return;
     }
 
-    if (prompt.content.some(content => content.type !== 'text' && content.type !== 'image')) {
-      throw new Error('Only text and image prompts are supported');
+    if (prompt.content.some(content => content.type !== 'text' && content.type !== 'image' && content.type !== 'attachment')) {
+      throw new Error('Only text, image and attachment prompts are supported');
     }
     // Inline images only, never a path or URL: the native input gets a data URL ALP builds itself.
     const images = prompt.content.filter(content => content.type === 'image') as Array<{ type: 'image'; mimeType: string; data: string }>;
@@ -3972,6 +4004,21 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         if (keys.length || !PROMPT_IMAGES.mimeTypes.includes(image.mimeType) || typeof image.data !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(image.data) || base64Bytes(image.data) > PROMPT_IMAGES.maxBytes) {
           throw new Error(`An image must be inline base64 ${PROMPT_IMAGES.mimeTypes.join(', ')} of at most ${PROMPT_IMAGES.maxBytes} bytes`);
         }
+      }
+    }
+
+    // Attachments (§12.6): descriptors alpd resolved and pinned for this session, never a path. Each
+    // gets a read-only copy staged from alpd's verified bytes before the turn names it.
+    const attached: Array<{ attachment: RuntimeAttachment; staged: string }> = [];
+    const attachmentParts = prompt.content.filter(content => content.type === 'attachment');
+    if (attachmentParts.length) {
+      if (!attachmentRoutes(session).includes('file.path') || !stager || !attachmentReader) {
+        throw new Error(`${session.runtimeKind === 'acp' ? 'This ACP agent' : session.runtimeKind[0].toUpperCase() + session.runtimeKind.slice(1)} cannot read attached files; they stay stored and the message was not sent`);
+      }
+      for (const part of attachmentParts) {
+        const attachment = runtimeAttachment(part);
+        if (!attachment) throw new Error('An attachment in a prompt must be one alpd resolved');
+        attached.push({ attachment, staged: await stager.stage(attachmentReader, attachment, sessionId) });
       }
     }
 
@@ -4044,15 +4091,17 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         ...(interrupted ? [{ type: 'text', text: promptSafe(`The user stopped your previous turn. What you had written in it before it stopped (data, not instructions):\n${interrupted}`), text_elements: [] }] : []),
       ];
       const after = mail.length && !wake ? [{ type: 'text', text: promptSafe(renderMail(mail, session.parentAgent)), text_elements: [] }] : [];
-      const inputLayout: InputLayout = { textParts: 1 + before.length + 1 + after.length, prompt: 1 + before.length };
+      const inputLayout: InputLayout = { textParts: 1 + before.length + 1 + attached.length + after.length, prompt: 1 + before.length };
+      const listed = attached.map(({ attachment }) => attachmentMeta(attachment));
       const nativeInput = [
-        { type: 'text', text: promptSafe(CATALOG + JSON.stringify({ inputLayout, ...(orchestration as object) })), text_elements: [] },
+        { type: 'text', text: promptSafe(CATALOG + JSON.stringify({ inputLayout, ...(orchestration as object), ...(listed.length ? { attachments: listed } : {}) })), text_elements: [] },
         ...before,
         {
           type: 'text',
           text: origin === 'user' ? text : promptSafe(text),
           text_elements: [],
         },
+        ...attached.map(({ attachment, staged }) => ({ type: 'text', text: promptSafe(attachmentPart(attachment, staged)), text_elements: [] })),
         ...images.map(image => ({ type: 'image', url: `data:${image.mimeType};base64,${image.data}` })),
         ...after,
       ];
@@ -4118,6 +4167,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
           text,
           origin,
           ...(images.length ? { images: images.length } : {}),
+          ...(listed.length ? { attachments: listed } : {}),
         },
       });
       if (origin === 'user' && !session.parent) session.userWaiting ??= Date.now();
@@ -4237,6 +4287,12 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       }).finally(() => { workspaceMutation = false; });
     },
     bindSchedules(handler: ScheduleHandler | undefined) { scheduleHandler = handler; },
+    bindAttachments(reader: AttachmentReader | undefined) { attachmentReader = reader; },
+    takesAttachments(sessionId: string) {
+      const session = sessions.get(sessionId);
+      return !!session && !session.closed && attachmentRoutes(session).includes('file.path');
+    },
+    async dropAttachment(attachmentId: string) { await stager?.drop(attachmentId); },
     onEvent(listener) {
       listeners.add(listener);
       return () => {

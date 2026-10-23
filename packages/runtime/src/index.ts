@@ -8,6 +8,8 @@ export { resolveSession, InstructionsAdapter, skillDescription } from './resolve
 export type { SessionSpec, HostMcpServer, ResolvedSession, RuntimeKind } from './resolve.js';
 export { DEFAULT_MODEL, DEFAULT_CLAUDE_MODEL, models, modes, thinkingOptions, thinkingOptionsFor } from './catalog.js';
 export { CodexTransport } from './transport.js';
+export { ATTACHMENT_HEADER, ATTACHMENT_ROUTES, attachmentStageDir, createAttachmentStager } from './attachments.js';
+export type { AttachmentReader, AttachmentRoute } from './attachments.js';
 export { usageAllows } from './runtime-context.js';
 export { AcpTransport, acpDecision, acpEnv, acpPermission } from './acp-transport.js';
 export type { AcpProvider } from './acp-transport.js';

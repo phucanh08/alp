@@ -88,7 +88,7 @@ export type ConversationContext = {
   worktrees?: { assertAvailable(directory: string): Promise<void> };
   attachments?: {
     heldBy(holders: string[]): Promise<string[]>;
-    authorize(principal: Principal, attachmentIds: string[]): Promise<void>;
+    authorize(principal: Principal, attachmentIds: string[], forks?: string[]): Promise<void>;
     pin(holder: string, sessionId: string, attachmentIds: string[], kind?: string): Promise<void>;
   };
   crashPoint(name: string): void;
@@ -702,13 +702,20 @@ export function createConversation(ctx: ConversationContext) {
     const lineage: string[] = [];
     for (let id: string | undefined = source; id && !lineage.includes(id) && lineage.length < 32; id = records.get(id)?.forkedFrom?.sessionId) lineage.push(id);
     const holders: string[] = [];
+    // What the kept messages say they carried (ids alone): a fork's own holder pins every attachment it
+    // inherited, so only these of them go on, whichever ancestor is gone by now.
+    const named = new Set<string>();
     for (const { sessionId, cursor, event } of log) {
       if (sessionId !== source || (cursor ?? 0) >= cut || event.type !== 'item' || event.item.kind !== 'user_message' || !event.item.clientMessageId) continue;
       for (const id of lineage) holders.push(`prompt:${ctx.digest(['prompt', id, event.item.clientMessageId])}`);
+      for (const attachment of Array.isArray(event.item.attachments) ? event.item.attachments : []) if (typeof attachment?.attachmentId === 'string') named.add(attachment.attachmentId);
     }
-    const ids = await ctx.attachments.heldBy(holders);
+    const found = new Set(await ctx.attachments.heldBy(holders));
+    // A fork of a fork: the prompts' own holders went with an ancestor's deleted history, the forks' hold on.
+    if (named.size) for (const id of await ctx.attachments.heldBy(lineage.map(id => `fork:${id}`))) if (named.has(id)) found.add(id);
+    const ids = [...found];
     if (!ids.length) return [];
-    try { await ctx.attachments.authorize(principal, ids); }
+    try { await ctx.attachments.authorize(principal, ids, lineage); }
     catch { throw new RpcError(ERROR.forbidden, 'The conversation holds attachments this caller may not use', { reason: 'attachment_forbidden' }); }
     return ids;
   }

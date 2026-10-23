@@ -7,6 +7,7 @@ import type { ProviderUsage } from './usage.js';
 import type { AcpProvider } from './acp-transport.js';
 import type { AntigravityProvider } from './antigravity-transport.js';
 import type { GitHubRunner } from './github.js';
+import type { AttachmentReader } from './attachments.js';
 
 export type RuntimeTransport = {
   request(method: string, params: any): Promise<any>;
@@ -67,6 +68,12 @@ export type RuntimeOptions = {
   /** Where assignments whose profile has workdir copy get their disposable copies. Default: a directory in the temp directory. */
   copyDir?: string;
 
+  /**
+   * Where the runtime stages read-only copies of attached files for its sessions' tools (§12.6):
+   * alpd's `<ALP_HOME>/state/staged`. Omitted, no session takes attachment parts.
+   */
+  attachmentStageDir?: string;
+
   /** Where project boards are kept (JSONL per project). Omitted keeps them in memory only. */
   boardDir?: string;
 
@@ -116,6 +123,12 @@ export type ScheduleHandler = (action: 'create' | 'list' | 'get' | 'cancel', par
 export type AlpRuntime = {
   /** The daemon supplies its persistent schedule operations; standalone runtimes have none. */
   bindSchedules?: (handler: ScheduleHandler | undefined) => void;
+  /** alpd hands over its attachment reader (§12.6) once, at start; with a staging directory, Codex and Claude sessions then take attachment parts. */
+  bindAttachments?: (reader: AttachmentReader | undefined) => void;
+  /** Whether this live session's runtime takes `{ type: 'attachment' }` parts (RuntimeAttachment) now. */
+  takesAttachments?: (sessionId: string) => boolean;
+  /** Removes the staged copy of an attachment alpd no longer keeps. */
+  dropAttachment?: (attachmentId: string) => Promise<void>;
   onEvent(listener: (envelope: Envelope) => void): () => void;
   /** Certifies a brand-new generated checkout; never use to adopt an existing workspace. */
   registerWorkspace(directory: string): Promise<void>;

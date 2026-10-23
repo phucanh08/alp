@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import templates from 'alp:templates';
 import { alpHome, daemonPaths, assertPrivateDirectory, PROTOCOL_VERSION, withDaemonLifecycle } from '@anhlp/alp-client/index';
-import { createAlpRuntime, reclaimCopies, reclaimWorktrees } from '@anhlp/alp-runtime/index';
+import { attachmentStageDir, createAlpRuntime, reclaimCopies, reclaimWorktrees } from '@anhlp/alp-runtime/index';
 import { createDaemonServer } from './server.js';
 import { acquireLock, heartbeat, releaseLock, updateLock } from './lock.js';
 import { createStore } from './store.js';
@@ -208,6 +208,8 @@ async function run(home: string) {
   const settings = await userSettings(home);
   const runtime = createAlpRuntime({
     templates, runLogDir, worktreeDir, copyDir, boardDir: path.join(home, 'boards'), libraryDir: home,
+    // Read-only copies of attached files for the sessions' tools (§12.6); not on Windows, as the store.
+    ...(process.platform !== 'win32' ? { attachmentStageDir: attachmentStageDir(home) } : {}),
     assignmentResultFile: path.join(home, 'state', 'assignment-results.json'), recallFile: path.join(home, 'state', 'recall.json'), pauseFile: path.join(home, 'state', 'pause.json'), liveFile: path.join(home, 'state', 'live.json'),
     autoResume: settings?.limits?.autoResume !== false, recoveryResume: settings?.recovery?.autoResume !== false && !opened.restored, previousExit: exit,
   });

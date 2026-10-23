@@ -25,6 +25,14 @@
       "types": "./dist/antigravity-transport.d.ts",
       "default": "./dist/antigravity-transport.js"
     },
+    "./attachments": {
+      "alp-source": {
+        "types": "./src/attachments.ts",
+        "default": "./src/attachments.ts"
+      },
+      "types": "./dist/attachments.d.ts",
+      "default": "./dist/attachments.js"
+    },
     "./board": {
       "alp-source": {
         "types": "./src/board.ts",

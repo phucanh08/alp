@@ -53,6 +53,8 @@ export type AttachmentRuntime = {
   takesAttachments?(sessionId: string): boolean;
   /** alpd hands its reader over once, at start, as it does its schedules. */
   bindAttachments?(reader: AttachmentReader | undefined): void;
+  /** Removes the runtime's staged copy of an object alpd collected. */
+  dropAttachment?(attachmentId: string): Promise<void>;
 };
 
 type Meta = {
@@ -166,6 +168,8 @@ export type AttachmentStoreOptions = {
   io?: { write?(handle: FileHandle, buffer: Buffer, position: number): Promise<void> };
   /** How often expired uploads and unreferenced objects are collected while alpd runs. */
   sweepMs?: number;
+  /** Told of each committed object alpd removes (the runtime drops its staged copy); failures are logged. */
+  onDiscard?: (attachmentId: string) => Promise<void> | void;
 };
 
 export type AttachmentStore = ReturnType<typeof createAttachmentStore>;
@@ -300,6 +304,7 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
     objects.delete(meta.id);
     if (refs.released[meta.id] !== undefined) delete refs.released[meta.id];
     await rm(dirOf(meta.id), { recursive: true, force: true }).catch(error => log?.warn('could not remove an attachment directory', { code: 'ALPD_ATTACHMENT_REMOVE_FAILED', why, error }));
+    if (meta.state === 'committed') await Promise.resolve().then(() => options.onDiscard?.(`att_${meta.id}`)).catch(error => log?.warn('could not remove the staged copy of an attachment', { code: 'ALPD_ATTACHMENT_UNSTAGE_FAILED', why, error }));
   }
 
   /**
@@ -744,9 +749,24 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
      * must be committed and bound to this principal, its grant epoch and an authorized project, as every
      * other call checks; otherwise refused as an unknown one.
      */
-    async authorize(principal: Principal, attachmentIds: string[]) {
+    async authorize(principal: Principal, attachmentIds: string[], forks: string[] = []) {
       await recovered; usable();
-      for (const attachmentId of attachmentIds) await attachment(attachmentId, principal);
+      for (const attachmentId of attachmentIds) {
+        const id = typeof attachmentId === 'string' ? ATTACHMENT.exec(attachmentId)?.[1] : undefined;
+        const meta = id ? objects.get(id) : undefined;
+        if (meta?.state === 'committed' && await bound(meta, principal)) continue;
+        // A fork of a fork whose first ancestor's history is gone: the session the object was uploaded
+        // to is no longer known, but a fork in the lineage, still in the same project, pinned it after
+        // re-authorizing it for this very principal and epoch. Nothing else is relaxed.
+        if (meta?.state === 'committed' && meta.principalId === principal.id && meta.principalEpoch === principal.epoch && (principal.roots === undefined || principal.roots.includes(meta.project))) {
+          let held = false;
+          for (const fork of forks) {
+            if (refs.holders[`fork:${fork}`]?.sessionId === fork && refs.holders[`fork:${fork}`].attachments.includes(meta.id) && await projectOfSession(fork) === meta.project) { held = true; break; }
+          }
+          if (held) continue;
+        }
+        throw notFound('attachment');
+      }
     },
 
     /** Drops `holder`'s references (a prompt refused before it reached the runtime). */
