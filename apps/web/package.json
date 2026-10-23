@@ -20,6 +20,8 @@
     "@anhlp/alp-client": "0.0.1-beta.3",
     "@anhlp/alp-protocol": "0.0.1-beta.3",
     "@radix-ui/react-slot": "1.5.0",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react": "0.468.0",
