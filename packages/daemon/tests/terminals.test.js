@@ -462,7 +462,8 @@ test('after the shell has gone its Linux session still counts; a younger holder 
   clock += 60_000;
   table = [{ pid: 80_101, ppid: 1, pgid: 80_101, sid: first.pid, elapsedMs: 30_000 }];
   first.kill();
-  await new Promise(resolve => setTimeout(resolve, 100));
+  // The reap's passes: SIGHUP, SIGKILL after the grace, and SIGKILL again 100 ms later.
+  await until(() => killed.filter(([pid]) => pid === 80_101).length >= 3, 'the reap to finish');
   assert.deepEqual(killed.filter(([pid]) => pid === 80_101).map(([, signal]) => signal).slice(0, 2), ['SIGHUP', 'SIGKILL'], JSON.stringify(killed));
 
   // A process younger than the terminal holds the shell's pid and leads a session of its own: neither

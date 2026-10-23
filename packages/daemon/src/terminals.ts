@@ -155,7 +155,7 @@ const ENTRY = /^ALP_TERMINAL_ID=(atm_[0-9a-f]{32})$/;
  */
 export function psProcesses(platform: NodeJS.Platform = process.platform): () => Promise<ProcessRow[]> {
   const linux = platform === 'linux';
-  // At most 10 s, even for a ps that cannot be killed at once (Linux: stuck reading a hung /proc entry).
+  // At most 10 s for each ps, even one that does not die at once.
   const run = (args: string[]) => new Promise<string | undefined>(resolve => {
     const child = execFile('ps', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, killSignal: 'SIGKILL', env: { ...process.env, LC_ALL: 'C' } }, (error, stdout) => { clearTimeout(timer); resolve(error ? undefined : stdout); });
     const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(undefined); }, 10_000);
@@ -336,9 +336,10 @@ export function createTerminalService(options: TerminalServiceOptions) {
   async function tree(terminal: Terminal): Promise<ProcessRow[]> {
     // Whether the shell runs is decided before the snapshot, never after it.
     const running = !terminal.exit;
-    const rows = await listProcesses();
+    // The terminal's age when the snapshot began: ps (and its /proc reads) may take a while.
     const lifetime = now() - terminal.createdAt;
-    const age = lifetime + 2_000;
+    const rows = await listProcesses();
+    const age = now() - terminal.createdAt + 2_000;
     const own = rows.find(row => row.pid === process.pid);
     const children = new Map<number, ProcessRow[]>();
     for (const row of rows) children.set(row.ppid, [...(children.get(row.ppid) ?? []), row]);
@@ -354,7 +355,9 @@ export function createTerminalService(options: TerminalServiceOptions) {
     // terminal: once node-pty closed it the name may already be another PTY's.
     const tty = shell && terminal.tty && shell.tty === terminal.tty ? terminal.tty : undefined;
     // Linux: the session, also once the shell has gone. A pid is not given out again while it is a
-    // live process's session id, so it is still ours unless a younger process holds the shell's pid.
+    // live process's session id, so while our session has members its id stays ours; a younger
+    // process holding the shell's pid means it was given out again. (Left open: our session emptied,
+    // and within the reap's second or so a new session leader got the very same pid and exited.)
     for (const row of rows) {
       if ((tty && row.tty === tty) || (row.sid !== undefined && row.sid === terminal.pid && ours)) found.set(row.pid, row);
     }
