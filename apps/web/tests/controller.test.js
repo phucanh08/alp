@@ -1489,6 +1489,55 @@ for (const gap of ['release pending', 'attach timed out']) test(`unidentified ba
   assert.ok(w.state().tree.projection.entries.some(entry => entry.item.id === 'selected-known'), 'known selected child remains visible');
 });
 
+test('Load older indexes a historical child before its next live event', async t => {
+  const w = setup(t);
+  w.host.capabilities.push('session.history');
+  w.host.seed('ses_a');
+  w.host.openChild('ses_a', 'old_child');
+  w.host.emit('ses_a', 'ses_a', { type: 'item', item: { kind: 'notice', id: 'tail', text: 'root tail' } });
+  const root = w.host.root('ses_a');
+  const oldOpening = root.timeline.find(entry => entry.sessionId === 'old_child');
+  w.host.intercept.set('session.history', (params, _link, { answer }) => {
+    answer({ generation: root.generation, items: params.before ? [oldOpening] : root.timeline.filter(entry => entry.sessionId === 'ses_a'), hasOlder: !params.before, ...(!params.before ? { olderCursor: 'older-child' } : {}), tipCursor: root.cursor });
+    return 'handled';
+  });
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'root tail attached');
+  assert.ok(!w.state().tree.projection.order.includes('old_child'));
+  await w.controller.loadOlder();
+  assert.ok(w.state().tree.projection.order.includes('old_child'), 'older page proves membership');
+  w.host.emit('ses_a', 'old_child', { type: 'item', item: { kind: 'assistant_message', id: 'older-live', text: 'live historical child' } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(w.state().tree.projection.entries.some(entry => entry.item.id === 'older-live'), 'known historical child live event is retained');
+});
+
+test('wake indexes resumed history children before replay reaches the attach answer', async t => {
+  const w = setup(t);
+  w.host.capabilities.push('session.history');
+  w.host.seed('ses_a');
+  w.host.openChild('ses_a', 'resumed_child');
+  w.host.close('ses_a');
+  let histories = 0;
+  w.host.intercept.set('session.history', (_params, _link, { fail }) => {
+    if (++histories === 1) { fail(1001, 'temporarily unavailable closed history'); return 'handled'; }
+  });
+  w.host.intercept.set('session.attach', (_params, link, { answer }) => {
+    const root = w.host.root('ses_a');
+    root.live = true; root.viewers.add(link); link.attached.add('ses_a');
+    w.host.emit('ses_a', 'resumed_child', { type: 'item', item: { kind: 'assistant_message', id: 'resumed-before-answer', text: 'live resumed child' } });
+    answer({ session: { ...root.summary }, cursor: root.cursor });
+    return 'handled';
+  });
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => w.state().tree?.status === 'gone', 'closed root without cached history');
+  await w.controller.sendPrompt('resume [hold]');
+  assert.ok(w.host.calls.some(call => call.method === 'session.create' && call.params.resume), 'wake path exercised');
+  assert.ok(histories >= 2, 'wake loaded history');
+  assert.ok(w.state().tree.projection.entries.some(entry => entry.item.id === 'resumed-before-answer'), 'resumed history identifies child before replay');
+});
+
 test('navigation waits for the Stop observer to own a pre-receipt root before releasing the selected viewer', async t => {
   let releaseObserver, releasePrompt;
   const observerGate = new Promise(resolve => { releaseObserver = resolve; });

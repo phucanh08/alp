@@ -698,6 +698,12 @@ export class Controller {
     return tree;
   }
 
+  /** Index only identities established by this root's history or routed events. @param {Projection} projection */
+  #indexProjection(projection) {
+    for (const id of projection.order) this.#membership.set(id, projection.rootId);
+    return projection;
+  }
+
   /** The root an envelope belongs to when it is the watched tree's, else undefined. @param {any} envelope */
   #route(envelope) {
     const sessionId = envelope?.sessionId;
@@ -780,7 +786,7 @@ export class Controller {
     // A rewind replaced the root's history (§12.7): never kept, never projected; the view reloads.
     if (envelope.event?.type === 'history.reset' && envelope.sessionId === root) { this.#historyReset(root, envelope.event.generation); return; }
     if (tree.attaching) { tree.attaching.buffer.push(envelope); return; }
-    tree.projection = project(tree.projection, envelope);
+    tree.projection = this.#indexProjection(project(tree.projection, envelope));
     this.#publishTree(root);
     // Live events of the root itself (a replay is buffered above and never counts).
     const type = envelope.event?.type;
@@ -918,7 +924,7 @@ export class Controller {
         for (const item of page.items) tree.projection = project(tree.projection, historyEnvelope(item, root));
         // Replay can emit existing children's events before the attach answer, without another
         // session.opened. Establish their identities from history before routing that replay.
-        for (const id of tree.projection.order) this.#membership.set(id, root);
+        this.#indexProjection(tree.projection);
         tree.projection = { ...tree.projection, cursor: page.tipCursor };
         this.#older.set(root, { generation: page.generation, olderCursor: page.olderCursor, hasOlder: page.hasOlder });
       }
@@ -951,8 +957,7 @@ export class Controller {
 
   /** @param {string} root @param {{ projection: Projection }} tree @param {any} response @param {any[]} buffer */
   #finishAttach(root, tree, response, buffer) {
-    tree.projection = applyAttach(tree.projection, response ?? {}, buffer);
-    for (const id of tree.projection.order) this.#membership.set(id, root);
+    tree.projection = this.#indexProjection(applyAttach(tree.projection, response ?? {}, buffer));
     if (response?.reset && !tree.projection.historyUnavailable) this.#notify('info', 'The host restarted this conversation\'s history; it was loaded again from the beginning.');
     this.#publishTree(root, 'attached');
   }
@@ -1003,7 +1008,7 @@ export class Controller {
       const result = await client.request('session.history', { sessionId: root, before: page.olderCursor }, { timeoutMs: this.#options.requestTimeoutMs });
       if (this.#older.get(root) !== loading) return;
       if (result.generation !== page.generation) throw new Error('History changed; reconnect to refresh it.');
-      tree.projection = prependHistory(tree.projection, result.items);
+      tree.projection = this.#indexProjection(prependHistory(tree.projection, result.items));
       this.#older.set(root, { generation: result.generation, olderCursor: result.olderCursor, hasOlder: result.hasOlder });
     } catch (error) {
       if (this.#older.get(root) === loading) this.#older.set(root, { ...page, error: describe(error).message });
@@ -2138,6 +2143,7 @@ export class Controller {
         if (tree.attaching !== operation) return;
         tree.projection = emptyProjection(root);
         for (const item of page.items) tree.projection = project(tree.projection, historyEnvelope(item, root));
+        this.#indexProjection(tree.projection);
         tree.projection = { ...tree.projection, cursor: page.tipCursor };
         this.#older.set(root, { generation: page.generation, olderCursor: page.olderCursor, hasOlder: page.hasOlder });
       }
