@@ -98,6 +98,34 @@ sign in or call models. Its other options (`--prefer`, `--claude-model`, `--code
 usage `alp` prints when run with no command, and in the [README](../../README.md#install).
 Codex only: see [codex-only.md](codex-only.md).
 
+## Remote terminals (optional, off by default)
+
+alpd can run a real terminal (a shell) for remote clients: the ALP web app through `alp-gateway`,
+and Paseo app devices paired with this host. The shell runs **as the account that runs alpd**, with
+its files, programs and network; a workspace only picks the directory it starts in and is **not a
+sandbox**. It stays off until you opt in on the host:
+
+```sh
+alp terminal allow --yes          # gateway credentials that hold terminal.exec may open terminals
+alp terminal allow --paseo --yes  # also Paseo app devices paired with this host
+alp terminal status
+alp terminal deny                 # off; alpd ends every open terminal within 5 seconds
+```
+
+A gateway credential also needs the separate permission `terminal.exec`, which is never a default
+(docs/alp/remote-gateway.md §5.18).
+
+The PTY comes from [`node-pty`](https://github.com/microsoft/node-pty) `1.2.0-beta.15` (MIT,
+Microsoft), pinned exactly. It is an **optional dependency** of `@anhlp/alp`, `@anhlp/alp-cli`,
+`@anhlp/alp-daemon` and `@anhlp/alp-paseo`, and alpd loads it only when a terminal is first needed:
+
+- Its tarball carries prebuilt N-API binaries for macOS and Linux (x64, arm64) and Windows, so no
+  compiler is needed. Its install script only checks for a prebuild; with `--ignore-scripts`, or npm's
+  pending `allow-scripts` approval, it still works.
+- It adds about 27 MB unpacked, mostly Windows debug symbols.
+- If it fails to install or load, everything else works and alpd simply never offers terminals.
+- Windows: terminals are not supported and the capability is never listed.
+
 ## Paseo plugin
 
 The plugin `@anhlp/alp-paseo` shows ALP's sessions in Paseo `>=0.11.1 <0.13.0`. Plugin
