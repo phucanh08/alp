@@ -29,7 +29,7 @@
  *   running: Record<string, string>,
  *   closed: Record<string, boolean>,
  *   questions: Record<string, UserQuestion>,
- *   prompts: Record<string, { state: 'accepted' | 'failed', error?: string, turnId?: string, result?: 'turn' | 'steer' }>,
+ *   prompts: Record<string, { state: 'accepted' | 'failed', error?: string, errorCode?: string, turnId?: string, result?: 'turn' | 'steer' }>,
  *   turns: Record<string, 'running' | 'ended'>,
  *   turnOrder: string[],
  *   historyUnavailable: boolean,
@@ -117,7 +117,7 @@ export function project(state, envelope) {
       return result === 'turn' && id === next.rootId ? beginTurn(next, event.turnId) : next;
     }
     case 'prompt.failed':
-      return typeof event.clientMessageId === 'string' ? { ...next, prompts: { ...next.prompts, [event.clientMessageId]: { state: 'failed', ...(event.error?.message ? { error: event.error.message } : {}) } } } : next;
+      return typeof event.clientMessageId === 'string' ? { ...next, prompts: { ...next.prompts, [event.clientMessageId]: { state: 'failed', ...(event.error?.code ? { errorCode: event.error.code } : {}), ...(event.error?.message ? { error: event.error.message } : {}) } } } : next;
     case 'turn.started': {
       if (id === next.rootId) next = beginTurn(next, event.turnId);
       const previous = next.sessions[id];
@@ -213,7 +213,7 @@ export function treeBusy(state) {
 export function promptTurnOver(state, clientMessageId) {
   const outcome = state.prompts[clientMessageId];
   if (!outcome) return false;
-  if (outcome.state === 'failed') return true;
+  if (outcome.state === 'failed') return outcome.errorCode !== 'outcome_unknown';
   const running = Object.values(state.running);
   if (!outcome.turnId) return running.length === 0;
   const turn = state.turns[outcome.turnId];

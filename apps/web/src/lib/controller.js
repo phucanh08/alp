@@ -37,6 +37,7 @@ import { TerminalSession, terminalGate, terminalLimits } from './terminal.js';
 /** Capabilities the app cannot work without (§6.2). */
 export const REQUIRED_CAPABILITIES = ['attach.after', 'prompt.receipts'];
 export const CLIENT = { name: 'alp-web', version: '0.10.0' };
+const STOP_WAITING = 'Stop is waiting for this message’s outcome.';
 
 /**
  * @typedef {import('./gateway.js').Principal} Principal
@@ -54,7 +55,7 @@ export const CLIENT = { name: 'alp-web', version: '0.10.0' };
  *   id: string, rootId: string, text: string, delivery: 'auto' | 'steer',
  *   images?: import('./attachments.js').ImageAttachment[],
  *   files?: import('./attachments.js').FileAttachment[], uploadKey?: string, resumeUpload?: number,
- *   status: 'sending' | 'failed' | 'unknown', error?: string, retrySameId: boolean, accepted?: boolean, at: number,
+ *   status: 'sending' | 'failed' | 'unknown', error?: string, retrySameId: boolean, accepted?: boolean, submitted?: boolean, at: number,
  * }} PendingPrompt
  *   failed: did not reach the host, or the runtime refused it. unknown: may have; retrySameId says
  *   whether resending under the same clientMessageId is safe (receipts dedupe it, §10) or the host
@@ -480,6 +481,9 @@ export class Controller {
     this.#sentAt.clear();
     this.#taken.clear();
     this.#inflight.clear();
+    for (const intent of this.#stops.values()) { clearTimeout(intent.retry); intent.done(); }
+    this.#stops.clear();
+    this.#stopCandidates.clear();
     this.#requesting.clear();
     if (this.#busyTimer !== undefined) { clearTimeout(this.#busyTimer); this.#busyTimer = undefined; }
     this.#watching = null;
@@ -584,6 +588,7 @@ export class Controller {
     for (const terminal of this.#terminals.values()) terminal.connected();
     this.#sync();
     this.#resumeUploads();
+    for (const [root, intent] of this.#stops) { intent.attempts = 0; intent.exhausted = false; this.#pumpStop(root); }
     void this.refreshRegistry();
     if (this.#state.workspace) {
       void this.refreshSessions();
@@ -1014,15 +1019,28 @@ export class Controller {
     // said; one the runtime refused later (prompt.failed) is shown as failed.
     const delivered = deliveredPrompts(tree.projection);
     const refused = tree.projection.prompts;
+    for (const id of this.#stopCandidates.get(root) ?? []) {
+      const outcome = refused[id];
+      if ((outcome?.state === 'failed' && outcome.errorCode !== 'outcome_unknown')
+        || (outcome?.turnId && tree.projection.turns[outcome.turnId] === 'ended')) this.#stopCandidates.get(root)?.delete(id);
+    }
     let prompts = this.#state.prompts.filter(prompt => prompt.rootId !== root || !delivered.has(prompt.id));
-    prompts = prompts.map(prompt => prompt.rootId === root && refused[prompt.id]?.state === 'failed' && prompt.status !== 'failed'
-      ? { ...prompt, status: /** @type {const} */ ('failed'), error: refused[prompt.id].error ? `The agent did not take the message: ${refused[prompt.id].error}` : 'The agent did not take the message.', retrySameId: false }
-      : prompt);
+    prompts = prompts.map(prompt => {
+      const outcome = refused[prompt.id];
+      if (prompt.rootId !== root || outcome?.state !== 'failed') return prompt;
+      const unknown = outcome.errorCode === 'outcome_unknown';
+      const status = unknown ? 'unknown' : 'failed';
+      if (prompt.status === status) return prompt;
+      const message = unknown ? 'The host cannot tell whether the agent took the message' : 'The agent did not take the message';
+      return { ...prompt, status: /** @type {'unknown' | 'failed'} */ (status), error: outcome.error ? `${message}: ${outcome.error}` : `${message}.`, retrySameId: false };
+    });
     this.#set(state => ({
       tree: { rootId: root, status: status ?? (state.tree?.rootId === root ? state.tree.status : 'attached'), projection: tree.projection, ...(this.#older.has(root) ? { older: this.#older.get(root) } : {}), ...(status === 'attached' ? {} : state.tree?.rootId === root && state.tree.error ? { error: state.tree.error } : {}) },
       ...(prompts.length !== state.prompts.length || prompts.some((prompt, index) => prompt !== state.prompts[index]) ? { prompts } : {}),
       sessions: this.#mergeSummary(state.sessions, root, tree.projection),
+      busy: { ...state.busy, interrupt: this.#stops.has(root) && !this.#stops.get(root)?.exhausted },
     }));
+    this.#pumpStop(root);
   }
 
   /** Keeps the list row of a root in step with its live status. @param {State['sessions']} sessions @param {string} root @param {Projection} projection */
@@ -2262,6 +2280,13 @@ export class Controller {
     if (!root) return false;
     const tree = this.#trees.get(root);
     if (tree && root in tree.projection.running) return true;
+    if (this.#stops.has(root)) return true;
+    for (const id of this.#stopCandidates.get(root) ?? []) {
+      if (id === except) continue;
+      const outcome = tree?.projection.prompts[id];
+      if (!this.#taken.has(id) && (!outcome || outcome.errorCode === 'outcome_unknown')) return true;
+    }
+    if (this.#state.prompts.some(prompt => prompt.rootId === root && prompt.id !== except && prompt.status === 'unknown')) return true;
     // Still on its way, no answer yet. One the host answered as taken counts below, with a limit.
     // Messages still waiting behind it in the chain have not gone out and do not count.
     if (this.#state.prompts.some(prompt => prompt.rootId === root && prompt.id !== except && prompt.status === 'sending' && !prompt.accepted && this.#requesting.has(prompt.id))) return true;
@@ -2427,8 +2452,18 @@ export class Controller {
         // Discarded while its files were uploading: it is not sent.
         if (!this.#pending(prompt.id)) return;
       }
+      if (!this.#pending(prompt.id)) return;
+      update({ submitted: true });
+      let candidates = this.#stopCandidates.get(prompt.rootId);
+      if (!candidates) this.#stopCandidates.set(prompt.rootId, candidates = new Set());
+      candidates.add(prompt.id);
       const result = await client.request('session.prompt', { sessionId: prompt.rootId, clientMessageId: prompt.id, delivery: prompt.delivery, content: messageContent(prompt.text, prompt.images, files) }, { timeoutMs: this.#options.requestTimeoutMs });
+      if (result?.outcome === 'unknown') {
+        update({ status: 'unknown', error: 'The host cannot tell whether the agent took the message.', retrySameId: false });
+        return;
+      }
       if (result?.outcome === 'failed') {
+        this.#refusedStop(prompt.rootId, prompt.id);
         update({ status: 'failed', error: result.error?.message ? `The agent did not take the message: ${result.error.message}` : 'The agent did not take the message.', retrySameId: false });
         return;
       }
@@ -2456,6 +2491,9 @@ export class Controller {
       else update({ status: 'unknown', error: failure.message, retrySameId: failure.reason !== 'outcome_unknown' });
     } finally {
       this.#requesting.delete(prompt.id);
+      const current = this.#state.prompts.find(entry => entry.id === prompt.id);
+      if (current?.status === 'failed') this.#refusedStop(prompt.rootId, prompt.id);
+      else this.#pumpStop(prompt.rootId);
     }
   }
 
@@ -2667,18 +2705,110 @@ export class Controller {
     if (next) this.sendQueuedNow(next.id).catch(() => {});
   }
 
-  /** Stops the selected root's work: its turn ends canceled and its children close (§10). */
+  /** Submitted identities kept until an explicit outcome, independently of queue idle heuristics. @type {Map<string, Set<string>>} */
+  #stopCandidates = new Map();
+
+  /** Stop intents survive request timeouts and reconnects; each keeps the identity captured at click. */
+  /** @type {Map<string, { messageId?: string, turnId?: string, sending?: boolean, warned?: boolean, exhausted?: boolean, attempts?: number, retry?: ReturnType<typeof setTimeout>, done: () => void, promise: Promise<void> }>} */
+  #stops = new Map();
+
+  /** Stops only the selected turn, or the turn belonging to the message still on its way. */
   async interrupt() {
     const root = this.#state.selected;
     if (!root) return;
-    this.#set(state => ({ busy: { ...state.busy, interrupt: true } }));
-    try {
-      await this.#client().request('session.interrupt', { sessionId: root });
-    } catch (error) {
-      this.#notify('error', describe(error).message);
-    } finally {
-      this.#set(state => ({ busy: { ...state.busy, interrupt: false } }));
+    const existing = this.#stops.get(root);
+    if (existing) {
+      existing.attempts = 0;
+      existing.exhausted = false;
+      this.#pumpStop(root);
+      return existing.promise;
     }
+    if (!this.hasCapability('session.interrupt.turn')) {
+      this.#notify('error', 'This host cannot safely stop a specific turn. Upgrade the host to use Stop.');
+      return;
+    }
+    const projection = this.#trees.get(root)?.projection;
+    const turnId = projection?.running[root];
+    // A timed-out delivery is still a target: absence of a running turn proves nothing about it.
+    const messageId = !turnId ? [...new Set([...(this.#stopCandidates.get(root) ?? []), ...this.#state.prompts.filter(prompt => prompt.rootId === root && prompt.status !== 'failed').map(prompt => prompt.id)])].find(id => {
+      const outcome = projection?.prompts[id];
+      return !outcome || (outcome.state === 'failed' && outcome.errorCode === 'outcome_unknown')
+        || (outcome.state === 'accepted' && (!outcome.turnId || projection?.turns[outcome.turnId] !== 'ended'));
+    }) : undefined;
+    if (!turnId && !messageId) return;
+    const pending = this.#state.prompts.find(prompt => prompt.id === messageId);
+    if (pending && !pending.submitted) {
+      this.discardPrompt(pending.id);
+      this.#notify('info', 'Message canceled before sending.');
+      return;
+    }
+    let done = () => {};
+    const promise = new Promise(resolve => { done = () => resolve(undefined); });
+    this.#stops.set(root, { ...(turnId ? { turnId } : { messageId }), done, promise });
+    this.#set(state => ({ busy: { ...state.busy, interrupt: true } }));
+    if (!turnId) this.#notify('info', STOP_WAITING);
+    this.#pumpStop(root);
+    return promise;
+  }
+
+  /** @param {string} root */
+  #finishStop(root) {
+    const intent = this.#stops.get(root);
+    if (!intent) return;
+    this.#stops.delete(root);
+    clearTimeout(intent.retry);
+    intent.done();
+    if (this.#state.notice?.text === STOP_WAITING) this.#set({ notice: null });
+    if (this.#state.selected === root) this.#set(state => ({ busy: { ...state.busy, interrupt: false } }));
+  }
+
+  /** A definitive refusal, as opposed to an unknown delivery outcome. @param {string} root @param {string} id */
+  #refusedStop(root, id) {
+    this.#stopCandidates.get(root)?.delete(id);
+    if (this.#stops.get(root)?.messageId !== id) return;
+    this.#notify('info', 'The agent did not take that message. There is no turn to stop.');
+    this.#finishStop(root);
+  }
+
+  /** Uses replay and live events alike; never treats idle, a user message, or an RPC timeout as proof. @param {string} root */
+  #pumpStop(root) {
+    const intent = this.#stops.get(root);
+    if (!intent) return;
+    const projection = this.#trees.get(root)?.projection;
+    const outcome = intent.messageId ? projection?.prompts[intent.messageId] : undefined;
+    if (outcome?.state === 'failed' && outcome.errorCode !== 'outcome_unknown') {
+      this.#refusedStop(root, /** @type {string} */ (intent.messageId));
+      return;
+    }
+    if (!intent.turnId && outcome?.state === 'accepted' && outcome.turnId) intent.turnId = outcome.turnId;
+    if (intent.turnId && projection?.turns[intent.turnId] === 'ended') { this.#finishStop(root); return; }
+    if (!intent.turnId || intent.sending || intent.exhausted || this.#state.connection.phase !== 'open') return;
+    if (!this.hasCapability('session.interrupt.turn')) {
+      if (!intent.warned) { intent.warned = true; this.#notify('error', 'Stop is still waiting: this host cannot safely stop a specific turn.'); }
+      return;
+    }
+    clearTimeout(intent.retry);
+    intent.sending = true;
+    intent.attempts = (intent.attempts ?? 0) + 1;
+    if (this.#state.selected === root) this.#set(state => ({ busy: { ...state.busy, interrupt: true } }));
+    void this.#client().request('session.interrupt', { sessionId: root, turnId: intent.turnId }, { timeoutMs: this.#options.requestTimeoutMs }).then(result => {
+      // Both answers resolve this exact target. A false answer changes no later turn.
+      if (this.#stops.get(root) === intent && typeof result?.interrupted === 'boolean') this.#finishStop(root);
+    }, error => {
+      if (this.#stops.get(root) !== intent) return;
+      this.#notify('error', `Stop is still waiting for this turn's outcome: ${describe(error).message}`);
+    }).finally(() => {
+      intent.sending = false;
+      if (this.#stops.get(root) !== intent) return;
+      // Retrying a conditional request is safe even when the previous answer was lost. Bound
+      // automatic attempts; then re-enable Stop so the user can retry the same retained target.
+      if ((intent.attempts ?? 0) < 3) intent.retry = setTimeout(() => this.#pumpStop(root), 250);
+      else {
+        intent.exhausted = true;
+        if (this.#state.selected === root) this.#set(state => ({ busy: { ...state.busy, interrupt: false } }));
+        this.#notify('error', 'Stop is unresolved. Try Stop again to check this same turn.');
+      }
+    });
   }
 
   /**

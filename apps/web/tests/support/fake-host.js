@@ -15,7 +15,7 @@ export class FakeHost {
     this.separateTasks = separateTasks;
     this.promptTiming = promptTiming;
     this.principal = principal ?? { id: 'p1', label: 'tests', permissions: ['session.read', 'session.write', 'project.read', 'project.write'], workspaces: ['/w/a', '/w/b'], workspaceRoots: [{ path: '/w/a', canonical: '/w/a' }, { path: '/w/b', canonical: '/w/b' }] };
-    this.capabilities = ['attach.after', 'prompt.receipts', 'task', 'team', 'library', 'settings.language'];
+    this.capabilities = ['session.interrupt.turn', 'attach.after', 'prompt.receipts', 'task', 'team', 'library', 'settings.language'];
     /** @type {Map<string, any>} */
     this.roots = new Map();
     this.connections = new Set();
@@ -573,12 +573,13 @@ export class FakeHost {
       }
       case 'session.interrupt': {
         const root = this.roots.get(params.sessionId);
+        if (params.turnId !== undefined && root?.running !== params.turnId) return { interrupted: false };
         if (root?.running) {
           const turnId = root.running;
           root.running = undefined;
           this.#emit(root, root.id, { type: 'turn.ended', turnId, state: 'canceled' });
         }
-        return {};
+        return params.turnId !== undefined ? { interrupted: true } : {};
       }
       case 'session.configure.preview': return this.#configurePreview(params);
       case 'session.configure': {
