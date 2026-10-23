@@ -1,7 +1,7 @@
 /** Portable JSON-RPC structures; implementations and provider SDKs stay outside protocol. */
 import type { RuntimeKind, Pin } from './dto.js';
 import type { AlpError, Envelope, SessionSnapshot, TreeStatus, TurnAttention, UserQuestion } from './events.js';
-import type { ConversationBranch, ForkProvenance, PauseState, PromptContent, RecallAnswer, ResumeCommand, SessionPreview, SessionSpec, SessionSummary } from './session.js';
+import type { ConfigureOutcome, ConfigurePreview, ConversationBranch, ForkProvenance, PauseState, PromptContent, RecallAnswer, ResumeCommand, SessionPreview, SessionSpec, SessionSummary } from './session.js';
 import type { EntryName, LanguageSetting, LibraryEntryRow, LibraryKind, LibraryScope, LibrarySource, TaskRow, TeamRow } from './dto.js';
 import type { ScheduleJob, ScheduleStatus } from './schedule.js';
 
@@ -15,7 +15,7 @@ export type EventNotification = { jsonrpc: '2.0'; method: 'event'; params: Envel
 export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
 export type HistoryPage = { generation: string; items: HistoryItem[]; olderCursor?: string; hasOlder: boolean; tipCursor: number };
 
-export type Capability = 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
+export type Capability = 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.configure.live' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -38,7 +38,9 @@ export type ErrorReason =
   | 'session_busy' | 'stale_generation' | 'turn_not_found' | 'turn_in_progress' | 'empty_prefix' | 'boundary_unmapped'
   | 'runtime_unsupported' | 'native_refused' | 'branch_not_found' | 'attachment_forbidden'
   // session.reload (§12.8).
-  | 'session_closed' | 'no_history';
+  | 'session_closed' | 'no_history'
+  // session.configure with model, thinking or team (§12.9).
+  | 'runtime_mismatch' | 'agent_mismatch' | 'permission_escalation' | 'team_not_found';
 
 type Empty = Record<string, never>;
 
@@ -149,7 +151,21 @@ export type RpcMethodMap = {
     result: { outcome?: 'accepted' | 'failed'; error?: AlpError; duplicate?: boolean; durable?: boolean };
   };
   'session.interrupt': { params: { sessionId: string }; result: Empty };
-  'session.configure': { params: { sessionId: string; mode?: string }; result: { session: SessionSnapshot } };
+  /**
+   * Changes a session's permissions mode while idle; with capability `session.configure.live`, also a live
+   * root's model, effort or team (§12.9): those need requestId and ifGeneration, apply at the idle barrier
+   * through a restart of its native process on the same conversation, and answer `configured`. Answered
+   * once per (sessionId, requestId): a repeat answers the first result with `duplicate: true`.
+   */
+  'session.configure': {
+    params: { sessionId: string; mode?: string; model?: string; thinking?: string; team?: string; requestId?: string; ifGeneration?: string };
+    result: { session: SessionSnapshot | SessionSummary; configured?: ConfigureOutcome; duplicate?: true };
+  };
+  /** What session.configure would run a live root with, and whether it would take it now (capability `session.configure.live`, §12.9). */
+  'session.configure.preview': {
+    params: { sessionId: string; mode?: string; model?: string; thinking?: string; team?: string };
+    result: { preview: ConfigurePreview };
+  };
   'session.close': { params: { sessionId: string }; result: Empty };
   'session.rename': { params: { sessionId: string; title: string }; result: { session: SessionSummary } };
   /**

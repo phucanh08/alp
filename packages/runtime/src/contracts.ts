@@ -198,6 +198,36 @@ export type AlpRuntime = {
    * Undefined when the session is not open.
    */
   hold?(sessionId: string): (() => void) | undefined;
+  /**
+   * What a live root would run with after a change of model, thinking, team or mode (§12.9), and whether
+   * reconfigure would take it now; reads only. `teams` are the teams the host defines for its project.
+   */
+  previewConfigure?(sessionId: string, changes: ConfigureChanges): Promise<ConfigurePreview>;
+  /**
+   * Changes an idle live root's model, thinking, team or mode (§12.9): resolves the new configuration
+   * as session.create would (same runtime, agent and conversation; never more permissions or new
+   * executable resources), then restarts its native process with it on the same conversation (`fresh`:
+   * a root with no turn yet starts a new, empty one). The session takes the new configuration only
+   * once the runtime took it (Codex echoes the model it resumed with); otherwise the old one is
+   * restarted and a ConversationError thrown (`outcomeUnknown` when the runtime may have acted). A
+   * new team also replaces the root's supervisor. Refused as rebind is while the tree is not idle.
+   * Emits session.updated.
+   */
+  reconfigure?(sessionId: string, changes: ConfigureChanges, options?: { fresh?: boolean }): Promise<ConfigureResult>;
+};
+
+import type { ConfigureChanges, EffectiveConfig } from './configure.js';
+export type { ConfigureChanges, EffectiveConfig } from './configure.js';
+import type { ConfigurePreview } from '@anhlp/alp-protocol/session';
+export type { ConfigurePreview } from '@anhlp/alp-protocol/session';
+/** What reconfigure did: the session as it runs now, its effective configuration, and whether its process restarted. */
+export type ConfigureResult = {
+  session: SessionSnapshot;
+  effective: EffectiveConfig;
+  status: 'applied' | 'unchanged';
+  restarted: boolean;
+  /** What the native runtime answered it runs with (Codex: the resumed thread's model and effort). */
+  native?: { model?: string; reasoningEffort?: string };
 };
 
 /** The native conversation a session continues: its thread, or for Claude one its first prompt makes from `base`. */
@@ -224,7 +254,9 @@ export type BranchRequest = {
   turns: string[];
 };
 
-export type ConversationErrorReason = 'runtime_unsupported' | 'boundary_unmapped' | 'empty_prefix' | 'native_refused' | 'session_busy';
+export type ConversationErrorReason = 'runtime_unsupported' | 'boundary_unmapped' | 'empty_prefix' | 'native_refused' | 'session_busy'
+  // A live configure (§12.9).
+  | 'runtime_mismatch' | 'agent_mismatch' | 'permission_escalation' | 'team_not_found' | 'invalid_params' | 'not_root';
 /** A fork, rewind or rebind the runtime refused; `outcomeUnknown` when the native runtime may have acted. */
 export class ConversationError extends Error {
   readonly data: { reason: ConversationErrorReason };

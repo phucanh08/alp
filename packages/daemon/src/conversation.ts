@@ -2,8 +2,8 @@ import { randomBytes } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { ERROR, RPC_ERROR, resumeCommandOf } from '@anhlp/alp-protocol';
-import type { AlpRuntime, Envelope, NativeBinding, SessionSnapshot } from '@anhlp/alp-runtime/index';
-import type { ConversationBranch, ForkProvenance, SessionSummary } from '@anhlp/alp-protocol/session';
+import type { AlpRuntime, ConfigureChanges, EffectiveConfig, Envelope, NativeBinding, SessionSnapshot } from '@anhlp/alp-runtime/index';
+import type { ConfigureOutcome, ConfigurePreview, ConversationBranch, ForkProvenance, SessionSummary } from '@anhlp/alp-protocol/session';
 import type { RpcMethodMap } from '@anhlp/alp-protocol/rpc';
 import type { SessionRecord, Store, StoredBranch } from './store.js';
 import type { RegistryService } from './registry.js';
@@ -100,6 +100,21 @@ type ForkParams = RpcMethodMap['session.fork']['params'];
 type RewindParams = RpcMethodMap['session.rewind']['params'];
 type ReloadParams = RpcMethodMap['session.reload']['params'];
 type ReloadPlan = { root: string; threadId: string; at: string };
+type ConfigureParams = RpcMethodMap['session.configure']['params'];
+type ConfigurePreviewParams = RpcMethodMap['session.configure.preview']['params'];
+type ConfigurePlan = {
+  root: string; requested: ConfigureChanges;
+  /** No turn yet: the restart starts a new conversation, there is none to keep. */
+  fresh: boolean;
+  /** What the root ran with, and what prepare resolved it would run with (a crash's reconciliation reads it). */
+  previous: EffectiveConfig; proposed: EffectiveConfig;
+  at: string;
+};
+type ConfigureNative = {
+  status: 'applied' | 'unchanged'; restarted: boolean; effective: EffectiveConfig; threadId: string;
+  workflow: SessionSnapshot['workflow']; teamLabel?: string; native?: { model?: string; reasoningEffort?: string };
+};
+type ConfigureAnswer = { session: SessionSummary; configured: ConfigureOutcome };
 
 type RewindPlan = {
   root: string; beforeTurnId: string; cut: number; branchId: string; turns: number; at: string;
@@ -127,6 +142,24 @@ function refusal(error: any) {
   return new RpcError(ERROR.unavailable, `The runtime refused it: ${message}`, { reason: 'native_refused' });
 }
 
+/**
+ * A refusal of a live configure as a protocol error (§12.9): another runtime or agent is unavailable with
+ * a way on (a new session), more permissions forbidden, an unknown team not found, a malformed change
+ * invalid; the rest as refusal() maps them.
+ */
+function configureRefusal(error: any) {
+  if (error instanceof RpcError) return error;
+  const reason = error?.data?.reason;
+  const message = error instanceof Error ? error.message : String(error?.message ?? error);
+  if (error?.outcomeUnknown === true) return refusal(error);
+  if (reason === 'runtime_mismatch' || reason === 'agent_mismatch') return new RpcError(ERROR.unavailable, message, { reason, action: 'session.create' });
+  if (reason === 'permission_escalation') return new RpcError(ERROR.forbidden, message, { reason });
+  if (reason === 'team_not_found') return new RpcError(ERROR.notFound, message, { reason });
+  if (reason === 'invalid_params' || reason === 'not_root') return new RpcError(RPC_ERROR.invalidParams, message, { reason: 'invalid_params' });
+  if (reason === 'session_busy' && /not open/.test(message)) return new RpcError(ERROR.unavailable, 'The session is not open; open it (session.create { resume: true }), then change its configuration', { reason: 'session_closed' });
+  return refusal(error);
+}
+
 export function createConversation(ctx: ConversationContext) {
   const { runtime, store, journal, records } = ctx;
   const lifecycle = createLifecycle(journal, { crashPoint: ctx.crashPoint });
@@ -134,14 +167,16 @@ export function createConversation(ctx: ConversationContext) {
   const enabled = typeof runtime.branch === 'function' && typeof runtime.rebind === 'function' && process.platform !== 'win32';
   /** session.reload (§12.8): a runtime that restarts a root on its own conversation, on macOS and Linux. */
   const reloads = typeof runtime.reload === 'function' && process.platform !== 'win32';
+  /** session.configure with model, thinking or team (§12.9): a runtime that restarts a root with a new configuration, on macOS and Linux. */
+  const configures = typeof runtime.reconfigure === 'function' && typeof runtime.previewConfigure === 'function' && process.platform !== 'win32';
 
   /** A root alpd can fork or rewind, or the reason it cannot. */
   function support(record: SessionRecord, session: SessionSnapshot | undefined): SessionSummary['conversation'] {
-    const no = { fork: false, rewind: false, ...(reloads ? { reload: false } : {}) };
+    const no = { fork: false, rewind: false, ...(reloads ? { reload: false } : {}), ...(configures ? { configure: false } : {}) };
     if (record.rootId !== record.id || session?.parentId) return { ...no, reason: 'not_root' };
-    if (!session || !SUPPORTED.has(session.runtime) || (!enabled && !reloads)) return { ...no, reason: 'runtime_unsupported' };
+    if (!session || !SUPPORTED.has(session.runtime) || (!enabled && !reloads && !configures)) return { ...no, reason: 'runtime_unsupported' };
     if (!session.persistent || !session.threadId || !record.spec) return { ...no, reason: 'not_persistent' };
-    return { fork: enabled, rewind: enabled, ...(reloads ? { reload: true } : {}), ...(enabled ? {} : { reason: 'runtime_unsupported' as const }) };
+    return { fork: enabled, rewind: enabled, ...(reloads ? { reload: true } : {}), ...(configures ? { configure: true } : {}), ...(enabled ? {} : { reason: 'runtime_unsupported' as const }) };
   }
 
   /** The record of a root alpd may fork or rewind, refused with the reason otherwise. */
@@ -378,6 +413,149 @@ export function createConversation(ctx: ConversationContext) {
     return resumeCommandOf(sessionId, process.platform === 'win32' ? 'windows' : 'posix');
   }
 
+  // ------------------------------------------------------------------ live configure
+
+  /**
+   * session.configure with model, thinking or team (§12.9): the live root's native process restarts with
+   * the new configuration on the same conversation, at the idle barrier a reload waits for; alpd writes
+   * it to the session's record only once the runtime took it. Journaled as reload is; the native step is
+   * never sent twice, and a repeat answers the first result. A refusal before `prepared` (validation, a
+   * busy tree, a stale generation) records nothing.
+   */
+  async function configure(params: ConfigureParams) {
+    const { sessionId, requestId, ifGeneration } = params;
+    const requested: ConfigureChanges = {};
+    for (const key of ['model', 'thinking', 'team', 'mode'] as const) {
+      const value = params[key];
+      if (value === undefined) continue;
+      if (typeof value !== 'string' || !value.trim() || value.length > 200) throw new RpcError(RPC_ERROR.invalidParams, `${key} must be a nonempty name of at most 200 characters`, { reason: 'invalid_params' });
+      requested[key] = value.trim();
+    }
+    if (typeof requestId !== 'string' || !requestId || typeof ifGeneration !== 'string') throw new RpcError(RPC_ERROR.invalidParams, 'A change of model, thinking or team needs requestId and ifGeneration', { reason: 'invalid_params' });
+    const fingerprint = ctx.digest({ configure: sessionId, ...requested });
+    const release = ctx.holdPrompts(sessionId);
+    let releaseWakes: (() => void) | undefined;
+    try {
+      const { result, duplicate } = await lifecycle.run<ConfigurePlan, ConfigureNative, ConfigureAnswer>(
+        { resource: sessionId, operation: 'configure', requestId, fingerprint }, {
+          async prepare() {
+            const record = records.get(sessionId);
+            if (!record) throw new RpcError(ERROR.notFound, `No session ${sessionId}`, { reason: 'not_found' });
+            const live = runtime.snapshot(sessionId);
+            const allowed = support(record, live ?? record.session);
+            if (allowed?.reason === 'not_root') throw new RpcError(RPC_ERROR.invalidParams, 'Only a root session is reconfigured; an assignment keeps the team and model it started with', { reason: 'invalid_params' });
+            if (!allowed?.configure) throw new RpcError(ERROR.unavailable, allowed?.reason === 'not_persistent' ? 'This session keeps no native conversation to continue with a new configuration' : `alpd cannot change a running ${(live ?? record.session)?.runtime ?? ''} session's model or team; start a new session`.replace('running  session', 'running session'), { reason: 'runtime_unsupported' });
+            const unsettled = ctx.unsettled(sessionId);
+            if (unsettled) throw busy(sessionId, unsettled);
+            if (!live) throw new RpcError(ERROR.unavailable, 'The session is not open; open it (session.create { resume: true }), then change its configuration', { reason: 'session_closed' });
+            if (live.busy) throw busy(sessionId, 'a turn, child, assignment, mail or parked work is in progress');
+            if (runtime.questions().some(question => question.rootId === sessionId)) throw busy(sessionId, 'a question waits for an answer');
+            // Taken in the same tick as the idle check, as a reload takes it (t-15b0.17): no wake starts a
+            // turn while the reads below run; held mail reaches the restarted process.
+            releaseWakes = runtime.hold?.(sessionId);
+            await checkGeneration(sessionId, ifGeneration);
+            const turns = turnsOf(await store.timeline(sessionId), sessionId);
+            const running = turns.find(turn => turn.state === undefined);
+            if (running) throw inProgress(running.id);
+            // Resolved now, so a change the runtime would refuse (another runtime, more permissions, an
+            // unknown model or team) is refused here and journals nothing.
+            const preview = await runtime.previewConfigure!(sessionId, requested).catch(error => { throw configureRefusal(error); });
+            if (!preview.allowed) throw configureRefusal({ data: { reason: preview.reason }, message: preview.message ?? 'The change was refused' });
+            const now = runtime.snapshot(sessionId);
+            if (!now) throw new RpcError(ERROR.unavailable, 'The session closed; open it (session.create { resume: true }), then change its configuration', { reason: 'session_closed' });
+            if (now.activeTurnId || runtime.questions().some(question => question.rootId === sessionId)) throw busy(sessionId, 'a turn or question began meanwhile');
+            return { root: sessionId, requested, fresh: !turns.length && !record.base, previous: preview.current, proposed: preview.proposed, at: new Date().toISOString() };
+          },
+          async apply(plan) {
+            try {
+              const done = await runtime.reconfigure!(plan.root, plan.requested, { fresh: plan.fresh });
+              return { status: done.status, restarted: done.restarted, effective: done.effective, threadId: done.session.threadId, workflow: done.session.workflow, ...(done.session.teamLabel ? { teamLabel: done.session.teamLabel } : {}), ...(done.native ? { native: done.native } : {}) };
+            } catch (error) { throw configureRefusal(error); }
+          },
+          commit: commitConfigure,
+          repeat: entry => ({ session: ctx.summary(entry.plan.root) ?? entry.result!.session, configured: entry.result!.configured }),
+        });
+      return { ...result, session: ctx.summary(sessionId) ?? result.session, ...(duplicate ? { duplicate: true as const } : {}) };
+    } finally {
+      releaseWakes?.();
+      release();
+    }
+  }
+
+  /**
+   * alpd's side of a live configure, from the journal entry alone (idempotent): the session's record runs
+   * with what the runtime took, and a reopen resumes with it (its spec's effort, team and mode; its
+   * snapshot's model, team and thread).
+   */
+  async function commitConfigure(entry: LifecycleEntry<ConfigurePlan, ConfigureNative>): Promise<ConfigureAnswer> {
+    const plan = entry.plan;
+    const native = entry.native!;
+    const record = records.get(plan.root);
+    if (!record?.session || !record.spec) throw new Error(`session ${plan.root} is gone`);
+    if (native.status === 'applied') writeConfiguration(record, native.effective, { threadId: native.threadId, workflow: native.workflow, teamLabel: native.teamLabel });
+    record.updatedAt = new Date().toISOString();
+    await store.put(record);
+    return { session: ctx.summary(plan.root)!, configured: { status: native.status, requested: plan.requested, effective: native.effective, restarted: native.restarted } };
+  }
+
+  /** Writes an effective configuration to a session's record: what a reopen resumes with. */
+  function writeConfiguration(record: SessionRecord, effective: EffectiveConfig, session: { threadId?: string; workflow?: SessionSnapshot['workflow']; teamLabel?: string }) {
+    const { thinking: _thinking, ...spec } = record.spec!;
+    record.spec = { ...spec, thinking: effective.thinking, mode: effective.mode, ...(effective.team !== 'custom' ? { workflow: effective.team } : {}) };
+    const teamLabel = session.teamLabel ?? effective.teamLabel;
+    const { teamLabel: _label, ...snapshot } = record.session!;
+    record.session = {
+      ...snapshot, model: effective.model, thinking: effective.thinking, mode: effective.mode,
+      workflow: session.workflow ?? { mode: effective.team, maxPeers: effective.maxPeers ?? record.session!.workflow.maxPeers, supervisor: effective.supervisor },
+      ...(teamLabel ? { teamLabel } : {}),
+      ...(session.threadId ? { threadId: session.threadId } : {}),
+    };
+  }
+
+  /**
+   * At start: a configure a crash cut off between the runtime's taking it and alpd's commit is unknown
+   * to the journal, but the session's snapshot (written from the runtime's session.updated) may already
+   * show it. Its record then runs with it all through, never half of it; otherwise it keeps the old one.
+   */
+  async function reconcileConfigures() {
+    for (const entry of await journal.list()) {
+      if (entry.operation !== 'configure' || entry.state !== 'unknown') continue;
+      const plan = entry.plan as ConfigurePlan;
+      const record = records.get(plan.root);
+      const session = record?.session;
+      if (!record?.spec || !session || !plan.proposed) continue;
+      const shows = session.model === plan.proposed.model && session.thinking === plan.proposed.thinking && session.workflow?.mode === plan.proposed.team;
+      const spec = record.spec;
+      const agrees = spec.thinking === plan.proposed.thinking && (plan.proposed.team === 'custom' || spec.workflow === plan.proposed.team);
+      if (!shows || agrees) continue;
+      writeConfiguration(record, plan.proposed, {});
+      record.updatedAt = new Date().toISOString();
+      await store.put(record);
+      ctx.log.warn(`configure ${entry.requestId} of ${plan.root} was taken by the runtime before a crash; its record now runs with it`, { code: 'ALPD_CONFIGURE_RECONCILED', sessionId: plan.root });
+    }
+  }
+
+  /** session.configure.preview (§12.9): what a change would run the live root with, and whether it would be taken now. */
+  async function configurePreview(params: ConfigurePreviewParams): Promise<ConfigurePreview> {
+    const { sessionId } = params;
+    const requested: ConfigureChanges = {};
+    for (const key of ['model', 'thinking', 'team', 'mode'] as const) {
+      const value = params[key];
+      if (value === undefined) continue;
+      if (typeof value !== 'string' || !value.trim() || value.length > 200) throw new RpcError(RPC_ERROR.invalidParams, `${key} must be a nonempty name of at most 200 characters`, { reason: 'invalid_params' });
+      requested[key] = value.trim();
+    }
+    const record = records.get(sessionId);
+    if (!record && !runtime.snapshot(sessionId)) throw new RpcError(ERROR.notFound, `No session ${sessionId}`, { reason: 'not_found' });
+    const live = runtime.snapshot(sessionId);
+    if (!live) throw new RpcError(ERROR.unavailable, 'The session is not open; open it to see what it would run with', { reason: 'session_closed' });
+    const preview = await runtime.previewConfigure!(sessionId, requested).catch(error => { throw configureRefusal(error); });
+    const allowed = record ? support(record, live) : undefined;
+    if (preview.allowed && !allowed?.configure) return { ...preview, allowed: false, reason: allowed?.reason === 'not_root' ? 'not_root' : allowed?.reason === 'not_persistent' ? 'not_persistent' : 'runtime_unsupported' };
+    const unsettled = preview.allowed && preview.changes.length ? ctx.unsettled(sessionId) : undefined;
+    return unsettled ? { ...preview, allowed: false, reason: 'session_busy', message: `Session ${sessionId} is busy: ${unsettled}` } : preview;
+  }
+
   // ------------------------------------------------------------------ fork
 
   async function fork(params: ForkParams & { principal: Principal }) {
@@ -564,9 +742,10 @@ export function createConversation(ctx: ConversationContext) {
   return {
     enabled,
     reloads,
+    configures,
     /** The fields session summaries carry for a record (§12.7, §12.8). */
     fields(record: SessionRecord, session: SessionSnapshot | undefined): Partial<SessionSummary> {
-      if (!enabled) return reloads ? { conversation: support(record, session) } : {};
+      if (!enabled) return reloads || configures ? { conversation: support(record, session) } : {};
       return {
         conversation: support(record, session),
         ...(record.forkedFrom ? { forkedFrom: record.forkedFrom } : {}),
@@ -581,13 +760,16 @@ export function createConversation(ctx: ConversationContext) {
     rewind,
     reload,
     resumeCommand,
+    configure,
+    configurePreview,
     /** The requestId of a rewind whose commit is unfinished for this root: prompts and reopens wait for it. */
     fenced: (root: string) => fences.get(root),
     /** At start, before requests: finish or settle what a crash left (lifecycle.recover); a rewind left applied fences its root. */
     async recover() {
-      const unfinished = await lifecycle.recover({ rewind: entry => commitRewind(entry as LifecycleEntry<RewindPlan, NativeBinding>), fork: entry => commitFork(entry as LifecycleEntry<ForkPlan, NativeBinding>), reload: entry => commitReload(entry as LifecycleEntry<ReloadPlan, { threadId: string }>) },
+      const unfinished = await lifecycle.recover({ rewind: entry => commitRewind(entry as LifecycleEntry<RewindPlan, NativeBinding>), fork: entry => commitFork(entry as LifecycleEntry<ForkPlan, NativeBinding>), reload: entry => commitReload(entry as LifecycleEntry<ReloadPlan, { threadId: string }>), configure: entry => commitConfigure(entry as LifecycleEntry<ConfigurePlan, ConfigureNative>) },
         (message, fields) => ctx.log.warn(message, fields));
       for (const entry of unfinished) if (entry.operation === 'rewind') fences.set(entry.resource, entry.requestId);
+      await reconcileConfigures().catch(error => ctx.log.warn('could not reconcile live configures a crash cut off', { code: 'ALPD_CONFIGURE_RECONCILE_FAILED', error }));
     },
     lifecycle,
   };

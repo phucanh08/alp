@@ -139,7 +139,7 @@ test('rewind: same id, the later turns become a recoverable branch, history gene
   assert.ok(hello.capabilities.includes('session.fork') && hello.capabilities.includes('session.rewind'));
   const [first, second, third] = await conversation(d, 'r1', ['one', 'two', 'three']);
   const before = await d.request('session.get', { sessionId: 'r1' });
-  assert.deepEqual(before.session.conversation, { fork: true, rewind: true, reload: true });
+  assert.deepEqual(before.session.conversation, { fork: true, rewind: true, reload: true, configure: true });
   const threadBefore = before.session.threadId;
   const oldPage = await d.request('session.history', { sessionId: 'r1', limit: 2 });
   const generation = oldPage.generation;

@@ -19,9 +19,10 @@ import { ATTACHMENTS, CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS, WORKSPACE_G
  * directories and reading text files, docs/alp/remote-gateway.md §5.10). A write permission implies
  * its read; `files.read` implies nothing and nothing implies it. `attachments.write` (uploading
  * files into alpd's attachment store, §5.14) implies nothing either and is used together with
- * session.write. Host administration has no remote permission in v1.
+ * session.write. `session.team.write` (changing a live root's team, §5.17) implies nothing and is
+ * used together with session.write. Host administration has no remote permission in v1.
  */
-export const PERMISSIONS = Object.freeze(['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write', 'workspace.write', 'workspace.manage', 'attachments.write']);
+export const PERMISSIONS = Object.freeze(['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write', 'workspace.write', 'workspace.manage', 'attachments.write', 'session.team.write']);
 
 /**
  * What `alp-gateway credential create` grants without --permission: session and project read/write;
@@ -34,7 +35,7 @@ export const DEFAULT_PERMISSIONS = Object.freeze(['session.read', 'session.write
  * Within `library` and `settings.language` some methods stay unexposed and answer -32601
  * `not_exposed` (docs/alp/remote-gateway.md §5.4).
  */
-export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.workspaceRegistry, CAPABILITY.workspaceWorktree, CAPABILITY.sessionHistory, CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, CAPABILITY.workspaceGit, CAPABILITY.attachments, CAPABILITY.sessionFork, CAPABILITY.sessionRewind, CAPABILITY.sessionReload, CAPABILITY.sessionResumeCommand]);
+export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.workspaceRegistry, CAPABILITY.workspaceWorktree, CAPABILITY.sessionHistory, CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, CAPABILITY.workspaceGit, CAPABILITY.attachments, CAPABILITY.sessionFork, CAPABILITY.sessionRewind, CAPABILITY.sessionReload, CAPABILITY.sessionResumeCommand, CAPABILITY.sessionConfigureLive]);
 
 /** The codes of docs/protocol/alp-json-rpc-v1.md §5.1 the gateway answers its own refusals with; `data.reason` says why. */
 export const GATEWAY_ERROR = Object.freeze({ forbidden: ERROR.forbidden, unavailable: ERROR.unavailable });
@@ -183,15 +184,93 @@ export function projectForkedFrom(raw, visible) {
 }
 
 /**
- * A summary's conversation support as a remote client may see it: its booleans (fork, rewind, and
- * reload, §12.8) and a known reason.
+ * A summary's conversation support as a remote client may see it: its booleans (fork, rewind,
+ * reload §12.8, and configure §12.9) and a known reason.
  * @param {unknown} raw
  */
 export function projectConversation(raw) {
   if (!plain(raw)) return undefined;
   const source = /** @type {Record<string, any>} */ (raw);
   if (typeof source.fork !== 'boolean' || typeof source.rewind !== 'boolean') return undefined;
-  return { fork: source.fork, rewind: source.rewind, ...(typeof source.reload === 'boolean' ? { reload: source.reload } : {}), ...(['runtime_unsupported', 'not_persistent', 'not_root'].includes(source.reason) ? { reason: source.reason } : {}) };
+  return { fork: source.fork, rewind: source.rewind, ...(typeof source.reload === 'boolean' ? { reload: source.reload } : {}), ...(typeof source.configure === 'boolean' ? { configure: source.configure } : {}), ...(['runtime_unsupported', 'not_persistent', 'not_root'].includes(source.reason) ? { reason: source.reason } : {}) };
+}
+
+const NAME = /^[A-Za-z0-9][A-Za-z0-9_.:@\[\]\/-]{0,199}$/;
+const name = (/** @type {unknown} */ value) => typeof value === 'string' && NAME.test(value) ? value : undefined;
+const names = (/** @type {unknown} */ value) => Array.isArray(value) ? value.slice(0, 64).map(name).filter(item => item !== undefined) : [];
+/**
+ * An effective configuration (§12.9) as a remote client may see it: its names, booleans and counts,
+ * MCP servers by name and kind only; never a path, command or the instructions themselves.
+ * @param {unknown} raw
+ */
+export function projectEffective(raw) {
+  if (!plain(raw)) return undefined;
+  const source = /** @type {Record<string, any>} */ (raw);
+  const required = { team: name(source.team), agent: name(source.agent), model: name(source.model), thinking: name(source.thinking), mode: name(source.mode) };
+  if (Object.values(required).some(value => value === undefined) || !['codex', 'claude', 'acp', 'antigravity'].includes(source.runtime)) return undefined;
+  return {
+    ...required, runtime: source.runtime,
+    ...(typeof source.teamLabel === 'string' && source.teamLabel.length <= 200 ? { teamLabel: source.teamLabel } : {}),
+    ...(name(source.permissionProfile) ? { permissionProfile: source.permissionProfile } : {}),
+    supervisor: source.supervisor === true,
+    ...(Number.isSafeInteger(source.maxPeers) && source.maxPeers >= 0 ? { maxPeers: source.maxPeers } : {}),
+    delegates: names(source.delegates), tools: names(source.tools),
+    mcpServers: Array.isArray(source.mcpServers) ? source.mcpServers.slice(0, 64).filter(server => plain(server) && name(server.name) && ['stdio', 'http'].includes(server.kind)).map(server => ({ name: server.name, kind: server.kind })) : [],
+    hooks: Number.isSafeInteger(source.hooks) && source.hooks >= 0 ? source.hooks : 0,
+    ...(typeof source.instructionsSha === 'string' && /^[0-9a-f]{1,64}$/.test(source.instructionsSha) ? { instructionsSha: source.instructionsSha } : {}),
+  };
+}
+
+/** The message a client gets for each reason a live configure is refused or would be (§12.9); fixed, so no host text passes. */
+export const CONFIGURE_REASONS = Object.freeze({
+  session_busy: 'The session or one of its agents is working; wait until everything is idle, then try again',
+  session_closed: 'The session is not open; open it, then change its configuration',
+  not_root: 'Only a root session\'s configuration is changed; an assignment keeps the team and model it started with',
+  not_persistent: 'This session is not kept, so it cannot continue its conversation with a new configuration',
+  runtime_unsupported: 'The daemon host cannot change this session\'s model or team while it runs; start a new session',
+  runtime_mismatch: 'A session keeps its runtime; to use another runtime\'s model, start a new session with it',
+  agent_mismatch: 'That team runs another main agent; start a new session with that team',
+  permission_escalation: 'The change would give the session more permissions or new commands than it has; start a new session for it',
+  team_not_found: 'The daemon host defines no such team for this project',
+  invalid_params: 'The daemon host does not offer this model, effort or mode for this session',
+  native_refused: 'The runtime did not take the new configuration; the session keeps its own',
+  stale_generation: 'The conversation changed since it was read; read its history again and retry with the current generation',
+  key_conflict: 'This requestId was used for another request on this session',
+  outcome_unknown: 'The daemon host could not tell whether this completed; read the session before trying again',
+  persistence_failed: 'The daemon host could not store the change; read the session before trying again',
+  turn_in_progress: 'A turn of this conversation has not ended; try again when it has',
+  not_found: 'No such session for this credential',
+});
+
+/**
+ * session.configure.preview's answer (§12.9) as a remote client may see it: both configurations
+ * projected, the change list, booleans, a known reason with its fixed message, and the teams.
+ * @param {unknown} raw
+ */
+export function projectConfigurePreview(raw) {
+  if (!plain(raw)) return undefined;
+  const source = /** @type {Record<string, any>} */ (raw);
+  const current = projectEffective(source.current);
+  const proposed = projectEffective(source.proposed);
+  if (!current || !proposed || typeof source.restart !== 'boolean' || typeof source.allowed !== 'boolean') return undefined;
+  const reason = typeof source.reason === 'string' && Object.hasOwn(CONFIGURE_REASONS, source.reason) ? source.reason : undefined;
+  return {
+    current, proposed,
+    changes: Array.isArray(source.changes) ? source.changes.filter(change => ['model', 'thinking', 'team', 'mode'].includes(change)) : [],
+    restart: source.restart, allowed: source.allowed === true && !reason,
+    ...(reason ? { reason, message: CONFIGURE_REASONS[/** @type {keyof typeof CONFIGURE_REASONS} */ (reason)] } : source.allowed ? {} : { reason: 'runtime_unsupported', message: CONFIGURE_REASONS.runtime_unsupported }),
+    teams: Array.isArray(source.teams) ? source.teams.slice(0, 64).filter(team => plain(team) && name(team.id) && typeof team.label === 'string' && team.label.length <= 200).map(team => ({ id: team.id, label: team.label, ...(typeof team.description === 'string' && team.description.length <= 1000 ? { description: team.description } : {}) })) : [],
+  };
+}
+
+/** session.configure's `configured` (§12.9) as a remote client may see it. @param {unknown} raw */
+export function projectConfigured(raw) {
+  if (!plain(raw)) return undefined;
+  const source = /** @type {Record<string, any>} */ (raw);
+  const effective = projectEffective(source.effective);
+  if (!effective || !['applied', 'unchanged'].includes(source.status) || typeof source.restarted !== 'boolean') return undefined;
+  const requested = plain(source.requested) ? Object.fromEntries(['model', 'thinking', 'team', 'mode'].map(key => [key, name(source.requested[key])]).filter(([, value]) => value !== undefined)) : {};
+  return { status: source.status, requested, effective, restarted: source.restarted };
 }
 
 /** A history generation alpd answers: 32 lowercase hex digits. @param {unknown} value */
@@ -434,8 +513,8 @@ export function isModelId(value) {
  *   with 1003 grant naming the first one missing, before anything reaches alpd).
  * @typedef {{
  *   status: ExposureStatus,
- *   permission?: 'session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage' | 'attachments.write',
- *   alsoRequires?: readonly ('session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage' | 'attachments.write')[],
+ *   permission?: 'session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage' | 'attachments.write' | 'session.team.write',
+ *   alsoRequires?: readonly ('session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage' | 'attachments.write' | 'session.team.write')[],
  *   scope: string,
  *   capability?: string,
  *   params?: readonly string[],
@@ -486,7 +565,8 @@ export const EXPOSURE = Object.freeze({
   'session.reload': { status: 'exposed', permission: 'session.write', scope: 'session: sessionId a root in a granted workspace, looked up afresh; for a grant with modes, the modes of the root and its tree, looked up afresh, within them (as session.prompt: the restarted process drives the session); restarts its native process on its own conversation and configuration, nothing else; requestId namespaced per credential; the answer must be that root, projected; alpd errors rewritten to fixed text keeping code and reason', capability: CAPABILITY.sessionReload, params: ['sessionId', 'requestId', 'ifGeneration'], tests: ['permission', 'session-scope', 'result-filter', 'mode'] },
   'session.resumeCommand': { status: 'exposed', permission: 'session.read', scope: 'session: its tree\'s root and itself in a granted workspace; the answer is rebuilt by the gateway from the session id (resumeCommandOf, `alp attach <id>`) and refused unless alpd answered the same, so no path, env, credential or native runtime command passes; for the clipboard only, never run', capability: CAPABILITY.sessionResumeCommand, params: ['sessionId'], tests: ['permission', 'session-scope', 'result-filter'] },
   'session.interrupt': { status: 'exposed', permission: 'session.write', scope: 'session; stops: a root always, an assignment when its requesters\' modes are within the grant\'s', params: ['sessionId'], tests: ['permission', 'session-scope', 'mode'] },
-  'session.configure': { status: 'exposed', permission: 'session.write', scope: 'session; mode within the grant\'s modes', params: ['sessionId', 'mode'], tests: ['permission', 'session-scope', 'mode'] },
+  'session.configure': { status: 'exposed', permission: 'session.write', scope: 'session; mode within the grant\'s modes. With model, thinking or team (capability session.configure.live, §12.9): sessionId a root in a granted workspace, looked up afresh; for a grant with modes, the modes of the root and its tree, looked up afresh, within them (as session.prompt), and the mode alpd would run it with (session.configure.preview, asked first) too; team needs session.team.write as well; requestId namespaced per credential; the answer must be that root, projected, with its configuration projected (projectConfigured); alpd errors rewritten to fixed text keeping code, reason and the action session.create', params: ['sessionId', 'mode', 'model', 'thinking', 'team', 'requestId', 'ifGeneration'], tests: ['permission', 'session-scope', 'mode', 'result-filter', 'binding'] },
+  'session.configure.preview': { status: 'exposed', permission: 'session.read', scope: 'session: sessionId a root in a granted workspace; reads only. The answer projected (projectConfigurePreview): known fields, names and booleans only, a fixed message per reason; teams as session.preview lists them', capability: CAPABILITY.sessionConfigureLive, params: ['sessionId', 'mode', 'model', 'thinking', 'team'], tests: ['permission', 'session-scope', 'result-filter'] },
   'session.close': { status: 'exposed', permission: 'session.write', scope: 'session; stops, as session.interrupt', params: ['sessionId'], tests: ['permission', 'session-scope', 'mode'] },
   'session.rename': { status: 'exposed', permission: 'session.write', scope: 'session', params: ['sessionId', 'title'], tests: ['permission', 'session-scope'] },
   'session.archive': { status: 'exposed', permission: 'session.write', scope: 'session', params: ['sessionId', 'archived'], tests: ['permission', 'session-scope'] },

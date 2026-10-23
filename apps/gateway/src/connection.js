@@ -2,12 +2,12 @@ import { realpath as registryRealpath, stat as registryStat } from 'node:fs/prom
 // @ts-check
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
 import { homedir } from 'node:os';
-import { ERROR, PROTOCOL_VERSION, RPC_ERROR, WORKSPACE_FILES, base64Bytes, blockedFilePath, resumeCommandOf } from '@anhlp/alp-protocol';
+import { CAPABILITY, ERROR, PROTOCOL_VERSION, RPC_ERROR, WORKSPACE_FILES, base64Bytes, blockedFilePath, resumeCommandOf } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 import { isAlpClientError } from '@anhlp/alp-client/portable';
 import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.js';
 import { projectGitDiff, projectGitStatus, gatewayAttachmentLimits, projectAttachment, projectUploadBegun } from './policy.js';
-import { isGeneration, projectBranch, projectConversation, projectForkedFrom } from './policy.js';
+import { CONFIGURE_REASONS, isGeneration, projectBranch, projectConfigured, projectConfigurePreview, projectConversation, projectForkedFrom } from './policy.js';
 import { assertProjectDataContent } from '@anhlp/alp-core/library-edit';
 
 /**
@@ -1082,7 +1082,7 @@ export class ClientConnection {
     const source = error.data && typeof error.data === 'object' && !Array.isArray(error.data) ? error.data : {};
     for (const [key, value] of Object.entries(source).slice(0, 16)) {
       if (!/^[A-Za-z]{1,32}$/.test(key) || key === 'reason') continue;
-      if ((Number.isSafeInteger(value) && value >= 0) || (key === 'generation' && isGeneration(value))) data[key] = value;
+      if ((Number.isSafeInteger(value) && value >= 0) || (key === 'generation' && isGeneration(value)) || (key === 'action' && value === 'session.create')) data[key] = value;
     }
     const message = reason && Object.hasOwn(refusals, reason) ? refusals[reason]
       : reason && Object.hasOwn(CONVERSATION_REFUSALS, reason) ? CONVERSATION_REFUSALS[reason]
@@ -1101,6 +1101,37 @@ export class ClientConnection {
     if (scoped.root !== sessionId) throw forbidden(refusals.not_root, GATEWAY_REASON.notRoot);
     await this.#drive(sessionId);
     return scoped;
+  }
+
+  /**
+   * session.configure with model, thinking or team (§12.9, issue #121 D): a root in the grant, looked up
+   * afresh and driven within the grant's modes as session.prompt is (#conversationRoot); a team needs
+   * session.team.write too; the mode alpd would run it with, asked first (session.configure.preview),
+   * must be one of the grant's, so a change never takes the session beyond the credential. requestIds
+   * are this credential's own; alpd's refusals leave as fixed text with their code and reason.
+   * @param {any} params
+   */
+  async #configureLive(params) {
+    if (params.team !== undefined && !this.#grant.permissions.has('session.team.write')) throw forbidden('This credential lacks session.team.write', GATEWAY_REASON.grant, { permission: 'session.team.write' });
+    if (!this.#capabilities.includes(CAPABILITY.sessionConfigureLive)) throw new GatewayError(GATEWAY_ERROR.unavailable, 'The daemon host changes only the mode of a session', { reason: 'capability', capability: CAPABILITY.sessionConfigureLive });
+    await this.#conversationRoot(params.sessionId, CONFIGURE_REASONS);
+    if (params.mode !== undefined) this.#checkMode(params.mode, params.sessionId);
+    if (this.#grant.modes) {
+      const { requestId: _requestId, ifGeneration: _ifGeneration, ...asked } = params;
+      const answer = await this.#call('session.configure.preview', asked).catch(error => { throw this.#conversationError(error, CONFIGURE_REASONS); });
+      const preview = projectConfigurePreview(answer?.preview);
+      if (!preview) throw this.#conversationRefused('session.configure', 'shape');
+      this.#checkMode(preview.proposed.mode, params.sessionId);
+    }
+    const result = await this.#call('session.configure', { ...params, requestId: this.#registryRequestId(params.requestId) }).catch(error => { throw this.#conversationError(error, CONFIGURE_REASONS); });
+    const session = result?.session;
+    if (!session || session.id !== params.sessionId || session.parentId || !workspaceOf(this.#grant, session.projectRoot)) throw this.#conversationRefused('session.configure', 'session');
+    const configured = projectConfigured(result.configured);
+    if (!configured) throw this.#conversationRefused('session.configure', 'shape');
+    const scoped = this.#sessions.get(params.sessionId);
+    if (scoped && typeof session.mode === 'string') scoped.mode = session.mode;
+    await this.#seeForkSources([session]);
+    return { session: this.#safeSession(session), configured, ...(result.duplicate === true ? { duplicate: true } : {}) };
   }
 
   /** An answer of session.fork or session.rewind the gateway does not pass on. @param {string} method @param {string} why */
@@ -1384,12 +1415,22 @@ export class ClientConnection {
     },
 
     'session.configure': async params => {
+      if (params.model !== undefined || params.thinking !== undefined || params.team !== undefined) return this.#configureLive(params);
       await this.#resolve(params.sessionId);
       if (params.mode !== undefined) this.#checkMode(params.mode);
       const result = await this.#call('session.configure', params).catch(error => { throw sessionFault(error, 'session.configure', params); });
       const scoped = this.#sessions.get(params.sessionId);
       if (scoped && typeof result?.session?.mode === 'string') scoped.mode = result.session.mode;
       return this.#shownResult(result);
+    },
+    // What a change of a live root's model, effort, team or mode would run it with (§12.9): reads only.
+    'session.configure.preview': async params => {
+      const scoped = await this.#resolve(params.sessionId, { fresh: true });
+      if (scoped.root !== params.sessionId) throw forbidden(CONFIGURE_REASONS.not_root, GATEWAY_REASON.notRoot);
+      const result = await this.#call('session.configure.preview', params).catch(error => { throw this.#conversationError(error, CONFIGURE_REASONS); });
+      const preview = projectConfigurePreview(result?.preview);
+      if (!preview) throw this.#conversationRefused('session.configure.preview', 'shape');
+      return { preview };
     },
 
     'session.interrupt': async params => { await this.#drive(params.sessionId, { stop: true }); return this.#call('session.interrupt', params); },
