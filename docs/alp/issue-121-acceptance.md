@@ -62,7 +62,7 @@ web facade cannot upload attachments yet (t-4f38); this is a known limit of chec
 | Shared registry: project and workspace rows with branch | #182, #201 | §16 `project.list`, `workspace.list/get` (capability `workspace.registry`) | `project.read`; filtered by the grant before paging and counts | sidebar rows under each granted project, with branch (W:Sidebar) | `fetch_workspaces_request` from alpd's registry (`server/paseo/workspaces.ts`) | `apps/web/e2e/registry.spec.js`; `packages/daemon/tests/{registry,registry-rpc}.test.js`; `apps/gateway/tests/registry.test.js`; `integrations/paseo/tests/paseo-web.test.js` "projects and workspaces are kept by alpd…" | **done** |
 | Pins shared across clients and kept across restarts | #182 | §16 `workspace.update { pinned }` | `workspace.write` | Pin/Unpin on each row; pinned rows first | `workspace.pin.set.request` | `apps/web/e2e/registry.spec.js` (two browsers, then an alpd restart; a default token is told it needs `workspace.write`) | **done** |
 | Add project | #182 | §16 `project.register` | `workspace.write`; only an existing, exactly pregranted canonical directory | sidebar "Add project" with the token's granted directories | `open_project_request` (owner) | `apps/web/e2e/registry.spec.js`; the second spec there checks that outside grants are denied without registry or credential writes | **done, with limit** (L8) |
-| Worktrees: create, remove, branch row | #183, #184, #201 | §16 `workspace.worktree.options/create/remove` (capability `workspace.worktree`) | `workspace.manage` + the mapping id in the grant; the new checkout is granted to its creator only | WorktreeActions on a row | `workspace.create.request` with a worktree source becomes `workspace.worktree.create` | `apps/web/e2e/worktrees.spec.js` (create, branch after a restart, remove; refusals for a missing mapping, a dirty checkout, an active session, a saved session); `packages/daemon/tests/worktrees.test.js`; `packages/core/tests/user-worktree.test.js`; `apps/gateway/tests/worktrees.test.js`; `packages/daemon/tests/backup-authority.test.js`; [apps/gateway/docs/worktree-evidence.md](../../apps/gateway/docs/worktree-evidence.md) | **done, with limit** (L9) |
+| Worktrees: create, remove, branch row | #183, #184, #201 | §16 `workspace.worktree.options/create/remove` (capability `workspace.worktree`) | `workspace.manage` + the mapping id in the grant; the new checkout is granted to its creator only | WorktreeActions on a row | create only: `workspace.create.request` with a worktree source becomes `workspace.worktree.create` (the first approved mapping); archiving the workspace keeps the checkout |  `apps/web/e2e/worktrees.spec.js` (create, branch after a restart, remove; refusals for a missing mapping, a dirty checkout, an active session, a saved session); `packages/daemon/tests/worktrees.test.js`; `packages/core/tests/user-worktree.test.js`; `apps/gateway/tests/worktrees.test.js`; `packages/daemon/tests/backup-authority.test.js`; `integrations/paseo/tests/paseo-web.test.js` (the owner bridge creates only generated worktrees); [apps/gateway/docs/worktree-evidence.md](../../apps/gateway/docs/worktree-evidence.md) | **done, with limit** (L9) |
 
 ### Checkbox 5: non-image file attachments
 
@@ -118,7 +118,7 @@ docs and tests, so the product code is the same as the PR head's.
 
 The head of the PR that adds this document runs the same gates locally and in CI (`.github/workflows/ci.yml`). Its results are in that PR. A document cannot name the commit that contains it.
 
-**Real runtimes (owner, local IPC; 2026-10-23 13:14–13:18 UTC; `node test/e2e/<name>-real-e2e.mjs codex claude`)**
+**Real runtimes (owner, local IPC; 2026-10-23 13:13–13:18 UTC; `node test/e2e/<name>-real-e2e.mjs codex claude`)**
 
 Installed `codex-cli` and Claude Code, on the scripts' default small models (`codex:gpt-6-luna`,
 `claude:claude-haiku-4-5`; configure changes Codex to `gpt-6.1-sol` and Claude to `claude-sonnet-4-6`).
@@ -128,7 +128,7 @@ Before each run, Codex had used 0–1% of its five-hour window and 1% of its wee
 |---|---|---|---|
 | `conversation-real-e2e.mjs` | pass | pass | The fork through T1 answers ALPHA only; the source answers ALPHA and BRAVO; a rewind answers ALPHA on the same session; a repeat after an alpd restart is `duplicate`; the restored branch answers ALPHA and BRAVO; the project file's SHA-256 is unchanged. |
 | `configure-real-e2e.mjs` | pass | pass | Configure is refused while busy and for another runtime. The model, effort and team (Cafe) change on the same thread; the next reply recalls ALPHA; the runtime's own records name the new model after configure, after close/reopen and after an alpd restart. |
-| `reload-real-e2e.mjs` | pass | **fail, then pass** | First Claude run: turn 1 ignored "Remember codeword ALPHA" before any reload; after the reload, Claude called the prompt a "hidden override instruction" and the step failed. This is model behaviour already seen in the native evidence (the 21:40 run). A rerun at 13:17 passed: never-prompted refused `no_history`, `session.reloaded`, receipt `duplicate`, ALPHA after the reload, `alp attach <id>`. |
+| `reload-real-e2e.mjs` | pass | **fail, then pass** | First Claude run: turn 1 ignored "Remember codeword ALPHA" before any reload; after the reload, Claude called the prompt a "hidden override instruction" and the step failed. Claude's reply blamed a "system reminder"; ALP adds none to a prompt. The same kind of refusal is recorded for the conversation script in the native evidence (the 2026-10-22 21:40 run). A separate rerun, `reload-real-e2e.mjs claude` at 13:17, passed: never-prompted refused `no_history`, `session.reloaded`, receipt `duplicate`, ALPHA after the reload, `alp attach <id>`. |
 | `attachments-real-e2e.mjs` | pass | pass | Each runtime's own tools report the SHA-512 of a binary, a PDF and a text file, plus bytes at a random offset. A retry after an alpd restart is `duplicate` on the same staged copy. A fork reads the file again. |
 
 Every native thread these runs made was deleted: 17 `cleanup` steps, all `deleted: true`. No alpd, app-server or
@@ -161,7 +161,16 @@ rerun here; its pass is recorded in PR #193.
   Browsing or creating host directories stays a proposal (§14 `host.directories.suggest`), so the
   owner widens the credential first. apps/web has no button for `project.remove`. Labels and placement
   are owner-only (`registry.owner`).
-- **L9, worktrees on Windows.** Not supported: alpd does not list `workspace.worktree` there.
+- **L9, worktrees.** Not supported on Windows: alpd does not list `workspace.worktree` there. On
+  macOS/Linux:
+  - a worktree is created only from the source's committed HEAD, under a generated name and branch
+    (`alp/workspace/<id>`). Neither apps/web nor the facade offers a base ref, a branch name, setup hooks
+    or a first agent; the facade refuses those (`server/paseo/workspaces.ts:359`);
+  - only the principal and grant epoch that created a worktree can remove it (`not_managed`);
+  - the facade cannot remove one. Archiving the workspace there archives the record and keeps the
+    checkout on disk (`server/paseo/workspaces.ts:256-260`); removal is in apps/web;
+  - the facade always uses the first approved mapping (`server/paseo/workspaces.ts:370`); apps/web
+    lets the user choose.
 - **L10, attachments in the facade (t-4f38).** The `alp web` Paseo facade refuses uploads. The user
   accepted this on 2026-10-23. apps/web and the provider's `uploaded_file` path work.
 - **L11, attachment runtimes and platform.** Codex and Claude take `file.path`. ACP and Antigravity

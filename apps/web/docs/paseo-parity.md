@@ -103,7 +103,7 @@ The column **apps/web** gives the state before t-7679.2; **Now** gives it after.
 |---|---|---|---|---|---|
 | Hosts list, picker and search | P:components/left-sidebar.tsx | Thiếu (one gateway) | no | P2 | Thiếu |
 | Project, then workspace (worktree/branch), then agents | P:components/sidebar-workspace-list.tsx | Một phần: project = granted workspace; under it the host registry's workspace rows (title, branch, managed worktrees) and the sessions (W:app/Sidebar.tsx, WorktreeActions.tsx) | yes: `workspace.registry` (protocol §16; `project.read`), `workspace.worktree.*` (`workspace.manage`, macOS/Linux) | P1 | **Đã làm** (#121 E/F, PRs #182, #183, #201): shared registry rows with their branch, worktree create/remove from an approved host mapping (e2e/registry.spec.js, e2e/worktrees.spec.js). Left: Paseo's grouping of several projects' rows by its own project key |
-| Add or remove a project | P:sidebar-workspace-list.tsx | Thiếu | no: `project.*` §14 | P2 | Thiếu |
+| Add or remove a project | P:sidebar-workspace-list.tsx | Một phần: Add project (a pregranted directory); no remove | add: `project.register` (§16, `workspace.write`); remove: `project.remove` (§16, metadata only) | P2 | Add **đã làm** (#121 E, see Add project below); remove: Thiếu in apps/web (the `alp web` facade has Paseo's remove) |
 | Workspace row menu: rename, pin, copy path/branch, archive, labels | P:components/sidebar/sidebar-workspace-menu.tsx | Một phần: Rename, Archive; Pin/Unpin as a row button | pin: yes (`workspace.update { pinned }`, `workspace.write`, §16); labels are owner-only (`registry.owner`) | P1 | Một phần: pin done (#121 E); copy path/branch and labels not in the menu |
 | Pinned section; display preferences (grouping, filters, title source) | P:sidebar/pinned-section-header.tsx, display-preferences/menu.tsx | Một phần: pinned workspaces sort first, shared by every client and kept across alpd restarts; no separate Pinned header, no display preferences | pins: yes (§16); preferences: client only | P1 | Pins **đã làm** (#121 E, e2e/registry.spec.js: two clients, restart); section header and display preferences: Thiếu |
 | Workspace labels, hover card | P:workspace-labels/, workspace-hover-card.tsx | Thiếu | no / partial | P2 | Thiếu |
@@ -333,7 +333,7 @@ sessions (since t-7679.10 also files, on a host with `workspace.files`, with Pas
 screenshot (the browser's chrome); e2e/tabs.spec.js checks them.
 
 Differences on the workspace screenshots, kept on purpose: paseo-web groups sessions under a
-workspace row (ALP has no `workspace.*`), lists Schedules and Usage (no backend), and its Shortcuts
+workspace row (apps/web groups by granted workspace, not by Paseo's project key), lists Schedules and Usage (no backend), and its Shortcuts
 dialog lists features ALP lacks (open project, pin, theme, panes, voice; search files since t-7679.10). apps/web's
 History has a search field: on a host with `session.list.page` it asks the host, as paseo-web does;
 on an older host it filters on the client, where paseo-web hides it.
