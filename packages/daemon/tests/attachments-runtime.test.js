@@ -1,12 +1,13 @@
 // Attachments reaching a runtime (docs/protocol/alp-json-rpc-v1.md §12.6, issue #121 branch J): alpd's
 // store, the real ALP runtime and its staging of read-only copies, with a scripted native transport.
 // What the turn's input names, what the timeline shows, and what retries, restarts, tampering,
-// collection and forks of forks keep. Real Codex and Claude runs are test/e2e/attachments-e2e.mjs.
+// collection and forks of forks keep. Real Codex and Claude runs are test/e2e/attachments-real-e2e.mjs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { connect, daemonPaths } from '@anhlp/alp-client';
@@ -185,13 +186,14 @@ test('a tool command, its output or a reply that names a staged copy reaches the
   const [part] = attachmentParts(turnStarts(world.transports)[0].params.input);
   const real = await realpath(part.path);
   transport.notification('item/completed', { threadId: transport.threadId, item: { type: 'commandExecution', id: 'cmd-1', command: `shasum -a 256 ${part.path}`, cwd: world.project, status: 'completed', exitCode: 0, aggregatedOutput: `${sha('masked')}  ${real}\n` } });
-  transport.finish(`The file at ${part.path} has SHA-256 ${sha('masked')}.`);
+  transport.finish(`The file at ${part.path} has SHA-256 ${sha('masked')}. Not the copy: ${world.stageRoot}-old/x.`);
   await until(async () => !(await d.request('session.get', { sessionId: 'rm' })).session.activeTurnId, 'turn ended');
   const history = JSON.stringify(await d.request('session.history', { sessionId: 'rm' }));
-  assert.ok(!history.includes(world.stageRoot) && !history.includes(path.dirname(real)), 'no spelling of the staging directory in history');
-  assert.ok(!JSON.stringify(d.events).includes(world.stageRoot), 'nor in live events');
+  assert.ok(!history.includes(`${world.stageRoot}/`) && !history.includes(`${path.dirname(real)}/`), 'no spelling of the staging directory in history');
+  assert.ok(!JSON.stringify(d.events).includes(`${world.stageRoot}/`), 'nor in live events');
   assert.ok(history.includes(`<alp-attachments>/${path.basename(part.path)}`), 'the copy shows under the mask with its id');
   assert.ok(history.includes(sha('masked')));
+  assert.ok(history.includes(`${world.stageRoot}-old/x`), 'a longer name that merely starts like the directory is left alone');
 });
 
 test('retry, restart and reconnect keep one object and one staged copy; a tampered copy is replaced, never followed', { skip }, async t => {
@@ -230,6 +232,8 @@ test('retry, restart and reconnect keep one object and one staged copy; a tamper
     async () => { await chmod(part.path, 0o600); await writeFile(part.path, 'changed'); await chmod(part.path, 0o400); },
     async () => { await chmod(part.path, 0o644); },
     async () => { await unlink(part.path); await symlink(outside, part.path); },
+    // A FIFO never blocks staging: it is replaced without being opened.
+    async () => { await unlink(part.path); execFileSync('mkfifo', [part.path]); },
   ];
   for (const [index, change] of tamper.entries()) {
     await change();
@@ -306,19 +310,21 @@ test('a collected object takes its staged copy with it', { skip }, async t => {
   await until(async () => !(await lstat(part.path).then(() => true, () => false)), 'staged copy removed');
 });
 
-test('a fork of a fork keeps the attachments of its kept prompts after the first ancestor\'s history is deleted', { skip }, async t => {
+test('a fork of a fork keeps the attachments of its kept prompts after the first ancestor\'s history is deleted, and only for its own principal', { skip }, async t => {
   const world = await setup(t);
   let d = await world.start();
   await d.request('session.create', { sessionId: 'root', spec: { cwd: world.project, persist: true } });
+  await turn(d, world, 'root', 'm0', [{ type: 'text', text: 'no file yet' }]);
+  const plainTurn = world.transports.at(-1).turnId;
   const attachment = await upload(d.request, 'root', PDF, { name: 'report.pdf', mimeType: 'application/pdf' });
   await turn(d, world, 'root', 'm1', [{ type: 'text', text: 'read' }, { type: 'attachment', attachmentId: attachment.attachmentId }]);
-  const firstTurn = world.transports.at(-1).turnId;
+  const fileTurn = world.transports.at(-1).turnId;
   const generation = (await d.request('session.history', { sessionId: 'root', limit: 1 })).generation;
-  const fork1 = await d.request('session.fork', { sessionId: 'root', requestId: 'f1', ifGeneration: generation, boundary: { throughTurnId: firstTurn }, newSessionId: 'fork1' });
+  const fork1 = await d.request('session.fork', { sessionId: 'root', requestId: 'f1', ifGeneration: generation, boundary: { throughTurnId: fileTurn }, newSessionId: 'fork1' });
   assert.equal(fork1.session.id, 'fork1');
   // fork1's copy of the conversation still names the attachment by id.
-  const kept = (await d.request('session.history', { sessionId: 'fork1' })).items.map(item => item.event).find(event => event?.item?.kind === 'user_message');
-  assert.deepEqual(kept.item.attachments.map(entry => entry.attachmentId), [attachment.attachmentId]);
+  const kept = (await d.request('session.history', { sessionId: 'fork1' })).items.map(item => item.event).filter(event => event?.item?.kind === 'user_message');
+  assert.deepEqual(kept.map(event => (event.item.attachments ?? []).map(entry => entry.attachmentId)), [[], [attachment.attachmentId]]);
   await d.stop();
 
   // The root's history is deleted as retention does: its record and timeline go, its references are released.
@@ -333,7 +339,14 @@ test('a fork of a fork keeps the attachments of its kept prompts after the first
 
   d = await world.start();
   const generation1 = (await d.request('session.history', { sessionId: 'fork1', limit: 1 })).generation;
-  const fork2 = await d.request('session.fork', { sessionId: 'fork1', requestId: 'f2', ifGeneration: generation1, boundary: { throughTurnId: firstTurn }, newSessionId: 'fork2' });
+  // Another principal, the owner's under another grant epoch, or a grant without the project may not carry it on.
+  for (const [requestId, as] of [['fb', { principalId: 'bbbbbbbbbbbbbbbb', principalEpoch: 'e1' }], ['fe', { principalId: 'owner', principalEpoch: 'other-epoch' }], ['fr', { authorizedRoots: [path.join(world.directory, 'elsewhere')] }]]) {
+    await assert.rejects(d.request('session.fork', { sessionId: 'fork1', requestId, ifGeneration: generation1, boundary: { throughTurnId: fileTurn }, ...as }), error => error.code === 1003 && error.data?.reason === 'attachment_forbidden', requestId);
+  }
+  // A fork cut before the message that carried it holds nothing.
+  const early = await d.request('session.fork', { sessionId: 'fork1', requestId: 'f-early', ifGeneration: generation1, boundary: { throughTurnId: plainTurn }, newSessionId: 'fork-early' });
+  assert.equal(early.session.id, 'fork-early');
+  const fork2 = await d.request('session.fork', { sessionId: 'fork1', requestId: 'f2', ifGeneration: generation1, boundary: { throughTurnId: fileTurn }, newSessionId: 'fork2' });
   assert.equal(fork2.session.id, 'fork2');
   await d.stop();
   const after = createAttachmentStore({ root: path.join(state, 'attachments'), sessionProject: () => world.project, sweepMs: 0 });
@@ -341,5 +354,6 @@ test('a fork of a fork keeps the attachments of its kept prompts after the first
   const holders = Object.entries(after.holders());
   after.close();
   assert.deepEqual(holders.filter(([key]) => key === 'fork:fork2').map(([, holder]) => holder.attachments.map(id => `att_${id}`)), [[attachment.attachmentId]], 'the fork of the fork pins the attachment itself');
+  assert.deepEqual(holders.filter(([key]) => key === 'fork:fork-early'), [], 'the early fork pins nothing');
   assert.ok(holders.some(([key]) => key === 'fork:fork1'));
 });

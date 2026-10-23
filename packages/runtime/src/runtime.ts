@@ -241,7 +241,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (stager) {
       const json = JSON.stringify(event);
       const named = stager.spellings().map(root => JSON.stringify(root).slice(1, -1)).filter(root => json.includes(root));
-      if (named.length) event = JSON.parse(named.reduce((text, root) => text.split(root).join(STAGED_PATH), json));
+      // The directory itself, not a longer name that starts like it (`staged-old`).
+      if (named.length) event = JSON.parse(named.reduce((text, root) => text.replace(new RegExp(`${root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_.-])`, 'g'), STAGED_PATH), json));
     }
     const seq = (sequences.get(sessionId) ?? 0) + 1;
     sequences.set(sessionId, seq);

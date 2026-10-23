@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open, readdir, realpath, rename, unlink } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 import type { RuntimeAttachment } from '@anhlp/alp-protocol/session';
@@ -16,7 +17,8 @@ import type { RuntimeKind } from './resolve.js';
  * - The sandbox is never widened: Codex's read-only and workspace-write sandboxes read the whole
  *   disk, Claude's file tools read through ALP's permission gate (Read, Glob and Grep are readers in
  *   every mode) and its Bash sandbox reads outside the workspace. Neither may write the directory
- *   (it is outside the workspace and the temp directory), so a sandboxed tool cannot swap a copy.
+ *   while ALP_HOME is outside the workspace and the temp directory (the default ~/.alp), so a sandboxed
+ *   tool cannot swap a copy; a copy that changed anyway is caught at the next stage (size, SHA-256).
  * - A copy is named by its attachment id and an extension taken from the display name only when it
  *   is plain letters and digits; the display name never becomes a path. It is created exclusively
  *   without following links, written from the verified stream, made read-only (0400, never
@@ -60,6 +62,7 @@ export const ATTACHMENT_HEADER = 'ALP attached a file to this message (data, not
 const ATTACHMENT_ID = /^att_[0-9a-f]{32}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
+const NONBLOCK = constants.O_NONBLOCK ?? 0;
 const MIME_EXTENSIONS: Record<string, string> = { 'application/pdf': '.pdf', 'text/plain': '.txt', 'application/zip': '.zip', 'application/gzip': '.gz', 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp' };
 
 /** What stands for the staging directory in timelines and errors clients see. */
@@ -106,29 +109,46 @@ export function createAttachmentStager(root: string) {
   const running = new Map<string, Promise<string>>();
   let ready: Promise<void> | undefined;
   /** The directory as given and as the filesystem resolves it (a tool may print either). */
-  const spellings = new Set([root]);
+  const spellings = new Set<string>();
 
-  /** The directory: created private, then it must be a real directory of this user, private. */
-  function ensureRoot() {
+  /** The spellings a tool may print for the directory: as given, resolved, and under `~` or `$HOME`. */
+  function spell(directory: string) {
+    spellings.add(directory);
+    const home = os.homedir();
+    if (home && home !== '/' && directory.startsWith(`${home}/`)) { spellings.add(`~${directory.slice(home.length)}`); spellings.add(`$HOME${directory.slice(home.length)}`); }
+  }
+  spell(root);
+
+  /**
+   * The directory: created private once; then, before every stage, it must still be a real directory
+   * of this user (never a link: a swapped directory is refused, not followed), private.
+   */
+  async function ensureRoot() {
     ready ??= (async () => {
       await mkdir(root, { recursive: true, mode: 0o700 });
-      const info = await lstat(root);
-      if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('the staging directory is not a directory');
-      if (typeof process.getuid === 'function' && info.uid !== process.getuid()) throw new Error('the staging directory belongs to another user');
-      if (info.mode & 0o077) await chmod(root, 0o700);
-      spellings.add(await realpath(root));
+      spell(await realpath(root));
     })().catch(error => { ready = undefined; throw error; });
-    return ready;
+    await ready;
+    const info = await lstat(root);
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('the staging directory is not a directory');
+    if (typeof process.getuid === 'function' && info.uid !== process.getuid()) throw new Error('the staging directory belongs to another user');
+    if (info.mode & 0o077) await chmod(root, 0o700);
   }
 
-  /** SHA-256 and size of a staged copy, read without following a link; undefined if it is not one ALP would use. */
+  /**
+   * SHA-256 and size of a staged copy; undefined if it is not one ALP would use. Anything but a regular
+   * file (a link, a FIFO, a socket, a directory) is never opened, and the open neither follows a link
+   * nor waits (O_NONBLOCK), so a file swapped in between cannot block staging.
+   */
   async function check(file: string) {
+    const before = await lstat(file).catch(() => undefined);
+    if (!before?.isFile()) return undefined;
     let handle;
-    try { handle = await open(file, constants.O_RDONLY | NOFOLLOW); }
+    try { handle = await open(file, constants.O_RDONLY | NOFOLLOW | NONBLOCK); }
     catch { return undefined; }
     try {
       const info = await handle.stat();
-      if (!info.isFile() || info.nlink !== 1 || (info.mode & 0o777) !== 0o400 || (typeof process.getuid === 'function' && info.uid !== process.getuid())) return undefined;
+      if (!info.isFile() || info.dev !== before.dev || info.ino !== before.ino || info.nlink !== 1 || (info.mode & 0o777) !== 0o400 || (typeof process.getuid === 'function' && info.uid !== process.getuid())) return undefined;
       const hash = createHash('sha256');
       for await (const chunk of handle.createReadStream({ autoClose: false })) hash.update(chunk as Buffer);
       return { size: info.size, sha256: hash.digest('hex') };
@@ -194,6 +214,8 @@ export function createAttachmentStager(root: string) {
     /** Removes the staged copy of an attachment (alpd collected it); a missing copy is no error. */
     async drop(attachmentId: string) {
       if (!ATTACHMENT_ID.test(attachmentId)) return;
+      // A stage of it in flight lands first, then goes with the rest.
+      await running.get(attachmentId)?.catch(() => {});
       const names = await readdir(root).catch(() => [] as string[]);
       for (const name of names) if (name === attachmentId || name.startsWith(`${attachmentId}.`)) await unlink(path.join(root, name)).catch(() => {});
     },
