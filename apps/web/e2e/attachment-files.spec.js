@@ -8,6 +8,8 @@
 // upload: the refusal tests show that honestly, with the snapshot field put in on the wire so the
 // app tries; the success test then skips itself (set ALP_WEB_E2E_REQUIRE_FILES=1 to fail instead).
 import { createHash } from 'node:crypto';
+import { realpath } from 'node:fs/promises';
+import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import { startWorld } from './support/world.js';
 import { assistant, connect, idle, newSession } from './support/app.js';
@@ -171,9 +173,10 @@ test('a dropped and a picked file reach the runtime byte for byte; the timeline 
   const withFiles = (await world.turnStarts()).filter(entry => entry.files);
   expect(withFiles.at(-1).files.map(({ name, sha256: digest, bytes }) => ({ name, digest, bytes }))).toEqual([{ name: 'blob.bin', digest: sha256(BINARY), bytes: BINARY.length }, { name: 'notes.txt', digest: sha256(TEXT), bytes: TEXT.length }]);
   // The browser never sees where the host keeps or stages them.
+  // (The granted workspace's own path may show: it is the project the credential names.)
   const html = await page.content();
-  expect(html).not.toContain(world.home);
-  expect(html).not.toContain(world.directory);
+  const home = await realpath(world.home);
+  for (const hidden of [world.home, home, path.join(world.home, 'state', 'staged'), path.join(home, 'state', 'staged')]) expect(html).not.toContain(hidden);
 });
 
 test('a connection dropped mid-upload continues the same upload: one object, at most one receipt', async ({ page }) => {
