@@ -29,31 +29,38 @@ async function setup(t) {
   await server.listen();
   let controller;
   const held = [];
+  const links = [], calls = [], responses = [];
+  const pending = new Set();
   t.after(async () => {
     for (const gate of held) gate.resolve();
+    // Accepted local RPCs finish even after their viewer disconnects. Drain their replies and
+    // final store writes before deleting the scratch home, including observer attach/replay.
+    const closing = server.close();
     controller?.disconnect();
+    for (const link of links) link.end();
+    await until(() => pending.size === 0, 'local host requests drained');
     owner.close();
-    await server.close();
+    await closing;
     await runtime.shutdown();
+    await store.flush();
     await rm(directory, { recursive: true, force: true });
   });
   const owner = server.local();
   await owner.request('session.create', { sessionId: 'root', spec: { cwd: project } });
   await owner.request('session.attach', { sessionId: 'root' }); // Another viewer keeps idle work live across a drop.
-  const links = [];
-  const calls = [];
-  const responses = [];
   let intercept;
   let opening;
-  const open = async () => {
+  const open = async ({ signal } = {}) => {
     if (opening) await opening;
+    if (signal?.aborted) throw signal.reason;
+    const linkId = links.length;
     const messages = new Set(), closes = new Set();
     let ended = false;
-    const connection = server.accept(frame => { if (frame.id !== undefined) responses.push(frame); queueMicrotask(() => { if (!ended) for (const listener of messages) listener(JSON.stringify(frame)); }); });
+    const connection = server.accept(frame => { if (frame.id !== undefined && !frame.method) { pending.delete(`${linkId}:${frame.id}`); responses.push({ ...frame, linkId }); } queueMicrotask(() => { if (!ended) for (const listener of messages) listener(JSON.stringify(frame)); }); });
     const end = () => { if (ended) return; ended = true; connection.close(); for (const listener of closes) listener({ code: 1006 }); };
     const transport = {
       get state() { return ended ? 'closed' : 'open'; },
-      send(frame) { const message = JSON.parse(frame); calls.push(message); queueMicrotask(async () => { if (await intercept?.(message)) return; connection.receive(message); }); },
+      send(frame) { const message = JSON.parse(frame); calls.push({ ...message, linkId }); queueMicrotask(async () => { if (await intercept?.(message)) return; if (ended) return; if (message.id !== undefined) pending.add(`${linkId}:${message.id}`); connection.receive(message); }); },
       onMessage(fn) { messages.add(fn); return () => messages.delete(fn); },
       onClose(fn) { closes.add(fn); return () => closes.delete(fn); },
       close: end,
@@ -69,7 +76,7 @@ async function setup(t) {
   await until(() => state().sessions.status === 'ready', 'sessions ready');
   controller.selectSession('root');
   await until(() => state().tree?.status === 'attached', 'root attached');
-  return { controller, state, runtime, store, agents, owner, calls, links, responses, pauseOpen(promise) { opening = promise; }, gate() { const gate = deferred(); held.push(gate); return gate; }, intercept(fn) { intercept = fn; } };
+  return { controller, state, runtime, store, agents, owner, calls, links, responses, drop() { for (const link of links) link.end(); }, pauseOpen(promise) { opening = promise; }, gate() { const gate = deferred(); held.push(gate); return gate; }, intercept(fn) { intercept = fn; } };
 }
 
 for (const stopAfterTimeout of [false, true]) for (const replay of [false, true]) {
@@ -90,7 +97,7 @@ for (const stopAfterTimeout of [false, true]) for (const replay of [false, true]
     assert.equal(w.agents[0].started.length, 0, 'the provider has not seen the prompt');
     if (replay) {
       // Start the target while disconnected: reattachment must reconcile the same intent.
-      w.links.at(-1).end();
+      w.drop();
       gate.resolve();
       await until(() => w.agents[0].started.length === 1, 'provider starts');
       await until(() => w.links.length > 1 && w.state().tree?.status === 'attached' && w.state().connection.phase === 'open', 'replay attached');
@@ -124,7 +131,7 @@ test('a delayed conditional Stop cannot interrupt an unrelated later turn', { ti
   await stopping;
   await until(() => w.calls.some(call => call.method === 'session.interrupt'), 'stop sent');
   const request = w.calls.find(call => call.method === 'session.interrupt');
-  await until(() => w.responses.some(frame => frame.id === request.id), 'conditional Stop answered');
+  await until(() => w.responses.some(frame => frame.id === request.id && frame.linkId === request.linkId), 'conditional Stop answered');
   assert.equal(w.runtime.snapshot('root').activeTurnId, next);
   await w.runtime.interruptTurn('root', first).then(result => assert.equal(result, false));
   assert.equal(w.agents[0].calls.filter(call => call.method === 'turn/interrupt').length, 0);
@@ -146,7 +153,7 @@ test('a target that finished during the gap resolves on replay without stopping 
   const stopping = w.controller.interrupt();
   await sending;
   w.pauseOpen(reconnectGate.promise);
-  w.links.at(-1).end();
+  w.drop();
   receiptGate.resolve();
   await until(() => w.agents[0].started.length === 1, 'original started in gap');
   w.agents[0].finish('original completed in gap');
@@ -157,4 +164,38 @@ test('a target that finished during the gap resolves on replay without stopping 
   await stopping;
   assert.equal(w.runtime.snapshot('root').activeTurnId, next);
   assert.equal(w.calls.filter(call => call.method === 'session.interrupt').length, 0);
+});
+
+for (const navigation of ['session', 'workspace']) test(`real receipt-gated Stop survives ${navigation} navigation and reconnect`, { timeout: 5_000 }, async t => {
+  const w = await setup(t);
+  await w.owner.request('session.create', { sessionId: 'other', spec: { cwd: w.runtime.snapshot('root').projectRoot } });
+  await w.owner.request('session.prompt', { sessionId: 'other', clientMessageId: 'unrelated', content: [{ type: 'text', text: 'unrelated work' }] });
+  const otherTurn = w.runtime.snapshot('other').activeTurnId;
+  const gate = w.gate();
+  const putReceipt = w.store.putReceipt.bind(w.store);
+  let pending = false;
+  w.store.putReceipt = async (key, receipt) => {
+    if (receipt.sessionId === 'root' && receipt.state === 'pending') { pending = true; await gate.promise; }
+    return putReceipt(key, receipt);
+  };
+  const sending = w.controller.sendPrompt('original target');
+  await until(() => pending, 'original receipt gated');
+  const stopping = w.controller.interrupt();
+  if (navigation === 'session') {
+    w.controller.selectSession('other');
+    await until(() => w.state().tree?.rootId === 'other' && w.state().tree.status === 'attached', 'other root attached');
+  } else w.controller.selectWorkspace(null);
+  w.drop();
+  await until(() => w.state().connection.phase === 'open', 'main link reopened');
+  await sending;
+  gate.resolve();
+  await stopping;
+  assert.equal(w.runtime.snapshot('root').activeTurnId, undefined);
+  assert.equal(w.runtime.snapshot('other').activeTurnId, otherTurn);
+  assert.equal(w.calls.filter(call => call.method === 'session.interrupt').length, 1);
+  assert.equal(w.calls.find(call => call.method === 'session.interrupt').params.sessionId, 'root');
+  if (navigation === 'session') {
+    assert.equal(w.state().tree.rootId, 'other');
+    assert.ok(w.state().tree.projection.entries.every(entry => entry.sessionId !== 'root'));
+  }
 });

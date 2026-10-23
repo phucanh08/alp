@@ -5,7 +5,7 @@
 
 export class FakeHost {
   /**
-   * @param {{ principal?: any, separateTasks?: boolean, promptTiming?: { gapMs: number, answer: 'before' | 'middle' | 'after' } }} [options]
+   * @param {{ principal?: any, separateTasks?: boolean, promptTiming?: { gapMs?: number, gate?: Promise<void>, answer: 'before' | 'middle' | 'after' } }} [options]
    *   separateTasks: each frame reaches the client in a task of its own, as a browser WebSocket
    *   delivers messages (no microtask run of several events in a row).
    *   promptTiming: a prompt's user message, then `gapMs` later prompt.accepted and turn.started,
@@ -561,7 +561,7 @@ export class FakeHost {
         };
         const timing = this.promptTiming;
         if (!timing) { userMessage(); accepted(); return outcome; }
-        const gap = () => new Promise(resolve => setTimeout(resolve, timing.gapMs));
+        const gap = () => timing.gate ?? new Promise(resolve => setTimeout(resolve, timing.gapMs));
         const reply = () => this.#send(connection, { id: requestId, result: outcome });
         if (timing.answer === 'before') reply();
         userMessage();
