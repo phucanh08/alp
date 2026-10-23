@@ -1,6 +1,6 @@
 import * as React from 'react';
-import { ArrowUp, Pencil, Plus, Square, X } from 'lucide-react';
-import { IMAGE_TYPES, filesOf, fitImages, previewUrl, readImages, type ImageAttachment } from '../lib/attachments.js';
+import { ArrowUp, FileText, Pencil, Plus, Square, X } from 'lucide-react';
+import { IMAGE_TYPES, NO_FILES, fileSize, filesOf, fitFiles, fitImages, imageType, previewUrl, readFiles, readImages, type FileAttachment, type FileLimits, type ImageAttachment } from '../lib/attachments.js';
 import type { QueuedPrompt } from '../lib/controller.js';
 import { cn } from '../lib/utils';
 import { usePaneFocused } from './pane';
@@ -29,11 +29,17 @@ import { usePaneFocused } from './pane';
  *   as a path. Without `images` (the session's runtime takes none) there is no button, and a
  *   pasted or dropped image is refused with `imagesUnavailable`. A message with images is sent
  *   (or steered), never queued: a queued message is text.
+ * - Files (#121 J): with `files` (the host stores them, the token may upload, the session's runtime
+ *   reads them) the + button attaches any file, and a drop or paste of a file that is not an image
+ *   the session takes adds it as a file: a chip each (name, size, Remove). The bytes stay here until
+ *   the message is sent; the controller uploads them under the session first and shows their
+ *   progress on the message. Without `files`, a file is refused with `filesUnavailable` before
+ *   anything is sent. Like images, a message with files is sent, never queued.
  * - The context meter (t-7679.12): Paseo's ring before the primary action, when given `meter`.
  */
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
-export function Composer({ meter, imageLimits, images: takesImages = false, imagesUnavailable, onSend, onQueue, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', startLabel, startHold, initialText, addText, autoFocus, inputId }: {
+export function Composer({ meter, imageLimits, images: takesImages = false, imagesUnavailable, files: takesFiles = false, fileLimits, filesUnavailable, onSend, onQueue, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', startLabel, startHold, initialText, addText, autoFocus, inputId }: {
   /** Paseo's context window meter, before the primary action (t-7679.12). */
   meter?: React.ReactNode;
   /** The session takes images: the + button, paste and drop add them. */
@@ -41,7 +47,12 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
   imageLimits?: { maxCount: number; maxBytes: number; maxTotalBytes: number };
   /** Why a pasted or dropped image cannot go (the runtime takes none). */
   imagesUnavailable?: string;
-  onSend: (text: string, images: ImageAttachment[]) => Promise<unknown>;
+  /** Files other than the images the session takes may go (#121 J). */
+  files?: boolean;
+  fileLimits?: FileLimits;
+  /** Why a picked, pasted or dropped file cannot go. */
+  filesUnavailable?: string;
+  onSend: (text: string, images: ImageAttachment[], files: FileAttachment[]) => Promise<unknown>;
   onQueue: (text: string) => void;
   onStop: () => void;
   queued: QueuedPrompt[];
@@ -80,25 +91,50 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
   }, [addText]);
   const [error, setError] = React.useState<string | null>(null);
   const [attached, setAttached] = React.useState<ImageAttachment[]>([]);
+  const [attachedFiles, setAttachedFiles] = React.useState<FileAttachment[]>([]);
   const picker = React.useRef<HTMLInputElement>(null);
   const area = React.useRef<HTMLTextAreaElement>(null);
   const reason = blocked ?? disabledReason;
-  const hasText = !!text.trim() || attached.length > 0;
-  const queues = running && sendBehavior === 'queue' && !attached.length;
+  const hasText = !!text.trim() || attached.length > 0 || attachedFiles.length > 0;
+  const queues = running && sendBehavior === 'queue' && !attached.length && !attachedFiles.length;
   // The attached images as of now, set together with the state: a read that ends after a send, a
   // Remove or another paste joins what is attached then, never an earlier copy.
   const attachedRef = React.useRef(attached);
   const limitsRef = React.useRef(imageLimits);
   limitsRef.current = imageLimits;
   const setImages = (next: ImageAttachment[]) => { attachedRef.current = next; setAttached(next); };
-  /** Adds image files within the limits; a file left out says why. */
-  const attach = async (files: File[]) => {
-    if (!files.length || reason) return;
-    if (!takesImages) { setError(imagesUnavailable ?? 'This session takes no images.'); return; }
-    const { added, error: unread } = await readImages(attachedRef.current, files, limitsRef.current);
-    const { attachments, error: unfit } = fitImages(attachedRef.current, added, limitsRef.current);
-    setImages(attachments);
-    setError(unread ?? unfit);
+  const filesRef = React.useRef(attachedFiles);
+  const fileLimitsRef = React.useRef(fileLimits ?? NO_FILES);
+  fileLimitsRef.current = fileLimits ?? NO_FILES;
+  const setFiles = (next: FileAttachment[]) => { filesRef.current = next; setAttachedFiles(next); };
+  /**
+   * Adds what was picked, pasted or dropped within the limits: an image the session takes inline,
+   * any other file as a file when files may go; a file left out says why (the first reason).
+   */
+  const attach = async (picked: File[]) => {
+    if (!picked.length || reason) return;
+    const images: File[] = [];
+    const others: File[] = [];
+    let refused: string | null = null;
+    for (const file of picked) {
+      if (takesImages && (imageType(file) || (!takesFiles && file.type.startsWith('image/')))) images.push(file);
+      else if (takesFiles) others.push(file);
+      else refused ??= !takesImages && file.type.startsWith('image/') ? (imagesUnavailable ?? 'This session takes no images.') : (filesUnavailable ?? imagesUnavailable ?? 'This session takes no files.');
+    }
+    let failed: string | null = null;
+    if (images.length) {
+      const { added, error: unread } = await readImages(attachedRef.current, images, limitsRef.current);
+      const { attachments, error: unfit } = fitImages(attachedRef.current, added, limitsRef.current);
+      setImages(attachments);
+      failed ??= unread ?? unfit;
+    }
+    if (others.length) {
+      const { added, error: unread } = await readFiles(filesRef.current, others, fileLimitsRef.current);
+      const { attachments, error: unfit } = fitFiles(filesRef.current, added, fileLimitsRef.current);
+      setFiles(attachments);
+      failed ??= unread ?? unfit;
+    }
+    setError(refused ?? failed);
   };
   const [focused, setFocused] = React.useState(false);
 
@@ -141,17 +177,29 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
   const send = async () => {
     const body = text.trim();
     const images = attachedRef.current;
-    if ((!body && !images.length && !startLabel) || reason || (startLabel && startHold)) return;
+    const files = filesRef.current;
+    if ((!body && !images.length && !files.length && !startLabel) || reason || (startLabel && startHold)) return;
     const fitted = fitImages([], images, limitsRef.current);
     if (fitted.error) { setError(fitted.error); return; }
+    if (files.length) {
+      if (!takesFiles) { setError(filesUnavailable ?? 'This session takes no files.'); return; }
+      const fit = fitFiles([], files, fileLimitsRef.current);
+      if (fit.error) { setError(fit.error); return; }
+    }
     setText('');
     setImages([]);
+    setFiles([]);
     setError(null);
-    try { await onSend(body, images); } catch (failure) { setText(body); setImages(fitImages(images, attachedRef.current, limitsRef.current).attachments); setError(failure instanceof Error ? failure.message : String(failure)); }
+    try { await onSend(body, images, files); } catch (failure) {
+      setText(body);
+      setImages(fitImages(images, attachedRef.current, limitsRef.current).attachments);
+      setFiles(fitFiles(files, filesRef.current, fileLimitsRef.current).attachments);
+      setError(failure instanceof Error ? failure.message : String(failure));
+    }
   };
   const queue = () => {
     const body = text.trim();
-    if (attachedRef.current.length) return void send();
+    if (attachedRef.current.length || filesRef.current.length) return void send();
     if (!body || reason) return;
     try { onQueue(body); setText(''); setError(null); } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
   };
@@ -205,6 +253,21 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
               ))}
             </ul>
           ) : null}
+          {attachedFiles.length ? (
+            <ul aria-label="Attached files" className="flex flex-wrap gap-2">
+              {attachedFiles.map(file => (
+                <li key={file.id} data-testid="composer-file" className="flex h-9 max-w-[16rem] items-center gap-2 rounded-lg border border-border bg-muted pl-2 pr-1 text-[13px] text-foreground">
+                  <FileText aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 truncate" title={file.name}>{file.name}</span>
+                  <span className="shrink-0 text-muted-foreground">{fileSize(file.size)}</span>
+                  <button type="button" aria-label={`Remove ${file.name}`} title="Remove" onClick={() => setFiles(filesRef.current.filter(entry => entry.id !== file.id))}
+                    className="flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-3">
+                    <X aria-hidden />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {!focused && !text && !reason ? (
             <span aria-hidden className="pointer-events-none absolute right-4 top-3 hidden text-xs text-muted-foreground/80 [@media(pointer:fine)]:md:block" data-testid="composer-focus-hint">{isMac ? '⌘L' : 'Ctrl+L'} to focus</span>
           ) : null}
@@ -218,7 +281,7 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
             placeholder={reason && !blocked ? reason : placeholder}
             onChange={event => setText(event.target.value)}
             onPaste={event => {
-              const files = filesOf(event.clipboardData).filter(file => file.type.startsWith('image/'));
+              const files = filesOf(event.clipboardData).filter(file => takesFiles || file.type.startsWith('image/'));
               if (!files.length) return;
               event.preventDefault();
               void attach(files);
@@ -243,13 +306,13 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
           />
           <div className="-mx-1.5 flex min-h-7 shrink-0 items-end justify-between">
             <div className="flex min-w-0 flex-1 items-end">
-              {takesImages && !startLabel ? (
+              {takesFiles || (takesImages && !startLabel) ? (
                 <>
-                  <button type="button" aria-label="Attach images" title="Attach images" disabled={!!reason} onClick={() => picker.current?.click()}
+                  <button type="button" aria-label={takesFiles ? 'Attach files' : 'Attach images'} title={takesFiles ? 'Attach files' : 'Attach images'} disabled={!!reason} onClick={() => picker.current?.click()}
                     className={cn(round, 'mr-1 text-muted-foreground hover:bg-muted hover:text-foreground')} data-testid="composer-attach">
                     <Plus aria-hidden />
                   </button>
-                  <input ref={picker} type="file" accept={IMAGE_TYPES.join(',')} multiple hidden data-testid="composer-attach-input"
+                  <input ref={picker} type="file" accept={takesFiles ? undefined : IMAGE_TYPES.join(',')} multiple hidden data-testid="composer-attach-input"
                     onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void attach(files); }} />
                 </>
               ) : null}

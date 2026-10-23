@@ -59,6 +59,9 @@ export class CreateOutcomeUnknownError extends Error {
  *   'unknown' when it may or may not have run. terminal: the connection cannot recover by retrying.
  */
 
+/** alpd's attachment refusals (docs/protocol/alp-json-rpc-v1.md §12.6) whose message the gateway fixes for people. */
+const ATTACHMENT_REASONS = new Set(['attachment_unsupported', 'attachment_limit', 'attachment_unavailable', 'attachment_too_large', 'attachment_forbidden', 'attachment_referenced', 'quota_exceeded', 'invalid_name', 'invalid_data', 'hash_mismatch', 'upload_incomplete', 'chunk_conflict', 'offset_mismatch', 'request_conflict', 'persistence_failed', 'upload_expired']);
+
 /** @param {unknown} error @returns {string | undefined} */
 const reasonOf = error => (error && typeof error === 'object' && /** @type {any} */ (error).data && typeof /** @type {any} */ (error).data.reason === 'string') ? /** @type {any} */ (error).data.reason : undefined;
 
@@ -101,6 +104,8 @@ export function describe(error) {
       return { ...base, sent: 'unknown', message: reason === 'gateway_timeout' ? 'The host took too long to answer. The request may still have run.' : 'The gateway lost the host before it answered. The request may still have run.' };
     }
     if (code === 1004 && reason === 'outcome_unknown') return { ...base, sent: 'unknown', message: 'The host cannot tell whether the agent received this message. Check the conversation before sending it again.' };
+    // Attachment refusals (§12.6): the gateway's fixed text says what happened to the file and the message.
+    if (reason && ATTACHMENT_REASONS.has(reason) && error.message) return { ...base, message: /[.!?]$/.test(error.message) ? error.message : `${error.message}.` };
     if (code === 1005 && reason === 'not_sent') return { ...base, sent: 'no', message: 'The gateway was too busy to pass the request on. Nothing reached the host.' };
     if (code === 1005 && reason === 'rate_limited') return { ...base, sent: 'no', message: 'Too many requests at once. Wait a moment and try again.' };
     if (code === 1005 && reason === 'too_many_pending') return { ...base, sent: 'no', message: 'Too many requests are waiting. Wait a moment and try again.' };

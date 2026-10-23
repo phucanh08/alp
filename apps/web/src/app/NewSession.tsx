@@ -8,6 +8,7 @@ import { Input } from '../components/ui/input';
 import { Spinner } from '../components/ui/spinner';
 import { baseName } from '../lib/format';
 import { cn } from '../lib/utils';
+import type { FileAttachment } from '../lib/attachments.js';
 import { Composer } from './Composer';
 import { ModeControl, controlClass } from './SessionView';
 import { useAppState, useController } from './store';
@@ -61,6 +62,8 @@ export function NewSessionScreen() {
   const controller = useController();
   const { finishDraft } = useTabs();
   const { catalog, workspace, preferences, busy, connection, principal } = useAppState();
+  // Files of the first message (#121 J) wait here until the session exists; its runtime is checked then.
+  const fileGate = controller.fileGate(null);
   const remembered = preferences.newSession;
   const [choices, setChoices] = React.useState<Choices>(() => initialChoices(catalog, remembered));
   const [title, setTitle] = React.useState('');
@@ -161,7 +164,7 @@ export function NewSessionScreen() {
   const starting = React.useRef(false);
   const mounted = React.useRef(true);
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const start = async (text: string) => {
+  const start = async (text: string, _images: unknown[] = [], files: FileAttachment[] = []) => {
     if (starting.current || controller.getState().busy.create || waiting) return;
     starting.current = true;
     try {
@@ -172,6 +175,7 @@ export function NewSessionScreen() {
         ...(effective.thinking ? { thinking: effective.thinking } : {}),
         ...(title.trim() ? { title: title.trim() } : {}),
         ...(text.trim() ? { prompt: text } : {}),
+        ...(files.length ? { files } : {}),
       }, text, { mounted: () => mounted.current, describe, nameOf: baseName });
       finishDraft(id);
     } finally {
@@ -244,6 +248,9 @@ export function NewSessionScreen() {
         autoFocus
         inputId={boxId}
         controls={controls}
+        files={!fileGate}
+        fileLimits={connection.attachmentLimits}
+        filesUnavailable={fileGate ?? undefined}
       />
     </div>
   );
