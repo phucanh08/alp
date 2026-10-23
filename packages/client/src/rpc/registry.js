@@ -143,5 +143,19 @@ export function conversation(client) {
      * @param {Map['session.resumeCommand']['params']} params @returns {Promise<Map['session.resumeCommand']['result']>}
      */
     resumeCommand: params => client.request('session.resumeCommand', params),
+    /**
+     * Changes a live root's model, effort or team (capability `session.configure.live`, §12.9) at the
+     * idle barrier, through a restart of its native process on the same conversation; `configured` says
+     * what it runs with now. Sent once: repeat the same `requestId` after a lost answer. A change to
+     * another runtime is refused (1005 runtime_mismatch, `data.action: 'session.create'`).
+     * @param {Map['session.configure']['params'] & { requestId: string; ifGeneration: string }} params @returns {Promise<Map['session.configure']['result']>}
+     */
+    configure: params => client.request('session.configure', params),
+    /**
+     * What a change of model, effort, team or mode would run a live root with, and whether it would be
+     * taken now (capability `session.configure.live`, §12.9). Reads only.
+     * @param {Map['session.configure.preview']['params']} params @returns {Promise<Map['session.configure.preview']['result']>}
+     */
+    configurePreview: params => client.request('session.configure.preview', params),
   };
 }

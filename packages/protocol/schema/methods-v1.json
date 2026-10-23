@@ -39,7 +39,8 @@
     "session.fork": "session.fork: a new root whose conversation is a root's up to a completed turn (or a branch a rewind set aside), by native fork of Codex and Claude sessions; files are never copied or changed. Listed with a store and a runtime that forks native conversations, on macOS and Linux (not Windows).",
     "session.rewind": "session.rewind: a root's conversation from before a turn on, under the same session id; the later turns stay a recoverable branch, files are never changed, history generation advances (`history.reset` event). Same condition as session.fork.",
     "session.reload": "session.reload: restarts a live root's native process on its own conversation and configuration at the idle barrier (no turn, child, question, mail or parked work), keeping its session id, history and receipts; through the lifecycle journal. Listed with a store and a runtime that restarts a root on its own conversation, on macOS and Linux (not Windows).",
-    "session.resumeCommand": "session.resumeCommand: the ALP CLI command (`alp attach <sessionId>`) that follows a session in a terminal, as argv and POSIX and Windows (cmd.exe) command lines built by alpd; for the clipboard only, never run, never a native runtime's command, credential, env or path."
+    "session.resumeCommand": "session.resumeCommand: the ALP CLI command (`alp attach <sessionId>`) that follows a session in a terminal, as argv and POSIX and Windows (cmd.exe) command lines built by alpd; for the clipboard only, never run, never a native runtime's command, credential, env or path.",
+    "session.configure.live": "session.configure takes model, thinking and team (with requestId and ifGeneration) besides mode, and session.configure.preview answers the configuration a change would run with: a live root's model, effort or team changes at the idle barrier (no turn, child, question, mail or parked work) through a controlled restart of its native process on the same conversation; the effective configuration is written only after the runtime took it, through the lifecycle journal (\u00a712.9). Never another runtime and never more permissions. Listed with a store and a runtime that restarts a root with a new configuration, on macOS and Linux (not Windows)."
   },
   "methods": {
     "assignment.recall": {
@@ -1638,7 +1639,10 @@
           "kind": "session",
           "param": "sessionId"
         },
-        "idempotent": true
+        "idempotent": "mode alone: yes; with model, thinking or team: with requestId",
+        "risks": [
+          "with model, thinking or team: restarts the root's native process on its own conversation; never another runtime, never more permissions"
+        ]
       },
       "params": {
         "type": "object",
@@ -1648,10 +1652,66 @@
           },
           "mode": {
             "type": "string"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Native model, or runtime-prefixed (codex:/claude:); the session's own runtime only (capability session.configure.live)."
+          },
+          "thinking": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "An effort the model takes (capability session.configure.live)."
+          },
+          "team": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "A team id the daemon host defines (capability session.configure.live); no path or configuration."
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "ifGeneration": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
           }
         },
         "required": [
           "sessionId"
+        ],
+        "anyOf": [
+          {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "model"
+                  ]
+                },
+                {
+                  "required": [
+                    "thinking"
+                  ]
+                },
+                {
+                  "required": [
+                    "team"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "requestId",
+              "ifGeneration"
+            ]
+          }
         ],
         "additionalProperties": true
       },
@@ -1660,10 +1720,71 @@
         "properties": {
           "session": {
             "$ref": "#/$defs/session"
+          },
+          "configured": {
+            "$ref": "#/$defs/configureOutcome"
+          },
+          "duplicate": {
+            "const": true
           }
         },
         "required": [
           "session"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "session.configure.preview": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "capability": "session.configure.live",
+        "idempotent": true
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "mode": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "thinking": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "team": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "preview": {
+            "$ref": "#/$defs/configurePreview"
+          }
+        },
+        "required": [
+          "preview"
         ],
         "additionalProperties": true
       }
@@ -6405,7 +6526,7 @@
             },
             "reload": {
               "type": "boolean",
-              "description": "Whether session.reload can restart this root's native process (§12.8); the root must also be open and idle."
+              "description": "Whether session.reload can restart this root's native process (\u00a712.8); the root must also be open and idle."
             },
             "reason": {
               "enum": [
@@ -6413,6 +6534,10 @@
                 "not_persistent",
                 "not_root"
               ]
+            },
+            "configure": {
+              "type": "boolean",
+              "description": "Whether session.configure can change this root's model, effort or team (\u00a712.9); the root must also be open and idle."
             }
           },
           "required": [
@@ -7462,7 +7587,7 @@
     },
     "forkProvenance": {
       "type": "object",
-      "description": "Where a fork came from (§12.7): the source root, and the turn its conversation was cut at.",
+      "description": "Where a fork came from (\u00a712.7): the source root, and the turn its conversation was cut at.",
       "properties": {
         "sessionId": {
           "type": "string",
@@ -7500,7 +7625,7 @@
     },
     "conversationBranch": {
       "type": "object",
-      "description": "Later turns a rewind set aside (§12.7): kept, never deleted, recoverable as a new session with session.fork { branchId }.",
+      "description": "Later turns a rewind set aside (\u00a712.7): kept, never deleted, recoverable as a new session with session.fork { branchId }.",
       "properties": {
         "branchId": {
           "type": "string",
@@ -7526,6 +7651,226 @@
         "beforeTurnId",
         "turns",
         "at"
+      ],
+      "additionalProperties": true
+    },
+    "effectiveConfig": {
+      "type": "object",
+      "description": "The configuration a root runs with, or would after a change, as alpd resolved it (\u00a712.9).",
+      "properties": {
+        "team": {
+          "type": "string"
+        },
+        "teamLabel": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "runtime": {
+          "enum": [
+            "claude",
+            "codex",
+            "acp",
+            "antigravity"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "thinking": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "permissionProfile": {
+          "type": "string",
+          "description": "The permission profile capping the agent's mode, when one does."
+        },
+        "supervisor": {
+          "type": "boolean"
+        },
+        "maxPeers": {
+          "type": "integer"
+        },
+        "delegates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Agents the root may delegate to."
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "ALP tools the root's agent is given."
+        },
+        "mcpServers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "stdio",
+                  "http"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "kind"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "hooks": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many hook commands the agent runs."
+        },
+        "instructionsSha": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "team",
+        "agent",
+        "runtime",
+        "model",
+        "thinking",
+        "mode",
+        "supervisor",
+        "delegates",
+        "tools",
+        "mcpServers",
+        "hooks"
+      ],
+      "additionalProperties": true
+    },
+    "configurePreview": {
+      "type": "object",
+      "properties": {
+        "current": {
+          "$ref": "#/$defs/effectiveConfig"
+        },
+        "proposed": {
+          "$ref": "#/$defs/effectiveConfig"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "model",
+              "thinking",
+              "team",
+              "mode"
+            ]
+          }
+        },
+        "restart": {
+          "type": "boolean",
+          "description": "Whether applying it restarts the root's native process (on its own conversation)."
+        },
+        "allowed": {
+          "type": "boolean",
+          "description": "Whether session.configure would take it now; a busy tree may still refuse it later."
+        },
+        "reason": {
+          "enum": [
+            "session_busy",
+            "session_closed",
+            "not_root",
+            "runtime_unsupported",
+            "runtime_mismatch",
+            "agent_mismatch",
+            "permission_escalation",
+            "team_not_found",
+            "invalid_params",
+            "not_persistent"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "teams": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "label"
+            ],
+            "additionalProperties": true
+          }
+        }
+      },
+      "required": [
+        "current",
+        "proposed",
+        "changes",
+        "restart",
+        "allowed",
+        "teams"
+      ],
+      "additionalProperties": true
+    },
+    "configureOutcome": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "applied",
+            "unchanged"
+          ]
+        },
+        "requested": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "thinking": {
+              "type": "string"
+            },
+            "team": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "effective": {
+          "$ref": "#/$defs/effectiveConfig"
+        },
+        "restarted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "status",
+        "requested",
+        "effective",
+        "restarted"
       ],
       "additionalProperties": true
     }

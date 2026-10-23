@@ -86,3 +86,13 @@ test('conversation helpers send session.reload and session.resumeCommand exactly
   assert.deepEqual(await api.resumeCommand({ sessionId: 'ses_1' }), { method: 'session.resumeCommand' });
   assert.deepEqual(sent, [['session.reload', reload], ['session.resumeCommand', { sessionId: 'ses_1' }]]);
 });
+
+test('conversation helpers send a live session.configure and its preview exactly as given (§12.9)', async () => {
+  const { conversation } = await import('@anhlp/alp-client/portable');
+  const sent = [];
+  const api = conversation({ request: async (method, params) => { sent.push([method, params]); return { method }; } });
+  const configure = { sessionId: 'ses_1', model: 'codex:gpt-6.1-sol', thinking: 'high', requestId: 'configure-1', ifGeneration: '0123456789abcdef0123456789abcdef' };
+  assert.deepEqual(await api.configure(configure), { method: 'session.configure' });
+  assert.deepEqual(await api.configurePreview({ sessionId: 'ses_1', team: 'cafe' }), { method: 'session.configure.preview' });
+  assert.deepEqual(sent, [['session.configure', configure], ['session.configure.preview', { sessionId: 'ses_1', team: 'cafe' }]]);
+});

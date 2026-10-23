@@ -118,6 +118,8 @@ export type SessionSummary = SessionSnapshot & {
     fork: boolean; rewind: boolean;
     /** Whether session.reload can restart this root's native process (capability `session.reload`, §12.8); the root must also be open and idle. */
     reload?: boolean;
+    /** Whether session.configure can change this root's model, effort or team (capability `session.configure.live`, §12.9); the root must also be open and idle. */
+    configure?: boolean;
     reason?: 'runtime_unsupported' | 'not_persistent' | 'not_root';
   };
   /** The session this root was forked from (§12.7). */
@@ -160,3 +162,52 @@ export type ConversationBranch = {
  * the daemon host's own platform. Never a native runtime's command, credential, env or path.
  */
 export type ResumeCommand = { argv: string[]; posix: string; windows: string; display: string; platform: 'posix' | 'windows' };
+
+/**
+ * The configuration a root runs with, or would after a change, as alpd resolved it (§12.9): its team,
+ * agent, runtime, model, effort and mode, and what they bring (delegation targets, ALP tools, MCP
+ * servers by name and kind, hook count, an instructions digest). Never a path, command or credential.
+ */
+export type EffectiveConfig = {
+  team: string;
+  teamLabel?: string;
+  agent: string;
+  runtime: RuntimeKind;
+  model: string;
+  thinking: string;
+  mode: string;
+  /** The permission profile capping the agent's mode, when one does. */
+  permissionProfile?: string;
+  supervisor: boolean;
+  maxPeers?: number;
+  delegates: string[];
+  tools: string[];
+  mcpServers: Array<{ name: string; kind: 'stdio' | 'http' }>;
+  hooks: number;
+  instructionsSha?: string;
+};
+
+export type ConfigureChange = 'model' | 'thinking' | 'team' | 'mode';
+export type ConfigureRefusal = 'session_busy' | 'session_closed' | 'not_root' | 'runtime_unsupported' | 'runtime_mismatch' | 'agent_mismatch' | 'permission_escalation' | 'team_not_found' | 'invalid_params' | 'not_persistent';
+
+/** session.configure.preview (§12.9): the current and proposed configuration, and whether alpd would apply it now. */
+export type ConfigurePreview = {
+  current: EffectiveConfig;
+  proposed: EffectiveConfig;
+  changes: ConfigureChange[];
+  /** Applying it restarts the root's native process on its own conversation. */
+  restart: boolean;
+  /** session.configure would take it now; a tree that gets busy meanwhile still refuses it. */
+  allowed: boolean;
+  reason?: ConfigureRefusal;
+  message?: string;
+  teams: Array<{ id: string; label: string; description?: string }>;
+};
+
+/** What a session.configure with model, thinking or team did (§12.9): what was asked, and what the root runs with now. */
+export type ConfigureOutcome = {
+  status: 'applied' | 'unchanged';
+  requested: { model?: string; thinking?: string; team?: string; mode?: string };
+  effective: EffectiveConfig;
+  restarted: boolean;
+};

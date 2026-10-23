@@ -748,6 +748,8 @@ export class ClaudeTransport {
       return;
     }
     if (message.type === 'assistant' && message.error === 'rate_limit') this.limitedTurn = true;
+    // The model Claude Code says it runs this query with (its init message), so ALP can show it took a configured one (§12.9).
+    if (message.type === 'system' && message.subtype === 'init' && typeof (message as any).model === 'string') this.emit('alp/nativeModel', { threadId: this.threadId, model: (message as any).model });
     // A compaction, reported as Codex reports one: a contextCompaction item from start to end (ALPD §57).
     if (message.type === 'system' && (message.subtype === 'status' || message.subtype === 'compact_boundary')) {
       const system = message as any;

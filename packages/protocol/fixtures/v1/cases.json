@@ -5975,6 +5975,474 @@
     "display": "alp attach ses_1",
     "platform": "posix"
    }
+  },
+  {
+   "name": "session.configure params changing model and thinking",
+   "check": "params",
+   "method": "session.configure",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_1",
+    "model": "codex:gpt-6.1-sol",
+    "thinking": "high",
+    "requestId": "configure-1",
+    "ifGeneration": "0123456789abcdef0123456789abcdef"
+   }
+  },
+  {
+   "name": "session.configure params changing team",
+   "check": "params",
+   "method": "session.configure",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_1",
+    "team": "cafe",
+    "requestId": "configure-2",
+    "ifGeneration": "0123456789abcdef0123456789abcdef"
+   }
+  },
+  {
+   "name": "session.configure params changing model without requestId",
+   "check": "params",
+   "method": "session.configure",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "model": "codex:gpt-6.1-sol",
+    "ifGeneration": "0123456789abcdef0123456789abcdef"
+   }
+  },
+  {
+   "name": "session.configure params changing team without a generation",
+   "check": "params",
+   "method": "session.configure",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "team": "cafe",
+    "requestId": "configure-3"
+   }
+  },
+  {
+   "name": "session.configure params with a malformed generation",
+   "check": "params",
+   "method": "session.configure",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "thinking": "low",
+    "requestId": "configure-4",
+    "ifGeneration": "gen-1"
+   }
+  },
+  {
+   "name": "session.configure result of a live change",
+   "check": "result",
+   "method": "session.configure",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_1",
+     "projectRoot": "/work/app",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "high",
+     "workflow": {
+      "mode": "cafe",
+      "maxPeers": 2,
+      "supervisor": true
+     },
+     "teamLabel": "Cafe",
+     "threadId": "thread-2",
+     "persistent": true,
+     "busy": false,
+     "status": "idle",
+     "conversation": {
+      "fork": true,
+      "rewind": true,
+      "reload": true,
+      "configure": true
+     }
+    },
+    "configured": {
+     "status": "applied",
+     "requested": {
+      "model": "codex:gpt-6.1-sol",
+      "thinking": "high",
+      "team": "cafe"
+     },
+     "effective": {
+      "team": "cafe",
+      "teamLabel": "Cafe",
+      "agent": "main",
+      "runtime": "codex",
+      "model": "gpt-6.1-sol",
+      "thinking": "high",
+      "mode": "workspace-write",
+      "supervisor": true,
+      "maxPeers": 2,
+      "delegates": [
+       "lead"
+      ],
+      "tools": [
+       "alp_delegate",
+       "alp_wait",
+       "alp_send",
+       "alp_board",
+       "alp_task"
+      ],
+      "mcpServers": [],
+      "hooks": 0,
+      "instructionsSha": "0123456789ab"
+     },
+     "restarted": true
+    }
+   }
+  },
+  {
+   "name": "session.configure result of a repeat",
+   "check": "result",
+   "method": "session.configure",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_1",
+     "projectRoot": "/work/app",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "high",
+     "workflow": {
+      "mode": "cafe",
+      "maxPeers": 2,
+      "supervisor": true
+     },
+     "teamLabel": "Cafe",
+     "threadId": "thread-2",
+     "persistent": true,
+     "busy": false,
+     "status": "idle",
+     "conversation": {
+      "fork": true,
+      "rewind": true,
+      "reload": true,
+      "configure": true
+     }
+    },
+    "configured": {
+     "status": "unchanged",
+     "requested": {
+      "thinking": "high"
+     },
+     "effective": {
+      "team": "pho",
+      "teamLabel": "Phở",
+      "agent": "main",
+      "runtime": "codex",
+      "model": "gpt-6.1-sol",
+      "thinking": "high",
+      "mode": "workspace-write",
+      "supervisor": true,
+      "maxPeers": 2,
+      "delegates": [
+       "peer",
+       "oracle",
+       "reviewer"
+      ],
+      "tools": [
+       "alp_delegate",
+       "alp_wait",
+       "alp_send",
+       "alp_board",
+       "alp_task"
+      ],
+      "mcpServers": [],
+      "hooks": 0,
+      "instructionsSha": "0123456789ab"
+     },
+     "restarted": false
+    },
+    "duplicate": true
+   }
+  },
+  {
+   "name": "session.configure result with an unknown outcome status",
+   "check": "result",
+   "method": "session.configure",
+   "valid": false,
+   "value": {
+    "session": {
+     "id": "ses_1",
+     "projectRoot": "/work/app",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "high",
+     "workflow": {
+      "mode": "cafe",
+      "maxPeers": 2,
+      "supervisor": true
+     },
+     "teamLabel": "Cafe",
+     "threadId": "thread-2",
+     "persistent": true,
+     "busy": false,
+     "status": "idle",
+     "conversation": {
+      "fork": true,
+      "rewind": true,
+      "reload": true,
+      "configure": true
+     }
+    },
+    "configured": {
+     "status": "maybe",
+     "requested": {},
+     "effective": {
+      "team": "pho",
+      "teamLabel": "Phở",
+      "agent": "main",
+      "runtime": "codex",
+      "model": "gpt-5.5",
+      "thinking": "medium",
+      "mode": "workspace-write",
+      "supervisor": true,
+      "maxPeers": 2,
+      "delegates": [
+       "peer",
+       "oracle",
+       "reviewer"
+      ],
+      "tools": [
+       "alp_delegate",
+       "alp_wait",
+       "alp_send",
+       "alp_board",
+       "alp_task"
+      ],
+      "mcpServers": [],
+      "hooks": 0,
+      "instructionsSha": "0123456789ab"
+     },
+     "restarted": false
+    }
+   }
+  },
+  {
+   "name": "session.configure.preview params",
+   "check": "params",
+   "method": "session.configure.preview",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_1",
+    "model": "claude:opus",
+    "team": "cafe"
+   }
+  },
+  {
+   "name": "session.configure.preview params naming a path",
+   "check": "params",
+   "method": "session.configure.preview",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "team": "cafe",
+    "teamPath": "/etc/teams/cafe"
+   }
+  },
+  {
+   "name": "session.configure.preview result",
+   "check": "result",
+   "method": "session.configure.preview",
+   "valid": true,
+   "value": {
+    "preview": {
+     "current": {
+      "team": "pho",
+      "teamLabel": "Phở",
+      "agent": "main",
+      "runtime": "codex",
+      "model": "gpt-5.5",
+      "thinking": "medium",
+      "mode": "workspace-write",
+      "supervisor": true,
+      "maxPeers": 2,
+      "delegates": [
+       "peer",
+       "oracle",
+       "reviewer"
+      ],
+      "tools": [
+       "alp_delegate",
+       "alp_wait",
+       "alp_send",
+       "alp_board",
+       "alp_task"
+      ],
+      "mcpServers": [],
+      "hooks": 0,
+      "instructionsSha": "0123456789ab"
+     },
+     "proposed": {
+      "team": "cafe",
+      "teamLabel": "Cafe",
+      "agent": "main",
+      "runtime": "codex",
+      "model": "gpt-5.5",
+      "thinking": "medium",
+      "mode": "workspace-write",
+      "supervisor": true,
+      "maxPeers": 2,
+      "delegates": [
+       "lead"
+      ],
+      "tools": [
+       "alp_delegate",
+       "alp_wait",
+       "alp_send",
+       "alp_board",
+       "alp_task"
+      ],
+      "mcpServers": [],
+      "hooks": 0,
+      "instructionsSha": "0123456789ab"
+     },
+     "changes": [
+      "team"
+     ],
+     "restart": true,
+     "allowed": true,
+     "teams": [
+      {
+       "id": "pho",
+       "label": "Phở"
+      },
+      {
+       "id": "cafe",
+       "label": "Cafe"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "session.configure.preview result refused",
+   "check": "result",
+   "method": "session.configure.preview",
+   "valid": true,
+   "value": {
+    "preview": {
+     "current": {
+      "team": "pho",
+      "teamLabel": "Phở",
+      "agent": "main",
+      "runtime": "codex",
+      "model": "gpt-5.5",
+      "thinking": "medium",
+      "mode": "workspace-write",
+      "supervisor": true,
+      "maxPeers": 2,
+      "delegates": [
+       "peer",
+       "oracle",
+       "reviewer"
+      ],
+      "tools": [
+       "alp_delegate",
+       "alp_wait",
+       "alp_send",
+       "alp_board",
+       "alp_task"
+      ],
+      "mcpServers": [],
+      "hooks": 0,
+      "instructionsSha": "0123456789ab"
+     },
+     "proposed": {
+      "team": "pho",
+      "teamLabel": "Phở",
+      "agent": "main",
+      "runtime": "claude",
+      "model": "opus",
+      "thinking": "medium",
+      "mode": "workspace-write",
+      "supervisor": true,
+      "maxPeers": 2,
+      "delegates": [
+       "peer",
+       "oracle",
+       "reviewer"
+      ],
+      "tools": [
+       "alp_delegate",
+       "alp_wait",
+       "alp_send",
+       "alp_board",
+       "alp_task"
+      ],
+      "mcpServers": [],
+      "hooks": 0,
+      "instructionsSha": "0123456789ab"
+     },
+     "changes": [
+      "model"
+     ],
+     "restart": true,
+     "allowed": false,
+     "reason": "runtime_mismatch",
+     "message": "A session keeps its runtime; start a new session to use claude",
+     "teams": [
+      {
+       "id": "pho",
+       "label": "Phở"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "session.configure.preview result without the proposed configuration",
+   "check": "result",
+   "method": "session.configure.preview",
+   "valid": false,
+   "value": {
+    "preview": {
+     "current": {
+      "team": "pho",
+      "teamLabel": "Phở",
+      "agent": "main",
+      "runtime": "codex",
+      "model": "gpt-5.5",
+      "thinking": "medium",
+      "mode": "workspace-write",
+      "supervisor": true,
+      "maxPeers": 2,
+      "delegates": [
+       "peer",
+       "oracle",
+       "reviewer"
+      ],
+      "tools": [
+       "alp_delegate",
+       "alp_wait",
+       "alp_send",
+       "alp_board",
+       "alp_task"
+      ],
+      "mcpServers": [],
+      "hooks": 0,
+      "instructionsSha": "0123456789ab"
+     },
+     "changes": [],
+     "restart": false,
+     "allowed": true,
+     "teams": []
+    }
+   }
   }
  ]
 }

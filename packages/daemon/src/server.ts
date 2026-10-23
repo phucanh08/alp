@@ -1449,8 +1449,23 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       return {};
     },
 
-    async 'session.configure'(_connection, { sessionId, mode }) {
+    /**
+     * A session's permissions mode while idle; with model, thinking or team, a live root's configuration
+     * at the idle barrier through a restart on the same conversation (§12.9, capability session.configure.live).
+     */
+    async 'session.configure'(_connection, params) {
+      const { sessionId, mode } = params;
+      if (params.model !== undefined || params.thinking !== undefined || params.team !== undefined) {
+        if (!conversation?.configures) throw new RpcError(RPC_ERROR.invalidParams, 'This alpd changes only the mode of a session (capability session.configure.live is not listed)', { reason: 'invalid_params' });
+        return conversation.configure(params);
+      }
       return { session: await runtime.configure(sessionId, { mode }) };
+    },
+
+    /** What a change of model, thinking, team or mode would run a live root with (§12.9). */
+    async 'session.configure.preview'(_connection, params) {
+      if (!conversation?.configures) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd does not preview configurations (capability session.configure.live is not listed)');
+      return { preview: await conversation.configurePreview(params) };
     },
 
     async 'session.close'(_connection, { sessionId }) {
@@ -1678,7 +1693,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...(conversation?.reloads ? [CAPABILITY.sessionReload] : []), ...(conversation ? [CAPABILITY.sessionResumeCommand] : []), ...operations.capabilities];
+  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...(conversation?.reloads ? [CAPABILITY.sessionReload] : []), ...(conversation?.configures ? [CAPABILITY.sessionConfigureLive] : []), ...(conversation ? [CAPABILITY.sessionResumeCommand] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {

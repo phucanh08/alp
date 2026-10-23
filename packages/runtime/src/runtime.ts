@@ -6,7 +6,7 @@ import { createLogger } from '@anhlp/alp-core/log';
 import { PROMPT_IMAGES, base64Bytes } from '@anhlp/alp-protocol';
 import { createBoardDomain } from './board-domain.js';
 import { createWorktreeDomain } from './worktree-domain.js';
-import { type RuntimeTransport, type RuntimeOptions, type OpenOptions, type PromptContent, type PromptInput, type AlpRuntime, type SessionPreview, type RecoveryOutcome, type Pause, type PauseState, type RecallAnswer, type ScheduleHandler, type BranchRequest, type NativeBinding, ConversationError } from './contracts.js';
+import { type RuntimeTransport, type RuntimeOptions, type OpenOptions, type PromptContent, type PromptInput, type AlpRuntime, type SessionPreview, type RecoveryOutcome, type Pause, type PauseState, type RecallAnswer, type ScheduleHandler, type BranchRequest, type NativeBinding, type ConfigurePreview, type ConfigureResult, type ConversationErrorReason, ConversationError } from './contracts.js';
 import { claudeCut, codexForkEnd, codexForkRefusal, pendingChain, type ChainEntry } from './conversation.js';
 export type { RuntimeTransport, RuntimeOptions, OpenOptions, PromptContent, PromptInput, AlpRuntime, SessionPreview, RecoveryOutcome, Pause, PauseState, RecallAnswer } from './contracts.js';
 export { DEFAULT_TEAM } from './contracts.js';
@@ -29,7 +29,8 @@ import { models, modes, thinkingOptionsFor, withinMode, writes } from './catalog
 import { runHook } from '@anhlp/alp-core/hook-run';
 import { hookMatches } from '@anhlp/alp-core/hooks';
 import { isTrusted, trustProject } from '@anhlp/alp-core/trust';
-import { listTeams } from '@anhlp/alp-core/teams';
+import { listTeams, teamOf } from '@anhlp/alp-core/teams';
+import { CONFIGURABLE, changesOf, effectiveOf, executablesOf, nativeModelOf, offered, type ConfigureChange, type ConfigureChanges, type EffectiveConfig } from './configure.js';
 import { anyModel, offers, profileModel, selectedProfile } from '@anhlp/alp-core/profiles';
 import { LESSONS_FILE, READ_ONLY_AGENTS, resolveSession, type ResolvedSession, type RuntimeKind, type SessionSpec } from './resolve.js';
 import { MAIL_BODY_CHARS, MAIL_HEADER, publicEvent, renderMail, takeBatch, USER, type MailEvent } from './mailbox.js';
@@ -459,6 +460,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     params: any,
   ) {
     if (session.closed) return;
+    // What the runtime says it runs with; the run log keeps it beside the configured model (§12.9).
+    if (method === 'alp/nativeModel') {
+      if (typeof params?.model === 'string') runLog(rootOf(sessionId), { event: 'session.native_model', sessionId, agent: session.mapping.agent.name, configured: session.mapping.model, model: params.model.slice(0, 200) });
+      return;
+    }
 
     touch(sessionId, session);
 
@@ -3299,8 +3305,12 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
    * caller checks restartRefusal and runs this in the operation queue. `verify`: a Claude conversation
    * without a transcript (or base) is refused rather than left to Claude, which would refuse it at boot
    * or start it empty; reopening the binding a session already ran on resumes it as revive does.
+   * `shape`: the configuration the new process runs with, when not the session's own (a live configure,
+   * §12.9); the session itself keeps its own until its caller sees the restart through. No `binding`:
+   * a new conversation starts (a root reconfigured before its first turn has none to keep). Answers
+   * what the runtime answered (Codex: the model and effort it resumed the thread with).
    */
-  async function restartNative(sessionId: string, session: Session, binding: NativeBinding, verify = true) {
+  async function restartNative(sessionId: string, session: Session, binding: NativeBinding | undefined, verify = true, shape?: Pick<Session, 'mapping' | 'graph' | 'spec'>) {
     const old = session.runtime;
     const finishPending = beginPending(session);
     await old.close().catch(() => {});
@@ -3309,18 +3319,22 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     let failure: unknown;
     transport.onFailure(error => { failure ??= error; });
     session.runtime = transport;
+    let result: any;
     try {
       await transport.initialize();
-      const config = await configOf(session);
+      const config = await configOf(shape ? { ...session, ...shape } : session);
       noteInstructions(sessionId, session, config.developerInstructions);
       if (session.closed) throw new Error('Session closed during restart');
-      const result = await transport.request('thread/resume', {
-        ...config, threadId: binding.threadId,
-        ...(binding.base ? { base: binding.base } : verify && session.runtimeKind === 'claude' ? { requireHistory: true } : {}),
-      });
+      result = binding
+        ? await transport.request('thread/resume', {
+          ...config, threadId: binding.threadId,
+          ...(binding.base ? { base: binding.base } : verify && session.runtimeKind === 'claude' ? { requireHistory: true } : {}),
+        })
+        : await transport.request('thread/start', { ...config, ephemeral: !(shape ?? session).mapping.persist && !(shape ?? session).mapping.keepThread });
       if (failure) throw failure;
       if (session.closed) throw new Error('Session closed during restart');
-      if (result?.thread?.id !== undefined && result.thread.id !== binding.threadId) throw new Error(`${label(session.runtimeKind)} resumed ${result.thread.id} instead of ${binding.threadId}`);
+      if (binding && result?.thread?.id !== undefined && result.thread.id !== binding.threadId) throw new Error(`${label(session.runtimeKind)} resumed ${result.thread.id} instead of ${binding.threadId}`);
+      if (!binding && typeof result?.thread?.id !== 'string') throw new Error(`${label(session.runtimeKind)} started no conversation`);
     } catch (error) {
       await transport.close().catch(() => {});
       // Not pending any more: mail that waited runs again in the operation queue, after this restart's
@@ -3328,12 +3342,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       finishPending();
       throw error;
     }
-    session.threadId = binding.threadId;
-    if (binding.base) session.base = binding.base;
+    session.threadId = binding ? binding.threadId : result.thread.id;
+    if (binding?.base) session.base = binding.base;
     else delete session.base;
     session.buffered = [];
     wire(sessionId, session, transport);
     finishPending();
+    return result;
   }
 
   /** rebind(): moves an idle root to another native conversation, or reopens its own; see AlpRuntime.rebind. */
@@ -3391,6 +3406,178 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const updated = snapshot(sessionId, live);
     emit(sessionId, { type: 'session.updated', session: updated });
     return updated;
+  }
+
+  // ------------------------------------------------------------------ live configure (§12.9)
+
+  type ConfigureShape = Pick<Session, 'mapping' | 'graph' | 'spec'>;
+  type ConfigurePlan = {
+    shape: ConfigureShape;
+    current: EffectiveConfig;
+    proposed: EffectiveConfig;
+    changes: ConfigureChange[];
+    refusal?: { reason: ConversationErrorReason; message: string };
+  };
+
+  /** The effective configuration a root runs with, or would with `shape` (§12.9). */
+  async function effectiveConfig(session: Session, shape?: ConfigureShape) {
+    const view = shape ? { ...session, ...shape } : session;
+    const config = await configOf(view);
+    const name = view.mapping.agent.name;
+    return effectiveOf(session.runtimeKind, view.mapping, {
+      delegates: Object.hasOwn(view.graph, name) ? view.graph[name] : [],
+      tools: ((config.dynamicTools ?? []) as Array<{ name?: unknown }>).map(tool => tool.name).filter((tool): tool is string => typeof tool === 'string'),
+      supervisor: supervises(view),
+      instructionsSha: createHash('sha256').update(config.developerInstructions).digest('hex').slice(0, 12),
+    });
+  }
+
+  /**
+   * What a change of model, thinking, team or mode would make of a live root: the configuration resolved
+   * as session.create resolves one (same runtime, agent and conversation), or why it is refused. Reads only.
+   */
+  async function planConfigure(session: Session, changes: ConfigureChanges): Promise<ConfigurePlan> {
+    const current = await effectiveConfig(session);
+    const same: ConfigurePlan = { shape: { mapping: session.mapping, graph: session.graph, spec: session.spec }, current, proposed: current, changes: [] };
+    const refuse = (reason: ConversationErrorReason, message: string): ConfigurePlan => ({ ...same, refusal: { reason, message } });
+    if (session.parent || session.role === 'supervisor') return refuse('not_root', 'Only a root session is reconfigured; an assignment keeps the team and model it started with');
+    if (!CONFIGURABLE.has(session.runtimeKind)) return refuse('runtime_unsupported', `alpd cannot change a running ${label(session.runtimeKind)} session's model or team; start a new session`);
+    for (const key of ['model', 'thinking', 'team', 'mode'] as const) {
+      const value = changes[key];
+      if (value !== undefined && (typeof value !== 'string' || !value.trim() || value.length > 200)) return refuse('invalid_params', `${key} must be a nonempty name of at most 200 characters`);
+    }
+    const runtimeKind = session.runtimeKind;
+    let model = session.mapping.model;
+    if (changes.model !== undefined) {
+      const named = nativeModelOf(runtimeKind, changes.model.trim());
+      if ('runtime' in named) return refuse('runtime_mismatch', `A session keeps its runtime (${label(runtimeKind)}); to work with ${named.runtime}, start a new session with that model`);
+      if (!offered(runtimeKind, named.model, session.mapping)) return refuse('invalid_params', `The daemon host does not offer ${runtimeKind}:${named.model}; choose one of its models`);
+      model = named.model;
+    }
+    const projectRoot = session.mapping.agent.projectRoot;
+    let team = session.mapping.workflow.mode;
+    if (changes.team !== undefined) {
+      const wanted = teamOf(changes.team.trim());
+      const teams = await listTeams(projectRoot, { library: options.libraryDir, templates: options.templates });
+      if (!teams.some(row => row.id === wanted && !row.error)) return refuse('team_not_found', `The daemon host defines no team '${changes.team.trim()}' for this project`);
+      team = wanted;
+    }
+    const teamChanged = team !== session.mapping.workflow.mode;
+    const mode = changes.mode ?? session.mapping.mode;
+    if (!modes.some(candidate => candidate.id === mode)) return refuse('invalid_params', `Unsupported mode '${mode}'`);
+    // The effort asked for; else the session's own while the model takes it; else the model's default.
+    const takes = (effort: string) => { const efforts = thinkingOptionsFor(runtimeKind as 'codex' | 'claude', model); return !efforts.length || efforts.some(option => option.id === effort); };
+    const thinking = changes.thinking ?? (takes(session.mapping.thinking) ? session.mapping.thinking : undefined);
+    const { restore: _restore, thinking: _thinking, ...kept } = session.spec;
+    const spec: SessionSpec = { ...kept, mode, ...(teamChanged ? { workflow: team } : {}), ...(thinking !== undefined ? { thinking } : {}) };
+    let mapping: ResolvedSession;
+    try {
+      mapping = await resolveSession({
+        ...spec,
+        restore: { agent: session.mapping.agent.name, threadId: session.threadId || 'unstarted', runtime: runtimeKind, model, ...(teamChanged ? {} : { workflow: session.mapping.workflow }) },
+      }, { templates: options.templates, library: options.libraryDir, language: options.language, initialize: false });
+    } catch (error) {
+      const message = errorData(error).message;
+      return refuse(/^Team '[^']*' not found/.test(message) ? 'team_not_found' : /different runtime/.test(message) ? 'runtime_mismatch' : /different ALP agent/.test(message) ? 'agent_mismatch' : 'invalid_params', message);
+    }
+    const graph = teamChanged ? (mapping.team ? mapping.team.delegation : await resolveDelegation(projectRoot)) : session.graph;
+    const shape: ConfigureShape = { mapping, graph, spec };
+    const proposed = await effectiveConfig(session, shape);
+    const plan: ConfigurePlan = { shape, current, proposed, changes: changesOf(current, proposed) };
+    const refused = (reason: ConversationErrorReason, message: string): ConfigurePlan => ({ ...plan, refusal: { reason, message } });
+    if (mapping.runtimeKind !== runtimeKind) return refused('runtime_mismatch', `A session keeps its runtime (${label(runtimeKind)}); start a new session for another runtime`);
+    if (mapping.agent.name !== session.mapping.agent.name) return refused('agent_mismatch', 'A session keeps its agent; start a new session for another agent');
+    const agent = session.mapping.agent.name;
+    if (teamChanged && agent === mainOf(session.mapping) && agent !== mainOf(mapping)) return refused('agent_mismatch', `Team ${mapping.team?.label ?? team}'s main agent is ${mainOf(mapping)}, not ${agent}; start a new session with that team`);
+    // Never more permissions: the mode asked for stays within the profile and READ_ONLY_AGENTS, and a
+    // team or effort change never raises the mode the session runs with.
+    if (changes.mode !== undefined && mapping.mode !== changes.mode) return refused('permission_escalation', READ_ONLY_AGENTS.includes(agent) ? 'Advisors and the supervisor must remain read-only' : `Permission profile ${mapping.permissions?.name ?? ''} allows at most ${mapping.permissions?.base ?? mapping.mode}`.replace('profile  allows', 'profile allows'));
+    if (changes.mode === undefined && !withinMode(mapping.mode, session.mapping.mode)) return refused('permission_escalation', `The change would run the session in ${mapping.mode}, beyond its ${session.mapping.mode}`);
+    if (runtimeKind === 'antigravity' && mapping.mode !== session.mapping.mode) return refused('runtime_unsupported', 'Antigravity sessions keep their mode');
+    const before = executablesOf(session.mapping);
+    const added = [...executablesOf(mapping)].filter(entry => !before.has(entry));
+    if (added.length) return refused('permission_escalation', `The change would give the session commands it did not run (${added.map(entry => entry.split(':').slice(0, 2).join(' ')).join(', ')}); start a new session for it`);
+    if (proposed.delegates.length && !session.delegation) return refused('invalid_params', 'This session\'s client cannot show assignments, so it cannot take a team that delegates');
+    return plan;
+  }
+
+  /** previewConfigure(): see AlpRuntime.previewConfigure. */
+  async function previewConfigureSession(sessionId: string, changes: ConfigureChanges): Promise<ConfigurePreview> {
+    const session = sessions.get(sessionId);
+    if (!session || session.closed) throw new ConversationError('session_busy', 'The session is not open');
+    const plan = await planConfigure(session, changes ?? {});
+    const busy = plan.changes.length ? restartRefusal(sessionId, session) : undefined;
+    const teams = (await listTeams(session.mapping.agent.projectRoot, { library: options.libraryDir, templates: options.templates }))
+      .filter(team => !team.error)
+      .map(team => ({ id: team.id, label: team.label ?? team.id, ...(team.description ? { description: team.description } : {}) }));
+    return {
+      current: plan.current, proposed: plan.proposed, changes: plan.changes,
+      restart: plan.changes.some(change => change !== 'mode'),
+      allowed: !plan.refusal && !busy,
+      ...(plan.refusal ? { reason: plan.refusal.reason as ConfigurePreview['reason'], message: plan.refusal.message } : busy ? { reason: 'session_busy' as const, message: busy } : {}),
+      teams,
+    };
+  }
+
+  /** reconfigure(): see AlpRuntime.reconfigure. */
+  async function reconfigureSession(sessionId: string, changes: ConfigureChanges, { fresh = false }: { fresh?: boolean } = {}): Promise<ConfigureResult> {
+    const session = sessions.get(sessionId);
+    const busy = restartRefusal(sessionId, session);
+    if (busy) throw new ConversationError(session && (session.parent || session.role === 'supervisor') ? 'not_root' : 'session_busy', busy);
+    const live = session!;
+    const plan = await planConfigure(live, changes ?? {});
+    if (plan.refusal) throw new ConversationError(plan.refusal.reason, plan.refusal.message);
+    // Its files were read meanwhile: the tree must still be idle.
+    const after = restartRefusal(sessionId, live);
+    if (after) throw new ConversationError('session_busy', after);
+    if (!plan.changes.length) return { session: snapshot(sessionId, live), effective: plan.current, status: 'unchanged', restarted: false };
+    const agent = live.mapping.agent.name;
+    if (plan.changes.every(change => change === 'mode')) {
+      // Permissions alone change as session.configure { mode } changes them, without a restart.
+      await configureSession(sessionId, { mode: plan.shape.mapping.mode });
+      runLog(rootOf(sessionId), { event: 'session.configured', sessionId, agent, changes: plan.changes, mode: plan.shape.mapping.mode });
+      return { session: snapshot(sessionId, live), effective: { ...plan.proposed, instructionsSha: plan.current.instructionsSha }, status: 'applied', restarted: false };
+    }
+    if (!fresh && !live.threadId) throw new ConversationError('runtime_unsupported', 'This session keeps no native conversation to continue');
+    const binding: NativeBinding | undefined = fresh ? undefined : { threadId: live.threadId, ...(live.base ? { base: live.base } : {}) };
+    const from = { model: live.mapping.model, thinking: live.mapping.thinking, team: live.mapping.workflow.mode, mode: live.mapping.mode };
+    const to = { model: plan.shape.mapping.model, thinking: plan.shape.mapping.thinking, team: plan.shape.mapping.workflow.mode, mode: plan.shape.mapping.mode };
+    let native: any;
+    try {
+      native = await restartNative(sessionId, live, binding, true, plan.shape);
+      // The runtime's own word on what it took: Codex answers the model it resumed the thread with.
+      if (live.runtimeKind === 'codex' && typeof native?.model === 'string' && native.model !== to.model) throw new ConversationError('native_refused', `Codex continued the conversation with ${native.model}, not ${to.model}`);
+    } catch (error) {
+      runLog(rootOf(sessionId), { event: 'session.configure_failed', sessionId, agent, from, to, error: errorData(error).message });
+      // The session keeps its configuration: a process with it restarts on the same conversation.
+      try {
+        if (live.closed) throw error;
+        await restartNative(sessionId, live, fresh ? undefined : binding, false);
+      } catch (reopen) {
+        // Neither starts: the session fails as a provider failure does; its record keeps the old configuration.
+        live.pending = false;
+        if (!live.closed) failSession(sessionId, live, reopen);
+      }
+      if (error instanceof ConversationError) throw error;
+      throw new ConversationError('native_refused', `The runtime did not take the new configuration; the session keeps its own: ${errorData(error).message}`);
+    }
+    live.mapping = plan.shape.mapping;
+    live.graph = plan.shape.graph;
+    live.spec = plan.shape.spec;
+    runLog(rootOf(sessionId), { event: 'session.configured', sessionId, agent, changes: plan.changes, from, to, threadId: live.threadId, native: { model: native?.model, reasoningEffort: native?.reasoningEffort } });
+    if (plan.changes.includes('team')) {
+      // The old team's supervisor ends at this boundary (it reviews nothing: restartRefusal saw to it);
+      // the new team's, if it has one, starts beside the root as at open.
+      const old = live.supervisor;
+      if (old) { live.supervisor = undefined; await closeSession(old).catch(() => {}); }
+      if (supervises(live)) void enqueue(() => openSupervisor(sessionId));
+    }
+    const updated = snapshot(sessionId, live);
+    emit(sessionId, { type: 'session.updated', session: updated });
+    return {
+      session: updated, effective: { ...plan.proposed, ...(live.instructionsSha ? { instructionsSha: live.instructionsSha } : {}) }, status: 'applied', restarted: true,
+      native: { ...(typeof native?.model === 'string' ? { model: native.model } : {}), ...(typeof native?.reasoningEffort === 'string' ? { reasoningEffort: native.reasoningEffort } : {}) },
+    };
   }
 
   /** branch(): makes the native conversation a fork or rewind continues; see AlpRuntime.branch. */
@@ -3859,6 +4046,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
                 clientUserMessageId:
                   prompt.clientMessageId,
                 input: nativeInput,
+                // Codex keeps a turn's model and effort for later turns too; ALP names both on every turn (§12.9).
+                ...(session.runtimeKind === 'codex' ? { model: session.mapping.model } : {}),
                 effort:
                   session.mapping.thinking,
                 approvalPolicy: codexApproval(session.mapping),
@@ -4058,6 +4247,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     rebind: (sessionId, binding) => enqueue(() => rebindSession(sessionId, binding)),
 
     reload: sessionId => enqueue(() => reloadSession(sessionId)),
+
+    previewConfigure: (sessionId, changes) => previewConfigureSession(sessionId, changes),
+
+    reconfigure: (sessionId, changes, options) => enqueue(() => reconfigureSession(sessionId, changes, options)),
 
     hold: sessionId => {
       const session = sessions.get(sessionId);

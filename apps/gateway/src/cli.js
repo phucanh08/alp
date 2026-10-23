@@ -33,6 +33,8 @@ files.read (list directories, read text files and, with project.read, Git diffs 
 --permission for each credential that may read file contents.
 attachments.write (upload files into alpd's attachment store and send them in prompts; used with session.write) is never a
 default and implies nothing: name it with --permission.
+session.team.write (change the team of a live root session; used with session.write) is never a default and implies
+nothing: name it with --permission. session.write alone changes a live root's model and effort within --mode.
 session.write also forks and rewinds a root's conversation (session.fork needs session.read too); only the
 conversation changes, never a file. A token is printed once; only its hash is kept.
 Files live in $ALP_GATEWAY_HOME, else $ALP_HOME/gateway. The gateway never starts alpd.`;
