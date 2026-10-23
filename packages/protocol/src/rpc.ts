@@ -34,7 +34,7 @@ export type TerminalNotification = { jsonrpc: '2.0'; method: 'terminal.event'; p
 export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
 export type HistoryPage = { generation: string; items: HistoryItem[]; olderCursor?: string; hasOlder: boolean; tipCursor: number };
 
-export type Capability = 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.configure.live' | 'terminal' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
+export type Capability = 'session.interrupt.turn' | 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.configure.live' | 'terminal' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -178,7 +178,7 @@ export type RpcMethodMap = {
     /** `{}` from a daemon without prompt.receipts. */
     result: { outcome?: 'accepted' | 'failed'; error?: AlpError; duplicate?: boolean; durable?: boolean };
   };
-  'session.interrupt': { params: { sessionId: string }; result: Empty };
+  'session.interrupt': { params: { sessionId: string; /** With session.interrupt.turn, cancel only this turn. */ turnId?: string }; result: { /** Conditional request only: false means the named turn is no longer active. */ interrupted?: boolean } };
   /**
    * Changes a session's permissions mode while idle; with capability `session.configure.live`, also a live
    * root's model, effort or team (§12.9): those need requestId and ifGeneration, apply at the idle barrier

@@ -142,6 +142,8 @@ export type AlpRuntime = {
   prompt(sessionId: string, input: PromptInput): Promise<void>;
   /** Cancels the running turn and closes the whole subtree. */
   interrupt(sessionId: string): Promise<void>;
+  /** Atomically cancels only this active turn; false leaves the session and subtree untouched. */
+  interruptTurn?(sessionId: string, turnId: string): Promise<boolean>;
   /** Changes permission mode while idle; undefined keeps the current mode. */
   configure(sessionId: string, changes: { mode?: string }): Promise<SessionSnapshot>;
   close(sessionId: string): Promise<void>;

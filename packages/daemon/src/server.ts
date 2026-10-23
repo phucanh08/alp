@@ -1470,7 +1470,12 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       return conversation.resumeCommand(sessionId);
     },
 
-    async 'session.interrupt'(_connection, { sessionId }) {
+    async 'session.interrupt'(_connection, { sessionId, turnId }) {
+      if (turnId !== undefined) {
+        if (typeof turnId !== 'string' || !turnId) throw new RpcError(-32602, 'turnId must be a nonempty string');
+        if (!runtime.interruptTurn) throw new RpcError(ERROR.unavailable, 'This runtime cannot interrupt a specific turn');
+        return { interrupted: await runtime.interruptTurn(sessionId, turnId) };
+      }
       await runtime.interrupt(sessionId);
       return {};
     },
@@ -1719,7 +1724,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...(conversation?.reloads ? [CAPABILITY.sessionReload] : []), ...(conversation?.configures ? [CAPABILITY.sessionConfigureLive] : []), ...(conversation ? [CAPABILITY.sessionResumeCommand] : []), ...operations.capabilities];
+  const capabilities = [...(runtime.interruptTurn ? [CAPABILITY.sessionInterruptTurn] : []), CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...(conversation?.reloads ? [CAPABILITY.sessionReload] : []), ...(conversation?.configures ? [CAPABILITY.sessionConfigureLive] : []), ...(conversation ? [CAPABILITY.sessionResumeCommand] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {

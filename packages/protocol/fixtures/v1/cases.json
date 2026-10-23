@@ -7104,6 +7104,63 @@
      "reason": "crashed"
     }
    }
+  },
+  {
+   "name": "conditional interrupt params",
+   "check": "params",
+   "method": "session.interrupt",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "name": "conditional interrupt with an empty turn",
+   "check": "params",
+   "method": "session.interrupt",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "turnId": ""
+   }
+  },
+  {
+   "name": "conditional interrupt with a non-string turn",
+   "check": "params",
+   "method": "session.interrupt",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "turnId": 42
+   }
+  },
+  {
+   "name": "conditional interrupt canceled the target",
+   "check": "result",
+   "method": "session.interrupt",
+   "valid": true,
+   "value": {
+    "interrupted": true
+   }
+  },
+  {
+   "name": "conditional interrupt left another turn untouched",
+   "check": "result",
+   "method": "session.interrupt",
+   "valid": true,
+   "value": {
+    "interrupted": false
+   }
+  },
+  {
+   "name": "conditional interrupt with a non-boolean answer",
+   "check": "result",
+   "method": "session.interrupt",
+   "valid": false,
+   "value": {
+    "interrupted": "yes"
+   }
   }
  ]
 }

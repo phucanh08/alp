@@ -4340,6 +4340,12 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }),
 
     interrupt: sessionId => enqueue(() => interruptSession(sessionId)),
+    interruptTurn: (sessionId, turnId) => enqueue(async () => {
+      // Compare in the same admission slot as the cancellation, before any side effect or await.
+      if (sessions.get(sessionId)?.active !== turnId) return false;
+      await interruptSession(sessionId);
+      return true;
+    }),
 
     configure: (sessionId, changes) => enqueue(() => configureSession(sessionId, changes)),
 
