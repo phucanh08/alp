@@ -158,8 +158,13 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
    * subagent (children) once it works now or shows in the history the timeline holds (promote).
    */
   const members = new Map<string, { root: string; session: SessionSummary }>();
-  /** The session list attaches that start together (the bridge's start, a reconnect) share. */
-  let listing: { connection: DaemonConnection; sessions: Promise<SessionSummary[]> } | undefined;
+  /** The session list attaches that start together (the bridge's start, a reconnect) share, as each session's listed members. */
+  let listing: { connection: DaemonConnection; below: Promise<Map<string, SessionSummary[]>> } | undefined;
+  /**
+   * Subagents a rewind set aside that clients were not told of yet, by root: the attach that settles next
+   * tells them, whichever it is (the one that found them may be replaced or fail first).
+   */
+  const setAside = new Map<string, Set<string>>();
   const childTimelines = new InMemoryAgentTimelineStore();
   const childDeltas = new Map<string, TimelineDeltas>();
 
@@ -466,8 +471,6 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       // nothing more from its next step on, and its awaiters wait for the later one instead (t-b589 c, h).
       const current = () => attaching.get(root) === pending;
       const later = () => attaching.get(root);
-      /** Subagents a rewind set aside, for clients to drop. */
-      const dropped = new Set<string>();
       try {
         for (let attempt = 1; ; attempt++) {
           timelines.initialize(root);
@@ -487,11 +490,11 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
           try { if (connection.capabilities?.includes('session.history')) page = await connection.request('session.history', { sessionId: root }); }
           catch (error: any) { if (error.code !== -32601 && error.code !== 1005) throw error; }
           if (!current()) return later();
-          for (const id of learnTree(root, tree, page)) dropped.add(id);
+          learnTree(root, tree, page);
           // Without a page too, the replay and live events apply once each by their cursor (t-b589 g).
           durable.set(root, { ...(page ? { page } : {}), events: new Map(), floor: 0 });
           if (page) {
-            await seedHistoryChildren(connection, root, page.items);
+            await seedHistoryChildren(connection, root, page.items, current);
             if (!current()) return later();
             for (const item of page.items) { const event = historyEvent(root, item); if (event.event.type !== 'question' && event.event.type !== 'question.resolved') onEvent(event, root); }
           }
@@ -522,7 +525,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
           durable.get(root)!.floor = Math.max(tip, typeof answer?.cursor === 'number' ? answer.cursor : 0);
           replaying.delete(root);
           // What came after the page is what happened since the read; without a page all of it is history.
-          settle(root, dropped, page ? after : []);
+          settle(root, page ? after : []);
           return;
         }
       }
@@ -540,33 +543,35 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
   /** The members of a root's tree among alpd's sessions (session.list, closed and archived ones too). */
   async function treeOf(connection: DaemonConnection, root: string) {
     if (listing?.connection !== connection) {
-      const entry = { connection, sessions: connection.request<{ sessions: SessionSummary[] }>('session.list', { includeClosed: true, includeArchived: true }).then(answer => answer.sessions ?? []) };
+      const below = connection.request<{ sessions: SessionSummary[] }>('session.list', { includeClosed: true, includeArchived: true }).then(answer => {
+        const index = new Map<string, SessionSummary[]>();
+        for (const session of answer.sessions ?? []) if (session.parentId) index.set(session.parentId, [...index.get(session.parentId) ?? [], session]);
+        return index;
+      });
+      const entry = { connection, below };
       listing = entry;
       // Attaches that start while the list is read share it; a later one reads again.
-      void entry.sessions.then(() => {}, () => {}).then(() => { if (listing === entry) listing = undefined; });
+      void below.then(() => {}, () => {}).then(() => { if (listing === entry) listing = undefined; });
     }
-    const sessions = await listing.sessions;
-    const byId = new Map(sessions.map(session => [session.id, session]));
+    const below = await listing.below;
     const tree = new Map<string, SessionSummary>();
-    for (const session of sessions) {
-      let parent = session.parentId;
-      for (let depth = 0; parent && parent !== root && depth < 32; depth++) parent = byId.get(parent)?.parentId;
-      if (session.parentId && parent === root) tree.set(session.id, session);
+    const next = [root];
+    for (let depth = 0; next.length && depth < 32; depth++) {
+      for (const parent of next.splice(0)) for (const session of below.get(parent) ?? []) if (!tree.has(session.id)) { tree.set(session.id, session); next.push(session.id); }
     }
     return tree;
   }
 
   /**
-   * The root's members as alpd lists them now; which of its subagents a rewind set aside (answered, for
-   * clients to drop: t-b589 d); and the members at work, which are subagents whether or not the history
-   * read shows them. A subagent was set aside when the page covers where it opened but holds no event
+   * The root's members as alpd lists them now; which of its subagents a rewind set aside (kept in setAside
+   * for clients to drop: t-b589 d); and the members at work, which are subagents whether or not the history
+   * read shows them (an idle or closed one becomes one at its first event, or where the history shows it). A subagent was set aside when the page covers where it opened but holds no event
    * there (a rewind keeps the cursors of what it keeps), or when the page is the whole history and holds
    * none of its events.
    */
   function learnTree(root: string, tree: Map<string, SessionSummary>, page: HistoryPage | undefined) {
     for (const [id, entry] of members) if (entry.root === root) members.delete(id);
     for (const [id, session] of tree) members.set(id, { root, session });
-    const dropped: string[] = [];
     if (page) {
       const cursors = new Set(page.items.map(item => item.cursor));
       const sessions = new Set(page.items.flatMap(item => 'oversized' in item ? [] : [item.sessionId]));
@@ -576,11 +581,10 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
         const cut = child.openedCursor !== undefined && child.openedCursor >= first && !cursors.has(child.openedCursor);
         if (!cut && (page.hasOlder || sessions.has(child.id) || page.items.some(item => 'oversized' in item))) continue;
         children.delete(child.id); childTimelines.delete(child.id); childDeltas.delete(child.id);
-        dropped.push(child.id);
+        setAside.set(root, (setAside.get(root) ?? new Set()).add(child.id));
       }
     }
-    for (const [id, session] of tree) if (session.status !== 'closed' && session.status !== 'error') promote(id, false);
-    return dropped;
+    for (const [id, session] of tree) if (session.status === 'running' || session.busy || session.activeTurnId) promote(id, false);
   }
 
   /**
@@ -588,8 +592,9 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
    * and what the root's own turns did since the history read (`window`): a turn that ended there asks for
    * attention, one that started clears it, as live events would. Nothing of the replay is sent as new.
    */
-  function settle(root: string, dropped: Set<string>, window: Envelope[]) {
-    for (const id of dropped) if (!children.has(id)) broadcast({ type: 'agent.provider_subagents.update', payload: { kind: 'remove', parentAgentId: root, subagentId: id } });
+  function settle(root: string, window: Envelope[]) {
+    for (const id of setAside.get(root) ?? []) if (!children.has(id)) broadcast({ type: 'agent.provider_subagents.update', payload: { kind: 'remove', parentAgentId: root, subagentId: id } });
+    setAside.delete(root);
     for (const child of children.values()) if (child.root === root) publishChild(child);
     let raised: { reason: 'finished' | 'error'; at: string } | undefined;
     let changed = false;
@@ -606,22 +611,24 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     if (refreshing) void refresh().catch(() => {});
   }
 
-  async function seedHistoryChildren(connection: DaemonConnection, root: string, items: HistoryPage['items']) {
+  /** The members a history page shows, as subagents; it stops once `current` says the read was replaced. */
+  async function seedHistoryChildren(connection: DaemonConnection, root: string, items: HistoryPage['items'], current: () => boolean) {
     const pending = new Set<string>();
     async function seed(id: string, depth = 0): Promise<void> {
-      if (id === root || children.has(id) || promote(id, false)) return;
+      if (!current() || id === root || children.has(id) || promote(id, false)) return;
       if (depth >= 32 || pending.has(id)) throw new Error('Invalid history ancestry');
       pending.add(id);
       // A member alpd did not list yet (it opened after the list was read).
       const { session } = await connection.request<{ session: SessionSummary }>('session.get', { sessionId: id });
       if (!session?.parentId) throw new Error('History child is outside its tree');
       await seed(session.parentId, depth + 1);
+      if (!current()) return;
       childOpened({ sessionId: id, epoch: 'history', seq: 0, ts: session.createdAt ?? '', event: { type: 'session.opened', session, cwd: session.projectRoot, effective: { model: session.model, thinking: session.thinking } } });
       const child = children.get(id)!;
       child.status = statusOf(session);
       pending.delete(id);
     }
-    for (const item of items) if (!('oversized' in item)) await seed(item.sessionId);
+    for (const item of items) if (!('oversized' in item) && current()) await seed(item.sessionId);
   }
 
   function historyEvent(root: string, item: HistoryPage['items'][number]): Envelope {
@@ -635,7 +642,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     const page = await connection.request('session.history', { sessionId: root, before: cached.page.olderCursor }) as HistoryPage;
     if (durable.get(root) !== cached) return;
     const known = new Set(children.keys());
-    await seedHistoryChildren(connection, root, page.items);
+    await seedHistoryChildren(connection, root, page.items, () => durable.get(root) === cached);
     if (durable.get(root) !== cached) return;
     for (const item of page.items) { const event = historyEvent(root, item); cached.events.set(event.cursor!, event); }
     cached.page = page;
@@ -697,6 +704,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       childDeltas.delete(child.id);
     }
     for (const [id, entry] of [...members]) if (entry.root === root) members.delete(id);
+    setAside.delete(root);
   }
 
   /** Whether alpd rewinds this root's conversation now (capability session.rewind and the root's own support). */

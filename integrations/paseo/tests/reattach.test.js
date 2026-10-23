@@ -173,7 +173,7 @@ const ended = (cursor, turnId, state = 'completed') => env(cursor, 'r1', { type:
  * A scripted alpd connection. `history(call)` and `attach(params, call, listener)` answer by call number;
  * `sessions` is what session.list answers.
  */
-function scripted({ capabilities = ['session.history'], sessions = [ROOT], history, attach, extra = () => undefined }) {
+function scripted({ capabilities = ['session.history'], sessions = [ROOT], history, attach, get, extra = () => undefined }) {
   const world = { calls: [], listener: () => {}, sessions };
   let histories = 0;
   let attaches = 0;
@@ -184,7 +184,7 @@ function scripted({ capabilities = ['session.history'], sessions = [ROOT], histo
       world.calls.push({ method, params });
       if (method === 'session.list') return { sessions: params?.rootsOnly ? world.sessions.filter(session => !session.parentId) : world.sessions };
       if (method === 'question.list') return { questions: [] };
-      if (method === 'session.get') return { session: world.sessions.find(session => session.id === params.sessionId) };
+      if (method === 'session.get') return get ? get(params) : { session: world.sessions.find(session => session.id === params.sessionId) };
       if (method === 'session.history') return history(histories++, params);
       if (method === 'session.attach') return attach(params, attaches++, world.listener);
       const answer = await extra(method, params);
@@ -370,4 +370,69 @@ test('an event at or before the cursor an attach covered that comes after its an
   world.listener(say(7, 'seven'));
   await until(async () => shown((await timeline(world.agents, 'r1')).payload.entries).includes('assistant_message:seven'), 'the live item');
   assert.deepEqual(shown((await timeline(world.agents, 'r1')).payload.entries), ['assistant_message:five', 'assistant_message:six', 'assistant_message:seven']);
+});
+
+test('a rewind\'s set-aside members are removed for clients by the attach that settles, when the one that found them was replaced', async t => {
+  const NEXT = 'c'.repeat(32);
+  const kept = opened(2, 'c-kept');
+  const gone = opened(4, 'c-gone');
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  let reached; const atGate = new Promise(resolve => { reached = resolve; });
+  const rewound = { generation: NEXT, hasOlder: false, tipCursor: 9, items: [say(1, 'one'), kept, say(3, 'kept says hi', 'c-kept'), env(9, 'r1', { type: 'item', item: { kind: 'notice', id: 'rewind:br', level: 'info', text: 'Conversation rewound' } })] };
+  const world = scripted({
+    sessions: [{ ...ROOT, status: 'closed' }, { ...kept.event.session, status: 'closed' }, { ...gone.event.session, status: 'closed' }],
+    history: call => call === 0 ? { generation: G1, hasOlder: false, tipCursor: 5, items: [say(1, 'one'), kept, say(3, 'kept says hi', 'c-kept'), gone, say(5, 'gone says hi', 'c-gone')] } : rewound,
+    // The attach after the history.reset waits; a reload replaces it meanwhile (as a rewind's own answer does).
+    async attach(params, call) { if (call === 1) { reached(); await gate; } return { session: ROOT, cursor: 9 }; },
+    extra: method => method === 'session.create' ? {} : undefined,
+  });
+  t.after(() => world.agents.close());
+  await world.agents.start();
+  assert.deepEqual((await subagents(world.agents, 'r1')).subagents.map(subagent => subagent.id).sort(), ['c-gone', 'c-kept']);
+  world.listener(env(undefined, 'r1', { type: 'history.reset', generation: NEXT, reason: 'rewind', branchId: 'br' }));
+  await atGate;
+  await world.agents.handlers.refresh_agent_request({ type: 'refresh_agent_request', agentId: 'r1', requestId: 'reload' });
+  assert.deepEqual((await subagents(world.agents, 'r1')).subagents.map(subagent => subagent.id), ['c-kept']);
+  assert.ok(world.frames.some(frame => frame.type === 'agent.provider_subagents.update' && frame.payload.kind === 'remove' && frame.payload.subagentId === 'c-gone'), 'clients are told the member is gone');
+  release();
+});
+
+test('a listed member that is idle is no subagent until it shows in the history or acts', async t => {
+  const idle = { ...ROOT, id: 'sup', parentId: 'r1', agent: 'supervisor', status: 'idle' };
+  const world = scripted({
+    sessions: [ROOT, idle],
+    history: () => ({ generation: G1, hasOlder: false, tipCursor: 1, items: [say(1, 'one')] }),
+    attach: () => ({ session: ROOT, cursor: 1 }),
+  });
+  t.after(() => world.agents.close());
+  await world.agents.start();
+  assert.deepEqual((await subagents(world.agents, 'r1')).subagents, []);
+  world.listener(say(2, 'supervisor says hi', 'sup'));
+  await until(async () => (await subagents(world.agents, 'r1')).subagents.length === 1, 'the member acts');
+  assert.deepEqual(await subagentRows(world.agents, 'r1', 'sup'), ['assistant_message:supervisor says hi']);
+});
+
+test('an attach a later one replaced while it looked up a member of its page adds no subagent', async t => {
+  // A member alpd did not list yet: the first page shows it, the attach looks it up; a reload replaces the attach meanwhile.
+  const late = { ...ROOT, id: 'late', parentId: 'r1', agent: 'peer', status: 'closed' };
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  let reached; const atGate = new Promise(resolve => { reached = resolve; });
+  const world = scripted({
+    sessions: [{ ...ROOT, status: 'closed' }],
+    history: call => call === 0
+      ? { generation: G1, hasOlder: false, tipCursor: 2, items: [say(1, 'one'), say(2, 'late says hi', 'late')] }
+      : { generation: G2, hasOlder: false, tipCursor: 1, items: [say(1, 'one')] },
+    async get(params) { if (params.sessionId === 'late') { reached(); await gate; } return { session: late }; },
+    attach: () => ({ session: ROOT, cursor: 2 }),
+    extra: method => method === 'session.create' ? {} : undefined,
+  });
+  t.after(() => world.agents.close());
+  await world.agents.start();
+  const first = timeline(world.agents, 'r1');
+  await atGate;
+  await world.agents.handlers.refresh_agent_request({ type: 'refresh_agent_request', agentId: 'r1', requestId: 'reload' });
+  assert.deepEqual((await subagents(world.agents, 'r1')).subagents, []);
+  release();
+  assert.equal((await first).payload.error, null);
+  assert.deepEqual((await subagents(world.agents, 'r1')).subagents, [], 'the replaced attach\'s member is not added');
 });
