@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type { SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
 import { encodeTerminalStreamFrame, TerminalStreamOpcode } from '@getpaseo/protocol/binary-frames/terminal';
@@ -510,7 +511,7 @@ export function createTerminals({
       poll();
     },
 
-    async create_terminal_request(message: Inbound<'create_terminal_request'>) {
+    async create_terminal_request(message: Inbound<'create_terminal_request'>, client) {
       const reply = (fields: { terminal: PaseoTerminal & { cwd: string } | null; error: string | null }) =>
         ({ type: 'create_terminal_response', payload: { requestId: message.requestId, ...fields } }) satisfies Outbound;
       if (!await available()) return reply({ terminal: null, error: TERMINALS_OFF });
@@ -520,7 +521,7 @@ export function createTerminals({
         const workspace = workspaceOf(await workspaces(), message.cwd, message.workspaceId);
         const { cols, rows } = sizeOf(message.size);
         const connection = await daemon();
-        const { terminal } = await connection.request('terminal.create', { workspaceId: workspace.id, cols, rows, requestId: `paseo:${message.requestId}`.slice(0, 128) });
+        const { terminal } = await connection.request('terminal.create', { workspaceId: workspace.id, cols, rows, requestId: `paseo:${createHash('sha256').update(`${client.clientId}\0${message.requestId}`).digest('hex')}` });
         const info = terminal as TerminalInfo;
         made = streams.get(info.terminalId) ?? stream(info, workspace);
         if (made.state === 'detached') await attach(made);
