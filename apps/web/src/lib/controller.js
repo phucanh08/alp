@@ -230,7 +230,6 @@ export function initialState(gateway = '') {
  * }} ControllerOptions
  */
 
-/** A file of a message could not be uploaded (#121 J): which, and the failure. */
 /** A message was discarded while its files were uploading: its upload stops, nothing is sent. */
 class DiscardedError extends Error {
   constructor() {
@@ -239,6 +238,7 @@ class DiscardedError extends Error {
   }
 }
 
+/** A file of a message could not be uploaded (#121 J): which, and the failure. */
 class UploadError extends Error {
   /** @param {string} fileName @param {Failure} failure @param {boolean} dropped the connection went away under it */
   constructor(fileName, failure, dropped) {
@@ -2377,7 +2377,8 @@ export class Controller {
    * After session.prompt was refused because the host no longer has (not_found) or cannot read
    * (attachment_unavailable) a committed file of `prompt`: those files lose their attachment id and
    * get a new attempt (a requestId of their own), so Retry uploads them afresh. attachment_unavailable
-   * names the file (data.attachmentId) or, without it, means all of them; for not_found, attachment.get
+   * from alpd itself may name the file (data.attachmentId); through the gateway, which passes only the
+   * reason, it means all of them; for not_found, attachment.get
    * tells which are gone (a not_found about something else leaves them as they are).
    * @param {PendingPrompt} prompt @param {unknown} error
    */

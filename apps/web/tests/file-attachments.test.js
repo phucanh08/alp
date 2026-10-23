@@ -395,7 +395,26 @@ test('a prompt refused because the host lost a file uploads that file afresh on 
   assert.equal(world.host.receipts.size, 1);
 });
 
-test('attachment_unavailable re-uploads the file it names; a not_found about the session keeps the files', async t => {
+test('attachment_unavailable as the gateway sends it (its reason only) re-uploads every committed file of the message', async t => {
+  const world = hostWithStore();
+  let refused = false;
+  world.host.intercept.set('session.prompt', (_params, _connection, { fail }) => {
+    if (refused) return undefined;
+    refused = true;
+    fail(1005, 'The attachment store of the daemon host cannot be used now', { reason: 'attachment_unavailable' });
+    return 'handled';
+  });
+  const controller = await connected(t, world);
+  const { added } = await readFiles([], [file('a.txt', [97], 'text/plain'), file('b.txt', [98], 'text/plain')], LIMITS);
+  await controller.sendPrompt('two', undefined, [], added);
+  const [failed] = controller.getState().prompts;
+  assert.deepEqual(failed.files.map(entry => [entry.attachmentId, entry.attempt ?? 0]), [[undefined, 1], [undefined, 1]]);
+  await controller.retryPrompt(failed.id);
+  await until(() => !controller.getState().prompts.length, 'delivered');
+  assert.equal(world.store.begins.length, 4, 'both uploaded again, once each');
+});
+
+test('attachment_unavailable from alpd itself re-uploads the file it names; a not_found about the session keeps the files', async t => {
   const world = hostWithStore();
   /** @type {any[]} */
   const refusals = [
