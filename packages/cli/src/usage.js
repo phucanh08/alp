@@ -12,6 +12,7 @@ const USAGE = `Usage:
   alp acp                                serve ALP to an editor (Zed, JetBrains) over the Agent Client Protocol on stdio
   alp web [--print]                      open the local web app alpd serves; --print only prints its address
   alp web pair [--on|--off]              the link that pairs Paseo's app on another device through the relay; --on or --off turns the relay on or off
+  alp terminal <allow [--paseo] --yes|deny [--paseo]|status> [--json]   remote terminals (a shell as you on this host; a workspace is not a sandbox), off by default
   alp doctor [--project DIR] [--fix] [--json]   check this machine and project; --fix repairs what is safe to
   alp backup [-o FILE] [--project DIR]... [--no-projects] [--stop] [--json]   sessions, settings, library and tasks in one file
   alp backup verify <file> [--json] | alp backup list [--json]
