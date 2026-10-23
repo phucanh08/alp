@@ -591,43 +591,63 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
   }
 
-  async function closeSession(sessionId: string) {
-    const session = sessions.get(sessionId);
-    if (!session || session.closed) return;
+  // Failure callbacks and an opening call's catch can both retire the same record.
+  // Keep the cleanup with that incarnation, even after its id has been reused.
+  const sessionClosures = new WeakMap<Session, Promise<void>>();
+  const openedSessions = new WeakSet<Session>();
+  const assignmentSessions = new WeakMap<Assignment, Session>();
+  function closeSession(sessionId: string, session = sessions.get(sessionId), notify = true): Promise<void> {
+    if (!session) return Promise.resolve();
+    const closing = sessionClosures.get(session);
+    if (closing) return closing;
+    if (session.closed) return Promise.resolve();
 
     session.closed = true;
-    cancelQuestions(sessionId);
-    approvalLedger.delete(sessionId);
-    releaseClaims(sessionId, session.mapping.agent.projectRoot);
-
-    await Promise.all(
-      [...session.children, ...(session.supervisor ? [session.supervisor] : [])].map(closeSession),
-    );
-
-    terminal(sessionId, session, 'canceled');
-    session.settle?.('canceled', 'Session closed');
-
-    await session.runtime.close();
-
-    // Copies of assignments that did not finish hold nothing to keep.
-    for (const assignment of session.assignments.values()) if (assignment.copy && !assignment.finished) await removeCopy(assignment.copy).catch(() => {});
-
-    for (const [assignmentId, { worktree }] of session.worktrees) {
-      await removeWorktree(worktree).catch(() => {});
-      runLog(rootOf(sessionId), { event: 'worktree.kept', assignmentId, branch: worktree.branch });
-    }
-    session.worktrees.clear();
-
-    sessions.delete(sessionId);
-
-    if (session.parent) {
-      const parent = sessions.get(session.parent);
-      parent?.children.delete(sessionId);
-      if (parent?.supervisor === sessionId) parent.supervisor = undefined;
+    const current = sessions.get(sessionId) === session;
+    const opened = openedSessions.has(session);
+    const parent = session.parent ? sessions.get(session.parent) : undefined;
+    const descendants = current ? [...session.children, ...(session.supervisor ? [session.supervisor] : [])]
+      .map(id => [id, sessions.get(id)] as const).filter((entry): entry is readonly [string, Session] => !!entry[1]) : [];
+    if (current) {
+      cancelQuestions(sessionId);
+      approvalLedger.delete(sessionId);
+      releaseClaims(sessionId, session.mapping.agent.projectRoot);
+      // terminal also touches questions and parent bookkeeping by id. Do it before
+      // yielding, while this is still the record registered under that id.
+      terminal(sessionId, session, 'canceled');
+      session.settle?.('canceled', 'Session closed');
     }
 
-    // Kept: a session resumed in this runtime goes on from its last seq, so (epoch, seq) never repeats.
-    emit(sessionId, { type: 'session.closed' });
+    const cleanup = (async () => {
+      await Promise.all(
+        descendants.map(([id, child]) => closeSession(id, child)),
+      );
+      await session.runtime.close();
+
+      // Copies of assignments that did not finish hold nothing to keep.
+      for (const assignment of session.assignments.values()) if (assignment.copy && !assignment.finished) await removeCopy(assignment.copy).catch(() => {});
+
+      for (const [assignmentId, { worktree }] of session.worktrees) {
+        await removeWorktree(worktree).catch(() => {});
+        runLog(rootOf(sessionId), { event: 'worktree.kept', assignmentId, branch: worktree.branch });
+      }
+      session.worktrees.clear();
+
+      // Every id-based side effect belongs to this incarnation, including the
+      // parent's membership and the event that tells viewers it is no longer live.
+      if (sessions.get(sessionId) !== session) return;
+      sessions.delete(sessionId);
+      if (session.parent && parent && sessions.get(session.parent) === parent) {
+        parent.children.delete(sessionId);
+        if (parent.supervisor === sessionId) parent.supervisor = undefined;
+      }
+
+      // An opening failure has no live incarnation to close. Its failure callback
+      // reports session.failed; an ordinary startup rejection is the open error.
+      if (notify && opened) emit(sessionId, { type: 'session.closed' });
+    })();
+    sessionClosures.set(session, cleanup);
+    return cleanup;
   }
 
   let runLogWrites = Promise.resolve();
@@ -2192,18 +2212,21 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   async function finishAssignment(parentId: string, parent: Session, assignment: Assignment, state: string, error?: unknown, quiet = false) {
     if (assignment.finished) return;
     assignment.finished = true;
+    const child = assignmentSessions.get(assignment);
     // alpd is stopping: the assignment stays in the live file and its task stays in progress, for the next alpd to continue.
     if (closed && inFlight.get(assignment.id)) {
       runLog(assignment.rootId, { event: 'assignment.interrupted', assignmentId: assignment.id, agent: assignment.agent, reason: 'alpd stopped' });
-      await closeSession(assignment.id);
+      if (child) await closeSession(assignment.id, child);
       if (assignment.lease && leases.get(assignment.lease)?.assignment === assignment.id) leases.delete(assignment.lease);
-      childContexts.delete(assignment.id);
-      parent.children.delete(assignment.id);
-      parent.assignments.delete(assignment.id);
+      if (!sessions.has(assignment.id) || sessions.get(assignment.id) === child) {
+        childContexts.delete(assignment.id);
+        parent.children.delete(assignment.id);
+      }
+      if (parent.assignments.get(assignment.id) === assignment) parent.assignments.delete(assignment.id);
       return;
     }
     // Ownership must reach durable storage before recovery evidence can disappear.
-    const resultChild = sessions.get(assignment.id);
+    const resultChild = child;
     try {
       if (assignment.worktree || writes(assignment.mode)) await assignmentResults.put({
         assignmentId: assignment.id,
@@ -2219,8 +2242,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
     // A crash while finishing never runs finished work again.
     void inFlight.remove(assignment.id);
-    const child = sessions.get(assignment.id);
-    if (child && state === 'failed' && child.active) terminal(assignment.id, child, 'failed', error);
+    if (child && sessions.get(assignment.id) === child && state === 'failed' && child.active) terminal(assignment.id, child, 'failed', error);
     assignment.ask?.resolve(toolResult(false, { error: 'Assignment ended' }));
 
     // Interim commentary stays in the child timeline; the final message is the answer.
@@ -2234,7 +2256,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       ...(error ? { error: errorData(error).message } : {}),
     };
 
-    await closeSession(assignment.id);
+    if (child) await closeSession(assignment.id, child);
     // Its native thread stays on disk, so its requesters can ask it about its work later.
     // An ACP agent cannot fork a session to answer questions about it.
     if (child?.threadId && child.mapping.keepThread && child.runtimeKind !== 'acp') {
@@ -2280,9 +2302,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     });
     if (!parent.closed) emit(parentId, { type: 'assignment', assignment: assignmentSnapshot(assignment, state) });
 
-    childContexts.delete(assignment.id);
-    parent.children.delete(assignment.id);
-    parent.assignments.delete(assignment.id);
+    if (!sessions.has(assignment.id) || sessions.get(assignment.id) === child) {
+      childContexts.delete(assignment.id);
+      parent.children.delete(assignment.id);
+    }
+    if (parent.assignments.get(assignment.id) === assignment) parent.assignments.delete(assignment.id);
     if (roleOf(parent.mapping, assignment.agent) === 'peer') {
       const root = sessions.get(assignment.rootId);
       if (root) root.peerCount--;
@@ -2856,10 +2880,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         thinking,
         mode: childMode,
       };
-      await openSession(childId, childSpec, 'skip', session.delegation);
+      await openSession(childId, childSpec, 'skip', session.delegation, assignment);
       admitted();
 
-      const child = sessions.get(childId);
+      const child = assignmentSessions.get(assignment);
+      if (child && sessions.get(childId) !== child) throw new Error('Child session was replaced during open');
       if (child) void runHooks(childId, child, 'assignment.start', { assignment: childId, brief: clip(args.task, 2000) }, args.taskId);
 
       if (
@@ -2966,10 +2991,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     });
   }
 
-  async function openSession(sessionId: string, spec: SessionSpec, history: 'replay' | 'skip', delegation = true): Promise<SessionSnapshot> {
-    return admission(() => openSessionAdmitted(sessionId, spec, history, delegation));
+  async function openSession(sessionId: string, spec: SessionSpec, history: 'replay' | 'skip', delegation = true, assignment?: Assignment): Promise<SessionSnapshot> {
+    return admission(() => openSessionAdmitted(sessionId, spec, history, delegation, assignment));
   }
-  async function openSessionAdmitted(sessionId: string, spec: SessionSpec, history: 'replay' | 'skip', delegation = true): Promise<SessionSnapshot> {
+  async function openSessionAdmitted(sessionId: string, spec: SessionSpec, history: 'replay' | 'skip', delegation = true, assignment?: Assignment): Promise<SessionSnapshot> {
     if (sessions.has(sessionId)) {
       throw new Error(
         'Session is already open',
@@ -3066,6 +3091,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       acknowledged: Promise.resolve(),
       worktrees: new Map(),
     };
+    if (assignment) assignmentSessions.set(assignment, session);
     // Pending until its thread exists: mail posted meanwhile waits for it, as in a restart.
     const finishPending = beginPending(session);
 
@@ -3079,7 +3105,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     try {
       await runtime.initialize();
 
-      if (session.closed) {
+      if (session.closed || sessions.get(sessionId) !== session) {
         throw new Error(
           'Session closed during initialization',
         );
@@ -3132,7 +3158,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       session.threadId =
         result.thread.id;
 
-      if (session.closed) {
+      if (session.closed || sessions.get(sessionId) !== session) {
         throw new Error(
           'Session closed during thread creation',
         );
@@ -3141,6 +3167,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       session.buffered = [];
       finishPending();
 
+      openedSessions.add(session);
       emit(sessionId, {
         type: 'session.opened',
         session: snapshot(sessionId, session),
@@ -3176,14 +3203,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       return snapshot(sessionId, session);
     } catch (error) {
       log.error(`${session.mapping.agent.name} could not start its ${session.runtimeKind} session`, { code: 'ALP_PROVIDER_START_FAILED', sessionId, rootId: rootOf(sessionId), agent: session.mapping.agent.name, provider: session.runtimeKind, error });
-      session.closed = true;
-      // Closed first: mail that waited for the open finds the session gone and stops.
+      // Share the retirement already started by a process failure, and never
+      // resolve the id to a replacement record when this open finishes late.
+      const cleanup = closeSession(sessionId, session, false);
       finishPending();
-      sessions.delete(
-        sessionId,
-      );
-
-      await runtime.close();
+      await cleanup;
 
       throw error;
     }
@@ -3210,17 +3234,18 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     });
     transport.onFailure((error) => {
       // A transport ALP already replaced reports nothing.
-      if (session.closed || session.runtime !== transport) return;
+      if (session.closed || session.runtime !== transport || sessions.get(sessionId) !== session) return;
       if (revivable(session)) void revive(sessionId, session, error);
       else failSession(sessionId, session, error);
     });
   }
 
   function failSession(sessionId: string, session: Session, error: unknown) {
+    if (session.closed || sessions.get(sessionId) !== session) return;
     log.error(`${session.mapping.agent.name}'s ${session.runtimeKind} session failed`, { code: 'ALP_PROVIDER_FAILED', sessionId, rootId: rootOf(sessionId), agent: session.mapping.agent.name, provider: session.runtimeKind, error });
     terminal(sessionId, session, 'failed', error);
     session.settle?.('failed', error);
-    void closeSession(sessionId);
+    void closeSession(sessionId, session);
     emit(sessionId, { type: 'session.failed', error: errorData(error) });
   }
 
@@ -3792,8 +3817,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         assignment.taskId = entry.taskId;
         touchTask(entry.rootId, entry.taskId);
       }
-      await openSession(id, { ...spec, restore: { agent: entry.agent, threadId: entry.threadId, runtime: entry.runtime, model: entry.model, workflow: parent.mapping.workflow } }, 'skip', entry.delegation);
-      const child = sessions.get(id)!;
+      await openSession(id, { ...spec, restore: { agent: entry.agent, threadId: entry.threadId, runtime: entry.runtime, model: entry.model, workflow: parent.mapping.workflow } }, 'skip', entry.delegation, assignment);
+      const child = assignmentSessions.get(assignment)!;
+      if (sessions.get(id) !== child) throw new Error('Child session was replaced during recovery');
       child.settle = (state, error) => void finishAssignment(entry.parentId, parent, assignment, state, error);
       if (entry.brief) child.brief = entry.brief;
       if (assignment.taskId && writes(entry.mode)) {
@@ -3965,7 +3991,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     await Promise.all(
       [...session.children].map(
-        closeSession,
+        id => closeSession(id),
       ),
     );
 
@@ -4556,7 +4582,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
       await Promise.all(
         [...sessions.keys()].map(
-          closeSession,
+          id => closeSession(id),
         ),
       );
 
