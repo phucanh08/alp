@@ -646,7 +646,6 @@ export function createConversation(ctx: ConversationContext) {
             // A turn that started and ended before the hold: the cut no longer keeps the latest turn.
             const now = turnsOf(await timelineOf(sessionId, branch), sessionId);
             if (now.length !== turns.length || now.some((turn, index) => turn.id !== turns[index].id)) throw busy(sessionId, 'its conversation changed while the fork was prepared');
-            if (runtime.snapshot(sessionId)?.activeTurnId) throw busy(sessionId, 'a turn began meanwhile');
           }
           const latestTurn = turns.at(-1)?.id;
           const cutoff: ForkPlan['cutoff'] = kind === 'through' ? { throughTurnId: turnId! } : kind === 'before' ? { beforeTurnId: turnId! } : latestTurn ? { throughTurnId: latestTurn } : undefined;
@@ -654,6 +653,8 @@ export function createConversation(ctx: ConversationContext) {
           if (records.has(id) || runtime.snapshot(id)) throw new RpcError(ERROR.conflict, `Session ${id} already exists`, { reason: 'request_conflict' });
           const cwd = await destinationOf(record, workspaceId);
           const attachmentIds = await reauthorize(sessionId, log, cut, principal);
+          // Last, after every read of prepare: held mail may wait; a turn that began anyway may not.
+          if (latest && runtime.snapshot(sessionId)?.activeTurnId) throw busy(sessionId, 'a turn began meanwhile');
           return {
             source: sessionId, newSessionId: id, ...(branchId ? { branchId } : {}), cut, boundary: kind, ...(turnId ? { turnId } : {}),
             cwd, ...(workspaceId ? { workspaceId } : {}), title: title ?? defaultForkTitle(record.title, cwd === record.spec!.cwd), at: new Date().toISOString(), attachmentIds,
