@@ -533,9 +533,13 @@ export function createConversation(ctx: ConversationContext) {
   }
 
   /**
-   * At start: a configure a crash cut off between the runtime's taking it and alpd's commit is unknown
-   * to the journal, but the session's snapshot (written from the runtime's session.updated) may already
-   * show it. Its record then runs with it all through, never half of it; otherwise it keeps the old one.
+   * At start: a configure whose outcome is unknown (a crash, or a journal that could not record what
+   * the runtime took) may have reached the runtime, whose session.updated then wrote the session's
+   * snapshot (model, effort, team, mode) but not its spec (what a reopen resolves effort, team and mode
+   * from). For the fields that configure changed, and only when the snapshot already shows its values,
+   * the spec is made to agree with the snapshot: never more than the snapshot says the root ran with,
+   * and never a field it did not change, so an old entry re-read at a later start (they are kept for
+   * the journal's retention) cannot undo what later changes did. Otherwise the record is left as it is.
    */
   async function reconcileConfigures() {
     for (const entry of await journal.list()) {
@@ -544,18 +548,19 @@ export function createConversation(ctx: ConversationContext) {
       const record = records.get(plan.root);
       const session = record?.session;
       if (!record?.spec || !session || !plan.proposed || !plan.previous) continue;
-      // Only what the change changes says whether the runtime took it: an unchanged field matches either way.
       const changed = configChanges(plan.previous, plan.proposed);
       if (!changed.length) continue;
       const shows = changed.every(field => field === 'team' ? session.workflow?.mode === plan.proposed.team : session[field] === plan.proposed[field]);
       if (!shows) continue;
-      const spec = record.spec;
-      const agrees = spec.thinking === plan.proposed.thinking && spec.mode === plan.proposed.mode && (plan.proposed.team === 'custom' || spec.workflow === plan.proposed.team);
-      if (agrees) continue;
-      writeConfiguration(record, plan.proposed, {});
+      const spec = { ...record.spec };
+      if (changed.includes('thinking')) spec.thinking = session.thinking;
+      if (changed.includes('mode')) spec.mode = session.mode;
+      if (changed.includes('team') && session.workflow.mode !== 'custom') spec.workflow = session.workflow.mode;
+      if (spec.thinking === record.spec.thinking && spec.mode === record.spec.mode && spec.workflow === record.spec.workflow) continue;
+      record.spec = spec;
       record.updatedAt = new Date().toISOString();
       await store.put(record);
-      ctx.log.warn(`configure ${entry.requestId} of ${plan.root} was taken by the runtime before a crash; its record now runs with it`, { code: 'ALPD_CONFIGURE_RECONCILED', sessionId: plan.root });
+      ctx.log.warn(`configure ${entry.requestId} of ${plan.root} was taken by the runtime before alpd could record it; its spec now agrees with what the session ran`, { code: 'ALPD_CONFIGURE_RECONCILED', sessionId: plan.root, fields: changed });
     }
   }
 
