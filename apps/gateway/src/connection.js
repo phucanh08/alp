@@ -1094,11 +1094,11 @@ export class ClientConnection {
    * The root a fork or rewind names: in a granted workspace, looked up afresh, and a root (a child's
    * conversation belongs to its requester's tree). Both drive the session's future conversation (a fork
    * inherits its configuration), so a grant with `modes` must allow the mode of the root and its tree,
-   * looked up afresh, exactly as session.prompt checks it (#drive). @param {string} sessionId
+   * looked up afresh, exactly as session.prompt checks it (#drive). @param {string} sessionId @param {{ not_root: string }} [refusals] its not_root text
    */
-  async #conversationRoot(sessionId) {
+  async #conversationRoot(sessionId, refusals = CONVERSATION_REFUSALS) {
     const scoped = await this.#resolve(sessionId, { fresh: true });
-    if (scoped.root !== sessionId) throw forbidden(CONVERSATION_REFUSALS.not_root, GATEWAY_REASON.notRoot);
+    if (scoped.root !== sessionId) throw forbidden(refusals.not_root, GATEWAY_REASON.notRoot);
     await this.#drive(sessionId);
     return scoped;
   }
@@ -1413,8 +1413,7 @@ export class ClientConnection {
     // Reload (§12.8, issue #121 G2): the root's native process restarts on its own conversation. A
     // root in the grant, looked up afresh, driven within the grant's modes as session.prompt is.
     'session.reload': async params => {
-      await this.#resolve(params.sessionId, { fresh: true }).then(scoped => { if (scoped.root !== params.sessionId) throw forbidden(RELOAD_REFUSALS.not_root, GATEWAY_REASON.notRoot); });
-      await this.#drive(params.sessionId);
+      await this.#conversationRoot(params.sessionId, RELOAD_REFUSALS);
       const result = await this.#call('session.reload', { ...params, requestId: this.#registryRequestId(params.requestId) }).catch(error => { throw this.#conversationError(error, RELOAD_REFUSALS); });
       const session = result?.session;
       if (!session || session.id !== params.sessionId || session.parentId || !workspaceOf(this.#grant, session.projectRoot)) throw this.#conversationRefused('session.reload', 'session');

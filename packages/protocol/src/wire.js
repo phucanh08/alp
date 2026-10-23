@@ -134,8 +134,10 @@ export function decodeFrame(line) { return JSON.parse(line); }
 /**
  * The command lines of session.resumeCommand (docs/protocol/alp-json-rpc-v1.md §12.8), built from argv
  * so that every argument reaches the program as it is: for a POSIX shell (sh, bash, zsh) and for
- * Windows cmd.exe (the shell npm's `alp.cmd` runs under). An argument with a control character (a
- * line break would run a pasted command early) is refused.
+ * Windows cmd.exe, typed at its prompt and then read again by npm's `alp.cmd` shim (`%*`). An argument
+ * with a control character (a line break would run a pasted command early) is refused, and for cmd.exe
+ * one with `"`, `%` or `!` too: a quote inside an argument ends the shim's quoting and lets the rest
+ * run, and `%`/`!` expand variables in either parse, so no escaping keeps them (session ids have none).
  */
 const POSIX_SAFE = /^[A-Za-z0-9_@+:,./-]+$/;
 const WINDOWS_SAFE = /^[A-Za-z0-9_@+:./\\-]+$/;
@@ -150,17 +152,20 @@ export function quotePosix(arg) {
   return text && POSIX_SAFE.test(text) ? text : `'${text.replace(/'/g, `'\\''`)}'`;
 }
 /**
- * One argument for cmd.exe: as it is when nothing in it is special; else quoted as the C runtime
- * splits a command line (backslashes before a quote or the end doubled, quotes escaped), then every
- * cmd.exe metacharacter, the quotes too, escaped with ^ so cmd.exe interprets none of them.
+ * One argument for cmd.exe: as it is when nothing in it is special; else in double quotes for the C
+ * runtime's split (backslashes before the closing quote doubled), with every cmd.exe metacharacter,
+ * the quotes too, escaped with ^ for the interactive parse; the shim's second parse then sees one
+ * quoted argument, inside which `&|<>()^` are literal. `"`, `%` and `!` are refused (see above).
  * @param {string} arg
  */
 export function quoteWindows(arg) {
   const text = assertArgument(arg);
   if (text && WINDOWS_SAFE.test(text)) return text;
-  const quoted = `"${text.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, '$1$1')}"`;
-  return quoted.replace(/([()\][%!^"`<>&|;, *?])/g, '^$1');
+  if (/["%!]/.test(text)) throw new TypeError('A cmd.exe command argument has no ", % or !');
+  const quoted = `"${text.replace(/(\\*)$/, '$1$1')}"`;
+  return quoted.replace(/([()\][^"`<>&|;, *?])/g, '^$1');
 }
+const SESSION_ID = /^[\w.:-]{1,128}$/;
 /** argv as one command line. @param {string[]} argv @param {'posix' | 'windows'} platform */
 export function commandLine(argv, platform) {
   return argv.map(platform === 'windows' ? quoteWindows : quotePosix).join(' ');
@@ -172,6 +177,7 @@ export function commandLine(argv, platform) {
  * @param {string} sessionId @param {'posix' | 'windows'} platform the daemon host's
  */
 export function resumeCommandOf(sessionId, platform) {
+  if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) throw new TypeError('A session id is [A-Za-z0-9_.:-], at most 128 characters');
   const argv = ['alp', 'attach', sessionId];
   const posix = commandLine(argv, 'posix');
   const windows = commandLine(argv, 'windows');

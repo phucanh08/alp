@@ -687,3 +687,31 @@ test('a prompt sent during a reload waits for it, then reaches the new process',
   assert.notEqual(fresh, old);
   await until(() => fresh.calls.some(call => call.method === 'turn/start'), 'delivered to the new process');
 });
+
+test('mail that wakes the root while a reload reads its history waits for the new process; the reload is not refused busy', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'rm', ['one']);
+  const generation = await generationOf(d, 'rm');
+  const old = world.transports.at(-1);
+  // A session.message from another client lands between the idle check and the end of prepare.
+  const timeline = d.store.timeline.bind(d.store);
+  let sent = false;
+  d.store.timeline = async sessionId => {
+    if (sessionId === 'rm' && !sent) {
+      sent = true;
+      await d.request('session.message', { sessionId: 'rm', text: 'mail during reload' });
+      await new Promise(resolve => setTimeout(resolve, 30));
+    }
+    return timeline(sessionId);
+  };
+  const result = await d.request('session.reload', { sessionId: 'rm', requestId: 'm1', ifGeneration: generation });
+  d.store.timeline = timeline;
+  assert.ok(sent, 'the mail went out during prepare');
+  assert.equal(result.session.id, 'rm');
+  assert.equal(world.native.reloads.length, 1);
+  assert.equal(old.calls.filter(call => call.method === 'turn/start').length, 1, 'no wake turn on the old process');
+  const fresh = world.transports.at(-1);
+  assert.notEqual(fresh, old);
+  await until(() => fresh.calls.some(call => call.method === 'turn/start'), 'the mail wakes the new process');
+});
