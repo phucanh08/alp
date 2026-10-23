@@ -144,7 +144,8 @@ exit 0
 `);
   await chmod(manager, 0o755);
   await writeFile(path.join(directory, 'hold-once'), '');
-  const env = { PATH: process.env.PATH, HOME: directory, ALP_HOME: home, ALP_SERVICE_DIR: path.join(directory, 'agents'), ALP_LAUNCHCTL: manager, ALP_SYSTEMCTL: manager };
+  // TMPDIR as the runner's, so alpd sees its home inside the temp directory on macOS as on Linux.
+  const env = { PATH: process.env.PATH, HOME: directory, ALP_HOME: home, ALP_SERVICE_DIR: path.join(directory, 'agents'), ALP_LAUNCHCTL: manager, ALP_SYSTEMCTL: manager, TMPDIR: tmpdir() };
   const alp = (...args) => execFileSync(process.execPath, [CLI, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] }).toString();
   const service = serviceFor({ home, env });
   assert.equal(path.dirname(service.file), env.ALP_SERVICE_DIR);
