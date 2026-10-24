@@ -24,7 +24,9 @@ if (isMainThread) {
       } catch { return true; } // Admission disappearing must never run the product entry point.
     };
     if (closed()) stop();
-    fs.writeFileSync(path.join(directory, process.pid + '-' + randomUUID() + '.json'), JSON.stringify({ pid: process.pid, home, token }));
+    const file = path.join(directory, process.pid + '-' + randomUUID());
+    fs.writeFileSync(file + '.tmp', JSON.stringify({ pid: process.pid, home, token }));
+    fs.renameSync(file + '.tmp', file + '.json');
     if (closed()) stop();
     parentPort.postMessage('admitted');
     setInterval(() => { if (closed()) stop(); }, 10);
