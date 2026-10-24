@@ -354,6 +354,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       return;
     }
     session.parkReason = undefined;
+    session.parkPause = undefined;
 
     // A requester is not done while its assignments run or mail awaits it.
     if (state === 'completed' && (session.assignments.size || hasActiveMail(session))) {
@@ -580,7 +581,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
       // A usage limit pauses its runtime; an assignment it stopped is parked to continue later.
       if (state === 'failed' && LIMIT_ERRORS.includes(params.turn.error?.codexErrorInfo)) {
-        if (session.role !== 'supervisor') session.parkReason = `the ${label(session.runtimeKind)} usage limit was reached`;
+        if (session.role !== 'supervisor') {
+          session.parkReason = `the ${label(session.runtimeKind)} usage limit was reached`;
+          session.parkPause = { scope: paused.all ? 'all' : session.runtimeKind };
+        }
         void limitReached(session, params.turn.error);
       }
 
@@ -1372,7 +1376,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (now) {
       for (const [id, session] of sessions) {
         if (!session.parent || session.closed || !session.active || session.role === 'supervisor' || (scope !== 'all' && session.runtimeKind !== scope)) continue;
+        // A process restart already owns its continuation; this pause must not replace its cause.
+        if (session.parkReason && !session.parkPause) continue;
         session.parkReason = `paused by ${pause.by}`;
+        session.parkPause = { scope };
         void session.runtime.request('turn/interrupt', { threadId: session.threadId, turnId: session.active }).catch(() => {});
         runLog(rootOf(id), { event: 'assignment.parking', assignmentId: id, agent: session.mapping.agent.name, reason: session.parkReason });
       }
@@ -1384,22 +1391,30 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     else delete paused.runtimes[scope];
     savePauses();
     watchLimits();
+    const matches = (pause: Session['parkPause']) => pause && (scope === 'all' || pause.scope === scope);
+    const continuing = [...sessions.values()].some(session => !session.closed && !pauseOf(session.runtimeKind) && matches(session.parked?.pause));
     const free = RUNTIMES.filter(kind => !pauseOf(kind));
-    if (free.length) notice('info', say => say.resumed(scope === 'all' ? 'ALP' : label(scope), by, pauseState().parked.length > 0));
+    if (free.length) notice('info', say => say.resumed(scope === 'all' ? 'ALP' : label(scope), by, continuing));
     for (const [id, session] of sessions) {
-      if (session.closed || pauseOf(session.runtimeKind)) continue;
-      if (session.parked) continueParked(id, session);
-      else if (session.wakeHeld) { session.wakeHeld = false; deliver(id, session); }
+      if (session.closed || (scope !== 'all' && session.runtimeKind !== scope)) continue;
+      if (matches(session.parkPause)) session.parkPause!.resumed = true;
+      if (pauseOf(session.runtimeKind)) continue;
+      if (session.parked) {
+        if (matches(session.parked.pause)) continueParked(id, session);
+      } else if (session.wakeHeld) { session.wakeHeld = false; deliver(id, session); }
     }
   }
 
   /** An assignment whose turn a limit or a pause ended stays open, and its requester learns why. */
   function park(sessionId: string, session: Session) {
-    session.parked = { reason: session.parkReason!, since: Date.now() };
+    session.parked = { reason: session.parkReason!, since: Date.now(), ...(session.parkPause ? { pause: session.parkPause } : {}) };
+    const resumed = session.parkPause?.resumed;
+    session.parkPause = undefined;
     const then = session.parkThen;
     session.parkReason = undefined;
     session.parkThen = undefined;
     emit(sessionId, { type: 'session.updated', session: snapshot(sessionId, session) });
+    if (resumed) continueParked(sessionId, session);
     const parent = session.parent ? sessions.get(session.parent) : undefined;
     const assignment = parent?.assignments.get(sessionId);
     runLog(rootOf(sessionId), { event: 'assignment.parked', assignmentId: sessionId, agent: session.mapping.agent.name, reason: session.parked.reason });
@@ -1410,12 +1425,12 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     else post(session.parent!, { kind: 'stalled', from: assignment.agent, assignment: sessionId, body: `Parked: ${session.parked.reason}. ALP continues this assignment where it stopped when ${label(session.runtimeKind)} is resumed (${options.autoResume !== false && (pauseOf(session.runtimeKind)?.by ?? 'alpd') === 'alpd' ? `ALP resumes it as soon as ${label(session.runtimeKind)} says the limit lifted` : 'the user runs alp resume'}). Wait for it, start other work, or stop it with alp_cancel and give the rest to an agent on another runtime (pass model claude:… or codex:…); what it changed stays in your checkout or its worktree.` });
   }
 
-  function continueParked(sessionId: string, session: Session) {
+  function continueParked(sessionId: string, session: Session, expected = session.parked) {
     void enqueue(async () => {
-      if (session.closed || session.active || session.pending || !session.parked || pauseOf(session.runtimeKind)) return;
+      if (session.closed || session.active || session.pending || !session.parked || session.parked !== expected || pauseOf(session.runtimeKind)) return;
       // A lifecycle operation (a fork or rewind reading the conversation) holds the session: the work stays
       // parked and continues when the last hold releases, as held mail does.
-      if (session.lifecycleHolds) { session.resumeHeld = true; return; }
+      if (session.lifecycleHolds) { session.resumeHeld = session.parked; return; }
       const parked = session.parked;
       const { reason, prompt } = parked;
       session.parked = undefined;
@@ -3309,10 +3324,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const harness = label(session.runtimeKind);
     log.warn(`${harness} process of ${session.mapping.agent.name} stopped; restarting it`, { code: 'ALP_PROVIDER_RESTARTED', sessionId, rootId: rootOf(sessionId), agent: session.mapping.agent.name, provider: session.runtimeKind, error });
     runLog(rootOf(sessionId), { event: 'session.restarted', sessionId, agent: session.mapping.agent.name, error: errorData(error).message, restarts: session.restarts.length });
+    let interrupted: Session['parked'];
     if (session.active) {
       session.parkReason = `its ${harness} process stopped`;
+      session.parkPause = undefined;
       session.parkThen = `ALP is restarting the ${harness} process; this assignment continues by itself.`;
       terminal(sessionId, session, 'failed', error);
+      interrupted = session.parked;
     }
     const old = session.runtime;
     void old.close().catch(() => {});
@@ -3330,7 +3348,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       session.buffered = [];
       finishPending();
       runLog(rootOf(sessionId), { event: 'session.revived', sessionId, agent: session.mapping.agent.name });
-      if (session.parked && !pauseOf(session.runtimeKind)) {
+      if (session.parked && session.parked === interrupted) {
+        // This restart owns its continuation. If a pause blocks it now, retain that blocker
+        // so only its matching resume may release it later.
+        if (pauseOf(session.runtimeKind)) session.parked.pause = { scope: paused.all ? 'all' : session.runtimeKind };
         session.parked.prompt = `ALP restarted your ${harness} process after it stopped in the middle of your turn. Continue where you left off: your earlier work in this session and its files are intact.${session.parent ? ' Finish with alp_handoff as before.' : ''}`;
         continueParked(sessionId, session);
       }
@@ -3901,7 +3922,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       : '';
     const proceed = (sessionId: string, session: Session, text: string) => {
       if (options.recoveryResume === false || pauseOf(session.runtimeKind)) {
-        session.parked = { reason: cause, since: Date.now(), prompt: text };
+        session.parked = { reason: cause, since: Date.now(), prompt: text, ...(options.recoveryResume !== false ? { pause: { scope: paused.all ? 'all' as const : session.runtimeKind } } : {}) };
         emit(sessionId, { type: 'session.updated', session: snapshot(sessionId, session) });
         runLog(rootId, { event: 'assignment.parked', assignmentId: sessionId, agent: session.mapping.agent.name, reason: cause });
         const outcome = outcomes.find(entry => entry.assignmentId === sessionId);
@@ -3920,16 +3941,24 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (parkedRoot) {
       root.parked = { reason: parkedRoot, since: Date.now() };
       emit(rootId, { type: 'session.updated', session: snapshot(rootId, root) });
-      if (options.autoResume !== false && options.recoveryResume !== false && !pauseOf(root.runtimeKind)) continueParked(rootId, root);
+      // Legacy persisted reasons carry no pause provenance. Only an explicit session prompt
+      // can release them, including old quota/process parks; never infer scope from text or flags.
     } else if (continueRoot) proceed(rootId, root, `ALP: ${cause} during your turn, and reopened this session. Continue the user's request where you stopped.${listed(resumed.get(rootId))}`);
     else for (const assignment of resumed.get(rootId) ?? []) post(rootId, { kind: 'note', from: assignment.agent, assignment: assignment.id, passive: true, body: `${cause}; ALP reopened this assignment and it continues. It reports when done.` });
     const failed = outcomes.filter(outcome => outcome.outcome === 'failed');
-    if (entries.length || continueRoot) {
-      const parked = outcomes.some(outcome => outcome.outcome === 'parked') || (continueRoot && !!root.parked);
+    if (entries.length || continueRoot || parkedRoot) {
+      const parked = outcomes.flatMap(outcome => {
+        const park = outcome.outcome === 'parked' ? sessions.get(outcome.assignmentId)?.parked : undefined;
+        return park ? [park] : [];
+      });
+      if ((continueRoot || parkedRoot) && root.parked) parked.push(root.parked);
+      const next = parked.some(park => !park.pause)
+        ? 'send an explicit prompt to each parked session to continue it'
+        : 'run alp resume to continue them';
       notice(failed.length ? 'warning' : 'info',
         `ALP: ${cause}${options.previousExit?.at ? ` (around ${options.previousExit.at})` : ''}. ` +
-        `${entries.length - failed.length} of ${entries.length} running assignments reopened${continueRoot ? ', and this session' : ''}` +
-        `${parked ? '; they wait parked: run alp resume to continue them' : ''}.` +
+        `${entries.length - failed.length} of ${entries.length} running assignments reopened${continueRoot || parkedRoot ? ', and this session' : ''}` +
+        `${parked.length ? `; they wait parked: ${next}` : ''}.` +
         `${failed.length ? ` Could not continue: ${failed.map(outcome => `${outcome.agent} ${outcome.assignmentId} (${outcome.error})`).join('; ')}; their tasks went back to open.` : ''}`,
         root.mapping.agent.projectRoot);
     }
@@ -3984,6 +4013,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     session.userStopped = true;
     session.parked = undefined;
     session.parkReason = undefined;
+    session.parkPause = undefined;
+    session.resumeHeld = undefined;
     emit(sessionId, { type: 'session.updated', session: snapshot(sessionId, session) });
     approvalCancellation.set(session, (approvalCancellation.get(session) ?? 0) + 1);
     cancelQuestions(sessionId);
@@ -4453,8 +4484,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         if (session.lifecycleHolds || session.closed) return;
         // Parked work a resume reached during the hold continues now; paused again, it waits for that resume.
         if (session.resumeHeld) {
-          session.resumeHeld = false;
-          if (session.parked) return continueParked(sessionId, session);
+          const expected = session.resumeHeld;
+          session.resumeHeld = undefined;
+          if (session.parked === expected) return continueParked(sessionId, session, expected);
         }
         if (session.parked || pauseOf(session.runtimeKind) || !session.wakeHeld) return;
         session.wakeHeld = false;

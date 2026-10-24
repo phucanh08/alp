@@ -6,6 +6,10 @@ import type { Verification } from '@anhlp/alp-core/verify';
 import type { Handoff } from './handoff.js';
 import type { SessionUsage } from './events.js';
 
+/** The pause that stopped a turn; a matching resume may arrive before its interruption settles. */
+export type ParkPause = { scope: RuntimeKind | 'all'; resumed?: boolean };
+export type Parked = { reason: string; since: number; prompt?: string; pause?: ParkPause };
+
 export type Session = {
   runtimeKind: RuntimeKind;
   runtime: RuntimeTransport;
@@ -53,7 +57,7 @@ export type Session = {
   /** Set by interrupt: pending mail waits for the next user prompt. */
   wakeBlocked: boolean;
   /** An assignment a usage limit or a pause stopped: it waits, open, until its runtime resumes. prompt is what continues it. */
-  parked?: { reason: string; since: number; prompt?: string };
+  parked?: Parked;
   /** What the requester of a session parked by its turn's end is told happens next, instead of waiting for alp resume. */
   parkThen?: string;
   /** When ALP restarted this session's native process, within the last RESTART_WINDOW_MS. */
@@ -72,12 +76,13 @@ export type Session = {
   skillsUsed?: Set<string>;
   /** Why the running turn is being stopped, so its end parks the assignment instead of ending it. */
   parkReason?: string;
+  parkPause?: ParkPause;
   /** Mail arrived while its runtime was paused; it is delivered on resume. */
   wakeHeld?: boolean;
   /** How many lifecycle operations (a rewind) hold its wakes now; mail waits until the last releases (AlpRuntime.hold). */
   lifecycleHolds?: number;
   /** Its parked work was to continue during a lifecycle hold; it continues when the last hold releases. */
-  resumeHeld?: boolean;
+  resumeHeld?: Parked;
   /** An assignment opened but not yet sent its brief: mail waits and rides with the brief's turn. */
   awaitingBrief?: boolean;
   /** Permission questions to the user, one at a time. */
