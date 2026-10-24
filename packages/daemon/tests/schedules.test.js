@@ -629,6 +629,44 @@ test('a job whose session never answers fails with a reason, and cannot be cance
   assert.equal(runtimes[0].started.length, 1);
 });
 
+test('a delivery timeout retains the runtime queue until the native start settles', async t => {
+  const { start, create, project, runtimes, releases } = await setup(t);
+  const daemon = await start({ scheduleDeliveryTimeoutMs: 30 });
+  const { session } = await create(daemon);
+  const { session: other } = await create(daemon);
+  let admissionAnswered = false;
+  const admit = daemon.runtime.withIdlePrompt.bind(daemon.runtime);
+  daemon.runtime.withIdlePrompt = async (...args) => {
+    const answer = await admit(...args);
+    admissionAnswered = true;
+    return answer;
+  };
+  let release;
+  runtimes[0].hold = new Promise(resolve => { release = resolve; });
+  releases.push(release);
+  const { job } = await daemon.request('schedule.create', { projectRoot: project, sessionId: session.id, dueAt: inMs(-1), prompt: 'Keep native start ownership.' });
+  await until(() => runtimes[0].started.length === 1);
+  await untilStatus(daemon, job.id, 'failed');
+  assert.equal((await jobOf(daemon, job.id)).lastError.code, 'delivery_timeout');
+  await until(() => admissionAnswered, 'the admission caller to receive its timeout result');
+  let secondAdmitted = false;
+  const queued = admit(other.id, async send => {
+    secondAdmitted = true;
+    await send({ clientMessageId: 'after-timeout', delivery: 'auto', content: [] });
+  });
+  // Drain a separate event-loop turn: an incorrectly released queue can run its
+  // queued prompt, while a retained queue still waits for the explicit gate.
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(secondAdmitted, false, 'no later operation enters the global queue before the native start settles');
+  assert.equal(runtimes[1].started.length, 0, 'the timed-out native start still owns the global queue');
+  release();
+  await queued;
+  await until(async () => (await jobOf(daemon, job.id)).lastError?.code === 'delivery_accepted_late');
+  assert.equal(runtimes[0].started.length, 1);
+  assert.equal(runtimes[1].started.length, 1);
+  assert.equal((await jobOf(daemon, job.id)).attempts, 1);
+});
+
 test('a job that is cancelled before its time never runs', async t => {
   const { start, create, project, runtimes } = await setup(t);
   const daemon = await start();
