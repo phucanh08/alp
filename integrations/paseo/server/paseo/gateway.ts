@@ -39,6 +39,8 @@ export type Outbound = { type: string; payload?: unknown; [key: string]: unknown
 
 export type ClientContext = {
   clientId: string;
+  /** Socket lifetime, never derived from the untrusted hello identity. */
+  assertActive?(): void;
   /** Sends one session message to this client. */
   emit(message: Outbound): void;
   /** Sends one binary frame, as Paseo's terminal stream does ([opcode, slot, payload]). */
@@ -60,6 +62,7 @@ export type GatewayOptions = {
   /** Runs before each server_info, so features that follow the host (terminals) are current. */
   beforeServerInfo?: () => Promise<unknown>;
   onClient?(client: ClientContext): () => void;
+  onBinary?(bytes: Uint8Array, client: ClientContext): void;
   /** The text of a not_implemented answer, in the user's language. */
   inDevelopment?: () => string | Promise<string>;
   log?: (message: string) => void;
@@ -97,10 +100,11 @@ export function createPaseoGateway(options: GatewayOptions) {
   }
 
   function attach(ws: FrameSocket, { bearer }: { bearer?: string } = {}) {
+    let ended = false;
     let client: ClientContext | undefined;
     let detach: (() => void) | undefined;
     const write = (data: string | Uint8Array) => {
-      if (ws.readyState !== OPEN) return;
+      if (ended || ws.readyState !== OPEN) return;
       // A relay socket's send fails as a promise when the device has gone; its close event follows.
       let sent: any;
       try { sent = ws.send(data); } catch { return; }
@@ -112,6 +116,7 @@ export function createPaseoGateway(options: GatewayOptions) {
     const bearerOk = bearer !== undefined && same(bearer.slice(BEARER_PREFIX.length), options.token());
 
     async function hello(message: any) {
+      if (ended || client) return;
       if (typeof message.clientId !== 'string' || !message.clientId.trim()) return close(CLOSE_INVALID_HELLO, 'Invalid hello');
       const reject = (reason: 'password_required' | 'incorrect_password' | 'incompatible_protocol') => {
         send({ type: 'hello.rejected', reason, accepts: ['password'] });
@@ -125,6 +130,7 @@ export function createPaseoGateway(options: GatewayOptions) {
       if (!client) {
         client = {
           clientId: message.clientId.trim(),
+          assertActive: () => { if (ended) throw new Error('This connection is closed'); },
           emit: outbound => send({ type: 'session', message: outbound }),
           emitBinary: bytes => write(bytes),
           buffered: () => (typeof ws.bufferedAmount === 'number' ? ws.bufferedAmount : 0),
@@ -136,7 +142,7 @@ export function createPaseoGateway(options: GatewayOptions) {
     }
 
     async function session(message: SessionMessage) {
-      if (!client || !message || typeof message.type !== 'string') return;
+      if (ended || !client || !message || typeof message.type !== 'string') return;
       if (process.env.ALP_PASEO_DEBUG) log(`paseo <- ${message.type}${message.requestId ? ` ${message.requestId}` : ''}`);
       if (message.type === 'ping' && typeof message.requestId === 'string') {
         const now = Date.now();
@@ -160,7 +166,13 @@ export function createPaseoGateway(options: GatewayOptions) {
     }
 
     ws.on('message', (data: unknown, binary?: boolean) => {
-      if (binary || data instanceof ArrayBuffer) return;
+      if (ended) return;
+      if (binary || data instanceof ArrayBuffer || (binary === undefined && ArrayBuffer.isView(data))) {
+        if (!client) return close(CLOSE_INVALID_HELLO, 'Hello required before binary frames');
+        const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : Array.isArray(data) ? Buffer.concat(data) : undefined;
+        if (bytes) { try { options.onBinary?.(bytes, client); } catch (error: any) { log(`paseo binary failed: ${error?.message ?? error}`); close(1002, 'Invalid binary frame'); } }
+        return;
+      }
       let frame: any;
       try { frame = JSON.parse(String(data)); } catch { return; }
       if (process.env.ALP_PASEO_DEBUG && frame?.type !== 'session') log(`paseo <= ${frame?.type}`);
@@ -170,6 +182,8 @@ export function createPaseoGateway(options: GatewayOptions) {
     });
     if (process.env.ALP_PASEO_DEBUG) ws.on('close', (code: number, reason: unknown) => log(`paseo socket closed ${code} ${String(reason)} (client ${client?.clientId ?? 'none'})`));
     const end = () => {
+      if (ended) return;
+      ended = true;
       clearTimeout(timer);
       if (client) clients.delete(client);
       detach?.();

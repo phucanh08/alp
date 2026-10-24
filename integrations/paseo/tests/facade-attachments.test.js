@@ -53,7 +53,7 @@ test('the facade refuses attachments instead of dropping them, and nothing is se
   const uploaded = { type: 'uploaded_file', id: `upload_${randomUUID()}`, fileName: 'plan.pdf', mimeType: 'application/pdf', size: 3, path: '/Users/someone/.paseo/uploads/x/plan.pdf' };
   const reply = await send({ attachments: [uploaded], activeTurnBehavior: 'interrupt' });
   assert.equal(reply.payload.accepted, false);
-  assert.match(reply.payload.error, /ALP cannot send files \("plan\.pdf"\) attached in this app yet; nothing was sent/);
+  assert.match(reply.payload.error, /Files must be uploaded on this connection/);
   assert.ok(!reply.payload.error.includes('/Users/someone'), 'no host path');
   const review = await send({ attachments: [{ type: 'review', mimeType: 'application/paseo-review', cwd: '/w', mode: 'uncommitted', comments: [] }, { type: 'text', mimeType: 'text/plain', title: 't', text: 'ctx' }] });
   assert.equal(review.payload.accepted, false);
@@ -61,14 +61,10 @@ test('the facade refuses attachments instead of dropping them, and nothing is se
   assert.equal(prompts().length, 0, 'no prompt was sent');
   assert.ok(!calls.some(call => call.method === 'session.interrupt'), 'a refused message does not interrupt the running turn');
 
-  // Paseo's upload itself is refused at once (the binary frames that follow are ignored).
-  const upload = await agents.handlers['file.upload.request']({ type: 'file.upload.request', requestId: 'u1', fileName: 'plan.pdf', mimeType: 'application/pdf', size: 3, modifiedAt: new Date().toISOString() });
-  assert.deepEqual(upload, { type: 'file.upload.response', payload: { requestId: 'u1', file: null, error: 'ALP does not take files uploaded through this app yet; nothing was uploaded.' } });
-
   // A new agent whose first message has attachments is not created.
   const created = await agents.handlers.create_agent_request({ type: 'create_agent_request', requestId: 'c1', config: { provider: 'alp', cwd: '/w' }, initialPrompt: 'go', attachments: [uploaded] }, { clientId: 'c', emit: () => {} });
   assert.equal(created.payload.status, 'agent_create_failed');
-  assert.match(created.payload.error, /ALP cannot send files/);
+  assert.match(created.payload.error, /File was not uploaded on this connection|This upload connection is closed/);
   assert.ok(!calls.some(call => call.method === 'session.create'), 'no session was created');
 });
 
