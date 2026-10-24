@@ -6,7 +6,7 @@ import { normalizeWorkspaceLabelName, workspaceLabelKey, type WorkspaceLabelDefi
 import { firstMessage } from './prompt-content.js';
 import type { AgentSnapshotPayload, SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
 import type { SessionSummary } from '@anhlp/alp-protocol/session';
-import type { Handler } from './gateway.js';
+import type { ClientContext, Handler } from './gateway.js';
 import { checkoutCache, type CheckoutFacts } from './git.js';
 
 /**
@@ -42,10 +42,11 @@ export type AgentsView = {
   archive(sessionId: string): Promise<void>;
   markUnread(sessionId: string): void;
   clearAttention(sessionIds: string[]): string[];
+  validateFirst?(input: Omit<CreateAgentInput, 'workspaceId'>): void;
   create(input: CreateAgentInput): Promise<AgentSnapshotPayload>;
 };
 /** `images` and `attachments` are Paseo's (send_agent_message's); see prompt-content.ts for what ALP takes of them. */
-export type CreateAgentInput = { config: { provider: string; cwd: string; model?: string | null; modeId?: string | null; title?: string | null }; workspaceId: string; initialPrompt?: string; clientMessageId?: string; images?: unknown[]; attachments?: unknown[] };
+export type CreateAgentInput = { config: { provider: string; cwd: string; model?: string | null; modeId?: string | null; title?: string | null }; workspaceId: string; initialPrompt?: string; clientMessageId?: string; images?: unknown[]; attachments?: unknown[]; client?: ClientContext };
 
 const hex = () => randomBytes(8).toString('hex');
 const now = () => new Date().toISOString();
@@ -349,7 +350,20 @@ export function createWorkspaces({ rpc, broadcast, agents, inDevelopment, log = 
       }
     },
 
-    async 'workspace.create.request'(request: Inbound<'workspace.create.request'>) {
+    async create_paseo_worktree_request(request: Inbound<'create_paseo_worktree_request'>, client: ClientContext) {
+      const reply = (workspace: WorkspaceDescriptor | null, error: string | null, errorCode?: string): Outbound => ({ type: 'create_paseo_worktree_response', payload: { requestId: request.requestId, workspace, error, ...(errorCode ? { errorCode } : {}), setupTerminalId: null } });
+      // Upstream FirstAgentContext drives naming/setup, not an agent prompt. This facade does not
+      // run that automation, so explicitly refuse its input rather than silently discard context.
+      const context = request.firstAgentContext;
+      const hasAttachments = (value: unknown) => value !== undefined && (!Array.isArray(value) || value.length > 0);
+      if ((context !== undefined && (!context || typeof context !== 'object' || Array.isArray(context) || (context.prompt !== undefined && context.prompt !== '') || hasAttachments(context.attachments))) || (request.nameContext !== undefined && request.nameContext !== '') || hasAttachments(request.attachments)) return reply(null, 'This ALP host cannot use first-agent context for worktree naming or setup; nothing was created');
+      try {
+      const result = await handlers['workspace.create.request']({ type: 'workspace.create.request', requestId: request.requestId, source: { kind: 'worktree', cwd: request.cwd, projectId: request.projectId, worktreeSlug: request.worktreeSlug, refName: request.refName, action: request.action, checkoutSource: request.checkoutSource, githubPrNumber: request.githubPrNumber } }, client) as Extract<Outbound, { type: 'workspace.create.response' }>;
+      return reply(result.payload.workspace, result.payload.error, result.payload.errorCode);
+      } catch (error) { return reply(null, message(error), code(error)); }
+    },
+
+    async 'workspace.create.request'(request: Inbound<'workspace.create.request'>, client: ClientContext) {
       await load();
       const reply = (fields: Partial<Extract<Outbound, { type: 'workspace.create.response' }>['payload']>): Outbound =>
         ({ type: 'workspace.create.response', payload: { requestId: request.requestId, workspace: null, setupTerminalId: null, error: null, ...fields } });
@@ -376,7 +390,10 @@ export function createWorkspaces({ rpc, broadcast, agents, inDevelopment, log = 
       try {
         // A first agent whose message carries what ALP cannot send (attachments, malformed images) is
         // refused before the workspace is made; agents().create builds the same message again.
-        if (request.agent) firstMessage(request.agent.initialPrompt, request.agent.images, request.agent.attachments);
+        if (request.agent) {
+          firstMessage(request.agent.initialPrompt, request.agent.images, request.agent.attachments);
+          agents().validateFirst?.({ ...request.agent, client });
+        }
         const owner = request.source.projectId ? project(request.source.projectId) : await addProject(request.source.path);
         if (!owner || owner.removedAt) throw new RequestError(`No project ${request.source.projectId}`);
         const directory = path.resolve(request.source.path);
@@ -387,7 +404,7 @@ export function createWorkspaces({ rpc, broadcast, agents, inDevelopment, log = 
         let agent: AgentSnapshotPayload | undefined;
         if (request.agent) {
           const { config, initialPrompt, clientMessageId, images, attachments } = request.agent;
-          agent = await agents().create({ config: { ...config, cwd: directory }, workspaceId: entry.id, ...(initialPrompt ? { initialPrompt } : {}), ...(clientMessageId ? { clientMessageId } : {}), ...(images ? { images } : {}), ...(attachments ? { attachments } : {}) });
+          agent = await agents().create({ client, config: { ...config, cwd: directory }, workspaceId: entry.id, ...(initialPrompt ? { initialPrompt } : {}), ...(clientMessageId ? { clientMessageId } : {}), ...(images ? { images } : {}), ...(attachments ? { attachments } : {}) });
         }
         sync();
         return reply({ workspace: descriptor(entry), ...(agent ? { agent } : {}) });

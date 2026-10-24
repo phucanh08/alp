@@ -354,7 +354,7 @@ test('projects and workspaces are kept by alpd: add, create with an agent, title
   // A first agent whose message ALP cannot send (attachments, a malformed image) is refused before
   // the workspace is made.
   const refusedAgents = [
-    [{ attachments: [{ type: 'uploaded_file', id: `upload_${randomUUID()}`, fileName: 'plan.pdf', mimeType: 'application/pdf', size: 3, path: '/Users/someone/.paseo/uploads/x/plan.pdf' }] }, /ALP cannot send files \("plan\.pdf"\)/],
+    [{ attachments: [{ type: 'uploaded_file', id: `upload_${randomUUID()}`, fileName: 'plan.pdf', mimeType: 'application/pdf', size: 3, path: '/Users/someone/.paseo/uploads/x/plan.pdf' }] }, /File was not uploaded on this connection/],
     [{ images: [{ data: 'iVBORw0KGgo=' }] }, /not inline base64 with its type/],
   ];
   for (const [extra, pattern] of refusedAgents) {

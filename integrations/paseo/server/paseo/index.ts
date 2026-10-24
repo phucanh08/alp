@@ -65,9 +65,11 @@ export function createPaseoBridge({ clientFactory, version, token, serverId, hom
     token, serverId, version, handlers, features, log, inDevelopment,
     // workspaceTerminals follows the host's switch (terminal.json), read again at most every 5 s.
     beforeServerInfo: async () => { await terminals.refresh(); features.workspaceTerminals = terminals.features.workspaceTerminals; },
+    onBinary: (bytes, client) => agents.uploads.binary(bytes, client),
     onClient: client => {
+      agents.uploads.add(client);
       void agents.start().then(() => workspaces.start()).catch(error => log?.(`agents failed to start: ${error?.message ?? error}`));
-      return () => { checkouts.drop(client); terminals.drop(client); };
+      return () => { agents.uploads.drop(client); checkouts.drop(client); terminals.drop(client); };
     },
   });
   const broadcast = (message: Parameters<typeof gateway.broadcast>[0]) => gateway.broadcast(message);
@@ -106,7 +108,7 @@ export function createPaseoBridge({ clientFactory, version, token, serverId, hom
 
   return Object.assign(gateway, {
     relay,
-    close: () => { agents.close(); checkouts.close(); terminals.close(); void relay.stop(); return workspaces.close(); },
+    close: () => { agents.uploads.close(); agents.close(); checkouts.close(); terminals.close(); void relay.stop(); return workspaces.close(); },
     scripts: { '/alp-plugins.js': plugins.script },
   });
 }

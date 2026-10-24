@@ -14,7 +14,10 @@ import { searchTimeline } from './chat-search.js';
 import { TimelineDeltas } from './timeline-items.js';
 import { InMemoryAgentTimelineStore } from './timeline-store.js';
 import { agentUsage } from '../session-usage.js';
-import { firstMessage, messageContent, uploadRefused } from './prompt-content.js';
+import { firstMessage, messageContent, type MessagePart } from './prompt-content.js';
+import { attachments as attachmentStore } from '@anhlp/alp-client/portable';
+import { createFacadeUploads } from './uploads.js';
+import { uploadRequestId } from '../upload-names.js';
 
 /**
  * ALP's roots as Paseo's agents (D31 step 3, ALPD §62). Each root session is one agent of the
@@ -65,6 +68,77 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
   directory: Directory;
   log?: (message: string) => void;
 }) {
+  const uploads = createFacadeUploads();
+  type DeliveryState = { delivery: 'steer' | 'auto'; interrupted?: boolean };
+  const deliveries = new WeakMap<ClientContext, Map<string, DeliveryState>>();
+  // Upload request ids are daemon-wide for this owner. Serialize same-session/message conversions
+  // across sockets too, so a failed duplicate cannot abort another attempt's active upload.
+  const promptQueues = new Map<string, Promise<void>>();
+  const queued = new WeakMap<ClientContext, number>();
+  let queuedTotal = 0;
+  async function serialPrompt<T>(client: ClientContext | undefined, key: string, run: () => Promise<T>) {
+    if (queuedTotal >= 64 || (client && (queued.get(client) ?? 0) >= 8)) throw new Error('Too many attachment messages in flight; retry when a message finishes');
+    queuedTotal++;
+    if (client) queued.set(client, (queued.get(client) ?? 0) + 1);
+    const previous = promptQueues.get(key);
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    promptQueues.set(key, held);
+    try { await previous; return await run(); }
+    finally {
+      queuedTotal--;
+      if (client) queued.set(client, (queued.get(client) ?? 1) - 1);
+      if (promptQueues.get(key) === held) promptQueues.delete(key);
+      release();
+    }
+  }
+  function prepare(content: MessagePart[] | undefined, client?: ClientContext) {
+    const files = content?.filter(part => part.type === 'uploaded_file') ?? [];
+    if (!files.length) return { content, release() {}, assertActive() { client?.assertActive?.(); } };
+    const lease = uploads.lease(client, files);
+    return { ...lease, content };
+  }
+  async function fileLimits(prepared: ReturnType<typeof prepare>, connection: DaemonConnection) {
+    prepared.assertActive();
+    if (!('files' in prepared)) return;
+    const hello = await connection.request<any>('daemon.hello', { protocolVersion: 1, client: { name: 'alp-paseo-facade', version: '1' } });
+    prepared.assertActive();
+    const limits = hello.attachmentLimits;
+    if (!(connection.capabilities ?? hello.capabilities)?.includes('attachments') || !limits || !['maxObjectBytes', 'maxPerPrompt', 'maxPromptBytes', 'maxChunkBytes'].every(k => Number.isSafeInteger(limits[k]) && limits[k] >= 0) || !limits.maxChunkBytes) throw new Error('This ALP daemon does not offer valid attachment limits');
+    const files = prepared.files;
+    if (files.length > limits.maxPerPrompt || files.reduce((n, f) => n + f.size, 0) > limits.maxPromptBytes || files.some(f => f.size > limits.maxObjectBytes)) throw new Error('Files exceed this ALP daemon’s attachment limits; nothing was sent');
+    return limits;
+  }
+  async function translate(prepared: ReturnType<typeof prepare>, sessionId: string, messageId: string, connection: DaemonConnection) {
+    prepared.assertActive();
+    if (!('files' in prepared)) return prepared.content;
+    const limits = await fileLimits(prepared, connection);
+    const files = prepared.files;
+    let pending: string | undefined;
+    const store = attachmentStore({ request: async (method: any, params: any) => {
+      prepared.assertActive();
+      const answer = await connection.request<any>(method, params);
+      if (method === 'attachment.begin' && answer.state !== 'committed') pending = answer.uploadId;
+      if (method === 'attachment.commit') pending = undefined;
+      prepared.assertActive();
+      return answer;
+    } } as DaemonConnection);
+    try {
+      let index = 0;
+      const result: any[] = [];
+      for (const [partIndex, part] of prepared.content!.entries()) {
+        if (part.type !== 'uploaded_file') { result.push(part); continue; }
+        const file = files[index++]!;
+        const attachment = await store.upload({ sessionId, name: file.fileName, mimeType: file.mimeType, data: file.data, requestId: uploadRequestId(sessionId, messageId, partIndex), maxChunkBytes: limits.maxChunkBytes });
+        prepared.assertActive();
+        result.push({ type: 'attachment', attachmentId: attachment.attachmentId });
+      }
+      return result;
+    } catch (error) {
+      if (pending) await connection.request('attachment.abort', { uploadId: pending }).catch(() => {});
+      throw error;
+    }
+  }
   let alp: DaemonConnection | undefined;
   let timer: NodeJS.Timeout | undefined;
   let stopped = false;
@@ -90,7 +164,11 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     connection.onClose(() => { if (!stopped && alp === connection) { alp = undefined; clearRefresh(); scheduleReconnect(); } });
     return connection;
   };
-  const connectAgentClient = async () => { alp = await openAgentClient(); };
+  const connectAgentClient = async () => {
+    const connection = await openAgentClient();
+    if (stopped) { connection.close(); throw new Error('ALP facade is closed'); }
+    alp = connection;
+  };
   /** Drops a connection, whether it is unusable (a failed refresh) or being replaced. */
   const resetConnection = () => { const connection = alp; alp = undefined; clearRefresh(); try { connection?.close(); } catch {} };
   const reconnectLoop = async () => {
@@ -770,17 +848,29 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     if (config.provider !== PROVIDER) throw new Error(`ALP runs its own teams; ${config.provider} is not one of them`);
     // Built and checked before anything is made: an agent is never created without what its first
     // message carried, nor with a first message the facade can already tell is malformed.
-    const content = firstMessage(input.initialPrompt, input.images, input.attachments);
-    const sessionId = `web-${randomUUID()}`;
-    await alp!.request('session.create', { sessionId, ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}), spec: { cwd: config.cwd, persist: true, ...(config.model ? { workflow: config.model } : {}), ...(config.modeId ? { mode: config.modeId } : {}) } });
-    if (config.title) await alp!.request('session.rename', { sessionId, title: config.title });
-    await refresh();
-    await ensureTimeline(sessionId);
-    if (content) {
-      const answer = await alp!.request('session.prompt', { sessionId, clientMessageId: input.clientMessageId ?? randomUUID(), content });
-      if (answer?.outcome === 'failed') throw new Error(`ALP created the agent, but its first message failed: ${answer.error?.message ?? 'unknown error'}`);
-    }
-    return agentOf(known(sessionId));
+    const prepared = prepare(firstMessage(input.initialPrompt, input.images, input.attachments), input.client);
+    try {
+      prepared.assertActive();
+      const connection = alp!;
+      await fileLimits(prepared, connection);
+      prepared.assertActive();
+      const sessionId = `web-${randomUUID()}`;
+      await connection.request('session.create', { sessionId, ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}), spec: { cwd: config.cwd, persist: true, ...(config.model ? { workflow: config.model } : {}), ...(config.modeId ? { mode: config.modeId } : {}) } });
+      if (config.title) await connection.request('session.rename', { sessionId, title: config.title });
+      await refresh();
+      await ensureTimeline(sessionId);
+      prepared.assertActive();
+      if (prepared.content) {
+        try {
+          const clientMessageId = input.clientMessageId ?? randomUUID();
+          const content = await translate(prepared, sessionId, clientMessageId, connection);
+          prepared.assertActive();
+          const answer = await connection.request('session.prompt', { sessionId, clientMessageId, content });
+          if (answer?.outcome === 'failed') throw new Error(answer.error?.message ?? 'unknown error');
+        } catch (error: any) { throw new Error(`ALP created the agent, but its first message failed: ${error?.message ?? error}`); }
+      }
+      return agentOf(known(sessionId));
+    } finally { prepared.release(); }
   }
 
   const view: AgentsView = {
@@ -800,6 +890,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       for (const id of cleared) { const session = roots.get(id); if (session) upsert(session); }
       return cleared;
     },
+    validateFirst(input) { const p = prepare(firstMessage(input.initialPrompt, input.images, input.attachments), input.client); p.release(); },
     create: input => create(input),
   };
 
@@ -964,47 +1055,64 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       try {
         await started;
         const workspaceId = message.workspaceId;
-        const agent = await create({ config, ...(workspaceId ? { workspaceId } : {}), ...(message.initialPrompt ? { initialPrompt: message.initialPrompt } : {}), ...(message.clientMessageId ? { clientMessageId: message.clientMessageId } : {}), ...(message.images ? { images: message.images } : {}), ...(message.attachments ? { attachments: message.attachments } : {}) });
+        const agent = await create({ config, client, ...(workspaceId ? { workspaceId } : {}), ...(message.initialPrompt ? { initialPrompt: message.initialPrompt } : {}), ...(message.clientMessageId ? { clientMessageId: message.clientMessageId } : {}), ...(message.images ? { images: message.images } : {}), ...(message.attachments ? { attachments: message.attachments } : {}) });
         client.emit({ type: 'status', payload: { status: 'agent_created', requestId: message.requestId, agentId: agent.id, agent } });
       } catch (error) {
         return fail(error);
       }
     },
 
-    /**
-     * Paseo's file upload (file.upload.request, then binary file frames, which the gateway ignores):
-     * refused at once, so the app says so when the file is attached, not when the message is sent.
-     * Paseo uploads before a message names the agent, and alpd binds an upload to its session when it
-     * begins (§12.6); see prompt-content.ts.
-     */
-    'file.upload.request'(message: Inbound<'file.upload.request'>) {
-      return { type: 'file.upload.response', payload: { requestId: message.requestId, file: null, error: uploadRefused } } satisfies Outbound;
+    'file.upload.request': (message, client) => uploads.request(message, client),
+
+    async send_agent_message_request(message: Inbound<'send_agent_message_request'>, client: ClientContext) {
+      const reply = (error: string | null): Outbound => ({ type: 'send_agent_message_response', payload: { requestId: message.requestId, agentId: message.agentId, accepted: !error, error } });
+      let prepared: ReturnType<typeof prepare> | undefined;
+      try {
+        prepared = prepare(messageContent(message.text, message.images, message.attachments), client);
+        await started;
+        prepared.assertActive();
+        const connection = alp!;
+        const session = known(message.agentId);
+        const messageId = message.messageId ?? randomUUID();
+        const run = async () => {
+          // Validate the socket grant before every retry, including an already committed daemon upload.
+          const content = await translate(prepared!, session.id, messageId, connection);
+          prepared!.assertActive();
+          await open(session);
+          prepared!.assertActive();
+          await ensureTimeline(session.id);
+          prepared!.assertActive();
+          const running = session.status === 'running' || session.busy;
+          let delivery: 'auto' | 'steer' = running && message.activeTurnBehavior !== 'interrupt' ? 'steer' : 'auto';
+          let deliveryState: DeliveryState | undefined;
+          if (client && message.messageId) {
+            let cache = deliveries.get(client);
+            if (!cache) { cache = new Map(); deliveries.set(client, cache); }
+            const key = JSON.stringify([session.id, messageId]);
+            deliveryState = cache.get(key) ?? { delivery };
+            delivery = deliveryState.delivery;
+            cache.set(key, deliveryState);
+            if (cache.size > 128) cache.delete(cache.keys().next().value!);
+          }
+          if (running && message.activeTurnBehavior === 'interrupt' && !deliveryState?.interrupted) {
+            await connection.request('session.interrupt', { sessionId: session.id });
+            if (deliveryState) deliveryState.interrupted = true;
+          }
+          prepared!.assertActive();
+          if (deliveryState) deliveryState.interrupted = true;
+          const answer = await connection.request('session.prompt', { sessionId: session.id, clientMessageId: messageId, delivery, content });
+          if (answer?.outcome === 'failed') return reply(answer.error?.message ?? 'ALP could not deliver the message');
+          attention.delete(session.id);
+          return reply(null);
+        };
+        return 'files' in prepared ? await serialPrompt(client, JSON.stringify([session.id, messageId]), run) : await run();
+      } catch (error: any) { return reply(error?.message ?? String(error)); }
+      finally { prepared?.release(); }
     },
 
-    async send_agent_message_request(message: Inbound<'send_agent_message_request'>) {
-      const reply = (error: string | null): Outbound => ({ type: 'send_agent_message_response', payload: { requestId: message.requestId, agentId: message.agentId, accepted: !error, error } });
-      try {
-        // What the message carries is checked first: a message is never sent without its images or attachments.
-        const content = messageContent(message.text, message.images, message.attachments);
-        const session = known(message.agentId);
-        await open(session);
-        await ensureTimeline(session.id);
-        const running = session.status === 'running' || session.busy;
-        // Paseo's interrupt stops the turn and starts a new one; its steer (the default) goes into the turn.
-        if (running && message.activeTurnBehavior === 'interrupt') await alp!.request('session.interrupt', { sessionId: session.id });
-        const answer = await alp!.request('session.prompt', {
-          sessionId: session.id,
-          clientMessageId: message.messageId ?? randomUUID(),
-          delivery: running && message.activeTurnBehavior !== 'interrupt' ? 'steer' : 'auto',
-          content,
-        });
-        // alpd answered the prompt's outcome (prompt.receipts, §10): a failed one is not accepted.
-        if (answer?.outcome === 'failed') return reply(answer.error?.message ?? 'ALP could not deliver the message');
-        attention.delete(session.id);
-        return reply(null);
-      } catch (error: any) {
-        return reply(error?.message ?? String(error));
-      }
+    async send_agent_message(message: Omit<Inbound<'send_agent_message_request'>, 'type' | 'requestId'> & { type: 'send_agent_message' }, client: ClientContext) {
+      const response = await handlers.send_agent_message_request({ ...message, type: 'send_agent_message_request', requestId: '' }, client) as Extract<Outbound, { type: 'send_agent_message_response' }>;
+      if (response.payload.error) client.emit({ type: 'agent_stream', payload: { agentId: message.agentId, event: { type: 'turn_failed', provider: PROVIDER, error: response.payload.error }, timestamp: new Date().toISOString() } } as Outbound);
     },
 
     /**
@@ -1169,6 +1277,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
   };
 
   return {
+    uploads,
     handlers,
     view,
     /** ALP itself as the app lists providers: its teams are the models (ALPD §62 step 3). */
@@ -1208,6 +1317,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     },
     close() {
       stopped = true;
+      uploads.close();
       clearRefresh();
       alp?.close();
       alp = undefined;

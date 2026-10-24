@@ -171,8 +171,13 @@ rerun here; its pass is recorded in PR #193.
     checkout on disk (`server/paseo/workspaces.ts:256-260`); removal is in apps/web;
   - the facade needs exactly one approved mapping for the source and refuses otherwise
     (`server/paseo/workspaces.ts:368`); apps/web lets the user choose.
-- **L10, attachments in the facade (t-4f38).** The `alp web` Paseo facade refuses uploads. The user
-  accepted this on 2026-10-23. apps/web and the provider's `uploaded_file` path work.
+- **L10, attachments in the facade (t-4f38).** The Paseo facade accepts binary file uploads bound to
+  the same connection, then delivers them through alpd's attachment store (including legacy messages
+  and new-agent first prompts). Reconnect requires re-upload. Staging is limited to 20 MiB/file,
+  eight files/40 MiB per connection and 64 files/128 MiB globally, expiring after ten minutes;
+  daemon limits may lower prompt limits further. Unsupported context kinds still refuse the whole
+  message. Legacy worktree FirstAgentContext/attachments are refused explicitly because they drive
+  unsupported naming/setup automation, not a first-agent prompt. See [limits](paseo-plugin.md#prototype-limits).
 - **L11, attachment runtimes and platform.** Codex and Claude take `file.path`. ACP and Antigravity
   answer `1005 attachment_unsupported`. alpd keeps no attachment store on Windows. Masking of the staging
   path in text an agent writes is best effort.
