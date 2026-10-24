@@ -228,12 +228,12 @@ test('uploaded files become attachment parts in place, order kept, other parts u
   await prompt('m2', [{ type: 'text', text: 'plain' }]);
   assert.deepEqual(alpd.sent('session.prompt')[1].params.content, [{ type: 'text', text: 'plain' }]);
   assert.equal(alpd.sent('attachment.begin').length, 2);
-  // Images keep their handling: this provider does not advertise prompt.image, so Paseo's contract
-  // refuses the prompt before the provider reads or uploads anything, with or without a file.
+  // A backend advertising images takes an inline image alongside an uploaded file, in order.
   await prompt('m3', [IMAGE, await fixture.upload('c.txt', 'c')]);
-  assert.match(failures().at(-1).result.error.message, /does not support prompt\.image/);
-  assert.equal(alpd.sent('attachment.begin').length, 2);
-  assert.equal(alpd.sent('session.prompt').length, 2);
+  assert.deepEqual(failures(), []);
+  assert.equal(alpd.sent('attachment.begin').length, 3);
+  assert.equal(alpd.sent('session.prompt').length, 3);
+  assert.deepEqual(alpd.sent('session.prompt')[2].params.content, [IMAGE, { type: 'attachment', attachmentId: 'att-3' }]);
 });
 
 test('the same prompt sent again reuses its upload and object; an interrupted upload resumes', { skip: !posix }, async t => {

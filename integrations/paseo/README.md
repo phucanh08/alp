@@ -98,6 +98,20 @@ reports that alpd.js was not found, run `alp daemon start` once, or set
 environment. `ALP_HOME` (default `~/.alp`) selects the daemon's directory and
 must match between the CLI and Paseo.
 
+The provider offers images when alpd's connection handshake (or `daemon.hello`
+for an embedded connection) lists `prompt.images`, and Paseo requests them.
+Individual sessions still validate runtime support and image limits. The offer
+is fixed for the provider connection; a replacement backend validates each prompt.
+Missing or failed capability discovery leaves images unavailable.
+
+Forge issues and change requests, legacy GitHub attachments, reviews, and text
+context are sent as ordinary user text using Paseo's attachment rendering. Bodies
+and review lines retain their content and order; context metadata grants no system
+authority. Uploaded files continue through alpd's attachment store. Native command prompts
+(`{ type: "command", name, arguments }`) are unsupported: the provider does not
+advertise `prompt.command` and rejects them before waking or contacting a session.
+It does not translate commands into prose.
+
 Closing an agent in Paseo stops watching it; work in progress finishes in
 alpd. Use interrupt to stop work. You talk with main: when main asks you a
 question with `alp_ask`, Paseo shows it as a question prompt; your answer, or a
