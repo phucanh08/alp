@@ -1,12 +1,13 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { createAlpRuntime } from '../../dist/runtime/index.js';
@@ -15,17 +16,22 @@ import { createPaseoBridge } from '../../integrations/paseo/server/dist/index.js
 import { initProject } from '../../packages/core/src/init.js';
 import { seedLibrary } from '../../packages/core/src/library.js';
 import { fakeTransport } from '../support/fake-agent.js';
+import { fixtureProcesses } from '../support/fixture-processes.js';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
 const cli = path.join(root, 'packages', 'cli', 'dist', 'cli.js');
 const integrationDescriptor = path.join(root, 'integrations', 'web.json');
 const execFileAsync = promisify(execFile);
+const processFixtures = new Map();
 
 // The integration serves a web app only when one is built beside it; these tests exercise the process
 // lifecycle, so a stand-in page keeps them independent of the large web build (ALP_WEB_APP is the override).
 const standInApp = await mkdtemp(path.join(tmpdir(), 'alp-web-app-'));
 await writeFile(path.join(standInApp, 'index.html'), '<!doctype html><title>ALP</title>');
 process.env.ALP_WEB_APP = standInApp;
+// The outer test process must never fall back to the developer's live home either.
+process.env.ALP_HOME = path.join(standInApp, 'outer-home');
+await mkdir(process.env.ALP_HOME, { mode: 0o700 });
 after(() => rm(standInApp, { recursive: true, force: true }));
 const { connect, readLock, lockAlive } = await import('../../packages/client/dist/index.js');
 
@@ -36,7 +42,7 @@ const { connect, readLock, lockAlive } = await import('../../packages/client/dis
 async function run(args, home, timeout = 60_000, extraEnv = {}) {
   try {
     const { stdout, stderr } = await execFileAsync(process.execPath, [cli, ...args], {
-      env: { ...process.env, ALP_HOME: home, ...extraEnv },
+      env: { ...process.env, ...extraEnv, ...processFixtures.get(home).env },
       encoding: 'utf8',
       timeout,
       killSignal: 'SIGKILL',
@@ -60,37 +66,22 @@ async function homeJson(home, name) {
 const webJson = home => homeJson(home, 'web.json');
 const lockJson = home => homeJson(home, path.join('integrations', 'web.lock'));
 
-async function stopPid(pid) {
-  if (!Number.isSafeInteger(pid)) return;
-  try { process.kill(pid, 'SIGTERM'); } catch { return; }
-  for (let i = 0; i < 200; i++) { try { process.kill(pid, 0); } catch { return; } await sleep(25); }
-  try { process.kill(pid, 'SIGKILL'); } catch {}
-  for (let i = 0; i < 80; i++) { try { process.kill(pid, 0); } catch { return; } await sleep(25); }
-}
-
 async function waitGone(pid) {
   for (let i = 0; i < 200; i++) { try { process.kill(pid, 0); } catch { return; } await sleep(25); }
   assert.fail(`process ${pid} did not exit`);
 }
 
-/** A temporary ALP home with an ephemeral web port and no relay, cleaned up with its own PIDs. */
+/** A private home whose detached Node descendants are admitted before their entry points run. */
 async function createHome(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-integration-'));
   const home = path.join(directory, 'home');
   await mkdir(home, { recursive: true, mode: 0o700 });
   await writeFile(path.join(home, 'settings.json'), JSON.stringify({ web: { port: 0, relay: { enabled: false } } }));
+  const processes = await fixtureProcesses(home);
+  processFixtures.set(home, processes);
   t.after(async () => {
-    // Stop the integration before the daemon: a supervised integration would otherwise restart
-    // the daemon after we stop it. Only PIDs named by this home's own metadata are touched.
-    const owned = new Set();
-    const info = await webJson(home);
-    if (info?.pid) owned.add(info.pid);
-    const lock = await lockJson(home);
-    if (lock?.pid) owned.add(lock.pid);
-    for (const pid of owned) await stopPid(pid);
-    await run(['daemon', 'stop'], home, 20_000).catch(() => {});
-    const daemon = await readLock(home).catch(() => undefined);
-    if (daemon?.pid) await stopPid(daemon.pid);
+    await processes.stop();
+    processFixtures.delete(home);
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
   return { directory, home };
@@ -120,6 +111,75 @@ async function waitFor(fn, what, tries = 300, gap = 50) {
   }
   assert.fail(`Expected ${what} did not arrive`);
 }
+
+test('cleanup stops unpublished detached daemon and service under gated startup load', async t => {
+  let cleanup;
+  const { home } = await createHome({ after: hook => { cleanup = hook; } });
+  const owned = processFixtures.get(home);
+  // Preserve a private emergency shutdown controller even when exercising old teardown.
+  t.after(async () => { await owned.stop(); await rm(path.dirname(home), { recursive: true, force: true }); });
+  const gate = path.join(home, 'startup-gate.mjs');
+  const arrived = path.join(home, 'arrived');
+  await writeFile(gate, `
+    import fs from 'node:fs/promises';
+    import { appendFileSync } from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    const open = fs.open;
+    fs.open = async function(file, ...args) {
+      if ([${JSON.stringify(path.join(home, 'alpd.lock'))}, ${JSON.stringify(path.join(home, 'integrations', 'web.lock'))}].includes(String(file))) {
+        appendFileSync(${JSON.stringify(arrived)}, process.pid + '\\n');
+        // Bound synchronous startup load. The fixture watchdog has its own event loop.
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30_000);
+      }
+      return open.call(this, file, ...args);
+    };
+    syncBuiltinESMExports();
+  `);
+  const env = { ...process.env, ...owned.env, NODE_OPTIONS: owned.env.NODE_OPTIONS + ' --import=' + pathToFileURL(gate).href };
+  const children = [path.join(root, 'dist', 'alpd.js'), path.join(root, 'integrations', 'paseo', 'server', 'dist', 'main.js')].map(entry => {
+    const child = spawn(process.execPath, [entry, '--service'], { env, detached: true, stdio: 'ignore' });
+    child.unref();
+    return child;
+  });
+  const pids = children.map(child => child.pid);
+  await waitFor(async () => (await readFile(arrived, 'utf8')).trim().split('\n').length === 2, 'both real processes blocked before metadata');
+  assert.equal(await webJson(home), undefined);
+  assert.equal(await lockJson(home), undefined);
+  assert.equal(await readLock(home), undefined);
+  assert.ok(pids.every(pid => { try { process.kill(pid, 0); return true; } catch { return false; } }));
+  await cleanup();
+  for (const pid of pids) await waitGone(pid);
+  // A delayed launch holding a copied env must fail closed after the home is removed.
+  const late = await execFileAsync(process.execPath, ['-e', 'process.exit(42)'], { env }).catch(error => error);
+  assert.equal(late.code, 1, 'closed admission must prevent the entry point');
+  assert.match(late.stderr, /owner\.json/);
+});
+
+test('cleanup ignores foreign metadata PIDs and drains an unrecorded detached descendant', async t => {
+  let cleanup;
+  const { home } = await createHome({ after: hook => { cleanup = hook; } });
+  const owned = processFixtures.get(home);
+  const sentinel = await createHome(t);
+  const foreign = processFixtures.get(sentinel.home);
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { env: { ...process.env, ...foreign.env }, stdio: 'ignore' });
+  await waitFor(async () => (await foreign.running()).some(entry => entry.pid === child.pid), 'foreign sentinel admission');
+  t.after(async () => { await owned.stop(); await rm(path.dirname(home), { recursive: true, force: true }); });
+  // A real detached descendant is launched without publishing any ALP lock.
+  const script = `
+    const { spawn } = require('node:child_process');
+    spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { env: process.env, detached: true, stdio: 'ignore' }).unref();
+  `;
+  await execFileAsync(process.execPath, ['-e', script], { env: { ...process.env, ...owned.env } });
+  await waitFor(async () => (await owned.running()).length === 1, 'unrecorded detached descendant');
+  for (const file of ['web.json', 'integrations/web.lock', 'alpd.lock']) {
+    await mkdir(path.dirname(path.join(home, file)), { recursive: true });
+    await writeFile(path.join(home, file), JSON.stringify({ pid: child.pid }));
+  }
+  const pids = (await owned.running()).map(entry => entry.pid);
+  await cleanup();
+  for (const pid of pids) await waitGone(pid);
+  assert.doesNotThrow(() => process.kill(child.pid, 0), 'another home survives stale/foreign metadata');
+});
 
 test('cold alp web starts one integration on an ephemeral port and reuses it', async t => {
   const { home } = await createHome(t);
