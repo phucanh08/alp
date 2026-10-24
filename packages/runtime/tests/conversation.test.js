@@ -446,10 +446,12 @@ test('a parked root resumed during a lifecycle hold stays parked until the hold 
   runtimes[0].finish();
   await until(() => !runtime.snapshot('root').busy);
   const kind = runtime.snapshot('root').runtime;
-  const resumes = () => runtimes[0].of('turn/start').filter(params => JSON.stringify(params).includes('ALP resumed this session')).length;
+  const resumes = () => runtimes[0].of('turn/start').filter(params => JSON.stringify(params).includes("Continue the user's request where you stopped")).length;
   for (const pausedAtRelease of [true, false]) {
     runtime.pause({ runtime: kind });
-    await runtime.recover('root', { parkedRoot: 'alpd restarted' });
+    // New recovery continuation blocked solely by this pause has a known scope.
+    // Legacy parkedRoot reason strings cannot establish that authority.
+    await runtime.recover('root', { continueRoot: true });
     assert.ok(runtime.snapshot('root').parked);
     const before = resumes();
     const release = runtime.hold('root');
@@ -692,4 +694,54 @@ test('reload refuses unless the whole tree is idle', async t => {
   await refused(runtime.reload('root'), 'session_busy');
   await refused(runtime.reload(child), 'session_busy');
   assert.equal(runtimes.filter(r => r.of('thread/resume').length).length, 0, 'nothing restarted');
+});
+
+for (const resumeBeforeRestart of [true, false]) {
+  test(`process restart continuation waits for its pause, resume before restart=${resumeBeforeRestart}`, async t => {
+    let releaseRestart;
+    const restarted = new Promise(resolve => { releaseRestart = resolve; });
+    const { root, runtime, runtimes, prompt } = await setup(t, async (transport, method) => {
+      if (transport.index === 2 && method === 'thread/resume') await restarted;
+    });
+    await runtime.open('root', { cwd: root, persist: true, model: 'codex:gpt-5.6-sol' });
+    await runtime.open('barrier', { cwd: root, persist: true });
+    await prompt('root', 'work');
+    runtimes[0].failure(new Error('process exited'));
+    try {
+      await until(() => runtimes[2]?.of('thread/resume').length === 1);
+      runtime.pause({ runtime: 'codex' });
+      runtime.resume({ runtime: 'claude' });
+      if (resumeBeforeRestart) runtime.resume({ runtime: 'codex' });
+    } finally { releaseRestart(); }
+    await until(() => !runtime.starting('root'));
+    await runtime.recover('barrier');
+    if (!resumeBeforeRestart) {
+      assert.equal(runtimes[2].of('turn/start').length, 0);
+      runtime.resume({ runtime: 'claude' });
+      await runtime.recover('barrier');
+      assert.equal(runtimes[2].of('turn/start').length, 0);
+      runtime.resume({ runtime: 'codex' });
+    }
+    await until(() => runtimes[2].of('turn/start').length === 1);
+    assert.equal(runtime.snapshot('root').parked, undefined);
+  });
+}
+
+test('native process replacement does not give manual recovery roots automatic resume authority', async t => {
+  const { root, runtime, runtimes, prompt } = await setup(t, undefined, { recoveryResume: false });
+  await runtime.open('root', { cwd: root, persist: true, model: 'codex:gpt-5.6-sol' });
+  await runtime.open('barrier', { cwd: root, persist: true });
+  await prompt('root', 'work');
+  runtimes[0].finish();
+  await runtime.recover('root', { continueRoot: true });
+  const reason = runtime.snapshot('root').parked;
+  runtimes[0].failure(new Error('idle parked process exited'));
+  await until(() => runtimes[2]?.of('thread/resume').length === 1 && !runtime.starting('root'));
+  runtime.resume({ runtime: 'codex' });
+  runtime.resume();
+  await runtime.recover('barrier');
+  assert.equal(runtimes[2].of('turn/start').length, 0);
+  assert.equal(runtime.snapshot('root').parked, reason);
+  await prompt('root', 'explicit recovery', 'Continue');
+  assert.equal(runtimes[2].of('turn/start').length, 1);
 });

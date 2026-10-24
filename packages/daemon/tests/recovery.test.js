@@ -186,7 +186,7 @@ test('a runtime process that dies mid-turn is restarted and its assignment conti
   main.finish('ok');
 });
 
-test('assignments the next alpd cannot continue end with their task reopened; with recovery parked they wait for alp resume', async t => {
+test('assignments the next alpd cannot continue end with their task reopened; parked recovery needs an explicit session prompt', async t => {
   const { directory, root, options } = await workspace(t);
   const runtimes = [];
   const start = async () => {
@@ -223,10 +223,17 @@ test('assignments the next alpd cannot continue end with their task reopened; wi
   const peer = runtimes.at(-1);
   assert.equal(peer.started.length, 0);
   assert.deepEqual(third.pauses().parked.map(entry => [entry.assignmentId, entry.reason]), [[parked.assignmentId, 'alpd restarted']]);
-  assert.match(events.find(envelope => envelope.event.item?.kind === 'notice').event.item.text, /1 of 1 running assignments reopened; they wait parked: run alp resume to continue them\./);
+  assert.match(events.find(envelope => envelope.event.item?.kind === 'notice').event.item.text, /1 of 1 running assignments reopened; they wait parked: send an explicit prompt to each parked session to continue it\./);
+  third.resume({ runtime: parked.snapshot.runtime });
   third.resume();
+  // Queue barrier after both resume callbacks: manual recovery has no pause provenance.
+  await third.recover('root');
+  assert.equal(peer.started.length, 0);
+  assert.ok(third.snapshot(parked.assignmentId).parked);
+  await third.prompt(parked.assignmentId, { clientMessageId: 'explicit-recovery', delivery: 'auto', content: [{ type: 'text', text: 'Continue recovered assignment' }] });
   await until(() => peer.started.length === 1);
-  assert.match(peer.lastText(), /^ALP: alpd restarted while you worked on this assignment/);
+  assert.equal(third.snapshot(parked.assignmentId).parked, undefined);
+  assert.match(peer.lastText(), /Continue recovered assignment/);
   assert.equal((await loadTasks(root)).tasks.find(entry => entry.id === parked.task.id).status, 'in_progress');
 });
 
@@ -378,7 +385,7 @@ test('finished shared assignments remain continuable after a daemon restart', as
 });
 
 for (const mode of ['poll after restart', 'reset before restart', 'autoResume false', 'manual pause', 'global pause', 'failed start']) {
-  test(`an isolated usage-stopped root survives daemon restart: ${mode}`, async t => {
+  test(`an isolated legacy usage-stopped root waits for an explicit prompt after daemon restart: ${mode}`, async t => {
     const { directory, root, options } = await workspace(t);
     const runtimes = [];
     let used = 100;
@@ -431,6 +438,7 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
     await until(() => second.runtime.snapshot(session.id)?.threadId === main.threadId, 'root thread reopened without client');
     let again = runtimes.slice(before).find(agent => agent.calls.some(call => call.method === 'thread/resume' && call.params.threadId === main.threadId));
     assert.ok(again);
+    await until(() => second.runtime.snapshot(session.id)?.parked, 'legacy root restored parked');
     assert.equal(await readFile(path.join(root, 'notes.txt'), 'utf8'), 'unfinished work');
     // Hold real atomic record replacements so runtime completion cannot accidentally
     // stand in for persistence completion. Other tests/files keep their normal I/O.
@@ -455,6 +463,14 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
         assert.ok(second.runtime.snapshot(session.id).parked);
         second.runtime.resume();
       }
+      await until(() => !second.runtime.pauses().all && !second.runtime.pauses().runtimes.codex, 'provider pause lifted');
+      second.runtime.resume({ runtime: 'codex' });
+      second.runtime.resume();
+      await second.runtime.recover(session.id);
+      assert.equal(again.started.length, 0, 'legacy reason cannot grant automatic scope resume');
+      assert.ok(second.runtime.snapshot(session.id).parked);
+      const prompt = clientMessageId => second.runtime.prompt(session.id, { clientMessageId, delivery: 'auto', content: [{ type: 'text', text: 'Continue the recovered notes' }] });
+      await prompt('explicit-recovery');
       if (mode === 'failed start') {
         await until(() => !failNext && second.runtime.snapshot(session.id)?.parked, 'failed start retains intent');
         assert.equal(again.started.length, 0);
@@ -463,6 +479,9 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
         second = await daemon();
         await until(() => second.runtime.snapshot(session.id)?.threadId === main.threadId, 'failed start recovers on another restart');
         again = runtimes.slice(retryIndex).find(agent => agent.calls.some(call => call.method === 'thread/resume' && call.params.threadId === main.threadId));
+        await until(() => second.runtime.snapshot(session.id)?.parked, 'failed explicit start remains parked after restart');
+        assert.equal(again.started.length, 0);
+        await prompt('explicit-recovery-retry');
       }
       await until(() => again.started.length === 1, 'exactly one continued root turn');
       second.runtime.resume();

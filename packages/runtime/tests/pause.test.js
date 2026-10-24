@@ -277,3 +277,214 @@ test('Cafe main and lead can inspect beside a parked peer, and lead can return a
   assert.equal(runtime.pauses().parked.length, 0);
   assert.equal(runtime.status('root').assignments.length, 0);
 });
+
+// An idle root is a queue barrier: recover does not send a turn without continuation intent.
+async function barrier(runtime) { await runtime.recover('barrier'); }
+async function openIdle(runtime, root, id, model = 'codex:gpt-5.6-sol') {
+  await runtime.open(id, { cwd: root, model });
+}
+
+for (const scope of ['claude', 'codex', 'all']) {
+  test(`resume ${scope} leaves manual recovery roots parked, including one recovered during a pause`, async t => {
+    const { root, runtime, runtimes, main, events } = await setup(t, () => ({ recoveryResume: false }));
+    main.finish();
+    await openIdle(runtime, root, 'barrier');
+    await runtime.recover('root', { continueRoot: true });
+    await openIdle(runtime, root, 'other', 'claude:claude-sonnet-4-6');
+    runtime.pause({ runtime: 'claude' });
+    await runtime.recover('other', { continueRoot: true });
+    runtime.resume(scope === 'all' ? {} : { runtime: scope });
+    await barrier(runtime);
+    assert.equal(main.started.length, 1, 'manual Codex recovery must wait for an explicit session prompt');
+    assert.doesNotMatch(notices(events).at(-1).text, /Parked assignments continue/);
+    assert.equal(runtimes[2].started.length, 0, 'manual Claude recovery must wait even when recovered during a provider pause');
+    assert.ok(runtime.snapshot('root').parked);
+    assert.ok(runtime.snapshot('other').parked);
+    await runtime.prompt('root', { clientMessageId: 'explicit-recovery', delivery: 'auto', content: [{ type: 'text', text: 'Continue my recovered session' }] });
+    assert.equal(main.started.length, 2, 'explicit session resume still starts the recovered root');
+    assert.equal(runtime.snapshot('root').parked, undefined);
+  });
+}
+
+test('provider resume selects the pause that parked work and survives resume before interrupt completion', async t => {
+  const { root, runtime, runtimes, main } = await setup(t, none);
+  await openIdle(runtime, root, 'barrier');
+  const { assignmentId } = await main.call('alp_delegate', { agent: 'peer', task: 'Work', mode: 'read-only', wait: false });
+  await until(() => runtimes[2]?.started.length === 1);
+  const peer = runtimes[2];
+  runtime.pause({ runtime: 'codex', now: true });
+  runtime.resume({ runtime: 'claude' });
+  await barrier(runtime);
+  assert.equal(peer.started.length, 1);
+  runtime.resume({ runtime: 'codex' });
+  runtime.resume({ runtime: 'codex' });
+  await barrier(runtime);
+  assert.equal(peer.started.length, 1, 'the interrupted turn has not settled yet');
+  peer.notification('turn/completed', { threadId: peer.threadId, turn: { id: peer.turnId, status: 'interrupted' } });
+  await barrier(runtime);
+  assert.equal(peer.started.length, 2, 'the matching earlier resume continues the turn once it parks');
+  assert.equal(runtime.snapshot(assignmentId).parked, undefined);
+  runtime.resume();
+  await barrier(runtime);
+  assert.equal(peer.started.length, 2, 'repeated resume cannot duplicate a continuation');
+});
+
+test('wrong-provider resume cannot reach a parked root through a lifecycle hold', async t => {
+  const { root, runtime, main } = await setup(t, () => ({ recoveryResume: false }));
+  main.finish();
+  await openIdle(runtime, root, 'barrier');
+  await runtime.recover('root', { continueRoot: true });
+  const release = runtime.hold('root');
+  runtime.resume({ runtime: 'claude' });
+  await barrier(runtime);
+  release();
+  release();
+  await barrier(runtime);
+  assert.equal(main.started.length, 1);
+  assert.ok(runtime.snapshot('root').parked);
+});
+
+for (const terminal of ['interrupted', 'completed']) {
+  test(`pause resume ordering is safe when the interrupted assignment ends ${terminal}`, async t => {
+    const { root, runtime, runtimes, main } = await setup(t, none);
+    await openIdle(runtime, root, 'barrier');
+    await main.call('alp_delegate', { agent: 'peer', task: 'Work', mode: 'read-only', wait: false });
+    await until(() => runtimes[2]?.started.length === 1);
+    const peer = runtimes[2];
+    runtime.pause({ runtime: 'codex', now: true });
+    peer.finish('ended', { status: terminal });
+    await barrier(runtime);
+    runtime.resume({ runtime: 'claude' });
+    await barrier(runtime);
+    assert.equal(peer.started.length, 1, 'wrong scope cannot continue the assignment');
+    runtime.resume({ runtime: 'codex' });
+    runtime.resume();
+    await barrier(runtime);
+    assert.equal(peer.started.length, terminal === 'completed' ? 1 : 2, 'completed work is not restarted; parked work continues once');
+  });
+}
+
+for (const timing of ['queued', 'held']) {
+  test(`a ${timing} pause resume cannot continue replacement manual recovery intent`, async t => {
+    const { root, runtime, main } = await setup(t, () => ({ autoResume: false }));
+    await openIdle(runtime, root, 'barrier');
+    main.limit();
+    await until(() => runtime.snapshot('root').parked);
+    const release = timing === 'held' ? runtime.hold('root') : undefined;
+    let replacement;
+    if (timing === 'queued') replacement = runtime.recover('root', { parkedRoot: 'manual recovery replacement' });
+    runtime.resume({ runtime: 'codex' });
+    if (timing === 'held') {
+      await barrier(runtime);
+      replacement = runtime.recover('root', { parkedRoot: 'manual recovery replacement' });
+    }
+    await replacement;
+    release?.();
+    await barrier(runtime);
+    assert.equal(main.started.length, 1, 'old resume authority belongs only to its original parked object');
+    assert.equal(runtime.snapshot('root').parked, 'manual recovery replacement');
+  });
+}
+
+test('automatic quota resume continues its limited root and leaves unrelated manual recovery alone', async t => {
+  const { root, runtime, runtimes, main } = await setup(t, () => ({ limitCheckMs: 20, recoveryResume: false }));
+  await openIdle(runtime, root, 'barrier');
+  await openIdle(runtime, root, 'manual');
+  await runtime.recover('manual', { continueRoot: true });
+  let allowed = false;
+  main.orchestrationContext = async () => ({ usage: { available: true, limits: [{ windows: [{ usedPercent: allowed ? 0 : 100, resetsAt: 1_900_000_000 }] }] } });
+  main.limit();
+  await until(() => runtime.pauses().runtimes.codex?.checkedAt);
+  allowed = true;
+  await until(() => main.started.length === 2);
+  await barrier(runtime);
+  assert.equal(runtimes[2].started.length, 0);
+  assert.ok(runtime.snapshot('manual').parked);
+});
+
+test('matching pause resume survives nested holds and a second pause without duplicate turns', async t => {
+  const { root, runtime, main } = await setup(t, none);
+  await openIdle(runtime, root, 'barrier');
+  main.limit();
+  await until(() => runtime.snapshot('root').parked && runtime.pauses().runtimes.codex);
+  const first = runtime.hold('root');
+  const last = runtime.hold('root');
+  runtime.resume({ runtime: 'codex' });
+  runtime.resume({ runtime: 'codex' });
+  await barrier(runtime);
+  first();
+  await barrier(runtime);
+  assert.equal(main.started.length, 1);
+  runtime.pause({ runtime: 'codex' });
+  last();
+  await barrier(runtime);
+  assert.equal(main.started.length, 1, 're-pause holds the authorized continuation');
+  runtime.resume({ runtime: 'claude' });
+  await barrier(runtime);
+  assert.equal(main.started.length, 1);
+  runtime.resume({ runtime: 'codex' });
+  runtime.resume();
+  await barrier(runtime);
+  assert.equal(main.started.length, 2);
+});
+
+test('a newer provider pause replaces released global pause intent before the interrupted turn settles', async t => {
+  const { root, runtime, runtimes, main } = await setup(t, none);
+  await openIdle(runtime, root, 'barrier');
+  await main.call('alp_delegate', { agent: 'peer', task: 'Work', mode: 'read-only', wait: false });
+  await until(() => runtimes[2]?.started.length === 1);
+  const peer = runtimes[2];
+  runtime.pause({ now: true });
+  runtime.resume();
+  runtime.pause({ runtime: 'codex', now: true });
+  peer.finish('interrupted', { status: 'interrupted' });
+  await barrier(runtime);
+  assert.equal(peer.started.length, 1);
+  runtime.resume({ runtime: 'codex' });
+  await barrier(runtime);
+  assert.equal(peer.started.length, 2);
+});
+
+for (const scope of ['codex', 'all']) {
+  test(`automatic working recovery blocked by ${scope} pause waits for the matching resume`, async t => {
+    const { root, runtime, main } = await setup(t, none);
+    main.finish();
+    await openIdle(runtime, root, 'barrier');
+    runtime.pause(scope === 'all' ? {} : { runtime: scope });
+    await runtime.recover('root', { continueRoot: true });
+    assert.ok(runtime.snapshot('root').parked);
+    if (scope === 'all') assert.throws(() => runtime.resume({ runtime: 'codex' }), /All of ALP is paused/);
+    else runtime.resume({ runtime: 'claude' });
+    await barrier(runtime);
+    assert.equal(main.started.length, 1);
+    runtime.resume(scope === 'all' ? {} : { runtime: scope });
+    runtime.resume();
+    await barrier(runtime);
+    assert.equal(main.started.length, 2);
+    assert.equal(runtime.snapshot('root').parked, undefined);
+  });
+}
+
+for (const paused of [false, true]) {
+  test(`legacy persisted parked reasons remain explicit-only when initially paused=${paused}`, async t => {
+    const { root, runtime, main, events } = await setup(t, none);
+    main.finish();
+    await openIdle(runtime, root, 'barrier');
+    if (paused) runtime.pause({ runtime: 'codex' });
+    // Reason text is deliberately a familiar quota message. It is not provenance.
+    const reason = 'the Codex usage limit was reached';
+    await runtime.recover('root', { parkedRoot: reason });
+    assert.match(notices(events).at(-1).text, /send an explicit prompt to each parked session to continue it/);
+    await barrier(runtime);
+    assert.equal(main.started.length, 1, 'unpaused recovery must not infer automatic continuation');
+    runtime.resume({ runtime: 'claude' });
+    runtime.resume({ runtime: 'codex' });
+    runtime.resume();
+    await barrier(runtime);
+    assert.equal(main.started.length, 1, 'provider/all resume cannot infer a legacy park scope');
+    assert.equal(runtime.snapshot('root').parked, reason);
+    await runtime.prompt('root', { clientMessageId: 'explicit-legacy', delivery: 'auto', content: [{ type: 'text', text: 'Continue' }] });
+    assert.equal(main.started.length, 2);
+    assert.equal(runtime.snapshot('root').parked, undefined);
+  });
+}
