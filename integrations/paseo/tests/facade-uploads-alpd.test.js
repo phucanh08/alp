@@ -21,18 +21,26 @@ const pause = ms => new Promise(r => setTimeout(r, ms));
 async function until(fn) { for (let i=0;i<600;i++) { const value = await fn(); if (value) return value; await pause(5); } assert.fail('condition timed out'); }
 const deferred = () => { let resolve; const promise = new Promise(r => resolve=r); return {promise, resolve}; };
 
-async function fixture(t, limits) {
+async function fixture(t, limits, { manualTurns = false } = {}) {
   const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'alp-facade-files-')));
   const home = path.join(dir, 'home'), project = path.join(dir, 'project');
   await mkdir(home); await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
   if (limits) await writeFile(path.join(home,'attachments.json'), JSON.stringify({limits}));
-  const native = [];
+  const native = [], steers = [], completions = [];
   const runtime = createAlpRuntime({ supervisor:false, runLogDir:path.join(dir,'runs'), attachmentStageDir:attachmentStageDir(home), transport:() => {
     const tr = { async initialize() {}, onNotification(fn) { this.notify=fn; }, onFailure() {}, onRequest() {}, async close() {},
       async request(method, params) {
         if (method.startsWith('thread/')) return {thread:{id:'thread-'+native.length}};
-        if (method === 'turn/start') { native.push(params); const id='turn-'+native.length; setTimeout(()=>this.notify?.('turn/completed',{threadId:params.threadId,turn:{id,status:'completed'}}),5); return {turn:{id}}; }
+        if (method === 'turn/steer') { steers.push(params); return {}; }
+        if (method === 'turn/start') {
+          native.push(params);
+          const id='turn-'+native.length;
+          const complete=()=>this.notify?.('turn/completed',{threadId:params.threadId,turn:{id,status:'completed'}});
+          completions.push(complete);
+          if (!manualTurns) setTimeout(complete,5);
+          return {turn:{id}};
+        }
         return {};
       } };
     return tr;
@@ -67,7 +75,7 @@ async function fixture(t, limits) {
     c.ws.send(encode({opcode:O.FileEnd,requestId:id}));
     const response=await c.take('file.upload.response',id);assert.ok(FileUploadResponseSchema.safeParse(response).success);assert.equal(response.payload.error,null);return response.payload.file;
   }
-  return {url:`ws://127.0.0.1:${wss.address().port}`,home,project,native,rpc,calls,connect,upload, failNext(method) { failure=method; }, block(method) { const g={method,entered:deferred(),release:deferred()};gate=g;return g; }};
+  return {url:`ws://127.0.0.1:${wss.address().port}`,home,project,native,steers,rpc,calls,connect,upload, completeTurn(index) { completions[index](); }, failNext(method) { failure=method; }, block(method) { const g={method,entered:deferred(),release:deferred()};gate=g;return g; }};
 }
 const skip=process.platform==='win32' && 'daemon attachments require POSIX';
 
@@ -98,18 +106,44 @@ test('facade same hello id on another socket cannot send or create using a file;
   assert.equal(f.calls.filter(x=>['attachment.begin','session.prompt','session.interrupt','session.create'].includes(x.method)).length,0);
 });
 
-test('attachment-only new-agent first prompt and legacy one-way inline images/files reach runtime', {skip}, async t=> {
-  const f=await fixture(t),c=await f.connect();const file=await f.upload(c);
-  c.send({type:'create_agent_request',requestId:'new',config:{provider:'alp',cwd:f.project},clientMessageId:'first',attachments:[file]});
-  const reply=await c.take('status','new');assert.equal(reply.payload.status,'agent_created',JSON.stringify(reply));await until(()=>f.native.length===1);
-  c.send({type:'send_agent_message',agentId:reply.payload.agentId,text:'legacy',messageId:'legacy',images:[{mimeType:'image/png',data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII='}],attachments:[file]});
-  await until(()=>f.native.length===2);
-  assert.ok(f.native[1].input.some(p=>p.type==='image'));
-  assert.ok(f.native[1].input.some(p=>p.type==='text'&&p.text.startsWith(ATTACHMENT_HEADER)));
-  c.send({type:'send_agent_message',agentId:'root',text:'bad',attachments:[{...file,path:'/etc/passwd'}]});
-  const failure=await until(()=>c.frames.find(x=>x.message?.type==='agent_stream'&&x.message.payload.event.type==='turn_failed'));
-  assert.ok(AgentStreamMessageSchema.safeParse(failure.message).success);assert.equal(f.native.length,2);
-});
+for (const followup of ['after completion', 'during active turn']) {
+  test(`attachment-only new-agent first prompt and legacy one-way inline images/files reach runtime: ${followup}`, {skip}, async t=> {
+    const f=await fixture(t, undefined, {manualTurns:true}),c=await f.connect();const file=await f.upload(c);
+    c.send({type:'create_agent_request',requestId:'new',config:{provider:'alp',cwd:f.project},clientMessageId:'first',attachments:[file]});
+    const reply=await c.take('status','new');assert.equal(reply.payload.status,'agent_created',JSON.stringify(reply));await until(()=>f.native.length===1);
+    const agentId=reply.payload.agentId;
+    const latestAgent=()=>c.frames.findLast(x=>x.message?.type==='agent_update' && x.message.payload.agent?.id===agentId)?.message.payload.agent;
+    await until(()=>latestAgent()?.status==='running');
+    if (followup==='after completion') {
+      // Native acceptance is not completion. Wait for both the terminal event and the
+      // facade's refreshed idle state before expecting a new turn/start.
+      f.completeTurn(0);
+      await until(()=>c.frames.some(x=>x.message?.type==='agent_stream' && x.message.payload.agentId===agentId && x.message.payload.event.type==='turn_completed'));
+      await until(()=>latestAgent()?.status==='idle');
+    }
+    c.send({type:'send_agent_message',agentId,text:'legacy',messageId:'legacy',images:[{mimeType:'image/png',data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII='}],attachments:[file]});
+    const delivered=followup==='after completion' ? f.native : f.steers;
+    await until(()=>delivered.length===(followup==='after completion' ? 2 : 1));
+    const legacy=delivered.at(-1);
+    assert.ok(legacy.input.some(p=>p.type==='image'));
+    const attachment=legacy.input.find(p=>p.type==='text'&&p.text.startsWith(ATTACHMENT_HEADER));
+    assert.ok(attachment);
+    const named=JSON.parse(attachment.text.slice(ATTACHMENT_HEADER.length).split('\n')[0]);
+    assert.deepEqual(await readFile(named.path),Buffer.from([0,255,2]));
+    assert.equal(named.sha256,hash(Buffer.from([0,255,2])));
+    assert.equal(f.native.length,followup==='after completion' ? 2 : 1);
+    assert.equal(f.steers.length,followup==='after completion' ? 0 : 1);
+    if (followup==='during active turn') {
+      assert.equal(legacy.expectedTurnId,'turn-1');
+      f.completeTurn(0);
+    }
+    c.send({type:'send_agent_message',agentId:'root',text:'bad',attachments:[{...file,path:'/etc/passwd'}]});
+    const failure=await until(()=>c.frames.find(x=>x.message?.type==='agent_stream'&&x.message.payload.event.type==='turn_failed'));
+    assert.ok(AgentStreamMessageSchema.safeParse(failure.message).success);
+    assert.equal(f.native.length,followup==='after completion' ? 2 : 1);
+    assert.equal(f.steers.length,followup==='after completion' ? 0 : 1);
+  });
+}
 
 test('daemon lowered limits refuse the whole message before upload or interruption', {skip}, async t=> {
   const f=await fixture(t,{maxObjectBytes:2}),c=await f.connect();const file=await f.upload(c);
