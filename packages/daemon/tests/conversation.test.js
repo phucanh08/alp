@@ -1006,3 +1006,142 @@ for (const operation of ['fork', 'rewind', 'reload']) {
     }
   });
 }
+
+
+for (const replay of [false, true]) {
+  test(`rewind attach handover holds a generation-less attach during marker commit (replay=${replay})`, async t => {
+    const world = await setup(t);
+    const d = { ...await world.start(), ...world };
+    const [, second] = await conversation(d, 'handover', ['one', 'two']);
+    const generation = await generationOf(d, 'handover');
+    const before = await d.open();
+    await before.request('session.attach', { sessionId: 'handover', replay: false, generation });
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    t.after(release);
+    let entered = false;
+    const rewind = d.store.rewind;
+    // commitRewind has journaled/allocated the marker cursor, but has not published it.
+    d.store.rewind = async (...args) => { entered = true; await gate; return rewind(...args); };
+    const params = { sessionId: 'handover', requestId: 'handover', ifGeneration: generation, beforeTurnId: second };
+    const rewinding = d.request('session.rewind', params);
+    await until(() => entered, 'marker commit gate');
+    const during = await d.open();
+    let responseIndex;
+    const attaching = during.request('session.attach', { sessionId: 'handover', replay })
+      .then(result => { responseIndex = during.events.length; return result; });
+    const aware = await d.open();
+    const stale = assert.rejects(aware.request('session.attach', { sessionId: 'handover', replay, generation }), rpcError(1004, 'stale_cursor'));
+    // RPC frames on this socket are ordered: the attach handler ran before this barrier.
+    await during.request('daemon.status');
+    await aware.request('daemon.status');
+    release();
+    const result = await attaching;
+    const rewound = await rewinding;
+    await stale;
+    await before.request('daemon.status');
+    await during.request('daemon.status');
+    const markers = events => events.filter(e => e.event.type === 'item' && e.event.item.id === `rewind:${rewound.branch.branchId}`);
+    assert.equal(markers(before.events).length, 1, 'an already attached viewer receives one live marker');
+    const marker = markers(before.events)[0];
+    assert.ok(result.cursor >= marker.cursor, 'attach response includes the reserved marker in its tip');
+    const late = during.events.slice(responseIndex).filter(e => e.cursor !== undefined && e.cursor <= result.cursor);
+    assert.deepEqual(late, [], 'no live cursor at or below the attach response tip (§8.3)');
+    assert.equal(markers(during.events).length, replay ? 1 : 0, 'marker is replayed once, or excluded by replay=false');
+    const after = await d.open();
+    await after.request('session.attach', { sessionId: 'handover', generation: rewound.generation, replay: true });
+    assert.equal(markers(after.events).length, 1, 'attach after commit replays the marker once');
+    await assert.rejects(after.request('session.attach', { sessionId: 'handover', generation }), rpcError(1004, 'stale_cursor'));
+    assert.equal((await d.request('session.rewind', params)).duplicate, true);
+    await before.request('daemon.status');
+    assert.equal(markers(before.events).length, 1, 'committed repeat does not broadcast again');
+  });
+}
+
+
+test('rewind attach handover rereads history if a rewind finishes during the attach history read', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  const [, second] = await conversation(d, 'read-race', ['one', 'two']);
+  const generation = await generationOf(d, 'read-race');
+  // A closed root has no in-memory replay coverage, so attach reads the durable timeline.
+  await d.request('session.close', { sessionId: 'read-race' });
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(release);
+  let entered = false;
+  const timeline = d.store.timeline;
+  d.store.timeline = async (...args) => {
+    const result = await timeline(...args);
+    if (!entered) { entered = true; await gate; }
+    return result;
+  };
+  const viewer = await d.open();
+  const attaching = viewer.request('session.attach', { sessionId: 'read-race' });
+  await until(() => entered, 'attach history read');
+  const rewound = await d.request('session.rewind', { sessionId: 'read-race', requestId: 'read-race', ifGeneration: generation, beforeTurnId: second });
+  release();
+  const attached = await attaching;
+  assert.ok(!viewer.events.some(e => e.event.type === 'item' && e.event.item.text === 'two'), 'discarded history must not replay');
+  const marker = viewer.events.find(e => e.event.type === 'item' && e.event.item.id === `rewind:${rewound.branch.branchId}`);
+  assert.ok(marker, 'kept marker must replay');
+  assert.ok(attached.cursor >= marker.cursor);
+});
+
+test('rewind attach handover releases queued attaches on commit failure and replay after restart keeps one marker', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  const [, second] = await conversation(d, 'failed-handover', ['one', 'two']);
+  const generation = await generationOf(d, 'failed-handover');
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(release);
+  let entered = false;
+  const rewind = d.store.rewind;
+  d.store.rewind = async () => { entered = true; await gate; throw new Error('commit blocked'); };
+  const params = { sessionId: 'failed-handover', requestId: 'failed-handover', ifGeneration: generation, beforeTurnId: second };
+  const failed = assert.rejects(d.request('session.rewind', params), rpcError(1000, 'persistence_failed'));
+  await until(() => entered, 'failing marker commit');
+  const viewer = await d.open();
+  const attaching = assert.rejects(viewer.request('session.attach', { sessionId: 'failed-handover' }), rpcError(1004, 'session_busy'));
+  await viewer.request('daemon.status');
+  release();
+  await failed;
+  await attaching;
+  d.store.rewind = rewind;
+  await d.stop();
+  const restarted = { ...await world.start(), ...world };
+  const attached = await restarted.request('session.attach', { sessionId: 'failed-handover' });
+  const markers = restarted.events.filter(e => e.event.type === 'item' && e.event.item.id?.startsWith('rewind:'));
+  assert.equal(markers.length, 1, 'applied journal recovery persists one marker');
+  assert.ok(attached.cursor >= markers[0].cursor);
+  assert.equal((await restarted.request('session.rewind', params)).duplicate, true);
+  await restarted.request('daemon.status');
+  assert.equal(restarted.events.filter(e => e.event.type === 'item' && e.event.item.id?.startsWith('rewind:')).length, 1);
+  assert.equal(world.native.branches.length, 1, 'recovery never repeats the native step');
+});
+
+
+test('rewind attach handover revalidates generation if rewind finishes during the checkpoint read', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  const [, second] = await conversation(d, 'checkpoint-race', ['one', 'two']);
+  const generation = await generationOf(d, 'checkpoint-race');
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(release);
+  let entered = false;
+  const history = d.store.history;
+  d.store.history = async (...args) => {
+    const result = await history(...args);
+    if (!entered) { entered = true; await gate; }
+    return result;
+  };
+  const viewer = await d.open();
+  const attaching = assert.rejects(viewer.request('session.attach', { sessionId: 'checkpoint-race', generation, replay: false }), rpcError(1004, 'stale_cursor'));
+  await until(() => entered, 'attach checkpoint read');
+  await d.request('session.rewind', { sessionId: 'checkpoint-race', requestId: 'checkpoint-race', ifGeneration: generation, beforeTurnId: second });
+  release();
+  await attaching;
+  assert.equal(viewer.events.length, 0, 'stale attach never registers a live subscription');
+});
