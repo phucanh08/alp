@@ -150,7 +150,7 @@ test('cleanup stops unpublished detached daemon and service under gated startup 
   await cleanup();
   for (const pid of pids) await waitGone(pid);
   // A delayed launch holding a copied env must fail closed after the home is removed.
-  const late = await execFileAsync(process.execPath, ['-e', 'process.exit(42)'], { env }).catch(error => error);
+  const late = await execFileAsync(process.execPath, ['-e', 'process.exit(42)'], { env: { ...env, NODE_OPTIONS: owned.env.NODE_OPTIONS } }).catch(error => error);
   assert.equal(late.code, 1, 'closed admission must prevent the entry point');
   assert.match(late.stderr, /owner\.json/);
 });
