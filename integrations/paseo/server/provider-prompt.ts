@@ -166,4 +166,3 @@ function formatIssueNumber(forge: string, number: number): string {
 function padLineNumber(lineNumber: number | null): string {
   return (lineNumber?.toString() ?? "-").padStart(2);
 }
-
