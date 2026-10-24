@@ -7,9 +7,11 @@ import {
   type ProviderRegistration,
   type ProviderEvent,
   type ProviderInput,
+  type ProviderContent,
   type ProviderPersistence,
   type ProviderTimelineItem,
 } from './compat.js';
+import { userPromptPart } from './provider-prompt.js';
 import { randomUUID } from 'node:crypto';
 import type { AttachmentLimits, DaemonConnection, Envelope, SessionSnapshot, TimelineItem } from '@anhlp/alp-protocol';
 import { attachments } from '@anhlp/alp-client/portable';
@@ -171,13 +173,23 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
         throw new Error('Unsupported Paseo provider protocol version');
       }
 
-      const capabilities = negotiateProviderCapabilities(
-        request.capabilities,
-        supported,
-      );
-
       const backend = await strategy.open();
       let client = backend.client;
+      // Socket clients have a handshake; embedded clients expose the same offer via hello.
+      // An unknown/failed offer never promises images. This advertisement belongs to this
+      // provider connection; a replacement backend still validates every submitted prompt.
+      let offered = client.capabilities;
+      if (offered === undefined) {
+        try {
+          const hello = await client.request('daemon.hello', { protocolVersion: 1, client: { name: 'alp-paseo', version: '1' } });
+          offered = Array.isArray(hello.capabilities) ? hello.capabilities : [];
+        } catch { offered = []; }
+      }
+      const capabilities = negotiateProviderCapabilities(
+        request.capabilities,
+        [...supported, ...(offered?.includes('prompt.images') ? ['prompt.image' as const] : [])],
+      );
+
       const delegation = capabilities.includes('session.subsession');
       /** Questions to the user appear as Paseo question prompts on the root agent; without them, answer with the CLI. */
       const asksUser = capabilities.includes('permission');
@@ -491,7 +503,8 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
 
       /**
        * A prompt's content for alpd: each `uploaded_file` part becomes an attachment part in its place
-       * (§12.6), every other part (text, inline images) is passed on as it was. The files Paseo's
+       * (§12.6), inline images stay intact, and contextual attachments become ordinary user text.
+       * Plain text bodies and part order are preserved. The files Paseo's
        * daemon stored are read (strategy.readUpload, confined to Paseo's uploads) and uploaded into
        * alpd's store for this session under a requestId of this prompt and part, so the same prompt
        * sent again resumes or reuses the same upload and object. Every check that can refuse a file
@@ -502,9 +515,10 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
        * prompt sent again, and alpd's retention removes it otherwise. Refusals name files, never host
        * paths.
        */
-      async function promptContent<Part extends { type: string }>(sessionId: string, clientMessageId: string, content: Part[]) {
-        const files = content.filter(part => part.type === 'uploaded_file') as unknown as UploadedFile[];
-        if (!files.length) return content;
+      async function promptContent(sessionId: string, clientMessageId: string, content: ProviderContent[]) {
+        const normalized = content.map(userPromptPart);
+        const files = normalized.filter(part => part.type === 'uploaded_file') as unknown as UploadedFile[];
+        if (!files.length) return normalized;
         const names = files.map(file => displayName(file.fileName)).join(', ');
         if (!strategy.readUpload) throw new Error(`ALP cannot attach ${names}: files uploaded to Paseo are not sent to this ALP host`);
         const connection = client;
@@ -523,7 +537,7 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
         // Read and check every file before uploading any, so a refused file leaves nothing in alpd.
         const read = new Map<number, Uint8Array>();
         let total = 0;
-        for (const [index, part] of content.entries()) {
+        for (const [index, part] of normalized.entries()) {
           if (part.type !== 'uploaded_file') continue;
           const data = await strategy.readUpload(part as unknown as UploadedFile, limits.maxObjectBytes);
           total += data.byteLength;
@@ -531,8 +545,8 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
           read.set(index, data);
         }
         const store = attachments(connection);
-        const parts: Array<Part | { type: 'attachment'; attachmentId: string }> = [];
-        for (const [index, part] of content.entries()) {
+        const parts: Array<(typeof normalized)[number] | { type: 'attachment'; attachmentId: string }> = [];
+        for (const [index, part] of normalized.entries()) {
           if (part.type !== 'uploaded_file') { parts.push(part); continue; }
           const file = part as unknown as UploadedFile;
           let attachment;
@@ -548,10 +562,8 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
       }
 
       async function handle(input: ProviderInput) {
-        requireProviderCapabilities(
-          capabilities,
-          input,
-        );
+        // Prompt capabilities are checked below after the native-command refusal.
+        if (input.type !== 'session.prompt') requireProviderCapabilities(capabilities, input);
 
         if (input.type === 'catalog') {
           emit({
@@ -633,13 +645,17 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
 
         if (input.type === 'session.prompt') {
           const { prompt } = input;
+          // alpd has no native-command prompt contract. Never turn a command into user
+          // prose or send an incomplete command part; reject before waking a session.
+          if (prompt.input.type === 'command') throw new Error('ALP does not support native command prompts');
+          requireProviderCapabilities(capabilities, input);
           await wake(input.sessionId);
           const sessionId = toAlpd(input.sessionId);
           await client.request('session.prompt', {
             sessionId,
             clientMessageId: prompt.clientMessageId,
             delivery: prompt.delivery === 'steer' ? 'steer' : 'auto',
-            content: prompt.input.type === 'message' ? await promptContent(sessionId, prompt.clientMessageId, prompt.input.content) : [{ type: prompt.input.type }],
+            content: await promptContent(sessionId, prompt.clientMessageId, prompt.input.content),
           });
           return;
         }
@@ -693,6 +709,12 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
             );
 
           try {
+            // Refuse unsupported native commands even while disconnected: no relink,
+            // retry, session wake or daemon request is needed to know this limitation.
+            if (input.type === 'session.prompt' && input.prompt.input.type === 'command') {
+              await handle(input);
+              return;
+            }
             await linked();
             try {
               await handle(input);

@@ -4,7 +4,8 @@ export {
   requireProviderCapabilities, ProviderInputSchema, ProviderEventSchema,
 } from '@getpaseo/plugin/server/provider';
 export type {
-  ProviderRegistration, ProviderConnection, ProviderInput, ProviderEvent,
+  ProviderRegistration, ProviderConnection, ProviderInput, ProviderEvent, ProviderContent,
   ProviderSessionConfig, ProviderPersistence, ProviderCatalog, ProviderTimelineItem,
 } from '@getpaseo/plugin/server/provider';
 export type { PluginServerContext } from '@getpaseo/plugin/server';
+export { getForgeDefinitionOrNeutral } from '@getpaseo/protocol/forge-manifest';

@@ -13,7 +13,7 @@ Copyright (c) 2025-present Mohamed Boudra, licensed under the Apache License,
 Version 2.0. Third-party components incorporated into Paseo remain licensed
 under the licenses provided by their respective copyright holders.
 
-All of it is taken from Paseo at commit
+Except for provider-prompt.ts noted below, the following is taken from Paseo at commit
 b63a325be3d3ae444fbd38815658cca01ab1288f (0.11.2) and changed for ALP:
 
 * server/dist/web-app: Paseo's web app (packages/app), built with the patches
@@ -32,3 +32,10 @@ b63a325be3d3ae444fbd38815658cca01ab1288f (0.11.2) and changed for ALP:
   - utils/diff-highlighter.ts, its unified-diff parser (checkout.ts)
 * server/dist also bundles Paseo's @getpaseo/protocol and @getpaseo/relay;
   see server/dist/THIRD-PARTY-NOTICES.txt.
+
+* server/provider-prompt.ts adapts renderPromptAttachmentAsText from
+  packages/server/src/server/agent/prompt-attachments.ts at
+  cafe4b01c8522ff39560241c5deb01427dc8dc5b (0.12.0), identical at
+  ab10a6694ccf068959d1a6b67b6c915e21a9fe91 (0.11.1). It renders textual
+  context as user text, preserves images and uploads for their dedicated paths,
+  and applies the protocol's GitHub default when forge is omitted.
