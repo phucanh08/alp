@@ -140,6 +140,12 @@ export type AlpRuntime = {
   preview(spec: SessionSpec): Promise<SessionPreview>;
   /** Failures are reported as prompt.failed, once per clientMessageId. */
   prompt(sessionId: string, input: PromptInput): Promise<void>;
+  /**
+   * Atomically admits an idle scheduled prompt in the runtime queue. Busy leaves all preparation
+   * untouched. The callback may persist its attempt/receipt, then use its single-use sender;
+   * the sender is valid only during the callback. Do not enqueue runtime operations in the callback.
+   */
+  withIdlePrompt?<T>(sessionId: string, run: (send: (input: PromptInput) => Promise<void>) => Promise<T>): Promise<{ busy: true } | { busy: false; value: T }>;
   /** Cancels the running turn and closes the whole subtree. */
   interrupt(sessionId: string): Promise<void>;
   /** Atomically cancels only this active turn; false leaves the session and subtree untouched. */
@@ -216,7 +222,7 @@ export type AlpRuntime = {
   hold?(sessionId: string): (() => void) | undefined;
   /**
    * Whether an open session may begin a turn it has no id for yet: its turn/start (a prompt or a mail
-   * wake) is on its way to the native runtime, or its native process is opening or restarting. Such a
+   * wake) is reserved, queued or on its way to the native runtime, or its process is opening or restarting. Such a
    * turn shows in `activeTurnId` only once the runtime answers, and a hold taken meanwhile does not
    * stop it. False when the session is not open.
    */

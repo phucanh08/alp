@@ -172,6 +172,8 @@ export class WorkspaceMutationError extends Error {
 
 export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   const sessions = new Map<string, Session>();
+  /** Queue slots preparing a scheduled prompt, before its native turn/start. */
+  const admittedPrompts = new Set<string>();
   /** What ALP writes for the user of a session, in their language (ALPD §54). */
   const wordsFor = (session: Session) => words(session.mapping.language);
 
@@ -4019,6 +4021,26 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
   }
 
+  // Shared by ordinary prompts and the scheduler's queue-scoped sender.
+  async function promptSession(sessionId: string, input: PromptInput): Promise<void> {
+    const session = sessions.get(sessionId);
+    const parked = session?.parked;
+    try {
+      const prompt = session?.active && session.resumedTurn === session.active && input.delivery === 'auto'
+        ? { ...input, delivery: 'steer' as const } : input;
+      await startPrompt(sessionId, prompt, 'user');
+      if (session && parked && session.parked === parked) {
+        session.parked = undefined;
+        emit(sessionId, { type: 'session.updated', session: snapshot(sessionId, session) });
+      }
+    } catch (error) {
+      const session = sessions.get(sessionId);
+      if (session?.seen.has(input.clientMessageId)) return;
+      session?.seen.add(input.clientMessageId);
+      emit(sessionId, { type: 'prompt.failed', clientMessageId: input.clientMessageId, error: errorData(error) });
+    }
+  }
+
   /** Starts a turn or steers the running one; throws when the prompt was not delivered. */
   async function startPrompt(sessionId: string, prompt: PromptInput, origin: TurnOrigin, wake?: MailEvent[]) {
     const session = openOf(sessionId);
@@ -4355,23 +4377,43 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       return opened;
     }),
 
-    prompt: (sessionId, input) => enqueue(async () => {
-      const session = sessions.get(sessionId);
-      const parked = session?.parked;
-      try {
-        const prompt = session?.active && session.resumedTurn === session.active && input.delivery === 'auto'
-          ? { ...input, delivery: 'steer' as const } : input;
-        await startPrompt(sessionId, prompt, 'user');
-        if (session && parked && session.parked === parked) {
-          session.parked = undefined;
-          emit(sessionId, { type: 'session.updated', session: snapshot(sessionId, session) });
+    prompt: (sessionId, input) => enqueue(() => promptSession(sessionId, input)),
+
+    withIdlePrompt: (sessionId, run) => new Promise((resolve, reject) => {
+      void enqueue(async () => {
+        const session = openOf(sessionId);
+        if (session.active || session.pending || session.lifecycleHolds || session.mail.some(event => event.deliveredTurn === STARTING)) { resolve({ busy: true }); return; }
+        // Expose the reservation to lifecycle operations before any durable write can yield.
+        admittedPrompts.add(sessionId);
+        // Keep newly arriving mail unreserved until this admitted prompt has finished preparation.
+        session.lifecycleHolds = (session.lifecycleHolds ?? 0) + 1;
+        let valid = true;
+        let used = false;
+        let sending: Promise<void> | undefined;
+        try {
+          const value = await run(input => {
+            if (!valid || used) return Promise.reject(new Error('The admitted prompt sender is no longer available'));
+            used = true;
+            sending = promptSession(sessionId, input);
+            return sending;
+          });
+          resolve({ busy: false, value });
+        } catch (error) {
+          reject(error);
+        } finally {
+          valid = false;
+          // A timeout of the caller cannot release the queue while its native start is outstanding.
+          try { await sending; }
+          finally {
+            admittedPrompts.delete(sessionId);
+            session.lifecycleHolds = Math.max(0, (session.lifecycleHolds ?? 1) - 1);
+            if (!session.lifecycleHolds && !session.closed && session.wakeHeld) {
+              session.wakeHeld = false;
+              deliver(sessionId, session);
+            }
+          }
         }
-      } catch (error) {
-        const session = sessions.get(sessionId);
-        if (session?.seen.has(input.clientMessageId)) return;
-        session?.seen.add(input.clientMessageId);
-        emit(sessionId, { type: 'prompt.failed', clientMessageId: input.clientMessageId, error: errorData(error) });
-      }
+      }).catch(reject);
     }),
 
     interrupt: sessionId => enqueue(() => interruptSession(sessionId)),
@@ -4396,7 +4438,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     starting: sessionId => {
       const session = sessions.get(sessionId);
-      return !!session && !session.closed && !!session.pending;
+      return !!session && !session.closed && (admittedPrompts.has(sessionId) || !!session.pending || session.mail.some(event => event.deliveredTurn === STARTING));
     },
 
     hold: sessionId => {

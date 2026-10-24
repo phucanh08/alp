@@ -851,12 +851,12 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
    * clientMessageId of the job's own. The receipt of that message is what keeps a job
    * from running twice: a retry after a crash reads the receipt instead of sending.
    */
-  async function deliverJob(job: ScheduleJob, content: PromptContent, messageId: string): Promise<ScheduleDelivery> {
+  async function deliverJob(job: ScheduleJob, content: PromptContent, messageId: string, send: AlpRuntime['prompt'] = (id, input) => runtime.prompt(id, input)): Promise<ScheduleDelivery> {
     // The id is the job's own, so it is the same in every attempt of this job.
     const clientMessageId = messageId || scheduleMessageId(job);
     return deliverOnce(job.sessionId, clientMessageId, digest({ delivery: 'auto', content }), async () => {
       live(job.sessionId);
-      await runtime.prompt(job.sessionId, { clientMessageId, delivery: 'auto', content });
+      await send(job.sessionId, { clientMessageId, delivery: 'auto', content });
     }, { requireReceipt: job.attempts > 1 });
   }
 
