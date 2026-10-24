@@ -144,8 +144,9 @@ export type AlpRuntime = {
   interrupt(sessionId: string): Promise<void>;
   /** Atomically cancels only this active turn; false leaves the session and subtree untouched. */
   interruptTurn?(sessionId: string, turnId: string): Promise<boolean>;
-  /** Changes permission mode while idle; undefined keeps the current mode. */
-  configure(sessionId: string, changes: { mode?: string }): Promise<SessionSnapshot>;
+  /** Changes permission mode while idle; undefined keeps the current mode.
+   * onApplied is awaited after apply and before session.updated; failure does not roll back permissions. */
+  configure(sessionId: string, changes: { mode?: string }, options?: { onApplied?: (session: SessionSnapshot) => Promise<void> }): Promise<SessionSnapshot>;
   close(sessionId: string): Promise<void>;
   snapshot(sessionId: string): SessionSnapshot | undefined;
   /** Live sessions, roots before their children. */

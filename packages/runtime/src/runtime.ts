@@ -4382,7 +4382,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       return true;
     }),
 
-    configure: (sessionId, changes) => enqueue(() => configureSession(sessionId, changes)),
+    configure: (sessionId, changes, options) => enqueue(() => configureSession(sessionId, changes, options?.onApplied)),
 
     branch: request => branchConversation(request),
 

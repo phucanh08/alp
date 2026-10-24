@@ -500,12 +500,11 @@ test('when the runtime took a configure but the journal could not record it, the
 });
 
 for (const field of ['mode', 'thinking']) for (const observedFirst of [false, true]) {
-  test(`historical unknown configure cannot persist a later run-only ${field} override (${observedFirst ? 'seen at earlier startup' : 'legacy unseen'})`, async t => {
+  test(`historical unknown configure cannot overwrite a later accepted ${field} override (${observedFirst ? 'seen at earlier startup' : 'legacy unseen'})`, async t => {
     const world = await setup(t);
     let d = { ...await world.start(), ...world };
     await conversation(d, 'historical', ['one']);
     const override = field === 'mode' ? 'read-only' : 'high';
-    const saved = field === 'mode' ? 'full-access' : 'medium';
     const params = { sessionId: 'historical', model: 'gpt-5.6-sol', [field]: override, requestId: 'old', ifGeneration: await generationOf(d, 'historical') };
     world.native.configure = async () => { throw Object.assign(new Error('lost answer'), { outcomeUnknown: true }); };
     await assert.rejects(d.request('session.configure', params), rpcError(1004, 'outcome_unknown'));
@@ -515,14 +514,14 @@ for (const field of ['mode', 'thinking']) for (const observedFirst of [false, tr
       d = { ...await world.start(), ...world };
       await d.request('session.create', { sessionId: 'historical', spec: { cwd: d.project }, resume: true });
     }
-    // The old proposal matches this independent mode override. It must remain run-only.
+    // The old proposal matches this independently accepted override, which is saved causally.
     if (field === 'mode') await d.request('session.configure', { sessionId: 'historical', mode: override });
     else {
       await d.request('session.close', { sessionId: 'historical' });
       await d.request('session.create', { sessionId: 'historical', spec: { cwd: d.project, thinking: override }, resume: true });
     }
     const unchanged = await d.request('session.configure', { sessionId: 'historical', model: 'gpt-5.6-sol', requestId: 'unchanged', ifGeneration: await generationOf(d, 'historical') });
-    assert.equal(unchanged.configured.status, 'unchanged', 'unchanged must not promote the run-only override');
+    assert.equal(unchanged.configured.status, 'unchanged', 'unchanged does not apply the historical proposal');
     const generation = await generationOf(d, 'historical');
     await d.request('session.close', { sessionId: 'historical' });
     await d.stop();
@@ -531,7 +530,7 @@ for (const field of ['mode', 'thinking']) for (const observedFirst of [false, tr
       assert.equal(await generationOf(d, 'historical'), generation, 'startup does not rewrite history');
       await assert.rejects(d.request('session.configure', params), rpcError(1004, 'outcome_unknown'));
       await d.request('session.create', { sessionId: 'historical', spec: { cwd: d.project }, resume: true });
-      assert.equal((await d.request('session.get', { sessionId: 'historical' })).session[field], saved, 'run-only override did not become a saved preference');
+      assert.equal((await d.request('session.get', { sessionId: 'historical' })).session[field], override, 'independently accepted preference remains durable');
       await d.request('session.close', { sessionId: 'historical' });
       await d.stop();
     }
@@ -592,4 +591,98 @@ test('lost configure journal answer never overwrites a subsequent run-only mode 
   await d.request('session.close', { sessionId: 'legacy-order' });
   await d.request('session.create', { sessionId: 'legacy-order', spec: { cwd: world.project }, resume: true });
   assert.equal(d.runtime.snapshot('legacy-order').mode, 'full-access');
+});
+
+for (const route of ['legacy-mode', 'resume-mode', 'resume-thinking']) {
+  test(`persistence: ${route} survives close/reopen and daemon restart`, async t => {
+    const world = await setup(t);
+    const d = { ...await world.start(), ...world };
+    const sessionId = route;
+    await conversation(d, sessionId, []);
+    const field = route === 'resume-thinking' ? 'thinking' : 'mode';
+    const value = field === 'thinking' ? 'high' : 'read-only';
+    if (route === 'legacy-mode') await d.request('session.configure', { sessionId, mode: value });
+    else {
+      await d.request('session.close', { sessionId });
+      const changed = await d.request('session.create', { sessionId, resume: true, spec: { cwd: world.project, [field]: value, model: 'ignored-model' } });
+      assert.equal(changed.session[field], value);
+      assert.equal(changed.session.model, 'gpt-5.6-sol', 'resume does not accept a requested model');
+    }
+    await d.request('session.close', { sessionId });
+    const reopened = await d.request('session.create', { sessionId, resume: true, spec: { cwd: world.project } });
+    assert.equal(reopened.session[field], value, 'close/reopen keeps accepted configuration');
+    await d.request('session.close', { sessionId });
+    await d.stop();
+    const e = await world.start();
+    const restarted = await e.request('session.create', { sessionId, resume: true, spec: { cwd: world.project } });
+    assert.equal(restarted.session[field], value, 'fresh daemon reads accepted configuration');
+    assert.equal(restarted.session.model, 'gpt-5.6-sol');
+  });
+}
+
+for (const route of ['legacy-mode', 'resume']) {
+  test(`persistence: rejected ${route} leaves the stored spec unchanged`, async t => {
+    const world = await setup(t);
+    const d = { ...await world.start(), ...world };
+    await conversation(d, 'refused-spec', []);
+    await d.store.flush();
+    const before = (await d.store.list()).find(record => record.id === 'refused-spec').spec;
+    if (route === 'legacy-mode') await assert.rejects(d.request('session.configure', { sessionId: 'refused-spec', mode: 'invalid-mode' }));
+    else {
+      await d.request('session.close', { sessionId: 'refused-spec' });
+      await assert.rejects(d.request('session.create', { sessionId: 'refused-spec', resume: true, spec: { cwd: world.project, mode: 'invalid-mode', thinking: 'high' } }));
+    }
+    await d.store.flush();
+    assert.deepEqual((await d.store.list()).find(record => record.id === 'refused-spec').spec, before);
+    if (route === 'legacy-mode') await d.request('session.close', { sessionId: 'refused-spec' });
+    const opened = await d.request('session.create', { sessionId: 'refused-spec', resume: true, spec: { cwd: world.project } });
+    assert.equal(opened.session.thinking, 'medium');
+    assert.notEqual(opened.session.mode, 'invalid-mode');
+  });
+}
+
+for (const route of ['legacy-mode', 'resume']) {
+  test(`persistence: ${route} reports a store failure after apply without rollback`, async t => {
+    const world = await setup(t);
+    const d = { ...await world.start(), ...world };
+    await conversation(d, 'unrecorded', []);
+    if (route === 'resume') await d.request('session.close', { sessionId: 'unrecorded' });
+    const put = d.store.put.bind(d.store);
+    let appliedWrites = 0;
+    d.store.put = async record => {
+      if (record.id === 'unrecorded' && record.spec.mode === 'read-only') { appliedWrites++; throw new Error('store offline'); }
+      return put(record);
+    };
+    const updates = [];
+    const unsubscribe = d.runtime.onEvent(({ event }) => { if (event.type === 'session.updated') updates.push(event); });
+    t.after(unsubscribe);
+    const request = route === 'legacy-mode'
+      ? d.request('session.configure', { sessionId: 'unrecorded', mode: 'read-only' })
+      : d.request('session.create', { sessionId: 'unrecorded', resume: true, spec: { cwd: world.project, mode: 'read-only' } });
+    await assert.rejects(request, error => error.data?.reason === 'persistence_failed' && /runtime already applied/.test(error.message));
+    assert.equal(appliedWrites, 1);
+    assert.equal(d.runtime.snapshot('unrecorded').mode, 'read-only', 'native apply is not rolled back');
+    if (route === 'legacy-mode') assert.equal(updates.length, 0, 'failed persistence precedes session.updated');
+    d.store.put = put;
+  });
+}
+
+test('persistence: legacy mode is durably recorded before its session.updated', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'ordered-mode', []);
+  const put = d.store.put.bind(d.store);
+  let durable = false;
+  let observed = false;
+  d.store.put = async record => {
+    const saving = record.id === 'ordered-mode' && record.spec.mode === 'read-only';
+    await put(record);
+    if (saving) durable = true;
+  };
+  const unsubscribe = d.runtime.onEvent(({ sessionId, event }) => {
+    if (sessionId === 'ordered-mode' && event.type === 'session.updated') { observed = true; assert.equal(durable, true); }
+  });
+  t.after(unsubscribe);
+  await d.request('session.configure', { sessionId: 'ordered-mode', mode: 'read-only' });
+  assert.equal(observed, true);
 });
