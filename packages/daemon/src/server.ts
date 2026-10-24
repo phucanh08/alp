@@ -278,7 +278,10 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
    * deliveries and reopens of the root wait until it is through (§12.7).
    */
   const holds = new Map<string, { count: number; open: Promise<void>; release: () => void }>();
+  // Conservatively invalidate in-flight attach reads even when a lifecycle hold ends during I/O.
+  let holdRevision = 0;
   function holdPrompts(root: string) {
+    holdRevision++;
     let gate = holds.get(root);
     if (!gate) {
       let release!: () => void;
@@ -1377,42 +1380,52 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
 
     async 'session.attach'(connection, { sessionId, replay = true, after, generation }) {
       if (after !== undefined && (!Number.isSafeInteger(after) || after < 0)) throw new RpcError(-32602, 'after must be a cursor');
-      const found = known(sessionId);
-      const root = rootOf.get(sessionId) ?? records.get(sessionId)?.rootId ?? sessionId;
-      let stored: Envelope[] = [];
-      if (replay || (store && !cursors.has(root))) {
-        // The in-memory log keeps a live tree's latest events only; older ones come from the store.
-        const memory = logs.get(root);
-        const covered = !!memory?.length && (memory[0].cursor ?? 1) <= (after ?? 0) + 1;
-        if (!covered) stored = store ? await store.timeline(root) : memory ?? [];
-      }
-      if (generation !== undefined) {
-        const checkpoint = await store?.history(root, sessionId, { limit: 1 });
-        if (checkpoint?.generation !== generation) throw new RpcError(1004, 'History generation changed', { reason: 'stale_cursor' });
-      }
-      // From here to the return nothing awaits, so no live event slips between replay and attach.
-      const live = logs.get(root) ?? [];
-      const tip = Math.max(cursors.get(root) ?? 0, stored.at(-1)?.cursor ?? 0, live.at(-1)?.cursor ?? 0);
-      if (generation !== undefined && replay) {
-        const covered = Math.max(after ?? 0, stored.at(-1)?.cursor ?? 0);
-        const next = live.find(envelope => (envelope.cursor ?? 0) > covered)?.cursor;
-        if ((next !== undefined && next > covered + 1) || (next === undefined && tip > covered)) {
-          throw new RpcError(1005, 'History advanced beyond replay coverage; retry attach', { reason: 'history_gap' });
+      known(sessionId);
+      const root = rootIdOf(sessionId);
+      for (;;) {
+        // A rewind reserves its marker cursor before publishing it. Wait through afterRewind,
+        // including if it began while a history read awaited, so replay owns every cursor <= tip.
+        while (holds.has(root)) await holds.get(root)!.open;
+        refuseFenced(root);
+        const revision = holdRevision;
+        const found = known(sessionId);
+        let stored: Envelope[] = [];
+        if (replay || (store && !cursors.has(root))) {
+          // The in-memory log keeps a live tree's latest events only; older ones come from the store.
+          const memory = logs.get(root);
+          const covered = !!memory?.length && (memory[0].cursor ?? 1) <= (after ?? 0) + 1;
+          if (!covered) stored = store ? await store.timeline(root) : memory ?? [];
         }
+        if (holds.has(root) || revision !== holdRevision) continue;
+        if (generation !== undefined) {
+          const checkpoint = await store?.history(root, sessionId, { limit: 1 });
+          if (holds.has(root) || revision !== holdRevision) continue;
+          if (checkpoint?.generation !== generation) throw new RpcError(1004, 'History generation changed', { reason: 'stale_cursor' });
+        }
+        // From here to the return nothing awaits, so no live event slips between replay and attach.
+        const live = logs.get(root) ?? [];
+        const tip = Math.max(cursors.get(root) ?? 0, stored.at(-1)?.cursor ?? 0, live.at(-1)?.cursor ?? 0);
+        if (generation !== undefined && replay) {
+          const covered = Math.max(after ?? 0, stored.at(-1)?.cursor ?? 0);
+          const next = live.find(envelope => (envelope.cursor ?? 0) > covered)?.cursor;
+          if ((next !== undefined && next > covered + 1) || (next === undefined && tip > covered)) {
+            throw new RpcError(1005, 'History advanced beyond replay coverage; retry attach', { reason: 'history_gap' });
+          }
+        }
+        // Without a store the in-memory log keeps only the latest events: a cursor before them cannot continue either.
+        const first = replay ? [...stored, ...live].find(envelope => envelope.cursor !== undefined)?.cursor : undefined;
+        // A cursor in history a rewind set aside starts over too: what the client holds after it is not this conversation.
+        const reset = after !== undefined && (after > tip || (replay && after < tip && (first === undefined || first > after + 1)) || !!conversation?.discarded(records.get(root), after));
+        const from = reset ? 0 : after ?? 0;
+        attach(connection, root);
+        if (replay) {
+          let last = from;
+          for (const envelope of stored) if ((envelope.cursor ?? 0) > last) { if (current(envelope)) deliver(connection, envelope); last = envelope.cursor ?? last; }
+          for (const envelope of live) if ((envelope.cursor ?? 0) > last) { if (current(envelope)) deliver(connection, envelope); last = envelope.cursor ?? last; }
+        }
+        announceQuestions(connection, root);
+        return { session: root === found.id ? found : summary(root), cursor: tip, ...(reset ? { reset: true } : {}) };
       }
-      // Without a store the in-memory log keeps only the latest events: a cursor before them cannot continue either.
-      const first = replay ? [...stored, ...live].find(envelope => envelope.cursor !== undefined)?.cursor : undefined;
-      // A cursor in history a rewind set aside starts over too: what the client holds after it is not this conversation.
-      const reset = after !== undefined && (after > tip || (replay && after < tip && (first === undefined || first > after + 1)) || !!conversation?.discarded(records.get(root), after));
-      const from = reset ? 0 : after ?? 0;
-      attach(connection, root);
-      if (replay) {
-        let last = from;
-        for (const envelope of stored) if ((envelope.cursor ?? 0) > last) { if (current(envelope)) deliver(connection, envelope); last = envelope.cursor ?? last; }
-        for (const envelope of live) if ((envelope.cursor ?? 0) > last) { if (current(envelope)) deliver(connection, envelope); last = envelope.cursor ?? last; }
-      }
-      announceQuestions(connection, root);
-      return { session: root === found.id ? found : summary(root), cursor: tip, ...(reset ? { reset: true } : {}) };
     },
 
     async 'session.release'(connection, { sessionId }) {
