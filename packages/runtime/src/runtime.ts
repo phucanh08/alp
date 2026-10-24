@@ -1427,7 +1427,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
   function continueParked(sessionId: string, session: Session, expected = session.parked) {
     void enqueue(async () => {
-      if (session.closed || session.active || session.pending || !session.parked || session.parked !== expected || pauseOf(session.runtimeKind)) return;
+      if (session.closed || session.active || session.pending || !session.parked || session.parked !== expected) return;
+      // This continuation owns only the captured park. A pause may have arrived while
+      // it waited in the queue; retain the actual blocker for a matching later resume.
+      if (pauseOf(session.runtimeKind)) {
+        session.parked.pause = { scope: paused.all ? 'all' : session.runtimeKind };
+        return;
+      }
       // A lifecycle operation (a fork or rewind reading the conversation) holds the session: the work stays
       // parked and continues when the last hold releases, as held mail does.
       if (session.lifecycleHolds) { session.resumeHeld = session.parked; return; }
@@ -3349,9 +3355,6 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       finishPending();
       runLog(rootOf(sessionId), { event: 'session.revived', sessionId, agent: session.mapping.agent.name });
       if (session.parked && session.parked === interrupted) {
-        // This restart owns its continuation. If a pause blocks it now, retain that blocker
-        // so only its matching resume may release it later.
-        if (pauseOf(session.runtimeKind)) session.parked.pause = { scope: paused.all ? 'all' : session.runtimeKind };
         session.parked.prompt = `ALP restarted your ${harness} process after it stopped in the middle of your turn. Continue where you left off: your earlier work in this session and its files are intact.${session.parent ? ' Finish with alp_handoff as before.' : ''}`;
         continueParked(sessionId, session);
       }
