@@ -745,3 +745,73 @@ test('native process replacement does not give manual recovery roots automatic r
   await prompt('root', 'explicit recovery', 'Continue');
   assert.equal(runtimes[2].of('turn/start').length, 1);
 });
+
+for (const scope of ['codex', 'all']) {
+  test(`process restart queued before pause retains its blocker for ${scope} resume`, async t => {
+    let releaseQueue;
+    const blocked = new Promise(resolve => { releaseQueue = resolve; });
+    const { root, runtime, runtimes, prompt } = await setup(t, async (transport, method) => {
+      if (transport.index === 1 && method === 'turn/start') await blocked;
+    });
+    await runtime.open('root', { cwd: root, persist: true, model: 'codex:gpt-5.6-sol' });
+    await runtime.open('blocker', { cwd: root, persist: true });
+    await runtime.open('barrier', { cwd: root, persist: true });
+    await prompt('root', 'work');
+    const blocking = prompt('blocker', 'block queue');
+    try {
+      await until(() => runtimes[1].of('turn/start').length === 1);
+      runtimes[0].failure(new Error('process exited'));
+      await until(() => runtimes[3]?.of('thread/resume').length === 1 && !runtime.starting('root'));
+      runtime.pause({ runtime: 'codex' });
+    } finally { releaseQueue(); }
+    await blocking;
+    await runtime.recover('barrier');
+    assert.equal(runtimes[3].of('turn/start').length, 0, 'queued restart obeyed the new pause');
+    assert.ok(runtime.snapshot('root').parked);
+    runtime.resume({ runtime: 'claude' });
+    await runtime.recover('barrier');
+    assert.equal(runtimes[3].of('turn/start').length, 0, 'wrong provider cannot release the restart');
+    if (scope === 'all') runtime.resume();
+    else runtime.resume({ runtime: scope });
+    await runtime.recover('barrier');
+    assert.equal(runtimes[3].of('turn/start').length, 1, 'matching resume releases the captured restart park');
+    assert.match(JSON.stringify(runtimes[3].of('turn/start')[0]), /ALP restarted your/);
+    runtime.resume({ runtime: 'codex' });
+    runtime.resume();
+    await runtime.recover('barrier');
+    assert.equal(runtimes[3].of('turn/start').length, 1, 'repeated resumes cannot replay the continuation');
+    assert.equal(runtime.snapshot('root').parked, undefined);
+  });
+}
+
+test('a queued process restart cannot mark replacement manual recovery as paused', async t => {
+  let releaseQueue;
+  const blocked = new Promise(resolve => { releaseQueue = resolve; });
+  const { root, runtime, runtimes, prompt } = await setup(t, async (transport, method) => {
+    if (transport.index === 1 && method === 'turn/start') await blocked;
+  });
+  await runtime.open('root', { cwd: root, persist: true, model: 'codex:gpt-5.6-sol' });
+  await runtime.open('blocker', { cwd: root, persist: true });
+  await runtime.open('barrier', { cwd: root, persist: true });
+  await prompt('root', 'work');
+  const blocking = prompt('blocker', 'block queue');
+  let replacement;
+  try {
+    await until(() => runtimes[1].of('turn/start').length === 1);
+    // This replacement enters the queue before revive enqueues its continuation.
+    replacement = runtime.recover('root', { parkedRoot: 'manual recovery replacement' });
+    runtimes[0].failure(new Error('process exited'));
+    await until(() => runtimes[3]?.of('thread/resume').length === 1 && !runtime.starting('root'));
+    runtime.pause({ runtime: 'codex' });
+  } finally { releaseQueue(); }
+  await blocking;
+  await replacement;
+  await runtime.recover('barrier');
+  runtime.resume({ runtime: 'codex' });
+  runtime.resume();
+  await runtime.recover('barrier');
+  assert.equal(runtimes[3].of('turn/start').length, 0, 'stale restart cannot attach pause authority to replacement');
+  assert.equal(runtime.snapshot('root').parked, 'manual recovery replacement');
+  await prompt('root', 'explicit replacement resume', 'Continue');
+  assert.equal(runtimes[3].of('turn/start').length, 1);
+});
