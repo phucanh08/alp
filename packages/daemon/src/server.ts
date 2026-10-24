@@ -991,6 +991,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     markOpening(record.id);
     // The reason of an earlier failure is not true while the session opens again.
     recoveryErrors.delete(record.id);
+    let applied = false;
     try {
       if (worktrees) await worktrees.assertAvailable(record.spec.cwd);
       const stored = await treeLog(record.id);
@@ -1004,9 +1005,13 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         persist: true,
         restore: { agent: session.agent, threadId: session.threadId, runtime: session.runtime, model: session.model, workflow: session.workflow, ...(record.base ? { base: record.base } : {}) },
       }, { history: stored.length ? 'skip' : history, delegation: record.delegation ?? delegation });
+      applied = true;
+      await persistAcceptedSpec(record.id, opened, { mode: spec.mode !== undefined, thinking: spec.thinking !== undefined });
       if (history === 'replay') replayHistory(connection, record.id, stored);
       return opened;
     } catch (error: any) {
+      // A durable-write failure does not undo a successful open or abandon its viewer.
+      if (applied) throw error;
       detach(connection, record.id);
       // The session could not be opened: a job that waits for it says why.
       keepRecoveryError(record.id, error?.message ?? String(error));
@@ -1014,6 +1019,20 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     } finally {
       clearOpening(record.id);
     }
+  }
+
+  /** Causal successful apply/open only: never infer requested configuration from later events. */
+  async function persistAcceptedSpec(id: string, accepted: SessionSnapshot, fields: { mode?: boolean; thinking?: boolean }) {
+    const record = records.get(id);
+    if (!record?.spec || (!fields.mode && !fields.thinking)) return;
+    record.spec = {
+      ...record.spec,
+      ...(fields.mode ? { mode: accepted.mode } : {}),
+      ...(fields.thinking ? { thinking: accepted.thinking } : {}),
+    };
+    record.updatedAt = new Date().toISOString();
+    try { await store?.put(record); }
+    catch (error) { throw persistenceFailed(`the configuration of ${id}; the runtime already applied it`, error); }
   }
 
   /** Projects, tasks, library and settings (docs/protocol/alp-json-rpc-v1.md §15); a team save syncs the projects sessions ran in. */
@@ -1311,7 +1330,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         try {
           const session = await resume(connection, record, spec, history, delegation);
           return { session, attached: false, resumed: true, ...await persisted(id) };
-        } catch (error) { await rollback(); throw error; }
+        } catch (error) { if (!runtime.snapshot(id)) await rollback(); throw error; }
       }
       const { restore: _restore, ...kept } = spec;
       const now = new Date().toISOString();
@@ -1490,7 +1509,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         if (!conversation?.configures) throw new RpcError(RPC_ERROR.invalidParams, 'This alpd changes only the mode of a session (capability session.configure.live is not listed)', { reason: 'invalid_params' });
         return conversation.configure(params);
       }
-      return { session: await runtime.configure(sessionId, { mode }) };
+      return { session: await runtime.configure(sessionId, { mode }, {
+        onApplied: accepted => persistAcceptedSpec(sessionId, accepted, { mode: true }),
+      }) };
     },
 
     /** What a change of model, thinking, team or mode would run a live root with (§12.9). */
