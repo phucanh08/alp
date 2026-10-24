@@ -72,7 +72,7 @@ export function createScheduler({ store, runtime, deliver, ready, session, settl
   /** The runtime that holds the sessions a job continues. */
   runtime: AlpRuntime;
   /** The daemon's prompt path: a delivery of this job, by its own clientMessageId. */
-  deliver: (job: ScheduleJob, content: PromptContent, clientMessageId: string) => Promise<ScheduleDelivery>;
+  deliver: (job: ScheduleJob, content: PromptContent, clientMessageId: string, send?: AlpRuntime['prompt']) => Promise<ScheduleDelivery>;
   /** The daemon's own start-up; a job waits for it, so a reopened session is ready. */
   ready?: () => Promise<unknown>;
   /**
@@ -245,7 +245,7 @@ export function createScheduler({ store, runtime, deliver, ready, session, settl
     opening.delete(current.id);
     if (snapshot.parentId) return fail(current, 'The session this job continues is not a root session', 'not_a_root');
     if (projectKey(snapshot.projectRoot) !== projectKey(current.projectRoot)) return fail(current, 'The session this job continues belongs to another project', 'other_project');
-    if (snapshot.activeTurnId) {
+    const waitBusy = async (): Promise<'waiting' | 'failed'> => {
       // The session is working. The job waits for the turn to end; it never steers it.
       const overdue = now() - Date.parse(current.dueAt);
       if (overdue > graceMs) return fail(current, `The session was still busy ${duration(overdue)} after the job was due`, 'session_busy');
@@ -255,61 +255,68 @@ export function createScheduler({ store, runtime, deliver, ready, session, settl
       await store.change(current.id, job => job.status === 'pending' && job.lastError?.code !== note.code ? { lastError: note } : undefined)
         .catch(error => log.warn(`could not record the wait of job ${current.id}`, { code: 'ALP_SCHEDULE_WRITE_FAILED', jobId: current.id, error }));
       return 'waiting';
-    }
-    // From here the job is being delivered: a cancel that arrives now is refused, so
-    // the job and the record cannot disagree about what happened.
-    delivering.add(current.id);
-    try {
-      // The first attempt fixes when the job was tried and how late it is, and both are
-      // written before the delivery: a retry after a crash sends the very same words.
-      const attemptedAtMs = current.attemptedAt ? Date.parse(current.attemptedAt) : now();
-      const lateByMs = current.lateByMs ?? Math.max(0, attemptedAtMs - Date.parse(current.dueAt));
-      const fields = { attemptedAt: new Date(attemptedAtMs).toISOString(), lateByMs, attempts: (current.attempts ?? 0) + 1, lastError: undefined };
-      // The attempt is written under the store's own lock: a cancel that landed while
-      // the job was being prepared wins, and the job does not run.
-      const persisted = await store.change(current.id, job => job.status === 'pending' ? fields : undefined);
-      if (!persisted || persisted.status !== 'pending') {
-        release(persisted ?? current);
-        return 'skipped';
+    };
+    if (snapshot.activeTurnId || runtime.starting?.(current.sessionId)) return waitBusy();
+    const dispatch = async (send?: AlpRuntime['prompt']): Promise<'delivered' | 'failed' | 'waiting' | 'skipped'> => {
+      // From here the job is being delivered: a cancel that arrives now is refused, so
+      // the job and the record cannot disagree about what happened.
+      delivering.add(current.id);
+      try {
+        // The first attempt fixes when the job was tried and how late it is, and both are
+        // written before the delivery: a retry after a crash sends the very same words.
+        const attemptedAtMs = current.attemptedAt ? Date.parse(current.attemptedAt) : now();
+        const lateByMs = current.lateByMs ?? Math.max(0, attemptedAtMs - Date.parse(current.dueAt));
+        const fields = { attemptedAt: new Date(attemptedAtMs).toISOString(), lateByMs, attempts: (current.attempts ?? 0) + 1, lastError: undefined };
+        // The attempt is written under the store's own lock: a cancel that landed while
+        // the job was being prepared wins, and the job does not run.
+        const persisted = await store.change(current.id, job => job.status === 'pending' ? fields : undefined);
+        if (!persisted || persisted.status !== 'pending') {
+          release(persisted ?? current);
+          return 'skipped';
+        }
+        attempt = persisted;
+        const written = attempt;
+        const content: PromptContent = [{ type: 'text', text: renderPrompt(written) }];
+        // A session that never answers does not hold the tick: the job fails for it.
+        const delivery = deliver(written, content, clientMessageId(written), send);
+        // A delivery that answers after the timeout is logged, not left unhandled.
+        void delivery.catch(error => log.warn(`the delivery of job ${written.id} failed after it timed out`, { code: 'ALP_SCHEDULE_DELIVERY_FAILED', jobId: written.id, error }));
+        let timer: NodeJS.Timeout | undefined;
+        const answer = await Promise.race([
+          delivery,
+          new Promise<ScheduleDelivery>(resolve => {
+            timer = setTimeout(() => resolve({ outcome: 'failed', error: { message: `The session did not acknowledge the prompt within ${duration(deliveryTimeoutMs)}; execution outcome is unknown. The outstanding request was not cancelled and may still start a turn. Do not recreate automatically`, code: 'delivery_timeout' } }), deliveryTimeoutMs);
+            timer.unref?.();
+          }),
+        ]).finally(() => { if (timer) clearTimeout(timer); });
+        if (answer.error?.code === 'delivery_timeout') {
+          const result = await fail(attempt, answer.error.message, 'delivery_timeout');
+          // The timeout bounds waiting, not provider execution. Keep the terminal job
+          // (never resend it), but make a late acknowledgement observable on inspection.
+          void delivery.then(async late => {
+            const message = late.outcome === 'accepted'
+              ? 'The provider acknowledged the prompt after the delivery timeout; a turn may have executed. No retry was sent.'
+              : `The delivery answered after the timeout: ${late.error?.message ?? late.outcome}. No retry was sent.`;
+            log.warn(`job ${written.id}: ${message}`, { code: 'ALP_SCHEDULE_LATE_ACK', jobId: written.id });
+            await store.change(written.id, job => job.status === 'failed' && job.lastError?.code === 'delivery_timeout'
+              ? { lastError: { code: late.outcome === 'accepted' ? 'delivery_accepted_late' : 'delivery_timeout', message } } : undefined);
+          }).catch(error => log.warn(`could not record late acknowledgement for job ${written.id}`, { code: 'ALP_SCHEDULE_WRITE_FAILED', jobId: written.id, error }));
+          return result;
+        }
+        if (answer.outcome === 'accepted') return done(attempt);
+        if (answer.outcome === 'unknown') return fail(attempt, answer.error?.message ?? 'alpd cannot tell whether the prompt reached the agent', answer.error?.code ?? 'outcome_unknown');
+        return fail(attempt, answer.error?.message ?? 'The session refused the prompt', answer.error?.code ?? 'refused');
+      } catch (error: any) {
+        // The attempt, when it was written, is what is failed: the times it fixed are kept.
+        return fail(attempt ?? current, error?.message ?? String(error), error?.data?.reason ?? 'delivery_failed');
+      } finally {
+        delivering.delete(current.id);
       }
-      attempt = persisted;
-      const written = attempt;
-      const content: PromptContent = [{ type: 'text', text: renderPrompt(written) }];
-      // A session that never answers does not hold the tick: the job fails for it.
-      const delivery = deliver(written, content, clientMessageId(written));
-      // A delivery that answers after the timeout is logged, not left unhandled.
-      void delivery.catch(error => log.warn(`the delivery of job ${written.id} failed after it timed out`, { code: 'ALP_SCHEDULE_DELIVERY_FAILED', jobId: written.id, error }));
-      let timer: NodeJS.Timeout | undefined;
-      const answer = await Promise.race([
-        delivery,
-        new Promise<ScheduleDelivery>(resolve => {
-          timer = setTimeout(() => resolve({ outcome: 'failed', error: { message: `The session did not acknowledge the prompt within ${duration(deliveryTimeoutMs)}; execution outcome is unknown. The outstanding request was not cancelled and may still start a turn. Do not recreate automatically`, code: 'delivery_timeout' } }), deliveryTimeoutMs);
-          timer.unref?.();
-        }),
-      ]).finally(() => { if (timer) clearTimeout(timer); });
-      if (answer.error?.code === 'delivery_timeout') {
-        const result = await fail(attempt, answer.error.message, 'delivery_timeout');
-        // The timeout bounds waiting, not provider execution. Keep the terminal job
-        // (never resend it), but make a late acknowledgement observable on inspection.
-        void delivery.then(async late => {
-          const message = late.outcome === 'accepted'
-            ? 'The provider acknowledged the prompt after the delivery timeout; a turn may have executed. No retry was sent.'
-            : `The delivery answered after the timeout: ${late.error?.message ?? late.outcome}. No retry was sent.`;
-          log.warn(`job ${written.id}: ${message}`, { code: 'ALP_SCHEDULE_LATE_ACK', jobId: written.id });
-          await store.change(written.id, job => job.status === 'failed' && job.lastError?.code === 'delivery_timeout'
-            ? { lastError: { code: late.outcome === 'accepted' ? 'delivery_accepted_late' : 'delivery_timeout', message } } : undefined);
-        }).catch(error => log.warn(`could not record late acknowledgement for job ${written.id}`, { code: 'ALP_SCHEDULE_WRITE_FAILED', jobId: written.id, error }));
-        return result;
-      }
-      if (answer.outcome === 'accepted') return done(attempt);
-      if (answer.outcome === 'unknown') return fail(attempt, answer.error?.message ?? 'alpd cannot tell whether the prompt reached the agent', answer.error?.code ?? 'outcome_unknown');
-      return fail(attempt, answer.error?.message ?? 'The session refused the prompt', answer.error?.code ?? 'refused');
-    } catch (error: any) {
-      // The attempt, when it was written, is what is failed: the times it fixed are kept.
-      return fail(attempt ?? current, error?.message ?? String(error), error?.data?.reason ?? 'delivery_failed');
-    } finally {
-      delivering.delete(current.id);
-    }
+    };
+    // Historical attempts only reconcile receipts; they must never send a fresh prompt.
+    if (current.attempts || !runtime.withIdlePrompt) return dispatch();
+    const admission = await runtime.withIdlePrompt(current.sessionId, send => dispatch((_id, input) => send(input)));
+    return admission.busy ? waitBusy() : admission.value;
   }
 
   /**

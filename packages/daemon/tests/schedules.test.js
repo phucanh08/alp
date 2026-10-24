@@ -52,7 +52,8 @@ async function setup(t) {
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'] } }));
   const runtimes = [];
   const stops = [];
-  t.after(async () => { for (const stop of stops.reverse()) await stop(); await rm(directory, { recursive: true, force: true }); });
+  const releases = [];
+  t.after(async () => { for (const release of releases) release(); for (const stop of stops.reverse()) await stop(); await rm(directory, { recursive: true, force: true }); });
   const state = path.join(directory, 'state');
   let count = 0;
   async function start(options = {}) {
@@ -88,7 +89,7 @@ async function setup(t) {
     return { runtime, store, server, open, stop, project, ...first };
   }
   const create = (daemon, params = {}) => daemon.request('session.create', { spec: { cwd: project, persist: true }, ...params });
-  return { directory, state, project, runtimes, start, create };
+  return { directory, state, project, runtimes, start, create, releases };
 }
 
 /** The text of the user message the session received, if it received one. */
@@ -122,6 +123,180 @@ test('a job that comes due opens a turn on its session, without a user message',
   assert.equal(after.attempts, 1);
   assert.ok(after.deliveredAt, 'the delivery is timed');
   assert.equal(after.lastError, undefined);
+});
+
+for (const phase of ['queued wake', 'in-flight wake start']) {
+  test(`a due job waits for a ${phase} with no active turn id, then delivers once`, async t => {
+    const { start, create, project, runtimes, releases } = await setup(t);
+    const daemon = await start();
+    const { session } = await create(daemon);
+    const wake = runtimes[0];
+    let releaseWake;
+    wake.hold = new Promise(resolve => { releaseWake = resolve; });
+    releases.push(() => releaseWake());
+    let releaseBlock;
+    let blocked;
+    if (phase === 'queued wake') {
+      await daemon.runtime.open('queue-blocker', { cwd: project });
+      const blocker = runtimes.at(-1);
+      blocker.hold = new Promise(resolve => { releaseBlock = resolve; });
+      releases.push(() => releaseBlock());
+      blocked = daemon.runtime.prompt('queue-blocker', { clientMessageId: 'block', delivery: 'auto', content: [{ type: 'text', text: 'Hold the global admission queue.' }] });
+      await until(() => blocker.started.length === 1);
+    }
+    daemon.runtime.message(session.id, 'Wake before the scheduled continuation.');
+    if (phase === 'in-flight wake start') await until(() => wake.started.length === 1);
+    assert.equal(daemon.runtime.snapshot(session.id).activeTurnId, undefined);
+    const { job } = await daemon.request('schedule.create', { projectRoot: project, sessionId: session.id, dueAt: inMs(-1), prompt: `Continue after ${phase}.` });
+    await until(async () => {
+      const current = await jobOf(daemon, job.id);
+      return current.attempts > 0 || current.lastError?.code === 'session_busy';
+    }, 'the due job was inspected');
+    const waiting = await jobOf(daemon, job.id);
+    assert.equal(waiting.attempts, 0, 'busy admission must not consume an attempt or create a receipt');
+    assert.equal(waiting.status, 'pending');
+    assert.equal(waiting.lastError.code, 'session_busy');
+    assert.equal(promptOf(daemon.events, `Continue after ${phase}.`), undefined);
+    releaseBlock?.();
+    await blocked;
+    await until(() => wake.started.length === 1);
+    releaseWake();
+    await until(() => daemon.runtime.snapshot(session.id).activeTurnId);
+    wake.finish();
+    await untilStatus(daemon, job.id, 'delivered');
+    assert.equal((await jobOf(daemon, job.id)).attempts, 1);
+    assert.equal(wake.started.length, 2, 'one wake and exactly one scheduled turn');
+    assert.equal(userTexts(daemon.events).filter(text => text.includes(`Continue after ${phase}.`)).length, 1);
+  });
+}
+
+for (const failReceipt of [false, true]) {
+  test(`mail arriving during a scheduled receipt write cannot overtake admission (${failReceipt ? 'write failure' : 'success'})`, async t => {
+    const { start, create, project, runtimes, releases } = await setup(t);
+    const daemon = await start();
+    const { session } = await create(daemon);
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    releases.push(release);
+    let entered = false;
+    const putReceipt = daemon.store.putReceipt.bind(daemon.store);
+    daemon.store.putReceipt = async (key, receipt) => {
+      if (receipt.state === 'pending') {
+        entered = true;
+        await gate;
+        if (failReceipt) throw new Error('receipt disk failure');
+      }
+      return putReceipt(key, receipt);
+    };
+    const { job } = await daemon.request('schedule.create', { projectRoot: project, sessionId: session.id, dueAt: inMs(-1), prompt: 'Persist before the wake.' });
+    await until(() => entered);
+    assert.equal(daemon.runtime.starting(session.id), true, 'lifecycle operations see admission before native start');
+    daemon.runtime.message(session.id, 'Mail during the durable write.');
+    assert.equal(runtimes[0].started.length, 0, 'neither prompt starts before durable preparation');
+    await assert.rejects(daemon.request('schedule.cancel', { id: job.id, projectRoot: project }), { code: 1004 });
+    release();
+    await untilStatus(daemon, job.id, failReceipt ? 'failed' : 'delivered');
+    await until(() => runtimes[0].started.length === 1);
+    const input = JSON.stringify(runtimes[0].started[0].params.input);
+    assert.equal(input.includes('Persist before the wake.'), !failReceipt, 'a write failure sends no job; success sends the admitted job first');
+    assert.ok(input.includes('Mail during the durable write.'), 'mail is included in the admitted prompt or the failure wake');
+    assert.equal((await jobOf(daemon, job.id)).attempts, 1);
+    assert.equal(userTexts(daemon.events).filter(text => text.includes('Persist before the wake.')).length, failReceipt ? 0 : 1);
+  });
+}
+
+test('the idle sender is single-use and expires when its admission callback ends', async t => {
+  const { start, create, runtimes } = await setup(t);
+  const daemon = await start();
+  const { session } = await create(daemon);
+  let escaped;
+  const result = await daemon.runtime.withIdlePrompt(session.id, async send => {
+    escaped = send;
+    await send({ clientMessageId: 'admitted', delivery: 'auto', content: [{ type: 'text', text: 'One admitted prompt.' }] });
+    await assert.rejects(send({ clientMessageId: 'twice', delivery: 'auto', content: [] }), /no longer available/);
+    return 'sent';
+  });
+  assert.deepEqual(result, { busy: false, value: 'sent' });
+  await assert.rejects(escaped({ clientMessageId: 'escaped', delivery: 'auto', content: [] }), /no longer available/);
+  assert.equal(runtimes[0].started.length, 1);
+});
+
+test('mail arriving during attempt persistence stays behind the admitted job', async t => {
+  const { start, create, directory, project, runtimes, releases } = await setup(t);
+  const daemon = await start();
+  const { session } = await create(daemon);
+  const store = createScheduleStore(path.join(directory, 'attempt-jobs'));
+  const job = await store.create({ projectRoot: project, sessionId: session.id, dueAt: inMs(-1), prompt: 'Attempt gate.' });
+  let entered = false;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  releases.push(release);
+  const change = store.change.bind(store);
+  store.change = async (...args) => {
+    const result = await change(...args);
+    if (result?.status === 'pending' && result.attempts === 1) { entered = true; await gate; }
+    return result;
+  };
+  const scheduler = createScheduler({ store, runtime: daemon.runtime, deliver: async (job, content, clientMessageId, send = (id, input) => daemon.runtime.prompt(id, input)) => {
+    await send(job.sessionId, { clientMessageId, delivery: 'auto', content });
+    return { outcome: 'accepted' };
+  } });
+  const tick = scheduler.tick();
+  await until(() => entered);
+  daemon.runtime.message(session.id, 'Mail at attempt gate.');
+  assert.equal(runtimes[0].started.length, 0);
+  assert.equal(scheduler.delivering(job.id), true);
+  release();
+  assert.deepEqual(await tick, { delivered: 1, failed: 0, waiting: 0 });
+  assert.equal(runtimes[0].started.length, 1);
+  const input = JSON.stringify(runtimes[0].started[0].params.input);
+  assert.ok(input.includes('Attempt gate.'));
+  assert.ok(input.includes('Mail at attempt gate.'));
+  await scheduler.tick();
+  assert.equal(runtimes[0].started.length, 1);
+});
+
+test('a cancelled job waiting for runtime admission never consumes an attempt', async t => {
+  const { start, create, directory, project, runtimes, releases } = await setup(t);
+  const daemon = await start();
+  const { session } = await create(daemon);
+  await daemon.runtime.open('cancel-blocker', { cwd: project });
+  const blocker = runtimes.at(-1);
+  let release;
+  blocker.hold = new Promise(resolve => { release = resolve; });
+  releases.push(release);
+  const blocked = daemon.runtime.prompt('cancel-blocker', { clientMessageId: 'block', delivery: 'auto', content: [] });
+  await until(() => blocker.started.length === 1);
+  const store = createScheduleStore(path.join(directory, 'cancel-jobs'));
+  const job = await store.create({ projectRoot: project, sessionId: session.id, dueAt: inMs(-1), prompt: 'Never admitted.' });
+  let queued = false;
+  const runtime = { ...daemon.runtime, withIdlePrompt: (...args) => { queued = true; return daemon.runtime.withIdlePrompt(...args); } };
+  let sends = 0;
+  const scheduler = createScheduler({ store, runtime, deliver: async () => { sends++; return { outcome: 'accepted' }; } });
+  const tick = scheduler.tick();
+  await until(() => queued);
+  await store.change(job.id, () => ({ status: 'cancelled', cancelledAt: new Date().toISOString() }));
+  release();
+  await blocked;
+  assert.deepEqual(await tick, { delivered: 0, failed: 0, waiting: 0 });
+  assert.equal((await store.get(job.id)).attempts, 0);
+  assert.equal((await store.get(job.id)).status, 'cancelled');
+  assert.equal(sends, 0);
+});
+
+test('a scheduled continuation can still prompt a parked quota root once', async t => {
+  const { start, create, project, runtimes } = await setup(t);
+  const daemon = await start();
+  const { session } = await create(daemon);
+  daemon.runtime.pause({ reason: 'quota test' });
+  await daemon.runtime.recover(session.id, { parkedRoot: 'provider quota' });
+  assert.equal(daemon.runtime.snapshot(session.id).busy, true);
+  assert.equal(daemon.runtime.snapshot(session.id).parked, 'provider quota');
+  const { job } = await daemon.request('schedule.create', { projectRoot: project, sessionId: session.id, dueAt: inMs(-1), prompt: 'Recheck quota and continue.' });
+  await untilStatus(daemon, job.id, 'delivered');
+  assert.equal((await jobOf(daemon, job.id)).attempts, 1);
+  assert.equal(runtimes[0].started.length, 1);
+  assert.equal(daemon.runtime.snapshot(session.id).parked, undefined);
 });
 
 test('a job that comes due late says how late it is', async t => {
