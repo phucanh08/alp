@@ -43,6 +43,25 @@ host's ALP library; saving a built-in entry creates an override. The ALP plugin
 settings screen and the ALP project panel remain available for library management
 and project overrides.
 
+## Managed worktree removal through the web facade
+
+The facade accepts Paseo's native `paseo_worktree_archive_request`. Set
+`scope: "worktree"` to remove an ALP-managed user worktree, targeting its
+`workspaceId` or absolute `worktreePath` (or `repoRoot` and `branchName`). If
+multiple target fields are supplied they must agree. A workspace archived earlier
+can still be targeted explicitly. Removal retains the Git branch.
+
+The daemon's `workspace.worktree.remove` is the sole deletion authority. It checks
+the creator, approved mapping, checkout identity, dirty files, runtime admission,
+leases, assignments and saved session history. A refusal leaves workspace metadata
+and checkout files intact; sessions are never archived to bypass these checks.
+External checkouts cannot be deleted. Older daemons return an upgrade error.
+
+Omitting `scope`, choosing `scope: "workspace"`, or using
+`archive_workspace_request` only archives the workspace. As in supported Paseo
+0.11.1–0.12.x, the legacy `deleteWorktreeFromDisk` flag does not request deletion.
+This follows [Paseo's native archive contract](https://github.com/getpaseo/paseo/blob/b63a325be3d3ae444fbd38815658cca01ab1288f/packages/server/src/server/worktree/commands.ts#L121).
+
 ## Install
 
 This is the beta `0.0.1-beta.3` (until it is on npm, `@beta` installs `0.0.0-beta.2`, which Paseo 0.12 refuses; check with
