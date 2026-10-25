@@ -447,6 +447,48 @@ export function createWorkspaces({ rpc, broadcast, agents, inDevelopment, log = 
       }
     },
 
+    // Paseo 0.11.1–0.12.x: only scope=worktree requests disk removal. The legacy
+    // deleteWorktreeFromDisk flag is ignored upstream; workspace scope is archive-only.
+    async paseo_worktree_archive_request(request: Inbound<'paseo_worktree_archive_request'>) {
+      const reply = (error: { code: 'NOT_ALLOWED' | 'UNKNOWN'; message: string } | null, removedAgents: string[] = []): Outbound =>
+        ({ type: 'paseo_worktree_archive_response', payload: { requestId: request.requestId, success: !error, removedAgents, error } });
+      try {
+        await load();
+        const canonical = async (value: string) => {
+          if (!path.isAbsolute(value)) throw new RequestError('Worktree target must be an absolute path');
+          // A committed removal can leave a record whose checkout is already absent.
+          return realpath(value).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return path.resolve(value); throw error; });
+        };
+        const target = request.worktreePath ? await canonical(request.worktreePath) : undefined;
+        const source = request.repoRoot ? await canonical(request.repoRoot) : undefined;
+        let candidates = request.workspaceId ? registry.workspaces.filter(entry => entry.id === request.workspaceId)
+          : target ? registry.workspaces.filter(entry => entry.directory === target)
+          : source && request.branchName ? registry.workspaces.filter(entry => entry.worktree?.source === source && entry.worktree.branch === request.branchName) : [];
+        if (!request.workspaceId && candidates.some(entry => entry.worktree)) candidates = candidates.filter(entry => entry.worktree);
+        if (candidates.length !== 1) throw new RequestError('An unambiguous registered workspace target is required');
+        const entry = candidates[0];
+        if ((target && entry.directory !== target) || (source && entry.worktree?.source !== source) || (request.branchName && entry.worktree?.branch !== request.branchName))
+          throw new RequestError('Worktree target does not match the workspace');
+        if (request.scope !== 'worktree') {
+          const ids = rootsIn(entry.id).map(session => session.id);
+          await archiveWorkspace(known(entry.id), request.requestId);
+          return reply(null, ids);
+        }
+        // No archive/session mutation before alpd's owner, mapping, dirty, lease and
+        // retained-history guards. It alone owns native deletion and the tombstone.
+        if (!entry.worktree) throw new RequestError('Only managed user worktrees can be removed');
+        if (registry.workspaces.some(other => other.id !== entry.id && other.directory === entry.directory && active(other)))
+          throw new RequestError('Other workspaces still reference this checkout');
+        await rpc('workspace.worktree.remove', { workspaceId: entry.id, requestId: request.requestId, ifRevision: registry.revision });
+        await load();
+        sync();
+        return reply(null);
+      } catch (error: any) {
+        if (error?.code === -32601) return reply({ code: 'UNKNOWN', message: 'This ALP daemon cannot remove managed worktrees; upgrade and restart it' });
+        return reply({ code: error instanceof RequestError || error?.code === 1003 || error?.code === 1004 ? 'NOT_ALLOWED' : 'UNKNOWN', message: message(error) });
+      }
+    },
+
     /** Marks the newest finished root unread again, as Paseo's daemon does. */
     async 'workspace.mark_unread.request'(request: Inbound<'workspace.mark_unread.request'>) {
       await load();
