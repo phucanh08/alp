@@ -461,3 +461,27 @@ test('Stop during a local upload cancels the message before session.prompt can l
   assert.equal(controller.getState().prompts.length, 0);
   assert.match(controller.getState().notice.text, /canceled before sending/);
 });
+
+test('create ownership: switching during first-file upload preserves the initial prompt', async t => {
+  const world = hostWithStore();
+  const controller = await connected(t, world);
+  world.host.seed('ses_b');
+  const set = world.host.roots.set.bind(world.host.roots);
+  world.host.roots.set = (id, root) => { root.summary.promptAttachments = ['file.path']; return set(id, root); };
+  const { added } = await readFiles([], [file('blob.bin', BINARY)], LIMITS);
+  world.store.holdChunk = 1;
+  const creating = controller.createSession({ prompt: 'initial upload [hold]', files: added });
+  await until(() => world.store.held, 'first upload held');
+  const id = world.store.begins[0].sessionId;
+  controller.selectSession('ses_b');
+  // Let navigation reconcile before the upload completes, if it is allowed to.
+  await new Promise(resolve => setImmediate(resolve));
+  world.store.held();
+  await creating;
+  await until(() => world.host.receipts.size === 1 || controller.getState().prompts.some(p => p.status === 'failed'), 'initial delivery settled');
+  assert.equal(world.host.receipts.size, 1, 'the initial message is accepted once');
+  assert.equal(world.host.root(id).running !== undefined, true, 'the created turn runs');
+  await until(() => controller.getState().tree?.rootId === 'ses_b' && controller.getState().tree.status === 'attached', 'B attached');
+  assert.ok([...world.host.connections].every(link => [...link.attached].every(root => root === 'ses_b')), 'no orphan C');
+  assert.equal(controller.getState().prompts.some(p => p.status === 'failed'), false);
+});
