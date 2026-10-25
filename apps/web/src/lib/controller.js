@@ -296,7 +296,19 @@ export class Controller {
   #forkWorktrees = new Map();
   /** The worktree.create params of a fork, by its request id, sent unchanged again on a retry. @type {Map<string, any>} */
   #forkWorktreeRequests = new Map();
-  #syncing = false;
+  /** Viewer operations are ordered per link; an old link cannot delay a new connection.
+   * @type {WeakMap<AlpRpcClient, Promise<unknown>>} */
+  #viewerTails = new WeakMap();
+
+  /** @template T @param {AlpRpcClient} client @param {() => Promise<T>} operation @returns {Promise<T>} */
+  #withViewer(client, operation) {
+    const result = (this.#viewerTails.get(client) ?? Promise.resolve()).then(operation);
+    this.#viewerTails.set(client, result.catch(() => {}));
+    return result;
+  }
+
+  /** @type {WeakSet<AlpRpcClient>} */
+  #syncing = new WeakSet();
   #retryingTeams = false;
   /** A first message whose start failed after the New session screen closed: the next one shows it again (memory only). */
   /** @type {{ workspace: string, text: string } | null} */
@@ -559,9 +571,10 @@ export class Controller {
       this.#ensureTree(root).failed = null;
       try {
         await this.#attachTree(client, root, signal);
+        if (this.#run !== run || signal.aborted) throw new Error('This connection was replaced.');
         this.#attached = { client, root };
       } catch (error) {
-        if (!endsRoot(error)) throw error;
+        if (this.#run !== run || signal.aborted || !endsRoot(error)) throw error;
         this.#markGone(root, error);
       }
     }
@@ -942,6 +955,7 @@ export class Controller {
         queueMicrotask(() => void this.#reloadTree(client, root));
       }
     } catch (error) {
+      if (tree.attaching !== operation) throw error;
       if (/** @type {any} */ (error)?.data?.reason === 'stale_cursor' && staleRetries < 1 && this.#older.has(root)) {
         this.#older.delete(root); tree.projection = emptyProjection(root);
         if (tree.attaching === operation) tree.attaching = null;
@@ -950,7 +964,7 @@ export class Controller {
       if (tree.attaching === operation) tree.attaching = null;
       // Its events stop here: applied without the replay they could skip a gap. The next attach
       // replays from the cursor.
-      if (this.#watching === root) this.#watching = null;
+      if (client === this.#run?.alp?.client && this.#watching === root) this.#watching = null;
       throw error;
     }
   }
@@ -984,7 +998,13 @@ export class Controller {
   }
 
   /** Reads a root's history again and attaches after it, on the connection it is attached on. @param {AlpRpcClient} client @param {string} root */
-  async #reloadTree(client, root) {
+  #reloadTree(client, root) {
+    return this.#withViewer(client, () => this.#reloadViewer(client, root));
+  }
+
+  /** @param {AlpRpcClient} client @param {string} root */
+  async #reloadViewer(client, root) {
+    if (client !== this.#run?.alp?.client || this.#state.selected !== root) return;
     if (this.#attached?.client !== client || this.#attached.root !== root) return;
     this.#older.delete(root);
     try {
@@ -1077,24 +1097,25 @@ export class Controller {
    * meanwhile. Only reads are sent here.
    */
   async #sync() {
-    if (this.#syncing) { this.#syncAgain = true; return; }
-    this.#syncing = true;
+    const client = this.#run?.alp?.client;
+    if (!client) return;
+    if (this.#syncing.has(client)) { this.#syncAgain = true; return; }
+    this.#syncing.add(client);
     try {
       for (;;) {
         this.#syncAgain = false;
-        const again = await this.#syncStep();
+        const again = await this.#withViewer(client, () => this.#syncViewer(client));
+        if (client !== this.#run?.alp?.client) break;
         if (!again && !this.#syncAgain) break;
       }
     } finally {
-      this.#syncing = false;
+      this.#syncing.delete(client);
     }
   }
 
-  /** One step of #sync; true when another step may be needed. */
-  async #syncStep() {
-    const alp = this.#run?.alp;
-    const client = alp?.state === 'open' ? alp.client : undefined;
-    if (!client) return false;
+  /** One step of #sync; true when another step may be needed. @param {AlpRpcClient} client */
+  async #syncViewer(client) {
+    if (this.#run?.alp?.state !== 'open' || client !== this.#run.alp.client) return false;
     const want = this.#state.selected;
     if (this.#attached && this.#attached.client !== client) this.#attached = null;
     const have = this.#attached;
@@ -1121,12 +1142,16 @@ export class Controller {
     try {
       // Reclaim a retained subscription before any delayed observer handoff can release it.
       this.#stopLeases.delete(want);
+      // Attach may subscribe before its response is lost: own that possibility too.
+      this.#attached = { client, root: want };
       await this.#attachTree(client, want);
+      if (client !== this.#run?.alp?.client) return true;
       this.#attached = { client, root: want };
       return this.#state.selected !== want;
     } catch (error) {
       // A failed re-selection still needs its receipt fence until observer ownership is safe.
       if (retained && client === this.#run?.alp?.client) {
+        if (this.#attached?.client === client && this.#attached.root === want) this.#attached = null;
         await this.#handoffViewer(retained);
       }
       this.#attachFailed(client, want, error);
@@ -1153,9 +1178,13 @@ export class Controller {
   #releaseStopLease(root, expected) {
     const lease = this.#stopLeases.get(root);
     if (!lease || (expected && lease !== expected)) return;
-    this.#stopLeases.delete(root);
-    if (this.#run?.alp?.client !== lease.client) return;
-    void lease.client.request('session.release', { sessionId: root }, { timeoutMs: this.#options.releaseTimeoutMs }).catch(() => {});
+    void this.#withViewer(lease.client, async () => {
+      if (this.#stopLeases.get(root) !== lease) return;
+      this.#stopLeases.delete(root);
+      if (this.#run?.alp?.client !== lease.client) return;
+      if (this.#attached?.client === lease.client && this.#attached.root === root) return;
+      await lease.client.request('session.release', { sessionId: root }, { timeoutMs: this.#options.releaseTimeoutMs }).catch(() => {});
+    });
   }
 
   /**
@@ -1165,8 +1194,8 @@ export class Controller {
    * @param {AlpRpcClient} client @param {string} root @param {unknown} error
    */
   #attachFailed(client, root, error) {
-    if (endsRoot(error)) { this.#markGone(root, error); return; }
     if (client !== this.#run?.alp?.client) return;
+    if (endsRoot(error)) { this.#markGone(root, error); return; }
     const tree = this.#ensureTree(root);
     tree.failed = describe(error);
     if (this.#state.selected === root) this.#set({ tree: { rootId: root, status: 'error', error: tree.failed, projection: tree.projection } });
@@ -1178,8 +1207,16 @@ export class Controller {
     if (!root) return;
     const tree = this.#trees.get(root);
     if (tree) { tree.gone = null; tree.failed = null; }
-    this.#attached = null;
-    this.#sync();
+    const client = this.#run?.alp?.client;
+    if (!client) return;
+    void this.#withViewer(client, async () => {
+      const have = this.#attached;
+      if (have?.client === client && have.root === root) {
+        this.#attached = null;
+        if (this.#watching === root) this.#watching = null;
+        await this.#handoffViewer(have);
+      }
+    }).finally(() => this.#sync());
   }
 
   // ---- workspaces and sessions -------------------------------------------------------------
@@ -1742,79 +1779,104 @@ export class Controller {
     if (this.#creating || this.#state.busy.create) throw new ConfigurationError('A new session is already starting.');
     const client = this.#client();
     const id = newSessionId();
-    const previous = this.#attached;
+    const context = this.#context;
     this.#creating = id;
     this.#set(state => ({ busy: { ...state.busy, create: true } }));
+    // Claim selection before yielding: a later user choice must win over this create.
+    const tree = this.#ensureTree(id);
+    const placeholder = /** @type {SessionSummary} */ (/** @type {unknown} */ ({ id, projectRoot: workspace, status: 'initializing', ...(title ? { title } : {}), createdAt: new Date().toISOString() }));
+    this.#set(state => ({
+      selected: id, focus: id,
+      tree: { rootId: id, status: 'attaching', projection: tree.projection },
+      sessions: { ...state.sessions, list: [placeholder, ...state.sessions.list.filter(session => session.id !== id)] },
+    }));
+    const current = () => context === this.#context && client === this.#run?.alp?.client;
+    const check = () => { if (!current()) throw new ConfigurationError('The connection or workspace changed while starting the session.'); };
     try {
-      // Leave the tree shown now first, so its last events do not mix with the new one's.
-      if (previous && previous.client === client) {
-        this.#attached = null;
-        this.#watching = null;
-        await this.#handoffViewer(previous);
-      }
-      const tree = this.#ensureTree(id);
-      const operation = { buffer: /** @type {any[]} */ ([]) };
-      tree.attaching = operation;
-      this.#watching = id;
-      const placeholder = /** @type {SessionSummary} */ (/** @type {unknown} */ ({ id, projectRoot: workspace, status: 'initializing', ...(title ? { title } : {}), createdAt: new Date().toISOString() }));
-      this.#set(state => ({
-        selected: id, focus: id,
-        tree: { rootId: id, status: 'attaching', projection: tree.projection },
-        sessions: { ...state.sessions, list: [placeholder, ...state.sessions.list.filter(session => session.id !== id)] },
-      }));
-      const spec = { cwd: workspace, persist: true, ...(team ? { workflow: team } : {}), ...(mode ? { mode } : {}), ...(model ? { model } : {}), ...(thinking ? { thinking } : {}) };
-      try {
-        await client.request('session.create', { sessionId: id, spec, history: 'skip' }, { timeoutMs: this.#options.createTimeoutMs });
-      } catch (error) {
-        tree.attaching = null;
-        const failure = describe(error);
-        if (failure.sent !== 'unknown') {
-          this.#trees.delete(id);
-          this.#older.delete(id);
-          this.#membership.delete(id);
-          if (this.#watching === id) this.#watching = null;
-          this.#set(state => ({ selected: null, focus: null, tree: null, sessions: { ...state.sessions, list: state.sessions.list.filter(session => session.id !== id) } }));
-          throw error;
+      return await this.#withViewer(client, async () => {
+        check();
+        const previous = this.#attached;
+        // Leave the tree shown now first, so its last events do not mix with the new one's.
+        if (previous && previous.client === client) {
+          this.#attached = null;
+          this.#watching = null;
+          await this.#handoffViewer(previous);
         }
-        // It may exist: keep it selected; the list and the next attach tell. Its first message
-        // is not sent; the caller is told (it keeps the text), never a silent success.
-        void this.refreshSessions();
-        throw new CreateOutcomeUnknownError(`${failure.message} If the new session shows in the list, open it and send your message there; otherwise start again.`, id);
-      }
-      try {
-        let generation;
-        if (this.hasCapability('session.history')) {
-          const checkpoint = await client.request('session.history', { sessionId: id, limit: 1 }, { timeoutMs: this.#options.requestTimeoutMs });
-          generation = checkpoint.generation;
-          this.#older.set(id, { generation, hasOlder: false });
-        }
-        const response = await client.request('session.attach', { sessionId: id, ...(generation ? { generation, after: 0 } : {}) }, { timeoutMs: this.#options.requestTimeoutMs });
-        if (tree.attaching === operation) {
+        check();
+        const operation = { buffer: /** @type {any[]} */ ([]) };
+        tree.attaching = operation;
+        this.#watching = id;
+        const spec = { cwd: workspace, persist: true, ...(team ? { workflow: team } : {}), ...(mode ? { mode } : {}), ...(model ? { model } : {}), ...(thinking ? { thinking } : {}) };
+        // Claim the implicit create subscription before sending: an unknown outcome may have
+        // subscribed too, and still needs reconciliation when another root is selected.
+        this.#attached = { client, root: id };
+        try {
+          await client.request('session.create', { sessionId: id, spec, history: 'skip' }, { timeoutMs: this.#options.createTimeoutMs });
+          check();
+          // session.create itself subscribes the client, even if the following attach fails.
+          this.#attached = { client, root: id };
+        } catch (error) {
+          if (!current()) throw error;
           tree.attaching = null;
-          tree.failed = null;
-          this.#finishAttach(id, tree, response, operation.buffer);
-          // Attached only once the answer is in: before it, #sync must still see work to do.
-          if (client === this.#run?.alp?.client) this.#attached = { client, root: id };
+          const failure = describe(error);
+          if (failure.sent !== 'unknown') {
+            if (this.#attached?.client === client && this.#attached.root === id) {
+              this.#attached = null;
+              await this.#handoffViewer({ client, root: id });
+            }
+            if (!current()) throw error;
+            this.#trees.delete(id);
+            this.#older.delete(id);
+            this.#membership.delete(id);
+            if (this.#watching === id) this.#watching = null;
+            this.#set(state => ({ ...(state.selected === id ? { selected: null, focus: null, tree: null } : {}), sessions: { ...state.sessions, list: state.sessions.list.filter(session => session.id !== id) } }));
+            throw error;
+          }
+          // It may exist: keep it selected; the list and the next attach tell. Its first message
+          // is not sent; the caller is told (it keeps the text), never a silent success.
+          void this.refreshSessions();
+          throw new CreateOutcomeUnknownError(`${failure.message} If the new session shows in the list, open it and send your message there; otherwise start again.`, id);
         }
-      } catch (error) {
-        if (tree.attaching === operation) tree.attaching = null;
-        if (this.#watching === id) this.#watching = null;
-        // Never session.create again: the session exists. A drop reattaches on reconnect; a
-        // timeout or refusal on a live connection is shown with Retry (an attach is a read).
-        this.#attachFailed(client, id, error);
-      }
-      if (title?.trim()) await this.renameSession(id, title.trim()).catch(() => {});
-      this.#rememberNewSession({ team, mode, model, thinking });
-      if (prompt?.trim() || files.length) {
-        // Sent like a composer message: a failure stays in the timeline with Retry, never
-        // resent by itself.
-        void this.sendPrompt(prompt ?? '', id, [], files, { keepRefused: true }).catch(error => this.#notify('error', describe(error).message));
-      }
-      void this.refreshSessions({ quiet: true });
-      return id;
+        try {
+          let generation;
+          if (this.hasCapability('session.history')) {
+            const checkpoint = await client.request('session.history', { sessionId: id, limit: 1 }, { timeoutMs: this.#options.requestTimeoutMs });
+            check();
+            generation = checkpoint.generation;
+            this.#older.set(id, { generation, hasOlder: false });
+          }
+          const response = await client.request('session.attach', { sessionId: id, ...(generation ? { generation, after: 0 } : {}) }, { timeoutMs: this.#options.requestTimeoutMs });
+          check();
+          if (tree.attaching === operation) {
+            tree.attaching = null;
+            tree.failed = null;
+            this.#finishAttach(id, tree, response, operation.buffer);
+          }
+        } catch (error) {
+          if (!current()) throw error;
+          if (tree.attaching === operation) tree.attaching = null;
+          if (this.#watching === id) this.#watching = null;
+          // Never session.create again: the session exists. A drop reattaches on reconnect; a
+          // timeout or refusal on a live connection is shown with Retry (an attach is a read).
+          this.#attachFailed(client, id, error);
+        }
+        if (title?.trim()) await this.renameSession(id, title.trim()).catch(() => {});
+        check();
+        this.#rememberNewSession({ team, mode, model, thinking });
+        if (prompt?.trim() || files.length) {
+          // Keep the new viewer until upload and prompt admission settle, so navigating away
+          // cannot close this idle root before its first message reaches the host. This waits
+          // for delivery, never for the runtime turn; failures retain the usual Retry entry.
+          await this.sendPrompt(prompt ?? '', id, [], files, { keepRefused: true }).catch(error => this.#notify('error', describe(error).message));
+        }
+        void this.refreshSessions({ quiet: true });
+        return id;
+      });
     } finally {
-      if (this.#creating === id) this.#creating = null;
-      this.#set(state => ({ busy: { ...state.busy, create: false } }));
+      if (this.#creating === id) {
+        this.#creating = null;
+        this.#set(state => ({ busy: { ...state.busy, create: false } }));
+      }
       this.#sync();
     }
   }
@@ -2128,7 +2190,16 @@ export class Controller {
    * after its cursor so what reopening emitted is replayed in order.
    * @param {AlpRpcClient} client @param {string} root
    */
-  async #wake(client, root) {
+  #wake(client, root) {
+    return this.#withViewer(client, async () => {
+      if (client !== this.#run?.alp?.client || this.#state.selected !== root) return;
+      try { await this.#wakeViewer(client, root); }
+      finally { this.#sync(); }
+    });
+  }
+
+  /** @param {AlpRpcClient} client @param {string} root */
+  async #wakeViewer(client, root) {
     const tree = this.#ensureTree(root);
     const snapshot = tree.projection.sessions[root];
     const listed = this.#state.sessions.list.find(row => row.id === root);
@@ -2142,6 +2213,7 @@ export class Controller {
     this.#watching = root;
     try {
       await client.request('session.create', { sessionId: root, spec: { cwd: workspace, ...(mode ? { mode } : {}) }, resume: true, history: 'skip' }, { timeoutMs: this.#options.createTimeoutMs });
+      if (client !== this.#run?.alp?.client) return;
       this.#attached = { client, root };
       if (this.hasCapability('session.history') && !this.#older.has(root)) {
         const page = await client.request('session.history', { sessionId: root }, { timeoutMs: this.#options.requestTimeoutMs });
@@ -2489,7 +2561,10 @@ export class Controller {
     this.#requesting.add(prompt.id);
     try {
       const client = this.#client();
-      if (this.#state.selected === prompt.rootId) await this.#wake(client, prompt.rootId);
+      // The initial prompt already runs inside create's viewer transaction on a fresh root.
+      // Queuing another viewer operation here would wait on that same transaction.
+      const creating = this.#creating === prompt.rootId && this.#attached?.client === client && this.#attached.root === prompt.rootId;
+      if (!creating && this.#state.selected === prompt.rootId) await this.#wake(client, prompt.rootId);
       const fitted = fitImages([], prompt.images ?? [], this.#state.connection.promptImageLimits);
       if (fitted.error) throw new ConfigurationError(fitted.error);
       let files = prompt.files ?? [];

@@ -179,7 +179,10 @@ test('answers for an old workspace or session are dropped', async t => {
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(w.state().tree.rootId, 'ses_b2');
   assert.deepEqual(texts(w.state, 'ses_b2'), []);
-  assert.ok(w.host.calls.some(call => call.method === 'session.release' && call.params.sessionId === 'ses_b'), 'the first tree was released');
+  assert.ok([...w.host.connections].every(link => !link.attached.has('ses_b')), 'the obsolete tree has no subscription');
+  if (w.host.calls.some(call => call.method === 'session.attach' && call.params.sessionId === 'ses_b')) {
+    assert.ok(w.host.calls.some(call => call.method === 'session.release' && call.params.sessionId === 'ses_b'), 'an attach already sent was released');
+  }
 });
 
 test('disconnect during backoff stops for good and clears the token and data', async t => {
@@ -1641,3 +1644,181 @@ for (const refusal of ['principal', 'capability']) test(`a Stop observer with ch
   w.controller.disconnect();
   await until(() => w.host.connections.size === 0, 'both connections closed');
 });
+
+// Gate transport boundaries rather than relying on response timing.
+for (const next of ['ses_b', null]) {
+  test(`create ownership: a later selection ${next} survives a held release`, async t => {
+    const w = setup(t);
+    w.host.seed('ses_a'); w.host.seed('ses_b');
+    await connected(w);
+    w.controller.selectSession('ses_a');
+    await until(() => attached(w.state), 'A attached');
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    t.after(() => release());
+    w.host.intercept.set('session.release', async params => {
+      if (params.sessionId === 'ses_a') await gate;
+    });
+    const creating = w.controller.createSession({});
+    await until(() => w.host.calls.some(call => call.method === 'session.release' && call.params.sessionId === 'ses_a'), 'A release held');
+    w.controller.selectSession(next);
+    // On the broken implementation B can attach while create is paused here.
+    await new Promise(resolve => setImmediate(resolve));
+    release();
+    const id = await creating;
+    await until(() => next ? w.state().tree?.rootId === next && attached(w.state) : w.state().tree === null, 'newer choice preserved');
+    await until(() => [...w.host.connections].every(link => [...link.attached].every(root => root === next)), 'no orphan subscriptions');
+    assert.equal(w.state().selected, next);
+    assert.notEqual(id, next);
+    if (next) {
+      w.host.emit(next, next, { type: 'item', item: { kind: 'assistant_message', id: 'selected-live', text: 'selected live event' } });
+      await until(() => texts(w.state, next).includes('selected live event'), 'selected events still route');
+      assert.equal(w.state().tree.projection.order.includes(id), false, 'created root never contaminates selected membership');
+    }
+  });
+}
+
+for (const boundary of ['session.create', 'session.attach']) {
+  for (const fails of [false, true]) {
+    test(`create ownership: later selection survives held ${boundary}, failure=${fails}`, async t => {
+      const w = setup(t);
+      w.host.seed('ses_b');
+      await connected(w);
+      let release;
+      const gate = new Promise(resolve => { release = resolve; });
+      t.after(() => release());
+      w.host.intercept.set(boundary, async (params, _link, { fail }) => {
+        if (!params.sessionId.startsWith('web_')) return;
+        await gate;
+        if (fails) { fail(1005, 'refused'); return 'handled'; }
+      });
+      const creating = w.controller.createSession({}).then(id => ({ id }), error => ({ error }));
+      await until(() => w.host.calls.some(call => call.method === boundary && call.params.sessionId.startsWith('web_')), 'create boundary held');
+      w.controller.selectSession('ses_b');
+      release();
+      const result = await creating;
+      assert.equal(!!result.error, fails && boundary === 'session.create');
+      await until(() => w.state().tree?.rootId === 'ses_b' && attached(w.state), 'B attached');
+      await until(() => [...w.host.connections].every(link => [...link.attached].every(root => root === 'ses_b')), 'created subscription released');
+    });
+  }
+}
+
+test('ownership: a subscribed attach with a lost answer is released after Retry then switch', async t => {
+  const w = setup(t, undefined, { requestTimeoutMs: 40 });
+  w.host.seed('ses_a'); w.host.seed('ses_b');
+  await connected(w);
+  w.host.intercept.set('session.attach', (params, link) => {
+    if (params.sessionId !== 'ses_a') return;
+    // Model the server subscribing successfully but the response never reaching the client.
+    link.attached.add('ses_a');
+    w.host.root('ses_a').viewers.add(link);
+    return 'handled';
+  });
+  w.controller.selectSession('ses_a');
+  await until(() => w.state().tree?.status === 'error', 'attach timed out after subscription');
+  w.controller.retryAttach();
+  w.controller.selectSession('ses_b');
+  await until(() => w.state().tree?.rootId === 'ses_b' && attached(w.state), 'B attached after Retry');
+  assert.ok([...w.host.connections].every(link => !link.attached.has('ses_a')));
+});
+
+for (const replace of ['reconnect', 'new run', 'workspace']) {
+  test(`create ownership: stale create cannot overwrite ${replace}`, async t => {
+    const w = setup(t);
+    w.host.seed('ses_b');
+    await connected(w);
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    t.after(() => release());
+    w.host.intercept.set('session.create', async params => {
+      if (params.sessionId.startsWith('web_')) await gate;
+    });
+    const creating = w.controller.createSession({}).then(id => ({ id }), error => ({ error }));
+    await until(() => w.host.count('session.create') === 1, 'create held');
+    if (replace === 'reconnect') w.host.drop();
+    if (replace === 'new run') { w.controller.disconnect(); await connected(w); }
+    if (replace === 'workspace') w.controller.selectWorkspace('/w/b');
+    w.controller.selectSession('ses_b');
+    if (replace !== 'workspace') {
+      // A new healthy link must not wait for the old create request's gate or timeout.
+      await until(() => w.state().connection.phase === 'open' && w.state().tree?.rootId === 'ses_b' && attached(w.state), 'new link reads B while old request held');
+    }
+    release();
+    const result = await creating;
+    assert.ok(result.error, 'stale create reports its failure');
+    await until(() => w.state().tree?.rootId === 'ses_b' && attached(w.state), 'B remains selected');
+    assert.equal(w.state().selected, 'ses_b');
+    assert.ok([...w.host.connections].every(link => [...link.attached].every(root => root === 'ses_b')));
+  });
+}
+
+for (const operation of ['wake', 'history reload']) {
+  test(`ownership: ${operation} finishing after selection releases its old viewer`, async t => {
+    const w = setup(t);
+    w.host.capabilities.push('session.history');
+    w.host.seed('ses_a'); w.host.seed('ses_b');
+    w.host.openChild('ses_b', 'known_b_child');
+    await connected(w);
+    w.controller.selectSession('ses_a');
+    await until(() => attached(w.state), 'A attached');
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    t.after(() => release());
+    let held = false;
+    const method = operation === 'wake' ? 'session.create' : 'session.attach';
+    w.host.intercept.set(method, async params => {
+      if (params.sessionId !== 'ses_a') return;
+      held = true;
+      await gate;
+    });
+    let sending;
+    if (operation === 'wake') {
+      w.host.close('ses_a');
+      await until(() => w.state().tree.projection.closed.ses_a, 'A closed');
+      sending = w.controller.sendPrompt('resume [hold]');
+    } else {
+      w.host.root('ses_a').generation = 'new-generation';
+      w.host.emit('ses_a', 'ses_a', { type: 'history.reset', generation: 'new-generation', reason: 'rewind', branchId: 'br-test' });
+    }
+    await until(() => held, 'ownership operation held');
+    w.controller.selectSession('ses_b');
+    release();
+    await sending;
+    await until(() => w.state().tree?.rootId === 'ses_b' && attached(w.state), 'B attached');
+    await until(() => [...w.host.connections].every(link => [...link.attached].every(root => root === 'ses_b')), 'only B subscribed');
+    w.host.emit('ses_b', 'known_b_child', { type: 'item', item: { kind: 'assistant_message', id: 'child-live', text: 'B child after race' } });
+    await until(() => texts(w.state, 'known_b_child').includes('B child after race'), 'history-known child routes');
+    assert.equal(w.state().tree.projection.order.includes('ses_a'), false);
+  });
+}
+
+for (const refused of [false, true]) {
+  test(`create ownership: initial prompt admission settles before release, refused=${refused}`, async t => {
+    const w = setup(t);
+    w.host.seed('ses_b');
+    await connected(w);
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    t.after(() => release());
+    w.host.intercept.set('session.prompt', async (_params, _link, { fail }) => {
+      await gate;
+      if (refused) { fail(1005, 'prompt refused'); return 'handled'; }
+    });
+    let settled = false;
+    const creating = w.controller.createSession({ prompt: 'first [hold]' }).then(id => { settled = true; return id; });
+    await until(() => w.host.count('session.prompt') === 1, 'initial admission held');
+    const root = w.host.calls.find(call => call.method === 'session.create').params.sessionId;
+    w.controller.selectSession('ses_b');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(settled, false, 'create waits for admission');
+    assert.ok([...w.host.connections].some(link => link.attached.has(root)), 'new viewer retained during admission');
+    release();
+    assert.equal(await creating, root);
+    await until(() => w.state().tree?.rootId === 'ses_b' && attached(w.state), 'newer B selection attached');
+    assert.ok([...w.host.connections].every(link => [...link.attached].every(id => id === 'ses_b')));
+    assert.equal(w.host.count('session.prompt'), 1);
+    if (refused) assert.equal(w.state().prompts.find(p => p.rootId === root)?.status, 'failed');
+    else assert.ok(w.host.root(root).running, 'create returns while the runtime turn still runs');
+  });
+}
