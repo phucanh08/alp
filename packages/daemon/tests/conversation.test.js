@@ -1,3 +1,4 @@
+import { failCommittedMarker } from './lifecycle-marker-fault.js';
 // session.fork and session.rewind in alpd (docs/protocol/alp-json-rpc-v1.md §12.7, issue #121 branch C):
 // the lifecycle journal, the idle barrier, timeline cuts, history generations, branches and receipts.
 // The runtime's native side (runtime.branch / runtime.rebind) is scripted here; packages/runtime tests
@@ -1144,4 +1145,89 @@ test('rewind attach handover revalidates generation if rewind finishes during th
   release();
   await attaching;
   assert.equal(viewer.events.length, 0, 'stale attach never registers a live subscription');
+});
+
+for (const retryBeforeRestart of [false, true]) {
+  test(`marker write failure (retry=${retryBeforeRestart}): old rewind replay preserves later thread and generation`, async t => {
+    const world = await setup(t);
+    const d = { ...await world.start(), ...world };
+    const [, second, third] = await conversation(d, 'marker-rewind', ['one', 'two', 'three']);
+    const first = { sessionId: 'marker-rewind', requestId: 'marker-old', ifGeneration: await generationOf(d, 'marker-rewind'), beforeTurnId: third };
+    const restore = failCommittedMarker(d.store, world.state, first.requestId);
+    const original = await d.request('session.rewind', first);
+    assert.equal((await restore()).state, 'applied');
+    const latest = await d.request('session.rewind', { ...first, requestId: 'marker-new', ifGeneration: original.generation, beforeTurnId: second });
+    const generation = await generationOf(d, first.sessionId);
+    if (retryBeforeRestart) {
+      const repeat = await d.request('session.rewind', first);
+      assert.equal(repeat.duplicate, true);
+      assert.equal(repeat.generation, original.generation);
+      assert.equal(await generationOf(d, first.sessionId), generation);
+      assert.equal(world.native.rebinds.length, 2, 'receipt retry cannot rebind old thread');
+    }
+    await d.stop();
+    const restarted = { ...await world.start(), ...world };
+    assert.equal((await restarted.request('session.get', { sessionId: first.sessionId })).session.threadId, 'thread-branch-2');
+    assert.equal(await generationOf(restarted, first.sessionId), generation);
+    const repeat = await restarted.request('session.rewind', first);
+    assert.equal(repeat.duplicate, true);
+    assert.equal(repeat.generation, original.generation, 'historical receipt keeps its generation');
+    assert.equal(repeat.session.threadId, 'thread-branch-2');
+    assert.equal(await generationOf(restarted, first.sessionId), generation);
+    assert.equal(world.native.branches.length, 2);
+    assert.equal(world.native.rebinds.length, 2, 'no rebind from replay');
+    await restarted.stop();
+    const again = await world.start();
+    assert.equal(await generationOf(again, first.sessionId), generation);
+  });
+}
+
+test('fork marker loss replays continuation without replacing later target history or title', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  const [first] = await conversation(d, 'fork-marker-source', ['one', 'two']);
+  const params = { sessionId: 'fork-marker-source', requestId: 'fork-marker', ifGeneration: await generationOf(d, 'fork-marker-source'), boundary: { throughTurnId: first }, newSessionId: 'fork-marker-target' };
+  const restore = failCommittedMarker(d.store, world.state, params.requestId);
+  await d.request('session.fork', params);
+  assert.equal((await restore()).state, 'applied');
+  await d.request('session.rename', { sessionId: params.newSessionId, title: 'later target title' });
+  await d.request('session.create', { sessionId: params.newSessionId, spec: { cwd: world.project, persist: true }, resume: true });
+  await d.request('session.prompt', { sessionId: params.newSessionId, clientMessageId: 'after-fork', content: [{ type: 'text', text: 'later target turn' }] });
+  const transport = world.transports.at(-1);
+  await until(() => transport.turnId, 'target turn');
+  transport.finish('later target answer');
+  await until(async () => !(await d.request('session.get', { sessionId: params.newSessionId })).session.activeTurnId, 'target idle');
+  const generation = await generationOf(d, params.newSessionId);
+  const timeline = await d.store.timeline(params.newSessionId);
+  await d.stop();
+  const restarted = await world.start();
+  assert.equal((await restarted.request('session.get', { sessionId: params.newSessionId })).session.title, 'later target title');
+  assert.equal(await generationOf(restarted, params.newSessionId), generation);
+  assert.deepEqual(await restarted.store.timeline(params.newSessionId), timeline);
+  assert.equal((await restarted.request('session.fork', params)).duplicate, true);
+  assert.equal(world.native.branches.length, 1);
+});
+
+test('legacy applied rewind with newer journal evidence preserves the later thread and generation', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  const [, second, third] = await conversation(d, 'legacy-rewind', ['one', 'two', 'three']);
+  const params = { sessionId: 'legacy-rewind', requestId: 'legacy-old', ifGeneration: await generationOf(d, 'legacy-rewind'), beforeTurnId: third };
+  const restore = failCommittedMarker(d.store, world.state, params.requestId);
+  const first = await d.request('session.rewind', params);
+  const old = await restore();
+  await d.request('session.rewind', { ...params, requestId: 'legacy-new', ifGeneration: first.generation, beforeTurnId: second });
+  const generation = await generationOf(d, params.sessionId);
+  await d.stop();
+  const record = await d.store.get(params.sessionId);
+  delete record.lifecycleCommits;
+  await d.store.put(record);
+  delete old.attemptId;
+  await writeFile(path.join(world.state, 'lifecycle', `${old.key}.json`), JSON.stringify(old));
+  const restarted = await world.start();
+  assert.equal((await restarted.request('session.get', { sessionId: params.sessionId })).session.threadId, 'thread-branch-2');
+  assert.equal(await generationOf(restarted, params.sessionId), generation);
+  await assert.rejects(restarted.request('session.rewind', params), rpcError(1000, 'persistence_failed'));
+  assert.equal(world.native.branches.length, 2);
+  assert.equal(world.native.rebinds.length, 2);
 });

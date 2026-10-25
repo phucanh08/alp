@@ -51,6 +51,8 @@ export type SessionRecord = {
   forkedFrom?: ForkProvenance;
   /** Branches rewinds set aside, oldest first (§12.7). */
   branches?: StoredBranch[];
+  /** Atomic proof of completed conversation commits whose journal marker may be missing. */
+  lifecycleCommits?: Record<string, { operation: string; requestId: string; createdAt: string; fingerprint: string; attemptId?: string; result: any }>;
   createdAt: string;
   updatedAt: string;
 };
@@ -265,6 +267,13 @@ export function createStore(root: string) {
           if (info && now - info.mtimeMs > maxAgeMs) await rm(file, { force: true });
         }
       }
+    },
+
+    /** Authoritative record after queued writes, including failed writes (which do not prove completion). */
+    async get(id: string): Promise<SessionRecord | undefined> {
+      await writes.get(id)?.catch(() => {});
+      try { return JSON.parse(await readFile(path.join(sessionsDir, `${fileName(id)}.json`), 'utf8')); }
+      catch (error: any) { if (error?.code === 'ENOENT') return undefined; throw error; }
     },
 
     async list(): Promise<SessionRecord[]> {

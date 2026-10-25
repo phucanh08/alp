@@ -33,6 +33,8 @@ export type LifecycleEntry<Plan = any, Native = any, Result = any> = {
   requestId: string;
   /** A digest of the request; another payload under the same requestId is a conflict. */
   fingerprint: string;
+  /** Unique attempt, so a retained completion witness cannot match a reused journal key. */
+  attemptId?: string;
   state: LifecycleState;
   /** Startup has observed this unknown outcome. It remains unknown for retries and audit. */
   recoverySeenAt?: string;
@@ -145,7 +147,9 @@ export type LifecycleSteps<Plan, Native, Result> = {
  * Runs journaled operations: one at a time per resource, at most once per (resource, operation,
  * requestId). The seam later lifecycle operations (live configure, reload) reuse with their own steps.
  */
-export function createLifecycle(journal: LifecycleJournal, { crashPoint = (_name: string) => {} }: { crashPoint?: (name: string) => void } = {}) {
+export function createLifecycle(journal: LifecycleJournal, {
+  crashPoint = (_name: string) => {}, completed = async (_entry: LifecycleEntry): Promise<{ result: any } | undefined> => undefined,
+}: { crashPoint?: (name: string) => void; completed?: (entry: LifecycleEntry) => Promise<{ result: any } | undefined> } = {}) {
   const queues = new Map<string, Promise<unknown>>();
   const inflight = new Map<string, Promise<unknown>>();
 
@@ -173,12 +177,23 @@ export function createLifecycle(journal: LifecycleJournal, { crashPoint = (_name
         if (entry.state === 'committed') return { result: steps.repeat ? await steps.repeat(entry) : entry.result as Result, duplicate: true, entry };
         if (entry.state === 'failed') throw new RpcError(entry.error?.code ?? 1000, entry.error?.message ?? `${request.operation} failed`, entry.error?.data);
         // A commit that failed earlier finishes now; this is its first answer.
-        if (entry.state === 'applied') { const done = await commit(entry, steps); return { result: done.result as Result, duplicate: false, entry: done }; }
+        if (entry.state === 'applied') {
+          const saved = await completed(entry);
+          const done = await commit(entry, steps, saved);
+          return { result: done.result as Result, duplicate: saved !== undefined, entry: done };
+        }
         throw outcomeUnknown(request.operation, request.requestId);
+      }
+      // A failed store commit is not success. Keep later native mutations behind it until a
+      // retry/start finishes it; a durable receipt permits progress despite a lost final marker.
+      for (const pending of await journal.list()) {
+        if (pending.resource === request.resource && ['configure', 'rewind'].includes(pending.operation) && pending.state === 'applied' && !await completed(pending)) {
+          throw new RpcError(1000, `alpd must finish ${pending.operation} ${pending.requestId} before another conversation mutation`, { reason: 'persistence_failed' });
+        }
       }
       const plan = await steps.prepare();
       const now = new Date().toISOString();
-      entry = { version: 1, key, ...request, state: 'prepared', plan, createdAt: now, updatedAt: now };
+      entry = { version: 1, key, ...request, attemptId: randomBytes(16).toString('hex'), state: 'prepared', plan, createdAt: now, updatedAt: now };
       try { await journal.put(entry); }
       catch (error) { throw new RpcError(1000, `alpd could not record ${request.operation} ${request.requestId}; nothing was changed`, { reason: 'persistence_failed' }); }
       crashPoint(`${request.operation}.after-prepared`);
@@ -207,9 +222,19 @@ export function createLifecycle(journal: LifecycleJournal, { crashPoint = (_name
     return attempt;
   }
 
-  async function commit<Plan, Native, Result>(entry: LifecycleEntry<Plan, Native, Result>, steps: Pick<LifecycleSteps<Plan, Native, Result>, 'commit'>) {
+  async function commit<Plan, Native, Result>(entry: LifecycleEntry<Plan, Native, Result>, steps: Pick<LifecycleSteps<Plan, Native, Result>, 'commit'>, saved?: { result: Result }) {
     let result: Result;
-    try { result = await steps.commit(entry); }
+    try {
+      if (!saved && !entry.attemptId && ['configure', 'rewind'].includes(entry.operation)) {
+        // Legacy applied entries have no atomic completion witness. A strictly later
+        // applied/committed attempt proves a newer native operation ran; replaying this
+        // ambiguous older commit could undo it. Keep it unfinished, never invent success.
+        const newer = (await journal.list()).some(other => other.resource === entry.resource && other.key !== entry.key
+          && other.createdAt > entry.createdAt && ['applied', 'committed'].includes(other.state));
+        if (newer) throw new RpcError(1000, `alpd cannot safely replay ${entry.operation} ${entry.requestId} over a later conversation mutation`, { reason: 'persistence_failed' });
+      }
+      result = saved ? saved.result : await steps.commit(entry);
+    }
     catch (error) {
       if (error instanceof RpcError) throw error;
       throw new RpcError(1000, `alpd could not finish ${entry.operation} ${entry.requestId}; it finishes when tried again or when alpd starts`, { reason: 'persistence_failed' });
@@ -245,7 +270,7 @@ export function createLifecycle(journal: LifecycleJournal, { crashPoint = (_name
         } else if (entry.state === 'applied') {
           const committer = commits[entry.operation];
           if (!committer) continue;
-          await serial(entry.resource, () => commit(entry, { commit: committer })).catch(error => {
+          await serial(entry.resource, async () => commit(entry, { commit: committer }, await completed(entry))).catch(error => {
             unfinished.push(entry);
             log?.(`could not finish ${entry.operation} ${entry.requestId} of ${entry.resource}`, { code: 'ALPD_LIFECYCLE_ROLLFORWARD_FAILED', error });
           });

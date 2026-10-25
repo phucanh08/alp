@@ -1,10 +1,11 @@
+import { failCommittedMarker } from './lifecycle-marker-fault.js';
 // session.configure with model, thinking or team, and session.configure.preview, in alpd
 // (docs/protocol/alp-json-rpc-v1.md §12.9, issue #121 branch D): the lifecycle journal, the idle barrier,
 // what the session's record keeps for a reopen, and refusals that change nothing. The runtime and its
 // fake processes are real ALP code; packages/runtime tests prove the restart, test/e2e the real runs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
@@ -685,4 +686,147 @@ test('persistence: legacy mode is durably recorded before its session.updated', 
   t.after(unsubscribe);
   await d.request('session.configure', { sessionId: 'ordered-mode', mode: 'read-only' });
   assert.equal(observed, true);
+});
+
+for (const retryBeforeRestart of [false, true]) {
+  test(`marker write failure (retry=${retryBeforeRestart}): old configure replay cannot undo a later configuration`, async t => {
+    const world = await setup(t);
+    const d = { ...await world.start(), ...world };
+    await conversation(d, 'marker-config', ['one']);
+    const generation = await generationOf(d, 'marker-config');
+    const first = { sessionId: 'marker-config', requestId: 'marker-old', ifGeneration: generation, thinking: 'high' };
+    const restore = failCommittedMarker(d.store, world.state, first.requestId);
+    const original = await d.request('session.configure', first);
+    assert.equal((await restore()).state, 'applied', 'actual commit succeeded but marker rename failed');
+    await d.request('session.configure', { ...first, requestId: 'marker-new', thinking: 'low' });
+    if (retryBeforeRestart) {
+      const repeat = await d.request('session.configure', first);
+      assert.equal(repeat.duplicate, true);
+      assert.deepEqual(repeat.configured, original.configured);
+      assert.equal(repeat.session.thinking, 'low');
+    }
+    await d.stop();
+    const restarted = { ...await world.start(), ...world };
+    assert.equal((await restarted.request('session.get', { sessionId: first.sessionId })).session.thinking, 'low');
+    const repeat = await restarted.request('session.configure', first);
+    assert.equal(repeat.duplicate, true);
+    assert.deepEqual(repeat.configured, original.configured, 'receipt describes the original native outcome');
+    assert.equal(repeat.session.thinking, 'low');
+    assert.equal(world.native.configures.length, 2, 'restart/retry sends no native mutation');
+    await restarted.stop();
+    const again = await world.start();
+    assert.equal((await again.request('session.get', { sessionId: first.sessionId })).session.thinking, 'low');
+  });
+}
+
+test('an unfinished configure store commit blocks later native mutations and retries real work', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'unfinished-config', ['one']);
+  const first = { sessionId: 'unfinished-config', requestId: 'unfinished', ifGeneration: await generationOf(d, 'unfinished-config'), thinking: 'high' };
+  const put = d.store.put;
+  let failed = false;
+  d.store.put = async record => {
+    const entries = await journalOf(world.state);
+    if (entries.some(entry => entry.requestId === first.requestId && entry.state === 'applied')) {
+      failed = true;
+      throw new Error('final record put refused');
+    }
+    return put(record);
+  };
+  await assert.rejects(d.request('session.configure', first), rpcError(1000, 'persistence_failed'));
+  assert.equal(failed, true);
+  await assert.rejects(d.request('session.configure', { ...first, requestId: 'later', thinking: 'low' }), rpcError(1000, 'persistence_failed'));
+  assert.equal(world.native.configures.length, 1, 'later native operation stays behind incomplete commit');
+  d.store.put = put;
+  const result = await d.request('session.configure', first);
+  assert.equal(result.duplicate, undefined, 'unwritten witness is not success');
+  assert.equal(world.native.configures.length, 1);
+  await d.request('session.configure', { ...first, requestId: 'later', thinking: 'low' });
+  await d.stop();
+  const restarted = await world.start();
+  assert.equal((await restarted.request('session.get', { sessionId: first.sessionId })).session.thinking, 'low');
+});
+
+test('retained completion witness cannot complete a reused requestId attempt', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'reuse-config', ['one']);
+  const params = { sessionId: 'reuse-config', requestId: 'reuse', ifGeneration: await generationOf(d, 'reuse-config'), thinking: 'high' };
+  const restore = failCommittedMarker(d.store, world.state, params.requestId);
+  await d.request('session.configure', params);
+  const old = await restore();
+  await d.request('session.configure', { ...params, requestId: 'middle', thinking: 'low' });
+  assert.equal(Object.keys((await d.store.get(params.sessionId)).lifecycleCommits).length, 2, 'pending marker witness retained');
+  // Terminal retention permits key reuse. Simulate expiration while its harmless witness remains.
+  await rm(path.join(world.state, 'lifecycle', `${old.key}.json`));
+  const put = d.store.put;
+  d.store.put = async record => {
+    if ((await journalOf(world.state)).some(entry => entry.requestId === params.requestId && entry.state === 'applied')) throw new Error('new attempt final put failed');
+    return put(record);
+  };
+  await assert.rejects(d.request('session.configure', params), rpcError(1000, 'persistence_failed'));
+  const applied = (await journalOf(world.state)).find(entry => entry.requestId === params.requestId);
+  assert.notEqual(applied.attemptId, old.attemptId);
+  // Even two attempts with the same millisecond timestamp must remain distinct.
+  applied.createdAt = old.createdAt;
+  await writeFile(path.join(world.state, 'lifecycle', `${applied.key}.json`), JSON.stringify(applied));
+  d.store.put = put;
+  const retried = await d.request('session.configure', params);
+  assert.equal(retried.duplicate, undefined, 'old attempt receipt cannot bypass incomplete new commit');
+  assert.equal(world.native.configures.length, 3);
+  assert.equal(retried.session.thinking, 'high');
+  await d.request('session.configure', { ...params, requestId: 'cleanup', thinking: 'low' });
+  assert.equal(Object.keys((await d.store.get(params.sessionId)).lifecycleCommits).length, 1, 'committed witnesses compact on the next commit');
+});
+
+test('a queued record save completing after commit failure keeps its durable witness through later saves', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'queued-witness', ['one']);
+  const params = { sessionId: 'queued-witness', requestId: 'queued-old', ifGeneration: await generationOf(d, 'queued-witness'), thinking: 'high' };
+  const put = d.store.put;
+  let queued;
+  d.store.put = async record => {
+    if ((await journalOf(world.state)).some(entry => entry.requestId === params.requestId && entry.state === 'applied')) {
+      // An event save has captured the full completed mutation before its original caller fails.
+      queued = put(record);
+      throw new Error('original record write failed while event save was queued');
+    }
+    return put(record);
+  };
+  await assert.rejects(d.request('session.configure', params), rpcError(1000, 'persistence_failed'));
+  await queued;
+  d.store.put = put;
+  const [witness] = Object.values((await d.store.get(params.sessionId)).lifecycleCommits);
+  assert.equal(witness.result.configured.effective.thinking, 'high');
+  await d.request('session.configure', { ...params, requestId: 'queued-new', thinking: 'low' });
+  await d.stop();
+  const restarted = await world.start();
+  assert.equal((await restarted.request('session.get', { sessionId: params.sessionId })).session.thinking, 'low');
+  const repeat = await restarted.request('session.configure', params);
+  assert.equal(repeat.configured.effective.thinking, 'high');
+  assert.equal(repeat.session.thinking, 'low');
+});
+
+test('legacy applied configure with newer journal evidence stays unfinished without undoing later state', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'legacy-config', ['one']);
+  const params = { sessionId: 'legacy-config', requestId: 'legacy-old', ifGeneration: await generationOf(d, 'legacy-config'), thinking: 'high' };
+  const restore = failCommittedMarker(d.store, world.state, params.requestId);
+  await d.request('session.configure', params);
+  const old = await restore();
+  await d.request('session.configure', { ...params, requestId: 'legacy-new', thinking: 'low' });
+  await d.stop();
+  const record = await d.store.get(params.sessionId);
+  delete record.lifecycleCommits;
+  await d.store.put(record);
+  delete old.attemptId;
+  await writeFile(path.join(world.state, 'lifecycle', `${old.key}.json`), JSON.stringify(old));
+  const restarted = await world.start();
+  assert.equal((await restarted.request('session.get', { sessionId: params.sessionId })).session.thinking, 'low');
+  await assert.rejects(restarted.request('session.configure', params), rpcError(1000, 'persistence_failed'));
+  assert.equal((await journalOf(world.state)).find(entry => entry.key === old.key).state, 'applied');
+  assert.equal(world.native.configures.length, 2);
 });

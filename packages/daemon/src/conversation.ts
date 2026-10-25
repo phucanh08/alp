@@ -162,7 +162,32 @@ function configureRefusal(error: any) {
 
 export function createConversation(ctx: ConversationContext) {
   const { runtime, store, journal, records } = ctx;
-  const lifecycle = createLifecycle(journal, { crashPoint: ctx.crashPoint });
+  const lifecycle = createLifecycle(journal, { crashPoint: ctx.crashPoint, completed });
+
+  async function completed(entry: LifecycleEntry) {
+    if (entry.state !== 'applied') return undefined;
+    const saved = (await store.get(entry.resource))?.lifecycleCommits?.[entry.key];
+    return saved?.createdAt === entry.createdAt && saved.fingerprint === entry.fingerprint && saved.attemptId === entry.attemptId ? { result: saved.result } : undefined;
+  }
+
+  /** Publish the result with the final record mutation, never inferred from a later snapshot. */
+  async function commitRecord(record: SessionRecord, entry: LifecycleEntry, result: unknown) {
+    const previous = record.lifecycleCommits;
+    const receipts = { ...previous };
+    // Only discard witnesses whose exact journal attempt no longer needs replay protection.
+    for (const [key, receipt] of Object.entries(receipts)) {
+      try {
+        const saved = await journal.get(record.id, receipt.operation, receipt.requestId);
+        if (!saved || saved.createdAt !== receipt.createdAt || saved.fingerprint !== receipt.fingerprint || saved.attemptId !== receipt.attemptId || saved.state === 'committed') delete receipts[key];
+      } catch { /* A read failure is not proof that its witness can be removed. */ }
+    }
+    receipts[entry.key] = { operation: entry.operation, requestId: entry.requestId, createdAt: entry.createdAt, fingerprint: entry.fingerprint, attemptId: entry.attemptId, result };
+    record.lifecycleCommits = receipts;
+    // Keep the witness in every subsequent shared-record snapshot, even when this put fails:
+    // an event save already queued with it can still durably complete the mutation. Only
+    // completed()'s persisted read may use that witness to skip work.
+    await store.put(record);
+  }
   // Proven on macOS and Linux only (issue #121 closure scope); Windows does not list the capabilities.
   const enabled = typeof runtime.branch === 'function' && typeof runtime.rebind === 'function' && process.platform !== 'win32';
   /** session.reload (§12.8): a runtime that restarts a root on its own conversation, on macOS and Linux. */
@@ -316,9 +341,10 @@ export function createConversation(ctx: ConversationContext) {
     record.session = { ...record.session, threadId: native.threadId };
     if (native.base) record.base = native.base; else delete record.base;
     record.updatedAt = new Date().toISOString();
-    await store.put(record);
+    const result = { session: ctx.summary(plan.root)!, generation: await generationOf(plan.root), branch: publicBranch(branch) };
+    await commitRecord(record, entry, result);
     if (ctx.logs.has(plan.root)) ctx.logs.set(plan.root, (await store.timeline(plan.root)).slice(-ctx.treeLogLimit));
-    return { session: ctx.summary(plan.root)!, generation: await generationOf(plan.root), branch: publicBranch(branch) };
+    return result;
   }
 
   function rewindMarker(plan: RewindPlan): Envelope {
@@ -512,8 +538,9 @@ export function createConversation(ctx: ConversationContext) {
     if (!record?.session || !record.spec) throw new Error(`session ${plan.root} is gone`);
     if (native.status === 'applied') writeConfiguration(record, native.effective, { threadId: native.threadId, workflow: native.workflow, teamLabel: native.teamLabel });
     record.updatedAt = new Date().toISOString();
-    await store.put(record);
-    return { session: ctx.summary(plan.root)!, configured: { status: native.status, requested: plan.requested, effective: native.effective, restarted: native.restarted } };
+    const result = { session: ctx.summary(plan.root)!, configured: { status: native.status, requested: plan.requested, effective: native.effective, restarted: native.restarted } };
+    await commitRecord(record, entry, result);
+    return result;
   }
 
   /** Writes an effective configuration to a session's record: what a reopen resumes with. */
