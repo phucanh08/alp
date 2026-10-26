@@ -94,7 +94,7 @@ try {
       if (run.latest().find(step => step.id === 'W5')?.status === 'pass' && before === after) run.record('W5', 'fail', '.alp/tasks did not change on disk');
     });
   } else {
-    for (const id of ['W1', 'W2', 'W3', 'W4', 'W5']) run.record(id, 'skip', 'needs Paseo and a model (--live); permission cards are covered hermetically by integrations/paseo/tests/permissions.test.js and paseo-web.test.js');
+    for (const id of ['W1', 'W2', 'W3', 'W4', 'W5']) run.record(id, 'skip', 'needs Paseo and a model (--live); permission cards are covered hermetically by integrations/paseo/tests/permissions.test.js and bridge-socket.test.js');
   }
 
   await run.step('W6', 'alp web --print (alp-web, no plugin needed); the token gate', async () => {

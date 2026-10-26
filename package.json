@@ -41,7 +41,6 @@
     "test:e2e:human": "node test/e2e/human-e2e.mjs cli && node test/e2e/human-e2e.mjs paseo",
     "test:e2e:board": "node scripts/build-core.mjs && node test/e2e/board-e2e.mjs",
     "prepack": "npm run build",
-    "build:web": "node scripts/build-paseo-web.mjs",
     "build:packages": "npm run build --workspaces --if-present",
     "test:packages": "npm run test --workspaces --if-present",
     "check:boundaries": "node scripts/check-boundaries.mjs",

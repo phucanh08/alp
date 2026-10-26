@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // Pack a release once (docs/alp/beta-scope.md §7.2 P2–P3): the eight tarballs in publish order into
 // a new directory, npm's pack JSON for each, SHA256SUMS and release-manifest.json, then A5 on them.
-// Run it in a clean clone at the release tag, after `npm ci`, `npm run build:web` and
-// `npm run build:packages`. It never publishes, tags or commits.
+// Run it in a clean clone at the release tag, after `npm ci` and `npm run build:packages`. It never publishes, tags or commits.
 //
 //   release-pack.mjs --out <new directory> [--rehearsal] [--ignore-scripts]
 //

@@ -42,17 +42,17 @@ async function licenceProblems(location, pkg, files) {
   if (pkg.name === '@anhlp/alp-paseo' ? !notice.startsWith(rootNotice) || !notice.includes('Mohamed Boudra') : notice !== rootNotice) problems.push(`${pkg.name}: NOTICE missing or not ALP's`);
   const notices = (await Promise.all([...files].filter(file => file.endsWith(THIRD_PARTY_NOTICES)).map(file => read(at(file))))).join('\n');
   const bundled = new Set();
-  for (const file of [...files].filter(file => file.endsWith('.js') && !file.includes('/web-app/'))) {
+  for (const file of [...files].filter(file => file.endsWith('.js'))) {
     for (const [, comment] of (await read(at(file))).matchAll(/^\/\/ (\S+)$/gm)) {
       const directory = packageDirectory(comment);
       if (directory) bundled.add(packageName(directory));
     }
   }
   for (const name of bundled) if (!notices.includes(`\n${name}@`)) problems.push(`${pkg.name}: bundles ${name} but no ${THIRD_PARTY_NOTICES} lists it`);
-  // The web app is Paseo's: its licence and ALP's notice of the changes ship with it.
-  if ([...files].some(file => file.includes('/web-app/'))) {
-    for (const file of ['server/dist/web-app/LICENSE.paseo.txt', 'server/dist/web-app/NOTICE.txt', `server/dist/web-app/${THIRD_PARTY_NOTICES}`]) if (!files.has(file)) problems.push(`${pkg.name}: web app without ${file}`);
-  }
+  // The plugin's bridge carries code taken from Paseo: Paseo's licence ships with it.
+  if (pkg.name === '@anhlp/alp-paseo' && !files.has('LICENSE.paseo.txt')) problems.push(`${pkg.name}: no LICENSE.paseo.txt`);
+  // Paseo's web app was removed (t-55ce.3); a checkout that built it before still has it in server/dist.
+  if ([...files].some(file => file.startsWith('server/dist/web-app/'))) problems.push(`${pkg.name}: carries a stale server/dist/web-app (Paseo's removed web app); delete it and pack again`);
   return problems;
 }
 

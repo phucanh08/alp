@@ -122,7 +122,10 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # The ALP web app (ALPD §62): Paseo's app at the pinned commit with ALP's patches, built and opened in Chrome.
+  # The eight packages: built, packed once like a release (a rehearsal), checked, installed and
+  # exercised by the consumer checks, including Paseo's own plugin compiler on the plugin (#111).
+  # The job keeps its name, a required check: it built and smoked Paseo's web app (paseo-web)
+  # until that app was removed (t-55ce.3).
   packages-and-web:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -131,19 +134,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # npm's cache for ALP's own install and the Paseo monorepo's, which changes only with the pinned commit.
-      - uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: npm-web-app-${{ hashFiles('package-lock.json', 'paseo-web/upstream.json') }}
-          restore-keys: npm-web-app-
+          cache: npm
       - run: npm ci
-      # Builds the pinned web app and all packages before inspecting/installing tarballs.
+      # Checks out the pinned Paseo compiler and builds all packages before inspecting/installing tarballs.
       - run: npm run validate:packages
-      - run: node scripts/web-app-smoke.mjs
-      - uses: actions/upload-artifact@v4
-        with:
-          name: alp-web-app
-          path: dist/web-app
-          retention-days: 14
-          if-no-files-found: error

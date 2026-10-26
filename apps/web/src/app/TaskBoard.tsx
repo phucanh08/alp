@@ -11,7 +11,7 @@ import { useTabs } from './tabs';
 
 /*
  * ALP's task board, in the Tasks tab and on the full-screen Tasks screen, as the alp-provider
- * plugin shows it in paseo-web (integrations/paseo/client/tasks-panel.tsx): a toolbar with the
+ * plugin shows it in Paseo's app (integrations/paseo/client/tasks-panel.tsx): a toolbar with the
  * open count and the List / Board / Epics views, the filters Open / Ready / Closed / All with their
  * counts and a search; under it apps/web's own new-task form. The rows come from task.list
  * through the gateway (the controller polls while a board shows).

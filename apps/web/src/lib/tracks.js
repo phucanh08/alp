@@ -1,7 +1,7 @@
 // @ts-check
 
 /**
- * ALP's Tasks pill above the composer, as paseo-web shows it (integrations/paseo/client/
+ * ALP's Tasks pill above the composer, as ALP's Paseo plugin shows it (integrations/paseo/client/
  * task-pills.ts): the label counts the tasks this session worked on (done of them) or else the
  * project's open tasks; the menu lists the session's tasks first, then the other open ones,
  * what waits for the user first. Pure functions over the session's todo and task.list rows.

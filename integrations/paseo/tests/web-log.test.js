@@ -79,7 +79,7 @@ test('a normal detached launch writes the advertised integration log', async t =
   await close(free);
   // The entry publishes paseo.json inside listen() and logs the listening line only afterwards, so
   // under load the line can trail the file: wait for it rather than reading once.
-  const listening = /web app on http:\/\/127\.0\.0\.1:\d+\//;
+  const listening = /Paseo bridge on http:\/\/127\.0\.0\.1:\d+\//;
   assert.match(await waitForText(logFile(home), listening), listening);
 
   // Shut the entry down through the pid its own metadata names; no other process is touched.
@@ -102,7 +102,7 @@ test('an injected startup failure is captured in the advertised log', async t =>
 
   assert.equal(code, 1, 'the entry fails when it cannot publish its address');
   assert.ok(existsSync(logFile(home)), 'the log exists on the failure path too');
-  assert.match(await readFile(logFile(home), 'utf8'), /web app not started/);
+  assert.match(await readFile(logFile(home), 'utf8'), /Paseo bridge not started/);
 });
 
 test('--register records the entry as integration paseo, not web', async t => {

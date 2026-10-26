@@ -8,7 +8,7 @@ import { alpHome } from '@anhlp/alp-client/index';
 import { superviseDaemon } from '@anhlp/alp-client/supervise';
 import { contributeRemote, gatewayConfig } from './remote/index.js';
 export { createProvider } from './provider.js';
-export { createPaseoBridge, NOT_IMPLEMENTED, PASEO_PROTOCOL_VERSION, webAppDir } from './paseo/index.js';
+export { createPaseoBridge, NOT_IMPLEMENTED, PASEO_PROTOCOL_VERSION } from './paseo/index.js';
 export { createWebServer, DEFAULT_WEB_PORT, webFile } from './web.js';
 export type { PaseoGateway } from './paseo/gateway.js';
 export { sessionTasks } from './session-tasks.js';

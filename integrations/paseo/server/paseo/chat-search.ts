@@ -1,5 +1,5 @@
 // Copied from Paseo (https://github.com/getpaseo/paseo, commit b63a325, packages/server/src/server/agent/chat-search/index.ts),
-// Copyright (c) 2025-present Mohamed Boudra, Apache License 2.0 (paseo-web/LICENSE).
+// Copyright (c) 2025-present Mohamed Boudra, Apache License 2.0 (integrations/paseo/LICENSE.paseo.txt).
 // Changed for ALP: it searches the store's projected rows, and an assistant message's Markdown source as a whole
 // (Paseo counts rendered blocks with markdown-it); the app recounts on the rendered text either way. See ALPD §62.
 

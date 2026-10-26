@@ -10,7 +10,7 @@ export function corePackageProblems(pkg, files = []) {
     for (const name of names) if (isPaseo(name)) problems.push(`${pkg.name}: forbidden Paseo bundle ${name}`);
   }
   for (const file of [...(pkg.files ?? []), ...files]) {
-    if (/(^|\/)(?:integrations|web-app)(?:\/|$)|@getpaseo\/|@anhlp\/alp-paseo/.test(file)) problems.push(`${pkg.name}: forbidden core artifact ${file}`);
+    if (/(^|\/)integrations(?:\/|$)|@getpaseo\/|@anhlp\/alp-paseo/.test(file)) problems.push(`${pkg.name}: forbidden core artifact ${file}`);
   }
   return problems;
 }

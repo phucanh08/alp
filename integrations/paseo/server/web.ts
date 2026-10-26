@@ -1,20 +1,20 @@
 import { randomBytes } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import { MAX_FRAME } from '@anhlp/alp-client/index';
 
 /**
- * The local web app (ALPD §61, §62): alpd serves the ALP web app, Paseo's app built with ALP's
- * patches, on 127.0.0.1, and its socket speaks Paseo's protocol through the gateway. The page is
- * public; the socket needs the token kept in $ALP_HOME/paseo.json, which is also the password
- * Paseo's app asks for. It listens on a port the system picks (alp-web owns `web.port` and
- * web.json); only `daemon.get_status` and token-authenticated Paseo sockets use this listener, and
- * relay sockets attach to the gateway directly. Requests must name this host and port (no DNS rebinding), and the socket must
- * come from the page's own origin (no other site in the browser). An alpd built without the app
- * serves a page that says how to build it.
+ * The Paseo integration's local listener (ALPD §61, §62): a socket on 127.0.0.1, at a port the
+ * system picks (alp-web owns `web.port` and web.json), that speaks Paseo's protocol through the
+ * bridge. The socket needs the token kept in $ALP_HOME/paseo.json, which is also the password
+ * Paseo's app asks for. Only `daemon.get_status` (which reports this address) and
+ * token-authenticated Paseo sockets use this listener; relay sockets attach to the bridge directly.
+ * It served Paseo's web app (paseo-web) until that app was removed (t-55ce.3); `alp web` now serves
+ * ALP's own app (apps/web), so this listener answers plain HTTP requests with 404. Requests must
+ * name this host and port (no DNS rebinding), and the socket must come from this listener's own
+ * origin (no other site in the browser).
  */
 
 /**
@@ -29,16 +29,10 @@ const PORT_TRIES = 10;
 
 export type WebInfo = { port: number; token: string; url: string; pid: number; serverId: string };
 
-/** The built ALP web app (Paseo's app, D31): served from a directory, its socket speaks Paseo's protocol. */
-export type WebGateway = { attach(ws: any, options?: { bearer?: string }): void; close?(): void; scripts?: Record<string, string> };
-export type WebApp = { dir: string; gateway: WebGateway };
-
-const TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8', '.map': 'application/json; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
-  '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.gif': 'image/gif', '.webp': 'image/webp',
-  '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf', '.wasm': 'application/wasm',
-};
+/** The Paseo bridge: each socket it is given speaks Paseo's protocol over alpd. */
+export type WebGateway = { attach(ws: any, options?: { bearer?: string }): void; close?(): void };
+/** @deprecated Pass `gateway`; `dir` is ignored since Paseo's web app was removed. Kept for one release. */
+export type WebApp = { dir?: string; gateway: WebGateway };
 
 /** Where the integration records its address, token and server id: `<home>/paseo.json`. */
 export function webFile(home: string) {
@@ -49,9 +43,9 @@ export function webFile(home: string) {
 const legacyWebFile = (home: string) => path.join(home, 'web.json');
 
 /**
- * The token and the server id are made once and kept, so an open page and a paired device survive
- * alpd restarts. Without paseo.json, an identity the integration wrote to web.json before the rename
- * is carried over once (alp-web's own web.json names `app: 'alp-web'` and is never read).
+ * The token and the server id are made once and kept, so a paired device survives alpd restarts.
+ * Without paseo.json, an identity the integration wrote to web.json before the rename is carried
+ * over once (alp-web's own web.json names `app: 'alp-web'` and is never read).
  */
 async function lastIdentity(home: string) {
   let kept: { token?: unknown; serverId?: unknown; app?: unknown } = {};
@@ -69,79 +63,39 @@ async function lastIdentity(home: string) {
   };
 }
 
-/** What an alpd without the built app serves at every address. */
-const MISSING_APP = `<!doctype html><meta charset="utf-8"><title>ALP</title><body style="font:16px system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem">
-<h1>ALP</h1><p>This alpd was built without the ALP web app. Build it with <code>node scripts/build-paseo-web.mjs</code>, then <code>alp daemon restart</code>, or install ALP from npm, which carries it.</p>`;
+/** What every plain HTTP request gets: there is no page here. */
+const NO_PAGE = 'Not found: this is the Paseo bridge\'s socket, not a web page. Open ALP\'s web app with `alp web`.\n';
 
-export function createWebServer({ app, home, port = 0, log = () => {} }: {
-  /** The built app and its gateway; without them every address gets a page saying how to build it. */
+export function createWebServer({ gateway: given, app, home, port = 0, log = () => {} }: {
+  /** The bridge each authenticated socket is attached to; without it the socket is refused. */
+  gateway?: WebGateway;
+  /** @deprecated Use `gateway`. */
   app?: WebApp;
   home: string;
   /** 0 (the default) lets the system pick; a fixed port is tried with the next nine. */
   port?: number;
   log?: (message: string) => void;
 }) {
+  const gateway = given ?? app?.gateway;
   let token = '';
   let serverId = '';
   let bound = 0;
   const hosts = () => new Set([`127.0.0.1:${bound}`, `localhost:${bound}`]);
   const origins = () => new Set([`http://127.0.0.1:${bound}`, `http://localhost:${bound}`]);
-
-  // Paseo's app inlines styles, builds images and workers from blobs, and may compile WebAssembly.
-  const csp = () => `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self' ws://127.0.0.1:${bound} ws://localhost:${bound}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`;
-  const headers = (type: string) => ({
-    'content-type': type,
+  const headers = {
+    'content-type': 'text/plain; charset=utf-8',
+    'cache-control': 'no-store',
     'x-content-type-options': 'nosniff',
     'x-frame-options': 'DENY',
     'referrer-policy': 'no-referrer',
-    'content-security-policy': csp(),
-  });
-
-  /** A file of the built app, with the compressed copy the browser takes; the page for any route. */
-  async function serveApp(request: http.IncomingMessage, response: http.ServerResponse, dir: string, pathname: string) {
-    let relative: string;
-    try { relative = path.normalize(decodeURIComponent(pathname)).replace(/^([/\\])+/, ''); } catch { response.writeHead(400).end(); return; }
-    let file = path.join(dir, relative);
-    if (!file.startsWith(dir + path.sep) && file !== dir) { response.writeHead(403).end(); return; }
-    const found = await stat(file).then(info => info.isFile(), () => false);
-    if (!found) {
-      if (path.extname(relative)) { response.writeHead(404).end('Not found'); return; }
-      file = path.join(dir, 'index.html');
-    }
-    const type = TYPES[path.extname(file)] ?? 'application/octet-stream';
-    const accepts = String(request.headers['accept-encoding'] ?? '');
-    let encoding: 'br' | 'gzip' | undefined;
-    let body = file;
-    for (const [name, suffix] of [['br', '.br'], ['gzip', '.gz']] as const) {
-      if (accepts.includes(name) && await stat(file + suffix).then(info => info.isFile(), () => false)) { encoding = name; body = file + suffix; break; }
-    }
-    const { size } = await stat(body);
-    response.writeHead(200, {
-      ...headers(type),
-      // Expo names its bundles by content; everything else may change with the next build.
-      'cache-control': relative.split(path.sep).join('/').startsWith('_expo/static/') ? 'public, max-age=31536000, immutable' : 'no-cache',
-      'content-length': String(size),
-      vary: 'accept-encoding',
-      ...(encoding ? { 'content-encoding': encoding } : {}),
-    });
-    if (request.method === 'HEAD') { response.end(); return; }
-    createReadStream(body).on('error', () => response.destroy()).pipe(response);
-  }
+    'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
+  };
 
   const server = http.createServer((request, response) => {
-    if (!hosts().has(request.headers.host ?? '')) { response.writeHead(403).end('Forbidden host'); return; }
-    if (request.method !== 'GET' && request.method !== 'HEAD') { response.writeHead(405).end(); return; }
-    const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
-    // Scripts alpd makes itself, such as its plugin's client code (ALPD §62 step 7).
-    const script = app?.gateway.scripts?.[pathname];
-    if (script !== undefined) {
-      response.writeHead(200, { ...headers('text/javascript; charset=utf-8'), 'cache-control': 'no-cache', 'content-length': String(Buffer.byteLength(script)) });
-      response.end(request.method === 'HEAD' ? undefined : script);
-      return;
-    }
-    if (app) { serveApp(request, response, app.dir, pathname).catch(() => { if (!response.headersSent) response.writeHead(500); response.end(); }); return; }
-    response.writeHead(200, { ...headers('text/html; charset=utf-8'), 'cache-control': 'no-store' });
-    response.end(request.method === 'HEAD' ? undefined : MISSING_APP);
+    if (!hosts().has(request.headers.host ?? '')) { response.writeHead(403, headers).end('Forbidden host\n'); return; }
+    if (request.method !== 'GET' && request.method !== 'HEAD') { response.writeHead(405, headers).end(); return; }
+    response.writeHead(404, headers);
+    response.end(request.method === 'HEAD' ? undefined : NO_PAGE);
   });
 
   // A browser carries Paseo's password as a subprotocol and needs it echoed to keep the socket.
@@ -151,9 +105,9 @@ export function createWebServer({ app, home, port = 0, log = () => {} }: {
     const refuse = (status: string) => { socket.end(`HTTP/1.1 ${status}\r\n\r\n`); };
     if (url.pathname !== '/ws' || !hosts().has(request.headers.host ?? '')) return refuse('403 Forbidden');
     if (!origins().has(request.headers.origin ?? '')) return refuse('403 Forbidden');
-    if (!app) return refuse('404 Not Found');
+    if (!gateway) return refuse('404 Not Found');
     // The token comes with the hello (or as the subprotocol) and the gateway checks it.
-    sockets.handleUpgrade(request, socket, head, ws => app.gateway.attach(ws, { bearer: ws.protocol || undefined }));
+    sockets.handleUpgrade(request, socket, head, ws => gateway.attach(ws, { bearer: ws.protocol || undefined }));
   });
 
   return {
@@ -186,7 +140,7 @@ export function createWebServer({ app, home, port = 0, log = () => {} }: {
 
     async close() {
       for (const client of sockets.clients) client.terminate();
-      app?.gateway.close?.();
+      gateway?.close?.();
       await new Promise<void>(resolve => server.close(() => resolve()));
     },
   };

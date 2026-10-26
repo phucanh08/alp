@@ -37,9 +37,6 @@ async function setup(t, { without = [] } = {}) {
     const config = JSON.parse(await readFile(file, 'utf8'));
     await writeFile(file, JSON.stringify({ ...config, command: `alp-test-missing-${id}` }));
   }
-  const dir = path.join(directory, 'web-app');
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, 'index.html'), '<!doctype html><title>ALP</title>');
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false, libraryDir: home });
   const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test', home });
   const calls = [];
@@ -53,7 +50,7 @@ async function setup(t, { without = [] } = {}) {
       close: client.close.bind(client), onClose: client.onClose.bind(client),
     };
   }, version: 'test', home, token: () => web.token, serverId: () => web.serverId });
-  web = createWebServer({ home, port: 0, app: { dir, gateway } });
+  web = createWebServer({ home, port: 0, gateway });
   const info = await web.listen();
   t.after(async () => { await web.close(); await runtime.shutdown(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   const client = await new Promise((resolve, reject) => {

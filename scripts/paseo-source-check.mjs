@@ -13,10 +13,10 @@
 // This check installs the same way, then
 //   1. asserts no shipped TypeScript source or declaration imports a non-host package that is not
 //      installed beside it, and
-//   2. runs Paseo's own compiler (from the pinned checkout scripts/build-paseo-web.mjs makes) on
+//   2. runs Paseo's own compiler (from the pinned checkout scripts/paseo-checkout.mjs makes) on
 //      the installed plugin's server and client entries, which also follows the declarations of
 //      installed dependencies. Without that checkout it is skipped, unless
-//      ALP_REQUIRE_PASEO_COMPILER=1 (validate:packages sets it after building the checkout).
+//      ALP_REQUIRE_PASEO_COMPILER=1 (validate:packages sets it after making the checkout).
 // The scan in 1 resolves imports as Paseo's compiler-imports.ts does, but only the plugin's own
 // files: it is a fast, readable pre-check; the compile in 2 is the authoritative one. The compiler
 // is bundled against this repository's esbuild and typescript, not Paseo's pinned versions.
@@ -33,11 +33,12 @@ import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import ts from 'typescript';
 import { spawnCommand } from './spawn-command.mjs';
+import { PASEO_COMPILER_DIRECTORY, paseoSource } from './paseo-checkout.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 export const PASEO_NPM_INSTALL = ['install', '--ignore-scripts', '--legacy-peer-deps', '--omit=dev'];
-const PASEO_SOURCE = path.resolve(process.env.ALP_PASEO_SRC ?? path.join(ROOT, '.cache/paseo-web'));
-const PASEO_COMPILER = 'packages/server/src/server/plugins/compiler.ts';
+const PASEO_SOURCE = paseoSource();
+const PASEO_COMPILER = `${PASEO_COMPILER_DIRECTORY}/compiler.ts`;
 // Paseo's plugin-sdk-specifiers.ts and the host-module test in compiler.ts.
 const HOST_SDK = new Set(['@getpaseo/plugin', '@getpaseo/plugin/server', '@getpaseo/plugin/server/provider', '@getpaseo/plugin/server/usage', '@getpaseo/plugin/server/acp', '@getpaseo/plugin/client', '@getpaseo/plugin/client/ui', '@getpaseo/plugin/client/react-native']);
 const HOST_MODULE = /^(zod|react|react-native|@tanstack\/react-query)(\/|$)/;
@@ -90,7 +91,7 @@ export function unresolvedTypeScriptImports(project, packageDirectory) {
 async function paseoCompile(packageDirectory) {
   const compiler = path.join(PASEO_SOURCE, PASEO_COMPILER);
   if (!existsSync(compiler)) {
-    if (process.env.ALP_REQUIRE_PASEO_COMPILER === '1') throw new Error(`Paseo's plugin compiler is missing at ${compiler}; run scripts/build-paseo-web.mjs first`);
+    if (process.env.ALP_REQUIRE_PASEO_COMPILER === '1') throw new Error(`Paseo's plugin compiler is missing at ${compiler}; run scripts/paseo-checkout.mjs first`);
     return { skipped: `no Paseo checkout at ${PASEO_SOURCE}` };
   }
   // Bundled into this repository's .cache so its own esbuild and typescript imports resolve here.

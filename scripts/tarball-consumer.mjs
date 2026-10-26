@@ -179,7 +179,7 @@ console.log('plugin runtime imports ok');
   console.log('plugin consumer ok (isolated, real SDK, no declarations)');
 
   // Run the existing behavioral regressions against installed public APIs, not workspace links.
-  const tests = ['paseo', 'team', 'human', 'web', 'relay', 'paseo-web', 'workflow', 'transport'];
+  const tests = ['paseo', 'team', 'human', 'web', 'relay', 'bridge-socket', 'workflow', 'transport'];
   const suite = path.join(pluginDir, 'integrations/paseo/tests');
   mkdirSync(suite, { recursive: true });
   mkdirSync(path.join(pluginDir, 'test/support'), { recursive: true });

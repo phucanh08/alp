@@ -2,8 +2,6 @@
 // The browser files `alp web` serves (packages/cli/dist/alp-web.js, docs/alp/web.md): apps/web built
 // with its own Vite config straight into packages/cli/dist/alp-web/, with a THIRD-PARTY-NOTICES.txt
 // for exactly the npm packages Rollup put into the browser bundle (its module graph, not a guess).
-// The directory is never named web-app: that name belongs to Paseo's app and is forbidden in core
-// packages (scripts/core-package-boundary.mjs).
 import { access, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';

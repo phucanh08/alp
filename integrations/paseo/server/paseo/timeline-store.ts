@@ -1,5 +1,5 @@
 // Copied from Paseo (https://github.com/getpaseo/paseo, commit b63a325, packages/server/src/server/agent/agent-timeline-store.ts
-// and agent-timeline-store-types.ts), Copyright (c) 2025-present Mohamed Boudra, Apache License 2.0 (paseo-web/LICENSE).
+// and agent-timeline-store-types.ts), Copyright (c) 2025-present Mohamed Boudra, Apache License 2.0 (integrations/paseo/LICENSE.paseo.txt).
 // Changed for ALP: types come from @getpaseo/protocol, the fetch types are declared here, and findLast is spelled for ES2022. See ALPD §62.
 
 import { randomUUID } from "node:crypto";

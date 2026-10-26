@@ -55,13 +55,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: npm-web-app-${{ hashFiles('package-lock.json', 'paseo-web/upstream.json') }}
-          restore-keys: npm-web-app-
+          cache: npm
       - run: npm ci
-      - run: npm run build:web
       # The CLI's build includes alp-web (`alp web`): packages/cli/dist/alp-web.js with the private
       # gateway inlined, and the apps/web files in packages/cli/dist/alp-web/ with their notices.
       - run: npm run build:packages
