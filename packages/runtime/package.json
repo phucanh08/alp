@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp-runtime",
-  "version": "0.0.1-beta.3",
+  "version": "0.0.1-beta.4",
   "type": "module",
   "description": "ALP runtime module",
   "files": [
@@ -230,8 +230,8 @@
     "node": ">=22.12"
   },
   "dependencies": {
-    "@anhlp/alp-core": "0.0.1-beta.3",
-    "@anhlp/alp-protocol": "0.0.1-beta.3",
+    "@anhlp/alp-core": "0.0.1-beta.4",
+    "@anhlp/alp-protocol": "0.0.1-beta.4",
     "@anthropic-ai/claude-agent-sdk": "^0.3.292",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@agentclientprotocol/sdk": "1.7.0",

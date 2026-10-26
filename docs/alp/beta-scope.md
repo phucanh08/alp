@@ -1,4 +1,6 @@
-# Phạm vi beta (`0.0.0-beta.1`, `0.0.0-beta.2`, `0.0.1-beta.3`)
+# Phạm vi beta (`0.0.0-beta.1`, `0.0.0-beta.2`, `0.0.1-beta.3`, `0.0.1-beta.4`)
+
+> **Beta.4 (`0.0.1-beta.4`):** phạm vi và gate ở **§13**; chưa publish.
 
 > **Beta.3 (`0.0.1-beta.3`):** phạm vi, gate, kế hoạch publish và acceptance ở **§12**, dùng lại
 > quy trình của §7 và §11.
@@ -1104,3 +1106,39 @@ Khác với beta.2 khi chạy:
 Evidence (output lệnh, lockfile, ảnh chụp) nằm ngoài repo, trên máy anh: `~/alp-release/evidence/beta3/`,
 `~/alp-release/evidence/q-18aa65f/`, `~/alp-release/runs/{18aa65f-cli-claude,r5-18aa65f,r5b-18aa65f}/`;
 các dòng đã ghi vào `~/alp-release/release-evidence-18aa65f.json`.
+
+
+## 13. Beta.4 (`0.0.1-beta.4`)
+
+Chuẩn bị ngày 2026-10-27 (task t-23bf), nhánh `release/0.0.1-beta.4` từ `origin/main`
+`353b3edc062504cf7aa18a4910a98d7aa810bd1c`. Chưa publish; chưa có dòng gate nào được
+coi là pass trên release SHA. Kết quả sẽ lưu ngoài checkout, gắn SHA và checksum tarball.
+
+### 13.1 Phạm vi
+
+- Cùng tám package public của §2, version `0.0.1-beta.4`, dependency nội bộ pin đúng version.
+  Ba workspace private vẫn không publish riêng; mọi manifest và acceptance VERSION đồng bộ.
+- Remote terminals (mặc định tắt), dependency optional `node-pty`, CLI `alp web` với app ALP
+  và gateway nhúng, đổi integration Paseo sang `paseo` và bỏ web Paseo. Chi tiết và giới hạn:
+  [beta-release-notes.md](beta-release-notes.md), mục beta.4.
+- Paseo `>=0.11.1 <1.0.0` (đã mở range sau beta.3); nền tảng như §12; Windows alp-web chưa được test.
+  Không sửa backlog trong release này.
+
+### 13.2 Gate và phát hành
+
+Dùng lại §12.2–§12.4 và §7 với version/tag mới `0.0.1-beta.4` / `v0.0.1-beta.4`:
+
+- Review độc lập đúng SHA cuối; CI đầy đủ trên SHA đó, gồm H1–H4, SDK floor và H6
+  `paseo-compat`; kiểm `git diff --check`, build/pack/consumer, license và audit.
+- Merge vào main chỉ sau review pass và toàn bộ CI xanh. Workflow `release-acceptance`
+  pack một lần trên release SHA ở main; dùng đúng tám tarball đó cho A5 và acceptance.
+- R1, R2, R5, R5b và R7 vẫn chặn như §12.2. Việc bỏ Codex của beta.3 chỉ áp dụng beta.3;
+  không mang waiver đó sang beta.4. Mọi thiếu sót phải báo người điều phối trước publication.
+- Publish tay đúng thứ tự §7.4, từ saved tarball, `--tag beta --access public`.
+  Q1–Q3 kiểm registry/integrity, install sạch và plugin Paseo trước khi chuyển `latest` ở Q4;
+  Q5 kiểm install không tag. Không unpublish, ghi đè version hay deprecate bản cũ.
+- GitHub prerelease giữ draft tới khi phase `announce` của release gate qua.
+
+### 13.3 Kết quả
+
+Pending: release SHA, review, CI, artifact checks, real-provider acceptance, publication và Q1–Q5.
