@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { Controller } from '../src/lib/controller.js';
 import { AuthenticationError, ConfigurationError, TransientError } from '../src/lib/errors.js';
-import { LINK_NOT_LOOPBACK, LINK_TOKEN_INVALID, LINK_TOKEN_KEY, LINK_TOKEN_MALFORMED, isLinkToken, isLoopbackPage, parseLinkHash, storedLinkToken, takeLinkToken } from '../src/lib/link-token.js';
+import { LINK_NOT_LOOPBACK, LINK_TOKEN_INVALID, LINK_TOKEN_KEY, LINK_TOKEN_MALFORMED, STANDALONE_GATEWAY, defaultGatewayAddress, isLinkToken, isLoopbackPage, parseLinkHash, servedByAlpWeb, storedLinkToken, takeLinkToken } from '../src/lib/link-token.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 const TOKEN = `alpgw1.0123456789abcdef.${'A'.repeat(42)}w`;
@@ -238,4 +238,23 @@ test('showError shows the connect form with a message', t => {
   w.controller.showError(LINK_NOT_LOOPBACK);
   assert.equal(w.state().connection.phase, 'failed');
   assert.equal(w.state().connection.error.message, LINK_NOT_LOOPBACK);
+});
+
+test('the connect form defaults to the page origin on alp web\'s loopback page, else to the standalone gateway', () => {
+  const at = href => page(href).location;
+  // alp web serves the app and its gateway on one loopback listener: the page's origin is the gateway.
+  assert.equal(defaultGatewayAddress({ location: at('http://127.0.0.1:7433/') }), 'http://127.0.0.1:7433');
+  assert.equal(defaultGatewayAddress({ location: at('http://localhost:9000/?x=1') }), 'http://localhost:9000');
+  assert.equal(servedByAlpWeb({ location: at('http://127.0.0.1:7433/') }), true);
+  // Vite's dev server sits beside a standalone gateway; a page elsewhere is not alp web's.
+  assert.equal(defaultGatewayAddress({ location: at('http://127.0.0.1:7435/'), dev: true }), STANDALONE_GATEWAY);
+  assert.equal(servedByAlpWeb({ location: at('http://127.0.0.1:7435/'), dev: true }), false);
+  assert.equal(defaultGatewayAddress({ location: at('https://alp.example.com/') }), STANDALONE_GATEWAY);
+  assert.equal(defaultGatewayAddress({ location: at('http://192.168.1.5:7433/') }), STANDALONE_GATEWAY);
+  assert.equal(servedByAlpWeb({ location: at('https://alp.example.com/') }), false);
+  assert.equal(STANDALONE_GATEWAY, 'http://127.0.0.1:7434');
+  // An address the person connected to before on this origin wins over both.
+  assert.equal(defaultGatewayAddress({ location: at('http://127.0.0.1:7433/'), remembered: 'https://alp.example.com' }), 'https://alp.example.com');
+  assert.equal(defaultGatewayAddress({ location: at('http://127.0.0.1:7433/'), remembered: '' }), 'http://127.0.0.1:7433');
+  assert.equal(defaultGatewayAddress({ location: at('http://127.0.0.1:7433/'), remembered: null }), 'http://127.0.0.1:7433');
 });

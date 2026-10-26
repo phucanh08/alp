@@ -135,9 +135,13 @@ test('alp web opens the app connected by its link token, kept in the tab only; r
   stored = await storage(page);
   expect(stored.session['alp-web:link-token']).toBeUndefined();
   expect(stored.local).not.toContain('alpgw1');
-  // Reloading does not try the old token again.
+  // Reloading does not try the old token again; the form still names alp web's own address, and
+  // its help points to alp web.
   await page.reload();
   await expect(tokenInput(page)).toBeVisible();
+  await expect(page.getByLabel('Gateway address')).toHaveValue(origin);
+  await page.getByText('Getting a token').click();
+  await expect(page.getByText(/run alp web: it opens this page/)).toBeVisible();
 
   // The new link works in a new tab.
   const fresh = LINK.exec((await alp('web', '--print')).trim());

@@ -5,13 +5,17 @@ import { Input, Label } from '../components/ui/input';
 import { Spinner } from '../components/ui/spinner';
 import { useAppState, useController } from './store';
 import { Logo } from './Logo';
+import { defaultGatewayAddress, servedByAlpWeb } from '../lib/link-token.js';
 
 /** The gateway address is the only thing remembered between visits; it is not a secret. */
 const GATEWAY_KEY = 'alp-web:gateway';
-const DEFAULT_GATEWAY = 'http://127.0.0.1:7434';
+/** Vite's dev server runs beside a standalone gateway; a built app on loopback is alp web's. */
+const DEV = import.meta.env.DEV;
 
 function rememberedGateway() {
-  try { return window.localStorage.getItem(GATEWAY_KEY) || DEFAULT_GATEWAY; } catch { return DEFAULT_GATEWAY; }
+  let remembered: string | null = null;
+  try { remembered = window.localStorage.getItem(GATEWAY_KEY); } catch { /* storage may be off */ }
+  return defaultGatewayAddress({ location: window.location, remembered, dev: DEV });
 }
 
 /** The page `alp web` opened, connecting with the token from its address (it retries until alp web is up). */
@@ -91,11 +95,18 @@ export function ConnectScreen() {
         <details className="mt-5 rounded-lg border border-border/70 bg-card/40 px-4 py-3 text-sm text-muted-foreground">
           <summary className="flex cursor-pointer items-center gap-2 font-medium text-foreground/90"><KeyRound aria-hidden className="size-4" /> Getting a token</summary>
           <div className="mt-3 space-y-2">
-            <p>On the ALP host, create a token for the workspaces you want to open here, then start the gateway with this page's address as an allowed origin:</p>
+            {servedByAlpWeb({ location: window.location, dev: DEV }) ? (
+              <>
+                <p>On this machine, run <code className="font-mono">alp web</code>: it opens this page with a link that signs you in. <code className="font-mono">alp web --print</code> prints the link instead, and <code className="font-mono">alp web rotate</code> replaces its token, signing out every open page.</p>
+                <p>To use a standalone gateway instead, create a token for the workspaces you want to open, then start the gateway with this page's address as an allowed origin:</p>
+              </>
+            ) : (
+              <p>On the ALP host, create a token for the workspaces you want to open here, then start the gateway with this page's address as an allowed origin:</p>
+            )}
             <pre className="overflow-x-auto rounded-md bg-background px-3 py-2 font-mono text-xs text-foreground/90">{`alp-gateway credential create --label web \\
   --workspace /path/to/project
 alp-gateway serve --origin ${typeof window === 'undefined' ? 'http://127.0.0.1:7435' : window.location.origin}`}</pre>
-            <p>From another machine, use the host's HTTPS address, or an SSH tunnel to 127.0.0.1:7434.</p>
+            <p>From another machine, use the host's HTTPS address, or an SSH tunnel to the gateway's port (127.0.0.1:7434 by default).</p>
           </div>
         </details>
       </div>
