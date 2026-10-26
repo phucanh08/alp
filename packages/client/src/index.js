@@ -430,6 +430,8 @@ async function distributionRoots() {
 }
 
 export async function discoverIntegration(name = 'web', options = {}) {
+  // The name becomes a descriptor path under <home>/integrations, so it must stay one safe segment.
+  assertIntegrationName(name);
   // Explicit environment override always wins.
   const envCandidates = [
     process.env.ALP_WEB_INTEGRATION,
@@ -519,7 +521,7 @@ export async function startIntegration(nameOrOptions = 'web') {
     const lock = await readLock();
     if (lock && !lock.ready) throw new Error('ALP web integration started but did not become ready; see ~/.alp/logs/integrations/paseo.log');
     if (!lock) throw new Error('ALP web app is provided by an optional integration package. Install it (for example `npm install -g @anhlp/alp-paseo@beta`) and run `alp web` again.');
-    throw new Error('ALP web integration did not publish a matching web.json lock');
+    throw new Error(`ALP web integration did not publish a matching ${name}.json lock`);
   }
 
   const existing = await readLock();

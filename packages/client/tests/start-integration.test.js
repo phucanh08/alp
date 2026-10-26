@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { startIntegration } from '@anhlp/alp-client/index';
+import { discoverIntegration, startIntegration } from '@anhlp/alp-client/index';
 
 const outer = await mkdtemp(path.join(tmpdir(), 'alp-start-integration-'));
 const pids = [];
@@ -114,6 +114,21 @@ test('integration names are single lowercase path segments, with or without an e
   }
   await assert.rejects(startIntegration('../x'), TypeError);
   assert.ok(await absent(path.join(f.home, 'started-names.json')), 'nothing may start for an invalid name');
+});
+
+test('discoverIntegration validates the name before reading any descriptor or override', async t => {
+  const f = await fixture('discover-names');
+  const service = await f.write(path.join(f.directory, 'service.mjs'), 'discover-names');
+  // A descriptor outside <home>/integrations that `../outside` would otherwise resolve to.
+  await writeFile(path.join(f.home, 'outside.json'), JSON.stringify({ main: service }));
+  environment(t, f.name, { ALP_INTEGRATION_ENTRY: '' });
+  assert.equal(await discoverIntegration(f.name, { home: f.home }), undefined, 'the fixture registers nothing by default');
+  for (const name of ['../outside', '', 'Web', 'a/b', 'a\\b', '.web', '-web', 'web.lock', 7, null]) {
+    await assert.rejects(discoverIntegration(name, { home: f.home }), TypeError, String(name));
+  }
+  // Even an explicit override is not returned for an invalid name.
+  environment(t, f.name, { ALP_INTEGRATION_ENTRY: service });
+  await assert.rejects(discoverIntegration('../outside', { home: f.home }), TypeError);
 });
 
 test('without an entry, discovery still selects the script (unchanged behaviour)', async t => {

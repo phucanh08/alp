@@ -1,4 +1,4 @@
-// The Paseo integration entry (server/main.ts) owns the `web` integration lock from
+// The Paseo integration entry (server/main.ts) owns the `paseo` integration lock from
 // @anhlp/alp-client/integration-lock; the lock's own protocol tests live in packages/client/tests.
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,7 +14,7 @@ await mkdir(process.env.ALP_HOME, { mode: 0o700 });
 after(() => rm(outer, { recursive: true, force: true }));
 async function fixture() {
   const home = await mkdtemp(path.join(outer, 'home-'));
-  const file = path.join(home, 'integrations/web.lock');
+  const file = path.join(home, 'integrations/paseo.lock');
   await mkdir(path.dirname(file), { mode: 0o700 });
   return { home, file, guard: file + '.reclaim' };
 }

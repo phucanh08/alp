@@ -9,7 +9,7 @@ packages/       ALP libraries and executables, published as @anhlp/alp-*
   protocol  core  runtime  client  daemon  cli
 integrations/   optional adapters to external hosts, each a separate package
   paseo/        @anhlp/alp-paseo (Paseo plugin, web app, relay)
-  web.json      development-only descriptor; not shipped in core
+  paseo.json    development-only descriptor; not shipped in core
 apps/           standalone applications
   tui/          @anhlp/alp-tui (reserved, private)
 ```
@@ -102,7 +102,7 @@ The web/Paseo surface moved out of the neutral daemon into the optional plugin. 
 | --- | --- |
 | `@anhlp/alp-daemon/web` (`createWebServer`, `createPaseoBridge`, `webAppDir`, `webFile`, `DEFAULT_WEB_PORT`) | `@anhlp/alp-paseo/web` (same named exports) |
 
-`@anhlp/alp-daemon` keeps only its `index`, `lock`, `main`, `server` and `store` subpaths; the `web` export and `src/web.ts` are gone, so an `alp-daemon/web` import now fails at resolution. The daemon's neutral core bundles (`dist/runtime/index.js`, `dist/daemon/index.js`, `dist/alpd.js`, `dist/acp.js`, `dist/acp/agent.js`) never include the plugin or `@getpaseo`; `npm run check:boundaries` reads `dist/build-manifest.json` to prove it. The plugin's own subpaths (`@anhlp/alp-paseo`, `/main`, `/web`, `/paseo/*`, `/panel/*`) replace the old in-daemon copies, and Paseo's installed integration can register its descriptor at `$ALP_HOME/integrations/web.json` using `alp-web-integration --register`.
+`@anhlp/alp-daemon` keeps only its `index`, `lock`, `main`, `server` and `store` subpaths; the `web` export and `src/web.ts` are gone, so an `alp-daemon/web` import now fails at resolution. The daemon's neutral core bundles (`dist/runtime/index.js`, `dist/daemon/index.js`, `dist/alpd.js`, `dist/acp.js`, `dist/acp/agent.js`) never include the plugin or `@getpaseo`; `npm run check:boundaries` reads `dist/build-manifest.json` to prove it. The plugin's own subpaths (`@anhlp/alp-paseo`, `/main`, `/web`, `/paseo/*`, `/panel/*`) replace the old in-daemon copies, and Paseo's installed integration can register its descriptor at `$ALP_HOME/integrations/paseo.json` using `alp-paseo-integration --register` (`alp-web-integration` is an alias for one release).
 
 Migrate an in-repo consumer in two steps:
 
@@ -130,11 +130,11 @@ The six core workspaces depend only on `@anhlp/*` packages and their own declare
 
 The daemon hosts *neutral* IPC extensions: a connection registers a method with `extension.register`, owns it until it disconnects or calls `extension.unregister`, and the daemon routes `extension.invoke` calls back to the owner (bounded pending calls, torn down on disconnect). The daemon assigns no meaning to a method. The plugin registers `web.pairing` on its alpd connection and re-registers it after a daemon restart; `alp web pair` waits for the fresh registration instead of failing on an unknown method.
 
-The plugin's per-process data stays under the selected home, never inside the daemon: the integration lock is `<home>/integrations/web.lock`, the ready address is `<home>/web.json`, the registered descriptor is `<home>/integrations/web.json`, and the log is `<home>/logs/integrations/paseo.log`. `alp web` reads the lock and `web.json` and ignores a stale file named by another pid. Set `ALP_HOME` to keep everything in one directory.
+The plugin's per-process data stays under the selected home, never inside the daemon: the integration is named `paseo`: its lock is `<home>/integrations/paseo.lock`, the ready address is `<home>/paseo.json`, the registered descriptor is `<home>/integrations/paseo.json`, and the log is `<home>/logs/integrations/paseo.log`. `alp web` reads the lock and `paseo.json` and ignores a stale file named by another pid. Set `ALP_HOME` to keep everything in one directory.
 
-The web integration serializes every lock mutation with the exclusive directory `<home>/integrations/web.lock.reclaim`. The protocol is `createIntegrationLock(home, name)` from `@anhlp/alp-client/integration-lock`; an integration named `<name>` uses `integrations/<name>.lock` and `integrations/<name>.lock.reclaim` with the same rules (the Paseo integration currently uses `web`). It never reaps this guard by age or PID. A stalled initializer/reclaimer retains exclusion; a crash during even a short guarded operation can require manual recovery. A complete recognized lock is automatically recovered only when its positive PID is absent (`ESRCH`) in the same boot context. Live PIDs (including reused PIDs), permission errors, unknown liveness errors, boot uncertainty, malformed locks and unsupported metadata never authorize takeover. Ready updates and release check the acquired lifetime nonce and file identity.
+The Paseo integration serializes every lock mutation with the exclusive directory `<home>/integrations/paseo.lock.reclaim`. The protocol is `createIntegrationLock(home, name)` from `@anhlp/alp-client/integration-lock`; an integration named `<name>` uses `integrations/<name>.lock` and `integrations/<name>.lock.reclaim` with the same rules (the Paseo integration uses `paseo`; `alp-web` uses `web`). It never reaps this guard by age or PID. A stalled initializer/reclaimer retains exclusion; a crash during even a short guarded operation can require manual recovery. A complete recognized lock is automatically recovered only when its positive PID is absent (`ESRCH`) in the same boot context. Live PIDs (including reused PIDs), permission errors, unknown liveness errors, boot uncertainty, malformed locks and unsupported metadata never authorize takeover. Ready updates and release check the acquired lifetime nonce and file identity.
 
-This guarantee requires a private local filesystem on one host in the same PID namespace, with **all integration writers using this protocol**. Stop all old integration processes before upgrading; the directory guard alone does not make competing old/new writers safe. Network/shared homes, live manual lock deletion/replacement and storage power-loss durability are outside the guarantee. After a stranded guard or malformed lock, first stop and wait for **ALL integration processes using that ALP_HOME**. Only then remove `integrations/web.lock` and `integrations/web.lock.reclaim` (including its guard token), and restart. Retain the web configuration, daemon state and separate `state/paseo-create/writer.lock`/receipt journal; this recovery procedure does not authorize changing them.
+This guarantee requires a private local filesystem on one host in the same PID namespace, with **all integration writers using this protocol**. Stop all old integration processes before upgrading; the directory guard alone does not make competing old/new writers safe. Network/shared homes, live manual lock deletion/replacement and storage power-loss durability are outside the guarantee. After a stranded guard or malformed lock, first stop and wait for **ALL integration processes using that ALP_HOME**. Only then remove that integration's `integrations/<name>.lock` and `integrations/<name>.lock.reclaim` (including its guard token), and restart. Retain the web configuration, daemon state and separate `state/paseo-create/writer.lock`/receipt journal; this recovery procedure does not authorize changing them.
 
 #### Restart and upgrade
 
@@ -210,5 +210,5 @@ artifacts and the complete npm dependency tree are checked for Paseo leakage.
 The existing runtime/reconnect test also runs against the six installed packages.
 
 To retain the web UI after upgrading core, install `@anhlp/alp-paseo` separately
-and run `alp-web-integration --register` in the intended `ALP_HOME` (global PATH
+and run `alp-paseo-integration --register` in the intended `ALP_HOME` (global PATH
 discovery also works). See the [plugin installation and compatibility notes](../integrations/paseo/README.md#optional-web-installation).

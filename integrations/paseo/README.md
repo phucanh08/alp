@@ -192,7 +192,7 @@ npm pack -w @anhlp/alp-paseo
 
 ```sh
 npm install -g @anhlp/alp@beta @anhlp/alp-paseo@beta
-alp-web-integration --register
+alp-paseo-integration --register
 alp web --print
 alp web pair --off
 ```
@@ -202,7 +202,7 @@ React Native are optional peers that the Paseo app provides, so npm does not ins
 Do not use `--legacy-peer-deps` for a standalone installation unless you supply the required
 peers explicitly. The binary is also discoverable on PATH, so registration is optional
 for a global install. For a local install, run
-`./node_modules/.bin/alp-web-integration --register` with the intended `ALP_HOME`.
+`./node_modules/.bin/alp-paseo-integration --register` with the intended `ALP_HOME`.
 
 A plugin directory managed by `paseo plugin add npm:…` is not a standalone web
 installation. Paseo installs it without peers and supplies `@getpaseo/plugin` through
@@ -210,8 +210,8 @@ its plugin loader. Running `node <managed-plugin>/server/dist/main.js --register
 directly bypasses that loader and can fail with `ERR_MODULE_NOT_FOUND` for
 `@getpaseo/plugin`; this invocation from the managed directory is unsupported
 ([#154](https://github.com/phucanh08/alp/issues/154)). Use the normal npm installation
-and `alp-web-integration --register` shown above. For a local npm installation with
-required peers, use `./node_modules/.bin/alp-web-integration --register` with the
+and `alp-paseo-integration --register` shown above. For a local npm installation with
+required peers, use `./node_modules/.bin/alp-paseo-integration --register` with the
 intended `ALP_HOME`. Registration records the entry path; it does not install missing
 peers or turn a host-managed plugin into a standalone installation.
 
@@ -220,7 +220,13 @@ available independently of this standalone web process.
 
 Core upgrades no longer update a bundled plugin: upgrade `@anhlp/alp-paseo`
 separately, and re-register if its installation location changes. Keep existing
-`web` settings, `web.json` token/server identity and ALP session storage.
+`web` settings and ALP session storage. The integration is named `paseo`: it keeps its token and
+server identity in `paseo.json` (carried over once from a `web.json` written before the rename),
+locks `integrations/paseo.lock`, registers `integrations/paseo.json` and binds a port the system
+picks, since `web.port` and `web.json` now belong to `alp-web`. `alp-web-integration` remains an
+alias of `alp-paseo-integration` for one release, and a home that has only the old
+`integrations/web.json` descriptor still starts it, with a hint to re-register.
+When Paseo's app asks for a password, give it the one `alp web pair` prints.
 `alp web`, `alp web --print`, `alp web pair --on/--off`, `ALP_WEB_INTEGRATION`,
 `ALP_INTEGRATION_ENTRY`, `ALP_DAEMON_ENTRY`, `ALP_SUPERVISE` and `ALP_HOME` retain
 their meanings. Without the plugin, web commands explain how to install it;

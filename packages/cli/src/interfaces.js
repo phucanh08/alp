@@ -1,12 +1,34 @@
 import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { alpHome, lockAlive, readLock, startIntegration } from '@anhlp/alp-client/index';
+import { alpHome, discoverIntegration, lockAlive, readLock, startIntegration } from '@anhlp/alp-client/index';
 import { UsageError } from './usage.js';
 import { built, start, running } from './daemon.js';
 import { DAEMON_ENTRY, distributionEntry } from './paths.js';
 
+/** The Paseo integration (its web app, bridge and relay) runs as integration `paseo`. */
+const PASEO = 'paseo';
+
+/**
+ * Starts the Paseo integration. For one release, a home that still has only the descriptor
+ * registered before the rename (`integrations/web.json`) keeps working, with a hint to re-register.
+ * Exported for tests.
+ * @param {string} home
+ */
+export async function startPaseoIntegration(home) {
+  const entry = await discoverIntegration(PASEO, { home });
+  if (!entry) {
+    const legacy = path.join(home, 'integrations', 'web.json');
+    const registered = await access(legacy).then(() => true, () => false);
+    const legacyEntry = registered ? await discoverIntegration('web', { home }) : undefined;
+    if (legacyEntry) {
+      console.error(`Using the Paseo integration registered before its rename (${legacy}); run \`alp-paseo-integration --register\` to register it again.`);
+      return startIntegration({ name: PASEO, entry: legacyEntry, home });
+    }
+  }
+  return startIntegration({ name: PASEO, home });
+}
 
 async function webCommand(args) {
   if (args[0] === 'pair') return pairCommand(args.slice(1));
@@ -19,17 +41,17 @@ async function webCommand(args) {
     if (settings?.web?.enabled === false) throw new Error('ALP web app is disabled by settings ("web.enabled": false).');
   } catch (error) { if (/disabled by settings/.test(error?.message ?? '')) throw error; }
   // The web app is owned by the optional Paseo integration.
-  await startIntegration();
   const home = alpHome();
-  const file = path.join(home, 'web.json');
+  await startPaseoIntegration(home);
+  const file = path.join(home, `${PASEO}.json`);
   let info;
-  // A fresh integration writes web.json just before it is ready; stale files from daemon or an older pid are rejected.
+  // A fresh integration writes paseo.json just before it is ready; stale files from daemon or an older pid are rejected.
   for (let i = 0; i < 100; i++) {
     info = await readFile(file, 'utf8').then(JSON.parse, () => undefined);
     let alive = false;
     try { if (info?.pid) { process.kill(info.pid, 0); alive = true; } } catch { alive = false; }
     let integrationPid = undefined;
-    try { integrationPid = JSON.parse(await readFile(path.join(home, 'integrations', 'web.lock'), 'utf8'))?.pid; } catch {}
+    try { integrationPid = JSON.parse(await readFile(path.join(home, 'integrations', `${PASEO}.lock`), 'utf8'))?.pid; } catch {}
     if (info?.token && info?.url && alive && info.pid !== lock?.pid && (!integrationPid || info.pid === integrationPid)) break;
     info = undefined;
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -45,7 +67,8 @@ async function webCommand(args) {
 
 /**
  * alp web pair: the link that pairs Paseo's app on another device with alpd through Paseo's relay
- * (ALPD §64). The device then signs in with the token that `alp web --print` shows.
+ * (ALPD §64). The device then signs in with the password this command prints (the token kept in
+ * ~/.alp/paseo.json).
  */
 
 /**
@@ -72,7 +95,8 @@ async function pairCommand(args) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { on: { type: 'boolean' }, off: { type: 'boolean' } } });
   if (positionals.length || (values.on && values.off)) throw new UsageError();
   await start();
-  await startIntegration();
+  const home = alpHome();
+  await startPaseoIntegration(home);
   const client = await running();
   try {
     const pairing = await requestPairing(client, values.on ? { enable: true } : values.off ? { enable: false } : {});
@@ -82,7 +106,9 @@ async function pairCommand(args) {
     }
     console.log(`Relay ${pairing.endpoint}: ${pairing.connected ? 'connected' : 'connecting'}`);
     console.log(`Open this link on the device, or scan the QR code in the web app (Settings → host → Pair device):\n${pairing.url}`);
-    console.log("When Paseo's app asks for a password, give it alpd's token: the part after #token= in alp web --print.");
+    const password = await readFile(path.join(home, `${PASEO}.json`), 'utf8').then(text => JSON.parse(text)?.token, () => undefined);
+    if (typeof password === 'string' && password) console.log(`When Paseo's app asks for a password, give it: ${password}`);
+    else console.log(`When Paseo's app asks for a password, give it the token in ${path.join(home, `${PASEO}.json`)}.`);
   } finally {
     client.close();
   }

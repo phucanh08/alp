@@ -77,7 +77,7 @@ try {
   const lock = await readLock(homeB);
   assert.equal(lock.ready, true, 'the installed alpd comes up ready');
   assert.equal(socket, lock.socket, 'the lock publishes the socket');
-  await assert.rejects(access(path.join(homeB, 'integrations/web.json')), 'no integration descriptor exists at start');
+  await assert.rejects(access(path.join(homeB, 'integrations/paseo.json')), 'no integration descriptor exists at start');
 
   const client = await connect(socket);
   const events = [];
@@ -110,7 +110,7 @@ try {
   again.close();
   await until(async () => !(await readLock(homeB)), 'the daemon lock to clear');
   await assert.rejects(connect(socket), 'a stopped daemon refuses connections');
-  await assert.rejects(access(path.join(homeB, 'integrations/web.json')), 'the integration never appeared');
+  await assert.rejects(access(path.join(homeB, 'integrations/paseo.json')), 'the integration never appeared');
   console.log('PART_B_OK installed alpd: start(no integration) + RPC + ACP session + disconnect + replay + shutdown');
   console.log('STANDALONE_CORE_SMOKE_PASSED');
 } finally {

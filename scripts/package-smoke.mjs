@@ -103,7 +103,7 @@ void frame; void observe;
   const token = line.match(/#token=([0-9a-f]{32,})$/)?.[1];
   if (!token) throw new Error(`alp web --print printed no authentication token: ${line}`);
   const alpd = JSON.parse(await readFile(path.join(env.ALP_HOME, 'alpd.lock'), 'utf8'));
-  const integration = JSON.parse(await readFile(path.join(env.ALP_HOME, 'integrations', 'web.lock'), 'utf8'));
+  const integration = JSON.parse(await readFile(path.join(env.ALP_HOME, 'integrations', 'paseo.lock'), 'utf8'));
   if (!integration.pid || integration.pid === alpd.pid) throw new Error(`the web integration must run as its own process (alpd ${alpd.pid}, web ${integration.pid})`);
   for (const pid of [alpd.pid, integration.pid]) { try { process.kill(pid, 0); } catch { throw new Error(`process ${pid} is not alive`); } }
   const served = await fetch(line.replace(/#.*$/, ''));

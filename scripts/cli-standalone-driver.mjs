@@ -54,7 +54,7 @@ try {
   const { sessionId } = await request('session/new', { cwd: project, mcpServers: [] });
   assert.equal((await request('session/prompt', { sessionId, prompt: [{ type: 'text', text: 'fake:say isolated-cli-ok' }] })).stopReason, 'end_turn');
   assert.ok(updates.filter(update => update.sessionUpdate === 'agent_message_chunk').map(update => update.content.text).join('').includes('isolated-cli-ok'), 'installed alp acp streams the fake provider response');
-  assert.equal(await readFile(path.join(home, 'integrations/web.json')).catch(() => undefined), undefined);
+  assert.equal(await readFile(path.join(home, 'integrations/paseo.json')).catch(() => undefined), undefined);
   console.log('INSTALLED_CLI_OK init/upgrade + daemon + IPC + ACP stdio handshake/prompt/stream; no Paseo');
 } finally {
   child?.kill();

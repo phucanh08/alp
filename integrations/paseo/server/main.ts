@@ -49,7 +49,7 @@ async function run(home: string) {
     process.exit(0);
   }
 
-  const integrationLock = createIntegrationLock(home, 'web');
+  const integrationLock = createIntegrationLock(home, 'paseo');
   const { acquired, lock } = await integrationLock.acquire();
   if (!acquired) {
     log.info(`integration already running (pid ${lock.pid})`, { code: 'ALP_LOCK_HELD' });
@@ -65,7 +65,8 @@ async function run(home: string) {
   if (!appDir) webLog('the web app is not built beside the integration; the page says how to build it');
   let listening: string | null = null;
   const gateway = appDir ? createPaseoBridge({ version: VERSION, home, token: () => web?.token ?? '', serverId: () => web?.serverId ?? '', relay: settings?.web?.relay, listen: () => listening, log: webLog }) : undefined;
-  const web = createWebServer({ app: appDir && gateway ? { dir: appDir, gateway } : undefined, home, port: settings?.web?.port, log: webLog });
+  // Port 0: `web.port` belongs to alp-web; this listener serves only daemon.get_status and Paseo sockets with the token.
+  const web = createWebServer({ app: appDir && gateway ? { dir: appDir, gateway } : undefined, home, port: 0, log: webLog });
   // Ready is published only after web.pairing is registered (below), so a caller that waits for the
   // ready lock can rely on the RPC being served; marking ready here would race callers of web.pairing.
   await web.listen().then(info => { listening = `127.0.0.1:${info.port}`; log.info(`web app on ${info.url}`, { event: 'web.listening' }); })
@@ -172,7 +173,7 @@ const home = alpHome();
 if (process.argv.includes('--register')) {
   await mkdir(path.join(home, 'integrations'), { recursive: true, mode: 0o700 });
   const entry = fileURLToPath(import.meta.url);
-  const file = path.join(home, 'integrations', 'web.json');
+  const file = path.join(home, 'integrations', 'paseo.json');
   const tmp = `${file}.${process.pid}.tmp`;
   await writeFile(tmp, JSON.stringify({ main: entry, registeredAt: new Date().toISOString() }), { mode: 0o600 });
   await rename(tmp, file);

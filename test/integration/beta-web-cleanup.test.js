@@ -29,8 +29,8 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
         const info = { pid: process.pid, port: server.address().port };
         fs.mkdirSync(path.join(home, 'integrations'), { recursive: true });
         fs.appendFileSync(${JSON.stringify(journal)}, JSON.stringify({ ...info, role, home }) + '\\n');
-        fs.writeFileSync(path.join(home, role === 'web' ? 'integrations/web.lock' : 'alpd.lock'), JSON.stringify(info));
-        if (role === 'web' && process.env.FIXTURE_SCENARIO !== 'web-startup-failure') fs.writeFileSync(path.join(home, 'web.json'), JSON.stringify(info));
+        fs.writeFileSync(path.join(home, role === 'web' ? 'integrations/paseo.lock' : 'alpd.lock'), JSON.stringify(info));
+        if (role === 'web' && process.env.FIXTURE_SCENARIO !== 'web-startup-failure') fs.writeFileSync(path.join(home, 'paseo.json'), JSON.stringify(info));
       });
       process.on('SIGTERM', () => setTimeout(() => server.close(() => process.exit(0)), 150));
     `);
@@ -38,7 +38,7 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
       import { spawn } from 'node:child_process'; import fs from 'node:fs'; import path from 'node:path';
       const [role, home] = process.argv.slice(2);
       const child = spawn(process.execPath, [${JSON.stringify(path.join(base, 'worker.mjs'))}, role, home], { env: process.env, detached: true, stdio: 'ignore' }); child.unref();
-      const lock = path.join(home, role === 'web' ? 'integrations/web.lock' : 'alpd.lock');
+      const lock = path.join(home, role === 'web' ? 'integrations/paseo.lock' : 'alpd.lock');
       for (let i = 0; !fs.existsSync(lock); i++) { if (i > 500) process.exit(1); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10); }
     `);
     await writeFile(path.join(base, 'beta-acceptance-lib.mjs'), `
@@ -61,7 +61,7 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
           if (label === 'setup' && args[1] === 'setup' && scenario === 'setup-failure') return { status: 1 };
           if (label === 'fixture-web') launch('web');
           if (label === 'cleanup') {
-            const f = path.join(env.ALP_HOME, 'integrations/web.lock');
+            const f = path.join(env.ALP_HOME, 'integrations/paseo.lock');
             if (fs.existsSync(f)) { const { pid } = JSON.parse(fs.readFileSync(f)); try { process.kill(pid, 0); fs.writeFileSync(path.join(base, 'wrong-order'), 'web still alive'); } catch {} }
             // A failed daemon stop must still trigger the owned-lock fallback.
             return { status: 1 };
@@ -104,7 +104,7 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
             return { status: 1, stdout: '', stderr: 'injected failure after web lock publication' };
           }
           if (args[1] === 'daemon' && args[2] === 'stop') {
-            const lock = path.join(options.env.ALP_HOME, 'integrations/web.lock');
+            const lock = path.join(options.env.ALP_HOME, 'integrations/paseo.lock');
             if (fs.existsSync(lock)) { try { process.kill(JSON.parse(fs.readFileSync(lock)).pid, 0); fs.writeFileSync(path.join(process.env.FIXTURE_BASE, 'wrong-order'), 'web still alive'); } catch {} }
           }
           return { status: 0, stdout: '', stderr: '' };

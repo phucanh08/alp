@@ -6,7 +6,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
 const home = process.env.ALP_HOME;
 if (!home || !process.env.ALP_LOCK_FIXTURE || !home.startsWith(process.env.ALP_LOCK_FIXTURE + path.sep)) throw new Error('private fixture home required');
-const guard = path.join(home, 'integrations/web.lock.reclaim');
+const guard = path.join(home, 'integrations/paseo.lock.reclaim');
 let armed = false, attempts = 0, signals = 0;
 const mkdir = fs.mkdir;
 fs.mkdir = async (...args) => {

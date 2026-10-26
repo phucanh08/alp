@@ -21,6 +21,8 @@ paseo plugin install /absolute/path/to/alp-workspace/integrations/paseo
 paseo provider models alp
 ```
 
+The standalone web process of this package is integration `paseo` (`alp-paseo-integration --register` writes `$ALP_HOME/integrations/paseo.json`; `alp-web-integration` stays an alias for one release). It holds `integrations/paseo.lock`, keeps its address, token and server id in `$ALP_HOME/paseo.json`, and listens on a port the system picks: `web.port`, `web.json` and `integrations/web.lock` belong to the `alp-web` service, so both can run at once. The listener only answers `daemon.get_status` and Paseo sockets that present the token; relay sockets attach to the bridge directly. It keeps registering `web.pairing` with alpd, `settings.web.relay` configures its relay, and `alp web pair` prints the token as the password Paseo's app asks for. For one release, a home registered only with the old `integrations/web.json` descriptor still starts it, with a hint to re-register.
+
 Select a team under **ALP** in Paseo's model picker: Phở and Cafe, then the teams of your library, then the project's. When a repository lacks `ALP.md` or `.alp/settings.json`, the provider creates them; agents, skills and teams come from ALP's built-ins and your library, so nothing else is copied. Existing files are preserved. A team fixes its members' models; other model names supported by the installed native runtime can be set through `.alp/settings.json`:
 
 ```json
