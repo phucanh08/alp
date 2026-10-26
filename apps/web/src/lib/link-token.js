@@ -95,3 +95,25 @@ export function takeLinkToken({ location, history, storage }) {
   const kept = storedLinkToken(storage);
   return kept ? { url: location.origin, token: kept } : undefined;
 }
+
+/** The standalone gateway's default address (`alp-gateway serve`), for a page it does not serve. */
+export const STANDALONE_GATEWAY = 'http://127.0.0.1:7434';
+
+/**
+ * Whether this page is the one `alp web` serves: a built app (not Vite's dev server, which sits
+ * beside a standalone gateway) on this machine's loopback address. alp web serves the app and its
+ * gateway on one listener, so the page's own origin is the gateway.
+ * @param {{ location: { protocol: string, hostname: string }, dev?: boolean }} page
+ */
+export const servedByAlpWeb = ({ location, dev = false }) => !dev && isLoopbackPage(location);
+
+/**
+ * The connect form's gateway address before the person types one: the address remembered from an
+ * earlier connect on this origin, else this page's origin when alp web serves it, else the
+ * standalone gateway's default.
+ * @param {{ location: { protocol: string, hostname: string, origin: string }, remembered?: string | null, dev?: boolean }} page
+ */
+export function defaultGatewayAddress({ location, remembered, dev = false }) {
+  if (remembered) return remembered;
+  return servedByAlpWeb({ location, dev }) ? location.origin : STANDALONE_GATEWAY;
+}
