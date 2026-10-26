@@ -1,15 +1,16 @@
 #!/usr/bin/env node
-import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { existsSync, mkdirSync } from 'node:fs';
 import { openSync, writeSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { alpHome, readLock, lockAlive, bootTime } from '@anhlp/alp-client/index';
+import { alpHome, readLock } from '@anhlp/alp-client/index';
 import { superviseDaemon } from '@anhlp/alp-client/supervise';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { createLogger } from '@anhlp/alp-core/log';
 import { createWebServer } from './web.js';
+import { createIntegrationLock } from './integration-lock.js';
 import { createPaseoBridge, webAppDir } from './paseo/index.js';
 
 const log = createLogger({ component: 'alp-integration' });
@@ -40,110 +41,6 @@ async function userSettings(home: string): Promise<any> {
   }
 }
 
-function integrationLockPath(home: string) {
-  return path.join(home, 'integrations', 'web.lock');
-}
-
-async function readIntegrationLock(home: string) {
-  try { return JSON.parse(await readFile(integrationLockPath(home), 'utf8')); } catch { return undefined; }
-}
-
-function integrationAlive(lock: any) {
-  if (!lock || !Number.isSafeInteger(lock.pid)) return false;
-  try { process.kill(lock.pid, 0); } catch (error: any) { return error?.code === 'EPERM'; }
-  const currentBoot = bootTime();
-  if (typeof lock.bootTime === 'number' && Math.abs(lock.bootTime - currentBoot) > 30) return false;
-  return true;
-}
-
-async function acquireIntegrationLock(home: string) {
-  await mkdir(path.dirname(integrationLockPath(home)), { recursive: true, mode: 0o700 });
-  const file = integrationLockPath(home);
-  const current = await readIntegrationLock(home);
-  if (current && integrationAlive(current)) {
-    return { acquired: false, lock: current };
-  }
-  // Stale lock reclaim race-safe: exclusive create. Never unlink a live, fresh, or malformed
-  // lock that another contender is still writing; a reclaim is serialized through a marker file.
-  const reclaim = `${file}.reclaim`;
-  const deadline = Date.now() + 20_000;
-  while (Date.now() < deadline) {
-    const value = { pid: process.pid, bootTime: bootTime(), startedAt: new Date().toISOString(), ready: false };
-    try {
-      const handle = await open(file, 'wx', 0o600);
-      await handle.writeFile(JSON.stringify(value));
-      await handle.close();
-      return { acquired: true, lock: value };
-    } catch (error: any) {
-      if (error?.code !== 'EEXIST') throw error;
-      const again = await readIntegrationLock(home);
-      if (again && integrationAlive(again)) return { acquired: false, lock: again };
-      const info = await stat(file).catch(() => undefined);
-      // Grace: an empty or malformed file may be mid-creation; reclaim only after it is old enough.
-      const ageMs = info ? Date.now() - info.mtimeMs : Number.POSITIVE_INFINITY;
-      if (ageMs < 1_500) { await new Promise(resolve => setTimeout(resolve, 150)); continue; }
-      const raw = await readFile(file, 'utf8').catch(() => undefined);
-      if (raw === undefined) continue;
-      let parsed: any;
-      try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
-      if (parsed && integrationAlive(parsed)) return { acquired: false, lock: parsed };
-      if (raw && again && JSON.stringify(again) !== raw) continue;
-      // Serialize stale reclaim so two contenders cannot delete each other's lock.
-      try {
-        const marker = await open(reclaim, 'wx', 0o600);
-        await marker.close();
-      } catch (markerError: any) {
-        if (markerError?.code !== 'EEXIST') throw markerError;
-        // A reclaimer that crashed may leave its marker behind; drop it once it is clearly stale.
-        const markerInfo = await stat(reclaim).catch(() => undefined);
-        if (markerInfo && Date.now() - markerInfo.mtimeMs > 2_000) await unlink(reclaim).catch(() => {});
-        await new Promise(resolve => setTimeout(resolve, 150));
-        continue;
-      }
-      try {
-        const latest = await readFile(file, 'utf8').catch(() => undefined);
-        if (latest !== undefined && latest === raw) await unlink(file).catch(() => {});
-      } finally {
-        await unlink(reclaim).catch(() => {});
-      }
-      continue;
-    }
-  }
-  throw new Error('Could not acquire the integration lock');
-}
-
-async function markReady(home: string) {
-  const lock = await readIntegrationLock(home);
-  if (!lock || lock.pid !== process.pid) return;
-  lock.ready = true;
-  const file = integrationLockPath(home);
-  const tmp = `${file}.${process.pid}.tmp`;
-  await writeFile(tmp, JSON.stringify(lock), { mode: 0o600 });
-  await rename(tmp, file);
-}
-
-/**
- * The inverse of markReady, for the moment the daemon connection drops: publish our own lock as
- * not-ready atomically, so a caller waiting for the ready lock stops relying on a registration that
- * no longer exists (the connection is re-registered below).
- */
-async function clearReady(home: string) {
-  const lock = await readIntegrationLock(home);
-  if (!lock || lock.pid !== process.pid || lock.ready !== true) return;
-  lock.ready = false;
-  const file = integrationLockPath(home);
-  const tmp = `${file}.${process.pid}.tmp`;
-  await writeFile(tmp, JSON.stringify(lock), { mode: 0o600 });
-  await rename(tmp, file);
-}
-
-async function releaseIntegrationLock(home: string) {
-  const lock = await readIntegrationLock(home);
-  if (lock?.pid === process.pid) {
-    await unlink(integrationLockPath(home)).catch(() => {});
-  }
-}
-
 async function run(home: string) {
   await mkdir(home, { recursive: true, mode: 0o700 });
   const settings = await userSettings(home);
@@ -152,7 +49,8 @@ async function run(home: string) {
     process.exit(0);
   }
 
-  const { acquired, lock } = await acquireIntegrationLock(home);
+  const integrationLock = createIntegrationLock(home);
+  const { acquired, lock } = await integrationLock.acquire();
   if (!acquired) {
     log.info(`integration already running (pid ${lock.pid})`, { code: 'ALP_LOCK_HELD' });
     process.exit(0);
@@ -167,7 +65,7 @@ async function run(home: string) {
   // Ready is published only after web.pairing is registered (below), so a caller that waits for the
   // ready lock can rely on the RPC being served; marking ready here would race callers of web.pairing.
   await web.listen().then(info => { listening = `127.0.0.1:${info.port}`; log.info(`web app on ${info.url}`, { event: 'web.listening' }); })
-    .catch(async error => { log.error('web app not started', { code: 'ALP_WEB_START_FAILED', error }); await releaseIntegrationLock(home); process.exit(1); });
+    .catch(async error => { log.error('web app not started', { code: 'ALP_WEB_START_FAILED', error }); await integrationLock.release(); process.exit(1); });
   const relay = web.token && gateway ? gateway.relay : undefined;
   await relay?.start().catch(error => webLog(`relay not started: ${error?.message ?? error}`));
 
@@ -208,7 +106,7 @@ async function run(home: string) {
             if (extensionClient === client) extensionClient = null;
             // Our own ready flag describes a registration that has just gone away with the socket.
             if (!shuttingDown) {
-              void clearReady(home);
+              void integrationLock.setReady(false);
               void ensurePairingRegistration();
             }
           });
@@ -227,10 +125,10 @@ async function run(home: string) {
           // so the extension ends up registered on a live connection.
           if (closed) { registrationPending = true; continue; }
           webLog('registered web.pairing');
-          await markReady(home);
+          await integrationLock.setReady(true);
           // The socket may have dropped while ready was being published; the ready flag would then
           // describe a dead registration, so re-check and let the retry loop reconnect.
-          if (closed) { await clearReady(home); registrationPending = true; continue; }
+          if (closed) { await integrationLock.setReady(false); registrationPending = true; continue; }
           return;
         } catch (error: any) {
           if (extensionClient) { try { extensionClient.close(); } catch {} extensionClient = null; }
@@ -252,7 +150,7 @@ async function run(home: string) {
     await relay?.stop?.().catch(() => {});
     await (gateway as any)?.close?.().catch(() => {});
     await stopDaemon().catch(() => {});
-    await releaseIntegrationLock(home);
+    await integrationLock.release();
     process.exit(code);
   };
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => void shutdown());
