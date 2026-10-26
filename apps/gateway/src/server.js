@@ -30,6 +30,13 @@ export const TICKET_PATH = '/v1/tickets';
 /** @param {string | undefined} address */
 const plain = address => (address ?? '').replace(/^::ffff:/, '');
 
+/**
+ * The path of a raw request target, or undefined when it cannot be parsed (`//[`, `//x:99999/`):
+ * such a target is a 400, never an exception in the request handler.
+ * @param {http.IncomingMessage} request
+ */
+const pathOf = request => { try { return new URL(request.url ?? '/', 'http://gateway').pathname; } catch { return undefined; } };
+
 /** Paths the gateway answers itself, whatever the method; a static hook never sees them. @param {string} pathname */
 const ownPath = pathname => pathname === '/healthz' || pathname === '/readyz' || pathname === '/v1' || pathname.startsWith('/v1/');
 
@@ -145,7 +152,8 @@ export function createGateway({ config, store, openTransport, logger, version, m
     const peer = peerOf(request);
     const refused = refusal(request, peer);
     if (refused) return json(response, refused.status, { error: refused.error });
-    const { pathname } = new URL(request.url ?? '/', 'http://gateway');
+    const pathname = pathOf(request);
+    if (pathname === undefined) return json(response, 400, { error: 'bad_request' });
     if (serveStatic && !ownPath(pathname) && (request.method === 'GET' || request.method === 'HEAD')) return void staticRoute(serveStatic, request, response);
     if (pathname === '/healthz' && request.method === 'GET') return json(response, 200, { live: true });
     if (pathname === '/readyz' && request.method === 'GET') {
@@ -204,7 +212,9 @@ export function createGateway({ config, store, openTransport, logger, version, m
     const peer = peerOf(request);
     const refused = refusal(request, peer);
     if (refused) return refuse(refused.status, refused.status === 421 ? 'Misdirected Request' : 'Forbidden', refused.error);
-    if (new URL(request.url ?? '/', 'http://gateway').pathname !== WEBSOCKET_PATH) return refuse(404, 'Not Found');
+    const pathname = pathOf(request);
+    if (pathname === undefined) return refuse(400, 'Bad Request', 'request_target');
+    if (pathname !== WEBSOCKET_PATH) return refuse(404, 'Not Found');
     const origin = originOf(request);
     if (origin === false) return refuse(403, 'Forbidden', 'origin_not_allowed');
     const offered = String(request.headers['sec-websocket-protocol'] ?? '').split(',').map(entry => entry.trim()).filter(Boolean);
@@ -225,19 +235,56 @@ export function createGateway({ config, store, openTransport, logger, version, m
       release();
       const id = randomBytes(6).toString('hex');
       const log = logger.child({ connection: id, principal: grant.id, ip: peer.ip });
-      const connection = new ClientConnection({
-        ws, grant, id, connectUpstream, logger: log,
-        limits: { maxPending: limits.maxPending, rate: limits.rate, burst: limits.burst, maxStrikes: limits.maxStrikes, handshakeMs: limits.handshakeMs, requestTimeoutMs: limits.requestTimeoutMs, maxBufferedBytes: limits.maxBufferedBytes, maxQueue: limits.maxQueue, closeGraceMs: limits.closeGraceMs, maxFrame: limits.maxFrame },
-        onClosed: (closed, code) => {
-          connections.delete(closed);
-          perPrincipal.set(grant.id, Math.max(0, (perPrincipal.get(grant.id) ?? 1) - 1));
-          if (!perPrincipal.get(grant.id)) perPrincipal.delete(grant.id);
-          log.info('closed a connection', { code: 'ALP_GATEWAY_DISCONNECTED', closeCode: code });
-        },
-      });
-      if (!connection.closed) connections.add(connection);
-      log.info('opened a connection', { code: 'ALP_GATEWAY_CONNECTED' });
+      let counted = true;
+      /** Gives back this connection's place in its credential's count, once. */
+      const uncount = () => {
+        if (!counted) return;
+        counted = false;
+        perPrincipal.set(grant.id, Math.max(0, (perPrincipal.get(grant.id) ?? 1) - 1));
+        if (!perPrincipal.get(grant.id)) perPrincipal.delete(grant.id);
+      };
+      try {
+        const connection = new ClientConnection({
+          ws, grant, id, connectUpstream, logger: log,
+          limits: { maxPending: limits.maxPending, rate: limits.rate, burst: limits.burst, maxStrikes: limits.maxStrikes, handshakeMs: limits.handshakeMs, requestTimeoutMs: limits.requestTimeoutMs, maxBufferedBytes: limits.maxBufferedBytes, maxQueue: limits.maxQueue, closeGraceMs: limits.closeGraceMs, maxFrame: limits.maxFrame },
+          onClosed: (closed, code) => {
+            connections.delete(closed);
+            uncount();
+            log.info('closed a connection', { code: 'ALP_GATEWAY_DISCONNECTED', closeCode: code });
+          },
+        });
+        if (!connection.closed) connections.add(connection);
+        log.info('opened a connection', { code: 'ALP_GATEWAY_CONNECTED' });
+      } catch (error) {
+        // A connection that cannot be set up is dropped; it never takes the gateway down.
+        log.error('could not set up a connection', { code: 'ALP_GATEWAY_CONNECTION_FAILED', error });
+        uncount();
+        try { ws.terminate(); } catch {}
+      }
     });
+  }
+
+  /**
+   * The handlers as the server calls them: a throw from one is logged and answered (500, or the
+   * socket closed), never left to reach the process, so one bad request cannot stop the gateway.
+   * @param {http.IncomingMessage} request @param {http.ServerResponse} response
+   */
+  function guardedRequest(request, response) {
+    try { onRequest(request, response); }
+    catch (error) {
+      logger.error('a request handler failed', { code: 'ALP_GATEWAY_REQUEST_FAILED', error });
+      if (!response.headersSent) { try { json(response, 500, { error: 'internal' }); return; } catch {} }
+      response.destroy();
+    }
+  }
+
+  /** @param {http.IncomingMessage} request @param {import('node:stream').Duplex} socket @param {Buffer} head */
+  function guardedUpgrade(request, socket, head) {
+    try { onUpgrade(request, socket, head); }
+    catch (error) {
+      logger.error('an upgrade handler failed', { code: 'ALP_GATEWAY_UPGRADE_FAILED', error });
+      try { socket.end('HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\nCache-Control: no-store\r\nContent-Length: 0\r\n\r\n'); } catch { socket.destroy(); }
+    }
   }
 
   // A revoked, rotated or expired credential loses its tickets and connections at once; a changed
@@ -270,11 +317,11 @@ export function createGateway({ config, store, openTransport, logger, version, m
     async listen() {
       await store.reload();
       server = config.tls
-        ? https.createServer({ cert: await readFile(config.tls.cert), key: await readFile(config.tls.key) }, onRequest)
-        : http.createServer(onRequest);
+        ? https.createServer({ cert: await readFile(config.tls.cert), key: await readFile(config.tls.key) }, guardedRequest)
+        : http.createServer(guardedRequest);
       server.headersTimeout = 10_000;
       server.requestTimeout = 15_000;
-      server.on('upgrade', onUpgrade);
+      server.on('upgrade', guardedUpgrade);
       server.on('clientError', (_error, socket) => { try { socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'); } catch {} });
       const listening = /** @type {http.Server} */ (server);
       await new Promise((resolve, reject) => {
