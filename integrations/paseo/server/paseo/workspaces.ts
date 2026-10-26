@@ -8,6 +8,7 @@ import type { AgentSnapshotPayload, SessionInboundMessage, SessionOutboundMessag
 import type { SessionSummary } from '@anhlp/alp-protocol/session';
 import type { ClientContext, Handler } from './gateway.js';
 import { checkoutCache, type CheckoutFacts } from './git.js';
+import { createCreationReceipts, creationDigest, type CreationReceipts, type CreationAttempt } from './create-receipts.js';
 
 /**
  * Paseo's projects and workspaces, kept by alpd (D31 step 6, ALPD §62). A project is a directory
@@ -46,7 +47,7 @@ export type AgentsView = {
   create(input: CreateAgentInput): Promise<AgentSnapshotPayload>;
 };
 /** `images` and `attachments` are Paseo's (send_agent_message's); see prompt-content.ts for what ALP takes of them. */
-export type CreateAgentInput = { config: { provider: string; cwd: string; model?: string | null; modeId?: string | null; title?: string | null }; workspaceId: string; initialPrompt?: string; clientMessageId?: string; images?: unknown[]; attachments?: unknown[]; client?: ClientContext };
+export type CreateAgentInput = { config: { provider: string; cwd: string; model?: string | null; modeId?: string | null; title?: string | null }; workspaceId: string; initialPrompt?: string; clientMessageId?: string; images?: unknown[]; attachments?: unknown[]; client?: ClientContext; creationKey?: string; creationIntent?: unknown; attempt?: CreationAttempt };
 
 const hex = () => randomBytes(8).toString('hex');
 const now = () => new Date().toISOString();
@@ -60,7 +61,8 @@ async function isDirectory(directory: string) {
   return (await stat(directory).catch(() => undefined))?.isDirectory() ?? false;
 }
 
-export function createWorkspaces({ rpc, broadcast, agents, inDevelopment, log = () => {} }: {
+export function createWorkspaces({ rpc, broadcast, agents, inDevelopment, receipts = createCreationReceipts(), log = () => {} }: {
+  receipts?: CreationReceipts;
   rpc(method: string, params: any): Promise<any>;
   broadcast(message: Outbound): void;
   agents: () => AgentsView;
@@ -385,8 +387,6 @@ export function createWorkspaces({ rpc, broadcast, agents, inDevelopment, log = 
           await load();const entry=workspace(made.workspace.id)!;await git.read(entry.directory);sync();return reply({workspace:descriptor(entry)});
         } catch(error) { return reply({error:message(error)}); }
       }
-      const again = request.idempotencyKey ? registry.workspaces.find(entry => entry.idempotencyKey === request.idempotencyKey) : undefined;
-      if (again) return reply({ workspace: descriptor(again) });
       try {
         // A first agent whose message carries what ALP cannot send (attachments, malformed images) is
         // refused before the workspace is made; agents().create builds the same message again.
@@ -394,20 +394,52 @@ export function createWorkspaces({ rpc, broadcast, agents, inDevelopment, log = 
           firstMessage(request.agent.initialPrompt, request.agent.images, request.agent.attachments);
           agents().validateFirst?.({ ...request.agent, client });
         }
-        const owner = request.source.projectId ? project(request.source.projectId) : await addProject(request.source.path);
-        if (!owner || owner.removedAt) throw new RequestError(`No project ${request.source.projectId}`);
-        const directory = path.resolve(request.source.path);
-        if (!await isDirectory(directory)) throw new RequestError(`${request.source.path} is not a directory`, 'directory_not_found');
-        await git.read(directory);
-        const made = await mutate('workspace.create', { directory, projectId: owner.id, workspaceId: request.workspaceId, title: request.title, idempotencyKey: request.idempotencyKey }, request.requestId);
-        const entry = workspace(made.workspace.id)!;
-        let agent: AgentSnapshotPayload | undefined;
-        if (request.agent) {
-          const { config, initialPrompt, clientMessageId, images, attachments } = request.agent;
-          agent = await agents().create({ client, config: { ...config, cwd: directory }, workspaceId: entry.id, ...(initialPrompt ? { initialPrompt } : {}), ...(clientMessageId ? { clientMessageId } : {}), ...(images ? { images } : {}), ...(attachments ? { attachments } : {}) });
-        }
+        client?.assertActive?.();
+        const { requestId: _requestId, idempotencyKey, ...intent } = request;
+        const identity = idempotencyKey ?? request.requestId;
+        const source = request.source;
+        const result = await receipts.run('workspace', identity, intent, !!request.agent?.attachments?.length, async (state, checkpoint) => {
+          if (!state.phase) {
+            // Legacy metadata cannot prove which initial-agent intent ran. Never infer absence.
+            if (idempotencyKey && registry.workspaces.some(entry => entry.idempotencyKey === idempotencyKey)) throw new RequestError('Workspace creation has no matching creation receipt; inspect its initial agent before retrying');
+            await checkpoint({ phase: 'workspace_ready' });
+          }
+          if (state.phase === 'workspace_pending') throw new RequestError('Workspace creation outcome is unknown; inspect it before retrying');
+          if (!['workspace_ready', 'workspace_created', 'create_ready', 'create_pending', 'native_created', 'native_ready', 'rename_pending', 'prompt_pending', 'failed', 'done'].includes(state.phase!)) throw new RequestError('Invalid workspace creation receipt');
+          const directory = path.resolve(source.path);
+          if (state.phase === 'workspace_ready') {
+            if (!path.isAbsolute(source.path) || !await isDirectory(directory)) throw new RequestError(`${source.path} is not a directory`, 'directory_not_found');
+            await git.read(directory); client?.assertActive?.();
+            await checkpoint({ phase: 'workspace_pending' });
+            try { client?.assertActive?.(); }
+            catch (error) { await checkpoint({ phase: 'workspace_ready' }); throw error; }
+            try {
+              const operationId = creationDigest(['workspace', identity]);
+              const owner = source.projectId ? project(source.projectId) : await addProject(directory, `create-project:${operationId}`);
+              if (!owner || owner.removedAt) throw new RequestError(`No project ${source.projectId}`);
+              const made = await mutate('workspace.create', { directory, projectId: owner.id, workspaceId: request.workspaceId, title: request.title, idempotencyKey }, `create-workspace:${operationId}`);
+              await checkpoint({ phase: 'workspace_created', workspaceId: made.workspace.id });
+            } catch (error: any) {
+              if (error?.code === -32602) await checkpoint({ phase: 'workspace_ready' });
+              throw error;
+            }
+          }
+          if (!state.workspaceId) throw new RequestError('Invalid reserved workspace identity');
+          let agent: AgentSnapshotPayload | undefined;
+          if (request.agent && state.phase !== 'done') {
+            const { config, initialPrompt, clientMessageId, images, attachments } = request.agent;
+            agent = await agents().create({ client, attempt: { state, checkpoint }, config: { ...config, cwd: directory }, workspaceId: state.workspaceId!, ...(initialPrompt ? { initialPrompt } : {}), ...(clientMessageId ? { clientMessageId } : {}), ...(images ? { images } : {}), ...(attachments ? { attachments } : {}) });
+          }
+          if (state.phase !== 'done') await checkpoint({ phase: 'done', ...(agent ? { agentId: agent.id } : {}) });
+          return { workspaceId: state.workspaceId!, agentId: state.agentId };
+        });
+        await load();
+        const entry = workspace(result.workspaceId);
+        if (!entry || !active(entry)) throw new RequestError('The retained creation result is no longer available; nothing was recreated');
+        const session = result.agentId && agents().roots().find(root => root.id === result.agentId);
+        if (result.agentId && !session) throw new RequestError('The retained initial agent is no longer available; nothing was recreated');
         sync();
-        return reply({ workspace: descriptor(entry), ...(agent ? { agent } : {}) });
+        return reply({ workspace: descriptor(entry), ...(session ? { agent: agents().snapshot(session) } : {}) });
       } catch (error) {
         return reply({ error: message(error), ...(code(error) ? { errorCode: code(error) } : {}) });
       }

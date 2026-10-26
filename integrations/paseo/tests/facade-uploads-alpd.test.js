@@ -24,7 +24,7 @@ const deferred = () => { let resolve; const promise = new Promise(r => resolve=r
 async function fixture(t, limits, { manualTurns = false } = {}) {
   const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'alp-facade-files-')));
   const home = path.join(dir, 'home'), project = path.join(dir, 'project');
-  await mkdir(home); await initProject(project);
+  await mkdir(home, { mode: 0o700 }); await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
   if (limits) await writeFile(path.join(home,'attachments.json'), JSON.stringify({limits}));
   const native = [], steers = [], completions = [];
@@ -232,4 +232,36 @@ test('workspace first-agent file is authorized before mutation and delivered as 
   c.send({...request,requestId:'workspace-file'});
   const made=await c.take('workspace.create.response','workspace-file');assert.equal(made.payload.error,null);assert.ok(made.payload.agent?.id);
   await until(()=>f.native.length===1);assert.ok(f.native[0].input.some(x=>x.type==='text'&&x.text.startsWith(ATTACHMENT_HEADER)));
+});
+
+test('creation replay survives a lost socket response and sends one native first prompt', {skip}, async t => {
+  const f = await fixture(t), c = await f.connect();
+  const request = { type: 'create_agent_request', requestId: 'retry-create', config: { provider: 'alp', cwd: f.project }, initialPrompt: 'once' };
+  const held = f.block('session.create');
+  c.send(request); await held.entered.promise;
+  c.send(request); held.release.resolve();
+  await until(() => c.frames.filter(frame => frame.message?.type === 'status' && frame.message.payload?.requestId === request.requestId).length === 2);
+  const first = await c.take('status', request.requestId);
+  assert.equal(first.payload.status, 'agent_created');
+  c.ws.terminate();
+  const reconnect = await f.connect(); reconnect.send(request);
+  assert.equal((await reconnect.take('status', request.requestId)).payload.agentId, first.payload.agentId);
+  assert.equal(f.calls.filter(call => call.method === 'session.create').length, 1);
+  assert.equal(f.calls.filter(call => call.method === 'session.prompt').length, 1);
+  assert.equal(f.native.length, 1);
+});
+
+test('completed workspace creation cannot replay an upload grant to another socket', {skip}, async t => {
+  const f = await fixture(t), c = await f.connect(), other = await f.connect(), file = await f.upload(c);
+  const request = { type: 'workspace.create.request', requestId: 'original', idempotencyKey: 'file-workspace-once', source: { kind: 'directory', path: f.project }, agent: { config: { provider: 'alp', cwd: f.project }, attachments: [file], labels: {} } };
+  c.send(request); const first = await c.take('workspace.create.response', 'original');
+  assert.equal(first.payload.error, null); assert.ok(first.payload.agent?.id);
+  other.send({ ...request, requestId: 'foreign-replay' });
+  const denied = await other.take('workspace.create.response', 'foreign-replay');
+  assert.equal(denied.payload.workspace, null); assert.match(denied.payload.error, /not uploaded/);
+  c.send({ ...request, requestId: 'same-socket-replay' });
+  const again = await c.take('workspace.create.response', 'same-socket-replay');
+  assert.equal(again.payload.error, null); assert.equal(again.payload.agent?.id, first.payload.agent.id);
+  assert.equal(f.calls.filter(call => call.method === 'session.create').length, 1);
+  assert.equal(f.calls.filter(call => call.method === 'session.prompt').length, 1);
 });
