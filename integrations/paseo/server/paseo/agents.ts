@@ -18,6 +18,7 @@ import { firstMessage, messageContent, type MessagePart } from './prompt-content
 import { attachments as attachmentStore } from '@anhlp/alp-client/portable';
 import { createFacadeUploads } from './uploads.js';
 import { uploadRequestId } from '../upload-names.js';
+import { createCreationReceipts, creationDigest, type CreationReceipts, type CreationAttempt } from './create-receipts.js';
 
 /**
  * ALP's roots as Paseo's agents (D31 step 3, ALPD §62). Each root session is one agent of the
@@ -61,7 +62,8 @@ const availableModes = modes.map(mode => ({ id: mode.id, label: mode.label }));
 /** A team's id stands for the model Paseo shows; a custom root shows its own runtime and model. */
 const modelOf = (session: SessionSummary) => session.workflow.mode === 'custom' ? `${session.runtime}:${session.model}` : session.workflow.mode;
 
-export function createAgents({ clientFactory, home, broadcast, directory, log = () => {} }: {
+export function createAgents({ clientFactory, home, broadcast, directory, receipts = createCreationReceipts(home), log = () => {} }: {
+  receipts?: CreationReceipts;
   clientFactory?: (onEvent: (envelope: any) => void) => Promise<DaemonConnection>;
   home?: string;
   broadcast(message: Outbound): void;
@@ -851,25 +853,61 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
     const prepared = prepare(firstMessage(input.initialPrompt, input.images, input.attachments), input.client);
     try {
       prepared.assertActive();
-      const connection = alp!;
-      await fileLimits(prepared, connection);
-      prepared.assertActive();
-      const sessionId = `web-${randomUUID()}`;
-      await connection.request('session.create', { sessionId, ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}), spec: { cwd: config.cwd, persist: true, ...(config.model ? { workflow: config.model } : {}), ...(config.modeId ? { mode: config.modeId } : {}) } });
-      if (config.title) await connection.request('session.rename', { sessionId, title: config.title });
-      await refresh();
-      await ensureTimeline(sessionId);
-      prepared.assertActive();
-      if (prepared.content) {
-        try {
-          const clientMessageId = input.clientMessageId ?? randomUUID();
-          const content = await translate(prepared, sessionId, clientMessageId, connection);
-          prepared.assertActive();
-          const answer = await connection.request('session.prompt', { sessionId, clientMessageId, content });
-          if (answer?.outcome === 'failed') throw new Error(answer.error?.message ?? 'unknown error');
-        } catch (error: any) { throw new Error(`ALP created the agent, but its first message failed: ${error?.message ?? error}`); }
-      }
-      return agentOf(known(sessionId));
+      const { client: _client, creationKey: _key, creationIntent: _intent, attempt: _attempt, ...intent } = input;
+      const execute = async ({ state, checkpoint }: CreationAttempt) => {
+        prepared.assertActive();
+        if (!state.phase || state.phase === 'workspace_created') await checkpoint({ phase: 'create_ready', sessionId: `web-${randomUUID()}`, messageId: input.clientMessageId ?? randomUUID() });
+        const sessionId = state.sessionId!;
+        if (!/^web-[a-f0-9-]{36}$/.test(sessionId ?? '') || !state.messageId) throw new Error('Invalid reserved creation identity');
+        if (state.phase === 'create_pending' || state.phase === 'rename_pending' || state.phase === 'prompt_pending' || state.phase === 'failed') throw new Error(state.error ?? `Creation outcome is unknown for agent ${sessionId}; inspect it before retrying`);
+        if (!['create_ready', 'native_created', 'native_ready', 'done'].includes(state.phase!)) throw new Error('Invalid agent creation receipt; inspect it before retrying');
+        const connection = alp!;
+        if (state.phase === 'create_ready') {
+          await fileLimits(prepared, connection); prepared.assertActive();
+          await checkpoint({ phase: 'create_pending' });
+          try { prepared.assertActive(); }
+          catch (error) { await checkpoint({ phase: 'create_ready' }); throw error; }
+          try {
+            await connection.request('session.create', { sessionId, ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}), spec: { cwd: config.cwd, persist: true, ...(config.model ? { workflow: config.model } : {}), ...(config.modeId ? { mode: config.modeId } : {}) } });
+          } catch (error: any) {
+            // Only this method's received pre-open parameter refusal proves no native create.
+            if (error?.code === -32602) await checkpoint({ phase: 'create_ready' });
+            throw error;
+          }
+          await checkpoint({ phase: 'native_created' });
+        }
+        if (state.phase === 'native_created') {
+          if (config.title) {
+            await checkpoint({ phase: 'rename_pending' });
+            try { prepared.assertActive(); }
+            catch (error) { await checkpoint({ phase: 'native_created' }); throw error; }
+            await connection.request('session.rename', { sessionId, title: config.title });
+          }
+          await checkpoint({ phase: 'native_ready' });
+        }
+        await refresh(); await ensureTimeline(sessionId); prepared.assertActive();
+        if (state.phase !== 'done' && prepared.content) {
+          const clientMessageId = state.messageId!;
+          await checkpoint({ phase: 'prompt_pending' });
+          try {
+            const content = await translate(prepared, sessionId, clientMessageId, connection);
+            prepared.assertActive();
+            const answer = await connection.request('session.prompt', { sessionId, clientMessageId, content });
+            // The native no-store contract resolves with {}; receipt-capable daemons return an outcome.
+            const failed = answer?.outcome !== undefined && answer.outcome !== 'accepted';
+            if (failed || (connection.capabilities?.includes('prompt.receipts') && answer?.outcome !== 'accepted')) {
+              const error = `ALP created the agent, but its first message failed: ${answer?.error?.message ?? 'outcome unknown; inspect the agent before retrying'} (agent ${sessionId})`;
+              await checkpoint({ phase: 'failed', error }); throw new Error(error);
+            }
+          } catch (error: any) {
+            if (state.phase === 'failed') throw error;
+            throw new Error(`ALP created the agent, but its first message failed: ${error?.message ?? error} (agent ${sessionId}; outcome unknown)`);
+          }
+        }
+        if (state.phase !== 'done') await checkpoint({ phase: 'done', agentId: sessionId });
+        return agentOf(known(sessionId));
+      };
+      return await (input.attempt ? execute(input.attempt) : receipts.run('agent', input.creationKey ?? randomUUID(), input.creationIntent ?? intent, !!prepared.content?.some(p => p.type === 'uploaded_file'), (state, checkpoint) => execute({ state, checkpoint })));
     } finally { prepared.release(); }
   }
 
@@ -890,7 +928,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       for (const id of cleared) { const session = roots.get(id); if (session) upsert(session); }
       return cleared;
     },
-    validateFirst(input) { const p = prepare(firstMessage(input.initialPrompt, input.images, input.attachments), input.client); p.release(); },
+    validateFirst(input) { if (input.config.provider !== PROVIDER) throw new Error(`ALP runs its own teams; ${input.config.provider} is not one of them`); const p = prepare(firstMessage(input.initialPrompt, input.images, input.attachments), input.client); p.release(); },
     create: input => create(input),
   };
 
@@ -1055,7 +1093,10 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       try {
         await started;
         const workspaceId = message.workspaceId;
-        const agent = await create({ config, client, ...(workspaceId ? { workspaceId } : {}), ...(message.initialPrompt ? { initialPrompt: message.initialPrompt } : {}), ...(message.clientMessageId ? { clientMessageId: message.clientMessageId } : {}), ...(message.images ? { images: message.images } : {}), ...(message.attachments ? { attachments: message.attachments } : {}) });
+        // Fingerprint the complete received intent, including fields this facade does not interpret.
+        const { requestId: _requestId, idempotencyKey, ...intent } = message as typeof message & { idempotencyKey?: string };
+        view.validateFirst?.({ ...message, client }); client.assertActive?.();
+        const agent = await create({ config, client, creationIntent: intent, creationKey: `request:${creationDigest(idempotencyKey ?? message.requestId)}`, ...(workspaceId ? { workspaceId } : {}), ...(message.initialPrompt ? { initialPrompt: message.initialPrompt } : {}), ...(message.clientMessageId ? { clientMessageId: message.clientMessageId } : {}), ...(message.images ? { images: message.images } : {}), ...(message.attachments ? { attachments: message.attachments } : {}) });
         client.emit({ type: 'status', payload: { status: 'agent_created', requestId: message.requestId, agentId: agent.id, agent } });
       } catch (error) {
         return fail(error);
@@ -1321,6 +1362,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, log = 
       clearRefresh();
       alp?.close();
       alp = undefined;
+      return receipts.close();
     },
   };
 }

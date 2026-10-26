@@ -15,6 +15,7 @@ import { createUsage } from './usage.js';
 import { createWorkspaces } from './workspaces.js';
 import { createDaemonConfig, createRelay, type RelaySettings } from './relay.js';
 import { createProviders } from './providers.js';
+import { createCreationReceipts } from './create-receipts.js';
 
 
 export { createPaseoGateway, NOT_IMPLEMENTED, PASEO_PROTOCOL_VERSION } from './gateway.js';
@@ -73,8 +74,9 @@ export function createPaseoBridge({ clientFactory, version, token, serverId, hom
     },
   });
   const broadcast = (message: Parameters<typeof gateway.broadcast>[0]) => gateway.broadcast(message);
-  const workspaces = createWorkspaces({ rpc: (method, params) => agents.request(method, params), broadcast, agents: () => agents.view, inDevelopment, log });
-  const agents = createAgents({ clientFactory, home, broadcast, directory: workspaces, log });
+  const receipts = createCreationReceipts(home ?? alpHome());
+  const workspaces = createWorkspaces({ rpc: (method, params) => agents.request(method, params), broadcast, agents: () => agents.view, inDevelopment, receipts, log });
+  const agents = createAgents({ clientFactory, home, broadcast, directory: workspaces, receipts, log });
   const readUsage = async (refresh = false) => {
     if (clientFactory) {
       const connection = await clientFactory(() => {});
@@ -108,7 +110,7 @@ export function createPaseoBridge({ clientFactory, version, token, serverId, hom
 
   return Object.assign(gateway, {
     relay,
-    close: () => { agents.uploads.close(); agents.close(); checkouts.close(); terminals.close(); void relay.stop(); return workspaces.close(); },
+    close: async () => { await receipts.close(); agents.uploads.close(); await agents.close(); checkouts.close(); terminals.close(); await relay.stop(); await workspaces.close(); },
     scripts: { '/alp-plugins.js': plugins.script },
   });
 }
