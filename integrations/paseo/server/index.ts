@@ -30,6 +30,6 @@ export default function contribute(server: PluginServerContext) {
   // While Paseo runs, alpd runs: started now, and again whenever it goes down, unless the user stopped it (ALPD §40).
   const stop = process.env.ALP_SUPERVISE === '0'
     ? async () => {}
-    : superviseDaemon({ home: alpHome(), entry: () => daemonEntry(), log: message => createLogger({ component: 'alp-plugin' }).warn(message, { code: 'ALP_DAEMON_SUPERVISION' }) });
+    : superviseDaemon({ home: alpHome(), entry: () => daemonEntry(), by: 'Paseo', log: message => createLogger({ component: 'alp-plugin' }).warn(message, { code: 'ALP_DAEMON_SUPERVISION' }) });
   return () => stop();
 }

@@ -61,14 +61,16 @@ export async function startDaemon({ home, entry, env = process.env, timeoutMs = 
  * Starts alpd now and starts it again whenever it is found down on `misses` checks in a
  * row, `intervalMs` apart, unless the user holds it. Two misses let `alp daemon restart`
  * and `install` finish their own stop and start first. Returns a function that stops
- * watching, and resolves once a start it began has settled; alpd keeps running.
+ * watching, and resolves once a start it began has settled; alpd keeps running. `by` names the
+ * caller in the log line of the first start ("alpd started with <by>").
  */
-export function superviseDaemon({ home, entry, env = process.env, intervalMs = 5_000, misses = 2, log = () => {} }) {
+export function superviseDaemon({ home, entry, env = process.env, intervalMs = 5_000, misses = 2, log = () => {}, by }) {
   let stopped = false;
   let missed = 0;
   let starting;
-  const start = reason => {
-    starting ??= startDaemon({ home, entry: typeof entry === 'function' ? entry() : entry, env, automatic: reason !== 'started with Paseo' })
+  // The first start is the caller's own request (it lifts a hold); later ones are automatic.
+  const start = (reason, automatic = true) => {
+    starting ??= startDaemon({ home, entry: typeof entry === 'function' ? entry() : entry, env, automatic })
       .then(socket => { if (socket) log(`alpd ${reason}`); }, error => log(`could not start alpd: ${error?.message ?? error}`))
       .finally(() => { starting = undefined; missed = 0; });
     return starting;
@@ -80,7 +82,8 @@ export function superviseDaemon({ home, entry, env = process.env, intervalMs = 5
     // Stopped while this check looked: start nothing.
     if (++missed >= misses && !stopped) await start('was down; started it again');
   };
-  const initial = start('started with Paseo');
+  // `by` names the supervising service in the log, for example `Paseo` or `alp web`.
+  const initial = start(by ? `started with ${by}` : 'started', false);
   const timer = setInterval(() => { void check(); }, intervalMs);
   timer.unref?.();
   const stop = () => { stopped = true; clearInterval(timer); return starting ?? Promise.resolve(); };

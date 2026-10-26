@@ -1,6 +1,7 @@
 // Copied into an isolated tarball consumer. Only installed APIs and Node builtins are used.
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import path from 'node:path';
@@ -25,8 +26,20 @@ try {
   const lock = await readLock(home);
   const client = await connect(lock.socket);
   try { assert.equal((await client.request('daemon.status')).pid, lock.pid); } finally { client.close(); }
-  // A missing optional integration gives installation guidance and leaves alpd working.
-  assert.throws(() => run('web', '--print'), /optional integration package/);
+  // alp web runs alp-web, which ships in the CLI as dist/alp-web.js: no optional integration is
+  // needed. A CLI built from a core-only source (no apps/gateway or apps/web, as
+  // core-standalone-smoke builds it) has no alp-web and must say so; package-smoke covers the full build.
+  if (existsSync(path.join(path.dirname(cli), 'alp-web.js'))) {
+    const printed = run('web', '--print').trim().split('\n').pop();
+    const match = /^(http:\/\/127\.0\.0\.1:\d+)\/#token=(alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43})$/.exec(printed);
+    assert.ok(match, `alp web --print: ${printed}`);
+    const ticket = await fetch(`${match[1]}/v1/tickets`, { method: 'POST', headers: { authorization: `Bearer ${match[2]}` } });
+    assert.equal(ticket.status, 201, 'the printed token is a live credential');
+    await ticket.body?.cancel();
+    assert.equal(JSON.parse(await readFile(path.join(home, 'web.json'), 'utf8')).app, 'alp-web');
+  } else {
+    assert.throws(() => run('web', '--print'), /alp web is not built: .*alp-web\.js is missing/);
+  }
   run('daemon', 'status');
 
   child = spawn(process.execPath, [cli, 'acp'], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -55,8 +68,14 @@ try {
   assert.equal((await request('session/prompt', { sessionId, prompt: [{ type: 'text', text: 'fake:say isolated-cli-ok' }] })).stopReason, 'end_turn');
   assert.ok(updates.filter(update => update.sessionUpdate === 'agent_message_chunk').map(update => update.content.text).join('').includes('isolated-cli-ok'), 'installed alp acp streams the fake provider response');
   assert.equal(await readFile(path.join(home, 'integrations/paseo.json')).catch(() => undefined), undefined);
-  console.log('INSTALLED_CLI_OK init/upgrade + daemon + IPC + ACP stdio handshake/prompt/stream; no Paseo');
+  console.log('INSTALLED_CLI_OK init/upgrade + daemon + IPC + alp web (alp-web) + ACP stdio handshake/prompt/stream; no Paseo');
 } finally {
   child?.kill();
+  // alp-web keeps alpd up; stop it first (its own lock and web.json name it), then alpd.
+  const web = await readFile(path.join(home, 'web.json'), 'utf8').then(JSON.parse, () => undefined);
+  if (web?.app === 'alp-web' && Number.isSafeInteger(web.pid)) {
+    try { process.kill(web.pid, 'SIGTERM'); } catch {}
+    for (let i = 0; i < 200; i++) { try { process.kill(web.pid, 0); } catch { break; } await new Promise(resolve => setTimeout(resolve, 50)); }
+  }
   run('daemon', 'stop');
 }

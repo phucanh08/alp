@@ -9,4 +9,6 @@ export function superviseDaemon(options: {
   intervalMs?: number;
   misses?: number;
   log?: (message: string) => void;
+  /** Who keeps alpd up, for the log: "alpd started with <by>". */
+  by?: string;
 }): (() => Promise<void>) & { started: Promise<void> };

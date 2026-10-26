@@ -405,7 +405,7 @@ async function integrationCandidateFromHome(home, name) {
 }
 
 function integrationBinaryName(name) {
-  return name === 'web' ? 'alp-web-integration' : `alp-${name}-integration`;
+  return `alp-${name}-integration`;
 }
 
 /** Distribution roots that may carry a bundled integration descriptor. */
@@ -429,14 +429,26 @@ async function distributionRoots() {
   return [...new Set(roots)];
 }
 
+/**
+ * The entry of integration `name`: an environment override, a descriptor under the home or a
+ * distribution root, or an `alp-<name>-integration` binary. Discovery never returns an entry for
+ * `web`: that name belongs to alp-web, which ships with the CLI and is started with its explicit
+ * entry. Everything once registered under `web` (the descriptor `integrations/web.json`, the
+ * `alp-web-integration` binary, `ALP_WEB_INTEGRATION`) is the Paseo integration from before its
+ * rename to `paseo`, which must never run under the web lock. `ALP_WEB_INTEGRATION` is read for
+ * `paseo` only, after `ALP_PASEO_INTEGRATION`, for one release (like the alp-web-integration alias).
+ * @param {string} [name]
+ * @param {{ home?: string }} [options]
+ */
 export async function discoverIntegration(name = 'web', options = {}) {
   // The name becomes a descriptor path under <home>/integrations, so it must stay one safe segment.
   assertIntegrationName(name);
-  // Explicit environment override always wins.
+  if (name === 'web') return undefined;
+  // Explicit environment override always wins: the integration's own, then the generic one.
   const envCandidates = [
-    process.env.ALP_WEB_INTEGRATION,
+    process.env[`ALP_${name.toUpperCase()}_INTEGRATION`],
+    name === 'paseo' ? process.env.ALP_WEB_INTEGRATION : undefined,
     process.env.ALP_INTEGRATION_ENTRY,
-    name !== 'web' ? process.env[`ALP_${name.toUpperCase()}_INTEGRATION`] : undefined,
   ].filter(Boolean);
   for (const candidate of envCandidates) if (await isFile(candidate)) return candidate;
 
@@ -471,30 +483,61 @@ function integrationAlive(lock) {
 }
 
 /**
- * Starts integration `name` (default `web`) detached with `--service` unless its lock already names a
- * live owner, then waits until its ready lock and `<home>/<name>.json` name the same pid. `entry`
- * names the script to run with this Node and skips descriptor, environment and PATH discovery.
- * @param {string | { name?: string, entry?: string, home?: string }} [nameOrOptions]
+ * What startIntegration says about integration `name`, and where its service writes its log: alp-web
+ * (`web`) is part of the CLI, Paseo (`paseo`) an optional package, anything else named as is.
+ * @param {string} name
+ * @param {string} home
+ */
+function integrationText(name, home) {
+  const logs = path.join(home, 'logs', 'integrations');
+  if (name === 'web') return {
+    what: 'alp web',
+    log: path.join(logs, 'alp-web.log'),
+    missing: 'alp web runs the alp-web service of the ALP CLI, which is started with its entry (packages/cli/dist/alp-web.js); run `alp web`',
+  };
+  if (name === 'paseo') return {
+    what: 'The Paseo integration',
+    log: path.join(logs, 'paseo.log'),
+    missing: 'The Paseo integration is an optional integration package. Install it (for example `npm install -g @anhlp/alp-paseo@beta`), then run the command again.',
+  };
+  return {
+    what: `ALP integration ${name}`,
+    log: path.join(logs, `${name}.log`),
+    missing: `ALP integration ${name} is not installed: no ALP_${name.toUpperCase()}_INTEGRATION, descriptor <home>/integrations/${name}.json or alp-${name}-integration binary was found.`,
+  };
+}
+
+/**
+ * Starts integration `name` (default `web`) detached with `--service` (then `args`) unless its lock
+ * already names a live owner, then waits until its ready lock and `<home>/<name>.json` name the same
+ * pid. `entry` names the script to run with this Node and skips descriptor, environment and PATH
+ * discovery; `web` (alp-web) is never discovered, so it needs its entry. `"web": { "enabled": false }`
+ * in the home's settings.json refuses `web` only.
+ * @param {string | { name?: string, entry?: string, home?: string, args?: string[] }} [nameOrOptions]
  */
 export async function startIntegration(nameOrOptions = 'web') {
   const options = typeof nameOrOptions === 'string' ? { name: nameOrOptions } : (nameOrOptions ?? {});
   const name = assertIntegrationName(options.name ?? 'web');
   if (options.entry !== undefined && (typeof options.entry !== 'string' || !options.entry)) throw new TypeError('startIntegration entry must be a non-empty path');
+  const args = options.args ?? [];
+  if (!Array.isArray(args) || !args.every(arg => typeof arg === 'string')) throw new TypeError('startIntegration args must be a list of strings');
   const fs = await import('node:fs/promises');
   const pathMod = await import('node:path');
   const home = options.home ? pathMod.resolve(options.home) : alpHome();
+  const text = integrationText(name, home);
   // An explicit entry is the caller's own service script: it must exist even when a live owner is
   // reused, and it replaces descriptor, environment and PATH discovery.
   const explicit = options.entry !== undefined ? pathMod.resolve(options.entry) : undefined;
-  if (explicit !== undefined && !(await isFile(explicit))) throw new Error(`ALP integration entry not found: ${explicit}`);
+  if (explicit !== undefined && !(await isFile(explicit))) throw new Error(`${text.what}: integration entry not found: ${explicit}`);
   const lockPath = pathMod.join(home, 'integrations', `${name}.lock`);
   const webPath = pathMod.join(home, `${name}.json`);
+  const started = explicit ? ` (entry ${explicit})` : '';
 
-  // Clear, actionable diagnostics for a disabled optional integration.
-  let settings = {};
-  try { settings = JSON.parse(await fs.readFile(pathMod.join(home, 'settings.json'), 'utf8')); } catch {}
-  if (settings?.web?.enabled === false) {
-    throw new Error('ALP web app is disabled by settings ("web.enabled": false).');
+  // web.enabled turns off alp web only; other integrations have their own switches.
+  if (name === 'web') {
+    let settings = {};
+    try { settings = JSON.parse(await fs.readFile(pathMod.join(home, 'settings.json'), 'utf8')); } catch {}
+    if (settings?.web?.enabled === false) throw new Error('alp web is disabled by settings ("web.enabled": false).');
   }
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -505,7 +548,7 @@ export async function startIntegration(nameOrOptions = 'web') {
     try { return JSON.parse(await fs.readFile(webPath, 'utf8')); } catch { return undefined; }
   };
 
-  // The authoritative check: the ready integration lock and live web.json must name the same pid.
+  // The authoritative check: the ready integration lock and live <name>.json must name the same pid.
   // A loser of a concurrent start accepts the winning pid after its own contender has exited or
   // the lock already names the winner.
   async function waitForReady() {
@@ -519,9 +562,9 @@ export async function startIntegration(nameOrOptions = 'web') {
       await sleep(100);
     }
     const lock = await readLock();
-    if (lock && !lock.ready) throw new Error('ALP web integration started but did not become ready; see ~/.alp/logs/integrations/paseo.log');
-    if (!lock) throw new Error('ALP web app is provided by an optional integration package. Install it (for example `npm install -g @anhlp/alp-paseo@beta`) and run `alp web` again.');
-    throw new Error(`ALP web integration did not publish a matching ${name}.json lock`);
+    if (lock && !lock.ready) throw new Error(`${text.what}${started} started but did not become ready; see ${text.log}`);
+    if (!lock) throw new Error(explicit ? `${text.what}${started} did not start; see ${text.log}` : text.missing);
+    throw new Error(`${text.what}${started} did not publish a ${name}.json matching its lock; see ${text.log}`);
   }
 
   const existing = await readLock();
@@ -530,15 +573,13 @@ export async function startIntegration(nameOrOptions = 'web') {
   }
 
   const entry = explicit ?? await discoverIntegration(name, { home });
-  if (!entry) {
-    throw new Error('ALP web app is provided by an optional integration package. Install it (for example `npm install -g @anhlp/alp-paseo@beta`) and run `alp web` again.');
-  }
+  if (!entry) throw new Error(text.missing);
 
   const { spawn } = await import('node:child_process');
   // The child is detached with its stdio ignored, so it cannot rely on the parent's console. `--service`
   // is the generic contract: the entry writes its own log (the path its error messages advertise) and
   // keeps the process alive as a service. `--register` still prints to stdout and is not passed here.
-  const child = spawn(process.execPath, [entry, '--service'], { stdio: 'ignore', detached: true, env: { ...process.env, ALP_HOME: home } });
+  const child = spawn(process.execPath, [entry, '--service', ...args], { stdio: 'ignore', detached: true, env: { ...process.env, ALP_HOME: home } });
   let spawnError = null;
   child.on('error', error => { spawnError = error; });
   let exited = false;
@@ -549,7 +590,7 @@ export async function startIntegration(nameOrOptions = 'web') {
   // Give the process a moment to fail immediately on missing entry or bad permissions.
   await sleep(150);
   if (spawnError) throw spawnError;
-  if (exited) throw new Error('ALP web integration failed to start; see ~/.alp/logs/integrations/paseo.log');
+  if (exited) throw new Error(`${text.what}${explicit ? started : ` (${entry})`} failed to start; see ${text.log}`);
 
   return waitForReady();
 }

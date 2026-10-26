@@ -10,7 +10,8 @@ const USAGE = `Usage:
   alp daemon status [--json]             liveness and readiness; exit 0 ready, 3 not running, 4 not ready
   alp daemon <install|uninstall>         run alpd as a login service that restarts after a crash
   alp acp                                serve ALP to an editor (Zed, JetBrains) over the Agent Client Protocol on stdio
-  alp web [--print]                      open the local web app alpd serves; --print only prints its address
+  alp web [--print]                      open the ALP web app on this machine (alp-web, loopback); --print only prints its address
+  alp web rotate                         give alp web a new token: open pages lose access; prints the new address
   alp web pair [--on|--off]              the link that pairs Paseo's app on another device through the relay; --on or --off turns the relay on or off
   alp terminal <allow [--paseo] --yes|deny [--paseo]|status> [--json]   remote terminals (a shell as you on this host; a workspace is not a sandbox), off by default
   alp doctor [--project DIR] [--fix] [--json]   check this machine and project; --fix repairs what is safe to

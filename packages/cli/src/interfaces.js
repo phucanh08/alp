@@ -1,14 +1,17 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { alpHome, discoverIntegration, lockAlive, readLock, startIntegration } from '@anhlp/alp-client/index';
+import { alpHome, discoverIntegration, startIntegration } from '@anhlp/alp-client/index';
 import { UsageError } from './usage.js';
 import { built, start, running } from './daemon.js';
 import { DAEMON_ENTRY, distributionEntry } from './paths.js';
+import { alpWebEntry, refusal, stopPreRenamePaseo, stopWebService, webOwner } from './web-service.js';
 
 /** The Paseo integration (its web app, bridge and relay) runs as integration `paseo`. */
 const PASEO = 'paseo';
+/** alp-web (packages/cli/src/web), the service behind `alp web`, runs as integration `web`. */
+const WEB = 'web';
 
 /**
  * Starts the Paseo integration. For one release, a home that still has only the descriptor
@@ -50,39 +53,95 @@ async function legacyDescriptorEntry(file, home) {
   return undefined;
 }
 
+/** `--project <cwd>` when the directory `alp web` runs in is an ALP project: its grant then covers it. */
+async function projectArgs() {
+  const cwd = process.cwd();
+  return await stat(path.join(cwd, '.alp')).then(info => info.isDirectory(), () => false) ? ['--project', cwd] : [];
+}
+
+/** Whether settings.json turns alp web off. @param {string} home */
+async function webDisabled(home) {
+  const settings = await readFile(path.join(home, 'settings.json'), 'utf8').then(text => JSON.parse(text), () => undefined);
+  return settings?.web?.enabled === false;
+}
+
+const DISABLED = 'alp web is disabled by settings ("web.enabled": false).';
+
+/**
+ * Starts alp-web unless it runs and returns the address to open, the token in its fragment (which
+ * the browser never sends to a server). The Paseo integration from before its rename, still running
+ * as integration `web`, is stopped first.
+ * @param {string} home @param {string} entry
+ */
+async function serveWeb(home, entry) {
+  await stopPreRenamePaseo(home);
+  // A lock held by a process proven not to be alp web: say so now rather than wait for it. A
+  // running alp-web (its web.json names the lock's pid) is left to startIntegration, whatever the
+  // proof says, so a clock step can never keep alp web from reusing it.
+  const held = await webOwner(home);
+  const published = await readFile(path.join(home, 'web.json'), 'utf8').then(text => JSON.parse(text), () => undefined);
+  const claimed = published?.app === 'alp-web' && published.pid === (await readFile(path.join(home, 'integrations', 'web.lock'), 'utf8').then(text => JSON.parse(text)?.pid, () => undefined));
+  if ('reason' in held && held.alive && held.kind === 'foreign' && !claimed) throw new Error(`${refusal(home)} (${held.reason}). Stop it, then run alp web again.`);
+  let lock;
+  try { lock = await startIntegration({ name: WEB, entry, home, args: await projectArgs() }); }
+  catch (error) {
+    // Still held by a live process alp cannot prove: name it, as the wait may have been for it.
+    const owner = await webOwner(home);
+    if ('reason' in owner && owner.alive) throw new Error(`${error?.message ?? error}\n${refusal(home)} (${owner.reason}). If it is not alp web, stop it, then run alp web again.`, { cause: error });
+    throw error;
+  }
+  const info = await readFile(path.join(home, 'web.json'), 'utf8').then(text => JSON.parse(text), () => undefined);
+  if (info?.app !== 'alp-web' || info.pid !== lock.pid) {
+    const owner = await webOwner(home);
+    throw new Error(`${refusal(home)}${'reason' in owner ? ` (${owner.reason})` : ''}. Stop pid ${lock.pid}, then run alp web again.`);
+  }
+  if (typeof info.url !== 'string' || typeof info.token !== 'string') throw new Error(`alp web published no address; see ${path.join(home, 'logs', 'integrations', 'alp-web.log')}`);
+  return `${info.url}#token=${info.token}`;
+}
+
 async function webCommand(args) {
   if (args[0] === 'pair') return pairCommand(args.slice(1));
+  if (args[0] === 'rotate') return rotateCommand(args.slice(1));
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { print: { type: 'boolean' } } });
   if (positionals.length) throw new UsageError();
-  const lock = await readLock(alpHome()).catch(() => undefined);
-  await start();
-  try {
-    const settings = JSON.parse(await readFile(path.join(alpHome(),'settings.json'),'utf8'));
-    if (settings?.web?.enabled === false) throw new Error('ALP web app is disabled by settings ("web.enabled": false).');
-  } catch (error) { if (/disabled by settings/.test(error?.message ?? '')) throw error; }
-  // The web app is owned by the optional Paseo integration.
+  const entry = alpWebEntry();
   const home = alpHome();
-  await startPaseoIntegration(home);
-  const file = path.join(home, `${PASEO}.json`);
-  let info;
-  // A fresh integration writes paseo.json just before it is ready; stale files from daemon or an older pid are rejected.
-  for (let i = 0; i < 100; i++) {
-    info = await readFile(file, 'utf8').then(JSON.parse).catch(() => undefined);
-    let alive = false;
-    try { if (info?.pid) { process.kill(info.pid, 0); alive = true; } } catch { alive = false; }
-    let integrationPid = undefined;
-    try { integrationPid = JSON.parse(await readFile(path.join(home, 'integrations', `${PASEO}.lock`), 'utf8'))?.pid; } catch {}
-    if (info?.token && info?.url && alive && info.pid !== lock?.pid && (!integrationPid || info.pid === integrationPid)) break;
-    info = undefined;
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-  if (!info) throw new Error(lockAlive(lock) ? 'alpd serves no web app: it is older than this alp (alp daemon restart), or "web": { "enabled": false } is set in ~/.alp/settings.json' : 'alpd started without its web app; see ~/.alp/logs/alpd.log');
-  // The token rides in the fragment, which the browser never sends to a server.
-  const url = `${info.url}#token=${info.token}`;
+  if (await webDisabled(home)) throw new Error(DISABLED);
+  await start();
+  const url = await serveWeb(home, entry);
   console.log(url);
   if (values.print) return;
   const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
   spawn(opener, [url], { stdio: 'ignore', detached: true }).on('error', () => console.error('Open the address above in your browser')).unref();
+}
+
+/**
+ * alp web rotate: alp web's token is replaced and the old one revoked, so every open page loses
+ * access. Only the process holding the web lock writes alp web's credentials, so the service is
+ * stopped first; `alp-web.js --rotate` then takes the lock, replaces the credential, records the
+ * new token in web.json and releases the lock, and the service starts again with it.
+ */
+async function rotateCommand(args) {
+  if (args.length) throw new UsageError();
+  const entry = alpWebEntry();
+  const home = alpHome();
+  await start();
+  const project = await projectArgs();
+  for (let attempt = 1; ; attempt++) {
+    await stopWebService(home);
+    const rotated = await new Promise(resolve => {
+      execFile(process.execPath, [entry, '--rotate', ...project], { env: { ...process.env, ALP_HOME: home }, encoding: 'utf8', timeout: 60_000, killSignal: 'SIGTERM' },
+        (error, stdout, stderr) => resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, output: `${stderr}${stdout}`.trim() }));
+    });
+    if (rotated.code === 0) break;
+    // Exit 3: alp web started again between the stop and the rotation; stop it once more.
+    if (rotated.code !== 3 || attempt >= 3) throw new Error(`alp web could not rotate its token${rotated.output ? `:\n${rotated.output.slice(-2000)}` : ''}`);
+  }
+  if (await webDisabled(home)) {
+    console.log(`alp web has a new token; the old one no longer works. ${DISABLED.replace(/\.$/, '')}, so it was not started.`);
+    return;
+  }
+  console.log(await serveWeb(home, entry));
 }
 
 /**

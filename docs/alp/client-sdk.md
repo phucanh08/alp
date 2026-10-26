@@ -173,7 +173,7 @@ alp.onEvent(envelope => { if (envelope.cursor !== undefined) cursor = envelope.c
 | `client.request/onEvent/onRequest/onClose/close/closed` | Có, cùng ngữ nghĩa | như cũ, thêm `onNotification`, `pendingCount`, `{ signal, timeoutMs }` |
 | `PROTOCOL_VERSION`, `MAX_FRAME`, `AlpRpcError`, `encodeFrame` | Có | `@anhlp/alp-client/portable` (trừ `encodeFrame`: dùng `@anhlp/alp-protocol`) |
 | `alpHome`, `daemonPaths`, `assertPrivateDirectory`, `assertPrivateSocket`, lock, `ensureDaemon`, `findDaemonEntry`, `discoverIntegration`, `startIntegration` | Có, Node-only | không có bản portable (không thuộc remote) |
-| `startIntegration({ name, entry, home })` | Mới: `entry` chạy script đó với `--service`, bỏ qua descriptor/biến môi trường/PATH | không truyền `entry` thì như cũ |
+| `startIntegration({ name, entry, home, args })` | Mới: `entry` chạy script đó với `--service` rồi `args`, bỏ qua descriptor/biến môi trường/PATH. `web` (alp-web của CLI) không bao giờ được discover nên cần `entry`; `web.enabled: false` chỉ chặn `web` | không truyền `entry` thì như cũ, trừ `web`. `ALP_WEB_INTEGRATION` chỉ còn áp cho `paseo` (sau `ALP_PASEO_INTEGRATION`), trong một bản phát hành |
 | `createIntegrationLock(home, name)` | Mới, Node-only: `@anhlp/alp-client/integration-lock` (chuyển từ plugin Paseo) | khóa `integrations/<name>.lock`, guard `<name>.lock.reclaim` |
 | `./supervise`, `./doctor`, `./service`, `./setup`, `./render`, `./command`, `./prompt`, probes | Có, Node-only | không đổi |
 
