@@ -109,11 +109,27 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
 
 ### 4.2 Credential và dữ liệu
 
-- Token chỉ nằm trong field private `#token` của `Controller`.
-  - Không lưu vào URL, localStorage, sessionStorage hay cookie.
+- Khi kết nối, token nằm trong field private `#token` của `Controller`.
   - Không ghi log. Request ticket gửi `credentials: 'omit'`, `cache: 'no-store'`,
     `redirect: 'error'`, `referrerPolicy: 'no-referrer'`.
-  - E2E kiểm tra token không có trong storage, URL và log gateway.
+  - Không bao giờ lưu vào localStorage hay cookie.
+- Token gõ vào form chỉ nằm trong bộ nhớ: reload hay đóng tab là mất.
+- Link của `alp web` (`http://127.0.0.1:<port>/#token=alpgw1.…`, `src/lib/link-token.js`):
+  - Khi trang load, `main.tsx` đọc `#token=` và kiểm tra dạng `alpgw1.<16 hex>.<43 base64url>`.
+  - Fragment bị xóa ngay bằng `history.replaceState`, trước khi render, kể cả khi token hỏng.
+  - Token hợp lệ được giữ trong sessionStorage của tab (key `alp-web:link-token`). Reload tab đó
+    kết nối lại; tab khác và lần mở sau không thấy token.
+  - App kết nối tới `location.origin` (alp-web vừa serve trang), chỉ khi trang ở loopback
+    (`127.0.0.1`, `localhost`). Ngoài loopback, app không giữ và không dùng token của link.
+  - Lần kết nối đầu không có form: app chờ alp-web lên (retry với backoff) và có nút
+    "Use another access token".
+  - Gateway từ chối token (401, sau `alp web rotate` hay revoke): app xóa token khỏi
+    sessionStorage và hiện form với thông báo "This link's access token is no longer valid. Run
+    `alp web` again…". Lỗi terminal khác (origin, TLS) giữ token cho lần reload sau.
+  - Gateway đóng socket với 4403 (grant đổi, ví dụ alp-web thêm project mới): app tự nối lại với
+    cùng token và nhận grant mới.
+  - Disconnect hoặc kết nối bằng form thì xóa token của link. `pagehide` thì giữ để reload dùng lại.
+- E2E kiểm tra token không có trong localStorage, URL, Referer, console và log.
 - localStorage chỉ giữ ba key, không key nào chứa token hay secret:
   - `alp-web:gateway`: địa chỉ gateway;
   - `alp-web:preferences` (`src/lib/preferences.js`): Default send, theme (System/Light/Dark),
@@ -125,7 +141,8 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
     mặc định), và chỉ ghi các field đã biết.
 - Disconnect, `pagehide` hoặc lỗi xác thực:
   - dừng reconnect và mọi timer;
-  - xóa token, cây session, hàng đợi và state về ban đầu.
+  - xóa token trong bộ nhớ, cây session, hàng đợi và state về ban đầu;
+  - token của link trong sessionStorage: xem ở trên.
 - Settings có Reset để về mặc định.
 
 ### 4.3 Chat theo logic của Paseo
@@ -238,6 +255,7 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
 |---|---|
 | "allows this page's origin" | Thêm đúng origin của trang: `alp-gateway serve --origin <scheme://host:port>`. |
 | "refused this access token" | Token sai, đã bị rotate hoặc revoke: `alp-gateway credential list`; cấp token mới. |
+| "This link's access token is no longer valid" | Token của `alp web` đã bị `alp web rotate`: chạy `alp web` lại để mở link mới. |
 | `tls_required` | Truy cập từ ngoài loopback mà không có HTTPS: dùng reverse proxy TLS hoặc SSH tunnel. |
 | Banner "Reconnecting…" kéo dài | Gateway hoặc alpd đang dừng. Work trên host vẫn chạy; app tự nối lại và tiếp tục sau cursor. |
 | "can only drive sessions in … mode" | Credential bị giới hạn `--mode`; session chạy mode khác. Tạo session với mode được phép. |
@@ -271,6 +289,8 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
       settings;
     - recovery;
     - access: token sai, chỉ đọc, giới hạn mode, workspace khác, revoke, origin không được phép;
+    - local: `alp web --print` với CLI đã build, link tự kết nối, hash rỗng, token chỉ ở
+      sessionStorage, reload, 4403 khi thêm project, `alp web rotate`;
     - chat, new-session, settings, tabs, workspace;
     - mobile.
 - Chạy E2E: `npm ci` ở gốc repo một lần (workspace dùng chung `node_modules` gốc), rồi

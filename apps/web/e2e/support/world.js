@@ -68,19 +68,21 @@ async function stop(child) {
 }
 
 /**
- * @param {{ webPort?: number, gatewayPort?: number, provider?: 'fake' | 'real', serveWeb?: boolean, worktrees?: boolean, terminal?: boolean }} [options]
+ * @param {{ webPort?: number, gatewayPort?: number, provider?: 'fake' | 'real', serveWeb?: boolean, worktrees?: boolean, terminal?: boolean, gateway?: boolean, settings?: object }} [options]
+ *   gateway: false starts no standalone alp-gateway and creates no credentials (a spec that runs
+ *   `alp web`, whose service is its own gateway). settings: the host's settings.json.
  *   terminal (#121 H): the host's owner allows remote terminals (alp terminal allow --yes writes
  *   <home>/terminal.json, 0600) before alpd starts, alpd's shell is /bin/sh, and the credential
  *   `terminal` holds terminal.exec.
  */
-export async function startWorld({ webPort, gatewayPort, provider = 'fake', serveWeb = true, worktrees = false, terminal = false } = {}) {
+export async function startWorld({ webPort, gatewayPort, provider = 'fake', serveWeb = true, worktrees = false, terminal = false, gateway: standalone = true, settings: hostSettings = {} } = {}) {
   for (const file of [ALPD, CLI]) if (!existsSync(file)) throw new Error(`${path.relative(REPOSITORY, file)} is missing: run npm run build:alp-web:e2e-deps (node scripts/build-workspace.mjs cli && node scripts/build-workspace.mjs daemon)`);
   if (serveWeb && !existsSync(path.join(WEB, 'dist/index.html'))) throw new Error('apps/web/dist is missing: run npm run build:alp-web');
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-web-e2e-'));
   const home = path.join(directory, 'home');
   const gatewayHome = path.join(directory, 'gateway');
   await mkdir(home, { mode: 0o700 });
-  await writeFile(path.join(home, 'settings.json'), '{}');
+  await writeFile(path.join(home, 'settings.json'), JSON.stringify(hostSettings));
   const journal = path.join(directory, 'codex.jsonl');
   const env = { ...process.env, ALP_HOME: home, ALP_GATEWAY_HOME: gatewayHome, ALP_LOG_LEVEL: 'info' };
   // Fail before any CLI/daemon starts if fixture paths ever escape its owned root.
@@ -147,7 +149,7 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     const { stdout } = await run(process.execPath, [GATEWAY, 'credential', 'create', '--label', label, ...extra, '--json'], { env });
     return JSON.parse(stdout);
   };
-  const created = {
+  const created = !standalone ? {} : {
     libraryWriter: await credential('library-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'project.read', '--permission', 'library.write']),
     worktreeWriter: await credential('worktree-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'workspace.write', '--permission', 'workspace.manage','--worktree-mapping','browser']),
     registryWriter: await credential('registry-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'workspace.write']),
@@ -196,7 +198,7 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     }
     throw new Error('gateway never became ready');
   }
-  await startGateway();
+  if (standalone) await startGateway();
 
   const web = serveWeb ? await serveStatic(path.join(WEB, 'dist'), webPort) : undefined;
 
@@ -248,6 +250,10 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     webUrl: webOrigin,
     gatewayUrl: `http://127.0.0.1:${gatewayPort}`,
     get socket() { return socket; },
+    /** The environment every process of this host runs with (its ALP_HOME, the fake runtimes). */
+    env,
+    /** The built alp CLI. */
+    cli: CLI,
     /** alpd's process id now (a restart changes it), to find what it started. */
     get daemonPid() { return daemon?.pid; },
     /** Runs the alp CLI on the host as its owner would. */
