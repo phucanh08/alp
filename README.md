@@ -201,6 +201,7 @@ alp ps [--all]            # live sessions as a tree; --all adds closed ones
 alp top [session]         # live dashboard: who runs, who waits, questions, worktrees, leases
 alp attach <session>      # follow a running tree, or print a closed one
 alp send <session> "More context"   # resumes a closed root first; to an agent, mail from you
+alp send <live-session> --prompt "Continue with this instruction" # explicit new prompt, including a recovery child
 alp questions             # questions agents asked you
 alp answer <question> "Your answer"   # or: --dismiss [--reason R]
 alp log <session>         # delegations, mail, handoffs, worktrees, pins and questions of a tree
@@ -214,6 +215,8 @@ alp pause [codex|claude] [--now]   # hold delegation; --now parks running assign
 alp resume [codex|claude]          # parked assignments continue
 alp interrupt <session>
 ```
+
+`alp send <child> --prompt <text>` explicitly prompts an existing live child and follows only its output. An active turn refuses this new prompt; default root send keeps its steering behavior. It does not replay the saved recovery continuation; supply the instruction you want it to follow. Existing queued mail is consumed by the ordinary runtime once. The existing runtime prompt rules remain authoritative; this command does not lift provider pauses. Default child `alp send` remains user mail and does not unpark manual recovery. `alp resume` only continues sessions parked for the matching provider or global pause; manual and legacy recovery need an explicit prompt.
 
 You talk with main. Main can ask you a question with `alp_ask` without ending its turn; `run`, `attach` and `send` show it and, in a terminal, read the answer, and `alp answer` answers from anywhere by question id or a unique prefix. In Paseo the question appears as a question prompt. Other agents do not talk to you unless you write to them first with `alp send <agent session>`; ALP then tells the agent that assigned them, and they may ask you questions too.
 

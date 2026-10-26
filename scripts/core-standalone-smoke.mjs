@@ -112,6 +112,7 @@ try {
   mkdirSync(distribution);
   writeFileSync(path.join(distribution, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
   run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', path.join(packs, packedRoot.filename), ...Object.keys(manifest.dependencies).filter(name => byName.has(name)).map(name => byName.get(name))], { cwd: distribution, timeout: 420_000 });
+  copyFileSync(path.join(root, 'packages/daemon/tests/recovery.test.js'), path.join(core, 'recovery.test.js'));
   for (const [directory, cli] of [[core, 'node_modules/@anhlp/alp-cli/dist/cli.js'], [distribution, 'node_modules/@anhlp/alp/packages/cli/dist/cli.js']]) {
     // Installs use --legacy-peer-deps, so only missing peers of an installed package are expected.
     const { stdout: tree } = run('npm', ['ls', '--all', '--json'], { cwd: directory, capture: true, allowFailure: true });
@@ -133,6 +134,8 @@ try {
     copyFileSync(path.join(root, 'test/support/fake-acp.js'), path.join(directory, 'fake-acp.js'));
     copyFileSync(path.join(root, 'scripts/cli-standalone-driver.mjs'), path.join(directory, 'cli-driver.mjs'));
     run(process.execPath, ['cli-driver.mjs', cli], { cwd: directory, timeout: 180_000, env: { HOME: noHome, USERPROFILE: noHome, ALP_HOME: path.join(directory, 'cli-home'), ALP_WEB_INTEGRATION: '', ALP_INTEGRATION_ENTRY: '', PATH: path.dirname(process.execPath), NODE_PATH: '' } });
+    // Installed CLI -> installed daemon/runtime, with disposable state and scripted native turns.
+    run(process.execPath, ['--test', '--test-name-pattern=explicit CLI prompt', 'recovery.test.js'], { cwd: core, timeout: 60_000, env: { HOME: noHome, USERPROFILE: noHome, ALP_HOME: path.join(directory, 'recovery-home'), ALP_TEST_RECOVERY_CLI: path.join(directory, cli), NODE_PATH: '' } });
   }
   console.log('Standalone core and main distribution smoke passed');
 } finally {
