@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawnCommand } from './spawn-command.mjs';
 import { corePackageProblems } from './core-package-boundary.mjs';
 import { THIRD_PARTY_NOTICES, packageDirectory, packageName } from './third-party-notices.mjs';
+import { shippedWebProblems } from './release-lib.mjs';
 const root = path.resolve(import.meta.dirname, '..');
 const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 
@@ -82,7 +83,7 @@ for (const location of ['.', ...manifest.workspaces]) {
     }
   }
   for (const bin of Object.values(pkg.bin ?? {})) if (!files.has(bin)) throw new Error(`${pkg.name}: missing executable ${bin}`);
-  const problems = await licenceProblems(location, pkg, files);
+  const problems = [...await licenceProblems(location, pkg, files), ...shippedWebProblems(pkg.name, files)];
   if (problems.length) throw new Error(problems.join('\n'));
   console.log(`${pkg.name}@${pkg.version}: ${files.size} packed files, public exports and licences verified`);
 }

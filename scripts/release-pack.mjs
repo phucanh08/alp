@@ -13,7 +13,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 
 import os from 'node:os';
 import path from 'node:path';
 import { spawnCommand } from './spawn-command.mjs';
-import { MANIFEST_FILE, RELEASE_PACKAGES, SUMS_FILE, createReleaseManifest, digests, formatSha256Sums, sourceProblems, verifyRelease } from './release-lib.mjs';
+import { MANIFEST_FILE, RELEASE_PACKAGES, SUMS_FILE, createReleaseManifest, digests, formatSha256Sums, shippedWebProblems, sourceProblems, verifyRelease } from './release-lib.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
@@ -79,6 +79,12 @@ const result = verifyRelease(out, { rehearsal });
 for (const note of result.notes) console.log(`[release-pack] rehearsal only: ${note}`);
 if (result.problems.length) {
   console.error(`[release-pack] A5 failed on the packed artifacts in ${out}:\n- ${result.problems.join('\n- ')}`);
+  process.exit(1);
+}
+// Beside A5: the CLI's alp web files (alp-web.js, its app and notices) are in both packages that carry the CLI.
+const missing = result.artifacts.flatMap(artifact => shippedWebProblems(artifact.name, artifact.files.keys()));
+if (missing.length) {
+  console.error(`[release-pack] the packed artifacts in ${out} cannot run alp web:\n- ${missing.join('\n- ')}`);
   process.exit(1);
 }
 console.log(`[release-pack] ${artifacts.length} tarballs, ${SUMS_FILE} and ${MANIFEST_FILE} in ${out}`);

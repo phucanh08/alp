@@ -138,6 +138,26 @@ export function createReleaseManifest({ version, git, build, pack, artifacts, sh
   };
 }
 
+/**
+ * `alp web` runs alp-web (docs/alp/web.md): its service bundle, the browser app and their notices
+ * ship inside the CLI, so both packages that carry the CLI must have them. The gateway it inlines
+ * stays private (A5 refuses a ninth tarball); this list is checked beside A5, not as part of it.
+ */
+const ALP_WEB_FILES = ['dist/alp-web.js', 'dist/alp-web/index.html', `dist/alp-web/${THIRD_PARTY_NOTICES}`, `dist/${THIRD_PARTY_NOTICES}`];
+export const SHIPPED_WEB_FILES = Object.freeze({
+  '@anhlp/alp-cli': ALP_WEB_FILES,
+  '@anhlp/alp': ALP_WEB_FILES.map(file => `packages/cli/${file}`),
+});
+
+/**
+ * The alp-web files a packed package lacks, as problems; none for packages that do not carry the CLI.
+ * @param {string} name @param {Iterable<string>} files the packed paths, relative to the package root
+ */
+export function shippedWebProblems(name, files) {
+  const packed = new Set(files);
+  return (SHIPPED_WEB_FILES[name] ?? []).filter(file => !packed.has(file)).map(file => `${name}: ${file} is not packed; alp web cannot run (build the CLI with apps/gateway and apps/web present)`);
+}
+
 /** Problems a single packed package has, from its own files (no repository source involved). */
 function contentProblems(name, files, version, rootFiles) {
   const problems = [];
