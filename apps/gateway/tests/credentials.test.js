@@ -3,7 +3,7 @@
 // one-time, short-lived and bound to their Origin; nothing secret reaches a log line.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import * as credentials from '../src/credentials.js';
@@ -211,4 +211,71 @@ test('log lines never carry tokens or tickets', () => {
   const token = `alpgw1.0123456789abcdef.${'x'.repeat(43)}`;
   const line = scrubGatewaySecrets(`auth ${token} ticket alpgwt.${'y'.repeat(43)} protocol alp.ticket.alpgwt.${'z'.repeat(43)}`);
   assert.ok(!line.includes('x'.repeat(43)) && !line.includes('y'.repeat(43)) && !line.includes('z'.repeat(43)), line);
+});
+
+test('update replaces workspaces and permissions in place: the token stays valid and open connections close with 4403', async t => {
+  const { workspace, directory } = await home(t);
+  const second = path.join(directory, 'second');
+  await mkdir(second);
+  const daemon = fakeDaemon();
+  const gw = await startGateway(t, { daemon, credentials: { phone: { workspaces: [workspace], permissions: ['session.read'] } } });
+  const before = gw.store.verify(gw.tokens.phone);
+  const stored = (await credentials.readCredentials(gw.home)).credentials[0];
+  const active = await gw.rawSession('phone');
+  const pending = await gw.ticket(gw.tokens.phone);
+  const notices = [];
+  gw.store.onChange(change => notices.push(Object.fromEntries(change)));
+
+  const updated = await credentials.updateCredential(gw.home, gw.ids.phone, { workspaces: [workspace, second], permissions: ['session.write', 'project.read'] });
+  assert.equal(updated.token, undefined, 'no new token');
+  assert.ok(!('hash' in updated.credential));
+  assert.deepEqual(updated.credential.permissions, ['session.read', 'session.write', 'project.read'], 'checked and expanded as at creation');
+  await gw.store.reload();
+  assert.equal((await active.closed).code, 4403, 'the old grant\'s connection closes as a changed grant');
+  assert.deepEqual(notices, [{ [gw.ids.phone]: 'changed' }]);
+  assert.equal((await gw.raw(pending.body.subprotocols)).refused, 401, 'tickets issued under the old grant die');
+
+  const after = gw.store.verify(gw.tokens.phone);
+  assert.ok(after, 'the same token still verifies');
+  assert.equal(after.secretHash, before.secretHash);
+  assert.notEqual(after.fingerprint, before.fingerprint);
+  assert.equal(after.scopeId, before.scopeId, 'the principal epoch stays');
+  const disk = (await credentials.readCredentials(gw.home)).credentials[0];
+  assert.equal(disk.hash, stored.hash);
+  assert.deepEqual([disk.id, disk.label, disk.createdAt, disk.scopeId, disk.rotatedAt], [stored.id, stored.label, stored.createdAt, stored.scopeId, undefined]);
+  assert.deepEqual(disk.workspaces.map(entry => entry.path), [workspace, second]);
+  if (process.platform !== 'win32') assert.equal((await stat(credentialsFile(gw.home))).mode & 0o777, 0o600);
+
+  const issued = await gw.ticket(gw.tokens.phone);
+  assert.equal(issued.status, 201, 'a new ticket with the unchanged token');
+  assert.deepEqual(issued.body.principal.permissions, ['session.read', 'session.write', 'project.read']);
+  assert.deepEqual(issued.body.principal.workspaces, [workspace, second]);
+  const reopened = await gw.raw(issued.body.subprotocols);
+  assert.ok(reopened.socket, 'the new ticket opens a connection under the new grant');
+  reopened.socket.close();
+
+  // Only the supplied field changes.
+  await credentials.updateCredential(gw.home, gw.ids.phone, { permissions: ['session.read'] });
+  const narrowed = (await credentials.readCredentials(gw.home)).credentials[0];
+  assert.deepEqual([narrowed.permissions, narrowed.workspaces.map(entry => entry.path), narrowed.hash], [['session.read'], [workspace, second], stored.hash]);
+});
+
+test('update rejects invalid input and revoked credentials without touching the file', async t => {
+  const { home: gatewayHome, workspace } = await home(t);
+  const { credential, token } = await createCredential(gatewayHome, { label: 'phone', workspaces: [workspace], permissions: ['session.read'] });
+  const disk = await readFile(credentialsFile(gatewayHome), 'utf8');
+  for (const options of [undefined, {}, { permissions: ['host.admin'] }, { permissions: [] }, { permissions: 'session.read' }, { workspaces: [] }, { workspaces: ['relative'] }, { workspaces: [`${workspace}/../project`] }, { workspaces: [path.join(workspace, 'missing')] }, { workspaces: [workspace], permissions: ['nope'] }]) {
+    await assert.rejects(credentials.updateCredential(gatewayHome, credential.id, options), JSON.stringify(options));
+    assert.equal(await readFile(credentialsFile(gatewayHome), 'utf8'), disk, `invalid update ${JSON.stringify(options)} leaves disk unchanged`);
+  }
+  await assert.rejects(credentials.updateCredential(gatewayHome, '0000000000000000', { permissions: ['session.read'] }), /No credential/);
+  assert.equal(await readFile(credentialsFile(gatewayHome), 'utf8'), disk);
+  await revokeCredential(gatewayHome, credential.id);
+  const revoked = await readFile(credentialsFile(gatewayHome), 'utf8');
+  await assert.rejects(credentials.updateCredential(gatewayHome, credential.id, { permissions: ['session.write'] }), /revoked/);
+  assert.equal(await readFile(credentialsFile(gatewayHome), 'utf8'), revoked);
+  const store = new CredentialStore({ home: gatewayHome, pollMs: 0 });
+  t.after(() => store.close());
+  await store.reload();
+  assert.equal(store.verify(token), undefined, 'a revoked credential stays revoked');
 });

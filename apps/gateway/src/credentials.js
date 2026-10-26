@@ -28,7 +28,7 @@ const MODE = /^[a-z][a-z0-9-]{0,63}$/;
  *   names a workspace by either string, exactly.
  * @typedef {{
  *   id: string, label: string, hash: string, workspaces: Workspace[], permissions: string[],
- *   worktreeMappings?: string[], scopeId?: string, modes?: string[], createdAt: string, rotatedAt?: string, expiresAt?: string, revokedAt?: string,
+ *   worktreeMappings?: string[], scopeId?: string, modes?: string[], createdAt: string, rotatedAt?: string, updatedAt?: string, expiresAt?: string, revokedAt?: string,
  * }} StoredCredential
  * @typedef {{
  *   id: string, label: string, workspaces: Workspace[], permissions: Set<string>,
@@ -219,6 +219,31 @@ export async function reissueCredential(home, id, { label, workspaces, permissio
   Object.assign(credential, replacement, { hash: digest(token.secret), rotatedAt: now.toISOString() });
   await writeCredentials(home, data);
   return { credential: describeCredential(credential), token: token.token };
+}
+
+/**
+ * Replaces a credential's workspaces and/or permissions in place, keeping its secret: the token
+ * stays valid (new tickets carry the new grant) while the gateway closes the connections opened
+ * under the old grant with 4403, so they reconnect under the new one. The device id, scopeId
+ * (principal epoch), label, modes and expiry stay; a credential stored without a scopeId derives
+ * its epoch from the grant (grantOf), so for it the epoch changes too. Omitted fields retain their
+ * grants; supplied lists replace rather than append. Inputs are checked as createCredential checks
+ * them, before anything is written.
+ * @param {string} home @param {string} id
+ * @param {{ workspaces?: string[], permissions?: string[], now?: Date }} [options]
+ */
+export async function updateCredential(home, id, { workspaces, permissions, now = new Date() } = {}) {
+  if (workspaces === undefined && permissions === undefined) throw new Error('An update needs workspaces or permissions');
+  const data = await readCredentials(home);
+  const credential = find(data, id);
+  if (credential.revokedAt) throw new Error(`Credential ${id} is revoked; create a new one`);
+  const replacement = {
+    ...(workspaces !== undefined ? { workspaces: await resolveWorkspaces(workspaces) } : {}),
+    ...(permissions !== undefined ? { permissions: checkPermissions(permissions) } : {}),
+  };
+  Object.assign(credential, replacement, { updatedAt: now.toISOString() });
+  await writeCredentials(home, data);
+  return { credential: describeCredential(credential) };
 }
 
 /** Revokes a credential for good; the gateway closes its connections. @param {string} home @param {string} id @param {{ now?: Date }} [options] */
