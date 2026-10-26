@@ -724,11 +724,14 @@ test('an unfinished configure store commit blocks later native mutations and ret
   const d = { ...await world.start(), ...world };
   await conversation(d, 'unfinished-config', ['one']);
   const first = { sessionId: 'unfinished-config', requestId: 'unfinished', ifGeneration: await generationOf(d, 'unfinished-config'), thinking: 'high' };
+  await d.store.flush();
   const put = d.store.put;
   let failed = false;
   d.store.put = async record => {
-    const entries = await journalOf(world.state);
-    if (entries.some(entry => entry.requestId === first.requestId && entry.state === 'applied')) {
+    // Reject every snapshot carrying this commit, including queued event saves. Awaiting
+    // a journal read here lets such a save publish the shared record's witness, correctly
+    // allowing later work despite the original put failure (covered separately below).
+    if (Object.values(record.lifecycleCommits ?? {}).some(receipt => receipt.requestId === first.requestId)) {
       failed = true;
       throw new Error('final record put refused');
     }
@@ -736,7 +739,9 @@ test('an unfinished configure store commit blocks later native mutations and ret
   };
   await assert.rejects(d.request('session.configure', first), rpcError(1000, 'persistence_failed'));
   assert.equal(failed, true);
+  assert.equal(Object.values((await d.store.get(first.sessionId)).lifecycleCommits ?? {}).some(receipt => receipt.requestId === first.requestId), false, 'no queued save durably completed the commit');
   await assert.rejects(d.request('session.configure', { ...first, requestId: 'later', thinking: 'low' }), rpcError(1000, 'persistence_failed'));
+  assert.equal((await journalOf(world.state)).some(entry => entry.requestId === 'later'), false, 'barrier refuses before preparing a new native attempt');
   assert.equal(world.native.configures.length, 1, 'later native operation stays behind incomplete commit');
   d.store.put = put;
   const result = await d.request('session.configure', first);
