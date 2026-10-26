@@ -2,7 +2,7 @@
 // Consumer verification on a saved release (docs/alp/beta-scope.md §6.3, §7.2): installs exactly the
 // eight tarballs in the release directory, never packs or builds them again, and proves that what
 // got installed is those files:
-//   1. A5 (release-verify) passes on the directory;
+//   1. A5 (release-verify) passes on the directory, and the CLI's alp web files are in its tarballs;
 //   2. a fresh project installs the eight tarballs; its package-lock.json resolves every @anhlp/*
 //      package to a local file with the manifest's integrity, at the release version, gateway absent;
 //   3. tarball-consumer.mjs and package-smoke.mjs run against the same files (--packs);
@@ -14,7 +14,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnCommand } from './spawn-command.mjs';
-import { RELEASE_NAMES, installedProblems, verifyRelease } from './release-lib.mjs';
+import { RELEASE_NAMES, installedProblems, shippedWebProblems, verifyRelease } from './release-lib.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
@@ -31,6 +31,9 @@ function verified(stage) {
 }
 
 const before = verified('before install');
+// The saved tarballs carry what `alp web` runs (alp-web.js, its app, their notices); checked beside A5.
+const missingWeb = before.artifacts.flatMap(artifact => shippedWebProblems(artifact.name, artifact.files.keys()));
+if (missingWeb.length) throw new Error(`the saved tarballs cannot run alp web:\n- ${missingWeb.join('\n- ')}`);
 const work = mkdtempSync(path.join(os.tmpdir(), 'alp-release-consumer-'));
 try {
   writeFileSync(path.join(work, 'package.json'), `${JSON.stringify({ name: 'alp-release-consumer', private: true, version: '0.0.0', type: 'module' }, null, 2)}\n`);

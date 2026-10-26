@@ -10,7 +10,7 @@ import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import {
   GATE_PHASES, GATE_ROWS, MANIFEST_FILE, RELEASE_NAMES, RELEASE_PACKAGES, SUMS_FILE, createReleaseManifest, digests, evaluateGate,
-  formatSha256Sums, gateTemplate, installedProblems, parseSha256Sums, readTarball, releaseArtifacts, sourceProblems, tarballFilename, verifyRelease,
+  formatSha256Sums, gateTemplate, installedProblems, parseSha256Sums, readTarball, releaseArtifacts, shippedWebProblems, SHIPPED_WEB_FILES, sourceProblems, tarballFilename, verifyRelease,
 } from '../../scripts/release-lib.mjs';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
@@ -311,3 +311,21 @@ test('the consumer lockfile must resolve every @anhlp package to the saved tarba
     '@anhlp/alp-cli: not installed',
   ]);
 }));
+
+test('both packages that carry the CLI must pack alp web: alp-web.js, its app and the notices', () => {
+  const cli = ['dist/alp-web.js', 'dist/alp-web/index.html', 'dist/alp-web/THIRD-PARTY-NOTICES.txt', 'dist/THIRD-PARTY-NOTICES.txt'];
+  assert.deepEqual(SHIPPED_WEB_FILES['@anhlp/alp-cli'], cli);
+  assert.deepEqual(SHIPPED_WEB_FILES['@anhlp/alp'], cli.map(file => `packages/cli/${file}`));
+  assert.deepEqual(Object.keys(SHIPPED_WEB_FILES).sort(), ['@anhlp/alp', '@anhlp/alp-cli'], 'the gateway is never a package of its own');
+  assert.deepEqual(shippedWebProblems('@anhlp/alp-cli', ['package.json', ...cli, 'dist/alp-web/assets/index.js']), []);
+  assert.deepEqual(shippedWebProblems('@anhlp/alp', SHIPPED_WEB_FILES['@anhlp/alp']), []);
+  for (const file of cli) {
+    const found = shippedWebProblems('@anhlp/alp-cli', cli.filter(entry => entry !== file));
+    assert.equal(found.length, 1);
+    assert.match(found[0], new RegExp(`^@anhlp/alp-cli: ${file.replace(/[.]/g, '\\.')} is not packed`));
+  }
+  assert.equal(shippedWebProblems('@anhlp/alp', cli).length, 4, 'the root package carries them under packages/cli/');
+  // Packages without the CLI carry no alp web, and A5 itself is unchanged by this list.
+  for (const name of RELEASE_NAMES.filter(name => !(name in SHIPPED_WEB_FILES))) assert.deepEqual(shippedWebProblems(name, []), []);
+  withRelease({}, directory => assert.deepEqual(verifyRelease(directory).problems, []));
+});

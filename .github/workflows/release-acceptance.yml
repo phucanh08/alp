@@ -62,9 +62,12 @@ jobs:
           restore-keys: npm-web-app-
       - run: npm ci
       - run: npm run build:web
+      # The CLI's build includes alp-web (`alp web`): packages/cli/dist/alp-web.js with the private
+      # gateway inlined, and the apps/web files in packages/cli/dist/alp-web/ with their notices.
       - run: npm run build:packages
       # release:pack refuses a dirty checkout or an untagged commit, runs prepack, writes SHA256SUMS
-      # and release-manifest.json, and runs A5 itself; verify again against the SHA asked for.
+      # and release-manifest.json, and runs A5 itself, then checks that @anhlp/alp and @anhlp/alp-cli
+      # carry alp-web.js, alp-web/index.html and the notices; verify again against the SHA asked for.
       - run: npm run release:pack -- --out "$RUNNER_TEMP/release/$TAG"
       - run: npm run release:verify -- "$RUNNER_TEMP/release/$TAG" --sha "$RELEASE_SHA"
       - uses: actions/upload-artifact@v4
