@@ -57,9 +57,14 @@ try {
   mkdirSync(source);
   const sourceManifest = { ...manifest, workspaces: manifest.workspaces.filter(location => location.startsWith('packages/')) };
   writeFileSync(path.join(source, 'package.json'), JSON.stringify(sourceManifest));
+  const copied = new Set(sourceManifest.workspaces.map(location => JSON.parse(readFileSync(path.join(root, location, 'package.json'), 'utf8')).name));
   for (const location of sourceManifest.workspaces) {
     mkdirSync(path.join(source, location), { recursive: true });
-    copyFileSync(path.join(root, location, 'package.json'), path.join(source, location, 'package.json'));
+    // The CLI bundles the private gateway (apps/gateway) as a devDependency; a core-only copy has no
+    // apps, so such edges to workspaces left out are dropped (the CLI then builds without alp-web).
+    const pkg = JSON.parse(readFileSync(path.join(root, location, 'package.json'), 'utf8'));
+    for (const name of Object.keys(pkg.devDependencies ?? {})) if (name.startsWith('@anhlp/alp-') && !copied.has(name)) delete pkg.devDependencies[name];
+    writeFileSync(path.join(source, location, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);
     cpSync(path.join(root, location, 'src'), path.join(source, location, 'src'), { recursive: true });
   }
   for (const location of ['scripts', 'templates', 'packages/protocol/schema', 'packages/protocol/fixtures', 'packages/protocol/conformance']) cpSync(path.join(root, location), path.join(source, location), { recursive: true });
