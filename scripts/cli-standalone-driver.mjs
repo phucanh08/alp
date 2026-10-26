@@ -29,6 +29,7 @@ try {
   // alp web runs alp-web, which ships in the CLI as dist/alp-web.js: no optional integration is
   // needed. A CLI built from a core-only source (no apps/gateway or apps/web, as
   // core-standalone-smoke builds it) has no alp-web and must say so; package-smoke covers the full build.
+  let webChecked;
   if (existsSync(path.join(path.dirname(cli), 'alp-web.js'))) {
     const printed = run('web', '--print').trim().split('\n').pop();
     const match = /^(http:\/\/127\.0\.0\.1:\d+)\/#token=(alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43})$/.exec(printed);
@@ -37,8 +38,10 @@ try {
     assert.equal(ticket.status, 201, 'the printed token is a live credential');
     await ticket.body?.cancel();
     assert.equal(JSON.parse(await readFile(path.join(home, 'web.json'), 'utf8')).app, 'alp-web');
+    webChecked = 'alp web (alp-web)';
   } else {
     assert.throws(() => run('web', '--print'), /alp web is not built: .*alp-web\.js is missing/);
+    webChecked = 'alp web refused (core-only build: no alp-web)';
   }
   run('daemon', 'status');
 
@@ -68,7 +71,7 @@ try {
   assert.equal((await request('session/prompt', { sessionId, prompt: [{ type: 'text', text: 'fake:say isolated-cli-ok' }] })).stopReason, 'end_turn');
   assert.ok(updates.filter(update => update.sessionUpdate === 'agent_message_chunk').map(update => update.content.text).join('').includes('isolated-cli-ok'), 'installed alp acp streams the fake provider response');
   assert.equal(await readFile(path.join(home, 'integrations/paseo.json')).catch(() => undefined), undefined);
-  console.log('INSTALLED_CLI_OK init/upgrade + daemon + IPC + alp web (alp-web) + ACP stdio handshake/prompt/stream; no Paseo');
+  console.log(`INSTALLED_CLI_OK init/upgrade + daemon + IPC + ${webChecked} + ACP stdio handshake/prompt/stream; no Paseo`);
 } finally {
   child?.kill();
   // alp-web keeps alpd up; stop it first (its own lock and web.json name it), then alpd.

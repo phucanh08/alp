@@ -5,8 +5,6 @@ import { assertIntegrationName, bootTime } from './index.js';
 
 /**
  * @typedef {{ pid: number, bootTime: number, startedAt: string, ready: boolean, lockVersion?: number, owner?: string }} IntegrationLockRecord
- * @typedef {{ owner: string, dev: number, ino: number }} Identity
- * @typedef {{ value: any, info: import('node:fs').Stats }} Snapshot
  * @typedef {{
  *   acquire(): Promise<{ acquired: boolean, lock: IntegrationLockRecord }>,
  *   setReady(ready: boolean): Promise<boolean>,
@@ -29,8 +27,11 @@ export function createIntegrationLock(home, name) {
   const guard = `${file}.reclaim`;
   /** @type {'new' | 'acquiring' | 'owned' | 'retired'} */
   let phase = 'new';
-  /** @type {Identity | undefined} */
+  /** This instance's lock while it owns it: the lifetime nonce and the file's identity. @type {{ owner: string, dev: number, ino: number } | undefined} */
   let owned;
+  // The lock file as read: its record and the stats of the handle it was read through. Kept inside
+  // the factory so the published declarations name only IntegrationLock and its record.
+  /** @typedef {{ value: any, info: import('node:fs').Stats }} Snapshot */
   /** @param {string} reason */
   const recovery = reason => new Error(`${reason}. Stop ALL integration processes using this ALP_HOME before manual lock-only recovery of ${file} and ${guard}; see docs/modular-monorepo.md`);
 
