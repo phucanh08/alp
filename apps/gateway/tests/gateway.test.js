@@ -294,3 +294,82 @@ test('conditional interrupt forwards its identity and answer only to a capable d
     }
   }
 });
+
+/** One plain HTTP request with exactly these headers. @returns {Promise<{ status: number, body: string, headers: import('node:http').IncomingHttpHeaders }>} */
+async function plainRequest(base, { method = 'GET', path: target = '/', headers = {} } = {}) {
+  const http = await import('node:http');
+  return new Promise((resolve, reject) => {
+    const outgoing = http.request({ host: '127.0.0.1', port: new URL(base).port, method, path: target, headers }, response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8'), headers: response.headers }));
+    });
+    outgoing.on('error', reject);
+    outgoing.end();
+  });
+}
+
+test('without a static hook, other paths answer 404 as before', async t => {
+  const { base } = await setup(t);
+  const host = `127.0.0.1:${new URL(base).port}`;
+  for (const method of ['GET', 'HEAD']) {
+    const answer = await plainRequest(base, { method, path: '/index.html', headers: { host } });
+    assert.equal(answer.status, 404, method);
+    if (method === 'GET') assert.deepEqual(JSON.parse(answer.body), { error: 'not_found' });
+  }
+});
+
+test('a static hook answers GET and HEAD outside the gateway paths, only behind the Host and TLS checks', async t => {
+  const calls = [];
+  const serveStatic = (request, response) => {
+    calls.push(`${request.method} ${request.url}`);
+    if (request.url === '/missing') return false;
+    if (request.url === '/boom') throw new Error('broken hook');
+    response.writeHead(200, { 'content-type': 'text/html', 'content-length': '5' });
+    response.end(request.method === 'HEAD' ? undefined : 'hello');
+    return true;
+  };
+  const daemon = fakeDaemon();
+  const { a } = await workspaces(t);
+  const gw = await startGateway(t, { daemon, serveStatic, config: { trustProxy: ['127.0.0.1'], hosts: ['alp.example.com'] }, credentials: { alice: { workspaces: [a] } } });
+  const host = `127.0.0.1:${new URL(gw.base).port}`;
+  const send = (target, options = {}) => plainRequest(gw.base, { path: target, ...options, headers: { host, ...options.headers } });
+
+  // Refused before the hook: a Host the gateway does not serve (DNS rebinding), plaintext beyond loopback.
+  assert.equal((await send('/index.html', { headers: { host: 'attacker.example' } })).status, 421);
+  assert.equal((await send('/index.html', { method: 'HEAD', headers: { host: 'attacker.example' } })).status, 421);
+  assert.equal((await send('/index.html', { headers: { host: 'alp.example.com', 'x-forwarded-for': '203.0.113.9', 'x-forwarded-proto': 'http' } })).status, 403);
+  assert.deepEqual(calls, [], 'the hook saw no refused request');
+
+  const page = await send('/index.html');
+  assert.deepEqual([page.status, page.headers['content-type'], page.body], [200, 'text/html', 'hello']);
+  const head = await send('/index.html', { method: 'HEAD' });
+  assert.deepEqual([head.status, head.body], [200, '']);
+  const proxied = await send('/app.js', { headers: { host: 'alp.example.com', 'x-forwarded-for': '203.0.113.9', 'x-forwarded-proto': 'https' } });
+  assert.equal(proxied.status, 200, 'an allowed Host over TLS through the proxy');
+  assert.deepEqual(calls, ['GET /index.html', 'HEAD /index.html', 'GET /app.js']);
+
+  // `false` leaves the gateway's 404; a throw is a 500. Other methods never reach the hook.
+  assert.deepEqual([(await send('/missing')).status, JSON.parse((await send('/missing')).body)], [404, { error: 'not_found' }]);
+  assert.deepEqual(JSON.parse((await send('/boom')).body), { error: 'internal' });
+  assert.ok(gw.lines.some(line => line.includes('ALP_GATEWAY_STATIC_FAILED')));
+  assert.equal((await send('/index.html', { method: 'POST' })).status, 404);
+  calls.length = 0;
+
+  // The gateway's own paths answer as without the hook, and still need their credentials.
+  assert.deepEqual(JSON.parse((await send('/healthz')).body), { live: true });
+  assert.equal((await send('/healthz', { method: 'HEAD' })).status, 404);
+  assert.equal((await send('/readyz', { method: 'HEAD' })).status, 404);
+  assert.equal((await send('/v1/tickets')).status, 405);
+  assert.equal((await send('/v1/tickets', { method: 'HEAD' })).status, 405);
+  assert.equal((await send('/v1/tickets', { method: 'POST' })).status, 401);
+  assert.equal((await send('/v1/tickets', { method: 'POST', headers: { authorization: 'Bearer alpgw1.0000000000000000.' + 'A'.repeat(43) } })).status, 401);
+  assert.equal((await send('/v1/ws')).status, 404);
+  assert.equal((await send('/v1/other')).status, 404);
+  assert.equal((await send('/v1')).status, 404);
+  assert.equal((await gw.raw(['alp.v1'])).refused, 401, 'a WebSocket still needs a ticket');
+  assert.deepEqual(calls, [], 'no gateway path reached the hook');
+  assert.equal((await gw.ticket(gw.tokens.alice)).status, 201);
+  const opened = await gw.rawSession('alice');
+  assert.ok(opened.socket);
+});

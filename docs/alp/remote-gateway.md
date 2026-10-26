@@ -141,6 +141,14 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
   - credential bị thu hồi, xoay hoặc hết hạn → đóng connection với 4401;
   - grant đổi (workspace, permission, mode) → đóng với 4403;
   - hạn dùng được kiểm tra lại mỗi 15 giây.
+- API thư viện `updateCredential(home, id, { workspaces?, permissions? })` (export từ
+  `@anhlp/alp-gateway`) thay workspace và/hoặc permission **tại chỗ, giữ nguyên secret**:
+  - token vẫn dùng được, ticket mới mang grant mới;
+  - grant thật sự đổi thì connection đang mở đóng với 4403 và ticket chưa dùng bị hủy;
+  - input được kiểm tra như lúc tạo (ít nhất một workspace, permission cấp được); input sai hoặc
+    credential đã thu hồi → từ chối, file không đổi;
+  - giữ id, label, mode, hạn dùng và epoch của principal (`scopeId`); credential cũ chưa có
+    `scopeId` thì epoch suy ra từ grant nên cũng đổi. Ghi bằng một lần rename.
 - Workspace được `realpath` **lúc cấp credential, trên host, bởi chủ máy**. Grant giữ cả đường
   dẫn đã nhập lẫn đường dẫn canonical.
 - Permission cấp được:
@@ -1022,6 +1030,11 @@ client khác (có test).
   - `ALP_GATEWAY_DAEMON_NOT_READY`;
   - `ALP_GATEWAY_STARTING`.
   Không trả pid hay chi tiết nội bộ.
+- `createGateway({ …, serveStatic })` (tùy chọn): hook `(request, response)` trả lời `GET`/`HEAD`
+  cho path **ngoài** các route của gateway (`/healthz`, `/readyz`, `/v1` và mọi path dưới `/v1/`
+  không bao giờ tới hook), **sau** kiểm tra Host và TLS như mọi route. Hook tự ghi response; trả
+  `false` mà chưa ghi → `404`, ném lỗi → `500` (log `ALP_GATEWAY_STATIC_FAILED`). Không có hook thì
+  path lạ vẫn là `404`.
 - Log là JSON trên stderr, `component: "alp-gateway"`, mỗi connection có field `connection`,
   `principal` và `ip`. Các code chính:
   - `ALP_GATEWAY_LISTENING`, `ALP_GATEWAY_CONNECTED`, `ALP_GATEWAY_DISCONNECTED` (kèm `closeCode`);

@@ -18,9 +18,9 @@ export async function until(check, what = 'condition', ms = 5000) {
 
 /**
  * @param {import('node:test').TestContext} t
- * @param {{ daemon: ReturnType<typeof import('./fake-daemon.js').fakeDaemon>, credentials?: Record<string, { workspaces: string[], permissions?: string[], modes?: string[], worktreeMappings?: string[] }>, config?: object }} options
+ * @param {{ daemon: ReturnType<typeof import('./fake-daemon.js').fakeDaemon>, credentials?: Record<string, { workspaces: string[], permissions?: string[], modes?: string[], worktreeMappings?: string[] }>, config?: object, serveStatic?: Function }} options
  */
-export async function startGateway(t, { daemon, credentials = {}, config = {} }) {
+export async function startGateway(t, { daemon, credentials = {}, config = {}, serveStatic }) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gateway-'));
   const home = path.join(directory, 'gateway');
   const tokens = {};
@@ -36,7 +36,7 @@ export async function startGateway(t, { daemon, credentials = {}, config = {} })
   const store = new CredentialStore({ home, logger, pollMs: 25 });
   const gateway = createGateway({
     config: resolveConfig({ port: 0, origins: [ORIGIN], ...config }),
-    store, logger, version: 'test', openTransport: daemon.open, monitorIntervalMs: 50,
+    store, logger, version: 'test', openTransport: daemon.open, monitorIntervalMs: 50, ...(serveStatic ? { serveStatic } : {}),
   });
   const address = await gateway.listen();
   t.after(async () => { await gateway.close(); store.close(); await rm(directory, { recursive: true, force: true }); });

@@ -17,6 +17,9 @@ import { daemonMonitor, upstreamConnector } from './upstream.js';
  *   GET  /v1/ws       WebSocket, subprotocols `alp.v1` and `alp.ticket.<ticket>`
  * Every route checks the Host header (no DNS rebinding) and that a non-loopback client came over
  * TLS, directly or through a trusted proxy; browser routes check the Origin.
+ *
+ * With `serveStatic`, a GET or HEAD for any other path goes to that hook, after the same Host and
+ * TLS checks; the gateway's own paths (above, and everything under /v1/) never reach it.
  */
 
 export const SUBPROTOCOL = 'alp.v1';
@@ -27,6 +30,9 @@ export const TICKET_PATH = '/v1/tickets';
 /** @param {string | undefined} address */
 const plain = address => (address ?? '').replace(/^::ffff:/, '');
 
+/** Paths the gateway answers itself, whatever the method; a static hook never sees them. @param {string} pathname */
+const ownPath = pathname => pathname === '/healthz' || pathname === '/readyz' || pathname === '/v1' || pathname.startsWith('/v1/');
+
 /**
  * @param {{
  *   config: import('./config.js').GatewayConfig,
@@ -35,9 +41,13 @@ const plain = address => (address ?? '').replace(/^::ffff:/, '');
  *   logger: import('@anhlp/alp-core/log').Logger,
  *   version: string,
  *   monitorIntervalMs?: number,
+ *   serveStatic?: (request: http.IncomingMessage, response: http.ServerResponse) => unknown,
  * }} options
+ *   `serveStatic` answers GET and HEAD requests outside the gateway's own paths, once the Host and
+ *   TLS checks passed. It writes the response itself; returning (or resolving to) `false` without
+ *   writing leaves the gateway's 404, and a throw or rejection becomes a 500.
  */
-export function createGateway({ config, store, openTransport, logger, version, monitorIntervalMs }) {
+export function createGateway({ config, store, openTransport, logger, version, monitorIntervalMs, serveStatic }) {
   const { limits } = config;
   const tickets = new TicketBook({ ttlMs: limits.ticketTtlMs });
   /** @type {Set<ClientConnection>} */
@@ -118,12 +128,25 @@ export function createGateway({ config, store, openTransport, logger, version, m
   /** CORS for an allowed browser origin; nothing for clients without one. @param {string | null} origin @returns {Record<string, string>} */
   const cors = origin => origin ? { 'access-control-allow-origin': origin, vary: 'Origin' } : {};
 
+  /** Hands a request to the static hook; its `false` or failure ends in a 404 or 500. @param {NonNullable<typeof serveStatic>} hook @param {http.IncomingMessage} request @param {http.ServerResponse} response */
+  async function staticRoute(hook, request, response) {
+    try {
+      const handled = await hook(request, response);
+      if (handled === false && !response.headersSent && !response.writableEnded) json(response, 404, { error: 'not_found' });
+    } catch (error) {
+      logger.error('the static file hook failed', { code: 'ALP_GATEWAY_STATIC_FAILED', error });
+      if (!response.headersSent) json(response, 500, { error: 'internal' });
+      else response.destroy();
+    }
+  }
+
   /** @param {http.IncomingMessage} request @param {http.ServerResponse} response */
   function onRequest(request, response) {
     const peer = peerOf(request);
     const refused = refusal(request, peer);
     if (refused) return json(response, refused.status, { error: refused.error });
     const { pathname } = new URL(request.url ?? '/', 'http://gateway');
+    if (serveStatic && !ownPath(pathname) && (request.method === 'GET' || request.method === 'HEAD')) return void staticRoute(serveStatic, request, response);
     if (pathname === '/healthz' && request.method === 'GET') return json(response, 200, { live: true });
     if (pathname === '/readyz' && request.method === 'GET') {
       const state = monitor?.state ?? { connected: false, ready: false, code: 'ALP_GATEWAY_STARTING' };
