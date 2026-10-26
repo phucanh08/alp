@@ -52,7 +52,7 @@ test('the plugin keeps alpd up: started with Paseo, started again after a crash,
   const home = await mkdtemp(path.join(tmpdir(), 'alp-keep-'));
   const logged = [];
   // Two misses must take longer than alpd takes to start, as with the real 5 s interval.
-  const stop = superviseDaemon({ home, entry: ENTRY, intervalMs: 600, log: message => logged.push(message) });
+  const stop = superviseDaemon({ home, entry: ENTRY, intervalMs: 600, by: 'Paseo', log: message => logged.push(message) });
   // The home goes even if stopping failed: an alpd whose lock is gone stops at its next heartbeat.
   t.after(async () => {
     try { await stop(); } finally {

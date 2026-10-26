@@ -9,12 +9,17 @@
  * with alpd's project registry.
  *
  *   node alp-web.js [--service] [--project DIR]
+ *   node alp-web.js --rotate [--project DIR]
  * `--service` (how startIntegration starts it) writes the log to <home>/logs/integrations/alp-web.log.
+ * `--rotate` (how `alp web rotate` replaces the token) takes the web lock, which fails with exit 3
+ * while the service runs, creates a new credential, revokes every other one, records the new token
+ * in web.json for the next start, releases the lock and exits. It ignores web.enabled: turning alp
+ * web off must not keep an old token alive.
  * ALP_WEB_APP names another directory of built app files (tests).
  */
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, openSync, writeSync } from 'node:fs';
-import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -82,6 +87,75 @@ async function publish(home, info) {
   } catch (error) { await unlink(temporary).catch(() => {}); throw error; }
 }
 
+/** Exit code of `--rotate` when the service holds the web lock. */
+const LOCK_HELD = 3;
+
+/**
+ * Before the rename, the Paseo integration ran as integration `web` and kept its identity (the token
+ * paired devices sign in with, and its server id) in web.json, without `app`. Before alp-web first
+ * overwrites such a file, and only when the Paseo integration has no paseo.json yet, that identity
+ * is written to paseo.json, where the integration looks for it, so paired devices stay paired. The
+ * file appears whole (written aside, then linked into place) and an existing paseo.json is never
+ * replaced. Returns whether it carried anything.
+ * @param {string} home @param {import('@anhlp/alp-core/log').Logger} log
+ */
+async function carryPaseoIdentity(home, log) {
+  let legacy;
+  try { legacy = JSON.parse(await readFile(webFile(home), 'utf8')); } catch { return false; }
+  if (!legacy || typeof legacy !== 'object' || legacy.app !== undefined) return false;
+  const identity = {
+    ...(typeof legacy.token === 'string' && /^[a-f0-9]{64}$/.test(legacy.token) ? { token: legacy.token } : {}),
+    ...(typeof legacy.serverId === 'string' && /^alp-[a-f0-9]{16}$/.test(legacy.serverId) ? { serverId: legacy.serverId } : {}),
+  };
+  if (!Object.keys(identity).length) return false;
+  const target = path.join(home, 'paseo.json');
+  const temporary = `${target}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(identity)}\n`, { mode: 0o600, flag: 'wx' });
+    await chmod(temporary, 0o600);
+    await link(temporary, target);
+  } catch (error) {
+    if (/** @type {any} */ (error)?.code === 'EEXIST') return false;
+    throw new Error(`the Paseo integration's identity in ${webFile(home)} could not be kept in ${target}, so alp web leaves web.json alone: ${/** @type {any} */ (error)?.message ?? error}`, { cause: error });
+  } finally { await unlink(temporary).catch(() => {}); }
+  log.info(`kept the Paseo integration's identity from web.json in ${target}, so paired devices stay paired`, { code: 'ALP_WEB_PASEO_IDENTITY' });
+  return true;
+}
+
+/**
+ * `--rotate`: a new credential and token, recorded in web.json, under the web lock.
+ * @param {string} home @param {string | undefined} project @param {any} settings @param {import('@anhlp/alp-core/log').Logger} log
+ */
+async function rotate(home, project, settings, log) {
+  const lock = createIntegrationLock(home, 'web');
+  const { acquired, lock: held } = await lock.acquire();
+  if (!acquired) {
+    process.stderr.write(`alp web runs (pid ${held.pid}); it must stop before its token is rotated\n`);
+    process.exit(LOCK_HELD);
+  }
+  let code = 0;
+  try {
+    await carryPaseoIdentity(home, log);
+    const permissions = grantPermissions(settings?.web?.permissions, message => log.warn(message, { code: 'ALP_WEB_PERMISSIONS_IGNORED' }));
+    const store = new CredentialStore({ home: webGatewayHome(home), logger: log });
+    try {
+      const socket = daemonPaths(home).socket;
+      const grant = createGrant({ home, store, permissions, project, socket: () => socket, log: message => log.info(message, { code: 'ALP_WEB_GRANT' }) });
+      // No previous token to keep: a new credential, and every other one revoked.
+      const token = await grant.ensure({});
+      await grant.settled();
+      await publish(home, { version: WEB_FILE_VERSION, app: 'alp-web', token, credentialId: grant.id });
+      log.info(`rotated the token: credential ${grant.id}`, { code: 'ALP_WEB_ROTATED' });
+    } finally { store.close(); }
+  } catch (error) {
+    log.error('alp web could not rotate its token', { code: 'ALP_WEB_ROTATE_FAILED', error });
+    code = 1;
+  }
+  // A failed release leaves the lock (fail closed); the next acquire reclaims it once this pid is gone.
+  await lock.release().catch(error => { log.error('web lock not released', { code: 'ALP_LOCK_RELEASE_FAILED', error }); code = 1; });
+  process.exit(code);
+}
+
 /** The page's Content-Security-Policy on `port`: its own origin only, the socket included. @param {number} port */
 const policy = port => {
   const origins = [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`];
@@ -91,12 +165,13 @@ const policy = port => {
 };
 
 async function run() {
-  const { values } = parseArgs({ options: { service: { type: 'boolean' }, project: { type: 'string' } }, strict: true });
+  const { values } = parseArgs({ options: { service: { type: 'boolean' }, rotate: { type: 'boolean' }, project: { type: 'string' } }, strict: true });
   const home = alpHome();
   await mkdir(home, { recursive: true, mode: 0o700 });
   if (values.service) serviceLog(home);
   const log = createGatewayLogger();
   const settings = await userSettings(home, log);
+  if (values.rotate) return rotate(home, values.project ? path.resolve(values.project) : undefined, settings, log);
   if (settings?.web?.enabled === false) {
     log.info('alp web is disabled by settings ("web.enabled": false)', { code: 'ALP_WEB_DISABLED' });
     process.exit(0);
@@ -135,7 +210,7 @@ async function run() {
   startup = (async () => {
     const stopDaemon = process.env.ALP_SUPERVISE === '0'
       ? async () => {}
-      : superviseDaemon({ home, entry: daemonEntry, log: (/** @type {string} */ message) => log.warn(message, { code: 'ALP_DAEMON_SUPERVISION' }) });
+      : superviseDaemon({ home, entry: daemonEntry, by: 'alp web', log: (/** @type {string} */ message) => log.warn(message, { code: 'ALP_DAEMON_SUPERVISION' }) });
     cleanups.push(() => stopDaemon());
 
     const permissions = grantPermissions(settings?.web?.permissions, message => log.warn(message, { code: 'ALP_WEB_PERMISSIONS_IGNORED' }));
@@ -150,6 +225,9 @@ async function run() {
     });
     // A credentials write under way finishes before the process exits (no half-done temporary file).
     cleanups.push(() => grant.settled());
+    // Before web.json is first overwritten (publish, below).
+    await carryPaseoIdentity(home, log);
+    if (shuttingDown) return;
     const token = await grant.ensure(await previousWeb(home));
     if (shuttingDown) return;
     // The registry, if alpd answers already, before the first page asks for it.

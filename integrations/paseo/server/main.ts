@@ -77,7 +77,7 @@ async function run(home: string) {
   // Keep daemon available.
   const stopDaemon = process.env.ALP_SUPERVISE === '0'
     ? async () => {}
-    : superviseDaemon({ home, entry: () => process.env.ALP_DAEMON_ENTRY ?? fileURLToPath(new URL('./alpd.js', import.meta.url)), log: message => log.warn(message, { code: 'ALP_DAEMON_SUPERVISION' }) });
+    : superviseDaemon({ home, entry: () => process.env.ALP_DAEMON_ENTRY ?? fileURLToPath(new URL('./alpd.js', import.meta.url)), by: 'Paseo', log: message => log.warn(message, { code: 'ALP_DAEMON_SUPERVISION' }) });
 
   let shuttingDown = false;
   let extensionClient: any = null;

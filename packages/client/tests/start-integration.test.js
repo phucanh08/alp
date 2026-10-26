@@ -140,3 +140,57 @@ test('without an entry, discovery still selects the script (unchanged behaviour)
   assert.deepEqual(record.argv, ['--service']);
   assert.equal(lock.pid, record.pid);
 });
+
+test('args follow --service, and must be strings', async t => {
+  const f = await fixture('args');
+  environment(t, f.name, {});
+  const service = await f.write(path.join(f.directory, 'service.mjs'), 'args');
+  const lock = await startIntegration({ name: f.name, entry: service, home: f.home, args: ['--project', '/some where'] });
+  const record = await started(f.home, 'args');
+  assert.deepEqual(record.argv, ['--service', '--project', '/some where']);
+  assert.equal(lock.pid, record.pid);
+  for (const args of ['--project', [1], [null]]) await assert.rejects(startIntegration({ name: f.name, entry: service, home: f.home, args }), /args must be a list of strings/);
+});
+
+test('web.enabled=false refuses web only; messages name the integration, its entry and its own log', async t => {
+  const f = await fixture('gated');
+  environment(t, f.name, {});
+  await writeFile(path.join(f.home, 'settings.json'), JSON.stringify({ web: { enabled: false } }));
+  const service = await f.write(path.join(f.directory, 'service.mjs'), 'gated');
+  await assert.rejects(startIntegration({ name: 'web', entry: service, home: f.home }), /^Error: alp web is disabled by settings \("web\.enabled": false\)\.$/);
+  // Another integration is not alp web: the switch does not apply.
+  const lock = await startIntegration({ name: f.name, entry: service, home: f.home });
+  assert.equal(lock.pid, (await started(f.home, 'gated')).pid);
+
+  // An entry that exits at once is reported with its integration, entry and log path.
+  const failing = path.join(f.directory, 'failing.mjs');
+  await writeFile(failing, 'process.exit(1);');
+  const logs = path.join(f.home, 'logs', 'integrations');
+  await assert.rejects(startIntegration({ name: 'other', entry: failing, home: f.home }), new RegExp(`^Error: ALP integration other \\(entry ${escape(failing)}\\) failed to start; see ${escape(path.join(logs, 'other.log'))}$`));
+  await assert.rejects(startIntegration({ name: 'paseo', entry: failing, home: f.home }), new RegExp(`^Error: The Paseo integration \\(entry ${escape(failing)}\\) failed to start; see ${escape(path.join(logs, 'paseo.log'))}$`));
+  await rm(path.join(f.home, 'settings.json'));
+  await assert.rejects(startIntegration({ name: 'web', entry: failing, home: f.home }), new RegExp(`^Error: alp web \\(entry ${escape(failing)}\\) failed to start; see ${escape(path.join(logs, 'alp-web.log'))}$`));
+  // A missing integration: the name decides the guidance.
+  await assert.rejects(startIntegration({ name: 'nothing-here', home: f.home }), /^Error: ALP integration nothing-here is not installed/);
+});
+
+test('web is never discovered; ALP_WEB_INTEGRATION names the Paseo integration only', async t => {
+  const f = await fixture('paseo');
+  const legacy = await f.write(path.join(f.directory, 'legacy.mjs'), 'legacy');
+  const own = await f.write(path.join(f.directory, 'own.mjs'), 'own');
+  environment(t, 'paseo', { ALP_WEB_INTEGRATION: legacy, ALP_INTEGRATION_ENTRY: undefined });
+  // Everything once registered for `web` is the Paseo integration before its rename: a descriptor,
+  // the environment override. None of it may run under the web lock.
+  await mkdir(path.join(f.home, 'integrations'), { recursive: true });
+  await writeFile(path.join(f.home, 'integrations', 'web.json'), JSON.stringify({ main: legacy }));
+  assert.equal(await discoverIntegration('web', { home: f.home }), undefined);
+  await assert.rejects(startIntegration({ name: 'web', home: f.home }), /alp web runs the alp-web service of the ALP CLI/);
+  assert.ok(await absent(path.join(f.home, 'started-legacy.json')), 'nothing was started');
+  // For paseo, the pre-rename override still works for one release, after the integration's own.
+  assert.equal(await discoverIntegration('paseo', { home: f.home }), legacy);
+  process.env.ALP_PASEO_INTEGRATION = own;
+  assert.equal(await discoverIntegration('paseo', { home: f.home }), own);
+  // And it never applies to another name.
+  delete process.env.ALP_PASEO_INTEGRATION;
+  assert.equal(await discoverIntegration('sample', { home: f.home }), undefined);
+});

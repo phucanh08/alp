@@ -89,9 +89,8 @@ void frame; void observe;
   alp('daemon', 'stop');
   const legacyCli = path.join(directory, 'node_modules/@anhlp/alp/packages/cli/dist/cli.js');
   for (const args of [['init', path.join(directory, 'legacy-project')], ['upgrade', path.join(directory, 'legacy-project')], ['language'], ['daemon', 'start'], ['daemon', 'status'], ['daemon', 'stop']]) run(process.execPath, [legacyCli, ...args], { env });
-  // Explicitly register the separately installed plugin, using its existing public command.
-  run(process.execPath, [path.join(directory, 'node_modules/@anhlp/alp-paseo/server/dist/main.js'), '--register'], { env });
-  // The optional integration starts as a separate process from an unrelated directory through a symlink.
+  // `alp web` runs alp-web, which ships in the CLI: it needs no plugin. It starts from an unrelated
+  // directory through a symlink, as its own process, with the alpgw1 token of a live credential.
   const bin = path.join(directory, 'bin');
   const elsewhere = path.join(directory, 'elsewhere');
   await mkdir(bin, { recursive: true });
@@ -100,17 +99,25 @@ void frame; void observe;
   await symlink(path.relative(bin, legacyCli), alpLink);
   const fromElsewhere = (...args) => run(process.execPath, [alpLink, ...args], { cwd: elsewhere, env });
   const line = fromElsewhere('web', '--print').trim().split('\n').pop();
-  const token = line.match(/#token=([0-9a-f]{32,})$/)?.[1];
-  if (!token) throw new Error(`alp web --print printed no authentication token: ${line}`);
+  const match = /^(http:\/\/127\.0\.0\.1:\d+)\/#token=(alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43})$/.exec(line);
+  if (!match) throw new Error(`alp web --print printed no loopback address with an alpgw1 token: ${line}`);
+  const [, origin, token] = match;
   const alpd = JSON.parse(await readFile(path.join(env.ALP_HOME, 'alpd.lock'), 'utf8'));
-  const integration = JSON.parse(await readFile(path.join(env.ALP_HOME, 'integrations', 'paseo.lock'), 'utf8'));
-  if (!integration.pid || integration.pid === alpd.pid) throw new Error(`the web integration must run as its own process (alpd ${alpd.pid}, web ${integration.pid})`);
-  for (const pid of [alpd.pid, integration.pid]) { try { process.kill(pid, 0); } catch { throw new Error(`process ${pid} is not alive`); } }
-  const served = await fetch(line.replace(/#.*$/, ''));
-  if (served.status >= 400) throw new Error(`the web app did not serve over HTTP: ${served.status}`);
+  const web = JSON.parse(await readFile(path.join(env.ALP_HOME, 'integrations', 'web.lock'), 'utf8'));
+  if (!web.pid || web.pid === alpd.pid) throw new Error(`alp web must run as its own process (alpd ${alpd.pid}, alp-web ${web.pid})`);
+  for (const pid of [alpd.pid, web.pid]) { try { process.kill(pid, 0); } catch { throw new Error(`process ${pid} is not alive`); } }
+  const served = await fetch(`${origin}/`);
+  if (served.status !== 200) throw new Error(`GET ${origin}/ answered ${served.status}`);
+  await served.body?.cancel();
+  const ticket = await fetch(`${origin}/v1/tickets`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
+  if (ticket.status !== 201) throw new Error(`POST ${origin}/v1/tickets with the printed token answered ${ticket.status}`);
+  await ticket.body?.cancel();
+  // Explicitly register the separately installed plugin, using its existing public command; `alp web
+  // pair` then starts the Paseo integration beside alp-web.
+  run(process.execPath, [path.join(directory, 'node_modules/@anhlp/alp-paseo/server/dist/main.js'), '--register'], { env });
   const paired = fromElsewhere('web', 'pair', '--off');
   if (!/relay is off/i.test(paired)) throw new Error(`alp web pair --off did not report the relay off: ${paired}`);
-  console.log(`Standalone installation verified: ${imports.length} module APIs, Paseo server, ACP, CLI and daemon lifecycle, plus the legacy @anhlp/alp distribution and the separately installed web integration.`);
+  console.log(`Standalone installation verified: ${imports.length} module APIs, Paseo server, ACP, CLI and daemon lifecycle, the legacy @anhlp/alp distribution, alp web (alp-web, no plugin) and the separately installed Paseo integration.`);
 } finally {
   await cleanupFakeWeb(env.ALP_HOME, () => {
     if (cli) spawnSync(process.execPath, [cli, 'daemon', 'stop'], { cwd: directory, env, stdio: 'ignore', timeout: 20_000 });

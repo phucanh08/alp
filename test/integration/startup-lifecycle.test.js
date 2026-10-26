@@ -194,7 +194,7 @@ test('automatic restart rechecks a hold published while waiting for admission', 
   await stop();
   assert.equal(await daemonHeld(f.home), true);
   assert.equal(lockAlive(await readLock(f.home)), false);
-  assert.deepEqual(logs, ['alpd started with Paseo']);
+  assert.deepEqual(logs, ['alpd started']);
 });
 
 test('direct service login lifts the existing hold and preserves a newer stop', async t => {

@@ -5,7 +5,6 @@
 import { cleanupFakeWeb, freeWebPort } from './beta-web-lifecycle.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { CHOICES, Run, alpCommand, environment, gateRow, install, manual, options } from './beta-acceptance-lib.mjs';
@@ -13,7 +12,7 @@ import { CHOICES, Run, alpCommand, environment, gateRow, install, manual, option
 const USAGE = `Usage: node scripts/beta-acceptance-web.mjs --packs <dir> (--fake | --live --provider codex|claude) [options]
 
   --packs DIR          the saved release (§7.2); never repacked
-  --fake               W6's token gate only, on a throwaway ALP_HOME with the fakes; not gate evidence
+  --fake               W6's token gate only (alp web, no plugin), on a throwaway ALP_HOME with the fakes; not gate evidence
   --live               W1–W6 with the Paseo 0.11.x on this machine (R5 on macOS, R6 on Linux); W3–W5 need you
   --provider P         codex or claude: the runtime alp setup gives the project's teams
   --use-default-home   allow ALP_HOME to be ~/.alp (Paseo's default). Back it up first (alp daemon stop, copy it),
@@ -98,25 +97,25 @@ try {
     for (const id of ['W1', 'W2', 'W3', 'W4', 'W5']) run.record(id, 'skip', 'needs Paseo and a model (--live); permission cards are covered hermetically by integrations/paseo/tests/permissions.test.js and paseo-web.test.js');
   }
 
-  await run.step('W6', 'alp-paseo-integration --register; alp web --print; the token gate', async () => {
-    const register = run.exec('W6', process.execPath, [path.join(plugin, 'server', 'dist', 'main.js'), '--register'], { env, cwd: project });
-    if (register.status !== 0) throw new Error(`alp-paseo-integration --register failed: ${register.stderr.trim().slice(0, 300)}`);
+  await run.step('W6', 'alp web --print (alp-web, no plugin needed); the token gate', async () => {
     const printed = cli('W6', ['web', '--print']);
     const url = printed.stdout.trim().split('\n').at(-1);
-    const match = /^(http:\/\/127\.0\.0\.1:\d+)\/?#token=([0-9a-f]+)$/.exec(url ?? '');
-    if (printed.status !== 0 || !match) throw new Error(`alp web --print gave no loopback address with a token: ${(printed.stderr || printed.stdout).trim().slice(0, 300)}`);
+    const match = /^(http:\/\/127\.0\.0\.1:\d+)\/#token=(alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43})$/.exec(url ?? '');
+    if (printed.status !== 0 || !match) throw new Error(`alp web --print gave no loopback address with an alpgw1 token: ${(printed.stderr || printed.stdout).trim().slice(0, 300)}`);
     const [, origin, token] = match;
-    const page = await fetch(origin);
-    if (page.status !== 200) throw new Error(`GET ${origin} answered ${page.status}`);
-    const without = await hello(origin, undefined);
-    const wrong = await hello(origin, '0'.repeat(token.length));
-    const right = await hello(origin, token);
+    const page = await fetch(`${origin}/`);
+    await page.body?.cancel();
+    if (page.status !== 200) throw new Error(`GET ${origin}/ answered ${page.status}`);
+    // The gateway's ticket endpoint is the gate: the printed token gets a ticket, nothing else does.
+    const without = await ticket(origin, undefined);
+    const wrong = await ticket(origin, `${token.slice(0, -1)}${token.endsWith('A') ? 'B' : 'A'}`);
+    const right = await ticket(origin, token);
     const problems = [];
-    if (without !== 'rejected:password_required') problems.push(`no token: ${without}`);
-    if (wrong !== 'rejected:incorrect_password') problems.push(`wrong token: ${wrong}`);
-    if (right !== 'accepted') problems.push(`right token: ${right}`);
+    if (without !== 401) problems.push(`no token: ${without}`);
+    if (wrong !== 401) problems.push(`wrong token: ${wrong}`);
+    if (right !== 201) problems.push(`right token: ${right}`);
     if (problems.length) throw new Error(problems.join('; '));
-    run.record('W6', opts.live ? 'check' : 'pass', `${origin} serves the app; the socket refuses no token and a wrong one, accepts alpd's`, { origin });
+    run.record('W6', opts.live ? 'check' : 'pass', `${origin} serves the app; POST /v1/tickets refuses no token and a wrong one (401), accepts the printed one (201)`, { origin });
     if (opts.live) {
       await manual(run, 'W6', `Open ${url} on this machine (Linux headless: ssh -L ${new URL(origin).port}:127.0.0.1:${new URL(origin).port} <host>, then open it on yours).`,
         'the project and the W3 session show; asking and answering and the Tasks panel work');
@@ -133,22 +132,11 @@ try {
 }
 process.exit(run.summary());
 
-/** Paseo's hello on alpd's socket, as the app sends it: how alpd answers. */
-function hello(origin, password) {
-  const WebSocket = createRequire(path.join(consumer, 'package.json'))('ws');
-  return new Promise(resolve => {
-    const ws = new WebSocket(`${origin.replace('http', 'ws')}/ws`, { headers: { Origin: origin } });
-    const done = result => { clearTimeout(timer); ws.terminate(); resolve(result); };
-    const timer = setTimeout(() => done('no answer in 10 s'), 10_000);
-    ws.on('unexpected-response', (_request, response) => done(`refused ${response.statusCode}`));
-    ws.on('error', error => done(`error ${error.message}`));
-    ws.on('open', () => ws.send(JSON.stringify({ type: 'hello', clientId: 'alp-beta-acceptance', clientType: 'browser', protocolVersion: 1, capabilities: { helloRejection: true }, ...(password ? { auth: { kind: 'password', password } } : {}) })));
-    ws.on('message', data => {
-      const frame = JSON.parse(String(data));
-      if (frame.type === 'hello.rejected') done(`rejected:${frame.reason}`);
-      else if (frame.message?.payload?.status === 'server_info') done('accepted');
-    });
-  });
+/** POST /v1/tickets on alp-web's gateway with `token` (none: no Authorization header): the status. */
+async function ticket(origin, token) {
+  const response = await fetch(`${origin}/v1/tickets`, { method: 'POST', headers: token ? { authorization: `Bearer ${token}` } : {} });
+  await response.body?.cancel();
+  return response.status;
 }
 
 /** The task files of a project, hashed, to tell whether the panel changed them. */
