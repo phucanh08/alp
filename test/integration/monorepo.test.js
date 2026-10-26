@@ -54,6 +54,30 @@ test('the boundary checker rejects Paseo deps, imports, createRequire aliases an
   assert.match(output, /packages\/daemon\/src\/escape\.ts: relative import escapes package: \.\.\/\.\.\/outside\.js/);
 });
 
+test('the CLI may bundle the private gateway only as a devDependency; other packages may not depend on it', async t => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), 'alp-bundled-app-'));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const write = async (relative, contents) => { await mkdir(path.dirname(path.join(fixture, relative)), { recursive: true }); await writeFile(path.join(fixture, relative), contents); };
+  const check = () => { const result = spawnSync(process.execPath, ['scripts/check-boundaries.mjs', '--root', fixture], { cwd: root, encoding: 'utf8' }); return { status: result.status, output: result.stdout + result.stderr }; };
+  await write('package.json', JSON.stringify({ private: true, workspaces: ['packages/cli', 'packages/daemon', 'apps/gateway'] }));
+  await write('apps/gateway/package.json', JSON.stringify({ name: '@anhlp/alp-gateway', version: '0.0.0', private: true }));
+  await write('packages/daemon/package.json', JSON.stringify({ name: '@anhlp/alp-daemon', version: '0.0.0' }));
+  await write('packages/cli/src/web/main.js', "import { createGateway } from '@anhlp/alp-gateway';\nexport default createGateway;\n");
+  await write('packages/cli/package.json', JSON.stringify({ name: '@anhlp/alp-cli', version: '0.0.0', devDependencies: { '@anhlp/alp-gateway': '0.0.0' } }));
+  const bundled = check();
+  assert.equal(bundled.status, 0, bundled.output);
+  await write('packages/cli/package.json', JSON.stringify({ name: '@anhlp/alp-cli', version: '0.0.0', dependencies: { '@anhlp/alp-gateway': '0.0.0' } }));
+  const installed = check();
+  assert.equal(installed.status, 1, installed.output);
+  assert.match(installed.output, /@anhlp\/alp-cli: bundles @anhlp\/alp-gateway, so it may name it only as a devDependency/);
+  await write('packages/cli/package.json', JSON.stringify({ name: '@anhlp/alp-cli', version: '0.0.0', devDependencies: { '@anhlp/alp-gateway': '0.0.0' } }));
+  await write('packages/daemon/package.json', JSON.stringify({ name: '@anhlp/alp-daemon', version: '0.0.0', devDependencies: { '@anhlp/alp-gateway': '0.0.0' } }));
+  const other = check();
+  assert.equal(other.status, 1, other.output);
+  assert.match(other.output, /@anhlp\/alp-daemon: forbidden package dependency @anhlp\/alp-gateway/);
+  assert.match(other.output, /@anhlp\/alp-daemon: depends on @anhlp\/alp-gateway, which lives in apps\/gateway/);
+});
+
 // Source-only checks remain useful before building; CI must reject absent build evidence.
 test('strict boundary checks fail when build artifacts are missing', async t => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), 'alp-missing-artifacts-'));

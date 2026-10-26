@@ -167,8 +167,10 @@ export function validateUserSettings(settings, source) {
   }
   if (settings.web !== undefined) {
     check(object(settings.web), 'web must be an object');
-    const extra = Object.keys(settings.web).find(field => !['enabled', 'port', 'relay'].includes(field));
-    check(!extra, `unsupported web field '${extra}'; use enabled, port or relay`);
+    const extra = Object.keys(settings.web).find(field => !['enabled', 'port', 'relay', 'permissions'].includes(field));
+    check(!extra, `unsupported web field '${extra}'; use enabled, port, relay or permissions`);
+    // Gateway permissions `alp web` adds to its default grant; alp-web checks each name against the gateway's list.
+    if (settings.web.permissions !== undefined) check(Array.isArray(settings.web.permissions) && settings.web.permissions.every(entry => typeof entry === 'string' && /^[a-z][a-z.]*$/.test(entry)), 'web.permissions must be a list of permission names, such as files.read');
     // The relay that lets Paseo's app reach alpd from another device (ALPD §64).
     const relay = settings.web.relay;
     if (relay !== undefined) {

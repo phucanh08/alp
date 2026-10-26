@@ -18,13 +18,18 @@ const allowed = {
   '@anhlp/alp-runtime': ['@anhlp/alp-core', '@anhlp/alp-protocol'],
   '@anhlp/alp-client': ['@anhlp/alp-core', '@anhlp/alp-protocol'],
   '@anhlp/alp-daemon': ['@anhlp/alp-runtime', '@anhlp/alp-core', '@anhlp/alp-client', '@anhlp/alp-protocol'],
-  '@anhlp/alp-cli': ['@anhlp/alp-client', '@anhlp/alp-core', '@anhlp/alp-protocol'],
+  '@anhlp/alp-cli': ['@anhlp/alp-client', '@anhlp/alp-core', '@anhlp/alp-protocol', '@anhlp/alp-gateway'],
   '@anhlp/alp-tui': [],
   '@anhlp/alp-gateway': ['@anhlp/alp-client', '@anhlp/alp-core', '@anhlp/alp-protocol'],
   // The browser app: the portable SDK and protocol only (its build checks the bundled graph too).
   '@anhlp/alp-web': ['@anhlp/alp-client', '@anhlp/alp-protocol'],
   '@anhlp/alp-paseo': ['@anhlp/alp-daemon', '@anhlp/alp-runtime', '@anhlp/alp-client', '@anhlp/alp-core', '@anhlp/alp-protocol'],
 };
+/**
+ * The one exception to "apps are leaves": the CLI bundles the private gateway into dist/alp-web.js
+ * (`alp web`), so it names it as a devDependency only and never installs it.
+ */
+const bundledApps = { '@anhlp/alp-cli': ['@anhlp/alp-gateway'] };
 const failures = corePackageProblems(manifest);
 const supportDirectory = path.join(root, 'test', 'support');
 
@@ -63,7 +68,9 @@ for (const location of manifest.workspaces ?? []) {
   for (const dep of edges) if (!(allowed[pkg.name] ?? []).includes(dep)) failures.push(`${pkg.name}: forbidden package dependency ${dep}`);
   for (const name of Object.keys(declared)) {
     const target = locationOf.get(name);
-    if (target && /^(integrations|apps)\//.test(target)) failures.push(`${pkg.name}: depends on ${name}, which lives in ${target} (integrations and apps are leaves)`);
+    const bundled = (bundledApps[pkg.name] ?? []).includes(name);
+    if (bundled && (pkg.dependencies?.[name] || pkg.peerDependencies?.[name] || pkg.optionalDependencies?.[name])) failures.push(`${pkg.name}: bundles ${name}, so it may name it only as a devDependency`);
+    else if (target && /^(integrations|apps)\//.test(target) && !bundled) failures.push(`${pkg.name}: depends on ${name}, which lives in ${target} (integrations and apps are leaves)`);
   }
   if (pkg.name !== '@anhlp/alp-paseo') {
     for (const dep of Object.keys({ ...pkg.dependencies, ...pkg.peerDependencies, ...pkg.devDependencies, ...pkg.optionalDependencies })) {
