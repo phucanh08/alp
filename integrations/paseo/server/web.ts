@@ -9,12 +9,18 @@ import { MAX_FRAME } from '@anhlp/alp-client/index';
 /**
  * The local web app (ALPD §61, §62): alpd serves the ALP web app, Paseo's app built with ALP's
  * patches, on 127.0.0.1, and its socket speaks Paseo's protocol through the gateway. The page is
- * public; the socket needs the token kept in $ALP_HOME/web.json, which `alp web` puts in the
- * address it opens. Requests must name this host and port (no DNS rebinding), and the socket must
+ * public; the socket needs the token kept in $ALP_HOME/paseo.json, which is also the password
+ * Paseo's app asks for. It listens on a port the system picks (alp-web owns `web.port` and
+ * web.json); only `daemon.get_status` and token-authenticated Paseo sockets use this listener, and
+ * relay sockets attach to the gateway directly. Requests must name this host and port (no DNS rebinding), and the socket must
  * come from the page's own origin (no other site in the browser). An alpd built without the app
  * serves a page that says how to build it.
  */
 
+/**
+ * @deprecated The integration no longer listens on `web.port` (alp-web does); it binds port 0.
+ * Kept for one release for importers of `@anhlp/alp-paseo/web`.
+ */
 export const DEFAULT_WEB_PORT = 7433;
 const BEARER_PREFIX = 'paseo.bearer.';
 function bearerOf(protocols: Iterable<string>) { for (const protocol of protocols) if (protocol.startsWith(BEARER_PREFIX)) return protocol; return undefined; }
@@ -34,14 +40,29 @@ const TYPES: Record<string, string> = {
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf', '.wasm': 'application/wasm',
 };
 
+/** Where the integration records its address, token and server id: `<home>/paseo.json`. */
 export function webFile(home: string) {
-  return path.join(home, 'web.json');
+  return path.join(home, 'paseo.json');
 }
 
-/** The token and the server id are made once and kept, so an open page survives alpd restarts. */
+/** Before the rename the integration kept its identity in `<home>/web.json`, which alp-web now owns. */
+const legacyWebFile = (home: string) => path.join(home, 'web.json');
+
+/**
+ * The token and the server id are made once and kept, so an open page and a paired device survive
+ * alpd restarts. Without paseo.json, an identity the integration wrote to web.json before the rename
+ * is carried over once (alp-web's own web.json names `app: 'alp-web'` and is never read).
+ */
 async function lastIdentity(home: string) {
-  let kept: { token?: unknown; serverId?: unknown } = {};
-  try { kept = JSON.parse(await readFile(webFile(home), 'utf8')); } catch {}
+  let kept: { token?: unknown; serverId?: unknown; app?: unknown } = {};
+  try { kept = JSON.parse(await readFile(webFile(home), 'utf8')); } catch (error: any) {
+    if (error?.code === 'ENOENT') {
+      try {
+        const legacy = JSON.parse(await readFile(legacyWebFile(home), 'utf8'));
+        if (legacy && typeof legacy === 'object' && legacy.app === undefined) kept = legacy;
+      } catch {}
+    }
+  }
   return {
     token: typeof kept.token === 'string' && /^[a-f0-9]{64}$/.test(kept.token) ? kept.token : randomBytes(32).toString('hex'),
     serverId: typeof kept.serverId === 'string' && /^alp-[a-f0-9]{16}$/.test(kept.serverId) ? kept.serverId : `alp-${randomBytes(8).toString('hex')}`,
@@ -52,10 +73,11 @@ async function lastIdentity(home: string) {
 const MISSING_APP = `<!doctype html><meta charset="utf-8"><title>ALP</title><body style="font:16px system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem">
 <h1>ALP</h1><p>This alpd was built without the ALP web app. Build it with <code>node scripts/build-paseo-web.mjs</code>, then <code>alp daemon restart</code>, or install ALP from npm, which carries it.</p>`;
 
-export function createWebServer({ app, home, port = DEFAULT_WEB_PORT, log = () => {} }: {
+export function createWebServer({ app, home, port = 0, log = () => {} }: {
   /** The built app and its gateway; without them every address gets a page saying how to build it. */
   app?: WebApp;
   home: string;
+  /** 0 (the default) lets the system pick; a fixed port is tried with the next nine. */
   port?: number;
   log?: (message: string) => void;
 }) {
@@ -137,7 +159,7 @@ export function createWebServer({ app, home, port = DEFAULT_WEB_PORT, log = () =
   return {
     get token() { return token; },
     get serverId() { return serverId; },
-    /** Listens on the first free port from `port`, and records where in web.json. */
+    /** Listens on `port` (or the first free one after it), and records where in paseo.json. */
     async listen(): Promise<WebInfo> {
       ({ token, serverId } = await lastIdentity(home));
       for (let attempt = 0; ; attempt++) {

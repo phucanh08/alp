@@ -1,6 +1,7 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
+import { createServer as createNetServer } from 'node:net';
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
@@ -20,7 +21,9 @@ import { fixtureProcesses } from '../support/fixture-processes.js';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
 const cli = path.join(root, 'packages', 'cli', 'dist', 'cli.js');
-const integrationDescriptor = path.join(root, 'integrations', 'web.json');
+const integrationDescriptor = path.join(root, 'integrations', 'paseo.json');
+const paseoEntry = path.join(root, 'integrations', 'paseo', 'server', 'dist', 'main.js');
+const alpWebService = path.join(root, 'packages', 'cli', 'dist', 'alp-web.js');
 const execFileAsync = promisify(execFile);
 const processFixtures = new Map();
 
@@ -63,8 +66,9 @@ async function homeJson(home, name) {
   return readFile(path.join(home, name), 'utf8').then(JSON.parse, () => undefined);
 }
 
-const webJson = home => homeJson(home, 'web.json');
-const lockJson = home => homeJson(home, path.join('integrations', 'web.lock'));
+// The Paseo integration is integration `paseo`; web.json and integrations/web.lock belong to alp-web.
+const webJson = home => homeJson(home, 'paseo.json');
+const lockJson = home => homeJson(home, path.join('integrations', 'paseo.lock'));
 
 async function waitGone(pid) {
   for (let i = 0; i < 200; i++) { try { process.kill(pid, 0); } catch { return; } await sleep(25); }
@@ -126,7 +130,7 @@ test('cleanup stops unpublished detached daemon and service under gated startup 
     import { syncBuiltinESMExports } from 'node:module';
     const open = fs.open;
     fs.open = async function(file, ...args) {
-      if ([${JSON.stringify(path.join(home, 'alpd.lock'))}, ${JSON.stringify(path.join(home, 'integrations', 'web.lock'))}].includes(String(file))) {
+      if ([${JSON.stringify(path.join(home, 'alpd.lock'))}, ${JSON.stringify(path.join(home, 'integrations', 'paseo.lock'))}].includes(String(file))) {
         appendFileSync(${JSON.stringify(arrived)}, process.pid + '\\n');
         // Bound synchronous startup load. The fixture watchdog has its own event loop.
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30_000);
@@ -171,7 +175,7 @@ test('cleanup ignores foreign metadata PIDs and drains an unrecorded detached de
   `;
   await execFileAsync(process.execPath, ['-e', script], { env: { ...process.env, ...owned.env } });
   await waitFor(async () => (await owned.running()).length === 1, 'unrecorded detached descendant');
-  for (const file of ['web.json', 'integrations/web.lock', 'alpd.lock']) {
+  for (const file of ['paseo.json', 'integrations/paseo.lock', 'alpd.lock']) {
     await mkdir(path.dirname(path.join(home, file)), { recursive: true });
     await writeFile(path.join(home, file), JSON.stringify({ pid: child.pid }));
   }
@@ -213,7 +217,7 @@ test('two concurrent cold alp web invocations converge on one integration', asyn
   assert.ok(a.stdout.includes(`127.0.0.1:${info.port}/#token=${info.token}`), 'the first caller names the winner');
   assert.ok(b.stdout.includes(`127.0.0.1:${info.port}/#token=${info.token}`), 'the second caller converges on the winner');
 
-  // The web lock and web.json agree on the single winning process.
+  // The paseo lock and paseo.json agree on the single winning process.
   const lock = await lockJson(home);
   assert.equal(lock.pid, info.pid);
 });
@@ -287,38 +291,111 @@ test('a disabled web setting fails fast with a clear message', async t => {
   assert.match((refused.stderr || '') + (refused.stdout || ''), /disabled/i);
 });
 
-test('a missing integration descriptor names the optional package', async t => {
-  // Discovery always searches these system bin directories, whatever PATH and HOME say; an
-  // integration installed there cannot be hidden from the CLI, so the refusal cannot be observed.
-  const installed = ['/opt/homebrew/bin', '/usr/local/bin'].map(directory => path.join(directory, 'alp-web-integration')).find(file => existsSync(file));
-  if (installed) { t.skip(`alp-web-integration is installed at ${installed}, which discovery always searches`); return; }
-  const { home } = await createHome(t);
-  await startDaemon(home);
+/** A globally installed integration binary that discovery always finds, whatever PATH says. */
+function installedIntegration() {
+  return ['/opt/homebrew/bin', '/usr/local/bin'].flatMap(directory => ['alp-paseo-integration', 'alp-web-integration'].map(binary => path.join(directory, binary))).find(file => existsSync(file));
+}
 
-  // Hide the distribution descriptor so discovery finds no web integration, then restore it.
+/** Runs `fn` with the distribution descriptor hidden and an environment that reaches no installed integration. */
+async function withoutDiscovery(t, fn) {
   const hidden = `${integrationDescriptor}.hidden`;
   await rename(integrationDescriptor, hidden);
   t.after(async () => { await rename(hidden, integrationDescriptor).catch(() => {}); });
+  const empty = await mkdtemp(path.join(tmpdir(), 'alp-no-home-'));
+  t.after(() => rm(empty, { recursive: true, force: true }));
   try {
-    // Discovery also searches PATH (the workspace links `alp-web-integration` into node_modules/.bin,
-    // and a developer may have it installed globally, possibly beside node itself) and the well-known
-    // bin directories under HOME (~/.npm-global/bin, ~/.local/bin). The CLI is launched through
-    // process.execPath and the refusal path spawns nothing, so give it an empty PATH and HOME, and
-    // clear the explicit overrides, so no installed integration is reachable.
-    const empty = await mkdtemp(path.join(tmpdir(), 'alp-no-home-'));
-    t.after(() => rm(empty, { recursive: true, force: true }));
-    const refused = await run(['web', '--print'], home, 60_000, {
-      PATH: empty,
-      HOME: empty,
-      USERPROFILE: empty,
-      ALP_WEB_INTEGRATION: '',
-      ALP_INTEGRATION_ENTRY: '',
-    });
-    assert.notEqual(refused.code, 0);
-    assert.match((refused.stderr || '') + (refused.stdout || ''), /optional integration package/i);
+    return await fn({ PATH: empty, HOME: empty, USERPROFILE: empty, ALP_WEB_INTEGRATION: '', ALP_INTEGRATION_ENTRY: '', ALP_PASEO_INTEGRATION: '' });
   } finally {
     await rename(hidden, integrationDescriptor).catch(() => {});
   }
+}
+
+test('a home registered before the rename still starts the Paseo integration, with a hint', async t => {
+  const installed = installedIntegration();
+  if (installed) { t.skip(`${path.basename(installed)} is installed at ${installed}, which discovery always searches`); return; }
+  const { home } = await createHome(t);
+  await startDaemon(home);
+  await mkdir(path.join(home, 'integrations'), { recursive: true, mode: 0o700 });
+  await writeFile(path.join(home, 'integrations', 'web.json'), JSON.stringify({ main: paseoEntry }));
+  await withoutDiscovery(t, async env => {
+    const served = await run(['web', '--print'], home, 60_000, env);
+    assert.equal(served.code, 0, served.stderr || served.stdout);
+    assert.match(served.stderr, /registered before its rename[\s\S]*alp-paseo-integration --register/);
+    const info = await webJson(home);
+    assert.equal((await lockJson(home))?.pid, info?.pid, 'the legacy entry runs as integration paseo');
+    assert.ok(served.stdout.includes(`#token=${info.token}`));
+  });
+});
+
+test('alp web pair prints the password kept in paseo.json', async t => {
+  const { home } = await createHome(t);
+  // A relay nobody answers: the link is offered whether or not it connects.
+  await writeFile(path.join(home, 'settings.json'), JSON.stringify({ web: { relay: { enabled: false, endpoint: '127.0.0.1:9' } } }));
+  await startDaemon(home);
+  const paired = await run(['web', 'pair', '--on'], home);
+  assert.equal(paired.code, 0, paired.stderr || paired.stdout);
+  const info = await webJson(home);
+  assert.match(info?.token ?? '', /^[0-9a-f]{64}$/);
+  assert.ok(paired.stdout.includes(`give it: ${info.token}`), paired.stdout);
+  assert.doesNotMatch(paired.stdout, /#token=/);
+  const off = await run(['web', 'pair', '--off'], home);
+  assert.equal(off.code, 0, off.stderr || off.stdout);
+});
+
+test('alp-web and the Paseo integration run side by side in one home', async t => {
+  const { home } = await createHome(t);
+  const port = await new Promise((resolve, reject) => { const server = createNetServer(); server.once('error', reject); server.listen(0, '127.0.0.1', () => { const { port } = server.address(); server.close(() => resolve(port)); }); });
+  await writeFile(path.join(home, 'settings.json'), JSON.stringify({ web: { port, relay: { enabled: false } } }));
+  await startDaemon(home);
+  const first = await run(['web', '--print'], home);
+  assert.equal(first.code, 0, first.stderr || first.stdout);
+  const paseo = await webJson(home);
+  assert.notEqual(paseo.port, port, 'the Paseo integration leaves web.port to alp-web');
+
+  const child = spawn(process.execPath, [alpWebService, '--service'], { stdio: 'ignore', env: { ...process.env, ...processFixtures.get(home).env } });
+  const exited = new Promise(resolve => child.once('exit', code => resolve(code)));
+  t.after(() => { try { child.kill('SIGKILL'); } catch {} });
+  const web = await waitFor(async () => {
+    if (child.exitCode !== null) assert.fail(`alp-web exited ${child.exitCode}: ${await readFile(path.join(home, 'logs', 'integrations', 'alp-web.log'), 'utf8').catch(() => '')}`);
+    const lock = await homeJson(home, path.join('integrations', 'web.lock'));
+    const info = await homeJson(home, 'web.json');
+    return lock?.ready && lock.pid === child.pid && info?.pid === child.pid ? info : undefined;
+  }, 'alp-web to become ready beside the Paseo integration');
+  assert.equal(web.app, 'alp-web');
+  assert.equal(web.port, port, 'alp-web owns web.port');
+
+  // Neither displaced the other: the Paseo integration still owns its lock and file, and serves.
+  assert.deepEqual(await webJson(home), paseo);
+  assert.equal((await lockJson(home)).pid, paseo.pid);
+  process.kill(paseo.pid, 0);
+  const again = await run(['web', '--print'], home);
+  assert.equal(again.code, 0, again.stderr || again.stdout);
+  assert.equal((await webJson(home)).pid, paseo.pid, 'alp web reuses the running Paseo integration');
+  child.kill('SIGTERM');
+  if (process.platform !== 'win32') assert.equal(await exited, 0);
+  else await exited;
+  assert.equal((await lockJson(home)).pid, paseo.pid, 'stopping alp-web leaves the Paseo integration alone');
+});
+
+test('a missing integration descriptor names the optional package', async t => {
+  // Discovery always searches these system bin directories, whatever PATH and HOME say; an
+  // integration installed there cannot be hidden from the CLI, so the refusal cannot be observed.
+  const installed = installedIntegration();
+  if (installed) { t.skip(`${path.basename(installed)} is installed at ${installed}, which discovery always searches`); return; }
+  const { home } = await createHome(t);
+  await startDaemon(home);
+
+  // Hide the distribution descriptor so discovery finds no integration, then restore it. Discovery
+  // also searches PATH (the workspace links the integration binaries into node_modules/.bin, and a
+  // developer may have them installed globally, possibly beside node itself) and the well-known bin
+  // directories under HOME (~/.npm-global/bin, ~/.local/bin). The CLI is launched through
+  // process.execPath and the refusal path spawns nothing, so it gets an empty PATH and HOME and no
+  // explicit overrides, and no installed integration is reachable.
+  await withoutDiscovery(t, async env => {
+    const refused = await run(['web', '--print'], home, 60_000, env);
+    assert.notEqual(refused.code, 0);
+    assert.match((refused.stderr || '') + (refused.stdout || ''), /optional integration package/i);
+  });
 });
 
 test('stale web metadata from a dead process is replaced by a live integration', async t => {
@@ -326,7 +403,7 @@ test('stale web metadata from a dead process is replaced by a live integration',
   const daemon = await startDaemon(home);
 
   const dead = 2 ** 31 - 1;
-  await writeFile(path.join(home, 'web.json'), JSON.stringify({ pid: dead, port: 1, token: 'a'.repeat(64), serverId: 'alp-0000000000000000', url: 'http://127.0.0.1:1/' }));
+  await writeFile(path.join(home, 'paseo.json'), JSON.stringify({ pid: dead, port: 1, token: 'a'.repeat(64), serverId: 'alp-0000000000000000', url: 'http://127.0.0.1:1/' }));
 
   const served = await run(['web', '--print'], home);
   assert.equal(served.code, 0, served.stderr || served.stdout);

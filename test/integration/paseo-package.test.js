@@ -35,9 +35,11 @@ test('canonical Paseo plugin and root compatibility distribution remain buildabl
   assert.ok(existsSync(path.join(root, 'packages/cli/dist/cli.js')), 'missing root CLI build');
 
   // The repository descriptor is a development convenience; only the plugin ships its server/web.
-  const descriptor = JSON.parse(await readFile(path.join(root, 'integrations/web.json'), 'utf8'));
+  const descriptor = JSON.parse(await readFile(path.join(root, 'integrations/paseo.json'), 'utf8'));
   assert.ok(existsSync(path.resolve(root, 'integrations', descriptor.main)));
   assert.ok(pkg.files.includes('server/dist'));
+  assert.equal(pkg.bin['alp-paseo-integration'], 'server/dist/main.js');
+  // The pre-rename name stays an alias for one release.
   assert.equal(pkg.bin['alp-web-integration'], 'server/dist/main.js');
   assert.ok(!manifest.files.some(entry => /integrations|web-app/.test(entry)));
   assert.ok(!manifest.dependencies['@getpaseo/plugin']);

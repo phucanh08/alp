@@ -65,6 +65,7 @@
     "prepack": "npm run build && node ../../scripts/check-web-app.mjs"
   },
   "bin": {
+    "alp-paseo-integration": "server/dist/main.js",
     "alp-web-integration": "server/dist/main.js"
   },
   "exports": {

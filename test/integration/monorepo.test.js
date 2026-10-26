@@ -107,7 +107,7 @@ test('root distribution boundary rejects direct/optional/peer/dev/bundled SDK an
   for (const field of ['bundledDependencies', 'bundleDependencies']) {
     assert.match(corePackageProblems({ name: '@anhlp/alp', [field]: ['@getpaseo/plugin'] }).join('\n'), /forbidden Paseo bundle/);
   }
-  for (const file of ['integrations/web.json', 'integrations/paseo/server/dist/main.js', 'dist/web-app/index.html', 'node_modules/@getpaseo/plugin/package.json']) {
+  for (const file of ['integrations/web.json', 'integrations/paseo.json', 'integrations/paseo/server/dist/main.js', 'dist/web-app/index.html', 'node_modules/@getpaseo/plugin/package.json']) {
     assert.match(corePackageProblems({ name: '@anhlp/alp' }, [file]).join('\n'), /forbidden core artifact/);
   }
   const fixture = await mkdtemp(path.join(os.tmpdir(), 'alp-root-boundary-'));

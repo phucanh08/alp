@@ -265,8 +265,8 @@ The optional `@anhlp/alp-paseo` package serves the ALP web app as a separate pro
 
 ```sh
 npm install -g @anhlp/alp-paseo@beta
-alp-web-integration --register  # register in the selected ALP_HOME (also discoverable on PATH)
-alp web            # opens http://127.0.0.1:7433 with its access token
+alp-paseo-integration --register  # register in the selected ALP_HOME (also discoverable on PATH)
+alp web            # opens the web app's loopback address with its access token
 alp web --print    # prints the address instead
 ```
 
@@ -279,7 +279,7 @@ The app is [Paseo](https://github.com/getpaseo/paseo)'s web app (Apache 2.0), bu
 - **Usage:** the sidebar Usage button and Settings → Usage show Codex and Claude account limits, plan names and reset windows. ALP's Usage workspace panel and plugin settings also show paused runtimes and parked assignment counts. Reads are cached for 30 seconds; Refresh requests fresh data. Missing provider data is shown as unavailable. These are account-wide provider limits, not ALP token costs.
 - What Paseo has and ALP not yet (terminals, committing and pushing, worktrees from the app, voice, …) says "Tính năng đang phát triển" (in your language) when used.
 
-The web app listens on 127.0.0.1 only. The page needs the token `alp web` puts in its address (kept in `~/.alp/web.json`), and the integration refuses requests for another host name and sockets from another site. `"web": { "port": 8000 }` in `~/.alp/settings.json` moves it, and `"web": { "enabled": false }` turns it off. In a checkout of this repository, build the app with `npm run build:web` (it clones Paseo into `.cache/paseo-web`). Details: [ALPD §62](plans/reference/ALPD.md#62-the-alp-web-app-on-paseos-app-2026-10-10).
+The web app listens on 127.0.0.1 only. The Paseo integration runs as integration `paseo` (`~/.alp/integrations/paseo.lock`) on a port the system picks; `web.port` and `~/.alp/web.json` belong to the `alp-web` service. The page needs the token `alp web` puts in its address (kept in `~/.alp/paseo.json`), and the integration refuses requests for another host name and sockets from another site. `"web": { "enabled": false }` in `~/.alp/settings.json` turns it off. `alp-web-integration` remains an alias of `alp-paseo-integration` for one release, and a home registered with it (`integrations/web.json`) still starts the integration, with a hint to re-register. In a checkout of this repository, build the app with `npm run build:web` (it clones Paseo into `.cache/paseo-web`). Details: [ALPD §62](plans/reference/ALPD.md#62-the-alp-web-app-on-paseos-app-2026-10-10).
 
 ### Paseo's app on your phone (experimental)
 
@@ -290,7 +290,7 @@ alp web pair --on     # turns the relay on and prints the pairing link
 alp web pair          # the link again; --off turns the relay off
 ```
 
-Or in the web app: Settings → your host → Pair device → Enable relay, then scan the QR code with Paseo's app. Traffic between the device and alpd is end-to-end encrypted; the relay only passes it on. The link carries alpd's public key, not its token: when Paseo's app asks for a password, give it the token (the part after `#token=` in `alp web --print`). The relay stays off until you turn it on; `"web": { "relay": { "endpoint": "host:port" } }` points the integration at another relay. Paseo's app shows ALP's sessions and teams, and answers what ALP has not built yet as an error. Details: [ALPD §64](plans/reference/ALPD.md#64-paseos-relay-and-its-app-on-another-device-2026-10-12).
+Or in the web app: Settings → your host → Pair device → Enable relay, then scan the QR code with Paseo's app. Traffic between the device and alpd is end-to-end encrypted; the relay only passes it on. The link carries alpd's public key, not its token: when Paseo's app asks for a password, give it the password `alp web pair` prints (the token in `~/.alp/paseo.json`). The relay stays off until you turn it on; `"web": { "relay": { "endpoint": "host:port" } }` points the integration at another relay. Paseo's app shows ALP's sessions and teams, and answers what ALP has not built yet as an error. Details: [ALPD §64](plans/reference/ALPD.md#64-paseos-relay-and-its-app-on-another-device-2026-10-12).
 
 ## Antigravity CLI (experimental)
 

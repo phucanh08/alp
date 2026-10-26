@@ -163,16 +163,19 @@ in its address. It is not the standalone app in `apps/web`, which is deferred.
 
 ```sh
 npm install -g @anhlp/alp-paseo@beta
-alp-web-integration --register            # in the ALP_HOME you use
-alp web                                   # opens http://127.0.0.1:7433/… with its token
+alp-paseo-integration --register            # in the ALP_HOME you use
+alp web                                   # opens the loopback address with its token
 alp web --print                           # prints the address instead
 ```
 
 Normal npm installs bring the plugin's required peers (`@getpaseo/*`, `ws`); React and React
 Native are optional peers that the Paseo app provides, so npm does not install them. Do not add
-`--legacy-peer-deps`. On a headless Linux machine, forward the port and open the address on
-your own machine: `ssh -L 7433:127.0.0.1:7433 <host>`. Pairing Paseo's app on another device
-through the relay (`alp web pair --on`) is **experimental** and off by default.
+`--legacy-peer-deps`. The integration picks its port when it starts (`alp web --print` names
+it); on a headless Linux machine, forward that port and open the address on your own machine:
+`ssh -L <port>:127.0.0.1:<port> <host>`. Pairing Paseo's app on another device through the relay
+(`alp web pair --on`) is **experimental** and off by default; when Paseo's app asks for a
+password, give it the one `alp web pair` prints (the token in `~/.alp/paseo.json`).
+`alp-web-integration` remains an alias of `alp-paseo-integration` for one release.
 
 A plugin directory managed by `paseo plugin add npm:…` is not a standalone web
 installation. Paseo installs it without peers and supplies `@getpaseo/plugin` through
@@ -180,8 +183,8 @@ its plugin loader. Running `node <managed-plugin>/server/dist/main.js --register
 directly bypasses that loader and can fail with `ERR_MODULE_NOT_FOUND` for
 `@getpaseo/plugin`; this invocation from the managed directory is unsupported
 ([#154](https://github.com/phucanh08/alp/issues/154)). Use the normal npm installation
-and `alp-web-integration --register` shown above. For a local npm installation with
-required peers, use `./node_modules/.bin/alp-web-integration --register` with the
+and `alp-paseo-integration --register` shown above. For a local npm installation with
+required peers, use `./node_modules/.bin/alp-paseo-integration --register` with the
 intended `ALP_HOME`. Registration records the entry path; it does not install missing
 peers or turn a host-managed plugin into a standalone installation.
 
@@ -207,7 +210,7 @@ plugin ID, `alp-provider`, is the same).
    ```sh
    npm install -g @anhlp/alp@beta @anhlp/alp-paseo@beta
    npm ls -g @anhlp/alp @anhlp/alp-paseo     # both 0.0.1-beta.3
-   alp-web-integration --register
+   alp-paseo-integration --register
    ```
 
 4. Replace the Paseo plugin. `paseo plugin update` would fetch the old name again, so remove it
@@ -293,7 +296,8 @@ npm uninstall -g @anhlp/alp-paseo @anhlp/alp
 What stays, for you to keep or remove yourself once you no longer need it:
 
 - `$ALP_HOME` (default `~/.alp`): sessions, settings, your library, logs, backups,
-  `web.json` (the web token) and `integrations/web.json`;
+  `paseo.json` (the Paseo integration's token) and `integrations/paseo.json`, and `web.json` and
+  `integrations/web.json` from earlier versions;
 - in each project: `ALP.md` and `.alp/` (including `.alp/tasks`), and git branches
   `alp/<id>` that hold an assignment's work;
 - with Antigravity: the `alp` entry ALP added to `~/.gemini/config/mcp_config.json`;

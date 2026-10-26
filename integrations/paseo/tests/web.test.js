@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { get } from 'node:http';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import WebSocket from 'ws';
@@ -42,6 +42,35 @@ test('without the built app, alpd says how to build it at every address, on 127.
     ws.on('error', () => {});
   });
   assert.equal(refused, 404);
+});
+
+test('the integration records itself in paseo.json and carries over only its own pre-rename web.json identity', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-web-identity-'));
+  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  const start = async (home, legacy) => {
+    await mkdir(home, { recursive: true });
+    if (legacy) await writeFile(path.join(home, 'web.json'), JSON.stringify(legacy));
+    const web = createWebServer({ home });
+    const info = await web.listen();
+    await web.close();
+    return info;
+  };
+  const old = { port: 7433, token: 'a'.repeat(64), serverId: 'alp-0123456789abcdef', url: 'http://127.0.0.1:7433/', pid: 1 };
+  const carried = path.join(directory, 'carried');
+  const info = await start(carried, old);
+  assert.equal(webFile(carried), path.join(carried, 'paseo.json'));
+  assert.deepEqual(JSON.parse(await readFile(webFile(carried), 'utf8')), info);
+  assert.deepEqual([info.token, info.serverId], [old.token, old.serverId], 'a paired device keeps its password across the rename');
+  assert.deepEqual(JSON.parse(await readFile(path.join(carried, 'web.json'), 'utf8')), old, 'web.json is never written');
+  assert.ok(info.port > 0 && info.port !== 7433, 'the default listener is ephemeral, not web.port');
+  // alp-web's own web.json is not the integration's identity.
+  const alpWeb = path.join(directory, 'alp-web');
+  const fresh = await start(alpWeb, { ...old, app: 'alp-web' });
+  assert.notEqual(fresh.token, old.token);
+  assert.notEqual(fresh.serverId, old.serverId);
+  // Once paseo.json exists it wins over web.json.
+  const again = await start(carried, { ...old, token: 'b'.repeat(64) });
+  assert.equal(again.token, old.token);
 });
 
 test('settings may turn the web app off or move its port', () => {

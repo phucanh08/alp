@@ -42,7 +42,7 @@ async function stop(pid) {
 /** Stop the reconnecting web integration first, then alpd, and await both before reporting success. */
 export async function cleanupFakeWeb(home, stopDaemon) {
   const web = new Set();
-  for (const file of ['web.json', 'integrations/web.lock']) {
+  for (const file of ['paseo.json', 'integrations/paseo.lock', 'web.json', 'integrations/web.lock']) {
     const info = await metadata(home, file);
     if (info?.pid) web.add(info.pid);
   }

@@ -28,7 +28,7 @@ async function makeDistribution() {
   // The distribution is an ESM package, as the real one is.
   await writeFile(path.join(distro, 'package.json'), JSON.stringify({ name: '@anhlp/alp', type: 'module', version: '0.0.0-test' }));
   // The descriptor points at a bundled entry, relative to its own directory.
-  await writeFile(path.join(distro, 'integrations', 'web.json'), JSON.stringify({ main: './entry.js' }));
+  await writeFile(path.join(distro, 'integrations', 'paseo.json'), JSON.stringify({ main: './entry.js' }));
   await writeFile(path.join(distro, 'integrations', 'entry.js'), await entrySource());
   // The CLI the global bin links to: a probe that reports what discovery and startIntegration find.
   await writeFile(path.join(distro, 'packages', 'cli', 'dist', 'cli.js'), await probeSource());
@@ -36,7 +36,7 @@ async function makeDistribution() {
   return { directory, distro, bin, cli: path.join(bin, 'alp') };
 }
 
-/** The bundled integration entry: publish the ready lock and web.json in the home it is given. */
+/** The bundled integration entry: publish the ready lock and paseo.json in the home it is given. */
 async function entrySource() {
   return `import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -49,8 +49,8 @@ if (process.argv.includes('--service')) {
   await mkdir(path.join(home, 'logs', 'integrations'), { recursive: true });
   await writeFile(path.join(home, 'logs', 'integrations', 'paseo.log'), 'integration started\\n');
 }
-await writeFile(path.join(home, 'web.json'), JSON.stringify({ pid: process.pid, port: 0, token: 't'.repeat(64), serverId: 'alp-test', url: 'http://127.0.0.1:0/' }));
-await writeFile(path.join(home, 'integrations', 'web.lock'), JSON.stringify({ pid: process.pid, ready: true, socket: path.join(home, 'alp.sock') }));
+await writeFile(path.join(home, 'paseo.json'), JSON.stringify({ pid: process.pid, port: 0, token: 't'.repeat(64), serverId: 'alp-test', url: 'http://127.0.0.1:0/' }));
+await writeFile(path.join(home, 'integrations', 'paseo.lock'), JSON.stringify({ pid: process.pid, ready: true, socket: path.join(home, 'alp.sock') }));
 process.on('SIGTERM', () => process.exit(0));
 setInterval(() => {}, 60_000);
 `;
@@ -61,10 +61,10 @@ async function probeSource() {
   return `import { discoverIntegration, startIntegration } from ${JSON.stringify(new URL(`file://${clientDist}`).href)};
 const [mode, home] = process.argv.slice(2);
 if (mode === 'discover') {
-  const found = await discoverIntegration('web', { home });
+  const found = await discoverIntegration('paseo', { home });
   console.log(JSON.stringify({ argv1: process.argv[1], found: found ?? null }));
 } else {
-  const lock = await startIntegration({ name: 'web', home });
+  const lock = await startIntegration({ name: 'paseo', home });
   console.log(JSON.stringify({ argv1: process.argv[1], lock }));
 }
 `;
@@ -112,11 +112,11 @@ test('startIntegration keeps every artifact in the selected home and passes it t
   pid = lock?.pid;
   assert.ok(Number.isSafeInteger(pid), 'a real integration process was started');
 
-  // The lock and web.json are in the selected home, never the ambient one.
-  const web = JSON.parse(await readFile(path.join(selected, 'web.json'), 'utf8'));
+  // The lock and paseo.json are in the selected home, never the ambient one.
+  const web = JSON.parse(await readFile(path.join(selected, 'paseo.json'), 'utf8'));
   assert.equal(web.pid, pid, 'the selected home holds the integration metadata');
-  assert.ok(existsSync(path.join(selected, 'integrations', 'web.lock')), 'the ready lock is in the selected home');
-  assert.ok(!existsSync(path.join(ambient, 'web.json')), 'the ambient home is untouched');
+  assert.ok(existsSync(path.join(selected, 'integrations', 'paseo.lock')), 'the ready lock is in the selected home');
+  assert.ok(!existsSync(path.join(ambient, 'paseo.json')), 'the ambient home is untouched');
   assert.ok(!existsSync(path.join(ambient, 'integrations')), 'the ambient home got no integrations directory');
 
   // The launcher starts the entry as a detached service, so the entry can write the log its errors

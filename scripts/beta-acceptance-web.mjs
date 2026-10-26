@@ -98,9 +98,9 @@ try {
     for (const id of ['W1', 'W2', 'W3', 'W4', 'W5']) run.record(id, 'skip', 'needs Paseo and a model (--live); permission cards are covered hermetically by integrations/paseo/tests/permissions.test.js and paseo-web.test.js');
   }
 
-  await run.step('W6', 'alp-web-integration --register; alp web --print; the token gate', async () => {
+  await run.step('W6', 'alp-paseo-integration --register; alp web --print; the token gate', async () => {
     const register = run.exec('W6', process.execPath, [path.join(plugin, 'server', 'dist', 'main.js'), '--register'], { env, cwd: project });
-    if (register.status !== 0) throw new Error(`alp-web-integration --register failed: ${register.stderr.trim().slice(0, 300)}`);
+    if (register.status !== 0) throw new Error(`alp-paseo-integration --register failed: ${register.stderr.trim().slice(0, 300)}`);
     const printed = cli('W6', ['web', '--print']);
     const url = printed.stdout.trim().split('\n').at(-1);
     const match = /^(http:\/\/127\.0\.0\.1:\d+)\/?#token=([0-9a-f]+)$/.exec(url ?? '');
