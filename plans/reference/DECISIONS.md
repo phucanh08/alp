@@ -281,6 +281,10 @@ Decided by the user on 2026-10-10: "turn ALP into ACP, then make a local web app
 
 ## D31 — The ALP web app is Paseo's app over alpd
 
+> **Superseded** by the user's decision of 2026-10-26 (epic t-55ce): `alp web` serves ALP's own app
+> (`apps/web`) with an embedded gateway, and Paseo's web app (`paseo-web/`) was removed on 2026-10-27
+> (t-55ce.3). The Paseo bridge, the relay and `alp web pair` remain for Paseo's own app.
+
 Decided by the user on 2026-10-10, after using the D30 web app: "it does not feel as natural as Paseo; take Paseo's web as the base and graft ALP onto it; whatever Paseo has that ALP lacks says the feature is in development when clicked, and report those features to me". Chosen over running Paseo's own daemon and web UI, so that installing ALP stays enough.
 
 - **The app.** ALP builds Paseo's web app (packages/app, Apache 2.0) from a pinned commit with a small set of patches kept in `paseo-web/`, keeps Paseo's licence and a notice of the changes, and serves it from alpd in place of the D30 app. The patches connect the app to the alpd that serves it with the token `alp web` gives it, name it ALP, and add what ALP needs.

@@ -184,8 +184,9 @@ alp web rotate       # replaces the token; pages already open lose access
   `"web": { "permissions": ["files.read", "attachments.write"] }` (others: `session.team.write`,
   `terminal.exec`). If one entry is not a permission, the whole list is ignored with a warning;
   an entry that is not a lowercase name with dots (such as `"files-read"`) makes the whole
-  `settings.json` invalid, so alp-web ignores all of it, `web.port` included, and logs
-  `ALP_SETTINGS_INVALID` in `~/.alp/logs/integrations/alp-web.log`.
+  `settings.json` invalid, so both alpd and alp-web ignore all of it (alp-web's `web.port`
+  included, alpd's own settings too) and log `ALP_SETTINGS_INVALID`, alp-web in
+  `~/.alp/logs/integrations/alp-web.log`.
 - It reaches the projects alpd knows, and the folder you ran `alp web` in when it started the
   service, if that folder is an ALP project.
 - alp-web keeps alpd running (`ALP_SUPERVISE=0` turns that off). It reads `web.port`,
@@ -230,8 +231,9 @@ alp web pair --on                         # turns the relay on and prints the pa
 
 Normal npm installs bring the plugin's required peers (`@getpaseo/*`, `ws`); React and React
 Native are optional peers that the Paseo app provides, so npm does not install them. Do not add
-`--legacy-peer-deps`. When Paseo's app asks for a password, give it the one `alp web pair` prints
-(the token in `~/.alp/paseo.json`). `alp-web-integration` remains an alias of
+`--legacy-peer-deps`. Open the link `alp web pair` prints on the device that runs Paseo's app;
+when Paseo's app asks for a password, give it the one `alp web pair` prints (the token in
+`~/.alp/paseo.json`). This package no longer ships Paseo's web app (removed in t-55ce.3). `alp-web-integration` remains an alias of
 `alp-paseo-integration`, and `ALP_WEB_INTEGRATION` of `ALP_PASEO_INTEGRATION`, for one release.
 
 A plugin directory managed by `paseo plugin add npm:…` is not a standalone web

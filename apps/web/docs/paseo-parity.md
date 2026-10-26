@@ -1,5 +1,11 @@
 # apps/web compared with paseo-web
 
+> **Historical.** paseo-web was removed from this repository on 2026-10-27 (task t-55ce.3, PR
+> #233): its patches, `paseo-web/upstream.json`, `scripts/build-paseo-web.mjs`, `dist/web-app`
+> and the screenshot script `apps/web/scripts/compare-paseo.mjs` are gone, and `alp web` serves
+> apps/web. The paths and commands below describe the repository before that; the comparison is
+> kept as the record of the parity work.
+
 This document compares the screens and features of **paseo-web** with those of **apps/web**,
 lists what apps/web is missing, and ranks the gaps. Tasks t-7679.1 (chat/timeline), t-7679.2
 (sidebar/workspace), t-7679.3 (settings persistence and the New session flow), t-7679.5 (the workspace's

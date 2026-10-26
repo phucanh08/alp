@@ -1967,6 +1967,19 @@ Goal (D30, steps 2–3): installing ALP is enough to code from a browser. alpd s
 
 ## 62. The ALP web app on Paseo's app (2026-10-10)
 
+> **Historical (superseded by epic t-55ce, 2026-10-26).** `alp web` serves ALP's own app (`apps/web`)
+> through the CLI's `alp-web` service ([docs/alp/web.md](../../docs/alp/web.md) §3.1). Paseo's web
+> app was removed on 2026-10-27 (t-55ce.3): `paseo-web/` (patches, `upstream.json`, its LICENSE and
+> NOTICE), `scripts/build-paseo-web.mjs`, `scripts/check-web-app.mjs`, `scripts/web-app-smoke.mjs`,
+> `npm run build:web`, `dist/web-app` and `server/dist/web-app`, and the serving of the app's files
+> and `/alp-plugins.js`. What remains of this section is the Paseo bridge (`integrations/paseo/server/paseo`,
+> the protocol core below), which serves Paseo's app through the relay (§64) and a token-guarded
+> local socket; the integration's listener answers plain HTTP with 404. Paseo's licence is now
+> `integrations/paseo/LICENSE.paseo.txt`; `test/paseo-web.test.js` below is now
+> `integrations/paseo/tests/bridge-socket.test.js`, and the pinned Paseo checkout for the plugin
+> compiler check (#111) is made by `scripts/paseo-checkout.mjs`. The rest of this section is the
+> record as of 2026-10-10 to 2026-10-12.
+
 Goal (D31): the browser app is Paseo's own web app, so it feels like Paseo, with ALP underneath. Steps 1–2 here: the build and the protocol core.
 
 - **Build** (`scripts/build-paseo-web.mjs`, `paseo-web/`): `paseo-web/upstream.json` pins Paseo's repository and commit (0.11.2, `b63a325`); `paseo-web/patches/` holds ALP's changes as `git format-patch` files; `paseo-web/LICENSE` is Paseo's Apache 2.0 licence and `paseo-web/NOTICE` says what ALP changes. The script keeps a checkout in `.cache/paseo-web` (or `$ALP_PASEO_SRC`) at the pinned commit, applies the patches, installs the monorepo only when its lockfile changed, runs Paseo's patch step and `build:app-deps`, and exports the app with `expo export --platform web`. The export, with `.br` and `.gz` copies of each text file, the licence, the notice and `alp-web-app.json` (commit and patches), goes to `dist/web-app` and beside the Paseo plugin's alpd. A build takes about 70 s after the first install; the app is about 21 MB, 2 MB brotli.

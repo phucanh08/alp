@@ -1,7 +1,8 @@
 # Legacy source-directory cleanup verification
 
 > **Historical record**, kept as evidence. Paths below are of the machine and workspace at the
-> time; not current guidance.
+> time; not current guidance. Paseo's web app (`paseo-web/`, `scripts/build-paseo-web.mjs`,
+> `dist/web-app`) named below was removed later (t-55ce.3); `alp web` serves `apps/web`.
 
 Date: 2026-10-14
 Workspace: `/Users/anhlp/StudioProjects/alp-paseo`
