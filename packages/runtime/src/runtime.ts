@@ -3956,7 +3956,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       });
       if ((continueRoot || parkedRoot) && root.parked) parked.push(root.parked);
       const next = parked.some(park => !park.pause)
-        ? 'send an explicit prompt to each parked session to continue it'
+        ? 'send an explicit prompt to each parked session to continue it: alp send <session> --prompt <text>'
         : 'run alp resume to continue them';
       notice(failed.length ? 'warning' : 'info',
         `ALP: ${cause}${options.previousExit?.at ? ` (around ${options.previousExit.at})` : ''}. ` +

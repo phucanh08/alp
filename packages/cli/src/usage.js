@@ -25,7 +25,8 @@ const USAGE = `Usage:
   alp ps [--all]
   alp top [session] [--once]
   alp attach <session> [--json]
-  alp send <session> [--json] <text>
+  alp send <session> [--prompt] [--json] <text>
+            child default: user mail; --prompt: explicit new prompt to a live root or child
   alp questions [--json]
   alp answer <question> <text> | alp answer <question> --dismiss [--reason R]
   alp log <session> [--json]
