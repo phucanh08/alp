@@ -387,12 +387,21 @@ test('a job that is hours late is still delivered after a restart', async t => {
   let release;
   const resume = new Promise(resolve => { release = resolve; });
   releases.push(release);
+  // Do not allow any scheduler pass before native resume is gated. Otherwise an
+  // opening note from before a snapshot existed could satisfy the observation.
+  let allowTick = false;
+  const interval = globalThis.setInterval;
+  const tickGate = t.mock.method(globalThis, 'setInterval', (callback, ms, ...args) =>
+    interval(() => { if (ms !== 20 || allowTick) callback(...args); }, ms));
   // Hold the actual native resume: the runtime already exposes a snapshot, but its
   // thread is not ready. A scheduler tick must observe this exact recovery phase.
   const next = await start({ resumeGate: async () => { entered(); await resume; } });
   await resuming;
   assert.ok(next.runtime.snapshot(session.id), 'a snapshot exists before native resume answers');
   assert.equal(next.runtime.starting(session.id), true);
+  assert.equal((await jobOf(next, job.id)).lastError, undefined, 'no earlier tick supplied an opening note');
+  allowTick = true;
+  tickGate.mock.restore();
   await until(async () => {
     const current = await jobOf(next, job.id);
     return current.lastError || current.status !== 'pending';
