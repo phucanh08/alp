@@ -1,4 +1,19 @@
-# Unreleased (next beta)
+# ALP 0.0.1-beta.4 — release notes
+
+Prepared 2026-10-27. Publication and acceptance results will be recorded in
+[beta-scope.md](beta-scope.md) §13. Install after publication with:
+
+```sh
+npm install -g @anhlp/alp@beta
+paseo plugin add npm:@anhlp/alp-paseo@beta
+```
+
+All eight public packages use `0.0.1-beta.4`, with internal dependencies pinned to that version.
+The Paseo compatibility range is now `>=0.11.1 <1.0.0` (beta.3 declared `<0.13.0`). macOS and Linux support,
+Node 22.12+ and 24, and the experimental status of Windows and remote features are unchanged.
+Back up your ALP home before upgrading; see [beta-install.md](beta-install.md).
+
+Changes since `0.0.1-beta.3`:
 
 - **Remote terminals** (issue #121 H, off by default): a real PTY shell on the host, as the account
   that runs alpd (a workspace is not a sandbox), for the web app through `alp-gateway` (credential

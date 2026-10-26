@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp-web",
-  "version": "0.0.1-beta.3",
+  "version": "0.0.1-beta.4",
   "private": true,
   "type": "module",
   "description": "ALP web: a browser client for alpd through the ALP remote gateway, on the portable client SDK",
@@ -17,8 +17,8 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@anhlp/alp-client": "0.0.1-beta.3",
-    "@anhlp/alp-protocol": "0.0.1-beta.3",
+    "@anhlp/alp-client": "0.0.1-beta.4",
+    "@anhlp/alp-protocol": "0.0.1-beta.4",
     "@radix-ui/react-slot": "1.5.0",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
