@@ -32,7 +32,7 @@ const processFixtures = new Map();
 
 // alp-web serves the built apps/web files; these tests exercise the process lifecycle, so a stand-in
 // page keeps them independent of the web build (ALP_WEB_APP is the override).
-const standInApp = await mkdtemp(path.join(tmpdir(), 'alp-web-app-'));
+const standInApp = await mkdtemp(path.join(tmpdir(), 'alp-web-stand-in-'));
 await writeFile(path.join(standInApp, 'index.html'), '<!doctype html><title>ALP</title>');
 process.env.ALP_WEB_APP = standInApp;
 // The outer test process must never fall back to the developer's live home either.

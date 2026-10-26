@@ -9,7 +9,8 @@
     "client",
     "shared",
     "server/dist",
-    "NOTICE"
+    "NOTICE",
+    "LICENSE.paseo.txt"
   ],
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.292",
@@ -62,7 +63,7 @@
   "scripts": {
     "build": "node ../../scripts/build-workspace.mjs paseo",
     "test": "node ../../scripts/test-package.mjs paseo",
-    "prepack": "npm run build && node ../../scripts/check-web-app.mjs"
+    "prepack": "npm run build"
   },
   "bin": {
     "alp-paseo-integration": "server/dist/main.js",

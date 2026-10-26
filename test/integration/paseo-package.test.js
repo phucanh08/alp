@@ -41,7 +41,7 @@ test('canonical Paseo plugin and root compatibility distribution remain buildabl
   assert.equal(pkg.bin['alp-paseo-integration'], 'server/dist/main.js');
   // The pre-rename name stays an alias for one release.
   assert.equal(pkg.bin['alp-web-integration'], 'server/dist/main.js');
-  assert.ok(!manifest.files.some(entry => /integrations|web-app/.test(entry)));
+  assert.ok(!manifest.files.some(entry => /integrations/.test(entry)));
   assert.ok(!manifest.dependencies['@getpaseo/plugin']);
   assert.ok(!manifest.bundledDependencies?.includes('@getpaseo/plugin'));
 });

@@ -11,9 +11,9 @@ const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-ring';
 const headerButton = cn('flex size-8 shrink-0 items-center justify-center rounded-lg text-extra-muted hover:bg-secondary hover:text-foreground [&_svg]:size-[18px]', focusRing);
 
 /**
- * ALP's Tasks screen, as the alp-provider plugin opens it in paseo-web with "Open ALP tasks full
+ * ALP's Tasks screen, as the alp-provider plugin opens it in Paseo's app with "Open ALP tasks full
  * screen" (integrations/paseo, docs/alp/paseo-plugin.md): the project's task board in place of the
- * workspace (the sidebar stays, as on paseo-web; on a phone that is the whole screen), with its
+ * workspace (the sidebar stays, as in Paseo's app; on a phone that is the whole screen), with its
  * List, Board and Epics views, filters and search (TaskBoard.tsx). Its header's close button (or
  * Escape) goes back to the workspace. A task picked from the board shows beside it when the
  * screen is 820 px wide or more, in place of it otherwise, where the detail's back arrow shows

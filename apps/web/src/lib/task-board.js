@@ -1,4 +1,4 @@
-// ALP's task board as the alp-provider plugin shows it in paseo-web (integrations/paseo,
+// ALP's task board as the alp-provider plugin shows it in Paseo's app (integrations/paseo,
 // client/tasks-panel.tsx and shared/tasks.ts): the filters Open/Ready/Closed/All, a search on id,
 // title, type, assignee and labels, and the List (grouped by what the user acts on), Board (a
 // column per state) and Epics (with their progress and their tasks) views. Pure, so the views

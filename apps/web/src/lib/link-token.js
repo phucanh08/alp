@@ -100,9 +100,11 @@ export function takeLinkToken({ location, history, storage }) {
 export const STANDALONE_GATEWAY = 'http://127.0.0.1:7434';
 
 /**
- * Whether this page is the one `alp web` serves: a built app (not Vite's dev server, which sits
- * beside a standalone gateway) on this machine's loopback address. alp web serves the app and its
- * gateway on one listener, so the page's own origin is the gateway.
+ * Whether this page is probably the one `alp web` serves: a built app (not Vite's dev server, which
+ * sits beside a standalone gateway) on this machine's loopback address. alp web serves the app and
+ * its gateway on one listener, so there the page's own origin is the gateway. This is a heuristic
+ * from the address alone: anything else that serves the built app on loopback looks the same. The
+ * connect form uses it only for its default address, which the user can edit, and its help text.
  * @param {{ location: { protocol: string, hostname: string }, dev?: boolean }} page
  */
 export const servedByAlpWeb = ({ location, dev = false }) => !dev && isLoopbackPage(location);

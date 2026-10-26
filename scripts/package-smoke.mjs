@@ -40,13 +40,13 @@ try {
   const savedRoot = saved?.find(artifact => artifact.name === manifest.name);
   const legacy = savedRoot ? undefined : JSON.parse(run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', directory], { cwd: root }))[0];
   if (legacy) dependencies[manifest.name] = `file:${path.join(directory, legacy.filename)}`;
-  // Core distribution stays neutral even in a checkout with built plugin/web artifacts.
+  // Core distribution stays neutral even in a checkout with built plugin artifacts.
   const shipped = new Set(savedRoot ? savedRoot.files.keys() : legacy.files.map(file => file.path));
   for (const file of ['packages/cli/dist/cli.js', 'packages/core/dist/index.js', 'packages/client/dist/index.js', 'dist/alpd.js']) {
     if (!shipped.has(file)) throw new Error(`the root distribution must ship ${file}`);
   }
   for (const file of shipped) {
-    if (/integrations\/|web-app\/|@getpaseo\//.test(file)) throw new Error(`core tarball leaks ${file}`);
+    if (/integrations\/|@getpaseo\//.test(file)) throw new Error(`core tarball leaks ${file}`);
   }
   // The plugin package's server entry needs its host SDK peers; pin the versions this repository
   // resolved. The React client-host peers stay out of this server-only smoke.

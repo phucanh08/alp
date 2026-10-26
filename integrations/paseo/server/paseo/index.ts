@@ -1,5 +1,3 @@
-import { existsSync } from 'node:fs';
-import path from 'node:path';
 import { userLanguage } from '@anhlp/alp-core/user-settings';
 import { alpHome, connect, readLock } from '@anhlp/alp-client/index';
 import type { DaemonConnection } from '@anhlp/alp-protocol';
@@ -21,12 +19,6 @@ import { createCreationReceipts } from './create-receipts.js';
 export { createPaseoGateway, NOT_IMPLEMENTED, PASEO_PROTOCOL_VERSION } from './gateway.js';
 export type { PaseoGateway } from './gateway.js';
 
-/** Where the built app sits: beside alpd.js (dist/web-app), unless settings or the environment say. */
-export function webAppDir(alpdFile: string, configured?: string) {
-  const dir = path.resolve(configured ?? process.env.ALP_WEB_APP ?? path.join(path.dirname(alpdFile), 'web-app'));
-  return existsSync(path.join(dir, 'index.html')) ? dir : undefined;
-}
-
 /**
  * Features whose buttons the app shows only when the daemon says it has them, and which send a
  * request only when the user uses them. ALP lights them up so the app looks like Paseo's, and
@@ -41,8 +33,10 @@ const ENTRY_POINTS = {
 };
 
 /**
- * The daemon side of the ALP web app (ALPD §62): Paseo's protocol over alpd. The handlers and the
- * features they light up grow step by step (D31); everything else answers "in development".
+ * The Paseo bridge (ALPD §62): Paseo's protocol over alpd, for Paseo's app through the relay and
+ * for token-authenticated local sockets. It was first built for Paseo's web app (paseo-web, removed
+ * in t-55ce.3). The handlers and the features they light up grow step by step (D31); everything
+ * else answers "in development".
  * ALP's state is read on the first client's hello, not at alpd's start.
  */
 export function createPaseoBridge({ clientFactory, version, token, serverId, home, relay: relaySettings, listen = () => null, log }: {
@@ -50,7 +44,7 @@ export function createPaseoBridge({ clientFactory, version, token, serverId, hom
   clientFactory?: (onEvent: (envelope: any) => void) => Promise<DaemonConnection>;
   /** The user's web.relay setting (ALPD §64). */
   relay?: RelaySettings;
-  /** Where the web app listens, as daemon.get_status reports it. */
+  /** Where the integration's local listener is, as daemon.get_status reports it. */
   listen?: () => string | null;
   /** ALP's home, whose settings name the user's language. */
   home?: string;
@@ -111,6 +105,5 @@ export function createPaseoBridge({ clientFactory, version, token, serverId, hom
   return Object.assign(gateway, {
     relay,
     close: async () => { await receipts.close(); agents.uploads.close(); await agents.close(); checkouts.close(); terminals.close(); await relay.stop(); await workspaces.close(); },
-    scripts: { '/alp-plugins.js': plugins.script },
   });
 }

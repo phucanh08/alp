@@ -199,7 +199,7 @@ test('command center: Open ALP tasks, and the full-screen board', async ({ page 
   await expect(panes(page).getByRole('tab', { name: 'Tasks' })).toHaveAttribute('aria-selected', 'true');
 
   await command(page, 'full screen', 'alp-open-tasks-screen');
-  // The board in place of the workspace, as paseo-web's Tasks screen: the sidebar stays.
+  // The board in place of the workspace, as the Paseo plugin's Tasks screen: the sidebar stays.
   const screen = page.getByRole('region', { name: 'ALP tasks' });
   await expect(screen).toBeVisible();
   await expect(page.getByRole('heading', { level: 1, name: 'ALP tasks' })).toBeVisible();

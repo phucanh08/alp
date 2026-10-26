@@ -8,12 +8,11 @@ import type { PluginServerContext } from '../panel/compat.js';
 import type { Handler } from './gateway.js';
 
 /**
- * ALP's own panels in the web app (D31 step 7, ALPD §62): the Paseo plugin ALP ships for Paseo's
- * desktop app (plugins/paseo: the Tasks panel and screen, the ALP project panel, the ALP settings
- * screen) runs in the web app too. Its client code is compiled into alpd as Paseo compiles a
- * plugin's client bundle and served at /alp-plugins.js, a same-origin script the app's patch 8
- * runs instead of evaluating code from the catalog, so the page keeps a CSP without
- * 'unsafe-eval'. Its RPCs run here, in alpd, through the plugin's own handlers.
+ * ALP's own panels over the bridge (D31 step 7, ALPD §62): the catalog names the Paseo plugin ALP
+ * ships (the Tasks panel and screen, the ALP project panel, the ALP settings screen), and its RPCs
+ * run here, in alpd, through the plugin's own handlers. Its client code is compiled into alpd as
+ * Paseo compiles a plugin's client bundle; the digest of that code versions the catalog entry.
+ * (Paseo's web app, removed in t-55ce.3, loaded that code from /alp-plugins.js through its patch 8.)
  */
 
 type Inbound<T extends SessionInboundMessage['type']> = Extract<SessionInboundMessage, { type: T }>;
@@ -21,9 +20,6 @@ type Outbound = SessionOutboundMessage;
 type Contract = { name: string; input: { parseAsync(value: unknown): Promise<unknown> }; output: { parseAsync(value: unknown): Promise<unknown> } };
 
 const digest = createHash('sha256').update(plugin.factory).digest('hex').slice(0, 16);
-
-/** The script the page loads before the app: each plugin's factory by id. */
-export const pluginScript = `window.__ALP_PLUGINS__ = Object.assign(window.__ALP_PLUGINS__ || {}, { ${JSON.stringify(plugin.id)}: ${plugin.factory} });\n`;
 
 export function createPlugins({ log = () => {}, usage, home, projectDirectories }: {
   home?: string;
@@ -58,5 +54,5 @@ export function createPlugins({ log = () => {}, usage, home, projectDirectories 
     },
   };
 
-  return { handlers, features: { plugins: true, pluginSettings: true, pluginManagement: true }, script: pluginScript };
+  return { handlers, features: { plugins: true, pluginSettings: true, pluginManagement: true } };
 }

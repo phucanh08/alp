@@ -9,7 +9,10 @@ import { defaultGatewayAddress, servedByAlpWeb } from '../lib/link-token.js';
 
 /** The gateway address is the only thing remembered between visits; it is not a secret. */
 const GATEWAY_KEY = 'alp-web:gateway';
-/** Vite's dev server runs beside a standalone gateway; a built app on loopback is alp web's. */
+/**
+ * Vite's dev server runs beside a standalone gateway; a built app on loopback is most likely alp
+ * web's. That is a guess from the page's address, so the form's default stays editable.
+ */
 const DEV = import.meta.env.DEV;
 
 function rememberedGateway() {

@@ -176,8 +176,10 @@ function contentProblems(name, files, version, rootFiles) {
     if (!files.has(bin.replace(/^\.\//, ''))) problems.push(`${name}: missing executable ${bin}`);
   }
   if (name === PLUGIN) {
-    // The plugin carries Paseo's web app: Paseo's licence and the notice of ALP's changes ship with it.
-    for (const file of ['server/dist/web-app/LICENSE.paseo.txt', 'server/dist/web-app/NOTICE.txt']) if (!files.has(file)) problems.push(`${name}: no ${file}`);
+    // The plugin carries code taken from Paseo (the bridge in server/dist): Paseo's licence ships with it.
+    if (!files.has('LICENSE.paseo.txt')) problems.push(`${name}: no LICENSE.paseo.txt`);
+    // Paseo's web app was removed (t-55ce.3); a checkout that built it before still has it in server/dist.
+    if ([...files.keys()].some(file => file.startsWith('server/dist/web-app/'))) problems.push(`${name}: carries a stale server/dist/web-app (Paseo's removed web app); delete it and pack again`);
     const notice = text('NOTICE') ?? '';
     const rootNotice = rootFiles?.get('NOTICE')?.toString('utf8');
     if (!/Paseo/.test(notice) || (rootNotice && !notice.startsWith(rootNotice))) problems.push(`${name}: NOTICE is not ALP's NOTICE followed by Paseo's attribution`);
@@ -189,7 +191,7 @@ function contentProblems(name, files, version, rootFiles) {
   const notices = [...files].filter(([file]) => file.endsWith(THIRD_PARTY_NOTICES)).map(([, body]) => body.toString('utf8')).join('\n');
   const bundled = new Set();
   for (const [file, body] of files) {
-    if (!file.endsWith('.js') || file.includes('/web-app/')) continue;
+    if (!file.endsWith('.js')) continue;
     for (const [, comment] of body.toString('utf8').matchAll(/^\/\/ (\S+)$/gm)) {
       const directory = packageDirectory(comment);
       if (directory) bundled.add(packageName(directory));
@@ -301,7 +303,7 @@ export function installedProblems(lock, manifest) {
 export const GATE_ROWS = [
   { id: 'H1', title: 'CI core + paseo (validate:core, validate:paseo), Ubuntu, Node 22 and 24', blocking: true, binds: 'sha' },
   { id: 'H2', title: 'validate:core + validate:paseo on macOS (CI core-paseo-macos, Node 24)', blocking: true, binds: 'sha' },
-  { id: 'H3', title: 'CI packages-and-web (validate:packages, web-app-smoke), Ubuntu, Node 22', blocking: true, binds: 'sha' },
+  { id: 'H3', title: 'CI packages-and-web (validate:packages), Ubuntu, Node 22', blocking: true, binds: 'sha' },
   { id: 'H4', title: 'CI windows-daemon, Node 22 and 24', blocking: true, binds: 'sha' },
   { id: 'H5', title: 'CI alp-web, Ubuntu and macOS', blocking: false, binds: 'sha' },
   { id: 'L1', title: 'Licence, license field, repository metadata (T4)', blocking: true, binds: 'sha' },

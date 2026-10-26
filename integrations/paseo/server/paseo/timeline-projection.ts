@@ -1,5 +1,5 @@
 // Copied from Paseo (https://github.com/getpaseo/paseo, commit b63a325, packages/server/src/server/agent/timeline-projection.ts),
-// Copyright (c) 2025-present Mohamed Boudra, Apache License 2.0 (paseo-web/LICENSE). Changed for ALP: types come from
+// Copyright (c) 2025-present Mohamed Boudra, Apache License 2.0 (integrations/paseo/LICENSE.paseo.txt). Changed for ALP: types come from
 // @getpaseo/protocol and the row type is declared here. Keep it in step with upstream; see ALPD §62.
 
 import type { AgentTimelineItem, ToolCallDetail } from "@getpaseo/protocol/agent-types";

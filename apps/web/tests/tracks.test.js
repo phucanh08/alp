@@ -1,4 +1,4 @@
-// The Tasks pill above the composer (lib/tracks.js), as paseo-web's ALP plugin shows it.
+// The Tasks pill above the composer (lib/tracks.js), as ALP's Paseo plugin shows it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { stateOf, tasksTrack } from '../src/lib/tracks.js';

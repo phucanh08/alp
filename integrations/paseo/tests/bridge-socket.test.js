@@ -6,7 +6,6 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { brotliCompressSync } from 'node:zlib';
 import WebSocket from 'ws';
 import { validateWSOutboundMessage } from '@getpaseo/protocol/validation/ws-outbound';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
@@ -17,9 +16,9 @@ import { initProject } from '@anhlp/alp-core/init';
 import { fakeTransport, until } from '../../../test/support/fake-agent.js';
 import { seedLibrary } from '@anhlp/alp-core/library';
 
-/** alpd in this process serving a stand-in for the built ALP web app (Paseo's app, ALPD §62). */
+/** alpd in this process behind the Paseo bridge's local socket (ALPD §62), as Paseo's app speaks to it. */
 async function setup(t, usage) {
-  const directory = await mkdtemp(path.join(tmpdir(), 'alp-paseo-web-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-paseo-bridge-'));
   const home = path.join(directory, 'home');
   await seedLibrary(home);
   // Provider discovery stays offline in these gateway tests.
@@ -31,13 +30,6 @@ async function setup(t, usage) {
   const root = path.join(directory, 'project');
   await initProject(root, { library: home });
   const agents = [];
-  const dir = path.join(directory, 'web-app');
-  await mkdir(path.join(dir, '_expo/static/js/web'), { recursive: true });
-  await writeFile(path.join(dir, 'index.html'), '<!doctype html><title>ALP</title><script src="/_expo/static/js/web/index-1.js" defer></script>');
-  const bundle = `console.log(${JSON.stringify('x'.repeat(4000))})`;
-  await writeFile(path.join(dir, '_expo/static/js/web/index-1.js'), bundle);
-  await writeFile(path.join(dir, '_expo/static/js/web/index-1.js.br'), brotliCompressSync(bundle));
-  await writeFile(path.join(directory, 'secret.txt'), 'no');
   const factory = fakeTransport(agents);
   const runtime = createAlpRuntime({ language: 'English', transport: (...args) => { const transport = factory(...args); if (usage) transport.orchestrationContext = async () => ({ usage: usage[args[2]] }); return transport; }, supervisor: false, libraryDir: home });
   const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test', home });
@@ -47,7 +39,7 @@ async function setup(t, usage) {
     client.onEvent(onEvent);
     return { request: client.request.bind(client), close: client.close.bind(client), onClose: client.onClose.bind(client) };
   }, version: 'test', home, token: () => web.token, serverId: () => web.serverId });
-  web = createWebServer({ home, port: 0, app: { dir, gateway } });
+  web = createWebServer({ home, port: 0, gateway });
   const info = await web.listen();
   t.after(async () => { await web.close(); await runtime.shutdown(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   const origin = `http://127.0.0.1:${info.port}`;
@@ -88,24 +80,6 @@ async function setup(t, usage) {
   };
   return { info, origin, socket, hello, session, connected, ask, root, agents, home };
 }
-
-test('alpd serves the built app: compressed bundles, the page for any route, nothing outside it', async t => {
-  const { origin } = await setup(t);
-  const page = await fetch(`${origin}/workspace/abc`);
-  assert.equal(page.status, 200);
-  assert.match(await page.text(), /<title>ALP/);
-  assert.equal(page.headers.get('cache-control'), 'no-cache');
-  assert.match(page.headers.get('content-security-policy'), /script-src 'self' 'wasm-unsafe-eval'/);
-  assert.equal(page.headers.get('x-frame-options'), 'DENY');
-  const bundle = await fetch(`${origin}/_expo/static/js/web/index-1.js`, { headers: { 'accept-encoding': 'br' } });
-  assert.equal(bundle.headers.get('content-encoding'), 'br');
-  assert.equal(bundle.headers.get('cache-control'), 'public, max-age=31536000, immutable');
-  assert.match(await bundle.text(), /^console\.log/);
-  assert.equal((await fetch(`${origin}/_expo/static/js/web/missing.js`)).status, 404);
-  // Encoded climbs stay inside the app's directory.
-  const climb = await fetch(`${origin}/_expo/..%2f..%2f..%2fsecret.txt`);
-  assert.equal(climb.status, 404);
-});
 
 test('the socket wants the token at hello, then speaks Paseo: server_info, pongs, and "in development" for the rest', async t => {
   const { socket, hello, session, info, home } = await setup(t);
@@ -433,20 +407,10 @@ test('projects and workspaces are kept by alpd: add, create with an agent, title
   assert.deepEqual((await ask(client, { type: 'project.list.request', requestId: 'l2' })).payload.projects.map(entry => entry.projectId), [project.projectId]);
 });
 
-test("ALP's plugin runs in the app from alpd: its script, catalog and RPCs", async t => {
+test("ALP's plugin over the bridge: its catalog entry and RPCs, and no page or script on the listener", async t => {
   const { connected, ask, root, origin } = await setup(t);
-  // The plugin's code is a same-origin script, so the page needs no 'unsafe-eval'.
-  const script = await fetch(`${origin}/alp-plugins.js`);
-  assert.equal(script.status, 200);
-  assert.match(script.headers.get('content-type'), /javascript/);
-  assert.doesNotMatch(script.headers.get('content-security-policy'), / 'unsafe-eval'/);
-  const code = await script.text();
-  assert.match(code, /^window\.__ALP_PLUGINS__ = Object\.assign\(window\.__ALP_PLUGINS__ \|\| \{\}, \{ "alp-provider": \(function\(require\)/);
-  const factory = new Function('window', `${code}; return window.__ALP_PLUGINS__['alp-provider'];`)({});
-  // Paseo's app calls it with its require shim and takes the default export as the plugin's setup.
-  const anything = new Proxy(function () {}, { get: (_target, key) => key === '__esModule' ? undefined : anything, apply: () => anything, construct: () => anything });
-  const shim = name => { if (['react', 'react/jsx-runtime', 'react-native', '@tanstack/react-query', 'zod'].includes(name) || name.startsWith('@getpaseo/plugin')) return anything; throw new Error(`not in the app: ${name}`); };
-  assert.equal(typeof factory(shim).default, 'function');
+  // Paseo's web app, which loaded the plugin from /alp-plugins.js, is gone (t-55ce.3): nothing is served.
+  for (const address of ['/', '/alp-plugins.js']) assert.equal((await fetch(`${origin}${address}`)).status, 404);
 
   const client = await connected();
   const features = client.frames.find(frame => frame.message?.payload?.status === 'server_info').message.payload.features;

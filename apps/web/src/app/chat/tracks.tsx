@@ -7,7 +7,7 @@ import { useAppState, useController } from '../store';
 import { useTabs } from '../tabs';
 
 /**
- * The pills above Paseo's composer (composer/tracks.tsx). paseo-web shows ALP's tasks there
+ * The pills above Paseo's composer (composer/tracks.tsx). ALP's Paseo plugin shows ALP's tasks there
  * (integrations/paseo/client/task-pills.ts): the pill counts the tasks this session worked on
  * (done of them) or else the project's open tasks; its menu lists the session's tasks first,
  * then the other open ones, what waits for the user first, and All tasks.
@@ -30,7 +30,7 @@ export function TasksPill({ worked }: { worked: Worked[] }) {
   const { tasks } = useAppState();
   const { openTask, openPanel } = useTabs();
   const blocked = controller.tasksBlock();
-  // Read when the pill shows, on each opening and every 20 s as paseo-web's pill does; the
+  // Read when the pill shows, on each opening and every 20 s as the plugin's pill does; the
   // Tasks views poll faster on their own.
   React.useEffect(() => {
     if (blocked) return;

@@ -211,7 +211,7 @@ function CommandCenterHost({ open, scope, onClose, history, splits, onAction, on
     { id: 'shortcuts', label: 'Keyboard shortcuts', group: 'actions', always: true, icon: Keyboard, shortcut: hint('shortcuts.toggle', mac), keywords: ['keys', 'help'], run: () => onAction('shortcuts.toggle') },
     { id: 'toggle-sidebar', label: 'Toggle left sidebar', group: 'actions', icon: PanelLeft, shortcut: hint('sidebar.left', mac), run: () => onAction('sidebar.left') },
     { id: 'search-sessions', label: 'Search sessions in the sidebar', group: 'actions', icon: Search, keywords: ['filter', 'find'], disabled: !workspace, run: () => onAction('search') },
-    // What ALP's plugin adds to paseo-web's command center (integrations/paseo/index.client.tsx).
+    // What ALP's plugin adds to Paseo's command center (integrations/paseo/index.client.tsx).
     { id: 'alp-open-tasks', label: 'Open ALP tasks', group: 'alp', always: true, icon: ListTodo, keywords: ['tasks', 'todo', 'alp', 'panel'], disabled: !workspace, run: () => { openPanel('tasks'); onAction('tab.shown'); } },
     { id: 'alp-open-tasks-screen', label: 'Open ALP tasks full screen', group: 'alp', always: true, icon: ListTodo, keywords: ['tasks', 'todo', 'alp', 'phone'], disabled: !workspace, run: () => onAction('tasks.screen') },
   ];

@@ -11,7 +11,7 @@ import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { createLogger } from '@anhlp/alp-core/log';
 import { createWebServer } from './web.js';
 import { createIntegrationLock } from '@anhlp/alp-client/integration-lock';
-import { createPaseoBridge, webAppDir } from './paseo/index.js';
+import { createPaseoBridge } from './paseo/index.js';
 
 const log = createLogger({ component: 'alp-integration' });
 
@@ -61,17 +61,15 @@ async function run(home: string) {
   });
 
   const webLog = (message: string) => log.info(`web: ${message}`);
-  const appDir = webAppDir(fileURLToPath(import.meta.url));
-  if (!appDir) webLog('the web app is not built beside the integration; the page says how to build it');
   let listening: string | null = null;
-  const gateway = appDir ? createPaseoBridge({ version: VERSION, home, token: () => web?.token ?? '', serverId: () => web?.serverId ?? '', relay: settings?.web?.relay, listen: () => listening, log: webLog }) : undefined;
+  const gateway = createPaseoBridge({ version: VERSION, home, token: () => web?.token ?? '', serverId: () => web?.serverId ?? '', relay: settings?.web?.relay, listen: () => listening, log: webLog });
   // Port 0: `web.port` belongs to alp-web; this listener serves only daemon.get_status and Paseo sockets with the token.
-  const web = createWebServer({ app: appDir && gateway ? { dir: appDir, gateway } : undefined, home, port: 0, log: webLog });
+  const web = createWebServer({ gateway, home, port: 0, log: webLog });
   // Ready is published only after web.pairing is registered (below), so a caller that waits for the
   // ready lock can rely on the RPC being served; marking ready here would race callers of web.pairing.
-  await web.listen().then(info => { listening = `127.0.0.1:${info.port}`; log.info(`web app on ${info.url}`, { event: 'web.listening' }); })
-    .catch(async error => { log.error('web app not started', { code: 'ALP_WEB_START_FAILED', error }); await releaseLock(); process.exit(1); });
-  const relay = web.token && gateway ? gateway.relay : undefined;
+  await web.listen().then(info => { listening = `127.0.0.1:${info.port}`; log.info(`Paseo bridge on ${info.url}`, { event: 'web.listening' }); })
+    .catch(async error => { log.error('Paseo bridge not started', { code: 'ALP_WEB_START_FAILED', error }); await releaseLock(); process.exit(1); });
+  const relay = web.token ? gateway.relay : undefined;
   await relay?.start().catch(error => webLog(`relay not started: ${error?.message ?? error}`));
 
   // Keep daemon available.
@@ -82,8 +80,8 @@ async function run(home: string) {
   let shuttingDown = false;
   let extensionClient: any = null;
   const pairingHandler = async (params: any = {}) => {
-    const currentRelay = (web as any)?.token && gateway ? gateway.relay : undefined;
-    if (!currentRelay) throw new Error('alpd serves no web app, so it has no relay');
+    const currentRelay = (web as any)?.token ? gateway.relay : undefined;
+    if (!currentRelay) throw new Error('the Paseo integration is not listening yet, so it has no relay');
     if (typeof params?.enable === 'boolean') await currentRelay.setEnabled(params.enable);
     return { ...(await currentRelay.offer()), connected: currentRelay.connected, ...currentRelay.config() };
   };

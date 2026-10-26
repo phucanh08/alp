@@ -184,7 +184,7 @@ async function pairCommand(args) {
       return;
     }
     console.log(`Relay ${pairing.endpoint}: ${pairing.connected ? 'connected' : 'connecting'}`);
-    console.log(`Open this link on the device, or scan the QR code in the web app (Settings → host → Pair device):\n${pairing.url}`);
+    console.log(`Open this link on the device that runs Paseo's app:\n${pairing.url}`);
     const password = await readFile(path.join(home, `${PASEO}.json`), 'utf8').then(text => JSON.parse(text)?.token).catch(() => undefined);
     if (typeof password === 'string' && password) console.log(`When Paseo's app asks for a password, give it: ${password}`);
     else console.log(`When Paseo's app asks for a password, give it the token in ${path.join(home, `${PASEO}.json`)}.`);

@@ -68,8 +68,7 @@ function packageFiles(name, version = VERSION) {
   const files = { 'package.json': JSON.stringify(pkg), LICENSE, NOTICE, 'dist/index.js': 'export {};\n' };
   if (name === '@anhlp/alp-paseo') Object.assign(files, {
     NOTICE: `${NOTICE}\nThis product includes Paseo.\n`,
-    'server/dist/web-app/LICENSE.paseo.txt': 'Paseo licence\n',
-    'server/dist/web-app/NOTICE.txt': 'Paseo notice\n',
+    'LICENSE.paseo.txt': 'Paseo licence\n',
   });
   return files;
 }
@@ -203,9 +202,10 @@ test('A5 reads the packed package.json: version, pinned internal dependencies, l
   ]);
   assert.deepEqual(problems((name, files) => { if (name === '@anhlp/alp-core') delete files.LICENSE; }), ['@anhlp/alp-core: no LICENSE']);
   assert.deepEqual(problems((name, files) => { if (name === '@anhlp/alp-cli') files.LICENSE = 'MIT\n'; }), ["@anhlp/alp-cli: LICENSE differs from @anhlp/alp's"]);
-  assert.deepEqual(problems((name, files) => { if (name === '@anhlp/alp-paseo') delete files['server/dist/web-app/LICENSE.paseo.txt']; }), ['@anhlp/alp-paseo: no server/dist/web-app/LICENSE.paseo.txt']);
+  assert.deepEqual(problems((name, files) => { if (name === '@anhlp/alp-paseo') delete files['LICENSE.paseo.txt']; }), ['@anhlp/alp-paseo: no LICENSE.paseo.txt']);
+  assert.deepEqual(problems((name, files) => { if (name === '@anhlp/alp-paseo') files['server/dist/web-app/index.html'] = '<html>'; }), ["@anhlp/alp-paseo: carries a stale server/dist/web-app (Paseo's removed web app); delete it and pack again"]);
   assert.deepEqual(problems((name, files) => { if (name === '@anhlp/alp-paseo') files.NOTICE = NOTICE; }), ["@anhlp/alp-paseo: NOTICE is not ALP's NOTICE followed by Paseo's attribution"]);
-  assert.match(problems((name, files) => { if (name === '@anhlp/alp') files['web-app/index.html'] = '<html>'; }).join('\n'), /@anhlp\/alp: forbidden core artifact web-app\/index\.html/);
+  assert.match(problems((name, files) => { if (name === '@anhlp/alp') files['integrations/paseo/server/dist/main.js'] = 'export {};'; }).join('\n'), /@anhlp\/alp: forbidden core artifact integrations\/paseo\/server\/dist\/main\.js/);
   assert.deepEqual(problems((name, files) => { if (name === '@anhlp/alp-cli') files['dist/cli.js'] = '// node_modules/smol-toml/dist/index.js\nexport {};\n'; }), ['@anhlp/alp-cli: bundles smol-toml but no THIRD-PARTY-NOTICES.txt lists it']);
   assert.deepEqual(problems((name, files) => {
     if (name !== '@anhlp/alp-cli') return;

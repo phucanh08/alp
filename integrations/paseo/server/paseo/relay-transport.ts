@@ -1,5 +1,5 @@
 // Copied from Paseo (https://github.com/getpaseo/paseo, commit b63a325, packages/server/src/server/relay-transport.ts
-// and websocket/encrypted-relay-socket.ts), Copyright (c) 2025-present Mohamed Boudra, Apache License 2.0 (paseo-web/LICENSE).
+// and websocket/encrypted-relay-socket.ts), Copyright (c) 2025-present Mohamed Boudra, Apache License 2.0 (integrations/paseo/LICENSE.paseo.txt).
 // Changed for ALP: a plain log function instead of pino, no socket metadata, and the two files in one.
 import { EventEmitter } from 'node:events';
 import { WebSocket } from 'ws';

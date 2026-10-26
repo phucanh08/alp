@@ -2,8 +2,8 @@
 // Smoke checks of the portable client SDK (docs/alp/client-sdk.md) outside node --test:
 //   browser  headless Chromium runs the portable client over the browser's own WebSocket against a
 //            real alpd (scripted agents) through a test-only bridge: handshake, a request, streamed
-//            events, a local abort alpd ignores, and a disconnect. Playwright comes from the Paseo
-//            checkout ($ALP_PASEO_SRC or .cache/paseo-web), like scripts/web-app-smoke.mjs.
+//            events, a local abort alpd ignores, and a disconnect. Playwright is this repository's
+//            (apps/web's end-to-end tests install it).
 //   metro    Metro (the React Native bundler) resolves and bundles the portable entries; the bundle
 //            then runs in a bare JS context with no Node globals against a WebSocket double. It does
 //            not run Hermes or a device: React Native's Babel preset and runtime are not installed.
@@ -110,8 +110,7 @@ window.sdk = {
 
 async function browser() {
   const { build } = await import('esbuild');
-  const source = path.resolve(process.env.ALP_PASEO_SRC ?? path.join(root, '.cache/paseo-web'));
-  const { chromium } = await import(pathToFileURL(path.join(source, 'node_modules/playwright/index.mjs')).href);
+  const { chromium } = await import('playwright');
   const bundle = await build({ absWorkingDir: root, bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', stdin: { contents: PAGE_ENTRY, resolveDir: root, loader: 'js' }, logLevel: 'silent' });
   const alpd = await alpdWithBridge();
   alpd.routes.set('/', { type: 'text/html; charset=utf-8', text: '<!doctype html><meta charset="utf-8"><title>ALP SDK smoke</title><script type="module" src="/app.js"></script>' });
@@ -201,7 +200,7 @@ globalThis.smoke = (async () => {
       unstable_enablePackageExports: true,
       unstable_conditionNames: ['react-native', 'import', 'require', 'default'],
       nodeModulesPaths: [path.join(root, 'node_modules')],
-      blockList: [/\/\.cache\/paseo-web\/.*/, /\/dist\/web-app\/.*/],
+      blockList: [/\/\.cache\/.*/],
     },
     // No React Native Babel preset here: Metro's own import/export transform turns ES modules into
     // its module system, and syntax passes through as the SDK wrote it.

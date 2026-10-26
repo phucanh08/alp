@@ -20,7 +20,7 @@ export const packageName = directory => /node_modules\/((?:@[^/]+\/)?[^/]+)$/.ex
 export const heading = (name, version, license) => `${name}@${version} (${license})`;
 
 // Paseo's own packages ship without a licence file or field; they are Paseo's Apache-2.0 code.
-const PASEO = { license: 'Apache-2.0', file: path.join(root, 'paseo-web/LICENSE') };
+const PASEO = { license: 'Apache-2.0', file: path.join(root, 'integrations/paseo/LICENSE.paseo.txt') };
 
 // https://raw.githubusercontent.com/spdx/license-list-data/main/text/MIT.txt
 const MIT = `MIT License
