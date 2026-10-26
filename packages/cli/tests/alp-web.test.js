@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
@@ -232,6 +232,10 @@ test('alp-web serves the app and the gateway on one loopback listener, with its 
   const nul = await rawRequest(port, 'GET /index.html\0../../secret.txt HTTP/1.1');
   assert.match(nul, /^HTTP\/1\.1 400/);
   assert.ok(!nul.includes(SECRET));
+  // A target the URL parser cannot read is a 400 from the gateway, not a crash of the service.
+  for (const target of ['//[', '//x:99999/']) assert.match(await rawRequest(port, `GET ${target} HTTP/1.1`), /^HTTP\/1\.1 400 /, target);
+  assert.equal((await request(port, '/healthz')).status, 200, 'still serving');
+  assert.equal(service.child.exitCode, null, 'still running');
 
   // The token: a ticket from POST /v1/tickets, then a WebSocket with it.
   const ticket = await tickets(port, web.token);
@@ -289,7 +293,7 @@ test('the token survives a restart, and the built app is served when no override
   assert.equal(served.status, 200);
   assert.equal(served.headers['cache-control'], 'public, max-age=31536000, immutable');
   const notices = await readFile(path.join(BUILT_APP, 'THIRD-PARTY-NOTICES.txt'), 'utf8');
-  for (const name of ['react', 'react-dom', '@xterm/xterm', 'tailwindcss']) assert.match(notices, new RegExp(`\\n${name.replace(/[/.]/g, '\\$&')}@\\d`), name);
+  for (const name of ['react', 'react-dom', '@xterm/xterm', 'tailwindcss', 'vite']) assert.match(notices, new RegExp(`\\n${name.replace(/[/.]/g, '\\$&')}@\\d`), name);
 });
 
 test('a stale web.json token is replaced and its credential revoked', limit, async t => {
@@ -308,6 +312,29 @@ test('a stale web.json token is replaced and its credential revoked', limit, asy
   assert.equal(credentials.filter(entry => !entry.revokedAt).length, 1);
   assert.equal((await tickets(port, first.web.token)).status, 401);
   assert.equal((await tickets(port, second.web.token)).status, 201);
+});
+
+test('a SIGTERM while startup waits on alpd exits 0, publishes nothing and releases the lock', { ...limit, skip: !posix && 'a Unix socket stands in for alpd' }, async t => {
+  const context = await createHome(t, { web: { port: await freePorts() } });
+  // An "alpd" that accepts and never answers: the first grant refresh of startup waits on it (bounded).
+  const connections = [];
+  const silent = net.createServer(socket => connections.push(socket));
+  const socketPath = daemonPaths(context.home).socket;
+  await new Promise(resolve => silent.listen(socketPath, resolve));
+  await chmod(socketPath, 0o600);
+  t.after(() => { for (const socket of connections) socket.destroy(); return new Promise(resolve => silent.close(resolve)); });
+  const service = await startService(context, { env: { ALP_SUPERVISE: '0' }, wait: false });
+  // Startup has made its credential and now waits in the registry call.
+  await waitFor(async () => connections.length > 0 || service.child.exitCode !== null, 'startup to ask alpd for its projects');
+  assert.equal(service.child.exitCode, null);
+  service.child.kill('SIGTERM');
+  assert.deepEqual(await exitOf(service), [0, null]);
+  assert.equal(existsSync(path.join(context.home, 'web.json')), false, 'no web.json after the shutdown began');
+  assert.equal(existsSync(path.join(context.home, 'integrations', 'web.lock')), false, 'the lock is released');
+  assert.equal(existsSync(path.join(context.home, 'integrations', 'web.lock.reclaim')), false, 'and its guard');
+  for (const directory of [context.home, path.join(context.home, 'web')]) {
+    assert.deepEqual((await readdir(directory)).filter(name => name.endsWith('.tmp')), [], `no temporary file left in ${directory}`);
+  }
 });
 
 test('web.enabled=false starts nothing', limit, async t => {
@@ -364,7 +391,7 @@ test('the credentials directory and file keep the gateway\'s private-mode checks
   await refused('a credentials file others can read', /readable by other users/);
   await chmod(file, 0o600);
   await chmod(path.join(context.home, 'web'), 0o755);
-  await refused('a credentials directory others can list', /private permissions \(0700\)/);
+  await refused('a credentials directory others can list', /alp web keeps its credentials in .*web, which must be a directory owned by you with private permissions \(0700\)/);
   await chmod(path.join(context.home, 'web'), 0o700);
   const again = await startService(context, { env: { ALP_SUPERVISE: '0' } });
   t.after(() => stopService(again).catch(() => {}));

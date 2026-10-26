@@ -52,10 +52,13 @@ export function assertRemoteInputs(metafile, label) {
   if (offenders.size) throw new Error(`${label}: the remote entry reached local-only code:\n  ${[...offenders].join('\n  ')}`);
 }
 
-/** Workspace inputs (packages/*) and external imports of one bundle, small and deterministic. */
+/**
+ * Workspace inputs (packages/*, and apps/* such as the gateway inlined into the CLI's alp-web.js)
+ * and external imports of one bundle, small and deterministic.
+ */
 export function summarize(metafile, outfile) {
   const output = metafile.outputs[outfile] ?? Object.values(metafile.outputs ?? {})[0];
-  const inputs = Object.keys(metafile.inputs ?? {}).map(normalize).filter(file => file.startsWith('packages/')).sort();
+  const inputs = Object.keys(metafile.inputs ?? {}).map(normalize).filter(file => file.startsWith('packages/') || file.startsWith('apps/')).sort();
   const external = [...new Set((output?.imports ?? []).filter(entry => entry.external).map(entry => entry.path))].sort();
   return { inputs, external };
 }

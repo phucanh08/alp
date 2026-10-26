@@ -160,7 +160,9 @@ export function createGrant({ home, store, permissions, project, socket, log = (
      */
     ensure: previous => serial(async () => {
       // Throws unless the directory is the user's and private; creates it (0700) on the first start.
-      await assertPrivateDirectory(credentialsHome, { create: true });
+      await assertPrivateDirectory(credentialsHome, { create: true }).catch(error => {
+        throw new Error(`alp web keeps its credentials in ${credentialsHome}, which must be a directory owned by you with private permissions (0700); run chmod 700 on it (${error?.message ?? error})`, { cause: error });
+      });
       await store.reload();
       const reused = typeof previous.token === 'string' ? store.verify(previous.token) : undefined;
       let token;
