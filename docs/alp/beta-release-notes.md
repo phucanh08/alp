@@ -8,6 +8,45 @@
   `-cli`, `-daemon` and `@anhlp/alp-paseo`: prebuilt binaries in its tarball, loaded only for a
   terminal, about 27 MB unpacked. It is optional, so an install where it fails still works, without
   terminals. Windows is not supported.
+- **New `alp web`** (epic t-55ce): `alp web` now opens ALP's own web app (`apps/web`) through the
+  CLI's `alp-web` service, shipped in `@anhlp/alp` and `@anhlp/alp-cli` (`dist/alp-web.js`, the app
+  in `dist/alp-web/`, `THIRD-PARTY-NOTICES.txt`); no Paseo plugin is needed. One listener on
+  `127.0.0.1` at `web.port` (default 7433, then the next nine ports) serves the app and an embedded
+  ALP gateway; `alp-web` keeps alpd running (`ALP_SUPERVISE=0` opts out). `alp web --print` prints
+  `http://127.0.0.1:<port>/#token=alpgw1.…` instead of opening it. The gateway stays private and
+  unpublished (bundled into the CLI): still eight tarballs. Details:
+  [web.md](web.md#31-alp-web-trên-máy-này-alp-web), [beta-install.md](beta-install.md#alp-web-on-this-machine).
+  - **Credential:** the token is a gateway credential in `~/.alp/web/credentials.json`, a store of
+    alp-web's own that `alp-gateway credential list/create` do not see. The page drops it from the
+    address and keeps it only in the tab's session storage; a reload reuses it.
+  - **`alp web rotate`:** stops alp-web, replaces the credential (the old token is revoked and open
+    pages lose access) and starts it again; open the new link from `alp web`.
+  - **Permissions:** `session.read`/`write`, `project.read`/`write` and `workspace.write`.
+    `files.read`, `attachments.write`, `session.team.write` and `terminal.exec` only when listed in
+    the `web.permissions` setting; a list with an entry that is not a permission is ignored, with a
+    warning. Settings apply when alp-web starts.
+  - **Workspaces:** alpd's project registry plus the folder `alp web` ran in when it started the
+    service, if that folder is an ALP project. New projects reach open pages: the grant is updated
+    and connections close with 4403, then reconnect. Sessions recorded under a symlinked project
+    root (`/var/…` instead of `/private/var/…`) do not show.
+  - **Upgrade:** the first `alp web` stops a Paseo integration from before the rename that still
+    holds `integrations/web.lock` (SIGTERM, only to a proven same-user, same-boot owner; never on
+    Windows) and copies its token and server id once to `~/.alp/paseo.json` when that file does not
+    exist, so paired devices keep working.
+- **The Paseo integration is renamed `paseo`** (`@anhlp/alp-paseo`): `integrations/paseo.lock`,
+  `~/.alp/paseo.json`, and a port the system picks (never `web.port`). It keeps the bridge, the
+  relay and `alp web pair`, which prints the token in `paseo.json` as the password. For one release
+  `alp-web-integration` remains an alias of `alp-paseo-integration`, `ALP_WEB_INTEGRATION` is read
+  after `ALP_PASEO_INTEGRATION` for this integration only, and a home registered with
+  `integrations/web.json` still starts it. Paseo's web app still ships in `@anhlp/alp-paseo`, but
+  `alp web` no longer opens it.
+- **Windows: untested.** CI runs alp-web's tests on Linux and macOS only, and macOS remains the
+  primary platform. A trial on Windows CI found writes of the credential file failing now and then
+  with `EPERM`, which can make `alp web rotate`, a workspace grant update or a start that replaces the token fail. On Windows alp never
+  stops a running alp-web or the old Paseo integration for you: `alp web rotate` and the upgrade
+  takeover refuse while one runs. End the process whose pid `~/.alp/web.json` names
+  (`taskkill /PID <pid>`), then run the command again. Ending it this way is not a clean shutdown;
+  the next start reclaims its lock.
 
 # ALP 0.0.1-beta.3 — release notes
 

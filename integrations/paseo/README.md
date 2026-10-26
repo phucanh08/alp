@@ -186,14 +186,19 @@ npm pack -w @anhlp/alp-paseo
 
 `integrations/paseo` owns the plugin client, server, shared types and manifest. The build writes the self-contained server bundles (including the integration entry `server/dist/main.js` and `server/dist/alpd.js`) and the web app to `server/dist`; only the plugin package ships these Paseo artifacts. The npm package is `@anhlp/alp-paseo` (`alp-paseo-plugin` up to 0.10.0); the Paseo plugin ID remains `alp-provider`.
 
-## Optional web installation
+<a id="optional-web-installation"></a>
 
-`@anhlp/alp` and the six core packages install without Paseo. To use the web UI:
+## Optional standalone integration (relay pairing)
+
+`@anhlp/alp` and the six core packages install without Paseo. `alp web` no longer needs this
+package: from the release after `0.0.1-beta.3` it runs the CLI's own `alp-web` service
+([web.md](https://github.com/phucanh08/alp/blob/main/docs/alp/web.md)). This package's standalone
+integration (integration `paseo`) is what pairs Paseo's app on another device through the relay:
 
 ```sh
 npm install -g @anhlp/alp@beta @anhlp/alp-paseo@beta
 alp-paseo-integration --register
-alp web --print
+alp web pair --on       # starts the integration, turns the relay on, prints the link and password
 alp web pair --off
 ```
 
@@ -227,10 +232,14 @@ picks, since `web.port` and `web.json` now belong to `alp-web`. `alp-web-integra
 alias of `alp-paseo-integration` for one release, and a home that has only the old
 `integrations/web.json` descriptor still starts it, with a hint to re-register.
 When Paseo's app asks for a password, give it the one `alp web pair` prints.
-`alp web`, `alp web --print`, `alp web pair --on/--off`, `ALP_WEB_INTEGRATION`,
-`ALP_INTEGRATION_ENTRY`, `ALP_DAEMON_ENTRY`, `ALP_SUPERVISE` and `ALP_HOME` retain
-their meanings. Without the plugin, web commands explain how to install it;
-CLI, daemon, IPC and ACP remain usable.
+`ALP_PASEO_INTEGRATION` names the integration's entry; `ALP_WEB_INTEGRATION` is read for it too,
+after `ALP_PASEO_INTEGRATION`, for one release, and never selects what `alp web` runs.
+`alp web pair --on/--off`, `ALP_INTEGRATION_ENTRY`, `ALP_DAEMON_ENTRY`, `ALP_SUPERVISE` and
+`ALP_HOME` retain their meanings. `alp web` and `alp web --print` now open the CLI's `alp-web`
+service instead of this package's web app, and the first `alp web` stops a pre-rename integration
+that still holds `integrations/web.lock` (only a provable same-user, same-boot owner). Without the
+plugin, `alp web pair` explains how to install it; CLI, daemon, IPC, ACP and `alp web` remain
+usable.
 
 The public provider (`alp`), plugin ID (`alp-provider`), exports (`.`, `/main`,
 `/web`, `/paseo/*`, `/panel/*`), Phở/Cafe sessions, streaming/cancel, delegation,

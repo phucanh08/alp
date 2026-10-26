@@ -1,15 +1,18 @@
 # ALP web (Task 10A, beta)
 
-> **Trạng thái beta `0.0.1-beta.3`: deferred.** App `apps/web` (`@anhlp/alp-web`, private) không
-> phát hành trong beta, và gateway nó cần cũng không. "Beta" trong tài liệu này là giai đoạn
-> riêng của app, không phải bản phát hành `0.0.1-beta.3`. Web có trong beta là `alp web` cục bộ
-> (loopback, port 7433) của `@anhlp/alp-paseo`: xem [beta-install.md](beta-install.md#alp-web-on-this-machine).
-> Kết quả ở cuối tài liệu là bằng chứng lịch sử của nhánh phát triển. Phạm vi: [beta-scope.md](beta-scope.md) §4.
+> **Trạng thái (bản beta sau `0.0.1-beta.3`, chưa phát hành).** App `apps/web` (`@anhlp/alp-web`,
+> private) không phải là package riêng: nó được build vào CLI (`@anhlp/alp`, `@anhlp/alp-cli`,
+> `dist/alp-web/`) và mở bằng `alp web` (§3.1). `@anhlp/alp-gateway` vẫn không phát hành; CLI mang
+> sẵn gateway trong `dist/alp-web.js`. Cách triển khai riêng ở §3.2 cần `alp-gateway` chạy từ
+> checkout. Trong `0.0.1-beta.3` đã phát hành, `alp web` vẫn là web của Paseo trong
+> `@anhlp/alp-paseo`. Kết quả ở §9 là bằng chứng lịch sử của nhánh phát triển. Phạm vi:
+> [beta-scope.md](beta-scope.md) §4.
 
 App trình duyệt độc lập (`apps/web`, package `@anhlp/alp-web`, private). App nói chuyện với alpd
 **chỉ qua** ALP remote gateway ([remote-gateway.md](remote-gateway.md)) và client SDK
-([client-sdk.md](client-sdk.md)). Lâu dài app này thay Paseo web. Trong giai đoạn chuyển, Paseo và
-`alp web` cũ (port 7433, bản fork Paseo) vẫn chạy song song, không bị đổi.
+([client-sdk.md](client-sdk.md)). Từ bản này `alp web` mở app này (service `alp-web`) thay cho web
+của Paseo. Web của Paseo (`paseo-web/`, `server/dist/web-app` trong `@anhlp/alp-paseo`) vẫn còn
+trong package plugin và do integration `paseo` phục vụ, nhưng `alp web` không mở nó nữa.
 
 Luồng: `Browser → HTTPS/WSS (hoặc loopback/SSH) → alp-gateway → IPC → alpd`.
 
@@ -19,7 +22,7 @@ Số mục (§) có thể được code và test tham chiếu; giữ ổn địn
 
 | Có | Chi tiết |
 |---|---|
-| Kết nối | HTTPS, hoặc HTTP chỉ trên loopback (`127.0.0.1`, `localhost`, SSH tunnel). Token dán tay, chỉ giữ trong bộ nhớ của tab. |
+| Kết nối | `alp web` mở link có sẵn token và app tự kết nối (§3.1, §4.2). Hoặc form kết nối: HTTPS, hoặc HTTP chỉ trên loopback (`127.0.0.1`, `localhost`, SSH tunnel); token dán tay chỉ giữ trong bộ nhớ của tab. Trên trang loopback do `alp web` phục vụ, ô gateway mặc định là origin của trang, và "Getting a token" chỉ tới `alp web`, `alp web --print`, `alp web rotate` trước, rồi tới `alp-gateway credential create` + `serve --origin` cho gateway riêng. |
 | Projects | Các workspace mà credential cấp (`principal.workspaces`), cùng registry chung của host (`workspace.registry`, protocol §16, #121): **Add project** chỉ đăng ký một thư mục đã được cấp sẵn (`workspace.write`; không duyệt thư mục của host, không cấp thêm quyền), pin chung giữa các client và giữ qua restart, worktree tạo/xóa theo mapping chủ host đã duyệt (`workspace.manage`, chỉ macOS/Linux). Web chưa có nút bỏ project (`project.remove` của protocol chỉ bỏ đăng ký, không xóa file). |
 | Sessions | Liệt kê, tạo (team, permissions, model, title), mở, đổi tên, archive. Mỗi agent của cây (main và assignment) là một tab. Trên Codex và Claude (#121): fork và rewind chỉ hội thoại (§12.7, không đổi file), đổi team/model/thinking khi session đang sống (§12.9, đổi team cần thêm `session.team.write`), Reload agent và Copy resume command trong menu tab (§12.8), tải lịch sử cũ hơn (`session.history`, §8.7), đính kèm file không phải ảnh (§12.6, cần `attachments.write`). |
 | Chat | Prompt + stream, tool call, todo, notice; trả lời câu hỏi theo luồng chọn rồi Submit của Paseo (Other thay lựa chọn, Enter gửi, Dismiss), thẻ câu hỏi nằm trong stream; interrupt; steer khi agent đang chạy; hàng đợi (§4.3). |
@@ -51,8 +54,8 @@ npm run test:alp-web:e2e     # build cli, daemon, web rồi chạy Playwright
 npm run validate:web         # cả lane CI: tsc, unit, boundary, build, E2E
 ```
 
-- Port mặc định: web **7435**, gateway **7434**, `alp web` cũ **7433** (không đổi). Test dùng port
-  ngẫu nhiên.
+- Port mặc định: Vite dev server **7435**, `alp-gateway` riêng **7434**, `alp web` (alp-web: app và
+  gateway trên một listener) **7433**. Test dùng port ngẫu nhiên.
 - E2E cần Chromium của Playwright: `npx playwright install chromium` (Linux:
   `--with-deps`).
 - Thử bằng tay với host dùng một lần (alpd + fake Codex + gateway trong thư mục tạm):
@@ -60,6 +63,56 @@ npm run validate:web         # cả lane CI: tsc, unit, boundary, build, E2E
   tạm. Không đụng `~/.alp` và không đụng alpd thật.
 
 ## 3. Triển khai
+
+### 3.1 `alp web` trên máy này (alp-web)
+
+```sh
+alp web            # chạy service alp-web nếu chưa chạy, rồi mở link có token
+alp web --print    # chỉ in link
+alp web rotate     # thay token; trang đang mở mất quyền
+```
+
+- Service: `alp web` chạy `dist/alp-web.js` của CLI (source `packages/cli/src/web/`). Một listener
+  trên `127.0.0.1` tại `web.port` (mặc định **7433**; port bận thì thử chín port kế tiếp) phục vụ
+  file của app (`dist/alp-web/`) và gateway nhúng trên cùng origin. Service giữ
+  `integrations/web.lock`, ghi `<home>/web.json` (`version: 2`, `app: "alp-web"`, pid, port, URL,
+  token) và log ở `<home>/logs/integrations/alp-web.log`. Service giữ alpd chạy (`ALP_SUPERVISE=0`
+  thì không), trừ sau `alp daemon stop`.
+- Link: `http://127.0.0.1:<port>/#token=alpgw1.…`. Token là credential gateway thật, lưu trong
+  `<home>/web/credentials.json` (thư mục 0700, file 0600 của user; sai quyền thì service không
+  chạy). Đây là kho riêng của alp-web: `alp-gateway credential list/create/revoke` (đọc
+  `<home>/gateway`) không thấy credential này. Lần chạy sau dùng lại token trong `web.json` khi nó
+  còn hợp lệ.
+- `alp web rotate`: dừng alp-web, tạo credential mới, revoke mọi credential khác trong kho đó (token
+  cũ hết hiệu lực, trang đang mở nhận 401 và báo chạy `alp web` lại), rồi chạy lại service và in link
+  mới. Với `"web": { "enabled": false }`, rotate vẫn thay token nhưng không chạy lại service.
+- Quyền mặc định: `DEFAULT_PERMISSIONS` của gateway cộng `workspace.write`, tức `session.read`,
+  `session.write`, `project.read`, `project.write`, `workspace.write`. Các quyền khác (ví dụ
+  `files.read`, `attachments.write`, `session.team.write`, `terminal.exec`) chỉ có khi thêm vào
+  setting `web.permissions` (mảng). Chỉ cần một mục không phải quyền của credential là alp-web bỏ
+  qua **cả danh sách** và ghi warning; grant giữ mặc định. Có `terminal.exec` thì log ghi cảnh báo
+  của gateway.
+- Workspace được cấp: registry project của alpd (project chưa bị bỏ) ∪ thư mục mà `alp web` đang
+  đứng khi khởi động service (hoặc khi `alp web rotate`), nếu thư mục đó có `.alp/` (là project
+  ALP). Đường dẫn được so theo realpath. alp-web theo dõi registry khoảng mỗi 5 giây; grant đổi
+  thì credential được cập nhật (giữ token) và gateway đóng các kết nối với 4403, app tự nối lại.
+- Setting: `web.port`, `web.permissions`, `web.enabled` chỉ được đọc khi service khởi động. Không
+  có `alp web stop`, và `alp daemon stop` không dừng alp-web. Muốn áp dụng thay đổi: dừng process
+  có pid trong `<home>/web.json` (macOS/Linux: `kill <pid>`; Windows: `taskkill /PID <pid>`), rồi chạy `alp web`; token được giữ.
+  `alp web rotate` cũng khởi động lại service, nhưng với token mới.
+- Nâng cấp từ `alp web` dựa trên Paseo: nếu integration Paseo cũ vẫn giữ `web.lock` (`web.json`
+  không có `app`), `alp web` gửi SIGTERM cho nó, chỉ khi chứng minh được đó là process của chính
+  user, cùng lần boot, và pid không bị dùng lại (macOS/Linux; Windows không dừng nó). Trước lần đầu
+  ghi đè `web.json`, alp-web chép token và server id của integration cũ sang `<home>/paseo.json` một
+  lần, chỉ khi `paseo.json` chưa có, để thiết bị đã pair vẫn dùng được.
+- **Windows: chưa được kiểm.** CI chỉ chạy test của alp-web trên Linux và macOS; macOS vẫn là nền
+  tảng chính. Một lần thử trên CI Windows thấy việc ghi file credential thỉnh thoảng lỗi `EPERM`, có
+  thể làm `alp web rotate`, việc cập nhật grant workspace, hoặc lần khởi động phải thay token bị lỗi. Trên Windows, alp không tự
+  dừng alp-web hay integration Paseo cũ đang chạy: `alp web rotate` và bước takeover khi nâng cấp
+  từ chối khi chúng còn chạy. Dừng process có pid trong `<home>/web.json` (`taskkill /PID <pid>`),
+  rồi chạy lại lệnh. Cách dừng này không phải shutdown sạch; lần khởi động sau tự lấy lại lock.
+
+### 3.2 Triển khai riêng với `alp-gateway`
 
 `apps/web/dist` là file tĩnh. Có thể phục vụ bằng bất kỳ web server nào, khác origin với gateway
 cũng được.
@@ -255,7 +308,8 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
 |---|---|
 | "allows this page's origin" | Thêm đúng origin của trang: `alp-gateway serve --origin <scheme://host:port>`. |
 | "refused this access token" | Token sai, đã bị rotate hoặc revoke: `alp-gateway credential list`; cấp token mới. |
-| "This link's access token is no longer valid" | Token của `alp web` đã bị `alp web rotate`: chạy `alp web` lại để mở link mới. |
+| "This link's access token is no longer valid" | Token của `alp web` đã bị `alp web rotate`: chạy `alp web` lại để mở link mới. Credential này không có trong `alp-gateway credential list` (§3.1). |
+| `alp web` báo `web.lock` "is held by a process that alp cannot prove…" | Một process khác giữ lock (của user khác, lần boot khác, hoặc trên Windows). Dừng nó rồi chạy `alp web` lại. |
 | `tls_required` | Truy cập từ ngoài loopback mà không có HTTPS: dùng reverse proxy TLS hoặc SSH tunnel. |
 | Banner "Reconnecting…" kéo dài | Gateway hoặc alpd đang dừng. Work trên host vẫn chạy; app tự nối lại và tiếp tục sau cursor. |
 | "can only drive sessions in … mode" | Credential bị giới hạn `--mode`; session chạy mode khác. Tạo session với mode được phép. |
@@ -299,10 +353,12 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
   Playwright, nên dist cũ (lỗi "host too old: lacks attach.after") không còn xảy ra. Gọi thẳng
   `npx playwright test` thì bỏ qua bước này.
 - CI: job `alp-web` trên `ubuntu-latest` và `macos-latest`, Node 22, chạy `npm run validate:web`.
-  Khi lỗi, CI upload trace và ảnh.
+  Khi lỗi, CI upload trace và ảnh. Windows: xem §3.1.
 
 ## 8. Giới hạn đã biết
 
+- `alp web`: session được ghi với projectRoot qua symlink (ví dụ `/var/…` thay vì `/private/var/…`
+  trên macOS) không hiện dưới grant theo realpath của thư mục đang đứng.
 - Chỉ một cây session được attach tại một thời điểm. Session khác cập nhật qua poll list mỗi 15
   giây.
 - Children/delegation chỉ có unit test. Fake provider của E2E không delegate.

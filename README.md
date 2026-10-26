@@ -261,36 +261,35 @@ Finished assignments stay recallable for 14 days: main, or the agent that assign
 
 ## The web app
 
-The optional `@anhlp/alp-paseo` package serves the ALP web app as a separate process, on this machine only (loopback). The core `@anhlp/alp` distribution includes no Paseo SDK or web app; ALP 0.10.0 and earlier bundled it. This is not the standalone app in `apps/web`, which is deferred and not published. Install the plugin once to keep using the existing web commands:
+`alp web` opens ALP's own web app (`apps/web`) on this machine. It ships in the CLI (`@anhlp/alp`, `@anhlp/alp-cli`); you do not need Paseo or its plugin:
+
+```sh
+alp web            # starts the alp-web service if needed and opens its address with its access token
+alp web --print    # prints the address instead
+alp web rotate     # replaces the access token; open pages lose access
+```
+
+`alp web` runs the `alp-web` service: one listener on `127.0.0.1` at `web.port` (default 7433; if it is busy, the next nine ports are tried) that serves the app's files and an embedded ALP gateway. The address is `http://127.0.0.1:<port>/#token=alpgw1.…`. The token is a gateway credential that alp-web keeps in `~/.alp/web/credentials.json`, apart from the standalone `alp-gateway` and its `credential list`. The page takes the token out of the address at once and keeps it only in that tab's session storage, so a reload reconnects and a new tab needs the link again. alp-web keeps alpd running (`ALP_SUPERVISE=0` turns that off) and records its pid, port and token in `~/.alp/web.json`.
+
+- **What the token may do:** sessions, projects and adding projects (`session.read`/`write`, `project.read`/`write`, `workspace.write`). File reading, attachments, terminals and changing a live session's team are off until you add them: `"web": { "permissions": ["files.read", "attachments.write"] }` in `~/.alp/settings.json`. If one entry is not a permission, alp-web warns and ignores the whole list.
+- **Which projects:** the projects alpd knows, and the folder `alp web` ran in when it started the service, if that folder is an ALP project (it has `.alp/`). New projects are added while alp-web runs; open pages reconnect by themselves.
+- **Settings:** `web.port`, `web.permissions` and `"web": { "enabled": false }` (turns `alp web` off). alp-web reads them when it starts; `alp daemon stop` does not stop it. To apply a change, stop the process whose pid `~/.alp/web.json` names (`kill <pid>` on macOS and Linux, `taskkill /PID <pid>` on Windows), then run `alp web`; `alp web rotate` also restarts it, with a new token.
+- **Coming from the Paseo-based `alp web`:** the first `alp web` stops the old Paseo integration if it still holds `web.port` (only when it is provably your process from this boot) and copies its token and server id to `~/.alp/paseo.json`, unless that file exists, so paired devices keep working.
+
+The app's features and limits: [docs/alp/web.md](docs/alp/web.md). macOS is the primary platform. `alp web` is untested on Windows: CI runs its tests on Linux and macOS only (a Windows trial found credential-file writes failing now and then with `EPERM`). On Windows, `alp web rotate` and the upgrade takeover do not stop a running alp-web for you: end the pid in `~/.alp/web.json` (`taskkill /PID <pid>`) first.
+
+### Paseo's app on your phone (experimental)
+
+The optional `@anhlp/alp-paseo` package is the Paseo plugin and the Paseo integration, which runs as integration `paseo` (`~/.alp/integrations/paseo.lock`, `~/.alp/paseo.json`) on a port the system picks, never `web.port`. It still carries Paseo's web app with ALP's patches (`paseo-web/`), but `alp web` no longer opens it. Relay pairing is experimental in the beta and off by default. The integration can reach alpd from [Paseo](https://paseo.sh)'s own app on another device, through Paseo's relay (`relay.paseo.sh`):
 
 ```sh
 npm install -g @anhlp/alp-paseo@beta
 alp-paseo-integration --register  # register in the selected ALP_HOME (also discoverable on PATH)
-alp web            # opens the web app's loopback address with its access token
-alp web --print    # prints the address instead
-```
-
-The app is [Paseo](https://github.com/getpaseo/paseo)'s web app (Apache 2.0), built from a pinned commit with ALP's patches (`paseo-web/`) and run over alpd, so it looks and works like Paseo:
-
-- **Sidebar:** your projects and their workspaces, with their branch, pins, labels and unread marks. Add a project by typing its folder or browsing to it (Add project → Browse folders); a new workspace starts with its first agent.
-- **Agents:** each session is an agent of the provider ALP, its team (Phở, Cafe, …) as the model. The timeline streams main's replies and tool calls; questions from the team are cards to answer; History and Find in chat search past sessions. The team members are the agent's subagents, each with its own timeline.
-- **ALP's own parts:** the Tasks panel and screen, the ALP project panel and the ALP settings screen (Settings → Plugins → alp-provider) come from ALP's Paseo plugin, which alpd runs.
-- **Changes and Files:** the checkout's diff, uncommitted or against its base branch, and its files, read-only.
-- **Usage:** the sidebar Usage button and Settings → Usage show Codex and Claude account limits, plan names and reset windows. ALP's Usage workspace panel and plugin settings also show paused runtimes and parked assignment counts. Reads are cached for 30 seconds; Refresh requests fresh data. Missing provider data is shown as unavailable. These are account-wide provider limits, not ALP token costs.
-- What Paseo has and ALP not yet (terminals, committing and pushing, worktrees from the app, voice, …) says "Tính năng đang phát triển" (in your language) when used.
-
-The web app listens on 127.0.0.1 only. The Paseo integration runs as integration `paseo` (`~/.alp/integrations/paseo.lock`) on a port the system picks; `web.port` and `~/.alp/web.json` belong to the `alp-web` service. The page needs the token `alp web` puts in its address (kept in `~/.alp/paseo.json`), and the integration refuses requests for another host name and sockets from another site. `"web": { "enabled": false }` in `~/.alp/settings.json` turns it off. `alp-web-integration` remains an alias of `alp-paseo-integration` for one release, and a home registered with it (`integrations/web.json`) still starts the integration, with a hint to re-register. In a checkout of this repository, build the app with `npm run build:web` (it clones Paseo into `.cache/paseo-web`). Details: [ALPD §62](plans/reference/ALPD.md#62-the-alp-web-app-on-paseos-app-2026-10-10).
-
-### Paseo's app on your phone (experimental)
-
-Relay pairing is experimental in the beta and off by default. The integration can also reach alpd from [Paseo](https://paseo.sh)'s own app on another device, through Paseo's relay (`relay.paseo.sh`):
-
-```sh
 alp web pair --on     # turns the relay on and prints the pairing link
 alp web pair          # the link again; --off turns the relay off
 ```
 
-Or in the web app: Settings → your host → Pair device → Enable relay, then scan the QR code with Paseo's app. Traffic between the device and alpd is end-to-end encrypted; the relay only passes it on. The link carries alpd's public key, not its token: when Paseo's app asks for a password, give it the password `alp web pair` prints (the token in `~/.alp/paseo.json`). The relay stays off until you turn it on; `"web": { "relay": { "endpoint": "host:port" } }` points the integration at another relay. Paseo's app shows ALP's sessions and teams, and answers what ALP has not built yet as an error. Details: [ALPD §64](plans/reference/ALPD.md#64-paseos-relay-and-its-app-on-another-device-2026-10-12).
+Open the link on the device that runs Paseo's app. Traffic between the device and alpd is end-to-end encrypted; the relay only passes it on. The link carries alpd's public key, not its token: when Paseo's app asks for a password, give it the password `alp web pair` prints (the token in `~/.alp/paseo.json`). The relay stays off until you turn it on; `"web": { "relay": { "endpoint": "host:port" } }` points the integration at another relay. Paseo's app shows ALP's sessions and teams, and answers what ALP has not built yet as an error. `alp-web-integration` remains an alias of `alp-paseo-integration`, and `ALP_WEB_INTEGRATION` of `ALP_PASEO_INTEGRATION`, for one release; a home registered with the old name (`integrations/web.json`) still starts the integration, with a hint to re-register. Details: [ALPD §64](plans/reference/ALPD.md#64-paseos-relay-and-its-app-on-another-device-2026-10-12).
 
 ## Antigravity CLI (experimental)
 
@@ -418,4 +417,4 @@ ALP is organized into npm workspaces for protocol, core, runtime, daemon, client
 
 ## License
 
-ALP is licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE). Packages that bundle third-party code ship a `THIRD-PARTY-NOTICES.txt`. The `alp web` app in `@anhlp/alp-paseo` is Paseo's web app (Apache-2.0, © Mohamed Boudra) with ALP's patches; see that package's `NOTICE`. The web app's third-party licences are in `server/dist/web-app/THIRD-PARTY-NOTICES.txt`.
+ALP is licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE). Packages that bundle third-party code ship a `THIRD-PARTY-NOTICES.txt`. The `alp web` app's third-party licences are in `dist/alp-web/THIRD-PARTY-NOTICES.txt` of `@anhlp/alp-cli` (`packages/cli/dist/alp-web/` in `@anhlp/alp`). `@anhlp/alp-paseo` carries Paseo's web app (Apache-2.0, © Mohamed Boudra) with ALP's patches; see that package's `NOTICE`. That app's third-party licences are in `server/dist/web-app/THIRD-PARTY-NOTICES.txt`.
