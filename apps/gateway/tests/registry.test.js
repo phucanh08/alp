@@ -9,7 +9,7 @@ import { DEFAULT_PERMISSIONS } from '../src/policy.js';
 
 test('registry: exact existing grants, filtered pagination/count, explicit projection, opt-in writes and authorize before replay', async t => {
  const root=await mkdtemp(path.join(tmpdir(), 'alp-gw-registry-'));t.after(()=>rm(root,{recursive:true,force:true}));
- const a= root+'/a', b=root+'/b', alias=root+'/alias';await mkdir(a);await mkdir(b);await symlink(a,alias,process.platform === 'win32' ? 'junction' : 'dir');
+ const a=path.join(root,'a'), b=path.join(root,'b'), alias=path.join(root,'alias');await mkdir(a);await mkdir(b);await symlink(a,alias,process.platform === 'win32' ? 'junction' : 'dir');
  const ca=await realpath(a), cb=await realpath(b);let revision=0;let writes=0;
  const projects=[{id:'prj_b',root:cb,canonical:cb,addedAt:'old'},{id:'prj_a',root:ca,canonical:ca,addedAt:'old',ownerSecret:'hidden'}];
  const workspaces=[{id:'wks_b',projectId:'prj_b',directory:cb,canonical:cb,createdAt:'old',labels:[]},{id:'wks_a',projectId:'prj_a',directory:ca,canonical:ca,createdAt:'old',labels:[],placement:'hidden'}];
