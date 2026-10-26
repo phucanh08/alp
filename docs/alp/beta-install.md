@@ -182,7 +182,10 @@ alp web rotate       # replaces the token; pages already open lose access
 - The token may read and drive sessions and projects and add projects. To allow more, list the
   permissions in `~/.alp/settings.json`, for example
   `"web": { "permissions": ["files.read", "attachments.write"] }` (others: `session.team.write`,
-  `terminal.exec`). If one entry is not a permission, the whole list is ignored with a warning.
+  `terminal.exec`). If one entry is not a permission, the whole list is ignored with a warning;
+  an entry that is not a lowercase name with dots (such as `"files-read"`) makes the whole
+  `settings.json` invalid, so alp-web ignores all of it, `web.port` included, and logs
+  `ALP_SETTINGS_INVALID` in `~/.alp/logs/integrations/alp-web.log`.
 - It reaches the projects alpd knows, and the folder you ran `alp web` in when it started the
   service, if that folder is an ALP project.
 - alp-web keeps alpd running (`ALP_SUPERVISE=0` turns that off). It reads `web.port`,
