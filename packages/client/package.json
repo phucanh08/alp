@@ -57,6 +57,14 @@
       "types": "./dist/index.d.ts",
       "default": "./src/index.js"
     },
+    "./integration-lock": {
+      "alp-source": {
+        "types": "./src/integration-lock.js",
+        "default": "./src/integration-lock.js"
+      },
+      "types": "./dist/integration-lock.d.ts",
+      "default": "./src/integration-lock.js"
+    },
     "./ipc": {
       "alp-source": {
         "types": "./src/ipc.js",

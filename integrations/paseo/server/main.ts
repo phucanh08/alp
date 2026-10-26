@@ -10,7 +10,7 @@ import { superviseDaemon } from '@anhlp/alp-client/supervise';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { createLogger } from '@anhlp/alp-core/log';
 import { createWebServer } from './web.js';
-import { createIntegrationLock } from './integration-lock.js';
+import { createIntegrationLock } from '@anhlp/alp-client/integration-lock';
 import { createPaseoBridge, webAppDir } from './paseo/index.js';
 
 const log = createLogger({ component: 'alp-integration' });
@@ -49,7 +49,7 @@ async function run(home: string) {
     process.exit(0);
   }
 
-  const integrationLock = createIntegrationLock(home);
+  const integrationLock = createIntegrationLock(home, 'web');
   const { acquired, lock } = await integrationLock.acquire();
   if (!acquired) {
     log.info(`integration already running (pid ${lock.pid})`, { code: 'ALP_LOCK_HELD' });

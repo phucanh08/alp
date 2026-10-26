@@ -457,9 +457,16 @@ function integrationAlive(lock) {
   return true;
 }
 
+/**
+ * Starts integration `name` (default `web`) detached with `--service` unless its lock already names a
+ * live owner, then waits until its ready lock and `<home>/<name>.json` name the same pid. `entry`
+ * names the script to run with this Node and skips descriptor, environment and PATH discovery.
+ * @param {string | { name?: string, entry?: string, home?: string }} [nameOrOptions]
+ */
 export async function startIntegration(nameOrOptions = 'web') {
   const options = typeof nameOrOptions === 'string' ? { name: nameOrOptions } : (nameOrOptions ?? {});
   const name = options.name ?? 'web';
+  if (options.entry !== undefined && (typeof options.entry !== 'string' || !options.entry)) throw new TypeError('startIntegration entry must be a non-empty path');
   const fs = await import('node:fs/promises');
   const pathMod = await import('node:path');
   const home = options.home ? pathMod.resolve(options.home) : alpHome();
@@ -505,7 +512,9 @@ export async function startIntegration(nameOrOptions = 'web') {
     return waitForReady();
   }
 
-  const entry = await discoverIntegration(name, { home });
+  // An explicit entry is the caller's own service script: no discovery, and it must exist.
+  const entry = options.entry !== undefined ? pathMod.resolve(options.entry) : await discoverIntegration(name, { home });
+  if (options.entry !== undefined && !(await isFile(entry))) throw new Error(`ALP integration entry not found: ${entry}`);
   if (!entry) {
     throw new Error('ALP web app is provided by an optional integration package. Install it (for example `npm install -g @anhlp/alp-paseo@beta`) and run `alp web` again.');
   }
