@@ -344,6 +344,12 @@ test('the pre-rename fallback reads only the home descriptor, never PATH or othe
     assert.notEqual(refused.code, 0, refused.stdout);
     assert.match((refused.stderr || '') + (refused.stdout || ''), /optional integration package/i);
     assert.equal(await lockJson(home), undefined, 'nothing ran as integration paseo');
+    // A corrupt home descriptor is no registration either: the same guidance, not a parse error.
+    await writeFile(path.join(home, 'integrations', 'web.json'), '{bad');
+    const corrupt = await run(['web', '--print'], home, 60_000, { ...env, PATH: bin });
+    assert.notEqual(corrupt.code, 0, corrupt.stdout);
+    assert.match((corrupt.stderr || '') + (corrupt.stdout || ''), /optional integration package/i);
+    assert.equal(await lockJson(home), undefined);
   });
 });
 
