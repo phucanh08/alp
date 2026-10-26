@@ -59,7 +59,7 @@ async function setup(t) {
   const state = path.join(directory, 'state');
   const native = { branches: [], rebinds: [], reloads: [], next: 0, branch: undefined, rebind: undefined, reload: undefined };
   let count = 0;
-  async function start() {
+  async function start(options = {}) {
     const runtime = createAlpRuntime({ supervisor: false, transport: fakeTransport(transports), runLogDir: path.join(directory, 'runs') });
     runtime.branch = async request => {
       native.branches.push(request);
@@ -79,7 +79,7 @@ async function setup(t) {
     };
     const store = createStore(state);
     const socketPath = daemonPaths(path.join(directory, `d${count++}`)).socket;
-    const server = createDaemonServer({ runtime, socketPath, version: 'test', store });
+    const server = createDaemonServer({ runtime, socketPath, version: 'test', store, ...options });
     await server.listen();
     const clients = [];
     const open = async () => {
@@ -1230,4 +1230,133 @@ test('legacy applied rewind with newer journal evidence preserves the later thre
   await assert.rejects(restarted.request('session.rewind', params), rpcError(1000, 'persistence_failed'));
   assert.equal(world.native.branches.length, 2);
   assert.equal(world.native.rebinds.length, 2);
+});
+
+
+for (const startupOnly of [false, true]) test(`fork marker loss: genuine target retention must not resurrect it on restart (startup=${startupOnly})`, async t => {
+  const world = await setup(t);
+  const d = { ...await world.start({ retentionSweepMs: startupOnly ? 60_000 : 10 }), ...world };
+  const [first] = await conversation(d, 'retained-source', ['one', 'two']);
+  const params = { sessionId: 'retained-source', requestId: 'retained-fork', ifGeneration: await generationOf(d, 'retained-source'), boundary: { throughTurnId: first }, newSessionId: 'expired-target' };
+  const restore = failCommittedMarker(d.store, world.state, params.requestId);
+  await d.request('session.fork', params);
+  const applied = await restore();
+  assert.equal(applied.state, 'applied');
+  assert.ok(await d.store.get(params.newSessionId));
+  await d.request('session.close', { sessionId: params.sessionId });
+  if (startupOnly) await d.stop();
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  t.mock.timers.setTime(Date.now() + 31 * 24 * 60 * 60 * 1000);
+  if (startupOnly) {
+    const restarted = await world.start();
+    await assert.rejects(restarted.request('session.get', { sessionId: params.newSessionId }), error => error.code === 1001);
+    assert.equal(world.native.branches.length, 1);
+    assert.deepEqual(await restarted.store.timeline(params.newSessionId), []);
+    return;
+  }
+  await until(async () => !await d.store.get(params.newSessionId), 'real retention removes target record');
+  assert.deepEqual(await d.store.timeline(params.newSessionId), [], 'retention removes target history');
+  assert.ok(await d.store.get(params.sessionId), 'closed source completion witness survives retention');
+  assert.equal(JSON.parse(await readFile(path.join(world.state, 'lifecycle', `${applied.key}.json`), 'utf8')).state, 'applied');
+  await d.stop();
+  const restarted = await world.start();
+  await assert.rejects(restarted.request('session.get', { sessionId: params.newSessionId }), error => error.code === 1001);
+  assert.equal(await restarted.store.get(params.newSessionId), undefined, 'no recreated target record');
+  assert.deepEqual(await restarted.store.timeline(params.newSessionId), [], 'no recreated history');
+  assert.equal(world.native.branches.length, 1, 'no second native fork');
+  assert.equal((await restarted.request('session.fork', params)).duplicate, true, 'historical result remains idempotent');
+  assert.equal(await restarted.store.get(params.newSessionId), undefined);
+});
+
+
+test('fork unfinished source witness write: retention keeps both dependencies and restart finishes once', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start({ retentionSweepMs: 10 }), ...world };
+  const [first] = await conversation(d, 'unfinished-source', ['one', 'two']);
+  await d.request('session.close', { sessionId: 'unfinished-source' });
+  const params = { sessionId: 'unfinished-source', requestId: 'unfinished-fork', ifGeneration: await generationOf(d, 'unfinished-source'), boundary: { throughTurnId: first }, newSessionId: 'unfinished-target' };
+  const put = d.store.put;
+  d.store.put = record => {
+    if (record.id === params.sessionId && Object.keys(record.lifecycleCommits ?? {}).length) throw new Error('source completion write fault');
+    return put(record);
+  };
+  await assert.rejects(d.request('session.fork', params), rpcError(1000, 'persistence_failed'));
+  assert.ok(await d.store.get(params.newSessionId), 'target record already committed');
+  assert.equal((await d.store.get(params.sessionId)).lifecycleCommits, undefined, 'in-memory witness is not persisted proof');
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  t.mock.timers.setTime(Date.now() + 31 * 24 * 60 * 60 * 1000);
+  // An unrelated old closed root proves startup retention actually runs.
+  const other = await d.store.get(params.newSessionId);
+  await put({ ...other, id: 'unrelated-old', rootId: 'unrelated-old' });
+  // Put the disposable control outside the restore grace window too.
+  const { utimes } = await import('node:fs/promises');
+  const old = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+  await utimes(path.join(world.state, 'sessions', 'unrelated-old.json'), old, old);
+  d.store.put = put;
+  await d.stop();
+  const restarted = await world.start();
+  assert.ok(await restarted.store.get(params.sessionId), 'source was retained before recovery');
+  assert.ok(await restarted.store.get(params.newSessionId), 'unfinished target was retained before recovery');
+  const repeat = await restarted.request('session.fork', params);
+  assert.equal(repeat.duplicate, true);
+  assert.equal(repeat.session.id, params.newSessionId);
+  assert.equal(await restarted.store.get('unrelated-old'), undefined, 'startup retention genuinely ran');
+  assert.equal(world.native.branches.length, 1);
+});
+
+for (const targetKind of ['missing', 'owned', 'unrelated', 'wrong-attempt']) test(`applied fork migration/ownership: ${targetKind} target`, async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  const [first] = await conversation(d, 'legacy-fork-source', ['one', 'two']);
+  const params = { sessionId: 'legacy-fork-source', requestId: 'legacy-fork', ifGeneration: await generationOf(d, 'legacy-fork-source'), boundary: { throughTurnId: first }, newSessionId: 'legacy-fork-target' };
+  const restore = failCommittedMarker(d.store, world.state, params.requestId);
+  await d.request('session.fork', params);
+  const entry = await restore();
+  await d.stop();
+  const source = await d.store.get(params.sessionId);
+  delete source.lifecycleCommits;
+  await d.store.put(source);
+  if (targetKind !== 'wrong-attempt') delete entry.plan.recoveryVersion;
+  await writeFile(path.join(world.state, 'lifecycle', `${entry.key}.json`), JSON.stringify(entry));
+  const target = await d.store.get(params.newSessionId);
+  const history = await d.store.timeline(params.newSessionId);
+  if (targetKind === 'wrong-attempt') target.forkAttempt.attemptId = 'unrelated-attempt';
+  else delete target.forkAttempt;
+  if (targetKind === 'missing') await d.store.remove(params.newSessionId, [params.newSessionId]);
+  else {
+    if (targetKind === 'unrelated') delete target.forkedFrom;
+    await d.store.put(target);
+  }
+  const restarted = await world.start();
+  if (targetKind === 'owned') {
+    assert.equal((await restarted.request('session.fork', params)).duplicate, true);
+    assert.deepEqual(await restarted.store.timeline(params.newSessionId), history);
+  } else {
+    await assert.rejects(restarted.request('session.fork', params), rpcError(1000, 'persistence_failed'));
+    assert.deepEqual(await restarted.store.get(params.newSessionId), targetKind === 'missing' ? undefined : target);
+  }
+  assert.equal(world.native.branches.length, 1);
+});
+
+
+test('fork request key reused after real pruning cannot adopt an old source witness', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start({ retentionSweepMs: 10 }), ...world };
+  const [first] = await conversation(d, 'reuse-source', ['one', 'two']);
+  const params = { sessionId: 'reuse-source', requestId: 'reused-fork', ifGeneration: await generationOf(d, 'reuse-source'), boundary: { throughTurnId: first }, newSessionId: 'reuse-target' };
+  const restore = failCommittedMarker(d.store, world.state, params.requestId);
+  await d.request('session.fork', params);
+  const entry = await restore();
+  const previous = (await d.store.get(params.sessionId)).lifecycleCommits[entry.key];
+  assert.equal((await d.request('session.fork', params)).duplicate, true, 'repair terminal marker');
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  t.mock.timers.setTime(Date.now() + 31 * 24 * 60 * 60 * 1000);
+  await until(async () => !await d.store.get(params.newSessionId), 'target retention');
+  await until(async () => !(await readdir(path.join(world.state, 'lifecycle'))).includes(`${entry.key}.json`), 'terminal journal pruning');
+  const created = await d.request('session.fork', params);
+  assert.equal(created.duplicate, undefined, 'new attempt is not historical success');
+  assert.equal(world.native.branches.length, 2);
+  const next = (await d.store.get(params.sessionId)).lifecycleCommits[entry.key];
+  assert.notEqual(next.attemptId, previous.attemptId);
+  assert.equal((await d.store.get(params.newSessionId)).forkAttempt.attemptId, next.attemptId);
 });

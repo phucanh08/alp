@@ -49,6 +49,8 @@ export type SessionRecord = {
   base?: NativeBase;
   /** Where this root was forked from (§12.7). */
   forkedFrom?: ForkProvenance;
+  /** Stable creation ownership; current native binding/title may change after a fork. */
+  forkAttempt?: { key: string; attemptId?: string; createdAt: string; fingerprint: string };
   /** Branches rewinds set aside, oldest first (§12.7). */
   branches?: StoredBranch[];
   /** Atomic proof of completed conversation commits whose journal marker may be missing. */

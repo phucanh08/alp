@@ -123,6 +123,8 @@ type RewindPlan = {
   turnIds: string[];
 };
 type ForkPlan = {
+  /** New attempts distinguish recoverable pre-record crashes from ambiguous legacy absence. */
+  recoveryVersion?: 1;
   source: string; newSessionId: string; branchId?: string; cut: number; boundary: ForkProvenance['boundary']; turnId?: string;
   cwd: string; workspaceId?: string; title: string; at: string; attachmentIds: string[];
   /** The source's turn ids prepare checked, and the runtime cut (a whole fork is cut through its last turn). */
@@ -644,7 +646,7 @@ export function createConversation(ctx: ConversationContext) {
           // Last, after every read of prepare: held mail may wait; a turn that began anyway may not.
           if (latest && begun(sessionId)) throw busy(sessionId, 'a turn began meanwhile');
           return {
-            source: sessionId, newSessionId: id, ...(branchId ? { branchId } : {}), cut, boundary: kind, ...(turnId ? { turnId } : {}),
+            recoveryVersion: 1, source: sessionId, newSessionId: id, ...(branchId ? { branchId } : {}), cut, boundary: kind, ...(turnId ? { turnId } : {}),
             cwd, ...(workspaceId ? { workspaceId } : {}), title: title ?? defaultForkTitle(record.title, cwd === record.spec!.cwd), at: new Date().toISOString(), attachmentIds,
             turnIds: turns.map(turn => turn.id), ...(cutoff ? { cutoff } : {}),
           };
@@ -724,7 +726,21 @@ export function createConversation(ctx: ConversationContext) {
     const source = records.get(plan.source);
     if (!source?.session || !source.spec) throw new Error(`session ${plan.source} is gone`);
     const forkedFrom: ForkProvenance = { sessionId: plan.source, ...(plan.turnId ? { turnId: plan.turnId } : {}), boundary: plan.boundary, ...(plan.branchId ? { branchId: plan.branchId } : {}), at: plan.at };
-    if (!records.has(plan.newSessionId)) {
+    const target = records.get(plan.newSessionId);
+    const owner = target?.forkAttempt;
+    if (target && (owner
+      ? owner.key !== entry.key || owner.attemptId !== entry.attemptId || owner.createdAt !== entry.createdAt || owner.fingerprint !== entry.fingerprint
+      : plan.recoveryVersion === 1 || target.rootId !== plan.newSessionId || target.forkedFrom?.sessionId !== plan.source
+        || target.forkedFrom.at !== plan.at || target.forkedFrom.boundary !== plan.boundary
+        || target.forkedFrom.turnId !== plan.turnId || target.forkedFrom.branchId !== plan.branchId)) {
+      throw new RpcError(ERROR.failed, 'The fork target does not belong to this journal attempt', { reason: 'persistence_failed' });
+    }
+    if (!target && plan.recoveryVersion !== 1) {
+      // Pre-upgrade absence cannot distinguish a pre-record crash from a completed fork
+      // whose target retention already removed. Never recreate that ambiguous target.
+      throw new RpcError(ERROR.failed, 'The legacy fork target is gone; its completion cannot be established', { reason: 'persistence_failed' });
+    }
+    if (!target) {
       const branch = plan.branchId ? source.branches?.find(candidate => candidate.branchId === plan.branchId) : undefined;
       const kept = (await timelineOf(plan.source, branch)).filter(envelope => envelope.sessionId === plan.source && (envelope.cursor ?? 0) < plan.cut && CONVERSATION.has(envelope.event.type));
       const envelopes: Envelope[] = kept.map((envelope, index) => ({ ...envelope, sessionId: plan.newSessionId, cursor: index + 1 }));
@@ -741,7 +757,7 @@ export function createConversation(ctx: ConversationContext) {
       const record: SessionRecord = {
         version: 1, id: plan.newSessionId, rootId: plan.newSessionId, spec: { ...source.spec, cwd: plan.cwd }, ...(source.delegation !== undefined ? { delegation: source.delegation } : {}),
         session: { ...kept_, id: plan.newSessionId, threadId: native.threadId, busy: false, ...(moved ? { projectRoot: await realpath(plan.cwd).catch(() => path.resolve(plan.cwd)) } : {}) },
-        status: 'closed', title: plan.title, forkedFrom, ...(native.base ? { base: native.base } : {}), createdAt: now, updatedAt: now,
+        status: 'closed', title: plan.title, forkedFrom, forkAttempt: { key: entry.key, attemptId: entry.attemptId, createdAt: entry.createdAt, fingerprint: entry.fingerprint }, ...(native.base ? { base: native.base } : {}), createdAt: now, updatedAt: now,
       };
       ctx.crashPoint('fork.before-record');
       await store.put(record);
@@ -749,7 +765,11 @@ export function createConversation(ctx: ConversationContext) {
     }
     await place(plan, entry.key);
     if (plan.attachmentIds.length) await ctx.attachments?.pin(`fork:${plan.newSessionId}`, plan.newSessionId, plan.attachmentIds, 'fork');
-    return { session: ctx.summary(plan.newSessionId)!, forkedFrom };
+    const result = { session: ctx.summary(plan.newSessionId)!, forkedFrom };
+    // The source outlives an independently expired target. Only this final persisted
+    // witness, after placement and pins, proves that replay must not create it again.
+    await commitRecord(source, entry, result);
+    return result;
   }
 
   /** The fork's place in the registry: the destination workspace, else its source's, else its directory's. */
@@ -804,5 +824,14 @@ export function createConversation(ctx: ConversationContext) {
       for (const entry of unfinished) if (entry.operation === 'rewind') fences.set(entry.resource, entry.requestId);
     },
     lifecycle,
+    /** Retention cannot erase an unfinished fork or its completion witness owner. */
+    async retainsFork(root: string) {
+      for (const entry of await journal.list((_name, error) => { throw error; })) {
+        if (entry.operation !== 'fork' || entry.state !== 'applied') continue;
+        if (entry.resource === root) return true;
+        if (entry.plan.newSessionId === root && !await completed(entry)) return true;
+      }
+      return false;
+    },
   };
 }
