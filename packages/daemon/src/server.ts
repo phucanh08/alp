@@ -660,25 +660,31 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     }
     const continuing = new Set(runtime.recoverable().map(entry => entry.rootId));
     for (const [root, tree] of byRoot) {
-      if (!tree.some(record => record.id === root)) continue;
-      if (tree.some(record => LIVE.includes(record.status))) continue;
-      if (now - Math.max(...tree.map(record => Date.parse(record.updatedAt) || now)) <= RETENTION_MS) continue;
-      if (tree.some(record => now - (receiptWritten.get(record.id) ?? 0) <= RECEIPT_RETENTION_MS)) continue;
-      if (continuing.has(root) || rootOf.has(root) || attached.get(root)?.size || recovering.has(root)) continue;
-      // A tree a job waits for stays: the job is to continue that very session.
-      if (scheduler?.holds(root)) continue;
-      const ids = tree.map(record => record.id);
-      // A tree restored from a backup counts from its restore: its files were written then.
-      if (now - await store!.writtenAt(ids) <= RETENTION_MS) continue;
-      if (rootOf.has(root) || attached.get(root)?.size || recovering.has(root)) continue;
-      // Forgotten before the files go, so a resume arriving meanwhile finds nothing to reopen.
-      for (const id of ids) records.delete(id);
-      cursors.delete(root);
-      await store!.remove(root, ids);
-      // The history is gone: what its prompts pinned is released (kept releasedGraceMs more).
-      await attachments?.releaseSessions(ids).catch(error => recoveryLog.warn('could not release the attachments of removed sessions', { code: 'ALPD_ATTACHMENT_RELEASE_FAILED', error }));
-      if (runLogDir) await unlink(path.join(runLogDir, `${root.replace(/[^\w.-]/g, '_')}.jsonl`)).catch(() => {});
-      removed.add(root);
+      const remove = async () => {
+        if (!tree.some(record => record.id === root)) return;
+        if (tree.some(record => LIVE.includes(record.status))) return;
+        if (now - Math.max(...tree.map(record => Date.parse(record.updatedAt) || now)) <= RETENTION_MS) return;
+        if (tree.some(record => now - (receiptWritten.get(record.id) ?? 0) <= RECEIPT_RETENTION_MS)) return;
+        if (continuing.has(root) || rootOf.has(root) || attached.get(root)?.size || recovering.has(root)) return;
+        // A tree a job waits for stays: the job is to continue that very session.
+        if (scheduler?.holds(root)) return;
+        const ids = tree.map(record => record.id);
+        // A tree restored from a backup counts from its restore: its files were written then.
+        if (now - await store!.writtenAt(ids) <= RETENTION_MS) return;
+        if (rootOf.has(root) || attached.get(root)?.size || recovering.has(root)) return;
+        if (await conversation?.retainsFork(root)) return;
+        // Forgotten before the files go, so a resume arriving meanwhile finds nothing to reopen.
+        for (const id of ids) records.delete(id);
+        cursors.delete(root);
+        await store!.remove(root, ids);
+        // The history is gone: what its prompts pinned is released (kept releasedGraceMs more).
+        await attachments?.releaseSessions(ids).catch(error => recoveryLog.warn('could not release the attachments of removed sessions', { code: 'ALPD_ATTACHMENT_RELEASE_FAILED', error }));
+        if (runLogDir) await unlink(path.join(runLogDir, `${root.replace(/[^\w.-]/g, '_')}.jsonl`)).catch(() => {});
+        removed.add(root);
+      };
+      // A source cannot start a native fork between the dependency check and deletion.
+      if (conversation) await conversation.lifecycle.serial(root, remove);
+      else await remove();
     }
     if (removed.size) recoveryLog.info(`retention removed ${removed.size} session tree${removed.size > 1 ? 's' : ''} unused for ${RETENTION_MS / 86_400_000} days`, { code: 'ALP_RETENTION_REMOVED', trees: removed.size });
     return removed;
