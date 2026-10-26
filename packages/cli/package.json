@@ -158,5 +158,8 @@
   },
   "optionalDependencies": {
     "node-pty": "1.2.0-beta.15"
+  },
+  "devDependencies": {
+    "@anhlp/alp-gateway": "0.0.1-beta.3"
   }
 }
