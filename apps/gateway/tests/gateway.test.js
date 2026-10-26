@@ -5,6 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { revokeCredential, rotateCredential, resolveConfig } from '../src/index.js';
@@ -372,4 +373,60 @@ test('a static hook answers GET and HEAD outside the gateway paths, only behind 
   assert.equal((await gw.ticket(gw.tokens.alice)).status, 201);
   const opened = await gw.rawSession('alice');
   assert.ok(opened.socket);
+});
+
+/** One request written to the socket byte for byte, for targets an HTTP client refuses to send. */
+function rawExchange(base, lines) {
+  const { hostname, port } = new URL(base);
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(Number(port), hostname, () => socket.end(`${lines.join('\r\n')}\r\n\r\n`));
+    let text = '';
+    socket.setEncoding('latin1');
+    socket.on('data', chunk => { text += chunk; });
+    socket.on('end', () => resolve(text));
+    socket.on('error', reject);
+  });
+}
+
+test('an unparsable request target is a 400, in a request or an upgrade, and the gateway keeps serving', async t => {
+  const serveStatic = () => { throw new Error('the hook must not see an unparsable target'); };
+  const daemon = fakeDaemon();
+  const { a } = await workspaces(t);
+  const gw = await startGateway(t, { daemon, serveStatic, credentials: { alice: { workspaces: [a] } } });
+  const host = `Host: 127.0.0.1:${new URL(gw.base).port}`;
+  for (const target of ['//[', '//x:99999/', '//[::1/']) {
+    const plain = await rawExchange(gw.base, [`GET ${target} HTTP/1.1`, host, 'Connection: close']);
+    assert.match(plain, /^HTTP\/1\.1 400 /, `GET ${target}`);
+    assert.match(plain, /"error":"bad_request"/, `GET ${target}`);
+    const upgrade = await rawExchange(gw.base, [`GET ${target} HTTP/1.1`, host, 'Connection: Upgrade', 'Upgrade: websocket', 'Sec-WebSocket-Version: 13', 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==', 'Sec-WebSocket-Protocol: alp.v1']);
+    assert.match(upgrade, /^HTTP\/1\.1 400 Bad Request/, `upgrade ${target}`);
+  }
+  // Still the Host check first: an unknown Host is a 421 whatever the target.
+  assert.match(await rawExchange(gw.base, ['GET //[ HTTP/1.1', 'Host: attacker.example', 'Connection: close']), /^HTTP\/1\.1 421 /);
+  assert.deepEqual(JSON.parse((await plainRequest(gw.base, { path: '/healthz', headers: { host: host.slice(6) } })).body), { live: true });
+  assert.equal((await gw.ticket(gw.tokens.alice)).status, 201);
+});
+
+test('a throw in a request or upgrade handler is a logged 500, and the gateway keeps serving', async t => {
+  const daemon = fakeDaemon();
+  const { a } = await workspaces(t);
+  const gw = await startGateway(t, { daemon, credentials: { alice: { workspaces: [a] } } });
+  const { verify, grant } = gw.store;
+  t.after(() => { gw.store.verify = verify; gw.store.grant = grant; });
+  // The ticket route throws while it checks the token.
+  gw.store.verify = () => { throw new Error('broken store'); };
+  const ticket = await gw.ticket(gw.tokens.alice);
+  assert.equal(ticket.status, 500);
+  assert.deepEqual(ticket.body, { error: 'internal' });
+  assert.ok(gw.lines.some(line => line.includes('ALP_GATEWAY_REQUEST_FAILED')));
+  gw.store.verify = verify;
+  const issued = await gw.ticket(gw.tokens.alice);
+  assert.equal(issued.status, 201);
+  // The upgrade throws while it looks up the ticket's grant.
+  gw.store.grant = () => { throw new Error('broken store'); };
+  assert.equal((await gw.raw(issued.body.subprotocols)).refused, 500);
+  assert.ok(gw.lines.some(line => line.includes('ALP_GATEWAY_UPGRADE_FAILED')));
+  gw.store.grant = grant;
+  assert.deepEqual(JSON.parse((await plainRequest(gw.base, { path: '/healthz', headers: { host: `127.0.0.1:${new URL(gw.base).port}` } })).body), { live: true });
+  assert.ok((await gw.rawSession('alice')).socket, 'a new connection still opens');
 });
