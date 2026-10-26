@@ -114,6 +114,17 @@ export async function findDaemonEntry({ home = alpHome(), env = process.env, can
   return undefined;
 }
 
+/**
+ * Integration names are single lowercase path segments: they name `<home>/integrations/<name>.lock`,
+ * its guard and `<home>/<name>.json`. Returns the name, or throws a TypeError.
+ * @param {unknown} name
+ * @returns {string}
+ */
+export function assertIntegrationName(name) {
+  if (typeof name !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new TypeError(`Invalid integration name: ${JSON.stringify(name)}`);
+  return name;
+}
+
 /** Wall-clock boot time; a lock from an earlier boot is stale even if its pid is reused. */
 export function bootTime() {
   return Math.round((Date.now() - os.uptime() * 1000) / 1000);
@@ -465,11 +476,15 @@ function integrationAlive(lock) {
  */
 export async function startIntegration(nameOrOptions = 'web') {
   const options = typeof nameOrOptions === 'string' ? { name: nameOrOptions } : (nameOrOptions ?? {});
-  const name = options.name ?? 'web';
+  const name = assertIntegrationName(options.name ?? 'web');
   if (options.entry !== undefined && (typeof options.entry !== 'string' || !options.entry)) throw new TypeError('startIntegration entry must be a non-empty path');
   const fs = await import('node:fs/promises');
   const pathMod = await import('node:path');
   const home = options.home ? pathMod.resolve(options.home) : alpHome();
+  // An explicit entry is the caller's own service script: it must exist even when a live owner is
+  // reused, and it replaces descriptor, environment and PATH discovery.
+  const explicit = options.entry !== undefined ? pathMod.resolve(options.entry) : undefined;
+  if (explicit !== undefined && !(await isFile(explicit))) throw new Error(`ALP integration entry not found: ${explicit}`);
   const lockPath = pathMod.join(home, 'integrations', `${name}.lock`);
   const webPath = pathMod.join(home, `${name}.json`);
 
@@ -512,9 +527,7 @@ export async function startIntegration(nameOrOptions = 'web') {
     return waitForReady();
   }
 
-  // An explicit entry is the caller's own service script: no discovery, and it must exist.
-  const entry = options.entry !== undefined ? pathMod.resolve(options.entry) : await discoverIntegration(name, { home });
-  if (options.entry !== undefined && !(await isFile(entry))) throw new Error(`ALP integration entry not found: ${entry}`);
+  const entry = explicit ?? await discoverIntegration(name, { home });
   if (!entry) {
     throw new Error('ALP web app is provided by an optional integration package. Install it (for example `npm install -g @anhlp/alp-paseo@beta`) and run `alp web` again.');
   }
