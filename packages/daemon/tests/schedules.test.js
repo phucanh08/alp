@@ -16,7 +16,7 @@ async function until(check, what = 'condition') {
 }
 
 /** A scripted native runtime; set `hold` to a promise to keep turn/start unanswered until it settles. */
-function fakeTransport(runtimes) {
+function fakeTransport(runtimes, resumeGate) {
   return () => {
     const index = runtimes.length;
     let turns = 0;
@@ -27,7 +27,7 @@ function fakeTransport(runtimes) {
       async close() {},
       async request(method, params) {
         this.calls.push({ method, params });
-        if (method === 'thread/resume') return { thread: { id: params.threadId } };
+        if (method === 'thread/resume') { await resumeGate?.(); return { thread: { id: params.threadId } }; }
         if (method.startsWith('thread/')) return { thread: { id: this.threadId } };
         if (method === 'turn/start') { await this.hold; this.turnId = `turn-${index}-${++turns}`; return { turn: { id: this.turnId } }; }
         if (method === 'turn/interrupt') { queueMicrotask(() => this.notification('turn/completed', { threadId: this.threadId, turn: { id: params.turnId, status: 'interrupted' } })); return {}; }
@@ -57,10 +57,10 @@ async function setup(t) {
   const state = path.join(directory, 'state');
   let count = 0;
   async function start(options = {}) {
-    const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(directory, 'runs') });
+    const { openDelayMs, openFailure, resumeGate, ...rest } = options;
+    const runtime = createAlpRuntime({ transport: fakeTransport(runtimes, resumeGate), runLogDir: path.join(directory, 'runs') });
     // A daemon whose sessions take a moment to open again, as a real provider does,
     // or one whose sessions cannot be opened at all.
-    const { openDelayMs, openFailure, ...rest } = options;
     const daemon = openDelayMs || openFailure
       ? { ...runtime, open: async (...args) => {
         if (openFailure) throw new Error(openFailure);
@@ -375,20 +375,44 @@ test('a job that came due while alpd was down is delivered, not failed', async t
 });
 
 test('a job that is hours late is still delivered after a restart', async t => {
-  const { start, create, project } = await setup(t);
+  const { start, create, project, runtimes, releases } = await setup(t);
   const daemon = await start({ scheduleTickMs: 60_000 });
   const { session } = await create(daemon);
   // The machine slept for hours: the job is more than an hour late, and alpd was down.
   const { job } = await daemon.request('schedule.create', { projectRoot: project, sessionId: session.id, dueAt: inMs(-3 * 60 * 60 * 1000), prompt: 'Three hours late.' });
   await daemon.stop();
 
-  const next = await start({ scheduleTickMs: 20, openDelayMs: 300 });
+  let entered;
+  const resuming = new Promise(resolve => { entered = resolve; });
+  let release;
+  const resume = new Promise(resolve => { release = resolve; });
+  releases.push(release);
+  // Hold the actual native resume: the runtime already exposes a snapshot, but its
+  // thread is not ready. A scheduler tick must observe this exact recovery phase.
+  const next = await start({ resumeGate: async () => { entered(); await resume; } });
+  await resuming;
+  assert.ok(next.runtime.snapshot(session.id), 'a snapshot exists before native resume answers');
+  assert.equal(next.runtime.starting(session.id), true);
+  await until(async () => {
+    const current = await jobOf(next, job.id);
+    return current.lastError || current.status !== 'pending';
+  }, 'the scheduler inspected the job during native resume');
+  const waiting = await jobOf(next, job.id);
+  assert.equal(waiting.status, 'pending', 'native reopening is not a busy turn, however late the job');
+  assert.equal(waiting.lastError.code, 'session_opening');
+  assert.equal(waiting.attempts, 0);
+  assert.equal(runtimes.at(-1).started.length, 0, 'no prompt reaches the unopened thread');
+  release();
   await next.request('session.attach', { sessionId: session.id });
   // The lateness of the job says nothing about how long the session takes to open again.
   await until(() => promptOf(next.events, 'Three hours late.'), 'the late job did not fire after the restart');
   await untilStatus(next, job.id, 'delivered');
   const after = await jobOf(next, job.id);
   assert.ok(after.lateByMs >= 3 * 60 * 60 * 1000, 'the job records how late it is');
+  assert.equal(after.attempts, 1);
+  assert.equal(after.lastError, undefined);
+  assert.equal(runtimes.at(-1).started.length, 1, 'the native runtime receives exactly one turn');
+  assert.equal(userTexts(next.events).filter(text => text.includes('Three hours late.')).length, 1);
 });
 
 test('a job on a session the user closed is not resurrected after a restart', async t => {

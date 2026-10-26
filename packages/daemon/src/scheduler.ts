@@ -222,20 +222,21 @@ export function createScheduler({ store, runtime, deliver, ready, session, settl
     let attempt: ScheduleJob | undefined;
     const snapshot = runtime.snapshot(current.sessionId);
     const known = session?.(current.sessionId);
+    // Native opening publishes a snapshot before its thread is ready. Recovery
+    // still owns this session: it is neither closed nor busy with a turn yet.
+    if (known?.opening) {
+      // The wait is bounded from the moment it began: how late the job is says
+      // nothing about how long the session takes to open again.
+      const since = opening.get(current.id) ?? now();
+      opening.set(current.id, since);
+      const waited = now() - since;
+      if (waited > graceMs) return fail(current, `The session was not open again within ${duration(waited)}`, 'session_not_open');
+      const note = { message: 'The session is being opened again; the job waits for it', code: 'session_opening' };
+      await store.change(current.id, job => job.status === 'pending' && job.lastError?.code !== note.code ? { lastError: note } : undefined)
+        .catch(error => log.warn(`could not record the wait of job ${current.id}`, { code: 'ALP_SCHEDULE_WRITE_FAILED', jobId: current.id, error }));
+      return 'waiting';
+    }
     if (!snapshot) {
-      // A session that is being opened again is not a closed one: the job waits for it.
-      if (known?.opening) {
-        // The wait is bounded from the moment it began: how late the job is says
-        // nothing about how long the session takes to open again.
-        const since = opening.get(current.id) ?? now();
-        opening.set(current.id, since);
-        const waited = now() - since;
-        if (waited > graceMs) return fail(current, `The session was not open again within ${duration(waited)}`, 'session_not_open');
-        const note = { message: 'The session is being opened again; the job waits for it', code: 'session_opening' };
-        await store.change(current.id, job => job.status === 'pending' && job.lastError?.code !== note.code ? { lastError: note } : undefined)
-          .catch(error => log.warn(`could not record the wait of job ${current.id}`, { code: 'ALP_SCHEDULE_WRITE_FAILED', jobId: current.id, error }));
-        return 'waiting';
-      }
       // A session that could not be opened again says why; the job fails with that reason.
       if (known?.error) return fail(current, known.error.message, known.error.code ?? 'session_open_failed');
       return fail(current, 'The session this job continues is closed', 'session_closed');
