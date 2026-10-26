@@ -4,7 +4,7 @@ import { execFile, spawn } from 'node:child_process';
 import { createServer as createNetServer } from 'node:net';
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -324,6 +324,26 @@ test('a home registered before the rename still starts the Paseo integration, wi
     const info = await webJson(home);
     assert.equal((await lockJson(home))?.pid, info?.pid, 'the legacy entry runs as integration paseo');
     assert.ok(served.stdout.includes(`#token=${info.token}`));
+  });
+});
+
+test('the pre-rename fallback reads only the home descriptor, never PATH or other discovery', async t => {
+  const installed = installedIntegration();
+  if (installed) { t.skip(`${path.basename(installed)} is installed at ${installed}, which discovery always searches`); return; }
+  const { directory, home } = await createHome(t);
+  await startDaemon(home);
+  // A stale home descriptor, and an `alp-web-integration` binary on PATH that a full lookup for
+  // `web` would find: the fallback must not launch it under the paseo lock.
+  await mkdir(path.join(home, 'integrations'), { recursive: true, mode: 0o700 });
+  await writeFile(path.join(home, 'integrations', 'web.json'), JSON.stringify({ main: path.join(directory, 'gone.js') }));
+  const bin = path.join(directory, 'bin');
+  await mkdir(bin);
+  await symlink(paseoEntry, path.join(bin, 'alp-web-integration'));
+  await withoutDiscovery(t, async env => {
+    const refused = await run(['web', '--print'], home, 60_000, { ...env, PATH: bin });
+    assert.notEqual(refused.code, 0, refused.stdout);
+    assert.match((refused.stderr || '') + (refused.stdout || ''), /optional integration package/i);
+    assert.equal(await lockJson(home), undefined, 'nothing ran as integration paseo');
   });
 });
 
