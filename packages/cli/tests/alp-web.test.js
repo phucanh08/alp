@@ -122,7 +122,12 @@ async function startService(context, { args = [], env = {}, wait = true } = {}) 
     const lock = await readJson(path.join(context.home, 'integrations', 'web.lock'));
     const info = await readJson(path.join(context.home, 'web.json'));
     return lock.ready && lock.pid === child.pid && info.pid === child.pid ? info : undefined;
-  }, 'alp-web to become ready');
+  }, 'alp-web to become ready').catch(async error => {
+    // What the service was doing, and what it left on disk, when it never became ready.
+    const lock = await readFile(path.join(context.home, 'integrations', 'web.lock'), 'utf8').catch(() => '(none)');
+    const info = await readFile(path.join(context.home, 'web.json'), 'utf8').catch(() => '(none)');
+    throw new Error(`${error.message} (pid ${child.pid})\nweb.lock: ${lock}\nweb.json: ${info}\nlog:\n${await serviceLog(context.home)}`, { cause: error });
+  });
   return { child, exited, web };
 }
 
@@ -134,6 +139,13 @@ async function exitOf(service, timeoutMs = 30_000) {
   const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`alp-web (pid ${service.child.pid}) did not exit within ${timeoutMs} ms`)), timeoutMs); });
   try { return await Promise.race([service.exited, timeout]); } finally { clearTimeout(timer); }
 }
+
+/**
+ * The exit code a stop gives: on POSIX, SIGTERM is alp-web's graceful shutdown (exit 0, lock
+ * released). Windows has no signals: kill() ends the process at once (exit code null), its lock is
+ * left behind and the next start reclaims it from the dead pid.
+ */
+const STOPPED = posix ? 0 : null;
 
 async function stopService(service) {
   service.child.kill('SIGTERM');
@@ -261,17 +273,19 @@ test('alp-web serves the app and the gateway on one loopback listener, with its 
   assert.equal(await readFile(path.join(context.home, 'web', 'credentials.json'), 'utf8'), before);
   assert.equal((await readJson(path.join(context.home, 'web.json'))).pid, service.child.pid);
 
-  // SIGTERM: it stops, exits 0 and releases its lock.
-  assert.equal(await stopService(service), 0);
-  assert.equal(existsSync(path.join(context.home, 'integrations', 'web.lock')), false);
-  assert.equal(existsSync(path.join(context.home, 'integrations', 'web.lock.reclaim')), false);
+  // SIGTERM: it stops, exits 0 and releases its lock (POSIX; on Windows the process just ends).
+  assert.equal(await stopService(service), STOPPED);
+  if (posix) {
+    assert.equal(existsSync(path.join(context.home, 'integrations', 'web.lock')), false);
+    assert.equal(existsSync(path.join(context.home, 'integrations', 'web.lock.reclaim')), false);
+  }
 });
 
 test('the token survives a restart, and the built app is served when no override is set', limit, async t => {
   const port = await freePorts();
   const context = await createHome(t, { web: { port } });
   const first = await startService(context, { env: { ALP_SUPERVISE: '0' } });
-  assert.equal(await stopService(first), 0);
+  assert.equal(await stopService(first), STOPPED);
   const second = await startService(context, { env: { ALP_SUPERVISE: '0' } });
   t.after(() => stopService(second).catch(() => {}));
   assert.notEqual(second.web.pid, first.web.pid);
@@ -300,7 +314,7 @@ test('a stale web.json token is replaced and its credential revoked', limit, asy
   const port = await freePorts();
   const context = await createHome(t, { web: { port } });
   const first = await startService(context, { env: { ALP_SUPERVISE: '0' } });
-  assert.equal(await stopService(first), 0);
+  assert.equal(await stopService(first), STOPPED);
   // The token in web.json no longer matches its credential (lost secret, hand edit).
   const forged = { ...first.web, token: `alpgw1.${first.web.credentialId}.${'A'.repeat(43)}` };
   await writeFile(path.join(context.home, 'web.json'), JSON.stringify(forged), { mode: 0o600 });
@@ -376,7 +390,7 @@ test('an unknown web.permissions entry leaves the default grant, and says so', l
 test('the credentials directory and file keep the gateway\'s private-mode checks', { ...limit, skip: !posix && 'POSIX file modes' }, async t => {
   const context = await createHome(t, { web: { port: await freePorts() } });
   const first = await startService(context, { env: { ALP_SUPERVISE: '0' } });
-  assert.equal(await stopService(first), 0);
+  assert.equal(await stopService(first), STOPPED);
   const file = path.join(context.home, 'web', 'credentials.json');
   const kept = { credentials: await readFile(file, 'utf8'), web: await readFile(path.join(context.home, 'web.json'), 'utf8') };
   const refused = async (what, pattern) => {
