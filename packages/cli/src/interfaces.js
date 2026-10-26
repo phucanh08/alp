@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { access, readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { alpHome, discoverIntegration, lockAlive, readLock, startIntegration } from '@anhlp/alp-client/index';
@@ -20,14 +20,29 @@ export async function startPaseoIntegration(home) {
   const entry = await discoverIntegration(PASEO, { home });
   if (!entry) {
     const legacy = path.join(home, 'integrations', 'web.json');
-    const registered = await access(legacy).then(() => true, () => false);
-    const legacyEntry = registered ? await discoverIntegration('web', { home }) : undefined;
+    const legacyEntry = await legacyDescriptorEntry(legacy, home);
     if (legacyEntry) {
       console.error(`Using the Paseo integration registered before its rename (${legacy}); run \`alp-paseo-integration --register\` to register it again.`);
       return startIntegration({ name: PASEO, entry: legacyEntry, home });
     }
   }
   return startIntegration({ name: PASEO, home });
+}
+
+/**
+ * The entry named by the pre-rename descriptor `<home>/integrations/web.json`, and nothing else: no
+ * environment, distribution or PATH lookup, since the name `web` now belongs to alp-web. A relative
+ * `main` resolves against the descriptor's directory, then the home, as discovery does.
+ * @param {string} file
+ * @param {string} home
+ */
+async function legacyDescriptorEntry(file, home) {
+  const main = await readFile(file, 'utf8').then(text => JSON.parse(text)?.main, () => undefined);
+  if (typeof main !== 'string' || !main) return undefined;
+  const isFile = candidate => stat(candidate).then(info => info.isFile(), () => false);
+  const candidates = path.isAbsolute(main) ? [main] : [path.resolve(path.dirname(file), main), path.resolve(home, main)];
+  for (const candidate of candidates) if (await isFile(candidate)) return candidate;
+  return undefined;
 }
 
 async function webCommand(args) {
