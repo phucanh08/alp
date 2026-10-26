@@ -24,7 +24,8 @@
   - **Permissions:** `session.read`/`write`, `project.read`/`write` and `workspace.write`.
     `files.read`, `attachments.write`, `session.team.write` and `terminal.exec` only when listed in
     the `web.permissions` setting; a list with an entry that is not a permission is ignored, with a
-    warning. Settings apply when alp-web starts.
+    warning, and a malformed entry (not a lowercase name with dots) makes alp-web ignore the whole
+    `settings.json` (`ALP_SETTINGS_INVALID`). Settings apply when alp-web starts.
   - **Workspaces:** alpd's project registry plus the folder `alp web` ran in when it started the
     service, if that folder is an ALP project. New projects reach open pages: the grant is updated
     and connections close with 4403, then reconnect. Sessions recorded under a symlinked project

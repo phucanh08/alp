@@ -22,7 +22,7 @@ Số mục (§) có thể được code và test tham chiếu; giữ ổn địn
 
 | Có | Chi tiết |
 |---|---|
-| Kết nối | `alp web` mở link có sẵn token và app tự kết nối (§3.1, §4.2). Hoặc form kết nối: HTTPS, hoặc HTTP chỉ trên loopback (`127.0.0.1`, `localhost`, SSH tunnel); token dán tay chỉ giữ trong bộ nhớ của tab. Trên trang loopback do `alp web` phục vụ, ô gateway mặc định là origin của trang, và "Getting a token" chỉ tới `alp web`, `alp web --print`, `alp web rotate` trước, rồi tới `alp-gateway credential create` + `serve --origin` cho gateway riêng. |
+| Kết nối | `alp web` mở link có sẵn token và app tự kết nối (§3.1, §4.2). Hoặc form kết nối: HTTPS, hoặc HTTP chỉ trên loopback (`127.0.0.1`, `localhost`, SSH tunnel); token dán tay chỉ giữ trong bộ nhớ của tab. Trên trang loopback của bản build (như trang `alp web` phục vụ; dev server Vite thì không), ô gateway mặc định là origin của trang (địa chỉ đã nhớ thì ưu tiên), và "Getting a token" chỉ tới `alp web`, `alp web --print`, `alp web rotate` trước, rồi tới `alp-gateway credential create` + `serve --origin` cho gateway riêng. |
 | Projects | Các workspace mà credential cấp (`principal.workspaces`), cùng registry chung của host (`workspace.registry`, protocol §16, #121): **Add project** chỉ đăng ký một thư mục đã được cấp sẵn (`workspace.write`; không duyệt thư mục của host, không cấp thêm quyền), pin chung giữa các client và giữ qua restart, worktree tạo/xóa theo mapping chủ host đã duyệt (`workspace.manage`, chỉ macOS/Linux). Web chưa có nút bỏ project (`project.remove` của protocol chỉ bỏ đăng ký, không xóa file). |
 | Sessions | Liệt kê, tạo (team, permissions, model, title), mở, đổi tên, archive. Mỗi agent của cây (main và assignment) là một tab. Trên Codex và Claude (#121): fork và rewind chỉ hội thoại (§12.7, không đổi file), đổi team/model/thinking khi session đang sống (§12.9, đổi team cần thêm `session.team.write`), Reload agent và Copy resume command trong menu tab (§12.8), tải lịch sử cũ hơn (`session.history`, §8.7), đính kèm file không phải ảnh (§12.6, cần `attachments.write`). |
 | Chat | Prompt + stream, tool call, todo, notice; trả lời câu hỏi theo luồng chọn rồi Submit của Paseo (Other thay lựa chọn, Enter gửi, Dismiss), thẻ câu hỏi nằm trong stream; interrupt; steer khi agent đang chạy; hàng đợi (§4.3). |
@@ -90,8 +90,10 @@ alp web rotate     # thay token; trang đang mở mất quyền
   `session.write`, `project.read`, `project.write`, `workspace.write`. Các quyền khác (ví dụ
   `files.read`, `attachments.write`, `session.team.write`, `terminal.exec`) chỉ có khi thêm vào
   setting `web.permissions` (mảng). Chỉ cần một mục không phải quyền của credential là alp-web bỏ
-  qua **cả danh sách** và ghi warning; grant giữ mặc định. Có `terminal.exec` thì log ghi cảnh báo
-  của gateway.
+  qua **cả danh sách** và ghi warning; grant giữ mặc định. Còn một mục sai dạng (không phải chuỗi
+  chữ thường và dấu chấm, ví dụ `"files-read"`) làm cả `settings.json` không hợp lệ: alp-web bỏ qua
+  toàn bộ file, kể cả `web.port`, và ghi `ALP_SETTINGS_INVALID` vào log. Có `terminal.exec` thì log
+  ghi cảnh báo của gateway.
 - Workspace được cấp: registry project của alpd (project chưa bị bỏ) ∪ thư mục mà `alp web` đang
   đứng khi khởi động service (hoặc khi `alp web rotate`), nếu thư mục đó có `.alp/` (là project
   ALP). Đường dẫn được so theo realpath. alp-web theo dõi registry khoảng mỗi 5 giây; grant đổi
@@ -140,7 +142,9 @@ cũng được.
    - Khi deploy trên domain riêng, có thể siết `connect-src` về đúng gateway.
 
 Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:7435 host`, rồi mở
-`http://127.0.0.1:7435` và dùng gateway `http://127.0.0.1:7434`.
+`http://127.0.0.1:7435` và dùng gateway `http://127.0.0.1:7434`. App build sẵn trên loopback không
+phân biệt được trang của `alp web` với bản tự phục vụ, nên ô gateway lúc đầu là origin của trang
+(`http://127.0.0.1:7435`): gõ `http://127.0.0.1:7434` một lần, app nhớ địa chỉ đó cho lần sau.
 
 ## 4. Thiết kế
 
