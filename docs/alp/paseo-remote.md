@@ -19,7 +19,8 @@ Bản phân tích ban đầu: `docs/alp/paseo-remote-rpc-gap-analysis.md` (F01�
 ## 1. Phạm vi
 
 - Topology T1: H1 (provider Paseo desktop + các panel) đi remote qua gateway. **H2** (web bridge
-  `alp web`, ứng dụng web fork của Paseo) vẫn chạy trên ALP host, cạnh alpd. Nó không thuộc 09B-2.
+  của integration `paseo`, ứng dụng web fork của Paseo; trước khi đổi tên đây là `alp web`, nay
+  `alp web` là service `alp-web`, xem [web.md](web.md) §3.1) vẫn chạy trên ALP host, cạnh alpd. Nó không thuộc 09B-2.
 - Một credential gateway = một danh sách workspace (project root trên ALP host) + permission +
   (tùy chọn) mode. Danh sách workspace của remote mode là **grant của credential**. Gateway là
   nguồn duy nhất; plugin không ghi registry workspace nào (không dual-write).

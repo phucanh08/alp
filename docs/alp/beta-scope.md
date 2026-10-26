@@ -119,11 +119,11 @@ khớp các bản cũ, không khớp `0.0.0-beta.1`. Bỏ deprecate nhầm: `npm
 
 | Package | Beta | Ghi chú |
 |---|---|---|
-| `@anhlp/alp` | Phát hành | `alp`, `alpd`; không chứa Paseo |
+| `@anhlp/alp` | Phát hành | `alp`, `alpd`; không chứa Paseo. Từ bản sau `0.0.1-beta.3`: cả `alp web` (`dist/alp-web.js`, app ở `dist/alp-web/`, `THIRD-PARTY-NOTICES.txt`; `-cli` cũng mang các file này) |
 | `@anhlp/alp-protocol`, `-core`, `-runtime`, `-client`, `-daemon`, `-cli` | Phát hành (bắt buộc) | root và plugin pin đúng version |
-| `@anhlp/alp-paseo` | Phát hành | plugin Paseo, `alp web` (bản fork web Paseo, Apache-2.0), `alp-web-integration` |
-| `@anhlp/alp-gateway` | **Không phát hành** (deferred) | chờ nghiệm thu web; [Local] chưa có `private: true` (T2) |
-| `@anhlp/alp-web` (`apps/web`) | Không phát hành (deferred) | private; chưa nghiệm thu |
+| `@anhlp/alp-paseo` | Phát hành | plugin Paseo, web của Paseo (bản fork, Apache-2.0; tới `0.0.1-beta.3` là `alp web`), `alp-paseo-integration` (`alp-web-integration` là alias trong một bản phát hành) |
+| `@anhlp/alp-gateway` | **Không phát hành** (deferred) | workspace private (`apps/gateway`); từ bản sau `0.0.1-beta.3` được bundle vào `dist/alp-web.js` của CLI, nên vẫn đúng 8 tarball |
+| `@anhlp/alp-web` (`apps/web`) | Không phát hành riêng | private; từ bản sau `0.0.1-beta.3`, bản build nằm trong CLI và mở bằng `alp web` ([web.md](web.md) §3.1) |
 | `@anhlp/alp-tui` | Không phát hành | private, rỗng |
 
 Thứ tự publish: protocol → core → runtime → client → daemon → cli → plugin → root (§7.4).
@@ -149,7 +149,9 @@ Thứ tự publish: protocol → core → runtime → client → daemon → cli 
   allow / Deny), worktree và `alp_merge`, tạm dừng khi hết usage, phục hồi sau khi alpd restart
   hoặc crash.
 - Plugin Paseo: provider `alp`, Tasks panel, Settings → ALP, ALP project panel, giám sát alpd.
-- `alp web` cục bộ, chỉ loopback (port 7433, có token), qua `alp-web-integration`.
+- `alp web` cục bộ, chỉ loopback (port 7433, có token): tới `0.0.1-beta.3` là web của Paseo qua
+  `alp-web-integration`; từ bản sau là service `alp-web` của CLI (app `apps/web` + gateway nhúng,
+  không cần plugin).
 
 **Experimental** (có trong docs, ghi nhãn experimental, không nằm trong gate):
 - Provider ACP và Antigravity; `alp acp` cho editor.
@@ -318,8 +320,9 @@ PASEO_PID=$!
   terminal acceptance trước khi chạy harness. Không đổi môi trường của session điều khiển.
 - Live harness giữ daemon/plugin để người chạy hoàn tất bước manual. Khi xong, đóng session thử,
   gỡ plugin bằng `paseo plugin remove alp-provider --home "$PASEO_HOME"`, dừng và chờ PID
-  `$PASEO_PID` do terminal này tạo. Nếu có web integration riêng, ghi PID từ `web.json` và
-  `integrations/web.lock` **của `ALP_HOME` mới này**, dừng/chờ integration trước, rồi
+  `$PASEO_PID` do terminal này tạo. Nếu có alp-web (`web.json`, `integrations/web.lock`) hoặc
+  integration Paseo riêng (`paseo.json`, `integrations/paseo.lock`), ghi PID từ các file đó
+  **của `ALP_HOME` mới này**, dừng/chờ chúng trước, rồi
   `alp daemon stop` với đúng `ALP_HOME`; xác nhận các PID đã hết trước khi xóa fixture.
   Giữ lại log/evidence. Không dùng PID lịch sử, `pkill`, `killall`, hoặc xóa home/worktree người dùng.
 
@@ -420,7 +423,7 @@ Ghi lại các session id và kết quả vào §6.4.
 | W3 | Trong Paseo: tạo session ALP · Phở ở `/tmp/alp-beta/project`, gửi prompt dài, bấm Stop | stream; Stop dừng turn; prompt tiếp theo chạy được |
 | W4 | Dùng profile ở C6; trong Paseo gửi "Chạy đúng lệnh: touch w4-once.txt" → Allow once, rồi "touch w4-deny.txt" → Deny | câu hỏi quyền hiện thành question card trong Paseo; `w4-once.txt` có, `w4-deny.txt` không có |
 | W5 | Tasks panel: thêm, đóng, mở lại một task | `.alp/tasks` đổi đúng; panel làm mới |
-| W6 | `alp-web-integration --register`; `alp web --print`; mở địa chỉ trên máy đó (Linux headless: `ssh -L 7433:127.0.0.1:7433 <host>`, mở trên máy mình) | thấy project và session của W3; hỏi đáp và Tasks hoạt động; truy cập không có token bị từ chối |
+| W6 | `alp web --print` (service `alp-web`, không cần plugin); mở địa chỉ trên máy đó (Linux headless: `ssh -L <port>:127.0.0.1:<port> <host>`, mở trên máy mình) | in `http://127.0.0.1:<port>/#token=alpgw1.…`; `GET /` trả app; `POST /v1/tickets` trả 401 khi không có token hoặc token sai, 201 với token đã in (`scripts/beta-acceptance-web.mjs`); trên trình duyệt thấy project và session của W3, hỏi đáp và Tasks hoạt động |
 
 [Suy luận] Hai điểm chưa được thử: thêm plugin từ `node_modules` của project consumer (để các
 dependency `@anhlp/*` chưa publish được tìm thấy), và `alp web` qua SSH tunnel (host header vẫn là

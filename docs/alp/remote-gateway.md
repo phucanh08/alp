@@ -977,6 +977,10 @@ Upgrade bị từ chối trả HTTP (không có WebSocket):
 - **Origin**: không có Origin (Node, RN) → được phép. Có Origin → phải nằm trong `origins`
   (khớp tuyệt đối, chỉ gồm scheme, host và port).
 - Gateway không tự deploy, không sửa cấu hình máy và không khởi động alpd.
+- `alp web` không dùng gateway này: service `alp-web` của CLI chạy gateway nhúng riêng trên
+  `127.0.0.1:<web.port>` (mặc định 7433), cùng origin với app, với kho credential riêng
+  `<home>/web/credentials.json`. `alp-gateway credential list/create/revoke` (đọc `<home>/gateway`)
+  không thấy credential đó; thay token của nó bằng `alp web rotate` ([web.md](web.md) §3.1).
 
 ### 7.2 Đường TLS chính: reverse proxy
 
