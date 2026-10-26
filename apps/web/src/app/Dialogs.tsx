@@ -8,9 +8,16 @@ import { useAction, useController } from './store';
 
 export function RenameDialog({ session, onClose }: { session: SessionSummary | null; onClose: () => void }) {
   const controller = useController();
-  const [title, setTitle] = React.useState('');
+  const [title, setTitle] = React.useState(session?.title ?? '');
+  const [previousSession, setPreviousSession] = React.useState(session);
+  // Initialize before Dialog mounts/focuses the input. A passive effect can replace
+  // its value after the user selects it, collapsing the selection before typing.
+  if (session !== previousSession) {
+    setPreviousSession(session);
+    setTitle(session?.title ?? '');
+  }
   const rename = useAction(React.useCallback((id: string, value: string) => controller.renameSession(id, value), [controller]));
-  React.useEffect(() => { if (session) { setTitle(session.title ?? ''); rename.clearError(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [session]);
+  React.useEffect(() => { if (session) rename.clearError(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [session]);
   return (
     <Dialog open={!!session} onClose={onClose} title="Rename session"
       footer={<>
