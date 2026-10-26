@@ -5,7 +5,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 const home = process.env.ALP_HOME;
 if (!home || !process.env.ALP_LOCK_FIXTURE || !home.startsWith(process.env.ALP_LOCK_FIXTURE + path.sep)) throw new Error('private fixture home required');
-const file = path.join(home, 'integrations/web.lock');
+const lockName = process.env.ALP_LOCK_NAME;
+if (!lockName) throw new Error('ALP_LOCK_NAME required');
+const file = path.join(home, 'integrations', `${lockName}.lock`);
 const guard = file + '.reclaim';
 let gated = false, blocked = false, failed = false;
 let opened = 0, closed = 0;
@@ -52,9 +54,10 @@ for (const name of ['open', 'mkdir', 'rename', 'unlink', 'rmdir']) {
 }
 if (process.env.ALP_LOCK_KILL_ERROR) process.kill = () => { throw Object.assign(new Error('injected kill classification'), { code: process.env.ALP_LOCK_KILL_ERROR }); };
 syncBuiltinESMExports();
-const entry = process.env.ALP_LOCK_MODULE || new URL('../../server/dist/integration-lock.js', import.meta.url).href;
-const { createIntegrationLock } = await import(entry.startsWith('file:') ? entry : pathToFileURL(entry).href);
-const lock = createIntegrationLock(home);
+// ALP_LOCK_MODULE points a mutation check at an edited copy; by default the package export is exercised.
+const entry = process.env.ALP_LOCK_MODULE;
+const { createIntegrationLock } = await import(!entry ? '@anhlp/alp-client/integration-lock' : entry.startsWith('file:') ? entry : pathToFileURL(entry).href);
+const lock = createIntegrationLock(home, lockName);
 async function invoke(message) {
   if (message.command === 'resume') return;
   try {
