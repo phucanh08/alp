@@ -55,6 +55,10 @@ async function run(home: string) {
     log.info(`integration already running (pid ${lock.pid})`, { code: 'ALP_LOCK_HELD' });
     process.exit(0);
   }
+  // A failed release leaves the lock and guard in place (fail closed); report it and stop anyway.
+  const releaseLock = () => integrationLock.release().catch(error => {
+    log.error('integration lock not released; the integration stops anyway', { code: 'ALP_LOCK_RELEASE_FAILED', error });
+  });
 
   const webLog = (message: string) => log.info(`web: ${message}`);
   const appDir = webAppDir(fileURLToPath(import.meta.url));
@@ -65,7 +69,7 @@ async function run(home: string) {
   // Ready is published only after web.pairing is registered (below), so a caller that waits for the
   // ready lock can rely on the RPC being served; marking ready here would race callers of web.pairing.
   await web.listen().then(info => { listening = `127.0.0.1:${info.port}`; log.info(`web app on ${info.url}`, { event: 'web.listening' }); })
-    .catch(async error => { log.error('web app not started', { code: 'ALP_WEB_START_FAILED', error }); await integrationLock.release(); process.exit(1); });
+    .catch(async error => { log.error('web app not started', { code: 'ALP_WEB_START_FAILED', error }); await releaseLock(); process.exit(1); });
   const relay = web.token && gateway ? gateway.relay : undefined;
   await relay?.start().catch(error => webLog(`relay not started: ${error?.message ?? error}`));
 
@@ -106,7 +110,7 @@ async function run(home: string) {
             if (extensionClient === client) extensionClient = null;
             // Our own ready flag describes a registration that has just gone away with the socket.
             if (!shuttingDown) {
-              void integrationLock.setReady(false);
+              void integrationLock.setReady(false).catch(error => log.warn('integration ready flag not cleared', { code: 'ALP_LOCK_READY_FAILED', error }));
               void ensurePairingRegistration();
             }
           });
@@ -144,14 +148,18 @@ async function run(home: string) {
   void ensurePairingRegistration();
 
   const shutdown = async (code = 0) => {
+    // A later signal or uncaught exception must not start a second shutdown and release; the
+    // first one always reaches exit, even if a step throws.
+    if (shuttingDown) return;
     shuttingDown = true;
-    if (extensionClient) { try { await extensionClient.request('extension.unregister', { method: 'web.pairing' }); } catch {} extensionClient.close(); extensionClient = null; }
-    await web.close().catch(() => {});
-    await relay?.stop?.().catch(() => {});
-    await (gateway as any)?.close?.().catch(() => {});
-    await stopDaemon().catch(() => {});
-    await integrationLock.release();
-    process.exit(code);
+    try {
+      if (extensionClient) { try { await extensionClient.request('extension.unregister', { method: 'web.pairing' }); } catch {} extensionClient.close(); extensionClient = null; }
+      await web.close().catch(() => {});
+      await relay?.stop?.().catch(() => {});
+      await (gateway as any)?.close?.().catch(() => {});
+      await stopDaemon().catch(() => {});
+      await releaseLock();
+    } finally { process.exit(code); }
   };
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => void shutdown());
   process.on('uncaughtException', error => { log.error('uncaught exception; the integration stops', { code: 'ALP_FATAL', error }); void shutdown(1); });
