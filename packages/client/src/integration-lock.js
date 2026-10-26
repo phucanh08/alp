@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, open, rename, rmdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { bootTime } from './index.js';
+import { assertIntegrationName, bootTime } from './index.js';
 
 /**
  * @typedef {{ pid: number, bootTime: number, startedAt: string, ready: boolean, lockVersion?: number, owner?: string }} IntegrationLockRecord
@@ -14,9 +14,6 @@ import { bootTime } from './index.js';
  * }} IntegrationLock
  */
 
-/** Integration names are single path segments: they name `integrations/<name>.lock`. */
-const NAME = /^[a-z0-9][a-z0-9-]*$/;
-
 /**
  * The single-owner lock of one integration service, at `<home>/integrations/<name>.lock`, with its
  * mutation guard `<name>.lock.reclaim`. Each instance is single-use: acquire once, then setReady and
@@ -28,8 +25,7 @@ const NAME = /^[a-z0-9][a-z0-9-]*$/;
  * @returns {IntegrationLock}
  */
 export function createIntegrationLock(home, name) {
-  if (typeof name !== 'string' || !NAME.test(name)) throw new TypeError(`Invalid integration name: ${JSON.stringify(name)}`);
-  const file = path.join(home, 'integrations', `${name}.lock`);
+  const file = path.join(home, 'integrations', `${assertIntegrationName(name)}.lock`);
   const guard = `${file}.reclaim`;
   /** @type {'new' | 'acquiring' | 'owned' | 'retired'} */
   let phase = 'new';
