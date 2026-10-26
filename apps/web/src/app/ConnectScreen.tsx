@@ -14,13 +14,41 @@ function rememberedGateway() {
   try { return window.localStorage.getItem(GATEWAY_KEY) || DEFAULT_GATEWAY; } catch { return DEFAULT_GATEWAY; }
 }
 
+/** The page `alp web` opened, connecting with the token from its address (it retries until alp web is up). */
+function LinkConnecting() {
+  const controller = useController();
+  const { connection } = useAppState();
+  return (
+    <main className="flex min-h-full items-center justify-center bg-[radial-gradient(ellipse_at_top,_var(--glow)_0%,_var(--background)_55%)] px-4 py-10">
+      <div className="w-full max-w-md space-y-4" data-testid="link-connecting">
+        <div className="flex items-center gap-3">
+          <Logo className="size-10" />
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight">ALP</h1>
+            <p className="text-sm text-muted-foreground">Opening ALP on this machine</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Spinner label="Connecting…" />
+          {connection.attempt > 1 ? <span>Waiting for alp web (attempt {connection.attempt})</span> : null}
+        </div>
+        {connection.error ? <p className="text-sm text-muted-foreground">{connection.error.message}</p> : null}
+        <Button size="sm" variant="ghost" onClick={() => controller.disconnect()}>Use another access token</Button>
+      </div>
+    </main>
+  );
+}
+
 export function ConnectScreen() {
   const controller = useController();
   const { connection } = useAppState();
-  const [gateway, setGateway] = React.useState(rememberedGateway);
+  // After a connection that failed (a link's refused token, too), the address it used.
+  const [gateway, setGateway] = React.useState(() => connection.gateway || rememberedGateway());
   const [token, setToken] = React.useState('');
   const connecting = connection.phase === 'connecting';
   const error = connection.phase === 'failed' ? connection.error : undefined;
+  // The address `alp web` opened is connecting with its token: nothing to type.
+  if (connecting && connection.link) return <LinkConnecting />;
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();

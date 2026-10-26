@@ -4,6 +4,7 @@ import { AuthenticationError, ConfigurationError, CreateOutcomeUnknownError, FIL
 import { cleanListing, relativeFilePath } from './file-tree.js';
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
 import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
+import { LINK_TOKEN_INVALID, forgetLinkToken } from './link-token.js';
 import { newConversationRequestId, newMessageId, newRequestId, newSessionId } from './ids.js';
 import { RELOAD_MESSAGES, agentControlsGate, conversationGate, describeConversationError, describeReloadError } from './conversation.js';
 import { GIT_ERROR_MESSAGES, GitAccessError, describeGitError, gitAccess, gitCompare, gitRequestPath, registryWorkspaceOf } from './git.js';
@@ -91,7 +92,7 @@ const STOP_WAITING = 'Stop is waiting for this message’s outcome.';
  *   older?: { generation: string, olderCursor?: string, hasOlder: boolean, loading?: boolean, error?: string },
  * }} TreeView
  * @typedef {{
- *   connection: { phase: Phase, gateway: string, attempt: number, error?: Failure, daemonVersion?: string, hostname?: string, promptImageLimits?: ReturnType<typeof imageLimits>, attachmentLimits?: import('./attachments.js').FileLimits, terminalLimits?: import('@anhlp/alp-protocol').TerminalLimits, capabilities: string[] },
+ *   connection: { phase: Phase, gateway: string, attempt: number, error?: Failure, link?: boolean, daemonVersion?: string, hostname?: string, promptImageLimits?: ReturnType<typeof imageLimits>, attachmentLimits?: import('./attachments.js').FileLimits, terminalLimits?: import('@anhlp/alp-protocol').TerminalLimits, capabilities: string[] },
  *   principal: Principal | null,
  *   workspace: string | null,
  *   catalog: Load & { teams: Team[], teamsKnown?: boolean, teamsUnavailable?: import('./new-session.js').TeamsUnavailable, modes: Mode[], models: Model[], defaultMode?: string },
@@ -238,7 +239,11 @@ export function initialState(gateway = '') {
  *   storage?: import('./preferences.js').PreferenceStorage,
  *   terminalStorage?: import('./terminal.js').TerminalStorage | null,
  *   terminalOptions?: Partial<import('./terminal.js').TerminalOptions>,
+ *   linkStorage?: import('./link-token.js').TokenStorage,
  * }} ControllerOptions
+ *   linkStorage: where this tab keeps the token of the address `alp web` opened (sessionStorage,
+ *   lib/link-token.js); the controller forgets it there when the gateway refuses it or the person
+ *   disconnects or connects with another token.
  *   terminalStorage: where a terminal tab keeps its terminal's id for the page (sessionStorage), so a
  *   reload attaches the same terminal again.
  */
@@ -268,7 +273,7 @@ export class Controller {
   /** @type {Set<() => void>} */ #listeners = new Set();
   #emitQueued = false;
   #options;
-  /** The connection run: replaced on connect, cleared on disconnect, so late callbacks of an old one do nothing. @type {{ alp?: ReconnectingClient, principal?: Principal, opened: boolean } | null} */
+  /** The connection run: replaced on connect, cleared on disconnect, so late callbacks of an old one do nothing. @type {{ alp?: ReconnectingClient, principal?: Principal, opened: boolean, link?: boolean } | null} */
   #run = null;
   /** The access token, in this object's memory only, for the life of one connection. */
   #token = '';
@@ -429,10 +434,15 @@ export class Controller {
 
   /**
    * Connects to a gateway with an access token. The token stays in memory until disconnect().
-   * @param {{ url: string, token: string }} input
+   * `link`: the token came from the address `alp web` opened (lib/link-token.js) and this tab keeps
+   * it in linkStorage. Nobody is at a form then, so the first connection retries a host that is not
+   * up yet instead of failing, and a refused token is forgotten with a message saying to run
+   * `alp web` again. A connection without `link` (the form) forgets a kept link token.
+   * @param {{ url: string, token: string, link?: boolean }} input
    */
-  connect({ url, token }) {
-    this.disconnect();
+  connect({ url, token, link = false }) {
+    this.#end();
+    if (!link) forgetLinkToken(this.#options.linkStorage);
     let gateway;
     try { gateway = gatewayUrl(url); } catch (error) {
       this.#set({ connection: { ...this.#state.connection, phase: 'failed', gateway: String(url), error: describe(error) } });
@@ -445,9 +455,9 @@ export class Controller {
     }
     this.#token = secret;
     this.#state = { ...initialState(gateway), preferences: this.#state.preferences };
-    this.#set({ connection: { phase: 'connecting', gateway, attempt: 1, capabilities: [] } });
-    /** @type {{ alp?: ReconnectingClient, principal?: Principal, opened: boolean }} */
-    const run = { opened: false };
+    this.#set({ connection: { phase: 'connecting', gateway, attempt: 1, capabilities: [], ...(link ? { link: true } : {}) } });
+    /** @type {{ alp?: ReconnectingClient, principal?: Principal, opened: boolean, link?: boolean }} */
+    const run = { opened: false, ...(link ? { link: true } : {}) };
     this.#run = run;
     const { open, reconnecting, backoff, stableMs, requestTimeoutMs } = this.#options;
     const alp = reconnecting({
@@ -480,13 +490,27 @@ export class Controller {
     alp.onState((state, error) => { if (this.#run === run) this.#onState(run, state, error); });
   }
 
+  /** Shows the connect form with `message`, as a connection that failed before it began. @param {string} message */
+  showError(message) {
+    this.#end();
+    this.#set({ connection: { ...initialState(this.#state.connection.gateway).connection, phase: 'failed', error: { message, sent: 'no', terminal: true } } });
+  }
+
   /**
    * Ends the connection and forgets the token and everything the host sent. Its terminals end too
    * (terminal.close), except when the page is going away (`keepTerminals`, a reload): the host keeps
-   * them for reconnectMs, and the reloaded page attaches them again.
-   * @param {{ keepTerminals?: boolean }} [options]
+   * them for reconnectMs, and the reloaded page attaches them again. The token this tab kept from
+   * an `alp web` link is forgotten too, except when the page is going away (`keepLink`, a reload
+   * connects with it again).
+   * @param {{ keepTerminals?: boolean, keepLink?: boolean }} [options]
    */
-  disconnect({ keepTerminals = false } = {}) {
+  disconnect({ keepTerminals = false, keepLink = false } = {}) {
+    if (!keepLink) forgetLinkToken(this.#options.linkStorage);
+    this.#end({ keepTerminals });
+  }
+
+  /** disconnect() without touching the kept link token. @param {{ keepTerminals?: boolean }} [options] */
+  #end({ keepTerminals = false } = {}) {
     const run = this.#run;
     this.#run = null;
     this.#token = '';
@@ -518,7 +542,7 @@ export class Controller {
   }
 
   /**
-   * @param {{ alp?: ReconnectingClient, principal?: Principal, opened: boolean }} run
+   * @param {{ alp?: ReconnectingClient, principal?: Principal, opened: boolean, link?: boolean }} run
    * @param {import('@anhlp/alp-client/portable').ReconnectState} state @param {Error} [error]
    */
   #onState(run, state, error) {
@@ -535,7 +559,12 @@ export class Controller {
     }
     if (state === 'waiting') {
       // The first connection gets one try: the person is looking at the form and wants to know.
-      if (!run.opened) return this.#fail(error ?? new Error('Could not connect.'));
+      // A link's has nobody at a form: it waits for the host (alp web starting, restarting).
+      if (!run.opened && !run.link) return this.#fail(error ?? new Error('Could not connect.'));
+      if (!run.opened) {
+        this.#set({ connection: { ...connection, phase: 'connecting', error: error ? describe(error) : undefined } });
+        return;
+      }
       this.#stopTimers();
       this.#set({ connection: { ...connection, phase: 'reconnecting', error: error ? describe(error) : undefined } });
       return;
@@ -543,11 +572,20 @@ export class Controller {
     if (state === 'stopped' && error) this.#fail(error);
   }
 
-  /** The connection cannot go on: everything is dropped, the reason kept for the connect form. @param {Error} error */
+  /**
+   * The connection cannot go on: everything is dropped, the reason kept for the connect form. A
+   * link's token the gateway refused (rotated, revoked) is forgotten, so a reload does not try it again.
+   * @param {Error} error
+   */
   #fail(error) {
     const gateway = this.#state.connection.gateway;
-    const failure = describe(error);
-    this.disconnect();
+    let failure = describe(error);
+    const refusedLink = !!this.#run?.link && error instanceof AuthenticationError;
+    if (refusedLink) {
+      forgetLinkToken(this.#options.linkStorage);
+      failure = { ...failure, message: LINK_TOKEN_INVALID };
+    }
+    this.#end();
     this.#set({ connection: { ...initialState(gateway).connection, phase: 'failed', error: failure } });
   }
 
