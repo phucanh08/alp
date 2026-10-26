@@ -37,11 +37,16 @@ export async function startPaseoIntegration(home) {
  * @param {string} home
  */
 async function legacyDescriptorEntry(file, home) {
-  const main = await readFile(file, 'utf8').then(text => JSON.parse(text)?.main, () => undefined);
-  if (typeof main !== 'string' || !main) return undefined;
+  // A missing or corrupt descriptor is no registration: the caller then reports the missing package.
+  const raw = await readFile(file, 'utf8').then(text => JSON.parse(text)).catch(() => undefined);
   const isFile = candidate => stat(candidate).then(info => info.isFile(), () => false);
-  const candidates = path.isAbsolute(main) ? [main] : [path.resolve(path.dirname(file), main), path.resolve(home, main)];
-  for (const candidate of candidates) if (await isFile(candidate)) return candidate;
+  // The fields discovery accepts in a descriptor, in its priority order.
+  for (const field of ['main', 'entry', 'path', 'command']) {
+    const value = raw?.[field];
+    if (typeof value !== 'string' || !value.trim()) continue;
+    const candidates = path.isAbsolute(value) ? [value] : [path.resolve(path.dirname(file), value), path.resolve(home, value)];
+    for (const candidate of candidates) if (await isFile(candidate)) return candidate;
+  }
   return undefined;
 }
 
@@ -62,7 +67,7 @@ async function webCommand(args) {
   let info;
   // A fresh integration writes paseo.json just before it is ready; stale files from daemon or an older pid are rejected.
   for (let i = 0; i < 100; i++) {
-    info = await readFile(file, 'utf8').then(JSON.parse, () => undefined);
+    info = await readFile(file, 'utf8').then(JSON.parse).catch(() => undefined);
     let alive = false;
     try { if (info?.pid) { process.kill(info.pid, 0); alive = true; } } catch { alive = false; }
     let integrationPid = undefined;
@@ -121,7 +126,7 @@ async function pairCommand(args) {
     }
     console.log(`Relay ${pairing.endpoint}: ${pairing.connected ? 'connected' : 'connecting'}`);
     console.log(`Open this link on the device, or scan the QR code in the web app (Settings → host → Pair device):\n${pairing.url}`);
-    const password = await readFile(path.join(home, `${PASEO}.json`), 'utf8').then(text => JSON.parse(text)?.token, () => undefined);
+    const password = await readFile(path.join(home, `${PASEO}.json`), 'utf8').then(text => JSON.parse(text)?.token).catch(() => undefined);
     if (typeof password === 'string' && password) console.log(`When Paseo's app asks for a password, give it: ${password}`);
     else console.log(`When Paseo's app asks for a password, give it the token in ${path.join(home, `${PASEO}.json`)}.`);
   } finally {
