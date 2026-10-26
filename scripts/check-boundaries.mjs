@@ -27,9 +27,12 @@ const allowed = {
 };
 /**
  * The one exception to "apps are leaves": the CLI bundles the private gateway into dist/alp-web.js
- * (`alp web`), so it names it as a devDependency only and never installs it.
+ * (`alp web`), so it names it as a devDependency only and never installs it. Only the sources of
+ * that bundle (src/web/) may import it: every other CLI file is built with `@anhlp/*` external and
+ * would ship an import of a package that is never published.
  */
 const bundledApps = { '@anhlp/alp-cli': ['@anhlp/alp-gateway'] };
+const bundledSources = { '@anhlp/alp-cli': `src${path.sep}web${path.sep}` };
 const failures = corePackageProblems(manifest);
 const supportDirectory = path.join(root, 'test', 'support');
 
@@ -110,6 +113,7 @@ for (const location of manifest.workspaces ?? []) {
       } else if (!specifier.startsWith('node:') && !specifier.startsWith('alp:') && !builtinModules.includes(specifier)) {
         const dependency = specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0];
         if (dependency !== pkg.name && !declared[dependency]) failures.push(`${location}/${relative}: undeclared dependency ${dependency}`);
+        if ((bundledApps[pkg.name] ?? []).includes(dependency) && !relative.startsWith(bundledSources[pkg.name])) failures.push(`${location}/${relative}: imports ${dependency}, which only ${bundledSources[pkg.name].replaceAll(path.sep, '/')} (bundled) may import`);
         if (!relative.startsWith(`tests${path.sep}`) && (pkg.name.endsWith('-core') || pkg.name.endsWith('-protocol')) && !dependency.startsWith('@anhlp/alp-protocol')) failures.push(`${pkg.name}: leaf domain imports ${dependency}`);
       }
     }

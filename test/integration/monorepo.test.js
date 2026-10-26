@@ -66,6 +66,13 @@ test('the CLI may bundle the private gateway only as a devDependency; other pack
   await write('packages/cli/package.json', JSON.stringify({ name: '@anhlp/alp-cli', version: '0.0.0', devDependencies: { '@anhlp/alp-gateway': '0.0.0' } }));
   const bundled = check();
   assert.equal(bundled.status, 0, bundled.output);
+  // Only the bundle's own sources may import it: any other CLI file ships with `@anhlp/*` external.
+  await write('packages/cli/src/cli.js', "import { createGateway } from '@anhlp/alp-gateway';\nexport default createGateway;\n");
+  const unbundled = check();
+  assert.equal(unbundled.status, 1, unbundled.output);
+  assert.match(unbundled.output.replaceAll('\\', '/'), /packages\/cli\/src\/cli\.js: imports @anhlp\/alp-gateway, which only src\/web\/ \(bundled\) may import/);
+  assert.doesNotMatch(unbundled.output.replaceAll('\\', '/'), /src\/web\/main\.js/);
+  await rm(path.join(fixture, 'packages/cli/src/cli.js'));
   await write('packages/cli/package.json', JSON.stringify({ name: '@anhlp/alp-cli', version: '0.0.0', dependencies: { '@anhlp/alp-gateway': '0.0.0' } }));
   const installed = check();
   assert.equal(installed.status, 1, installed.output);

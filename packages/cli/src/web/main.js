@@ -115,12 +115,16 @@ async function run() {
   /** @type {Array<() => Promise<unknown>>} */
   const cleanups = [];
   let shuttingDown = false;
+  /** Startup, once it began; shutdown waits for it, so nothing it does lands after the lock is released. @type {Promise<unknown>} */
+  let startup = Promise.resolve();
   /** @param {number} [code] */
   const shutdown = async (code = 0) => {
     // A later signal or uncaught exception starts no second shutdown; the first always reaches exit.
     if (shuttingDown) return;
     shuttingDown = true;
     try {
+      // Startup stops at its next step once shuttingDown is set (each step is bounded).
+      await startup.catch(() => {});
       for (const cleanup of cleanups.reverse()) await cleanup().catch(error => log.warn('a shutdown step failed', { code: 'ALP_WEB_SHUTDOWN_STEP', error }));
       await releaseLock();
     } finally { process.exit(code); }
@@ -128,7 +132,7 @@ async function run() {
   for (const signal of /** @type {const} */ (['SIGINT', 'SIGTERM'])) process.on(signal, () => void shutdown());
   process.on('uncaughtException', error => { log.error('uncaught exception; alp web stops', { code: 'ALP_FATAL', error }); void shutdown(1); });
 
-  try {
+  startup = (async () => {
     const stopDaemon = process.env.ALP_SUPERVISE === '0'
       ? async () => {}
       : superviseDaemon({ home, entry: daemonEntry, log: (/** @type {string} */ message) => log.warn(message, { code: 'ALP_DAEMON_SUPERVISION' }) });
@@ -147,16 +151,17 @@ async function run() {
     // A credentials write under way finishes before the process exits (no half-done temporary file).
     cleanups.push(() => grant.settled());
     const token = await grant.ensure(await previousWeb(home));
+    if (shuttingDown) return;
     // The registry, if alpd answers already, before the first page asks for it.
     await grant.refresh();
+    if (shuttingDown) return;
 
     const dir = appDir();
     let bound = 0;
     const serveStatic = createStaticServer({ dir, csp: () => policy(bound), log: message => log.warn(message, { code: 'ALP_WEB_STATIC' }) });
     const base = settings?.web?.port ?? DEFAULT_WEB_PORT;
-    /** @type {ReturnType<typeof createGateway> | undefined} */
-    let gateway;
     for (let attempt = 0; ; attempt++) {
+      if (shuttingDown) return;
       const port = base + attempt;
       const config = resolveConfig({
         host: '127.0.0.1',
@@ -169,28 +174,34 @@ async function run() {
         limits: /** @type {any} */ ({ authFailures: 1_000 }),
       });
       const candidate = createGateway({ config, store, logger: log, version: VERSION, openTransport: () => connectSocket(socket), serveStatic });
-      try { await candidate.listen(); gateway = candidate; bound = port; break; }
+      try {
+        await candidate.listen();
+        bound = port;
+        cleanups.push(() => candidate.close());
+        break;
+      }
       catch (error) {
         await candidate.close().catch(() => {});
         if (/** @type {any} */ (error)?.code !== 'EADDRINUSE' || attempt + 1 >= PORT_TRIES) throw error;
         log.info(`port ${port} is in use; trying ${port + 1}`, { code: 'ALP_WEB_PORT_BUSY' });
       }
     }
-    const listening = gateway;
-    cleanups.push(() => listening.close());
-
+    if (shuttingDown) return;
     const url = `http://127.0.0.1:${bound}/`;
     await publish(home, { version: WEB_FILE_VERSION, app: 'alp-web', pid: process.pid, port: bound, url, token, credentialId: grant.id });
+    if (shuttingDown) return;
     const timer = setInterval(() => { if (!shuttingDown) void grant.refresh(); }, REFRESH_MS);
     timer.unref();
     cleanups.push(async () => clearInterval(timer));
     // A lock that is no longer ours means another process may own the credentials file: stop writing it.
     if (!(await lock.setReady(true))) throw new Error('the web lock is no longer held by this process');
     log.info(`alp web on ${url}`, { code: 'ALP_WEB_LISTENING' });
-  } catch (error) {
+  })();
+  // A failed start stops the service; shutdown waits for startup, which has settled by now.
+  await startup.catch(error => {
     log.error('alp web did not start', { code: 'ALP_WEB_START_FAILED', error });
-    await shutdown(1);
-  }
+    void shutdown(1);
+  });
 }
 
 await run();
