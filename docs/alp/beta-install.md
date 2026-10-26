@@ -35,7 +35,7 @@ Use `npm install`, not `npm update`, to move to the beta: by semver, `0.0.1-beta
 | OS | macOS, Linux (see below) | Windows: CLI and a local alpd; no `alp daemon install` | — |
 | Node.js | 22 (22.12 or later), 24 | 26 (local evidence only) | 20 (end of life) |
 | Provider | Codex CLI, Claude Code | ACP (OpenCode, Gemini CLI), Antigravity (full access; its read-only is only an instruction in the prompt) | — |
-| Paseo (for the plugin) | `>=0.11.1 <0.13.0` (0.11.x and 0.12.x; `0.0.0-beta.2` and earlier: `<0.12.0`) | — | 0.13 and later |
+| Paseo (for the plugin) | `>=0.11.1 <1.0.0` from the release after `0.0.1-beta.3`; `0.0.1-beta.3`: `<0.13.0` (0.11.x and 0.12.x); `0.0.0-beta.2` and earlier: `<0.12.0` | — | 1.0 and later; 0.13 and later with `0.0.1-beta.3` |
 
 macOS is the primary test platform: this beta is accepted there with real Codex and Claude.
 Linux passes the same automated tests (the providers are simulated there); real-provider runs on
@@ -128,7 +128,8 @@ Microsoft), pinned exactly. It is an **optional dependency** of `@anhlp/alp`, `@
 
 ## Paseo plugin
 
-The plugin `@anhlp/alp-paseo` shows ALP's sessions in Paseo `>=0.11.1 <0.13.0`. Plugin
+The plugin `@anhlp/alp-paseo` shows ALP's sessions in Paseo `>=0.11.1 <1.0.0` (releases after `0.0.1-beta.3`;
+`0.0.1-beta.3` declares `<0.13.0`, so Paseo 0.13 refuses it). Plugin
 releases up to `0.0.0-beta.2` declare `<0.12.0`, and Paseo 0.12 refuses to load them (`Plugin
 "alp-provider" requires Paseo >=0.11.1 <0.12.0`); use `0.0.1-beta.3` or later with
 Paseo 0.12. Sessions run
