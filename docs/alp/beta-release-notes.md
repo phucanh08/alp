@@ -24,8 +24,9 @@
   - **Permissions:** `session.read`/`write`, `project.read`/`write` and `workspace.write`.
     `files.read`, `attachments.write`, `session.team.write` and `terminal.exec` only when listed in
     the `web.permissions` setting; a list with an entry that is not a permission is ignored, with a
-    warning, and a malformed entry (not a lowercase name with dots) makes alp-web ignore the whole
-    `settings.json` (`ALP_SETTINGS_INVALID`). Settings apply when alp-web starts.
+    warning, and a malformed entry (not a lowercase name with dots) makes the whole `settings.json`
+    invalid: alpd, alp-web and the Paseo integration each ignore all of it and log
+    `ALP_SETTINGS_INVALID`. Settings apply when alp-web starts.
   - **Workspaces:** alpd's project registry plus the folder `alp web` ran in when it started the
     service, if that folder is an ALP project. New projects reach open pages: the grant is updated
     and connections close with 4403, then reconnect. Sessions recorded under a symlinked project
@@ -39,8 +40,17 @@
   relay and `alp web pair`, which prints the token in `paseo.json` as the password. For one release
   `alp-web-integration` remains an alias of `alp-paseo-integration`, `ALP_WEB_INTEGRATION` is read
   after `ALP_PASEO_INTEGRATION` for this integration only, and a home registered with
-  `integrations/web.json` still starts it. Paseo's web app still ships in `@anhlp/alp-paseo`, but
-  `alp web` no longer opens it.
+  `integrations/web.json` still starts it.
+- **Paseo's web app removed** (t-55ce.3): `@anhlp/alp-paseo` no longer ships ALP's patched build of
+  Paseo's web app (`server/dist/web-app`, with its `NOTICE.txt` and third-party notices), and the
+  repository no longer keeps its patches (`paseo-web/`), its build (`npm run build:web`,
+  `scripts/build-paseo-web.mjs`) or its CI smoke. The integration's local listener answers plain
+  HTTP requests with 404 and keeps only the token-guarded Paseo socket that `daemon.get_status`
+  reports. The bridge now starts whenever the integration runs; before, it started only when the
+  web app was built beside it. Pair Paseo's app on another device with `alp web pair`: open the link it
+  prints on that device and give the password it prints. The plugin ships Paseo's licence as
+  `LICENSE.paseo.txt` for the code it takes from Paseo. `createWebServer` takes `gateway`; `app`
+  (its `dir` ignored) is kept for one release, and `webAppDir` is gone.
 - **Windows: untested.** CI runs alp-web's tests on Linux and macOS only, and macOS remains the
   primary platform. A trial on Windows CI found writes of the credential file failing now and then
   with `EPERM`, which can make `alp web rotate`, a workspace grant update or a start that replaces the token fail. On Windows alp never

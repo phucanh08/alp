@@ -34,14 +34,14 @@ as a full screen from the chat:
   lists the open tasks. Tapping one opens it; **All tasks** opens the board.
 - `/alp-tasks` opens the board, and `/alp-tasks <id>` opens that task.
 
-## Host settings on the ALP web app
+## Host settings
 
-Settings → Host exposes **Templates**, **Agents**, **Skills**, **Hooks**, and
-**MCP servers** directly. Templates opens the Phở/Cafe team editor for models,
-members, delegation, supervisor, and house rules. Changes are saved in the selected
-host's ALP library; saving a built-in entry creates an override. The ALP plugin
-settings screen and the ALP project panel remain available for library management
-and project overrides.
+The ALP plugin settings screen and the ALP project panel manage the host's ALP
+library (teams, agents, skills, hooks, MCP servers) and project overrides; saving a
+built-in entry creates an override. ALP's patched build of Paseo's web app, which
+also showed these under Settings → Host, was removed (t-55ce.3). ALP's own web app
+(`alp web`) shows the library under Settings, within the limits in
+[web.md](https://github.com/phucanh08/alp/blob/main/docs/alp/web.md).
 
 ## Managed worktree removal through the web facade
 
@@ -184,7 +184,7 @@ npm run test -w @anhlp/alp-paseo
 npm pack -w @anhlp/alp-paseo
 ```
 
-`integrations/paseo` owns the plugin client, server, shared types and manifest. The build writes the self-contained server bundles (including the integration entry `server/dist/main.js` and `server/dist/alpd.js`) and the web app to `server/dist`; only the plugin package ships these Paseo artifacts. The npm package is `@anhlp/alp-paseo` (`alp-paseo-plugin` up to 0.10.0); the Paseo plugin ID remains `alp-provider`.
+`integrations/paseo` owns the plugin client, server, shared types and manifest. The build writes the self-contained server bundles (including the integration entry `server/dist/main.js` and `server/dist/alpd.js`) to `server/dist`; only the plugin package ships these Paseo artifacts. It no longer builds or ships Paseo's web app (removed in t-55ce.3); the package ships Paseo's licence as `LICENSE.paseo.txt` for the code it takes from Paseo. The npm package is `@anhlp/alp-paseo` (`alp-paseo-plugin` up to 0.10.0); the Paseo plugin ID remains `alp-provider`.
 
 <a id="optional-web-installation"></a>
 
@@ -236,7 +236,8 @@ When Paseo's app asks for a password, give it the one `alp web pair` prints.
 after `ALP_PASEO_INTEGRATION`, for one release, and never selects what `alp web` runs.
 `alp web pair --on/--off`, `ALP_INTEGRATION_ENTRY`, `ALP_DAEMON_ENTRY`, `ALP_SUPERVISE` and
 `ALP_HOME` retain their meanings. `alp web` and `alp web --print` now open the CLI's `alp-web`
-service instead of this package's web app, and the first `alp web` stops a pre-rename integration
+service; this package no longer has a web app, and its listener answers plain HTTP with 404 and
+keeps only the token-guarded Paseo socket. The first `alp web` stops a pre-rename integration
 that still holds `integrations/web.lock` (only a provable same-user, same-boot owner). Without the
 plugin, `alp web pair` explains how to install it; CLI, daemon, IPC, ACP and `alp web` remain
 usable.
@@ -248,6 +249,5 @@ daemon supervision/reconnection are unchanged. `release:tarball-check` runs the
 existing provider, team, human, web, relay and transport regressions against a
 separately installed plugin and real SDK peers.
 
-For source builds, `npm run build:paseo` builds the server; `npm run build:web`
-builds the pinned web app. Plugin prepack verifies its own web artifact. Neither
-step is required by core build/prepack.
+For source builds, `npm run build:paseo` builds the server (plugin prepack runs it). It
+is not required by core build/prepack.

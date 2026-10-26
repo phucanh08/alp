@@ -11,8 +11,8 @@
 App trình duyệt độc lập (`apps/web`, package `@anhlp/alp-web`, private). App nói chuyện với alpd
 **chỉ qua** ALP remote gateway ([remote-gateway.md](remote-gateway.md)) và client SDK
 ([client-sdk.md](client-sdk.md)). Từ bản này `alp web` mở app này (service `alp-web`) thay cho web
-của Paseo. Web của Paseo (`paseo-web/`, `server/dist/web-app` trong `@anhlp/alp-paseo`) vẫn còn
-trong package plugin và do integration `paseo` phục vụ, nhưng `alp web` không mở nó nữa.
+của Paseo. Web của Paseo (`paseo-web/`, `server/dist/web-app` trong `@anhlp/alp-paseo`) đã bị gỡ
+khỏi repo và package plugin (t-55ce.3); integration `paseo` chỉ còn bridge, relay và `alp web pair`.
 
 Luồng: `Browser → HTTPS/WSS (hoặc loopback/SSH) → alp-gateway → IPC → alpd`.
 
@@ -91,8 +91,9 @@ alp web rotate     # thay token; trang đang mở mất quyền
   `files.read`, `attachments.write`, `session.team.write`, `terminal.exec`) chỉ có khi thêm vào
   setting `web.permissions` (mảng). Chỉ cần một mục không phải quyền của credential là alp-web bỏ
   qua **cả danh sách** và ghi warning; grant giữ mặc định. Còn một mục sai dạng (không phải chuỗi
-  chữ thường và dấu chấm, ví dụ `"files-read"`) làm cả `settings.json` không hợp lệ: alp-web bỏ qua
-  toàn bộ file, kể cả `web.port`, và ghi `ALP_SETTINGS_INVALID` vào log. Có `terminal.exec` thì log
+  chữ thường và dấu chấm, ví dụ `"files-read"`) làm cả `settings.json` không hợp lệ: cả alpd lẫn
+  alp-web đều bỏ qua toàn bộ file (với alp-web là kể cả `web.port`; với alpd là mọi setting của nó)
+  và ghi `ALP_SETTINGS_INVALID` vào log. Có `terminal.exec` thì log
   ghi cảnh báo của gateway.
 - Workspace được cấp: registry project của alpd (project chưa bị bỏ) ∪ thư mục mà `alp web` đang
   đứng khi khởi động service (hoặc khi `alp web rotate`), nếu thư mục đó có `.alp/` (là project
