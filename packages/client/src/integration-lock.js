@@ -29,6 +29,8 @@ export function createIntegrationLock(home, name) {
   let phase = 'new';
   /** This instance's lock while it owns it: the lifetime nonce and the file's identity. @type {{ owner: string, dev: number, ino: number } | undefined} */
   let owned;
+  /** Serializes concurrent in-process setReady calls to preserve FIFO order. @type {Promise<any>} */
+  let readyQueue = Promise.resolve();
   // The lock file as read: its record and the stats of the handle it was read through. Kept inside
   // the factory so the published declarations name only IntegrationLock and its record.
   /** @typedef {{ value: any, info: import('node:fs').Stats }} Snapshot */
@@ -145,22 +147,28 @@ export function createIntegrationLock(home, name) {
 
     async setReady(ready) {
       if (phase !== 'owned') return false;
-      return guarded(async () => {
+      const execute = async () => {
         if (phase !== 'owned') return false;
-        const current = await snapshot();
-        if (!current || !matches(current)) { phase = 'retired'; owned = undefined; return false; }
-        const value = { ...current.value, ready };
-        const tmp = `${file}.${randomUUID()}.tmp`;
-        const handle = await open(tmp, 'wx', 0o600);
-        let info;
-        try {
-          try { await handle.writeFile(JSON.stringify(value)); info = await handle.stat(); }
-          finally { await handle.close(); }
-          await rename(tmp, file);
-          owned = { owner: value.owner, dev: info.dev, ino: info.ino };
-          return true;
-        } finally { await unlink(tmp).catch(error => { if (error?.code !== 'ENOENT') throw error; }); }
-      });
+        return guarded(async () => {
+          if (phase !== 'owned') return false;
+          const current = await snapshot();
+          if (!current || !matches(current)) { phase = 'retired'; owned = undefined; return false; }
+          const value = { ...current.value, ready };
+          const tmp = `${file}.${randomUUID()}.tmp`;
+          const handle = await open(tmp, 'wx', 0o600);
+          let info;
+          try {
+            try { await handle.writeFile(JSON.stringify(value)); info = await handle.stat(); }
+            finally { await handle.close(); }
+            await rename(tmp, file);
+            owned = { owner: value.owner, dev: info.dev, ino: info.ino };
+            return true;
+          } finally { await unlink(tmp).catch(error => { if (error?.code !== 'ENOENT') throw error; }); }
+        });
+      };
+      const chained = readyQueue.then(execute, execute);
+      readyQueue = chained.catch(() => {});
+      return chained;
     },
 
     async release() {
