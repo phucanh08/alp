@@ -484,7 +484,7 @@ test("a checkout's branch, its changes as the Changes panel shows them, and its 
   await writeFile(path.join(repo, 'new.txt'), 'fresh\n');
   await writeFile(path.join(repo, 'blob.bin'), Buffer.from([0, 1, 2, 3, 0, 5]));
   await writeFile(path.join(repo, 'dot.png'), Buffer.from('89504e470d0a1a0a', 'hex'));
-  await symlink(path.dirname(root), path.join(repo, 'outside'));
+  await symlink(path.dirname(root), path.join(repo, 'outside'), process.platform === 'win32' ? 'junction' : 'dir');
   const client = await connected();
   // Asking for the teams of a folder only reads it: no ALP.md or .alp appear in someone's repository.
   const teams = (await ask(client, { type: 'get_providers_snapshot_request', requestId: 'p0', cwd: repo })).payload.entries[0].models.map(model => model.id);
@@ -651,9 +651,10 @@ test('failed bridge pin save returns accepted false, retains committed metadata,
 });
 
 
-test('owner bridge creates only generated worktrees through a private host mapping and retries the same identity',async t=>{
- const {connected,ask,root,home}=await setup(t);const source=await realpath(root);const parent=path.join(home,'user-checkouts');await mkdir(parent,{mode:0o700});
- const native=(...args)=>execFileSync('/usr/bin/git',['-c','core.hooksPath=/dev/null',...args],{cwd:source,env:{PATH:'/usr/bin:/bin',GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_NOSYSTEM:'1'},encoding:'utf8'}).trim();
+test('owner bridge creates only generated worktrees through a private host mapping and retries the same identity', { skip: process.platform === 'win32' && 'User worktrees are POSIX-only' }, async t => {
+  const { connected, ask, root, home } = await setup(t); const source = await realpath(root); const parent = path.join(home, 'user-checkouts'); await mkdir(parent, { mode: 0o700 });
+  const nullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null';
+  const native = (...args) => execFileSync('git', ['-c', `core.hooksPath=${nullDevice}`, ...args], { cwd: source, env: { ...process.env, GIT_CONFIG_GLOBAL: nullDevice, GIT_CONFIG_NOSYSTEM: '1' }, encoding: 'utf8' }).trim();
  native('init','-q');await writeFile(path.join(source,'tracked'),'content');native('add','.');native('-c','user.name=Test','-c','user.email=test@localhost','commit','-qm','initial');
  await writeFile(path.join(home,'worktree-destinations.json'),JSON.stringify({version:1,mappings:[{id:'bridge',source,commonDir:path.join(source,'.git'),parent:await realpath(parent)}]}),{mode:0o600});
  const client=await connected();const opened=(await ask(client,{type:'open_project_request',requestId:'origin',cwd:root})).payload;assert.equal(opened.error,null);

@@ -1260,10 +1260,10 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       const { receipts: _receipts, ...metadata } = await registry!.snapshot();
       return { ...(result ? { result } : {}), registry: metadata };
     }),
-    'registry.worktree': (_c, p) => registryCall(() => worktrees!.grants(p)),
-    'workspace.worktree.options': (_c, p) => registryCall(async () => { const w = (await registry!.snapshot()).workspaces.find(w => w.id === p.workspaceId); if (!w) throw new RegistryError(1001, 'No workspace', { reason: 'not_found' }); const grants = await worktrees!.grants(p); return { mappingIds: grants.mappings.filter(m => m.source === (w.canonical ?? w.directory)).map(m => m.id) }; }),
-    'workspace.worktree.create': (_c, p) => registryCall(async () => { const result = await worktrees!.mutate('create', p, p); return { ...result, workspace: await workspaceDescriptor(result.workspace) }; }),
-    'workspace.worktree.remove': (_c, p) => registryCall(async () => { const result = await worktrees!.mutate('remove', p, p); return { ...result, workspace: await workspaceDescriptor(result.workspace) }; }),
+    'registry.worktree': (_c, p) => registryCall(async () => worktrees ? worktrees.grants(p) : { mappings: [], workspaces: [] }),
+    'workspace.worktree.options': (_c, p) => registryCall(async () => { const w = (await registry!.snapshot()).workspaces.find(w => w.id === p.workspaceId); if (!w) throw new RegistryError(1001, 'No workspace', { reason: 'not_found' }); const grants = worktrees ? await worktrees.grants(p) : { mappings: [], workspaces: [] }; return { mappingIds: grants.mappings.filter(m => m.source === (w.canonical ?? w.directory)).map(m => m.id) }; }),
+    'workspace.worktree.create': (_c, p) => registryCall(async () => { if (!worktrees) throw new RegistryError(1005, 'Worktrees are unavailable on this platform', { reason: 'worktrees_unsupported' }); const result = await worktrees.mutate('create', p, p); return { ...result, workspace: await workspaceDescriptor(result.workspace) }; }),
+    'workspace.worktree.remove': (_c, p) => registryCall(async () => { if (!worktrees) throw new RegistryError(1005, 'Worktrees are unavailable on this platform', { reason: 'worktrees_unsupported' }); const result = await worktrees.mutate('remove', p, p); return { ...result, workspace: await workspaceDescriptor(result.workspace) }; }),
     'workspace.git.status': (_c, p) => gitCall(reader => reader.status(p.workspaceId)),
     'workspace.git.diff': (_c, p) => gitCall(reader => reader.diff({ workspaceId: p.workspaceId, compare: p.compare, path: p.path, cursor: p.cursor })),
     'project.list': (_c, p) => registryList('projects', p),

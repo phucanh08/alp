@@ -108,12 +108,14 @@ export const gitReadsRunning = () => running;
 
 type Box = { git: string; root: string; env: NodeJS.ProcessEnv; deadline: number; overrides: string[] };
 
+const NULL_DEVICE = process.platform === 'win32' ? 'NUL' : '/dev/null';
+
 /** Flags before every subcommand: nothing the repository names may run, nothing is paged or coloured. */
 const BOXED = [
   '--no-pager', '--literal-pathspecs',
-  '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${os.devNull}`, '-c', 'core.pager=cat', '-c', 'core.untrackedCache=false',
+  '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${NULL_DEVICE}`, '-c', 'core.pager=cat', '-c', 'core.untrackedCache=false',
   '-c', 'core.quotePath=false', '-c', 'color.ui=never', '-c', 'diff.autoRefreshIndex=false', '-c', 'diff.noprefix=false',
-  '-c', 'diff.mnemonicPrefix=false', '-c', 'diff.relative=false', '-c', 'diff.suppressBlankEmpty=false', '-c', `diff.orderFile=${os.devNull}`,
+  '-c', 'diff.mnemonicPrefix=false', '-c', 'diff.relative=false', '-c', 'diff.suppressBlankEmpty=false', '-c', `diff.orderFile=${NULL_DEVICE}`,
   '-c', 'log.showSignature=false', '-c', 'submodule.recurse=false', '-c', 'protocol.allow=never', '-c', 'maintenance.auto=false',
   '-c', 'gc.auto=0', '-c', 'status.showStash=false', '-c', 'status.renames=true', '-c', 'diff.renames=true',
 ];
@@ -239,7 +241,7 @@ function environment(root: string, gitDir: string): NodeJS.ProcessEnv {
   let searchPath: string;
   try { searchPath = searchPathOutside(root); } catch { failed('the workspace cannot be examined'); }
   return {
-    ...env, PATH: searchPath!, GIT_DIR: gitDir, GIT_WORK_TREE: root, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull, GIT_ATTR_NOSYSTEM: '1',
+    ...env, PATH: searchPath!, GIT_DIR: gitDir, GIT_WORK_TREE: root, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: NULL_DEVICE, GIT_ATTR_NOSYSTEM: '1',
     GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', GIT_NO_LAZY_FETCH: '1', GIT_NO_REPLACE_OBJECTS: '1', GIT_PROTOCOL_FROM_USER: '0', LC_ALL: 'C', LANG: 'C',
   };
 }
