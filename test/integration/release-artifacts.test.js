@@ -319,6 +319,11 @@ test('both packages that carry the CLI must pack alp web: alp-web.js, its app an
   assert.deepEqual(Object.keys(SHIPPED_WEB_FILES).sort(), ['@anhlp/alp', '@anhlp/alp-cli'], 'the gateway is never a package of its own');
   assert.deepEqual(shippedWebProblems('@anhlp/alp-cli', ['package.json', ...cli, 'dist/alp-web/assets/index.js']), []);
   assert.deepEqual(shippedWebProblems('@anhlp/alp', SHIPPED_WEB_FILES['@anhlp/alp']), []);
+  for (const [name, prefix] of [['@anhlp/alp-cli', 'src/web/'], ['@anhlp/alp', 'packages/cli/src/web/']]) {
+    const found = shippedWebProblems(name, [...SHIPPED_WEB_FILES[name], `${prefix}main.js`]);
+    assert.equal(found.length, 1);
+    assert.match(found[0], /bundled-only .* is packed/);
+  }
   for (const file of cli) {
     const found = shippedWebProblems('@anhlp/alp-cli', cli.filter(entry => entry !== file));
     assert.equal(found.length, 1);
