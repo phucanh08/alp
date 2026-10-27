@@ -303,8 +303,20 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
     // Ask rules make Claude consult canUseTool in every mode, which asks the user.
     ...(rules?.ask?.length ? { settings: { permissions: { ask: rules.ask } } } : {}),
     // The floor: Bash runs in the OS sandbox, which writes only the workspace (or nothing, read-only) and temp files, offline.
+    // Local loopback binding (127.0.0.1) and Unix sockets in temporary directories are allowed for test servers.
     // A command leaves it only with dangerouslyDisableSandbox, which Claude allows itself for allow rules and asks canUseTool otherwise.
-    ...(rules?.floor ? { sandbox: { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: true, ...(rules.floor === 'read-only' && rules.floorRoot ? { filesystem: { denyWrite: [rules.floorRoot] } } : {}) } } : {}),
+    ...(rules?.floor ? {
+      sandbox: {
+        enabled: true,
+        autoAllowBashIfSandboxed: false,
+        allowUnsandboxedCommands: true,
+        network: {
+          allowLocalBinding: true,
+          allowAllUnixSockets: true,
+        },
+        ...(rules.floor === 'read-only' && rules.floorRoot ? { filesystem: { denyWrite: [rules.floorRoot] } } : {}),
+      },
+    } : {}),
     canUseTool: async (name: string, input: Record<string, unknown>, context?: { decisionReasonType?: string; suggestions?: unknown }) => {
       const mode = currentSandbox ? currentSandbox() : sandbox;
       const leaving = Boolean(rules?.floor) && name === 'Bash' && input.dangerouslyDisableSandbox === true;

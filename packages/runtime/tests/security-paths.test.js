@@ -42,3 +42,38 @@ test('OpenCode is told to ask before it edits, runs or fetches, over the config 
   assert.deepEqual(JSON.parse(acpEnv({ command: 'opencode', env: {} }, { OPENCODE_CONFIG_CONTENT: 'not json' }).OPENCODE_CONFIG_CONTENT), { permission: { edit: 'ask', bash: 'ask', webfetch: 'ask' } });
   assert.deepEqual(acpEnv({ command: 'gemini', env: { A: '1' } }, { PATH: '/bin' }), { PATH: '/bin', A: '1' });
 });
+
+test('security: claude sandbox floor allows local loopback and unix sockets for test servers while denying repo writes', async () => {
+  const root = path.join(os.tmpdir(), 'alp-test-repo-root');
+
+  // Read-only floor: allows local loopback binding and all Unix domain sockets for test servers, while denying writes to repo
+  const readOnly = claudePermissions('read-only', () => 'read-only', { allow: [], ask: [], deny: [], floor: 'read-only', floorRoot: root });
+  assert.deepEqual(readOnly.sandbox, {
+    enabled: true,
+    autoAllowBashIfSandboxed: false,
+    allowUnsandboxedCommands: true,
+    network: {
+      allowLocalBinding: true,
+      allowAllUnixSockets: true,
+    },
+    filesystem: {
+      denyWrite: [root],
+    },
+  });
+
+  // Workspace-write floor: allows local binding and Unix domain sockets without repo denyWrite restriction
+  const workspace = claudePermissions('workspace-write', () => 'workspace-write', { allow: [], ask: [], deny: [], floor: 'workspace-write', floorRoot: root });
+  assert.deepEqual(workspace.sandbox, {
+    enabled: true,
+    autoAllowBashIfSandboxed: false,
+    allowUnsandboxedCommands: true,
+    network: {
+      allowLocalBinding: true,
+      allowAllUnixSockets: true,
+    },
+  });
+
+  // Without floor: sandbox configuration is omitted
+  const noFloor = claudePermissions('read-only', () => 'read-only', { allow: [], ask: [], deny: [] });
+  assert.equal(noFloor.sandbox, undefined);
+});

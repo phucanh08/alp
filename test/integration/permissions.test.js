@@ -409,7 +409,7 @@ test('a floor puts Claude Bash in the OS sandbox and keeps file tools in the wor
   const root = path.join(tmpdir(), 'alp-floor-root');
   const asked = [];
   const readOnly = claudePermissions('read-only', () => 'read-only', { allow: ['Bash(npm test *)'], ask: [], deny: ['Bash(rm *)'], beyondMode: 'refuse', floor: 'read-only', floorRoot: root }, async request => { asked.push(request); return { allow: true }; });
-  assert.deepEqual(readOnly.sandbox, { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: true, filesystem: { denyWrite: [root] } });
+  assert.deepEqual(readOnly.sandbox, { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: true, network: { allowLocalBinding: true, allowAllUnixSockets: true }, filesystem: { denyWrite: [root] } });
   // Inside a read-only floor any command runs; the OS stops its writes.
   assert.equal((await readOnly.canUseTool('Bash', { command: 'node -e "1"' }, {})).behavior, 'allow');
   // Leaving the sandbox needs an allow rule; a deny rule refuses even that.
@@ -430,7 +430,7 @@ test('a floor puts Claude Bash in the OS sandbox and keeps file tools in the wor
 
   // A workspace floor: the workspace and temp files, nothing else, for Bash and file tools alike.
   const workspace = claudePermissions('workspace-write', () => 'workspace-write', { allow: [], ask: [], deny: [], beyondMode: 'refuse', floor: 'workspace-write', floorRoot: root });
-  assert.deepEqual(workspace.sandbox, { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: true });
+  assert.deepEqual(workspace.sandbox, { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: true, network: { allowLocalBinding: true, allowAllUnixSockets: true } });
   assert.equal((await workspace.canUseTool('Write', { file_path: path.join(root, 'src', 'a.js') }, {})).behavior, 'allow');
   assert.equal((await workspace.canUseTool('Write', { file_path: 'relative/b.js' }, {})).behavior, 'allow');
   assert.equal((await workspace.canUseTool('Write', { file_path: path.join(tmpdir(), 'scratch.txt') }, {})).behavior, 'allow');
