@@ -559,6 +559,10 @@ export async function startIntegration(nameOrOptions = 'web') {
         const info = await readWeb();
         if (info && info.pid === lock.pid) return lock;
       }
+      // alp-web can fail during bootstrap after the initial exit check (for example a
+      // refused uncertain lock). Its service log carries the cause; do not mask it with
+      // a readiness/web.json timeout. Check a concurrent winner's ready lock first.
+      if (name === 'web' && webStartupFailed()) throw new Error(`${text.what}${started} failed to start; see ${text.log}`);
       await sleep(100);
     }
     const lock = await readLock();
@@ -567,6 +571,8 @@ export async function startIntegration(nameOrOptions = 'web') {
     throw new Error(`${text.what}${started} did not publish a ${name}.json matching its lock; see ${text.log}`);
   }
 
+  // Existing-owner waits have no child to observe.
+  let webStartupFailed = () => false;
   const existing = await readLock();
   if (existing && integrationAlive(existing)) {
     return waitForReady();
@@ -585,6 +591,7 @@ export async function startIntegration(nameOrOptions = 'web') {
   let exited = false;
   child.on('exit', code => { if (code !== 0 && code !== null) exited = true; });
   child.unref();
+  webStartupFailed = () => exited;
 
   if (spawnError) throw spawnError;
   // Give the process a moment to fail immediately on missing entry or bad permissions.
