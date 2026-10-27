@@ -3,7 +3,7 @@
 // process with it on the same conversation and takes it only once the runtime did. Fakes; no model runs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
@@ -248,7 +248,24 @@ test('a team change resolves the new team\'s delegation and replaces the supervi
 });
 
 test('after a team change, the next delegation follows the new team; an earlier assignment keeps its own', async t => {
-  const { runtime, runtimes, prompt, root, runLog } = await setup(t);
+  let releaseWrite = () => {};
+  // Release before setup's shutdown cleanup, even if an assertion fails while the write is held.
+  t.after(() => releaseWrite());
+  const { runtime, runtimes, prompt, root, runLog, directory } = await setup(t);
+  // Hold only the second assignment's disk append, leaving runtime events and tool replies free.
+  const probe = await open(path.join(directory, 'file-handle-probe'), 'w');
+  const fileHandlePrototype = Object.getPrototypeOf(probe);
+  await probe.close();
+  const appendFile = fileHandlePrototype.appendFile;
+  const writeGate = new Promise(resolve => { releaseWrite = resolve; });
+  let leadWriteStarted = false;
+  t.mock.method(fileHandlePrototype, 'appendFile', async function (data, ...args) {
+    if (typeof data === 'string' && data.includes('"event":"assignment.started"') && data.includes('"agent":"lead"')) {
+      leadWriteStarted = true;
+      await writeGate;
+    }
+    return appendFile.call(this, data, ...args);
+  });
   // A tool call's answer as the model reads it; each call has its own id (a repeated id answers from the cache).
   let calls = 0;
   const tool = async (fake, name, args) => {
@@ -288,8 +305,9 @@ test('after a team change, the next delegation follows the new team; an earlier 
   assert.match(cafeStart.developerInstructions, /Profile: cafe; fixed for this session/);
   assert.match(cafeStart.developerInstructions, /assign bounded work to: peer, oracle, reviewer/);
   assert.equal(runtime.snapshot(second.assignmentId).workflow.mode, 'cafe');
-  const started = (await runLog('root')).filter(entry => entry.event === 'assignment.started').map(entry => [entry.assignmentId, entry.agent]);
-  assert.deepEqual(started, [[first.assignmentId, 'peer'], [second.assignmentId, 'lead']]);
+  await until(() => leadWriteStarted);
+  assert.deepEqual((await runLog('root')).filter(entry => entry.event === 'assignment.started').map(entry => [entry.assignmentId, entry.agent]), [[first.assignmentId, 'peer']], 'a running lead and a returned delegation do not imply its log append finished');
+  releaseWrite();
   // The earlier assignment ran with Phở's instructions; nothing restarted it. Its record: packages/daemon/tests/configure.test.js.
   assert.equal(runtimes[1].of('thread/start').length, 1);
   assert.equal(runtimes[1].of('thread/resume').length, 0);
@@ -298,6 +316,10 @@ test('after a team change, the next delegation follows the new team; an earlier 
   await tool(main, 'alp_wait', { assignments: [second.assignmentId] });
   main.finish();
   await until(() => !runtime.snapshot('root').busy);
+  // Run logs are best-effort asynchronous writes; shutdown is the existing drain barrier.
+  await runtime.shutdown();
+  const started = (await runLog('root')).filter(entry => entry.event === 'assignment.started').map(entry => [entry.assignmentId, entry.agent]);
+  assert.deepEqual(started, [[first.assignmentId, 'peer'], [second.assignmentId, 'lead']]);
 });
 
 test('a team change that would not keep the session\'s agent as main is refused', async t => {
