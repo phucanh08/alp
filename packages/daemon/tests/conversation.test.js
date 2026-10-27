@@ -1380,3 +1380,102 @@ test('fork request key reused after real pruning cannot adopt an old source witn
   assert.notEqual(next.attemptId, previous.attemptId);
   assert.equal((await d.store.get(params.newSessionId)).forkAttempt.attemptId, next.attemptId);
 });
+
+test('concurrent forks from two different sources with same explicit newSessionId: reservation and partial failure recovery', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  const [turnA] = await conversation(d, 'source-a', ['message from a']);
+  const [turnB] = await conversation(d, 'source-b', ['message from b']);
+  const genA = await generationOf(d, 'source-a');
+  const genB = await generationOf(d, 'source-b');
+  const targetId = 'contested-fork-target';
+
+  let releaseA;
+  const holdA = new Promise(resolve => { releaseA = resolve; });
+  let branchACalled = false;
+  let branchBCalled = false;
+
+  world.native.branch = async request => {
+    if (request.turns.includes(turnA)) {
+      branchACalled = true;
+      await holdA;
+    }
+    if (request.turns.includes(turnB)) {
+      branchBCalled = true;
+    }
+    return { threadId: `thread-branch-${++world.native.next}` };
+  };
+
+  const forkA = d.request('session.fork', {
+    sessionId: 'source-a',
+    requestId: 'fa1',
+    ifGeneration: genA,
+    boundary: { throughTurnId: turnA },
+    newSessionId: targetId,
+  });
+
+  await until(() => branchACalled, 'fork A reached native.branch');
+
+  // Source B requests fork with the same newSessionId while Source A is in flight (passed prepare, before commit)
+  const forkB = d.request('session.fork', {
+    sessionId: 'source-b',
+    requestId: 'fb1',
+    ifGeneration: genB,
+    boundary: { throughTurnId: turnB },
+    newSessionId: targetId,
+  });
+
+  // Source B must immediately reject with request_conflict at prepare time
+  await assert.rejects(forkB, rpcError(1004, 'request_conflict'));
+  assert.equal(branchBCalled, false, 'fork B was rejected during prepare and never called native.branch');
+  assert.equal(world.native.branches.length, 1);
+
+  // Release fork A and verify it commits successfully
+  releaseA();
+  const resA = await forkA;
+  assert.equal(resA.session.id, targetId);
+  assert.equal(resA.forkedFrom.sessionId, 'source-a');
+
+  // Subsequent fork specifying targetId now rejects because targetId is persistent in records
+  await assert.rejects(
+    d.request('session.fork', {
+      sessionId: 'source-b',
+      requestId: 'fb2',
+      ifGeneration: genB,
+      boundary: { throughTurnId: turnB },
+      newSessionId: targetId,
+    }),
+    rpcError(1004, 'request_conflict')
+  );
+
+  // Partial failure recovery: if a fork fails before commit, reservation is cleanly released
+  const recoverableTarget = 'recoverable-target';
+  let failBranch = true;
+  world.native.branch = async request => {
+    if (failBranch) throw new Error('simulated native branch failure');
+    return { threadId: `thread-branch-${++world.native.next}` };
+  };
+
+  await assert.rejects(
+    d.request('session.fork', {
+      sessionId: 'source-b',
+      requestId: 'fb3',
+      ifGeneration: genB,
+      boundary: { throughTurnId: turnB },
+      newSessionId: recoverableTarget,
+    }),
+    rpcError(1005, 'native_refused')
+  );
+
+  // The failed fork aborted; reservation must be released, allowing reuse of recoverableTarget
+  failBranch = false;
+  const recoveredFork = await d.request('session.fork', {
+    sessionId: 'source-a',
+    requestId: 'fa2',
+    ifGeneration: genA,
+    boundary: { throughTurnId: turnA },
+    newSessionId: recoverableTarget,
+  });
+  assert.equal(recoveredFork.session.id, recoverableTarget);
+  assert.equal(recoveredFork.forkedFrom.sessionId, 'source-a');
+});

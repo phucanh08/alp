@@ -165,6 +165,7 @@ function configureRefusal(error: any) {
 export function createConversation(ctx: ConversationContext) {
   const { runtime, store, journal, records } = ctx;
   const lifecycle = createLifecycle(journal, { crashPoint: ctx.crashPoint, completed });
+  const reservedForkIds = new Set<string>();
 
   async function completed(entry: LifecycleEntry) {
     if (entry.state !== 'applied') return undefined;
@@ -589,6 +590,7 @@ export function createConversation(ctx: ConversationContext) {
     // reopen or wake may land in between (released when it answers).
     let release: (() => void) | undefined;
     let releaseWakes: (() => void) | undefined;
+    let reservedId: string | undefined;
     try {
     const { result, duplicate } = await lifecycle.run<ForkPlan, NativeBinding, RpcMethodMap['session.fork']['result']>(
       { resource: sessionId, operation: 'fork', requestId, fingerprint }, {
@@ -639,8 +641,14 @@ export function createConversation(ctx: ConversationContext) {
           }
           const latestTurn = turns.at(-1)?.id;
           const cutoff: ForkPlan['cutoff'] = kind === 'through' ? { throughTurnId: turnId! } : kind === 'before' ? { beforeTurnId: turnId! } : latestTurn ? { throughTurnId: latestTurn } : undefined;
-          const id = newSessionId ?? `ses_${randomBytes(8).toString('hex')}`;
-          if (records.has(id) || runtime.snapshot(id)) throw new RpcError(ERROR.conflict, `Session ${id} already exists`, { reason: 'request_conflict' });
+          let id = newSessionId;
+          if (id !== undefined) {
+            if (records.has(id) || runtime.snapshot(id) || reservedForkIds.has(id)) throw new RpcError(ERROR.conflict, `Session ${id} already exists`, { reason: 'request_conflict' });
+          } else {
+            do { id = `ses_${randomBytes(8).toString('hex')}`; } while (records.has(id) || runtime.snapshot(id) || reservedForkIds.has(id));
+          }
+          reservedForkIds.add(id);
+          reservedId = id;
           const cwd = await destinationOf(record, workspaceId);
           const attachmentIds = await reauthorize(sessionId, log, cut, principal);
           // Last, after every read of prepare: held mail may wait; a turn that began anyway may not.
@@ -665,6 +673,7 @@ export function createConversation(ctx: ConversationContext) {
       });
     return { ...result, ...(duplicate ? { duplicate: true as const } : {}) };
     } finally {
+      if (reservedId && !records.has(reservedId)) reservedForkIds.delete(reservedId);
       releaseWakes?.();
       release?.();
     }
@@ -763,6 +772,7 @@ export function createConversation(ctx: ConversationContext) {
       await store.put(record);
       records.set(record.id, record);
     }
+    reservedForkIds.delete(plan.newSessionId);
     await place(plan, entry.key);
     if (plan.attachmentIds.length) await ctx.attachments?.pin(`fork:${plan.newSessionId}`, plan.newSessionId, plan.attachmentIds, 'fork');
     const result = { session: ctx.summary(plan.newSessionId)!, forkedFrom };
