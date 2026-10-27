@@ -5,7 +5,7 @@ import { failCommittedMarker } from './lifecycle-marker-fault.js';
 // fake processes are real ALP code; packages/runtime tests prove the restart, test/e2e the real runs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
@@ -753,6 +753,67 @@ test('an unfinished configure store commit blocks later native mutations and ret
   assert.equal((await restarted.request('session.get', { sessionId: first.sessionId })).session.thinking, 'low');
 });
 
+test('marker fault restoration joins an in-flight scanner before touching its files', async t => {
+  const world = await setup(t);
+  const store = createStore(world.state);
+  const underlyingPut = store.put;
+  const secondWritten = Promise.withResolvers();
+  let writes = 0;
+  store.put = async record => {
+    await underlyingPut(record);
+    if (++writes === 2) secondWritten.resolve();
+  };
+  const put = store.put;
+  const directory = path.join(world.state, 'lifecycle');
+  const file = path.join(directory, 'controlled.json');
+  const entry = { key: 'controlled', requestId: 'controlled', state: 'applied' };
+  await mkdir(directory, { recursive: true });
+  await writeFile(file, JSON.stringify(entry));
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  let released = false;
+  const restore = failCommittedMarker(store, world.state, entry.requestId, {
+    async renameMarker(from, to) {
+      if (to.endsWith('.saved')) {
+        entered.resolve();
+        await release.promise;
+      }
+      return rename(from, to);
+    },
+    removeMarker(...args) {
+      assert.equal(released, true, 'restore must join the scanner before removing the marker');
+      return rm(...args);
+    },
+  });
+  const scanning = store.put({ id: 'controlled' });
+  let concurrent, restoring;
+  try {
+    await entered.promise;
+    // A second save can finish its underlying store write while the first wrapper
+    // is still installing the fault. Neither it nor restore may overtake that work.
+    concurrent = store.put({ id: 'controlled' }).then(() => {
+      assert.equal(released, true, 'concurrent put must join fault installation');
+    });
+    await secondWritten.promise;
+    // Drain the resolved base write's promise continuations; no filesystem timer
+    // or arbitrary delay controls whether the concurrent caller can return.
+    await Promise.resolve();
+    await Promise.resolve();
+    restoring = restore();
+    assert.equal(store.put, put, 'restore detaches the fault wrapper before draining it');
+  } finally {
+    released = true;
+    release.resolve();
+    const results = await Promise.allSettled([scanning, concurrent, restoring]);
+    store.put = put;
+    await store.flush();
+    for (const result of results) if (result.status === 'rejected') throw result.reason;
+  }
+  assert.deepEqual(await restoring, entry);
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), entry);
+  assert.deepEqual(await readdir(directory), ['controlled.json'], 'no obstruction or saved marker remains');
+});
+
 test('retained completion witness cannot complete a reused requestId attempt', async t => {
   const world = await setup(t);
   const d = { ...await world.start(), ...world };
@@ -761,6 +822,7 @@ test('retained completion witness cannot complete a reused requestId attempt', a
   const restore = failCommittedMarker(d.store, world.state, params.requestId);
   await d.request('session.configure', params);
   const old = await restore();
+  assert.equal(old.state, 'applied', 'fault prevented the final committed marker');
   await d.request('session.configure', { ...params, requestId: 'middle', thinking: 'low' });
   assert.equal(Object.keys((await d.store.get(params.sessionId)).lifecycleCommits).length, 2, 'pending marker witness retained');
   // Terminal retention permits key reuse. Simulate expiration while its harmless witness remains.
