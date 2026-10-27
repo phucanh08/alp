@@ -275,3 +275,48 @@ test('the name selects integrations/<name>.lock and its guard; names are single 
   });
   assert.equal(await web.release(), true);
 });
+
+test('concurrent in-process setReady calls serialize strictly in FIFO order', async () => {
+  const { createIntegrationLock } = await import('@anhlp/alp-client/integration-lock');
+  const home = await mkdtemp(path.join(outer, 'fifo-'));
+  const lock = createIntegrationLock(home, 'test');
+  const { acquired } = await lock.acquire();
+  assert.equal(acquired, true);
+
+  const file = path.join(home, 'integrations/test.lock');
+
+  // Concurrent false followed immediately by true
+  const [r1, r2] = await Promise.all([lock.setReady(false), lock.setReady(true)]);
+  assert.equal(r1, true);
+  assert.equal(r2, true);
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).ready, true);
+
+  // Concurrent true followed immediately by false
+  const [r3, r4] = await Promise.all([lock.setReady(true), lock.setReady(false)]);
+  assert.equal(r3, true);
+  assert.equal(r4, true);
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).ready, false);
+
+  // Timing race: setReady(false), then setReady(true) in flight, then setReady(false).
+  // Without in-process FIFO serialization, the 25ms polling retry causes the middle call to finish last.
+  const s1 = lock.setReady(false);
+  await new Promise(r => setImmediate(r));
+  const s2 = lock.setReady(true);
+  await s1;
+  const s3 = lock.setReady(false);
+  await Promise.all([s2, s3]);
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).ready, false);
+
+  // Burst of alternating calls: the final state on disk must match the last invocation
+  const burstEndingInTrue = [false, true, false, true, false, true, false, true, false, true];
+  await Promise.all(burstEndingInTrue.map(ready => lock.setReady(ready)));
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).ready, true);
+
+  const burstEndingInFalse = [true, false, true, false, true, false, true, false, true, false];
+  await Promise.all(burstEndingInFalse.map(ready => lock.setReady(ready)));
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).ready, false);
+
+  // Clean release after serialization
+  assert.equal(await lock.release(), true);
+  assert.equal(await lock.setReady(true), false);
+});
