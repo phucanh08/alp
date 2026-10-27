@@ -10,6 +10,7 @@ import { superviseDaemon } from '@anhlp/alp-client/supervise';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { createLogger } from '@anhlp/alp-core/log';
 import { createWebServer } from './web.js';
+import { createShutdown } from './shutdown.js';
 import { createIntegrationLock } from '@anhlp/alp-client/integration-lock';
 import { createPaseoBridge } from './paseo/index.js';
 
@@ -143,20 +144,28 @@ async function run(home: string) {
   }
   void ensurePairingRegistration();
 
-  const shutdown = async (code = 0) => {
-    // A later signal or uncaught exception must not start a second shutdown and release; the
-    // first one always reaches exit, even if a step throws.
-    if (shuttingDown) return;
-    shuttingDown = true;
-    try {
-      if (extensionClient) { try { await extensionClient.request('extension.unregister', { method: 'web.pairing' }); } catch {} extensionClient.close(); extensionClient = null; }
-      await web.close().catch(() => {});
-      await relay?.stop?.().catch(() => {});
-      await (gateway as any)?.close?.().catch(() => {});
-      await stopDaemon().catch(() => {});
-      await releaseLock();
-    } finally { process.exit(code); }
-  };
+  const shutdown = createShutdown({
+    exit: code => process.exit(code),
+    report: (stage, error) => log.error(error ? 'integration cleanup failed' : 'integration shutdown timed out; lock retained if not released', {
+      code: error ? 'ALP_SHUTDOWN_FAILED' : 'ALP_SHUTDOWN_TIMEOUT', stage, error,
+    }),
+    steps: [
+      { name: 'unregister', run: async () => {
+        shuttingDown = true;
+        if (extensionClient) {
+          const client = extensionClient;
+          extensionClient = null;
+          try { await client.request('extension.unregister', { method: 'web.pairing' }); }
+          finally { client.close(); }
+        }
+      } },
+      { name: 'web', run: () => web.close() },
+      { name: 'relay', run: () => relay?.stop?.() },
+      // web.close owns gateway.close, including its asynchronous cleanup.
+      { name: 'supervision', run: () => stopDaemon() },
+      { name: 'release', run: releaseLock },
+    ],
+  });
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => void shutdown());
   process.on('uncaughtException', error => { log.error('uncaught exception; the integration stops', { code: 'ALP_FATAL', error }); void shutdown(1); });
 

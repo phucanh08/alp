@@ -30,7 +30,7 @@ const PORT_TRIES = 10;
 export type WebInfo = { port: number; token: string; url: string; pid: number; serverId: string };
 
 /** The Paseo bridge: each socket it is given speaks Paseo's protocol over alpd. */
-export type WebGateway = { attach(ws: any, options?: { bearer?: string }): void; close?(): void };
+export type WebGateway = { attach(ws: any, options?: { bearer?: string }): void; close?(): void | Promise<void> };
 /** @deprecated Pass `gateway`; `dir` is ignored since Paseo's web app was removed. Kept for one release. */
 export type WebApp = { dir?: string; gateway: WebGateway };
 
@@ -98,6 +98,10 @@ export function createWebServer({ gateway: given, app, home, port = 0, log = () 
     response.end(request.method === 'HEAD' ? undefined : NO_PAGE);
   });
 
+  // Track raw connections too: incomplete HTTP requests and upgrades can outlive server.close.
+  const connections = new Set<import('node:net').Socket>();
+  server.on('connection', socket => { connections.add(socket); socket.once('close', () => connections.delete(socket)); });
+
   // A browser carries Paseo's password as a subprotocol and needs it echoed to keep the socket.
   const sockets = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME, handleProtocols: protocols => bearerOf(protocols) ?? false });
   server.on('upgrade', (request, socket, head) => {
@@ -140,8 +144,10 @@ export function createWebServer({ gateway: given, app, home, port = 0, log = () 
 
     async close() {
       for (const client of sockets.clients) client.terminate();
-      gateway?.close?.();
-      await new Promise<void>(resolve => server.close(() => resolve()));
+      const closed = new Promise<void>(resolve => server.close(() => resolve()));
+      for (const connection of connections) connection.destroy();
+      await closed;
+      await gateway?.close?.();
     },
   };
 }
