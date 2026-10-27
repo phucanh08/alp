@@ -1,15 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { promisify } from 'node:util';
 import { connect, daemonPaths, readLock } from '@anhlp/alp-client/index';
 import { fixtureProcesses } from '../../../test/support/fixture-processes.js';
 
@@ -508,4 +509,76 @@ catch (error) { console.error(error.message); process.exitCode = 1; }`);
   assert.match(diagnostic, /alp web .*failed to start; see .*alp-web\.log/);
   assert.match(await serviceLog(context.home), /Integration owner boot context is uncertain/);
   assert.equal(await readFile(kept.file, 'utf8'), kept.bytes);
+});
+
+test('alp web from another project registers it and adds it to the running web grant (t-c0e0)', limit, async t => {
+  const port = await freePorts();
+  const context = await createHome(t, { web: { port } });
+  const rawA = path.join(context.directory, 'projectA');
+  const rawB = path.join(context.directory, 'projectB');
+  const outside = path.join(context.directory, 'outside');
+  await mkdir(path.join(rawA, '.alp'), { recursive: true });
+  await mkdir(path.join(rawB, '.alp'), { recursive: true });
+  await mkdir(outside, { recursive: true });
+  const projectA = await realpath(rawA);
+  const projectB = await realpath(rawB);
+
+  const CLI = path.join(root, 'packages/cli/dist/cli.js');
+  const exec = promisify(execFile);
+  const env = { ...process.env, ...context.env, ALP_WEB_GRANT_REFRESH_MS: '100' };
+
+  // 1. Invoke alp web from projectA (starts alpd and alp-web)
+  const first = await exec(process.execPath, [CLI, 'web', '--print'], { cwd: projectA, env, timeout: 30_000 });
+  assert.equal(first.stderr, '');
+  const urlA = first.stdout.trim();
+  assert.match(urlA, /^http:\/\/127\.0\.0\.1:\d+\/#token=alpgw1\./);
+
+  const credsA = await credentialsOf(context.home);
+  assert.equal(credsA.length, 1);
+  const workspacesA = credsA[0].workspaces.map(w => w.canonical ?? w.path);
+  assert.ok(workspacesA.includes(projectA), 'projectA is in the initial grant');
+  assert.ok(!workspacesA.includes(projectB), 'projectB is not yet in the grant');
+  const initialToken = (await readJson(path.join(context.home, 'web.json'))).token;
+
+  // 2. Invoke alp web from projectB (service already running)
+  const second = await exec(process.execPath, [CLI, 'web', '--print'], { cwd: projectB, env, timeout: 30_000 });
+  assert.equal(second.stderr, '');
+  const urlB = second.stdout.trim();
+  assert.equal(urlB, urlA, 'same address and token fragment returned');
+
+  const credsB = await credentialsOf(context.home);
+  assert.equal(credsB.length, 1);
+  const workspacesB = credsB[0].workspaces.map(w => w.canonical ?? w.path);
+  assert.ok(workspacesB.includes(projectA), 'projectA remains in the grant');
+  assert.ok(workspacesB.includes(projectB), 'projectB is added to the grant');
+  const web = await readJson(path.join(context.home, 'web.json'));
+  assert.equal(web.token, initialToken, 'token is preserved');
+
+  // 3. Invoking alp web from outside a project does not add outside to grant
+  const third = await exec(process.execPath, [CLI, 'web', '--print'], { cwd: outside, env, timeout: 30_000 });
+  assert.equal(third.stderr, '');
+  const credsC = await credentialsOf(context.home);
+  const workspacesC = credsC[0].workspaces.map(w => w.canonical ?? w.path);
+  assert.ok(!workspacesC.includes(outside), 'non-project directory is not added');
+  assert.deepEqual(workspacesC.sort(), [projectA, projectB].sort());
+
+  // 4. Ticket verification: issued principal workspaces cover both projects
+  const ticket = await tickets(port, web.token);
+  assert.equal(ticket.status, 201);
+  const issued = JSON.parse(ticket.body);
+  const principalWorkspaces = issued.principal.workspaces.map(p => path.resolve(p));
+  assert.ok(principalWorkspaces.includes(projectA));
+  assert.ok(principalWorkspaces.includes(projectB));
+  assert.ok(!principalWorkspaces.includes(outside));
+
+  // 5. Verify projectB is registered in alpd's registry
+  const lock = await readLock(context.home);
+  const client = await connect(lock.socket);
+  try {
+    const list = await client.request('project.list', { limit: 50 });
+    const roots = list.projects.map(p => p.canonical ?? p.root);
+    assert.ok(roots.includes(projectB), 'projectB is in alpd registry');
+  } finally {
+    client.close();
+  }
 });
