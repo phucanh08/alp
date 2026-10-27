@@ -403,6 +403,11 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     return runtime.snapshot(root)?.projectRoot ?? records.get(root)?.session?.projectRoot;
   }
 
+  const sameProject = (a?: string, b?: string) => {
+    if (a === undefined || b === undefined) return a === b;
+    return a === b || projectKey(a) === projectKey(b);
+  };
+
   /**
    * Tells watchers not attached to the tree of a question asked or resolved there, or, for those
    * that asked for `turns`, of the end of a root's turn. Their copy has no `cursor`: it is not part
@@ -415,7 +420,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     for (const [connection, { projectRoot, turns }] of watchers) {
       if (turn && !turns) continue;
       if (attached.get(root)?.has(connection)) continue;
-      if (projectRoot !== undefined && project !== projectRoot) continue;
+      if (projectRoot !== undefined && !sameProject(project, projectRoot)) continue;
       deliver(connection, announced);
     }
   }
@@ -431,7 +436,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     const envelope: Envelope = { sessionId: root, epoch: `attention-${startedAt}`, seq: 0, ts: new Date().toISOString(), event: { type: 'attention', ...(attention ? { attention } : {}) } };
     for (const [connection, watch] of watchers) {
       if (!watch.attention) continue;
-      if (watch.projectRoot !== undefined && project !== watch.projectRoot) continue;
+      if (watch.projectRoot !== undefined && !sameProject(project, watch.projectRoot)) continue;
       deliver(connection, envelope);
     }
   }
@@ -448,7 +453,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     const found: Array<{ sessionId: string; attention: TurnAttention }> = [];
     for (const record of records.values()) {
       if (record.id !== record.rootId || !record.attention || record.archived) continue;
-      if (projectRoot !== undefined && projectOf(record.id) !== projectRoot) continue;
+      if (projectRoot !== undefined && !sameProject(projectOf(record.id), projectRoot)) continue;
       found.push({ sessionId: record.id, attention: record.attention });
     }
     return found;
@@ -1128,7 +1133,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     },
 
     'question.list'(_connection, { projectRoot } = {}) {
-      return { questions: runtime.questions().filter(question => projectRoot === undefined || projectOf(question.rootId) === projectRoot) };
+      return { questions: runtime.questions().filter(question => projectRoot === undefined || sameProject(projectOf(question.rootId), projectRoot)) };
     },
 
     /**
@@ -1142,7 +1147,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       // No await between registering and listing: an event either is in the list or follows it.
       watchers.set(connection, { projectRoot, turns: turns === true, attention: attention === true });
       return {
-        questions: runtime.questions().filter(question => projectRoot === undefined || projectOf(question.rootId) === projectRoot),
+        questions: runtime.questions().filter(question => projectRoot === undefined || sameProject(projectOf(question.rootId), projectRoot)),
         ...(attention === true ? { attention: attentionOf(projectRoot) } : {}),
       };
     },
@@ -1582,7 +1587,20 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
      * a grant's workspaces (docs/protocol/alp-json-rpc-v1.md §12.1).
      */
     'session.list'(_connection, { projectRoot, projectRoots, rootsOnly = false, includeClosed = false, includeArchived = false, limit, cursor, query } = {}): { sessions: SessionSummary[]; nextCursor?: string } {
-      const projects = Array.isArray(projectRoots) ? new Set<string>(projectRoots) : undefined;
+      const cache = new Map<string, string>();
+      const keyOf = (root: string) => {
+        let key = cache.get(root);
+        if (key === undefined) {
+          key = projectKey(root);
+          cache.set(root, key);
+        }
+        return key;
+      };
+      // Projects are matched by their canonical identity (projectKey), so sessions created
+      // under a symlink (or /var -> /private/var on macOS) are listed when queried by their
+      // canonical path, and vice versa.
+      const wantedKey = projectRoot === undefined ? undefined : keyOf(projectRoot);
+      const allowedKeys = Array.isArray(projectRoots) ? new Set<string>(projectRoots.map(keyOf)) : undefined;
       const after = cursor === undefined ? undefined : listCursor.decode(cursor);
       const words = typeof query === 'string' ? query.toLowerCase().split(/\s+/).filter(Boolean) : [];
       const ids = new Set([...runtime.list().map(session => session.id), ...records.keys()]);
@@ -1590,8 +1608,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         .filter(session => includeClosed || session.status === 'idle' || session.status === 'running')
         .filter(session => includeArchived || !session.archived)
         .filter(session => !rootsOnly || !session.parentId)
-        .filter(session => projectRoot === undefined || session.projectRoot === projectRoot)
-        .filter(session => !projects || projects.has(session.projectRoot))
+        .filter(session => wantedKey === undefined || keyOf(session.projectRoot) === wantedKey)
+        .filter(session => !allowedKeys || allowedKeys.has(keyOf(session.projectRoot)))
         .filter(session => !words.length || words.every(word => `${session.title ?? ''}\n${session.id}`.toLowerCase().includes(word)))
         .sort((a, b) => listCursor.compare(listCursor.key(a), listCursor.key(b)))
         .filter(session => !after || listCursor.compare(listCursor.key(session), after) > 0);
