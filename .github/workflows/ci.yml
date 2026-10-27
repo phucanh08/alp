@@ -87,9 +87,12 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - run: node scripts/build-workspace.mjs cli
       - run: node scripts/build-workspace.mjs paseo
       # The CLI discovery fixture creates a Unix symlink; all daemon lifecycle/session tests run.
       - run: node --test packages/client/tests/daemon-paths.test.js packages/daemon/tests/daemon.test.js packages/daemon/tests/ipc-security.test.js integrations/paseo/tests/daemon-git.test.js
+      - run: npm test --workspace @anhlp/alp-gateway
+      - run: node --test packages/cli/tests/alp-web.test.js
 
   # The standalone browser app (apps/web, docs/alp/web.md): types, unit tests, the bundle's SDK-only
   # boundary, then Playwright against a real gateway and alpd with a fake provider on random ports.

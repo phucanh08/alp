@@ -1,9 +1,45 @@
 // @ts-check
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { lstat, readFile, realpath, rename, stat, writeFile, chmod, unlink } from 'node:fs/promises';
+import { setTimeout as sleep } from 'node:timers/promises';
 import path from 'node:path';
 import { alpHome, assertPrivateDirectory } from '@anhlp/alp-client';
 import { PERMISSIONS } from './policy.js';
+
+/**
+ * Errors Windows intermittently raises when replacing a file that is concurrently open for reading.
+ */
+export const RETRIABLE_RENAME_ERRORS = new Set(['EPERM', 'EACCES', 'EBUSY']);
+export const RENAME_MAX_RETRIES = 8;
+export const RENAME_INITIAL_BACKOFF_MS = 10;
+export const RENAME_MAX_BACKOFF_MS = 80;
+
+/**
+ * Replaces a file atomically, retrying with bounded backoff on Windows (or when encountering
+ * EPERM/EACCES/EBUSY) when the destination is temporarily held open by another process or reader.
+ * @param {string} temporary
+ * @param {string} destination
+ * @param {{ retries?: number, initialBackoffMs?: number, maxBackoffMs?: number, sleep?: (ms: number) => Promise<void> }} [options]
+ */
+export async function renameWithRetry(temporary, destination, {
+  retries = RENAME_MAX_RETRIES,
+  initialBackoffMs = RENAME_INITIAL_BACKOFF_MS,
+  maxBackoffMs = RENAME_MAX_BACKOFF_MS,
+  sleep: delayFn = sleep,
+} = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rename(temporary, destination);
+      return;
+    } catch (error) {
+      if (!RETRIABLE_RENAME_ERRORS.has(/** @type {any} */ (error)?.code) || attempt >= retries) {
+        throw error;
+      }
+      const delay = Math.min(initialBackoffMs * (2 ** attempt), maxBackoffMs);
+      await delayFn(delay);
+    }
+  }
+}
 
 /**
  * Gateway credentials (docs/alp/remote-gateway.md §4): long-lived bearer tokens that only ever
@@ -85,7 +121,7 @@ async function writeCredentials(home, data) {
   try {
     await writeFile(temporary, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
     await chmod(temporary, 0o600);
-    await rename(temporary, file);
+    await renameWithRetry(temporary, file);
   } catch (error) {
     await unlink(temporary).catch(() => {});
     throw error;

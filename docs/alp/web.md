@@ -110,12 +110,13 @@ alp web rotate     # thay token; trang đang mở mất quyền
   user, cùng lần boot, và pid không bị dùng lại (macOS/Linux; Windows không dừng nó). Trước lần đầu
   ghi đè `web.json`, alp-web chép token và server id của integration cũ sang `<home>/paseo.json` một
   lần, chỉ khi `paseo.json` chưa có, để thiết bị đã pair vẫn dùng được.
-- **Windows: chưa được kiểm.** CI chỉ chạy test của alp-web trên Linux và macOS; macOS vẫn là nền
-  tảng chính. Một lần thử trên CI Windows thấy việc ghi file credential thỉnh thoảng lỗi `EPERM`, có
-  thể làm `alp web rotate`, việc cập nhật grant workspace, hoặc lần khởi động phải thay token bị lỗi. Trên Windows, alp không tự
-  dừng alp-web hay integration Paseo cũ đang chạy: `alp web rotate` và bước takeover khi nâng cấp
-  từ chối khi chúng còn chạy. Dừng process có pid trong `<home>/web.json` (`taskkill /PID <pid>`),
-  rồi chạy lại lệnh. Cách dừng này không phải shutdown sạch; lần khởi động sau tự lấy lại lock.
+- **Windows:** macOS vẫn là nền tảng chính; trình duyệt E2E chạy trên Linux và macOS. Service
+  alp-web và gateway được kiểm thử trong CI Windows (`windows-daemon` trên Node 22 và 24). Thao tác
+  ghi đè `credentials.json` và `web.json` có cơ chế retry/backoff để xử lý lỗi `EPERM`/`EBUSY` khi
+  file đang được đọc. Trên Windows, alp không tự dừng alp-web hay integration Paseo cũ đang chạy:
+  `alp web rotate` và bước takeover khi nâng cấp từ chối khi chúng còn chạy. Dừng process có pid
+  trong `<home>/web.json` (`taskkill /PID <pid>`), rồi chạy lại lệnh. Cách dừng này không phải shutdown
+  sạch; lần khởi động sau tự lấy lại lock.
 
 ### 3.2 Triển khai riêng với `alp-gateway`
 
@@ -360,7 +361,7 @@ phân biệt được trang của `alp web` với bản tự phục vụ, nên �
   Playwright, nên dist cũ (lỗi "host too old: lacks attach.after") không còn xảy ra. Gọi thẳng
   `npx playwright test` thì bỏ qua bước này.
 - CI: job `alp-web` trên `ubuntu-latest` và `macos-latest`, Node 22, chạy `npm run validate:web`.
-  Khi lỗi, CI upload trace và ảnh. Windows: xem §3.1.
+  Khi lỗi, CI upload trace và ảnh. Service alp-web và gateway cũng chạy trong job `windows-daemon` trên Windows (Node 22 và 24; xem §3.1).
 
 ## 8. Giới hạn đã biết
 

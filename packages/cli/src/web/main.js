@@ -27,7 +27,7 @@ import { alpHome, connectSocket, daemonPaths } from '@anhlp/alp-client/index';
 import { createIntegrationLock } from '@anhlp/alp-client/integration-lock';
 import { superviseDaemon } from '@anhlp/alp-client/supervise';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
-import { CredentialStore, createGateway, createGatewayLogger, parseToken, resolveConfig } from '@anhlp/alp-gateway';
+import { CredentialStore, createGateway, createGatewayLogger, parseToken, renameWithRetry, resolveConfig } from '@anhlp/alp-gateway';
 import { TERMINAL_EXEC_WARNING } from '@anhlp/alp-gateway/policy';
 import { createGrant, grantPermissions, webGatewayHome } from './grant.js';
 import { createStaticServer } from './serve.js';
@@ -83,7 +83,7 @@ async function publish(home, info) {
   try {
     await writeFile(temporary, `${JSON.stringify(info)}\n`, { mode: 0o600, flag: 'wx' });
     await chmod(temporary, 0o600);
-    await rename(temporary, file);
+    await renameWithRetry(temporary, file);
   } catch (error) { await unlink(temporary).catch(() => {}); throw error; }
 }
 
