@@ -491,19 +491,59 @@ test('a web lock whose pid alp cannot prove is the integration is never signalle
 
 // ---- alp web pair: the Paseo integration, integration `paseo` ----
 
-test('cold alp web pair --off starts the Paseo integration and reports the relay off', async t => {
-  const { home } = await createHome(t);
-  const daemon = await startDaemon(home);
-  // No precondition: the CLI only returns from starting the integration once web.pairing is
-  // registered, so a cold `pair` cannot race the RPC. Readiness itself guarantees the extension.
-  const paired = await run(['web', 'pair', '--off'], home);
-  assert.equal(paired.code, 0, paired.stderr || paired.stdout);
-  assert.match(paired.stdout, /relay is off/i);
-  const info = await paseoJson(home);
-  assert.ok(info?.pid && info.pid !== daemon.pid, 'pair starts the integration as its own process');
-  assert.equal((await paseoLock(home)).pid, info.pid);
-  assert.equal(await webLock(home), undefined, 'pair does not start alp-web');
-});
+// Exercise the built service directly as well as the CLI: a launcher-only check would
+// miss a settings gate inside main.js before it publishes the integration lock.
+for (const enabled of [false, true, undefined]) {
+  test(`Paseo service and pair ignore web.enabled=${enabled ?? 'default'}`, async t => {
+    const { home } = await createHome(t, enabled === undefined ? {} : { enabled });
+    const daemon = await startDaemon(home);
+    const service = spawn(process.execPath, [paseoEntry, '--service'], {
+      env: { ...process.env, ...processFixtures.get(home).env, ALP_SUPERVISE: '0' },
+      stdio: 'ignore',
+    });
+    const ready = await Promise.race([
+      waitFor(async () => {
+        const lock = await paseoLock(home);
+        return lock?.ready && lock;
+      }, 'Paseo ready lock'),
+      new Promise((resolve, reject) => {
+        service.once('error', reject);
+        service.once('exit', code => reject(new Error(`Paseo service exited before ready (${code})`)));
+      }),
+    ]);
+    assert.equal(ready.pid, service.pid);
+    const paired = await run(['web', 'pair', '--off'], home);
+    assert.equal(paired.code, 0, paired.stderr || paired.stdout);
+    assert.match(paired.stdout, /relay is off/i);
+    const info = await paseoJson(home);
+    assert.equal(info.pid, service.pid, 'pair reuses the ready service');
+    assert.notEqual(info.pid, daemon.pid);
+    assert.equal(await webLock(home), undefined, 'pair never starts alp-web');
+    if (enabled === false) {
+      const refused = await run(['web', '--print'], home);
+      assert.notEqual(refused.code, 0);
+      assert.match(refused.stderr, /alp web is disabled by settings/);
+      assert.equal(await webLock(home), undefined);
+      assert.equal((await paseoLock(home)).pid, service.pid, 'refusal leaves Paseo running');
+    }
+  });
+}
+
+for (const enabled of [false, true, undefined]) {
+  test(`cold alp web pair --off starts Paseo with web.enabled=${enabled ?? 'default'}`, async t => {
+    const { home } = await createHome(t, enabled === undefined ? {} : { enabled });
+    const daemon = await startDaemon(home);
+    // No precondition: the CLI only returns from starting the integration once web.pairing is
+    // registered, so a cold `pair` cannot race the RPC. Readiness itself guarantees the extension.
+    const paired = await run(['web', 'pair', '--off'], home);
+    assert.equal(paired.code, 0, paired.stderr || paired.stdout);
+    assert.match(paired.stdout, /relay is off/i);
+    const info = await paseoJson(home);
+    assert.ok(info?.pid && info.pid !== daemon.pid, 'pair starts the integration as its own process');
+    assert.equal((await paseoLock(home)).pid, info.pid);
+    assert.equal(await webLock(home), undefined, 'pair does not start alp-web');
+  });
+}
 
 test('a killed Paseo integration keeps its token and server id when pair starts it again', async t => {
   const { home } = await createHome(t);

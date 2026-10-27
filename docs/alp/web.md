@@ -99,6 +99,8 @@ alp web rotate     # thay token; trang đang mở mất quyền
   đứng khi khởi động service (hoặc khi `alp web rotate`), nếu thư mục đó có `.alp/` (là project
   ALP). Đường dẫn được so theo realpath. alp-web theo dõi registry khoảng mỗi 5 giây; grant đổi
   thì credential được cập nhật (giữ token) và gateway đóng các kết nối với 4403, app tự nối lại.
+- `web.enabled=false` chỉ tắt alp-web (`alp web`); integration Paseo và `alp web pair`
+  vẫn chạy. Relay của Paseo vẫn tuân theo `web.relay.enabled` (và `alp web pair --off`).
 - Setting: `web.port`, `web.permissions`, `web.enabled` chỉ được đọc khi service khởi động. Không
   có `alp web stop`, và `alp daemon stop` không dừng alp-web. Muốn áp dụng thay đổi: dừng process
   có pid trong `<home>/web.json` (macOS/Linux: `kill <pid>`; Windows: `taskkill /PID <pid>`), rồi chạy `alp web`; token được giữ.
