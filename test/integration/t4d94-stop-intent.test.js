@@ -8,16 +8,17 @@ import path from 'node:path';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { initProject } from '@anhlp/alp-core/init';
+import { createReconnectingClient } from '@anhlp/alp-client/portable';
 import { Controller } from '../../apps/web/src/lib/controller.js';
 import { fakeTransport } from '../support/fake-agent.js';
 
 async function until(check, message) {
   for (let i = 0; i < 600; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
-  assert.fail(message);
+  assert.fail(typeof message === 'function' ? message() : message);
 }
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
-async function setup(t) {
+async function setup(t, { slowAttach } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-stop-intent-'));
   const project = path.join(directory, 'project');
   await initProject(project);
@@ -60,7 +61,18 @@ async function setup(t) {
     const end = () => { if (ended) return; ended = true; connection.close(); for (const listener of closes) listener({ code: 1006 }); };
     const transport = {
       get state() { return ended ? 'closed' : 'open'; },
-      send(frame) { const message = JSON.parse(frame); calls.push({ ...message, linkId }); queueMicrotask(async () => { if (await intercept?.(message)) return; if (ended) return; if (message.id !== undefined) pending.add(`${linkId}:${message.id}`); connection.receive(message); }); },
+      send(frame) {
+        const message = JSON.parse(frame);
+        calls.push({ ...message, linkId });
+        queueMicrotask(async () => {
+          // Model an attach dispatched after the old fixture's 50ms RPC deadline.
+          if (slowAttach === message.params?.sessionId && message.method === 'session.attach') await new Promise(resolve => setTimeout(resolve, 75));
+          if (await intercept?.(message)) return;
+          if (ended) return;
+          if (message.id !== undefined) pending.add(`${linkId}:${message.id}`);
+          connection.receive(message);
+        });
+      },
       onMessage(fn) { messages.add(fn); return () => messages.delete(fn); },
       onClose(fn) { closes.add(fn); return () => closes.delete(fn); },
       close: end,
@@ -68,14 +80,26 @@ async function setup(t) {
     links.push({ end, connection });
     return { transport, principal: { id: 'test', label: 'test', permissions: ['session.read', 'session.write', 'project.read', 'project.write'], workspaces: [project], workspaceRoots: [{ path: project, canonical: project }] } };
   };
-  controller = new Controller({ open, requestTimeoutMs: 50, releaseTimeoutMs: 50, stableMs: 1, backoff: { initialMs: 5, maxMs: 10, jitter: 0 }, sessionPollMs: 60_000, taskPollMs: 60_000 });
+  // Only prompt admission needs the short deadline in these tests. Applying it to
+  // history/attach makes ordinary host scheduling leave the selected tree in Retry.
+  // Keep the real RPC client's timeout/error path, including sent-unknown delivery.
+  const reconnecting = options => createReconnectingClient({
+    ...options,
+    onConnect(client, context) {
+      const request = client.request.bind(client);
+      client.request = (method, params, requestOptions) => request(method, params,
+        method === 'session.prompt' ? { ...requestOptions, timeoutMs: 50 } : requestOptions);
+      return options.onConnect(client, context);
+    },
+  });
+  controller = new Controller({ open, reconnecting, stableMs: 1, backoff: { initialMs: 5, maxMs: 10, jitter: 0 }, sessionPollMs: 60_000, taskPollMs: 60_000 });
   const state = () => controller.getState();
   controller.connect({ url: 'http://127.0.0.1:7434', token: 'test' });
   await until(() => state().connection.phase === 'open', 'controller connected');
   controller.selectWorkspace(project);
   await until(() => state().sessions.status === 'ready', 'sessions ready');
   controller.selectSession('root');
-  await until(() => state().tree?.status === 'attached', 'root attached');
+  await until(() => state().tree?.status === 'attached', () => `root attached: ${JSON.stringify(state().tree)}`);
   return { controller, state, runtime, store, agents, owner, calls, links, responses, drop() { for (const link of links) link.end(); }, pauseOpen(promise) { opening = promise; }, gate() { const gate = deferred(); held.push(gate); return gate; }, intercept(fn) { intercept = fn; } };
 }
 
@@ -166,8 +190,11 @@ test('a target that finished during the gap resolves on replay without stopping 
   assert.equal(w.calls.filter(call => call.method === 'session.interrupt').length, 0);
 });
 
-for (const navigation of ['session', 'workspace']) test(`real receipt-gated Stop survives ${navigation} navigation and reconnect`, { timeout: 5_000 }, async t => {
-  const w = await setup(t);
+for (const { navigation, slowAttach } of [
+  { navigation: 'session' }, { navigation: 'workspace' },
+  { navigation: 'session', slowAttach: 'root' }, { navigation: 'session', slowAttach: 'other' },
+]) test(`real receipt-gated Stop survives ${navigation} navigation and reconnect${slowAttach ? `, delayed ${slowAttach} attach` : ''}`, { timeout: 5_000 }, async t => {
+  const w = await setup(t, { slowAttach });
   await w.owner.request('session.create', { sessionId: 'other', spec: { cwd: w.runtime.snapshot('root').projectRoot } });
   await w.owner.request('session.prompt', { sessionId: 'other', clientMessageId: 'unrelated', content: [{ type: 'text', text: 'unrelated work' }] });
   const otherTurn = w.runtime.snapshot('other').activeTurnId;
@@ -183,7 +210,7 @@ for (const navigation of ['session', 'workspace']) test(`real receipt-gated Stop
   const stopping = w.controller.interrupt();
   if (navigation === 'session') {
     w.controller.selectSession('other');
-    await until(() => w.state().tree?.rootId === 'other' && w.state().tree.status === 'attached', 'other root attached');
+    await until(() => w.state().tree?.rootId === 'other' && w.state().tree.status === 'attached', () => `other root attached: ${JSON.stringify(w.state().tree)}`);
   } else w.controller.selectWorkspace(null);
   w.drop();
   await until(() => w.state().connection.phase === 'open', 'main link reopened');
