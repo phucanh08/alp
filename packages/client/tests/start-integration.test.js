@@ -3,6 +3,8 @@
 // discovery path is unchanged.
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -56,6 +58,60 @@ function environment(t, name, values) {
   for (const key of keys) delete process.env[key];
   for (const [key, value] of Object.entries({ TEST_INTEGRATION_NAME: name, ...values })) if (value !== undefined) process.env[key] = value;
   t.after(() => { for (const [key, value] of saved) value === undefined ? delete process.env[key] : process.env[key] = value; });
+}
+
+/** Control which side of the startup check observes a real child's nonzero exit.
+ * The launcher distinguishes an exit seen in its initial 150ms check from a readiness
+ * deadline with no lock. Child startup has no 150ms upper bound on a loaded machine.
+ * Only the late schedule advances the clock, after the real exit, to avoid a 30s test.
+ */
+async function exitSchedule(t, { releaseAfterCheck } = {}, run) {
+  const spawn = childProcess.spawn;
+  const setTimeout = globalThis.setTimeout;
+  const now = Date.now;
+  let exit, child, offset = 0;
+  const events = [];
+  const spawnMock = t.mock.method(childProcess, 'spawn', (...args) => {
+    child = spawn(...args);
+    exit = new Promise(resolve => child.once('exit', code => {
+      events.push(`exit:${code}`);
+      resolve();
+    }));
+    return child;
+  });
+  syncBuiltinESMExports();
+  const clockMock = t.mock.method(Date, 'now', () => now() + offset);
+  const timerMock = t.mock.method(globalThis, 'setTimeout', (callback, ms, ...args) => {
+    if (ms === 150) return setTimeout(async () => {
+      if (!releaseAfterCheck) {
+        child.ref();
+        await exit;
+        child.unref();
+      }
+      events.push('startup-check');
+      callback(...args);
+    }, 0);
+    if (ms === 100 && releaseAfterCheck) return setTimeout(async () => {
+      // Reaching the readiness poll proves the initial startup check has completed.
+      events.push('readiness-poll');
+      child.ref();
+      await releaseAfterCheck();
+      await exit;
+      child.unref();
+      offset = 30_001;
+      callback(...args);
+    }, 0);
+    return setTimeout(callback, ms, ...args);
+  });
+  try {
+    await run();
+    return events;
+  } finally {
+    timerMock.mock.restore();
+    clockMock.mock.restore();
+    spawnMock.mock.restore();
+    syncBuiltinESMExports();
+  }
 }
 
 test('an explicit entry is started with --service under the selected home and skips discovery', async t => {
@@ -166,12 +222,30 @@ test('web.enabled=false refuses web only; messages name the integration, its ent
   const failing = path.join(f.directory, 'failing.mjs');
   await writeFile(failing, 'process.exit(1);');
   const logs = path.join(f.home, 'logs', 'integrations');
-  await assert.rejects(startIntegration({ name: 'other', entry: failing, home: f.home }), new RegExp(`^Error: ALP integration other \\(entry ${escape(failing)}\\) failed to start; see ${escape(path.join(logs, 'other.log'))}$`));
-  await assert.rejects(startIntegration({ name: 'paseo', entry: failing, home: f.home }), new RegExp(`^Error: The Paseo integration \\(entry ${escape(failing)}\\) failed to start; see ${escape(path.join(logs, 'paseo.log'))}$`));
-  await rm(path.join(f.home, 'settings.json'));
-  await assert.rejects(startIntegration({ name: 'web', entry: failing, home: f.home }), new RegExp(`^Error: alp web \\(entry ${escape(failing)}\\) failed to start; see ${escape(path.join(logs, 'alp-web.log'))}$`));
+  const events = await exitSchedule(t, {}, async () => {
+    await assert.rejects(startIntegration({ name: 'other', entry: failing, home: f.home }), new RegExp(`^Error: ALP integration other \\(entry ${escape(failing)}\\) failed to start; see ${escape(path.join(logs, 'other.log'))}$`));
+    await assert.rejects(startIntegration({ name: 'paseo', entry: failing, home: f.home }), new RegExp(`^Error: The Paseo integration \\(entry ${escape(failing)}\\) failed to start; see ${escape(path.join(logs, 'paseo.log'))}$`));
+    await rm(path.join(f.home, 'settings.json'));
+    await assert.rejects(startIntegration({ name: 'web', entry: failing, home: f.home }), new RegExp(`^Error: alp web \\(entry ${escape(failing)}\\) failed to start; see ${escape(path.join(logs, 'alp-web.log'))}$`));
+  });
+  assert.deepEqual(events, ['exit:1', 'startup-check', 'exit:1', 'startup-check', 'exit:1', 'startup-check']);
   // A missing integration: the name decides the guidance.
   await assert.rejects(startIntegration({ name: 'nothing-here', home: f.home }), /^Error: ALP integration nothing-here is not installed/);
+});
+
+test('an exit after the startup check retains the no-lock readiness deadline diagnostic', async t => {
+  const f = await fixture('late-exit');
+  environment(t, f.name, {});
+  const failing = path.join(f.directory, 'failing.mjs');
+  const release = path.join(f.directory, 'release');
+  await writeFile(failing, `import { existsSync } from 'node:fs';
+const timer = setInterval(() => { if (existsSync(${JSON.stringify(release)})) process.exit(1); }, 10);
+`);
+  const events = await exitSchedule(t, { releaseAfterCheck: () => writeFile(release, '') }, async () => {
+    await assert.rejects(startIntegration({ name: f.name, entry: failing, home: f.home }),
+      new RegExp(`^Error: ALP integration late-exit \\(entry ${escape(failing)}\\) did not start; see ${escape(path.join(f.home, 'logs', 'integrations', 'late-exit.log'))}$`));
+  });
+  assert.deepEqual(events, ['startup-check', 'readiness-poll', 'exit:1']);
 });
 
 test('web is never discovered; ALP_WEB_INTEGRATION names the Paseo integration only', async t => {
