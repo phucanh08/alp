@@ -18,7 +18,7 @@
  * ALP_WEB_APP names another directory of built app files (tests).
  */
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, openSync, writeSync } from 'node:fs';
+import { mkdirSync, openSync, watch, writeSync } from 'node:fs';
 import { chmod, link, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -271,6 +271,27 @@ async function run() {
     const timer = setInterval(() => { if (!shuttingDown) void grant.refresh(); }, REFRESH_MS);
     timer.unref();
     cleanups.push(async () => clearInterval(timer));
+
+    const stateDir = path.join(home, 'state');
+    try {
+      await mkdir(stateDir, { recursive: true, mode: 0o700 });
+      /** @type {NodeJS.Timeout | undefined} */
+      let debounce;
+      const watcher = watch(stateDir, (_eventType, filename) => {
+        const name = typeof filename === 'string' ? filename : undefined;
+        if (!name || name === 'web-workspaces.json' || name.startsWith('web-workspaces.json')) {
+          clearTimeout(debounce);
+          debounce = setTimeout(() => {
+            if (!shuttingDown) void grant.refresh();
+          }, 20);
+          debounce?.unref?.();
+        }
+      });
+      cleanups.push(async () => {
+        clearTimeout(debounce);
+        watcher.close();
+      });
+    } catch {}
     // A lock that is no longer ours means another process may own the credentials file: stop writing it.
     if (!(await lock.setReady(true))) throw new Error('the web lock is no longer held by this process');
     log.info(`alp web on ${url}`, { code: 'ALP_WEB_LISTENING' });

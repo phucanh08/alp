@@ -1,8 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { alpHome, discoverIntegration, startIntegration } from '@anhlp/alp-client/index';
+import { alpHome, connect, daemonPaths, discoverIntegration, startIntegration } from '@anhlp/alp-client/index';
 import { UsageError } from './usage.js';
 import { built, start, running } from './daemon.js';
 import { DAEMON_ENTRY, distributionEntry } from './paths.js';
@@ -53,10 +54,70 @@ async function legacyDescriptorEntry(file, home) {
   return undefined;
 }
 
+/** Whether the current working directory is an ALP project: its grant then covers it. */
+async function currentProject() {
+  const cwd = process.cwd();
+  return await stat(path.join(cwd, '.alp')).then(info => info.isDirectory(), () => false) ? cwd : undefined;
+}
+
 /** `--project <cwd>` when the directory `alp web` runs in is an ALP project: its grant then covers it. */
 async function projectArgs() {
-  const cwd = process.cwd();
-  return await stat(path.join(cwd, '.alp')).then(info => info.isDirectory(), () => false) ? ['--project', cwd] : [];
+  const project = await currentProject();
+  return project ? ['--project', project] : [];
+}
+
+/**
+ * Registers `directory` as a project in alpd via IPC (`project.register`).
+ * If alpd cannot be reached or the call fails, this is best-effort.
+ * @param {string} home
+ * @param {string} directory
+ */
+async function registerProject(home, directory) {
+  const socket = daemonPaths(home).socket;
+  let client;
+  try { client = await connect(socket, { name: 'alp-cli', version: '1' }); }
+  catch { return; }
+  try {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const list = await client.request('project.list', { limit: 1 }).catch(() => undefined);
+      const revision = typeof list?.revision === 'number' ? list.revision : 0;
+      try {
+        await client.request('project.register', { directory, ifRevision: revision, requestId: randomUUID() });
+        break;
+      } catch (error) {
+        if (error?.data?.reason === 'stale_revision' && attempt < 4) continue;
+        break;
+      }
+    }
+  } catch {}
+  finally {
+    try { client.close(); } catch {}
+  }
+}
+
+/**
+ * Waits until the credential in `<home>/web/credentials.json` contains `project`.
+ * Polls for up to `timeoutMs` (default 5,000 ms).
+ * @param {string} home
+ * @param {string} credentialId
+ * @param {string} project
+ * @param {{ timeoutMs?: number }} [options]
+ */
+async function waitForGrant(home, credentialId, project, { timeoutMs = 5_000 } = {}) {
+  const credentialsFile = path.join(home, 'web', 'credentials.json');
+  const canonical = await realpath(project).catch(() => project);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const raw = JSON.parse(await readFile(credentialsFile, 'utf8'));
+      const credential = raw?.credentials?.find(c => c.id === credentialId && !c.revokedAt);
+      if (credential?.workspaces?.some(w => w.canonical === canonical || w.path === project || w.path === canonical)) {
+        return true;
+      }
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  return false;
 }
 
 /** Whether settings.json turns alp web off. @param {string} home */
@@ -82,8 +143,9 @@ async function serveWeb(home, entry) {
   const published = await readFile(path.join(home, 'web.json'), 'utf8').then(text => JSON.parse(text), () => undefined);
   const claimed = published?.app === 'alp-web' && published.pid === (await readFile(path.join(home, 'integrations', 'web.lock'), 'utf8').then(text => JSON.parse(text)?.pid, () => undefined));
   if ('reason' in held && held.alive && held.kind === 'foreign' && !claimed) throw new Error(`${refusal(home)} (${held.reason}). Stop it, then run alp web again.`);
+  const project = await currentProject();
   let lock;
-  try { lock = await startIntegration({ name: WEB, entry, home, args: await projectArgs() }); }
+  try { lock = await startIntegration({ name: WEB, entry, home, args: project ? ['--project', project] : [] }); }
   catch (error) {
     // Still held by a live process alp cannot prove: name it, as the wait may have been for it.
     const owner = await webOwner(home);
@@ -96,6 +158,10 @@ async function serveWeb(home, entry) {
     throw new Error(`${refusal(home)}${'reason' in owner ? ` (${owner.reason})` : ''}. Stop pid ${lock.pid}, then run alp web again.`);
   }
   if (typeof info.url !== 'string' || typeof info.token !== 'string') throw new Error(`alp web published no address; see ${path.join(home, 'logs', 'integrations', 'alp-web.log')}`);
+  if (project) {
+    await registerProject(home, project);
+    await waitForGrant(home, info.credentialId, project);
+  }
   return `${info.url}#token=${info.token}`;
 }
 
