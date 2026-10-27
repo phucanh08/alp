@@ -150,12 +150,15 @@ export const SHIPPED_WEB_FILES = Object.freeze({
 });
 
 /**
- * The alp-web files a packed package lacks, as problems; none for packages that do not carry the CLI.
+ * Missing alp-web assets or bundled-only source leaked into a packed package.
  * @param {string} name @param {Iterable<string>} files the packed paths, relative to the package root
  */
 export function shippedWebProblems(name, files) {
   const packed = new Set(files);
-  return (SHIPPED_WEB_FILES[name] ?? []).filter(file => !packed.has(file)).map(file => `${name}: ${file} is not packed; alp web cannot run (build the CLI with apps/gateway and apps/web present)`);
+  const problems = (SHIPPED_WEB_FILES[name] ?? []).filter(file => !packed.has(file)).map(file => `${name}: ${file} is not packed; alp web cannot run (build the CLI with apps/gateway and apps/web present)`);
+  const sourcePrefix = name === '@anhlp/alp-cli' ? 'src/web/' : name === '@anhlp/alp' ? 'packages/cli/src/web/' : undefined;
+  if (sourcePrefix && [...packed].some(file => file.startsWith(sourcePrefix))) problems.push(`${name}: bundled-only ${sourcePrefix} is packed; it imports the unpublished gateway (ship dist/alp-web.js instead)`);
+  return problems;
 }
 
 /** Problems a single packed package has, from its own files (no repository source involved). */

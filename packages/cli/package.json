@@ -5,6 +5,7 @@
   "description": "ALP cli module",
   "files": [
     "src",
+    "!src/web",
     "dist",
     "NOTICE"
   ],
