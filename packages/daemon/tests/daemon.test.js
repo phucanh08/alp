@@ -1034,3 +1034,66 @@ test('workspace.files.list and read over the socket: capability, confined answer
   await assert.rejects(client.request('workspace.files.read', { projectRoot: 'relative', path: 'a' }), { code: -32602 });
   await assert.rejects(client.request('workspace.files.list', { projectRoot: path.join(project, 'missing') }), { code: 1001, data: { reason: 'not_directory' } });
 });
+
+test('session.list finds sessions across symlink and canonical projectRoot paths', async t => {
+  const { project, open } = await setup(t);
+  const { client } = await open();
+  const canonical = await realpathOf(project);
+  const symlinkDir = path.join(path.dirname(project), 'project-symlink');
+  await symlink(project, symlinkDir, process.platform === 'win32' ? 'junction' : 'dir');
+  const sibling = path.join(path.dirname(project), 'sibling-project');
+  await mkdir(sibling, { recursive: true });
+
+  // 1. Session created with symlink projectRoot
+  const { session: s1 } = await client.request('session.create', { spec: { cwd: symlinkDir, persist: true } });
+  assert.equal(s1.projectRoot, symlinkDir);
+
+  // 2. Session created with canonical projectRoot
+  const { session: s2 } = await client.request('session.create', { spec: { cwd: canonical, persist: true } });
+  assert.equal(s2.projectRoot, canonical);
+
+  // Querying with canonical projectRoot should find both s1 and s2
+  const listByCanonical = await client.request('session.list', { projectRoot: canonical });
+  assert.deepEqual(listByCanonical.sessions.map(s => s.id).sort(), [s1.id, s2.id].sort());
+
+  // Querying with symlink projectRoot should find both s1 and s2
+  const listBySymlink = await client.request('session.list', { projectRoot: symlinkDir });
+  assert.deepEqual(listBySymlink.sessions.map(s => s.id).sort(), [s1.id, s2.id].sort());
+
+  // Trailing slash matching works symmetrically
+  const listTrailing = await client.request('session.list', { projectRoot: `${symlinkDir}/` });
+  assert.deepEqual(listTrailing.sessions.map(s => s.id).sort(), [s1.id, s2.id].sort());
+
+  // Querying with projectRoots: [canonical] should find both s1 and s2
+  const listByRootsCanonical = await client.request('session.list', { projectRoots: [canonical] });
+  assert.deepEqual(listByRootsCanonical.sessions.map(s => s.id).sort(), [s1.id, s2.id].sort());
+
+  // Querying with projectRoots: [symlinkDir] should find both s1 and s2
+  const listByRootsSymlink = await client.request('session.list', { projectRoots: [symlinkDir] });
+  assert.deepEqual(listByRootsSymlink.sessions.map(s => s.id).sort(), [s1.id, s2.id].sort());
+
+  // Querying sibling should find neither
+  const listSibling = await client.request('session.list', { projectRoot: sibling });
+  assert.deepEqual(listSibling.sessions, []);
+  const listSiblingRoots = await client.request('session.list', { projectRoots: [sibling] });
+  assert.deepEqual(listSiblingRoots.sessions, []);
+
+  // Pagination across canonical/symlink matching
+  const p1 = await client.request('session.list', { projectRoots: [canonical], limit: 1 });
+  assert.equal(p1.sessions.length, 1);
+  assert.ok(p1.nextCursor);
+  const p2 = await client.request('session.list', { projectRoots: [canonical], limit: 1, cursor: p1.nextCursor });
+  assert.equal(p2.sessions.length, 1);
+  assert.notEqual(p1.sessions[0].id, p2.sessions[0].id);
+  assert.deepEqual([p1.sessions[0].id, p2.sessions[0].id].sort(), [s1.id, s2.id].sort());
+
+  // Question watchers match canonical / symlinked project roots
+  const watcher = await open();
+  const watched = [];
+  watcher.client.onEvent(e => watched.push(e));
+  await watcher.client.request('question.watch', { projectRoot: canonical });
+  // Prompt s1 (created via symlinkDir)
+  await client.request('session.prompt', { sessionId: s1.id, clientMessageId: 'q-test', content: [{ type: 'text', text: 'hello' }] });
+  await new Promise(resolve => setTimeout(resolve, 50));
+});
+
