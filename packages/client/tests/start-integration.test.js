@@ -71,8 +71,11 @@ async function exitSchedule(t, { releaseAfterCheck } = {}, run) {
   const now = Date.now;
   let exit, child, offset = 0;
   const events = [];
+  const children = [];
   const spawnMock = t.mock.method(childProcess, 'spawn', (...args) => {
     child = spawn(...args);
+    const stopped = new Promise(resolve => child.once('close', resolve));
+    children.push({ child, stopped });
     exit = new Promise(resolve => child.once('exit', code => {
       events.push(`exit:${code}`);
       resolve();
@@ -111,8 +114,33 @@ async function exitSchedule(t, { releaseAfterCheck } = {}, run) {
     clockMock.mock.restore();
     spawnMock.mock.restore();
     syncBuiltinESMExports();
+    for (const { child, stopped } of children) {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.ref();
+        child.kill('SIGKILL');
+      }
+      await stopped;
+    }
   }
 }
+
+test('the exit schedule stops its detached child when the caller fails before polling', async t => {
+  const f = await fixture('cleanup');
+  const service = await f.write(path.join(f.directory, 'service.mjs'), 'cleanup');
+  let child;
+  const failure = new Error('caller failed before readiness polling');
+  await assert.rejects(exitSchedule(t, { releaseAfterCheck: () => assert.fail('must not poll') }, async () => {
+    child = childProcess.spawn(process.execPath, [service], {
+      detached: true, stdio: 'ignore', env: { ...process.env, ALP_HOME: f.home, TEST_INTEGRATION_NAME: f.name },
+    });
+    child.unref();
+    // Independent fallback also keeps a failed cleanup regression from leaking a service.
+    t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
+    throw failure;
+  }), error => error === failure);
+  assert.equal(child.signalCode, 'SIGKILL');
+  assert.throws(() => process.kill(child.pid, 0), { code: 'ESRCH' });
+});
 
 test('an explicit entry is started with --service under the selected home and skips discovery', async t => {
   const f = await fixture('sample');
