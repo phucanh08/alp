@@ -9,7 +9,7 @@ import { bootTime, connect, daemonPaths, lockAlive, readLock } from '@anhlp/alp-
 import { daemonHeld, holdDaemon, startDaemon, superviseDaemon } from '@anhlp/alp-client/supervise';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
-import { createProvider } from '@anhlp/alp-paseo';
+import { createProvider, daemonEntry } from '@anhlp/alp-paseo';
 
 const ENTRY = fileURLToPath(new URL('../../../packages/daemon/dist/alpd.js', import.meta.url));
 
@@ -193,4 +193,43 @@ test('a Paseo connection survives alpd going away: it reconnects, and the next p
   assert.equal(result('m3').type, 'turn');
   // Each reconnect found this test's alpd under its lock; none started another.
   assert.deepEqual(await launched(), []);
+});
+
+test('daemonEntry resolves explicit candidate, Paseo plugin directory, or host CLI', async t => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'alp-entry-test-'));
+  t.after(() => rm(tempDir, { recursive: true, force: true }));
+
+  // 1. Explicit existing entry takes precedence
+  const explicitPath = path.join(tempDir, 'custom-alpd.js');
+  await writeFile(explicitPath, '// custom alpd');
+  assert.equal(daemonEntry(explicitPath), explicitPath);
+
+  // 2. Paseo plugin path in config.json is discovered
+  const paseoHome = path.join(tempDir, 'paseo-home');
+  const mockPluginDir = path.join(tempDir, 'mock-plugin');
+  const bundledAlpd = path.join(mockPluginDir, 'server', 'dist', 'alpd.js');
+  await mkdir(path.dirname(bundledAlpd), { recursive: true });
+  await writeFile(bundledAlpd, '// bundled alpd');
+  await mkdir(paseoHome, { recursive: true });
+  await writeFile(path.join(paseoHome, 'config.json'), JSON.stringify({
+    version: 1,
+    plugins: {
+      'alp-provider': {
+        source: 'directory',
+        path: mockPluginDir,
+        enabled: true,
+      },
+    },
+  }));
+
+  // Resolve with explicit paseoHome
+  assert.equal(daemonEntry(undefined, paseoHome), bundledAlpd);
+
+  // 3. Fallback to CLI or environment when explicit is missing/invalid
+  const nonExistent = path.join(tempDir, 'missing.js');
+  const entryWithoutConfig = daemonEntry(nonExistent);
+  // Returns existing binary on host if installed, or undefined if no host CLI
+  if (entryWithoutConfig) {
+    assert.match(entryWithoutConfig, /alpd\.js$/);
+  }
 });

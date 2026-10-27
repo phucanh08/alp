@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAlpRuntime, type RuntimeOptions } from '@anhlp/alp-runtime/index';
@@ -39,9 +40,74 @@ declare const __ALP_DAEMON_ENTRY__: string | undefined;
  * bundle. Beyond these candidates (the build machine's path among them), ensureDaemon
  * looks where alpd last recorded itself and for the ALP CLI on PATH.
  */
-export function daemonEntry(explicit?: string) {
+export function daemonEntry(explicit?: string, paseoHome?: string) {
   const beside = () => { try { return fileURLToPath(new URL('./alpd.js', import.meta.url)); } catch { return undefined; } };
-  const candidates = [explicit, process.env.ALP_DAEMON_ENTRY, typeof __ALP_DAEMON_ENTRY__ === 'string' ? __ALP_DAEMON_ENTRY__ : undefined, beside()];
+  const fromPaseo = () => {
+    try {
+      const home = paseoHome ?? process.env.PASEO_HOME ?? path.join(os.homedir(), '.paseo');
+      const configFile = path.join(home, 'config.json');
+      if (existsSync(configFile)) {
+        const config = JSON.parse(readFileSync(configFile, 'utf8'));
+        for (const plugin of Object.values(config.plugins ?? {}) as Array<{ path?: string }>) {
+          if (plugin?.path) {
+            const entry = path.join(plugin.path, 'server', 'dist', 'alpd.js');
+            if (existsSync(entry)) return entry;
+            const distEntry = path.join(plugin.path, 'dist', 'alpd.js');
+            if (existsSync(distEntry)) return distEntry;
+          }
+        }
+      }
+    } catch {}
+    return undefined;
+  };
+  const fromCli = () => {
+    try {
+      const binDirs = [
+        ...(process.env.PATH ?? '').split(path.delimiter).filter(Boolean),
+        path.join(os.homedir(), '.npm-global', 'bin'),
+        path.join(os.homedir(), '.local', 'bin'),
+        '/opt/homebrew/bin',
+        '/usr/local/bin',
+      ];
+      for (const dir of binDirs) {
+        const bin = path.join(dir, 'alp');
+        if (!existsSync(bin)) continue;
+        const cli = realpathSync(bin);
+        const cliDir = path.dirname(cli);
+        const candidates = [
+          path.join(cliDir, 'alpd.js'),
+          path.resolve(cliDir, '..', 'dist', 'alpd.js'),
+          path.resolve(cliDir, '..', '..', 'dist', 'alpd.js'),
+        ];
+        for (const candidate of candidates) {
+          if (existsSync(candidate)) return candidate;
+        }
+      }
+    } catch {}
+    return undefined;
+  };
+  const fromCwd = () => {
+    try {
+      const candidates = [
+        path.join(process.cwd(), 'node_modules', '@anhlp', 'alp-paseo', 'server', 'dist', 'alpd.js'),
+        path.join(process.cwd(), 'node_modules', '@anhlp', 'alp', 'dist', 'alpd.js'),
+        path.join(process.cwd(), 'node_modules', '@anhlp', 'alp', 'packages', 'cli', 'dist', 'alpd.js'),
+      ];
+      for (const candidate of candidates) {
+        if (existsSync(candidate)) return candidate;
+      }
+    } catch {}
+    return undefined;
+  };
+  const candidates = [
+    explicit,
+    process.env.ALP_DAEMON_ENTRY,
+    fromPaseo(),
+    typeof __ALP_DAEMON_ENTRY__ === 'string' ? __ALP_DAEMON_ENTRY__ : undefined,
+    beside(),
+    fromCli(),
+    fromCwd(),
+  ];
   return candidates.find(candidate => candidate && existsSync(candidate));
 }
 
@@ -57,7 +123,7 @@ async function openBackend(options: Options): Promise<ProviderBackend> {
   const open = async (demand: boolean) => {
     const lock = await readLock(where);
     if (!demand && !(lockAlive(lock) && lock.ready) && await daemonHeld(where)) throw new Error('alpd was stopped with alp daemon stop');
-    return connect(await startDaemon({ home: where, entry: daemonEntry(entry) }), { name: 'alp-paseo', version: '1' });
+    return connect(await startDaemon({ home: where, entry: daemonEntry(entry, _paseoHome) }), { name: 'alp-paseo', version: '1' });
   };
   return { client: await open(true), async shutdown(client) { client.close(); }, relink: open };
 }
