@@ -1198,8 +1198,28 @@ test('fork marker loss replays continuation without replacing later target histo
   transport.finish('later target answer');
   await until(async () => !(await d.request('session.get', { sessionId: params.newSessionId })).session.activeTurnId, 'target idle');
   const generation = await generationOf(d, params.newSessionId);
-  const timeline = await d.store.timeline(params.newSessionId);
+  // Force the last viewer's disconnect to reap the idle target during stop's
+  // pre-close flush. Otherwise server.close can win and suppress the close event.
+  let releaseClose;
+  const closeGate = new Promise(resolve => { releaseClose = resolve; });
+  t.after(releaseClose);
+  const close = transport.close;
+  transport.close = async () => { await closeGate; await close.call(transport); };
+  let closed = false;
+  const off = d.runtime.onEvent(({ sessionId, event }) => {
+    if (sessionId === params.newSessionId && event.type === 'session.closed') closed = true;
+  });
+  t.after(off);
+  const flush = d.store.flush;
+  d.store.flush = async () => {
+    releaseClose();
+    await until(() => closed, 'target disconnect closure');
+    await flush.call(d.store);
+  };
   await d.stop();
+  await d.store.flush();
+  const timeline = await d.store.timeline(params.newSessionId);
+  assert.equal(timeline.at(-1).event.type, 'session.closed', 'disconnect closure is committed before the restart baseline');
   const restarted = await world.start();
   assert.equal((await restarted.request('session.get', { sessionId: params.newSessionId })).session.title, 'later target title');
   assert.equal(await generationOf(restarted, params.newSessionId), generation);
