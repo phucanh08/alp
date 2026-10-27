@@ -287,6 +287,7 @@ async function run() {
           debounce?.unref?.();
         }
       });
+      watcher.unref();
       cleanups.push(async () => {
         clearTimeout(debounce);
         watcher.close();
