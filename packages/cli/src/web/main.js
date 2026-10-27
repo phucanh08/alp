@@ -282,4 +282,9 @@ async function run() {
   });
 }
 
-await run();
+// Top-level bootstrap (including lock acquisition) precedes startup's cleanup handler.
+// Catch it explicitly: Node's native unhandled-rejection output bypasses serviceLog's JS sink.
+await run().catch(error => {
+  createGatewayLogger().error('alp web did not start', { code: 'ALP_WEB_START_FAILED', error });
+  process.exitCode = 1;
+});

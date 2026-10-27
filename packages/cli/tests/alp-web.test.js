@@ -7,6 +7,7 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile 
 import http from 'node:http';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { connect, daemonPaths, readLock } from '@anhlp/alp-client/index';
@@ -456,4 +457,55 @@ test('the grant follows alpd\'s project registry without a new token', limit, as
   const ticket = await tickets(port, service.web.token);
   assert.equal(ticket.status, 201);
   assert.deepEqual(JSON.parse(ticket.body).principal.workspaces.sort(), [first, second].sort());
+});
+
+// A real dead process with prior-boot metadata must remain refused (never reclaimed).
+async function priorBootLock(context) {
+  const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+  await once(child, 'exit');
+  const file = path.join(context.home, 'integrations', 'web.lock');
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  const bytes = JSON.stringify({ pid: child.pid, bootTime: 1, startedAt: new Date().toISOString(), ready: true });
+  await writeFile(file, bytes, { mode: 0o600 });
+  return { file, bytes };
+}
+
+test('bootstrap lock refusal is logged privately and preserves the refused lock', limit, async t => {
+  const context = await createHome(t);
+  const kept = await priorBootLock(context);
+  const token = `alpgw1.${'a'.repeat(16)}.${'B'.repeat(43)}`;
+  await writeFile(path.join(context.home, 'web.json'), JSON.stringify({ token }));
+  const service = await startService(context, { env: { ALP_SUPERVISE: '0' }, wait: false });
+  assert.deepEqual(await exitOf(service), [1, null]);
+  const log = await serviceLog(context.home);
+  assert.ok(log.trim(), 'bootstrap failure must reach the service log');
+  const record = log.trim().split('\n').map(line => JSON.parse(line)).find(line => line.code === 'ALP_WEB_START_FAILED');
+  assert.ok(record, log);
+  assert.match(log, /Integration owner boot context is uncertain/);
+  assert.match(log, /manual lock-only recovery/);
+  assert.ok(!log.includes(token));
+  assert.equal(await readFile(kept.file, 'utf8'), kept.bytes);
+  assert.equal(existsSync(path.join(context.home, 'web/credentials.json')), false);
+  if (posix) assert.equal((await stat(path.join(context.home, 'logs/integrations/alp-web.log'))).mode & 0o777, 0o600);
+});
+
+test('a delayed web bootstrap refusal reports failed startup before the readiness deadline', limit, async t => {
+  const context = await createHome(t);
+  const kept = await priorBootLock(context);
+  // Force exit after the launcher's initial 150ms observation, using the real built service.
+  const preload = path.join(context.directory, 'delay.mjs');
+  await writeFile(preload, `if (process.argv[1] === ${JSON.stringify(SERVICE)}) await new Promise(resolve => setTimeout(resolve, 400));`);
+  const runner = path.join(context.directory, 'runner.mjs');
+  await writeFile(runner, `import { startIntegration } from ${JSON.stringify(pathToFileURL(path.join(root, 'packages/client/src/index.js')).href)};
+try { await startIntegration({ name: 'web', home: process.env.ALP_HOME, entry: ${JSON.stringify(SERVICE)} }); process.exitCode = 2; }
+catch (error) { console.error(error.message); process.exitCode = 1; }`);
+  const child = spawn(process.execPath, [runner], { env: { ...process.env, ...context.env, ALP_SUPERVISE: '0', NODE_OPTIONS: `--import=${pathToFileURL(preload).href}` }, stdio: ['ignore', 'ignore', 'pipe'] });
+  let diagnostic = '';
+  child.stderr.on('data', chunk => { diagnostic += chunk; });
+  const service = { child, exited: once(child, 'exit') };
+  t.after(async () => { if (child.exitCode === null && child.signalCode === null) child.kill(); await service.exited; });
+  assert.deepEqual(await exitOf(service, 10_000), [1, null]);
+  assert.match(diagnostic, /alp web .*failed to start; see .*alp-web\.log/);
+  assert.match(await serviceLog(context.home), /Integration owner boot context is uncertain/);
+  assert.equal(await readFile(kept.file, 'utf8'), kept.bytes);
 });
