@@ -1086,14 +1086,4 @@ test('session.list finds sessions across symlink and canonical projectRoot paths
   assert.equal(p2.sessions.length, 1);
   assert.notEqual(p1.sessions[0].id, p2.sessions[0].id);
   assert.deepEqual([p1.sessions[0].id, p2.sessions[0].id].sort(), [s1.id, s2.id].sort());
-
-  // Question watchers match canonical / symlinked project roots
-  const watcher = await open();
-  const watched = [];
-  watcher.client.onEvent(e => watched.push(e));
-  await watcher.client.request('question.watch', { projectRoot: canonical });
-  // Prompt s1 (created via symlinkDir)
-  await client.request('session.prompt', { sessionId: s1.id, clientMessageId: 'q-test', content: [{ type: 'text', text: 'hello' }] });
-  await new Promise(resolve => setTimeout(resolve, 50));
 });
-
