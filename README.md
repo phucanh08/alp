@@ -276,7 +276,7 @@ alp web rotate     # replaces the access token; open pages lose access
 - **Settings:** `web.port`, `web.permissions` and `"web": { "enabled": false }` (turns `alp web` off). alp-web reads them when it starts; `alp daemon stop` does not stop it. To apply a change, stop the process whose pid `~/.alp/web.json` names (`kill <pid>` on macOS and Linux, `taskkill /PID <pid>` on Windows), then run `alp web`; `alp web rotate` also restarts it, with a new token.
 - **Coming from the Paseo-based `alp web`:** the first `alp web` stops the old Paseo integration if it still holds `integrations/web.lock` (only when it is provably your process from this boot) and copies its token and server id to `~/.alp/paseo.json`, unless that file exists, so paired devices keep working.
 
-The app's features and limits: [docs/alp/web.md](docs/alp/web.md). macOS is the primary platform. `alp web` is untested on Windows: CI runs its tests on Linux and macOS only (a Windows trial found credential-file writes failing now and then with `EPERM`). On Windows, `alp web rotate` and the upgrade takeover do not stop a running alp-web for you: end the pid in `~/.alp/web.json` (`taskkill /PID <pid>`) first.
+The app's features and limits: [docs/alp/web.md](docs/alp/web.md). macOS is the primary platform; browser E2E runs on Linux and macOS, while the gateway and `alp-web` service are tested on Windows in CI (with retry/backoff for atomic file replacement on Windows). On Windows, `alp web rotate` and the upgrade takeover do not stop a running alp-web for you: end the pid in `~/.alp/web.json` (`taskkill /PID <pid>`) first.
 
 ### Paseo's app on your phone (experimental)
 

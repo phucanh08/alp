@@ -3,7 +3,9 @@
 // one-time, short-lived and bound to their Origin; nothing secret reaches a log line.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import nodeFs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import * as credentials from '../src/credentials.js';
@@ -278,4 +280,154 @@ test('update rejects invalid input and revoked credentials without touching the 
   t.after(() => store.close());
   await store.reload();
   assert.equal(store.verify(token), undefined, 'a revoked credential stays revoked');
+});
+
+test('writeCredentials retries transient EPERM/EACCES/EBUSY on atomic rename and recovers', async t => {
+  const { home: gatewayHome, workspace } = await home(t);
+  const originalRename = nodeFs.promises.rename;
+  let calls = 0;
+  nodeFs.promises.rename = async function(from, to) {
+    calls++;
+    if (calls <= 2) {
+      const err = new Error('EPERM: operation not permitted, rename');
+      // @ts-ignore
+      err.code = calls === 1 ? 'EPERM' : 'EBUSY';
+      throw err;
+    }
+    return originalRename.call(this, from, to);
+  };
+  syncBuiltinESMExports();
+  t.after(() => {
+    nodeFs.promises.rename = originalRename;
+    syncBuiltinESMExports();
+  });
+
+  const { credential, token } = await createCredential(gatewayHome, { label: 'recovering', workspaces: [workspace], permissions: ['session.read'] });
+  assert.equal(calls, 3, 'retried twice and succeeded on third attempt');
+  assert.ok(parseToken(token));
+  assert.equal(credential.label, 'recovering');
+
+  const disk = await readFile(credentialsFile(gatewayHome), 'utf8');
+  assert.ok(disk.includes(credential.id));
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(credentialsFile(gatewayHome))).mode & 0o777, 0o600);
+  }
+
+  // Rotate credential with injected EACCES
+  let rotateCalls = 0;
+  nodeFs.promises.rename = async function(from, to) {
+    rotateCalls++;
+    if (rotateCalls <= 2) {
+      const err = new Error('EACCES: permission denied, rename');
+      // @ts-ignore
+      err.code = 'EACCES';
+      throw err;
+    }
+    return originalRename.call(this, from, to);
+  };
+  syncBuiltinESMExports();
+
+  const rotated = await rotateCredential(gatewayHome, credential.id);
+  assert.equal(rotateCalls, 3, 'rotate retried twice and succeeded on third attempt');
+  assert.ok(parseToken(rotated.token));
+  assert.notEqual(rotated.token, token);
+});
+
+test('writeCredentials rethrows and cleans up temp files when rename retries are exhausted', async t => {
+  const { home: gatewayHome, workspace } = await home(t);
+  const originalRename = nodeFs.promises.rename;
+  let calls = 0;
+  nodeFs.promises.rename = async function(from, to) {
+    calls++;
+    const err = new Error('EPERM: operation not permitted, rename');
+    // @ts-ignore
+    err.code = 'EPERM';
+    throw err;
+  };
+  syncBuiltinESMExports();
+  t.after(() => {
+    nodeFs.promises.rename = originalRename;
+    syncBuiltinESMExports();
+  });
+
+  await assert.rejects(
+    createCredential(gatewayHome, { label: 'exhausted', workspaces: [workspace], permissions: ['session.read'] }),
+    error => /** @type {any} */ (error)?.code === 'EPERM'
+  );
+  assert.equal(calls, credentials.RENAME_MAX_RETRIES + 1, 'retried up to RENAME_MAX_RETRIES then gave up');
+
+  // Verify that any temporary files were cleaned up
+  const entries = await readdir(gatewayHome).catch(() => []);
+  const tmpFiles = entries.filter(name => name.includes('.tmp'));
+  assert.deepEqual(tmpFiles, [], 'temporary files cleaned up on failure');
+});
+
+test('writeCredentials fails immediately on non-retriable rename errors without retrying', async t => {
+  const { home: gatewayHome, workspace } = await home(t);
+  const originalRename = nodeFs.promises.rename;
+  let calls = 0;
+  nodeFs.promises.rename = async function(from, to) {
+    calls++;
+    const err = new Error('EISDIR: illegal operation on a directory, rename');
+    // @ts-ignore
+    err.code = 'EISDIR';
+    throw err;
+  };
+  syncBuiltinESMExports();
+  t.after(() => {
+    nodeFs.promises.rename = originalRename;
+    syncBuiltinESMExports();
+  });
+
+  await assert.rejects(
+    createCredential(gatewayHome, { label: 'fail-fast', workspaces: [workspace], permissions: ['session.read'] }),
+    error => /** @type {any} */ (error)?.code === 'EISDIR'
+  );
+  assert.equal(calls, 1, 'did not retry non-retriable EISDIR error');
+
+  const entries = await readdir(gatewayHome).catch(() => []);
+  const tmpFiles = entries.filter(name => name.includes('.tmp'));
+  assert.deepEqual(tmpFiles, [], 'temporary files cleaned up on failure');
+});
+
+test('renameWithRetry unit contract: backoff schedule, bounds and error filtering', async t => {
+  const delays = [];
+  const sleepMock = async ms => { delays.push(ms); };
+  let attempts = 0;
+
+  // Custom 4 retries, initial backoff 10, max backoff 30
+  const customOptions = {
+    retries: 4,
+    initialBackoffMs: 10,
+    maxBackoffMs: 30,
+    sleep: sleepMock,
+  };
+
+  const { directory } = await home(t);
+  const src = path.join(directory, 'src.txt');
+  const dst = path.join(directory, 'dst.txt');
+  await writeFile(src, 'test content');
+
+  const originalRename = nodeFs.promises.rename;
+  nodeFs.promises.rename = async function(from, to) {
+    attempts++;
+    if (attempts <= 3) {
+      const err = new Error('EBUSY: resource busy');
+      // @ts-ignore
+      err.code = 'EBUSY';
+      throw err;
+    }
+    return originalRename.call(this, from, to);
+  };
+  syncBuiltinESMExports();
+  t.after(() => {
+    nodeFs.promises.rename = originalRename;
+    syncBuiltinESMExports();
+  });
+
+  await credentials.renameWithRetry(src, dst, customOptions);
+  assert.equal(attempts, 4);
+  // Delays: 10 * 2^0 = 10, 10 * 2^1 = 20, min(10 * 2^2, 30) = 30
+  assert.deepEqual(delays, [10, 20, 30]);
+  assert.equal(await readFile(dst, 'utf8'), 'test content');
 });
