@@ -44,10 +44,7 @@ async function userSettings(home: string): Promise<any> {
 async function run(home: string) {
   await mkdir(home, { recursive: true, mode: 0o700 });
   const settings = await userSettings(home);
-  if (settings?.web?.enabled === false) {
-    log.info('web app disabled by settings', { event: 'web.disabled' });
-    process.exit(0);
-  }
+  // web.enabled controls alp-web only; Paseo pairing still uses web.relay below.
 
   const integrationLock = createIntegrationLock(home, 'paseo');
   const { acquired, lock } = await integrationLock.acquire();
