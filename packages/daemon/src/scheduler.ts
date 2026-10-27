@@ -100,6 +100,8 @@ export function createScheduler({ store, runtime, deliver, ready, session, settl
   const held = new Map<string, { sessionId: string; at: number }>();
   /** The jobs that wait for a session to be opened again, with the moment the wait began. */
   const opening = new Map<string, number>();
+  /** The jobs that wait for a busy turn to end, with the moment the wait began. */
+  const busy = new Map<string, number>();
   /** The sessions a job is being created for: they are held before the job is written. */
   const heldSessions = new Map<string, number>();
   /** The jobs being delivered right now; a cancel that arrives is refused. */
@@ -121,6 +123,7 @@ export function createScheduler({ store, runtime, deliver, ready, session, settl
   const releaseId = (id: string) => {
     const entry = held.get(id);
     opening.delete(id);
+    busy.delete(id);
     if (!entry) return;
     held.delete(id);
     const ids = waiting.get(entry.sessionId);
@@ -247,9 +250,12 @@ export function createScheduler({ store, runtime, deliver, ready, session, settl
     if (snapshot.parentId) return fail(current, 'The session this job continues is not a root session', 'not_a_root');
     if (projectKey(snapshot.projectRoot) !== projectKey(current.projectRoot)) return fail(current, 'The session this job continues belongs to another project', 'other_project');
     const waitBusy = async (): Promise<'waiting' | 'failed'> => {
-      // The session is working. The job waits for the turn to end; it never steers it.
-      const overdue = now() - Date.parse(current.dueAt);
-      if (overdue > graceMs) return fail(current, `The session was still busy ${duration(overdue)} after the job was due`, 'session_busy');
+      // The session is working. The wait is bounded from the moment it began: how
+      // late the job is says nothing about how long a running turn takes to end.
+      const since = busy.get(current.id) ?? now();
+      busy.set(current.id, since);
+      const waited = now() - since;
+      if (waited > graceMs) return fail(current, `The session was still busy after waiting ${duration(waited)}`, 'session_busy');
       // Only the note is written, and only when it says something new: a cancel that
       // happened meanwhile is not overwritten, and the file is not rewritten every tick.
       const note = { message: 'The session is busy; the job waits for its turn to end', code: 'session_busy' };
@@ -258,6 +264,8 @@ export function createScheduler({ store, runtime, deliver, ready, session, settl
       return 'waiting';
     };
     if (snapshot.activeTurnId || runtime.starting?.(current.sessionId)) return waitBusy();
+    // The session is idle: the wait for a busy turn is over.
+    busy.delete(current.id);
     const dispatch = async (send?: AlpRuntime['prompt']): Promise<'delivered' | 'failed' | 'waiting' | 'skipped'> => {
       // From here the job is being delivered: a cancel that arrives now is refused, so
       // the job and the record cannot disagree about what happened.

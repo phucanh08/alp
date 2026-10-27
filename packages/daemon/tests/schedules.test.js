@@ -27,7 +27,7 @@ function fakeTransport(runtimes, resumeGate) {
       async close() {},
       async request(method, params) {
         this.calls.push({ method, params });
-        if (method === 'thread/resume') { await resumeGate?.(); return { thread: { id: params.threadId } }; }
+        if (method === 'thread/resume') { await resumeGate?.(); this.threadId = params.threadId; return { thread: { id: params.threadId } }; }
         if (method.startsWith('thread/')) return { thread: { id: this.threadId } };
         if (method === 'turn/start') { await this.hold; this.turnId = `turn-${index}-${++turns}`; return { turn: { id: this.turnId } }; }
         if (method === 'turn/interrupt') { queueMicrotask(() => this.notification('turn/completed', { threadId: this.threadId, turn: { id: params.turnId, status: 'interrupted' } })); return {}; }
@@ -424,6 +424,39 @@ test('a job that is hours late is still delivered after a restart', async t => {
   assert.equal(userTexts(next.events).filter(text => text.includes('Three hours late.')).length, 1);
 });
 
+test('a job that is hours late waits for an active turn on a recovered session, then delivers', async t => {
+  const { start, create, project, runtimes } = await setup(t);
+  const daemon = await start({ scheduleTickMs: 60_000 });
+  const { session } = await create(daemon);
+  // The machine slept for hours: the job is more than an hour late, and alpd was down.
+  const { job } = await daemon.request('schedule.create', { projectRoot: project, sessionId: session.id, dueAt: inMs(-3 * 60 * 60 * 1000), prompt: 'Three hours late behind turn.' });
+  await daemon.stop();
+
+  const next = await start({ scheduleTickMs: 20 });
+  await until(() => next.runtime.snapshot(session.id), 'session is reopened by recovery');
+  await next.request('session.attach', { sessionId: session.id });
+  // Start an active turn on the recovered session before the scheduler admits the late job
+  void next.request('session.prompt', { sessionId: session.id, clientMessageId: 'turn-recovered-1', content: [{ type: 'text', text: 'Active turn.' }] });
+  await until(() => next.runtime.snapshot(session.id)?.activeTurnId, 'the session is busy with an active turn');
+
+  await until(async () => {
+    const current = await jobOf(next, job.id);
+    return current.lastError || current.status !== 'pending';
+  }, 'the scheduler inspected the job');
+  const waiting = await jobOf(next, job.id);
+  assert.equal(waiting.status, 'pending', 'the overdue job waits for the busy turn to end');
+  assert.equal(waiting.lastError.code, 'session_busy');
+  assert.equal(waiting.attempts, 0);
+
+  runtimes.at(-1).finish();
+  await untilStatus(next, job.id, 'delivered');
+  const after = await jobOf(next, job.id);
+  assert.ok(after.lateByMs >= 3 * 60 * 60 * 1000, 'the job records how late it is');
+  assert.equal(after.attempts, 1);
+  assert.equal(after.lastError, undefined);
+  assert.equal(runtimes.at(-1).started.length, 2, 'the native runtime receives the active turn and then the scheduled continuation');
+});
+
 test('a job on a session the user closed is not resurrected after a restart', async t => {
   const { start, create, project } = await setup(t);
   const daemon = await start({ scheduleTickMs: 60_000 });
@@ -806,11 +839,18 @@ test('an overlapping tick cannot hide the active delivery from stop', async t =>
 test('a busy session beyond the grace window fails without sending a prompt', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-schedule-grace-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const now = () => 10000;
+  let currentTime = 10000;
+  const now = () => currentTime;
   const store = createScheduleStore(directory, { now });
   const job = await store.create({ projectRoot: directory, sessionId: 'root', dueAt: new Date(9000).toISOString(), prompt: 'Too late.' });
   let sent = 0;
   const scheduler = createScheduler({ store, runtime: { snapshot: () => ({ projectRoot: directory, activeTurnId: 'busy' }) }, now, graceMs: 500, deliver: async () => { sent++; return { outcome: 'accepted' }; } });
+  assert.equal((await scheduler.tick()).waiting, 1);
+  const waiting = await store.get(job.id);
+  assert.equal(waiting.lastError.code, 'session_busy');
+  assert.equal(waiting.status, 'pending');
+
+  currentTime = 10501;
   assert.equal((await scheduler.tick()).failed, 1);
   const after = await store.get(job.id);
   assert.equal(after.lastError.code, 'session_busy');
