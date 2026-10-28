@@ -112,14 +112,20 @@ test('the socket wants the token at hello, then speaks Paseo: server_info, pongs
   await client.next(frame => frame.type === 'pong');
   session(client, { type: 'ping', requestId: 'p1', clientSentAt: 5 });
   assert.equal((await client.next(frame => frame.message?.type === 'pong')).message.payload.clientSentAt, 5);
-  session(client, { type: 'capture_terminal_request', requestId: 'r1', terminalId: 'term_x' });
+  session(client, { type: 'checkout_commit_request', requestId: 'r1', cwd: '/workspace', message: 'test', addAll: true });
   const refused = await client.next(frame => frame.message?.type === 'rpc_error');
   // The app shows the text as it is, in the user's language: Vietnamese unless settings say.
-  assert.deepEqual(refused.message.payload, { requestId: 'r1', requestType: 'capture_terminal_request', error: 'Tính năng đang phát triển', code: 'not_implemented' });
+  assert.deepEqual(refused.message.payload, { requestId: 'r1', requestType: 'checkout_commit_request', error: 'Tính năng đang phát triển', code: 'not_implemented' });
   await mkdir(home, { recursive: true });
   await writeFile(path.join(home, 'settings.json'), JSON.stringify({ language: 'English' }));
-  session(client, { type: 'capture_terminal_request', requestId: 'r2', terminalId: 'term_x' });
+  session(client, { type: 'checkout_commit_request', requestId: 'r2', cwd: '/workspace', message: 'test', addAll: true });
   assert.equal((await client.next(frame => frame.message?.payload?.requestId === 'r2')).message.payload.error, 'This feature is in development');
+  session(client, { type: 'capture_terminal_request', requestId: 'capture-off', terminalId: 'term_x' });
+  const off = (await client.next(frame => frame.message?.payload?.requestId === 'capture-off')).message;
+  assert.equal(off.type, 'rpc_error');
+  assert.equal(off.payload.requestType, 'capture_terminal_request');
+  assert.match(off.payload.error, /alp terminal allow --paseo --yes/);
+  assert.notEqual(off.payload.code, 'not_implemented');
 });
 
 test('a browser may carry the token as the paseo.bearer subprotocol, and gets it echoed', async t => {
