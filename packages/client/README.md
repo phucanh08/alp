@@ -27,3 +27,9 @@ the gateway (Task 08).
 Build: `npm run build --workspace=@anhlp/alp-client`. Test: `npm run test --workspace=@anhlp/alp-client`.
 
 Public imports use the package root and its explicitly exported subpaths. See [architecture, provider extension, compatibility and release instructions](../../docs/modular-monorepo.md).
+
+Terminal directory clients can use `watchTerminals(connection, {capabilities, onSnapshot,
+onMode, onError})` from the portable entry. Install one per connection, await `ready`, and call
+`close()` when leaving. It uses atomic scoped snapshots and cursor invalidations on hosts with
+`terminal.watch`; `onMode('polling')` explicitly identifies the five-second older-host fallback.
+Reconnect with a new helper and replace the directory from the reset snapshot.

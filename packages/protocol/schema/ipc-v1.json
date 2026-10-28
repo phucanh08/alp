@@ -608,6 +608,26 @@
             "params"
           ],
           "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "terminal.changed"
+            },
+            "params": {
+              "$ref": "#/$defs/terminalChanged"
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
         }
       ]
     },
@@ -3266,6 +3286,24 @@
           "additionalProperties": false
         }
       ]
+    },
+    "terminalChanged": {
+      "type": "object",
+      "properties": {
+        "watchId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "cursor": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        }
+      },
+      "required": [
+        "watchId",
+        "cursor"
+      ],
+      "additionalProperties": false
     }
   }
 }

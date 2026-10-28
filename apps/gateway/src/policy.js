@@ -43,7 +43,7 @@ export const DEFAULT_PERMISSIONS = Object.freeze(['session.read', 'session.write
  * Within `library` and `settings.language` some methods stay unexposed and answer -32601
  * `not_exposed` (docs/alp/remote-gateway.md §5.4).
  */
-export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.sessionInterruptTurn, CAPABILITY.workspaceRegistry, CAPABILITY.workspaceWorktree, CAPABILITY.sessionHistory, CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, CAPABILITY.workspaceGit, CAPABILITY.attachments, CAPABILITY.sessionFork, CAPABILITY.sessionRewind, CAPABILITY.sessionReload, CAPABILITY.sessionResumeCommand, CAPABILITY.sessionConfigureLive, CAPABILITY.terminal]);
+export const FORWARDED_CAPABILITIES = Object.freeze([CAPABILITY.sessionInterruptTurn, CAPABILITY.workspaceRegistry, CAPABILITY.workspaceWorktree, CAPABILITY.sessionHistory, CAPABILITY.attachAfter, CAPABILITY.promptReceipts, CAPABILITY.task, CAPABILITY.team, CAPABILITY.library, CAPABILITY.libraryProjectWrite, CAPABILITY.settingsLanguage, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, CAPABILITY.workspaceGit, CAPABILITY.attachments, CAPABILITY.sessionFork, CAPABILITY.sessionRewind, CAPABILITY.sessionReload, CAPABILITY.sessionResumeCommand, CAPABILITY.sessionConfigureLive, CAPABILITY.terminal, CAPABILITY.terminalCapture, CAPABILITY.terminalWatch]);
 
 /** The codes of docs/protocol/alp-json-rpc-v1.md §5.1 the gateway answers its own refusals with; `data.reason` says why. */
 export const GATEWAY_ERROR = Object.freeze({ forbidden: ERROR.forbidden, unavailable: ERROR.unavailable });
@@ -181,6 +181,8 @@ export function projectTerminalEvent(raw, maxOutputFrameBytes) {
 
 /** alpd's terminal refusals the gateway passes on, each with its own fixed text. */
 export const TERMINAL_REFUSALS = Object.freeze({
+  terminal_capture_unavailable: 'Terminal capture exceeded its resource limit or its screen was released',
+  terminal_capture_too_large: 'Terminal capture is too large; select a smaller line range',
   not_found: 'No such terminal',
   terminal_disabled: 'The daemon host has not allowed remote terminals (its owner runs alp terminal allow)',
   terminal_unsupported: 'Terminals are not available on the daemon host',
@@ -645,6 +647,9 @@ export const EXPOSURE = Object.freeze({
   // only with the opt-in terminal.exec and the host owner's own switch; a workspace is not a sandbox.
   'terminal.create': { status: 'exposed', permission: 'terminal.exec', scope: 'workspace: workspaceId a registry workspace whose directory a grant names exactly, looked up afresh; alpd binds the terminal to this credential, its grant epoch and the grant\'s canonical workspaces (authorizedRoots), and picks the shell, its environment and directory itself (no shell, command, args, env, cwd or pid is a param); answer projected by projectTerminal', capability: CAPABILITY.terminal, params: ['workspaceId', 'cols', 'rows', 'requestId'], tests: ['permission', 'registry-scope', 'binding'] },
   'terminal.list': { status: 'exposed', permission: 'terminal.exec', scope: 'principal: only this credential\'s own terminals of its grant epoch and canonical workspaces (alpd filters); a workspaceId given is checked as for terminal.create', capability: CAPABILITY.terminal, params: ['workspaceId'], tests: ['permission', 'binding'] },
+  'terminal.watch': { status: 'exposed', permission: 'terminal.exec', scope: 'principal: atomic snapshot and cursor subscription, same credential epoch/authorized roots; optional registry workspace checked', capability: CAPABILITY.terminalWatch, params: ['workspaceId', 'after'], tests: ['permission', 'binding', 'cursor'] },
+  'terminal.unwatch': { status: 'exposed', permission: 'terminal.exec', scope: 'connection: stops only this connection subscription', capability: CAPABILITY.terminalWatch, params: [], tests: ['permission'] },
+  'terminal.capture': { status: 'exposed', permission: 'terminal.exec', scope: 'terminal: same principal, epoch and authorized roots; bounded rendered text only, explicit frame refusal', capability: CAPABILITY.terminalCapture, params: ['terminalId', 'start', 'end', 'stripAnsi'], tests: ['permission', 'binding', 'frame'] },
   'terminal.attach': { status: 'exposed', permission: 'terminal.exec', scope: 'terminal: alpd checks the binding (credential, grant epoch, authorized workspace); terminal.event notifications of attached terminals only, re-checked and projected (projectTerminalEvent)', capability: CAPABILITY.terminal, params: ['terminalId', 'after'], tests: ['permission', 'binding'] },
   'terminal.input': { status: 'exposed', permission: 'terminal.exec', scope: 'terminal: as terminal.attach, from the connection that attached it; never logged', capability: CAPABILITY.terminal, params: ['terminalId', 'data'], tests: ['permission', 'binding'] },
   'terminal.resize': { status: 'exposed', permission: 'terminal.exec', scope: 'terminal: as terminal.input', capability: CAPABILITY.terminal, params: ['terminalId', 'cols', 'rows'], tests: ['permission', 'binding'] },

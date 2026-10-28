@@ -28,13 +28,14 @@ export type TerminalEvent =
   | { terminalId: string; type: 'output'; seq: number; data: string }
   | { terminalId: string; type: 'exit'; seq: number; exitCode: number | null; signal: number | null; reason: TerminalEndReason }
   | { terminalId: string; type: 'detached'; reason: 'replaced' | 'slow_consumer' };
+export type TerminalChangedNotification = { jsonrpc: '2.0'; method: 'terminal.changed'; params: { watchId: string; cursor: string } };
 export type TerminalNotification = { jsonrpc: '2.0'; method: 'terminal.event'; params: TerminalEvent };
 
 /** Names a daemon may list in its daemon.hello result (schema/methods-v1.json `capabilities`). */
 export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
 export type HistoryPage = { generation: string; items: HistoryItem[]; olderCursor?: string; hasOlder: boolean; tipCursor: number };
 
-export type Capability = 'session.interrupt.turn' | 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.configure.live' | 'terminal' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
+export type Capability = 'session.interrupt.turn' | 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.configure.live' | 'terminal' | 'terminal.capture' | 'terminal.watch' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -61,6 +62,7 @@ export type ErrorReason =
   // session.configure with model, thinking or team (§12.9).
   | 'runtime_mismatch' | 'agent_mismatch' | 'permission_escalation' | 'team_not_found'
   // Terminal (§12.10).
+  | 'terminal_capture_unavailable' | 'terminal_capture_too_large' | 'terminal_snapshot_too_large'
   | 'terminal_disabled' | 'terminal_unsupported' | 'terminal_limit' | 'not_attached' | 'terminal_exited' | 'input_too_large';
 
 type Empty = Record<string, never>;
@@ -110,6 +112,9 @@ export type RegistryPage = { revision: number; total: number; nextCursor: string
 export type RpcMethodMap = {
   'terminal.create': { params: PrincipalContext & { workspaceId: string; cols: number; rows: number; requestId: string }; result: { terminal: TerminalInfo } };
   'terminal.list': { params: PrincipalContext & { workspaceId?: string }; result: { terminals: TerminalInfo[] } };
+  'terminal.watch': { params: PrincipalContext & { workspaceId?: string; after?: string }; result: { terminals: TerminalInfo[]; watchId: string; cursor: string; reset: boolean } };
+  'terminal.unwatch': { params: Empty; result: { closed: true } };
+  'terminal.capture': { params: PrincipalContext & { terminalId: string; start?: number; end?: number; stripAnsi?: boolean }; result: { lines: string[]; totalLines: number } };
   'terminal.attach': { params: PrincipalContext & { terminalId: string; after?: number }; result: { terminal: TerminalInfo; nextSeq: number; gap?: { fromSeq: number; toSeq: number } } };
   'terminal.input': { params: PrincipalContext & { terminalId: string; data: string }; result: { bytes: number } };
   'terminal.resize': { params: PrincipalContext & { terminalId: string; cols: number; rows: number }; result: { cols: number; rows: number } };

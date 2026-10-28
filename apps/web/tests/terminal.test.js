@@ -321,6 +321,7 @@ function hostWith({ permissions = ['session.read', 'session.write', 'project.rea
   host.capabilities.push(...capabilities);
   host.intercept.set('workspace.list', (_params, _connection, { answer }) => { answer({ workspaces: [ROW], revision: 1, total: 1, nextCursor: null }); return 'handled'; });
   let seq = 0;
+  host.intercept.set('terminal.list', (_params, _connection, { answer }) => { answer({ terminals: [] }); return 'handled'; });
   host.intercept.set('terminal.create', (_params, _connection, { answer }) => { answer({ terminal: info() }); return 'handled'; });
   host.intercept.set('terminal.attach', (params, connection, { answer }) => {
     // Replay before the answer, as alpd sends it: everything after `after`.
@@ -339,8 +340,8 @@ function hostWith({ permissions = ['session.read', 'session.write', 'project.rea
   return host;
 }
 
-async function connectController(t, host) {
-  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, attentionWatchPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500, terminalStorage: memoryStorage(), terminalOptions: { inputDelayMs: 1, resizeDelayMs: 5 } });
+async function connectController(t, host, options = {}) {
+  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, attentionWatchPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500, terminalStorage: memoryStorage(), terminalOptions: { inputDelayMs: 1, resizeDelayMs: 5 }, ...options });
   t.after(() => controller.disconnect());
   controller.connect({ url: 'http://127.0.0.1:7434', token: 'alpgw1.0123456789abcdef.secret' });
   await until(() => controller.getState().connection.phase === 'open', 'open');
@@ -404,4 +405,78 @@ test('controller: a page going away keeps its terminal for the reload; a person\
   await until(() => second.accepting, 'running');
   leaving.disconnect();
   await until(() => closes(ended) === 1, 'terminal.close');
+});
+
+
+test('controller: sibling terminal tabs keep independent identity, output, selection and close', async t => {
+  const host = hostWith();
+  let n = 0;
+  host.intercept.set('terminal.create', (_p, _c, { answer }) => { answer({ terminal: info(++n === 1 ? ID : ID2) }); return 'handled'; });
+  host.intercept.set('terminal.attach', (p, _c, { answer }) => { answer({ terminal: info(p.terminalId), nextSeq: 1 }); return 'handled'; });
+  const controller = await connectController(t, host);
+  const first = controller.terminal('wks_a');
+  first.start();
+  await until(() => first.accepting, 'first');
+  const firstKey = controller.terminalTabs('wks_a').active;
+  const secondKey = controller.addTerminal('wks_a');
+  const second = controller.terminal('wks_a');
+  second.start();
+  await until(() => second.accepting, 'second');
+  assert.notEqual(first, second);
+  assert.equal(first.getState().terminalId, ID);
+  assert.equal(second.getState().terminalId, ID2);
+  host.connections.values().next().value.deliver(JSON.stringify({ jsonrpc: '2.0', method: 'terminal.event', params: out(1, 'only second', ID2) }));
+  await until(() => second.history() === 'only second', 'routing');
+  assert.equal(first.history(), '');
+  controller.selectTerminal('wks_a', firstKey);
+  assert.equal(controller.terminal('wks_a'), first);
+  await controller.closeTerminalTab('wks_a', secondKey);
+  assert.equal(first.accepting, true);
+  assert.deepEqual(host.calls.filter(c => c.method === 'terminal.close').map(c => c.params.terminalId), [ID2]);
+  const thirdKey = controller.addTerminal('wks_a');
+  assert.notEqual(thirdKey, secondKey);
+  await controller.closeTerminal('wks_a');
+  assert.equal(first.getState().status, 'closed');
+  assert.equal(controller.terminalTabs('wks_a').tabs.length, 0);
+});
+
+test('controller: terminal tab manifest restores stable keys and active selection after reload', async t => {
+  const storage = memoryStorage();
+  const host = hostWith();
+  const first = await connectController(t, host, { terminalStorage: storage });
+  const original = first.terminal('wks_a');
+  original.start();
+  await until(() => original.accepting, 'original');
+  const secondKey = first.addTerminal('wks_a');
+  const snapshot = first.terminalTabs('wks_a');
+  first.disconnect({ keepTerminals: true });
+  const reloaded = await connectController(t, host, { terminalStorage: storage });
+  assert.deepEqual(reloaded.terminalTabs('wks_a').tabs.map(t => t.key), snapshot.tabs.map(t => t.key));
+  assert.equal(reloaded.terminalTabs('wks_a').active, secondKey);
+  const legacy = reloaded.terminalTabs('wks_a').tabs[0].session;
+  legacy.start();
+  await until(() => legacy.accepting, 'restored');
+  assert.equal(host.calls.filter(c => c.method === 'terminal.create').length, 1);
+});
+
+test('closing during terminal.create closes the late shell instead of orphaning it', async () => {
+  let answer;
+  const r = rig({ handlers: { 'terminal.create': () => new Promise(resolve => { answer = resolve; }) } });
+  r.session.start();
+  await r.session.close();
+  answer({ terminal: info() });
+  await until(() => r.of('terminal.close').length === 1, 'late shell closed');
+  assert.equal(r.session.getState().status, 'closed');
+  assert.equal(r.storage.map.has('k'), false);
+});
+
+test('controller: compatibility getter returns an existing off-workspace session; new tabs stay gated', async t => {
+  const host = hostWith();
+  const controller = await connectController(t, host);
+  const existing = controller.terminal('wks_a');
+  controller.selectWorkspace(null);
+  assert.equal(controller.terminal('wks_a'), existing);
+  assert.throws(() => controller.addTerminal('wks_a'), /Open a workspace/);
+  assert.throws(() => controller.terminal('wks_other'), /Open a workspace/);
+  assert.equal(host.calls.some(c => c.method === 'terminal.create'), false);
 });

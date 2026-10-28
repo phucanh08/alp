@@ -166,6 +166,7 @@ export function clampSize(cols, rows) {
  * @typedef {{ getItem(key: string): string | null, setItem(key: string, value: string): void, removeItem(key: string): void }} TerminalStorage
  * @typedef {{
  *   workspaceId: string,
+ *   initialTerminalId?: string,
  *   request: (method: string, params: Record<string, unknown>) => Promise<any>,
  *   limits?: import('@anhlp/alp-protocol').TerminalLimits,
  *   storage?: TerminalStorage,
@@ -259,8 +260,9 @@ export class TerminalSession {
   start(cols, rows) {
     if (this.#view.status !== 'idle') return;
     if (cols !== undefined && rows !== undefined) this.#size = clampSize(cols, rows);
-    const kept = this.#stored();
-    if (kept) { this.#set({ terminalId: kept }); void this.#attach(0, true); }
+    const initial = this.#options.initialTerminalId;
+    const kept = this.#stored() ?? (isTerminalId(initial) ? initial : undefined);
+    if (kept) { this.#store(kept); this.#set({ terminalId: kept }); void this.#attach(0, true); }
     else void this.#create();
   }
 
@@ -304,7 +306,14 @@ export class TerminalSession {
       this.#set({ status: 'failed', error: refusal(error) });
       return;
     }
-    if (attempt !== this.#attempt) return;
+    if (attempt !== this.#attempt) {
+      // A tab may close before create replies. Its late shell must not outlive that tab.
+      const id = result?.terminal?.terminalId;
+      if (this.#view.status === 'closed' && isTerminalId(id)) {
+        try { await this.#options.request('terminal.close', { terminalId: id }); } catch {}
+      }
+      return;
+    }
     const terminalId = result?.terminal?.terminalId;
     if (!isTerminalId(terminalId)) { this.#createId = null; this.#set({ status: 'failed', error: 'The host sent something this app does not understand.' }); return; }
     this.#createId = null;

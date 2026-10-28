@@ -602,3 +602,112 @@ test('Linux environ reads yield to the event loop and fail closed on permission,
   assert.deepEqual(rows[0].markers, [marker]);
   assert.ok(rows.slice(1).every(row => row.markers === undefined));
 });
+
+test('terminal watch atomically snapshots, scopes cursors, resets after reconnect and releases subscriptions', async t => {
+  const home = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-watch-')));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
+  const fake = fakePty();
+  const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} }, spawn: fake.spawn, processes: async () => [], sweepMs: 60000, killGraceMs: 1, platform: 'darwin' });
+  t.after(() => service.shutdown());
+  const alice = { id: 'alice', epoch: 'a', roots: [home] }, bob = { id: 'bob', epoch: 'b' };
+  const events = [], others = [], outside = [];
+  const sink = { send: value => events.push(value) }, other = { send: value => others.push(value) }, excluded = { send: value => outside.push(value) };
+  const first = await service.watch(alice, sink, {});
+  await service.watch(bob, other, {});
+  await service.watch({ ...alice, roots: ['/outside'] }, excluded, {});
+  const made = await service.create(alice, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'a' });
+  assert.equal(events.length, 1);
+  assert.deepEqual(others, []); assert.deepEqual(outside, []);
+  assert.equal(events[0].method, 'terminal.changed');
+  assert.deepEqual(Object.keys(events[0].params).sort(), ['cursor', 'watchId']);
+  const replay = await service.watch(alice, sink, { after: first.cursor });
+  assert.equal(replay.reset, true); assert.equal(replay.terminals[0].terminalId, made.terminal.terminalId);
+  assert.equal(replay.cursor, events[0].params.cursor);
+  assert.equal((await service.watch(alice, sink, { after: replay.cursor })).reset, false);
+  const changedScope = await service.watch({ ...alice, roots: ['/outside'] }, sink, { after: replay.cursor });
+  assert.equal(changedScope.reset, true); assert.deepEqual(changedScope.terminals, []);
+  assert.notEqual(changedScope.watchId, replay.watchId);
+  const newSink = { send() {} };
+  const reconnected = await service.watch(alice, newSink, { after: replay.cursor });
+  assert.equal(reconnected.reset, true); assert.equal(reconnected.terminals.length, 1);
+  service.disconnect(newSink);
+  await service.unwatch(other);
+  await service.close(alice, { terminalId: made.terminal.terminalId });
+  assert.deepEqual(others, []);
+});
+
+test('daemon capture retains rendered state across detach and bounds exited emulators as well as running ones', async t => {
+  const home = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-capture-')));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
+  const fake = fakePty();
+  const outputs = [];
+  const spawn = (...args) => { const pty = fake.spawn(...args); pty.onData = listener => { outputs.push(listener); return { dispose() {} }; }; return pty; };
+  const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} }, spawn, processes: async () => [], sweepMs: 60000, killGraceMs: 1, platform: 'darwin' });
+  t.after(() => service.shutdown());
+  const principal = { id: 'owner', epoch: 'owner' };
+  const first = (await service.create(principal, { workspaceId: 'w', cols: 20, rows: 3, requestId: 'a' })).terminal.terminalId;
+  outputs[0]('secret-old\r\x1b[2Knew\r\nsecond');
+  const sink = { send() {} };
+  await service.attach(principal, sink, { terminalId: first });
+  service.disconnect(sink);
+  assert.deepEqual((await service.capture(principal, { terminalId: first, start: 0, end: 1 })).lines, ['new', 'second']);
+  await assert.rejects(service.capture({ ...principal, epoch: 'other' }, { terminalId: first }), error => error.code === 1001);
+  await assert.rejects(service.capture({ ...principal, roots: ['/other'] }, { terminalId: first }), error => error.code === 1001);
+  fake.made[0].kill(); await Promise.resolve();
+  // More than sixteen retained exited records cannot retain sixteen-plus emulators.
+  for (let i = 0; i < 16; i++) {
+    await service.create(principal, { workspaceId: 'w', cols: 20, rows: 3, requestId: `next-${i}` });
+    fake.made.at(-1).kill(); await Promise.resolve();
+  }
+  await assert.rejects(service.capture(principal, { terminalId: first }), error => error.data?.reason === 'terminal_capture_unavailable');
+  const last = (await service.list(principal, {})).terminals.find(term => term.terminalId !== first);
+  assert.ok(last);
+  await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: false }), { mode: 0o600 });
+  await assert.rejects(service.capture(principal, { terminalId: last.terminalId }), error => error.data?.reason === 'terminal_disabled');
+});
+
+test('historical L5: an unresponsive ps executable is killed at the existing ten-second deadline', { timeout: 15000 }, async t => {
+  const { psProcesses } = await import('@anhlp/alp-daemon/terminals');
+  const { readFile } = await import('node:fs/promises');
+  const bin = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-ps-deadline-')));
+  t.after(() => rm(bin, { recursive: true, force: true }));
+  const pidFile = path.join(bin, 'children');
+  await writeFile(path.join(bin, 'ps'), `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(pidFile)}, process.pid+'\\n');\nsetInterval(() => {}, 1000);\n`, { mode: 0o755 });
+  const saved = process.env.PATH;
+  process.env.PATH = `${bin}:${saved}`;
+  t.after(() => { process.env.PATH = saved; });
+  const before = Date.now();
+  assert.deepEqual(await psProcesses('darwin')(), []);
+  assert.ok(Date.now() - before >= 9900 && Date.now() - before < 14000);
+  const pids = (await readFile(pidFile, 'utf8')).trim().split('\n').map(Number);
+  assert.equal(pids.length, 2, 'both independent ps passes ran');
+  await until(() => pids.every(pid => !alive(pid)), 'both owned fake ps processes killed', 1000);
+});
+
+test('historical L4: running state is sampled before the asynchronous process snapshot', async t => {
+  const home = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-running-snapshot-')));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
+  const fake = fakePty();
+  let first = true;
+  const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} }, spawn: fake.spawn,
+    processes: async () => {
+      if (!first) return [];
+      first = false;
+      fake.made[0].kill();
+      await Promise.resolve();
+      return [{ pid: fake.made[0].pid, ppid: process.pid, pgid: fake.made[0].pid, elapsedMs: 0 }];
+    }, sweepMs: 60000, killGraceMs: 1, platform: 'darwin' });
+  t.after(() => service.shutdown());
+  const signals = [];
+  const original = process.kill;
+  process.kill = (pid, signal) => { if (pid === fake.made[0]?.pid) { signals.push(signal); return true; } return original.call(process, pid, signal); };
+  t.after(() => { process.kill = original; });
+  const principal = { id: 'owner', epoch: 'owner' };
+  const { terminal } = await service.create(principal, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'snapshot' });
+  await service.close(principal, { terminalId: terminal.terminalId });
+  assert.deepEqual(signals, ['SIGHUP'], 'the pre-snapshot running state is used, not a later exit callback');
+  // This controlled ordering test is NOT identity-bound signal proof (B4 remains blocked).
+});

@@ -444,5 +444,16 @@ cases.push({"name":"conditional interrupt with a non-string turn","check":"param
 cases.push({"name":"conditional interrupt canceled the target","check":"result","method":"session.interrupt","valid":true,"value":{"interrupted":true}});
 cases.push({"name":"conditional interrupt left another turn untouched","check":"result","method":"session.interrupt","valid":true,"value":{"interrupted":false}});
 cases.push({"name":"conditional interrupt with a non-boolean answer","check":"result","method":"session.interrupt","valid":false,"value":{"interrupted":"yes"}});
+// Additive terminal screen and directory contract.
+P('terminal.capture', { terminalId: 'term_' + 'a'.repeat(32), start: -2, end: -1, stripAnsi: false });
+P('terminal.capture', { terminalId: 'term_' + 'a'.repeat(32), start: 1.5 }, false, 'fractional index');
+R('terminal.capture', { lines: ['screen'], totalLines: 1 });
+P('terminal.watch', { after: 'a'.repeat(32), workspaceId: 'w' });
+P('terminal.watch', { after: 'bad' }, false, 'bad cursor');
+R('terminal.watch', { terminals: [], watchId: 'a'.repeat(32), cursor: 'b'.repeat(32), reset: true });
+P('terminal.unwatch', {});
+R('terminal.unwatch', { closed: true });
+add('message', 'terminal list invalidation', { jsonrpc: '2.0', method: 'terminal.changed', params: { watchId: 'a'.repeat(32), cursor: 'b'.repeat(32) } });
+add('message', 'terminal list invalidation invalid token', { jsonrpc: '2.0', method: 'terminal.changed', params: { watchId: 'bad', cursor: 'b'.repeat(32) } }, false);
 writeFileSync(out, JSON.stringify({ $comment: 'Golden v1 values (docs/protocol/alp-json-rpc-v1.md §11). check: message (one frame), envelope, params or result of `method`. Every valid case must pass schema/methods-v1.json and the TypeScript projection in src/; every invalid one must fail the schema; `projection: false` marks values the closed TypeScript unions deliberately leave out. Implementations in any language can load this file.', cases }, null, 1) + '\n');
 console.log(cases.length);

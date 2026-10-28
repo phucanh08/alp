@@ -10,36 +10,36 @@ const memory = (initial = {}) => {
 };
 
 test('nothing stored, garbage, another version or a non-object give the defaults', () => {
-  const defaults = { sendBehavior: 'steer', theme: 'system', newSession: {} };
+  const defaults = { sendBehavior: 'steer', theme: 'system', newSession: {}, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } };
   for (const raw of [null, undefined, '', 'not json', '[]', 'null', '42', '"steer"', JSON.stringify({ v: 2, sendBehavior: 'queue' }), JSON.stringify({ sendBehavior: 'queue' })]) {
     assert.deepEqual(parsePreferences(raw), defaults, String(raw));
   }
-  assert.deepEqual({ ...DEFAULT_PREFERENCES, newSession: {} }, defaults);
+  assert.deepEqual({ ...DEFAULT_PREFERENCES, newSession: {}, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } }, defaults);
 });
 
 test('each field falls back on its own; unknown fields are dropped', () => {
   const raw = JSON.stringify({ v: PREFERENCES_VERSION, sendBehavior: 'queue', theme: 'purple', extra: 'x', newSession: { team: 'cafe', mode: 42, model: ' ', thinkingByModel: { 'codex:a': 'high', 'codex:b': 7, '': 'low' } } });
-  assert.deepEqual(parsePreferences(raw), { sendBehavior: 'queue', theme: 'system', newSession: { team: 'cafe', thinkingByModel: { 'codex:a': 'high' } } });
-  assert.deepEqual(parsePreferences(JSON.stringify({ v: 1, sendBehavior: 'interrupt', theme: 'light', newSession: 'cafe' })), { sendBehavior: 'steer', theme: 'light', newSession: {} });
+  assert.deepEqual(parsePreferences(raw), { sendBehavior: 'queue', theme: 'system', newSession: { team: 'cafe', thinkingByModel: { 'codex:a': 'high' } }, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } });
+  assert.deepEqual(parsePreferences(JSON.stringify({ v: 1, sendBehavior: 'interrupt', theme: 'light', newSession: 'cafe' })), { sendBehavior: 'steer', theme: 'light', newSession: {}, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } });
   // Over-long ids are not kept.
   assert.deepEqual(parsePreferences(JSON.stringify({ v: 1, newSession: { team: 'x'.repeat(201) } })).newSession, {});
 });
 
 test('serialize writes the version and known fields only: a token on the object never reaches storage', () => {
   const stored = serializePreferences({ sendBehavior: 'queue', theme: 'dark', newSession: { model: 'codex:gpt', thinkingByModel: { 'codex:gpt': 'high' } }, token: 'alpgw1.secret', gateway: 'https://h' });
-  assert.deepEqual(JSON.parse(stored), { v: 1, sendBehavior: 'queue', theme: 'dark', newSession: { model: 'codex:gpt', thinkingByModel: { 'codex:gpt': 'high' } } });
+  assert.deepEqual(JSON.parse(stored), { v: 1, sendBehavior: 'queue', theme: 'dark', newSession: { model: 'codex:gpt', thinkingByModel: { 'codex:gpt': 'high' } }, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } });
   assert.doesNotMatch(stored, /secret|gateway|https/);
-  assert.deepEqual(parsePreferences(stored), { sendBehavior: 'queue', theme: 'dark', newSession: { model: 'codex:gpt', thinkingByModel: { 'codex:gpt': 'high' } } });
+  assert.deepEqual(parsePreferences(stored), { sendBehavior: 'queue', theme: 'dark', newSession: { model: 'codex:gpt', thinkingByModel: { 'codex:gpt': 'high' } }, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } });
 });
 
 test('load and save through a storage; one that throws gives the defaults and reports the failed save', () => {
   const storage = memory();
-  assert.equal(savePreferences(storage, { sendBehavior: 'queue', theme: 'light', newSession: {} }), true);
+  assert.equal(savePreferences(storage, { sendBehavior: 'queue', theme: 'light', newSession: {}, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } }), true);
   assert.equal(JSON.parse(storage.entries.get(PREFERENCES_KEY)).sendBehavior, 'queue');
-  assert.deepEqual(loadPreferences(storage), { sendBehavior: 'queue', theme: 'light', newSession: {} });
+  assert.deepEqual(loadPreferences(storage), { sendBehavior: 'queue', theme: 'light', newSession: {}, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } });
   const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('quota'); } };
-  assert.deepEqual(loadPreferences(broken), { sendBehavior: 'steer', theme: 'system', newSession: {} });
-  assert.equal(savePreferences(broken, { sendBehavior: 'queue', theme: 'light', newSession: {} }), false);
+  assert.deepEqual(loadPreferences(broken), { sendBehavior: 'steer', theme: 'system', newSession: {}, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } });
+  assert.equal(savePreferences(broken, { sendBehavior: 'queue', theme: 'light', newSession: {}, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } }), false);
   assert.deepEqual(loadPreferences(undefined).sendBehavior, 'steer');
   // Garbage in storage is replaced by the next save.
   const dirty = memory({ [PREFERENCES_KEY]: '{oops' });
@@ -55,4 +55,15 @@ test('remembered New session choices: thinking per model, the team default under
   assert.deepEqual(choices, { mode: 'full-access', thinkingByModel: { 'codex:gpt': 'high', default: 'medium' } });
   choices = rememberChoices(choices, { model: 'codex:gpt' });
   assert.deepEqual(choices, { model: 'codex:gpt', thinkingByModel: { default: 'medium' } });
+});
+
+
+test('terminal preferences tolerate old/malformed values and persist only known settings', () => {
+  const clean = value => parsePreferences(JSON.stringify({ v: 1, terminal: value })).terminal;
+  assert.deepEqual(clean(undefined), { fontSize: 13, fontFamily: 'mono', theme: 'dark' });
+  assert.deepEqual(clean({ fontSize: 999, fontFamily: 'url(evil)', theme: 'evil' }), clean(null));
+  assert.deepEqual(clean({ fontSize: 16, fontFamily: 'consolas', theme: 'light' }), { fontSize: 16, fontFamily: 'consolas', theme: 'light' });
+  const stored = serializePreferences({ ...DEFAULT_PREFERENCES, terminal: { fontSize: 15, fontFamily: 'menlo', theme: 'light', secret: 'no' } });
+  assert.deepEqual(JSON.parse(stored).terminal, { fontSize: 15, fontFamily: 'menlo', theme: 'light' });
+  assert.doesNotMatch(stored, /secret/);
 });

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { ERROR, RPC_ERROR, TERMINAL, TERMINAL_LIMIT_KEYS, isTerminalId } from '@anhlp/alp-protocol';
 import type { TerminalEndReason, TerminalEvent, TerminalInfo, TerminalLimits } from '@anhlp/alp-protocol/rpc';
 import { RpcError } from './rpc-error.js';
+import { TerminalScreen, SCREEN_LIMITS } from './terminal-screen.js';
 
 /**
  * Terminals (capability `terminal`, docs/protocol/alp-json-rpc-v1.md §12.10, issue #121 H): a real
@@ -67,6 +68,7 @@ type Terminal = {
   cols: number;
   rows: number;
   pty: PtyProcess;
+  screen: TerminalScreen;
   pid: number;
   /** The PTY's device as ps names it (ttys004, pts/3): a controlling terminal outlives double forks. */
   tty?: string;
@@ -223,6 +225,19 @@ export function createTerminalService(options: TerminalServiceOptions) {
   const maxBuffered = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
   const terminals = new Map<string, Terminal>();
   const requests = new Map<string, string>();
+  const watchers = new Map<TerminalSink, { principal: TerminalPrincipal; workspaceId?: string; watchId: string; cursor: string }>();
+  const token = () => randomBytes(16).toString('hex');
+  function changed(terminal: Terminal) {
+    for (const [sink, watch] of watchers) {
+      if (watch.principal.id !== terminal.principal.id || watch.principal.epoch !== terminal.principal.epoch || !within(watch.principal, terminal.root) || (watch.workspaceId !== undefined && watch.workspaceId !== terminal.workspaceId)) continue;
+      watch.cursor = token();
+      try { sink.send({ jsonrpc: '2.0', method: 'terminal.changed', params: { watchId: watch.watchId, cursor: watch.cursor } }); } catch { watchers.delete(sink); }
+    }
+  }
+  function snapshot(principal: TerminalPrincipal, workspaceId?: string) {
+    return [...terminals.values()].filter(terminal => terminal.principal.id === principal.id && terminal.principal.epoch === principal.epoch && within(principal, terminal.root) && (workspaceId === undefined || terminal.workspaceId === workspaceId))
+      .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? -1 : 1)).map(info);
+  }
   let spawner: PtySpawn | undefined = options.spawn;
   let loadError: unknown;
   let closed = false;
@@ -312,11 +327,13 @@ export function createTerminalService(options: TerminalServiceOptions) {
     terminal.sink = undefined;
     terminal.detachedAt = now();
     if (reason !== 'disconnected') sink.send({ jsonrpc: '2.0', method: 'terminal.event', params: { terminalId: terminal.id, type: 'detached', reason } satisfies TerminalEvent });
+    changed(terminal);
     audit('terminal detached', terminal, { code: 'ALPD_TERMINAL_DETACHED', reason });
   }
 
   function output(terminal: Terminal, data: string, limits: TerminalLimits) {
     terminal.lastActivityAt = now();
+    terminal.screen.write(data);
     for (const piece of frames(data, limits.maxOutputFrameBytes)) {
       const frame: Frame = { seq: terminal.nextSeq++, data: piece, bytes: Buffer.byteLength(piece) };
       terminal.ring.push(frame);
@@ -403,6 +420,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
     for (const disposable of terminal.disposables) { try { disposable.dispose(); } catch {} }
     requests.delete(terminal.requestKey);
     send(terminal, { terminalId: terminal.id, type: 'exit', seq: terminal.exit.seq, exitCode, signal: signalNumber, reason });
+    changed(terminal);
     audit('terminal ended', terminal, { code: 'ALPD_TERMINAL_ENDED', reason, exitCode, signal: signalNumber });
     void reap(terminal);
   }
@@ -431,7 +449,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
     const at = now();
     for (const terminal of [...terminals.values()]) {
       if (terminal.exit) {
-        if (at - terminal.exit.at >= limits.reconnectMs) terminals.delete(terminal.id);
+        if (at - terminal.exit.at >= limits.reconnectMs) forget(terminal);
         continue;
       }
       if (at >= terminal.expiresAt) void end(terminal, 'lifetime');
@@ -456,6 +474,12 @@ export function createTerminalService(options: TerminalServiceOptions) {
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) if (value !== undefined && !PRIVATE_ENV.test(key)) env[key] = value;
     return { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor', ALP_TERMINAL: '1', ALP_TERMINAL_ID: marker };
+  }
+
+  function forget(terminal: Terminal) {
+    terminal.screen.dispose();
+    terminals.delete(terminal.id);
+    changed(terminal);
   }
 
   const running = (filter: (terminal: Terminal) => boolean) => [...terminals.values()].filter(terminal => !terminal.exit && filter(terminal)).length;
@@ -488,12 +512,19 @@ export function createTerminalService(options: TerminalServiceOptions) {
       }
       if (running(terminal => terminal.principal.id === principal.id) >= limits.maxPerPrincipal) throw new RpcError(ERROR.unavailable, `At most ${limits.maxPerPrincipal} terminals run per principal`, { reason: 'terminal_limit', limit: 'principal' });
       if (running(() => true) >= limits.maxPerDaemon) throw new RpcError(ERROR.unavailable, `At most ${limits.maxPerDaemon} terminals run on this host`, { reason: 'terminal_limit', limit: 'daemon' });
+      // Running terminals are bounded already; exited records must not retain unbounded emulators.
+      const screens = [...terminals.values()].filter(terminal => terminal.screen.available);
+      while (screens.length >= SCREEN_LIMITS.retained) {
+        const oldest = screens.findIndex(terminal => !!terminal.exit);
+        if (oldest < 0) break;
+        screens.splice(oldest, 1)[0]!.screen.dispose();
+      }
       const at = now();
       const marker = `atm_${randomBytes(16).toString('hex')}`;
       const process_ = pty()!(file, [], { name: 'xterm-256color', cols: params.cols, rows: params.rows, cwd: root, env: environment(marker) });
       const terminal: Terminal = {
         id: `term_${randomBytes(16).toString('hex')}`, principal: { id: principal.id, epoch: principal.epoch }, workspaceId: params.workspaceId,
-        root, title: path.basename(file).slice(0, 64), cols: params.cols, rows: params.rows, pty: process_, pid: process_.pid,
+        root, title: path.basename(file).slice(0, 64), cols: params.cols, rows: params.rows, pty: process_, pid: process_.pid, screen: new TerminalScreen(params.cols, params.rows),
         ...(typeof process_.ptsName === 'string' && process_.ptsName.startsWith('/dev/') ? { tty: process_.ptsName.slice('/dev/'.length) } : {}),
         createdAt: at, lastActivityAt: at, expiresAt: at + limits.maxLifetimeMs, requestKey, ring: [], ringBytes: 0, nextSeq: 1,
         detachedAt: at, marker, disposables: [],
@@ -502,16 +533,35 @@ export function createTerminalService(options: TerminalServiceOptions) {
       requests.set(requestKey, terminal.id);
       terminal.disposables.push(process_.onData(data => output(terminal, data, limits)));
       terminal.disposables.push(process_.onExit(({ exitCode, signal: number }) => exited(terminal, terminal.ending ? null : exitCode, number || null)));
+      changed(terminal);
       audit('terminal created', terminal, { code: 'ALPD_TERMINAL_CREATED' });
       return { terminal: info(terminal) };
     },
 
     async list(principal: TerminalPrincipal, params: { workspaceId?: string }) {
       if (supported) await state().catch(() => undefined);
-      const terminals_ = [...terminals.values()]
-        .filter(terminal => terminal.principal.id === principal.id && terminal.principal.epoch === principal.epoch && within(principal, terminal.root) && (params.workspaceId === undefined || terminal.workspaceId === params.workspaceId))
-        .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? -1 : 1));
-      return { terminals: terminals_.map(info) };
+      return { terminals: snapshot(principal, params.workspaceId) };
+    },
+
+    async watch(principal: TerminalPrincipal, sink: TerminalSink, params: { workspaceId?: string; after?: string }) {
+      await ready();
+      const old = watchers.get(sink);
+      const same = old && old.principal.id === principal.id && old.principal.epoch === principal.epoch && JSON.stringify(old.principal.roots) === JSON.stringify(principal.roots) && old.workspaceId === params.workspaceId;
+      const watch = same ? old : { principal: { ...principal, ...(principal.roots ? { roots: [...principal.roots] } : {}) }, workspaceId: params.workspaceId, watchId: token(), cursor: token() };
+      // Register and snapshot in one synchronous step after all configuration awaits.
+      watchers.set(sink, watch);
+      return { terminals: snapshot(principal, params.workspaceId), watchId: watch.watchId, cursor: watch.cursor, reset: params.after !== watch.cursor };
+    },
+    async unwatch(sink: TerminalSink) { watchers.delete(sink); return { closed: true as const }; },
+
+    async capture(principal: TerminalPrincipal, params: { terminalId: string; start?: number; end?: number; stripAnsi?: boolean }) {
+      await ready();
+      const terminal = own(principal, params.terminalId);
+      const result = await terminal.screen.capture(params);
+      // Permission/config and record lifetime may have changed while the parser flushed.
+      await ready();
+      if (own(principal, params.terminalId) !== terminal) throw notFound();
+      return result;
     },
 
     async attach(principal: TerminalPrincipal, sink: TerminalSink, params: { terminalId: string; after?: number }) {
@@ -526,6 +576,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
       const gap = after + 1 < first && after < lastOutput ? { fromSeq: after + 1, toSeq: Math.min(first, lastOutput + 1) - 1 } : undefined;
       for (const frame of terminal.ring) if (frame.seq > after) sink.send({ jsonrpc: '2.0', method: 'terminal.event', params: { terminalId: terminal.id, type: 'output', seq: frame.seq, data: frame.data } satisfies TerminalEvent });
       if (terminal.exit && terminal.exit.seq > after) sink.send({ jsonrpc: '2.0', method: 'terminal.event', params: { terminalId: terminal.id, type: 'exit', seq: terminal.exit.seq, exitCode: terminal.exit.exitCode, signal: terminal.exit.signal, reason: terminal.exit.reason } satisfies TerminalEvent });
+      changed(terminal);
       audit('terminal attached', terminal, { code: 'ALPD_TERMINAL_ATTACHED', after, ...(gap ? { gap: gap.toSeq - gap.fromSeq + 1 } : {}) });
       return { terminal: info(terminal), nextSeq: terminal.nextSeq, ...(gap ? { gap } : {}) };
     },
@@ -547,17 +598,19 @@ export function createTerminalService(options: TerminalServiceOptions) {
       const terminal = own(principal, params.terminalId);
       if (terminal.sink !== sink) throw new RpcError(ERROR.conflict, 'Attach the terminal on this connection first', { reason: 'not_attached' });
       if (terminal.exit || terminal.ending) throw new RpcError(ERROR.conflict, 'The terminal has ended', { reason: 'terminal_exited' });
+      terminal.screen.resize(params.cols, params.rows);
       terminal.pty.resize(params.cols, params.rows);
       terminal.cols = params.cols;
       terminal.rows = params.rows;
+      changed(terminal);
       return { cols: terminal.cols, rows: terminal.rows };
     },
 
     async close(principal: TerminalPrincipal, params: { terminalId: string }) {
       const terminal = own(principal, params.terminalId);
-      if (terminal.exit) { terminals.delete(terminal.id); return { closed: true as const }; }
+      if (terminal.exit) { forget(terminal); return { closed: true as const }; }
       await end(terminal, 'closed');
-      terminals.delete(terminal.id);
+      forget(terminal);
       return { closed: true as const };
     },
 
@@ -566,13 +619,14 @@ export function createTerminalService(options: TerminalServiceOptions) {
       const mine = [...terminals.values()].filter(terminal => terminal.principal.id === principalId);
       const live = mine.filter(terminal => !terminal.exit && !terminal.ending);
       await Promise.all(live.map(terminal => end(terminal, 'revoked')));
-      for (const terminal of mine) terminals.delete(terminal.id);
+      for (const terminal of mine) forget(terminal);
       if (mine.length) log.info('revoked the terminals of a principal', { code: 'ALPD_TERMINAL_REVOKED', principal: principalId, closed: live.length });
       return { closed: live.length };
     },
 
     /** A connection closed: its terminals keep running for reconnectMs. */
     disconnect(sink: TerminalSink) {
+      watchers.delete(sink);
       for (const terminal of terminals.values()) if (terminal.sink === sink) detach(terminal, 'disconnected');
     },
 
@@ -583,7 +637,9 @@ export function createTerminalService(options: TerminalServiceOptions) {
       closed = true;
       clearInterval(timer);
       await Promise.all([...terminals.values()].map(terminal => terminal.exit ? terminal.reaped : end(terminal, 'shutdown')));
+      for (const terminal of terminals.values()) terminal.screen.dispose();
       terminals.clear();
+      watchers.clear();
     },
 
     /** Test hook: pids of every running terminal's shell. */

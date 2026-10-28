@@ -5,7 +5,7 @@ import { encodeTerminalStreamFrame, TerminalStreamOpcode } from '@getpaseo/proto
 import { TerminalInputModeTracker } from '@getpaseo/protocol/terminal-input-mode';
 import { TERMINAL, type DaemonConnection } from '@anhlp/alp-protocol';
 import type { TerminalEvent, TerminalInfo, TerminalLimits } from '@anhlp/alp-protocol/rpc';
-import { alpHome, connect, readLock } from '@anhlp/alp-client/index';
+import { alpHome, connect, readLock, watchTerminals } from '@anhlp/alp-client/index';
 import { frames, readTerminalConfig } from '@anhlp/alp-daemon/terminals';
 import type { ClientContext, Handler } from './gateway.js';
 
@@ -121,7 +121,11 @@ export function createTerminals({
   let conn: Promise<DaemonConnection> | undefined;
   let live: DaemonConnection | undefined;
   let closed = false;
-  let pollTimer: NodeJS.Timeout | undefined;
+  let generation = 0;
+  let directory: ReturnType<typeof watchTerminals> | undefined;
+  let directorySnapshot: TerminalInfo[] = [];
+  let daemonCapabilities: readonly string[] = [];
+  let startingDirectory: Promise<void> | undefined;
   let drainTimer: NodeJS.Timeout | undefined;
   let gateTimer: NodeJS.Timeout | undefined;
   let reconnecting: Promise<void> | undefined;
@@ -138,25 +142,29 @@ export function createTerminals({
 
   // ── alpd ────────────────────────────────────────────────────────────────────────────────────
   async function open(): Promise<DaemonConnection> {
+    const openingGeneration = generation;
     const connection = connectTo ? await connectTo() : await (async () => {
       const lock = await readLock(home);
       if (!lock?.ready) throw new Error('ALP daemon is not running');
       return connect(lock.socket, { name: 'alp-paseo-terminals', version: '1' }) as Promise<DaemonConnection>;
     })();
-    if (closed) { connection.close(); throw new Error('closed'); }
+    if (closed || openingGeneration !== generation) { connection.close(); throw new Error('closed'); }
     if (!connection.onNotification) { connection.close(); throw new Error('This ALP daemon connection carries no terminal events'); }
     connection.onNotification((method, params) => { if (method === 'terminal.event') event(connection, params as TerminalEvent); });
     connection.onClose(() => lost(connection));
     live = connection;
+    daemonCapabilities = connection.capabilities ?? [];
     return connection;
   }
   function daemon() {
-    conn ??= open().catch(error => { conn = undefined; throw error; });
-    return conn;
+    if (conn) return conn;
+    const promise = open().catch(error => { if (conn === promise) conn = undefined; throw error; });
+    conn = promise;
+    return promise;
   }
   function drop(connection: DaemonConnection | undefined) {
     if (!connection) return;
-    if (live === connection) { live = undefined; conn = undefined; }
+    if (live === connection) { directory?.close(false); directory = undefined; directorySnapshot = []; live = undefined; conn = undefined; }
     try { connection.close(); } catch {}
   }
 
@@ -178,10 +186,12 @@ export function createTerminals({
         try {
           const connection = await daemon();
           if (connection.capabilities !== undefined && (connection.terminalLimits !== undefined || !connection.capabilities.includes('terminal'))) {
+            daemonCapabilities = connection.capabilities;
             on = connection.capabilities.includes('terminal');
             if (connection.terminalLimits && typeof connection.terminalLimits === 'object') limits = { ...limits, ...connection.terminalLimits };
           } else {
             const hello = await connection.request('daemon.hello', { protocolVersion: 1 });
+            daemonCapabilities = Array.isArray(hello?.capabilities) ? hello.capabilities : [];
             on = Array.isArray(hello?.capabilities) && hello.capabilities.includes('terminal');
             if (hello?.terminalLimits && typeof hello.terminalLimits === 'object') limits = { ...limits, ...hello.terminalLimits };
           }
@@ -202,7 +212,7 @@ export function createTerminals({
   }
 
   function lost(connection: DaemonConnection) {
-    if (live === connection) { live = undefined; conn = undefined; }
+    if (live === connection) { directory?.close(false); directory = undefined; directorySnapshot = []; live = undefined; conn = undefined; }
     let any = false;
     for (const stream of streams.values()) {
       if (stream.conn !== connection) continue;
@@ -211,16 +221,17 @@ export function createTerminals({
       stream.pending = undefined;
       any = true;
     }
-    if (any && !closed) reconnect();
+    if ((any || directories.size) && !closed) reconnect();
   }
   /** alpd went away: attach every stream again within reconnectMs, else end it. */
   function reconnect() {
     if (reconnecting) return;
+    const reconnectGeneration = generation;
     const deadline = Date.now() + gate.limits.reconnectMs;
     reconnecting = (async () => {
       while (!closed) {
         const waiting = [...streams.values()].filter(stream => stream.state === 'detached');
-        if (!waiting.length) return;
+        if (!waiting.length && !directories.size) return;
         if (Date.now() >= deadline) { for (const stream of waiting) end(stream, LOST); return; }
         await new Promise<void>(resolve => {
           wakeRetry = resolve;
@@ -229,13 +240,16 @@ export function createTerminals({
         });
         retryTimer = undefined;
         wakeRetry = undefined;
-        if (closed) return;
+        if (closed || reconnectGeneration !== generation) return;
         try {
-          await daemon();
+          const connection = await daemon();
+          if (closed || reconnectGeneration !== generation) { drop(connection); return; }
           // Back: the next request reads the switch and alpd's capability again.
           gate.at = -Infinity;
           if (!await available()) return;
+          poll();
           for (const stream of waiting) if (streams.get(stream.id) === stream && stream.state === 'detached') await reattach(stream);
+          return;
         } catch (error: any) {
           log(`terminals: reconnect failed: ${error?.message ?? error}`);
         }
@@ -253,12 +267,16 @@ export function createTerminals({
     if (claimed) { pendingSizes.delete(made.id); made.size = { cols: claimed.cols, rows: claimed.rows }; made.owner = claimed.client; }
     streams.set(made.id, made);
     // While a stream is open the switch is read again even if no request comes: output stops too.
+    watchGate();
+    return made;
+  }
+
+  function watchGate() {
     gateTimer ??= setInterval(() => {
-      if (!streams.size) { clearInterval(gateTimer); gateTimer = undefined; return; }
-      void available();
+      if (!streams.size && !directories.size) { clearInterval(gateTimer); gateTimer = undefined; return; }
+      void available().then(on => { if (on && !closed) poll(); });
     }, Math.max(checkMs, 100));
     gateTimer.unref?.();
-    return made;
   }
 
   /** Attaches (again) after the last seq seen: alpd replays what its ring still has, then answers. */
@@ -384,11 +402,15 @@ export function createTerminals({
    * alpd (best effort) before its connection goes, so none keeps running for alpd's reconnect time.
    */
   function shutdown(error: string) {
+    generation++;
+    if (retryTimer) clearTimeout(retryTimer);
+    wakeRetry?.();
     const closing = [...streams.values()].map(target => target.conn?.request('terminal.close', { terminalId: target.id })
       .catch((failure: any) => log(`terminals: close ${target.id} failed: ${failure?.message ?? failure}`)));
     for (const target of [...streams.values()]) end(target, error);
     pendingSizes.clear();
     // The connection is no longer the bridge's from now on: a new stream opens another one.
+    directory?.close(); directory = undefined; directorySnapshot = [];
     const connection = live;
     if (connection) { live = undefined; conn = undefined; }
     if (connection) {
@@ -432,7 +454,7 @@ export function createTerminals({
   }
   async function running() {
     const connection = await daemon();
-    const [{ terminals }, all] = await Promise.all([connection.request('terminal.list', {}), workspaces()]);
+    const [{ terminals }, all] = await Promise.all([directory ? directory.refresh().then(() => ({ terminals: directorySnapshot })) : connection.request('terminal.list', {}), workspaces()]);
     const byId = new Map(all.map(workspace => [workspace.id, workspace]));
     return { all, terminals: (terminals as TerminalInfo[]).filter(info => info.state === 'running' && byId.has(info.workspaceId)).map(info => ({ info, workspace: byId.get(info.workspaceId)! })) };
   }
@@ -471,15 +493,29 @@ export function createTerminals({
       client.emit({ type: 'terminals_changed', payload: { cwd: sub.cwd, ...(sub.workspaceId ? { workspaceId: sub.workspaceId } : {}), terminals } });
     }
   }
-  /** ALP has no list-change event: while a directory is watched, the list is read every pollMs. */
+  /** Watch-capable hosts use atomic snapshots; older hosts explicitly fall back to polling. */
   function poll() {
-    if (directories.size && !pollTimer) {
-      pollTimer = setInterval(changed, pollMs);
-      pollTimer.unref?.();
-    } else if (!directories.size && pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = undefined;
-    }
+    if (!directories.size) { directory?.close(); directory = undefined; directorySnapshot = []; return; }
+    if (closed) return;
+    watchGate();
+    if (directory || startingDirectory) return;
+    startingDirectory = (async () => {
+      if (!await available() || closed || !directories.size) return;
+      const connection = await daemon();
+      if (closed || !directories.size || directory) return;
+      directory = watchTerminals(connection, {
+        capabilities: daemonCapabilities, pollMs,
+        onMode: mode => log(`terminals: directory mode ${mode}${mode === 'polling' ? ' (older host)' : ''}`),
+        onSnapshot: terminals => {
+          if (closed) return;
+          const different = JSON.stringify(directorySnapshot) !== JSON.stringify(terminals);
+          directorySnapshot = terminals;
+          if (different) changed();
+        },
+        onError: error => log(`terminals: directory failed: ${error instanceof Error ? error.message : String(error)}`),
+      });
+      await directory.ready;
+    })().catch(error => log(`terminals: directory unavailable: ${error instanceof Error ? error.message : String(error)}`)).finally(() => { startingDirectory = undefined; });
   }
 
   function slotFor(client: ClientContext, terminalId: string) {
@@ -525,6 +561,22 @@ export function createTerminals({
       let workspace: TerminalWorkspace;
       try { workspace = workspaceOf(state.all, message.cwd, message.workspaceId); } catch { return reply([]); }
       return reply(state.terminals.filter(entry => entry.workspace.id === workspace.id).map(({ info }) => paseo(info, workspace)));
+    },
+
+    async capture_terminal_request(message: Inbound<'capture_terminal_request'>) {
+      if (!await available()) throw new Refused(TERMINALS_OFF);
+      const entry = await find(message.terminalId);
+      if (!entry) throw new Refused('No such terminal');
+      const connection = await daemon();
+      const result = await connection.request('terminal.capture', {
+        terminalId: entry.info.terminalId,
+        ...(message.start !== undefined ? { start: message.start } : {}),
+        ...(message.end !== undefined ? { end: message.end } : {}),
+        stripAnsi: message.stripAnsi ?? true,
+      });
+      gate.at = -Infinity;
+      if (!await available()) throw new Refused(TERMINALS_OFF);
+      return { type: 'capture_terminal_response', payload: { terminalId: entry.info.terminalId, lines: result.lines, totalLines: result.totalLines, requestId: message.requestId } } satisfies Outbound;
     },
 
     async subscribe_terminals_request(message: Inbound<'subscribe_terminals_request'>, client) {
@@ -673,6 +725,8 @@ export function createTerminals({
     },
     close() {
       closed = true;
+      generation++;
+      directory?.close(); directory = undefined; directorySnapshot = [];
       if (retryTimer) clearTimeout(retryTimer);
       wakeRetry?.();
       for (const [connection, timer] of retiring) {
@@ -680,10 +734,9 @@ export function createTerminals({
         try { connection.close(); } catch {}
       }
       retiring.clear();
-      if (pollTimer) clearInterval(pollTimer);
       if (drainTimer) clearInterval(drainTimer);
       if (gateTimer) clearInterval(gateTimer);
-      pollTimer = drainTimer = gateTimer = undefined;
+      drainTimer = gateTimer = undefined;
       streams.clear();
       directories.clear();
       drop(live);

@@ -26,3 +26,5 @@ export { MAX_TIMER_MS, timerDelay } from './rpc/timers.js';
 export { hello } from './rpc/handshake.js';
 export { backoffDelay, createReconnectingClient, retryable } from './rpc/reconnect.js';
 export { attachments, base64Encode, conversation, sha256Hex, workspaceRegistry } from './rpc/registry.js';
+
+export { watchTerminals } from "./rpc/terminal-directory.js";

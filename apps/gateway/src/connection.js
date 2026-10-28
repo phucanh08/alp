@@ -356,6 +356,7 @@ export class ClientConnection {
   /** @type {import('@anhlp/alp-protocol').AttachmentLimits} */ #attachmentLimits = gatewayAttachmentLimits(undefined);
   /** @type {import('@anhlp/alp-protocol').TerminalLimits} */ #terminalLimits = gatewayTerminalLimits(undefined);
   /** alpd's terminal output events do not fit this gateway's frames: terminal.* is refused. */ #terminalFramesTooSmall = false;
+  #terminalWatching = false;
   /** Terminals this connection attached: only their terminal.event notifications leave (§5.18). @type {Set<string>} */ #terminals = new Set();
 
   /**
@@ -405,11 +406,11 @@ export class ClientConnection {
     // Remember compatibility even while the host switch is off: it can be enabled later.
     this.#terminalFramesTooSmall = !(Number.isSafeInteger(daemonFrames) && daemonFrames <= this.#terminalLimits.maxOutputFrameBytes);
     if (this.#terminalFramesTooSmall) {
-      this.#capabilities = this.#capabilities.filter(capability => capability !== 'terminal');
+      this.#capabilities = this.#capabilities.filter(capability => capability !== 'terminal' && capability !== 'terminal.capture');
       this.#terminalFramesTooSmall = true;
       this.#log.warn('alpd\'s terminal output does not fit this gateway\'s frame limit; terminals are not forwarded', { code: 'ALP_GATEWAY_TERMINAL_FRAME' });
     }
-    client.onNotification((method, params) => { if (method === 'terminal.event') this.#terminalEvent(params); });
+    client.onNotification((method, params) => { if (method === 'terminal.event') this.#terminalEvent(params); else if (method === 'terminal.changed') this.#terminalChanged(params); });
     client.onEvent(envelope => { if (!this.#capabilities.includes('workspace.worktree') || !this.#grant.permissions.has('workspace.manage')) { this.#event(envelope); return; } this.#eventTail = this.#eventTail.then(async () => { await this.#refreshWorktrees(); this.#event(envelope); }).catch(() => { this.close(CLOSE_CODE.internal, 'Workspace authority unavailable; reconnect'); }); });
     client.onClose(error => this.#upstreamClosed(error));
   }
@@ -1100,6 +1101,14 @@ export class ClientConnection {
     this.#push(JSON.stringify({ jsonrpc: '2.0', method: 'terminal.event', params: event }));
   }
 
+  /** Only this connection's authorized watch gets opaque invalidations; never host terminal data.
+   * @param {any} raw */
+  #terminalChanged(raw) {
+    if (this.#closed || !this.#terminalWatching || !this.#grant.permissions.has('terminal.exec')) return;
+    if (!/^[0-9a-f]{32}$/.test(raw?.watchId) || !/^[0-9a-f]{32}$/.test(raw?.cursor)) return;
+    this.#push(JSON.stringify({ jsonrpc: '2.0', method: 'terminal.changed', params: { watchId: raw.watchId, cursor: raw.cursor } }));
+  }
+
   /** alpd's refusal of a terminal call: a fixed text per known reason, its code and reason, `limit` only. @param {unknown} caught */
   #terminalError(caught) {
     const error = /** @type {any} */ (caught);
@@ -1761,6 +1770,29 @@ export class ClientConnection {
       const result = /** @type {any} */ (await this.#terminalCall('terminal.list', params));
       if (!Array.isArray(result?.terminals)) throw new GatewayError(ERROR.failed, 'The daemon host answered a list the gateway does not pass on');
       return { terminals: result.terminals.map((/** @type {unknown} */ entry) => this.#terminalAnswer(entry, 'terminal.list')) };
+    },
+    'terminal.watch': async params => {
+      if (params.workspaceId !== undefined) await this.#registryWorkspace(params.workspaceId);
+      this.#terminalWatching = true;
+      try {
+        const result = /** @type {any} */ (await this.#terminalCall('terminal.watch', params));
+        if (!Array.isArray(result?.terminals) || !/^[0-9a-f]{32}$/.test(result.watchId) || !/^[0-9a-f]{32}$/.test(result.cursor) || typeof result.reset !== 'boolean') throw new GatewayError(ERROR.failed, 'Invalid terminal snapshot from daemon host');
+        const safe = { terminals: result.terminals.map((/** @type {unknown} */ entry) => this.#terminalAnswer(entry, 'terminal.watch')), watchId: result.watchId, cursor: result.cursor, reset: result.reset };
+        if (Buffer.byteLength(JSON.stringify(safe)) > (this.#limits.maxFrame ?? 512 * 1024) - 1024) throw new GatewayError(GATEWAY_ERROR.unavailable, 'Terminal snapshot exceeds this gateway frame limit; select a workspace', { reason: 'terminal_snapshot_too_large' });
+        return safe;
+      } catch (error) { this.#terminalWatching = false; throw error; }
+    },
+    'terminal.unwatch': async () => {
+      this.#terminalWatching = false;
+      await this.#call('terminal.unwatch', {});
+      return { closed: true };
+    },
+    'terminal.capture': async params => {
+      const result = /** @type {any} */ (await this.#terminalCall('terminal.capture', params));
+      if (!Array.isArray(result?.lines) || !result.lines.every((/** @type {unknown} */ line) => typeof line === 'string') || !Number.isSafeInteger(result.totalLines) || result.totalLines < 0 || result.lines.length > result.totalLines) throw new GatewayError(ERROR.failed, 'The daemon host answered a capture the gateway does not pass on');
+      const safe = { lines: result.lines, totalLines: result.totalLines };
+      if (Buffer.byteLength(JSON.stringify(safe)) > (this.#limits.maxFrame ?? 512 * 1024) - 1024) throw new GatewayError(GATEWAY_ERROR.unavailable, 'Terminal capture exceeds this gateway frame limit; select a smaller line range', { reason: 'terminal_capture_too_large' });
+      return safe;
     },
     'terminal.attach': async params => {
       // Its replay arrives before the answer: the terminal is this connection's from now on.
