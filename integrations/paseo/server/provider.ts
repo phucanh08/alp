@@ -6,6 +6,7 @@ import { createAlpRuntime, type RuntimeOptions } from '@anhlp/alp-runtime/index'
 import { createDaemonServer } from '@anhlp/alp-daemon/server';
 import { alpHome, connect, lockAlive, readLock } from '@anhlp/alp-client/index';
 import { daemonHeld, startDaemon } from '@anhlp/alp-client/supervise';
+import type { DaemonConnection } from '@anhlp/alp-protocol';
 import type { ProviderRegistration } from './compat.js';
 import { models as runtimeModels, modes, teamModels, templates, toSessionSpec } from './mapping.js';
 import { createAlpProvider, type ProviderBackend } from './provider-core.js';
@@ -120,12 +121,36 @@ async function openBackend(options: Options): Promise<ProviderBackend> {
     return { client, async shutdown() { client.close(); await runtime.shutdown(); } };
   }
   const where = home ?? alpHome();
-  const open = async (demand: boolean) => {
+  let closed = false;
+  const open = async (demand: boolean, signal?: AbortSignal) => {
+    if (closed || signal?.aborted) throw new Error('Provider connection is closed');
     const lock = await readLock(where);
+    if (closed || signal?.aborted) throw new Error('Provider connection is closed');
     if (!demand && !(lockAlive(lock) && lock.ready) && await daemonHeld(where)) throw new Error('alpd was stopped with alp daemon stop');
-    return connect(await startDaemon({ home: where, entry: daemonEntry(entry, _paseoHome) }), { name: 'alp-paseo', version: '1' });
+    if (closed || signal?.aborted) throw new Error('Provider connection is closed');
+    const socket = await startDaemon({ home: where, entry: daemonEntry(entry, _paseoHome) });
+    let connection: DaemonConnection | undefined;
+    try {
+      if (closed || signal?.aborted) throw new Error('Provider connection is closed');
+      connection = await connect(socket, { name: 'alp-paseo', version: '1' });
+      if (closed || signal?.aborted) {
+        try { connection.close(); } catch {}
+        throw new Error('Provider connection is closed');
+      }
+      return connection;
+    } catch (error) {
+      if (connection) { try { connection.close(); } catch {} }
+      throw error;
+    }
   };
-  return { client: await open(true), async shutdown(client) { client.close(); }, relink: open };
+  return {
+    client: await open(true),
+    async shutdown(client) {
+      closed = true;
+      client.close();
+    },
+    relink: open,
+  };
 }
 
 export function createProvider(options: Options = {}): ProviderRegistration {

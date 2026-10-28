@@ -48,7 +48,7 @@ export type ProviderBackend = {
    * the user stopped it on purpose and nobody has asked for it since (`demand`); remotely it asks
    * the gateway for a new ticket and connects again.
    */
-  relink?(demand: boolean): Promise<DaemonConnection>;
+  relink?(demand: boolean, signal?: AbortSignal): Promise<DaemonConnection>;
 };
 
 export type TeamModel = { id: string; label: string; description?: string; thinkingOptions: never[] };
@@ -89,6 +89,8 @@ export type ProviderStrategy = {
    * this machine is read) a prompt with an uploaded file fails and nothing is sent.
    */
   readUpload?(file: UploadedFile, maxBytes: number): Promise<Uint8Array>;
+  /** Timeout in ms to wait during close() for an in-flight relink to finish (default: 5_000). */
+  relinkCloseTimeoutMs?: number;
 };
 
 /** JSON-RPC codes that settle a root's fate on reattach: gone (1001), refused (1003), malformed. */
@@ -108,6 +110,8 @@ export function endsRoot(error: unknown) {
 
 /** How long a request waits for alpd to come back before it fails. */
 const RELINK_WAIT_MS = 20_000;
+/** How long close() waits for an in-flight relink to finish before proceeding. */
+const RELINK_CLOSE_TIMEOUT_MS = 5_000;
 
 /** The attachment limits the provider uses: those it checks before a byte moves, from daemon.hello. */
 type PromptFileLimits = Pick<AttachmentLimits, 'maxObjectBytes' | 'maxPerPrompt' | 'maxPromptBytes' | 'maxChunkBytes'>;
@@ -205,12 +209,14 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
       const toAlpd = (sessionId: string) => alpdIds.get(sessionId) ?? sessionId;
       const toPaseo = (sessionId: string) => paseoIds.get(sessionId) ?? sessionId;
       let closed = false;
+      let closing: Promise<void> | undefined;
       /** Roots' directories, to reopen one that alpd no longer has open after a restart. */
       const cwds = new Map<string, string>();
       /** Roots alpd did not reopen after a restart: the next prompt reopens them. */
       const dormant = new Set<string>();
       /** A reconnection to alpd in progress; `demanded` once the user asks for something meanwhile. */
       let relinking: Promise<void> | undefined;
+      let relinkAbort: AbortController | undefined;
       let demanded = false;
       let lastError: unknown;
       /** Set when reconnecting cannot help (finalLinkError): requests fail with it. */
@@ -389,8 +395,13 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
           let next: DaemonConnection | undefined;
           const stops: Array<() => void> = [];
           try {
-            next = await backend.relink!(demanded);
-            if (closed) { next.close(); return; }
+            relinkAbort = new AbortController();
+            next = await backend.relink!(demanded, relinkAbort.signal);
+            if (closed) {
+              for (const stop of stops) stop();
+              try { next?.close(); } catch {}
+              return;
+            }
             let dropped: unknown;
             // Replay arrives before each attach answer, so events are projected from the start.
             stops.push(next.onEvent(envelope => project(envelope, true)));
@@ -400,7 +411,11 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
               if (dropped !== undefined || next.closed) throw dropped ?? new Error('ALP daemon connection closed');
               await reattach(next, sessionId);
             }
-            if (closed) { next.close(); return; }
+            if (closed) {
+              for (const stop of stops) stop();
+              try { next?.close(); } catch {}
+              return;
+            }
             if (dropped !== undefined || next.closed) throw dropped ?? new Error('ALP daemon connection closed');
             for (const stop of stops) stop();
             client = next;
@@ -412,15 +427,17 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
           } catch (error) {
             lastError = error;
             for (const stop of stops) stop();
-            if (next && next !== client) { try { next.close(); } catch {} }
+            if (next && next !== client) { try { next?.close(); } catch {} }
+            if (closed) return;
             if (strategy.finalLinkError?.(error)) {
               dead = error;
               for (const sessionId of roots) emit({ type: 'session.runtime_failed', sessionId, error: errorData(error) });
               roots.clear();
               return;
             }
-            if (closed) return;
             await backoff(attempt);
+          } finally {
+            relinkAbort = undefined;
           }
         }
       }
@@ -744,13 +761,28 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
           }
         },
 
-        async close() {
-          closed = true;
-          wakeBackoff?.();
-          await Promise.all([...roots].map(sessionId => client.request('session.release', { sessionId: toAlpd(sessionId) }).catch(() => {})));
-          roots.clear();
-          await backend.shutdown(client);
-          listeners.clear();
+        close() {
+          closing ??= (async () => {
+            closed = true;
+            wakeBackoff?.();
+            relinkAbort?.abort();
+            if (relinking) {
+              let timer: NodeJS.Timeout | undefined;
+              const timeout = new Promise<void>(resolve => {
+                timer = setTimeout(resolve, strategy.relinkCloseTimeoutMs ?? RELINK_CLOSE_TIMEOUT_MS);
+              });
+              try {
+                await Promise.race([relinking.catch(() => {}), timeout]);
+              } finally {
+                clearTimeout(timer);
+              }
+            }
+            await Promise.all([...roots].map(sessionId => client.request('session.release', { sessionId: toAlpd(sessionId) }).catch(() => {})));
+            roots.clear();
+            await backend.shutdown(client);
+            listeners.clear();
+          })();
+          return closing;
         },
       };
     },
