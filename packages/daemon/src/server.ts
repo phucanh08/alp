@@ -696,8 +696,10 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** Retention while alpd runs: receipts past their window, then expired trees; temporary files stay, as writes may be under way. */
+  let sweeping = false;
   async function sweep() {
-    if (closing || !store) return;
+    if (closing || !store || sweeping) return;
+    sweeping = true;
     try {
       await restored;
       await store.pruneReceipts(RECEIPT_RETENTION_MS, { temporaries: false });
@@ -705,6 +707,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       await expire(trees(records.values()));
     } catch (error) {
       recoveryLog.warn('retention sweep failed', { code: 'ALP_RETENTION_FAILED', error });
+    } finally {
+      sweeping = false;
     }
   }
   const sweeper = store ? setInterval(() => void sweep(), retentionSweepMs) : undefined;
