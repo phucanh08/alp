@@ -24,12 +24,13 @@ after(async () => {
 /** A service entry: records how it was started, then publishes its ready lock and <name>.json and stays up. */
 function entrySource(tag) {
   return `import { mkdirSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 const home = process.env.ALP_HOME, name = process.env.TEST_INTEGRATION_NAME;
 writeFileSync(path.join(home, ${JSON.stringify(`started-${tag}.json`)}), JSON.stringify({ argv: process.argv.slice(2), home, pid: process.pid }));
 mkdirSync(path.join(home, 'integrations'), { recursive: true });
 writeFileSync(path.join(home, name + '.json'), JSON.stringify({ pid: process.pid }));
-writeFileSync(path.join(home, 'integrations', name + '.lock'), JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), ready: true }));
+writeFileSync(path.join(home, 'integrations', name + '.lock'), JSON.stringify({ pid: process.pid, bootTime: Math.round((Date.now() - os.uptime() * 1000) / 1000), startedAt: new Date().toISOString(), ready: true }));
 setInterval(() => {}, 60_000);
 `;
 }
