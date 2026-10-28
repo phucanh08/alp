@@ -126,7 +126,7 @@ test('a Paseo connection survives alpd going away: it reconnects, and the next p
   const launched = () => readFile(launches, 'utf8').then(text => text.split('\n').filter(Boolean), error => { if (error.code === 'ENOENT') return []; throw error; });
   // An alpd in this process over a durable store; its lock names this process.
   async function daemon() {
-    const runtime = createAlpRuntime({ transport: fakeRuntime(runtimes) });
+    const runtime = createAlpRuntime({ libraryDir: path.join(home, 'library'), transport: fakeRuntime(runtimes) });
     const store = createStore(path.join(home, 'state'));
     const server = createDaemonServer({ runtime, socketPath: socket, version: 'test', store });
     await server.listen();
@@ -224,6 +224,24 @@ test('daemonEntry resolves explicit candidate, Paseo plugin directory, or host C
 
   // Resolve with explicit paseoHome
   assert.equal(daemonEntry(undefined, paseoHome), bundledAlpd);
+
+  const unrelated = path.join(tempDir, 'unrelated');
+  await mkdir(path.join(unrelated, 'server', 'dist'), { recursive: true });
+  await writeFile(path.join(unrelated, 'server', 'dist', 'alpd.js'), '// other daemon');
+  await writeFile(path.join(paseoHome, 'config.json'), JSON.stringify({ plugins: {
+    other: { path: unrelated, enabled: true },
+    'alp-provider': { path: mockPluginDir, enabled: true },
+  } }));
+  assert.equal(daemonEntry(undefined, paseoHome), bundledAlpd, 'unrelated-first registration is ignored');
+
+  // Disabled and unrelated registrations cannot select a daemon binary.
+  for (const plugins of [
+    { 'alp-provider': { path: mockPluginDir, enabled: false } },
+    { other: { path: mockPluginDir, enabled: true } },
+  ]) {
+    await writeFile(path.join(paseoHome, 'config.json'), JSON.stringify({ plugins }));
+    assert.notEqual(daemonEntry(undefined, paseoHome), bundledAlpd);
+  }
 
   // 3. Fallback to CLI or environment when explicit is missing/invalid
   const nonExistent = path.join(tempDir, 'missing.js');

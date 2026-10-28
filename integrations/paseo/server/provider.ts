@@ -49,8 +49,8 @@ export function daemonEntry(explicit?: string, paseoHome?: string) {
       const configFile = path.join(home, 'config.json');
       if (existsSync(configFile)) {
         const config = JSON.parse(readFileSync(configFile, 'utf8'));
-        for (const plugin of Object.values(config.plugins ?? {}) as Array<{ path?: string }>) {
-          if (plugin?.path) {
+        for (const [id, plugin] of Object.entries(config.plugins ?? {}) as Array<[string, { path?: string; enabled?: boolean }]>) {
+          if (id === 'alp-provider' && plugin?.enabled === true && plugin.path) {
             const entry = path.join(plugin.path, 'server', 'dist', 'alpd.js');
             if (existsSync(entry)) return entry;
             const distEntry = path.join(plugin.path, 'dist', 'alpd.js');
@@ -128,7 +128,7 @@ async function openBackend(options: Options): Promise<ProviderBackend> {
     if (closed || signal?.aborted) throw new Error('Provider connection is closed');
     if (!demand && !(lockAlive(lock) && lock.ready) && await daemonHeld(where)) throw new Error('alpd was stopped with alp daemon stop');
     if (closed || signal?.aborted) throw new Error('Provider connection is closed');
-    const socket = await startDaemon({ home: where, entry: daemonEntry(entry, _paseoHome) });
+    const socket = await startDaemon({ home: where, entry: daemonEntry(entry, _paseoHome), signal });
     let connection: DaemonConnection | undefined;
     try {
       if (closed || signal?.aborted) throw new Error('Provider connection is closed');

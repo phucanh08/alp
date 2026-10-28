@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
 import { bootTime, daemonPaths } from '@anhlp/alp-client';
+import { startDaemon } from '@anhlp/alp-client/supervise';
+import { withDaemonLifecycle } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { createAlpProvider } from '../server/dist/provider-core.js';
@@ -235,7 +237,7 @@ test('defensive: if backend.relink resolves after close timeout, connection is c
   }, /closed/);
 });
 
-test('real createProvider: close() settles relink and never starts daemon or leaks after home deletion', async () => {
+test('real createProvider: cancelled queued relink never launches after admission is released', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-relink-close-home-'));
   const home = path.join(directory, 'home');
   const record = await mkdtemp(path.join(tmpdir(), 'alp-relink-close-record-'));
@@ -245,7 +247,7 @@ test('real createProvider: close() settles relink and never starts daemon or lea
   const launched = () => readFile(launches, 'utf8').then(text => text.split('\n').filter(Boolean), error => { if (error.code === 'ENOENT') return []; throw error; });
 
   const { socket } = daemonPaths(home);
-  const runtime = createAlpRuntime({ transport: { async init() {}, async list() { return []; }, async open() { throw new Error('noop'); } } });
+  const runtime = createAlpRuntime({ libraryDir: path.join(home, 'library'), transport: () => ({ initialize: async () => {}, onNotification() {}, onFailure() {}, onRequest() {}, close: async () => {}, request: async method => method.startsWith('thread/') ? { thread: { id: 'native', turns: [] } } : {} }) });
   const store = createStore(path.join(home, 'state'));
   const server = createDaemonServer({ runtime, socketPath: socket, version: 'test', store });
   await server.listen();
@@ -255,28 +257,49 @@ test('real createProvider: close() settles relink and never starts daemon or lea
   const conn = await createProvider({ home, daemonEntry: entry }).connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
   conn.onEvent(e => events.push(e));
 
-  // Crash daemon to trigger relink
+  const root = path.join(directory, 'project');
+  await mkdir(path.join(root, '.alp', 'agents', 'main'), { recursive: true });
+  await writeFile(path.join(root, '.alp', 'agents', 'main', 'AGENT.md'), 'Agent main');
+  await conn.send({ type: 'session.open', requestId: 'open', sessionId: 's', history: 'skip', config: { cwd: root, env: {}, settings: {}, mcpServers: {}, systemPrompt: '', persist: true } });
+  assert.ok(events.some(e => e.type === 'session.opened'), 'root opened before disconnect');
+  let release;
+  let admitted;
+  const entered = new Promise(resolve => { admitted = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const blocking = withDaemonLifecycle(home, 'stop', async () => { admitted(); await gate; });
+  await entered;
+  t.after(async () => {
+    release();
+    await blocking;
+    await conn.close();
+    await server.close();
+    await runtime.shutdown();
+    await rm(directory, { recursive: true, force: true });
+    await rm(record, { recursive: true, force: true });
+  });
+  // Remove the live test PID lock: relink must now reach the actual start branch.
+  await unlink(daemonPaths(home).lock);
   await store.flush();
   await server.close();
-  await runtime.shutdown();
-
-  // Wait for provider to detect connection loss and start relinking
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline && !events.some(e => e.type === 'timeline.item' && /lost its connection to alpd/.test(e.item?.message ?? ''))) {
-    await new Promise(r => setTimeout(r, 20));
-  }
-
-  // Close provider while relink is attempting to reconnect
+  const until = async (check, label) => {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      if (await check()) return;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.fail(label);
+  };
+  await until(() => events.some(e => e.type === 'timeline.item' && /lost its connection to alpd/.test(e.item?.message ?? '')), 'opened root observes disconnect');
+  await until(async () => (await readdir(path.join(home, 'state'))).some(name => name.startsWith('alpd.starting-owner-')), 'relink queues behind lifecycle owner');
   await conn.close();
-
-  // Clean up home directory
-  await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-
-  // Give any background starts a chance to run if not stopped
-  await new Promise(r => setTimeout(r, 300));
-
-  // Assert NO daemon was started by the provider
-  assert.deepEqual(await launched(), [], 'no alpd was started by provider after close');
-
-  await rm(record, { recursive: true, force: true });
+  // Release only after close has returned (including its bounded join on broken code).
+  release();
+  await blocking;
+  // Verify cancellation does not block another caller's admission.
+  await withDaemonLifecycle(home, 'stop', async () => {});
+  await until(async () => !(await readdir(path.join(home, 'state'))).some(name => name.startsWith('alpd.starting')), 'cancelled admission leaves no candidates');
+  assert.deepEqual(await launched(), [], 'cancelled queued relink must never launch');
+  // Positive control: the same unlocked home and entry really launch when not cancelled.
+  await assert.rejects(startDaemon({ home, entry }), /launcher exited/);
+  assert.equal((await launched()).length, 1, 'control reaches actual child launch');
 });
