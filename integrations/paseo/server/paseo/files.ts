@@ -13,6 +13,7 @@ import { git } from './git.js';
 
 type Inbound<T extends SessionInboundMessage['type']> = Extract<SessionInboundMessage, { type: T }>;
 type Outbound = SessionOutboundMessage;
+type Rpc = (method: string, params: any) => Promise<any>;
 type Entry = { path: string; kind: 'file' | 'directory' };
 
 /** Folders a search never walks into: big, generated, or (on macOS) behind a consent prompt. */
@@ -97,7 +98,7 @@ async function workspaceEntries(root: string): Promise<Entry[]> {
   return entries;
 }
 
-async function workspaceSearch(message: Inbound<'directory_suggestions_request'>, root: string, limit: number): Promise<Entry[]> {
+async function workspaceSearch(message: Inbound<'directory_suggestions_request'>, root: string, limit: number, rpc?: Rpc): Promise<Entry[]> {
   const wantFiles = message.includeFiles === true;
   const wantDirectories = message.includeDirectories !== false;
   const keep = (entry: Entry) => entry.kind === 'file' ? wantFiles : wantDirectories;
@@ -107,7 +108,16 @@ async function workspaceSearch(message: Inbound<'directory_suggestions_request'>
       .map((entry): Entry => ({ path: entry.name, kind: entry.isDirectory() ? 'directory' : 'file' })).filter(keep)
       .sort((a, b) => a.path.localeCompare(b.path)).slice(0, limit);
   }
-  const all = (await workspaceEntries(root)).filter(keep);
+  let all: Entry[];
+  if (rpc && wantFiles && !wantDirectories && message.matchMode !== 'suffix') {
+    // The daemon's ranking differs from this adapter's. Only a complete name set
+    // can be ranked here without losing a better match beyond its result limit.
+    const result = await rpc('workspace.files.search', { projectRoot: root, query: '', limit: 100 });
+    // Truncation is an unsupported completeness boundary, never an authorization
+    // error. Keep the legacy bounded enumeration in that case; refusals propagate.
+    all = result.truncated ? (await workspaceEntries(root)).filter(keep)
+      : result.files.map((file: { path: string }): Entry => ({ path: file.path, kind: 'file' }));
+  } else all = (await workspaceEntries(root)).filter(keep);
   if (message.matchMode === 'suffix') {
     const wanted = query.toLowerCase();
     return all.filter(entry => entry.path.toLowerCase() === wanted || entry.path.toLowerCase().endsWith(`/${wanted}`)).sort((a, b) => a.path.length - b.path.length).slice(0, limit);
@@ -122,12 +132,12 @@ async function workspaceSearch(message: Inbound<'directory_suggestions_request'>
     .slice(0, limit).map(row => row.entry);
 }
 
-export async function directorySuggestions(message: Inbound<'directory_suggestions_request'>): Promise<Outbound> {
+export async function directorySuggestions(message: Inbound<'directory_suggestions_request'>, rpc?: Rpc): Promise<Outbound> {
   const limit = message.limit ?? 30;
   try {
     const cwd = message.cwd?.trim();
     const query = message.query.trim();
-    const entries = cwd ? await workspaceSearch(message, path.resolve(expand(cwd)), limit)
+    const entries = cwd ? await workspaceSearch(message, path.resolve(expand(cwd)), limit, rpc)
       : !query ? []
       : path.isAbsolute(query) || query.startsWith('~') ? await pathCompletions(query, limit)
       : await homeSearch(query, limit);

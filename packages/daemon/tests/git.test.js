@@ -241,6 +241,13 @@ test('status: branch, upstream, base branch, remote without credentials, detache
   assert.equal(status.remoteUrl, 'https://github.com/acme/repo.git');
   assert.ok(!JSON.stringify(status).includes('secrettoken'));
 
+  for (const malformed of ['github.com:org@evil:x', 'user:pa/ss@host:repo', 'https://user:pa/ss@host:repo', 'ssh://user:pa/ss@host:repo']) {
+    git('config', 'remote.origin.url', malformed);
+    const refused = checked('workspace.git.status', await reader.status('w'), base);
+    assert.equal(refused.remoteUrl, null, malformed);
+    assert.ok(!JSON.stringify(refused).includes('pa/ss'));
+  }
+
   git('checkout', '-q', '--detach', 'HEAD~1');
   status = checked('workspace.git.status', await reader.status('w'), base);
   assert.deepEqual([status.branch, status.detached, status.upstream, status.aheadBehind, status.head], [null, true, null, null, git('rev-parse', 'HEAD').trim()]);
@@ -265,8 +272,8 @@ test('remote URLs lose credentials, queries and local paths; branch names are na
   assert.equal(scrubRemoteUrl('https://x-access-token:tok@github.com/a/b.git'), 'https://github.com/a/b.git');
   assert.equal(scrubRemoteUrl('ssh://git@github.com:22/a/b.git'), 'ssh://github.com:22/a/b.git');
   assert.equal(scrubRemoteUrl('git@github.com:a/b.git'), 'github.com:a/b.git');
-  assert.equal(scrubRemoteUrl('user:s3cret@github.com:a/b.git'), 'github.com:a/b.git', 'a password in scp-like user information');
-  assert.equal(scrubRemoteUrl('a@b:c@github.com:org/x.git'), 'github.com:org/x.git');
+  assert.equal(scrubRemoteUrl('user:s3cret@github.com:a/b.git'), null, 'ambiguous scp user information is refused');
+  for (const value of ['a@b:c@github.com:org/x.git', 'github.com:org@evil:x', 'user:pa/ss@host:repo', 'https://user:pa/ss@host:repo', 'ssh://user:pa/ss@host:repo']) assert.equal(scrubRemoteUrl(value), null, value);
   assert.equal(scrubRemoteUrl('HTTPS://u@host/p?q=1#f'), 'https://host/p');
   for (const local of ['/srv/repo.git', '../repo', './repo', 'file:///srv/repo', 'file:/srv/repo', 'C:\\repo', 'c:/repo', '', null, 'ext::sh -c evil', 'a\nb']) assert.equal(scrubRemoteUrl(local), null, String(local));
   for (const good of ['main', 'feature/x', 'release-1.2', 'a.b']) assert.equal(validBranchName(good), true, good);
@@ -496,7 +503,7 @@ test('what is sent is measured: short lines and non-UTF-8 text never take a page
   for (const page of pages) assert.ok(Buffer.byteLength(JSON.stringify(page)) <= WORKSPACE_GIT.maxTotalBytes, `a page of ${Buffer.byteLength(JSON.stringify(page))} bytes`);
   const files = byPath(pages.flatMap(page => page.files));
   assert.deepEqual(Object.keys(files).sort(), ['empty-a.txt', 'empty-b.txt', 'latin1.txt', 'small.txt']);
-  for (const name of ['latin1.txt', 'empty-a.txt', 'empty-b.txt']) { assert.equal(files[name].kind, 'too_large', name); assert.deepEqual(files[name].hunks, []); }
+  for (const name of ['latin1.txt', 'empty-a.txt', 'empty-b.txt']) { assert.equal(files[name].kind, 'too_large', name); assert.deepEqual(files[name].hunks, []); assert.deepEqual([files[name].additions, files[name].deletions], [0, 0], name); }
   assert.equal(files['small.txt'].kind, 'text');
 });
 
