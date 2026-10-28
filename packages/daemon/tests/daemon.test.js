@@ -1104,7 +1104,7 @@ test('session.list finds sessions across symlink and canonical projectRoot paths
 });
 
 test('session.list rootsOnly pre-filters candidate IDs without computing child summaries (t-92bf)', async t => {
-  const { project, runtimes, open } = await setup(t);
+  const { project, runtimes, runtime, open } = await setup(t);
   const { client, events } = await open();
   const { session } = await client.request('session.create', { spec: { cwd: project, persist: true } });
   await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Delegate work') });
@@ -1116,14 +1116,21 @@ test('session.list rootsOnly pre-filters candidate IDs without computing child s
   const child = events.find(e => e.event.type === 'session.opened' && e.event.session.parentId === session.id);
   assert.ok(child, 'child session was created');
 
+  // summary() reads runtime.snapshot; count that real work, not only returned rows.
+  const summarized = [];
+  const snapshot = runtime.snapshot.bind(runtime);
+  t.mock.method(runtime, 'snapshot', id => { summarized.push(id); return snapshot(id); });
   // rootsOnly: true must only return the root session
   const roots = await client.request('session.list', { rootsOnly: true, includeClosed: true });
   assert.deepEqual(roots.sessions.map(s => s.id), [session.id]);
   assert.equal(roots.sessions.some(s => s.id === child.sessionId), false);
+  assert.ok(!summarized.includes(child.sessionId), 'a child summary is never computed for a roots-only list');
+  summarized.length = 0;
 
   // rootsOnly: false must return both root and child sessions
   const all = await client.request('session.list', { rootsOnly: false, includeClosed: true });
   const allIds = all.sessions.map(s => s.id);
   assert.ok(allIds.includes(session.id));
   assert.ok(allIds.includes(child.sessionId));
+  assert.ok(summarized.includes(child.sessionId), 'the counter observes child summary work in an unfiltered list');
 });
