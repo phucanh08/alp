@@ -7,7 +7,7 @@ import { TERMINAL, type DaemonConnection } from '@anhlp/alp-protocol';
 import type { TerminalEvent, TerminalInfo, TerminalLimits } from '@anhlp/alp-protocol/rpc';
 import { alpHome, connect, readLock } from '@anhlp/alp-client/index';
 import { frames, readTerminalConfig } from '@anhlp/alp-daemon/terminals';
-import { NOT_IMPLEMENTED, type ClientContext, type Handler } from './gateway.js';
+import type { ClientContext, Handler } from './gateway.js';
 
 /**
  * Terminals for the app (issue #121 H, ALPD §62): Paseo's terminal messages over alpd's
@@ -89,7 +89,7 @@ const defaults = (): TerminalLimits => ({
 class Refused extends Error {}
 
 export function createTerminals({
-  workspaces: readWorkspaces, home = alpHome(), connect: connectTo, log = () => {}, inDevelopment = async () => 'This feature is in development', timing = {},
+  workspaces: readWorkspaces, home = alpHome(), connect: connectTo, log = () => {}, archiveAgent = async () => { throw new Error('Agent archives are unavailable'); }, timing = {},
 }: {
   /** The live registry workspaces (not archived, project not removed); read from alpd by default. */
   workspaces?: () => Promise<TerminalWorkspace[]>;
@@ -98,7 +98,8 @@ export function createTerminals({
   /** A new connection to alpd, used for terminals only; defaults to its socket through the lock. */
   connect?: () => Promise<DaemonConnection>;
   log?: (message: string) => void;
-  inDevelopment?: () => Promise<string>;
+  /** Archives a known ALP root through the agents facade; independent of terminal opt-in. */
+  archiveAgent?: (agentId: string) => Promise<{ agentId: string; archivedAt: string }>;
   /** Shorter intervals for tests. */
   timing?: { checkMs?: number; pollMs?: number; retryMs?: number; drainMs?: number };
 }) {
@@ -619,9 +620,13 @@ export function createTerminals({
         try { success = await close(terminalId); } catch (error: any) { log(`terminals: close failed: ${error?.message ?? error}`); }
         terminals.push({ terminalId, success });
       }
-      // Closing agents here is not ALP's yet: it answers "in development" as before, terminals closed.
-      if (message.agentIds?.length) return { type: 'rpc_error', payload: { requestId: message.requestId, requestType: message.type, error: await inDevelopment(), code: NOT_IMPLEMENTED } } satisfies Outbound;
-      return { type: 'close_items_response', payload: { agents: [], terminals, requestId: message.requestId } } satisfies Outbound;
+      // Paseo reports only successful agent archives; one failure must not hide other results.
+      const agents: { agentId: string; archivedAt: string }[] = [];
+      for (const agentId of message.agentIds ?? []) {
+        try { agents.push(await archiveAgent(agentId)); }
+        catch (error: any) { log(`agents: archive ${agentId} failed: ${error?.message ?? error}`); }
+      }
+      return { type: 'close_items_response', payload: { agents, terminals, requestId: message.requestId } } satisfies Outbound;
     },
 
     'terminal.rename.request': (message: Inbound<'terminal.rename.request'>) =>

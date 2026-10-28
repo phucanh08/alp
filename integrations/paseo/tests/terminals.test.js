@@ -149,11 +149,11 @@ function fakeClient(name = 'c1') {
 }
 
 /** The bridge's terminals on a fake alpd; `call` answers like the gateway (a returned reply is emitted). */
-async function setup(t, { config, capabilities, timing, replayBytes, maxInputBytes } = {}) {
+async function setup(t, { config, capabilities, timing, replayBytes, maxInputBytes, archiveAgent } = {}) {
   const home = await homeWith(t, config);
   const alpd = fakeAlpd({ capabilities, replayBytes, maxInputBytes });
   const logs = [];
-  const terminals = createTerminals({ home, connect: alpd.connect, log: message => logs.push(message), inDevelopment: async () => 'This feature is in development', timing: { retryMs: 10, drainMs: 10, ...timing } });
+  const terminals = createTerminals({ home, connect: alpd.connect, log: message => logs.push(message), archiveAgent, timing: { retryMs: 10, drainMs: 10, ...timing } });
   t.after(() => terminals.close());
   const call = async (client, message) => {
     const reply = await terminals.handlers[message.type](message, client);
@@ -509,8 +509,13 @@ test('input: in order, in whole-character pieces of at most 64 KiB; mouse and st
   assert.ok(world2.alpd.terminals.get(id2).inputs.every(piece => Buffer.byteLength(piece) <= 64 * 1024));
 });
 
-test('kill and close_items close the terminal in alpd; agents there still answer in development', async t => {
-  const world = await setup(t);
+test('kill and close_items close terminals and report successful agent archives', async t => {
+  const archived = [];
+  const world = await setup(t, { archiveAgent: async agentId => {
+    if (agentId === 'missing') throw new Error('No agent missing');
+    archived.push(agentId);
+    return { agentId, archivedAt: '2026-01-01T00:00:00.000Z' };
+  } });
   const client = fakeClient();
   const watcher = fakeClient('watcher');
   const a = (await world.create(client)).terminal.id;
@@ -527,8 +532,13 @@ test('kill and close_items close the terminal in alpd; agents there still answer
   assert.equal((await world.call(client, { type: 'kill_terminal_request', terminalId: 'term_ffffffffffffffffffffffffffffffff', requestId: 'k3' })).payload.success, false);
   const closed = (await world.call(client, { type: 'close_items_request', agentIds: [], terminalIds: [b, 'term_ffffffffffffffffffffffffffffffff'], requestId: 'x1' })).payload;
   assert.deepEqual(closed, { agents: [], terminals: [{ terminalId: b, success: true }, { terminalId: 'term_ffffffffffffffffffffffffffffffff', success: false }], requestId: 'x1' });
-  const mixed = await world.call(client, { type: 'close_items_request', agentIds: ['agent-1'], terminalIds: [c], requestId: 'x2' });
-  assert.deepEqual(mixed, { type: 'rpc_error', payload: { requestId: 'x2', requestType: 'close_items_request', error: 'This feature is in development', code: 'not_implemented' } });
+  const mixed = await world.call(client, { type: 'close_items_request', agentIds: ['agent-1', 'missing', 'agent-2'], terminalIds: [c], requestId: 'x2' });
+  assert.deepEqual(mixed, { type: 'close_items_response', payload: { requestId: 'x2', agents: ['agent-1', 'agent-2'].map(agentId => ({ agentId, archivedAt: '2026-01-01T00:00:00.000Z' })), terminals: [{ terminalId: c, success: true }] } });
+  assert.deepEqual(archived, ['agent-1', 'agent-2']);
+  assert.match(world.logs.at(-1), /No agent missing/);
+  assert.deepEqual((await world.call(client, { type: 'close_items_request', agentIds: [], terminalIds: [], requestId: 'empty' })).payload, { agents: [], terminals: [], requestId: 'empty' });
+  const replay = await world.call(client, { type: 'close_items_request', agentIds: ['agent-1'], terminalIds: [c], requestId: 'x2' });
+  assert.deepEqual(replay.payload, { requestId: 'x2', agents: [{ agentId: 'agent-1', archivedAt: '2026-01-01T00:00:00.000Z' }], terminals: [{ terminalId: c, success: false }] });
   assert.equal(world.alpd.terminals.get(c).state, 'exited', 'its terminals closed all the same');
   const renamed = (await world.call(client, { type: 'terminal.rename.request', terminalId: c, title: 'x', requestId: 'n1' })).payload;
   assert.equal(renamed.success, false);

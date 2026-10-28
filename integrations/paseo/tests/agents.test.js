@@ -432,3 +432,35 @@ for (const historical of ['archived', 'closed', 'error', 'running']) test(`bridg
     assert.ok(after.sessions.unmapped); assert.ok(after.sessions.live);
   } finally { agents.close(); await workspaces.close(); }
 });
+
+test('archive facade shares single-agent behavior, accepts closed roots and refuses unknown children', async t => {
+  const root = { id: 'archive-root', status: 'closed', projectRoot: '/', agent: 'main', runtime: 'codex', model: 'm', mode: 'read-only', workflow: { mode: 'custom' }, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' };
+  const mutations = [];
+  let refuseArchive = false;
+  const connection = fakeConnection({ onRequest(method, params) {
+    if (method === 'session.list') return { sessions: [root] };
+    if (method === 'question.list') return { questions: [] };
+    if (method === 'session.archive') {
+      if (refuseArchive) throw new Error('Archive persistence failed');
+      mutations.push(params);
+      root.archived = true;
+      return { session: root };
+    }
+    throw new Error(`unexpected ${method}`);
+  } });
+  const agents = createAgents({ clientFactory: async () => connection, broadcast: () => {}, directory });
+  t.after(() => agents.close());
+  await agents.start();
+  await assert.rejects(agents.archive('child-of-root'), /No agent child-of-root/);
+  assert.deepEqual(mutations, []);
+  refuseArchive = true;
+  await assert.rejects(agents.archive(root.id), /Archive persistence failed/);
+  assert.equal(root.archived, undefined);
+  refuseArchive = false;
+  const archived = await agents.archive(root.id);
+  assert.deepEqual(archived, { agentId: root.id, archivedAt: root.updatedAt });
+  assert.deepEqual(await agents.archive(root.id), archived, 'repeated archive stays archived');
+  assert.deepEqual((await agents.handlers.archive_agent_request({ type: 'archive_agent_request', agentId: root.id, requestId: 'single' })).payload, { ...archived, requestId: 'single' });
+  assert.deepEqual(mutations, Array(3).fill({ sessionId: root.id }));
+  assert.ok(connection.calls.every(method => ['session.list', 'question.list', 'session.archive'].includes(method)), 'no delete, native-thread or worktree operations');
+});

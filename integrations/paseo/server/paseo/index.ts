@@ -88,7 +88,7 @@ export function createPaseoBridge({ clientFactory, version, token, serverId, hom
   const checkouts = createCheckouts({ broadcast, rpc: (method, params) => agents.request(method, params), log });
   // Terminals use their own connection to alpd (one attach per terminal, fanned out to every client).
   const terminals = createTerminals({
-    home: home ?? alpHome(), log, inDevelopment,
+    home: home ?? alpHome(), log, archiveAgent: agents.archive,
     ...(clientFactory ? { connect: () => clientFactory(() => {}) } : {}),
   });
   const relay = createRelay({ home, serverId, attach: socket => gateway.attach(socket), initial: relaySettings, log: message => log?.(message) });
