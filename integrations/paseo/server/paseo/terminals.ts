@@ -125,6 +125,9 @@ export function createTerminals({
   let drainTimer: NodeJS.Timeout | undefined;
   let gateTimer: NodeJS.Timeout | undefined;
   let reconnecting: Promise<void> | undefined;
+  const retiring = new Map<DaemonConnection, ReturnType<typeof setTimeout>>();
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let wakeRetry: (() => void) | undefined;
   let refreshing: Promise<void> | undefined;
   let again = false;
   const workspaces = readWorkspaces ?? (async (): Promise<TerminalWorkspace[]> => {
@@ -219,7 +222,14 @@ export function createTerminals({
         const waiting = [...streams.values()].filter(stream => stream.state === 'detached');
         if (!waiting.length) return;
         if (Date.now() >= deadline) { for (const stream of waiting) end(stream, LOST); return; }
-        await new Promise(resolve => setTimeout(resolve, retryMs).unref?.());
+        await new Promise<void>(resolve => {
+          wakeRetry = resolve;
+          retryTimer = setTimeout(resolve, retryMs);
+          retryTimer.unref?.();
+        });
+        retryTimer = undefined;
+        wakeRetry = undefined;
+        if (closed) return;
         try {
           await daemon();
           // Back: the next request reads the switch and alpd's capability again.
@@ -381,8 +391,19 @@ export function createTerminals({
     // The connection is no longer the bridge's from now on: a new stream opens another one.
     const connection = live;
     if (connection) { live = undefined; conn = undefined; }
-    const settled = Promise.allSettled(closing);
-    void Promise.race([settled, new Promise(resolve => setTimeout(resolve, 5_000).unref?.())]).then(() => { try { connection?.close(); } catch {} });
+    if (connection) {
+      const finish = () => {
+        const timer = retiring.get(connection);
+        if (!timer) return;
+        clearTimeout(timer);
+        retiring.delete(connection);
+        try { connection.close(); } catch {}
+      };
+      const timer = setTimeout(finish, 5_000);
+      timer.unref?.();
+      retiring.set(connection, timer);
+      void Promise.allSettled(closing).then(finish);
+    }
     changed();
   }
 
@@ -652,6 +673,13 @@ export function createTerminals({
     },
     close() {
       closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      wakeRetry?.();
+      for (const [connection, timer] of retiring) {
+        clearTimeout(timer);
+        try { connection.close(); } catch {}
+      }
+      retiring.clear();
       if (pollTimer) clearInterval(pollTimer);
       if (drainTimer) clearInterval(drainTimer);
       if (gateTimer) clearInterval(gateTimer);

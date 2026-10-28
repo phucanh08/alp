@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { readFileSync } from 'node:fs';
 import { access, lstat, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -153,7 +152,10 @@ const ENTRY = /^ALP_TERMINAL_ID=(atm_[0-9a-f]{32})$/;
  * markers in each process's environment (macOS: `ps -E`, this user's processes only; Linux:
  * /proc/<pid>/environ, readable for this user's processes).
  */
-export function psProcesses(platform: NodeJS.Platform = process.platform): () => Promise<ProcessRow[]> {
+export function psProcesses(platform: NodeJS.Platform = process.platform, options: {
+  /** Controlled filesystem seam; production always reads the actual proc entry asynchronously. */
+  readEnvironment?: (pid: number) => Promise<string>;
+} = {}): () => Promise<ProcessRow[]> {
   const linux = platform === 'linux';
   // At most 10 s for each ps, even one that does not die at once.
   const run = (args: string[]) => new Promise<string | undefined>(resolve => {
@@ -181,7 +183,7 @@ export function psProcesses(platform: NodeJS.Platform = process.platform): () =>
       const tty = cells[linux ? 4 : 3]!;
       let markers: string[] = [];
       // Linux: one entry of the environment, never a marker inside another variable's value.
-      if (linux) { try { markers = readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').flatMap(entry => ENTRY.exec(entry)?.[1] ?? []); } catch {} }
+      if (linux) { try { markers = (await (options.readEnvironment ? options.readEnvironment(pid) : readFile(`/proc/${pid}/environ`, 'utf8'))).split('\0').flatMap(entry => ENTRY.exec(entry)?.[1] ?? []); } catch {} }
       else {
         // Exactly one space after etime: a command line may itself start with spaces.
         const full = /^\s*(?:\S+\s+){4}\S+ (.*)$/.exec(line)?.[1] ?? '';
@@ -562,7 +564,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
     /** Every terminal of a principal, any epoch: a gateway's revocation. */
     async revoke(principalId: string) {
       const mine = [...terminals.values()].filter(terminal => terminal.principal.id === principalId);
-      const live = mine.filter(terminal => !terminal.exit);
+      const live = mine.filter(terminal => !terminal.exit && !terminal.ending);
       await Promise.all(live.map(terminal => end(terminal, 'revoked')));
       for (const terminal of mine) terminals.delete(terminal.id);
       if (mine.length) log.info('revoked the terminals of a principal', { code: 'ALPD_TERMINAL_REVOKED', principal: principalId, closed: live.length });
