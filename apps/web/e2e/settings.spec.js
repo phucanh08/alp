@@ -33,7 +33,7 @@ test('Default send and the theme survive a reload; the token does not; garbage a
   // What storage holds: the versioned preferences; the token nowhere (the connect form keeps only
   // the gateway address, as before).
   const preferences = JSON.parse(await page.evaluate(() => localStorage.getItem('alp-web:preferences')));
-  expect(preferences).toEqual({ v: 1, sendBehavior: 'queue', theme: 'light', newSession: {} });
+  expect(preferences).toEqual({ v: 1, sendBehavior: 'queue', theme: 'light', newSession: {}, terminal: { fontFamily: 'mono', fontSize: 13, theme: 'dark' } });
   const stored = await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }));
   expect(stored).not.toContain(world.tokens.owner);
   expect(stored).not.toContain(world.tokens.owner.split('.').at(-1));
