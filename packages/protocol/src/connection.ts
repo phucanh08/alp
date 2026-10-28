@@ -1,4 +1,6 @@
 import type { Envelope } from './events.js';
+import type { AttachmentLimits, TerminalLimits } from './rpc.js';
+
 export type DaemonConnection = {
   request<T = any>(method: string, params?: unknown): Promise<T>;
   onEvent(listener: (envelope: Envelope) => void): () => void;
@@ -10,4 +12,8 @@ export type DaemonConnection = {
   readonly closed?: boolean;
   /** Features captured by the Node client handshake; absent on older adapters. */
   readonly capabilities?: readonly string[];
+  /** Limits captured by the Node client handshake; absent on older adapters. */
+  readonly attachmentLimits?: AttachmentLimits;
+  readonly promptImageLimits?: { readonly maxCount: number; readonly maxBytes: number; readonly maxTotalBytes: number };
+  readonly terminalLimits?: TerminalLimits;
 };

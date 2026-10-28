@@ -88,7 +88,9 @@ export async function readImages(current, files, limits = IMAGE_LIMITS) {
     const mimeType = imageType(file);
     const refuse = refusal([...current, ...added], name, mimeType, file.size, limits);
     if (refuse || !mimeType) { error ??= refuse; continue; }
-    const data = toBase64(new Uint8Array(await file.arrayBuffer()));
+    let data;
+    try { data = toBase64(new Uint8Array(await file.arrayBuffer())); }
+    catch { error ??= `Could not read ${name}.`; continue; }
     added.push({ id: `image-${++counter}`, type: 'image', mimeType, data, name, size: file.size });
   }
   return { added, error };

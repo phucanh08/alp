@@ -813,7 +813,7 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
         const meta = id ? objects.get(id) : undefined;
         if (!meta || meta.state !== 'committed' || !Object.values(refs.holders).some(holder => holder.sessionId === sessionId && holder.attachments.includes(meta.id))) throw notFound('attachment');
         const { handle, info: stat } = await openPayload(meta, OPEN_READ);
-        if (stat.size !== meta.size) { await handle.close(); throw unavailable('attachment_unavailable', 'The attachment\'s bytes changed'); }
+        if (stat.size !== meta.size) { await handle.close(); throw unavailable('attachment_unavailable', 'The attachment\'s bytes changed', { attachmentId: `att_${meta.id}` }); }
         const hash = createHash('sha256');
         const stream = handle.createReadStream({ start: 0, ...(meta.size ? { end: meta.size - 1 } : {}), autoClose: true });
         const verified = stream.pipe(new Transform({

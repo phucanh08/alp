@@ -66,6 +66,79 @@ test('attachment helpers send their methods as given; upload chunks within the a
   assert.deepEqual(done, { attachmentId: 'att_1' });
 });
 
+test('attachments().upload supports signal abort, run.abort(), onBegun and aborts on onProgress error', async () => {
+  const { attachments } = await import('@anhlp/alp-client/portable');
+  const data = new Uint8Array(20);
+
+  // 1. Abort via AbortSignal mid-chunk
+  {
+    const calls = [];
+    const controller = new AbortController();
+    const daemon = {
+      async request(method, params) {
+        calls.push(method);
+        if (method === 'attachment.begin') return { uploadId: 'upl_sig', state: 'uploading', received: 0, size: data.length, maxChunkBytes: 5 };
+        if (method === 'attachment.chunk') {
+          controller.abort(new Error('signal canceled'));
+          return { received: 5, size: data.length };
+        }
+        if (method === 'attachment.abort') return { aborted: true };
+        throw new Error(`unexpected ${method}`);
+      },
+    };
+    let begunId;
+    await assert.rejects(
+      attachments(daemon).upload({ sessionId: 's', name: 'f', mimeType: 'text/plain', data, requestId: 'r1', maxChunkBytes: 5, signal: controller.signal, onBegun: id => { begunId = id; } }),
+      err => err.message === 'signal canceled'
+    );
+    assert.equal(begunId, 'upl_sig');
+    assert.ok(calls.includes('attachment.abort'));
+  }
+
+  // 2. Abort via run.abort()
+  {
+    const calls = [];
+    let resolveChunk;
+    const daemon = {
+      async request(method, params) {
+        calls.push(method);
+        if (method === 'attachment.begin') return { uploadId: 'upl_meth', state: 'uploading', received: 0, size: data.length, maxChunkBytes: 5 };
+        if (method === 'attachment.chunk') {
+          return new Promise(resolve => { resolveChunk = resolve; });
+        }
+        if (method === 'attachment.abort') return { aborted: true };
+        throw new Error(`unexpected ${method}`);
+      },
+    };
+    const run = attachments(daemon).upload({ sessionId: 's', name: 'f', mimeType: 'text/plain', data, requestId: 'r2', maxChunkBytes: 5 });
+    // Let begin complete
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(run.uploadId, 'upl_meth');
+    await run.abort(new Error('user canceled'));
+    resolveChunk({ received: 5, size: data.length });
+    await assert.rejects(run, err => err.message === 'user canceled');
+    assert.ok(calls.includes('attachment.abort'));
+  }
+
+  // 3. Abort before begin throws immediately without begin
+  {
+    const calls = [];
+    const controller = new AbortController();
+    controller.abort(new Error('aborted early'));
+    const daemon = {
+      async request(method, params) {
+        calls.push(method);
+        return {};
+      },
+    };
+    await assert.rejects(
+      attachments(daemon).upload({ sessionId: 's', name: 'f', mimeType: 'text/plain', data, requestId: 'r3', maxChunkBytes: 5, signal: controller.signal }),
+      err => err.message === 'aborted early'
+    );
+    assert.equal(calls.length, 0);
+  }
+});
+
 test('conversation helpers send session.fork and session.rewind exactly as given (capabilities session.fork, session.rewind)', async () => {
   const { conversation } = await import('@anhlp/alp-client/portable');
   const sent = [];

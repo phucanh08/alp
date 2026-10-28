@@ -507,11 +507,18 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
       function attachmentOffer(connection: DaemonConnection) {
         let offer = offers.get(connection);
         if (!offer) {
-          offer = connection.request('daemon.hello', { protocolVersion: 1, client: { name: 'alp-paseo', version: '1' } })
-            .then((hello: any) => {
-              const listed = connection.capabilities ?? (Array.isArray(hello?.capabilities) ? hello.capabilities : []);
-              return { capable: listed.includes('attachments'), limits: attachmentLimitsOf(hello?.attachmentLimits) };
+          if (connection.capabilities !== undefined && (connection.attachmentLimits !== undefined || !connection.capabilities.includes('attachments'))) {
+            offer = Promise.resolve({
+              capable: connection.capabilities.includes('attachments'),
+              limits: attachmentLimitsOf(connection.attachmentLimits),
             });
+          } else {
+            offer = connection.request('daemon.hello', { protocolVersion: 1, client: { name: 'alp-paseo', version: '1' } })
+              .then((hello: any) => {
+                const listed = connection.capabilities ?? (Array.isArray(hello?.capabilities) ? hello.capabilities : []);
+                return { capable: listed.includes('attachments'), limits: attachmentLimitsOf(hello?.attachmentLimits) };
+              });
+          }
           offers.set(connection, offer);
           offer.catch(() => { if (offers.get(connection) === offer) offers.delete(connection); });
         }

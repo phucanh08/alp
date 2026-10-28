@@ -484,6 +484,18 @@ test('prompts: attachments are refused honestly when the runtime cannot read the
   assert.equal(Buffer.concat(chunks).toString(), 'twelve bytes');
   assert.equal(described.sha256, sha('twelve bytes'));
   await assert.rejects(env.control.reader.open(attachment.attachmentId, 'ses_other'), { code: 1001 }, 'only for a session that pins it');
+  // When an attachment's payload changes on disk, reader.open fails with attachment_unavailable and includes attachmentId.
+  const payloadFile = path.join(env.directory, 'home', 'state', 'attachments', attachment.attachmentId.slice(4), 'payload');
+  await chmod(payloadFile, 0o600);
+  await writeFile(payloadFile, 'changed');
+  await chmod(payloadFile, 0o400);
+  await assert.rejects(
+    env.control.reader.open(attachment.attachmentId, sessionId),
+    err => err.code === 1005 && err.data?.reason === 'attachment_unavailable' && err.data?.attachmentId === attachment.attachmentId
+  );
+  await chmod(payloadFile, 0o600);
+  await writeFile(payloadFile, 'twelve bytes');
+  await chmod(payloadFile, 0o400);
   // The receipt covers the attachments: the same prompt is a duplicate; another attachment is a conflict.
   assert.equal((await prompt('m1', [attachment.attachmentId])).duplicate, true);
   const second = (await upload(daemon.request, sessionId, 'other')).attachment;

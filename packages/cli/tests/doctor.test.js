@@ -106,7 +106,7 @@ test('doctor fails without any runtime and passes a clean setup', async t => {
   await mkdir(home, { mode: 0o700 });
   await chmod(home, 0o700);
   const none = await diagnose({ home, env: { PATH: path.join(directory, 'empty') } });
-  assert.deepEqual(none.filter(check => check.status !== 'ok').map(check => [check.id, check.status]), [['codex', 'fail'], ['claude', 'fail'], ['antigravity', 'fail']]);
+  assert.deepEqual(none.filter(check => check.status !== 'ok').map(check => [check.id, check.status]), [['codex', 'fail'], ['claude', 'fail'], ['antigravity', 'fail'], ['home', 'warn']]);
 
   const bin = path.join(directory, 'bin');
   await mkdir(bin);
@@ -114,8 +114,8 @@ test('doctor fails without any runtime and passes a clean setup', async t => {
   const project = path.join(directory, 'project');
   await initProject(project);
   const checks = await diagnose({ home, project, env: { PATH: bin, ...via('ALP_CODEX_BIN', codex) }, sandbox: true });
-  // Claude and Antigravity missing is fine while Codex works.
-  assert.deepEqual(checks.filter(check => check.status !== 'ok').map(check => [check.id, check.status]), [['claude', 'warn'], ['antigravity', 'warn']]);
+  // Claude and Antigravity missing is fine while Codex works. home is in temp directory.
+  assert.deepEqual(checks.filter(check => check.status !== 'ok').map(check => [check.id, check.status]), [['claude', 'warn'], ['antigravity', 'warn'], ['home', 'warn']]);
   assert.match(checks.find(check => check.id === 'agents').summary, /agents resolve: .*main/);
 });
 
@@ -257,4 +257,25 @@ test('doctor --json and error output stay machine readable and scrubbed', async 
   // A failing command prints its error scrubbed, on stderr.
   const failing = (() => { try { execFileSync(process.execPath, [cli, 'task', 'show', `Bearer-${SECRET}`], { env, stdio: ['ignore', 'pipe', 'pipe'] }); return { stderr: '', stdout: '' }; } catch (error) { return { stderr: error.stderr.toString(), stdout: error.stdout.toString() }; } })();
   assert.ok(!failing.stderr.includes(SECRET) && !failing.stdout.includes(SECRET));
+});
+
+test('doctor warns when ALP_HOME is inside temp directory or workspace', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-doctor-home-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const project = path.join(directory, 'project');
+  const homeInProject = path.join(project, '.alp-home');
+  await mkdir(homeInProject, { recursive: true, mode: 0o700 });
+  await initProject(project);
+
+  const inProject = await diagnose({ home: homeInProject, project, env: { PATH: path.join(directory, 'empty') } });
+  const projectCheck = inProject.find(c => c.id === 'home');
+  assert.equal(projectCheck?.status, 'warn');
+  assert.match(projectCheck?.summary, /inside this project's workspace/);
+
+  const homeInTmp = path.join(directory, 'home');
+  await mkdir(homeInTmp, { recursive: true, mode: 0o700 });
+  const inTmp = await diagnose({ home: homeInTmp, env: { PATH: path.join(directory, 'empty') } });
+  const tmpCheck = inTmp.find(c => c.id === 'home');
+  assert.equal(tmpCheck?.status, 'warn');
+  assert.match(tmpCheck?.summary, /inside the temp directory/);
 });

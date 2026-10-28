@@ -173,9 +173,14 @@ export function createTerminals({
       if (config.enabled && config.paseo) {
         try {
           const connection = await daemon();
-          const hello = await connection.request('daemon.hello', { protocolVersion: 1 });
-          on = Array.isArray(hello?.capabilities) && hello.capabilities.includes('terminal');
-          if (hello?.terminalLimits && typeof hello.terminalLimits === 'object') limits = { ...limits, ...hello.terminalLimits };
+          if (connection.capabilities !== undefined && (connection.terminalLimits !== undefined || !connection.capabilities.includes('terminal'))) {
+            on = connection.capabilities.includes('terminal');
+            if (connection.terminalLimits && typeof connection.terminalLimits === 'object') limits = { ...limits, ...connection.terminalLimits };
+          } else {
+            const hello = await connection.request('daemon.hello', { protocolVersion: 1 });
+            on = Array.isArray(hello?.capabilities) && hello.capabilities.includes('terminal');
+            if (hello?.terminalLimits && typeof hello.terminalLimits === 'object') limits = { ...limits, ...hello.terminalLimits };
+          }
         } catch (error: any) {
           reachable = false;
           log(`terminals: ALP daemon not reachable: ${error?.message ?? error}`);

@@ -273,6 +273,12 @@ export async function releaseDaemonLock(home) {
 export class AlpClient extends AlpRpcClient {
   /** Host features captured by connect's handshake. @type {readonly string[]} */
   capabilities = [];
+  /** Limits captured by connect's handshake. @type {import('@anhlp/alp-protocol').AttachmentLimits | undefined} */
+  attachmentLimits;
+  /** @type {{ readonly maxCount: number; readonly maxBytes: number; readonly maxTotalBytes: number } | undefined} */
+  promptImageLimits;
+  /** @type {import('@anhlp/alp-protocol').TerminalLimits | undefined} */
+  terminalLimits;
   /**
    * @param {import('node:net').Socket} socket a connected or connecting socket; the client owns it
    * @param {import('./rpc/client.js').AlpRpcClientOptions & import('./ipc.js').SocketTransportOptions} [options]
@@ -314,6 +320,15 @@ export async function connect(socketPath, client = { name: 'alp', version: '0' }
   try {
     const greeting = await hello(connection, client);
     connection.capabilities = Object.freeze(Array.isArray(greeting.capabilities) ? greeting.capabilities.filter(value => typeof value === 'string') : []);
+    if (greeting.attachmentLimits && typeof greeting.attachmentLimits === 'object') {
+      connection.attachmentLimits = Object.freeze({ ...greeting.attachmentLimits });
+    }
+    if (greeting.promptImageLimits && typeof greeting.promptImageLimits === 'object') {
+      connection.promptImageLimits = Object.freeze({ ...greeting.promptImageLimits });
+    }
+    if (greeting.terminalLimits && typeof greeting.terminalLimits === 'object') {
+      connection.terminalLimits = Object.freeze({ ...greeting.terminalLimits });
+    }
   } catch (error) {
     connection.close();
     throw error;

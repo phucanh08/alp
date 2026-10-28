@@ -181,6 +181,10 @@ test('chunks over the advertised size are refused before alpd; answers and error
   const failed = await client.request('attachment.commit', { uploadId: UPLOAD, sha256: SHA }).catch(error => error);
   assert.deepEqual([failed.code, failed.data], [1000, { reason: 'persistence_failed' }]);
   assert.ok(!failed.message.includes('/home'));
+  daemon.state.handlers['attachment.get'] = () => { throw { code: 1005, message: 'bytes missing at /home/u/store', data: { reason: 'attachment_unavailable', attachmentId: ATTACHMENT, internalPath: '/secret' } }; };
+  const unavail = await client.request('attachment.get', { attachmentId: ATTACHMENT }).catch(error => error);
+  assert.deepEqual([unavail.code, unavail.data], [1005, { reason: 'attachment_unavailable', attachmentId: ATTACHMENT }]);
+  assert.ok(!JSON.stringify(unavail).includes('/home') && !JSON.stringify(unavail).includes('/secret'));
 });
 
 test('a credential revoked mid-upload loses its connection at once: no further chunk or commit reaches alpd; a reissued grant is another epoch', async t => {
