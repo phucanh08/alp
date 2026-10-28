@@ -489,6 +489,28 @@ test('a web lock whose pid alp cannot prove is the integration is never signalle
   assert.match(other.stderr, /cannot prove[\s\S]*pid 1 belongs to another user/);
 });
 
+test('alp web refuses stale web.json when alp-web died and its pid was reused by another process (t-9c7d)', async t => {
+  const { home } = await createHome(t);
+  await startDaemon(home);
+  const bystander = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', env: { ...process.env, ...processFixtures.get(home).env } });
+  t.after(() => { try { bystander.kill('SIGKILL'); } catch {} });
+  await waitFor(async () => (await processFixtures.get(home).running()).some(entry => entry.pid === bystander.pid), 'the bystander');
+  await mkdir(path.join(home, 'integrations'), { recursive: true, mode: 0o700 });
+
+  // A dead alp-web whose PID was reused: lock written before bystander started, web.json has app: 'alp-web'
+  const reusedLock = { pid: bystander.pid, bootTime: bootTime(), startedAt: new Date(Date.now() - 3_600_000).toISOString(), ready: true, lockVersion: 1, owner: randomUUID() };
+  await writeFile(path.join(home, 'integrations', 'web.lock'), JSON.stringify(reusedLock), { mode: 0o600 });
+  const deadUrl = 'http://127.0.0.1:59996/';
+  await writeFile(path.join(home, 'web.json'), JSON.stringify({ version: 2, app: 'alp-web', pid: bystander.pid, port: 59996, url: deadUrl, token: 'alpgw1.dummy' }), { mode: 0o600 });
+
+  // alp web must refuse and must not print the dead URL or signal the bystander
+  const refused = await run(['web', '--print'], home, 90_000);
+  assert.notEqual(refused.code, 0, 'must refuse');
+  assert.doesNotMatch(refused.stdout || '', new RegExp(deadUrl), 'must not print the dead URL');
+  assert.match(refused.stderr, /cannot prove[\s\S]*started after the lock was written/);
+  assert.ok(alive(bystander.pid), 'bystander left alone');
+});
+
 // ---- alp web pair: the Paseo integration, integration `paseo` ----
 
 // Exercise the built service directly as well as the CLI: a launcher-only check would
