@@ -45,22 +45,25 @@ test('the listener serves no page at any address, on 127.0.0.1 only, and without
   const status = await new Promise((resolve, reject) => get(`${origin}/`, { headers: { Host: 'attacker.example' } }, response => { response.resume(); resolve(response.statusCode); }).on('error', reject));
   assert.equal(status, 403);
   // No bridge, no socket.
-  assert.equal(await upgrade(info, { Origin: origin }), 404);
+  assert.equal(await upgrade(info, {}), 404);
 });
 
-test('with the bridge, the socket opens only from its own origin and host; pages stay 404', async t => {
+test('with the bridge, the socket opens only without a browser Origin and with its loopback host; pages stay 404', async t => {
   const attached = [];
   const gateway = { attach: (ws, options) => { attached.push(options); ws.close(); } };
   const { info, origin } = await setup(t, { gateway });
   assert.equal((await fetch(`${origin}/`)).status, 404);
   assert.equal(await upgrade(info, { Origin: 'http://attacker.example' }), 403);
-  assert.equal(await upgrade(info, {}), 403);
-  assert.equal(await upgrade(info, { Origin: origin, Host: 'attacker.example' }), 403);
-  assert.equal(await upgrade(info, { Origin: origin }), 'open');
+  assert.equal(await upgrade(info, { Origin: 'null' }), 403);
+  assert.equal(await upgrade(info, { Origin: '' }), 403);
+  assert.equal(await upgrade(info, { Host: 'attacker.example' }), 403);
+  assert.equal(await upgrade(info, { Origin: origin }), 403);
+  assert.equal(await upgrade(info, { Origin: `http://localhost:${info.port}` }), 403);
+  assert.equal(await upgrade(info, {}), 'open');
   assert.equal(attached.length, 1);
   // The deprecated `app` option still names the bridge for one release; its `dir` is ignored.
   const legacy = await setup(t, { app: { dir: '/nonexistent', gateway } });
-  assert.equal(await upgrade(legacy.info, { Origin: legacy.origin }), 'open');
+  assert.equal(await upgrade(legacy.info, {}), 'open');
   assert.equal((await fetch(`${legacy.origin}/`)).status, 404);
 });
 

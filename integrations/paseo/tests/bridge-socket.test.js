@@ -45,7 +45,7 @@ async function setup(t, usage) {
   const origin = `http://127.0.0.1:${info.port}`;
   /** A socket as the app opens it: every frame alpd sends must pass Paseo's own validator. */
   const socket = (options = {}) => new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${info.port}/ws`, options.protocols ?? [], { headers: { Origin: options.origin ?? origin } });
+    const ws = new WebSocket(`ws://127.0.0.1:${info.port}/ws`, options.protocols ?? [], { headers: options.origin === undefined ? {} : { Origin: options.origin } });
     const frames = [];
     const waiting = [];
     ws.on('message', data => {
@@ -64,7 +64,7 @@ async function setup(t, usage) {
       resolve({ ws, frames, next, closed, send: frame => ws.send(JSON.stringify(frame)) });
     });
   });
-  const hello = (extra = {}) => ({ type: 'hello', clientId: 'cid-test', clientType: 'browser', protocolVersion: 1, capabilities: { helloRejection: true }, ...extra });
+  const hello = (extra = {}) => ({ type: 'hello', clientId: 'cid-test', clientType: 'mobile', protocolVersion: 1, capabilities: { helloRejection: true }, ...extra });
   const session = (client, message) => client.send({ type: 'session', message });
   /** A client past hello, as the app is once it shows anything. */
   const connected = async () => {
@@ -417,9 +417,9 @@ test("ALP's plugin over the bridge: its catalog entry and RPCs, and no page or s
   assert.deepEqual([features.plugins, features.pluginSettings, features.providerSubagents], [true, true, true]);
   const [entry] = (await ask(client, { type: 'plugin.catalog.get.request', requestId: 'c1' })).payload.plugins;
   assert.equal(entry.id, 'alp-provider');
-  assert.match(entry.clientBundle, /^alp-preloaded:alp-provider:[0-9a-f]{16}$/);
+  assert.equal(typeof (0, eval)(entry.clientBundle), 'function', 'native Paseo evaluates the catalog bundle as a factory');
   assert.ok(entry.requirements.paseo);
-  // The built-in core adapter still loads, but is not a user-managed plugin.
+  // The native client evaluates the built-in adapter; it is not a user-managed plugin.
   assert.deepEqual((await ask(client, { type: 'plugin.list.request', requestId: 'l1' })).payload.plugins, []);
 
   const invoke = async (method, input) => (await ask(client, { type: 'plugin.rpc.invoke.request', requestId: `${method}-${Math.random()}`, pluginId: 'alp-provider', method, input })).payload;

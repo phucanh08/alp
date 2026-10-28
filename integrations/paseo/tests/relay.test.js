@@ -156,7 +156,7 @@ test('a paired device reaches alpd through the relay, encrypted, and signs in wi
 test('the web app turns the relay on and off, kept in settings.json; other config changes are in development', async t => {
   const relay = await fakeRelay(t);
   const { home, info, gateway } = await setup(t, { endpoint: relay.endpoint, useTls: false });
-  const ws = new WebSocket(`ws://127.0.0.1:${info.port}/ws`, { headers: { Origin: `http://127.0.0.1:${info.port}` } });
+  const ws = new WebSocket(`ws://127.0.0.1:${info.port}/ws`);
   t.after(() => ws.terminate());
   await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
   const app = frames(t, data => ws.send(data));

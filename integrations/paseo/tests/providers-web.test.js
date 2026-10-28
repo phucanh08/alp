@@ -40,7 +40,7 @@ async function setup(t) {
   web = createWebServer({ home, port: 0, gateway });
   const info = await web.listen();
   t.after(async () => { await web.close(); await runtime.shutdown(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
-  const ws = new WebSocket(`ws://127.0.0.1:${info.port}/ws`, { headers: { Origin: `http://127.0.0.1:${info.port}` } });
+  const ws = new WebSocket(`ws://127.0.0.1:${info.port}/ws`);
   t.after(() => ws.terminate());
   await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
   const frames = [];

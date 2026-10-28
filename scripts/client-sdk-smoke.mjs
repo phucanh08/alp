@@ -110,7 +110,7 @@ window.sdk = {
 
 async function browser() {
   const { build } = await import('esbuild');
-  const { chromium } = await import('playwright');
+  const { chromium } = await import('@playwright/test');
   const bundle = await build({ absWorkingDir: root, bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', stdin: { contents: PAGE_ENTRY, resolveDir: root, loader: 'js' }, logLevel: 'silent' });
   const alpd = await alpdWithBridge();
   alpd.routes.set('/', { type: 'text/html; charset=utf-8', text: '<!doctype html><meta charset="utf-8"><title>ALP SDK smoke</title><script type="module" src="/app.js"></script>' });

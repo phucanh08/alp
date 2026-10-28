@@ -54,7 +54,7 @@ async function setup(t, { without = [] } = {}) {
   const info = await web.listen();
   t.after(async () => { await web.close(); await runtime.shutdown(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   const client = await new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${info.port}/ws`, [], { headers: { Origin: `http://127.0.0.1:${info.port}` } });
+    const ws = new WebSocket(`ws://127.0.0.1:${info.port}/ws`, []);
     const frames = [];
     const waiting = [];
     ws.on('message', data => {

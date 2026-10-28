@@ -19,8 +19,8 @@ process.chdir(path.resolve(import.meta.dirname, '..'));
 // `npm run build:paseo` also produces the neutral bundles tests import from dist/.
 await buildCore({ log: message => console.log(message) });
 
-// The plugin's client side as the ALP web app runs it (ALPD §62 step 7): compiled as Paseo's daemon
-// compiles a plugin's client bundle, and embedded in the plugin's server, which serves it at /alp-plugins.js.
+// The native Paseo app evaluates clientBundle from the plugin catalog as a CommonJS factory.
+// Embed that factory in the bridge, compiled with Paseo's Hermes interop and host SDK imports.
 const PLUGIN_SDK = ['@getpaseo/plugin', '@getpaseo/plugin/*', 'react', 'react/jsx-runtime', 'react-native', '@tanstack/react-query', 'zod'];
 const pluginClientBuild = await build({ entryPoints: ['integrations/paseo/index.client.tsx'], bundle: true, write: false, format: 'cjs', jsx: 'automatic', platform: 'neutral', target: 'es2020', mainFields: ['module', 'main'], supported: { 'async-await': false }, external: PLUGIN_SDK, legalComments: 'none' });
 const pluginManifest = JSON.parse(await readFile('integrations/paseo/paseo-plugin.json', 'utf8'));

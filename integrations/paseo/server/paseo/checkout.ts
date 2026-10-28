@@ -1,3 +1,7 @@
+// Adapted from Paseo (https://github.com/getpaseo/paseo, commit b63a325, packages/server/src/server/utils/diff-highlighter.ts),
+// Copyright (c) 2025-present Mohamed Boudra, Apache License 2.0 (integrations/paseo/LICENSE.paseo.txt).
+// Changed for ALP: the unified-diff parser consumes alpd diff pages; Git operations stay in alpd.
+
 import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
