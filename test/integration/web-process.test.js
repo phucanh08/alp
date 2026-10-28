@@ -253,9 +253,15 @@ test('alp web passes an ALP project it runs in to alp-web\'s grant', async t => 
   await runIn(project, ['web', '--print']);
   const workspaces = async () => (await homeJson(home, path.join('web', 'credentials.json'))).credentials.filter(entry => !entry.revokedAt).flatMap(entry => entry.workspaces.map(workspace => workspace.path));
   assert.ok((await workspaces()).includes(project), 'the project is granted');
-  // From elsewhere, rotating grants no project: the cwd is not one.
+  // Rotating from a non-project keeps explicitly registered projects in the grant.
+  // Neither an unrelated cwd nor an unregistered ALP project is admitted.
+  const unregistered = path.join(directory, 'unregistered');
+  await mkdir(path.join(unregistered, '.alp'), { recursive: true });
   await runIn(elsewhere, ['web', 'rotate']);
-  assert.ok(!(await workspaces()).includes(project));
+  const rotated = await workspaces();
+  assert.deepEqual(rotated, [project], 'rotation grants exactly the registered project');
+  assert.ok(!rotated.includes(elsewhere), 'a non-project cwd is not granted');
+  assert.ok(!rotated.includes(unregistered), 'an unregistered project is not granted');
 });
 
 test('two concurrent cold alp web invocations converge on one alp-web', async t => {
