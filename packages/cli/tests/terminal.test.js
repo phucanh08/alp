@@ -53,3 +53,21 @@ test('allow needs --yes after the warning; the file is private; deny keeps limit
 test('no backup carries the switch', () => {
   assert.ok(!HOME_UNITS.includes('terminal.json'));
 });
+
+test('corrupt terminal.json falls back to default off status without throwing SyntaxError', async t => {
+  const home = await mkdtemp(path.join(tmpdir(), 'alp-terminal-corrupt-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const file = path.join(home, 'terminal.json');
+  await writeFile(file, 'INVALID JSON { truncated: true', { mode: 0o600 });
+  const lines = [];
+  const out = line => lines.push(line);
+  // Status must not throw SyntaxError and must report off
+  await terminalCommand(['status', '--json'], { home, out });
+  const status = JSON.parse(lines[0]);
+  assert.equal(status.allowRemoteTerminal, false);
+  assert.equal(status.allowPaseoTerminal, false);
+
+  // allow --yes must overwrite corrupt file cleanly
+  await terminalCommand(['allow', '--yes'], { home, out });
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { version: 1, allowRemoteTerminal: true });
+});
