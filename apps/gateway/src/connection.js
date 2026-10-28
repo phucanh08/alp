@@ -2,7 +2,7 @@ import { realpath as registryRealpath, stat as registryStat } from 'node:fs/prom
 // @ts-check
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
 import { homedir } from 'node:os';
-import { CAPABILITY, ERROR, PROTOCOL_VERSION, RPC_ERROR, WORKSPACE_FILES, base64Bytes, blockedFilePath, resumeCommandOf } from '@anhlp/alp-protocol';
+import { CAPABILITY, ERROR, PROTOCOL_VERSION, RPC_ERROR, TERMINAL, WORKSPACE_FILES, base64Bytes, blockedFilePath, resumeCommandOf } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 import { isAlpClientError } from '@anhlp/alp-client/portable';
 import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.js';
@@ -402,7 +402,10 @@ export class ClientConnection {
     this.#attachmentLimits = gatewayAttachmentLimits(hello.attachmentLimits, this.#limits.maxFrame);
     this.#terminalLimits = gatewayTerminalLimits(hello.terminalLimits, this.#limits.maxFrame);
     // A frame too small for alpd's output events would drop output: no terminals through this gateway then.
-    const daemonFrames = /** @type {any} */ (hello.terminalLimits)?.maxOutputFrameBytes;
+    const advertisedFrames = /** @type {any} */ (hello.terminalLimits)?.maxOutputFrameBytes;
+    // An off host omits limits. The protocol maximum still bounds a later opt-in: retain the
+    // daemon's own disabled refusal when that maximum fits, and refuse a smaller gateway.
+    const daemonFrames = !listed.includes('terminal') && advertisedFrames === undefined ? TERMINAL.maxOutputFrameBytes : advertisedFrames;
     // Remember compatibility even while the host switch is off: it can be enabled later.
     this.#terminalFramesTooSmall = !(Number.isSafeInteger(daemonFrames) && daemonFrames <= this.#terminalLimits.maxOutputFrameBytes);
     if (this.#terminalFramesTooSmall) {
