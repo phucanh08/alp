@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, realpath, writeFile, readFile, stat, symlink, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { createRegistry } from '@anhlp/alp-daemon/registry';
-async function setup(t) { const root = await mkdtemp(path.join(tmpdir(), 'alp-registry-test-')); t.after(() => rm(root, { recursive: true, force: true })); const home = path.join(root, 'home'); const directory = path.join(root, 'project'); await mkdir(directory); return { root, home, directory }; }
+async function setup(t) { const root = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-registry-test-'))); t.after(() => rm(root, { recursive: true, force: true })); const home = path.join(root, 'home'); const directory = path.join(root, 'project'); await mkdir(directory); return { root, home, directory }; }
 test('migration retains complete legacy IDs, labels, pins, placement and exact backup; private modes', async t => {
  const { home, directory } = await setup(t); await mkdir(path.join(home,'state'),{recursive:true});
  const legacy = { projects:[{id:'prj_0000000000000001',root:directory,customName:'Custom',addedAt:'old'}],workspaces:[{id:'wks_0000000000000001',projectId:'prj_0000000000000001',directory,title:'Title',pinnedAt:'pin',labels:['Bug'],createdAt:'old',idempotencyKey:'key'}],sessions:{s:'wks_0000000000000001'},labels:{generation:'gen',seq:8,catalog:[{name:'Bug',color:'red'}]} };
@@ -95,8 +95,20 @@ for (const archived of [true, false]) test(`historical ${archived ? 'archived' :
  const {home,root,directory}=await setup(t);const alias=path.join(root,'future-alias');const r=createRegistry(home);
  await r.mutate('placement.prepare',{sessions:[{id:'history',projectRoot:alias,archived,status:'closed'}]},{requestId:'history'});
  const before=await r.snapshot();assert.equal(before.workspaces[0].canonical,undefined);assert.equal(before.projects[0].canonical,undefined);
- await symlink(directory,alias,'dir');const restarted=createRegistry(home);
- assert.equal(await restarted.resolve(before.sessions.history,undefined,true),await realpath(directory));
- // No past identity was observed: resolving checks today's path without inventing one in persisted history.
+ // When it appears as an alias, resolving rejects with identity_changed (matching sourceOf and describe)
+ await symlink(directory,alias,'dir');let restarted=createRegistry(home);
+ await assert.rejects(restarted.resolve(before.sessions.history,undefined,true),{data:{reason:'identity_changed'}});
+ // When it appears as its own canonical directory, it resolves without inventing canonical in persisted history
+ await rm(alias);await mkdir(alias);restarted=createRegistry(home);
+ assert.equal(await restarted.resolve(before.sessions.history,undefined,true),alias);
  assert.deepEqual(await restarted.snapshot(),before);
+});
+
+test('legacy record without canonical resolves at its own canonical path and rejects through an alias', async t => {
+ const {home,root,directory}=await setup(t);const alias=path.join(root,'alias');await symlink(directory,alias,process.platform === 'win32' ? 'junction' : 'dir');
+ const legacy={version:1,revision:1,receipts:{},projects:[{id:'prj_0000000000000001',root:directory,addedAt:'old'},{id:'prj_0000000000000002',root:alias,addedAt:'old'}],workspaces:[{id:'wks_0000000000000001',projectId:'prj_0000000000000001',directory,labels:[],createdAt:'old'},{id:'wks_0000000000000002',projectId:'prj_0000000000000002',directory:alias,labels:[],createdAt:'old'}],sessions:{s1:'wks_0000000000000001',s2:'wks_0000000000000002'},labels:{generation:'g',seq:0,catalog:[]}};
+ await mkdir(path.join(home,'state'),{recursive:true});const file=path.join(home,'state/web-workspaces.json');await writeFile(file,JSON.stringify(legacy));
+ const r=createRegistry(home);
+ assert.equal(await r.resolve('wks_0000000000000001'),directory);
+ await assert.rejects(r.resolve('wks_0000000000000002'),{data:{reason:'identity_changed'}});
 });
