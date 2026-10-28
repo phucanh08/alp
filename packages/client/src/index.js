@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -373,7 +374,8 @@ export async function readDaemonLifecycle(home) {
  * be replaced. Reaping/release unlinks only its unique owner token, then rmdir; even
  * racing stale reapers cannot remove a successor's nonempty directory.
  */
-export async function withDaemonLifecycle(home, action, run, { joinStart = false } = {}) {
+export async function withDaemonLifecycle(home, action, run, { joinStart = false, signal = /** @type {AbortSignal | undefined} */ (undefined) } = {}) {
+  signal?.throwIfAborted();
   try {
     await assertPrivateDirectory(home, { create: true });
   } catch (cause) {
@@ -409,6 +411,7 @@ export async function withDaemonLifecycle(home, action, run, { joinStart = false
       }
     }
     while (!joined) {
+      signal?.throwIfAborted();
       try { await rename(candidate, directory); break; }
       catch (error) {
         if (!['EEXIST', 'ENOTEMPTY', 'EPERM', 'EACCES'].includes(error.code)) throw error;
@@ -416,10 +419,10 @@ export async function withDaemonLifecycle(home, action, run, { joinStart = false
           if (!lockAlive(owner)) await unlink(path.join(directory, owner.token)).catch(error => { if (error.code !== 'ENOENT') throw error; });
         }
         await rmdir(directory).catch(error => { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error; });
-        await new Promise(resolve => setTimeout(resolve, 25));
+        await delay(25, undefined, { signal });
       }
     }
-    try { return await run(); }
+    try { signal?.throwIfAborted(); return await run(); }
     finally {
       await unlink(path.join(directory, token));
       await rmdir(directory).catch(error => { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error; });
@@ -435,8 +438,9 @@ export async function withDaemonLifecycle(home, action, run, { joinStart = false
  * `entry` is the daemon script; it is started through its own detaching launcher so the
  * daemon outlives the client that started it.
  */
-export async function ensureDaemon({ home = alpHome(), entry = /** @type {string | undefined} */ (undefined), env = process.env, execPath = process.execPath, timeoutMs = 15_000, lifecycleLocked = false } = {}) {
-  if (!lifecycleLocked) return withDaemonLifecycle(home, 'start', () => ensureDaemon({ home, entry, env, execPath, timeoutMs, lifecycleLocked: true }));
+export async function ensureDaemon({ home = alpHome(), entry = /** @type {string | undefined} */ (undefined), env = process.env, execPath = process.execPath, timeoutMs = 15_000, lifecycleLocked = false, signal = /** @type {AbortSignal | undefined} */ (undefined) } = {}) {
+  signal?.throwIfAborted();
+  if (!lifecycleLocked) return withDaemonLifecycle(home, 'start', () => ensureDaemon({ home, entry, env, execPath, timeoutMs, lifecycleLocked: true, signal }), { signal });
   const ready = async () => {
     const lock = await readLock(home);
     return lockAlive(lock) && lock.ready ? lock.socket : undefined;
@@ -448,6 +452,7 @@ export async function ensureDaemon({ home = alpHome(), entry = /** @type {string
   if (!lockAlive(held)) {
     entry ??= await findDaemonEntry({ home, env });
     if (!entry) throw new Error('ALP daemon is not running and alpd.js was not found. Install the ALP CLI and run `alp daemon start`, or set ALP_DAEMON_ENTRY to alpd.js');
+    signal?.throwIfAborted();
     await new Promise((resolve, reject) => {
       const launcher = spawn(execPath, [entry, '--detach', `--startup-timeout=${timeoutMs}`], {
         env: { ...env, ALP_HOME: home, ELECTRON_RUN_AS_NODE: '1' },
@@ -463,6 +468,7 @@ export async function ensureDaemon({ home = alpHome(), entry = /** @type {string
   }
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    signal?.throwIfAborted();
     const socket = await ready();
     if (socket) return socket;
     await new Promise(resolve => setTimeout(resolve, 100));

@@ -27,9 +27,10 @@ export async function daemonHeld(home) {
 }
 
 /** Polls until an alpd for `home` is ready; returns its socket. */
-async function whenReady(home, timeoutMs) {
+async function whenReady(home, timeoutMs, signal) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    signal?.throwIfAborted();
     const lock = await readLock(home);
     if (lockAlive(lock) && lock.ready) return lock.socket;
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -41,20 +42,23 @@ async function whenReady(home, timeoutMs) {
  * Starts alpd for `home` unless it runs, and lifts a hold: someone asked for it.
  * Returns its socket.
  */
-export async function startDaemon({ home, entry, env = process.env, timeoutMs = 15_000, automatic = false }) {
+export async function startDaemon({ home, entry, env = process.env, timeoutMs = 15_000, automatic = false, signal }) {
   return withDaemonLifecycle(home, 'start', async () => {
+    signal?.throwIfAborted();
     if (automatic) {
       if (await daemonHeld(home)) return;
     } else await releaseHold(home);
     const lock = await readLock(home);
-    if (lockAlive(lock)) return lock.ready ? lock.socket : whenReady(home, timeoutMs);
+    signal?.throwIfAborted();
+    if (lockAlive(lock)) return lock.ready ? lock.socket : whenReady(home, timeoutMs, signal);
     const service = serviceFor({ home, env });
     if (service && await installedProgram(service)) {
+      signal?.throwIfAborted();
       await startService(service);
-      return whenReady(home, timeoutMs);
+      return whenReady(home, timeoutMs, signal);
     }
-    return ensureDaemon({ home, entry, env, timeoutMs, lifecycleLocked: true });
-  });
+    return ensureDaemon({ home, entry, env, timeoutMs, lifecycleLocked: true, signal });
+  }, { signal });
 }
 
 /**
