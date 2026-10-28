@@ -13,6 +13,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { connect as hostConnect } from '@anhlp/alp-client';
 import { freePort, startWorld } from './support/world.js';
+import { closeWorldAfter } from './support/cleanup.js';
 
 const run = promisify(execFile);
 const LINK = /^http:\/\/127\.0\.0\.1:(\d+)\/#token=(alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43})$/m;
@@ -29,13 +30,14 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => {
   if (!world) return;
-  // alp-web before alpd: it holds a socket to alpd and the browser's connections.
-  const info = await readFile(path.join(world.home, 'web.json'), 'utf8').then(JSON.parse, () => undefined);
-  if (info?.pid) {
-    try { process.kill(info.pid, 'SIGTERM'); } catch {}
-    await expect.poll(() => { try { process.kill(info.pid, 0); return true; } catch { return false; } }, { timeout: 15_000 }).toBe(false);
-  }
-  await world.close();
+  await closeWorldAfter(world, async () => {
+    // alp-web before alpd: it holds a socket to alpd and the browser's connections.
+    const info = await readFile(path.join(world.home, 'web.json'), 'utf8').then(JSON.parse, () => undefined);
+    if (info?.pid) {
+      try { process.kill(info.pid, 'SIGTERM'); } catch {}
+      await expect.poll(() => { try { process.kill(info.pid, 0); return true; } catch { return false; } }, { timeout: 15_000 }).toBe(false);
+    }
+  });
 });
 
 /** The CLI on the host, in the main project, as its owner runs it. */

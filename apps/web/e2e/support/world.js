@@ -264,7 +264,11 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     stopDaemon: () => stop(daemon),
     stopGateway: () => stop(gateway),
     async restartGateway() { await stop(gateway); await startGateway(); },
-    async restartDaemon() { await stop(daemon); await startDaemon(); await stop(gateway); await startGateway(); },
+    async restartDaemon() {
+      await stop(daemon);
+      await startDaemon();
+      if (standalone) { await stop(gateway); await startGateway(); }
+    },
     async gatewayLog() { return readFile(logs.gateway, 'utf8').catch(() => ''); },
     async close() {
       // Processes first: a browser keeping a connection open can hold the web server's close.

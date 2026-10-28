@@ -85,8 +85,12 @@ export function takeLinkToken({ location, history, storage }) {
     history.replaceState(history.state, '', `${location.pathname}${location.search}`);
   }
   const loopback = isLoopbackPage(location);
-  if (link && 'malformed' in link) return { error: LINK_TOKEN_MALFORMED };
-  if (link && !loopback) return { error: LINK_NOT_LOOPBACK };
+  // An explicitly refused link supersedes this tab's old credential too: once its fragment
+  // is stripped, a reload must not silently reconnect with the previous valid token.
+  if (link && ('malformed' in link || !loopback)) {
+    forgetLinkToken(storage);
+    return { error: 'malformed' in link ? LINK_TOKEN_MALFORMED : LINK_NOT_LOOPBACK };
+  }
   if (link) {
     try { storage?.setItem(LINK_TOKEN_KEY, link.token); } catch { /* storage may be off: this load still connects */ }
     return { url: location.origin, token: link.token };
