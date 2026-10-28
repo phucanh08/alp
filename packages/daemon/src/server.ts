@@ -1292,6 +1292,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     // terminal.* (§12.10): each call acts for its principal context; input, resize and the stream
     // belong to the connection that attached the terminal.
     'terminal.create': (_c, p) => terminalCall(service => service.create(principalOf(p), p)),
+    'terminal.watch': (c, p) => terminalCall(service => service.watch(principalOf(p), c, p)),
+    'terminal.unwatch': (c) => terminalCall(service => service.unwatch(c)),
+    'terminal.capture': (_c, p) => terminalCall(service => service.capture(principalOf(p), p)),
     'terminal.list': (_c, p) => terminalCall(service => service.list(principalOf(p), p)),
     'terminal.attach': (c, p) => terminalCall(service => service.attach(principalOf(p), c, p)),
     'terminal.input': (c, p) => terminalCall(service => service.input(principalOf(p), c, p)),
@@ -1857,7 +1860,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         connection.helloed = true;
         // Terminals are listed only while the host's switch is on (and the PTY module loads).
         const terminalLimits = await terminals?.advertised();
-        respond({ result: { protocolVersion: PROTOCOL_VERSION, daemonVersion: version, pid: process.pid, hostname: os.hostname(), capabilities: terminalLimits ? [...capabilities, CAPABILITY.terminal] : capabilities, ...(attachments ? { attachmentLimits: attachments.limits } : {}), ...(terminalLimits ? { terminalLimits } : {}) } });
+        respond({ result: { protocolVersion: PROTOCOL_VERSION, daemonVersion: version, pid: process.pid, hostname: os.hostname(), capabilities: terminalLimits ? [...capabilities, CAPABILITY.terminal, CAPABILITY.terminalCapture, CAPABILITY.terminalWatch] : capabilities, ...(attachments ? { attachmentLimits: attachments.limits } : {}), ...(terminalLimits ? { terminalLimits } : {}) } });
         return;
       }
       if (!connection.helloed) throw new RpcError(ERROR.protocol, 'daemon.hello is required first', { reason: 'hello_required' });

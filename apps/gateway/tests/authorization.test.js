@@ -60,6 +60,7 @@ const OUT_OF_SCOPE = {
   'workspace.git.status': null, 'workspace.git.diff': null, // git.test.js checks registry scope, both permissions, paths and projection
   'attachment.begin': null, 'attachment.chunk': null, 'attachment.commit': null, 'attachment.abort': null, 'attachment.get': null, 'attachment.delete': null, // attachments.test.js checks the session scope, both permissions and the principal context; alpd's binding is tested against its store
 
+  'terminal.capture': null, 'terminal.watch': null, 'terminal.unwatch': null,
   'terminal.create': null, 'terminal.list': null, 'terminal.attach': null, 'terminal.input': null, 'terminal.resize': null, 'terminal.close': null, // terminal.test.js checks terminal.exec, the registry scope, the principal context and event filtering; alpd's binding is tested against real PTYs
   'catalog.get': null, // global: the static catalogue of models and modes
   'session.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
@@ -119,6 +120,7 @@ const IN_SCOPE = ({ a }) => ({
   'attachment.begin': { sessionId: 'sa', name: 'a.txt', size: 1, mimeType: 'text/plain', requestId: 'r' }, 'attachment.chunk': { uploadId: `upl_${'1'.repeat(32)}`, offset: 0, data: 'AAAA' },
   'attachment.commit': { uploadId: `upl_${'1'.repeat(32)}`, sha256: '0'.repeat(64) }, 'attachment.abort': { uploadId: `upl_${'1'.repeat(32)}` },
   'attachment.get': { attachmentId: `att_${'1'.repeat(32)}` }, 'attachment.delete': { attachmentId: `att_${'1'.repeat(32)}` },
+  'terminal.capture': { terminalId: `term_${'1'.repeat(32)}` }, 'terminal.watch': {}, 'terminal.unwatch': {},
   'terminal.create': { workspaceId: 'wks_a', cols: 80, rows: 24, requestId: 'r' }, 'terminal.list': {}, 'terminal.attach': { terminalId: `term_${'1'.repeat(32)}` },
   'terminal.input': { terminalId: `term_${'1'.repeat(32)}`, data: 'x' }, 'terminal.resize': { terminalId: `term_${'1'.repeat(32)}`, cols: 80, rows: 24 }, 'terminal.close': { terminalId: `term_${'1'.repeat(32)}` },
   'catalog.get': {}, 'library.models': {}, 'settings.language.get': {},

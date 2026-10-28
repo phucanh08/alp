@@ -210,3 +210,37 @@ test('oversized output from an attached terminal closes with an explicit negotia
   await until(() => closed !== undefined, 'explicit socket refusal');
   assert.match(closed.data?.reason, /negotiated frame limit/);
 });
+
+test('directory cursors and captures retain terminal.exec binding and explicit frame refusals', async t => {
+  const env = await world(t, { capabilities: ['terminal', 'terminal.watch', 'terminal.capture', 'workspace.registry'], config: { limits: { maxFrame: 512 * 1024 } } });
+  const wid = 'a'.repeat(32), cursor = 'b'.repeat(32);
+  env.daemon.state.handlers['terminal.watch'] = (params, link) => {
+    link.send({ jsonrpc: '2.0', method: 'terminal.changed', params: { watchId: wid, cursor, private: 'host secret' } });
+    return { terminals: [info()], watchId: wid, cursor, reset: true, private: 'x' };
+  };
+  env.daemon.state.handlers['terminal.unwatch'] = () => ({ closed: true });
+  env.daemon.state.handlers['terminal.capture'] = () => ({ lines: ['screen'], totalLines: 1, private: 'host path' });
+  const denied = await env.sdk('writer');
+  for (const method of ['terminal.watch', 'terminal.capture', 'terminal.unwatch']) await assert.rejects(denied.client.request(method, method === 'terminal.capture' ? { terminalId: T1 } : {}), error => error.code === 1003);
+  const { client } = await env.sdk('exec');
+  const events = [];
+  client.onNotification((method, params) => { if (method === 'terminal.changed') events.push(params); });
+  const result = await client.request('terminal.watch', { workspaceId: 'wks_a' });
+  assert.deepEqual(events, [{ watchId: wid, cursor }], 'notification before response is projected and preserved');
+  assert.deepEqual(result, { terminals: [info()], watchId: wid, cursor, reset: true });
+  const call = env.daemon.calls().find(call => call.method === 'terminal.watch');
+  assert.equal(call.params.principalId, env.ids.exec);
+  assert.deepEqual(call.params.authorizedRoots, [env.ca]);
+  await assert.rejects(client.request('terminal.watch', { workspaceId: 'wks_b' }), error => error.data?.reason === 'outside_workspace');
+  assert.deepEqual(await client.request('terminal.capture', { terminalId: T1 }), { lines: ['screen'], totalLines: 1 });
+  env.daemon.state.handlers['terminal.capture'] = () => ({ lines: ['x'.repeat(600 * 1024)], totalLines: 1 });
+  await assert.rejects(client.request('terminal.capture', { terminalId: T1 }), error => error.data?.reason === 'terminal_capture_too_large');
+  env.daemon.state.handlers['terminal.watch'] = () => ({ terminals: Array.from({ length: 3000 }, () => info()), watchId: wid, cursor, reset: true });
+  await assert.rejects(client.request('terminal.watch', {}), error => error.data?.reason === 'terminal_snapshot_too_large');
+  await client.request('terminal.unwatch', {});
+  const count = events.length;
+  const link = [...env.daemon.state.links].at(-1);
+  link.send({ jsonrpc: '2.0', method: 'terminal.changed', params: { watchId: wid, cursor: 'c'.repeat(32) } });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(events.length, count, 'unwatched connection receives no invalidation');
+});

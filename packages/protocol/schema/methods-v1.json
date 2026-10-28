@@ -42,7 +42,9 @@
     "session.resumeCommand": "session.resumeCommand: the ALP CLI command (`alp attach <sessionId>`) that follows a session in a terminal, as argv and POSIX and Windows (cmd.exe) command lines built by alpd; for the clipboard only, never run, never a native runtime's command, credential, env or path.",
     "session.configure.live": "session.configure takes model, thinking and team (with requestId and ifGeneration) besides mode, and session.configure.preview answers the configuration a change would run with: a live root's model, effort or team changes at the idle barrier (no turn, child, question, mail or parked work) through a controlled restart of its native process on the same conversation; the effective configuration is written only after the runtime took it, through the lifecycle journal (§12.9). Never another runtime and never more permissions. Listed with a store and a runtime that restarts a root with a new configuration, on macOS and Linux (not Windows).",
     "terminal": "terminal.create/list/attach/input/resize/close/revoke and terminal.event notifications: a real PTY shell on the daemon host as the daemon's account (a cwd is not a sandbox), served only when the host owner opted in (<ALP_HOME>/terminal.json allowRemoteTerminal) on macOS and Linux.",
-    "session.interrupt.turn": "session.interrupt accepts turnId and atomically cancels only that active turn, including its subtree. Conditional requests answer interrupted:true when canceled, false when the named turn is no longer active; false changes nothing. Without this capability clients must not send turnId or infer targeted cancellation from a legacy interrupt."
+    "session.interrupt.turn": "session.interrupt accepts turnId and atomically cancels only that active turn, including its subtree. Conditional requests answer interrupted:true when canceled, false when the named turn is no longer active; false changes nothing. Without this capability clients must not send turnId or infer targeted cancellation from a legacy interrupt.",
+    "terminal.capture": "terminal.capture: bounded daemon-owned rendered text, inclusive zero-based/negative line ranges; same terminal principal/host opt-in. Exceeding resource/result limits is an explicit refusal.",
+    "terminal.watch": "terminal.watch/unwatch and terminal.changed: atomic scoped snapshot/subscription. Opaque per-subscription cursor, latest snapshot replaces invalidation history on reconnect/reset; older hosts use explicit polling fallback."
   },
   "methods": {
     "assignment.recall": {
@@ -5419,6 +5421,191 @@
         ],
         "additionalProperties": false
       }
+    },
+    "terminal.capture": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "terminal",
+          "param": "terminalId"
+        },
+        "capability": "terminal.capture",
+        "idempotent": true,
+        "risks": [
+          "Reads terminal screen text, which may contain secrets the shell printed"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "terminalId": {
+            "type": "string",
+            "pattern": "^term_[0-9a-f]{32}$"
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the terminal's workspace must be one of them."
+          },
+          "start": {
+            "type": "integer"
+          },
+          "end": {
+            "type": "integer"
+          },
+          "stripAnsi": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "terminalId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "lines": {
+            "type": "array",
+            "maxItems": 1200,
+            "items": {
+              "type": "string"
+            }
+          },
+          "totalLines": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "lines",
+          "totalLines"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "terminal.watch": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project"
+        },
+        "capability": "terminal.watch",
+        "idempotent": true,
+        "description": "Connection-local read subscription management, like question.watch/session.attach; no host or terminal mutation."
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "principalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Set by a trusted gateway on its own connection: the remote principal the request acts for. Absent: the local owner."
+          },
+          "principalEpoch": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The grant epoch of principalId (a gateway credential scope). Absent: the local owner."
+          },
+          "authorizedRoots": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Set by a trusted gateway: the canonical workspaces the principal may use now; the terminal's workspace must be one of them."
+          },
+          "after": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "terminals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/terminal"
+            }
+          },
+          "watchId": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "cursor": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "reset": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "terminals",
+          "watchId",
+          "cursor",
+          "reset"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "terminal.unwatch": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "connection"
+        },
+        "capability": "terminal.watch",
+        "idempotent": true,
+        "description": "Connection-local read subscription management, like question.watch/session.attach; no host or terminal mutation."
+      },
+      "params": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "closed": {
+            "const": true
+          }
+        },
+        "required": [
+          "closed"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "$defs": {
@@ -6007,6 +6194,26 @@
             },
             "params": {
               "$ref": "#/$defs/terminalEvent"
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "terminal.changed"
+            },
+            "params": {
+              "$ref": "#/$defs/terminalChanged"
             }
           },
           "required": [
@@ -8673,6 +8880,24 @@
           "additionalProperties": false
         }
       ]
+    },
+    "terminalChanged": {
+      "type": "object",
+      "properties": {
+        "watchId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "cursor": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        }
+      },
+      "required": [
+        "watchId",
+        "cursor"
+      ],
+      "additionalProperties": false
     }
   }
 }

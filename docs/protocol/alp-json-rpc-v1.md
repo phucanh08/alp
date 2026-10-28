@@ -1681,3 +1681,55 @@ domain operations; that method never accepts a client replacement snapshot and i
 adapter's filtering/authorization. The gateway supplies them itself and never forwards remote
 values for them. Filtering and totals precede pagination. Scoped mutations recheck every affected
 canonical directory before receipt replay/CAS, including archived workspaces on project removal.
+
+#### Additive terminal screen and directory capabilities
+
+`terminal.capture` advertises a daemon-owned, continuously parsed xterm 6 screen. Params are the
+usual trusted principal context plus `terminalId`, optional integer `start`/`end`, and
+`stripAnsi` (default true). Result is `{lines: string[], totalLines: number}`. Indices are zero
+based, inclusive, negative relative to the end, and clamped; reversed ranges return no lines.
+This matches Paseo 0.12 text capture, including trailing-space trimming. False does not regenerate
+styling escapes: the source is rendered cells, not raw output. A parser barrier includes all
+previous output and resize operations. Alternate buffers, overwrites and erase sequences are
+interpreted. Detach/reconnect of a viewer does not reconstruct or reset the screen.
+
+The same host switch and principal/epoch/root ownership checks apply before and after capture.
+Paseo additionally requires its separate host opt-in and a live registered workspace. Refusals
+remain errors, never empty success-shaped captures. Older daemons may lack the capability/method.
+The gateway requires the existing `terminal.exec`, projects text only, and explicitly refuses a
+response exceeding its negotiated frame limit; callers can request a smaller line range.
+
+Screens keep at most 1000 scrollback rows plus the bounded grid (500 columns, 200 rows maximum).
+At most 16 emulators are retained, counting exited records: older exited screens are released
+before a new one is allocated. Their terminal records retain the normal reconnect lifetime.
+Each emulator accepts at most 256 pending parser operations (including empty capture/resize barriers),
+1 MiB of pending parser input and 8 MiB of lifetime input, including
+invisible OSC data and combining characters. Exceeding either disposes that emulator and makes
+capture fail with `terminal_capture_unavailable`; the terminal keeps running. This lifetime cap
+bounds parser and extended-cell data as well as row counts. Captures are limited to 1 MiB of
+serialized text (`terminal_capture_too_large`, no silent truncation). Removal and daemon shutdown
+dispose screens and release pending capture barriers.
+
+`terminal.watch` advertises `terminal.watch`, `terminal.unwatch`, and notifications
+`terminal.changed`. Watch params are trusted principal context, optional `workspaceId`, and
+optional opaque `after`. One subscription per connection is replaced when its principal,
+epoch, roots or workspace changes. After configuration checks, registration and snapshot are
+synchronous: result `{terminals, watchId, cursor, reset}`. A change to an authorized terminal
+sends only `{watchId,cursor}`, with fresh opaque 32-hex tokens; no host paths or other principals'
+terminal metadata. Creation, exit, removal, attach/detach and resize invalidate the snapshot.
+
+Cursors identify a scoped subscription's latest state, not a durable mutation log. A matching
+current token gives `reset:false`; an old, foreign, new-connection or restarted-daemon token
+gives `reset:true` and a complete current snapshot. Intermediate list invalidations are coalesced
+into that snapshot; output replay remains `terminal.attach`'s independent sequence protocol.
+The portable `watchTerminals` helper installs its listener before the first request, retains a
+bounded set of newest tokens during in-flight snapshots, refreshes again if a newer token arrived,
+and ignores duplicate/foreign subscription IDs. Consumers must replace state on each snapshot.
+This prevents a list/subscribe gap and recovers disconnects without replaying obsolete mutations.
+Unwatch/disconnect releases the subscription. Gateway snapshots exceeding its frame limit are
+explicitly refused (`terminal_snapshot_too_large`); selecting a workspace can reduce the result.
+
+Hosts without `terminal.watch` use the same helper's explicit `polling` mode (five seconds by
+default). Paseo logs this compatibility mode; event-capable hosts do not poll `terminal.list`.
+Host-switch checks remain separate from terminal-list polling. Existing terminal grants and
+ownership are unchanged.

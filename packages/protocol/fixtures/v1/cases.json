@@ -7161,6 +7161,113 @@
    "value": {
     "interrupted": "yes"
    }
+  },
+  {
+   "name": "terminal.capture params",
+   "check": "params",
+   "method": "terminal.capture",
+   "valid": true,
+   "value": {
+    "terminalId": "term_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "start": -2,
+    "end": -1,
+    "stripAnsi": false
+   }
+  },
+  {
+   "name": "terminal.capture fractional index",
+   "check": "params",
+   "method": "terminal.capture",
+   "valid": false,
+   "value": {
+    "terminalId": "term_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "start": 1.5
+   }
+  },
+  {
+   "name": "terminal.capture result",
+   "check": "result",
+   "method": "terminal.capture",
+   "valid": true,
+   "value": {
+    "lines": [
+     "screen"
+    ],
+    "totalLines": 1
+   }
+  },
+  {
+   "name": "terminal.watch params",
+   "check": "params",
+   "method": "terminal.watch",
+   "valid": true,
+   "value": {
+    "after": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "workspaceId": "w"
+   }
+  },
+  {
+   "name": "terminal.watch bad cursor",
+   "check": "params",
+   "method": "terminal.watch",
+   "valid": false,
+   "value": {
+    "after": "bad"
+   }
+  },
+  {
+   "name": "terminal.watch result",
+   "check": "result",
+   "method": "terminal.watch",
+   "valid": true,
+   "value": {
+    "terminals": [],
+    "watchId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "cursor": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "reset": true
+   }
+  },
+  {
+   "name": "terminal.unwatch params",
+   "check": "params",
+   "method": "terminal.unwatch",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "terminal.unwatch result",
+   "check": "result",
+   "method": "terminal.unwatch",
+   "valid": true,
+   "value": {
+    "closed": true
+   }
+  },
+  {
+   "name": "terminal list invalidation",
+   "check": "message",
+   "valid": true,
+   "value": {
+    "jsonrpc": "2.0",
+    "method": "terminal.changed",
+    "params": {
+     "watchId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "cursor": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+   }
+  },
+  {
+   "name": "terminal list invalidation invalid token",
+   "check": "message",
+   "valid": false,
+   "value": {
+    "jsonrpc": "2.0",
+    "method": "terminal.changed",
+    "params": {
+     "watchId": "bad",
+     "cursor": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+   }
   }
  ]
 }

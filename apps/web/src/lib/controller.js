@@ -1,5 +1,5 @@
 // @ts-check
-import { attachments as attachmentApi, createReconnectingClient, hello, isAlpClientError, sha256Hex } from '@anhlp/alp-client/portable';
+import { attachments as attachmentApi, createReconnectingClient, hello, isAlpClientError, sha256Hex, watchTerminals } from '@anhlp/alp-client/portable';
 import { AuthenticationError, ConfigurationError, CreateOutcomeUnknownError, FILE_MESSAGES, FileAccessError, describe, describeFileError, endsRoot } from './errors.js';
 import { cleanListing, relativeFilePath } from './file-tree.js';
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
@@ -97,6 +97,7 @@ const STOP_WAITING = 'Stop is waiting for this message’s outcome.';
  *   workspace: string | null,
  *   catalog: Load & { teams: Team[], teamsKnown?: boolean, teamsUnavailable?: import('./new-session.js').TeamsUnavailable, modes: Mode[], models: Model[], defaultMode?: string },
  *   sessions: Load & { list: SessionSummary[] },
+ *   terminalDirectory: { items: import('@anhlp/alp-protocol').TerminalInfo[], mode: 'idle' | 'events' | 'polling', error?: string },
  *   registry: { workspaces: import('@anhlp/alp-protocol').RegistryWorkspace[], revision: number, error?: string, loading?: boolean },
  *   history: Load & { list: SessionSummary[], query: string, nextCursor?: string, more?: 'loading' | 'error' },
  *   attention: Record<string, number>,
@@ -207,6 +208,7 @@ export function initialState(gateway = '') {
     catalog: { status: 'idle', teams: [], modes: [], models: [] },
     sessions: { status: 'idle', list: [] },
     registry: { workspaces: [], revision: 0 },
+    terminalDirectory: { items: [], mode: 'idle' },
     history: { status: 'idle', list: [], query: '' },
     attention: {},
     turnAttention: {},
@@ -363,6 +365,10 @@ export class Controller {
   #noticeId = 0;
   /** The Terminal tab's terminal of each registry workspace (#121 H), for this connection. @type {Map<string, TerminalSession>} */
   #terminals = new Map();
+  /** @type {Map<string, { tabs: Array<{ key: string, session: TerminalSession }>, active: string | null, storage?: import('./terminal.js').TerminalStorage, storageKey: string }>} */
+  #terminalGroups = new Map();
+  /** @type {ReturnType<typeof watchTerminals> | undefined} */
+  #terminalDirectory;
 
   /** @param {ControllerOptions} [options] */
   constructor(options = {}) {
@@ -470,6 +476,8 @@ export class Controller {
       onConnect: (client, context) => this.#onConnect(run, client, /** @type {AbortSignal} */ (context.signal)),
       onDisconnect: () => {
         if (this.#run !== run) return;
+        this.#terminalDirectory?.close(false);
+        this.#terminalDirectory = undefined;
         for (const terminal of this.#terminals.values()) terminal.disconnected();
         this.#attached = null;
         this.#stopLeases.clear();
@@ -643,6 +651,7 @@ export class Controller {
   }
 
   #afterOpen() {
+    this.#watchTerminalDirectory();
     for (const terminal of this.#terminals.values()) terminal.connected();
     this.#sync();
     this.#resumeUploads();
@@ -684,38 +693,132 @@ export class Controller {
    */
   terminalGate() { return terminalGate(this.#state); }
 
+  #watchTerminalDirectory() {
+    this.#terminalDirectory?.close();
+    this.#terminalDirectory = undefined;
+    const run = this.#run;
+    if (!run || !this.hasCapability('terminal') || !can(this.#state.principal ?? undefined, 'terminal.exec')) return;
+    this.#terminalDirectory = watchTerminals(this.#client(), {
+      capabilities: this.#state.connection.capabilities,
+      onMode: mode => { if (this.#run === run) this.#set(state => ({ terminalDirectory: { ...state.terminalDirectory, mode } })); },
+      onSnapshot: items => { if (this.#run === run) this.#set(state => ({ terminalDirectory: { ...state.terminalDirectory, items, error: undefined } })); },
+      onError: error => { if (this.#run === run) this.#set(state => ({ terminalDirectory: { ...state.terminalDirectory, error: describe(error).message } })); },
+    });
+  }
+
+  /** Opening another client's listed terminal is explicit: listing never steals its stream.
+   * @param {string} workspaceId @param {string} terminalId */
+  openListedTerminal(workspaceId, terminalId) {
+    const group = this.terminalTabs(workspaceId);
+    const existing = group.tabs.find(tab => tab.session.getState().terminalId === terminalId);
+    if (existing) { this.selectTerminal(workspaceId, existing.key); return; }
+    if (!this.#state.terminalDirectory.items.some(item => item.terminalId === terminalId && item.workspaceId === workspaceId && item.state === 'running') || group.tabs.length >= 32) return;
+    const key = globalThis.crypto.randomUUID();
+    const session = this.#makeTerminal(workspaceId, key, group.storage, group.storageKey, terminalId);
+    group.tabs = [...group.tabs, { key, session }];
+    group.active = key;
+    this.#saveTerminalTabs(workspaceId);
+  }
+
   /**
    * The Terminal tab's terminal of a registry workspace on this connection: made (not started)
    * the first time. Only when the gate allows it.
    * @param {string} workspaceId
    */
   terminal(workspaceId) {
-    let terminal = this.#terminals.get(workspaceId);
-    if (terminal) return terminal;
+    let group = this.#terminalGroups.get(workspaceId) ?? this.terminalTabs(workspaceId);
+    if (!group.tabs.length) { this.addTerminal(workspaceId); group = this.terminalTabs(workspaceId); }
+    return /** @type {{ key: string, session: TerminalSession }} */ (group.tabs.find(tab => tab.key === group.active) ?? group.tabs[0]).session;
+  }
+
+  /** Stable, page-session tab identities; the old single terminal keeps its legacy storage key.
+   * @param {string} workspaceId */
+  terminalTabs(workspaceId) {
     const gate = this.terminalGate();
     if (!gate.ok || gate.workspaceId !== workspaceId) throw new ConfigurationError(gate.ok ? 'That workspace is not the open one.' : gate.messages.join(' '));
+    let group = this.#terminalGroups.get(workspaceId);
+    if (group) return group;
     const storage = this.#options.terminalStorage === undefined ? sessionStorageOf() : this.#options.terminalStorage ?? undefined;
-    terminal = new TerminalSession({
+    const storageKey = `alp-web.terminal|${this.#state.connection.gateway}|${this.#state.principal?.id ?? ''}|${workspaceId}`;
+    /** @type {string[]} */
+    let keys = ['default'];
+    let active = 'default';
+    try {
+      const saved = JSON.parse(storage?.getItem(`${storageKey}|tabs`) ?? 'null');
+      if (saved?.v === 1 && Array.isArray(saved.keys) && saved.keys.length <= 32 && saved.keys.every((/** @type {unknown} */ key) => typeof key === 'string' && /^(default|[a-zA-Z0-9-]{1,64})$/.test(key)) && new Set(saved.keys).size === saved.keys.length) {
+        keys = saved.keys;
+        active = keys.includes(saved.active) ? saved.active : keys[0] ?? null;
+      }
+    } catch {}
+    group = { tabs: keys.map(key => ({ key, session: this.#makeTerminal(workspaceId, key, storage, storageKey) })), active, storage, storageKey };
+    this.#terminalGroups.set(workspaceId, group);
+    return group;
+  }
+
+  /** @param {string} workspaceId @param {string} key @param {import('./terminal.js').TerminalStorage | undefined} storage @param {string} storageKey @param {string} [initialTerminalId] */
+  #makeTerminal(workspaceId, key, storage, storageKey, initialTerminalId) {
+    const terminal = new TerminalSession({
       workspaceId,
+      ...(initialTerminalId ? { initialTerminalId } : {}),
       request: (method, params) => this.#client().request(method, params, { timeoutMs: this.#options.requestTimeoutMs }),
       limits: this.#state.connection.terminalLimits ?? terminalLimits(undefined),
-      ...(storage ? { storage, storageKey: `alp-web.terminal|${this.#state.connection.gateway}|${this.#state.principal?.id ?? ''}|${workspaceId}` } : {}),
+      ...(storage ? { storage, storageKey: key === 'default' ? storageKey : `${storageKey}|${key}` } : {}),
       ...this.#options.terminalOptions,
     });
-    this.#terminals.set(workspaceId, terminal);
+    this.#terminals.set(JSON.stringify([workspaceId, key]), terminal);
     return terminal;
   }
 
-  /**
-   * The Terminal tab of a workspace (the open one by default) closed: its terminal ends on the host
-   * (terminal.close).
-   * @param {string} [workspaceId]
-   */
+  /** @param {string} workspaceId */
+  #saveTerminalTabs(workspaceId) {
+    const group = this.#terminalGroups.get(workspaceId);
+    if (!group) return;
+    try { group.storage?.setItem(`${group.storageKey}|tabs`, JSON.stringify({ v: 1, keys: group.tabs.map(tab => tab.key), active: group.active })); } catch {}
+    this.#set({});
+  }
+
+  /** @param {string} workspaceId */
+  addTerminal(workspaceId) {
+    const group = this.terminalTabs(workspaceId);
+    if (group.tabs.length >= 32) return group.active;
+    const key = globalThis.crypto.randomUUID();
+    group.tabs = [...group.tabs, { key, session: this.#makeTerminal(workspaceId, key, group.storage, group.storageKey) }];
+    group.active = key;
+    this.#saveTerminalTabs(workspaceId);
+    return key;
+  }
+
+  /** @param {string} workspaceId @param {string} key */
+  selectTerminal(workspaceId, key) {
+    const group = this.terminalTabs(workspaceId);
+    if (!group.tabs.some(tab => tab.key === key)) return;
+    group.active = key;
+    this.#saveTerminalTabs(workspaceId);
+  }
+
+  /** Closing one tab never ends its siblings. @param {string} workspaceId @param {string} key */
+  closeTerminalTab(workspaceId, key) {
+    const group = this.terminalTabs(workspaceId);
+    const index = group.tabs.findIndex(tab => tab.key === key);
+    if (index < 0) return Promise.resolve();
+    const tab = group.tabs[index];
+    group.tabs = group.tabs.filter(item => item.key !== key);
+    if (group.active === key) group.active = group.tabs[Math.min(index, group.tabs.length - 1)]?.key ?? null;
+    this.#terminals.delete(JSON.stringify([workspaceId, key]));
+    this.#saveTerminalTabs(workspaceId);
+    return tab.session.close();
+  }
+
+  /** The parent panel closes every terminal in its workspace. @param {string} [workspaceId] */
   closeTerminal(workspaceId = registryWorkspaceOf(this.#state)?.id) {
-    const terminal = workspaceId ? this.#terminals.get(workspaceId) : undefined;
-    if (!workspaceId || !terminal) return Promise.resolve();
-    this.#terminals.delete(workspaceId);
-    return terminal.close();
+    const group = workspaceId ? this.#terminalGroups.get(workspaceId) : undefined;
+    if (!workspaceId || !group) return Promise.resolve();
+    const tabs = group.tabs;
+    group.tabs = [];
+    group.active = null;
+    for (const tab of tabs) this.#terminals.delete(JSON.stringify([workspaceId, tab.key]));
+    this.#saveTerminalTabs(workspaceId);
+    return Promise.allSettled(tabs.map(tab => tab.session.close()));
   }
 
   /**
@@ -725,6 +828,8 @@ export class Controller {
    * @param {{ alp?: ReconnectingClient } | null} run
    */
   #endTerminals(run) {
+    this.#terminalDirectory?.close();
+    this.#terminalDirectory = undefined;
     const client = run?.alp?.state === 'open' ? run.alp.client : undefined;
     const closing = [];
     for (const terminal of this.#terminals.values()) {
@@ -733,6 +838,7 @@ export class Controller {
       if (client && terminalId && status !== 'gone' && status !== 'closed') closing.push(client.request('terminal.close', { terminalId }, { timeoutMs: 1_000 }).catch(() => {}));
     }
     this.#terminals.clear();
+    this.#terminalGroups.clear();
     return closing.length ? Promise.allSettled(closing) : undefined;
   }
 
@@ -3231,6 +3337,11 @@ export class Controller {
   /** The New session choices that started a session, for the next one (as Paseo's form preferences). @param {{ team?: string, mode?: string, model?: string, thinking?: string }} used */
   #rememberNewSession(used) {
     this.#setPreferences({ newSession: rememberChoices(this.#state.preferences.newSession, used) });
+  }
+
+  /** @param {Partial<import('./preferences.js').TerminalPreferences>} change */
+  setTerminalPreferences(change) {
+    this.#setPreferences({ terminal: { ...this.#state.preferences.terminal, ...change } });
   }
 
   /** Back to the defaults, in state and storage (Paseo's reset settings). */

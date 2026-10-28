@@ -20,13 +20,24 @@ export const PREFERENCES_VERSION = 1;
  * thinking option per model. Empty strings never stored: absent means the host's default.
  * @typedef {{ team?: string, mode?: string, model?: string, thinkingByModel?: Record<string, string> }} NewSessionChoices
  */
-/** @typedef {{ sendBehavior: SendBehavior, theme: ThemePreference, newSession: NewSessionChoices }} Preferences */
+/** @typedef {{ fontSize: number, fontFamily: 'mono' | 'menlo' | 'consolas', theme: 'dark' | 'light' }} TerminalPreferences */
+/** @typedef {{ sendBehavior: SendBehavior, theme: ThemePreference, newSession: NewSessionChoices, terminal: TerminalPreferences }} Preferences */
+export const DEFAULT_TERMINAL_PREFERENCES = Object.freeze(/** @type {TerminalPreferences} */ ({ fontSize: 13, fontFamily: 'mono', theme: 'dark' }));
+/** @param {unknown} value @returns {TerminalPreferences} */
+function parseTerminal(value) {
+  const row = /** @type {any} */ (value && typeof value === 'object' ? value : {});
+  return {
+    fontSize: Number.isInteger(row.fontSize) && row.fontSize >= 10 && row.fontSize <= 24 ? row.fontSize : 13,
+    fontFamily: ['mono', 'menlo', 'consolas'].includes(row.fontFamily) ? row.fontFamily : 'mono',
+    theme: row.theme === 'light' ? 'light' : 'dark',
+  };
+}
 
 export const SEND_BEHAVIORS = /** @type {const} */ (['steer', 'queue']);
 export const THEMES = /** @type {const} */ (['system', 'light', 'dark']);
 
 /** @type {Preferences} */
-export const DEFAULT_PREFERENCES = Object.freeze({ sendBehavior: 'steer', theme: 'system', newSession: Object.freeze({}) });
+export const DEFAULT_PREFERENCES = Object.freeze({ sendBehavior: 'steer', theme: 'system', newSession: Object.freeze({}), terminal: DEFAULT_TERMINAL_PREFERENCES });
 
 const ID_CHARS = 200;
 const MAX_THINKING_ENTRIES = 64;
@@ -71,6 +82,7 @@ export function parsePreferences(raw) {
     sendBehavior: SEND_BEHAVIORS.includes(value.sendBehavior) ? value.sendBehavior : DEFAULT_PREFERENCES.sendBehavior,
     theme: THEMES.includes(value.theme) ? value.theme : DEFAULT_PREFERENCES.theme,
     newSession: parseNewSession(value.newSession),
+    terminal: parseTerminal(value.terminal),
   };
 }
 
@@ -80,7 +92,7 @@ export function parsePreferences(raw) {
  */
 export function serializePreferences(preferences) {
   const clean = parsePreferences(JSON.stringify({ ...preferences, v: PREFERENCES_VERSION }));
-  return JSON.stringify({ v: PREFERENCES_VERSION, sendBehavior: clean.sendBehavior, theme: clean.theme, newSession: clean.newSession });
+  return JSON.stringify({ v: PREFERENCES_VERSION, sendBehavior: clean.sendBehavior, theme: clean.theme, newSession: clean.newSession, terminal: clean.terminal });
 }
 
 /**

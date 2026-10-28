@@ -48,6 +48,13 @@ function fakeAlpd({ capabilities = ['terminal'], replayBytes = 1024 * 1024, maxI
   const conns = [];
   const terminals = new Map();
   let made = 0;
+  let revision = 0;
+  function changed() {
+    for (const conn of conns) if (conn.watchId && !conn.closed) {
+      conn.cursor = String(++revision).padStart(32, '0');
+      for (const listener of conn.listeners) listener('terminal.changed', { watchId: conn.watchId, cursor: conn.cursor });
+    }
+  }
   const error = (code, reason, message = reason) => Object.assign(new Error(message), { code, data: { reason } });
   const send = (conn, params) => { if (conn && !conn.closed) for (const listener of [...conn.listeners]) listener('terminal.event', params); };
   const info = term => ({ terminalId: term.id, workspaceId: term.workspaceId, title: 'sh', cols: term.cols, rows: term.rows, state: term.state, createdAt: '2026-01-01T00:00:00.000Z' });
@@ -58,11 +65,19 @@ function fakeAlpd({ capabilities = ['terminal'], replayBytes = 1024 * 1024, maxI
       const id = `term_${String(++made).padStart(32, '0')}`;
       const term = { id, workspaceId: params.workspaceId, cols: params.cols, rows: params.rows, state: 'running', events: [], seq: 0, attached: null, inputs: [] };
       terminals.set(id, term);
+      changed();
       return { terminal: info(term) };
     }
+    if (method === 'terminal.watch') {
+      conn.watchId ??= String(conns.indexOf(conn) + 1).padStart(32, '0');
+      conn.cursor ??= String(++revision).padStart(32, '0');
+      return { terminals: [...terminals.values()].filter(term => !term.forgotten).map(info), watchId: conn.watchId, cursor: conn.cursor, reset: params.after !== conn.cursor };
+    }
+    if (method === 'terminal.unwatch') { conn.watchId = undefined; return { closed: true }; }
     if (method === 'terminal.list') return { terminals: [...terminals.values()].filter(term => !term.forgotten).map(info) };
     const term = terminals.get(params.terminalId);
     if (!term || term.forgotten) throw error(1001, 'not_found', 'No such terminal');
+    if (method === 'terminal.capture') return { lines: ['rendered'], totalLines: 1 };
     if (method === 'terminal.attach') {
       if (term.attached && term.attached !== conn) send(term.attached, { terminalId: term.id, type: 'detached', reason: 'replaced' });
       term.attached = conn;
@@ -111,6 +126,7 @@ function fakeAlpd({ capabilities = ['terminal'], replayBytes = 1024 * 1024, maxI
     exit(id, reason = 'exited') {
       const term = terminals.get(id);
       term.state = 'exited';
+      changed();
       const event = { terminalId: id, type: 'exit', seq: ++term.seq, exitCode: 0, signal: null, reason };
       term.events.push(event);
       send(term.attached, event);
@@ -543,7 +559,7 @@ test('kill and close_items close terminals and report successful agent archives'
   const renamed = (await world.call(client, { type: 'terminal.rename.request', terminalId: c, title: 'x', requestId: 'n1' })).payload;
   assert.equal(renamed.success, false);
   assert.match(renamed.error, /cannot rename/);
-  assert.equal(world.terminals.handlers.capture_terminal_request, undefined, 'capture answers "in development" from the gateway');
+  assert.equal(typeof world.terminals.handlers.capture_terminal_request, 'function');
 });
 
 test('a client that leaves loses its slots and subscriptions; the terminal keeps running and attached', async t => {
@@ -691,6 +707,14 @@ test('real: create, type, see the output; a new client gets a Restore holding it
   // The typed line echoes once, the command prints once.
   await until(() => (first.output().match(/alp-ok\r\n/g) ?? []).length >= 2, 'alp-ok printed');
 
+  const captured = await first.ask({ type: 'capture_terminal_request', terminalId: id, stripAnsi: true, requestId: 'screen1' }, 'capture_terminal_response');
+  assert.equal(captured.terminalId, id);
+  assert.ok(captured.lines.some(line => line === 'alp-ok'), JSON.stringify(captured));
+  assert.ok(captured.totalLines >= 30);
+  const lastLine = await first.ask({ type: 'capture_terminal_request', terminalId: id, start: -1, end: -1, requestId: 'screen2' }, 'capture_terminal_response');
+  assert.equal(lastLine.lines.length, 1);
+  assert.equal(lastLine.totalLines, captured.totalLines);
+
   const second = await app('second');
   await second.ask({ type: 'subscribe_terminal_request', terminalId: id, requestId: 's2' }, 'subscribe_terminal_response');
   const restored = second.frames.find(frame => frame.opcode === TerminalStreamOpcode.Restore);
@@ -757,4 +781,49 @@ test('close while reconnect sleeps cancels the sleep and opens no late socket', 
   await Promise.resolve(); await Promise.resolve();
   assert.equal(world.alpd.conns.length, count);
   assert.ok(world.alpd.conns.every(connection => connection.closed));
+});
+
+
+test('Paseo capture forwards exact text options with dual opt-in and registry checks', async t => {
+  const world = await setup(t, { timing: { checkMs: 0 } });
+  const client = fakeClient();
+  const { terminal } = await world.create(client);
+  const result = await world.call(client, { type: 'capture_terminal_request', terminalId: terminal.id, start: -2, end: -1, stripAnsi: false, requestId: 'capture' });
+  assert.deepEqual(result, { type: 'capture_terminal_response', payload: { terminalId: terminal.id, lines: ['rendered'], totalLines: 1, requestId: 'capture' } });
+  assert.deepEqual(world.alpd.calls.find(call => call.method === 'terminal.capture').params, { terminalId: terminal.id, start: -2, end: -1, stripAnsi: false });
+  await assert.rejects(world.call(client, { type: 'capture_terminal_request', terminalId: 'missing', requestId: 'bad' }), /No such terminal/);
+  await writeFile(path.join(world.home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true, allowPaseoTerminal: false }), { mode: 0o600 });
+  const before = world.alpd.calls.filter(call => call.method === 'terminal.capture').length;
+  await assert.rejects(world.call(client, { type: 'capture_terminal_request', terminalId: terminal.id, requestId: 'off' }), /terminal/i);
+  assert.equal(world.alpd.calls.filter(call => call.method === 'terminal.capture').length, before);
+});
+
+test('event-capable terminal directory reports external create/exit immediately with no five-second poll', async t => {
+  const world = await setup(t, { capabilities: ['terminal', 'terminal.watch'], timing: { pollMs: 60000, checkMs: 0 } });
+  const client = fakeClient();
+  await world.call(client, { type: 'subscribe_terminals_request', cwd: '/w/a', requestId: 'watch' });
+  await until(() => world.alpd.calls.some(call => call.method === 'terminal.watch'), 'atomic watch');
+  const id = await world.alpd.create();
+  await until(() => client.json('terminals_changed').some(message => message.payload.terminals.some(term => term.id === id)), 'external create invalidation');
+  world.alpd.exit(id);
+  await until(() => client.json('terminals_changed').at(-1).payload.terminals.length === 0, 'external exit invalidation');
+  assert.ok(world.logs.some(line => line.includes('directory mode events')));
+  assert.equal(world.alpd.calls.filter(call => call.method === 'terminal.list').length, 0);
+  world.alpd.conns.at(-1).close();
+  await until(() => world.alpd.conns.length > 1 && world.alpd.calls.filter(call => call.method === 'terminal.watch').length >= 3, 'directory-only reconnect snapshot');
+});
+
+test('opt-out while reconnect sleeps wakes it without opening a late connection', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const world = await setup(t, { timing: { checkMs: 0, retryMs: 1000 } });
+  const client = fakeClient();
+  const { terminal } = await world.create(client);
+  await world.subscribe(client, terminal.id);
+  world.alpd.conns.at(-1).close();
+  const count = world.alpd.conns.length;
+  await writeFile(path.join(world.home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: false }), { mode: 0o600 });
+  assert.equal(await world.terminals.refresh(), false);
+  t.mock.timers.tick(1000);
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(world.alpd.conns.length, count);
 });

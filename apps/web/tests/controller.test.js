@@ -731,7 +731,7 @@ const memoryStorage = () => {
 test('preferences survive a new controller (a reload) and connect/disconnect; the token never reaches storage', async t => {
   const storage = memoryStorage();
   const w = setup(t, undefined, { storage });
-  assert.deepEqual(w.state().preferences, { sendBehavior: 'steer', theme: 'system', newSession: {} });
+  assert.deepEqual(w.state().preferences, { sendBehavior: 'steer', theme: 'system', newSession: {}, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } });
   await connected(w);
   w.controller.setSendBehavior('queue');
   w.controller.setTheme('light');
@@ -742,7 +742,7 @@ test('preferences survive a new controller (a reload) and connect/disconnect; th
   const stored = [...storage.entries.values()].join('\n');
   assert.doesNotMatch(stored, /alpgw1|secret|127\.0\.0\.1/);
   const reloaded = setup(t, undefined, { storage });
-  assert.deepEqual(reloaded.state().preferences, { sendBehavior: 'queue', theme: 'light', newSession: {} });
+  assert.deepEqual(reloaded.state().preferences, { sendBehavior: 'queue', theme: 'light', newSession: {}, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } });
   reloaded.controller.resetPreferences();
   assert.equal(JSON.parse(storage.entries.get('alp-web:preferences')).sendBehavior, 'steer');
   // Another tab wrote something: reloadPreferences follows it; garbage gives the defaults.
