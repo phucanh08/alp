@@ -40,6 +40,7 @@ async function makeDistribution() {
 async function entrySource() {
   return `import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { bootId, bootTime } from ${JSON.stringify(new URL(`file://${clientDist}`).href)};
 const home = process.env.ALP_HOME;
 if (!home) { console.error('no ALP_HOME'); process.exit(1); }
 await mkdir(path.join(home, 'integrations'), { recursive: true });
@@ -50,7 +51,7 @@ if (process.argv.includes('--service')) {
   await writeFile(path.join(home, 'logs', 'integrations', 'paseo.log'), 'integration started\\n');
 }
 await writeFile(path.join(home, 'paseo.json'), JSON.stringify({ pid: process.pid, port: 0, token: 't'.repeat(64), serverId: 'alp-test', url: 'http://127.0.0.1:0/' }));
-await writeFile(path.join(home, 'integrations', 'paseo.lock'), JSON.stringify({ pid: process.pid, ready: true, socket: path.join(home, 'alp.sock') }));
+await writeFile(path.join(home, 'integrations', 'paseo.lock'), JSON.stringify({ pid: process.pid, bootId: bootId(), bootTime: bootTime(), ready: true, socket: path.join(home, 'alp.sock') }));
 process.on('SIGTERM', () => process.exit(0));
 setInterval(() => {}, 60_000);
 `;
