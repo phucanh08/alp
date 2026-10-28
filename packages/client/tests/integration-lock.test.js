@@ -235,11 +235,12 @@ for (const point of ['ready-write', 'ready-stat', 'ready-close', 'ready-rename',
 
 
 test('unsupported metadata and dead owners with uncertain boot context are retained', async t => {
-  for (const unknownVersion of [false, true]) {
+  for (const scenario of ['version', 'legacy-boot', 'foreign-boot']) {
     const f = await fixture(t), dead = await f.start(); await dead.call({ command: 'acquire' });
     const value = JSON.parse(await readFile(f.file, 'utf8'));
-    if (unknownVersion) value.lockVersion = 999;
-    else value.bootTime = 1;
+    if (scenario === 'version') value.lockVersion = 999;
+    else if (scenario === 'legacy-boot') { delete value.bootId; value.bootTime = 1; }
+    else value.bootId = '00000000-0000-0000-0000-000000000000';
     const raw = JSON.stringify(value); await writeFile(f.file, raw);
     const stopped = once(dead.child, 'exit'); dead.child.kill('SIGKILL'); await stopped;
     const next = await f.start(); const result = await next.call({ command: 'acquire' });

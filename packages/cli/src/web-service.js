@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { lstat, readFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { bootTime, readLock } from '@anhlp/alp-client/index';
+import { bootTime, isSameBoot, readLock } from '@anhlp/alp-client/index';
 import { distributionEntry } from './paths.js';
 
 /**
@@ -31,8 +32,8 @@ export function alpWebEntry() {
 
 const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
 
-/** When `pid` started, in ms since the epoch (to about a second), or undefined when ps cannot say. @param {number} pid */
-async function processStart(pid) {
+/** When `pid` started and elapsed seconds from ps, or undefined when ps cannot say. @param {number} pid */
+async function processTimes(pid) {
   try {
     const { stdout } = await execFileAsync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8', timeout: 5_000 });
     // [[dd-]hh:]mm:ss
@@ -40,7 +41,7 @@ async function processStart(pid) {
     if (!match) return undefined;
     const [, days = '0', hours = '0', minutes, seconds] = match;
     const elapsed = ((Number(days) * 24 + Number(hours)) * 60 + Number(minutes)) * 60 + Number(seconds);
-    return Date.now() - elapsed * 1000;
+    return { started: Date.now() - elapsed * 1000, elapsed };
   } catch { return undefined; }
 }
 
@@ -50,9 +51,9 @@ async function processStart(pid) {
  * `foreign` (proven not to be the integration: another user's, another boot's, or a reused pid) or
  * `unknown` (it cannot be proven either way, for example without ps or on Windows).
  *
- * The reuse proof compares the lock's wall-clock `startedAt` with the process's start from ps: a
- * wall clock stepped back by more than two seconds after the lock was written could make a reused
- * pid look older than the lock. A step forward only refuses.
+ * The reuse proof compares the lock's creation time with the process's start from ps: when
+ * `startedUptime` is recorded, monotonic uptime comparison prevents clock step vulnerabilities.
+ * For legacy locks, wall-clock `startedAt` is compared.
  * @param {string} home
  * @returns {Promise<{ pid: number, app: unknown } | { reason: string, alive: boolean, kind?: 'transient' | 'foreign' | 'unknown' }>}
  */
@@ -74,12 +75,16 @@ export async function webOwner(home) {
   if (process.platform === 'win32') return refuse('alp does not stop it on Windows', 'unknown');
   const uid = process.getuid?.();
   if (lockInfo.uid !== uid) return refuse('its lock is not yours', 'foreign');
-  if (Math.abs(lock.bootTime - bootTime()) > 30) return refuse('its lock is from another boot', 'foreign');
+  if (!isSameBoot(lock)) return refuse('its lock is from another boot', 'foreign');
   if (pid === process.pid || pid === (await readLock(home).catch(() => undefined))?.pid) return refuse(`pid ${pid} is not an integration`, 'foreign');
-  const started = await processStart(pid);
-  if (started === undefined) return refuse(`the start time of pid ${pid} is unknown`, 'unknown');
-  // ps rounds the elapsed time down, so `started` may be up to a second late; allow two.
-  if (started > Date.parse(lock.startedAt) + 2_000) return refuse(`pid ${pid} started after the lock was written (a reused pid)`, 'foreign');
+  const times = await processTimes(pid);
+  if (times === undefined) return refuse(`the start time of pid ${pid} is unknown`, 'unknown');
+  // When startedUptime is recorded, monotonic uptime comparison prevents clock step vulnerabilities.
+  // Otherwise, fallback to wall-clock startedAt comparison with 2s tolerance for ps resolution.
+  const isReused = typeof lock.startedUptime === 'number'
+    ? (Math.floor(os.uptime()) - times.elapsed) > lock.startedUptime + 2
+    : times.started > Date.parse(lock.startedAt) + 2_000;
+  if (isReused) return refuse(`pid ${pid} started after the lock was written (a reused pid)`, 'foreign');
   // The lock's owner; web.json must name it too (an owner still starting has not written it yet).
   let info, infoStat;
   try { infoStat = await lstat(infoFile); info = await readJson(infoFile); } catch { return refuse(`${infoFile} is missing or unreadable`, 'transient'); }

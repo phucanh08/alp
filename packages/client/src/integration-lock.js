@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, open, rename, rmdir, unlink } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
-import { assertIntegrationName, bootTime } from './index.js';
+import { assertIntegrationName, bootId, bootTime, isSameBoot } from './index.js';
 
 /**
- * @typedef {{ pid: number, bootTime: number, startedAt: string, ready: boolean, lockVersion?: number, owner?: string }} IntegrationLockRecord
+ * @typedef {{ pid: number, bootTime: number, bootId?: string, startedUptime?: number, startedAt: string, ready: boolean, lockVersion?: number, owner?: string }} IntegrationLockRecord
  * @typedef {{
  *   acquire(): Promise<{ acquired: boolean, lock: IntegrationLockRecord }>,
  *   setReady(ready: boolean): Promise<boolean>,
@@ -91,6 +92,8 @@ export function createIntegrationLock(home, name) {
   function complete(value) {
     return value && Number.isSafeInteger(value.pid) && value.pid > 0
       && typeof value.bootTime === 'number' && Number.isFinite(value.bootTime) && value.bootTime > 0
+      && (value.bootId === undefined || typeof value.bootId === 'string' && value.bootId.length > 0)
+      && (value.startedUptime === undefined || typeof value.startedUptime === 'number' && Number.isFinite(value.startedUptime))
       && typeof value.startedAt === 'string' && Number.isFinite(Date.parse(value.startedAt))
       && typeof value.ready === 'boolean'
       && (value.lockVersion === undefined && value.owner === undefined
@@ -106,7 +109,7 @@ export function createIntegrationLock(home, name) {
     catch (error) {
       if (/** @type {any} */ (error)?.code !== 'ESRCH') return false; // EPERM and unknown errors never grant takeover.
       // Approximate wall-clock boot metadata is context, never affirmative death evidence.
-      if (Math.abs(value.bootTime - bootTime()) > 30) throw recovery('Integration owner boot context is uncertain');
+      if (!isSameBoot(value)) throw recovery('Integration owner boot context is uncertain');
       return true;
     }
   }
@@ -132,8 +135,18 @@ export function createIntegrationLock(home, name) {
             if (!dead(current.value)) { phase = 'retired'; return { acquired: false, lock: current.value }; }
             await unlink(file);
           }
+          const currentBootId = bootId();
           /** @type {IntegrationLockRecord & { owner: string }} */
-          const value = { pid: process.pid, bootTime: bootTime(), startedAt: new Date().toISOString(), ready: false, lockVersion: 1, owner: randomUUID() };
+          const value = {
+            pid: process.pid,
+            bootTime: bootTime(),
+            ...(currentBootId ? { bootId: currentBootId } : {}),
+            startedAt: new Date().toISOString(),
+            startedUptime: Math.floor(os.uptime()),
+            ready: false,
+            lockVersion: 1,
+            owner: randomUUID(),
+          };
           const handle = await open(file, 'wx', 0o600);
           let info;
           try { await handle.writeFile(JSON.stringify(value)); info = await handle.stat(); }
