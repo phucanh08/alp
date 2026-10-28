@@ -43,35 +43,32 @@ test('OpenCode is told to ask before it edits, runs or fetches, over the config 
   assert.deepEqual(acpEnv({ command: 'gemini', env: { A: '1' } }, { PATH: '/bin' }), { PATH: '/bin', A: '1' });
 });
 
-test('security: claude sandbox floor allows local loopback and unix sockets for test servers while denying repo writes', async () => {
+test('security: claude sandbox floors do not grant broad host socket access', async () => {
   const root = path.join(os.tmpdir(), 'alp-test-repo-root');
 
-  // Read-only floor: allows local loopback binding and all Unix domain sockets for test servers, while denying writes to repo
+  // A host service can write on a caller's behalf; denyWrite alone cannot constrain it.
   const readOnly = claudePermissions('read-only', () => 'read-only', { allow: [], ask: [], deny: [], floor: 'read-only', floorRoot: root });
   assert.deepEqual(readOnly.sandbox, {
     enabled: true,
     autoAllowBashIfSandboxed: false,
     allowUnsandboxedCommands: true,
-    network: {
-      allowLocalBinding: true,
-      allowAllUnixSockets: true,
-    },
     filesystem: {
       denyWrite: [root],
     },
   });
 
-  // Workspace-write floor: allows local binding and Unix domain sockets without repo denyWrite restriction
+  // Workspace-write retains the same restrictive host-network defaults.
   const workspace = claudePermissions('workspace-write', () => 'workspace-write', { allow: [], ask: [], deny: [], floor: 'workspace-write', floorRoot: root });
   assert.deepEqual(workspace.sandbox, {
     enabled: true,
     autoAllowBashIfSandboxed: false,
     allowUnsandboxedCommands: true,
-    network: {
-      allowLocalBinding: true,
-      allowAllUnixSockets: true,
-    },
   });
+
+  for (const permissions of [readOnly, workspace]) {
+    assert.notEqual(permissions.sandbox.network?.allowAllUnixSockets, true, 'no arbitrary host Unix service access');
+    assert.notEqual(permissions.sandbox.network?.allowLocalBinding, true, 'no broad macOS localhost access');
+  }
 
   // Without floor: sandbox configuration is omitted
   const noFloor = claudePermissions('read-only', () => 'read-only', { allow: [], ask: [], deny: [] });
