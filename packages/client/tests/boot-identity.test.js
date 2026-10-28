@@ -115,6 +115,26 @@ test('lockAlive() and integrationAlive() survive clock jumps when bootId matches
   };
   assert.equal(lockAlive(crossBootLock), false);
   assert.equal(integrationAlive(crossBootLock), false);
+
+  // Cross-boot lock with foreign-owned PID (throws EPERM on kill(pid, 0)) never bypasses boot identity
+  const epermCrossBootLock = {
+    pid: 1,
+    bootId: 'other-boot-uuid',
+    bootTime: currentBoot,
+  };
+  assert.equal(lockAlive(epermCrossBootLock), false);
+  assert.equal(integrationAlive(epermCrossBootLock), false);
+
+  const epermLegacyCrossBootLock = {
+    pid: 1,
+    bootTime: currentBoot - 3600,
+  };
+  assert.equal(lockAlive(epermLegacyCrossBootLock), false);
+  assert.equal(integrationAlive(epermLegacyCrossBootLock), false);
+
+  // Incomplete lock without boot metadata fails closed
+  assert.equal(lockAlive({ pid: 1 }), false);
+  assert.equal(integrationAlive({ pid: 1 }), false);
 });
 
 test('acquireDaemonLock records bootId and startedUptime', async (t) => {

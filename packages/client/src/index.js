@@ -563,12 +563,13 @@ export async function discoverIntegration(name = 'web', options = {}) {
 }
 
 export function integrationAlive(lock) {
-  if (!lock || !Number.isSafeInteger(lock.pid)) return false;
-  try { process.kill(lock.pid, 0); } catch (error) {
+  if (!lock || !Number.isSafeInteger(lock.pid) || !isSameBoot(lock)) return false;
+  try {
+    process.kill(lock.pid, 0);
+    return true;
+  } catch (error) {
     return error?.code === 'EPERM';
   }
-  if ((typeof lock.bootTime === 'number' || typeof lock.bootId === 'string') && !isSameBoot(lock)) return false;
-  return true;
 }
 
 /**
