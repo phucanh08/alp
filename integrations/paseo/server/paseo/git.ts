@@ -38,21 +38,31 @@ export async function checkoutFacts(cwd: string): Promise<CheckoutFacts> {
 }
 
 /** Checkout facts kept for a while, so a poll does not run git for every directory each time. */
-export function checkoutCache(ttlMs = 10_000) {
+export function checkoutCache(
+  ttlMs = 10_000,
+  readFacts: (cwd: string) => Promise<CheckoutFacts> = cwd => checkoutFacts(cwd).catch(() => ({ isGit: false })),
+  identity: (cwd: string) => string = cwd => cwd,
+) {
   const entries = new Map<string, { at: number; facts: CheckoutFacts; pending?: Promise<CheckoutFacts> }>();
   return {
     /** The last facts known, or undefined before the first read. */
-    peek: (cwd: string) => entries.get(cwd)?.facts,
+    peek: (cwd: string) => entries.get(identity(cwd))?.facts,
     /** Fresh facts when the kept ones are older than the TTL (or `force`). */
     async read(cwd: string, force = false) {
-      const entry = entries.get(cwd);
-      if (entry && !force && Date.now() - entry.at < ttlMs) return entry.facts;
+      const key = identity(cwd);
+      const entry = entries.get(key);
       if (entry?.pending) return entry.pending;
-      const pending = checkoutFacts(cwd).catch((): CheckoutFacts => ({ isGit: false }));
-      entries.set(cwd, { at: entry?.at ?? 0, facts: entry?.facts ?? { isGit: false }, pending });
-      const facts = await pending;
-      entries.set(cwd, { at: Date.now(), facts });
-      return facts;
+      if (entry && !force && Date.now() - entry.at < ttlMs) return entry.facts;
+      const pending = readFacts(cwd);
+      entries.set(key, { at: entry?.at ?? 0, facts: entry?.facts ?? { isGit: false }, pending });
+      try {
+        const facts = await pending;
+        entries.set(key, { at: Date.now(), facts });
+        return facts;
+      } catch (error) {
+        entries.delete(key);
+        throw error;
+      }
     },
   };
 }

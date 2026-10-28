@@ -912,7 +912,7 @@ implied. alpd lists the capability when it has the workspace registry.
   `WORKSPACE_GIT.maxFileBytes`, or the file's JSON alone over a page), `withheld` (content
   that holds a private key, as §12.4, on either side), `symlink` (a link on either side: its target
   is never shown) or `submodule` (a gitlink: no content, never recursed). Only `text` has hunks;
-  `additions`/`deletions` count its lines. A hunk is `{ oldStart, oldCount, newStart, newCount,
+  `additions`/`deletions` count its lines; every non-text kind, including `too_large`, has both counts set to zero (the content was not fully presented). A hunk is `{ oldStart, oldCount, newStart, newCount,
   context?, lines }`, a line `{ type: 'add' | 'remove' | 'context', content, noNewline? }` (`noNewline`:
   Git's "No newline at end of file" applies to it). An untracked file is `change: 'untracked'`, all
   lines added; alpd reads it itself as §12.4 confines a read (no link, one name, a regular file), at

@@ -250,12 +250,6 @@ const EMPTY_TREE = { sha1: '4b825dc642cb6eb9a060e54bf8d69288fbee4904', sha256: '
 
 type Repository = Box & { remoteUrl: string | null; emptyTree: string; gitDir: string; config: string };
 
-/**
- * The box for a located repository: the configuration overrides that neutralize every filter it
- * names, origin's URL, its object format. A filter name `-c` cannot carry, or a work tree
- * configured elsewhere than the workspace, refuses (unsupported or failed), never runs Git
- * without the overrides.
- */
 /** The configuration a box is built from: origin, the work tree, the object format and every filter driver. */
 const CONFIG_READ = ['config', '--null', '--get-regexp', '^(remote\\.origin\\.url|core\\.worktree|extensions\\.objectformat|filter\\..+\\.(smudge|clean|process|required))$'];
 
@@ -269,6 +263,12 @@ async function sameConfig(repo: Repository): Promise<void> {
   if (hash(stdout) !== repo.config) failed('the repository configuration changed during the read');
 }
 
+/**
+ * The box for a located repository: the configuration overrides that neutralize every filter it
+ * names, origin's URL, its object format. A filter name `-c` cannot carry, or a work tree
+ * configured elsewhere than the workspace, refuses (unsupported or failed), never runs Git
+ * without the overrides.
+ */
 async function boxFor(located: Extract<Located, { kind: 'repository' }>, git: string, deadline: number): Promise<Repository | 'unsupported'> {
   const box: Box = { git, root: located.root, env: environment(located.root, located.gitDir), deadline, overrides: [] };
   if (!(await recentEnough(box))) throw new RpcError(ERROR.unavailable, FIXED.tooOld, { reason: 'git_unavailable' });
@@ -323,6 +323,9 @@ export function scrubRemoteUrl(url: string | null): string | null {
   if (scheme) {
     const protocol = scheme[1]!.toLowerCase();
     if (protocol === 'file') return null;
+    // A slash inside malformed user information must not turn a credential
+    // fragment into an apparent authority (for example user:pa/ss@host).
+    try { if (!new URL(value).host) return null; } catch { return null; }
     const host = scheme[2]!.slice(scheme[2]!.lastIndexOf('@') + 1);
     return host ? `${protocol}://${host}${scheme[3]}` : null;
   }
@@ -331,6 +334,9 @@ export function scrubRemoteUrl(url: string | null): string | null {
   // letter. User information is everything up to the last '@' before the first slash.
   const slash = value.indexOf('/');
   const at = (slash < 0 ? value : value.slice(0, slash)).lastIndexOf('@');
+  // A colon before the final @ is ambiguous with a repository path or malformed credentials.
+  // Refuse rather than exposing part of user information as a host/path.
+  if (value.includes('@') && value.indexOf(':') >= 0 && value.indexOf(':') < value.lastIndexOf('@')) return null;
   const scp = /^([^@/:]+):(.*)$/.exec(at < 0 ? value : value.slice(at + 1));
   if (scp && scp[1]!.length > 1 && !scp[2]!.startsWith('\\')) return `${scp[1]}:${scp[2]}`;
   return null;
@@ -553,7 +559,7 @@ function sized(file: GitDiffFile): { file: GitDiffFile; cost: number } {
   for (const hunk of file.hunks) for (const line of hunk.lines) content += Buffer.byteLength(line.content, 'utf8');
   const bytes = cost(file);
   if (content <= WORKSPACE_GIT.maxFileBytes && bytes <= PAGE_BYTES) return { file, cost: bytes };
-  const large: GitDiffFile = { ...file, kind: 'too_large', hunks: [] };
+  const large: GitDiffFile = { ...file, kind: 'too_large', additions: 0, deletions: 0, hunks: [] };
   return { file: large, cost: cost(large) };
 }
 
@@ -921,7 +927,7 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
   type Result = { file: GitDiffFile; cost: number } | undefined;
 
   async function diffWindow(repo: Repository, planned: Planned[], mode: GitCompare['mode'], range: string[], diffFlags: string[], ignoreWhitespace: boolean): Promise<Result[]> {
-    const shown = (entry: Entry, kind: GitDiffFile['kind'], extra: Partial<GitDiffFile> = {}, _cost = 0): Result => sized({ path: entry.path, ...(entry.oldPath ? { oldPath: entry.oldPath } : {}), change: entry.change, kind, additions: 0, deletions: 0, hunks: [], ...extra });
+    const shown = (entry: Entry, kind: GitDiffFile['kind'], extra: Partial<GitDiffFile> = {}): Result => sized({ path: entry.path, ...(entry.oldPath ? { oldPath: entry.oldPath } : {}), change: entry.change, kind, additions: 0, deletions: 0, hunks: [], ...extra });
     const readable = (size: number) => size <= GIT_READ.maxScanBytes;
     const wanted = new Map<string, number>();
     for (const entry of planned) {
@@ -989,7 +995,7 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
           const parsed = parseSection(section);
           results[item!.index] = parsed.binary
             ? shown(item!.entry, 'binary')
-            : shown(item!.entry, 'text', { additions: parsed.additions, deletions: parsed.deletions, hunks: parsed.hunks }, section.bytes);
+            : shown(item!.entry, 'text', { additions: parsed.additions, deletions: parsed.deletions, hunks: parsed.hunks });
         }
         // A file Git listed but gave no section for has no content change (its stat only changed).
       }
@@ -1028,7 +1034,7 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
     if (holdsKey(bytes)) return shown(entry, 'withheld');
     if (likelyBinary(bytes)) return shown(entry, 'binary');
     const { hunks, additions } = addedHunks(DECODER.decode(bytes));
-    return shown(entry, 'text', { additions, hunks }, bytes.length + additions);
+    return shown(entry, 'text', { additions, hunks });
   }
 
   /** Runs a read, answering any failure that is not a refusal as `1000 git_failed` (its cause logged). */

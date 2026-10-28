@@ -137,6 +137,7 @@ function Hunks({ file }: { file: GitDiffFile }) {
   const [limit, setLimit] = React.useState(LINE_LIMIT);
   const { shown, hidden } = clipLines(rows, limit);
   if (file.kind !== 'text') return <p className="px-3 py-2 text-xs text-muted-foreground" data-testid="git-file-kind" data-kind={file.kind}>{KIND_MESSAGES[file.kind]}</p>;
+  if (!rows.length && file.change === 'renamed' && file.oldPath) return <p className="px-3 py-2 text-xs text-muted-foreground" data-testid="git-file-rename">Renamed {file.oldPath} → {file.path}</p>;
   if (!rows.length) return <p className="px-3 py-2 text-xs text-muted-foreground" data-testid="git-file-empty">No changes to display</p>;
   const width = String(Math.max(0, ...rows.map(row => ('oldLine' in row ? Math.max(row.oldLine ?? 0, row.newLine ?? 0) : 0)))).length;
   const gutter = (value: number | undefined) => <span aria-hidden className="shrink-0 select-none pr-2 text-right text-muted-foreground tabular-nums" style={{ minWidth: `${width + 1}ch` }}>{value ?? ''}</span>;

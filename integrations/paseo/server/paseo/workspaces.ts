@@ -7,7 +7,7 @@ import { firstMessage } from './prompt-content.js';
 import type { AgentSnapshotPayload, SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
 import type { SessionSummary } from '@anhlp/alp-protocol/session';
 import type { ClientContext, Handler } from './gateway.js';
-import { checkoutCache, type CheckoutFacts } from './git.js';
+import { checkoutCache, checkoutFacts, type CheckoutFacts } from './git.js';
 import { createCreationReceipts, creationDigest, type CreationReceipts, type CreationAttempt } from './create-receipts.js';
 
 /**
@@ -70,7 +70,31 @@ export function createWorkspaces({ rpc, broadcast, agents, inDevelopment, receip
   log?: (message: string) => void;
 }) {
   let registry: Registry = { projects: [], workspaces: [], sessions: {}, labels: { generation: hex(), seq: 0, catalog: [] } };
-  const git = checkoutCache();
+  // Only registered live workspace roots have an existing daemon Git contract. Empty
+  // projects and pre-registration validation retain the isolated legacy read for now.
+  const registered = (directory: string) => registry.workspaces.filter(entry => entry.directory === directory && active(entry))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+  const git = checkoutCache(10_000, async directory => {
+    const entry = registered(directory);
+    if (!entry) return checkoutFacts(directory).catch(() => ({ isGit: false }));
+    // Permission, transport and read failures propagate; none are evidence of non-Git.
+    // Only explicit unsupported-contract boundaries retain legacy owner metadata.
+    let status;
+    try { status = await rpc('workspace.git.status', { workspaceId: entry.id }); }
+    catch (error: any) {
+      // This facade uses the owner's private daemon connection. Older daemons have
+      // no workspace.git method: retain only the previous optional metadata seam.
+      // The checkout panels still report their own capability error, without Git.
+      if (error?.code === -32601) return checkoutFacts(directory).catch(() => ({ isGit: false }));
+      throw error;
+    }
+    if (status.state === 'not_repository') return { isGit: false };
+    // A nested checkout is outside workspace.git's top-level-only contract. Its
+    // legacy facts retain the actual ancestor root, never the requested directory.
+    if (status.state === 'unsupported' && status.reason === 'not_repository_root') return checkoutFacts(directory).catch(() => ({ isGit: false }));
+    if (status.state !== 'repository') throw new RequestError('Git metadata requires a supported repository root');
+    return { isGit: true, repoRoot: directory, currentBranch: status.branch, remoteUrl: status.remoteUrl, isDirty: status.dirty };
+  }, directory => `${registered(directory)?.id ?? 'project-only'}:${directory}`);
   /** What each client last heard, so only changes are sent. */
   const sentWorkspaces = new Map<string, string>();
   const sentProjects = new Map<string, string>();

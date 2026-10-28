@@ -28,6 +28,7 @@ async function fixture(t) {
     // Return the committed snapshot after the mutation, as alpd does.
     if (method === 'registry.owner') result.registry = await registry.snapshot();
     if (method === 'session.list') result = { sessions: structuredClone(sessions) };
+    if (method === 'workspace.git.status') result = { state: 'not_repository' };
     if (method === 'question.list') result = { questions: [] };
     if (method === 'session.create') { const session = summary(params.sessionId); sessions.push(session); result = { session }; }
     if (method === 'session.prompt') result = { outcome: 'accepted' };

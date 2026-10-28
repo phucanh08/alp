@@ -156,6 +156,9 @@ test('only a registry workspace at its repository\'s top level is a checkout; ba
   const option = await ask({ type: 'subscribe_checkout_diff_request', requestId: 'd3', cwd: root, compare: { mode: 'base', baseRef: '--output=/tmp/alp-x' } });
   assert.deepEqual([option.error, option.files], [null, []]);
 
+  const listing = await ask({ type: 'fetch_workspaces_request', requestId: 'nested-list' });
+  const nested = listing.entries.find(row => row.workspaceDirectory === path.join(root, 'pkg'));
+  assert.equal(nested.project.checkout.worktreeRoot, root, 'unsupported nested metadata retains the actual ancestor root');
   const sub = await ask({ type: 'checkout_status_request', requestId: 's2', cwd: path.join(root, 'pkg') });
   assert.deepEqual([sub.isGit, sub.error?.code], [false, 'NOT_ALLOWED'], 'a directory inside a repository is not read');
   const subDiff = await ask({ type: 'subscribe_checkout_diff_request', requestId: 'd4', cwd: path.join(root, 'pkg'), compare: { mode: 'uncommitted' } });

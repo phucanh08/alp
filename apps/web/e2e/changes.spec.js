@@ -80,6 +80,9 @@ test('with files.read: the branch, the changed files with counts, hunks on deman
   await expect(hunks.locator('[data-diff="hunk"]').first()).toContainText('@@ -1,2 +1,3 @@');
   await expect(hunks.locator('[data-diff="remove"]')).toContainText(['export const tax = 0.1;']);
   await expect(hunks.locator('[data-diff="add"]')).toContainText(['export const tax = 0.2;', 'export const sum = total + tax;']);
+  await file(panel, 'docs/new-name.md').getByTestId('git-file-toggle').click();
+  await expect(file(panel, 'docs/new-name.md').getByTestId('git-file-rename')).toHaveText('Renamed docs/old-name.md → docs/new-name.md');
+  await expect(file(panel, 'docs/new-name.md')).not.toContainText('No changes to display');
   await file(panel, 'logo.png').getByTestId('git-file-toggle').click();
   await expect(file(panel, 'logo.png').getByTestId('git-file-kind')).toHaveText('Binary file');
   await file(panel, 'notes/todo.md').getByTestId('git-file-toggle').click();
