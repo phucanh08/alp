@@ -1,8 +1,8 @@
 # Paseo App 0.12 vs Host npm 0.12 Provider Plugin Boundary Investigation
 
-**Task ID:** `t-95df`  
-**Reference Evidence:** `/tmp/alp-t23bf-evidence/app-boundary.json`, durable release `~/alp-release/beta4-e3ebe53`  
-**Date:** 2026-10-28  
+**Task ID:** `t-95df`
+**Reference Evidence:** `/tmp/alp-t23bf-evidence/app-boundary.json`, durable release `~/alp-release/beta4-e3ebe53`
+**Date:** 2026-10-28
 
 ---
 
