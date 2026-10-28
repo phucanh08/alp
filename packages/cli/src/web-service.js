@@ -146,3 +146,39 @@ export async function stopWebService(home, timeoutMs = 30_000) {
 export function refusal(home) {
   return `${path.join(home, 'integrations', 'web.lock')} is held by a process that alp cannot prove is alp web or the Paseo integration from before its rename, so it was left running`;
 }
+
+/**
+ * Probes whether the published web service URL is live and answering requests.
+ * Accepts only loopback HTTP/HTTPS addresses.
+ * @param {string | undefined} url
+ * @param {number} [timeoutMs]
+ */
+export async function isWebReady(url, timeoutMs = 1_000) {
+  if (typeof url !== 'string' || !url) return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    if (!['127.0.0.1', 'localhost', '::1', '[::1]'].includes(parsed.hostname)) return false;
+    const res = await fetch(parsed.href, { signal: AbortSignal.timeout(timeoutMs) });
+    return typeof res.status === 'number' && res.status > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether web metadata is genuinely claimed by a live alp-web process.
+ * If the process is proven foreign (e.g. a reused PID or from another boot) or
+ * the URL does not answer HTTP requests, it is never claimed.
+ * @param {any} published
+ * @param {number | undefined} lockPid
+ * @param {any} held
+ * @param {number} [timeoutMs]
+ */
+export async function isWebClaimed(published, lockPid, held, timeoutMs = 1_000) {
+  if (published?.app !== 'alp-web' || published.pid !== lockPid) return false;
+  if (held && 'reason' in held && typeof held.reason === 'string') {
+    if (held.reason.includes('reused pid') || held.reason.includes('another boot')) return false;
+  }
+  return isWebReady(published.url, timeoutMs);
+}

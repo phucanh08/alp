@@ -7,7 +7,7 @@ import { alpHome, connect, daemonPaths, discoverIntegration, startIntegration } 
 import { UsageError } from './usage.js';
 import { built, start, running } from './daemon.js';
 import { DAEMON_ENTRY, distributionEntry } from './paths.js';
-import { alpWebEntry, refusal, stopPreRenamePaseo, stopWebService, webOwner } from './web-service.js';
+import { alpWebEntry, isWebClaimed, isWebReady, refusal, stopPreRenamePaseo, stopWebService, webOwner } from './web-service.js';
 
 /** The Paseo integration (its web app, bridge and relay) runs as integration `paseo`. */
 const PASEO = 'paseo';
@@ -137,11 +137,11 @@ const DISABLED = 'alp web is disabled by settings ("web.enabled": false).';
 async function serveWeb(home, entry) {
   await stopPreRenamePaseo(home);
   // A lock held by a process proven not to be alp web: say so now rather than wait for it. A
-  // running alp-web (its web.json names the lock's pid) is left to startIntegration, whatever the
-  // proof says, so a clock step can never keep alp web from reusing it.
+  // running alp-web (its web.json names the lock's pid and is answering) is left to startIntegration.
   const held = await webOwner(home);
   const published = await readFile(path.join(home, 'web.json'), 'utf8').then(text => JSON.parse(text), () => undefined);
-  const claimed = published?.app === 'alp-web' && published.pid === (await readFile(path.join(home, 'integrations', 'web.lock'), 'utf8').then(text => JSON.parse(text)?.pid, () => undefined));
+  const lockPid = await readFile(path.join(home, 'integrations', 'web.lock'), 'utf8').then(text => JSON.parse(text)?.pid, () => undefined);
+  const claimed = await isWebClaimed(published, lockPid, held);
   if ('reason' in held && held.alive && held.kind === 'foreign' && !claimed) throw new Error(`${refusal(home)} (${held.reason}). Stop it, then run alp web again.`);
   const project = await currentProject();
   let lock;
@@ -157,7 +157,9 @@ async function serveWeb(home, entry) {
     const owner = await webOwner(home);
     throw new Error(`${refusal(home)}${'reason' in owner ? ` (${owner.reason})` : ''}. Stop pid ${lock.pid}, then run alp web again.`);
   }
-  if (typeof info.url !== 'string' || typeof info.token !== 'string') throw new Error(`alp web published no address; see ${path.join(home, 'logs', 'integrations', 'alp-web.log')}`);
+  if (typeof info.url !== 'string' || typeof info.token !== 'string' || !(await isWebReady(info.url))) {
+    throw new Error(`alp web published no address; see ${path.join(home, 'logs', 'integrations', 'alp-web.log')}`);
+  }
   if (project) {
     await registerProject(home, project);
     await waitForGrant(home, info.credentialId, project);
