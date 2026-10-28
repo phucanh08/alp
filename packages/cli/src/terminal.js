@@ -24,7 +24,7 @@ async function read(home) {
   const info = await lstat(file(home)).catch(() => undefined);
   if (!info) return { exists: false, value: undefined, private: true };
   const own = !process.getuid || info.uid === process.getuid();
-  const value = info.isFile() ? await readFile(file(home), 'utf8').then(JSON.parse, () => undefined) : undefined;
+  const value = info.isFile() ? await readFile(file(home), 'utf8').then(JSON.parse).catch(() => undefined) : undefined;
   return { exists: true, value, private: info.isFile() && own && !(info.mode & 0o077) };
 }
 

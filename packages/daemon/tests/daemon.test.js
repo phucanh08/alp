@@ -285,6 +285,21 @@ test('finds alpd through the ALP CLI on PATH', { skip: process.platform === 'win
   assert.equal(await findDaemonEntry({ home, env: { PATH: path.join(directory, 'bin') }, candidates: [undefined, path.join(root, 'src', 'cli.js')] }), path.join(root, 'src', 'cli.js'));
 });
 
+test('findDaemonEntry ignores corrupt package.json without throwing SyntaxError (t-e69f)', { skip: process.platform === 'win32' }, async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-corrupt-pkg-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const root = path.join(directory, 'lib', 'alp');
+  await mkdir(path.join(root, 'src'), { recursive: true });
+  await mkdir(path.join(root, 'dist'));
+  await mkdir(path.join(directory, 'bin'));
+  await writeFile(path.join(root, 'package.json'), 'INVALID JSON { truncated');
+  await writeFile(path.join(root, 'src', 'cli.js'), '');
+  await writeFile(path.join(root, 'dist', 'alpd.js'), '');
+  await symlink(path.join(root, 'src', 'cli.js'), path.join(directory, 'bin', 'alp'));
+  const home = path.join(directory, 'home');
+  assert.equal(await findDaemonEntry({ home, env: { PATH: path.join(directory, 'bin') } }), undefined);
+});
+
 /** A daemon over a durable store; `stop(false)` abandons it without a clean shutdown, like a crash. */
 async function durable(t, directory, project, runtimes, { turns } = {}) {
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes, { turns }), runLogDir: path.join(directory, 'runs') });
