@@ -48,7 +48,7 @@ function Notice() {
   }, [notice, controller]);
   if (!notice) return null;
   return (
-    <div role={notice.level === 'error' ? 'alert' : 'status'} className={cn('fixed bottom-4 left-1/2 z-50 flex w-[min(92vw,28rem)] -translate-x-1/2 items-start gap-2 rounded-lg border px-3 py-2.5 text-sm shadow-xl shadow-[var(--shadow)]',
+    <div role={notice.level === 'error' ? 'alert' : 'status'} className={cn('mx-auto my-2 flex w-[min(92%,28rem)] shrink-0 items-start gap-2 rounded-lg border px-3 py-2.5 text-sm shadow-xl shadow-[var(--shadow)]',
       notice.level === 'error' ? 'border-destructive/40 bg-[var(--notice-error)] text-destructive' : 'border-border bg-popover text-foreground')}>
       {notice.level === 'error' ? <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" /> : <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-info" />}
       <span className="min-w-0 flex-1">{notice.text}</span>
@@ -415,6 +415,8 @@ function Shell() {
             <SplitView splits={medium} onNewSession={newSession} onRename={setRenaming} menuRequest={tabMenuRequest} onMenuRequestHandled={() => setTabMenuRequest(0)} />
           </>
         )}
+        {/* Reserve the notice's real height: overlays can hide composer controls or terminals. */}
+        <Notice />
       </main>
 
       {explorerShown && !away ? (
@@ -436,7 +438,6 @@ function Shell() {
       <CommandCenterHost open={!!commandCenter} scope={commandCenter ? commandCenter.scope : null} onClose={() => setCommandCenter(false)} history={away} splits={medium} onAction={onShortcut}
         onOpenSession={id => { controller.selectSession(id); toWorkspace(); setNavOpen(false); }} />
       <ShellShortcuts settings={settings} history={away} splits={medium} onAction={onShortcut} />
-      <Notice />
     </div>
     {settings ? <div className="fixed inset-0 z-50" data-modal-overlay><SettingsScreen mobile={!medium} onClose={() => setSettings(false)} /></div> : null}
     </TabsProvider>
