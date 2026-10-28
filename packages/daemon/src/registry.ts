@@ -229,7 +229,7 @@ export function createRegistry(home: string, options: { write?: typeof writeFile
       if (!includeArchived && !live(r, w)) fail('not_found', 'Workspace is archived', 1001);
       if (Object.values(r.worktreeJournal ?? {}).some(j => j.intent.id === workspaceId)) fail('reconciliation_required', 'Workspace mutation requires reconciliation');
       const canonical = await identity(w.directory);
-      if (w.canonical && canonical !== w.canonical) fail('identity_changed', 'Workspace directory identity changed', 1003);
+      if (canonical !== (w.canonical ?? w.directory)) fail('identity_changed', 'Workspace directory identity changed', 1003);
       if (cwd !== undefined && await identity(cwd) !== canonical) fail('cwd_mismatch', 'cwd and workspaceId must agree', -32602);
       return canonical;
     },
