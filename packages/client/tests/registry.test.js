@@ -169,3 +169,33 @@ test('conversation helpers send a live session.configure and its preview exactly
   assert.deepEqual(await api.configurePreview({ sessionId: 'ses_1', team: 'cafe' }), { method: 'session.configure.preview' });
   assert.deepEqual(sent, [['session.configure', configure], ['session.configure.preview', { sessionId: 'ses_1', team: 'cafe' }]]);
 });
+
+for (const callback of ['onBegun', 'onProgress']) test(`upload aborts uncommitted reservation when ${callback} throws`, async () => {
+  const { attachments } = await import('@anhlp/alp-client/portable');
+  const calls = [];
+  const failure = new Error('callback failed');
+  const api = attachments({ request: async (method, params) => {
+    calls.push(method);
+    if (method === 'attachment.begin') return { uploadId: 'upl_callback', state: 'uploading', received: 0, maxChunkBytes: 5 };
+    if (method === 'attachment.chunk') return { received: 5 };
+    if (method === 'attachment.abort') throw new Error('abort unavailable');
+    throw new Error(`unexpected ${method}`);
+  } });
+  await assert.rejects(api.upload({ sessionId: 's', name: 'x', mimeType: 'text/plain', data: new Uint8Array(5), requestId: 'callback', sha256: '0'.repeat(64), [callback]: () => { throw failure; } }), error => error === failure);
+  assert.equal(calls.at(-1), 'attachment.abort', 'best-effort abort preserves the original callback error');
+});
+
+test('callback failure preserves committed uploads and transport errors remain resumable', async () => {
+  const { attachments } = await import('@anhlp/alp-client/portable');
+  for (const committed of [false, true]) {
+    const calls = [];
+    const failure = new Error('failed');
+    const api = attachments({ request: async method => {
+      calls.push(method);
+      if (method === 'attachment.begin') return { uploadId: 'upl_resume', state: committed ? 'committed' : 'uploading', attachmentId: committed ? 'att_done' : undefined, received: 0, maxChunkBytes: 5 };
+      throw failure;
+    } });
+    await assert.rejects(api.upload({ sessionId: 's', name: 'x', mimeType: 'text/plain', data: new Uint8Array(5), requestId: 'resume', sha256: '0'.repeat(64), ...(committed ? { onBegun: () => { throw failure; } } : {}) }), error => error === failure);
+    assert.ok(!calls.includes('attachment.abort'), 'committed attachments and interrupted transports keep resumable state');
+  }
+});

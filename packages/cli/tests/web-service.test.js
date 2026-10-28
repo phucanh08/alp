@@ -229,6 +229,10 @@ test('isWebClaimed rejects stale metadata on reused PID, cross-boot, or unreacha
   };
   assert.equal(await isWebClaimed(validPublished, 12345, crossBootHeld), false);
 
+  for (const reason of ['pid 12345 belongs to another user', 'its lock is not yours', 'pid 12345 is not an integration']) {
+    assert.equal(await isWebClaimed(validPublished, 12345, { alive: true, kind: 'foreign', reason }), false, reason);
+  }
+
   // Unreachable service URL: must be rejected
   const deadPublished = { app: 'alp-web', pid: 12345, url: deadUrl };
   assert.equal(await isWebClaimed(deadPublished, 12345, { alive: false }), false);

@@ -102,7 +102,11 @@ export function attachments(client) {
           if (isAborted()) throw getAbortReason();
           const begun = await api.begin({ sessionId, name, size: data.length, mimeType, sha256: digest, requestId });
           uploadId = begun.uploadId;
-          onBegun?.(begun.uploadId);
+          try { onBegun?.(begun.uploadId); }
+          catch (error) {
+            if (begun.state !== 'committed') await api.abort(begun.uploadId).catch(() => {});
+            throw error;
+          }
           if (isAborted()) {
             if (begun.state !== 'committed') await api.abort(begun.uploadId).catch(() => {});
             throw getAbortReason();
@@ -134,7 +138,11 @@ export function attachments(client) {
               await api.abort(begun.uploadId).catch(() => {});
               throw getAbortReason();
             }
-            onProgress?.(offset, data.length);
+            try { onProgress?.(offset, data.length); }
+            catch (error) {
+              await api.abort(begun.uploadId).catch(() => {});
+              throw error;
+            }
           }
           if (isAborted()) {
             await api.abort(begun.uploadId).catch(() => {});
