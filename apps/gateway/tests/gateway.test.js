@@ -430,3 +430,40 @@ test('a throw in a request or upgrade handler is a logged 500, and the gateway k
   assert.deepEqual(JSON.parse((await plainRequest(gw.base, { path: '/healthz', headers: { host: `127.0.0.1:${new URL(gw.base).port}` } })).body), { live: true });
   assert.ok((await gw.rawSession('alice')).socket, 'a new connection still opens');
 });
+
+test('socket closing before upgrade cleans up perPrincipal entry without memory leak (t-7eb7)', async t => {
+  const { ticket, tokens, ids, gateway, base, rawSession } = await setup(t);
+  const { body } = await ticket(tokens.alice);
+  const port = Number(new URL(base).port);
+
+  // Send raw upgrade request and close immediately before upgrade finishes
+  const clientSocket = net.connect(port, '127.0.0.1');
+  const req = [
+    'GET /v1/ws HTTP/1.1',
+    `Host: 127.0.0.1:${port}`,
+    'Upgrade: websocket',
+    'Connection: Upgrade',
+    'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+    'Sec-WebSocket-Version: 13',
+    `Sec-WebSocket-Protocol: ${body.subprotocols.join(', ')}`,
+    `Origin: ${ORIGIN}`,
+    '',
+    '',
+  ].join('\r\n');
+
+  clientSocket.write(req);
+  clientSocket.destroy();
+
+  // perPrincipal must remove the entry completely rather than leaving count 0
+  await until(() => !gateway.perPrincipal.has(ids.alice), 'perPrincipal entry removed');
+  assert.equal(gateway.perPrincipal.has(ids.alice), false);
+  assert.equal(gateway.perPrincipal.size, 0);
+
+  // Subsequent connections for alice succeed and clean up on close
+  const session = await rawSession('alice');
+  assert.ok(session.socket);
+  assert.equal(gateway.perPrincipal.get(ids.alice), 1);
+  session.socket.close();
+  await until(() => !gateway.perPrincipal.has(ids.alice), 'perPrincipal cleaned up after session close');
+  assert.equal(gateway.perPrincipal.size, 0);
+});
