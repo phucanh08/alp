@@ -258,8 +258,10 @@ test('binding: foreign principals, epochs and roots get not_found; outside roots
 test('replay, gap and reconnect: a detached terminal keeps running for reconnectMs, then ends; input is never replayed', { skip }, async t => {
   const world = await setup(t, { terminalOptions: { limits: { replayBytes: 4096, reconnectMs: 1500 } } });
   const term = await open(world);
-  await term.type('echo SECRET-INPUT-$((6*7)) >/dev/null; i=0; while [ $i -lt 300 ]; do echo line-$i-xxxxxxxxxxxxxxxxxxxxxxxx; i=$((i+1)); done; echo DONE\r');
-  await until(() => term.text().includes('DONE\r\n'), 'the output');
+  // The input echo must not satisfy the completion marker before the loop finishes.
+  // Suppress the next prompt too, so no output can follow the marker before reconnect.
+  await term.type("stty -echo; PS1=''; echo SECRET-INPUT-$((6*7)) >/dev/null; i=0; while [ $i -lt 300 ]; do echo line-$i-xxxxxxxxxxxxxxxxxxxxxxxx; i=$((i+1)); done; printf 'TERM-%s\\n' DONE\r");
+  await until(() => term.text().includes('TERM-DONE\r\n'), 'the completed output');
   const last = Math.max(...term.viewer.events.map(event => event.seq ?? 0));
   // Disconnect: the terminal keeps running.
   term.viewer.connection.close();

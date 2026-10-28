@@ -351,7 +351,8 @@ test('discarding a message while its file uploads stops the upload, aborts it an
   await controller.abandonedUploads();
   assert.equal(world.store.chunks, 1, 'no chunk after the discard');
   assert.deepEqual(world.store.begins.map(begin => begin.requestId), [`${pending.id}:file-0`, `${pending.id}:file-0`], 'later.bin never begun; blob.bin begun again to abort it');
-  assert.deepEqual(world.store.aborts, ['upl_1']);
+  // SDK callback failure and controller discard independently clean up the same reservation.
+  assert.deepEqual(world.store.aborts, ['upl_1', 'upl_1'], 'both cleanup boundaries abort only this upload');
   assert.equal(world.store.uploads.size, 0);
   assert.equal(world.store.objects.size, 0);
   assert.equal(world.host.count('session.prompt'), 0);
