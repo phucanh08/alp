@@ -1,5 +1,6 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { open, readFile, writeFile, realpath, stat, lstat, mkdir, readlink, unlink, readdir, rename, rmdir, link } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
@@ -125,9 +126,80 @@ export function assertIntegrationName(name) {
   return name;
 }
 
+let cachedBootId = null;
+
+/**
+ * Returns a stable identifier for the current OS boot session,
+ * or undefined if unavailable on the platform or inaccessible.
+ *
+ * On Linux, reads /proc/sys/kernel/random/boot_id.
+ * On Darwin (macOS), queries sysctl kern.bootsessionuuid.
+ *
+ * @returns {string | undefined}
+ */
+export function bootId() {
+  if (cachedBootId !== null) return cachedBootId;
+  try {
+    if (process.platform === 'linux') {
+      const id = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+      if (id.length > 0) {
+        cachedBootId = id;
+        return cachedBootId;
+      }
+    } else if (process.platform === 'darwin') {
+      const id = execFileSync('sysctl', ['-n', 'kern.bootsessionuuid'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 2000,
+      }).trim();
+      if (id.length > 0) {
+        cachedBootId = id;
+        return cachedBootId;
+      }
+    }
+  } catch {
+    // Platform lacks boot id or procfs/sysctl is restricted; fall back gracefully.
+  }
+  cachedBootId = undefined;
+  return cachedBootId;
+}
+
+/**
+ * Internal/testing seam: resets or sets the cached boot identifier.
+ * @param {string | undefined | null} [id]
+ */
+export function _setBootIdForTest(id = null) {
+  cachedBootId = id;
+}
+
 /** Wall-clock boot time; a lock from an earlier boot is stale even if its pid is reused. */
 export function bootTime() {
   return Math.round((Date.now() - os.uptime() * 1000) / 1000);
+}
+
+/**
+ * Evaluates whether a lock record belongs to the current boot session.
+ *
+ * When both the lock and the current environment supply a bootId (Linux
+ * /proc/sys/kernel/random/boot_id or macOS kern.bootsessionuuid), identity is
+ * determined by exact bootId match, which is immune to wall-clock jumps.
+ *
+ * For legacy locks or environments without a bootId, falls back to checking
+ * whether wall-clock bootTime is within a 30-second window.
+ *
+ * @param {{ bootId?: string, bootTime?: number }} [lock]
+ * @param {{ bootId?: string, bootTime?: number }} [current]
+ * @returns {boolean}
+ */
+export function isSameBoot(lock, { bootId: curBootId = bootId(), bootTime: curBootTime = bootTime() } = {}) {
+  if (!lock) return false;
+  if (typeof lock.bootId === 'string' && lock.bootId.length > 0 && typeof curBootId === 'string' && curBootId.length > 0) {
+    return lock.bootId === curBootId;
+  }
+  if (typeof lock.bootTime === 'number' && Number.isFinite(lock.bootTime) && Number.isFinite(curBootTime)) {
+    return Math.abs(lock.bootTime - curBootTime) <= 30;
+  }
+  return false;
 }
 
 export async function readLock(home) {
@@ -140,7 +212,7 @@ export async function readLock(home) {
 }
 
 export function lockAlive(lock) {
-  if (!lock || !Number.isSafeInteger(lock.pid) || Math.abs((lock.bootTime ?? 0) - bootTime()) > 30) return false;
+  if (!lock || !Number.isSafeInteger(lock.pid) || !isSameBoot(lock)) return false;
   try {
     process.kill(lock.pid, 0);
     return true;
@@ -158,7 +230,17 @@ export function lockAlive(lock) {
  */
 export async function acquireDaemonLock(home, contents) {
   const file = daemonPaths(home).lock;
-  const lock = { pid: process.pid, startedAt: new Date().toISOString(), bootTime: bootTime(), uid: process.getuid?.() ?? -1, ready: false, ...contents };
+  const currentBootId = bootId();
+  const lock = {
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    startedUptime: Math.floor(os.uptime()),
+    bootTime: bootTime(),
+    ...(currentBootId ? { bootId: currentBootId } : {}),
+    uid: process.getuid?.() ?? -1,
+    ready: false,
+    ...contents,
+  };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const handle = await open(file, 'wx', 0o600);
@@ -287,10 +369,17 @@ export async function withDaemonLifecycle(home, action, run, { joinStart = false
   const state = path.join(home, 'state');
   await assertPrivateDirectory(state, { create: true });
   const directory = path.join(state, 'alpd.starting');
+  const currentBootId = bootId();
   const token = `owner-${process.pid}-${bootTime()}-${action}-${randomUUID()}`;
   const candidate = path.join(state, `alpd.starting-${token}`);
   await mkdir(candidate, { mode: 0o700 });
-  await writeFile(path.join(candidate, token), JSON.stringify({ pid: process.pid, bootTime: bootTime(), action }), { mode: 0o600 });
+  await writeFile(path.join(candidate, token), JSON.stringify({
+    pid: process.pid,
+    bootTime: bootTime(),
+    ...(currentBootId ? { bootId: currentBootId } : {}),
+    startedUptime: Math.floor(os.uptime()),
+    action,
+  }), { mode: 0o600 });
   try {
     let joined = false;
     if (joinStart) {
@@ -473,12 +562,12 @@ export async function discoverIntegration(name = 'web', options = {}) {
   return undefined;
 }
 
-function integrationAlive(lock) {
+export function integrationAlive(lock) {
   if (!lock || !Number.isSafeInteger(lock.pid)) return false;
   try { process.kill(lock.pid, 0); } catch (error) {
     return error?.code === 'EPERM';
   }
-  if (typeof lock.bootTime === 'number' && Math.abs(lock.bootTime - bootTime()) > 30) return false;
+  if ((typeof lock.bootTime === 'number' || typeof lock.bootId === 'string') && !isSameBoot(lock)) return false;
   return true;
 }
 
