@@ -186,7 +186,7 @@ test('a tool command, its output or a reply that names a staged copy reaches the
   const [part] = attachmentParts(turnStarts(world.transports)[0].params.input);
   const real = await realpath(part.path);
   transport.notification('item/completed', { threadId: transport.threadId, item: { type: 'commandExecution', id: 'cmd-1', command: `shasum -a 256 ${part.path}`, cwd: world.project, status: 'completed', exitCode: 0, aggregatedOutput: `${sha('masked')}  ${real}\n` } });
-  transport.finish(`The file at ${part.path} has SHA-256 ${sha('masked')}. Not the copy: ${world.stageRoot}-old/x. The copies are in ${world.stageRoot}.`);
+  transport.finish(`The file at ${part.path} has SHA-256 ${sha('masked')}. Not the copy: ${world.stageRoot}-old/x or ${world.stageRoot}.bak/x. The copies are in ${world.stageRoot}.`);
   await until(async () => !(await d.request('session.get', { sessionId: 'rm' })).session.activeTurnId, 'turn ended');
   const history = JSON.stringify(await d.request('session.history', { sessionId: 'rm' }));
   assert.ok(!history.includes(`${world.stageRoot}/`) && !history.includes(`${path.dirname(real)}/`), 'no spelling of the staging directory in history');
@@ -194,7 +194,36 @@ test('a tool command, its output or a reply that names a staged copy reaches the
   assert.ok(history.includes(`<alp-attachments>/${path.basename(part.path)}`), 'the copy shows under the mask with its id');
   assert.ok(history.includes(sha('masked')));
   assert.ok(history.includes(`${world.stageRoot}-old/x`), 'a longer name that merely starts like the directory is left alone');
+  assert.ok(history.includes(`${world.stageRoot}.bak/x`), 'a sibling directory with an extension like .bak is not masked');
   assert.ok(history.includes('The copies are in <alp-attachments>.'), 'the directory at the end of a sentence is masked too');
+});
+
+test('the staging exposure warning (ALP_ATTACHMENT_STAGE_EXPOSED) is emitted at most once per session', { skip }, async t => {
+  const world = await setup(t);
+  const d = await world.start();
+  await d.request('session.create', { sessionId: 'r-warn', spec: { cwd: world.project, persist: true } });
+  const first = await upload(d.request, 'r-warn', 'first payload');
+  const second = await upload(d.request, 'r-warn', 'second payload');
+
+  const lines = [];
+  t.mock.method(process.stderr, 'write', chunk => { lines.push(String(chunk)); return true; });
+
+  try {
+    await turn(d, world, 'r-warn', 'm1', [{ type: 'text', text: 'prompt 1' }, { type: 'attachment', attachmentId: first.attachmentId }]);
+    await turn(d, world, 'r-warn', 'm2', [{ type: 'text', text: 'prompt 2' }, { type: 'attachment', attachmentId: second.attachmentId }]);
+  } finally {
+    t.mock.restoreAll();
+  }
+
+  const warnings = lines.flatMap(line => {
+    try {
+      const parsed = JSON.parse(line);
+      return parsed.code === 'ALP_ATTACHMENT_STAGE_EXPOSED' && parsed.sessionId === 'r-warn' ? [parsed] : [];
+    } catch {
+      return [];
+    }
+  });
+  assert.equal(warnings.length, 1, 'warned exactly once for the session');
 });
 
 test('retry, restart and reconnect keep one object and one staged copy; a tampered copy is replaced, never followed', { skip }, async t => {

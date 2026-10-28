@@ -1074,9 +1074,15 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     if (!terminals) throw new RpcError(ERROR.unavailable, 'This alpd has no home: it serves no terminals', { reason: 'terminal_unsupported' });
     return run(terminals);
   };
-  const attachmentCall = <T>(run: (store: NonNullable<typeof attachments>) => Promise<T>) => {
+  const attachmentCall = async <T>(run: (store: NonNullable<typeof attachments>) => Promise<T>) => {
     if (!attachments) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd does not store attachments (capability attachments is not listed)');
-    return run(attachments);
+    try {
+      return await run(attachments);
+    } catch (error) {
+      if (error instanceof RpcError) throw error;
+      log.warn('attachment call failed', { code: 'ALPD_ATTACHMENT_FAILED', error });
+      throw new RpcError(ERROR.failed, 'alpd could not store the attachment; the upload was aborted', { reason: 'persistence_failed' });
+    }
   };
   const gitCall = <T>(run: (reader: NonNullable<typeof gitReader>) => Promise<T>) => {
     if (!gitReader) throw new RpcError(ERROR.unavailable, 'Registry needs ALP_HOME');
@@ -2070,7 +2076,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     async close() {
       closing = true;
       if (sweeper) clearInterval(sweeper);
-      attachments?.close();
+      await attachments?.close();
       // Every terminal ends with alpd, its whole process tree killed.
       await terminals?.shutdown();
       // The tick that runs now is waited for: a delivery under way finishes, so its

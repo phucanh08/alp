@@ -296,6 +296,7 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
   }
 
   function usable() {
+    if (closed) throw unavailable('attachment_unavailable', 'alpd attachment store is closed');
     if (failure) throw unavailable('attachment_unavailable', 'alpd cannot use its attachment store; its log says why');
   }
 
@@ -337,7 +338,7 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
 
   /** Collects expired uploads, unreferenced objects past their retention and leftovers of a crash. */
   async function sweep() {
-    if (failure) return;
+    if (failure || closed) return;
     await withRefs(async () => {
       const at = now();
       const released = { ...refs.released };
@@ -499,8 +500,8 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
       }
       // Reserved here, before anything awaits: concurrent begins see each other's reservation.
       const at = now();
-      // Expired uploads release their reservation now, and so do this principal's uploads of an
-      // earlier grant epoch (a reissued credential): nobody can continue or abort those any more.
+      // Expired uploads release their reservation now, and so do this principal's uploads of
+      // another grant epoch (a reissued credential): nobody can continue or abort those any more.
       // Their files go after any call on them.
       for (const meta of [...objects.values()]) {
         if (meta.state !== 'uploading') continue;
@@ -715,7 +716,8 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
     /**
      * Pins `attachmentIds` for `holder` durably (a prompt's receipt key; t-15b0.4's fork adds the
      * new session's holder the same way after re-authorizing the source's attachments for it). Each
-     * must still be committed; a write failure pins nothing.
+     * must still be committed; a write failure pins nothing. If interrupted by crash before the receipt
+     * is written, the pin is held conservatively until session cleanup (releaseSessions).
      */
     async pin(holder: string, sessionId: string, attachmentIds: string[], kind = 'prompt') {
       await recovered; usable();
@@ -828,7 +830,14 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
     /** The holders of the reference index, for tests. */
     holders: () => structuredClone(refs.holders),
 
-    close() { closed = true; if (sweeper) clearInterval(sweeper); sweeper = undefined; },
+    async close() {
+      closed = true;
+      if (sweeper) {
+        clearInterval(sweeper);
+        sweeper = undefined;
+      }
+      await Promise.allSettled([...queues.values()]);
+    },
   };
 }
 

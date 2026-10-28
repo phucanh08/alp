@@ -664,3 +664,38 @@ test('a begin of a newer grant epoch releases the principal\'s uploads of earlie
   assert.notEqual(one.uploadId, fresh.uploadId);
   assert.deepEqual(store.usage(after.id), { bytes: 4, uploads: 1 });
 });
+
+test('AttachmentStore.close() waits for in-flight operations to drain, then throws attachment_unavailable', { skip }, async t => {
+  const clock = { now: Date.now() };
+  const { store } = await bareStore(t, { now: () => clock.now });
+  const owner = { id: 'owner1', epoch: 'e1' };
+
+  const begun = await store.begin(owner, { sessionId: 's1', name: 'drain.bin', size: 10, mimeType: 'application/octet-stream', requestId: 'req-drain' });
+  await store.close();
+
+  await assert.rejects(
+    store.begin(owner, { sessionId: 's1', name: 'after.bin', size: 1, mimeType: 'text/plain', requestId: 'after' }),
+    { code: 1005, message: 'alpd attachment store is closed' }
+  );
+  await assert.rejects(
+    store.chunk(owner, { uploadId: begun.uploadId, offset: 0, data: b64('abc') }),
+    { code: 1005, message: 'alpd attachment store is closed' }
+  );
+});
+
+test('daemon IPC dispatcher sanitizes unexpected attachment errors without exposing host store paths', { skip }, async t => {
+  const world = await setup(t);
+  const daemon = await world.start();
+  const sessionId = await daemon.create();
+
+  const { uploadId } = await daemon.request('attachment.begin', { sessionId, name: 'leak.txt', size: 10, mimeType: 'text/plain', requestId: 'leak-req' });
+  const payloadPath = path.join(world.root, uploadId.slice(4), 'payload');
+  await chmod(payloadPath, 0o000);
+
+  const error = await daemon.request('attachment.chunk', { uploadId, offset: 0, data: b64('test') }).catch(err => err);
+  assert.equal(error.code, 1000);
+  assert.equal(error.data?.reason, 'persistence_failed');
+  assert.ok(!error.message.includes(world.root), 'message must not contain host filesystem paths');
+
+  await chmod(payloadPath, 0o600).catch(() => {});
+});

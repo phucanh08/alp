@@ -988,8 +988,8 @@ reveals that it exists.
   removed, trimmed, at most 255 UTF-8 bytes (`invalid_name` otherwise). `mimeType` is advisory (kept
   lower case); alpd sniffs the first bytes at commit for display (`detectedMimeType`) and neither
   chooses behaviour. `size` (0 allowed) is reserved against the quotas atomically: concurrent begins
-  cannot oversubscribe. Quotas count per principal across grant epochs: a begin of a newer epoch
-  releases that principal's uploads of earlier epochs at once (nobody can continue them), while its
+  cannot oversubscribe. Quotas count per principal across grant epochs: a begin under another grant
+  epoch releases that principal's in-flight uploads at once (nobody can continue them), while its
   committed objects of earlier epochs keep counting until they are collected or released. `sha256`,
   when given, must match at commit. A repeat with the same `requestId` and params (per principal and
   epoch) answers the same upload with what it holds now (`received`), so a client resumes there;
@@ -1020,8 +1020,10 @@ disk) aborts the upload: nothing half written is published and the reservation i
 name no host path.
 
 **References and retention**: a prompt pins its attachments (holder: its receipt key) durably in
-`refs.json` before the pending receipt and before delivery; a prompt the runtime refuses before it
-reaches the provider releases them; an `accepted`, `failed` or unknown outcome keeps them. Referenced
+`refs.json` before the pending receipt and before delivery; if interrupted by a crash before the receipt
+is written, references stay held conservatively until session history is removed (`releaseSessions`);
+a prompt the runtime refuses before it reaches the provider releases them; an `accepted`, `failed` or
+unknown outcome keeps them. Referenced
 objects survive expiry, `session.archive` and restarts, and count against quotas. An incomplete
 upload expires after `uploadTimeoutMs`; an unreferenced committed object is removed after
 `unreferencedRetentionMs`, a released one `releasedGraceMs` after its last reference went.
