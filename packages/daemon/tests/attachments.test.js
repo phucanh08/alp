@@ -3,6 +3,8 @@
 // checked for its code and reason, and every answer for host paths.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { createHash } from 'node:crypto';
 import { chmod, link, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, symlink, unlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -700,14 +702,79 @@ test('daemon IPC dispatcher sanitizes unexpected attachment errors without expos
   const daemon = await world.start();
   const sessionId = await daemon.create();
 
-  const { uploadId } = await daemon.request('attachment.begin', { sessionId, name: 'leak.txt', size: 10, mimeType: 'text/plain', requestId: 'leak-req' });
-  const payloadPath = path.join(world.root, uploadId.slice(4), 'payload');
-  await chmod(payloadPath, 0o000);
-
-  const error = await daemon.request('attachment.chunk', { uploadId, offset: 0, data: b64('test') }).catch(err => err);
+  const params = { sessionId, name: 'leak.txt', size: 10, mimeType: 'text/plain', requestId: 'leak-req' };
+  const { uploadId } = await daemon.request('attachment.begin', params);
+  // Repeating begin reads the existing payload without the chunk method's RpcError wrapper.
+  // Removing it produces an actual unwrapped open() ENOENT containing the host path.
+  await unlink(path.join(world.root, uploadId.slice(4), 'payload'));
+  const error = await daemon.request('attachment.begin', params).catch(err => err);
   assert.equal(error.code, 1000);
   assert.equal(error.data?.reason, 'persistence_failed');
-  assert.ok(!error.message.includes(world.root), 'message must not contain host filesystem paths');
+  assert.equal(error.message, 'alpd could not store the attachment; the upload was aborted');
+  assert.ok(!JSON.stringify(error).includes(world.root), 'response must not contain host filesystem paths');
+});
 
-  await chmod(payloadPath, 0o600).catch(() => {});
+function gate() {
+  let release;
+  const waiting = new Promise(resolve => { release = resolve; });
+  return { waiting, release };
+}
+
+test('close drains a begin paused before it enters an object queue', { skip }, async t => {
+  const { root, store } = await bareStore(t);
+  await store.ready();
+  const entered = gate(), resume = gate();
+  const original = fsPromises.realpath;
+  fsPromises.realpath = async (...args) => {
+    if (args[0] === path.dirname(root)) { entered.release(); await resume.waiting; }
+    return original(...args);
+  };
+  syncBuiltinESMExports();
+  let operation, closing, closedEarly;
+  try {
+    operation = store.begin({ id: 'owner', epoch: 'e1' }, { sessionId: 's1', name: 'a', size: 1, mimeType: 'text/plain', requestId: 'paused' });
+    await entered.waiting;
+    let closed = false;
+    closing = store.close().then(() => { closed = true; });
+    await new Promise(resolve => setImmediate(resolve));
+    closedEarly = closed;
+  } finally {
+    resume.release();
+    fsPromises.realpath = original;
+    syncBuiltinESMExports();
+    await operation;
+    await closing;
+  }
+  assert.equal(closedEarly, false, 'close waits for the entire admitted begin, including project lookup');
+  assert.equal(store.usage().uploads, 1, 'the admitted operation finished its writes before close returned');
+});
+
+test('close drains startup recovery before returning', { skip }, async t => {
+  const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'attach-close-recover-')));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const root = path.join(directory, 'attachments');
+  const entered = gate(), resume = gate();
+  const original = fsPromises.mkdir;
+  fsPromises.mkdir = async (...args) => {
+    if (args[0] === root) { entered.release(); await resume.waiting; }
+    return original(...args);
+  };
+  syncBuiltinESMExports();
+  let store, closing, closedEarly;
+  try {
+    store = createAttachmentStore({ root, sessionProject: () => directory, sweepMs: 0 });
+    await entered.waiting;
+    let closed = false;
+    closing = store.close().then(() => { closed = true; });
+    await new Promise(resolve => setImmediate(resolve));
+    closedEarly = closed;
+  } finally {
+    resume.release();
+    fsPromises.mkdir = original;
+    syncBuiltinESMExports();
+    await store.ready();
+    await closing;
+  }
+  assert.equal(closedEarly, false, 'recovery cannot create or rewrite files after close returned');
+  assert.ok((await stat(root)).isDirectory());
 });

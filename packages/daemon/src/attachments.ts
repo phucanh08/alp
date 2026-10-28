@@ -186,6 +186,16 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
   /** Begins in flight by request key, so a repeat waits for the first. */
   const beginning = new Map<string, Promise<unknown>>();
   const queues = new Map<string, Promise<unknown>>();
+  // Track complete public operations, including awaits before their first queue entry.
+  const pending = new Set<Promise<unknown>>();
+  function admitted<A extends unknown[], R>(run: (...args: A) => Promise<R>) {
+    return async (...args: A): Promise<R> => {
+      usable();
+      const operation = run(...args);
+      pending.add(operation);
+      try { return await operation; } finally { pending.delete(operation); }
+    };
+  }
   let failure: Error | undefined;
   let sweeper: NodeJS.Timeout | undefined;
   /** Referenced object directories whose meta could not be read (logged once). */
@@ -439,7 +449,7 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
   if (options.sweepMs !== 0) {
     void recovered.then(() => {
       if (closed || failure) return;
-      sweeper = setInterval(() => void sweep().catch(error => log?.warn('attachment collection failed', { code: 'ALPD_ATTACHMENT_SWEEP_FAILED', error })), options.sweepMs ?? Math.min(15 * 60 * 1000, Math.max(1000, Math.floor(limits.uploadTimeoutMs / 4))));
+      sweeper = setInterval(() => void admitted(sweep)().catch(error => log?.warn('attachment collection failed', { code: 'ALPD_ATTACHMENT_SWEEP_FAILED', error })), options.sweepMs ?? Math.min(15 * 60 * 1000, Math.max(1000, Math.floor(limits.uploadTimeoutMs / 4))));
       sweeper.unref();
     });
   }
@@ -466,7 +476,7 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
     }
   }
 
-  return {
+  const api = {
     /** Effective limits, advertised in daemon.hello. */
     limits,
     /** Settles when start-up recovery is done (or failed: the methods then answer 1005). */
@@ -836,8 +846,27 @@ export function createAttachmentStore(options: AttachmentStoreOptions) {
         clearInterval(sweeper);
         sweeper = undefined;
       }
+      await recovered;
+      await Promise.allSettled([...pending]);
       await Promise.allSettled([...queues.values()]);
     },
+  };
+  return {
+    ...api,
+    sweep: admitted(api.sweep),
+    begin: admitted(api.begin),
+    chunk: admitted(api.chunk),
+    commit: admitted(api.commit),
+    abort: admitted(api.abort),
+    get: admitted(api.get),
+    remove: admitted(api.remove),
+    resolve: admitted(api.resolve),
+    pin: admitted(api.pin),
+    heldBy: admitted(api.heldBy),
+    authorize: admitted(api.authorize),
+    release: admitted(api.release),
+    releaseSessions: admitted(api.releaseSessions),
+    reader: { ...api.reader, open: admitted(api.reader.open) },
   };
 }
 
