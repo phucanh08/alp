@@ -71,27 +71,43 @@ async function projectArgs() {
  * If alpd cannot be reached or the call fails, this is best-effort.
  * @param {string} home
  * @param {string} directory
+ * @param {{ timeoutMs?: number, connectClient?: typeof connect }} [options]
  */
-async function registerProject(home, directory) {
+export async function registerProject(home, directory, { timeoutMs = 5_000, connectClient = connect } = {}) {
   const socket = daemonPaths(home).socket;
   let client;
-  try { client = await connect(socket, { name: 'alp-cli', version: '1' }); }
-  catch { return; }
-  try {
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const list = await client.request('project.list', { limit: 1 }).catch(() => undefined);
+  let expired = false;
+  let timer;
+  const work = (async () => {
+    const connected = await connectClient(socket, { name: 'alp-cli', version: '1' }, { timeoutMs });
+    if (expired) { connected.close(); return; }
+    client = connected;
+    for (let attempt = 0; attempt < 5 && !expired; attempt++) {
+      const list = await client.request('project.list', { limit: 1 }, { timeoutMs }).catch(() => undefined);
+      if (expired) return;
       const revision = typeof list?.revision === 'number' ? list.revision : 0;
       try {
-        await client.request('project.register', { directory, ifRevision: revision, requestId: randomUUID() });
+        await client.request('project.register', { directory, ifRevision: revision, requestId: randomUUID() }, { timeoutMs });
         break;
       } catch (error) {
         if (error?.data?.reason === 'stale_revision' && attempt < 4) continue;
         break;
       }
     }
-  } catch {}
-  finally {
-    try { client.close(); } catch {}
+  })();
+  try {
+    // One deadline covers connection/hello and every retry; a late connection is closed above.
+    await Promise.race([work.catch(() => {}), new Promise(resolve => {
+      timer = setTimeout(() => {
+        expired = true;
+        try { client?.close(); } catch {}
+        resolve(undefined);
+      }, timeoutMs);
+    })]);
+  } finally {
+    expired = true;
+    clearTimeout(timer);
+    try { client?.close(); } catch {}
   }
 }
 

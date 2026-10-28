@@ -177,8 +177,6 @@ export async function isWebReady(url, timeoutMs = 1_000) {
  */
 export async function isWebClaimed(published, lockPid, held, timeoutMs = 1_000) {
   if (published?.app !== 'alp-web' || published.pid !== lockPid) return false;
-  if (held && 'reason' in held && typeof held.reason === 'string') {
-    if (held.reason.includes('reused pid') || held.reason.includes('another boot')) return false;
-  }
+  if (held?.kind === 'foreign') return false;
   return isWebReady(published.url, timeoutMs);
 }

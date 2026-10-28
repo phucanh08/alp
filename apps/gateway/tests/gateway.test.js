@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import net from 'node:net';
+import { WebSocketServer } from 'ws';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { revokeCredential, rotateCredential, resolveConfig } from '../src/index.js';
@@ -436,7 +437,9 @@ test('socket closing before upgrade cleans up perPrincipal entry without memory 
   const { body } = await ticket(tokens.alice);
   const port = Number(new URL(base).port);
 
-  // Send raw upgrade request and close immediately before upgrade finishes
+  // Hold the upgrade after the gateway reserves a slot, before a WebSocket exists.
+  let reservedSocket;
+  const upgrade = t.mock.method(WebSocketServer.prototype, 'handleUpgrade', (_request, socket) => { reservedSocket = socket; });
   const clientSocket = net.connect(port, '127.0.0.1');
   const req = [
     'GET /v1/ws HTTP/1.1',
@@ -451,8 +454,14 @@ test('socket closing before upgrade cleans up perPrincipal entry without memory 
     '',
   ].join('\r\n');
 
+  t.after(() => clientSocket.destroy());
+  clientSocket.on('error', () => {});
   clientSocket.write(req);
-  clientSocket.destroy();
+  await until(() => reservedSocket !== undefined, 'upgrade reached after reservation');
+  assert.equal(gateway.perPrincipal.get(ids.alice), 1, 'a slot is held before closing');
+  assert.equal(gateway.connections.size, 0, 'no completed WebSocket owns the slot');
+  reservedSocket.destroy();
+  upgrade.mock.restore();
 
   // perPrincipal must remove the entry completely rather than leaving count 0
   await until(() => !gateway.perPrincipal.has(ids.alice), 'perPrincipal entry removed');

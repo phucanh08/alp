@@ -432,12 +432,20 @@ test('a job that is hours late waits for an active turn on a recovered session, 
   const { job } = await daemon.request('schedule.create', { projectRoot: project, sessionId: session.id, dueAt: inMs(-3 * 60 * 60 * 1000), prompt: 'Three hours late behind turn.' });
   await daemon.stop();
 
+  // Recovery can finish before this test submits its active turn. Admit scheduler
+  // ticks only after that turn exists, so the test observes the busy-state contract.
+  let allowTick = false;
+  const interval = globalThis.setInterval;
+  const tickGate = t.mock.method(globalThis, 'setInterval', (callback, ms, ...args) =>
+    interval(() => { if (ms !== 20 || allowTick) callback(...args); }, ms));
   const next = await start({ scheduleTickMs: 20 });
   await until(() => next.runtime.snapshot(session.id), 'session is reopened by recovery');
   await next.request('session.attach', { sessionId: session.id });
   // Start an active turn on the recovered session before the scheduler admits the late job
   void next.request('session.prompt', { sessionId: session.id, clientMessageId: 'turn-recovered-1', content: [{ type: 'text', text: 'Active turn.' }] });
   await until(() => next.runtime.snapshot(session.id)?.activeTurnId, 'the session is busy with an active turn');
+  allowTick = true;
+  tickGate.mock.restore();
 
   await until(async () => {
     const current = await jobOf(next, job.id);
