@@ -913,12 +913,20 @@ export function createAgents({ clientFactory, home, broadcast, directory, receip
     } finally { prepared.release(); }
   }
 
+  /** Archive the root through alpd: closing its live tree keeps history and native sessions. */
+  async function archive(agentId: string) {
+    await started;
+    const session = known(agentId);
+    await alp!.request('session.archive', { sessionId: session.id });
+    await refresh();
+    return { agentId: session.id, archivedAt: agentOf(roots.get(session.id) ?? session).archivedAt ?? new Date().toISOString() };
+  }
+
   const view: AgentsView = {
     roots: () => [...roots.values()],
     snapshot: agentOf,
     async archive(sessionId) {
-      await alp!.request('session.archive', { sessionId });
-      await refresh();
+      await archive(sessionId);
     },
     markUnread(sessionId) {
       attention.set(sessionId, { reason: 'finished', at: new Date().toISOString() });
@@ -1215,11 +1223,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, receip
     },
 
     async archive_agent_request(message: Inbound<'archive_agent_request'>) {
-      const session = known(message.agentId);
-      await alp!.request('session.archive', { sessionId: session.id });
-      await refresh();
-      const archived = roots.get(session.id) ?? session;
-      return { type: 'agent_archived', payload: { agentId: session.id, archivedAt: agentOf(archived).archivedAt ?? new Date().toISOString(), requestId: message.requestId } } satisfies Outbound;
+      return { type: 'agent_archived', payload: { ...await archive(message.agentId), requestId: message.requestId } } satisfies Outbound;
     },
 
     async update_agent_request(message: Inbound<'update_agent_request'>) {
@@ -1323,6 +1327,7 @@ export function createAgents({ clientFactory, home, broadcast, directory, receip
     uploads,
     handlers,
     view,
+    archive,
     /** ALP itself as the app lists providers: its teams are the models (ALPD §62 step 3). */
     async providerEntry(cwd?: string) {
       const preview = await teams(cwd);

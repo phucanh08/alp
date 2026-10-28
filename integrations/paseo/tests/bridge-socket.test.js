@@ -78,7 +78,7 @@ async function setup(t, usage) {
     session(client, message);
     return (await client.next(frame => frame.message?.payload?.requestId === message.requestId)).message;
   };
-  return { info, origin, socket, hello, session, connected, ask, root, agents, home };
+  return { info, origin, socket, hello, session, connected, ask, root, agents, home, daemon, runtime };
 }
 
 test('the socket wants the token at hello, then speaks Paseo: server_info, pongs, and "in development" for the rest', async t => {
@@ -662,4 +662,39 @@ test('owner bridge creates only generated worktrees through a private host mappi
  const made=(await ask(client,request)).payload;assert.equal(made.error,null);assert.equal(made.workspace.workspaceKind,'worktree');assert.match(made.workspace.gitRuntime.currentBranch,/^alp\/workspace\/wks_/);assert.equal((await ask(client,{...request,requestId:'worktree-retry'})).payload.workspace.id,made.workspace.id);
  assert.equal(native('worktree','list','--porcelain').split('worktree ').length-1,2);
  const denied=(await ask(client,{...request,requestId:'arbitrary-ref',source:{...request.source,branchName:'arbitrary'}})).payload;assert.ok(denied.error);assert.equal(native('worktree','list','--porcelain').split('worktree ').length-1,2);
+});
+
+test('close_items archives a working root, keeps history, and replays safely without terminal permission', async t => {
+  const { connected, ask, root, agents, daemon, runtime, socket, session, hello } = await setup(t);
+  const client = await connected();
+  const agentId = (await ask(client, { type: 'create_agent_request', requestId: 'batch-create', config: { provider: 'alp', cwd: root }, labels: {} })).payload.agentId;
+  await ask(client, { type: 'send_agent_message_request', requestId: 'batch-send', agentId, text: 'Keep working', messageId: 'batch-message' });
+  await until(() => agents[0].started.length === 1, 'the active turn');
+  assert.ok(runtime.snapshot(agentId).activeTurnId);
+  // A connection without hello cannot archive any item.
+  const anonymous = await socket();
+  session(anonymous, { type: 'close_items_request', agentIds: [agentId], requestId: 'unauthorized' });
+  anonymous.send(hello());
+  assert.equal((await anonymous.next(frame => frame.type === 'hello.rejected')).reason, 'password_required');
+  await anonymous.closed;
+  assert.equal((await daemon.local().request('session.get', { sessionId: agentId })).session.archived, undefined);
+  const request = { type: 'close_items_request', agentIds: ['missing', agentId, agentId], terminalIds: ['term_ffffffffffffffffffffffffffffffff'], requestId: 'batch-close' };
+  const closed = await ask(client, request);
+  assert.equal(closed.type, 'close_items_response');
+  assert.deepEqual(closed.payload.agents.map(item => item.agentId), [agentId, agentId]);
+  assert.ok(closed.payload.agents.every(item => typeof item.archivedAt === 'string'));
+  assert.deepEqual(closed.payload.terminals, [{ terminalId: request.terminalIds[0], success: false }]);
+  assert.equal(runtime.snapshot(agentId), undefined, 'the live tree closed');
+  const stored = (await daemon.local().request('session.get', { sessionId: agentId })).session;
+  assert.equal(stored.archived, true);
+  assert.equal(stored.status, 'closed');
+  assert.deepEqual((await ask(client, { type: 'fetch_agents_request', requestId: 'batch-list' })).payload.entries, []);
+  const history = (await ask(client, { type: 'fetch_agent_history_request', requestId: 'batch-history' })).payload.entries;
+  assert.equal(history[0].agent.id, agentId);
+  assert.ok(history[0].agent.archivedAt);
+  const timeline = (await ask(client, { type: 'fetch_agent_timeline_request', requestId: 'batch-timeline', agentId })).payload;
+  assert.ok(timeline.entries.some(entry => entry.item.type === 'user_message' && entry.item.text === 'Keep working'));
+  // A new connection replays the same requestId, without reusing the test client's reply cache.
+  assert.deepEqual(await ask(await connected(), request), closed);
+  assert.deepEqual((await ask(client, { type: 'close_items_request', agentIds: [], terminalIds: [], requestId: 'batch-empty' })).payload, { agents: [], terminals: [], requestId: 'batch-empty' });
 });
