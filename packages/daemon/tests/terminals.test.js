@@ -544,7 +544,7 @@ test('the process table parser: commands with spaces, a marker in the environmen
     `  105     1   105 ??          00:01   spaced arg HOME=/x ALP_TERMINAL_ID=${marker}`,
   ].join('\n');
   const plain = ['  101 /bin/zsh -l', `  102 grep ALP_TERMINAL_ID=${marker}`, `  103 node server.js --flag=ALP_TERMINAL_ID=${marker}`, '  104 sleep 9', '  105   spaced arg'].join('\n');
-  await writeFile(path.join(bin, 'ps'), `#!/bin/sh\ncase "$*" in *-E*) cat <<'EOF_'\n${withEnv}\nEOF_\n;; *) cat <<'EOF_'\n${plain}\nEOF_\n;; esac\n`, { mode: 0o755 });
+  await writeFile(path.join(bin, 'ps'), `#!${process.execPath}\nprocess.stdout.write(process.argv.includes('-E') ? ${JSON.stringify(withEnv)} : ${JSON.stringify(plain)});\n`, { mode: 0o755 });
   const saved = process.env.PATH;
   process.env.PATH = `${bin}:${saved}`;
   t.after(() => { process.env.PATH = saved; });
@@ -559,4 +559,46 @@ test('the process table parser: commands with spaces, a marker in the environmen
   assert.deepEqual(byPid.get(104).markers, [marker], 'an escaped newline is one line');
   assert.deepEqual(byPid.get(105).markers, [marker], 'a command line that starts with spaces');
   assert.equal(rows.length, 5, 'no forged row');
+});
+
+
+test('simultaneous same-principal revokes count each terminal once while exit is pending', async t => {
+  const home = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-revoke-race-')));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
+  const fake = fakePty();
+  const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} },
+    spawn: (...args) => { const pty = fake.spawn(...args); pty.kill = () => {}; return pty; },
+    processes: async () => [], sweepMs: 60000, killGraceMs: 10, platform: 'darwin' });
+  t.after(() => service.shutdown());
+  await service.create({ id: 'owner', epoch: 'owner' }, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r' });
+  const results = await Promise.all([service.revoke('owner'), service.revoke('owner')]);
+  assert.equal(results.reduce((sum, result) => sum + result.closed, 0), 1);
+  assert.equal((await service.list({ id: 'owner', epoch: 'owner' }, {})).terminals.length, 0);
+});
+
+
+test('Linux environ reads yield to the event loop and fail closed on permission, disappearance and races', async t => {
+  const { psProcesses } = await import('@anhlp/alp-daemon/terminals');
+  const bin = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-linux-proc-')));
+  t.after(() => rm(bin, { recursive: true, force: true }));
+  const output = [101, 102, 103, 104].map(pid => `${pid} 1 ${pid} ${pid} pts/1 00:01`).join('\n');
+  await writeFile(path.join(bin, 'ps'), `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(output)});\n`, { mode: 0o755 });
+  const saved = process.env.PATH;
+  process.env.PATH = `${bin}:${saved}`;
+  t.after(() => { process.env.PATH = saved; });
+  const marker = `atm_${'b'.repeat(32)}`;
+  const read = [];
+  let yielded = false;
+  const rows = await psProcesses('linux', { readEnvironment: async pid => {
+    read.push(pid);
+    await new Promise(resolve => setImmediate(() => { yielded = true; resolve(); }));
+    if (pid === 102) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+    if (pid === 103) throw Object.assign(new Error('gone'), { code: 'ENOENT' });
+    return pid === 101 ? `ALP_TERMINAL_ID=${marker}\0` : `OTHER=ALP_TERMINAL_ID=${marker}\0`;
+  } })();
+  assert.equal(yielded, true);
+  assert.deepEqual(read, [101, 102, 103, 104]);
+  assert.deepEqual(rows[0].markers, [marker]);
+  assert.ok(rows.slice(1).every(row => row.markers === undefined));
 });

@@ -184,3 +184,29 @@ test('a gateway frame too small for alpd\'s output events forwards no terminals 
   await assert.rejects(client.request('terminal.attach', { terminalId: T1 }), error => error.code === 1005);
   assert.deepEqual(terminalCalls(env.daemon, mark), []);
 });
+
+
+test('late host opt-in still refuses incompatible frames; repeated hello cannot reset limits or authority', async t => {
+  const env = await world(t, { capabilities: ['workspace.registry'], config: { limits: { maxFrame: 256 * 1024 } } });
+  const { client } = await env.sdk('exec');
+  const again = await client.request('daemon.hello', { protocolVersion: 1 });
+  assert.ok(!again.capabilities.includes('terminal'));
+  const mark = env.daemon.calls().length;
+  await assert.rejects(client.request('terminal.create', { workspaceId: 'wks_a', cols: 80, rows: 24, requestId: 'late' }), error => error.code === 1005 && error.data?.reason === 'terminal_unsupported');
+  assert.deepEqual(terminalCalls(env.daemon, mark), []);
+  const next = await env.sdk('exec');
+  await assert.rejects(next.client.request('terminal.attach', { terminalId: T1 }), error => error.data?.reason === 'terminal_unsupported');
+});
+
+
+test('oversized output from an attached terminal closes with an explicit negotiated-limit reason', async t => {
+  const env = await world(t);
+  const { client } = await env.sdk('exec');
+  await client.request('terminal.attach', { terminalId: T1 });
+  let closed;
+  client.onClose(error => { closed = error; });
+  const link = [...env.daemon.state.links].at(-1);
+  link.send({ jsonrpc: '2.0', method: 'terminal.event', params: { terminalId: T1, type: 'output', seq: 2, data: 'x'.repeat(LIMITS.maxOutputFrameBytes + 1) } });
+  await until(() => closed !== undefined, 'explicit socket refusal');
+  assert.match(closed.data?.reason, /negotiated frame limit/);
+});

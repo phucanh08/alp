@@ -402,7 +402,9 @@ export class ClientConnection {
     this.#terminalLimits = gatewayTerminalLimits(hello.terminalLimits, this.#limits.maxFrame);
     // A frame too small for alpd's output events would drop output: no terminals through this gateway then.
     const daemonFrames = /** @type {any} */ (hello.terminalLimits)?.maxOutputFrameBytes;
-    if (this.#capabilities.includes('terminal') && !(Number.isSafeInteger(daemonFrames) && daemonFrames <= this.#terminalLimits.maxOutputFrameBytes)) {
+    // Remember compatibility even while the host switch is off: it can be enabled later.
+    this.#terminalFramesTooSmall = !(Number.isSafeInteger(daemonFrames) && daemonFrames <= this.#terminalLimits.maxOutputFrameBytes);
+    if (this.#terminalFramesTooSmall) {
       this.#capabilities = this.#capabilities.filter(capability => capability !== 'terminal');
       this.#terminalFramesTooSmall = true;
       this.#log.warn('alpd\'s terminal output does not fit this gateway\'s frame limit; terminals are not forwarded', { code: 'ALP_GATEWAY_TERMINAL_FRAME' });
@@ -1083,6 +1085,12 @@ export class ClientConnection {
    */
   #terminalEvent(raw) {
     if (this.#closed) return;
+    const candidate = /** @type {any} */ (raw);
+    if (candidate?.type === 'output' && typeof candidate.data === 'string' && this.#terminals.has(candidate.terminalId) && this.#grant.permissions.has('terminal.exec') && Buffer.byteLength(candidate.data) > this.#terminalLimits.maxOutputFrameBytes) {
+      // A host changed its output contract: explicitly end this connection rather than lose bytes.
+      this.close(CLOSE_CODE.internal, 'Terminal output exceeds the negotiated frame limit; reconnect');
+      return;
+    }
     const event = projectTerminalEvent(raw, this.#terminalLimits.maxOutputFrameBytes);
     if (!event || !this.#terminals.has(event.terminalId) || !this.#grant.permissions.has('terminal.exec')) {
       this.#log.warn('dropped a terminal event this connection may not get', { code: 'ALP_GATEWAY_EVENT_OUT_OF_SCOPE' });

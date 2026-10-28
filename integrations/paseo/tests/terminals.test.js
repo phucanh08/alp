@@ -720,3 +720,41 @@ test('a create requestId is namespaced per Paseo client: two devices never share
   assert.ok(ids.every(id => id.length <= 128 && !id.includes('device')), 'bounded, no client id in clear');
   assert.notEqual(a.payload.terminal.id, b.payload.terminal.id);
 });
+
+
+test('close during opt-out shutdown closes the retiring connection and clears its deadline', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const world = await setup(t, { timing: { checkMs: 0 } });
+  const client = fakeClient();
+  const created = await world.create(client);
+  await world.subscribe(client, created.terminal.id);
+  const connection = world.alpd.conns.at(-1);
+  const request = connection.request;
+  connection.request = (method, params) => method === 'terminal.close' ? new Promise(() => {}) : request(method, params);
+  await writeFile(path.join(world.home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: false }), { mode: 0o600 });
+  await world.terminals.refresh();
+  assert.equal(connection.closed, false, 'allow the in-flight close a deadline');
+  let closes = 0;
+  const originalClose = connection.close;
+  connection.close = () => { closes++; originalClose(); };
+  world.terminals.close();
+  assert.equal(connection.closed, true, 'closing bridge also closes retiring connection immediately');
+  t.mock.timers.tick(5000);
+  assert.equal(closes, 1, 'no late close deadline');
+});
+
+
+test('close while reconnect sleeps cancels the sleep and opens no late socket', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const world = await setup(t, { timing: { checkMs: 0, retryMs: 1000 } });
+  const client = fakeClient();
+  const { terminal } = await world.create(client);
+  await world.subscribe(client, terminal.id);
+  world.alpd.conns.at(-1).close();
+  const count = world.alpd.conns.length;
+  world.terminals.close();
+  t.mock.timers.tick(1000);
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(world.alpd.conns.length, count);
+  assert.ok(world.alpd.conns.every(connection => connection.closed));
+});
