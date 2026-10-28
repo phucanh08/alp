@@ -30,7 +30,7 @@ async function host(method, params) {
 const journal = async () => (await readFile(world.journal, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
 const sessionNamed = async title => (await host('session.list', { rootsOnly: true })).sessions.find(row => row.title === title);
 const status = page => page.getByRole('status').filter({ hasText: /^Changed:/ });
-/** Checks the notice says `text`, then dismisses it (the toast sits over the composer's toolbar). */
+/** Checks the notice says `text`, then dismisses it before the next configuration assertion. */
 async function noticed(locator, text) {
   await expect(locator).toContainText(text);
   await locator.getByRole('button', { name: 'Dismiss' }).click();
