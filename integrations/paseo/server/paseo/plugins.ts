@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type { SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
 import plugin from 'alp:plugin-client';
 import { registerLibraryRpc } from '../panel/library.js';
@@ -7,19 +6,15 @@ import { registerUsageRpc } from '../panel/usage.js';
 import type { PluginServerContext } from '../panel/compat.js';
 import type { Handler } from './gateway.js';
 
-/**
- * ALP's own panels over the bridge (D31 step 7, ALPD §62): the catalog names the Paseo plugin ALP
- * ships (the Tasks panel and screen, the ALP project panel, the ALP settings screen), and its RPCs
- * run here, in alpd, through the plugin's own handlers. Its client code is compiled into alpd as
- * Paseo compiles a plugin's client bundle; the digest of that code versions the catalog entry.
- * (Paseo's web app, removed in t-55ce.3, loaded that code from /alp-plugins.js through its patch 8.)
+/** ALP panels over the bridge: native Paseo evaluates the catalog's clientBundle as a factory,
+ * just as its own daemon's plugin runtime does. Keep the embedded client and the panel RPCs;
+ * the removed paseo-web preloader's alp-preloaded URI is not a native catalog bundle.
+ * See docs/alp/paseo-catalog-origin-012.md for the upstream 0.12 contract.
  */
 
 type Inbound<T extends SessionInboundMessage['type']> = Extract<SessionInboundMessage, { type: T }>;
 type Outbound = SessionOutboundMessage;
 type Contract = { name: string; input: { parseAsync(value: unknown): Promise<unknown> }; output: { parseAsync(value: unknown): Promise<unknown> } };
-
-const digest = createHash('sha256').update(plugin.factory).digest('hex').slice(0, 16);
 
 export function createPlugins({ log = () => {}, usage, home, projectDirectories }: {
   home?: string;
@@ -32,7 +27,7 @@ export function createPlugins({ log = () => {}, usage, home, projectDirectories 
 
   const handlers: Record<string, Handler> = {
     'plugin.catalog.get.request': (message: Inbound<'plugin.catalog.get.request'>) =>
-      ({ type: 'plugin.catalog.get.response', payload: { requestId: message.requestId, plugins: [{ id: plugin.id, clientBundle: `alp-preloaded:${plugin.id}:${digest}`, requirements: plugin.requirements }] } }) satisfies Outbound,
+      ({ type: 'plugin.catalog.get.response', payload: { requestId: message.requestId, plugins: [{ id: plugin.id, clientBundle: plugin.factory, requirements: plugin.requirements }] } }) satisfies Outbound,
 
     // ALP is core. The catalog loads its built-in UI adapter; management lists only
     // user plugins, so the adapter must not appear as an installed plugin.

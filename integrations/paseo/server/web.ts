@@ -13,8 +13,8 @@ import { MAX_FRAME } from '@anhlp/alp-client/index';
  * token-authenticated Paseo sockets use this listener; relay sockets attach to the bridge directly.
  * It served Paseo's web app (paseo-web) until that app was removed (t-55ce.3); `alp web` now serves
  * ALP's own app (apps/web), so this listener answers plain HTTP requests with 404. Requests must
- * name this host and port (no DNS rebinding), and the socket must come from this listener's own
- * origin (no other site in the browser).
+ * name this host and port (no DNS rebinding). Only clients without an Origin header may open
+ * the socket; browser origins are refused now that this listener serves no browser app.
  */
 
 /**
@@ -81,7 +81,6 @@ export function createWebServer({ gateway: given, app, home, port = 0, log = () 
   let serverId = '';
   let bound = 0;
   const hosts = () => new Set([`127.0.0.1:${bound}`, `localhost:${bound}`]);
-  const origins = () => new Set([`http://127.0.0.1:${bound}`, `http://localhost:${bound}`]);
   const headers = {
     'content-type': 'text/plain; charset=utf-8',
     'cache-control': 'no-store',
@@ -108,7 +107,7 @@ export function createWebServer({ gateway: given, app, home, port = 0, log = () 
     const url = new URL(request.url ?? '/', 'http://localhost');
     const refuse = (status: string) => { socket.end(`HTTP/1.1 ${status}\r\n\r\n`); };
     if (url.pathname !== '/ws' || !hosts().has(request.headers.host ?? '')) return refuse('403 Forbidden');
-    if (!origins().has(request.headers.origin ?? '')) return refuse('403 Forbidden');
+    if (request.headers.origin !== undefined) return refuse('403 Forbidden');
     if (!gateway) return refuse('404 Not Found');
     // The token comes with the hello (or as the subprotocol) and the gateway checks it.
     sockets.handleUpgrade(request, socket, head, ws => gateway.attach(ws, { bearer: ws.protocol || undefined }));
