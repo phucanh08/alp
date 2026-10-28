@@ -118,3 +118,15 @@ test('controller adopts smaller hello limits, rejects attachments before RPC and
   await controller.sendPrompt('look', undefined, attachments);
   assert.equal(host.count('session.prompt'), 1);
 });
+
+test('readImages catches arrayBuffer error safely and reports Could not read', async () => {
+  const badFile = {
+    name: 'corrupted.png',
+    size: 100,
+    type: 'image/png',
+    arrayBuffer() { return Promise.reject(new Error('disk read failed')); },
+  };
+  const result = await readImages([], [badFile]);
+  assert.equal(result.added.length, 0);
+  assert.equal(result.error, 'Could not read corrupted.png.');
+});

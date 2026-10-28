@@ -78,29 +78,84 @@ export function attachments(client) {
      * Uploads `data` and commits it: begin (or resume, with the same requestId), chunks of at most
      * the smaller of `maxChunkBytes` and what begin answered, commit with its SHA-256. A chunk
      * refused `offset_mismatch` continues from the daemon's `received`. Returns the attachment.
-     * @param {{ sessionId: string, name: string, mimeType: string, data: Uint8Array, requestId: string, sha256?: string, maxChunkBytes?: number, onProgress?: (received: number, size: number) => void }} options
+     * The returned promise exposes `.uploadId` once begun and `.abort(reason?: any)` to abort on alpd.
+     * @param {{ sessionId: string, name: string, mimeType: string, data: Uint8Array, requestId: string, sha256?: string, maxChunkBytes?: number, signal?: AbortSignal, onBegun?: (uploadId: string) => void, onProgress?: (received: number, size: number) => void }} options
+     * @returns {Promise<Map['attachment.commit']['result']['attachment']> & { readonly uploadId?: string, abort(reason?: any): Promise<void> }}
      */
-    async upload({ sessionId, name, mimeType, data, requestId, sha256, maxChunkBytes, onProgress }) {
-      const digest = sha256 ?? await sha256Hex(data);
-      const begun = await api.begin({ sessionId, name, size: data.length, mimeType, sha256: digest, requestId });
-      if (begun.state === 'committed' && begun.attachmentId) return (await api.get(begun.attachmentId)).attachment;
-      const size = Math.max(1, Math.min(begun.maxChunkBytes, maxChunkBytes ?? Infinity));
-      let offset = begun.received;
-      for (let realigned = 0; offset < data.length;) {
-        const end = Math.min(data.length, offset + size);
+    upload({ sessionId, name, mimeType, data, requestId, sha256, maxChunkBytes, signal, onBegun, onProgress }) {
+      /** @type {string | undefined} */
+      let uploadId;
+      let userAborted = false;
+      let userAbortReason;
+      const isAborted = () => userAborted || (signal?.aborted ?? false);
+      const getAbortReason = () => userAbortReason ?? signal?.reason ?? new Error('Upload aborted');
+
+      const onSignalAbort = () => {
+        if (uploadId) api.abort(uploadId).catch(() => {});
+      };
+      signal?.addEventListener?.('abort', onSignalAbort, { once: true });
+
+      const run = /** @type {Promise<Map['attachment.commit']['result']['attachment']> & { uploadId?: string, abort(reason?: any): Promise<void> }} */ ((async () => {
         try {
-          const { received } = await api.chunk({ uploadId: begun.uploadId, offset, data: base64Encode(data.subarray(offset, end)) });
-          offset = received;
-        } catch (error) {
-          const held = /** @type {any} */ (error)?.data;
-          // Another attempt got further (or less far) than this one knew: continue where the daemon is.
-          if (held?.reason !== 'offset_mismatch' || !Number.isSafeInteger(held.received) || ++realigned > 3) throw error;
-          offset = held.received;
-          continue;
+          if (isAborted()) throw getAbortReason();
+          const digest = sha256 ?? await sha256Hex(data);
+          if (isAborted()) throw getAbortReason();
+          const begun = await api.begin({ sessionId, name, size: data.length, mimeType, sha256: digest, requestId });
+          uploadId = begun.uploadId;
+          onBegun?.(begun.uploadId);
+          if (isAborted()) {
+            if (begun.state !== 'committed') await api.abort(begun.uploadId).catch(() => {});
+            throw getAbortReason();
+          }
+          if (begun.state === 'committed' && begun.attachmentId) return (await api.get(begun.attachmentId)).attachment;
+          const size = Math.max(1, Math.min(begun.maxChunkBytes, maxChunkBytes ?? Infinity));
+          let offset = begun.received;
+          for (let realigned = 0; offset < data.length;) {
+            if (isAborted()) {
+              await api.abort(begun.uploadId).catch(() => {});
+              throw getAbortReason();
+            }
+            const end = Math.min(data.length, offset + size);
+            try {
+              const { received } = await api.chunk({ uploadId: begun.uploadId, offset, data: base64Encode(data.subarray(offset, end)) });
+              offset = received;
+            } catch (error) {
+              if (isAborted()) {
+                await api.abort(begun.uploadId).catch(() => {});
+                throw getAbortReason();
+              }
+              const held = /** @type {any} */ (error)?.data;
+              // Another attempt got further (or less far) than this one knew: continue where the daemon is.
+              if (held?.reason !== 'offset_mismatch' || !Number.isSafeInteger(held.received) || ++realigned > 3) throw error;
+              offset = held.received;
+              continue;
+            }
+            if (isAborted()) {
+              await api.abort(begun.uploadId).catch(() => {});
+              throw getAbortReason();
+            }
+            onProgress?.(offset, data.length);
+          }
+          if (isAborted()) {
+            await api.abort(begun.uploadId).catch(() => {});
+            throw getAbortReason();
+          }
+          return (await api.commit({ uploadId: begun.uploadId, sha256: digest })).attachment;
+        } finally {
+          signal?.removeEventListener?.('abort', onSignalAbort);
         }
-        onProgress?.(offset, data.length);
-      }
-      return (await api.commit({ uploadId: begun.uploadId, sha256: digest })).attachment;
+      })());
+
+      Object.defineProperty(run, 'uploadId', {
+        get: () => uploadId,
+        enumerable: true,
+      });
+      run.abort = async (reason) => {
+        userAborted = true;
+        userAbortReason = reason ?? new Error('Upload aborted');
+        if (uploadId) await api.abort(uploadId).catch(() => {});
+      };
+      return run;
     },
   };
   return api;

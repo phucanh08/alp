@@ -1,4 +1,6 @@
+import { realpathSync } from 'node:fs';
 import { access, chmod, constants, lstat, readdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { runCommand } from './command.js';
 import { assertPrivateSocket, connect, daemonPaths, lockAlive, readLock } from './index.js';
@@ -519,12 +521,57 @@ async function schemaChecks(home) {
   return checks;
 }
 
+/** Checks whether directory `target` is inside directory `container`. */
+function isInside(target, container) {
+  const resolve = directory => {
+    let current = path.resolve(directory);
+    let suffix = '';
+    for (;;) {
+      try { return path.join(realpathSync(current), suffix); }
+      catch {
+        const parent = path.dirname(current);
+        if (parent === current) return path.join(current, suffix);
+        suffix = path.join(path.basename(current), suffix);
+        current = parent;
+      }
+    }
+  };
+  const resolvedTarget = resolve(target);
+  const resolvedContainer = resolve(container);
+  const relative = path.relative(resolvedContainer, resolvedTarget);
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+/**
+ * Checks where ALP_HOME sits: staging and state live there (§12.6). Sandboxed sessions
+ * can write the temp directory and their workspace, so staged copies inside either could
+ * be modified by a sandboxed tool before alpd reads them (ALP_ATTACHMENT_STAGE_EXPOSED).
+ */
+async function homeLocationCheck(home, project) {
+  if (process.platform === 'win32' || !home) return { id: 'home', status: 'ok', summary: home ?? '' };
+  if (project && isInside(home, project)) {
+    return {
+      id: 'home', status: 'warn',
+      summary: `ALP_HOME (${home}) is inside this project's workspace, which sandboxed sessions may write: a tool could change staged attachment copies before they are read; keep ALP_HOME outside workspaces (default ~/.alp)`,
+    };
+  }
+  const inTmp = isInside(home, os.tmpdir()) || isInside(home, '/tmp');
+  if (inTmp) {
+    return {
+      id: 'home', status: 'warn',
+      summary: `ALP_HOME (${home}) is inside the temp directory, which sandboxed sessions may write: a tool could change staged attachment copies before they are read; keep ALP_HOME outside it (default ~/.alp)`,
+    };
+  }
+  return { id: 'home', status: 'ok', summary: home };
+}
+
 export async function diagnose({ home, project, env = process.env, run = runCommand, sandbox, daemonEntry, timeoutMs = 3000 } = {}) {
   const checks = [];
   if (daemonEntry) {
     checks.push(await lstat(daemonEntry).then(() => ({ id: 'build', status: 'ok', summary: daemonEntry }), () => ({ id: 'build', status: 'fail', summary: `alpd is not built (${daemonEntry}); run npm run build` })));
   }
   checks.push(...await runtimeChecks({ env, run }));
+  checks.push(await homeLocationCheck(home, project));
   const daemon = await daemonCheck(home);
   checks.push(daemon);
   const service = await serviceCheck(home, env);

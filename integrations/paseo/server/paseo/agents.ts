@@ -103,7 +103,9 @@ export function createAgents({ clientFactory, home, broadcast, directory, receip
   async function fileLimits(prepared: ReturnType<typeof prepare>, connection: DaemonConnection) {
     prepared.assertActive();
     if (!('files' in prepared)) return;
-    const hello = await connection.request<any>('daemon.hello', { protocolVersion: 1, client: { name: 'alp-paseo-facade', version: '1' } });
+    const hello = (connection.capabilities !== undefined && (connection.attachmentLimits !== undefined || !connection.capabilities.includes('attachments')))
+      ? { capabilities: connection.capabilities, attachmentLimits: connection.attachmentLimits }
+      : await connection.request<any>('daemon.hello', { protocolVersion: 1, client: { name: 'alp-paseo-facade', version: '1' } });
     prepared.assertActive();
     const limits = hello.attachmentLimits;
     if (!(connection.capabilities ?? hello.capabilities)?.includes('attachments') || !limits || !['maxObjectBytes', 'maxPerPrompt', 'maxPromptBytes', 'maxChunkBytes'].every(k => Number.isSafeInteger(limits[k]) && limits[k] >= 0) || !limits.maxChunkBytes) throw new Error('This ALP daemon does not offer valid attachment limits');

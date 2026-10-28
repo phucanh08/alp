@@ -98,3 +98,14 @@ test('workspaces match whole strings, by the granted or the canonical path; writ
   assert.equal(can({ ...principal, permissions: ['project.write'] }, 'project.read'), true);
   assert.equal(can(principal, 'project.read'), false);
 });
+
+test('describe handles 1003 content_type specifically instead of generic host refusal', () => {
+  const errorWithMessage = { code: 1003, message: 'Prompt content of type "unknown" cannot be sent through the gateway', data: { reason: 'content_type' } };
+  const described1 = describe(errorWithMessage);
+  assert.equal(described1.message, 'Prompt content of type "unknown" cannot be sent through the gateway.');
+  assert.equal(described1.code, 1003);
+
+  const errorWithoutMessage = { code: 1003, data: { reason: 'content_type' } };
+  const described2 = describe(errorWithoutMessage);
+  assert.equal(described2.message, 'This message contains content the host does not accept.');
+});

@@ -44,7 +44,13 @@ async function fakeDaemon(t) {
         if (!message.method) { asked.get(message.id)?.(message); continue; }
         const reply = result => write({ jsonrpc: '2.0', id: message.id, result });
         switch (message.method) {
-          case 'daemon.hello': reply({ protocolVersion: PROTOCOL_VERSION }); break;
+          case 'daemon.hello': reply({
+            protocolVersion: PROTOCOL_VERSION,
+            capabilities: ['attachments', 'terminal'],
+            attachmentLimits: { maxObjectBytes: 100, maxPerPrompt: 2, maxPromptBytes: 200, maxChunkBytes: 50 },
+            promptImageLimits: { maxCount: 4, maxBytes: 1000, maxTotalBytes: 4000 },
+            terminalLimits: { maxPerPrincipal: 2, maxPerDaemon: 8, maxInputBytes: 1024, maxOutputFrameBytes: 2048, replayBytes: 4096, idleMs: 60000, maxLifetimeMs: 3600000, reconnectMs: 30000 },
+          }); break;
           case 'daemon.status': reply({ ok: true }); break;
           case 'test.stream':
             for (let seq = 1; seq <= 3; seq++) write({ jsonrpc: '2.0', method: 'event', params: { sessionId: 'ses_1', seq, event: { type: 'item' } } });
@@ -79,6 +85,13 @@ test('connect: handshake, requests, streamed events and frames arriving in piece
   assert.ok(client instanceof AlpClient && client instanceof AlpRpcClient);
   assert.ok(Array.isArray(client.capabilities));
   assert.ok(Object.isFrozen(client.capabilities));
+  assert.deepEqual(client.capabilities, ['attachments', 'terminal']);
+  assert.deepEqual(client.attachmentLimits, { maxObjectBytes: 100, maxPerPrompt: 2, maxPromptBytes: 200, maxChunkBytes: 50 });
+  assert.ok(Object.isFrozen(client.attachmentLimits));
+  assert.deepEqual(client.promptImageLimits, { maxCount: 4, maxBytes: 1000, maxTotalBytes: 4000 });
+  assert.ok(Object.isFrozen(client.promptImageLimits));
+  assert.deepEqual(client.terminalLimits, { maxPerPrincipal: 2, maxPerDaemon: 8, maxInputBytes: 1024, maxOutputFrameBytes: 2048, replayBytes: 4096, idleMs: 60000, maxLifetimeMs: 3600000, reconnectMs: 30000 });
+  assert.ok(Object.isFrozen(client.terminalLimits));
   assert.deepEqual(daemon.received[0].params, { protocolVersion: PROTOCOL_VERSION, client: { name: 'test', version: '1' } });
   const events = [];
   client.onEvent(envelope => events.push(envelope.seq));

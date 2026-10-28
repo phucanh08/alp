@@ -260,8 +260,8 @@ const CONVERSATION_REFUSALS = Object.freeze({
   invalid_params: 'The daemon host refused these parameters for this session',
 });
 
-/** Numbers and limit names of alpd's attachment errors a client acts on (where to resume, which quota). */
-const ATTACHMENT_ERROR_DATA = Object.freeze(['received', 'size', 'max', 'limit', 'maxPerPrompt', 'maxPromptBytes']);
+/** Numbers, limit names and opaque attachment ids of alpd's attachment errors a client acts on. */
+const ATTACHMENT_ERROR_DATA = Object.freeze(['received', 'size', 'max', 'limit', 'maxPerPrompt', 'maxPromptBytes', 'attachmentId']);
 
 /** Gateway cursors of a diff page split to fit the client's frame: per connection, at most this many kept. */
 const GIT_PAGE_PREFIX = 'alp-gateway-page:';
@@ -1066,7 +1066,11 @@ export class ClientConnection {
     const data = reason ? { reason } : {};
     for (const key of ATTACHMENT_ERROR_DATA) {
       const value = error.data?.[key];
-      if ((Number.isSafeInteger(value) && value >= 0) || (key === 'limit' && typeof value === 'string' && /^[a-z_]{1,32}$/.test(value))) data[key] = value;
+      if ((Number.isSafeInteger(value) && value >= 0)
+        || (key === 'limit' && typeof value === 'string' && /^[a-z_]{1,32}$/.test(value))
+        || (key === 'attachmentId' && typeof value === 'string' && /^att_[0-9a-f]{32}$/.test(value))) {
+        data[key] = value;
+      }
     }
     return new GatewayError(error.code, reason ? ATTACHMENT_REFUSALS[reason] : 'The attachment request failed on the daemon host', Object.keys(data).length ? data : undefined);
   }

@@ -117,6 +117,7 @@ export function describe(error) {
     if (code === 1003 && reason === 'mode') return { ...base, message: 'Your access token cannot drive a session in this mode. Ask the host owner for a token with that mode, or use a session in a granted mode.' };
     if (code === 1003 && reason === 'outside_workspace') return { ...base, message: 'That workspace is not granted to your access token.' };
     if (code === 1003 && reason === 'spec_field') return { ...base, message: 'The host refused one of the session settings.' };
+    if (code === 1003 && reason === 'content_type') return { ...base, message: error.message ? (/[.!?]$/.test(error.message) ? error.message : `${error.message}.`) : 'This message contains content the host does not accept.' };
     if (code === 1003) return { ...base, message: 'The host refused this request.' };
     if (code === 1001) return { ...base, message: 'Not found on the host. It may have been removed or expired.' };
     if (code === 1004 && reason === 'revision_conflict') return { ...base, message: 'It changed on the host meanwhile. The latest version is shown; try again if you still want to.' };
