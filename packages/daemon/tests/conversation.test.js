@@ -1479,3 +1479,57 @@ test('concurrent forks from two different sources with same explicit newSessionI
   assert.equal(recoveredFork.session.id, recoverableTarget);
   assert.equal(recoveredFork.forkedFrom.sessionId, 'source-a');
 });
+
+
+for (const [restart, state] of [[false, 'applied'], [true, 'applied'], [true, 'prepared'], [true, 'unknown']]) test(`unfinished fork retains its target across competing sources (restart=${restart}, state=${state})`, async t => {
+  const world = await setup(t);
+  let d = { ...await world.start(), ...world };
+  const [turnA] = await conversation(d, 'owner-a', ['from a']);
+  const [turnB] = await conversation(d, 'owner-b', ['from b']);
+  const a = { sessionId: 'owner-a', requestId: 'owner-fork', ifGeneration: await generationOf(d, 'owner-a'), boundary: { throughTurnId: turnA }, newSessionId: 'owned-target' };
+  const b = { sessionId: 'owner-b', requestId: 'competing-fork', ifGeneration: await generationOf(d, 'owner-b'), boundary: { throughTurnId: turnB }, newSessionId: a.newSessionId };
+  const put = d.store.put;
+  let failTarget = true;
+  d.store.put = record => {
+    if (record.id === a.newSessionId && failTarget) {
+      failTarget = false;
+      throw new Error('before target record write');
+    }
+    return put(record);
+  };
+  await assert.rejects(d.request('session.fork', a), rpcError(1000, 'persistence_failed'));
+  assert.equal(await d.store.get(a.newSessionId), undefined);
+  const entries = await Promise.all((await readdir(path.join(world.state, 'lifecycle')))
+    .filter(name => name.endsWith('.json'))
+    .map(async name => JSON.parse(await readFile(path.join(world.state, 'lifecycle', name), 'utf8'))));
+  assert.equal(entries.find(entry => entry.requestId === a.requestId)?.state, 'applied');
+  if (restart) {
+    await d.stop();
+    if (state !== 'applied') {
+      const entry = entries.find(entry => entry.requestId === a.requestId);
+      entry.state = state;
+      delete entry.native;
+      await writeFile(path.join(world.state, 'lifecycle', `${entry.key}.json`), JSON.stringify(entry));
+    }
+    const recoveryStore = createStore(world.state);
+    const recoveryPut = recoveryStore.put;
+    recoveryStore.put = record => {
+      if (record.id === a.newSessionId) throw new Error('recovery target write fault');
+      return recoveryPut(record);
+    };
+    d = { ...await world.start({ store: recoveryStore }), ...world, store: recoveryStore };
+    recoveryStore.put = recoveryPut;
+  }
+  await assert.rejects(d.request('session.fork', b), rpcError(1004, 'request_conflict'));
+  assert.equal(world.native.branches.length, 1, 'competitor never reaches native fork');
+  if (state !== 'applied') {
+    await assert.rejects(d.request('session.fork', a), rpcError(1004, 'outcome_unknown'));
+    assert.equal(await d.store.get(a.newSessionId), undefined);
+    assert.equal(world.native.branches.length, 1, 'unknown native step is never replayed');
+    return;
+  }
+  const result = await d.request('session.fork', a);
+  assert.equal(result.forkedFrom.sessionId, a.sessionId);
+  assert.equal((await d.store.get(a.newSessionId)).forkedFrom.sessionId, a.sessionId);
+  assert.equal(world.native.branches.length, 1, 'retry commits the existing native fork');
+});

@@ -641,11 +641,16 @@ export function createConversation(ctx: ConversationContext) {
           }
           const latestTurn = turns.at(-1)?.id;
           const cutoff: ForkPlan['cutoff'] = kind === 'through' ? { throughTurnId: turnId! } : kind === 'before' ? { beforeTurnId: turnId! } : latestTurn ? { throughTurnId: latestTurn } : undefined;
+          // A restart loses the in-memory reservations. Unfinished native attempts still
+          // own their targets, even when no target record was durably written yet.
+          const pendingIds = new Set((await journal.list())
+            .filter(entry => entry.operation === 'fork' && ['prepared', 'applied', 'unknown'].includes(entry.state))
+            .map(entry => (entry.plan as ForkPlan).newSessionId));
           let id = newSessionId;
           if (id !== undefined) {
-            if (records.has(id) || runtime.snapshot(id) || reservedForkIds.has(id)) throw new RpcError(ERROR.conflict, `Session ${id} already exists`, { reason: 'request_conflict' });
+            if (records.has(id) || runtime.snapshot(id) || reservedForkIds.has(id) || pendingIds.has(id)) throw new RpcError(ERROR.conflict, `Session ${id} already exists`, { reason: 'request_conflict' });
           } else {
-            do { id = `ses_${randomBytes(8).toString('hex')}`; } while (records.has(id) || runtime.snapshot(id) || reservedForkIds.has(id));
+            do { id = `ses_${randomBytes(8).toString('hex')}`; } while (records.has(id) || runtime.snapshot(id) || reservedForkIds.has(id) || pendingIds.has(id));
           }
           reservedForkIds.add(id);
           reservedId = id;
@@ -673,7 +678,12 @@ export function createConversation(ctx: ConversationContext) {
       });
     return { ...result, ...(duplicate ? { duplicate: true as const } : {}) };
     } finally {
-      if (reservedId && !records.has(reservedId)) reservedForkIds.delete(reservedId);
+      if (reservedId && !records.has(reservedId)) {
+        // A failed commit or unknown native outcome must keep ownership for retry.
+        // A refusal (or preparation failure before journaling) changed nothing.
+        const entry = await journal.get(sessionId, 'fork', requestId).catch(() => ({ state: 'unknown' }));
+        if (!entry || entry.state === 'failed') reservedForkIds.delete(reservedId);
+      }
       releaseWakes?.();
       release?.();
     }
