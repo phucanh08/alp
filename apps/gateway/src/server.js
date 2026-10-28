@@ -61,6 +61,12 @@ export function createGateway({ config, store, openTransport, logger, version, m
   const connections = new Set();
   /** Open and opening connections per credential. */
   const perPrincipal = new Map();
+  /** @param {string} id */
+  const decrementPrincipal = id => {
+    const next = (perPrincipal.get(id) ?? 1) - 1;
+    if (next <= 0) perPrincipal.delete(id);
+    else perPrincipal.set(id, next);
+  };
   let opening = 0;
   /** @type {Map<string, { count: number, resetAt: number }>} */
   const failures = new Map();
@@ -230,7 +236,7 @@ export function createGateway({ config, store, openTransport, logger, version, m
     perPrincipal.set(grant.id, (perPrincipal.get(grant.id) ?? 0) + 1);
     let settled = false;
     const release = () => { if (settled) return; settled = true; opening--; };
-    socket.once('close', () => { if (!settled) { release(); perPrincipal.set(grant.id, (perPrincipal.get(grant.id) ?? 1) - 1); } });
+    socket.once('close', () => { if (!settled) { release(); decrementPrincipal(grant.id); } });
     wss.handleUpgrade(request, socket, head, ws => {
       release();
       const id = randomBytes(6).toString('hex');
@@ -240,8 +246,7 @@ export function createGateway({ config, store, openTransport, logger, version, m
       const uncount = () => {
         if (!counted) return;
         counted = false;
-        perPrincipal.set(grant.id, Math.max(0, (perPrincipal.get(grant.id) ?? 1) - 1));
-        if (!perPrincipal.get(grant.id)) perPrincipal.delete(grant.id);
+        decrementPrincipal(grant.id);
       };
       try {
         const connection = new ClientConnection({
@@ -312,6 +317,7 @@ export function createGateway({ config, store, openTransport, logger, version, m
   return {
     connections,
     tickets,
+    perPrincipal,
     get monitor() { return monitor; },
     /** Loads credentials, starts watching alpd and listens; resolves with the bound address. */
     async listen() {
