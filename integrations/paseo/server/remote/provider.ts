@@ -55,7 +55,23 @@ export function createRemoteProvider(config: GatewayConfig, { version = '0', sta
   return createAlpProvider({
     description: 'ALP agents on a remote ALP host, through its gateway',
     async open() {
-      return { client: await connect(), async shutdown(client) { client.close(); }, relink: () => connect() };
+      let closed = false;
+      return {
+        client: await connect(),
+        async shutdown(client) {
+          closed = true;
+          client.close();
+        },
+        relink: async (demand?: boolean, signal?: AbortSignal) => {
+          if (closed || signal?.aborted) throw new Error('Provider connection is closed');
+          const client = await connect();
+          if (closed || signal?.aborted) {
+            try { client.close(); } catch {}
+            throw new Error('Provider connection is closed');
+          }
+          return client;
+        },
+      };
     },
     async teams(cwd, client) {
       // Paseo also asks with no folder (its provider list): the built-in teams every ALP host has,
