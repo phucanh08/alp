@@ -1603,7 +1603,19 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       const allowedKeys = Array.isArray(projectRoots) ? new Set<string>(projectRoots.map(keyOf)) : undefined;
       const after = cursor === undefined ? undefined : listCursor.decode(cursor);
       const words = typeof query === 'string' ? query.toLowerCase().split(/\s+/).filter(Boolean) : [];
-      const ids = new Set([...runtime.list().map(session => session.id), ...records.keys()]);
+      const live = runtime.list();
+      const liveChildren = rootsOnly ? new Set(live.filter(session => !!session.parentId).map(session => session.id)) : undefined;
+      const ids = new Set<string>();
+      for (const session of live) {
+        if (!rootsOnly || !session.parentId) ids.add(session.id);
+      }
+      for (const [id, record] of records) {
+        if (!rootsOnly) {
+          ids.add(id);
+        } else if (record.id === record.rootId && !record.session?.parentId && !liveChildren!.has(id)) {
+          ids.add(id);
+        }
+      }
       const sessions = [...ids].map(summary).filter((session): session is SessionSummary => !!session)
         .filter(session => includeClosed || session.status === 'idle' || session.status === 'running')
         .filter(session => includeArchived || !session.archived)

@@ -1102,3 +1102,28 @@ test('session.list finds sessions across symlink and canonical projectRoot paths
   assert.notEqual(p1.sessions[0].id, p2.sessions[0].id);
   assert.deepEqual([p1.sessions[0].id, p2.sessions[0].id].sort(), [s1.id, s2.id].sort());
 });
+
+test('session.list rootsOnly pre-filters candidate IDs without computing child summaries (t-92bf)', async t => {
+  const { project, runtimes, open } = await setup(t);
+  const { client, events } = await open();
+  const { session } = await client.request('session.create', { spec: { cwd: project, persist: true } });
+  await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Delegate work') });
+  const lead = runtimes[0].call('alp_delegate', { agent: 'lead', wait: true, task: 'Subtask' });
+  await until(() => runtimes[1]?.calls.some(c => c.method === 'turn/start'));
+  runtimes[1].finish('subtask done');
+  await lead;
+  await until(() => events.some(e => e.event.type === 'session.closed'));
+  const child = events.find(e => e.event.type === 'session.opened' && e.event.session.parentId === session.id);
+  assert.ok(child, 'child session was created');
+
+  // rootsOnly: true must only return the root session
+  const roots = await client.request('session.list', { rootsOnly: true, includeClosed: true });
+  assert.deepEqual(roots.sessions.map(s => s.id), [session.id]);
+  assert.equal(roots.sessions.some(s => s.id === child.sessionId), false);
+
+  // rootsOnly: false must return both root and child sessions
+  const all = await client.request('session.list', { rootsOnly: false, includeClosed: true });
+  const allIds = all.sessions.map(s => s.id);
+  assert.ok(allIds.includes(session.id));
+  assert.ok(allIds.includes(child.sessionId));
+});
