@@ -1,7 +1,11 @@
 name: Terminal native helpers
 
-# Builds the four Linux terminal-owner helpers from this exact revision so Linux CI lanes test with
-# the helper (t-9f0d). PR/rehearsal evidence only: releases still require committed prebuilts.
+# Rebuilds the four Linux terminal-owner helpers from this exact revision and checks the COMMITTED
+# prebuilts against it (t-08cf): the committed manifest must record the same terminal-owner.c hash
+# as the fresh build, and the committed binary must match its manifest and pass the same capability
+# checks. Builds are not byte-reproducible, so binary hashes are not compared across builds.
+# CI consumers and releases use the committed binaries; the uploaded fresh builds are what a
+# developer commits after changing terminal-owner.c (packages/daemon/native/README.md).
 on:
   workflow_call:
 
@@ -39,6 +43,10 @@ jobs:
           IMAGE: ${{ matrix.image }}
           SLOT: ${{ matrix.slot }}
         run: |
+          committed="$RUNNER_TEMP/committed"
+          mkdir -p "$committed"
+          # Keep the committed slot aside; a missing one fails the check step after the fresh upload.
+          if [ -d "packages/daemon/native/prebuilt/$SLOT" ]; then cp -a "packages/daemon/native/prebuilt/$SLOT" "$committed/"; fi
           case "$SLOT" in
             *-glibc)
               # The runner's official Node binary supports glibc 2.28, so it runs inside the floor image.
@@ -65,11 +73,32 @@ jobs:
             # and offer only root-only compatibility.
             test "$(sudo unshare --pid --fork "$dir/terminal-owner" --capability)" = "$full:root-only" ;;
           esac
-          # tar preserves the executable bit that upload-artifact drops.
+          # Package the FRESH build (what a developer commits after a source change). tar preserves the
+          # executable bit that upload-artifact drops.
           tar -C packages/daemon/native/prebuilt -cf "$RUNNER_TEMP/$SLOT.tar" "$SLOT"
+          echo "FRESH_SOURCE=$(node -p "require('./$dir/manifest.json').source")" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v4
         with:
           name: terminal-native-${{ matrix.slot }}
           path: ${{ runner.temp }}/${{ matrix.slot }}.tar
           retention-days: 7
           if-no-files-found: error
+      - name: Committed ${{ matrix.slot }} matches this source and executes
+        env:
+          IMAGE: ${{ matrix.image }}
+          SLOT: ${{ matrix.slot }}
+        run: |
+          dir="packages/daemon/native/prebuilt/$SLOT"
+          full=alp-terminal-owner:1
+          test -d "$RUNNER_TEMP/committed/$SLOT" || { echo "::error::No committed prebuilt for $SLOT"; exit 1; }
+          rm -rf "$dir" && cp -a "$RUNNER_TEMP/committed/$SLOT" "$dir"
+          git diff --exit-code -- packages/daemon/native/prebuilt
+          test "$(node -p "require('./$dir/manifest.json').source")" = "$FRESH_SOURCE" || { echo "::error::Committed $SLOT prebuilt is stale: rebuild all six slots (packages/daemon/native/README.md)"; exit 1; }
+          test "$(sha256sum "$dir/terminal-owner" | cut -d' ' -f1)" = "$(node -p "require('./$dir/manifest.json').sha256")"
+          test -x "$dir/terminal-owner"
+          test "$(docker run --rm --user 1001:1001 -v "$PWD:/w:ro" -w /w "$IMAGE" "$dir/terminal-owner" --capability)" = "$full"
+          case "$SLOT" in *-glibc)
+            test "$("$dir/terminal-owner" --capability)" = "$full"
+            test "$(sudo unshare --pid --fork --mount-proc "$dir/terminal-owner" --capability)" = "$full"
+            test "$(sudo unshare --pid --fork "$dir/terminal-owner" --capability)" = "$full:root-only" ;;
+          esac

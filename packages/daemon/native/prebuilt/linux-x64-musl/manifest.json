@@ -1,0 +1,10 @@
+{
+  "protocol": 1,
+  "slot": "linux-x64-musl",
+  "source": "d2fa72ce0b083e60cddbe76839365beaa80b891451b45987d968b805154d0636",
+  "sha256": "5d3e964057212ce231ab920426012ede944057138613712f0cf52a81f1397c2d",
+  "buildHost": "v20.15.1",
+  "executionChecked": true,
+  "executionProtection": "identity-bound",
+  "executionHost": "linux-x64"
+}

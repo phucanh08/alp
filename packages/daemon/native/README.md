@@ -3,7 +3,7 @@
 Task t-d71b. Production `src/terminals.ts` now uses this identity-bound owner,
 with no node-pty fallback on macOS or Linux. Linux may use the best-effort root-only mode described below;
 Windows has no protection helper and uses node-pty (ConPTY), best-effort (see "Windows" below). This candidate is NOT accepted for release:
-four Linux artifacts and actual Linux/Windows evidence remain missing. Missing or
+actual Linux (beyond CI capability checks) and Windows evidence remain missing. Missing or
 unverifiable backends refuse terminal capability explicitly (no plain-PTY fallback on Linux); on Linux a verified helper without full protection (any reason) offers root-only compatibility (best-effort, user decision 2026-10-29). No end-user compiler
 is required. Existing session authentication and host/Paseo opt-ins still apply.
 
@@ -82,13 +82,41 @@ Builds copy only verified prebuilt assets beside root, daemon, CLI and Paseo bun
 source-package daemon consumers also carry native source/hash manifests. They do
 not invoke a compiler. A rebuild replaces the generated asset directory wholesale.
 
+### Committed prebuilts and the rebuild procedure (t-08cf)
+
+All six slots are committed under `prebuilt/<slot>/` (binary with its exec bit, plus
+`manifest.json` binding protocol, `terminal-owner.c` SHA-256 and binary SHA-256), so a
+clean checkout passes `--require-matrix`, pack-check and the release clean-tree gate.
+CI and releases ship the committed binaries; nothing is compiled during build or release.
+
+The four Linux slots come from `.github/workflows/terminal-native.yml` (glibc on the
+manylinux_2_28 floor image, musl on Alpine 3.20, each executed non-root in its own libc;
+glibc also in fresh/ancestor PID namespaces). On every CI run that job rebuilds each slot
+from the checked-out source, then requires the COMMITTED slot's manifest to record the
+same source hash as the fresh build, its binary to match its manifest hash, and the
+committed binary to pass the same execution checks. Builds are not byte-reproducible, so
+binary hashes are NOT compared across builds: CI enforces source binding and execution,
+not bit-for-bit provenance.
+
+When `terminal-owner.c` changes, rebuild ALL six slots in the same commit:
+
+1. Darwin: on macOS, `node scripts/build-terminal-native.mjs --arch=arm64` and
+   `--arch=x64` (x64 capability executes through Rosetta).
+2. Linux: push the source change; the terminal-native jobs fail as stale but still upload
+   `terminal-native-<slot>` artifacts built from that exact revision. Download them
+   (`gh run download <run-id> -p 'terminal-native-*'`) and extract each tar with
+   `tar -C packages/daemon/native/prebuilt -xpf <slot>.tar` (tar keeps the exec bit).
+3. `node scripts/terminal-native-assets.mjs --require-matrix`, commit all six slots, and
+   check the next CI run is green.
+
 Current artifacts: Darwin arm64 executed on macOS27, Darwin x64 capability executed
 through existing Rosetta on that same host. Both target macOS11.0 (LC_BUILD_VERSION),
 matching [Node22's macOS floor](https://github.com/nodejs/node/blob/v22.23.0/BUILDING.md#platform-list).
 This deployment target is NOT proof of runtime compatibility on macOS11 or physical
 x64 hardware. Private-ABI capability validation still fails closed. Linux builds
-must retain the existing libc support baseline (Node22 glibc2.28); no Linux artifact
-or minimum-kernel execution has been proved here. pidfd_send_signal (Linux5.1 syscall baseline) selects full protection. Without it
+must retain the existing libc support baseline (Node22 glibc2.28). The committed Linux
+artifacts were built and capability-executed by CI run 40857935251 (GitHub-hosted
+Ubuntu 24.04 kernels); minimum-kernel execution has not been proved. pidfd_send_signal (Linux5.1 syscall baseline) selects full protection. Without it
 Linux runs the best-effort root-only mode described below, disclosed with a non-blocking notice.
 No permission denial or artifact failure silently selects compatibility.
 
@@ -149,7 +177,7 @@ and retain the admission lock. No delayed signals occur after root reap.
 Advice/source proof: oracle18a20d0e examined [Linux5.1 wait/ptrace reap](https://github.com/torvalds/linux/blob/v5.1/kernel/exit.c)
 and [original procdirfd signal dispatch](https://github.com/torvalds/linux/blob/v5.1/kernel/signal.c).
 Actual Linux compilation/execution (old and supported kernel, namespace/permission,
-ptrace/exec/reuse/race and four Linux shipped artifacts) remains NOT_CHECKED here.
+ptrace/exec/reuse/race) remains NOT_CHECKED here; the four shipped Linux artifacts are committed and CI capability-checked.
 Darwin author regressions validate the unchanged full path only; no seam/mock or
 Rosetta execution is claimed as Linux or physical-x64/minimum-macOS proof.
 

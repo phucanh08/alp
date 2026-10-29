@@ -1,0 +1,10 @@
+{
+  "protocol": 1,
+  "slot": "linux-x64-glibc",
+  "source": "d2fa72ce0b083e60cddbe76839365beaa80b891451b45987d968b805154d0636",
+  "sha256": "4746db2e0b89ffd81f9ab14da871a8a8a59b39d219ab9612bb86faa8d8db35b7",
+  "buildHost": "v22.23.4",
+  "executionChecked": true,
+  "executionProtection": "identity-bound",
+  "executionHost": "linux-x64"
+}

@@ -1,0 +1,10 @@
+{
+  "protocol": 1,
+  "slot": "linux-arm64-glibc",
+  "source": "d2fa72ce0b083e60cddbe76839365beaa80b891451b45987d968b805154d0636",
+  "sha256": "fa6e8b66f8e449d6fa294518c7f7d107e0707d2048623cc4952031b9580c31e3",
+  "buildHost": "v22.23.4",
+  "executionChecked": true,
+  "executionProtection": "identity-bound",
+  "executionHost": "linux-arm64"
+}

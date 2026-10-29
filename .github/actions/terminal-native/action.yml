@@ -1,15 +1,10 @@
-name: Stage terminal native helpers
-description: Stage the four Linux helpers built by terminal-native.yml for this run, then require the full matrix.
+name: Check committed terminal native helpers
+description: Require the committed six-slot matrix (terminal-native.yml already checked the Linux slots against a fresh build of this revision).
 runs:
   using: composite
   steps:
-    - uses: actions/download-artifact@v4
-      with:
-        pattern: terminal-native-*
-        path: ${{ runner.temp }}/terminal-native
-        merge-multiple: true
     - shell: bash
       run: |
-        for archive in "$RUNNER_TEMP"/terminal-native/*.tar; do tar -C packages/daemon/native/prebuilt -xf "$archive"; done
         ls -l packages/daemon/native/prebuilt/*/terminal-owner
         node scripts/terminal-native-assets.mjs --require-matrix
+        git diff --exit-code -- packages/daemon/native/prebuilt
