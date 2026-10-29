@@ -347,3 +347,19 @@ on an older host it filters on the client, where paseo-web hides it.
 On these screenshots paseo-web repeats streamed assistant text, for example "Answer
 received:Answer received: you …". This is a fault of ALP's Paseo bridge, not something apps/web
 should copy (see the discovered work in the handoff).
+
+### t-d71b Linux compatibility candidate — verification limits
+
+Web/direct clients now require a deliberate pre-use acknowledgment when a verified
+Linux helper lacks bound-signal capability (ENOSYS). The warning states that jobs
+may survive terminal close, access revocation or shutdown. Continue/Cancel precedes
+shell launch; a restored attachment warns independently. Full native-supported
+Linux/macOS keeps identity-bound cleanup. Missing/corrupt helpers and policy denials
+do not silently downgrade. Current Paseo protocol has no acknowledgment field: its
+bridge surfaces the warning and refuses degraded use, pending g6 consumer decision.
+This is not an accepted complete Paseo fallback.
+
+Required platform gaps remain: four Linux glibc/musl x64/arm64 prebuilts, actual Linux
+process/namespace/permission/race tests, Linux and Windows browser keyboard behavior,
+physical Darwin x64 and macOS11 execution, and independent actual native execution.
+No source/seam/macOS browser check substitutes for these; full task acceptance remains incomplete.

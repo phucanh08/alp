@@ -1,5 +1,5 @@
 /* ALP terminal owner protocol 1. Native-only spawn, lifetime acquisition, signals and reap.
- * No PID/group signal fallback. See README.md for proof obligations and platform limits. */
+ * Linux reduced-protection mode signals only its continuously owned unreaped root. See README.md for proof obligations and platform limits. */
 #define _GNU_SOURCE
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -49,6 +49,18 @@ static identity known[MAX_TRACKED];
 static size_t count;
 static pid_t root;
 static int scanning_failed, held = 1;
+#ifndef __APPLE__
+static int root_only, compatibility_available;
+/* Exclusive natural parent retains this child (live or WNOWAIT zombie).
+ * ECHILD revokes authority permanently; never infer ownership from a PID lookup. */
+static int root_status(void) {
+  if (!held || root <= 1) return 2;
+  siginfo_t info = {0}; int result;
+  do { result=waitid(P_PID,root,&info,WEXITED|WNOHANG|WNOWAIT); } while(result<0 && errno==EINTR);
+  if(result<0) { if(errno==ECHILD) held=0; return 2; }
+  return info.si_pid==root ? 0 : 1;
+}
+#endif
 static long long clock_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (long long)t.tv_sec*1000+t.tv_nsec/1000000; }
 static void event(const char *s) { (void)!write(3, s, strlen(s)); }
 #ifdef __APPLE__
@@ -122,6 +134,7 @@ static int proc_stat(int dir, pid_t *sid, char *state) {
   *sid = (pid_t)s; return 1;
 }
 static int acquire(pid_t p, identity *out, int session) {
+  if(root_only) { if(p!=root || root_status()==2) return 0; out->pid=root; out->fd=-1; return 1; }
   if (!held) return 0;
   char name[64]; snprintf(name, sizeof(name), "/proc/%d", p);
   int f=open(name, O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW); if (f<0) return 0;
@@ -130,11 +143,21 @@ static int acquire(pid_t p, identity *out, int session) {
   out->pid=p; out->fd=f; return 1;
 }
 static int status(identity *id) {
+  if(root_only) return id->pid==root ? root_status() : 2;
   pid_t sid; char state;
   if (!proc_stat(id->fd, &sid, &state)) return errno == ENOENT || errno == ESRCH ? 0 : 2;
   return state == 'Z' || state == 'X' ? 0 : 1;
 }
-static void bound_signal(identity *id, int sig) { (void)pid_signal(id->fd, sig); }
+static void bound_signal(identity *id, int sig) {
+  if(root_only) {
+    if(id->pid!=root || root_status()!=1) return;
+    /* No reap between waitid and kill: root PID remains continuously reserved. */
+    int r; do { r=kill(root,sig); } while(r<0 && errno==EINTR);
+    if(r<0 && errno!=ESRCH) scanning_failed=1;
+    return;
+  }
+  (void)pid_signal(id->fd, sig);
+}
 static void remember(pid_t p) {
   identity id;
   if (!acquire(p, &id, 1)) return;
@@ -144,13 +167,14 @@ static void remember(pid_t p) {
   known[count++]=id;
 }
 static void discover(void) {
-  if (!held) return;
+  if (root_only || !held) return;
   DIR *d=opendir("/proc"); if (!d) { scanning_failed=1; return; }
   struct dirent *e;
   while ((e=readdir(d))) { char *end; long p=strtol(e->d_name,&end,10); if (*e->d_name && !*end && p>1 && p<=INT32_MAX) remember((pid_t)p); }
   closedir(d);
 }
 static int capability(void) {
+  compatibility_available=0;
   /* Reject a proc mount in a different PID namespace (including numeric aliases).
    * The mount must be kernel procfs; /proc/self must report our local PID and SID. */
   int self=open("/proc/self",O_RDONLY|O_DIRECTORY|O_CLOEXEC);
@@ -170,7 +194,9 @@ static int capability(void) {
   identity id; pid_t saved=root; root=getsid(0);
   int ok=acquire(getpid(), &id, 1); root=saved;
   if (!ok) return 0;
-  int r=pid_signal(id.fd, 0); close(id.fd); return r==0;
+  int r=pid_signal(id.fd, 0); int saved_errno=errno; close(id.fd);
+  compatibility_available=r<0 && saved_errno==ENOSYS;
+  return r==0;
 }
 #endif
 static void signal_all(int sig) { for (size_t i=0;i<count;i++) if (status(&known[i]) != 0) bound_signal(&known[i], sig); }
@@ -192,13 +218,13 @@ static int abort_start(int master, int gate) {
   if(acquire(root,&id,0)) {
     bound_signal(&id,SIGKILL);
 #ifndef __APPLE__
-    close(id.fd);
+    if(id.fd>=0) close(id.fd);
 #endif
   }
   long long deadline=clock_ms()+250; int reaped=0;
   do {
     siginfo_t info={0};
-    if(waitid(P_PID,root,&info,WEXITED|WNOHANG|WNOWAIT)==0 && info.si_pid==root) { waitpid(root,NULL,WNOHANG); reaped=1; break; }
+    if(waitid(P_PID,root,&info,WEXITED|WNOHANG|WNOWAIT)==0 && info.si_pid==root) { int r; do { r=waitpid(root,NULL,WNOHANG); } while(r<0 && errno==EINTR); reaped=r==root; break; }
     usleep(1000);
   } while(clock_ms()<deadline);
   held=0; close(master);
@@ -207,9 +233,25 @@ static int abort_start(int master, int gate) {
   return 78;
 }
 int main(int argc, char **argv) {
-  signal(SIGPIPE,SIG_IGN); signal(SIGCHLD,SIG_DFL);
-  if (argc==2 && !strcmp(argv[1],"--capability")) { if (!capability()) return 78; puts("alp-terminal-owner:1"); return 0; }
-  if (argc<6 || !capability()) { event("{\"error\":\"native_capability_unavailable\"}\n"); return 78; }
+  signal(SIGPIPE,SIG_IGN);
+  struct sigaction child_action; memset(&child_action,0,sizeof(child_action));
+  child_action.sa_handler=SIG_DFL; sigemptyset(&child_action.sa_mask);
+  if(sigaction(SIGCHLD,&child_action,NULL)) return 71;
+  int capable=capability();
+#ifndef __APPLE__
+  if(argc==2 && !strcmp(argv[1],"--capability") && compatibility_available) { puts("alp-terminal-owner:1:root-only"); return 0; }
+  if(argc>1 && !strcmp(argv[1],"--root-only")) { root_only=1; argc--; argv++; }
+  if(argc>=6 && ((root_only && !compatibility_available) || (!root_only && !capable && compatibility_available))) {
+    event(!root_only ? "{\"refused\":\"terminal_protection_ack_required\"}\n" : "{\"refused\":\"terminal_unsupported\"}\n");
+    event("{\"cleanup\":true,\"observed\":0,\"live\":0,\"uncertain\":0}\n"); return 78;
+  }
+#endif
+  if (argc==2 && !strcmp(argv[1],"--capability")) { if (!capable) return 78; puts("alp-terminal-owner:1"); return 0; }
+  if (argc<6 || (!capable
+#ifndef __APPLE__
+    && !(root_only && compatibility_available)
+#endif
+  )) { event("{\"refused\":\"terminal_unsupported\"}\n"); event("{\"cleanup\":true,\"observed\":0,\"live\":0,\"uncertain\":0}\n"); return 78; }
   int cols=atoi(argv[1]),rows=atoi(argv[2]),grace=atoi(argv[3]);
   if(cols<1 || cols>1000 || rows<1 || rows>1000 || grace<0 || grace>10000) return 64;
   unsigned char *out=malloc(QUEUE),*input=malloc(QUEUE);
@@ -273,7 +315,9 @@ int main(int argc, char **argv) {
   for(size_t i=0;i<count;i++) { int s=status(&known[i]); if(s==1) live++; else if(s==2) uncertain++; }
   siginfo_t final={0};
   if(waitid(P_PID,root,&final,WEXITED|WNOHANG|WNOWAIT)==0 && final.si_pid==root) {
-    held=0; waitpid(root,NULL,WNOHANG);
+    int reaped; do { reaped=waitpid(root,NULL,WNOHANG); } while(reaped<0 && errno==EINTR);
+    if(reaped!=root) uncertain++;
+    held=0;
   } else { /* Never blocking reap of a live/unverifiable root; no adoption after this point. */
     held=0; uncertain++;
   }
@@ -298,12 +342,22 @@ int main(int argc, char **argv) {
     }
     if(drain[1].revents&(POLLHUP|POLLERR)) { io_failed=1; break; }
   }
-  if(!master_eof || outn) io_failed=1;
+  int limited_coverage=0;
+#ifndef __APPLE__
+  limited_coverage=root_only;
+#endif
+  /* An unmanaged descendant may retain the PTY indefinitely. Report this known
+   * coverage limit separately. Queued/lost bytes and adapter faults still fail. */
+  if(outn || (!master_eof && !limited_coverage)) io_failed=1;
   close(master);
   uncertain+=io_failed;
-  snprintf(msg,sizeof(msg),"{\"cleanup\":true,\"observed\":%zu,\"live\":%d,\"uncertain\":%d}\n",count,live,uncertain); event(msg);
+  const char *coverage="";
 #ifndef __APPLE__
-  for(size_t i=0;i<count;i++) close(known[i].fd);
+  if(root_only) coverage=master_eof ? ",\"coverage\":\"root-only\",\"outputOpen\":false" : ",\"coverage\":\"root-only\",\"outputOpen\":true";
+#endif
+  snprintf(msg,sizeof(msg),"{\"cleanup\":true,\"observed\":%zu,\"live\":%d,\"uncertain\":%d%s}\n",count,live,uncertain,coverage); event(msg);
+#ifndef __APPLE__
+  for(size_t i=0;i<count;i++) if(known[i].fd>=0) close(known[i].fd);
 #endif
   free(out);free(input); return live||uncertain?2:0;
 }

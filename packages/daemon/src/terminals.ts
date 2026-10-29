@@ -35,7 +35,7 @@ export type PtyProcess = {
   onData(listener: (data: string) => void): Disposable;
   onExit(listener: (event: { exitCode: number | null; signal?: number }) => void): Disposable;
 };
-export type PtySpawn = (file: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: Record<string, string>; killGraceMs?: number; signal?: AbortSignal }) => PtyProcess | Promise<PtyProcess>;
+export type PtySpawn = (file: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: Record<string, string>; killGraceMs?: number; signal?: AbortSignal; protection?: 'root-only' }) => PtyProcess | Promise<PtyProcess>;
 /** One process: ids, (Linux) session, controlling tty, age, and the terminal markers in its environment. */
 export type ProcessRow = { pid: number; ppid: number; pgid: number; sid?: number; tty?: string; elapsedMs: number; markers?: string[] };
 type Log = { info(message: string, fields?: Record<string, unknown>): void; warn(message: string, fields?: Record<string, unknown>): void };
@@ -51,6 +51,8 @@ export type TerminalServiceOptions = {
   platform?: NodeJS.Platform;
   /** Test hook: the PTY owner; production uses only the identity-bound native owner. */
   spawn?: PtySpawn;
+  /** Test hook: capability result; production always verifies the shipped helper. */
+  capability?: typeof nativeTerminalCapability;
   /** Test hook: the process table; default `ps`. */
   processes?: () => Promise<ProcessRow[]>;
   sweepMs?: number;
@@ -65,6 +67,7 @@ type Terminal = {
   principal: { id: string; epoch: string };
   workspaceId: string;
   root: string;
+  protection?: 'root-only';
   title: string;
   cols: number;
   rows: number;
@@ -241,13 +244,17 @@ export function createTerminalService(options: TerminalServiceOptions) {
   const pending = new Map<string, Pending>();
   // Explicit injected test owners need no host capability. Production never falls back to node-pty.
   const spawner: PtySpawn = options.spawn ?? nativePtySpawn;
-  let capable: boolean | undefined;
-  function pty() { capable ??= !!options.spawn || nativeTerminalCapability().available; return capable ? spawner : undefined; }
+  let capability: ReturnType<typeof nativeTerminalCapability> | undefined;
+  function pty() { capability ??= options.capability?.() ?? (options.spawn ? { available: true } : nativeTerminalCapability()); return capability.available ? spawner : undefined; }
+  function acknowledge(protection: string | undefined, acknowledgment?: string) {
+    if (protection === 'root-only' && acknowledgment !== 'linux-root-only-v1') throw new RpcError(ERROR.unavailable, 'This Linux host lacks terminal process protection. Closing the terminal ends its shell, but commands it started may continue running after close, access revocation or host shutdown. Continue only if you accept this limit.', { reason: 'terminal_protection_ack_required' });
+  }
   const cancel = (entry: Pending, reason: string) => { entry.reason ??= reason; entry.controller.abort(); };
   const refused = (reason: string) => new RpcError(ERROR.unavailable, 'Terminal startup was cancelled or its native owner is unavailable', { reason });
   async function cleanup(owner: PtyProcess, id?: string) {
     if (!owner.cleanup) { owner.kill(); return; } // explicit test owner only
     const result = await owner.cleanup();
+    if (result.coverage === 'root-only') log.info('terminal shell cleanup has reduced coverage; descendants are unmanaged', { code: 'ALPD_TERMINAL_ROOT_ONLY_CLEANUP', terminalId: id, outputOpen: result.outputOpen === true });
     if (result.live || result.uncertain) {
       cleanupFault = true;
       log.warn('native terminal cleanup could not prove all observed processes exited', { code: 'ALPD_TERMINAL_REAP_FAILED', terminalId: id, ...result });
@@ -430,7 +437,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
       return !cleanupFault && current?.enabled && pty() ? current.limits : undefined;
     },
 
-    create(principal: TerminalPrincipal, params: { workspaceId: string; cols: number; rows: number; requestId: string }): Promise<{ terminal: TerminalInfo }> {
+    create(principal: TerminalPrincipal, params: { workspaceId: string; cols: number; rows: number; requestId: string; protectionAcknowledgment?: 'linux-root-only-v1' }): Promise<{ terminal: TerminalInfo }> {
       const requestKey = JSON.stringify([principal.id, principal.epoch, params.requestId]);
       const existing = pending.get(requestKey);
       if (existing) {
@@ -449,6 +456,8 @@ export function createTerminalService(options: TerminalServiceOptions) {
             throw error;
           });
           if (!within(principal, root)) throw new RpcError(ERROR.forbidden, 'The workspace is outside this grant', { reason: 'outside_workspace' });
+          const protection = capability?.protection;
+          acknowledge(protection, params.protectionAcknowledgment);
           const file = await shell();
           if (cleanupFault) throw refused('terminal_cleanup_uncertain');
           if (entry.reason || closed) throw refused(entry.reason ?? 'terminal_unsupported');
@@ -463,7 +472,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
           entry.admitted = true;
           const at = now();
           const marker = `atm_${randomBytes(16).toString('hex')}`;
-          process_ = await spawner(file, [], { name: 'xterm-256color', cols: params.cols, rows: params.rows, cwd: root, env: environment(marker), killGraceMs, signal: entry.controller.signal });
+          process_ = await spawner(file, [], { name: 'xterm-256color', cols: params.cols, rows: params.rows, cwd: root, env: environment(marker), killGraceMs, signal: entry.controller.signal, protection });
           const current = await state();
           if (cleanupFault) throw refused('terminal_cleanup_uncertain');
           if (entry.reason || closed || !current.enabled) throw refused(entry.reason ?? (closed ? 'terminal_unsupported' : 'terminal_disabled'));
@@ -475,7 +484,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
           }
           const terminal: Terminal = {
             id: `term_${randomBytes(16).toString('hex')}`, principal: { id: principal.id, epoch: principal.epoch }, workspaceId: params.workspaceId,
-            root, title: path.basename(file).slice(0, 64), cols: params.cols, rows: params.rows, pty: process_, pid: process_.pid, screen: new TerminalScreen(params.cols, params.rows),
+            root, ...(protection === 'root-only' ? { protection: 'root-only' as const } : {}), title: path.basename(file).slice(0, 64), cols: params.cols, rows: params.rows, pty: process_, pid: process_.pid, screen: new TerminalScreen(params.cols, params.rows),
             ...(typeof process_.ptsName === 'string' && process_.ptsName.startsWith('/dev/') ? { tty: process_.ptsName.slice('/dev/'.length) } : {}),
             createdAt: at, lastActivityAt: at, expiresAt: at + limits.maxLifetimeMs, requestKey, ring: [], ringBytes: 0, nextSeq: 1,
             detachedAt: at, marker, disposables: [],
@@ -497,6 +506,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
             throw refused('terminal_cleanup_uncertain');
           }
           if (entry.reason) throw refused(entry.reason);
+          if ((error as { terminalReason?: string })?.terminalReason) { capability = undefined; if ((error as { terminalReason?: string }).terminalReason === 'terminal_protection_ack_required') acknowledge('root-only'); }
           if (entry.admitted && !(error instanceof RpcError)) throw refused('terminal_unsupported');
           throw error;
         } finally { pending.delete(requestKey); }
@@ -530,9 +540,10 @@ export function createTerminalService(options: TerminalServiceOptions) {
       return result;
     },
 
-    async attach(principal: TerminalPrincipal, sink: TerminalSink, params: { terminalId: string; after?: number }) {
+    async attach(principal: TerminalPrincipal, sink: TerminalSink, params: { terminalId: string; after?: number; protectionAcknowledgment?: 'linux-root-only-v1' }) {
       await ready();
       const terminal = own(principal, params.terminalId);
+      acknowledge(terminal.protection, params.protectionAcknowledgment);
       if (terminal.sink && terminal.sink !== sink) detach(terminal, 'replaced');
       terminal.sink = sink;
       terminal.detachedAt = undefined;

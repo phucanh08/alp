@@ -244,3 +244,20 @@ test('directory cursors and captures retain terminal.exec binding and explicit f
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(events.length, count, 'unwatched connection receives no invalidation');
 });
+
+test('reduced-protection challenge stays meaningful through gateway and acknowledgment keeps the principal binding', async t => {
+  const { daemon, sdk, ids, ca } = await world(t);
+  const { client } = await sdk('exec');
+  daemon.state.handlers['terminal.create'] = params => {
+    if (!params.protectionAcknowledgment) throw { code: 1005, message: '/private/host-secret', data: { reason: 'terminal_protection_ack_required', secret: 'must-not-leak' } };
+    assert.equal(params.protectionAcknowledgment, 'linux-root-only-v1');
+    assert.equal(params.principalId, ids.exec); assert.deepEqual(params.authorizedRoots, [ca]);
+    return { terminal: info() };
+  };
+  const params = { workspaceId: 'wks_a', cols: 80, rows: 24, requestId: 'warning' };
+  await assert.rejects(client.request('terminal.create', params), error => error.data?.reason === 'terminal_protection_ack_required' && /continue running/.test(error.message) && !JSON.stringify(error).includes('host-secret') && error.data.secret === undefined);
+  await client.request('terminal.create', { ...params, protectionAcknowledgment: 'linux-root-only-v1' });
+  await assert.rejects(client.request('terminal.create', { ...params, protectionAcknowledgment: true }), error => error.code === -32602);
+  const { client: forbidden } = await sdk('writer');
+  await assert.rejects(forbidden.request('terminal.create', { ...params, protectionAcknowledgment: 'linux-root-only-v1' }), error => error.code === 1003 && error.data.reason === 'grant');
+});
