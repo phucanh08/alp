@@ -3457,7 +3457,7 @@ export class Controller {
 
   /** Asks alpd to ask every provider for its models again (catalog.refresh), then re-reads them. */
   async refreshModels() {
-    if (!this.#state.principal || !can(this.#state.principal, 'session.read')) return;
+    if (!this.#state.principal || !can(this.#state.principal, 'session.read') || !this.hasCapability('catalog.live')) return;
     await this.#client().request('catalog.refresh', {}, { timeoutMs: Math.max(this.#options.requestTimeoutMs ?? 0, 60_000) });
     this.#onCatalogUpdated();
   }

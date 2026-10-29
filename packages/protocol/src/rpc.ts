@@ -38,7 +38,7 @@ export type TerminalNotification = { jsonrpc: '2.0'; method: 'terminal.event'; p
 export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
 export type HistoryPage = { generation: string; items: HistoryItem[]; olderCursor?: string; hasOlder: boolean; tipCursor: number };
 
-export type Capability = 'session.interrupt.turn' | 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.configure.live' | 'terminal' | 'terminal.capture' | 'terminal.watch' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule';
+export type Capability = 'session.interrupt.turn' | 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.configure.live' | 'terminal' | 'terminal.capture' | 'terminal.watch' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule' | 'catalog.live';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =

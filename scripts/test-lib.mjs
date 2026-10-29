@@ -45,7 +45,8 @@ export function runNodeTests(files, { extra = [] } = {}) {
   if (!files.length) throw new Error('no test files selected');
   const home = mkdtempSync(path.join(os.tmpdir(), 'alp-test-'));
   try {
-    const result = spawnSync(process.execPath, ['--test', ...extra, ...files], { cwd: ROOT, stdio: 'inherit', env: { ...process.env, ALP_HOME: home } });
+    // alpd under test never asks the real providers for models (t-e5ee); a test that wants it unsets this.
+    const result = spawnSync(process.execPath, ['--test', ...extra, ...files], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...process.env, ALP_HOME: home } });
     return result.status ?? 1;
   } finally { rmSync(home, { recursive: true, force: true }); }
 }

@@ -617,7 +617,8 @@ export function isModelId(value) {
 export const EXPOSURE = Object.freeze({
   'daemon.hello': { status: 'gateway', scope: 'connection', reason: 'Answered by the gateway after its own hello to alpd: capabilities are alpd\'s intersected with FORWARDED_CAPABILITIES; alpd\'s hostname when hostLabel accepts it; no pid.', tests: ['handshake'] },
 
-  'catalog.get': { status: 'exposed', permission: 'session.read', scope: 'none: the static model and mode catalogue', params: [], tests: ['permission'] },
+  'catalog.get': { status: 'exposed', permission: 'session.read', scope: 'none: the model and mode catalogue (live provider lists merged over static rows, t-e5ee)', params: [], tests: ['permission'] },
+  'catalog.refresh': { status: 'denied', scope: 'host: runs each provider CLI on the daemon host to list its models', reason: 'Starts provider processes on the host; remote clients read the catalog alpd refreshes on start, every 6 h and from turns (catalog.get), and the gateway forwards no catalog.updated.' },
   'session.list': { status: 'exposed', permission: 'session.read', scope: 'result: sessions whose tree lies in a granted workspace; projectRoot must name one; with limit, alpd pages are read until the filtered page is full', params: ['projectRoot', 'rootsOnly', 'includeClosed', 'includeArchived', 'limit', 'cursor', 'query'], tests: ['permission', 'workspace-param', 'result-filter', 'paging'] },
   'session.get': { status: 'exposed', permission: 'session.read', scope: 'session: its tree\'s root and itself in a granted workspace', params: ['sessionId'], tests: ['permission', 'session-scope'] },
   'session.status': { status: 'exposed', permission: 'session.read', scope: 'session; the answer must be the checked root\'s tree with every session in a granted workspace. Rows carry host paths of that tree (workdir, lease checkouts)', params: ['sessionId'], tests: ['permission', 'session-scope', 'tree-scope'] },

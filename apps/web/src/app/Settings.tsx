@@ -211,7 +211,7 @@ function Overview() {
         {settings.status === 'error' ? <p role="alert" className="border-t border-border px-4 py-3 text-xs text-destructive">{settings.error?.message}</p> : null}
       </Section>
       <Section title={`Models new sessions can pick${settings.models.length ? ` (${settings.models.length})` : ''}`}
-        action={<Button size="sm" variant="ghost" className="h-7 text-xs" data-testid="settings-models-refresh" disabled={refreshing} onClick={() => { setRefreshing(true); void controller.refreshModels().catch(() => {}).finally(() => setRefreshing(false)); }}>{refreshing ? 'Refreshing…' : 'Refresh'}</Button>}>
+        action={controller.hasCapability('catalog.live') ? <Button size="sm" variant="ghost" className="h-7 text-xs" data-testid="settings-models-refresh" disabled={refreshing} onClick={() => { setRefreshing(true); void controller.refreshModels().catch(() => {}).finally(() => setRefreshing(false)); }}>{refreshing ? 'Refreshing…' : 'Refresh'}</Button> : undefined}>
         {settings.models.length ? (
           <ul className="max-h-72 divide-y divide-border overflow-y-auto">
             {settings.models.map(model => (
