@@ -1748,6 +1748,40 @@
    }
   },
   {
+   "name": "catalog.refresh params",
+   "check": "params",
+   "method": "catalog.refresh",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "catalog.refresh result",
+   "check": "result",
+   "method": "catalog.refresh",
+   "valid": true,
+   "value": {
+    "models": [
+     {
+      "id": "codex:gpt-6.1-sol",
+      "label": "Codex · GPT-6.1-Sol"
+     }
+    ],
+    "modes": [
+     {
+      "id": "read-only",
+      "label": "Read only"
+     }
+    ],
+    "thinkingOptions": [
+     {
+      "id": "low",
+      "label": "low"
+     }
+    ],
+    "defaultModel": "codex:gpt-6.1-sol"
+   }
+  },
+  {
    "name": "assignment.recall params",
    "check": "params",
    "method": "assignment.recall",

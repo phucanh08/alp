@@ -1,5 +1,5 @@
 import { syncProjectSettings } from '@anhlp/alp-core/init';
-import { MODELS } from '@anhlp/alp-core/models';
+import { catalogModels } from '@anhlp/alp-core/models';
 import { listProviders } from '@anhlp/alp-core/providers';
 import { deleteEntry, duplicateEntry, getEntry, listEntries, renameEntry, saveEntry, setGivenSkills } from '@anhlp/alp-core/library-edit';
 import { testEntry } from '@anhlp/alp-client/library-test';
@@ -17,7 +17,7 @@ export function registerLibraryRpc(server: PluginServerContext, { home = alpHome
     return { root: root ?? undefined, library: home, templates };
   }
   server.handle(libraryModels, async () => {
-    const models = MODELS.map(model => ({ id: `${model.runtime}:${model.id}`, label: `${model.runtime} · ${model.label}`, efforts: model.efforts, ...(model.effort ? { effort: model.effort } : {}) }));
+    const models = catalogModels(home).map(model => ({ id: `${model.runtime}:${model.id}`, label: `${model.runtime} · ${model.label}`, efforts: model.efforts, ...(model.effort ? { effort: model.effort } : {}) }));
     for (const provider of await listProviders(home)) {
       if (provider.enabled === false || provider.kind === 'antigravity') continue;
       models.push({ id: `acp:${provider.id}`, label: `${provider.label} · Provider default`, efforts: [] });

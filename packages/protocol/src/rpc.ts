@@ -30,6 +30,7 @@ export type TerminalEvent =
   | { terminalId: string; type: 'output'; seq: number; data: string }
   | { terminalId: string; type: 'exit'; seq: number; exitCode: number | null; signal: number | null; reason: TerminalEndReason }
   | { terminalId: string; type: 'detached'; reason: 'replaced' | 'slow_consumer' };
+export type CatalogUpdatedNotification = { jsonrpc: '2.0'; method: 'catalog.updated'; params: { fetchedAt?: string } };
 export type TerminalChangedNotification = { jsonrpc: '2.0'; method: 'terminal.changed'; params: { watchId: string; cursor: string } };
 export type TerminalNotification = { jsonrpc: '2.0'; method: 'terminal.event'; params: TerminalEvent };
 
@@ -157,7 +158,8 @@ export type RpcMethodMap = {
   'daemon.resume': { params: { runtime?: RuntimeKind }; result: PauseState };
   'daemon.pauses': { params: Empty; result: PauseState };
   'daemon.usage': { params: { refresh?: boolean }; result: { providers: Array<Record<string, unknown>> } };
-  'catalog.get': { params: Empty; result: { models: Array<Record<string, unknown>>; modes: Array<Record<string, unknown>>; thinkingOptions?: unknown; defaultModel: string } };
+  'catalog.get': { params: Empty; result: { models: Array<Record<string, unknown>>; modes: Array<Record<string, unknown>>; thinkingOptions?: unknown; defaultModel: string; fetchedAt?: string; providers?: Record<string, { status: string; fetchedAt?: string; error?: string }> } };
+  'catalog.refresh': { params: Empty; result: { models: Array<Record<string, unknown>>; modes: Array<Record<string, unknown>>; thinkingOptions?: unknown; defaultModel: string; fetchedAt?: string; providers?: Record<string, { status: string; fetchedAt?: string; error?: string }> } };
   'assignment.recall': { params: { assignmentId?: string; taskId?: string; projectRoot?: string; question: string }; result: RecallAnswer };
   'board.list': { params: { projectRoot: string }; result: { pins: Pin[] } };
   'question.list': { params: { projectRoot?: string }; result: { questions: UserQuestion[] } };

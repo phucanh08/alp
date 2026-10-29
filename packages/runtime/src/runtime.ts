@@ -28,6 +28,7 @@ import { discoverAgents } from '@anhlp/alp-core/resolver';
 import { acpDecision, acpWhat, type AcpPermission } from './acp-transport.js';
 
 import { models, modes, thinkingOptionsFor, withinMode, writes } from './catalog.js';
+import { feedCatalog } from './model-catalog.js';
 import { runHook } from '@anhlp/alp-core/hook-run';
 import { hookMatches } from '@anhlp/alp-core/hooks';
 import { isTrusted, trustProject } from '@anhlp/alp-core/trust';
@@ -4638,6 +4639,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     try {
       const orchestration = session.runtime.orchestrationContext ? await session.runtime.orchestrationContext().catch(() => ({ available: false })) : { available: false };
+      // Each turn's own model list keeps the live catalog current (t-e5ee).
+      feedCatalog(orchestration);
       // Main starts each turn knowing what waits for its acceptance and what is ready.
       const tasks = prompt.delivery !== 'steer' && !session.parent && session.mapping.agent.name === mainOf(session.mapping)
         ? await releaseOrphansOnce(session.mapping.agent.projectRoot, sessionId).then(() => checkGatesOften(session.mapping.agent.projectRoot)).then(() => loadTasks(session.mapping.agent.projectRoot)).then(({ tasks, errors }) => taskDigest(tasks, errors), () => '')

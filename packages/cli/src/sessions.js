@@ -329,6 +329,17 @@ async function log(args) {
   for (const line of renderLog(rootId, entries)) console.log(line);
 }
 
+/** The models alpd offers now: the live catalog (t-e5ee); --refresh asks every provider again first. */
+async function models(args) {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { refresh: { type: 'boolean' }, json: { type: 'boolean' } } });
+  if (positionals.length) throw new UsageError();
+  const client = await running();
+  const catalog = await client.request(values.refresh ? 'catalog.refresh' : 'catalog.get', {}).finally(() => client.close());
+  if (values.json) { console.log(JSON.stringify(catalog)); return; }
+  for (const [runtime, state] of Object.entries(catalog.providers ?? {})) console.log(`${runtime}: ${state.status}${state.fetchedAt ? ` (${state.fetchedAt})` : ''}${state.error ? ` — ${state.error}` : ''}`);
+  for (const model of catalog.models) console.log(`${model.id.padEnd(40)} ${model.label}`);
+}
+
 /** The project board every agent on the project shares: live claims, then decisions and findings. */
 
 async function board(args) {
@@ -414,4 +425,4 @@ async function compact(args) {
   console.log(status === 'started' ? 'Compacting: main writes a checkpoint, then its context is compacted' : status === 'running' ? 'A compaction is already running' : 'Compaction queued for the next turn boundary');
 }
 
-export { printer, answerer, follow, run, ps, attach, send, questions, answer, renderStatus, top, log, board, printPauses, pause, resume, recall, interrupt, compact };
+export { printer, answerer, follow, run, ps, attach, send, questions, answer, renderStatus, top, log, board, models, printPauses, pause, resume, recall, interrupt, compact };

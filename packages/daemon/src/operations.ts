@@ -6,7 +6,7 @@ import { closeTask, createTask, epicReport, loadTasks, rejectGate, reopenTask, r
 import { taskRows } from '@anhlp/alp-core/task-rows';
 import { deleteEntry, duplicateEntry, getEntry, listEntries, renameEntry, saveEntry, setGivenSkills } from '@anhlp/alp-core/library-edit';
 import { listTeams } from '@anhlp/alp-core/teams';
-import { MODELS } from '@anhlp/alp-core/models';
+import { catalogEntries } from '@anhlp/alp-runtime/index';
 import { listProviders } from '@anhlp/alp-core/providers';
 import { languageSetting, setLanguage, LANGUAGE_CHARS } from '@anhlp/alp-core/user-settings';
 import { syncProjectSettings } from '@anhlp/alp-core/init';
@@ -283,7 +283,7 @@ export function createOperations({ home, templates, knownProjects = () => [], on
     'library.skills.set': guard(({ agent, skills }) => serial(() => setGivenSkills(agent, skills, { library: home })), { notFound: 'invalid_entry' }),
 
     'library.models': guard(async () => {
-      const models: Array<{ id: string; label: string; efforts: string[]; effort?: string }> = MODELS.map(model => ({ id: `${model.runtime}:${model.id}`, label: `${model.runtime} · ${model.label}`, efforts: model.efforts, ...(model.effort ? { effort: model.effort } : {}) }));
+      const models: Array<{ id: string; label: string; efforts: string[]; effort?: string }> = catalogEntries.map(model => ({ id: `${model.runtime}:${model.id}`, label: `${model.runtime} · ${model.label}`, efforts: model.efforts, ...(model.effort ? { effort: model.effort } : {}) }));
       for (const provider of await listProviders(home)) {
         if (provider.enabled === false || provider.kind === 'antigravity') continue;
         models.push({ id: `acp:${provider.id}`, label: `${provider.label} · Provider default`, efforts: [] });

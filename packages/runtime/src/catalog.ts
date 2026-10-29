@@ -25,7 +25,16 @@ const model = (runtime: 'codex' | 'claude' | 'antigravity', id: string, label: s
   ...(defaultThinkingOptionId ? { defaultThinkingOptionId } : {}),
 });
 
-export const models = MODELS.map(entry => model(entry.runtime as 'codex' | 'claude' | 'antigravity', entry.id, entry.label, entry.description, options(entry.efforts), entry.effort));
+export type CatalogEntry = { runtime: 'codex' | 'claude' | 'antigravity'; id: string; label: string; description: string; efforts: string[]; effort?: string; source?: 'live' | 'fallback' | 'static' };
+const toModel = (entry: CatalogEntry) => model(entry.runtime, entry.id, entry.label, entry.description, options(entry.efforts), entry.effort);
+/** The rows every consumer reads: core MODELS at start, replaced in place by the live catalog (model-catalog.ts). */
+export const entries: CatalogEntry[] = MODELS.map(entry => ({ ...entry, source: 'static' as const })) as CatalogEntry[];
+export const models = entries.map(toModel);
+/** Replaces the catalog in place so every module holding `models`/`entries` sees the new rows. */
+export function applyCatalog(next: CatalogEntry[]) {
+  entries.splice(0, entries.length, ...next);
+  models.splice(0, models.length, ...next.map(toModel));
+}
 
 export function thinkingOptionsFor(runtime: 'codex' | 'claude' | 'antigravity', nativeModel: string) {
   return models.find(candidate => candidate.id === `${runtime}:${nativeModel}`)?.thinkingOptions ?? thinkingOptions;

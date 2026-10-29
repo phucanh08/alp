@@ -12,7 +12,7 @@ import { createLogger } from '@anhlp/alp-core/log';
 import { AlpRpcError, CAPABILITY, MAX_FRAME, PROMPT_IMAGES, PROTOCOL_VERSION, ERROR, RPC_ERROR, RPC_METHODS, base64Bytes, encodeFrame } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 export { ERROR } from '@anhlp/alp-protocol';
-import { DEFAULT_MODEL, models, modes, thinkingOptions, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '@anhlp/alp-runtime/index';
+import { DEFAULT_MODEL, models, modes, type ModelCatalog, thinkingOptions, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '@anhlp/alp-runtime/index';
 import type { Receipt, SessionRecord, SessionStatus, Store, UnreadableReceipt } from './store.js';
 import type { PromptContent, SessionSummary } from '@anhlp/alp-protocol/session';
 import type { ScheduleJob, TurnAttention } from '@anhlp/alp-protocol/index';
@@ -200,7 +200,9 @@ export type DaemonServer = {
  * shape so every viewer agrees; re-exported here to keep `@anhlp/alp-daemon/server`'s API. */
 export type { SessionSummary };
 
-export function createDaemonServer({ runtime, socketPath, version, onShutdown, store, runLogDir, previousExit, retentionSweepMs = RETENTION_SWEEP_MS, home, templates, scheduleTickMs = SCHEDULE_TICK_MS, scheduleDeliveryTimeoutMs, attachmentOptions, terminalOptions }: {
+export function createDaemonServer({ runtime, socketPath, version, onShutdown, store, runLogDir, previousExit, retentionSweepMs = RETENTION_SWEEP_MS, home, templates, scheduleTickMs = SCHEDULE_TICK_MS, scheduleDeliveryTimeoutMs, attachmentOptions, terminalOptions, modelCatalog }: {
+  /** The live model catalog (t-e5ee); without it catalog.get answers the static rows and catalog.refresh is unavailable. */
+  modelCatalog?: ModelCatalog;
   runtime: AlpRuntime;
   socketPath: string;
   version: string;
@@ -227,6 +229,15 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   terminalOptions?: Partial<Pick<TerminalServiceOptions, 'limits' | 'now' | 'spawn' | 'processes' | 'sweepMs' | 'killGraceMs' | 'maxBufferedBytes' | 'platform'>>;
 }): DaemonServer {
   const connections = new Set<Connection>();
+  const catalogResult = () => {
+    const state = modelCatalog?.state();
+    return { models, modes, thinkingOptions, defaultModel: `codex:${DEFAULT_MODEL}`,
+      ...(state ? { fetchedAt: state.fetchedAt, providers: Object.fromEntries(Object.entries(state.providers).map(([runtime, provider]) => [runtime, { status: provider!.status, fetchedAt: provider!.fetchedAt, ...(provider!.error ? { error: provider!.error } : {}) }])) } : {}) };
+  };
+  // Every helloed connection learns that the catalog changed, and re-reads it (catalog.updated).
+  const unsubscribeCatalog = modelCatalog?.onUpdated(snapshot => {
+    for (const connection of connections) if (connection.helloed) { try { connection.send({ jsonrpc: '2.0', method: 'catalog.updated', params: { fetchedAt: snapshot.fetchedAt } }); } catch { /* a gone connection */ } }
+  });
   /** Root of every live session. */
   const rootOf = new Map<string, string>();
   const attached = new Map<string, Set<Connection>>();
@@ -1289,7 +1300,12 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     'project.register': (_c, p) => registryMutation('project.register', p),
     'project.remove': (_c, p) => registryMutation('project.remove', p),
     'workspace.update': (_c, p) => registryMutation('workspace.update', p),
-    'catalog.get': () => ({ models, modes, thinkingOptions, defaultModel: `codex:${DEFAULT_MODEL}` }),
+    'catalog.get': () => catalogResult(),
+    'catalog.refresh': async () => {
+      if (!modelCatalog) throw new RpcError(ERROR.unavailable, 'The live model catalog is not available');
+      await modelCatalog.refresh();
+      return catalogResult();
+    },
     // attachment.* (§12.6): each call acts for its principal context; without the store (no home or
     // store, or Windows) alpd does not serve them, as for any method it does not know.
     // terminal.* (§12.10): each call acts for its principal context; input, resize and the stream
@@ -2093,6 +2109,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     },
 
     async close() {
+      unsubscribeCatalog?.();
       closing = true;
       if (sweeper) clearInterval(sweeper);
       await attachments?.close();
