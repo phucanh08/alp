@@ -7,7 +7,12 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The four Linux terminal-owner helpers, built from this revision and staged by every Linux lane.
+  terminal-native:
+    uses: ./.github/workflows/terminal-native.yml
+
   core:
+    needs: terminal-native
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -21,9 +26,11 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - uses: ./.github/actions/terminal-native
       - run: npm run validate:core
 
   paseo:
+    needs: terminal-native
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -37,6 +44,7 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - uses: ./.github/actions/terminal-native
       # Plugin-owned and all cross-package tests use fake providers.
       - run: npm run validate:paseo
 
@@ -44,6 +52,7 @@ jobs:
   # This one runs it against the lowest release requirements.paseo admits, so both bounds of the
   # supported range are tested (t-e5dc). The newest published release: .github/workflows/paseo-compat.yml.
   paseo-sdk-floor:
+    needs: terminal-native
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -53,6 +62,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - uses: ./.github/actions/terminal-native
       - run: node scripts/use-paseo-sdk.mjs floor
       - run: npm ci
       - run: node scripts/use-paseo-sdk.mjs --verify
@@ -97,6 +107,7 @@ jobs:
   # The standalone browser app (apps/web, docs/alp/web.md): types, unit tests, the bundle's SDK-only
   # boundary, then Playwright against a real gateway and alpd with a fake provider on random ports.
   alp-web:
+    needs: terminal-native
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -110,6 +121,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/terminal-native
       - if: runner.os == 'Linux'
         run: npx playwright install --with-deps chromium
       - if: runner.os == 'macOS'
@@ -130,6 +143,7 @@ jobs:
   # The job keeps its name, a required check: it built and smoked Paseo's web app (paseo-web)
   # until that app was removed (t-55ce.3).
   packages-and-web:
+    needs: terminal-native
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -139,5 +153,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - uses: ./.github/actions/terminal-native
       # Checks out the pinned Paseo compiler and builds all packages before inspecting/installing tarballs.
       - run: npm run validate:packages
