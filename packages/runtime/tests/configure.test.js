@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
-import { ConversationError, createAlpRuntime } from '@anhlp/alp-runtime';
+import { ConversationError, createAlpRuntime, ModelCatalog } from '@anhlp/alp-runtime';
 
 /**
  * Fake transports. thread/resume and thread/start answer the model they were asked for, as Codex does;
@@ -436,4 +436,15 @@ test('unchanged and refused configures never call the applied persistence hook',
   assert.equal((await runtime.reconfigure('root', { model: 'gpt-5.6-sol' }, { onApplied })).status, 'unchanged');
   await refused(runtime.reconfigure('root', { model: 'not-a-model' }, { onApplied }), 'invalid_params');
   assert.equal(runtimes.length, 1);
+});
+
+test('a model only the live catalog knows (t-e5ee) is offered once a provider reported it, and refused before', async t => {
+  const { runtime } = await idleRoot(t);
+  const before = await runtime.previewConfigure('root', { model: 'codex:gpt-live-only' });
+  assert.equal(before.allowed, false);
+  const catalog = new ModelCatalog({ probes: { codex: async () => [{ id: 'gpt-live-only', label: 'GPT Live', efforts: ['low', 'high'] }] } });
+  t.after(() => new ModelCatalog({ probes: {} }).refresh());
+  await catalog.refresh(['codex']);
+  const after = await runtime.previewConfigure('root', { model: 'codex:gpt-live-only', thinking: 'high' });
+  assert.equal(after.allowed, true, JSON.stringify(after));
 });
