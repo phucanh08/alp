@@ -97,25 +97,59 @@ test('both concurrent revokes refuse if their shared pending cleanup becomes unc
   f.expectCleanupFailure();
 });
 
-test('root-only compatibility warns before spawn and before every new attachment', async t => {
+test('root-only Linux opens without acknowledgment and discloses its protection', async t => {
   const home = await mkdtemp(path.join(tmpdir(), 'alpd-compat-warning-'));
   await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
-  let spawned = 0, cleaned = 0;
+  let spawned = 0, cleaned = 0, spawnedProtection;
   const service = createTerminalService({ home, resolveWorkspace: async () => home, platform: 'linux',
     capability: () => ({ available: true, protection: 'root-only' }),
-    spawn: () => { spawned++; return { pid: 80001, write() {}, resize() {}, kill() {}, onData() { return { dispose() {} }; }, onExit() { return { dispose() {} }; }, async cleanup() { cleaned++; return { observed: 1, live: 0, uncertain: 0, coverage: 'root-only' }; } }; },
+    spawn: (file, args, options) => { spawned++; spawnedProtection = options.protection; return { pid: 80001, write() {}, resize() {}, kill() {}, onData() { return { dispose() {} }; }, onExit() { return { dispose() {} }; }, async cleanup() { cleaned++; return { observed: 1, live: 0, uncertain: 0, coverage: 'root-only' }; } }; },
     log: { info() {}, warn() {} } });
   t.after(async () => { await service.shutdown(); await rm(home, { recursive: true, force: true }); });
   assert.ok(await service.advertised(), 'compatibility is functional, not hidden');
-  const warning = e => e.data?.reason === 'terminal_protection_ack_required' && /continue running/.test(e.message);
-  await assert.rejects(service.create(owner, params('warn')), warning);
-  assert.equal(spawned, 0, 'no shell exists before deliberate acknowledgment');
-  const { terminal } = await service.create(owner, { ...params('warn'), protectionAcknowledgment: 'linux-root-only-v1' });
-  assert.equal(spawned, 1);
+  const { terminal } = await service.create(owner, params('open'));
+  assert.equal(spawned, 1, 'no acknowledgment is needed');
+  assert.equal(spawnedProtection, 'root-only', 'the helper is started in root-only mode');
+  assert.equal(terminal.protection, 'root-only', 'clients can disclose the limit');
   const sink = { send() {} };
-  await assert.rejects(service.attach(owner, sink, { terminalId: terminal.terminalId }), warning);
-  await service.attach(owner, sink, { terminalId: terminal.terminalId, protectionAcknowledgment: 'linux-root-only-v1' });
+  const attached = await service.attach(owner, sink, { terminalId: terminal.terminalId });
+  assert.equal(attached.terminal.protection, 'root-only');
+  const legacy = await service.create(owner, { ...params('legacy'), protectionAcknowledgment: 'linux-root-only-v1' });
+  assert.equal(legacy.terminal.protection, 'root-only', 'the deprecated acknowledgment is accepted and ignored');
+  await service.attach(owner, { send() {} }, { terminalId: legacy.terminal.terminalId, protectionAcknowledgment: 'linux-root-only-v1' });
+  assert.equal((await service.list(owner, {})).terminals.every(entry => entry.protection === 'root-only'), true);
   await service.close(owner, { terminalId: terminal.terminalId });
-  assert.equal(cleaned, 1);
+  await service.close(owner, { terminalId: legacy.terminal.terminalId });
+  assert.equal(cleaned, 2);
   assert.ok(await service.advertised(), 'known coverage limit is distinct from unexpected cleanup uncertainty');
+});
+
+test('a missing native helper still refuses on Linux (no plain-PTY fallback)', async t => {
+  const home = await mkdtemp(path.join(tmpdir(), 'alpd-compat-missing-'));
+  await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
+  let spawned = 0;
+  const service = createTerminalService({ home, resolveWorkspace: async () => home, platform: 'linux',
+    capability: () => ({ available: false, reason: 'native_prebuilt_unavailable' }),
+    spawn: () => { spawned++; throw new Error('must not spawn'); }, log: { info() {}, warn() {} } });
+  t.after(async () => { await service.shutdown(); await rm(home, { recursive: true, force: true }); });
+  assert.equal(await service.advertised(), undefined);
+  await assert.rejects(service.create(owner, params('missing')), e => e.data?.reason === 'terminal_unsupported');
+  assert.equal(spawned, 0);
+});
+
+test('win32 terminals use the platform PTY with protection none and best-effort kill on close', async t => {
+  const home = await mkdtemp(path.join(tmpdir(), 'alpd-win32-'));
+  await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
+  let killed = 0, exit;
+  const service = createTerminalService({ home, resolveWorkspace: async () => home, platform: 'win32',
+    capability: () => ({ available: true, protection: 'none' }),
+    // A node-pty-like owner: no native cleanup, so close kills the pty.
+    spawn: (file, args, options) => { assert.equal(options.protection, 'none'); return { pid: 80002, write() {}, resize() {}, kill() { killed++; exit?.({ exitCode: 0 }); }, onData() { return { dispose() {} }; }, onExit(listener) { exit = listener; return { dispose() {} }; } }; },
+    log: { info() {}, warn() {} } });
+  t.after(async () => { await service.shutdown(); await rm(home, { recursive: true, force: true }); });
+  assert.ok(await service.advertised(), 'win32 is served');
+  const { terminal } = await service.create(owner, params('win'));
+  assert.equal(terminal.protection, 'none');
+  await service.close(owner, { terminalId: terminal.terminalId });
+  assert.ok(killed >= 1, "close kills the pty");
 });

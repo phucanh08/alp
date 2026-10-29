@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import { access, lstat, readFile } from 'node:fs/promises';
 import { nativePtySpawn, nativeTerminalCapability, type CleanupResult } from './native-terminal.js';
+import { windowsPtySpawn, windowsShell, windowsTerminalCapability } from './windows-terminal.js';
 import path from 'node:path';
 import { ERROR, RPC_ERROR, TERMINAL, TERMINAL_LIMIT_KEYS, isTerminalId } from '@anhlp/alp-protocol';
 import type { TerminalEndReason, TerminalEvent, TerminalInfo, TerminalLimits } from '@anhlp/alp-protocol/rpc';
@@ -14,7 +15,8 @@ import { TerminalScreen, SCREEN_LIMITS } from './terminal-screen.js';
  * PTY running a shell on this host **as the daemon's account**. A workspace chooses only where the
  * shell starts and who sees the terminal; it is not a sandbox. alpd serves terminals only while the
  * host owner opted in (`<ALP_HOME>/terminal.json` `allowRemoteTerminal`, an owner-private file no RPC
- * writes), on macOS and Linux, when the shipped native owner validates its capability. Lifecycle is audited;
+ * writes), on macOS and Linux when the shipped native owner validates its capability (Linux may be
+ * best-effort `root-only`), and on Windows through node-pty/ConPTY (best-effort, `protection: 'none'`). Lifecycle is audited;
  * input, output and the environment never are.
  */
 
@@ -35,7 +37,9 @@ export type PtyProcess = {
   onData(listener: (data: string) => void): Disposable;
   onExit(listener: (event: { exitCode: number | null; signal?: number }) => void): Disposable;
 };
-export type PtySpawn = (file: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: Record<string, string>; killGraceMs?: number; signal?: AbortSignal; protection?: 'root-only' }) => PtyProcess | Promise<PtyProcess>;
+/** Absent: full native protection. root-only: best-effort Linux. none: Windows platform PTY. */
+export type TerminalProtection = 'root-only' | 'none';
+export type PtySpawn = (file: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: Record<string, string>; killGraceMs?: number; signal?: AbortSignal; protection?: TerminalProtection }) => PtyProcess | Promise<PtyProcess>;
 /** One process: ids, (Linux) session, controlling tty, age, and the terminal markers in its environment. */
 export type ProcessRow = { pid: number; ppid: number; pgid: number; sid?: number; tty?: string; elapsedMs: number; markers?: string[] };
 type Log = { info(message: string, fields?: Record<string, unknown>): void; warn(message: string, fields?: Record<string, unknown>): void };
@@ -67,7 +71,7 @@ type Terminal = {
   principal: { id: string; epoch: string };
   workspaceId: string;
   root: string;
-  protection?: 'root-only';
+  protection?: TerminalProtection;
   title: string;
   cols: number;
   rows: number;
@@ -219,7 +223,8 @@ export function createTerminalService(options: TerminalServiceOptions) {
   const { home, resolveWorkspace, log } = options;
   const now = options.now ?? Date.now;
   const platform = options.platform ?? process.platform;
-  const supported = platform === 'darwin' || platform === 'linux';
+  const supported = platform === 'darwin' || platform === 'linux' || platform === 'win32';
+  const windows = platform === 'win32';
   const killGraceMs = options.killGraceMs ?? KILL_GRACE_MS;
   const maxBuffered = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
   const terminals = new Map<string, Terminal>();
@@ -242,17 +247,15 @@ export function createTerminalService(options: TerminalServiceOptions) {
   let cleanupFault = false;
   type Pending = { principal: TerminalPrincipal; workspaceId: string; controller: AbortController; admitted: boolean; reason?: string; promise: Promise<{ terminal: TerminalInfo }> };
   const pending = new Map<string, Pending>();
-  // Explicit injected test owners need no host capability. Production never falls back to node-pty.
-  const spawner: PtySpawn = options.spawn ?? nativePtySpawn;
-  let capability: ReturnType<typeof nativeTerminalCapability> | undefined;
-  function pty() { capability ??= options.capability?.() ?? (options.spawn ? { available: true } : nativeTerminalCapability()); return capability.available ? spawner : undefined; }
-  function acknowledge(protection: string | undefined, acknowledgment?: string) {
-    if (protection === 'root-only' && acknowledgment !== 'linux-root-only-v1') throw new RpcError(ERROR.unavailable, 'This Linux host lacks terminal process protection. Closing the terminal ends its shell, but commands it started may continue running after close, access revocation or host shutdown. Continue only if you accept this limit.', { reason: 'terminal_protection_ack_required' });
-  }
+  // Explicit injected test owners need no host capability. Production never falls back to node-pty,
+  // except on win32: there is no protection helper, so Windows uses node-pty (ConPTY), best-effort.
+  const spawner: PtySpawn = options.spawn ?? (windows ? windowsPtySpawn : nativePtySpawn);
+  let capability: { available: boolean; protection?: TerminalProtection; reason?: string } | undefined;
+  function pty() { capability ??= options.capability?.() ?? (options.spawn ? { available: true } : windows ? windowsTerminalCapability() : nativeTerminalCapability()); return capability.available ? spawner : undefined; }
   const cancel = (entry: Pending, reason: string) => { entry.reason ??= reason; entry.controller.abort(); };
   const refused = (reason: string) => new RpcError(ERROR.unavailable, 'Terminal startup was cancelled or its native owner is unavailable', { reason });
   async function cleanup(owner: PtyProcess, id?: string) {
-    if (!owner.cleanup) { owner.kill(); return; } // explicit test owner only
+    if (!owner.cleanup) { owner.kill(); return; } // test owners and the win32 node-pty owner (best-effort)
     const result = await owner.cleanup();
     if (result.coverage === 'root-only') log.info('terminal shell cleanup has reduced coverage; descendants are unmanaged', { code: 'ALPD_TERMINAL_ROOT_ONLY_CLEANUP', terminalId: id, outputOpen: result.outputOpen === true });
     if (result.live || result.uncertain) {
@@ -285,7 +288,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
     return { enabled: config.enabled, limits };
   }
 
-  /** The switch, the platform and the module, or the refusal. */
+  /** The switch, the platform and the owner (native helper; node-pty on win32), or the refusal. */
   async function ready() {
     if (cleanupFault) throw refused('terminal_cleanup_uncertain');
     if (closed) throw new RpcError(ERROR.unavailable, 'alpd is shutting down', { reason: 'terminal_unsupported' });
@@ -302,6 +305,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
       state: terminal.exit ? 'exited' : 'running', attached: !!terminal.sink, createdAt: iso(terminal.createdAt),
       lastActivityAt: iso(terminal.lastActivityAt), expiresAt: iso(terminal.expiresAt),
       ...(terminal.exit ? { exitCode: terminal.exit.exitCode, signal: terminal.exit.signal, endReason: terminal.exit.reason } : {}),
+      ...(terminal.protection ? { protection: terminal.protection } : {}),
     };
   }
 
@@ -407,6 +411,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
 
   /** The approved shell: the daemon user's login shell when /etc/shells lists it, else /bin/sh. */
   async function shell() {
+    if (windows) return windowsShell();
     const candidate = process.env.SHELL;
     if (candidate && path.isAbsolute(candidate)) {
       const listed = await readFile('/etc/shells', 'utf8').then(text => text.split('\n').map(line => line.trim()).includes(candidate), () => false);
@@ -437,7 +442,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
       return !cleanupFault && current?.enabled && pty() ? current.limits : undefined;
     },
 
-    create(principal: TerminalPrincipal, params: { workspaceId: string; cols: number; rows: number; requestId: string; protectionAcknowledgment?: 'linux-root-only-v1' }): Promise<{ terminal: TerminalInfo }> {
+    create(principal: TerminalPrincipal, params: { workspaceId: string; cols: number; rows: number; requestId: string; protectionAcknowledgment?: 'linux-root-only-v1' /* deprecated, ignored */ }): Promise<{ terminal: TerminalInfo }> {
       const requestKey = JSON.stringify([principal.id, principal.epoch, params.requestId]);
       const existing = pending.get(requestKey);
       if (existing) {
@@ -456,8 +461,8 @@ export function createTerminalService(options: TerminalServiceOptions) {
             throw error;
           });
           if (!within(principal, root)) throw new RpcError(ERROR.forbidden, 'The workspace is outside this grant', { reason: 'outside_workspace' });
+          // Reduced protection (Linux root-only, Windows none) opens directly; clients disclose `protection`.
           const protection = capability?.protection;
-          acknowledge(protection, params.protectionAcknowledgment);
           const file = await shell();
           if (cleanupFault) throw refused('terminal_cleanup_uncertain');
           if (entry.reason || closed) throw refused(entry.reason ?? 'terminal_unsupported');
@@ -484,7 +489,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
           }
           const terminal: Terminal = {
             id: `term_${randomBytes(16).toString('hex')}`, principal: { id: principal.id, epoch: principal.epoch }, workspaceId: params.workspaceId,
-            root, ...(protection === 'root-only' ? { protection: 'root-only' as const } : {}), title: path.basename(file).slice(0, 64), cols: params.cols, rows: params.rows, pty: process_, pid: process_.pid, screen: new TerminalScreen(params.cols, params.rows),
+            root, ...(protection ? { protection } : {}), title: path.basename(file).slice(0, 64), cols: params.cols, rows: params.rows, pty: process_, pid: process_.pid, screen: new TerminalScreen(params.cols, params.rows),
             ...(typeof process_.ptsName === 'string' && process_.ptsName.startsWith('/dev/') ? { tty: process_.ptsName.slice('/dev/'.length) } : {}),
             createdAt: at, lastActivityAt: at, expiresAt: at + limits.maxLifetimeMs, requestKey, ring: [], ringBytes: 0, nextSeq: 1,
             detachedAt: at, marker, disposables: [],
@@ -506,7 +511,8 @@ export function createTerminalService(options: TerminalServiceOptions) {
             throw refused('terminal_cleanup_uncertain');
           }
           if (entry.reason) throw refused(entry.reason);
-          if ((error as { terminalReason?: string })?.terminalReason) { capability = undefined; if ((error as { terminalReason?: string }).terminalReason === 'terminal_protection_ack_required') acknowledge('root-only'); }
+          // The helper's capability changed since the probe: re-probe on the next create.
+          if ((error as { terminalReason?: string })?.terminalReason) { capability = undefined; throw refused('terminal_unsupported'); }
           if (entry.admitted && !(error instanceof RpcError)) throw refused('terminal_unsupported');
           throw error;
         } finally { pending.delete(requestKey); }
@@ -540,10 +546,9 @@ export function createTerminalService(options: TerminalServiceOptions) {
       return result;
     },
 
-    async attach(principal: TerminalPrincipal, sink: TerminalSink, params: { terminalId: string; after?: number; protectionAcknowledgment?: 'linux-root-only-v1' }) {
+    async attach(principal: TerminalPrincipal, sink: TerminalSink, params: { terminalId: string; after?: number; protectionAcknowledgment?: 'linux-root-only-v1' /* deprecated, ignored */ }) {
       await ready();
       const terminal = own(principal, params.terminalId);
-      acknowledge(terminal.protection, params.protectionAcknowledgment);
       if (terminal.sink && terminal.sink !== sink) detach(terminal, 'replaced');
       terminal.sink = sink;
       terminal.detachedAt = undefined;

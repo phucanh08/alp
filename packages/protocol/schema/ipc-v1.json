@@ -3165,6 +3165,13 @@
             "disabled",
             "shutdown"
           ]
+        },
+        "protection": {
+          "enum": [
+            "root-only",
+            "none"
+          ],
+          "description": "Absent: full native process protection (macOS, supported Linux). root-only: best-effort Linux; closing ends the shell, but processes it started may keep running. none: Windows platform PTY (ConPTY); cleanup is best-effort and not guaranteed. Clients show a non-blocking notice."
         }
       },
       "required": [
