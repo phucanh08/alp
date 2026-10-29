@@ -117,6 +117,8 @@ function digest(value: unknown) {
 type Connection = {
   socket?: net.Socket;
   helloed: boolean;
+  /** The client name daemon.hello gave: a gate card answered from alp-paseo* is recorded as paseo, else web. */
+  client?: string;
   roots: Set<string>;
   send(message: unknown): void;
   nextId: number;
@@ -1088,7 +1090,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     if (!gitReader) throw new RpcError(ERROR.unavailable, 'Registry needs ALP_HOME');
     return run(gitReader);
   };
-  const operations = createOperations({ home, templates, knownProjects: () => new Set([...records.values()].flatMap(record => record.session?.projectRoot ? [record.session.projectRoot] : [])) });
+  const operations = createOperations({ home, templates, knownProjects: () => new Set([...records.values()].flatMap(record => record.session?.projectRoot ? [record.session.projectRoot] : [])), onGateChange: root => runtime.syncGates?.(root) });
   const extensionOwners = new Map<string, Connection>();
   const handlers: Record<string, (connection: Connection, params: any) => Promise<unknown> | unknown> = {
     'extension.register': async (connection, params) => {
@@ -1250,13 +1252,14 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       }
     },
 
-    'question.answer'(_connection, { questionId, text, dismiss = false, reason }) {
+    'question.answer'(connection, { questionId, text, dismiss = false, reason }) {
       if (typeof questionId !== 'string') throw new RpcError(-32602, 'questionId is required');
       if (dismiss !== true && typeof text !== 'string') throw new RpcError(-32602, 'text or dismiss is required');
       // A unique prefix is enough, as in the CLI.
       const matches = runtime.questions().filter(question => question.id === questionId || question.id.startsWith(questionId));
       if (matches.length !== 1) throw new RpcError(ERROR.notFound, matches.length ? `Question id ${questionId} is ambiguous` : `No question ${questionId} waits for an answer`);
-      runtime.answer(matches[0].id, dismiss === true ? { dismiss: true, reason } : { text });
+      const channel = connection.client?.startsWith('alp-paseo') ? 'paseo' as const : 'web' as const;
+      runtime.answer(matches[0].id, dismiss === true ? { dismiss: true, reason, channel } : { text, channel });
       return { questionId: matches[0].id };
     },
 
@@ -1448,6 +1451,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
           for (const envelope of live) if ((envelope.cursor ?? 0) > last) { if (current(envelope)) deliver(connection, envelope); last = envelope.cursor ?? last; }
         }
         announceQuestions(connection, root);
+        // Gate cards are rebuilt from the project's tasks: one changed while nobody watched shows or settles now.
+        const gateProject = runtime.snapshot(root)?.projectRoot;
+        if (gateProject) void runtime.syncGates?.(gateProject)?.catch(() => {});
         return { session: root === found.id ? found : summary(root), cursor: tip, ...(reset ? { reset: true } : {}) };
       }
     },
@@ -1858,6 +1864,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         const issues = validateParams(method, params)!;
         if (issues.length) throw invalidParams(issues);
         connection.helloed = true;
+        if (typeof params?.client?.name === 'string') connection.client = params.client.name;
         // Terminals are listed only while the host's switch is on (and the PTY module loads).
         const terminalLimits = await terminals?.advertised();
         respond({ result: { protocolVersion: PROTOCOL_VERSION, daemonVersion: version, pid: process.pid, hostname: os.hostname(), capabilities: terminalLimits ? [...capabilities, CAPABILITY.terminal, CAPABILITY.terminalCapture, CAPABILITY.terminalWatch] : capabilities, ...(attachments ? { attachmentLimits: attachments.limits } : {}), ...(terminalLimits ? { terminalLimits } : {}) } });

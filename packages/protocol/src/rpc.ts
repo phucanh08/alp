@@ -249,7 +249,7 @@ export type RpcMethodMap = {
   'task.list': { params: { projectRoot: string }; result: { projectRoot: string; tasks: TaskRow[]; unreadable: Array<{ file: string; error: string }>; revision: string } };
   'task.create': { params: { projectRoot: string; title: string; priority?: number; requestId?: string }; result: { id: string; duplicate?: true } };
   'task.update': { params: { projectRoot: string; id: string; action: 'close' | 'reopen'; note?: string; ifRev?: number }; result: { id: string; status: string; rev: number; landed?: string } };
-  'task.gate.resolve': { params: { projectRoot: string; id: string; gate: string; note?: string; ifRev?: number }; result: { id: string; status: string; rev: number } };
+  'task.gate.resolve': { params: { projectRoot: string; id: string; gate: string; note?: string; ifRev?: number; /** One of a human gate's options; picking one approves it. */ choice?: string; /** Record the user's rejection instead (note is the reason); the gate stays open. */ reject?: boolean; /** Where the user decided, recorded on the gate. Default web. */ channel?: 'paseo' | 'web' }; result: { id: string; status: string; rev: number } };
   'library.list': { params: { kind: LibraryKind; projectRoot?: string }; result: { projectRoot: string | null; entries: LibraryEntryRow[] } };
   'library.get': {
     params: { kind: LibraryKind; name: EntryName; projectRoot?: string; scope?: LibraryScope };

@@ -51,6 +51,8 @@ export type RuntimeOptions = {
   checkInMs?: number;
   /** How often the watchdog looks at running assignments; derived from silentForMs and checkInMs when omitted. */
   watchMs?: number;
+  /** How often the project tasks are read for gate changes made without alpd, in ms; 0 turns the timer off. Default 5000. */
+  gateSyncMs?: number;
   /** How long alp_ask waits for the requester before returning unanswered. */
   askTimeoutMs?: number;
   /** How long alp_ask waits for the user before returning unanswered. Default 30 minutes. */
@@ -162,7 +164,9 @@ export type AlpRuntime = {
   /** Questions agents asked the user that wait for an answer. */
   questions(): UserQuestion[];
   /** Answers or dismisses a question to the user. */
-  answer(questionId: string, reply: { text?: string; dismiss?: boolean; reason?: string }): void;
+  answer(questionId: string, reply: { text?: string; dismiss?: boolean; reason?: string; /** Where the user answered a gate card: paseo or web. */ channel?: 'paseo' | 'web' }): void;
+  /** Mirrors the project's open human gates as cards on its main session and tells main of the user's gate decisions, once each (t-ccac). */
+  syncGates?(projectRoot: string): Promise<void>;
   /** Mails a note from the user to any live session, such as an assignment the user wants to redirect. */
   message(sessionId: string, text: string): void;
   /** The project board: live claims, then decisions and findings, oldest first. */

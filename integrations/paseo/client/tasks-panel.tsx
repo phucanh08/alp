@@ -16,7 +16,7 @@ const POLL_MS = 5000;
 /** At this width the list and the selected task's detail sit side by side. */
 const SPLIT_FROM = 820;
 
-type Action = { id: string; action: 'close' | 'reopen' | 'approve'; gate?: string };
+type Action = { id: string; action: 'close' | 'reopen' | 'approve' | 'reject'; gate?: string; choice?: string };
 export type View_ = 'list' | 'board' | 'epics';
 export type Filter = 'open' | 'ready' | 'closed' | 'all';
 
@@ -75,11 +75,11 @@ function useTasks(directory: string | null) {
     }
   }, [add, directory, refresh, toast]);
 
-  const onAction = useCallback(async ({ id, action, gate }: Action) => {
+  const onAction = useCallback(async ({ id, action, gate, choice }: Action) => {
     if (!directory) return;
     try {
-      const { landed } = await change({ directory, id, action, ...(gate ? { gate } : {}) });
-      toast.show(landed ?? (action === 'approve' ? `Approved ${id}` : action === 'close' ? `Closed ${id}` : `Reopened ${id}`), { variant: 'success' });
+      const { landed } = await change({ directory, id, action, ...(gate ? { gate } : {}), ...(choice ? { choice } : {}) });
+      toast.show(landed ?? (action === 'approve' ? `Approved ${id}${choice ? `: ${choice}` : ''}` : action === 'reject' ? `Rejected ${id}; the gate stays open` : action === 'close' ? `Closed ${id}` : `Reopened ${id}`), { variant: 'success' });
       refresh();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : String(cause));
@@ -331,7 +331,10 @@ function ListView({ theme, styles, tasks, selected, onOpen, onAction }: { theme:
                 {section.key === 'approve' ? task.approvals!.map(approval => (
                   <View key={approval.gate} style={styles.inlineAction}>
                     <Text style={styles.small} numberOfLines={2}>{approval.note || 'Waiting for your approval'}</Text>
-                    <SmallButton styles={styles} label="Approve" primary onPress={() => onAction({ id: task.id, action: 'approve', gate: approval.gate })} />
+                    {approval.options?.length
+                      ? approval.options.map(option => <SmallButton key={option} styles={styles} label={option.slice(0, 40)} primary onPress={() => onAction({ id: task.id, action: 'approve', gate: approval.gate, choice: option })} />)
+                      : <SmallButton styles={styles} label="Approve" primary onPress={() => onAction({ id: task.id, action: 'approve', gate: approval.gate })} />}
+                    {!approval.rejected ? <SmallButton styles={styles} label="Reject" onPress={() => onAction({ id: task.id, action: 'reject', gate: approval.gate })} /> : <Text style={styles.small}>Rejected</Text>}
                   </View>
                 )) : null}
               </View>
@@ -474,7 +477,12 @@ export function TaskDetail({ theme, styles, task, tasks, onBack, onOpen, onActio
         </View>
       ) : null}
       <View style={styles.detailActions}>
-        {(task.approvals ?? []).map(approval => <SmallButton key={approval.gate} styles={styles} primary label={`Approve${approval.note ? `: ${approval.note.slice(0, 40)}` : ''}`} onPress={() => onAction({ id: task.id, action: 'approve', gate: approval.gate })} />)}
+        {(task.approvals ?? []).flatMap(approval => [
+          ...(approval.options?.length
+            ? approval.options.map(option => <SmallButton key={`${approval.gate}-${option}`} styles={styles} primary label={option.slice(0, 40)} onPress={() => onAction({ id: task.id, action: 'approve', gate: approval.gate, choice: option })} />)
+            : [<SmallButton key={approval.gate} styles={styles} primary label={`Approve${approval.note ? `: ${approval.note.slice(0, 40)}` : ''}`} onPress={() => onAction({ id: task.id, action: 'approve', gate: approval.gate })} />]),
+          ...(!approval.rejected ? [<SmallButton key={`${approval.gate}-reject`} styles={styles} label="Reject" onPress={() => onAction({ id: task.id, action: 'reject', gate: approval.gate })} />] : []),
+        ])}
         {state === 'review' ? <SmallButton styles={styles} primary label="Accept and close" onPress={() => onAction({ id: task.id, action: 'close' })} /> : null}
         {task.status !== 'closed' && state !== 'review' && task.type !== 'epic' ? <SmallButton styles={styles} label="Close" onPress={() => onAction({ id: task.id, action: 'close' })} /> : null}
         {task.status === 'closed' ? <SmallButton styles={styles} label="Reopen" onPress={() => onAction({ id: task.id, action: 'reopen' })} /> : null}

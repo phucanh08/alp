@@ -65,8 +65,10 @@ const USAGE = `Usage:
   alp verify [--project DIR] [--task ID] [--json]   run the project's verify commands; --task records the result
   alp task reopen <id> [-m note]
   alp task dep <add|rm> <id> [--after ID]... [--parent ID] [--related ID]...
-  alp task gate add <id> --human "question" | --timer +2h|ISO | --pr N|owner/repo#N | --run N|owner/repo#N
-  alp task gate <clear|rm> <id> <gate> [-m note]
+  alp task gate add <id> --human "question" [--option answer]... | --timer +2h|ISO | --pr N|owner/repo#N | --run N|owner/repo#N
+  alp task gate clear <id> <gate> [--choice answer] [-m note]   approve; main is told by mail
+  alp task gate reject <id> <gate> [-m reason]   the gate stays open; main is told by mail
+  alp task gate rm <id> <gate> [-m note]
   alp pause [codex|claude] [--now] [-m reason] | alp pause status   hold delegation; --now parks running assignments
   alp resume [codex|claude]                  lift a pause; parked assignments continue
   alp language [name | --reset]              the language agents and ALP write to you in; default Vietnamese

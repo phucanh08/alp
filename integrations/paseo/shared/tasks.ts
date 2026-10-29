@@ -20,7 +20,7 @@ export const TaskRowSchema = z.object({
   /** Open gates, as labels. */
   waits: z.array(z.string()).optional(),
   /** Open human gates of this task: the user approves them here. */
-  approvals: z.array(z.object({ gate: z.string(), note: z.string() })).optional(),
+  approvals: z.array(z.object({ gate: z.string(), note: z.string(), options: z.array(z.string()).optional(), rejected: z.object({ at: z.string(), reason: z.string().optional() }).optional() })).optional(),
   handoff: z.object({ outcome: z.string(), summary: z.string(), agent: z.string().optional() }).optional(),
   closed: z.object({ reason: z.string(), summary: z.string().optional(), at: z.string() }).optional(),
   /** What the task is about, for its detail view; at most 4000 characters. */
@@ -60,9 +60,11 @@ export const tasksChange = defineRpc({
   input: z.object({
     directory: Directory,
     id: z.string().min(1),
-    action: z.enum(['close', 'reopen', 'approve']),
-    /** For approve: the human gate. */
+    action: z.enum(['close', 'reopen', 'approve', 'reject']),
+    /** For approve and reject: the human gate. */
     gate: z.string().optional(),
+    /** For approve: one of the gate's options. */
+    choice: z.string().min(1).max(200).optional(),
     note: z.string().max(2000).optional(),
   }),
   /** landed: the first line of the report when the close landed an epic. */

@@ -20,7 +20,7 @@ export async function taskRows(projectRoot) {
   }
   const rows = tasks.map(task => {
     const row = summarize(task, tasks);
-    const approvals = task.status === 'closed' ? [] : task.gates.filter(gate => gate.kind === 'human' && !gate.resolved).map(gate => ({ gate: gate.id, note: gate.note ?? '' }));
+    const approvals = task.status === 'closed' ? [] : task.gates.filter(gate => gate.kind === 'human' && !gate.resolved).map(gate => ({ gate: gate.id, note: gate.note ?? '', ...(gate.options?.length ? { options: gate.options } : {}), ...(gate.rejected ? { rejected: { at: gate.rejected.at, ...(gate.rejected.reason ? { reason: gate.rejected.reason } : {}) } } : {}) }));
     const waits = task.status === 'closed' ? [] : gatesOf(task, tasks);
     return {
       id: task.id, title: task.title, type: task.type, priority: task.priority, status: task.status, rev: task.rev,

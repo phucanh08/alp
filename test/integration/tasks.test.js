@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initProject } from '../../packages/core/src/init.js';
-import { addGate, blockersOf, checkGates, gatesOf, closeTask, compactTasks, createTask, resolveGate, startRefusal, getTask, linkTask, listTasks, loadTasks, readyTasks, releaseTask, reopenTask, startTask, submitTask, taskDigest, updateTask } from '../../packages/core/src/tasks.js';
+import { addGate, blockersOf, checkGates, gateDecisions, gatesOf, closeTask, compactTasks, createTask, markGateNotified, rejectGate, resolveGate, startRefusal, getTask, linkTask, listTasks, loadTasks, readyTasks, releaseTask, reopenTask, startTask, submitTask, taskDigest, updateTask } from '../../packages/core/src/tasks.js';
 import { createAlpRuntime, claudeToolShapes } from '../../dist/runtime/index.js';
 
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
@@ -604,6 +604,72 @@ test('main gates tasks, cannot clear a human gate, and GitHub gates clear at the
   assert.equal(calls.length, 1);
 });
 
+test('human gate options, choices, rejections and channels are validated and recorded; a decision is reported once (t-ccac)', async t => {
+  const { root } = await project(t);
+  const task = await createTask(root, { title: 'Ship' }, 'user');
+  await assert.rejects(addGate(root, task.id, { kind: 'human', note: 'Which?', options: Array.from({ length: 11 }, (_, i) => `o${i}`) }, 'main'), /at most 10 nonempty answers of at most 200/);
+  await assert.rejects(addGate(root, task.id, { kind: 'human', note: 'Which?', options: ['x'.repeat(201)] }, 'main'), /at most 200 characters/);
+  await assert.rejects(addGate(root, task.id, { kind: 'human', note: 'Which?', options: [' '] }, 'main'), /nonempty/);
+  await assert.rejects(addGate(root, task.id, { kind: 'human', note: 'Which?', options: 'A' }, 'main'), /options must list/);
+  await assert.rejects(addGate(root, task.id, { kind: 'timer', until: '+1h', options: ['A'] }, 'main'), /Only a human gate has options/);
+  let current = await addGate(root, task.id, { kind: 'human', note: 'Which?', options: [' A ', 'B', 'A', 'x'.repeat(200)] }, 'main');
+  assert.deepEqual(current.gates[0].options, ['A', 'B', 'x'.repeat(200)]);
+  await addGate(root, task.id, { kind: 'human', note: 'Plain?' }, 'main');
+
+  // A choice must be one of the options; the channel one of paseo, web, cli.
+  await assert.rejects(resolveGate(root, task.id, 'g1', { by: 'user', choice: 'C' }), /choice must be one of: A, B/);
+  await assert.rejects(resolveGate(root, task.id, 'g1', { by: 'user', choice: 'A', channel: 'email' }), /channel must be one of paseo, web, cli/);
+  await assert.rejects(rejectGate(root, task.id, 'g1', { by: 'user', reason: 'x'.repeat(2001) }), /reason must be text/);
+
+  // Rejecting keeps the gate open and records the latest decision.
+  current = await rejectGate(root, task.id, 'g1', { by: 'user', reason: 'Not yet', channel: 'web' });
+  assert.equal(current.gates[0].resolved, undefined);
+  assert.deepEqual([current.gates[0].rejected.by, current.gates[0].rejected.reason, current.gates[0].rejected.channel], ['user', 'Not yet', 'web']);
+  assert.ok(gatesOf(current, [current]).some(label => label.startsWith('g1 human')), 'still waits on g1');
+  assert.equal(current.log.at(-1).event, 'gate rejected');
+  let { tasks } = await loadTasks(root);
+  assert.deepEqual(gateDecisions(tasks).map(entry => [entry.gate.id, entry.decision]), [['g1', 'rejected']]);
+
+  // ifRev: a stale view clears nothing; the fresh one clears once.
+  await assert.rejects(resolveGate(root, task.id, 'g1', { by: 'user', choice: 'B', channel: 'paseo', ifRev: current.rev - 1 }), /changed \(rev/);
+  current = await resolveGate(root, task.id, 'g1', { by: 'user', choice: 'B', channel: 'paseo', ifRev: current.rev });
+  assert.deepEqual([current.gates[0].resolved.choice, current.gates[0].resolved.channel], ['B', 'paseo']);
+  await assert.rejects(resolveGate(root, task.id, 'g1', { by: 'user', channel: 'web', ifRev: current.rev }), /already clear/);
+  await assert.rejects(rejectGate(root, task.id, 'g1', { by: 'user' }), /already clear/);
+  await assert.rejects(rejectGate(root, task.id, 'g9', { by: 'user' }), /has no gate g9/);
+
+  // Without options a choice is free text; an older clear without a channel is never reported.
+  await resolveGate(root, task.id, 'g2', { by: 'user', note: 'ok' });
+  ({ tasks } = await loadTasks(root));
+  assert.deepEqual(gateDecisions(tasks).map(entry => [entry.gate.id, entry.decision]), [['g1', 'approved']]);
+
+  // Two racing reporters: exactly one marks it, and the rev stays.
+  const rev = (await getTask(root, task.id)).rev;
+  const marks = await Promise.all([markGateNotified(root, task.id, 'g1', 'approved'), markGateNotified(root, task.id, 'g1', 'approved')]);
+  assert.deepEqual(marks.sort(), [false, true]);
+  assert.equal((await getTask(root, task.id)).rev, rev);
+  ({ tasks } = await loadTasks(root));
+  assert.deepEqual(gateDecisions(tasks), []);
+  assert.equal(await markGateNotified(root, task.id, 'g2', 'approved'), false, 'no channel, nothing to report');
+});
+
+test('the CLI takes gate options, a choice and a rejection, and records channel cli (t-ccac)', async t => {
+  const { directory, root } = await project(t);
+  const run = (...args) => spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, ALP_HOME: path.join(directory, 'home') } });
+  const task = JSON.parse(run('task', 'add', 'Pick', '--json').stdout);
+  assert.equal(run('task', 'gate', 'add', task.id, '--pr', '1', '--option', 'A').status, 1);
+  assert.match(run('task', 'gate', 'add', task.id, '--human', 'Which?', '--option', 'A', '--option', 'x'.repeat(201)).stderr, /at most 200 characters/);
+  run('task', 'gate', 'add', task.id, '--human', 'Which?', '--option', 'A', '--option', 'B');
+  assert.match(run('task', 'show', task.id).stdout, /⏸ gate g1 human: Which\? options: A \| B/);
+  run('task', 'gate', 'reject', task.id, 'g1', '-m', 'Later');
+  assert.match(run('task', 'show', task.id).stdout, /⏸ gate g1 human: Which\? \(rejected by user: Later\)/);
+  assert.match(run('task', 'gate', 'clear', task.id, 'g1', '--choice', 'C').stderr, /choice must be one of: A, B/);
+  run('task', 'gate', 'clear', task.id, 'g1', '--choice', 'B');
+  const gate = (await getTask(root, task.id)).gates[0];
+  assert.deepEqual([gate.resolved.choice, gate.resolved.channel, gate.rejected.channel], ['B', 'cli', 'cli']);
+  assert.match(run('task', 'show', task.id).stdout, /✓ gate g1 human: Which\? \(cleared by user with "B" in cli\)/);
+});
+
 test('the CLI adds, lists and clears gates, checks GitHub ones, and compacts', async t => {
   const { directory, root } = await project(t);
   const home = path.join(directory, 'home');
@@ -622,7 +688,7 @@ test('the CLI adds, lists and clears gates, checks GitHub ones, and compacts', a
   run('task', 'gate', 'clear', task.id, 'g1', '-m', 'Yes');
   run('task', 'gate', 'rm', task.id, 'g2');
   assert.equal(JSON.parse(run('tasks', 'ready', '--json').stdout)[0].id, task.id);
-  assert.match(run('task', 'show', task.id).stdout, /✓ gate g1 human: Ship it\? \(cleared by user: Yes\)\n  ✓ gate g3 gh:run: acme\/w#9 \(cleared by github: completed success\)/);
+  assert.match(run('task', 'show', task.id).stdout, /✓ gate g1 human: Ship it\? \(cleared by user in cli: Yes\)\n  ✓ gate g3 gh:run: acme\/w#9 \(cleared by github: completed success\)/);
   assert.equal(run('task', 'gate', 'add', task.id, '--human', 'x', '--pr', '1').status, 1);
   run('task', 'close', task.id);
   assert.match(run('tasks', 'compact', '--days', '0', '--dry-run').stdout, /Would compact 1 closed task/);

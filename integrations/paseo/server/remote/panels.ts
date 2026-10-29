@@ -75,11 +75,11 @@ export function registerRemoteTaskRpc(server: PluginServerContext, link: RemoteL
     return link.request('task.create', { projectRoot, title, ...(priority !== undefined ? { priority } : {}), requestId: `paseo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}` });
   });
 
-  server.handle(tasksChange, async ({ directory, id, action, gate, note }) => {
+  server.handle(tasksChange, async ({ directory, id, action, gate, note, choice }) => {
     const projectRoot = await project(link, directory);
     if (!projectRoot) throw new Error(`${directory} is not in a workspace your ALP credential grants`);
-    if (action === 'approve') {
-      const { id: done, status } = await link.request('task.gate.resolve', { projectRoot, id, gate: gate ?? '', ...(note ? { note } : {}) });
+    if (action === 'approve' || action === 'reject') {
+      const { id: done, status } = await link.request('task.gate.resolve', { projectRoot, id, gate: gate ?? '', channel: 'paseo', ...(action === 'reject' ? { reject: true } : {}), ...(note ? { note } : {}), ...(choice ? { choice } : {}) });
       return { id: done, status };
     }
     const { id: done, status, landed } = await link.request('task.update', { projectRoot, id, action, ...(note ? { note } : {}) });

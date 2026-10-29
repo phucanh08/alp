@@ -3285,9 +3285,9 @@ export class Controller {
   }
 
   /**
-   * Closes or reopens a task, or approves a human gate, guarded by the row's revision (ifRev):
-   * a repeat or a stale view fails instead of changing something else.
-   * @param {any} row @param {{ action: 'close' | 'reopen' } | { gate: string }} change
+   * Closes or reopens a task, or approves (with one of its options) or rejects a human gate, guarded
+   * by the row's revision (ifRev): a repeat or a stale view fails instead of changing something else.
+   * @param {any} row @param {{ action: 'close' | 'reopen' } | { gate: string, choice?: string, reject?: boolean }} change
    */
   async changeTask(row, change) {
     const workspace = this.#state.workspace;
@@ -3296,7 +3296,7 @@ export class Controller {
     this.#set(state => ({ tasks: { ...state.tasks, busy: { ...state.tasks.busy, [row.id]: true }, message: undefined } }));
     try {
       const client = this.#client();
-      if ('gate' in change) await client.request('task.gate.resolve', { projectRoot: workspace, id: row.id, gate: change.gate, ifRev: row.rev });
+      if ('gate' in change) await client.request('task.gate.resolve', { projectRoot: workspace, id: row.id, gate: change.gate, channel: 'web', ...(change.choice ? { choice: change.choice } : {}), ...(change.reject ? { reject: true } : {}), ifRev: row.rev });
       else await client.request('task.update', { projectRoot: workspace, id: row.id, action: change.action, ...(change.action === 'close' ? { note: 'Closed in ALP web' } : {}), ifRev: row.rev });
     } catch (error) {
       if (context !== this.#context) return;

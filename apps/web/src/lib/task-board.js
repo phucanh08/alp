@@ -9,7 +9,7 @@
 /** @typedef {'approve' | 'review' | 'progress' | 'ready' | 'blocked' | 'closed'} TaskState */
 /**
  * @typedef {{ id: string, title: string, type?: string, priority: number, status: string, ready?: boolean, parent?: string,
- *   assignee?: string, labels?: string[], blockedBy?: string[], waits?: string[], approvals?: Array<{ gate: string, note: string }>,
+ *   assignee?: string, labels?: string[], blockedBy?: string[], waits?: string[], approvals?: Array<{ gate: string, note: string, options?: string[], rejected?: { at: string, reason?: string } }>,
  *   progress?: { done: number, total: number }, closed?: { at: string, reason?: string }, updatedAt?: string }} TaskRow
  */
 
