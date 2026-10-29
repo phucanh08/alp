@@ -70,3 +70,30 @@ test('stalled control reader bounds resize queue and cleanup bypasses pending re
   assert.equal((await cleanup).uncertain, 1); // Fake owner deliberately lacks cleanup result.
   if (!baseline) assert.equal(exit?.exitCode, null, 'unexpected owner death must notify service with unknown root exit');
 });
+async function tailFixture(t, delay, clean) {
+  const root = await fixture(t), source = path.join(root, 'tail.c'), binary = path.join(root, 'owner');
+  await writeFile(source, await sourceAt(path.join(native, 'terminal-owner.c'))); compile(source, binary);
+  const line = '012345678901234567890123456789012345678901234567890123456789012345';
+  const child = childProcess.spawn(binary, ['80', '24', '100', root, '/bin/sh', '-c', `i=0; while [ "$i" -lt 4000 ]; do printf '${line}\\n'; i=$((i+1)); done`], { stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'] });
+  let events = '', text = '', resumed = false;
+  child.stderr.resume(); child.stdin.on('error', () => {}); child.stdio[4].on('error', () => {});
+  child.stdout.on('data', value => { text += value; }); child.stdout.pause();
+  child.stdio[3].on('data', value => {
+    events += value;
+    if (!resumed && events.includes('"exitCode"')) {
+      resumed = true;
+      // Root has exited; the old implementation's 350ms cleanup finishes before this release.
+      setTimeout(() => child.stdout.resume(), delay);
+    }
+  });
+  await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
+  assert.equal(resumed, true, events);
+  const normalized = text.replace(/\r/g, ''), expected = (line + '\n').repeat(4000);
+  if (clean) {
+    assert.equal(normalized.length, expected.length, `tail bytes ${text.length}; ${events}`);
+    assert.equal(createHash('sha256').update(normalized).digest('hex'), createHash('sha256').update(expected).digest('hex'));
+    assert.match(events, /"uncertain":0/);
+  } else assert.match(events, /"uncertain":[1-9]/, events);
+}
+test('natural exit drains a partial nonblocking output tail after temporary consumer backpressure', { skip }, t => tailFixture(t, 600, true));
+test('a persistently stalled output reader gets explicit drain uncertainty', { skip }, t => tailFixture(t, 2000, false));

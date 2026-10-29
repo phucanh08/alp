@@ -92,7 +92,8 @@ from Node22's kernel4.18 floor, escalated to main. No silent numeric fallback.
 Async startup reserves request IDs and quota before native readiness. Revoke,
 shutdown and host optout cancel startup and await native cleanup before returning;
 late readiness cannot publish an orphan terminal. Root exit is delivered after
-stdio drains. Cleanup reports observed/live/uncertain, and uncertain/live results
+stdio drains. The helper reads the PTY to EOF and advances partial output writes
+for up to one further second; an undrained tail reports explicit uncertainty. Cleanup reports observed/live/uncertain, and uncertain/live results
 refuse success and stop further terminal admission. The existing real PTY cleanup
 scenarios now execute through the native owner (including exec, same-session
 orphans and a late child). Never-observed immediate-setsid escapes remain the

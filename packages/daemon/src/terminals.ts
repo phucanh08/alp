@@ -582,15 +582,16 @@ export function createTerminalService(options: TerminalServiceOptions) {
 
     /** Every terminal of a principal, any epoch: a gateway's revocation. */
     async revoke(principalId: string) {
-      const starting = [...pending.values()].filter(entry => entry.principal.id === principalId && !entry.reason);
-      for (const entry of starting) cancel(entry, 'terminal_revoked');
+      const starting = [...pending.values()].filter(entry => entry.principal.id === principalId);
+      const newlyCancelled = starting.filter(entry => !entry.reason);
+      for (const entry of newlyCancelled) cancel(entry, 'terminal_revoked');
       const mine = [...terminals.values()].filter(terminal => terminal.principal.id === principalId);
       const live = mine.filter(terminal => !terminal.exit && !terminal.ending);
       const outcomes = await Promise.allSettled([...mine.map(terminal => terminal.exit ? terminal.reaped : end(terminal, 'revoked')), ...starting.map(entry => entry.promise.then(() => {}, () => {}))]);
       if (cleanupFault || outcomes.some(result => result.status === 'rejected')) throw refused('terminal_cleanup_uncertain');
       for (const terminal of mine) forget(terminal);
       if (mine.length) log.info('revoked the terminals of a principal', { code: 'ALPD_TERMINAL_REVOKED', principal: principalId, closed: live.length });
-      return { closed: live.length + starting.length };
+      return { closed: live.length + newlyCancelled.length };
     },
 
     /** A connection closed: its terminals keep running for reconnectMs. */

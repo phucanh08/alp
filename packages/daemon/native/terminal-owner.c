@@ -269,7 +269,7 @@ int main(int argc, char **argv) {
   }
   /* Last scan and verification happen BEFORE final root reap: SID still reserved. */
   discover(); signal_all(SIGKILL); usleep(20000);
-  int live=0,uncertain=scanning_failed+io_failed;
+  int live=0,uncertain=scanning_failed;
   for(size_t i=0;i<count;i++) { int s=status(&known[i]); if(s==1) live++; else if(s==2) uncertain++; }
   siginfo_t final={0};
   if(waitid(P_PID,root,&final,WEXITED|WNOHANG|WNOWAIT)==0 && final.si_pid==root) {
@@ -277,9 +277,30 @@ int main(int argc, char **argv) {
   } else { /* Never blocking reap of a live/unverifiable root; no adoption after this point. */
     held=0; uncertain++;
   }
+  /* Drain all remaining PTY output and queued bytes, advancing partial writes.
+   * A stalled consumer cannot retain an owner indefinitely: undrained output is
+   * explicit uncertainty, NEVER a successful silent tail discard. No discovery
+   * or signals occur after final root reap above. */
+  long long drain_deadline=clock_ms()+1000; int master_eof=0;
+  while((!master_eof || outn) && clock_ms()<drain_deadline) {
+    struct pollfd drain[2]={{master,(!master_eof && outn<QUEUE)?POLLIN:0,0},{1,outn?POLLOUT:0,0}};
+    if(poll(drain,2,10)<0) { if(errno==EINTR) continue; io_failed=1; break; }
+    if(!master_eof && outn<QUEUE && (drain[0].revents&(POLLIN|POLLHUP|POLLERR))) {
+      ssize_t n=read(master,out+outn,QUEUE-outn);
+      if(n>0) outn+=(size_t)n;
+      else if(n==0 || errno==EIO) master_eof=1;
+      else if(errno!=EAGAIN && errno!=EINTR) { io_failed=1; master_eof=1; }
+    }
+    if(outn && (drain[1].revents&POLLOUT)) {
+      ssize_t n=write(1,out,outn);
+      if(n>0) { outn-=(size_t)n; memmove(out,out+n,outn); }
+      else if(errno!=EAGAIN && errno!=EINTR) { io_failed=1; break; }
+    }
+    if(drain[1].revents&(POLLHUP|POLLERR)) { io_failed=1; break; }
+  }
+  if(!master_eof || outn) io_failed=1;
   close(master);
-  /* Best-effort bounded tail. Protocol completion is distinct from PTY output. */
-  if(outn) (void)!write(1,out,outn);
+  uncertain+=io_failed;
   snprintf(msg,sizeof(msg),"{\"cleanup\":true,\"observed\":%zu,\"live\":%d,\"uncertain\":%d}\n",count,live,uncertain); event(msg);
 #ifndef __APPLE__
   for(size_t i=0;i<count;i++) close(known[i].fd);
