@@ -1,9 +1,9 @@
 # Terminal native owner — candidate, platform matrix incomplete
 
 Task t-d71b. Production `src/terminals.ts` now uses this identity-bound owner,
-with no numeric node-pty fallback. This candidate is NOT accepted for release:
+with no node-pty fallback. Linux may use the explicitly acknowledged root-only mode described below. This candidate is NOT accepted for release:
 four Linux artifacts and actual Linux/Windows evidence remain missing. Missing or
-unverifiable backends refuse terminal capability explicitly. No end-user compiler
+unverifiable backends refuse terminal capability explicitly; only a verified ENOSYS bound-signal capability result enables root-only compatibility. No end-user compiler
 is required. Existing session authentication and host/Paseo opt-ins still apply.
 
 ## Protocol and lifetime
@@ -22,7 +22,7 @@ other reaper, and uses waitid(WNOWAIT) to observe natural exit. It retains the
 root's live process or zombie until all discovery/signaling ends. This reserves
 the root PID and prevents unrelated sessions reusing that session number. Only
 processes proven to belong to that reserved session can be discovered. Observed
-identities remain authorized if they subsequently leave the session. There is no
+identities remain authorized if they subsequently leave the session. On the full-protection path there is no
 marker, environment, age, PPid, parentuniqueid, TTY, numeric PID signal or numeric
 group signal fallback. Never-observed children that immediately detach can be
 missed (the approved g3 limit).
@@ -85,9 +85,9 @@ matching [Node22's macOS floor](https://github.com/nodejs/node/blob/v22.23.0/BUI
 This deployment target is NOT proof of runtime compatibility on macOS11 or physical
 x64 hardware. Private-ABI capability validation still fails closed. Linux builds
 must retain the existing libc support baseline (Node22 glibc2.28); no Linux artifact
-or minimum-kernel execution has been proved here. pidfd_send_signal capability is
-mandatory (Linux5.1 syscall baseline), a material terminal-capability difference
-from Node22's kernel4.18 floor, escalated to main. No silent numeric fallback.
+or minimum-kernel execution has been proved here. pidfd_send_signal (Linux5.1 syscall baseline) selects full protection. User g5 approved
+functional compatibility below that capability with a pre-use warning, as described below.
+No permission denial or artifact failure silently selects compatibility.
 
 Async startup reserves request IDs and quota before native readiness. Revoke,
 shutdown and host optout cancel startup and await native cleanup before returning;
@@ -106,3 +106,43 @@ startup and a real stalled control reader. `ALP_NATIVE_BASELINE=8ed11fd` runs th
 same checks against the committed pre-correction C/TS in isolated scratch space.
 This mode does not change the checkout. Both cases fail on that baseline and pass
 on the correction. Ordinary lifecycle tests run separately from daemon/tests.
+
+## Linux root-only compatibility candidate (g5)
+
+Only a verified helper that passes procfs/PID-namespace checks and receives ENOSYS
+from its valid self `pidfd_send_signal` probe advertises `alp-terminal-owner:1:root-only`.
+EPERM/EACCES, proc/namespace failure, corrupt/missing binary or manifest, timeout,
+crash or malformed records refuse capability. ENOSYS may also be returned by a
+policy; we call the capability unavailable rather than assert a kernel version.
+The owner revalidates immediately before fork; a mode change refuses before shell
+launch, with a fresh acknowledgment challenge when full protection became unavailable.
+
+`terminal.create` and `terminal.attach` require explicit
+`protectionAcknowledgment: "linux-root-only-v1"` after a meaningful warning.
+Web Continue/Cancel is deliberate; restore/new shell does not inherit consent
+from storage. Direct clients receive a fixed structured refusal before a shell
+exists. Current Paseo protocol cannot send this acknowledgment, so its bridge
+surfaces the warning and refuses degraded create/attach (consumer decision g6
+pending, not accepted complete fallback).
+
+Compatibility never scans or explicitly signals descendants or process groups.
+Only its own direct root is signaled, before final reap, with SIGCHLD explicitly
+SIG_DFL and SA_NOCLDWAIT cleared by checked sigaction. A living child or WNOWAIT
+zombie continuously reserves its PID; an unexpected ECHILD permanently retires
+numeric authority. Final reap is checked. This is spawn ownership, not a snapshot
+or a numeric PID-reuse heuristic; helper compromise invalidates that premise.
+Kernel PTY hangup and line-discipline signals may naturally affect foreground jobs.
+
+Known reduced coverage is `coverage: "root-only"`; successful cleanup establishes
+only the shell's exit. Unmanaged jobs can survive close/revoke/optout/shutdown and
+keep the PTY open (`outputOpen: true` after bounded draining). This accepted known
+coverage limit alone does not lock admission. Root live/lost ownership, queued
+bytes not delivered, protocol loss or sticky adapter failure remain uncertainty
+and retain the admission lock. No delayed signals occur after root reap.
+
+Advice/source proof: oracle18a20d0e examined [Linux5.1 wait/ptrace reap](https://github.com/torvalds/linux/blob/v5.1/kernel/exit.c)
+and [original procdirfd signal dispatch](https://github.com/torvalds/linux/blob/v5.1/kernel/signal.c).
+Actual Linux compilation/execution (old and supported kernel, namespace/permission,
+ptrace/exec/reuse/race and four Linux shipped artifacts) remains NOT_CHECKED here.
+Darwin author regressions validate the unchanged full path only; no seam/mock or
+Rosetta execution is claimed as Linux or physical-x64/minimum-macOS proof.

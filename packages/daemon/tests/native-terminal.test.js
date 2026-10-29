@@ -104,3 +104,28 @@ test('post-ready adapter output overflow cannot be overwritten by a clean native
   assert.equal(delivered, 1024 * 1024, 'bounded startup buffer is retained');
   assert.ok(result.uncertain > 0, 'adapter loss must survive a subsequent clean native record');
 });
+
+test('pre-spawn mode change delivers acknowledgment challenge without inventing a cleanup fault', async () => {
+  const childProcess = (await import('node:child_process')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { EventEmitter } = await import('node:events');
+  const { PassThrough } = await import('node:stream');
+  const { nativePtySpawn } = await import('../dist/native-terminal.js');
+  const fake = new EventEmitter();
+  fake.stdin = new PassThrough(); fake.stdout = new PassThrough(); fake.stderr = new PassThrough();
+  fake.stdio = [fake.stdin, fake.stdout, fake.stderr, new PassThrough(), new PassThrough()];
+  const original = childProcess.spawn;
+  childProcess.spawn = () => { queueMicrotask(() => { fake.stdio[3].write('{"refused":"terminal_protection_ack_required"}\n{"cleanup":true,"observed":0,"live":0,"uncertain":0}\n'); fake.emit('close', 78); }); return fake; };
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(nativePtySpawn('/bin/sh', [], { cwd: tmpdir(), env: {}, name: 'xterm', cols: 80, rows: 24 }), error => error.terminalReason === 'terminal_protection_ack_required' && error.cleanupResult.uncertain === 0 && error.cleanupResult.observed === 0);
+  } finally { childProcess.spawn = original; syncBuiltinESMExports(); }
+});
+
+test('capability records never interpret generic errors, policy denials or malformed records as compatibility', async () => {
+  const { nativeCapabilityOf } = await import('../dist/native-terminal.js');
+  assert.deepEqual(nativeCapabilityOf({ status: 0, stdout: 'alp-terminal-owner:1:root-only\n' }, 'linux'), { available: true, protection: 'root-only', reason: 'bound_signal_unavailable' });
+  for (const platform of ['darwin', 'win32']) assert.equal(nativeCapabilityOf({ status: 0, stdout: 'alp-terminal-owner:1:root-only' }, platform).available, false);
+  for (const probe of [{ status: 78, stdout: 'EPERM' }, { status: 78, stdout: 'ENOSYS' }, { status: null, stdout: '' }, { status: 0, stdout: 'alp-terminal-owner:1:root-only\nextra' }, { status: 1, stdout: 'alp-terminal-owner:1:root-only' }]) assert.equal(nativeCapabilityOf(probe, 'linux').available, false);
+  assert.deepEqual(nativeCapabilityOf({ status: 0, stdout: 'alp-terminal-owner:1' }, 'linux'), { available: true });
+});

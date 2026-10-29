@@ -480,3 +480,34 @@ test('controller: compatibility getter returns an existing off-workspace session
   assert.throws(() => controller.terminal('wks_other'), /Open a workspace/);
   assert.equal(host.calls.some(c => c.method === 'terminal.create'), false);
 });
+
+test('reduced process protection waits for deliberate user action before create or saved-terminal attach', async () => {
+  for (const saved of [false, true]) {
+    const state = memoryStorage(); if (saved) state.setItem('k', ID);
+    let creations = 0, attachments = 0;
+    const f = rig({ storage: state, handlers: {
+      'terminal.create': p => { creations++; if (!p.protectionAcknowledgment) throw rpcError(1005, 'terminal_protection_ack_required'); return { terminal: info() }; },
+      'terminal.attach': p => { attachments++; if (!p.protectionAcknowledgment) throw rpcError(1005, 'terminal_protection_ack_required'); return { terminal: info(), nextSeq: 1 }; },
+    } });
+    f.session.start(80, 24);
+    await until(() => f.session.getState().status === 'protection-warning');
+    assert.equal(f.session.accepting, false);
+    f.session.connected(); await tick(10);
+    assert.equal(saved ? attachments : creations, 1, 'reconnect never consents for the user');
+    f.session.acknowledgeProtection();
+    await until(() => f.session.getState().status === 'running');
+    assert.equal(f.of('terminal.attach').at(-1).protectionAcknowledgment, 'linux-root-only-v1');
+    await f.session.close();
+  }
+});
+
+test('canceling a saved-terminal protection warning neither attaches nor kills its existing shell', async () => {
+  const storage = memoryStorage(); storage.setItem('k', ID);
+  const f = rig({ storage, handlers: { 'terminal.attach': () => { throw rpcError(1005, 'terminal_protection_ack_required'); } } });
+  f.session.start(80, 24);
+  await until(() => f.session.getState().status === 'protection-warning');
+  f.session.cancelProtection(); f.session.connected();
+  assert.equal(f.session.getState().status, 'closed');
+  assert.equal(f.of('terminal.close').length, 0);
+  assert.equal(f.of('terminal.attach').length, 1);
+});

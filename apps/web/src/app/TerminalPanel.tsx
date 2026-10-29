@@ -202,13 +202,14 @@ function TerminalView({ session, active, preferences, tabKey }: { session: Termi
 function Status({ session }: { session: TerminalSession }) {
   const view = useSession(session);
   const line = (text: string, action?: React.ReactNode, tone: 'info' | 'error' = 'info') => (
-    <div role="status" className={`flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-xs ${tone === 'error' ? 'text-destructive' : 'text-muted-foreground'}`} data-testid="terminal-status">
+    <div role="status" className={`flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-1.5 text-xs ${tone === 'error' ? 'text-destructive' : 'text-muted-foreground'}`} data-testid="terminal-status">
       <span className="min-w-0 flex-1">{text}</span>
       {action}
     </div>
   );
   const restart = <Button size="sm" variant="secondary" onClick={() => session.restart()}><RotateCcw aria-hidden />New terminal</Button>;
   switch (view.status) {
+    case 'protection-warning': return line(view.error ?? 'This host has reduced terminal protection.', <div className="flex shrink-0 gap-2"><Button size="sm" variant="secondary" onClick={() => session.acknowledgeProtection()}>Continue with limited protection</Button><Button size="sm" variant="ghost" onClick={() => session.cancelProtection()}>Cancel</Button></div>, 'error');
     case 'idle': case 'starting': return line('Starting a shell on the host…');
     case 'attaching': return line('Connecting to the terminal…');
     case 'reconnecting': return line('Reconnecting to the host… input is paused.');

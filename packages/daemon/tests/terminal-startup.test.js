@@ -96,3 +96,26 @@ test('both concurrent revokes refuse if their shared pending cleanup becomes unc
   f.release(); await Promise.all([rejected, a, b]);
   f.expectCleanupFailure();
 });
+
+test('root-only compatibility warns before spawn and before every new attachment', async t => {
+  const home = await mkdtemp(path.join(tmpdir(), 'alpd-compat-warning-'));
+  await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
+  let spawned = 0, cleaned = 0;
+  const service = createTerminalService({ home, resolveWorkspace: async () => home, platform: 'linux',
+    capability: () => ({ available: true, protection: 'root-only' }),
+    spawn: () => { spawned++; return { pid: 80001, write() {}, resize() {}, kill() {}, onData() { return { dispose() {} }; }, onExit() { return { dispose() {} }; }, async cleanup() { cleaned++; return { observed: 1, live: 0, uncertain: 0, coverage: 'root-only' }; } }; },
+    log: { info() {}, warn() {} } });
+  t.after(async () => { await service.shutdown(); await rm(home, { recursive: true, force: true }); });
+  assert.ok(await service.advertised(), 'compatibility is functional, not hidden');
+  const warning = e => e.data?.reason === 'terminal_protection_ack_required' && /continue running/.test(e.message);
+  await assert.rejects(service.create(owner, params('warn')), warning);
+  assert.equal(spawned, 0, 'no shell exists before deliberate acknowledgment');
+  const { terminal } = await service.create(owner, { ...params('warn'), protectionAcknowledgment: 'linux-root-only-v1' });
+  assert.equal(spawned, 1);
+  const sink = { send() {} };
+  await assert.rejects(service.attach(owner, sink, { terminalId: terminal.terminalId }), warning);
+  await service.attach(owner, sink, { terminalId: terminal.terminalId, protectionAcknowledgment: 'linux-root-only-v1' });
+  await service.close(owner, { terminalId: terminal.terminalId });
+  assert.equal(cleaned, 1);
+  assert.ok(await service.advertised(), 'known coverage limit is distinct from unexpected cleanup uncertainty');
+});

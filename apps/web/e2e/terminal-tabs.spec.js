@@ -284,3 +284,38 @@ async function assertRemoteDetached(remote, terminalId) {
     catch (error) { expect(error.data?.reason).toBe('not_attached'); }
   }).toPass();
 }
+
+// Synthetic wire challenge exercises the real UI before a real native-supported launch.
+// This is browser warning/consent evidence on macOS, never Linux fallback runtime proof.
+test('reduced-protection warning precedes shell launch and Continue or Cancel is deliberate', async ({ page }) => {
+  let warned = 0;
+  await page.routeWebSocket(url => url.href.startsWith(world.gatewayUrl), ws => {
+    const server = ws.connectToServer();
+    ws.onMessage(message => {
+      let request; try { request = JSON.parse(String(message)); } catch {}
+      if (request?.method === 'terminal.create' && !request.params?.protectionAcknowledgment) {
+        warned++;
+        ws.send(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: 1005, message: 'Reduced protection', data: { reason: 'terminal_protection_ack_required' } } }));
+      } else server.send(message);
+    });
+    server.onMessage(message => ws.send(message));
+  });
+  await connect(page, world, token);
+  await page.getByRole('button', { name: 'New tab', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
+  await expect(panel(page)).toHaveAttribute('data-status', 'protection-warning');
+  await expect(panel(page)).toContainText('may continue running');
+  expect((await list()).filter(item => item.state === 'running')).toHaveLength(0);
+  await page.waitForTimeout(1100);
+  expect(warned).toBe(1);
+  await panel(page).getByRole('button', { name: 'Cancel', exact: true }).click();
+  expect((await list()).filter(item => item.state === 'running')).toHaveLength(0);
+  await page.getByRole('button', { name: 'Add terminal', exact: true }).click();
+  await expect(panel(page)).toHaveAttribute('data-status', 'protection-warning');
+  await panel(page).getByRole('button', { name: 'Continue with limited protection', exact: true }).click();
+  await expect(panel(page)).toHaveAttribute('data-status', 'running');
+  await line(page, 'echo ACK-$((21*21))');
+  await expect(rows(page)).toContainText('ACK-441');
+  await page.getByRole('tab', { name: 'Terminal', exact: true }).press('Delete');
+  await expect.poll(async () => (await list()).filter(item => item.state === 'running').length).toBe(0);
+});

@@ -23,9 +23,10 @@ if (process.platform === 'darwin') {
   if (signed.status !== 0) throw new Error('Native ad-hoc signing failed');
 }
 const smoke = spawnSync(binary, ['--capability'], { encoding: 'utf8' });
-if (smoke.status !== 0 || smoke.stdout.trim() !== 'alp-terminal-owner:1') throw new Error('Native capability smoke failed');
+const protection = smoke.status === 0 && smoke.stdout.trim() === 'alp-terminal-owner:1' ? 'identity-bound' : process.platform === 'linux' && smoke.status === 0 && smoke.stdout.trim() === 'alp-terminal-owner:1:root-only' ? 'root-only' : undefined;
+if (!protection) throw new Error('Native capability smoke failed');
 const sha256 = value => createHash('sha256').update(value).digest('hex');
-writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ protocol: 1, slot, source: sha256(readFileSync(source)), sha256: sha256(readFileSync(binary)), buildHost: process.version, ...(process.platform === 'darwin' ? { deploymentTarget: '11.0' } : {}), executionChecked: true, executionHost: `${process.platform}-${process.arch}` }, null, 2) + '\n');
+writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ protocol: 1, slot, source: sha256(readFileSync(source)), sha256: sha256(readFileSync(binary)), buildHost: process.version, ...(process.platform === 'darwin' ? { deploymentTarget: '11.0' } : {}), executionChecked: true, executionProtection: protection, executionHost: `${process.platform}-${process.arch}` }, null, 2) + '\n');
 console.log(`Built and executed ${slot}. Other matrix slots were NOT built or checked.`);
 if (process.argv.includes('--require-matrix')) {
   for (const target of slots) {

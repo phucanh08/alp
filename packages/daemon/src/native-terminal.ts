@@ -5,7 +5,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
-export type CleanupResult = { observed: number; live: number; uncertain: number };
+export type CleanupResult = { observed: number; live: number; uncertain: number; coverage?: 'root-only'; outputOpen?: boolean };
 type Exit = { exitCode: number | null; signal?: number };
 type Listener<T> = (event: T) => void;
 const sha = (value: Buffer) => createHash('sha256').update(value).digest('hex');
@@ -19,15 +19,21 @@ function binary() {
   if (!statSync(file).isFile() || manifest.protocol !== 1 || manifest.slot !== slot || manifest.source !== sha(readFileSync(path.join(dir, 'terminal-owner.c'))) || manifest.sha256 !== sha(readFileSync(file))) throw new Error('Native helper manifest mismatch');
   return file;
 }
-export function nativeTerminalCapability(): { available: boolean; reason?: string } {
+/** Only an authenticated helper's exact capability record can select compatibility. */
+export function nativeCapabilityOf(probe: { status: number | null; stdout: string }, platform: NodeJS.Platform): { available: boolean; protection?: 'root-only'; reason?: string } {
+  if (probe.status === 0 && probe.stdout.trim() === 'alp-terminal-owner:1') return { available: true };
+  if (platform === 'linux' && probe.status === 0 && probe.stdout.trim() === 'alp-terminal-owner:1:root-only') return { available: true, protection: 'root-only', reason: 'bound_signal_unavailable' };
+  return { available: false, reason: 'native_capability_unavailable' };
+}
+export function nativeTerminalCapability(): ReturnType<typeof nativeCapabilityOf> {
   try {
     const probe = spawnSync(binary(), ['--capability'], { encoding: 'utf8', timeout: 2_000, maxBuffer: 4096 });
-    return probe.status === 0 && probe.stdout.trim() === 'alp-terminal-owner:1' ? { available: true } : { available: false, reason: 'native_capability_unavailable' };
+    return nativeCapabilityOf(probe, process.platform);
   } catch { return { available: false, reason: 'native_prebuilt_unavailable' }; }
 }
-export async function nativePtySpawn(file: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: Record<string, string>; killGraceMs?: number; signal?: AbortSignal }) {
+export async function nativePtySpawn(file: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: Record<string, string>; killGraceMs?: number; signal?: AbortSignal; protection?: 'root-only' }) {
   if (options.signal?.aborted) throw new Error('Native terminal startup cancelled');
-  const child = spawn(binary(), [String(options.cols), String(options.rows), String(options.killGraceMs ?? 1000), options.cwd, file, ...args], { env: options.env, stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'] });
+  const child = spawn(binary(), [...(options.protection === 'root-only' ? ['--root-only'] : []), String(options.cols), String(options.rows), String(options.killGraceMs ?? 1000), options.cwd, file, ...args], { env: options.env, stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'] });
   const control = child.stdio[4] as import('node:stream').Writable;
   const events = child.stdio[3] as import('node:stream').Readable;
   const data = new Set<Listener<string>>(), exits = new Set<Listener<Exit>>();
@@ -90,6 +96,7 @@ export async function nativePtySpawn(file: string, args: string[], options: { na
         if (value.ready && value.protocol === 1 && Number.isSafeInteger(value.ready) && value.ready > 1) { pid = value.ready; clearTimeout(timer); readyResolve(); }
         else if ('exitCode' in value) { exit = { exitCode: value.exitCode, signal: value.signal }; }
         else if (value.cleanup === true && ['observed', 'live', 'uncertain'].every(key => Number.isSafeInteger(value[key]) && value[key] >= 0)) result = value;
+        else if (value.refused === 'terminal_protection_ack_required' || value.refused === 'terminal_unsupported') { readyReject(Object.assign(new Error('Native terminal capability changed before startup'), { terminalReason: value.refused })); }
         else if (value.error) fail(String(value.error));
         else fail('Invalid native event');
       } catch { fail('Invalid native JSON'); }
