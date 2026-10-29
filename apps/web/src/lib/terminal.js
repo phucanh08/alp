@@ -53,7 +53,7 @@ export const TERMINAL_HEADER = 'Runs on the daemon host as the account that runs
 /** alpd's terminal refusals, for people (§12.10 reasons). */
 const REFUSALS = /** @type {Record<string, string>} */ ({
   terminal_disabled: TERMINAL_MESSAGES.capability,
-  terminal_unsupported: 'Terminals are not available on the daemon host (Windows, or its PTY module did not load).',
+  terminal_unsupported: 'Terminals are not available on the daemon host (its terminal owner did not load).',
   terminal_limit: 'Too many terminals are open on the host. Close one and try again.',
   input_too_large: 'That input was too large for the terminal.',
 });
