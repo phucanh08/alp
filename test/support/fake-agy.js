@@ -245,6 +245,7 @@ rl.on('line', async line => {
       duration_seconds: 1,
       num_turns: 1,
       usage: { input_tokens: 10, output_tokens: 15, total_tokens: 25 },
+      ...(/^deny /.test(commandLine) ? { denied_actions: [{ action: 'write_file', display_name: 'WriteFile' }] } : {}),
     },
   });
 });
