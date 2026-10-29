@@ -292,3 +292,45 @@ test('writeRoot is validated and cannot be combined with worktrees or read-only 
     assert.match(result.error, error, JSON.stringify(result));
   }
 });
+
+test('t-eae4: reclaim never deletes work it could not commit or read', async t => {
+  const { project, worktreeDir } = await setup(t);
+  // A worktree whose metadata is incomplete (ENOSPC-like): the directory holds files but no valid .git link.
+  const partial = path.join(worktreeDir, 'partial');
+  await mkdir(partial, { recursive: true });
+  await writeFile(path.join(partial, 'wip.txt'), 'unsaved\n');
+  // A worktree whose commit fails: its index is locked, so `git commit` cannot run.
+  git(project, 'worktree', 'add', '--quiet', '-b', 'alp/locked', path.join(worktreeDir, 'locked'));
+  await writeFile(path.join(worktreeDir, 'locked', 'dirty.txt'), 'dirty\n');
+  const gitdir = git(path.join(worktreeDir, 'locked'), 'rev-parse', '--absolute-git-dir');
+  await writeFile(path.join(gitdir, 'index.lock'), '');
+  // A worktree the assignment switched to its own branch: the alp branch does not hold that work.
+  git(project, 'worktree', 'add', '--quiet', '-b', 'alp/switched', path.join(worktreeDir, 'switched'));
+  git(path.join(worktreeDir, 'switched'), 'checkout', '--quiet', '-b', 'fix/own');
+  await writeFile(path.join(worktreeDir, 'switched', 'untracked.txt'), 'u\n');
+  await reclaimWorktrees(worktreeDir);
+  assert.equal(await readFile(path.join(partial, 'wip.txt'), 'utf8'), 'unsaved\n');
+  assert.equal(await readFile(path.join(worktreeDir, 'locked', 'dirty.txt'), 'utf8'), 'dirty\n');
+  assert.equal(await readFile(path.join(worktreeDir, 'switched', 'untracked.txt'), 'utf8'), 'u\n');
+});
+
+test('t-eae4: reattaching reuses a valid worktree and preserves an invalid one before re-creating it', async t => {
+  const { project, worktreeDir } = await setup(t);
+  const { reattachWorktree } = await import('@anhlp/alp-runtime');
+  const base = git(project, 'rev-parse', 'HEAD');
+  git(project, 'worktree', 'add', '--quiet', '-b', 'alp/live', path.join(worktreeDir, 'live'));
+  const live = { checkout: project, path: path.join(worktreeDir, 'live'), workdir: path.join(worktreeDir, 'live'), branch: 'alp/live', base };
+  await writeFile(path.join(live.path, 'dirty.txt'), 'dirty\n');
+  const reused = await reattachWorktree(live);
+  assert.equal(reused.preserved, undefined);
+  assert.equal(await readFile(path.join(live.path, 'dirty.txt'), 'utf8'), 'dirty\n');
+
+  git(project, 'branch', 'alp/broken');
+  const broken = { checkout: project, path: path.join(worktreeDir, 'broken'), workdir: path.join(worktreeDir, 'broken'), branch: 'alp/broken', base };
+  await mkdir(broken.path, { recursive: true });
+  await writeFile(path.join(broken.path, 'wip.txt'), 'unsaved\n');
+  const recreated = await reattachWorktree(broken);
+  assert.ok(recreated.preserved, 'the invalid directory was preserved');
+  assert.equal(await readFile(path.join(recreated.preserved, 'wip.txt'), 'utf8'), 'unsaved\n');
+  assert.equal(git(broken.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'alp/broken');
+});
