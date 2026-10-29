@@ -648,6 +648,33 @@
             "params"
           ],
           "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "description": "The live model catalog changed (capability catalog.live): re-read catalog.get.",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "catalog.updated"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "fetchedAt": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "additionalProperties": true
         }
       ]
     },

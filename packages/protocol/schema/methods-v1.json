@@ -40,7 +40,7 @@
     "session.rewind": "session.rewind: a root's conversation from before a turn on, under the same session id; the later turns stay a recoverable branch, files are never changed, history generation advances (`history.reset` event). Same condition as session.fork.",
     "session.reload": "session.reload: restarts a live root's native process on its own conversation and configuration at the idle barrier (no turn, child, question, mail or parked work), keeping its session id, history and receipts; through the lifecycle journal. Listed with a store and a runtime that restarts a root on its own conversation, on macOS and Linux (not Windows).",
     "session.resumeCommand": "session.resumeCommand: the ALP CLI command (`alp attach <sessionId>`) that follows a session in a terminal, as argv and POSIX and Windows (cmd.exe) command lines built by alpd; for the clipboard only, never run, never a native runtime's command, credential, env or path.",
-    "session.configure.live": "session.configure takes model, thinking and team (with requestId and ifGeneration) besides mode, and session.configure.preview answers the configuration a change would run with: a live root's model, effort or team changes at the idle barrier (no turn, child, question, mail or parked work) through a controlled restart of its native process on the same conversation; the effective configuration is written only after the runtime took it, through the lifecycle journal (\u00a712.9). Never another runtime and never more permissions. Listed with a store and a runtime that restarts a root with a new configuration, on macOS and Linux (not Windows).",
+    "session.configure.live": "session.configure takes model, thinking and team (with requestId and ifGeneration) besides mode, and session.configure.preview answers the configuration a change would run with: a live root's model, effort or team changes at the idle barrier (no turn, child, question, mail or parked work) through a controlled restart of its native process on the same conversation; the effective configuration is written only after the runtime took it, through the lifecycle journal (§12.9). Never another runtime and never more permissions. Listed with a store and a runtime that restarts a root with a new configuration, on macOS and Linux (not Windows).",
     "terminal": "terminal.create/list/attach/input/resize/close/revoke and terminal.event notifications: a real PTY shell on the daemon host as the daemon's account (a cwd is not a sandbox), served only when the host owner opted in (<ALP_HOME>/terminal.json allowRemoteTerminal) on macOS (full protection), Linux and Windows (best-effort).",
     "session.interrupt.turn": "session.interrupt accepts turnId and atomically cancels only that active turn, including its subtree. Conditional requests answer interrupted:true when canceled, false when the named turn is no longer active; false changes nothing. Without this capability clients must not send turnId or infer targeted cancellation from a legacy interrupt.",
     "terminal.capture": "terminal.capture: bounded daemon-owned rendered text, inclusive zero-based/negative line ranges; same terminal principal/host opt-in. Exceeding resource/result limits is an explicit refusal.",
@@ -6324,7 +6324,7 @@
         },
         {
           "type": "object",
-          "description": "A terminal's output, exit or detach (capability terminal, \u00a712.10).",
+          "description": "A terminal's output, exit or detach (capability terminal, §12.10).",
           "properties": {
             "jsonrpc": {
               "const": "2.0"
@@ -7495,7 +7495,7 @@
             },
             "reload": {
               "type": "boolean",
-              "description": "Whether session.reload can restart this root's native process (\u00a712.8); the root must also be open and idle."
+              "description": "Whether session.reload can restart this root's native process (§12.8); the root must also be open and idle."
             },
             "reason": {
               "enum": [
@@ -7506,7 +7506,7 @@
             },
             "configure": {
               "type": "boolean",
-              "description": "Whether session.configure can change this root's model, effort or team (\u00a712.9); the root must also be open and idle."
+              "description": "Whether session.configure can change this root's model, effort or team (§12.9); the root must also be open and idle."
             }
           },
           "required": [
@@ -8568,7 +8568,7 @@
     },
     "forkProvenance": {
       "type": "object",
-      "description": "Where a fork came from (\u00a712.7): the source root, and the turn its conversation was cut at.",
+      "description": "Where a fork came from (§12.7): the source root, and the turn its conversation was cut at.",
       "properties": {
         "sessionId": {
           "type": "string",
@@ -8606,7 +8606,7 @@
     },
     "conversationBranch": {
       "type": "object",
-      "description": "Later turns a rewind set aside (\u00a712.7): kept, never deleted, recoverable as a new session with session.fork { branchId }.",
+      "description": "Later turns a rewind set aside (§12.7): kept, never deleted, recoverable as a new session with session.fork { branchId }.",
       "properties": {
         "branchId": {
           "type": "string",
@@ -8637,7 +8637,7 @@
     },
     "effectiveConfig": {
       "type": "object",
-      "description": "The configuration a root runs with, or would after a change, as alpd resolved it (\u00a712.9).",
+      "description": "The configuration a root runs with, or would after a change, as alpd resolved it (§12.9).",
       "properties": {
         "team": {
           "type": "string"
@@ -8950,7 +8950,7 @@
       "additionalProperties": false
     },
     "terminalEvent": {
-      "description": "params of a terminal.event notification (\u00a712.10): sent only to the connection attached to the terminal.",
+      "description": "params of a terminal.event notification (§12.10): sent only to the connection attached to the terminal.",
       "oneOf": [
         {
           "type": "object",
