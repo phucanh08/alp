@@ -18,6 +18,11 @@ const en = {
     `${agent} wants to ${create ? `open an issue in ${where}` : `comment on issue #${issue} in ${where}`}. ` +
     'It is posted with your GitHub account, and anyone who can see the repository can read it.',
   issueTitle: 'Title',
+  lessonCurate: (agent: string, changes: string) =>
+    `${agent} proposes to curate the lessons files. Approve to apply every change below at once; nothing else changes.\n\n${changes}`,
+  lessonRemove: 'Remove',
+  lessonAdd: 'Add',
+  lessonScope: (scope: string, file: string) => `${scope === 'user' ? 'User lessons' : 'Project lessons'} (${file})`,
   issueLabels: 'Labels',
   trust: (project: string, names: string) => `This project's hooks run shell commands from ${project} on your machine: ${names}. ` +
     'Trust this workspace\'s hooks? ALP asks once: after you agree, its hooks run without asking, including hooks added or changed later.',
@@ -60,6 +65,11 @@ const vi: Words = {
     `${agent} muốn ${create ? `mở một issue trong ${where}` : `bình luận vào issue #${issue} trong ${where}`}. ` +
     'Nội dung được đăng bằng tài khoản GitHub của bạn, ai xem được repository đều đọc được.',
   issueTitle: 'Tiêu đề',
+  lessonCurate: (agent, changes) =>
+    `${agent} đề xuất rà soát file bài học. Duyệt để áp dụng cùng lúc mọi thay đổi dưới đây; không thay đổi gì khác.\n\n${changes}`,
+  lessonRemove: 'Bỏ',
+  lessonAdd: 'Thêm',
+  lessonScope: (scope, file) => `${scope === 'user' ? 'Bài học của người dùng' : 'Bài học của project'} (${file})`,
   issueLabels: 'Nhãn',
   trust: (project, names) => `Các hook của project này chạy lệnh shell từ ${project} trên máy của bạn: ${names}. ` +
     'Tin cậy các hook của workspace này? ALP chỉ hỏi một lần: khi bạn đồng ý, các hook chạy mà không hỏi lại, kể cả hook thêm hoặc sửa sau này.',

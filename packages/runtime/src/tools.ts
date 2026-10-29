@@ -237,6 +237,35 @@ export const LESSON_TOOL = {
   },
 };
 
+export const LESSON_CURATE_TOOL = {
+  type: 'function',
+  name: 'alp_lesson_curate',
+  description: 'Merge, shorten or remove recorded lessons. Each change removes the exact text of lessons from one scope and may add one rule in their place (a merge or a shortening); a change without add removes them. ALP shows every change to the user at once and applies them only when the user approves. Returns pending_approval with approvalId immediately; the result (applied, lessons not found, or the user\'s feedback) arrives once by mail. Never edit lessons files any other way.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      changes: {
+        type: 'array',
+        description: 'At most 50 changes.',
+        items: {
+          type: 'object',
+          properties: {
+            scope: { type: 'string', enum: ['project', 'user'] },
+            remove: { type: 'array', items: { type: 'string' }, description: 'The exact text of each lesson to remove, with or without its date.' },
+            add: { type: 'string', description: 'One rule, at most 600 characters, that replaces them.' },
+            reason: { type: 'string', description: 'Why, in one line.' },
+          },
+          required: ['scope', 'remove'],
+          additionalProperties: false,
+        },
+      },
+      requestId: { type: 'string', description: 'Optional session-scoped idempotency key (1-100 characters).' },
+    },
+    required: ['changes'],
+    additionalProperties: false,
+  },
+};
+
 export const SKILL_TOOL = {
   type: 'function',
   name: 'alp_skill',

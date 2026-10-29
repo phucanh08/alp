@@ -96,7 +96,8 @@ function readJob(text: string, name: string): ScheduleRecord | undefined {
     && (record.cancelledAt === undefined || isTime(record.cancelledAt))
     && (record.lateByMs === undefined || (Number.isSafeInteger(record.lateByMs) && record.lateByMs >= 0))
     && (record.attempts === undefined || (Number.isSafeInteger(record.attempts) && record.attempts >= 0))
-    && (record.lastError === undefined || isError(record.lastError));
+    && (record.lastError === undefined || isError(record.lastError))
+    && (record.keepsSession === undefined || record.keepsSession === false);
   if (!sound) {
     log.warn(`skipped invalid job ${name}`, { code: 'ALP_SCHEDULE_UNREADABLE', file: name });
     return undefined;
@@ -118,6 +119,7 @@ function readJob(text: string, name: string): ScheduleRecord | undefined {
     ...(record.cancelledAt === undefined ? {} : { cancelledAt: record.cancelledAt }),
     ...(record.lateByMs === undefined ? {} : { lateByMs: record.lateByMs }),
     ...(record.lastError === undefined ? {} : { lastError: { message: record.lastError.message, ...(record.lastError.code === undefined ? {} : { code: record.lastError.code }) } }),
+    ...(record.keepsSession === false ? { keepsSession: false as const } : {}),
   };
 }
 
@@ -162,7 +164,7 @@ export function createScheduleStore(root: string, { now = () => Date.now() } = {
      * A new job waiting for its time. The id is drawn here, so two jobs never
      * share one and a job's own id names its delivery.
      */
-    async create({ projectRoot, sessionId, prompt, dueAt }: { projectRoot: string; sessionId: string; prompt: string; dueAt: string }): Promise<ScheduleRecord> {
+    async create({ projectRoot, sessionId, prompt, dueAt, keepsSession }: { projectRoot: string; sessionId: string; prompt: string; dueAt: string; keepsSession?: boolean }): Promise<ScheduleRecord> {
       if (typeof projectRoot !== 'string' || !projectRoot) throw new ScheduleStoreError('INVALID_SCHEDULE', 'A job needs the project it continues');
       // A project is named by its absolute path: a relative one would be read against
       // the daemon's own directory, which is another project.
@@ -185,6 +187,7 @@ export function createScheduleStore(root: string, { now = () => Date.now() } = {
         attempts: 0,
         createdAt: at,
         updatedAt: at,
+        ...(keepsSession === false ? { keepsSession: false as const } : {}),
       });
     },
 

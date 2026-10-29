@@ -13,7 +13,7 @@ import { skillDescription } from '@anhlp/alp-runtime';
 import { legacyProject } from '../../../test/support/legacy.js';
 
 const expected = {
-  main: ['bug-loop', 'compact', 'goal-griller', 'prompt-leverage', 'sequence-execution-plan', 'smart-commits', 'xia'],
+  main: ['bug-loop', 'compact', 'curate', 'goal-griller', 'prompt-leverage', 'sequence-execution-plan', 'smart-commits', 'xia'],
   lead: ['bug-loop', 'prompt-leverage', 'sequence-execution-plan', 'smart-commits', 'xia'],
   peer: ['bug-loop', 'smart-commits', 'xia'],
 };
@@ -136,8 +136,8 @@ test('upgrade archives project skill copies that match the shipped skills and ke
   await writeFile(custom, 'Custom research method');
   const result = await upgradeProject(root);
   assert.deepEqual(result.customSkills, ['.alp/agents/peer/skills/xia']);
-  // 14 skill copies, then every agent copy left as shipped; peer keeps its customized skill.
-  assert.equal(result.removed.length, 19);
+  // 15 skill copies, then every agent copy left as shipped; peer keeps its customized skill.
+  assert.equal(result.removed.length, 20);
   assert.deepEqual(result.removed.filter(name => !name.includes('/skills/')), ['.alp/agents/main', '.alp/agents/lead', '.alp/agents/oracle', '.alp/agents/reviewer', '.alp/agents/supervisor']);
   assert.equal(await readFile(custom, 'utf8'), 'Custom research method');
   assert.deepEqual(await readdir(path.join(root, '.alp/agents')), ['peer']);

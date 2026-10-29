@@ -94,6 +94,8 @@ test('CLI supports cwd and explicit new directory, and rejects invalid usage', a
   const run = (...args) => spawnSync(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, ALP_HOME: home } });
   assert.match(run('init').stdout, /Skill library .*: \d+ files added/);
   assert.ok(JSON.parse(await readFile(path.join(home, 'role-skills.json'), 'utf8')).main.includes('xia'));
+  assert.ok(JSON.parse(await readFile(path.join(home, 'role-skills.json'), 'utf8')).main.includes('curate'));
+  assert.match(await readFile(path.join(home, 'skills/curate/SKILL.md'), 'utf8'), /^---\nname: curate\n/);
   const again = run('init');
   assert.match(again.stdout, /0 files created, 2 existing files preserved/);
   assert.doesNotMatch(again.stdout, /Skill library/);

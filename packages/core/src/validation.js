@@ -14,9 +14,9 @@ function requireValue(condition, code, source, message) {
 /** Efforts a profile may name; a model ALP knows takes only its own (src/core/models.js). */
 const EFFORTS = ['none', 'off', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode'];
 /** Top-level keys of a project's .alp/settings.json. */
-export const PROJECT_SETTINGS = ['$schema', 'defaultAgent', 'workflow', 'runtime', 'permissions', 'verify', 'delegation', 'team', 'profile', 'templateDefaults', 'compact'];
+export const PROJECT_SETTINGS = ['$schema', 'defaultAgent', 'workflow', 'runtime', 'permissions', 'verify', 'delegation', 'team', 'profile', 'templateDefaults', 'compact', 'curate'];
 /** Top-level keys of the user's $ALP_HOME/settings.json. */
-export const USER_SETTINGS = ['$schema', 'language', 'permissions', 'limits', 'recovery', 'web'];
+export const USER_SETTINGS = ['$schema', 'language', 'permissions', 'limits', 'recovery', 'web', 'curate'];
 /**
  * Top-level keys ALP no longer reads, with what to use instead. They warn rather than
  * fail, so settings written for an older ALP keep working.
@@ -62,11 +62,20 @@ export function settingsWarnings(settings, scope) {
     .map(({ key, instead }) => `setting '${key}' is no longer read; ${instead}`);
 }
 
+/** curate: { monthly: boolean } turns the monthly lessons-and-skills review on or off. */
+function checkCurate(settings, check) {
+  if (settings.curate === undefined) return;
+  check(object(settings.curate), 'curate must be an object');
+  check(Object.keys(settings.curate).every(key => key === 'monthly'), 'unsupported curate field; use monthly');
+  if (settings.curate.monthly !== undefined) check(typeof settings.curate.monthly === 'boolean', 'curate.monthly must be true or false');
+}
+
 export function validateSettings(settings, source) {
   const check = (ok, message) => requireValue(ok, 'INVALID_SETTINGS', source, message);
   check(object(settings), 'expected an object');
   const { unknown } = settingsKeys(settings, PROJECT_SETTINGS, RETIRED_SETTINGS.project);
   check(!unknown.length, unknown.length ? unknownMessage(unknown[0], PROJECT_SETTINGS) : '');
+  checkCurate(settings, check);
   if (settings.defaultAgent !== undefined) check(nonempty(settings.defaultAgent), 'defaultAgent must be a nonempty string');
   if (settings.workflow !== undefined) {
     check(object(settings.workflow), 'workflow must be an object');
@@ -164,6 +173,7 @@ export function validateUserSettings(settings, source) {
   check(object(settings), 'expected an object');
   const { unknown } = settingsKeys(settings, USER_SETTINGS, RETIRED_SETTINGS.user);
   check(!unknown.length, unknown.length ? unknownMessage(unknown[0], USER_SETTINGS) : '');
+  checkCurate(settings, check);
   for (const key of ['limits', 'recovery']) {
     if (settings[key] === undefined) continue;
     check(object(settings[key]), `${key} must be an object`);
