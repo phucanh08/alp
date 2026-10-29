@@ -1,0 +1,10 @@
+{
+  "protocol": 1,
+  "slot": "linux-arm64-musl",
+  "source": "d2fa72ce0b083e60cddbe76839365beaa80b891451b45987d968b805154d0636",
+  "sha256": "e6935d27c14c626b3207ea8edecd4a56b6bf13c8634b97a7480928e4bd22e9d6",
+  "buildHost": "v20.15.1",
+  "executionChecked": true,
+  "executionProtection": "identity-bound",
+  "executionHost": "linux-arm64"
+}
