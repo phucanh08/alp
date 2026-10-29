@@ -289,7 +289,7 @@ async function assertRemoteDetached(remote, terminalId) {
 // This is browser warning/consent evidence on macOS, never Linux fallback runtime proof.
 test('reduced-protection warning precedes shell launch and Continue or Cancel is deliberate', async ({ page }) => {
   let warned = 0;
-  await page.routeWebSocket(url => url.href.startsWith(world.gatewayUrl), ws => {
+  await page.routeWebSocket(url => url.host === new URL(world.gatewayUrl).host, ws => {
     const server = ws.connectToServer();
     ws.onMessage(message => {
       let request; try { request = JSON.parse(String(message)); } catch {}
