@@ -321,7 +321,9 @@ test('t-eae4: reattaching reuses a valid worktree and preserves an invalid one b
   git(project, 'worktree', 'add', '--quiet', '-b', 'alp/live', path.join(worktreeDir, 'live'));
   const live = { checkout: project, path: path.join(worktreeDir, 'live'), workdir: path.join(worktreeDir, 'live'), branch: 'alp/live', base };
   await writeFile(path.join(live.path, 'dirty.txt'), 'dirty\n');
+  await writeFile(path.join(git(live.path, 'rev-parse', '--absolute-git-dir'), 'index.lock'), '');
   const reused = await reattachWorktree(live);
+  git(live.path, 'add', '-A');
   assert.equal(reused.preserved, undefined);
   assert.equal(await readFile(path.join(live.path, 'dirty.txt'), 'utf8'), 'dirty\n');
 
