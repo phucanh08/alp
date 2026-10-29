@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { copyTerminalNative } from './terminal-native-assets.mjs';
 import { build } from 'esbuild';
 import { emitDeclarations } from './declarations.mjs';
 import { cp, mkdir, readdir, readFile, access, rm } from 'node:fs/promises';
@@ -80,8 +81,10 @@ async function compile(name) {
     const file = path.relative(dist, path.join(entry.parentPath ?? entry.path, entry.name));
     // build-alp-web.mjs replaces the browser files whole on each build.
     if (name === 'cli' && file.split(path.sep)[0] === 'alp-web') continue;
+    if (['daemon', 'cli'].includes(name) && file.split(path.sep)[0] === 'terminal-native') continue;
     if (!expected.has(file)) await rm(path.join(dist, file), { force: true });
   }
+  if (['daemon', 'cli'].includes(name)) await copyTerminalNative(path.join(directory, 'dist/terminal-native'));
   // Record the canonical bundle inputs and externals so check-boundaries can prove core neutrality.
   if (Object.keys(entries).length) await writeBuildManifest(path.join(directory, 'dist/build-manifest.json'), { version: manifest.version, entries });
   console.log(`Built ${manifest.name}@${manifest.version}`);
