@@ -74,6 +74,12 @@ Requires Paseo `>=0.11.1 <1.0.0` (the published `0.0.1-beta.3` declares `<0.13.0
 (Windows and Node.js 26 are experimental), and an authenticated native Codex or Claude Code
 executable on PATH.
 
+Terminals (after `alp terminal allow --paseo`) are guaranteed only on macOS, where the shipped
+native owner ends every process the shell started. Linux and Windows are best-effort: Linux
+falls back to root-only cleanup when full protection is unavailable, and Windows uses the
+platform PTY (ConPTY via node-pty) with no protection helper. Background processes may survive
+close there; the terminal shows a one-line notice when protection is reduced.
+
 ALP sessions run in `alpd`, a per-user daemon from the `@anhlp/alp` package; Paseo
 only views them. Install the CLI and start the daemon once, so it records where
 it is installed:
