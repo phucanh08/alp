@@ -286,37 +286,37 @@ async function assertRemoteDetached(remote, terminalId) {
   }).toPass();
 }
 
-// Synthetic wire challenge exercises the real UI before a real native-supported launch.
-// This is browser warning/consent evidence on macOS, never Linux fallback runtime proof.
-test('reduced-protection warning precedes shell launch and Continue or Cancel is deliberate', async ({ page }) => {
-  let warned = 0;
-  await page.routeWebSocket(url => url.host === new URL(world.gatewayUrl).host, ws => {
-    const server = ws.connectToServer();
-    ws.onMessage(message => {
-      let request; try { request = JSON.parse(String(message)); } catch {}
-      if (request?.method === 'terminal.create' && !request.params?.protectionAcknowledgment) {
-        warned++;
-        ws.send(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: 1005, message: 'Reduced protection', data: { reason: 'terminal_protection_ack_required' } } }));
-      } else server.send(message);
+// Synthetic wire projection: the host's answers are tagged with a reduced protection so the real
+// UI and a real macOS shell show the notice. This is browser notice evidence, not Linux/Windows runtime proof.
+for (const [protection, text] of [['root-only', 'Limited protection on this Linux host'], ['none', 'not guaranteed on Windows']]) {
+  test(`reduced protection (${protection}) opens directly with a non-blocking notice`, async ({ page }) => {
+    const sent = [];
+    await page.routeWebSocket(url => url.host === new URL(world.gatewayUrl).host, ws => {
+      const server = ws.connectToServer();
+      ws.onMessage(message => {
+        try { const request = JSON.parse(String(message)); if (request?.method === 'terminal.create' || request?.method === 'terminal.attach') sent.push(request); } catch {}
+        server.send(message);
+      });
+      server.onMessage(message => {
+        let reply; try { reply = JSON.parse(String(message)); } catch {}
+        if (reply?.result?.terminal && typeof reply.result.terminal.terminalId === 'string') { reply.result.terminal.protection = protection; ws.send(JSON.stringify(reply)); }
+        else ws.send(message);
+      });
     });
-    server.onMessage(message => ws.send(message));
+    await connect(page, world, token);
+    await page.getByRole('button', { name: 'New tab', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
+    await expect(panel(page)).toHaveAttribute('data-status', 'running');
+    const notice = panel(page).getByTestId('terminal-protection-notice');
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText(text);
+    await expect(notice).toHaveAttribute('data-protection', protection);
+    await expect(panel(page).getByRole('button', { name: 'Continue with limited protection' })).toHaveCount(0);
+    await line(page, 'echo NOTICE-$((21*21))');
+    await expect(rows(page)).toContainText('NOTICE-441');
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent.every(request => request.params?.protectionAcknowledgment === undefined)).toBe(true);
+    await page.getByRole('tab', { name: 'Terminal', exact: true }).press('Delete');
+    await expect.poll(async () => (await list()).filter(item => item.state === 'running').length).toBe(0);
   });
-  await connect(page, world, token);
-  await page.getByRole('button', { name: 'New tab', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
-  await expect(panel(page)).toHaveAttribute('data-status', 'protection-warning');
-  await expect(panel(page)).toContainText('may continue running');
-  expect((await list()).filter(item => item.state === 'running')).toHaveLength(0);
-  await page.waitForTimeout(1100);
-  expect(warned).toBe(1);
-  await panel(page).getByRole('button', { name: 'Cancel', exact: true }).click();
-  expect((await list()).filter(item => item.state === 'running')).toHaveLength(0);
-  await page.getByRole('button', { name: 'Add terminal', exact: true }).click();
-  await expect(panel(page)).toHaveAttribute('data-status', 'protection-warning');
-  await panel(page).getByRole('button', { name: 'Continue with limited protection', exact: true }).click();
-  await expect(panel(page)).toHaveAttribute('data-status', 'running');
-  await line(page, 'echo ACK-$((21*21))');
-  await expect(rows(page)).toContainText('ACK-441');
-  await page.getByRole('tab', { name: 'Terminal', exact: true }).press('Delete');
-  await expect.poll(async () => (await list()).filter(item => item.state === 'running').length).toBe(0);
-});
+}
