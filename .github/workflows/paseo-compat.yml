@@ -41,6 +41,10 @@ jobs:
       - run: npm ci
       - run: node scripts/check-paseo-compat.mjs --latest
 
+  # Linux helpers from this revision, staged before the plugin's terminal tests (t-9f0d).
+  terminal-native:
+    uses: ./.github/workflows/terminal-native.yml
+
   # The plugin's types and tests against the latest release: API breaks, not only the range.
   latest-sdk:
     needs: terminal-native
