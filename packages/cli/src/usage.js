@@ -73,7 +73,8 @@ const USAGE = `Usage:
   alp resume [codex|claude]                  lift a pause; parked assignments continue
   alp language [name | --reset]              the language agents and ALP write to you in; default Vietnamese
   alp recall <assignment|task> [--project DIR] [--json] <question>   ask a finished assignment about its work
-  alp interrupt <session>`;
+  alp interrupt <session>
+  alp compact <session>`;
 
 class UsageError extends Error {}
 
