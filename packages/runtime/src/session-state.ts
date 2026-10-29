@@ -70,6 +70,18 @@ export type Session = {
   usage?: SessionUsage;
   /** The context advisory was given since the context last emptied (ALPD §57). */
   contextLevel?: number;
+  /** How full its context last was, 0..1 (t-0e56). */
+  contextFill?: number;
+  /** The user asked to compact it; done at the next turn boundary (t-0e56). */
+  compactRequested?: boolean;
+  /** A compaction in progress (t-0e56): main writing its checkpoint, then the runtime compacting. */
+  compacting?: { phase: 'checkpoint' | 'native' | 'fresh'; trigger: 'auto' | 'manual'; checkpoint?: string; startedAt: number };
+  /** When its last compaction failed: automatic ones wait COMPACT_RETRY_MS after it. */
+  compactFailedAt?: number;
+  /** The user's prompts held while it compacts, sent after (t-0e56). */
+  compactBuffer?: import('./contracts.js').PromptInput[];
+  /** The user's last message to it, seeded into a fresh conversation after a compaction (t-0e56). */
+  lastUserText?: string;
   /** An assignment's brief as its requester gave it, repeated after a compaction. */
   brief?: string;
   /** The skills it has used, each logged once (ALPD §59). */

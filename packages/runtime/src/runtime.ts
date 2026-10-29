@@ -49,6 +49,7 @@ import { claudeSandboxAvailable, SKILL_PLUGIN } from './claude-transport.js';
 import { boundDetail, codexToolCall, toolError } from './tool-detail.js';
 import { ALP_REPO, gh, projectRepo } from './github.js';
 import { optionalRead, usageAllows, COMPACT_SHARE } from './runtime-context.js';
+import { checkpointPrompt, compactDue, compactInstructions, contextFill, NATIVE_COMPACT, seedPrompt } from './compact.js';
 import { providerUsage, sessionUsage, type ProviderUsage } from './usage.js';
 import { parse as toml } from 'smol-toml';
 import { findFormula, formulaDirs, listFormulas, pourFormula } from '@anhlp/alp-core/formulas';
@@ -116,6 +117,8 @@ const LIMIT_FRESH_MS = 15_000;
  */
 const CONTEXT_SOON = 0.9;
 const CONTEXT_RESET = 0.5;
+/** After a failed compaction, how long the automatic one waits before it tries again (t-0e56). */
+const COMPACT_RETRY_MS = 10 * 60_000;
 
 /** How much of an assignment's brief ALP repeats after a compaction. */
 const BRIEF_CHARS = 8000;
@@ -348,6 +351,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     session.userStopped = false;
     if (session.role === 'supervisor' && session.parent && sessions.get(session.parent)?.reviewPending) review(session.parent);
     if (!session.parent) void showTasks(sessionId, session);
+    if (!session.parent && session.role !== 'supervisor') queueMicrotask(() => compactAtBoundary(sessionId, session, state));
 
     // An assignment a limit or a pause stopped waits, open, to continue instead of ending.
     if (session.parkReason && state !== 'completed') {
@@ -1507,6 +1511,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const used = usage?.last?.totalTokens;
     const window = usage?.modelContextWindow;
     if (session.role === 'supervisor' || typeof used !== 'number' || typeof window !== 'number' || window <= 0) return;
+    session.contextFill = contextFill(usage);
     const compactAt = typeof usage.autoCompactTokens === 'number' && usage.autoCompactTokens > 0
       ? usage.autoCompactTokens
       : session.runtimeKind === 'codex' && session.mapping.autocompact
@@ -1559,14 +1564,134 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (!done) return;
     const agent = session.mapping.agent.name;
     runLog(rootOf(sessionId), { event: 'compacted', sessionId, agent, ...trigger, ...tokens, ...(failed ? { failed: true, ...(item.error ? { error: String(item.error) } : {}) } : {}) });
-    if (failed) return;
+    if (failed) { if (session.compacting?.phase === 'native') compactFailed(sessionId, session, item.error ? String(item.error) : 'the runtime could not compact'); return; }
     session.contextLevel = 0;
     if (session.supervisor) session.journal.push(stamp(`${agent}'s context was compacted`));
-    if (session.role !== 'supervisor') void restoreAfterCompaction(sessionId, session).catch(() => {});
+    const checkpoint = session.compacting?.phase === 'native' ? session.compacting.checkpoint : undefined;
+    if (session.role !== 'supervisor') void restoreAfterCompaction(sessionId, session, checkpoint).catch(() => {});
+    if (checkpoint !== undefined) compactFinished(sessionId, session, 'native');
+  }
+
+  /**
+   * Whether a root holds anything a compaction must not cut into (t-0e56): a turn, a restart,
+   * a question to the user, mail that wakes it, a park or the supervisor's review.
+   */
+  function compactHeld(sessionId: string, session: Session) {
+    return session.closed || !!session.active || !!session.pending || session.waiters.length > 0 || hasActiveMail(session) || !!session.wakeHeld
+      || !!session.parked || !!session.parkReason || reviewing(session)
+      || [...userQuestions.values()].some(pending => pending.question.rootId === sessionId && !pending.gate);
+  }
+
+  /**
+   * Main's compaction at a turn boundary (t-0e56). Once its context fills to the threshold,
+   * or the user asked, main writes a checkpoint by skill compact in a turn of its own; at that
+   * turn's end the runtime compacts natively, or ALP starts a fresh conversation seeded with it.
+   * Anything that holds the session defers it to a later boundary.
+   */
+  function compactAtBoundary(sessionId: string, session: Session, state: 'completed' | 'failed' | 'canceled') {
+    if (session.closed || sessions.get(sessionId) !== session) return;
+    const current = session.compacting;
+    if (current?.phase === 'checkpoint' && current.checkpoint === undefined) {
+      // The checkpoint turn just ended: its last words are the checkpoint.
+      const written = [...session.text.values()].at(-1)?.trim();
+      if (state !== 'completed' || !written) { compactFailed(sessionId, session, state !== 'completed' ? `the checkpoint turn ${state}` : 'main wrote no checkpoint'); return; }
+      current.checkpoint = written;
+    }
+    // The compaction turn ended without the runtime reporting a compaction.
+    if (current?.phase === 'native') { compactFailed(sessionId, session, 'the runtime reported no compaction'); return; }
+    if (compactHeld(sessionId, session)) return;
+    if (current?.checkpoint !== undefined) { void compactNow(sessionId, session); return; }
+    if (current) return;
+    if (session.compactBuffer?.length) { flushCompactBuffer(sessionId, session); return; }
+    const trigger = compactDue(session.mapping.compact ?? { auto: false, threshold: 1 }, session.contextFill, !!session.compactRequested);
+    if (!trigger) return;
+    if (trigger === 'auto' && session.compactFailedAt && Date.now() - session.compactFailedAt < COMPACT_RETRY_MS) return;
+    session.compactRequested = false;
+    session.compacting = { phase: 'checkpoint', trigger, startedAt: Date.now() };
+    runLog(rootOf(sessionId), { event: 'compact.started', sessionId, agent: session.mapping.agent.name, trigger, ...(session.contextFill !== undefined ? { fill: Math.round(session.contextFill * 100) / 100 } : {}) });
+    const work = queue.then(async () => {
+      if (session.closed || compactHeld(sessionId, session)) { session.compacting = undefined; if (trigger === 'manual') session.compactRequested = true; return; }
+      await startPrompt(sessionId, { clientMessageId: `alp-wake-compact-${randomUUID()}`, delivery: 'auto', content: [{ type: 'text', text: checkpointPrompt(trigger, session.contextFill) }] }, 'wake');
+    }).catch(error => compactFailed(sessionId, session, errorData(error).message));
+    queue = work.catch(() => {});
+  }
+
+  /** Compacts with the runtime's own mechanism, else a fresh conversation seeded with the checkpoint. */
+  async function compactNow(sessionId: string, session: Session) {
+    const current = session.compacting!;
+    const checkpoint = current.checkpoint!;
+    if (NATIVE_COMPACT.includes(session.runtimeKind) && current.phase === 'checkpoint') {
+      current.phase = 'native';
+      try {
+        // Codex takes the thread alone; its summary gets the checkpoint back from the note ALP sends after.
+        await session.runtime.request('thread/compact/start', { threadId: session.threadId, ...(session.runtimeKind === 'codex' ? {} : { instructions: compactInstructions(checkpoint) }) });
+        return;
+      } catch (error) {
+        runLog(rootOf(sessionId), { event: 'compact.native_failed', sessionId, agent: session.mapping.agent.name, error: errorData(error).message });
+        current.phase = 'fresh';
+      }
+    }
+    current.phase = 'fresh';
+    // A fresh conversation drops the old one: only when nothing runs that it would lose.
+    if (restartRefusal(sessionId, session)) return;
+    const work = queue.then(async () => {
+      if (session.closed || restartRefusal(sessionId, session)) return;
+      await restartNative(sessionId, session, undefined);
+      emit(sessionId, { type: 'session.updated', session: snapshot(sessionId, session) });
+      await startPrompt(sessionId, { clientMessageId: `alp-wake-compact-${randomUUID()}`, delivery: 'auto', content: [{ type: 'text', text: seedPrompt(checkpoint, session.lastUserText) }] }, 'wake');
+      compactFinished(sessionId, session, 'fresh');
+    }).catch(error => compactFailed(sessionId, session, errorData(error).message));
+    queue = work.catch(() => {});
+  }
+
+  function compactFinished(sessionId: string, session: Session, via: 'native' | 'fresh') {
+    const current = session.compacting;
+    if (!current) return;
+    session.compacting = undefined;
+    session.compactFailedAt = undefined;
+    session.contextFill = undefined;
+    runLog(rootOf(sessionId), { event: 'compact', sessionId, agent: session.mapping.agent.name, trigger: current.trigger, via, checkpointChars: current.checkpoint?.length ?? 0, ms: Date.now() - current.startedAt });
+    const text = wordsFor(session).compacted(via === 'native');
+    emit(sessionId, { type: 'item', item: { kind: 'notice', id: `notice-${randomUUID().slice(0, 8)}`, level: 'info', text } });
+    queueMicrotask(() => flushCompactBuffer(sessionId, session));
+  }
+
+  function compactFailed(sessionId: string, session: Session, reason: string) {
+    const current = session.compacting;
+    session.compacting = undefined;
+    session.compactFailedAt = Date.now();
+    runLog(rootOf(sessionId), { event: 'compact.failed', sessionId, agent: session.mapping.agent.name, ...(current ? { trigger: current.trigger } : {}), error: reason });
+    if (!session.closed) emit(sessionId, { type: 'item', item: { kind: 'notice', id: `notice-${randomUUID().slice(0, 8)}`, level: 'warning', text: wordsFor(session).compactFailed(reason) } });
+    queueMicrotask(() => flushCompactBuffer(sessionId, session));
+  }
+
+  /** Sends the user's words held during a compaction, in order, once no turn runs (t-0e56). */
+  function flushCompactBuffer(sessionId: string, session: Session) {
+    if (session.compacting || session.active || !session.compactBuffer?.length) return;
+    const held = session.compactBuffer.splice(0);
+    session.compactBuffer = undefined;
+    const work = queue.then(async () => {
+      for (const [index, input] of held.entries()) {
+        await promptSession(sessionId, { ...input, delivery: index === 0 && !session.active ? 'auto' : 'steer' }, true);
+      }
+    });
+    queue = work.catch(() => {});
+  }
+
+  /** The user's request to compact a root (t-0e56): now if it is idle, else at its next turn boundary. */
+  function requestCompact(sessionId: string) {
+    const session = sessions.get(sessionId);
+    if (!session || session.closed) throw new ConversationError('session_busy', 'The session is not open');
+    if (session.parent || session.role === 'supervisor') throw new ConversationError('runtime_unsupported', 'Only a root session is compacted');
+    if (session.compacting) return { status: 'running' as const };
+    session.compactRequested = true;
+    if (compactHeld(sessionId, session)) return { status: 'deferred' as const };
+    compactAtBoundary(sessionId, session, 'completed');
+    return { status: 'started' as const };
   }
 
   /** What ALP holds of a session's work, told to it after a compaction (ALPD §57). */
-  async function restoreAfterCompaction(sessionId: string, session: Session) {
+  async function restoreAfterCompaction(sessionId: string, session: Session, checkpoint?: string) {
     const parts = ['Your context was just compacted. In case the summary lost any of it, this is what ALP holds of your work now.'];
     if (session.parent && session.brief) parts.push(`Your assignment from ${session.parentAgent ?? 'your requester'}, as it was given:\n${cut(session.brief, BRIEF_CHARS)}`);
     const running = [...session.assignments.values()].filter(assignment => !assignment.finished);
@@ -1586,6 +1711,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       const board = renderBoard(await boardOf(project));
       if (board) parts.push(board);
     }
+    if (checkpoint) parts.push(`The checkpoint you wrote before the compaction, by skill compact:\n${cut(checkpoint, BRIEF_CHARS)}`);
     parts.push('Carry on where you were; alp_board and alp_task tell you more.');
     if (session.closed) return;
     post(sessionId, { kind: 'note', from: 'alp', assignment: sessionId, body: parts.join('\n\n'), ...(session.active ? {} : { passive: true }) });
@@ -4196,8 +4322,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   }
 
   // Shared by ordinary prompts and the scheduler's queue-scoped sender.
-  async function promptSession(sessionId: string, input: PromptInput): Promise<void> {
+  async function promptSession(sessionId: string, input: PromptInput, flushing = false): Promise<void> {
     const session = sessions.get(sessionId);
+    // While main writes its checkpoint and compacts, the user's words wait for the compaction's end (t-0e56).
+    if (!flushing && session && !session.parent && (session.compacting || session.compactBuffer?.length)) {
+      if (!session.seen.has(input.clientMessageId) && !session.compactBuffer?.some(held => held.clientMessageId === input.clientMessageId)) (session.compactBuffer ??= []).push(input);
+      return;
+    }
     const parked = session?.parked;
     try {
       const prompt = session?.active && session.resumedTurn === session.active && input.delivery === 'auto'
@@ -4414,6 +4545,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         },
       });
       if (origin === 'user' && !session.parent) session.userWaiting ??= Date.now();
+      if (origin === 'user' && !session.parent && text) session.lastUserText = clip(text, 4000);
       if (session.supervisor && origin === 'user') session.journal.push(stamp(`user ${prompt.delivery === 'steer' ? 'steered' : 'asked'} ${session.mapping.agent.name}: ${clip(text, 1500)}`));
       // The steer reaches the model once its waiting tool returns; return it now, not when the work ends.
       if (prompt.delivery === 'steer' && origin === 'user' && !session.parent) { releaseWaiters(session); releaseQuestions(sessionId); }
@@ -4605,6 +4737,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     rebind: (sessionId, binding) => enqueue(() => rebindSession(sessionId, binding)),
 
     reload: sessionId => enqueue(() => reloadSession(sessionId)),
+    compact: (sessionId: string) => requestCompact(sessionId),
 
     previewConfigure: (sessionId, changes) => previewConfigureSession(sessionId, changes),
 

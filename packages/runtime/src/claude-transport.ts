@@ -527,6 +527,20 @@ export class ClaudeTransport {
       return method === 'turn/start' ? { turn: { id: turnId } } : {};
     }
 
+    // t-0e56: Claude compacts on its /compact command, a turn of its own with what the summary must keep.
+    if (method === 'thread/compact/start') {
+      if (!this.query) throw new Error('Claude thread is not initialized');
+      if (this.activeTurn) throw new Error('A turn is running');
+      const turnId = randomUUID();
+      this.clearAssistantText();
+      this.activeTurn = turnId;
+      this.turnsStarted = true;
+      this.emit('turn/started', { threadId: this.threadId, turn: { id: turnId } });
+      const instructions = typeof params.instructions === 'string' ? ` ${params.instructions.trim()}` : '';
+      this.input.push({ type: 'user', message: { role: 'user', content: `/compact${instructions}` }, parent_tool_use_id: null, uuid: turnId, session_id: this.threadId });
+      return {};
+    }
+
     if (method === 'turn/interrupt') {
       this.streamingMessage = undefined;
       await this.query?.interrupt();
