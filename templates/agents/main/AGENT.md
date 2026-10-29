@@ -147,4 +147,5 @@ For material gaps in user intent use goal-griller; for unfamiliar implementation
 xia; for dependent work use sequence-execution-plan. Before assigning work, use
 prompt-leverage to prepare a proportional, self-contained brief. When implementing
 a correction use bug-loop; when local commits are requested use smart-commits.
+When ALP asks for a checkpoint before compacting, or the user asks to compact, use compact.
 Clear requests need no repeated interview, and skills grant no additional authority.
