@@ -3969,7 +3969,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (assignment.lease && leases.get(assignment.lease)?.assignment === id) leases.delete(assignment.lease);
       if (roleOf(parent.mapping, entry.agent) === 'peer') { const root = sessions.get(entry.rootId); if (root) root.peerCount--; }
       if (assignment.copy) await removeCopy(assignment.copy).catch(() => {});
-      if (assignment.worktree) await removeWorktree(assignment.worktree).catch(() => {});
+      // The worktree predates this recovery and may hold uncommitted work: it stays (t-eae4).
     };
     try {
       if (entry.lease) {
@@ -3977,7 +3977,14 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         if (holder && !lineage(entry.parentId).includes(holder.assignment)) throw new Error(`${holder.agent} writes ${entry.lease} now`);
         if (!holder) { assignment.lease = entry.lease; leases.set(entry.lease, { assignment: id, agent: entry.agent }); }
       }
-      if (entry.worktree) assignment.worktree = await reattachWorktree(entry.worktree);
+      if (entry.worktree) {
+        const { preserved, ...worktree } = await reattachWorktree(entry.worktree);
+        assignment.worktree = worktree;
+        if (preserved) {
+          runLog(entry.rootId, { event: 'worktree.preserved', assignmentId: id, branch: worktree.branch, preserved });
+          post(entry.parentId, { kind: 'note', from: entry.agent, assignment: id, passive: true, body: `Reopening ${id}: its worktree ${worktree.path} had no valid git metadata after the restart, so it was moved aside unchanged to ${preserved} and ${worktree.branch} was checked out again. Recover any uncommitted work from ${preserved}.` });
+        }
+      }
       if (entry.copyOf) {
         assignment.copy = await createCopy(entry.copyOf, copyRoot, id);
         spec = { ...spec, workdir: assignment.copy.workdir };

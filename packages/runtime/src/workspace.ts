@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -140,17 +140,33 @@ export async function createWorktree(workdir: string, root: string, id: string, 
   return { checkout, path: target, workdir: path.join(target, relative), branch, base, ...(fingerprint ? { fingerprint } : {}) };
 }
 
+/** Whether `directory` is the top level of a working git worktree. */
+async function validWorktree(directory: string) {
+  const top = await git(directory, ['rev-parse', '--show-toplevel']).catch(() => undefined);
+  if (top?.code !== 0) return false;
+  const [a, b] = await Promise.all([realpath(top.stdout.trim()).catch(() => ''), realpath(directory).catch(() => directory)]);
+  return a === b && (await git(directory, ['status', '--porcelain'])).code === 0;
+}
+
 /**
- * Checks out an assignment's existing branch again at its worktree's place, after
- * reclaimWorktrees committed and removed it, so the assignment continues there.
+ * Continues an assignment in its worktree after a restart. A worktree that is still valid
+ * is reused as is, whatever it holds. A directory left without valid git metadata (a crash
+ * mid-write) is never deleted: it moves aside to `preserved` and the branch is checked out
+ * again at its place.
  */
-export async function reattachWorktree(worktree: Worktree): Promise<Worktree> {
+export async function reattachWorktree(worktree: Worktree): Promise<Worktree & { preserved?: string }> {
+  const exists = !!await stat(worktree.path).catch(() => undefined);
+  if (exists && await validWorktree(worktree.path)) return worktree;
   if (!await branchExists(worktree.checkout, worktree.branch)) throw new Error(`Branch ${worktree.branch} of the worktree no longer exists`);
-  if (await stat(worktree.path).catch(() => undefined)) return worktree;
+  let preserved: string | undefined;
+  if (exists) {
+    preserved = `${worktree.path}.preserved-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    await rename(worktree.path, preserved);
+  }
   await mkdir(path.dirname(worktree.path), { recursive: true, mode: 0o700 });
   await git(worktree.checkout, ['worktree', 'prune']);
   await checked(worktree.checkout, ['worktree', 'add', '--quiet', worktree.path, worktree.branch]);
-  return worktree;
+  return preserved ? { ...worktree, preserved } : worktree;
 }
 
 /** A digest of a checkout's state: HEAD, its uncommitted changes, and the names of untracked files. */
@@ -234,7 +250,10 @@ export async function removeWorktree(worktree: Worktree, { deleteBranch = false 
 
 /**
  * After a crash: commits work left in worktrees under `root` to their branches and
- * removes the directories. Returns the branches that were kept.
+ * removes the directories. Returns the branches that were kept. A directory is removed
+ * only once everything in it is committed to its own `alp/<name>` branch; any other one
+ * (invalid git metadata, a failed commit, another branch checked out, a detached HEAD)
+ * stays untouched, so recovery reuses or preserves it and nothing uncommitted is lost.
  */
 export async function reclaimWorktrees(root: string) {
   const kept: string[] = [];
@@ -242,17 +261,19 @@ export async function reclaimWorktrees(root: string) {
   for (const name of entries) {
     const target = path.join(root, name);
     if (!(await stat(target).catch(() => undefined))?.isDirectory()) continue;
-    const common = await git(target, ['rev-parse', '--path-format=absolute', '--git-common-dir']).catch(() => undefined);
-    if (common?.code !== 0) {
-      await rm(target, { recursive: true, force: true });
-      continue;
-    }
+    if (!await validWorktree(target)) continue;
+    const common = await git(target, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+    if (common.code !== 0) continue;
     const checkout = path.dirname(common.stdout.trim());
-    const branch = (await git(target, ['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim();
-    await git(target, ['add', '-A']);
+    const ref = await git(target, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
+    const branch = ref.stdout.trim();
+    if (ref.code !== 0 || branch !== `alp/${name}`) continue;
+    if ((await git(target, ['add', '-A'])).code !== 0) continue;
     if ((await git(target, ['diff', '--cached', '--quiet'])).code === 1) {
-      await git(target, [...IDENTITY, 'commit', '--quiet', '--no-verify', '-m', 'alp: work left by an interrupted assignment']);
+      if ((await git(target, [...IDENTITY, 'commit', '--quiet', '--no-verify', '-m', 'alp: work left by an interrupted assignment'])).code !== 0) continue;
     }
+    const status = await git(target, ['status', '--porcelain', '--ignored=no']);
+    if (status.code !== 0 || status.stdout.trim()) continue;
     await removeWorktree({ checkout, path: target, workdir: target, branch, base: '' });
     kept.push(branch);
   }

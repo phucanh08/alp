@@ -456,3 +456,34 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
     }
   });
 }
+
+test('t-eae4: a recovery that fails to reopen a worktree assignment never deletes its uncommitted work', async t => {
+  const { root, options } = await workspace(t);
+  const runtimes = [];
+  const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
+  await first.open('root', { cwd: root, persist: true });
+  await first.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Build it' }] });
+  const delegated = await runtimes[0].call('alp_delegate', { agent: 'peer', task: 'Write notes.txt', mode: 'workspace-write', isolation: 'worktree', wait: false });
+  const peer = runtimes[1];
+  await until(() => peer.started.length === 1, 'the peer turn');
+  git(peer.cwd, 'checkout', '-q', '-b', 'fix/own-branch');
+  await writeFile(path.join(peer.cwd, 'notes.txt'), 'uncommitted\n');
+  await writeFile(path.join(peer.cwd, 'new.txt'), 'untracked\n');
+  const snapshot = first.snapshot('root');
+  await first.shutdown();
+  // The peer switched branches, so reclaim must leave its worktree as it is.
+  assert.deepEqual(await reclaimWorktrees(options.worktreeDir), []);
+
+  // The next alpd cannot reopen the peer's session (say the disk is still full).
+  const failing = fakeTransport(runtimes);
+  const transport = (...args) => { const r = failing(...args); if (runtimes.length > 3) r.initialize = async () => { throw new Error('ENOSPC: no space left on device'); }; return r; };
+  const second = createAlpRuntime({ ...options, transport, previousExit: { kind: 'crash', at: '2026-10-29T03:00:00.000Z' } });
+  t.after(() => second.shutdown());
+  await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot.threadId, runtime: snapshot.runtime, model: snapshot.model, workflow: snapshot.workflow } });
+  const outcomes = await second.recover('root', { continueRoot: true });
+  assert.notEqual(outcomes[0].outcome, 'resumed');
+  assert.equal(outcomes[0].assignmentId, delegated.assignmentId);
+  assert.equal(await readFile(path.join(peer.cwd, 'notes.txt'), 'utf8'), 'uncommitted\n');
+  assert.equal(await readFile(path.join(peer.cwd, 'new.txt'), 'utf8'), 'untracked\n');
+  assert.equal(git(peer.cwd, 'rev-parse', '--abbrev-ref', 'HEAD'), 'fix/own-branch');
+});
