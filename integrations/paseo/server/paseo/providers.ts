@@ -3,7 +3,7 @@ import templates from 'alp:templates';
 import { ensureLibrary } from '@anhlp/alp-core/library';
 import { deleteEntry, getEntry, saveEntry } from '@anhlp/alp-core/library-edit';
 import { listProviders, loadProvider, RESERVED_PROVIDERS } from '@anhlp/alp-core/providers';
-import { MODELS } from '@anhlp/alp-core/models';
+import { catalogModels } from '@anhlp/alp-core/models';
 import { runCommand } from '@anhlp/alp-client/command';
 import { probeAcp } from '@anhlp/alp-client/acp-probe';
 import { probeAntigravity } from '@anhlp/alp-client/antigravity-probe';
@@ -42,7 +42,7 @@ export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
   const folders: Array<string | undefined> = [undefined];
   const native = new Map<string, Promise<Entry>>();
   const nativeIds = ['claude', 'codex'];
-  function nativeEntry(id: string) {
+  function nativeEntry(id: string): Promise<Entry> {
     if (!native.has(id)) native.set(id, (async () => {
       const command = process.env[id === 'claude' ? 'ALP_CLAUDE_BIN' : 'ALP_CODEX_BIN'] ?? id;
       const version = await runCommand(command, ['--version'], { timeoutMs: 10_000 });
@@ -51,10 +51,10 @@ export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
         status: version.code === 0 ? 'ready' : 'unavailable',
         ...(version.code !== 0 ? { error: version.stderr.trim() || `${command} is unavailable` } : {}),
         description: 'Native runtime · models from the ALP catalog',
-        models: MODELS.filter(model => model.runtime === id).map((model, index) => ({ provider: id, id: model.id, label: model.label, description: model.description, isDefault: index === 0 })),
       };
     })());
-    return native.get(id)!;
+    // The models are read fresh each time: alpd's live catalog cache may have changed since (t-e5ee).
+    return native.get(id)!.then((entry): Entry => ({ ...entry, models: catalogModels(home).filter(model => model.runtime === id).map((model, index) => ({ provider: id, id: model.id, label: model.label, description: model.description, isDefault: index === 0 })) }));
   }
 
   async function files() {

@@ -112,6 +112,7 @@ P('daemon.resume', { runtime: 'codex' }); R('daemon.resume', { runtimes: {}, par
 P('daemon.pauses', {}); R('daemon.pauses', { all: { since: ts, by: 'the user', reason: 'paused by the user' }, runtimes: {}, parked: [] });
 P('daemon.usage', { refresh: true }); R('daemon.usage', { providers: [{ runtime: 'codex', pause: null, parked: 0 }] });
 P('catalog.get', {}); R('catalog.get', { models: [{ id: 'codex:gpt-6.1-sol', label: 'Codex · GPT-6.1-Sol' }], modes: [{ id: 'read-only', label: 'Read only' }], thinkingOptions: [{ id: 'low', label: 'low' }], defaultModel: 'codex:gpt-6.1-sol' });
+P('catalog.refresh', {}); R('catalog.refresh', { models: [{ id: 'codex:gpt-6.1-sol', label: 'Codex · GPT-6.1-Sol' }], modes: [{ id: 'read-only', label: 'Read only' }], thinkingOptions: [{ id: 'low', label: 'low' }], defaultModel: 'codex:gpt-6.1-sol' });
 P('assignment.recall', { assignmentId: 'a_1', question: 'Bạn đã sửa gì?' });
 P('assignment.recall', { assignmentId: 'a_1' }, false, 'without a question');
 R('assignment.recall', { assignmentId: 'a_1', agent: 'peer', taskId: 'bd-1', finishedAt: ts, answer: 'Đã sửa server.ts' });

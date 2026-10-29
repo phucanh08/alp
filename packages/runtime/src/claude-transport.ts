@@ -447,6 +447,18 @@ export class ClaudeTransport {
   }
   async initialize() {}
 
+  /** The models Claude offers now, from a Claude process that sends no prompt and is closed after (t-e5ee). */
+  async probeModels() {
+    const { query } = await import(CLAUDE_SDK);
+    const probe = query({ prompt: new InputQueue(), options: { cwd: this.cwd, env: this.env, settingSources: [], persistSession: false, strictMcpConfig: true, mcpServers: {}, pathToClaudeCodeExecutable: this.command } }) as ClaudeQuery;
+    try {
+      const models = await probe.supportedModels();
+      return models.map(model => ({ id: model.value, label: model.displayName, description: model.description, efforts: model.supportedEffortLevels ?? undefined }));
+    } finally {
+      probe.close();
+    }
+  }
+
   /** The plan's usage windows before a session starts, from a Claude process that sends no prompt and is closed after. */
   private async probeUsage() {
     if (this.closed) return undefined;

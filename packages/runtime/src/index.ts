@@ -6,7 +6,11 @@ export type { BranchRequest, ConversationErrorReason, NativeBase, NativeBinding,
 export type { AlpEvent, AlpError, Envelope, SessionSnapshot, TimelineItem, TurnOrigin, AssignmentSnapshot, UserQuestion, TreeStatus, SessionState } from './events.js';
 export { resolveSession, InstructionsAdapter, skillDescription } from './resolve.js';
 export type { SessionSpec, HostMcpServer, ResolvedSession, RuntimeKind } from './resolve.js';
-export { DEFAULT_MODEL, DEFAULT_CLAUDE_MODEL, models, modes, thinkingOptions, thinkingOptionsFor } from './catalog.js';
+export { DEFAULT_MODEL, DEFAULT_CLAUDE_MODEL, entries as catalogEntries, models, modes, thinkingOptions, thinkingOptionsFor } from './catalog.js';
+export type { CatalogEntry } from './catalog.js';
+export { ModelCatalog, mergeCatalog, liveFromContext, feedCatalog, setActiveCatalog, activeCatalog, POLICY as CATALOG_POLICY, REFRESH_MS as CATALOG_REFRESH_MS } from './model-catalog.js';
+export type { CatalogSnapshot, CatalogRuntime, LiveModel, Probe as CatalogProbe } from './model-catalog.js';
+export { liveProbes, codexProbe, claudeProbe, antigravityProbe, parseAgyModels } from './model-probes.js';
 export { CodexTransport } from './transport.js';
 export { ATTACHMENT_HEADER, ATTACHMENT_ROUTES, attachmentStageDir, createAttachmentStager, stagingExposure } from './attachments.js';
 export type { AttachmentReader, AttachmentRoute } from './attachments.js';

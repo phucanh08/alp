@@ -1,4 +1,7 @@
-/** Models ALP offers, with the efforts each takes: the runtime's catalog and alp setup read this list. */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
+/** Models ALP offers when no provider has answered yet (the live catalog, t-e5ee, merges provider lists over these), with the efforts each takes: the runtime's catalog and alp setup read this list. */
 const codexFull = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 const codexStandard = ['low', 'medium', 'high', 'xhigh', 'max'];
 const claudeFull = ['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'];
@@ -43,3 +46,60 @@ export const MODELS = [
   ['antigravity', 'claude-opus-4-6-thinking', 'Claude Opus 4.6 Thinking', 'Opus 4.6 with thinking via Antigravity.', [], undefined],
   ['antigravity', 'gpt-oss-120b-medium', 'GPT-OSS 120B (Medium)', 'Open weights model via Antigravity.', [], undefined],
 ].map(([runtime, id, label, description, efforts, effort]) => ({ runtime, id, label, description, efforts, ...(effort ? { effort } : {}) }));
+
+/** ALP policy applied over whatever a provider reports. */
+export const MODEL_POLICY = {
+  // ALP runs GPT-6 Astra at low effort only.
+  'codex:gpt-6-astra': { efforts: ['low'], effort: 'low' },
+};
+const CATALOG_RUNTIMES = ['codex', 'claude', 'antigravity'];
+
+/**
+ * Live over static (t-e5ee): a runtime with a live list shows its live models first, in the provider's
+ * order, with the provider's label and description; a live model ALP knows keeps ALP's efforts (plus any
+ * new ones the provider adds) and ALP's default effort, a new one takes the provider's. Static rows the
+ * provider did not report stay as `fallback` (aliases, 1M variants). A runtime without a live list keeps
+ * its static rows. MODEL_POLICY applies last.
+ * @param {typeof MODELS} base
+ * @param {Partial<Record<string, Array<{ id: string, label?: string, description?: string, efforts?: string[], effort?: string }> | undefined>>} live
+ * @returns {Array<(typeof MODELS)[number] & { source?: 'live' | 'fallback' | 'static' }>}
+ */
+export function mergeCatalog(base, live) {
+  const out = [];
+  for (const runtime of CATALOG_RUNTIMES) {
+    const known = base.filter(entry => entry.runtime === runtime);
+    const reported = (live?.[runtime] ?? []).filter(model => typeof model?.id === 'string' && model.id.trim());
+    if (!reported.length) { out.push(...known); continue; }
+    const seen = new Set();
+    for (const model of reported) {
+      if (seen.has(model.id)) continue;
+      seen.add(model.id);
+      const prior = known.find(entry => entry.id === model.id);
+      const priorEfforts = prior?.efforts ?? [];
+      const efforts = [...priorEfforts, ...(Array.isArray(model.efforts) ? model.efforts : []).filter(effort => typeof effort === 'string' && !priorEfforts.includes(effort))];
+      const effort = prior?.effort ?? (model.effort && efforts.includes(model.effort) ? model.effort : undefined);
+      out.push({ runtime, id: model.id, label: model.label || prior?.label || model.id, description: model.description || prior?.description || '', efforts, ...(effort ? { effort } : {}), source: 'live' });
+    }
+    for (const entry of known) if (!seen.has(entry.id)) out.push({ ...entry, source: 'fallback' });
+  }
+  return out.map(entry => {
+    const policy = MODEL_POLICY[`${entry.runtime}:${entry.id}`];
+    return policy ? { ...entry, ...policy } : entry;
+  });
+}
+
+/** Where alpd caches the live catalog: ALP_HOME/cache/models.json. @param {string} home */
+export const catalogCacheFile = home => path.join(home, 'cache', 'models.json');
+
+/**
+ * The catalog as alpd last saw it, for readers outside alpd (alp setup, the Paseo plugin): static rows
+ * when there is no cache or it is unreadable. @param {string | undefined} home
+ */
+export function catalogModels(home) {
+  if (!home) return MODELS;
+  try {
+    const cached = JSON.parse(readFileSync(catalogCacheFile(home), 'utf8'));
+    const providers = cached?.providers && typeof cached.providers === 'object' ? cached.providers : {};
+    return mergeCatalog(MODELS, Object.fromEntries(Object.entries(providers).map(([runtime, state]) => [runtime, Array.isArray(state?.models) ? state.models : undefined])));
+  } catch { return MODELS; }
+}

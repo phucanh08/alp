@@ -492,7 +492,10 @@ export class Controller {
     run.alp = alp;
     alp.onEvent(envelope => { if (this.#run === run && this.#onQuestionEvent(envelope)) this.#onEnvelope(envelope); });
     alp.onNotification((method, params) => {
-      if (this.#run !== run || method !== 'terminal.event') return;
+      if (this.#run !== run) return;
+      // The live model catalog changed (t-e5ee): re-read what this page shows of it.
+      if (method === 'catalog.updated') { this.#onCatalogUpdated(); return; }
+      if (method !== 'terminal.event') return;
       for (const terminal of this.#terminals.values()) terminal.event(params);
     });
     alp.onState((state, error) => { if (this.#run === run) this.#onState(run, state, error); });
@@ -3444,6 +3447,19 @@ export class Controller {
     const blocked = this.libraryWriteBlock(kind);
     if (blocked) throw new ConfigurationError(blocked);
     return this.#client().request(`library.${action}`, { ...params, kind, scope: 'project', projectRoot: this.#state.workspace }, { timeoutMs: this.#options.requestTimeoutMs });
+  }
+
+  /** Re-reads the models a page shows after alpd's catalog changed. */
+  #onCatalogUpdated() {
+    if (this.#state.catalog.status === 'ready') void this.#loadCatalog();
+    if (this.#state.settings.status === 'ready') void this.loadSettings();
+  }
+
+  /** Asks alpd to ask every provider for its models again (catalog.refresh), then re-reads them. */
+  async refreshModels() {
+    if (!this.#state.principal || !can(this.#state.principal, 'session.read')) return;
+    await this.#client().request('catalog.refresh', {}, { timeoutMs: Math.max(this.#options.requestTimeoutMs ?? 0, 60_000) });
+    this.#onCatalogUpdated();
   }
 
   async loadSettings() {

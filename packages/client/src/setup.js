@@ -2,7 +2,7 @@ import { copyFile, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { initProject } from '@anhlp/alp-core/init';
-import { MODELS } from '@anhlp/alp-core/models';
+import { catalogModels } from '@anhlp/alp-core/models';
 import { fitEffort, modelEfforts } from '@anhlp/alp-core/profiles';
 import { resolveTeam } from '@anhlp/alp-core/teams';
 import { validateSettings } from '@anhlp/alp-core/validation';
@@ -85,7 +85,7 @@ export async function setup(args, home) {
         ] });
         if (next === 'cancel') throw new Cancelled();
         if (next === 'save') break;
-        await change(seats);
+        await change(seats, home);
         show();
       }
     }
@@ -107,17 +107,19 @@ export async function setup(args, home) {
 const describe = choice => `${choice.provider}:${choice.model}${choice.effort ? `:${choice.effort}` : ''}`;
 
 /** Pick one seat and provider, then its model and effort. */
-async function change(seats) {
+async function change(seats, home) {
+  // alpd's live catalog (t-e5ee) when it has one, else the static rows.
+  const catalog = catalogModels(home);
   const [seat, at] = await select({ message: 'Which model?', choices: Object.entries(seats).flatMap(([seat, choices]) =>
     choices.map((choice, at) => ({ label: `${SEAT_LABEL[seat]} · ${PROVIDER_LABEL[choice.provider]}`, value: [seat, at], hint: describe(choice) }))) });
   const current = seats[seat][at];
-  const offered = MODELS.filter(model => model.runtime === current.provider);
+  const offered = catalog.filter(model => model.runtime === current.provider);
   const picked = await select({ message: `${SEAT_LABEL[seat]} on ${PROVIDER_LABEL[current.provider]}`, initial: current.model, choices: [
     ...offered.map(model => ({ label: model.label, value: model.id, hint: `${model.id} · ${model.description}` })),
     { label: 'Other…', value: undefined, hint: 'type a model ID' },
   ] });
   const model = picked ?? nativeModel(await text(`${PROVIDER_LABEL[current.provider]} model ID:`), current.provider, 'The model ID');
-  const efforts = modelEfforts(`${current.provider}:${model}`) ?? ANY_EFFORT;
+  const efforts = catalog.find(entry => entry.runtime === current.provider && entry.id === model)?.efforts ?? modelEfforts(`${current.provider}:${model}`) ?? ANY_EFFORT;
   const effort = efforts.length > 1 ? await select({ message: 'Effort', initial: efforts.includes(current.effort) ? current.effort : DEFAULTS[seat][current.provider][1],
     choices: efforts.map(effort => ({ label: effort, value: effort })) }) : efforts[0];
   seats[seat][at] = { provider: current.provider, model, ...(effort ? { effort } : {}) };

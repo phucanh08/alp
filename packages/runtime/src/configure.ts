@@ -4,7 +4,7 @@
  * the effective configuration a resolved session runs with, and what of it can run commands.
  */
 import { createHash } from 'node:crypto';
-import { MODELS } from '@anhlp/alp-core/models';
+import { entries } from './catalog.js';
 import { profileModel } from '@anhlp/alp-core/profiles';
 import type { ConfigureChange, EffectiveConfig } from '@anhlp/alp-protocol/session';
 import type { ResolvedSession, RuntimeKind } from './resolve.js';
@@ -30,13 +30,13 @@ export function nativeModelOf(runtime: RuntimeKind, model: string): { model: str
 }
 
 /**
- * Whether the host offers `model` on `runtime`: ALP's catalog (core MODELS, what library.models and
+ * Whether the host offers `model` on `runtime`: ALP's live catalog (catalog.ts entries, what library.models and
  * catalog.get list), a model the project's settings give an agent of the team, or the model the session
  * runs already. Never an arbitrary string.
  */
 export function offered(runtime: RuntimeKind, model: string, mapping: ResolvedSession) {
   if (model === mapping.model) return true;
-  if (MODELS.some(entry => entry.runtime === runtime && entry.id === model)) return true;
+  if (entries.some(entry => entry.runtime === runtime && entry.id === model)) return true;
   return Object.values(mapping.modelProfiles ?? {}).flat().some(profile => profileModel(profile) === `${runtime}:${model}`);
 }
 

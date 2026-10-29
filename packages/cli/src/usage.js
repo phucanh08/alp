@@ -71,6 +71,7 @@ const USAGE = `Usage:
   alp task gate rm <id> <gate> [-m note]
   alp pause [codex|claude] [--now] [-m reason] | alp pause status   hold delegation; --now parks running assignments
   alp resume [codex|claude]                  lift a pause; parked assignments continue
+  alp models [--refresh] [--json]            the models alpd offers now, from each provider (cached; refreshed every 6 h)
   alp language [name | --reset]              the language agents and ALP write to you in; default Vietnamese
   alp recall <assignment|task> [--project DIR] [--json] <question>   ask a finished assignment about its work
   alp interrupt <session>
