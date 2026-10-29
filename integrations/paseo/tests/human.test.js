@@ -222,3 +222,29 @@ test('Paseo shows main\'s question to the user as a question prompt and returns 
   await connection.send({ type: 'session.permission', sessionId: 'paseo-root', permissionId: second.request.id, response: { behavior: 'deny', message: 'Decide yourself' } });
   assert.deepEqual(await dismissed, { status: 'dismissed', question: second.request.id, reason: 'Decide yourself', next: 'Decide, and record the assumption in your handoff or final message; or report that you are blocked.' });
 });
+
+test('Paseo shows an open human gate as an approval card; picking an option approves it as paseo (t-ccac)', async t => {
+  const { root } = await project(t);
+  const { createTask, addGate, getTask } = await import('@anhlp/alp-core/tasks');
+  const task = await createTask(root, { title: 'Release' }, 'user');
+  await addGate(root, task.id, { kind: 'human', note: 'Ship?', options: ['Now', 'Friday'] }, 'main');
+  const runtimes = [];
+  const provider = createProvider({ transport: fakeTransport(runtimes) });
+  const connection = await provider.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
+  t.after(() => connection.close());
+  const events = [];
+  connection.onEvent(event => { ProviderEventSchema.parse(event); events.push(event); });
+  await connection.send({ type: 'session.open', requestId: 'open', sessionId: 'paseo-root', history: 'skip', config: { cwd: root, env: {}, mcpServers: {}, settings: {}, persist: true, mode: 'workspace-write' } });
+  await connection.send({ type: 'session.prompt', sessionId: 'paseo-root', prompt: { clientMessageId: 'first', delivery: 'auto', input: { type: 'message', content: [{ type: 'text', text: 'Go' }] } } });
+  await until(() => events.some(event => event.type === 'session.permission'));
+  const card = events.find(event => event.type === 'session.permission');
+  assert.equal(card.request.title, `Approval gate g1 of ${task.id}`);
+  assert.deepEqual(card.request.input.questions[0].options.slice(0, 2), [{ label: 'Now' }, { label: 'Friday' }]);
+  assert.equal(card.request.input.questions[0].options.length, 3, 'Reject follows the options');
+  assert.deepEqual(card.request.metadata.gate, { projectRoot: root, taskId: task.id, gateId: 'g1' });
+  await connection.send({ type: 'session.permission', sessionId: 'paseo-root', permissionId: card.request.id, response: { behavior: 'allow', updatedInput: { answers: { Answer: 'Friday' } } } });
+  await until(async () => (await getTask(root, task.id)).gates[0].resolved);
+  const { resolved } = (await getTask(root, task.id)).gates[0];
+  assert.deepEqual([resolved.choice, resolved.channel], ['Friday', 'paseo']);
+  await until(() => events.some(event => event.type === 'session.permission_resolved' && event.permissionId === card.request.id));
+});
