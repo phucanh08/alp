@@ -230,3 +230,31 @@ test('a runtime that takes the native request but reports nothing, or a fresh co
   assert.match((await log('compact.failed'))[0].error, /Assignments are still running/);
   await until(() => main.started.some(call => promptText(call).includes('Status?')), 'the held message after the failure');
 });
+
+test('with the supervisor on, a failed native compaction still falls back to a fresh conversation', async t => {
+  const { directory, root, runs } = await project(t);
+  const runtimes = [];
+  const factory = fakeTransport(runtimes);
+  const transport = (...args) => {
+    const agent = factory(...args);
+    const request = agent.request.bind(agent);
+    agent.request = async (method, params) => {
+      if (method === 'thread/compact/start') { agent.calls.push({ method, params }); throw new Error('unsupported'); }
+      return request(method, params);
+    };
+    return agent;
+  };
+  const runtime = createAlpRuntime({ transport, libraryDir: path.join(directory, 'home'), runLogDir: runs });
+  t.after(() => runtime.shutdown());
+  await runtime.open('root', { cwd: root, model: 'codex:gpt-5.6-sol' });
+  await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Ship the parser' }] });
+  const main = runtimes[0];
+  const log = logOf(runs);
+  main.usage(80_000);
+  main.finish('turn done');
+  await until(() => main.started.some(call => promptText(call).includes('ALP compact checkpoint')), 'the checkpoint turn');
+  main.finish(CHECKPOINT);
+  await until(async () => (await log('compact')).length === 1 || (await log('compact.failed')).length === 1, 'the end of the compaction');
+  assert.deepEqual((await log('compact.failed')), []);
+  assert.equal((await log('compact'))[0].via, 'fresh');
+});
