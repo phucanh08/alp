@@ -10,7 +10,7 @@ import { tree, until } from '../support/fake-agent.js';
 test('Claude gets the agent\'s skills to load as its own; Codex finds them in its instructions', async t => {
   const claude = await tree(t, { prefix: 'alp-skill-', open: { model: 'claude:claude-opus-5-5' } });
   const config = claude.main.config;
-  assert.deepEqual(config.skills.map(skill => skill.name), ['bug-loop', 'goal-griller', 'prompt-leverage', 'sequence-execution-plan', 'smart-commits', 'xia']);
+  assert.deepEqual(config.skills.map(skill => skill.name), ['bug-loop', 'compact', 'goal-griller', 'prompt-leverage', 'sequence-execution-plan', 'smart-commits', 'xia']);
   assert.ok(config.skills.every(skill => skill.path.endsWith(path.join('/skills', skill.name, 'SKILL.md'))));
   assert.match(config.developerInstructions, /Your skills are also Claude Code skills named alp:<name>: run one with the Skill tool/);
   assert.match(config.developerInstructions, /- xia \([^)]+[\\/]skills[\\/]xia[\\/]SKILL\.md\): Research an unfamiliar implementation/);

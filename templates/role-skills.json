@@ -1,5 +1,5 @@
 {
-  "main": ["goal-griller", "xia", "sequence-execution-plan", "prompt-leverage", "bug-loop", "smart-commits"],
+  "main": ["goal-griller", "xia", "sequence-execution-plan", "prompt-leverage", "bug-loop", "smart-commits", "compact"],
   "lead": ["xia", "sequence-execution-plan", "prompt-leverage", "bug-loop", "smart-commits"],
   "peer": ["xia", "bug-loop", "smart-commits"],
   "oracle": [],
