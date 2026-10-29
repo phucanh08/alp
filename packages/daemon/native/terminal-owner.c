@@ -34,6 +34,9 @@ _Static_assert(sizeof(struct uniqinfo) == 56, "private ABI size");
 #endif
 #define MAX_TRACKED 4096
 #define QUEUE (1024 * 1024)
+#ifndef START_TIMEOUT_MS
+#define START_TIMEOUT_MS 3000
+#endif
 typedef struct {
   pid_t pid;
 #ifdef __APPLE__
@@ -156,7 +159,13 @@ static int capability(void) {
   int statfd=openat(self,"stat",O_RDONLY|O_CLOEXEC); char buf[128]={0};
   ssize_t n=statfd<0?-1:read(statfd,buf,sizeof(buf)-1);
   if(statfd>=0) close(statfd);
-  int namespace_ok=n>0 && strtol(buf,NULL,10)==getpid() && !fstatfs(self,&fs) && fs.f_type==PROC_SUPER_MAGIC && proc_stat(self,&sid,&state) && sid==getsid(0);
+  int ownns=openat(self,"ns/pid",O_RDONLY|O_CLOEXEC);
+  int mountns=open("/proc/1/ns/pid",O_RDONLY|O_CLOEXEC);
+  struct stat a,b;
+  int same_namespace=ownns>=0 && mountns>=0 && !fstat(ownns,&a) && !fstat(mountns,&b) && a.st_dev==b.st_dev && a.st_ino==b.st_ino;
+  if(ownns>=0) close(ownns);
+  if(mountns>=0) close(mountns);
+  int namespace_ok=same_namespace && n>0 && strtol(buf,NULL,10)==getpid() && !fstatfs(self,&fs) && fs.f_type==PROC_SUPER_MAGIC && proc_stat(self,&sid,&state) && sid==getsid(0);
   close(self); if(!namespace_ok) return 0;
   identity id; pid_t saved=root; root=getsid(0);
   int ok=acquire(getpid(), &id, 1); root=saved;
@@ -174,6 +183,28 @@ static void close_extra(void) {
   long n=sysconf(_SC_OPEN_MAX); if(n<0) n=65536;
   for(int i=3;i<n;i++) close(i);
 #endif
+}
+/* Startup failure owns the unreaped root but must never wait indefinitely.
+ * Gate EOF prevents exec. All optional signals still use a verified identity. */
+static int abort_start(int master, int gate) {
+  close(gate);
+  identity id;
+  if(acquire(root,&id,0)) {
+    bound_signal(&id,SIGKILL);
+#ifndef __APPLE__
+    close(id.fd);
+#endif
+  }
+  long long deadline=clock_ms()+250; int reaped=0;
+  do {
+    siginfo_t info={0};
+    if(waitid(P_PID,root,&info,WEXITED|WNOHANG|WNOWAIT)==0 && info.si_pid==root) { waitpid(root,NULL,WNOHANG); reaped=1; break; }
+    usleep(1000);
+  } while(clock_ms()<deadline);
+  held=0; close(master);
+  event("{\"error\":\"native_identity_unavailable\"}\n");
+  char message[160]; snprintf(message,sizeof(message),"{\"cleanup\":true,\"observed\":1,\"live\":0,\"uncertain\":%d}\n",reaped?0:1); event(message);
+  return 78;
 }
 int main(int argc, char **argv) {
   signal(SIGPIPE,SIG_IGN); signal(SIGCHLD,SIG_DFL);
@@ -197,11 +228,14 @@ int main(int argc, char **argv) {
     execv(argv[5],&argv[5]); _exit(127);
   }
   close(gate[0]); close(started[1]); char ready=0;
-  int startok=read(started[0],&ready,1)==1 && ready=='S'; close(started[0]);
+  struct pollfd startup[3]={{started[0],POLLIN,0},{0,0,0},{4,POLLIN,0}};
+  int available=poll(startup,3,START_TIMEOUT_MS);
+  int startok=available>0 && !(startup[1].revents&(POLLHUP|POLLERR)) && !(startup[2].revents&(POLLIN|POLLHUP|POLLERR)) && (startup[0].revents&POLLIN) && read(started[0],&ready,1)==1 && ready=='S';
+  close(started[0]);
   identity first;
-  if(!startok || !acquire(root,&first,1)) { close(gate[1]); waitpid(root,NULL,0); close(master); event("{\"error\":\"native_identity_unavailable\"}\n"); return 78; }
+  if(!startok || !acquire(root,&first,1)) return abort_start(master,gate[1]);
   known[count++]=first;
-  if(write(gate[1],"G",1)!=1) { close(gate[1]); waitpid(root,NULL,0); close(master); return 71; }
+  if(write(gate[1],"G",1)!=1) return abort_start(master,gate[1]);
   close(gate[1]);
   char msg[256]; snprintf(msg,sizeof(msg),"{\"ready\":%d,\"protocol\":1}\n",root); event(msg);
   nonblock(master); nonblock(0); nonblock(1); nonblock(4);
@@ -239,7 +273,7 @@ int main(int argc, char **argv) {
   for(size_t i=0;i<count;i++) { int s=status(&known[i]); if(s==1) live++; else if(s==2) uncertain++; }
   siginfo_t final={0};
   if(waitid(P_PID,root,&final,WEXITED|WNOHANG|WNOWAIT)==0 && final.si_pid==root) {
-    held=0; waitpid(root,NULL,0);
+    held=0; waitpid(root,NULL,WNOHANG);
   } else { /* Never blocking reap of a live/unverifiable root; no adoption after this point. */
     held=0; uncertain++;
   }

@@ -34,10 +34,27 @@ export async function nativePtySpawn(file: string, args: string[], options: { na
   const ready = new Promise<void>((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
   const finished = new Promise<CleanupResult>(resolve => { finish = resolve; });
   let result: CleanupResult | undefined, closing = false;
+  let controlBlocked = false, pendingResize: string | undefined;
+  const resizeCommand = (command: string) => {
+    if (closing || result) return;
+    if (controlBlocked) { pendingResize = command; return; }
+    controlBlocked = !control.write(command);
+  };
+  control.on('drain', () => {
+    controlBlocked = false;
+    const next = pendingResize; pendingResize = undefined;
+    if (next) resizeCommand(next);
+  });
+  const closeOwner = () => {
+    if (closing || result) return;
+    closing = true; pendingResize = undefined;
+    // No queue of resizes can stand ahead of cleanup: closing fd4 wakes native POLLHUP.
+    control.destroy(); child.stdin?.end();
+  };
   const fail = (reason: string) => {
     readyReject(new Error(reason));
     // No bare child PID signaling. Closing owner input/control asks native bound cleanup.
-    child.stdin?.end(); control.end();
+    closeOwner();
   };
   const timer = setTimeout(() => fail('Native terminal startup timed out'), 5000);
   const complete = (value: CleanupResult) => { if (!result) { result = value; finish(value); } };
@@ -72,9 +89,9 @@ export async function nativePtySpawn(file: string, args: string[], options: { na
   return {
     pid,
     write(value: string) { if (closing || result) return; if ((child.stdin?.writableLength ?? 0) + Buffer.byteLength(value) > 1024*1024) { fail('Native input limit exceeded'); return; } child.stdin?.write(value); },
-    resize(cols: number, rows: number) { if (!closing && !result && Number.isInteger(cols) && Number.isInteger(rows)) control.write(`R ${cols} ${rows}\n`); },
-    kill() { if (!closing && !result) { closing = true; control.write('C\n'); } },
-    cleanup() { if (!closing && !result) { closing = true; control.write('C\n'); } return finished; },
+    resize(cols: number, rows: number) { if (Number.isInteger(cols) && Number.isInteger(rows) && cols > 0 && cols <= 1000 && rows > 0 && rows <= 1000) resizeCommand(`R ${cols} ${rows}\n`); },
+    kill() { closeOwner(); },
+    cleanup() { closeOwner(); return finished; },
     onData(listener: Listener<string>) { data.add(listener); if (buffered) { const value = buffered; buffered = ''; queueMicrotask(() => { if (data.has(listener)) listener(value); }); } return { dispose() { data.delete(listener); } }; },
     onExit(listener: Listener<Exit>) { exits.add(listener); if (exit) { const value = exit; queueMicrotask(() => { if (exits.has(listener)) listener(value); }); } return { dispose() { exits.delete(listener); } }; },
   };

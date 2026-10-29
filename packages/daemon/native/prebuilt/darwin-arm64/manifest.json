@@ -1,8 +1,8 @@
 {
   "protocol": 1,
   "slot": "darwin-arm64",
-  "source": "b3ac6f02635fd8d7be745e365198a3921557eb34af0f04f212eae0afe5f9dfc7",
-  "sha256": "63389c470446654bce390ba99f6eede5769b32d30188e01408524d9944d91097",
+  "source": "ee2b04d369452cc19e0eda77f819828e556e47ca17d14fc5612fe0a7902f0050",
+  "sha256": "455c4ea8fd5e172f5d2da916d05fb6aef947023ac5b2e7c61e51c880448fb1cc",
   "buildHost": "v24.22.1",
   "executionChecked": true
 }
