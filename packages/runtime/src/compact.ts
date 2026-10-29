@@ -9,7 +9,11 @@ export interface CompactSettings { auto: boolean; threshold: number }
 
 export const COMPACT_DEFAULTS: CompactSettings = Object.freeze({ auto: true, threshold: 0.7 });
 
-/** settings.json `compact`: { auto?: boolean, threshold?: number in (0, 1) }; anything else keeps the default. */
+/**
+ * settings.json `compact`: { auto?: boolean, threshold?: number in (0, 1) }; anything else keeps the default.
+ * The threshold is a share of the window main works in: the agent's autocompact or context setting when
+ * set, else the model's context window, as the context advisory measures it.
+ */
 export function compactSettings(raw: unknown): CompactSettings {
   const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   const auto = typeof value.auto === 'boolean' ? value.auto : COMPACT_DEFAULTS.auto;

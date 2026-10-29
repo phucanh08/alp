@@ -120,6 +120,7 @@ const CONTEXT_RESET = 0.5;
 /** After a failed compaction, how long the automatic one waits before it tries again (t-0e56). */
 const COMPACT_RETRY_MS = 10 * 60_000;
 const MAIL_WAITS = 'Mail waits for the session';
+const REVIEWING = 'The supervisor is reviewing the session';
 /** How long a runtime may take to report the compaction it was asked for (t-0e56). */
 const COMPACT_NATIVE_MS = 5 * 60_000;
 
@@ -1605,6 +1606,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       const written = [...session.text.values()].at(-1)?.trim();
       if (ended !== 'completed' || !written) { compactFailed(sessionId, session, ended !== 'completed' ? `the checkpoint turn ${ended}` : 'main wrote no checkpoint'); return; }
       current.checkpoint = written;
+      // A hold that outlasts this (a question, a park) fails it, so the user's held words go on.
+      const timer = setTimeout(() => { if (session.compacting === current && current.phase === 'checkpoint') compactFailed(sessionId, session, 'main stayed busy after its checkpoint'); }, COMPACT_NATIVE_MS);
+      timer.unref?.();
     }
     // The compaction turn ended without the runtime reporting a compaction.
     if (ended && current?.phase === 'native' && current.requested) { compactFailed(sessionId, session, 'the runtime reported no compaction'); return; }
@@ -1659,9 +1663,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const work = queue.then(async () => {
       if (session.compacting !== current || session.closed) return;
       // A fresh conversation drops the old one: only when nothing runs that it would lose.
-      // Held mail is no reason to wait: it reaches the new conversation after the seed.
+      // Held mail is no reason to wait: it reaches the new conversation after the seed; nor is the
+      // supervisor's review, which reads main's journal, not its native conversation.
       const refusal = restartRefusal(sessionId, session);
-      if (refusal && refusal !== MAIL_WAITS) { compactFailed(sessionId, session, `a fresh conversation cannot start now: ${refusal}`); return; }
+      if (refusal && refusal !== MAIL_WAITS && refusal !== REVIEWING) { compactFailed(sessionId, session, `a fresh conversation cannot start now: ${refusal}`); return; }
       await restartNative(sessionId, session, undefined);
       emit(sessionId, { type: 'session.updated', session: snapshot(sessionId, session) });
       await startPrompt(sessionId, { clientMessageId: `alp-wake-compact-${randomUUID()}`, delivery: 'auto', content: [{ type: 'text', text: seedPrompt(checkpoint, session.lastUserText) }] }, 'wake');
@@ -3685,7 +3690,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     // Mail a lifecycle hold keeps waits for its release, then reaches the session's new conversation.
     if ((hasActiveMail(session) || session.wakeHeld) && !session.lifecycleHolds) return MAIL_WAITS;
     if (session.parked || session.parkReason) return 'The session is parked';
-    if (reviewing(session)) return 'The supervisor is reviewing the session';
+    if (reviewing(session)) return REVIEWING;
     return undefined;
   }
 
