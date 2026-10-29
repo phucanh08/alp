@@ -5851,6 +5851,43 @@
    }
   },
   {
+   "name": "session.compact params",
+   "check": "params",
+   "method": "session.compact",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_1"
+   }
+  },
+  {
+   "name": "session.compact params with an extra field",
+   "check": "params",
+   "method": "session.compact",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "threshold": 0.5
+   }
+  },
+  {
+   "name": "session.compact result",
+   "check": "result",
+   "method": "session.compact",
+   "valid": true,
+   "value": {
+    "status": "deferred"
+   }
+  },
+  {
+   "name": "session.compact result of an unknown status",
+   "check": "result",
+   "method": "session.compact",
+   "valid": false,
+   "value": {
+    "status": "done"
+   }
+  },
+  {
    "name": "session.reload params",
    "check": "params",
    "method": "session.reload",

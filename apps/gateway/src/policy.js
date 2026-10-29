@@ -702,6 +702,7 @@ export const EXPOSURE = Object.freeze({
   'daemon.pause': { status: 'denied', scope: 'host', reason: 'host.admin' },
   'daemon.resume': { status: 'denied', scope: 'host', reason: 'host.admin' },
   'daemon.pauses': { status: 'denied', scope: 'host', reason: 'host.admin' },
+  'session.compact': { status: 'prohibited', scope: 'session', reason: 'Compacting main is a local CLI operation (alp compact) for now; remote clients may get it later.' },
   'daemon.shutdown': { status: 'prohibited', scope: 'host', reason: 'Stops alpd.' },
   'extension.register': { status: 'prohibited', scope: 'host', reason: 'Would let a remote client serve methods every local client calls.' },
   'extension.unregister': { status: 'prohibited', scope: 'host', reason: 'Extension methods are never remote.' },
