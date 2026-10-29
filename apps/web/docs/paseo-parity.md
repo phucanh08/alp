@@ -356,8 +356,9 @@ may survive terminal close, access revocation or shutdown. Continue/Cancel prece
 shell launch; a restored attachment warns independently. Full native-supported
 Linux/macOS keeps identity-bound cleanup. Missing/corrupt helpers and policy denials
 do not silently downgrade. Current Paseo protocol has no acknowledgment field: its
-bridge surfaces the warning and refuses degraded use, pending g6 consumer decision.
-This is not an accepted complete Paseo fallback.
+bridge surfaces the warning and refuses degraded use. User g6 accepted this temporary
+consumer limit on 2026-10-29; native-supported Paseo is unchanged. Other verification
+requirements below remain mandatory.
 
 Required platform gaps remain: four Linux glibc/musl x64/arm64 prebuilts, actual Linux
 process/namespace/permission/race tests, Linux and Windows browser keyboard behavior,

@@ -1429,7 +1429,8 @@ specific protection limit; it never supplies `terminal.exec`, host opt-in or wor
 Clients must not acknowledge automatically on retry, reconnect, or behalf of a user.
 ALP Web offers Continue/Cancel before launch and warns again in a fresh restored tab. Current
 Paseo messages cannot convey acknowledgment: the bridge surfaces the warning and refuses degraded
-creation/attachment. A consumer decision is pending (g6); this is not complete Paseo fallback.
+creation/attachment. User g6 accepted this temporary consumer limit on 2026-10-29;
+native-supported Paseo is unchanged. Platform/matrix/native-execution requirements remain.
 
 **Ending a terminal** sends `SIGHUP`, then after 1 s `SIGKILL` to retained authorized identities.
 In Linux compatibility mode the only explicit signal target is the owner's direct unreaped child.
