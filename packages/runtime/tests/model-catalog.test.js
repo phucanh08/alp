@@ -2,7 +2,7 @@
 // and that every in-process consumer (models, thinkingOptionsFor) reads the live rows. Mocked providers.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MODELS, catalogModels } from '@anhlp/alp-core/models';
@@ -109,6 +109,43 @@ test('each turn\'s orchestration context feeds the active catalog', async t => {
   assert.ok(models.some(model => model.id === 'codex:gpt-turn-new'));
   // The same list again changes nothing.
   assert.equal(await catalog.ingest('codex', liveFromContext(context).models), false);
+});
+
+test('a turn\'s list only adds models: it never narrows or reshapes what a probe answered', async t => {
+  reset(t);
+  const catalog = new ModelCatalog({ apply: false, probes: { codex: async () => codexLive } });
+  await catalog.refresh();
+  const before = catalog.state().providers.codex.models;
+  assert.equal(await catalog.ingest('codex', [{ id: 'gpt-6.1-terra', label: 'Other' }]), false);
+  assert.deepEqual(catalog.state().providers.codex.models, before);
+  assert.equal(catalog.entries().find(entry => entry.id === 'gpt-6.1-terra').effort, 'medium');
+  assert.equal(await catalog.ingest('codex', [{ id: 'gpt-7' }]), true);
+  assert.deepEqual(catalog.state().providers.codex.models.map(model => model.id), [...codexLive.map(model => model.id), 'gpt-7']);
+});
+
+test('a corrupt cache never stops the catalog: static rows serve and the next refresh works', async t => {
+  reset(t);
+  const directory = await home(t);
+  await mkdir(path.join(directory, 'cache'), { recursive: true });
+  for (const body of ['{not json', JSON.stringify({ providers: { codex: { status: 'ok', models: { a: 1 } }, claude: { models: [{ id: 5 }, { id: 'x', label: { a: 1 }, efforts: 'low' }] }, bogus: { models: [] } } })]) {
+    await writeFile(path.join(directory, 'cache', 'models.json'), body);
+    const catalog = new ModelCatalog({ home: directory, apply: false, probes: { codex: async () => codexLive } });
+    await catalog.load();
+    assert.ok(catalog.entries().some(entry => entry.id === 'gpt-6.1-sol'));
+    const claudeX = catalog.entries().find(entry => entry.runtime === 'claude' && entry.id === 'x');
+    if (claudeX) assert.equal(claudeX.label, 'x');
+    await catalog.refresh();
+    assert.ok(catalog.entries().some(entry => entry.id === 'gpt-6.1-terra'));
+  }
+});
+
+test('a probe past its bound is aborted', async t => {
+  reset(t);
+  let aborted = false;
+  const catalog = new ModelCatalog({ apply: false, timeoutMs: 30, probes: { claude: signal => new Promise(() => { signal.addEventListener('abort', () => { aborted = true; }); }) } });
+  await catalog.refresh();
+  assert.equal(aborted, true);
+  assert.equal(catalog.state().providers.claude.status, 'failed');
 });
 
 test('agy models output parses id<TAB>label lines', () => {

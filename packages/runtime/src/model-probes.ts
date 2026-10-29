@@ -31,7 +31,7 @@ export function codexProbe(command = process.env.ALP_CODEX_BIN ?? 'codex', env: 
 }
 
 export function claudeProbe(command = process.env.ALP_CLAUDE_BIN ?? 'claude', env: NodeJS.ProcessEnv = process.env): Probe {
-  return async () => new ClaudeTransport(command, os.tmpdir(), env).probeModels();
+  return async signal => new ClaudeTransport(command, os.tmpdir(), env).probeModels(signal);
 }
 
 /** `agy models` prints one model per line, `id<TAB>label`. */
@@ -39,14 +39,15 @@ export function parseAgyModels(stdout: string): LiveModel[] {
   return stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
     const [id, label] = line.split('\t').map(part => part.trim());
     return { id, label: label || id };
-  }).filter(model => model.id && /^[\w.:\-\[\]/]+$/.test(model.id));
+  }).filter(model => model.id && /^[A-Za-z0-9][\w.:\-\[\]/]*$/.test(model.id));
 }
 
 export function antigravityProbe(command = process.env.ALP_ANTIGRAVITY_BIN ?? 'agy', env: NodeJS.ProcessEnv = process.env): Probe {
   return signal => new Promise((resolve, reject) => {
-    const child = spawn(command, ['models'], { cwd: os.tmpdir(), env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, signal });
+    const child = spawn(command, ['models'], { cwd: os.tmpdir(), env, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, signal });
     let stdout = '';
-    child.stdout.on('data', chunk => { stdout += chunk; });
+    // A model list is small; more than this is not one.
+    child.stdout.on('data', chunk => { stdout += chunk; if (stdout.length > 256 * 1024) child.kill('SIGKILL'); });
     child.on('error', reject);
     child.on('close', code => code === 0 ? resolve(parseAgyModels(stdout)) : reject(new Error(`${command} models exited with ${code}`)));
   });

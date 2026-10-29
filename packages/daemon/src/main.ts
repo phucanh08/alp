@@ -220,7 +220,7 @@ async function run(home: string) {
       const force = setTimeout(() => process.exit(code), 10_000);
       force.unref();
       clearInterval(beat);
-      modelCatalog.stop();
+      modelCatalog?.stop();
       await server.close().catch(() => {});
       await runtime.shutdown().catch(() => {});
       await store.flush();
@@ -237,9 +237,9 @@ async function run(home: string) {
   for (const problem of attachmentConfig.problems) log.warn(problem, { code: 'ALP_ATTACHMENT_CONFIG' });
   // The live model catalog (t-e5ee): static rows at once, provider lists in the background, every 6 h.
   // ALP_MODEL_CATALOG=static keeps the static rows only (tests, offline hosts).
-  const modelCatalog = new ModelCatalog({ home, probes: process.env.ALP_MODEL_CATALOG === 'static' ? {} : liveProbes() });
+  const modelCatalog = process.env.ALP_MODEL_CATALOG === 'static' ? undefined : new ModelCatalog({ home, probes: liveProbes() });
   setActiveCatalog(modelCatalog);
-  void modelCatalog.start().catch(() => {});
+  void modelCatalog?.start().catch(() => {});
   const server = createDaemonServer({ runtime, socketPath: socket, version: VERSION, store, runLogDir, previousExit: exit, home, templates, attachmentOptions: { limits: attachmentConfig.limits }, modelCatalog, onShutdown: () => void shutdown() });
   const beat = setInterval(() => {
     void heartbeat(home).then(owned => { if (!owned) void shutdown(1); });

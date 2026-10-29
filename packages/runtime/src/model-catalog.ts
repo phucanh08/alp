@@ -34,6 +34,29 @@ const bounded = <T>(work: (signal: AbortSignal) => Promise<T>, ms: number) => {
   ]).finally(() => clearTimeout(timer));
 };
 
+const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : undefined;
+/** Only well-formed rows: a string id, string label/description/effort, string efforts. */
+export function sanitizeModels(value: unknown): LiveModel[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(model => model && typeof model === 'object' && typeof model.id === 'string' && model.id.trim()).map(model => ({
+    id: model.id,
+    ...(typeof model.label === 'string' ? { label: model.label } : {}),
+    ...(typeof model.description === 'string' ? { description: model.description } : {}),
+    ...(strings(model.efforts) ? { efforts: strings(model.efforts) } : {}),
+    ...(typeof model.effort === 'string' ? { effort: model.effort } : {}),
+  }));
+}
+/** A cache file read back: known runtimes only, each with a list of well-formed rows. */
+function sanitize(value: any): CatalogSnapshot {
+  const providers: CatalogSnapshot['providers'] = {};
+  for (const runtime of RUNTIMES) {
+    const state = value?.providers?.[runtime];
+    if (!state || typeof state !== 'object') continue;
+    providers[runtime] = { status: state.status === 'ok' ? 'ok' : 'failed', ...(typeof state.fetchedAt === 'string' ? { fetchedAt: state.fetchedAt } : {}), models: sanitizeModels(state.models) };
+  }
+  return { ...(typeof value?.fetchedAt === 'string' ? { fetchedAt: value.fetchedAt } : {}), providers };
+}
+
 type Listener = (snapshot: CatalogSnapshot, entries: CatalogEntry[]) => void;
 
 export class ModelCatalog {
@@ -64,18 +87,18 @@ export class ModelCatalog {
   async load() {
     if (!this.file) return;
     try {
-      const cached = JSON.parse(await readFile(this.file, 'utf8')) as CatalogSnapshot;
-      if (cached && typeof cached === 'object' && cached.providers && typeof cached.providers === 'object') { this.snapshot = cached; this.publish(false); }
-    } catch { /* no cache or unreadable: static rows serve */ }
+      this.snapshot = sanitize(JSON.parse(await readFile(this.file, 'utf8')));
+      await this.publish(false);
+    } catch { this.snapshot = { providers: {} }; /* no cache, or unreadable: static rows serve */ }
   }
 
-  /** Asks every provider (or the named ones) at once; each answer is bounded, and a failure keeps that provider's previous list. */
+  /** Asks every provider (or the named ones; a refresh already running answers instead) at once; each answer is bounded, and a failure keeps that provider's previous list. */
   refresh(runtimes: CatalogRuntime[] = RUNTIMES): Promise<CatalogSnapshot> {
     if (this.running) return this.running;
     this.running = (async () => {
       const now = () => (this.options.now?.() ?? new Date()).toISOString();
       const results = await Promise.all(runtimes.filter(runtime => this.options.probes[runtime]).map(async runtime => {
-        try { return [runtime, { status: 'ok', fetchedAt: now(), models: await bounded(this.options.probes[runtime]!, this.options.timeoutMs ?? PROBE_TIMEOUT_MS) }] as const; }
+        try { return [runtime, { status: 'ok', fetchedAt: now(), models: sanitizeModels(await bounded(this.options.probes[runtime]!, this.options.timeoutMs ?? PROBE_TIMEOUT_MS)) }] as const; }
         catch (error) {
           const prior = this.snapshot.providers[runtime];
           return [runtime, { status: 'failed', fetchedAt: prior?.fetchedAt, error: error instanceof Error ? error.message : String(error), models: prior?.models ?? [] }] as const;
@@ -93,12 +116,17 @@ export class ModelCatalog {
     return this.running;
   }
 
-  /** A list a session reported on its own (each turn's orchestration context): merged when it differs. */
+  /**
+   * A list a session reported on its own (each turn's orchestration context). Additive: it only adds
+   * models the catalog does not list yet, after the ones it has, so it never narrows or reshapes what a
+   * probe answered; a list with nothing new changes nothing.
+   */
   async ingest(runtime: CatalogRuntime, models: LiveModel[]) {
-    if (!models.length) return false;
     const prior = this.snapshot.providers[runtime];
-    if (prior?.status === 'ok' && JSON.stringify(prior.models) === JSON.stringify(models)) return false;
-    this.snapshot.providers[runtime] = { status: 'ok', fetchedAt: (this.options.now?.() ?? new Date()).toISOString(), models };
+    const known = new Set((prior?.models ?? []).map(model => model.id));
+    const added = sanitizeModels(models).filter(model => !known.has(model.id));
+    if (!added.length) return false;
+    this.snapshot.providers[runtime] = { ...(prior ?? { status: 'ok' }), status: prior?.status ?? 'ok', fetchedAt: prior?.fetchedAt ?? (this.options.now?.() ?? new Date()).toISOString(), models: [...(prior?.models ?? []), ...added] };
     await this.publish(true);
     return true;
   }
