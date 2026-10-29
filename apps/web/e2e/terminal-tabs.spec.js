@@ -125,7 +125,7 @@ test('independent terminal tabs survive settings, search, links, workspace switc
   await page.getByTestId('project-row').filter({ hasText: 'shop' }).click();
   await expect(panel(page)).toHaveAttribute('data-terminal-key', firstKey);
   await expect(rows(page)).toContainText('WORKSPACE-169');
-  expect((await list()).filter(t => t.state === 'running').map(t => t.terminalId).sort()).toEqual(originalIds);
+  await expect.poll(async () => (await list()).filter(t => t.state === 'running').map(t => t.terminalId).sort()).toEqual(originalIds);
 
   // Reload reattaches both tabs; the selected key and app preferences persist.
   await page.getByRole('tab', { name: 'Shell 2', exact: true }).click();
@@ -136,7 +136,7 @@ test('independent terminal tabs survive settings, search, links, workspace switc
   await expect(page.getByLabel('Terminal font', { exact: true })).toHaveValue('consolas');
   await expect(page.getByLabel('Terminal font size', { exact: true })).toHaveValue('16');
   await expect(page.getByLabel('Terminal theme', { exact: true })).toHaveValue('light');
-  expect((await list()).filter(t => t.state === 'running').map(t => t.terminalId).sort()).toEqual(originalIds);
+  await expect.poll(async () => (await list()).filter(t => t.state === 'running').map(t => t.terminalId).sort()).toEqual(originalIds);
   await world.restartGateway();
   await expect(panel(page)).toHaveAttribute('data-status', 'running', { timeout: 30_000 });
   await line(page, 'echo RECONNECTED-$((15*15))');

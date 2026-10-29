@@ -80,3 +80,27 @@ test('isolated shipped adapter runs with no compiler PATH and rejects a corrupte
   const value = JSON.parse(await readFile(manifest, 'utf8')); value.sha256 = '0'.repeat(64); await writeFile(manifest, JSON.stringify(value));
   assert.match(await run("import {nativeTerminalCapability} from './owner.mjs'; console.log(JSON.stringify(nativeTerminalCapability()));"), /"available":false/);
 });
+test('post-ready adapter output overflow cannot be overwritten by a clean native completion', { skip }, async () => {
+  const childProcess = (await import('node:child_process')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { EventEmitter } = await import('node:events');
+  const { PassThrough } = await import('node:stream');
+  const { nativePtySpawn } = await import('../dist/native-terminal.js');
+  const fake = new EventEmitter();
+  fake.stdin = new PassThrough(); fake.stdout = new PassThrough(); fake.stderr = new PassThrough();
+  fake.stdio = [fake.stdin, fake.stdout, fake.stderr, new PassThrough(), new PassThrough()];
+  const original = childProcess.spawn;
+  childProcess.spawn = () => { queueMicrotask(() => fake.stdio[3].write('{"ready":80000,"protocol":1}\n')); return fake; };
+  syncBuiltinESMExports();
+  let pty;
+  try { pty = await nativePtySpawn('/bin/sh', [], { cwd: tmpdir(), env: {}, name: 'xterm', cols: 80, rows: 24 }); }
+  finally { childProcess.spawn = original; syncBuiltinESMExports(); }
+  // The real production window: owner ready, async host config check, no output listener yet.
+  fake.stdout.write('a'.repeat(1024 * 1024)); fake.stdout.write('LOST');
+  let delivered = 0; pty.onData(value => { delivered += Buffer.byteLength(value); });
+  fake.stdio[3].write('{"exitCode":0,"signal":0}\n{"cleanup":true,"observed":1,"live":0,"uncertain":0}\n');
+  fake.emit('close', 0);
+  const result = await pty.cleanup();
+  assert.equal(delivered, 1024 * 1024, 'bounded startup buffer is retained');
+  assert.ok(result.uncertain > 0, 'adapter loss must survive a subsequent clean native record');
+});
