@@ -71,3 +71,28 @@ test('uncertain native cleanup is a refusal and disables new terminal admission'
   assert.equal(await f.service.advertised(), undefined);
   f.expectCleanupFailure();
 });
+test('a second concurrent revoke awaits already-cancelled startup without double counting', async t => {
+  const f = await fixture(t);
+  const first = f.service.create(owner, params('twice'));
+  const rejected = assert.rejects(first, e => e.data?.reason === 'terminal_revoked');
+  await f.started();
+  const a = f.service.revoke(owner.id);
+  let secondDone = false;
+  const b = f.service.revoke(owner.id).then(result => { secondDone = true; return result; });
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(secondDone, false, 'every revoke must await the pending native owner');
+  f.release(); await rejected;
+  assert.equal((await a).closed, 1); assert.equal((await b).closed, 0);
+  assert.equal(f.made[0].cleanups, 1);
+});
+test('both concurrent revokes refuse if their shared pending cleanup becomes uncertain', async t => {
+  const f = await fixture(t);
+  const first = f.service.create(owner, params('twice-uncertain'));
+  const rejected = assert.rejects(first, e => e.data?.reason === 'terminal_cleanup_uncertain');
+  await f.started();
+  f.made[0].cleanup = async () => ({ observed: 1, live: 1, uncertain: 0 });
+  const a = assert.rejects(f.service.revoke(owner.id), e => e.data?.reason === 'terminal_cleanup_uncertain');
+  const b = assert.rejects(f.service.revoke(owner.id), e => e.data?.reason === 'terminal_cleanup_uncertain');
+  f.release(); await Promise.all([rejected, a, b]);
+  f.expectCleanupFailure();
+});
