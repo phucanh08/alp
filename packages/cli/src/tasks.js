@@ -7,7 +7,7 @@ import { findFormula, formulaDirs, listFormulas, pourFormula } from '@anhlp/alp-
 import { describeVerification } from '@anhlp/alp-core/verify';
 import { ago } from '@anhlp/alp-client/render';
 import { parse as toml } from 'smol-toml';
-import { addGate, blockersOf, checkGates, childrenOf, closeTask, compactTasks, createTask, describeGate, gateOpen, epicReport, gatesOf, linkTask, listTasks, loadTasks, readyTasks, reopenTask, resolveGate, summarize, TASKS_DIR, updateTask } from '@anhlp/alp-core/tasks';
+import { addGate, blockersOf, checkGates, childrenOf, closeTask, compactTasks, createTask, describeGate, gateOpen, epicReport, gatesOf, linkTask, listTasks, loadTasks, readyTasks, rejectGate, reopenTask, resolveGate, summarize, TASKS_DIR, updateTask } from '@anhlp/alp-core/tasks';
 import { alpHome } from '@anhlp/alp-client/index';
 import { UsageError } from './usage.js';
 
@@ -182,7 +182,7 @@ async function taskCommand([action, ...args]) {
     description: { type: 'string', short: 'd' }, priority: { type: 'string', short: 'p' }, type: { type: 'string', short: 't' },
     label: { ...repeated, short: 'l' }, path: repeated, parent: { type: 'string' }, after: repeated, related: repeated, from: { type: 'string' },
     title: { type: 'string' }, message: { type: 'string', short: 'm' }, reason: { type: 'string' }, unverified: { type: 'string' }, project: { type: 'string' }, json: { type: 'boolean' },
-    human: { type: 'string' }, timer: { type: 'string' }, pr: { type: 'string' }, run: { type: 'string' },
+    human: { type: 'string' }, timer: { type: 'string' }, pr: { type: 'string' }, run: { type: 'string' }, option: repeated, choice: { type: 'string' },
   } });
   const root = await taskProject(values.project);
   const fields = {
@@ -232,9 +232,15 @@ async function taskCommand([action, ...args]) {
     const kinds = ['human', 'timer', 'pr', 'run'].filter(kind => values[kind] !== undefined);
     if (change === 'add' && id && !gate && kinds.length === 1) {
       const kind = kinds[0];
-      task = await addGate(root, id, kind === 'human' ? { kind, note: values.human } : kind === 'timer' ? { kind, until: values.timer } : { kind: `gh:${kind}`, ref: values[kind] }, 'user');
-    } else if ((change === 'clear' || change === 'rm') && id && gate && !rest.length && !kinds.length) {
-      task = await resolveGate(root, id, gate, { by: 'user', note: values.message, remove: change === 'rm' });
+      if (values.option && kind !== 'human') throw new UsageError();
+      task = await addGate(root, id, kind === 'human' ? { kind, note: values.human, ...(values.option ? { options: values.option } : {}) } : kind === 'timer' ? { kind, until: values.timer } : { kind: `gh:${kind}`, ref: values[kind] }, 'user');
+    } else if (change === 'clear' && id && gate && !rest.length && !kinds.length && !values.option) {
+      // A decision made here reaches main as mail, as one made in Paseo or ALP web does.
+      task = await resolveGate(root, id, gate, { by: 'user', note: values.message, channel: 'cli', ...(values.choice !== undefined ? { choice: values.choice } : {}) });
+    } else if (change === 'reject' && id && gate && !rest.length && !kinds.length && !values.option && values.choice === undefined) {
+      task = await rejectGate(root, id, gate, { by: 'user', reason: values.message, channel: 'cli' });
+    } else if (change === 'rm' && id && gate && !rest.length && !kinds.length && !values.option && values.choice === undefined) {
+      task = await resolveGate(root, id, gate, { by: 'user', note: values.message, remove: true });
     } else {
       throw new UsageError();
     }
@@ -261,7 +267,7 @@ function printTask(task, tasks) {
     task.related.length && `related ${task.related.join(', ')}`,
   ].filter(Boolean);
   if (relations.length) console.log(`  ${relations.join('; ')}`);
-  for (const gate of task.gates) console.log(`  ${gateOpen(gate) ? '⏸' : '✓'} gate ${describeGate(gate)}${gate.resolved ? ` (cleared by ${gate.resolved.by}${gate.resolved.note ? `: ${gate.resolved.note}` : ''})` : ''}`);
+  for (const gate of task.gates) console.log(`  ${gateOpen(gate) ? '⏸' : '✓'} gate ${describeGate(gate)}${gate.resolved ? ` (cleared by ${gate.resolved.by}${gate.resolved.choice ? ` with "${gate.resolved.choice}"` : ''}${gate.resolved.channel ? ` in ${gate.resolved.channel}` : ''}${gate.resolved.note ? `: ${gate.resolved.note}` : ''})` : gate.rejected ? ` (rejected by ${gate.rejected.by}${gate.rejected.reason ? `: ${gate.rejected.reason}` : ''})` : ''}${gateOpen(gate) && gate.options ? ` options: ${gate.options.join(' | ')}` : ''}`);
   const inherited = gatesOf(task, tasks).filter(label => label.startsWith('t-'));
   if (task.status !== 'closed' && inherited.length) console.log(`  waits on its parent's gates: ${inherited.join('; ')}`);
   if (task.compacted) console.log(`  compacted ${task.compacted.at.slice(0, 10)} from ${task.compacted.chars} characters`);

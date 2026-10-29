@@ -681,7 +681,7 @@ const GH_REF = /^(?:([\w.-]+\/[\w.-]+)#)?(\d+)$/;
  * timer (until a time: ISO, or +30m, +2h, +3d), gh:pr (a pull request is merged)
  * or gh:run (a workflow run succeeds); refs are 123 or owner/repo#123.
  */
-export function addGate(projectRoot, id, { kind, note, until, ref } = {}, by) {
+export function addGate(projectRoot, id, { kind, note, until, ref, options } = {}, by) {
   return mutate(projectRoot, id, task => {
     if (!GATE_KINDS.includes(kind)) fail('INVALID_TASK', `kind must be one of ${GATE_KINDS.join(', ')}`);
     if (task.status === 'closed') fail('INVALID_TASK', `${id} is closed`);
@@ -689,6 +689,11 @@ export function addGate(projectRoot, id, { kind, note, until, ref } = {}, by) {
     const gate = { id: `g${Math.max(0, ...(task.gates ?? []).map(entry => Number(entry.id.slice(1)) || 0)) + 1}`, kind };
     if (kind === 'human') gate.note = checkText(note, 'note', NOTE_CHARS, { required: true });
     else if (note !== undefined) gate.note = checkText(note, 'note', NOTE_CHARS);
+    if (options !== undefined) {
+      if (kind !== 'human') fail('INVALID_TASK', 'Only a human gate has options');
+      const choices = gateOptions(options);
+      if (choices.length) gate.options = choices;
+    }
     if (kind === 'timer') {
       const relative = typeof until === 'string' ? DURATION.exec(until.trim()) : null;
       const time = relative ? Date.now() + Number(relative[1]) * { m: 60_000, h: 3_600_000, d: 86_400_000 }[relative[2]] : Date.parse(until);
@@ -708,8 +713,28 @@ export function addGate(projectRoot, id, { kind, note, until, ref } = {}, by) {
   });
 }
 
-/** Clears a gate by hand, or removes it with `remove`. Only the user clears a human gate; the caller enforces who `by` is. */
-export function resolveGate(projectRoot, id, gateId, { by, note, remove = false, ifRev } = {}) {
+export const GATE_OPTIONS = 10;
+export const GATE_OPTION_CHARS = 200;
+export const GATE_CHANNELS = ['paseo', 'web', 'cli'];
+
+/** The answers a human gate offers its approver: at most 10 distinct, nonempty, each at most 200 characters. */
+function gateOptions(value) {
+  if (!Array.isArray(value) || value.length > GATE_OPTIONS || !value.every(item => typeof item === 'string' && !!item.trim() && item.trim().length <= GATE_OPTION_CHARS)) {
+    fail('INVALID_TASK', `options must list at most ${GATE_OPTIONS} nonempty answers of at most ${GATE_OPTION_CHARS} characters`);
+  }
+  return [...new Set(value.map(item => item.trim()))];
+}
+
+const checkChannel = channel => {
+  if (channel !== undefined && !GATE_CHANNELS.includes(channel)) fail('INVALID_TASK', `channel must be one of ${GATE_CHANNELS.join(', ')}`);
+  return channel;
+};
+
+/**
+ * Clears a gate by hand, or removes it with `remove`. Only the user clears a human gate; the caller enforces who `by` is.
+ * `choice` records which of a human gate's options the user picked; `channel` (paseo, web or cli) where they decided.
+ */
+export function resolveGate(projectRoot, id, gateId, { by, note, remove = false, ifRev, choice, channel } = {}) {
   return mutate(projectRoot, id, task => {
     const gate = (task.gates ?? []).find(entry => entry.id === gateId) ?? fail('INVALID_TASK', `${id} has no gate ${gateId}`);
     if (remove) {
@@ -719,17 +744,73 @@ export function resolveGate(projectRoot, id, gateId, { by, note, remove = false,
     }
     if (!gateOpen(gate)) fail('INVALID_TASK', `Gate ${gateId} of ${id} is already clear`);
     const text = checkText(note, 'note', NOTE_CHARS);
-    task.gates = task.gates.map(entry => entry === gate ? { ...entry, resolved: { at: now(), by, ...(text ? { note: text } : {}) } } : entry);
-    addLog(task, by, 'gate cleared', { gate: describeGate(gate), ...(text ? { note: text } : {}) });
+    checkChannel(channel);
+    if (choice !== undefined) {
+      if (gate.kind !== 'human') fail('INVALID_TASK', 'Only a human gate takes a choice');
+      if (typeof choice !== 'string' || !choice.trim() || (gate.options ? !gate.options.includes(choice.trim()) : choice.trim().length > GATE_OPTION_CHARS)) {
+        fail('INVALID_TASK', gate.options ? `choice must be one of: ${gate.options.join(', ')}` : `choice must be nonempty text of at most ${GATE_OPTION_CHARS} characters`);
+      }
+    }
+    const picked = choice?.trim();
+    task.gates = task.gates.map(entry => entry === gate ? { ...entry, resolved: { at: now(), by, ...(text ? { note: text } : {}), ...(picked ? { choice: picked } : {}), ...(channel ? { channel } : {}) } } : entry);
+    addLog(task, by, 'gate cleared', { gate: describeGate(gate), ...(picked ? { choice: picked } : {}), ...(channel ? { channel } : {}), ...(text ? { note: text } : {}) });
     // A formula's human step is the user's to do: approving its gate completes it.
     if (task.step?.human && task.status !== 'closed' && !task.gates.some(entry => gateOpen(entry))) {
-      const summary = `Approved by ${by}${text ? `: ${text}` : ''}`;
+      const summary = `Approved by ${by}${picked ? ` (${picked})` : ''}${text ? `: ${text}` : ''}`;
       task.status = 'closed';
       task.assignee = null;
       task.closed = { at: now(), by, reason: 'done', summary };
       addLog(task, by, 'closed', { reason: 'done', summary });
     }
   }, { ifRev });
+}
+
+/**
+ * The user rejects an open human gate: it stays open, and the decision is recorded on the gate
+ * (the latest one) and in the task's log. Rejecting again replaces the earlier decision.
+ */
+export function rejectGate(projectRoot, id, gateId, { by, reason, ifRev, channel } = {}) {
+  return mutate(projectRoot, id, task => {
+    const gate = (task.gates ?? []).find(entry => entry.id === gateId) ?? fail('INVALID_TASK', `${id} has no gate ${gateId}`);
+    if (gate.kind !== 'human') fail('INVALID_TASK', 'Only a human gate is rejected; remove another gate instead');
+    if (!gateOpen(gate)) fail('INVALID_TASK', `Gate ${gateId} of ${id} is already clear`);
+    const text = checkText(reason, 'reason', NOTE_CHARS);
+    checkChannel(channel);
+    task.gates = task.gates.map(entry => entry === gate ? { ...entry, rejected: { at: now(), by, ...(text ? { reason: text } : {}), ...(channel ? { channel } : {}) } } : entry);
+    addLog(task, by, 'gate rejected', { gate: describeGate(gate), ...(channel ? { channel } : {}), ...(text ? { note: text } : {}) });
+  }, { ifRev });
+}
+
+/**
+ * A user's decision on a human gate that main has not been told of yet: a clear or rejection made
+ * with a channel, without `notified`. Older records, without a channel, are never reported.
+ */
+export function gateDecisions(tasks) {
+  const found = [];
+  for (const task of tasks) for (const gate of task.gates ?? []) {
+    if (gate.kind !== 'human') continue;
+    if (gate.resolved?.channel && !gate.resolved.notified) found.push({ task, gate, decision: 'approved', record: gate.resolved });
+    else if (!gate.resolved && gate.rejected?.channel && !gate.rejected.notified) found.push({ task, gate, decision: 'rejected', record: gate.rejected });
+  }
+  return found;
+}
+
+/**
+ * Marks a decision reported, under the lock, and returns whether this call marked it: the one
+ * caller that gets true tells main, so card, panel and CLI never report one decision twice.
+ * Marking does not change the task's rev, so an open card's ifRev stays valid.
+ */
+export function markGateNotified(projectRoot, id, gateId, decision) {
+  return locked(projectRoot, async () => {
+    const { tasks } = await loadTasks(projectRoot);
+    const task = tasks.find(entry => entry.id === id);
+    const gate = task?.gates?.find(entry => entry.id === gateId);
+    const record = decision === 'approved' ? gate?.resolved : gate?.rejected;
+    if (!task || !record?.channel || record.notified) return false;
+    record.notified = now();
+    await save(projectRoot, task);
+    return true;
+  });
 }
 
 /**

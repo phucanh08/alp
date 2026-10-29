@@ -1,6 +1,6 @@
 import { access } from 'node:fs/promises';
 import path from 'node:path';
-import { closeTask, createTask, epicReport, loadTasks, reopenTask, resolveGate } from '@anhlp/alp-core/tasks';
+import { closeTask, createTask, epicReport, loadTasks, rejectGate, reopenTask, resolveGate } from '@anhlp/alp-core/tasks';
 import { taskRows } from '@anhlp/alp-core/task-rows';
 import { alpHome } from '@anhlp/alp-client/index';
 import type { PluginServerContext } from './compat.js';
@@ -45,12 +45,14 @@ export function registerTaskRpc(server: PluginServerContext) {
     return { id: task.id };
   });
 
-  server.handle(tasksChange, async ({ directory, id, action, gate, note }) => {
+  server.handle(tasksChange, async ({ directory, id, action, gate, note, choice }) => {
     const root = await requireProject(directory);
     const task =
       action === 'close' ? await closeTask(root, id, { reason: 'done', ...(note ? { summary: note } : {}) }, 'user')
       : action === 'reopen' ? await reopenTask(root, id, { ...(note ? { note } : {}) }, 'user')
-      : await resolveGate(root, id, gate ?? '', { by: 'user', ...(note ? { note } : {}) });
+      // A gate decision made here is recorded with channel paseo; alpd reads it and tells main by mail.
+      : action === 'reject' ? await rejectGate(root, id, gate ?? '', { by: 'user', channel: 'paseo', ...(note ? { reason: note } : {}) })
+      : await resolveGate(root, id, gate ?? '', { by: 'user', channel: 'paseo', ...(note ? { note } : {}), ...(choice ? { choice } : {}) });
     if (action !== 'close') return { id: task.id, status: task.status };
     const { tasks } = await loadTasks(root);
     const landed = tasks.some(entry => entry.parent === task.id) ? epicReport(task.id, tasks).text.split('\n')[0] : undefined;

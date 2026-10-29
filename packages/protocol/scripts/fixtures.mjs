@@ -69,6 +69,7 @@ const items = [
 for (const event of events) add('envelope', `event ${event.type}${event.state ? ` ${event.state}` : ''}`, env(event));
 for (const item of items) add('envelope', `item ${item.kind}${item.detail ? ` ${item.detail.type}${item.detail.toolName ? ` ${item.detail.toolName}` : ''}` : ''}`, env({ type: 'item', item }));
 add('envelope', 'item user_message with images', env({ type: 'item', item: { kind: 'user_message', id: 'user:m-2', text: 'Xem ảnh', clientMessageId: 'm-2', images: 2 } }));
+add('envelope', 'event question mirroring a human gate', env({ type: 'question', question: { ...question, id: 'gate-t-a3f8-g1', agent: 'ALP', body: 'Cổng phê duyệt g1 của t-a3f8 (Phát hành):\nPhát hành bản beta?', options: ['Phát hành', 'Đợi'], gate: { projectRoot: '/work/project', taskId: 't-a3f8', gateId: 'g1' } } }));
 add('envelope', 'announcement without a cursor', { sessionId: 'ses_fixture', epoch: 'announce-2026', seq: 0, ts, event: { type: 'question', question } });
 add('envelope', 'a future event type (receivers ignore it)', env({ type: 'tree.renamed', title: 'x' }));
 add('envelope', 'a future item kind (receivers ignore it)', env({ type: 'item', item: { kind: 'image', id: 'img-1', url: 'x' } }));
@@ -217,6 +218,10 @@ P('task.update', { projectRoot: '/work/project', id: 'bd-1', action: 'close' }, 
 R('task.update', { id: 't-a3f8', status: 'closed', rev: 4, landed: 'Epic t-a3f8 landed' });
 P('task.gate.resolve', { projectRoot: '/work/project', id: 't-a3f8', gate: 'g1', note: 'OK' });
 R('task.gate.resolve', { id: 't-a3f8', status: 'open', rev: 5 });
+P('task.gate.resolve', { projectRoot: '/work/project', id: 't-a3f8', gate: 'g1', choice: 'Ship it', channel: 'paseo', ifRev: 4 }, true, 'approving with one of the gate\'s options');
+P('task.gate.resolve', { projectRoot: '/work/project', id: 't-a3f8', gate: 'g1', reject: true, note: 'Not yet', channel: 'web' }, true, 'rejecting, which leaves the gate open');
+P('task.gate.resolve', { projectRoot: '/work/project', id: 't-a3f8', gate: 'g1', channel: 'cli' }, false, 'with channel cli (the CLI writes the files)');
+P('task.gate.resolve', { projectRoot: '/work/project', id: 't-a3f8', gate: 'g1', choice: 'x'.repeat(201) }, false, 'with a choice over 200 characters');
 P('library.list', { kind: 'agents', projectRoot: '/work/project' }); P('library.list', { kind: 'plugins' }, false, 'with an unknown kind');
 R('library.list', { projectRoot: null, entries: [{ name: 'main', source: 'builtin' }, { name: 'reviewer', source: 'project', overrides: 'library', description: 'Đọc lại', usedBy: ['team pho'] }] });
 P('library.get', { kind: 'mcp', name: 'docs', projectRoot: '/work/project', scope: 'project' });

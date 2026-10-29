@@ -2598,6 +2598,21 @@
           "ifRev": {
             "type": "integer",
             "minimum": 0
+          },
+          "choice": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "reject": {
+            "type": "boolean"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "paseo",
+              "web"
+            ]
           }
         },
         "required": [
@@ -5945,6 +5960,26 @@
         },
         "askedAt": {
           "type": "string"
+        },
+        "gate": {
+          "type": "object",
+          "properties": {
+            "projectRoot": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "gateId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "projectRoot",
+            "taskId",
+            "gateId"
+          ],
+          "additionalProperties": true
         }
       },
       "required": [

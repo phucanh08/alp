@@ -143,6 +143,8 @@ export type UserQuestion = {
   body: string;
   options?: string[];
   askedAt: string;
+  /** A card that mirrors an open human gate of the project's tasks: choosing an option approves it, dismissing rejects it. It has no timeout. */
+  gate?: { projectRoot: string; taskId: string; gateId: string };
 };
 
 export type SessionState = 'running' | 'waiting' | 'waiting_parent' | 'waiting_user' | 'idle';

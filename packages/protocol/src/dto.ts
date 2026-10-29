@@ -54,7 +54,7 @@ export type TaskRow = {
   ready: boolean;
   blockedBy?: string[];
   waits?: string[];
-  approvals?: Array<{ gate: string; note: string }>;
+  approvals?: Array<{ gate: string; note: string; /** Answers to pick from; any approves. */ options?: string[]; /** The user's latest rejection; the gate stays open. */ rejected?: { at: string; reason?: string } }>;
   handoff?: { outcome: string; summary: string; agent?: string };
   closed?: { reason: string; summary?: string; at: string };
   description?: string;

@@ -64,11 +64,15 @@ export function TaskDetail({ id, onOpenTask }: { id: string; onOpenTask?: (id: s
           <p role={tasks.message.level === 'error' ? 'alert' : 'status'} className={cn('mt-4 rounded-md px-3 py-2 text-xs', tasks.message.level === 'error' ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-highlight')}>{tasks.message.text}</p>
         ) : null}
 
-        {row.approvals?.map((approval: { gate: string; note: string }) => (
+        {row.approvals?.map((approval: { gate: string; note: string; options?: string[]; rejected?: { at: string; reason?: string } }) => (
           <div key={approval.gate} className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-warning/[0.06] px-4 py-3 text-sm">
             <ShieldCheck aria-hidden className="size-4 shrink-0 text-warning" />
             <span className="min-w-0 flex-1"><span className="text-warning">Needs your approval</span>{approval.note ? <span className="text-muted-foreground">: {approval.note}</span> : null}</span>
-            {canWrite ? <Button size="sm" disabled={busy} onClick={() => void controller.changeTask(row, { gate: approval.gate })}>Approve</Button> : null}
+            {approval.rejected ? <span className="text-xs text-muted-foreground">Rejected {relativeTime(approval.rejected.at)}</span> : null}
+            {canWrite ? (approval.options?.length
+              ? approval.options.map(option => <Button key={option} size="sm" disabled={busy} onClick={() => void controller.changeTask(row, { gate: approval.gate, choice: option })}>{option}</Button>)
+              : <Button size="sm" disabled={busy} onClick={() => void controller.changeTask(row, { gate: approval.gate })}>Approve</Button>) : null}
+            {canWrite && !approval.rejected ? <Button size="sm" variant="secondary" disabled={busy} onClick={() => void controller.changeTask(row, { gate: approval.gate, reject: true })}>Reject</Button> : null}
           </div>
         ))}
 

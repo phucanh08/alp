@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { lstat, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { CAPABILITY, ERROR, RPC_ERROR } from '@anhlp/alp-protocol';
-import { closeTask, createTask, epicReport, loadTasks, reopenTask, resolveGate } from '@anhlp/alp-core/tasks';
+import { closeTask, createTask, epicReport, loadTasks, rejectGate, reopenTask, resolveGate } from '@anhlp/alp-core/tasks';
 import { taskRows } from '@anhlp/alp-core/task-rows';
 import { deleteEntry, duplicateEntry, getEntry, listEntries, renameEntry, saveEntry, setGivenSkills } from '@anhlp/alp-core/library-edit';
 import { listTeams } from '@anhlp/alp-core/teams';
@@ -27,6 +27,8 @@ export type OperationsOptions = {
   templates?: Record<string, string>;
   /** Project roots the daemon knows from its session records, for a team save's sync. */
   knownProjects?: () => Iterable<string>;
+  /** A gate changed through task.gate.resolve: the runtime syncs the project's gate cards and mail. */
+  onGateChange?: (projectRoot: string) => Promise<void> | void;
 };
 
 type Handler = (params: any) => Promise<unknown>;
@@ -119,7 +121,7 @@ function unredact(kind: string, content: Record<string, unknown>, previous: Reco
   return next;
 }
 
-export function createOperations({ home, templates, knownProjects = () => [] }: OperationsOptions = {}) {
+export function createOperations({ home, templates, knownProjects = () => [], onGateChange }: OperationsOptions = {}) {
   /** Revisions on the wire are keyed per alpd process, so they never carry a hash of secret content. */
   const revisionKey = randomBytes(32);
   const toWire = (revision: string | null | undefined) => revision == null ? null : `r${createHmac('sha256', revisionKey).update(revision).digest('base64url').slice(0, 22)}`;
@@ -202,9 +204,15 @@ export function createOperations({ home, templates, knownProjects = () => [] }: 
       return { id: task.id, status: task.status, rev: task.rev, ...(landed ? { landed } : {}) };
     }),
 
-    'task.gate.resolve': guard(async ({ projectRoot, id, gate, note, ifRev }) => {
+    // Approves a gate, or with reject records the user's rejection and leaves it open. Either way
+    // the runtime is told, so main gets the decision by mail once and the gate's card settles.
+    'task.gate.resolve': guard(async ({ projectRoot, id, gate, note, ifRev, choice, reject, channel = 'web' }) => {
       const root = await project(projectRoot);
-      const task = await resolveGate(root, id, gate, { by: 'user', ...(note ? { note } : {}), ...(ifRev !== undefined ? { ifRev } : {}) });
+      const guarded = ifRev !== undefined ? { ifRev } : {};
+      const task = reject === true
+        ? await rejectGate(root, id, gate, { by: 'user', channel, ...(note ? { reason: note } : {}), ...guarded })
+        : await resolveGate(root, id, gate, { by: 'user', channel, ...(note ? { note } : {}), ...(choice !== undefined ? { choice } : {}), ...guarded });
+      await onGateChange?.(root);
       return { id: task.id, status: task.status, rev: task.rev };
     }),
   };

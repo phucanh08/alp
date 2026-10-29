@@ -107,6 +107,7 @@ export const toolShapes: Record<string, Record<string, z.ZodType>> = {
     kind: z.enum(GATE_KINDS as [string, ...string[]]).optional(),
     until: z.string().min(1).optional(),
     ref: z.string().min(1).optional(),
+    options: z.array(z.string().min(1).max(200)).max(10).optional(),
     gate: z.string().min(1).optional(),
     formula: z.string().min(1).optional(),
     vars: z.record(z.string(), z.string()).optional(),

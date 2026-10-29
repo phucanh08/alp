@@ -343,6 +343,26 @@
         },
         "askedAt": {
           "type": "string"
+        },
+        "gate": {
+          "type": "object",
+          "properties": {
+            "projectRoot": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "gateId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "projectRoot",
+            "taskId",
+            "gateId"
+          ],
+          "additionalProperties": true
         }
       },
       "required": [

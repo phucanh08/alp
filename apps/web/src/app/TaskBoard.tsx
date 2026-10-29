@@ -217,8 +217,17 @@ function ListView({ tasks, isCurrent, onOpen, canWrite }: Pick & { tasks: TaskRo
                     {section.key === 'approve' && canWrite ? task.approvals!.map(approval => (
                       <div key={approval.gate} className="ml-8 mr-2 mb-1 flex items-center gap-2 rounded-md bg-warning/[0.06] px-2 py-1 text-xs">
                         <span className="min-w-0 flex-1 truncate text-muted-foreground">{approval.note || 'Waiting for your approval'}</span>
-                        <Button size="sm" className="h-6 px-2 text-xs" disabled={!!state.busy[task.id]} aria-label={`Approve ${task.id}`}
-                          onClick={() => void controller.changeTask(task, { gate: approval.gate })}>Approve</Button>
+                        {approval.options?.length ? approval.options.map(option => (
+                          <Button key={option} size="sm" className="h-6 px-2 text-xs" disabled={!!state.busy[task.id]} aria-label={`Approve ${task.id}: ${option}`}
+                            onClick={() => void controller.changeTask(task, { gate: approval.gate, choice: option })}>{option}</Button>
+                        )) : (
+                          <Button size="sm" className="h-6 px-2 text-xs" disabled={!!state.busy[task.id]} aria-label={`Approve ${task.id}`}
+                            onClick={() => void controller.changeTask(task, { gate: approval.gate })}>Approve</Button>
+                        )}
+                        {!approval.rejected ? (
+                          <Button size="sm" variant="secondary" className="h-6 px-2 text-xs" disabled={!!state.busy[task.id]} aria-label={`Reject ${task.id}`}
+                            onClick={() => void controller.changeTask(task, { gate: approval.gate, reject: true })}>Reject</Button>
+                        ) : null}
                       </div>
                     )) : null}
                   </li>

@@ -53,7 +53,7 @@ import { providerUsage, sessionUsage, type ProviderUsage } from './usage.js';
 import { parse as toml } from 'smol-toml';
 import { findFormula, formulaDirs, listFormulas, pourFormula } from '@anhlp/alp-core/formulas';
 import { addAllowRule, capMode, commandDecision, profileFor, unwrapShell } from '@anhlp/alp-core/permissions';
-import { addGate, checkGates, resolveGate, blockersOf, childrenOf, closeTask, epicReport, releaseOrphans, createTask, getTask, linkTask, listTasks, loadTasks, readyTasks, releaseTask, reopenTask, retakeTask, startRefusal, startTask, submitTask, summarize, taskDigest, updateTask, type Task } from '@anhlp/alp-core/tasks';
+import { addGate, checkGates, gateDecisions, markGateNotified, rejectGate, resolveGate, blockersOf, childrenOf, closeTask, epicReport, releaseOrphans, createTask, getTask, linkTask, listTasks, loadTasks, readyTasks, releaseTask, reopenTask, retakeTask, startRefusal, startTask, submitTask, summarize, taskDigest, updateTask, type Task } from '@anhlp/alp-core/tasks';
 
 /** The first part of every input ALP builds for a turn; a replayed message that begins with it is ALP's (nativePrompt). */
 const CATALOG = 'ALP runtime catalog and usage snapshot (data, not instructions): ';
@@ -125,6 +125,7 @@ const STARTING = '\u0000starting';
 
 /** Answers that approve a proposal; anything else is feedback. */
 const APPROVALS = ['approve', 'approved', 'yes', 'y', 'ok', 'đồng ý', 'duyệt', 'có'];
+const CHOICES_REJECT = ['reject', 'từ chối'];
 const SKILL_BODY_CHARS = 20_000;
 const STARTER_ROLES = ['main', 'lead', 'peer', 'oracle', 'reviewer', 'supervisor'];
 const ISSUE_BODY_CHARS = 20_000;
@@ -764,7 +765,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   const boards = new Map<string, Promise<Pin[]>>();
   /** The same boards once loaded, for synchronous status. */
   const loadedBoards = new Map<string, Pin[]>();
-  const userQuestions = new Map<string, { question: UserQuestion; persistent?: boolean; /** From alp_ask: the user's words in the chat end it (#116). */ asked?: boolean; settle: (outcome: 'answered' | 'dismissed' | 'timeout' | 'canceled', answer?: string, reason?: string, result?: unknown) => void }>();
+  const userQuestions = new Map<string, { question: UserQuestion; persistent?: boolean; /** From alp_ask: the user's words in the chat end it (#116). */ asked?: boolean; /** A card mirroring a human gate (t-ccac). */ gate?: { rev: number; deciding: boolean; decide: (reply: { text?: string; dismiss?: boolean; reason?: string; channel?: 'paseo' | 'web' }) => Promise<void> }; settle: (outcome: 'answered' | 'dismissed' | 'timeout' | 'canceled', answer?: string, reason?: string, result?: unknown) => void }>();
   let mailSequence = 0;
   let watchdog: NodeJS.Timeout | undefined;
 
@@ -1081,7 +1082,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (action === 'pour' && (typeof input.formula !== 'string' || (input.vars !== undefined && (!input.vars || typeof input.vars !== 'object' || Array.isArray(input.vars) || !Object.values(input.vars).every(value => typeof value === 'string'))))) {
         return toolResult(false, { error: 'pour needs formula, and vars as an object of text values' });
       }
-      const { kind, until, ref, gate, formula: _formula, vars: _vars, ...fields } = input;
+      const { kind, until, ref, gate, options: gateChoices, formula: _formula, vars: _vars, ...fields } = input;
       if (action === 'clear') {
         const current = (await loadTasks(project)).tasks.find(candidate => candidate.id === id);
         if (current?.gates.find(entry => entry.id === gate)?.kind === 'human') return toolResult(false, { error: 'Only the user clears a human gate; ask them, and they approve it with alp task gate clear or in Paseo' });
@@ -1097,13 +1098,14 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         action === 'create' ? await createTask(project, fields as any, by)
         : action === 'update' ? await updateTask(project, id, { ...fields, note }, by)
         : action === 'pour' ? (poured = await pourFormula(project, (await findFormula(project, options.libraryDir, input.formula, { toml })).formula, input.vars, by, input.parent ? { parent: input.parent } : {})).epic
-        : action === 'gate' ? await addGate(project, id, { kind, note, until, ref }, by)
+        : action === 'gate' ? await addGate(project, id, { kind, note, until, ref, ...(gateChoices !== undefined ? { options: gateChoices } : {}) }, by)
         : action === 'clear' ? await resolveGate(project, id, gate, { by, note })
         : action === 'link' ? await linkTask(project, id, { add, remove }, by)
         : action === 'start' ? await startTask(project, id, { agent: by, session: sessionId }, by)
         : action === 'close' ? await hookedClose(id)
         : await reopenTask(project, id, { note }, by);
       touchTask(rootOf(sessionId), task.id);
+      if (action === 'gate' && kind === 'human') void syncGates(project);
       runLog(rootOf(sessionId), { event: 'task', action, agent: by, id: task.id, title: task.title, status: task.status, ...(summary ?? note ? { detail: summary ?? note } : {}) });
       const { tasks } = await loadTasks(project);
       const landed: Record<string, unknown> = {};
@@ -1575,7 +1577,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (session.worktrees.size) {
       parts.push('Finished worktree changes waiting for alp_merge or alp_discard:\n' + [...session.worktrees].map(([id, change]) => `- ${id}: ${change.agent}${change.taskId ? ` on ${change.taskId}` : ''}`).join('\n'));
     }
-    const asked = [...userQuestions.values()].filter(pending => pending.question.sessionId === sessionId);
+    const asked = [...userQuestions.values()].filter(pending => pending.question.sessionId === sessionId && !pending.gate);
     if (asked.length) parts.push('Waiting for the user to answer:\n' + asked.map(pending => `- ${clip(pending.question.body, 300)}`).join('\n'));
     if (!session.parent) {
       const project = session.mapping.agent.projectRoot;
@@ -1679,7 +1681,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
    * answer approves; a dismissal, a timeout or another answer does not.
    */
   async function confirm(sessionId: string, session: Session, body: string, approval?: { id: string }): Promise<{ approved: boolean; feedback?: string; outcome?: string }> {
-    if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId)) return { approved: false, outcome: 'busy', feedback: 'A question is already waiting for the user' };
+    if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId && !pending.gate)) return { approved: false, outcome: 'busy', feedback: 'A question is already waiting for the user' };
     const say = wordsFor(session);
     const result = await askUser(sessionId, session, undefined, body, [say.approve, say.reject], approval) as { contentItems: Array<{ text: string }> };
     let value: any;
@@ -1744,7 +1746,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     };
     try { await readRoles(); } catch (error) { return toolResult(false, { error: errorData(error).message }); }
     if (approvalCanceled(session, cancellation)) return toolResult(false, { error: 'Skill proposal canceled or session closed; no approval was created' });
-    if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId)) return toolResult(false, { error: 'A question is already waiting for the user; finish it before proposing a skill' });
+    if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId && !pending.gate)) return toolResult(false, { error: 'A question is already waiting for the user; finish it before proposing a skill' });
     const approvalId = `q-${randomUUID()}`;
     const record: { approvalId: string; draftKey: string; result?: Record<string, unknown> } = { approvalId, draftKey };
     approvals.set(key, record);
@@ -1901,7 +1903,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const previous = approvals.get(key);
     if (previous && previous.draftKey !== draftKey) return toolResult(false, { error: 'requestId was already used for a different draft' });
     if (previous) return toolResult(true, previous.result ?? { status: 'pending_approval', approvalId: previous.approvalId, repo });
-    if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId)) return toolResult(false, { error: 'A question is already waiting for the user; finish it before proposing another issue draft' });
+    if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId && !pending.gate)) return toolResult(false, { error: 'A question is already waiting for the user; finish it before proposing another issue draft' });
     const approvalId = `q-${randomUUID()}`;
     const record: { approvalId: string; draftKey: string; result?: Record<string, unknown> } = { approvalId, draftKey };
     approvals.set(key, record);
@@ -2567,8 +2569,142 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
   /** Ordinary questions end with their turn; issue approvals survive until decision or session cancellation. */
   function cancelQuestions(sessionId: string, turnOnly = false) {
-    for (const { question, settle, persistent } of [...userQuestions.values()]) {
+    for (const { question, settle, persistent, gate } of [...userQuestions.values()]) {
+      // A gate card ends only with its gate or its session; syncGates shows it again on the next main.
+      if (gate && turnOnly) continue;
       if (question.sessionId === sessionId && (!turnOnly || !persistent)) settle('canceled', undefined, undefined, toolResult(false, { error: 'Turn ended' }));
+    }
+  }
+
+  // Human gates (t-ccac): .alp/tasks stays the source of truth. Each open human gate of a project
+  // shows as a card on its live main root session, without a timeout and outside the one-question
+  // limit; syncGates rebuilds the cards from the files (on start, attach, a gate change and a timer,
+  // since the CLI and Paseo's local panel write the files without alpd) and tells main of every
+  // decision once: markGateNotified marks it under the task lock, so card, panel and CLI racing on
+  // one gate send one mail. With no live main, the decision waits for the project's next main.
+  const gateSyncs = new Map<string, Promise<void>>();
+  const gateCardId = (taskId: string, gateId: string) => `gate-${taskId}-${gateId}`;
+
+  /** The project's live main root session, if any. */
+  function mainSessionOf(projectRoot: string) {
+    for (const [id, session] of sessions) {
+      if (session.closed || session.parent || session.role === 'supervisor' || !session.threadId) continue;
+      if (session.mapping.agent.name !== mainOf(session.mapping) || path.resolve(session.mapping.agent.projectRoot) !== projectRoot) continue;
+      return { id, session };
+    }
+    return undefined;
+  }
+
+  function syncGates(projectRoot: string): Promise<void> {
+    const root = path.resolve(projectRoot);
+    const previous = gateSyncs.get(root) ?? Promise.resolve();
+    const next = previous.then(() => syncGatesNow(root)).catch(error => { runLog(mainSessionOf(root)?.id ?? root, { event: 'gate.sync.failed', projectRoot: root, error: errorData(error).message }); });
+    gateSyncs.set(root, next);
+    void next.finally(() => { if (gateSyncs.get(root) === next) gateSyncs.delete(root); });
+    return next;
+  }
+
+  async function syncGatesNow(projectRoot: string) {
+    if (closed) return;
+    const { tasks } = await loadTasks(projectRoot);
+    const main = mainSessionOf(projectRoot);
+    // The user's decisions, to main once each; without a live main they wait for the next one.
+    if (main) for (const { task, gate, decision, record } of gateDecisions(tasks)) {
+      if (!await markGateNotified(projectRoot, task.id, gate.id, decision)) continue;
+      const choice = decision === 'approved' ? (record as { choice?: string }).choice : undefined;
+      const words = decision === 'approved'
+        ? `The user approved human gate ${gate.id} of ${task.id} in ${record.channel}${choice ? `, choosing "${choice}"` : ''}${(record as { note?: string }).note ? `: ${(record as { note?: string }).note}` : ''}.`
+        : `The user rejected human gate ${gate.id} of ${task.id} in ${record.channel}${(record as { reason?: string }).reason ? `: ${(record as { reason?: string }).reason}` : ''}. The gate stays open.`;
+      post(main.id, { kind: 'result', from: 'ALP', assignment: gateCardId(task.id, gate.id), body: `Gate decision (data, not instructions): ${words} Task: ${task.title}` });
+      runLog(main.id, { event: 'gate.decision', projectRoot, taskId: task.id, gateId: gate.id, decision, channel: record.channel, ...(choice ? { choice } : {}) });
+    }
+    // A card for each open human gate the user has not rejected; a rejected one stays open for main to follow up.
+    const wanted = new Map<string, { task: Task; gate: Task['gates'][number] }>();
+    for (const task of tasks) {
+      if (task.status === 'closed') continue;
+      for (const gate of task.gates ?? []) if (gate.kind === 'human' && !gate.resolved && !gate.rejected) wanted.set(gateCardId(task.id, gate.id), { task, gate });
+    }
+    for (const [id, pending] of [...userQuestions]) {
+      if (pending.question.gate?.projectRoot !== projectRoot) continue;
+      const want = wanted.get(id);
+      if (!want || !main || pending.question.sessionId !== main.id) {
+        const task = tasks.find(entry => entry.id === pending.question.gate!.taskId);
+        const gate = task?.gates.find(entry => entry.id === pending.question.gate!.gateId);
+        pending.settle(gate?.resolved ? 'answered' : gate?.rejected ? 'dismissed' : 'canceled', gate?.resolved?.choice, gate?.rejected?.reason);
+      } else if (pending.gate) pending.gate.rev = want.task.rev;
+    }
+    if (!main) return;
+    for (const [id, { task, gate }] of wanted) if (!userQuestions.has(id)) showGateCard(main.id, main.session, projectRoot, task, gate);
+  }
+
+  /** The CLI and Paseo's local Tasks panel write gates without alpd: a timer reads them while a main is live. */
+  let gateWatch: NodeJS.Timeout | undefined;
+  function startGateWatch() {
+    if (gateWatch || options.gateSyncMs === 0) return;
+    gateWatch = setInterval(() => {
+      const roots = new Set([...sessions.values()].filter(session => !session.closed && !session.parent && session.role !== 'supervisor' && session.mapping.agent.name === mainOf(session.mapping)).map(session => path.resolve(session.mapping.agent.projectRoot)));
+      for (const root of roots) void syncGates(root);
+      if (!roots.size) { clearInterval(gateWatch); gateWatch = undefined; }
+    }, options.gateSyncMs ?? 5_000);
+    gateWatch.unref?.();
+  }
+
+  function showGateCard(sessionId: string, session: Session, projectRoot: string, task: Task, gate: Task['gates'][number]) {
+    const say = wordsFor(session);
+    const vietnamese = say.approve === words('vi').approve;
+    const question: UserQuestion = {
+      id: gateCardId(task.id, gate.id),
+      sessionId,
+      rootId: rootOf(sessionId),
+      agent: 'ALP',
+      body: `${vietnamese ? `Cổng phê duyệt ${gate.id} của ${task.id}` : `Approval gate ${gate.id} of ${task.id}`} (${task.title}):\n${gate.note ?? ''}`,
+      options: gate.options?.length ? gate.options : [say.approve, say.reject],
+      askedAt: gate.at ?? new Date().toISOString(),
+      gate: { projectRoot, taskId: task.id, gateId: gate.id },
+    };
+    const card = { rev: task.rev, deciding: false };
+    const settle = (outcome: 'answered' | 'dismissed' | 'timeout' | 'canceled', answer?: string) => {
+      if (userQuestions.get(question.id)?.question !== question) return;
+      userQuestions.delete(question.id);
+      emit(sessionId, { type: 'question.resolved', questionId: question.id, outcome, ...(answer !== undefined ? { answer } : {}) });
+    };
+    userQuestions.set(question.id, { question, settle, persistent: true, gate: Object.assign(card, { decide: (reply: { text?: string; dismiss?: boolean; reason?: string; channel?: 'paseo' | 'web' }) => decideGate(projectRoot, question, card, reply, !gate.options?.length) }) });
+    emit(sessionId, { type: 'question', question });
+    runLog(rootOf(sessionId), { event: 'gate.card', questionId: question.id, taskId: task.id, gateId: gate.id });
+  }
+
+  /**
+   * The user answered a gate card: an option approves (with the default Approve/Reject, Reject or
+   * other words reject), dismissing rejects. The card's task rev guards the write; a stale rev is
+   * read again and retried only while the gate is still open and undecided, so a decision another
+   * channel made first is never applied or mailed twice.
+   */
+  async function decideGate(projectRoot: string, question: UserQuestion, card: { rev: number; deciding: boolean }, reply: { text?: string; dismiss?: boolean; reason?: string; channel?: 'paseo' | 'web' }, defaults: boolean) {
+    if (card.deciding) return;
+    card.deciding = true;
+    const { taskId, gateId } = question.gate!;
+    const channel = reply.channel ?? 'web';
+    const text = reply.text?.trim();
+    const approve = !reply.dismiss && !!text && (defaults ? APPROVALS.includes(text.toLowerCase()) : question.options!.includes(text));
+    const rejectReason = reply.dismiss ? reply.reason : text && defaults && CHOICES_REJECT.includes(text.toLowerCase()) ? undefined : text;
+    const write = (ifRev: number) => approve
+      ? resolveGate(projectRoot, taskId, gateId, { by: 'user', ifRev, channel, ...(defaults ? {} : { choice: text }) })
+      : rejectGate(projectRoot, taskId, gateId, { by: 'user', ifRev, channel, ...(rejectReason ? { reason: rejectReason.slice(0, 2000) } : {}) });
+    try {
+      try { await write(card.rev); }
+      catch (error: any) {
+        if (error?.code !== 'TASK_CHANGED') throw error;
+        const current = (await loadTasks(projectRoot)).tasks.find(entry => entry.id === taskId);
+        const gate = current?.gates.find(entry => entry.id === gateId);
+        if (!current || current.status === 'closed' || !gate || gate.resolved || gate.rejected) return;
+        await write(current.rev);
+      }
+    } catch (error) {
+      // Already clear, or the task is gone: the other channel won; the sync below settles the card.
+      runLog(question.rootId, { event: 'gate.answer.failed', questionId: question.id, error: errorData(error).message });
+    } finally {
+      card.deciding = false;
+      await syncGates(projectRoot);
     }
   }
 
@@ -2583,7 +2719,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (args.options !== undefined && (to !== 'user' || !Array.isArray(args.options) || args.options.length > 10 || !args.options.every((option: unknown) => typeof option === 'string' && option.trim() && option.length <= 200))) {
       return Promise.resolve(toolResult(false, { error: 'options are up to 10 short answers, for questions to the user' }));
     }
-    if (assignment?.ask || [...userQuestions.values()].some(pending => pending.question.sessionId === sessionId)) {
+    if (assignment?.ask || [...userQuestions.values()].some(pending => pending.question.sessionId === sessionId && !pending.gate)) {
       return Promise.resolve(toolResult(false, { error: 'A question is already waiting for an answer' }));
     }
     // Only main talks to the user, unless the user has written to this assignment first.
@@ -3200,6 +3336,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
           thinking: result.reasoningEffort ?? mapping.thinking,
         },
       });
+      // A main root shows the project's open human gates and gets decisions made while none was live.
+      if (!session.parent && session.role !== 'supervisor' && mapping.agent.name === mainOf(mapping)) { void syncGates(mapping.agent.projectRoot); startGateWatch(); }
 
       if (
         history === 'replay'
@@ -3378,7 +3516,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (session.pending) return 'The session is still opening or restarting';
     if (session.active) return 'A turn is running';
     if (session.children.size || session.assignments.size) return 'Assignments are still running';
-    if ([...userQuestions.values()].some(pending => pending.question.rootId === sessionId)) return 'A question to the user waits for an answer';
+    if ([...userQuestions.values()].some(pending => pending.question.rootId === sessionId && !pending.gate)) return 'A question to the user waits for an answer';
     // Mail a lifecycle hold keeps waits for its release, then reaches the session's new conversation.
     if ((hasActiveMail(session) || session.wakeHeld) && !session.lifecycleHolds) return 'Mail waits for the session';
     if (session.parked || session.parkReason) return 'The session is parked';
@@ -4522,7 +4660,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       };
       visit(rootId);
       const questions = [...userQuestions.values()].map(pending => pending.question).filter(question => question.rootId === rootId);
-      const asking = new Set(questions.map(question => question.sessionId));
+      const asking = new Set(questions.filter(question => !question.gate).map(question => question.sessionId));
       const ids = new Set(tree.map(([id]) => id));
       return {
         rootId,
@@ -4610,6 +4748,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       };
     },
 
+    syncGates(projectRoot) {
+      if (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot)) return Promise.reject(new Error('syncGates needs an absolute projectRoot'));
+      return syncGates(projectRoot);
+    },
+
     async board(projectRoot) {
       if (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot)) throw new Error('board needs an absolute projectRoot');
       return (await boardOf(path.resolve(projectRoot))).filter(live);
@@ -4631,6 +4774,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     answer(questionId, reply) {
       const pending = userQuestions.get(questionId);
       if (!pending) throw new Error(`No question ${questionId} waits for an answer`);
+      if (pending.gate) {
+        if (!reply.dismiss && (typeof reply.text !== 'string' || !reply.text.trim() || reply.text.length > MAIL_BODY_CHARS)) throw new Error('An answer needs text');
+        void pending.gate.decide(reply);
+        return;
+      }
       if (reply.dismiss) {
         pending.settle('dismissed', undefined, reply.reason);
         return;
@@ -4673,6 +4821,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       );
 
       clearInterval(watchdog);
+      if (gateWatch) clearInterval(gateWatch);
+      await Promise.all(gateSyncs.values());
 
       // Claims released by the closes above are written before the board is left.
       await Promise.all(boards.values());

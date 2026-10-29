@@ -1015,6 +1015,38 @@
    }
   },
   {
+   "name": "event question mirroring a human gate",
+   "check": "envelope",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "epoch": "epoch-1",
+    "seq": 3,
+    "cursor": 12,
+    "ts": "2026-10-15T00:00:00.000Z",
+    "event": {
+     "type": "question",
+     "question": {
+      "id": "gate-t-a3f8-g1",
+      "sessionId": "ses_fixture",
+      "rootId": "ses_fixture",
+      "agent": "ALP",
+      "body": "Cổng phê duyệt g1 của t-a3f8 (Phát hành):\nPhát hành bản beta?",
+      "options": [
+       "Phát hành",
+       "Đợi"
+      ],
+      "askedAt": "2026-10-15T00:00:00.000Z",
+      "gate": {
+       "projectRoot": "/work/project",
+       "taskId": "t-a3f8",
+       "gateId": "g1"
+      }
+     }
+    }
+   }
+  },
+  {
    "name": "announcement without a cursor",
    "check": "envelope",
    "valid": true,
@@ -3497,6 +3529,58 @@
     "id": "t-a3f8",
     "status": "open",
     "rev": 5
+   }
+  },
+  {
+   "name": "task.gate.resolve approving with one of the gate's options",
+   "check": "params",
+   "method": "task.gate.resolve",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "id": "t-a3f8",
+    "gate": "g1",
+    "choice": "Ship it",
+    "channel": "paseo",
+    "ifRev": 4
+   }
+  },
+  {
+   "name": "task.gate.resolve rejecting, which leaves the gate open",
+   "check": "params",
+   "method": "task.gate.resolve",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "id": "t-a3f8",
+    "gate": "g1",
+    "reject": true,
+    "note": "Not yet",
+    "channel": "web"
+   }
+  },
+  {
+   "name": "task.gate.resolve with channel cli (the CLI writes the files)",
+   "check": "params",
+   "method": "task.gate.resolve",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "id": "t-a3f8",
+    "gate": "g1",
+    "channel": "cli"
+   }
+  },
+  {
+   "name": "task.gate.resolve with a choice over 200 characters",
+   "check": "params",
+   "method": "task.gate.resolve",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "id": "t-a3f8",
+    "gate": "g1",
+    "choice": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
    }
   },
   {

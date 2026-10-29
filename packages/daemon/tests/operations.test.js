@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
-import { addGate, loadTasks } from '@anhlp/alp-core/tasks';
+import { addGate, getTask, loadTasks } from '@anhlp/alp-core/tasks';
 import { getEntry } from '@anhlp/alp-core/library-edit';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
@@ -47,8 +47,50 @@ async function setup(t, { home: withHome = true } = {}) {
     if (reason) assert.equal(error.data?.reason, reason, `${method}: ${error.message}`);
     return true;
   });
-  return { directory, home, project, client, call, fails, runtime };
+  return { directory, home, project, client, call, fails, runtime, socket: daemonPaths(directory).socket };
 }
+
+test('gates (t-ccac): task.gate.resolve approves with a choice or rejects, records the channel, and settles the live main\'s card', async t => {
+  const { project, call, fails, runtime, socket } = await setup(t);
+  const { id } = await call('task.create', { projectRoot: project, title: 'Ship' });
+  await addGate(project, id, { kind: 'human', note: 'Which?', options: ['A', 'B'] }, 'main');
+  await addGate(project, id, { kind: 'human', note: 'Plain?' }, 'main');
+  // A viewer attaches a main root: the project's open human gates show on it as cards.
+  const { client } = { client: await connect(socket, { name: 'alp-web-test', version: '1' }) };
+  t.after(() => client.close());
+  const { session } = await client.request('session.create', { spec: { cwd: project } });
+  await client.request('session.attach', { sessionId: session.id });
+  const cards = () => runtime.questions().filter(question => question.gate);
+  for (let i = 0; i < 200 && cards().length < 2; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(cards().map(question => question.id).sort(), [`gate-${id}-g1`, `gate-${id}-g2`]);
+  let list = await call('task.list', { projectRoot: project });
+  assert.deepEqual(list.tasks[0].approvals[0], { gate: 'g1', note: 'Which?', options: ['A', 'B'] });
+
+  await fails('task.gate.resolve', { projectRoot: project, id, gate: 'g1', choice: 'C' }, 1004, 'task_state');
+  await fails('task.gate.resolve', { projectRoot: project, id, gate: 'g1', channel: 'cli' }, -32602, 'invalid_params');
+  const rejected = await call('task.gate.resolve', { projectRoot: project, id, gate: 'g1', reject: true, note: 'Not yet', ifRev: list.tasks[0].rev });
+  assert.equal(rejected.status, 'open');
+  list = await call('task.list', { projectRoot: project });
+  assert.equal(list.tasks[0].approvals[0].rejected.reason, 'Not yet');
+  assert.ok(!cards().some(question => question.id === `gate-${id}-g1`), 'a rejected gate has no card');
+  let stored = await getTask(project, id);
+  assert.deepEqual([stored.gates[0].rejected.channel, !!stored.gates[0].rejected.notified], ['web', true]);
+
+  // Answered from Paseo: the card's channel comes from the client's hello.
+  const paseo = await connect(socket, { name: 'alp-paseo', version: '1' });
+  t.after(() => paseo.close());
+  await paseo.request('question.answer', { questionId: `gate-${id}-g2`, text: 'Duyệt' });
+  for (let i = 0; i < 200 && !(await getTask(project, id)).gates[1].resolved?.notified; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  stored = await getTask(project, id);
+  assert.deepEqual([stored.gates[1].resolved.by, stored.gates[1].resolved.channel], ['user', 'paseo']);
+  assert.equal(cards().length, 0);
+
+  const approved = await call('task.gate.resolve', { projectRoot: project, id, gate: 'g1', choice: 'B', channel: 'paseo' });
+  assert.equal(approved.status, 'open');
+  stored = await getTask(project, id);
+  assert.deepEqual([stored.gates[0].resolved.choice, stored.gates[0].resolved.channel, !!stored.gates[0].resolved.notified], ['B', 'paseo', true]);
+  await fails('task.gate.resolve', { projectRoot: project, id, gate: 'g1', choice: 'A' }, 1004, 'task_state');
+});
 
 test('capabilities name only what this daemon serves; unserved methods are unknown', async t => {
   const bare = await setup(t, { home: false });

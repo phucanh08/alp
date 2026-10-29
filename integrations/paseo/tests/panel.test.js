@@ -316,6 +316,17 @@ test('the plugin server lists, adds, closes, reopens and approves tasks as the u
 
   assert.equal((await call('alp.tasks.change', { directory: root, id: gated.id, action: 'approve', gate: 'g1' })).status, 'open');
   assert.equal((await getTask(root, gated.id)).gates[0].resolved.by, 'user');
+  assert.equal((await getTask(root, gated.id)).gates[0].resolved.channel, 'paseo', 'alpd reads the channel and tells main');
+  // A gate with options: reject keeps it open; an option approves it with that choice (t-ccac).
+  await addGate(root, gated.id, { kind: 'human', note: 'Which channel?', options: ['beta', 'stable'] }, 'main');
+  assert.deepEqual((await call('alp.tasks.list', { directory: root })).tasks.find(task => task.id === gated.id).approvals, [{ gate: 'g2', note: 'Which channel?', options: ['beta', 'stable'] }]);
+  assert.equal((await call('alp.tasks.change', { directory: root, id: gated.id, action: 'reject', gate: 'g2', note: 'Not this week' })).status, 'open');
+  let approval = (await call('alp.tasks.list', { directory: root })).tasks.find(task => task.id === gated.id).approvals[0];
+  assert.equal(approval.rejected.reason, 'Not this week');
+  await assert.rejects(call('alp.tasks.change', { directory: root, id: gated.id, action: 'approve', gate: 'g2', choice: 'nightly' }), /choice must be one of: beta, stable/);
+  await call('alp.tasks.change', { directory: root, id: gated.id, action: 'approve', gate: 'g2', choice: 'stable' });
+  const second = (await getTask(root, gated.id)).gates[1];
+  assert.deepEqual([second.resolved.choice, second.resolved.channel, second.rejected.channel], ['stable', 'paseo', 'paseo']);
   assert.equal((await call('alp.tasks.list', { directory: root })).tasks.find(task => task.id === gated.id).ready, true);
   assert.equal((await call('alp.tasks.change', { directory: root, id: reviewed.id, action: 'close', note: 'Looks good' })).status, 'closed');
   assert.equal((await getTask(root, reviewed.id)).closed.summary, 'Looks good');
