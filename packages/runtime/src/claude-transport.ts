@@ -62,6 +62,15 @@ export const toolShapes: Record<string, Record<string, z.ZodType>> = {
     scope: z.enum(['project', 'user']),
     lesson: z.string().min(1).max(600),
   },
+  alp_lesson_curate: {
+    changes: z.array(z.object({
+      scope: z.enum(['project', 'user']),
+      remove: z.array(z.string().min(1).max(600)).min(1).max(50),
+      add: z.string().min(1).max(600).optional(),
+      reason: z.string().max(300).optional(),
+    }).strict()).min(1).max(50),
+    requestId: z.string().min(1).max(100).optional(),
+  },
   alp_skill: {
     name: z.string().min(1),
     description: z.string().min(1).max(300),

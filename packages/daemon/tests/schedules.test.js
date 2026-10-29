@@ -865,3 +865,24 @@ test('a busy session beyond the grace window fails without sending a prompt', as
   assert.equal(after.status, 'failed');
   assert.equal(sent, 0);
 });
+
+test('a job created with keepsSession false does not keep its session open, survives a reread, and fails once the session is closed', async t => {
+  const { start, create, project } = await setup(t);
+  const daemon = await start();
+  const { session } = await create(daemon);
+  const { job } = await daemon.request('schedule.create', { projectRoot: project, sessionId: session.id, dueAt: inMs(60_000), prompt: 'Monthly.', keepsSession: false });
+  assert.equal(job.keepsSession, false);
+  assert.equal((await jobOf(daemon, job.id)).keepsSession, false);
+  await assert.rejects(daemon.request('schedule.create', { projectRoot: project, sessionId: session.id, dueAt: inMs(60_000), prompt: 'x', keepsSession: 'no' }), /keepsSession/);
+  // The scheduler tracks it, but no session waits for it.
+  const store = createScheduleStore(path.join(path.dirname(project), 'keeps-jobs'));
+  const scheduler = createScheduler({ store, runtime: daemon.runtime, deliver: async () => ({ outcome: 'accepted' }) });
+  const loose = await store.create({ projectRoot: project, sessionId: 'loose', dueAt: inMs(60_000), prompt: 'Loose.', keepsSession: false });
+  const kept = await store.create({ projectRoot: project, sessionId: 'kept', dueAt: inMs(60_000), prompt: 'Kept.' });
+  assert.equal((await store.get(loose.id)).keepsSession, false);
+  assert.equal((await store.get(kept.id)).keepsSession, undefined);
+  scheduler.hold(loose);
+  scheduler.hold(kept);
+  assert.equal(scheduler.holds('loose'), false);
+  assert.equal(scheduler.holds('kept'), true);
+});

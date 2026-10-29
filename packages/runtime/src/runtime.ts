@@ -139,6 +139,9 @@ const ISSUE_BODY_CHARS = 20_000;
 const ISSUE_FOOTER = '\n\n---\n_Drafted by an ALP agent and posted with the user\'s approval._';
 
 const LESSON_CHARS = 600;
+/** The monthly curate job's prompt starts with this marker, so main and ALP recognize it. */
+export const CURATE_MARKER = '[alp-curate]';
+const CURATE_PROMPT = `${CURATE_MARKER} Monthly review of lessons and skills. Use the curate skill: read every lesson and skill, then propose to the user, in one message, the merges, shortenings and removals of lessons, the skills no longer needed, and what ALP itself should adopt. Change nothing before the user approves. To turn this off, set curate.monthly to false in .alp/settings.json.`;
 const DIGEST_CHARS = 12_000;
 const JOURNAL_LINE_CHARS = 400;
 /** Journal lines carry the local time, so the supervisor sees how long the user waited. */
@@ -1981,6 +1984,141 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
   let scheduleHandler: ScheduleHandler | undefined;
 
+  /**
+   * alp_lesson_curate: merges, shortenings and removals of recorded lessons, all shown to
+   * the user in one approval and applied only when approved. Lessons are matched by their
+   * exact rule text; nothing else in a lessons file changes.
+   */
+  async function lessonCurateTool(sessionId: string, session: Session, args: unknown) {
+    const cancellation = approvalCancellation.get(session) ?? 0;
+    args = structuredClone(args);
+    type Change = { scope: 'project' | 'user'; remove: string[]; add?: string; reason?: string };
+    const validChange = (change: any) => plainObject(change, ['scope', 'remove', 'add', 'reason']) && ['project', 'user'].includes(change.scope) &&
+      Array.isArray(change.remove) && change.remove.length > 0 && change.remove.length <= 50 && change.remove.every((lesson: unknown) => text(lesson, LESSON_CHARS)) &&
+      (change.add === undefined || text(change.add, LESSON_CHARS)) && (change.reason === undefined || (typeof change.reason === 'string' && change.reason.length <= 300));
+    if (!plainObject(args, ['changes', 'requestId']) || !Array.isArray(args.changes) || !args.changes.length || args.changes.length > 50 || !args.changes.every(validChange)) {
+      return toolResult(false, { error: `changes needs 1 to 50 entries, each with scope (project or user), remove (the exact text of 1 to 50 lessons) and optionally add (one rule of at most ${LESSON_CHARS} characters) and reason` });
+    }
+    if (args.requestId !== undefined && !text(args.requestId, 100)) return toolResult(false, { error: 'requestId must be a nonempty string of at most 100 characters' });
+    const changes = args.changes as Change[];
+    if (changes.some(change => change.scope === 'user') && !options.libraryDir) return toolResult(false, { error: 'This host keeps no user lessons' });
+    const fileOf = (scope: string) => scope === 'user' ? path.join(options.libraryDir!, LESSONS_FILE) : path.join(session.mapping.agent.projectRoot, '.alp', LESSONS_FILE);
+    const normalizeLesson = (lesson: string) => lesson.replace(/\s+/g, ' ').trim().replace(/^(?:- )?\d{4}-\d\d-\d\d: /, '').trim();
+    const normalized = changes.map(change => ({ ...change, remove: [...new Set(change.remove.map(normalizeLesson))], add: change.add?.replace(/\s+/g, ' ').trim() }));
+    const draftKey = JSON.stringify(['lessons', normalized]);
+    const key = `lessons:${args.requestId ?? draftKey}`;
+    const approvals = approvalsOf(sessionId);
+    const previous = approvals.get(key);
+    if (previous && previous.draftKey !== draftKey) return toolResult(false, { error: 'requestId was already used for a different draft' });
+    if (previous) return toolResult(true, previous.result ?? { status: 'pending_approval', approvalId: previous.approvalId });
+    // Every lesson to remove must be recorded now; a proposal never guesses.
+    const readLessons = async (file: string) => (await readFile(file, 'utf8').catch(() => '')).split('\n').flatMap(line => /^- \d{4}-\d\d-\d\d: /.test(line) ? [normalizeLesson(line)] : []);
+    const missing: string[] = [];
+    for (const change of normalized) {
+      const recorded = new Set(await readLessons(fileOf(change.scope)));
+      for (const lesson of change.remove) if (!recorded.has(lesson)) missing.push(`${change.scope}: ${lesson}`);
+    }
+    if (missing.length) return toolResult(false, { error: 'These lessons are not recorded; copy their exact text from the lessons files', missing });
+    if (approvalCanceled(session, cancellation)) return toolResult(false, { error: 'Lesson proposal canceled or session closed; no approval was created' });
+    if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId && !pending.gate)) return toolResult(false, { error: 'A question is already waiting for the user; finish it before proposing lesson changes' });
+    const approvalId = `q-${randomUUID()}`;
+    const record: { approvalId: string; draftKey: string; result?: Record<string, unknown> } = { approvalId, draftKey };
+    approvals.set(key, record);
+    const say = wordsFor(session);
+    const shown = normalized.map((change, index) =>
+      `${index + 1}. ${say.lessonScope(change.scope, fileOf(change.scope))}${change.reason ? ` — ${change.reason}` : ''}\n` +
+      change.remove.map(lesson => `   ${say.lessonRemove}: ${lesson}`).join('\n') +
+      (change.add ? `\n   ${say.lessonAdd}: ${change.add}` : '')).join('\n\n');
+    const decision = confirm(sessionId, session, `${say.lessonCurate(session.mapping.agent.name, shown)}\n\n${say.answerLine(session.mapping.agent.name)}`, { id: approvalId });
+    const apply = async (): Promise<Record<string, unknown>> => {
+      const removed: string[] = [];
+      const notFound: string[] = [];
+      let added = 0;
+      for (const scope of ['project', 'user'] as const) {
+        const mine = normalized.filter(change => change.scope === scope);
+        if (!mine.length) continue;
+        const file = fileOf(scope);
+        const write = (lessonWrites.get(file) ?? Promise.resolve()).catch(() => {}).then(async () => {
+          const current = await readFile(file, 'utf8').catch(() => undefined);
+          if (current === undefined) { for (const change of mine) notFound.push(...change.remove.map(lesson => `${scope}: ${lesson}`)); return; }
+          const targets = new Set(mine.flatMap(change => change.remove));
+          const seen = new Set<string>();
+          const kept = current.split('\n').filter(line => {
+            if (!/^- \d{4}-\d\d-\d\d: /.test(line)) return true;
+            const lesson = normalizeLesson(line);
+            if (!targets.has(lesson)) return true;
+            seen.add(lesson);
+            return false;
+          });
+          for (const lesson of targets) (seen.has(lesson) ? removed : notFound).push(`${scope}: ${lesson}`);
+          const date = new Date().toISOString().slice(0, 10);
+          // A replacement whose lessons are all gone meanwhile would only duplicate what replaced them.
+          const additions = mine.filter(change => change.add && change.remove.some(lesson => seen.has(lesson))).map(change => `- ${date}: ${change.add}`);
+          added += additions.length;
+          let body = kept.join('\n');
+          if (additions.length) body = body.replace(/\n*$/, '\n') + additions.join('\n') + '\n';
+          await writeFile(file, body);
+        });
+        lessonWrites.set(file, write);
+        await write;
+      }
+      runLog(rootOf(sessionId), { event: 'lesson.curate', agent: session.mapping.agent.name, removed, added, notFound });
+      return { approved: true, applied: true, removed, added, ...(notFound.length ? { lessonsNotFound: notFound } : {}) };
+    };
+    void (async () => {
+      const answer = await decision;
+      const canceled = approvalCanceled(session, cancellation);
+      let result: Record<string, unknown>;
+      if (!answer.approved || canceled) result = { approved: false, applied: false, outcome: canceled ? 'canceled' : answer.outcome, ...(answer.feedback ? { feedback: answer.feedback } : {}), next: 'Nothing changed. Revise from the feedback and propose again with a fresh requestId, or drop it.' };
+      else {
+        try { result = await apply(); }
+        catch (error) { result = { approved: true, applied: false, error: errorData(error).message, next: 'Tell the user; nothing is retried automatically.' }; }
+      }
+      record.result = { status: 'resolved', approvalId, ...result };
+      runLog(rootOf(sessionId), { event: 'lesson.curate.approval', agent: session.mapping.agent.name, ...record.result });
+      if (!closed && !session.closed && sessions.get(sessionId) === session) post(sessionId, { kind: 'result', from: 'ALP', assignment: approvalId, body: `Lesson curate result: ${JSON.stringify(record.result)}` });
+    })();
+    return toolResult(true, { status: 'pending_approval', approvalId, next: 'Continue other work or end your turn. ALP sends the decision and what changed by mail; do not resubmit this draft.' });
+  }
+
+  /**
+   * The monthly curate: a supervised main keeps one pending job that wakes it on the first
+   * of next month to run the curate skill. A job left by an earlier session of the project
+   * is replaced, since it could not be delivered. settings curate.monthly false turns it off.
+   */
+  const curateSchedules = new Map<string, Promise<unknown>>();
+  function ensureCurateSchedule(sessionId: string) {
+    const root = sessions.get(sessionId);
+    if (!scheduleHandler || !root || root.closed || root.parent) return Promise.resolve();
+    // One project's opens take turns, so two at once never leave two jobs.
+    const project = root.mapping.agent.projectRoot;
+    const run = (curateSchedules.get(project) ?? Promise.resolve()).catch(() => {}).then(() => curateScheduleOf(sessionId, root, project));
+    curateSchedules.set(project, run);
+    // The chain is dropped once nothing follows it.
+    void run.catch(() => {}).then(() => { if (curateSchedules.get(project) === run) curateSchedules.delete(project); });
+    return run;
+  }
+
+  async function curateScheduleOf(sessionId: string, root: Session, project: string) {
+    const handler = scheduleHandler;
+    if (!handler || root.closed || sessions.get(sessionId) !== root) return;
+    for (const file of [path.join(project, '.alp', 'settings.json'), ...(options.libraryDir ? [path.join(options.libraryDir, 'settings.json')] : [])]) {
+      const settings = await readFile(file, 'utf8').then(raw => { try { return JSON.parse(raw); } catch { return undefined; } }, () => undefined);
+      const monthly = settings?.curate?.monthly;
+      if (monthly === false) return;
+      if (monthly === true) break;
+    }
+    const listed = await handler('list', { projectRoot: project, status: 'pending' }) as { jobs?: Array<{ id: string; sessionId: string; prompt: string }> };
+    const curate = (listed?.jobs ?? []).filter(job => job.prompt.startsWith(CURATE_MARKER));
+    if (curate.some(job => job.sessionId === sessionId)) return;
+    for (const job of curate) await handler('cancel', { id: job.id, projectRoot: project }).catch(() => {});
+    const now = new Date();
+    const dueAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 2)).toISOString();
+    // The monthly job never keeps main open; a closed session's job fails and the next open makes another.
+    await handler('create', { projectRoot: project, sessionId, dueAt, prompt: CURATE_PROMPT, keepsSession: false });
+    runLog(sessionId, { event: 'curate.scheduled', dueAt, replaced: curate.map(job => job.id) });
+  }
+
   async function scheduleTool(sessionId: string, session: Session, args: unknown) {
     if (session.parent || session.role === 'supervisor' || session.mapping.agent.name !== mainOf(session.mapping)) return toolResult(false, { error: 'Only the main root session schedules continuations' });
     if (!scheduleHandler) return toolResult(false, { error: 'This host does not support scheduled continuations' });
@@ -2527,7 +2665,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
 
     if (
-      !['alp_delegate', 'alp_handoff', 'alp_wait', 'alp_cancel', 'alp_send', 'alp_ask', 'alp_merge', 'alp_discard', 'alp_recall', 'alp_verify', 'alp_pin', 'alp_board', 'alp_unpin', 'alp_lesson', 'alp_skill', 'alp_issue', 'alp_task', 'alp_schedule'].includes(params.tool) ||
+      !['alp_delegate', 'alp_handoff', 'alp_wait', 'alp_cancel', 'alp_send', 'alp_ask', 'alp_merge', 'alp_discard', 'alp_recall', 'alp_verify', 'alp_pin', 'alp_board', 'alp_unpin', 'alp_lesson', 'alp_lesson_curate', 'alp_skill', 'alp_issue', 'alp_task', 'alp_schedule'].includes(params.tool) ||
       params.namespace != null ||
       typeof params.callId !== 'string'
     ) {
@@ -2542,10 +2680,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const args = params.arguments;
     // The supervisor only reads the board and tasks, and writes to main.
     if (session.role === 'supervisor' && !['alp_send', 'alp_board', 'alp_task'].includes(params.tool)) return toolResult(false, { error: 'The supervisor only uses alp_send, alp_board and alp_task' });
-    if ((params.tool === 'alp_lesson' || params.tool === 'alp_skill') && !supervises(session)) return toolResult(false, { error: 'Only a supervised main records lessons and skills' });
+    if (['alp_lesson', 'alp_lesson_curate', 'alp_skill'].includes(params.tool) && !supervises(session)) return toolResult(false, { error: 'Only a supervised main records lessons and skills' });
     if (params.tool === 'alp_issue' && (session.parent || session.mapping.agent.name !== mainOf(session.mapping))) return toolResult(false, { error: 'Only main files issues; report the problem to your requester' });
     const work =
       params.tool === 'alp_lesson' ? lessonTool(sessionId, session, args)
+      : params.tool === 'alp_lesson_curate' ? lessonCurateTool(sessionId, session, args)
       : params.tool === 'alp_skill' ? skillTool(sessionId, session, args)
       : params.tool === 'alp_issue' ? issueTool(sessionId, session, args)
       : params.tool === 'alp_schedule' ? scheduleTool(sessionId, session, args)
@@ -4729,7 +4868,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       const opened = await openSession(sessionId, spec, history, delegation);
       const root = sessions.get(sessionId)!;
       // Main starts its supervisor beside it, without delaying its own open.
-      if (supervises(root)) void enqueue(() => openSupervisor(sessionId));
+      if (supervises(root)) {
+        void enqueue(() => openSupervisor(sessionId));
+        void ensureCurateSchedule(sessionId).catch(error => runLog(sessionId, { event: 'curate.schedule.failed', error: errorData(error).message }));
+      }
       return opened;
     }),
 

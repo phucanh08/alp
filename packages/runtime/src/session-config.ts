@@ -5,7 +5,7 @@ import type { ResolvedSession, RuntimeKind } from './resolve.js';
 import { models, thinkingOptionsFor } from './catalog.js';
 import { claudeSandboxAvailable, SKILL_PLUGIN } from './claude-transport.js';
 import { languageInstruction } from './language.js';
-import { HANDOFF_TOOL, WAIT_TOOL, SEND_TOOL, MERGE_TOOL, VERIFY_TOOL, DISCARD_TOOL, CANCEL_TOOL, RECALL_TOOL, PIN_TOOL, BOARD_TOOL, UNPIN_TOOL, ASK_TOOL, LESSON_TOOL, SKILL_TOOL, ISSUE_TOOL, SCHEDULE_TOOL, mainOf, taskActions, taskTool } from './tools.js';
+import { HANDOFF_TOOL, WAIT_TOOL, SEND_TOOL, MERGE_TOOL, VERIFY_TOOL, DISCARD_TOOL, CANCEL_TOOL, RECALL_TOOL, PIN_TOOL, BOARD_TOOL, UNPIN_TOOL, ASK_TOOL, LESSON_TOOL, LESSON_CURATE_TOOL, SKILL_TOOL, ISSUE_TOOL, SCHEDULE_TOOL, mainOf, taskActions, taskTool } from './tools.js';
 
 import { COMPACT_SHARE } from './runtime-context.js';
 
@@ -196,7 +196,7 @@ export function nativeSessionConfig(
       `Oracle runs on ${mapping.oracleModels.join(' or ')}; pass one as model (effort follows the team's oracle settings, otherwise high). For two independent opinions, start one oracle on each model with wait: false and compare their advice. If the model you need is unavailable, say so rather than choosing another. Usage context is advisory, may be unavailable or stale; never infer quota from token counts. Respect known exhausted limits and report them.`,
       ...(supervised
         ? ['A supervisor reviews your process after each turn. Its notes ask about process mistakes: answer them in your reply, then record each lesson with alp_lesson (scope project for this project, user for every project). Do not argue a note away; when it is wrong, say why in one line. ' +
-          'When three or more lessons cover one theme, or a lesson recurs, distill them into a skill with alp_skill: a method with steps and checks, listing the lessons it replaces. Scope it to the roles whose work it guides: yourself, lead, peer, oracle, reviewer, supervisor, or a custom agent; a lesson about briefing peers is yours, a lesson about verifying a change belongs to whoever makes it. The user approves it first.']
+          'When three or more lessons cover one theme, or a lesson recurs, distill them into a skill with alp_skill: a method with steps and checks, listing the lessons it replaces. Scope it to the roles whose work it guides: yourself, lead, peer, oracle, reviewer, supervisor, or a custom agent; a lesson about briefing peers is yours, a lesson about verifying a change belongs to whoever makes it. The user approves it first. To merge, shorten or remove lessons use alp_lesson_curate (the curate skill), never a file edit.']
         : []),
       ...(!parentAgent && mapping.agent.name === mainOf(mapping)
         ? ['When you find a problem outside the task that is worth tracking (a bug or gap in this project, or in ALP itself: its process, tools, agent instructions or runtime), search with alp_issue action search, then propose a comment on a matching issue or a new issue. Include facts, reproduction and evidence, never secrets. The user approves every post; never post issues or comments any other way, such as with gh in a shell.']
@@ -292,7 +292,7 @@ export function nativeSessionConfig(
       ...(targets.length ? [WAIT_TOOL, CANCEL_TOOL, MERGE_TOOL, DISCARD_TOOL, VERIFY_TOOL, RECALL_TOOL] : []),
       ...(targets.length || parentAgent ? [SEND_TOOL] : []),
       ...(parentAgent ? [HANDOFF_TOOL] : []),
-      ...(supervised ? [LESSON_TOOL, SKILL_TOOL] : []),
+      ...(supervised ? [LESSON_TOOL, LESSON_CURATE_TOOL, SKILL_TOOL] : []),
       ...(!parentAgent && mapping.agent.name === mainOf(mapping) ? [ISSUE_TOOL, SCHEDULE_TOOL] : []),
       ASK_TOOL,
       PIN_TOOL,

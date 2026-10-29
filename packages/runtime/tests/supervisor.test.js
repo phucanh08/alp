@@ -610,3 +610,135 @@ test('approval immediately followed by interrupt cancels before GitHub dispatch'
   assert.equal(writes, 0);
   assert.match(terminal()[0].event.mail.body, /"outcome":"canceled"/);
 });
+
+/** Proposes a lesson curate, answers its approval and returns the result mail. */
+async function curatedLessons(runtime, pending, reply) {
+  const events = []; const off = runtime.onEvent(e => events.push(e));
+  try {
+    const result = await pending;
+    assert.equal(result.status, 'pending_approval', JSON.stringify(result));
+    const question = runtime.questions().find(q => q.id === result.approvalId);
+    assert.ok(question);
+    runtime.answer(question.id, { text: reply });
+    let terminal;
+    await until(() => { terminal = events.find(e => e.event.type === 'mail' && e.event.mail.assignment === result.approvalId); return terminal; });
+    return { question, result: JSON.parse(terminal.event.mail.body.slice('Lesson curate result: '.length)) };
+  } finally { off(); }
+}
+
+test('main merges, shortens and removes lessons only after one user approval', async t => {
+  const { root, library, runtime, runtimes, prompt } = await setup(t);
+  await runtime.open('root', { cwd: root });
+  await until(() => runtimes.length === 2);
+  await prompt('m1', 'Work');
+  const main = runtimes[0];
+  assert.ok(main.config.dynamicTools.some(tool => tool.name === 'alp_lesson_curate'));
+  assert.ok(claudeToolShapes.alp_lesson_curate);
+  const project = path.join(root, '.alp/lessons.md');
+  const user = path.join(library, 'lessons.md');
+  for (const lesson of ['Run the check first.', 'Always run the check before reporting.', 'Keep this rule.', 'An obsolete rule.']) await main.call('alp_lesson', { scope: 'project', lesson });
+  await main.call('alp_lesson', { scope: 'user', lesson: 'A user rule that is far too long and repeats itself.' });
+  const before = [await readFile(project, 'utf8'), await readFile(user, 'utf8')];
+  // Unknown lessons are refused before any approval exists.
+  const unknown = await main.call('alp_lesson_curate', { changes: [{ scope: 'project', remove: ['Not recorded.'] }] });
+  assert.deepEqual(unknown.missing, ['project: Not recorded.']);
+  assert.equal(runtime.questions().length, 0);
+  assert.match((await main.call('alp_lesson_curate', { changes: [] })).error, /changes/);
+  const changes = [
+    { scope: 'project', remove: ['Run the check first.', '2026-01-01: Always run the check before reporting.'], add: 'Run the check before reporting it.', reason: 'duplicates' },
+    { scope: 'project', remove: ['An obsolete rule.'] },
+    { scope: 'user', remove: ['A user rule that is far too long and repeats itself.'], add: 'A short user rule.' },
+  ];
+  const rejected = await curatedLessons(runtime, main.call('alp_lesson_curate', { changes }), 'Reject');
+  assert.equal(rejected.result.applied, false);
+  assert.match(rejected.question.question ?? JSON.stringify(rejected.question), /Remove: An obsolete rule\./);
+  assert.deepEqual([await readFile(project, 'utf8'), await readFile(user, 'utf8')], before);
+  const { result } = await curatedLessons(runtime, main.call('alp_lesson_curate', { changes, requestId: 'go' }), 'Approve');
+  assert.equal(result.applied, true);
+  assert.equal(result.added, 2);
+  const after = await readFile(project, 'utf8');
+  assert.match(after, /# ALP lessons/);
+  assert.match(after, /Keep this rule\./);
+  assert.match(after, /- \d{4}-\d\d-\d\d: Run the check before reporting it\./);
+  assert.doesNotMatch(after, /Run the check first\.|Always run|obsolete/);
+  assert.match(await readFile(user, 'utf8'), /A short user rule\./);
+  assert.doesNotMatch(await readFile(user, 'utf8'), /far too long/);
+  // A replay of the approved draft applies nothing again.
+  const replay = await main.call('alp_lesson_curate', { changes, requestId: 'go' });
+  assert.equal(replay.status, 'resolved');
+  assert.equal(replay.applied, true);
+  assert.equal((await readFile(project, 'utf8')).match(/Run the check before reporting it\./g).length, 1);
+  assert.match((await main.call('alp_lesson_curate', { changes: [changes[1]], requestId: 'go' })).error, /different draft/);
+  // A dismissal changes nothing.
+  const kept = await readFile(project, 'utf8');
+  const pending = await main.call('alp_lesson_curate', { changes: [{ scope: 'project', remove: ['Keep this rule.'] }] });
+  runtime.answer(pending.approvalId, { dismiss: true, reason: 'Not now' });
+  await until(async () => (await main.call('alp_lesson_curate', { changes: [{ scope: 'project', remove: ['Keep this rule.'] }] })).status === 'resolved');
+  assert.equal(await readFile(project, 'utf8'), kept);
+});
+
+test('only a supervised main curates lessons', async t => {
+  const { root, runtime, runtimes, prompt } = await setup(t, { workflow: { mode: 'cafe', supervisor: false } });
+  await runtime.open('root', { cwd: root });
+  await prompt('m1', 'Work');
+  await until(() => runtimes[0]?.turnId);
+  assert.equal(runtimes[0].config.dynamicTools.some(tool => tool.name === 'alp_lesson_curate'), false);
+  assert.match((await runtimes[0].call('alp_lesson_curate', { changes: [{ scope: 'project', remove: ['x'] }] })).error, /Only a supervised main/);
+});
+
+test('a supervised main keeps one monthly curate job, replaces an older session\'s, and settings turn it off', async t => {
+  const jobs = [];
+  const handler = async (action, params) => {
+    if (action === 'list') return { jobs: jobs.filter(job => job.status === 'pending') };
+    if (action === 'cancel') { jobs.find(job => job.id === params.id).status = 'cancelled'; return {}; }
+    if (action === 'create') { const job = { id: `sch_${jobs.length}`, status: 'pending', ...params }; jobs.push(job); return { job }; }
+  };
+  const { root, library, runtime, runtimes } = await setup(t);
+  runtime.bindSchedules(handler);
+  await runtime.open('root', { cwd: root });
+  await until(() => jobs.length === 1);
+  assert.match(jobs[0].prompt, /^\[alp-curate\] [\s\S]*curate skill/);
+  assert.equal(jobs[0].sessionId, 'root');
+  assert.equal(jobs[0].keepsSession, false);
+  assert.match(jobs[0].dueAt, /^\d{4}-\d\d-01T02:00:00\.000Z$/);
+  assert.ok(Date.parse(jobs[0].dueAt) > Date.now());
+  await runtime.open('second', { cwd: root });
+  await until(() => jobs.length === 2);
+  assert.equal(jobs[0].status, 'cancelled');
+  assert.equal(jobs[1].sessionId, 'second');
+  await settle();
+  assert.equal(jobs.filter(job => job.status === 'pending').length, 1);
+  // Off in the user's settings; a project setting takes precedence.
+  await writeFile(path.join(library, 'settings.json'), JSON.stringify({ curate: { monthly: false } }));
+  await runtime.open('third', { cwd: root });
+  await until(() => runtimes.length >= 6);
+  await settle();
+  assert.equal(jobs.length, 2);
+  const projectSettings = path.join(root, '.alp/settings.json');
+  await writeFile(projectSettings, JSON.stringify({ ...JSON.parse(await readFile(projectSettings, 'utf8')), curate: { monthly: true } }));
+  await runtime.open('fourth', { cwd: root });
+  await until(() => jobs.length === 3);
+  assert.equal(jobs[2].sessionId, 'fourth');
+});
+
+test('two opens of one project at once leave one curate job, and a failing schedule never fails the open', async t => {
+  const jobs = [];
+  let fail = false;
+  const handler = async (action, params) => {
+    if (fail) throw new Error('alpd is down');
+    await new Promise(resolve => setTimeout(resolve, 10));
+    if (action === 'list') return { jobs: jobs.filter(job => job.status === 'pending') };
+    if (action === 'cancel') { jobs.find(job => job.id === params.id).status = 'cancelled'; return {}; }
+    if (action === 'create') { const job = { id: `sch_${jobs.length}`, status: 'pending', ...params }; jobs.push(job); return { job }; }
+  };
+  const { root, runtime } = await setup(t);
+  runtime.bindSchedules(handler);
+  await Promise.all([runtime.open('a', { cwd: root }), runtime.open('b', { cwd: root })]);
+  await until(() => jobs.length === 2);
+  await settle();
+  assert.equal(jobs.filter(job => job.status === 'pending').length, 1);
+  fail = true;
+  await runtime.open('c', { cwd: root });
+  await settle();
+  assert.ok(runtime.snapshot('c'));
+});

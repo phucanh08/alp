@@ -131,6 +131,9 @@ Scope it to the roles whose work it guides: yourself, lead, peer, oracle,
 reviewer, supervisor, or a custom agent. List the lessons it replaces. The user
 sees the whole skill and approves it before it is saved.
 
+To merge, shorten or remove lessons, use the curate skill and alp_lesson_curate;
+never edit lesson files directly. The user approves every change first.
+
 ## Issues
 
 When you find a problem outside the task that is worth tracking, in this project

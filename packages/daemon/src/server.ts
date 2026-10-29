@@ -1663,11 +1663,12 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
      * the project; a session that is closed when the job is due fails the job, and the
      * reason is kept.
      */
-    async 'schedule.create'(_connection, { projectRoot, sessionId, dueAt, prompt } = {}) {
+    async 'schedule.create'(_connection, { projectRoot, sessionId, dueAt, prompt, keepsSession } = {}) {
       if (!schedules) throw new RpcError(ERROR.failed, 'alpd does not serve scheduled jobs');
       if (typeof projectRoot !== 'string' || typeof sessionId !== 'string' || typeof dueAt !== 'string' || typeof prompt !== 'string') {
         throw new RpcError(RPC_ERROR.invalidParams, 'projectRoot, sessionId, dueAt and prompt are required');
       }
+      if (keepsSession !== undefined && typeof keepsSession !== 'boolean') throw new RpcError(RPC_ERROR.invalidParams, 'keepsSession must be true or false');
       if (!path.isAbsolute(projectRoot)) throw new RpcError(RPC_ERROR.invalidParams, 'projectRoot must be an absolute path');
       const snapshot = runtime.snapshot(sessionId);
       if (!snapshot) throw new RpcError(ERROR.notFound, `Session ${sessionId} is not open`);
@@ -1680,7 +1681,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       // in between; the job's own hold takes over once it exists.
       scheduler?.holdSession(sessionId);
       try {
-        const job = await schedules.create({ projectRoot, sessionId, dueAt, prompt });
+        const job = await schedules.create({ projectRoot, sessionId, dueAt, prompt, keepsSession });
         scheduler?.hold(job);
         return { job };
       } catch (error) {

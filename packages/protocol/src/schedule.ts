@@ -40,4 +40,9 @@ export type ScheduleJob = {
   lateByMs?: number;
   /** The last error of the job: why it failed, or why it still waits. */
   lastError?: ScheduleError;
+  /**
+   * false: the job does not keep its session open while it waits, so an idle session may
+   * still be closed and the job then fails as session_closed. Absent: it keeps it open.
+   */
+  keepsSession?: false;
 };

@@ -116,6 +116,8 @@ export function createScheduler({ store, runtime, deliver, ready, session, settl
 
   const hold = (job: ScheduleJob) => {
     if (!held.has(job.id)) held.set(job.id, { sessionId: job.sessionId, at: ++sequence });
+    // A job that does not keep its session open is tracked, but no session waits for it.
+    if (job.keepsSession === false) return;
     const ids = waiting.get(job.sessionId) ?? new Set<string>();
     ids.add(job.id);
     waiting.set(job.sessionId, ids);
