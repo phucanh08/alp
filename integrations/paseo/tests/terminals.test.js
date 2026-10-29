@@ -43,7 +43,7 @@ const WORKSPACES = [
  * alpd's terminal service as §12.10 says, without a PTY: one attached connection per terminal,
  * replay of the ring before the attach answers, a gap when the ring moved on, detached events.
  */
-function fakeAlpd({ protectionWarning, capabilities = ['terminal'], replayBytes = 1024 * 1024, maxInputBytes = 64 * 1024 } = {}) {
+function fakeAlpd({ protection, capabilities = ['terminal'], replayBytes = 1024 * 1024, maxInputBytes = 64 * 1024 } = {}) {
   const calls = [];
   const conns = [];
   const terminals = new Map();
@@ -57,12 +57,11 @@ function fakeAlpd({ protectionWarning, capabilities = ['terminal'], replayBytes 
   }
   const error = (code, reason, message = reason) => Object.assign(new Error(message), { code, data: { reason } });
   const send = (conn, params) => { if (conn && !conn.closed) for (const listener of [...conn.listeners]) listener('terminal.event', params); };
-  const info = term => ({ terminalId: term.id, workspaceId: term.workspaceId, title: 'sh', cols: term.cols, rows: term.rows, state: term.state, createdAt: '2026-01-01T00:00:00.000Z' });
+  const info = term => ({ terminalId: term.id, workspaceId: term.workspaceId, title: 'sh', cols: term.cols, rows: term.rows, state: term.state, createdAt: '2026-01-01T00:00:00.000Z', ...(protection ? { protection } : {}) });
   function handle(conn, method, params) {
     if (method === 'daemon.hello') return { protocolVersion: 1, capabilities, ...(capabilities.includes('terminal') ? { terminalLimits: { maxPerPrincipal: 4, maxPerDaemon: 16, maxInputBytes, maxOutputFrameBytes: 65536, replayBytes, idleMs: 1e6, maxLifetimeMs: 1e7, reconnectMs: 60000 } } : {}) };
     if (method === 'registry.owner') return { registry: { projects: [{ id: 'p1' }, { id: 'p2', removedAt: '2026-03-01T00:00:00.000Z' }], workspaces: WORKSPACES } };
     if (method === 'terminal.create') {
-      if (protectionWarning) throw error(1005, 'terminal_protection_ack_required', protectionWarning);
       const id = `term_${String(++made).padStart(32, '0')}`;
       const term = { id, workspaceId: params.workspaceId, cols: params.cols, rows: params.rows, state: 'running', events: [], seq: 0, attached: null, inputs: [] };
       terminals.set(id, term);
@@ -166,9 +165,9 @@ function fakeClient(name = 'c1') {
 }
 
 /** The bridge's terminals on a fake alpd; `call` answers like the gateway (a returned reply is emitted). */
-async function setup(t, { protectionWarning, config, capabilities, timing, replayBytes, maxInputBytes, archiveAgent } = {}) {
+async function setup(t, { protection, config, capabilities, timing, replayBytes, maxInputBytes, archiveAgent } = {}) {
   const home = await homeWith(t, config);
-  const alpd = fakeAlpd({ protectionWarning, capabilities, replayBytes, maxInputBytes });
+  const alpd = fakeAlpd({ protection, capabilities, replayBytes, maxInputBytes });
   const logs = [];
   const terminals = createTerminals({ home, connect: alpd.connect, log: message => logs.push(message), archiveAgent, timing: { retryMs: 10, drainMs: 10, ...timing } });
   t.after(() => terminals.close());
@@ -829,17 +828,27 @@ test('opt-out while reconnect sleeps wakes it without opening a late connection'
   assert.equal(world.alpd.conns.length, count);
 });
 
-test('Paseo surfaces the pre-use reduced-protection refusal and never silently acknowledges it', async t => {
-  const message = 'This Linux host lacks terminal process protection. Commands it started may continue running after close or access revocation. Continue only if you accept this limit.';
-  const f = await setup(t, { protectionWarning: message });
-  const client = fakeClient();
-  for (let i = 0; i < 2; i++) {
+for (const [protection, text] of [['root-only', 'Limited protection on this Linux host'], ['none', 'not guaranteed on Windows']]) {
+  test(`Paseo opens a ${protection} terminal without acknowledgment and shows its notice once per client`, async t => {
+    const f = await setup(t, { protection });
+    const client = fakeClient();
     const reply = await f.create(client);
-    assert.equal(reply.terminal, null);
-    assert.equal(reply.error, message);
-    assert.equal(f.alpd.terminals.size, 0);
-  }
-  const calls = f.alpd.terminalCalls().filter(call => call.method === 'terminal.create');
-  assert.equal(calls.length, 2);
-  assert.ok(calls.every(call => call.params.protectionAcknowledgment === undefined));
+    assert.equal(reply.error, null);
+    assert.ok(reply.terminal?.id, 'the terminal opens');
+    assert.equal((await f.subscribe(client, reply.terminal.id)).error, null);
+    assert.match(client.output(0), new RegExp(text), 'the notice is shown in the client view');
+    await f.call(client, { type: 'subscribe_terminal_request', terminalId: reply.terminal.id, requestId: 'again' });
+    assert.equal(client.output(0).split(text).length - 1, 1, 'shown once per client');
+    const calls = f.alpd.terminalCalls().filter(call => call.method === 'terminal.create' || call.method === 'terminal.attach');
+    assert.ok(calls.length >= 2);
+    assert.ok(calls.every(call => call.params.protectionAcknowledgment === undefined), 'never acknowledges');
+  });
+}
+
+test('Paseo shows no protection notice on a fully protected host', async t => {
+  const f = await setup(t);
+  const client = fakeClient();
+  const reply = await f.create(client);
+  await f.subscribe(client, reply.terminal.id);
+  assert.doesNotMatch(client.output(0), /\[ALP: /);
 });

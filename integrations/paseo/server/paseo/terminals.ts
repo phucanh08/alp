@@ -45,6 +45,12 @@ const SHELL_ONLY = 'ALP starts the host account\'s own shell: a command, argumen
   + 'The terminal\'s directory is where it starts, not a sandbox.';
 const REPLACED = 'This terminal was opened in another ALP client; open it again here to take it back';
 const LOST = 'The ALP daemon went away; this terminal is no longer shown';
+/** Paseo's terminal protocol has no notice field: a best-effort host's notice is one dim line in each client's view (never in alpd's output). */
+const PROTECTION_NOTICES: Record<string, string> = {
+  'root-only': 'Limited protection on this Linux host: closing the terminal may not stop background processes.',
+  none: 'Process cleanup is not guaranteed on Windows: closing the terminal may not stop background processes.',
+};
+export const protectionNoticeLine = (protection: unknown) => typeof protection === 'string' && Object.hasOwn(PROTECTION_NOTICES, protection) ? `\x1b[33m[ALP: ${PROTECTION_NOTICES[protection]}]\x1b[0m\r\n` : undefined;
 const GAP = '\r\n\x1b[2m[ALP: some output of this terminal is no longer kept]\x1b[0m\r\n';
 
 const CHECK_MS = 5_000;
@@ -57,9 +63,11 @@ const LOW_WATER = 1024 * 1024;
 const SLOTS = 256;
 const MAX_PENDING_SIZES = 256;
 
-type Sub = { client: ClientContext; slot: number; lagging: boolean };
+type Sub = { client: ClientContext; slot: number; lagging: boolean; noticed?: boolean };
 type Stream = {
   id: string; workspaceId: string; cwd: string; title: string;
+  /** The best-effort protection notice line, when alpd reports reduced protection. */
+  notice?: string;
   conn?: DaemonConnection;
   state: 'attaching' | 'attached' | 'detached';
   ready?: Promise<void>;
@@ -260,7 +268,7 @@ export function createTerminals({
   // ── Streams ─────────────────────────────────────────────────────────────────────────────────
   function stream(info: TerminalInfo, workspace: TerminalWorkspace): Stream {
     const made: Stream = {
-      id: info.terminalId, workspaceId: workspace.id, cwd: workspace.directory, title: info.title, state: 'detached',
+      id: info.terminalId, workspaceId: workspace.id, cwd: workspace.directory, title: info.title, state: 'detached', notice: protectionNoticeLine((info as { protection?: unknown }).protection),
       ring: [], ringBytes: 0, lastSeq: 0, tracker: new TerminalInputModeTracker(), subs: new Map(), input: Promise.resolve(),
     };
     const claimed = pendingSizes.get(made.id);
@@ -365,6 +373,8 @@ export function createTerminals({
     if (replay) sub.client.emitBinary(encodeTerminalStreamFrame({ opcode: TerminalStreamOpcode.Restore, slot: sub.slot, payload: replay }));
     const preamble = target.tracker.getPreamble();
     if (preamble) sub.client.emitBinary(encodeTerminalStreamFrame({ opcode: TerminalStreamOpcode.Output, slot: sub.slot, payload: preamble }));
+    // Once per client, after its replay (a Restore frame would replace it): a non-blocking disclosure; the terminal stays usable.
+    if (target.notice && !sub.noticed) { sub.noticed = true; sub.client.emitBinary(encodeTerminalStreamFrame({ opcode: TerminalStreamOpcode.Output, slot: sub.slot, payload: target.notice })); }
   }
   function lag(sub: Sub) {
     sub.lagging = true;
