@@ -1526,6 +1526,14 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       return conversation.reload(params);
     },
 
+    /** Compacts a live root's context now or at its next turn boundary (t-0e56). */
+    async 'session.compact'(_connection, { sessionId }) {
+      if (typeof sessionId !== 'string' || !sessionId) throw new RpcError(-32602, 'sessionId is required');
+      if (!runtime.compact) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd does not compact sessions');
+      try { return runtime.compact(sessionId); }
+      catch (error) { throw new RpcError(ERROR.unavailable, error instanceof Error ? error.message : String(error)); }
+    },
+
     /** The ALP CLI command that follows a session in a terminal, for the clipboard (§12.8). */
     async 'session.resumeCommand'(_connection, { sessionId }) {
       if (!conversation) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd has no resume command (capability session.resumeCommand is not listed)');

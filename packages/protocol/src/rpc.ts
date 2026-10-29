@@ -232,6 +232,14 @@ export type RpcMethodMap = {
    * The ALP CLI command that continues a session in a terminal, built by alpd (capability
    * `session.resumeCommand`, §12.8): argv and its POSIX and Windows command lines, for the clipboard only.
    */
+  /**
+   * Compacts a live root's context (t-0e56): main writes a checkpoint by skill compact, then its runtime
+   * compacts, or ALP starts a fresh conversation seeded with it. Idle: now; otherwise at its next turn boundary.
+   */
+  'session.compact': {
+    params: { sessionId: string };
+    result: { status: 'started' | 'deferred' | 'running' };
+  };
   'session.resumeCommand': {
     params: { sessionId: string };
     result: ResumeCommand;
