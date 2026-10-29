@@ -14,7 +14,7 @@ function requireValue(condition, code, source, message) {
 /** Efforts a profile may name; a model ALP knows takes only its own (src/core/models.js). */
 const EFFORTS = ['none', 'off', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode'];
 /** Top-level keys of a project's .alp/settings.json. */
-export const PROJECT_SETTINGS = ['$schema', 'defaultAgent', 'workflow', 'runtime', 'permissions', 'verify', 'delegation', 'team', 'profile', 'templateDefaults'];
+export const PROJECT_SETTINGS = ['$schema', 'defaultAgent', 'workflow', 'runtime', 'permissions', 'verify', 'delegation', 'team', 'profile', 'templateDefaults', 'compact'];
 /** Top-level keys of the user's $ALP_HOME/settings.json. */
 export const USER_SETTINGS = ['$schema', 'language', 'permissions', 'limits', 'recovery', 'web'];
 /**
@@ -75,6 +75,12 @@ export function validateSettings(settings, source) {
     if (settings.workflow.mode !== undefined) check(typeof settings.workflow.mode === 'string' && /^[\w.-]+$/.test(settings.workflow.mode) && settings.workflow.mode !== 'custom', 'workflow.mode must name a team, such as pho or cafe');
     if (settings.workflow.maxPeers !== undefined) check(Number.isSafeInteger(settings.workflow.maxPeers) && settings.workflow.maxPeers > 0, 'workflow.maxPeers must be a positive integer');
     if (settings.workflow.supervisor !== undefined) check(typeof settings.workflow.supervisor === 'boolean', 'workflow.supervisor must be true or false');
+  }
+  if (settings.compact !== undefined) {
+    check(object(settings.compact), 'compact must be an object');
+    check(Object.keys(settings.compact).every(key => ['auto', 'threshold'].includes(key)), 'compact takes auto and threshold');
+    if (settings.compact.auto !== undefined) check(typeof settings.compact.auto === 'boolean', 'compact.auto must be true or false');
+    if (settings.compact.threshold !== undefined) check(typeof settings.compact.threshold === 'number' && settings.compact.threshold > 0 && settings.compact.threshold < 1, 'compact.threshold must be a number between 0 and 1');
   }
   if (settings.templateDefaults !== undefined) {
     check(object(settings.templateDefaults), 'templateDefaults must map teams to profile fingerprints');

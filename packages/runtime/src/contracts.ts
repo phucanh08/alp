@@ -216,6 +216,8 @@ export type AlpRuntime = {
    * Emits session.updated.
    */
   reload?(sessionId: string): Promise<SessionSnapshot>;
+  /** Compacts a root's context at its next turn boundary, with a checkpoint main writes by skill compact (t-0e56). */
+  compact?(sessionId: string): { status: 'started' | 'deferred' | 'running' };
   /**
    * Holds the turns the runtime would start by itself on this session (mail wakes) while a lifecycle
    * operation changes its conversation (a rewind, later a reload or live configure): mail stays queued

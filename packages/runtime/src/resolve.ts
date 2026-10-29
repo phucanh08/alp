@@ -12,6 +12,7 @@ import type { AntigravityProvider } from './antigravity-transport.js';
 import { ensureLibrary } from '@anhlp/alp-core/library';
 import { compileAgent } from '@anhlp/alp-core/adapter';
 import { capMode, profileFor } from '@anhlp/alp-core/permissions';
+import { compactSettings } from './compact.js';
 import { userLanguage } from '@anhlp/alp-core/user-settings';
 import { claudeSandboxAvailable } from './claude-transport.js';
 import type { ResolvedAgent } from '@anhlp/alp-core/types';
@@ -224,6 +225,8 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
     // ALPD §57: the window the agent works in before its runtime compacts; absent, the model's.
     ...(agent.context ? { context: agent.context } : {}),
     autocompact: typeof profile?.autocompact === 'number' ? profile.autocompact as number : typeof agent.autocompact === 'number' ? agent.autocompact : undefined,
+    // t-0e56: when main's context is compacted at a turn boundary.
+    compact: compactSettings(projectSettings.compact),
     // ALPD §54: the language everything the user reads is written in.
     language: options.language ?? await userLanguage(options.library),
   };

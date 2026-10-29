@@ -33,6 +33,8 @@ const en = {
   limitReached: (runtime: string, resetsAt: string | undefined, other: string | undefined, autoResume: boolean, kind: string) =>
     `${runtime} usage limit reached${resetsAt ? `; it resets ${resetsAt}` : ''}. ALP paused delegation to ${runtime} agents and parked their assignments${other ? `; ${other} agents keep working` : ''}. ${autoResume ? `ALP asks ${runtime} every minute and resumes it as soon as the limit lifts.` : `ALP asks ${runtime} every minute and tells you when the limit lifts; then run alp resume ${kind}.`}`,
   limitLifted: (runtime: string, kind: string) => `${runtime} says its usage limit has lifted. Run alp resume ${kind} to continue its work.`,
+  compacted: (native: boolean) => `Main's context was compacted${native ? '' : ' into a fresh conversation'}; it keeps its checkpoint and carries on.`,
+  compactFailed: (reason: string) => `Compacting main's context failed (${reason}); ALP tries again later.`,
   usageWarning: (runtime: string, used: string, resetsAt: string | undefined) => `${runtime} has used ${used} of a usage window${resetsAt ? ` that resets ${resetsAt}` : ''}.`,
   /** The web app's answer to a Paseo feature ALP has not got yet (ALPD §62). */
   inDevelopment: 'This feature is in development',
@@ -73,6 +75,8 @@ const vi: Words = {
   limitReached: (runtime, resetsAt, other, autoResume, kind) =>
     `${runtime} đã hết hạn mức sử dụng${resetsAt ? `; hạn mức đặt lại lúc ${resetsAt}` : ''}. ALP tạm dừng giao việc cho các agent ${runtime} và tạm giữ việc của chúng${other ? `; các agent ${other} vẫn làm tiếp` : ''}. ${autoResume ? `ALP hỏi ${runtime} mỗi phút và tự chạy lại ngay khi có hạn mức.` : `ALP hỏi ${runtime} mỗi phút và báo khi có hạn mức trở lại; khi đó chạy alp resume ${kind}.`}`,
   limitLifted: (runtime, kind) => `${runtime} báo đã có hạn mức trở lại. Chạy alp resume ${kind} để làm tiếp việc của nó.`,
+  compacted: native => `Context của main đã được compact${native ? '' : ' sang một cuộc hội thoại mới'}; main giữ checkpoint và làm tiếp.`,
+  compactFailed: reason => `Compact context của main thất bại (${reason}); ALP sẽ thử lại sau.`,
   usageWarning: (runtime, used, resetsAt) => `${runtime} đã dùng ${used} hạn mức của kỳ này${resetsAt ? `, kỳ đặt lại lúc ${resetsAt}` : ''}.`,
   inDevelopment: 'Tính năng đang phát triển',
   resumed: (what, by, parked) => `${what} đã chạy lại, bởi ${by}.${parked ? ' Các việc đang tạm giữ được làm tiếp.' : ''}`,

@@ -17,6 +17,7 @@ export interface RawSettings {
   workflow?: { mode?: 'pho' | 'cafe' | 'smart' | 'supervised'; maxPeers?: number; supervisor?: boolean };
   delegation?: Record<string, string[]>;
   runtime?: { provider?: string; model?: string; reasoning?: string };
+  compact?: { auto?: boolean; threshold?: number };
 }
 export interface RawMcpServer {
   command?: string;
