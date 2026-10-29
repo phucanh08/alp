@@ -393,8 +393,8 @@ test('Antigravity runs each ALP mode with the agy flags that enforce it', async 
   const { root, runtime, turn, dir } = await setup(t);
   const log = path.join(dir, 'agy.jsonl');
   const expected = {
-    'read-only': { mode: undefined, permission: 'request-review' },
-    'workspace-write': { mode: 'accept-edits', permission: 'proceed-in-sandbox' },
+    'read-only': { mode: undefined, permission: 'request-review', allow: ['mcp(alp/*)', 'command(pwd)', 'command(ls)', 'command(cat)', 'command(head)', 'command(tail)', 'command(wc)', 'command(grep)'] },
+    'workspace-write': { mode: 'accept-edits', permission: 'proceed-in-sandbox', allow: ['mcp(alp/*)'] },
   };
   for (const [mode, want] of Object.entries(expected)) {
     await writeFile(log, '');
@@ -408,7 +408,7 @@ test('Antigravity runs each ALP mode with the agy flags that enforce it', async 
     assert.equal(settings.toolPermission, want.permission);
     assert.equal(settings.enableTerminalSandbox, true);
     assert.ok(settings.trustedWorkspaces.includes(root));
-    assert.deepEqual(settings.permissions.allow, ['mcp(alp/*)']);
+    assert.deepEqual(settings.permissions.allow, want.allow, mode);
     assert.match(await readFile(log, 'utf8'), new RegExp(`Your mode is ${mode}`));
   }
   await writeFile(log, '');

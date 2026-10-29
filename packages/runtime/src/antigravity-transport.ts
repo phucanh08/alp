@@ -65,14 +65,20 @@ process.stdin.on('end', () => process.exit(0));
 `;
 
 const MODES = ['read-only', 'workspace-write', 'full-access'];
+/**
+ * Commands read-only allows. agy matches an allow rule by command prefix and denies
+ * redirection, chaining and substitution itself (checked with agy 1.4.10), so each
+ * entry must have no flag that writes: git is left out (`git log --output`, and
+ * `git status` refreshes the index), as are rg (`--pre`) and find (`-delete`).
+ */
+const READ_ONLY_COMMANDS = ['pwd', 'ls', 'cat', 'head', 'tail', 'wc', 'grep'];
 const modeOf = (sandbox: unknown) => sandbox === 'danger-full-access' ? 'full-access' : String(sandbox);
 
 /**
  * The agy flags for an ALP mode. Headless agy cannot ask the user, so a tool its
  * permission mode does not allow is denied: both limited modes fail closed.
  * - read-only: agy's default request-review policy; built-in reads and search run,
- *   edits and every terminal command are denied (an allow rule for a command
- *   matches its prefix, so even `git log --output=f` would write).
+ *   READ_ONLY_COMMANDS run; edits and every other command are denied.
  * - workspace-write: edits accepted and commands run in agy's terminal sandbox,
  *   which keeps writes in the workspace; a bypass of the sandbox is denied.
  * - full-access: every tool runs without asking.
@@ -89,7 +95,7 @@ export function antigravityModeArgs(sandbox: unknown, cwd: string): string[] {
     toolPermission: mode === 'workspace-write' ? 'proceed-in-sandbox' : 'request-review',
     enableTerminalSandbox: true,
     trustedWorkspaces: [...new Set([cwd, real])],
-    permissions: { allow: ['mcp(alp/*)'] },
+    permissions: { allow: ['mcp(alp/*)', ...(mode === 'read-only' ? READ_ONLY_COMMANDS.map(command => `command(${command})`) : [])] },
   };
   return [...(mode === 'workspace-write' ? ['--mode', 'accept-edits'] : []), '--sandbox', '--settings', JSON.stringify(settings)];
 }
@@ -97,7 +103,7 @@ export function antigravityModeArgs(sandbox: unknown, cwd: string): string[] {
 /** What each mode lets an Antigravity agent do, for its instructions. */
 export function antigravityModeText(sandbox: unknown): string {
   const mode = modeOf(sandbox);
-  if (mode === 'read-only') return 'agy enforces read-only: its own file reading and search tools work, and ALP\'s tools; it denies every file edit and every terminal command. A denied tool ends your turn, so do not attempt one: report work that needs changes to your requester.';
+  if (mode === 'read-only') return 'agy enforces read-only: its own file reading and search tools work, and ALP\'s tools; it allows only the terminal commands pwd, ls, cat, head, tail, wc and grep, with no redirection or chaining, and denies every file edit and other command. A denied tool ends your turn, so do not attempt one: report work that needs changes to your requester.';
   if (mode === 'workspace-write') return 'agy accepts file edits and runs terminal commands in its sandbox, which writes only inside your workspace; anything outside the workspace or the sandbox is denied, and a denied tool ends your turn. Report work that needs more to your requester.';
   return 'Antigravity runs with full access: every tool runs without asking.';
 }
