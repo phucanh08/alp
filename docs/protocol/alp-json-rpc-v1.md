@@ -1350,8 +1350,8 @@ carries it, and a gateway credential cannot imply it. alpd reads the file again 
 call and at least every 5 s: once it is off (or unusable) every
 terminal is killed (`exit` reason `disabled`) and new ones are refused (`1005 terminal_disabled`).
 `daemon.hello` lists capability `terminal` with `terminalLimits` only while the switch is on, on
-macOS and Linux, and when the shipped native PTY owner passes integrity and capability checks. Windows is not
-supported (`1005 terminal_unsupported`; the capability is never listed there).
+on macOS and Linux when the shipped native PTY owner passes integrity and capability checks, and on
+Windows when node-pty (ConPTY) loads (best-effort, no protection helper; otherwise `1005 terminal_unsupported`).
 
 **Limits** (`TERMINAL` in `@anhlp/alp-protocol`, advertised as `daemon.hello` `terminalLimits`):
 `maxPerPrincipal` 4 and `maxPerDaemon` 16 running terminals; `maxInputBytes` 64 KiB (UTF-8) per
@@ -1368,7 +1368,7 @@ workspace (whose canonical directory must be one of `authorizedRoots`, when give
 checks the whole binding again; an id that is unknown, or of another principal, epoch or root,
 answers the same `1001 not_found`. Terminal ids are opaque (`term_` and 32 hex digits).
 
-- `terminal.create { workspaceId, cols, rows, requestId, protectionAcknowledgment? }` → `{ terminal }`. alpd starts the
+- `terminal.create { workspaceId, cols, rows, requestId, protectionAcknowledgment? (deprecated, ignored) }` → `{ terminal }`. alpd starts the
   approved shell (the daemon user's `$SHELL` when it is an absolute path listed in `/etc/shells`, else
   `/bin/sh`) as an interactive login-free shell in the workspace's directory, with alpd's environment
   minus `ALP_*` and `npm_*` variables, plus `TERM=xterm-256color`, `COLORTERM=truecolor` and
@@ -1379,7 +1379,7 @@ answers the same `1001 not_found`. Terminal ids are opaque (`term_` and 32 hex d
   creator attaches next; a terminal nobody attaches within `reconnectMs` is killed.
 - `terminal.list { workspaceId? }` → `{ terminals }`: the caller's own terminals (running, and exited
   ones kept for `reconnectMs` so a client can read their end), newest first.
-- `terminal.attach { terminalId, after?, protectionAcknowledgment? }` → `{ terminal, nextSeq, gap? }`. This connection becomes the
+- `terminal.attach { terminalId, after?, protectionAcknowledgment? (deprecated, ignored) }` → `{ terminal, nextSeq, gap? }`. This connection becomes the
   terminal's only stream: another one attached before is detached (`detached` reason `replaced`).
   alpd first sends, as `terminal.event` notifications, every output event with `seq > after`
   (`after` 0 or absent: from the start) still in the replay ring, and the `exit` event if the terminal
@@ -1415,22 +1415,17 @@ It can miss descendants that detach before ever being observed (approved discove
 macOS uses a runtime-validated private ABI and audit-token signals with the explicitly accepted
 32-bit global generation-wrap residual; see `packages/daemon/native/README.md`.
 
-**Linux compatibility and pre-use warning.** A verified helper may report reduced protection only
-when its bound-signal self-probe returns `ENOSYS`, after its procfs/namespace checks pass. This
-means capability unavailable (including a policy returning ENOSYS), not proof of an old kernel.
-Missing/corrupt artifacts, permission denials, namespace mismatch and other failures do not
-select compatibility. Before any compatibility shell is spawned, `terminal.create` refuses with
-`1005 terminal_protection_ack_required` and a warning: closing/revoking/turning off terminals or
-stopping ALP ends only the initial shell; commands/background jobs it started may continue.
-`terminal.attach` independently requires the warning acknowledgment for a reduced-protection
-terminal before replay or input access. After presenting this warning, a deliberate caller may
-supply `protectionAcknowledgment: "linux-root-only-v1"` on create/attach. This acknowledges that
-specific protection limit; it never supplies `terminal.exec`, host opt-in or workspace authority.
-Clients must not acknowledge automatically on retry, reconnect, or behalf of a user.
-ALP Web offers Continue/Cancel before launch and warns again in a fresh restored tab. Current
-Paseo messages cannot convey acknowledgment: the bridge surfaces the warning and refuses degraded
-creation/attachment. User g6 accepted this temporary consumer limit on 2026-10-29;
-native-supported Paseo is unchanged. Platform/matrix/native-execution requirements remain.
+**Best-effort hosts (Linux root-only, Windows).** Only macOS full protection is guaranteed.
+A verified Linux helper that cannot provide full protection for any reason reports reduced
+protection; missing/corrupt/hash-invalid artifacts still refuse (`terminal_unsupported`, no
+plain-PTY fallback). Such terminals open directly and carry `protection: "root-only"`: closing,
+revoking, turning off terminals or stopping ALP ends the initial shell, but commands/background
+jobs it started may continue. On Windows alpd uses node-pty (ConPTY) with no protection helper;
+terminals carry `protection: "none"` and close kills the pty, best-effort. `protection` is absent
+under full protection. Clients show a non-blocking notice for `root-only`/`none`; the terminal stays
+usable. `protectionAcknowledgment: "linux-root-only-v1"` is deprecated: still accepted on
+create/attach and ignored. Paseo's protocol has no notice field, so the ALP bridge writes the
+notice once as a dim line in each Paseo client's view.
 
 **Ending a terminal** sends `SIGHUP`, then after 1 s `SIGKILL` to retained authorized identities.
 In Linux compatibility mode the only explicit signal target is the owner's direct unreaped child.

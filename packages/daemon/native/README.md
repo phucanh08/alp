@@ -1,9 +1,10 @@
 # Terminal native owner — candidate, platform matrix incomplete
 
 Task t-d71b. Production `src/terminals.ts` now uses this identity-bound owner,
-with no node-pty fallback. Linux may use the explicitly acknowledged root-only mode described below. This candidate is NOT accepted for release:
+with no node-pty fallback on macOS or Linux. Linux may use the best-effort root-only mode described below;
+Windows has no protection helper and uses node-pty (ConPTY), best-effort (see "Windows" below). This candidate is NOT accepted for release:
 four Linux artifacts and actual Linux/Windows evidence remain missing. Missing or
-unverifiable backends refuse terminal capability explicitly; on Linux a verified helper without full protection (any reason) offers root-only compatibility (best-effort, user decision 2026-10-29). No end-user compiler
+unverifiable backends refuse terminal capability explicitly (no plain-PTY fallback on Linux); on Linux a verified helper without full protection (any reason) offers root-only compatibility (best-effort, user decision 2026-10-29). No end-user compiler
 is required. Existing session authentication and host/Paseo opt-ins still apply.
 
 ## Protocol and lifetime
@@ -87,8 +88,8 @@ matching [Node22's macOS floor](https://github.com/nodejs/node/blob/v22.23.0/BUI
 This deployment target is NOT proof of runtime compatibility on macOS11 or physical
 x64 hardware. Private-ABI capability validation still fails closed. Linux builds
 must retain the existing libc support baseline (Node22 glibc2.28); no Linux artifact
-or minimum-kernel execution has been proved here. pidfd_send_signal (Linux5.1 syscall baseline) selects full protection. User g5 approved
-functional compatibility below that capability with a pre-use warning, as described below.
+or minimum-kernel execution has been proved here. pidfd_send_signal (Linux5.1 syscall baseline) selects full protection. Without it
+Linux runs the best-effort root-only mode described below, disclosed with a non-blocking notice.
 No permission denial or artifact failure silently selects compatibility.
 
 Async startup reserves request IDs and quota before native readiness. Revoke,
@@ -118,16 +119,17 @@ only signals the unreaped session root and does not use procfs or pidfd, so
 background jobs may survive close. A corrupt/missing binary or manifest, timeout,
 crash or malformed record still refuses capability (no unverified code runs).
 The owner revalidates immediately before fork; a mode change refuses before shell
-launch, with a fresh acknowledgment challenge when full protection became unavailable.
+launch, and alpd probes the helper again for the next create.
 
-`terminal.create` and `terminal.attach` require explicit
-`protectionAcknowledgment: "linux-root-only-v1"` after a meaningful warning.
-Web Continue/Cancel is deliberate; restore/new shell does not inherit consent
-from storage. Direct clients receive a fixed structured refusal before a shell
-exists. Current Paseo protocol cannot send this acknowledgment, so its bridge
-surfaces the warning and refuses degraded create/attach. User g6 explicitly accepted
-this temporary consumer limit on 2026-10-29; native-supported Paseo is unchanged.
-This does not waive Linux artifacts, actual platform checks or independent native execution.
+Root-only terminals open directly: no acknowledgment is required (user decision
+2026-10-29, Linux and Windows are best-effort like Orca/Paseo). The deprecated
+`protectionAcknowledgment: "linux-root-only-v1"` parameter is still accepted on
+`terminal.create`/`terminal.attach` for compatibility and ignored. Terminal records
+carry `protection: "root-only"`, so clients disclose the limit: ALP Web shows one
+non-blocking notice ("Limited protection on this Linux host: closing the terminal may
+not stop background processes."), and the terminal stays usable. Paseo's terminal
+protocol has no notice field, so the ALP bridge writes the same notice once as a
+dim line into each Paseo client's view of the terminal (never into alpd's output).
 
 Compatibility never scans or explicitly signals descendants or process groups.
 Only its own direct root is signaled, before final reap, with SIGCHLD explicitly
@@ -150,3 +152,14 @@ Actual Linux compilation/execution (old and supported kernel, namespace/permissi
 ptrace/exec/reuse/race and four Linux shipped artifacts) remains NOT_CHECKED here.
 Darwin author regressions validate the unchanged full path only; no seam/mock or
 Rosetta execution is claimed as Linux or physical-x64/minimum-macOS proof.
+
+## Windows (best-effort, no protection helper)
+
+There is no Windows native owner and pack-check requires no Windows slot. On win32,
+`src/terminals.ts` spawns the shell (`%ComSpec%`, else `cmd.exe`) through node-pty
+(ConPTY), the same platform PTY Paseo uses; node-pty is an optional dependency, and
+when it cannot load, terminals refuse with `terminal_unsupported`. Terminals report
+`protection: "none"`, and clients show a "not guaranteed on Windows" notice. Closing,
+revoking or turning off terminals calls node-pty `kill()` (best-effort): the shell
+ends, but processes it started may keep running. This is the only production use of
+node-pty. Windows behavior has NOT been executed here; only injected-owner unit tests ran.
