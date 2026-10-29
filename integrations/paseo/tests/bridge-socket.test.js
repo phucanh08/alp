@@ -704,3 +704,19 @@ test('close_items archives a working root, keeps history, and replays safely wit
   assert.deepEqual(await ask(await connected(), request), closed);
   assert.deepEqual((await ask(client, { type: 'close_items_request', agentIds: [], terminalIds: [], requestId: 'batch-empty' })).payload, { agents: [], terminals: [], requestId: 'batch-empty' });
 });
+
+test('an Antigravity agent opens from Paseo in workspace-write and changes mode between turns', async t => {
+  const { connected, ask, root, agents } = await setup(t);
+  await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ workflow: { mode: 'pho', supervisor: false }, profile: { pho: { main: { profiles: ['antigravity:gemini-3.8-flash-high'] } } } }));
+  const client = await connected();
+  const created = (await ask(client, { type: 'create_agent_request', requestId: 'g1', config: { provider: 'alp', cwd: root, modeId: 'workspace-write' }, initialPrompt: 'Edit the docs', labels: {} })).payload;
+  assert.ok(created.agentId, JSON.stringify(created));
+  await until(() => agents[0]?.started.length === 1, 'the first Antigravity turn');
+  assert.equal(agents[0].config.sandbox, 'workspace-write');
+  agents[0].finish('Edited.');
+  let changed;
+  // Mode changes between turns: retry while the finished turn settles.
+  await until(async () => (changed = (await ask(client, { type: 'set_agent_mode_request', requestId: `g2-${Math.random()}`, agentId: created.agentId, modeId: 'read-only' })).payload).accepted, `mode change (${changed?.error})`);
+  assert.equal(changed.error, null);
+  assert.ok(agents[0].calls.some(call => call.method === 'session/configure' && call.params.sandbox === 'read-only'));
+});
