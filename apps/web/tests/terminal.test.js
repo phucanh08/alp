@@ -511,3 +511,17 @@ test('canceling a saved-terminal protection warning neither attaches nor kills i
   assert.equal(f.of('terminal.close').length, 0);
   assert.equal(f.of('terminal.attach').length, 1);
 });
+
+test('cancel then restart keeps the mounted terminal output subscriber through acknowledgment', async () => {
+  const f = rig({ handlers: { 'terminal.create': p => { if (!p.protectionAcknowledgment) throw rpcError(1005, 'terminal_protection_ack_required'); return { terminal: info() }; } } });
+  f.session.start(80, 24);
+  await until(() => f.session.getState().status === 'protection-warning');
+  f.session.cancelProtection();
+  f.session.restart();
+  await until(() => f.session.getState().status === 'protection-warning');
+  f.session.acknowledgeProtection();
+  await until(() => f.session.getState().status === 'running');
+  f.session.event(out(1, 'AFTER-CANCEL'));
+  assert.ok(f.screen.join('').includes('AFTER-CANCEL'), 'mounted xterm subscriber must receive output after restart');
+  await f.session.close();
+});
