@@ -147,3 +147,25 @@ test('Tasks screen: the board over the whole width; a card shows its task beside
   await screen.getByRole('button', { name: 'Close tasks' }).click();
   await expect(screen).toBeHidden();
 });
+
+test('a human gate with options: Reject keeps it open once, then an option approves it and records the choice (t-ccac)', async ({ page }) => {
+  const { readFile } = await import('node:fs/promises');
+  const path = await import('node:path');
+  const id = await add('Pick a region', '-p', '1');
+  await world.alp('task', 'gate', 'add', id, '--human', 'Where to deploy?', '--option', 'EU', '--option', 'US');
+  const gate = async () => JSON.parse(await readFile(path.join(world.projects.main, '.alp/tasks', `${id}.json`), 'utf8')).gates[0];
+  await connect(page, world);
+  await openTasks(page);
+  const board = page.getByTestId('task-board');
+  const approve = board.getByTestId('tasks-section-approve');
+  await expect(approve.getByRole('button', { name: `Approve ${id}: EU` })).toBeVisible();
+  await approve.getByRole('button', { name: `Reject ${id}` }).click();
+  await expect.poll(async () => (await gate()).rejected?.channel).toBe('web');
+  expect((await gate()).resolved).toBeUndefined();
+  // Still open, and once rejected it offers no second Reject.
+  await expect(approve.getByRole('button', { name: `Reject ${id}` })).toHaveCount(0);
+  await approve.getByRole('button', { name: `Approve ${id}: US` }).click();
+  await expect.poll(async () => (await gate()).resolved?.choice).toBe('US');
+  expect((await gate()).resolved.channel).toBe('web');
+  await expect(approve.getByRole('button', { name: `Approve ${id}: US` })).toHaveCount(0);
+});
