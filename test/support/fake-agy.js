@@ -99,7 +99,7 @@ rl.on('line', async line => {
 
   const content = parsed.message?.content || parsed.prompt || '';
   const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
-  const commandLine = lines.findLast(l => /^(say|tools|call_tool|tool_step|fail|hang)\b/.test(l)) || lines.at(-1) || '';
+  const commandLine = lines.findLast(l => /^(say|tools|call_tool|tool_step|fail|hang|deny)\b/.test(l)) || lines.at(-1) || '';
 
   // tool_step JSON: a native tool step, ACTIVE then DONE (or ERROR when JSON has error), with JSON as its
   // tool_info ({name, parameters, output, error: {type, message}}).
