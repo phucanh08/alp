@@ -181,3 +181,52 @@ test('manual trigger: now when idle, deferred while a turn runs; user words duri
   assert.equal((await log('compact'))[0].trigger, 'manual');
   await until(() => main.started.some(call => promptText(call).includes('Also check CI')), 'the held message after the compaction');
 });
+
+test('with the supervisor on, its review neither stops nor stalls the compaction, and the user\'s words reach main after', async t => {
+  const { directory, root, runs } = await project(t);
+  const runtimes = [];
+  const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), libraryDir: path.join(directory, 'home'), runLogDir: runs });
+  t.after(() => runtime.shutdown());
+  await runtime.open('root', { cwd: root, model: 'codex:gpt-5.6-sol' });
+  await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Ship the parser' }] });
+  const main = runtimes[0];
+  const log = logOf(runs);
+  main.usage(80_000);
+  main.finish('turn done');
+  await until(() => main.started.some(call => promptText(call).includes('ALP compact checkpoint')), 'the checkpoint turn despite the review');
+  // The supervisor's review ends while main writes its checkpoint; its mail waits.
+  const supervisor = runtimes.find(agent => agent !== main && agent.started.length);
+  if (supervisor?.turnId) supervisor.finish('No findings.');
+  await runtime.prompt('root', { clientMessageId: 'm2', delivery: 'auto', content: [{ type: 'text', text: 'Also check CI' }] });
+  main.finish(CHECKPOINT);
+  await until(() => main.calls.some(call => call.method === 'thread/compact/start'), 'the native compaction after the review');
+  const supervisorAgain = runtimes.find(agent => agent !== main && agent.turnId && agent.started.length > 1);
+  if (supervisorAgain) supervisorAgain.finish('No findings.');
+  main.compact(80_000, 9_000);
+  await until(async () => (await log('compact')).length === 1, 'the compaction');
+  await until(() => main.started.some(call => promptText(call).includes('Also check CI')), 'the held user message');
+  assert.equal(main.steered.filter(text => text.includes('ALP compact checkpoint')).length, 0);
+});
+
+test('a runtime that takes the native request but reports nothing, or a fresh conversation refused, fails the compaction and releases main', async t => {
+  const transport = agent => {
+    const request = agent.request.bind(agent);
+    agent.request = async (method, params) => {
+      if (method === 'thread/compact/start') { agent.calls.push({ method, params }); throw new Error('unsupported'); }
+      return request(method, params);
+    };
+    return agent;
+  };
+  const { runtimes, runtime, log } = await open(t, { transport });
+  const main = runtimes[0];
+  // An assignment runs, so a fresh conversation would lose it.
+  await main.call('alp_delegate', { agent: 'peer', task: 'Long work', wait: false });
+  main.usage(90_000);
+  main.finish('ok');
+  await until(() => main.started.length === 2, 'the checkpoint turn');
+  await runtime.prompt('root', { clientMessageId: 'm2', delivery: 'auto', content: [{ type: 'text', text: 'Status?' }] });
+  main.finish(CHECKPOINT);
+  await until(async () => (await log('compact.failed')).length === 1, 'the refused fresh conversation');
+  assert.match((await log('compact.failed'))[0].error, /Assignments are still running/);
+  await until(() => main.started.some(call => promptText(call).includes('Status?')), 'the held message after the failure');
+});

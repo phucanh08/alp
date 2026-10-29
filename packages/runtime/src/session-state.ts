@@ -75,7 +75,9 @@ export type Session = {
   /** The user asked to compact it; done at the next turn boundary (t-0e56). */
   compactRequested?: boolean;
   /** A compaction in progress (t-0e56): main writing its checkpoint, then the runtime compacting. */
-  compacting?: { phase: 'checkpoint' | 'native' | 'fresh'; trigger: 'auto' | 'manual'; checkpoint?: string; startedAt: number };
+  compacting?: { phase: 'checkpoint' | 'native' | 'fresh'; trigger: 'auto' | 'manual'; checkpoint?: string; startedAt: number; /** Its checkpoint turn was started. */ turn?: boolean; /** The runtime took the native request. */ requested?: boolean };
+  /** Compacted since main's last turn began: usage reported meanwhile may still count the old context. */
+  compactCooling?: boolean;
   /** When its last compaction failed: automatic ones wait COMPACT_RETRY_MS after it. */
   compactFailedAt?: number;
   /** The user's prompts held while it compacts, sent after (t-0e56). */

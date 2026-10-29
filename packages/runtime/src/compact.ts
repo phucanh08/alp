@@ -39,7 +39,7 @@ export const CHECKPOINT_MARK = 'ALP compact checkpoint';
 
 export function checkpointPrompt(trigger: 'auto' | 'manual', fill?: number) {
   const why = trigger === 'manual' ? 'The user asked to compact your context.' : `Your context is about ${Math.round((fill ?? 0) * 100)}% full.`;
-  return `${CHECKPOINT_MARK}: ${why} ALP compacts it after this turn. Write a checkpoint now following skill compact (read its SKILL.md): check the facts with alp_task, alp_board and gh where it applies, then reply with the checkpoint alone, in its sections. Do not start new work, delegate, wait or ask in this turn.`;
+  return `${CHECKPOINT_MARK}: ${why} ALP compacts it after this turn. Write a checkpoint now following skill compact (read its SKILL.md): check the facts with alp_task, alp_board and gh where it applies, then reply with the checkpoint alone, in its sections: skip the skill's notice to the user, ALP posts it. Do not start new work, delegate, wait or ask in this turn.`;
 }
 
 /** What the runtime's native compaction is told to keep. */
