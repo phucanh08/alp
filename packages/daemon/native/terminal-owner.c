@@ -206,8 +206,7 @@ static int capability(void) {
   identity id; pid_t saved=root; root=getsid(0);
   int ok=acquire(getpid(), &id, 1); root=saved;
   if (!ok) return 0;
-  int r=pid_signal(id.fd, 0); int saved_errno=errno; close(id.fd);
-  compatibility_available=r<0 && saved_errno==ENOSYS;
+  int r=pid_signal(id.fd, 0); close(id.fd);
   return r==0;
 }
 #endif
@@ -244,12 +243,25 @@ static int abort_start(int master, int gate) {
   char message[160]; snprintf(message,sizeof(message),"{\"cleanup\":true,\"observed\":1,\"live\":0,\"uncertain\":%d}\n",reaped?0:1); event(message);
   return 78;
 }
+/* A termination signal (e.g. one sent to the daemon's process group) must start
+ * bound cleanup, not kill the owner before it reaps the session it owns. */
+static volatile sig_atomic_t stop_requested=0;
+static void request_stop(int sig) { (void)sig; stop_requested=1; }
 int main(int argc, char **argv) {
   signal(SIGPIPE,SIG_IGN);
+  struct sigaction stop_action; memset(&stop_action,0,sizeof(stop_action));
+  stop_action.sa_handler=request_stop; sigemptyset(&stop_action.sa_mask);
+  if(sigaction(SIGTERM,&stop_action,NULL) || sigaction(SIGINT,&stop_action,NULL) || sigaction(SIGHUP,&stop_action,NULL)) return 71;
   struct sigaction child_action; memset(&child_action,0,sizeof(child_action));
   child_action.sa_handler=SIG_DFL; sigemptyset(&child_action.sa_mask);
   if(sigaction(SIGCHLD,&child_action,NULL)) return 71;
   int capable=capability();
+#ifndef __APPLE__
+  /* Linux is best-effort (user decision 2026-10-29): when identity-bound protection is
+   * unavailable for any reason, offer root-only compatibility, which only signals the
+   * unreaped session root and never trusts procfs or pidfd. The caller discloses it. */
+  compatibility_available=!capable;
+#endif
 #ifndef __APPLE__
   if(argc==2 && !strcmp(argv[1],"--capability") && compatibility_available) { puts("alp-terminal-owner:1:root-only"); return 0; }
   if(argc>1 && !strcmp(argv[1],"--root-only")) { root_only=1; argc--; argv++; }
@@ -303,7 +315,7 @@ int main(int argc, char **argv) {
       root_notified=1; code=info.si_code==CLD_EXITED?info.si_status:0; sig=info.si_code==CLD_EXITED?0:info.si_status;
       snprintf(msg,sizeof(msg),"{\"exitCode\":%d,\"signal\":%d}\n",code,sig); event(msg); cleaning=cleaning?cleaning:1;
     }
-    if(io_failed && !cleaning) cleaning=1;
+    if((io_failed || stop_requested) && !cleaning) cleaning=1;
     if(cleaning==1) { start=now; discover(); signal_all(SIGHUP); cleaning=2; }
     if(cleaning>=2 && now-start>=grace) { discover(); signal_all(SIGKILL); cleaning=3; }
     if(cleaning==3 && now-start>=grace+250) break;
