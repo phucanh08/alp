@@ -13,6 +13,16 @@ const DEFAULT_ANTIGRAVITY_MODELS = [
 
 const ANTIGRAVITY_MODES = [
   {
+    id: 'read-only',
+    label: 'Read only',
+    description: 'agy reads and searches; it denies file edits and terminal commands (--sandbox, request-review).',
+  },
+  {
+    id: 'workspace-write',
+    label: 'Workspace write',
+    description: 'agy edits files and runs commands in its terminal sandbox inside the workspace (--mode accept-edits --sandbox, proceed-in-sandbox).',
+  },
+  {
     id: 'full-access',
     label: 'Full access',
     description: 'Antigravity runs with full access (--dangerously-skip-permissions).',
@@ -54,7 +64,7 @@ function runCommand(command, args, { env = process.env, cwd, timeoutMs = 20_000 
 
 /**
  * Probes Antigravity CLI for version, status and available models.
- * @param {{ command?: string, args?: string[], env?: Record<string, string>, label?: string, id?: string, readOnlyMode?: 'instructions' | 'reject' }} [provider]
+ * @param {{ command?: string, args?: string[], env?: Record<string, string>, label?: string, id?: string}} [provider] readOnlyMode, if set, is a legacy setting with no effect: agy enforces read-only itself.
  * @param {{ cwd?: string, timeoutMs?: number }} [options]
  */
 export async function probeAntigravity(provider = {}, { cwd, timeoutMs = 20_000 } = {}) {
@@ -97,10 +107,7 @@ export async function probeAntigravity(provider = {}, { cwd, timeoutMs = 20_000 
     agent: { name: 'antigravity', title: 'Antigravity', version },
     models,
     currentModel: models[0]?.id,
-    modes: provider.readOnlyMode === 'instructions' ? [...ANTIGRAVITY_MODES, {
-      id: 'read-only', label: 'Read only (instructions)',
-      description: 'For new sessions: prompt-only read-only behavior. agy still runs with full access; no OS sandbox enforces this mode.',
-    }] : ANTIGRAVITY_MODES,
+    modes: ANTIGRAVITY_MODES,
     currentMode: 'full-access',
   };
 }

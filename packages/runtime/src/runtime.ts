@@ -4029,7 +4029,6 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     // team or effort change never raises the mode the session runs with.
     if (changes.mode !== undefined && mapping.mode !== changes.mode) return refused('permission_escalation', READ_ONLY_AGENTS.includes(agent) ? 'Advisors and the supervisor must remain read-only' : `Permission profile ${mapping.permissions?.name ?? ''} allows at most ${mapping.permissions?.base ?? mapping.mode}`.replace('profile  allows', 'profile allows'));
     if (changes.mode === undefined && !withinMode(mapping.mode, session.mapping.mode)) return refused('permission_escalation', `The change would run the session in ${mapping.mode}, beyond its ${session.mapping.mode}`);
-    if (runtimeKind === 'antigravity' && mapping.mode !== session.mapping.mode) return refused('runtime_unsupported', 'Antigravity sessions keep their mode');
     const before = executablesOf(session.mapping);
     const added = [...executablesOf(mapping)].filter(entry => !before.has(entry));
     if (added.length) return refused('permission_escalation', `The change would give the session commands it did not run (${added.map(entry => entry.split(':').slice(0, 2).join(' ')).join(', ')}); start a new session for it`);
@@ -4448,8 +4447,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
     const parent = session.parent ? sessions.get(session.parent) : undefined;
     if (parent && !withinMode(mode, parent.mapping.mode)) throw new Error('Child cannot exceed parent permissions');
-    if (session.runtimeKind === 'antigravity' && mode !== session.mapping.mode) throw new Error('Antigravity uses full-access natively; its permission instructions are fixed for the session. Open a new session to change mode');
-    if (session.runtimeKind === 'claude') await session.runtime.request('session/configure', { sandbox: nativeMode({ mode, copy: session.mapping.copy }) });
+    if (session.runtimeKind === 'claude' || session.runtimeKind === 'antigravity') await session.runtime.request('session/configure', { sandbox: nativeMode({ mode, copy: session.mapping.copy }) });
     session.mapping.mode = mode;
     session.spec = { ...session.spec, mode };
     const updated = snapshot(sessionId, session);

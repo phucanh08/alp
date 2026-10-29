@@ -1,6 +1,6 @@
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { rmSync } from 'node:fs';
+import { realpathSync, rmSync } from 'node:fs';
 import { mkdir, open, readFile, rename, writeFile, unlink } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
@@ -64,6 +64,44 @@ readline.createInterface({ input: process.stdin }).on('line', async line => {
 process.stdin.on('end', () => process.exit(0));
 `;
 
+const MODES = ['read-only', 'workspace-write', 'full-access'];
+const modeOf = (sandbox: unknown) => sandbox === 'danger-full-access' ? 'full-access' : String(sandbox);
+
+/**
+ * The agy flags for an ALP mode. Headless agy cannot ask the user, so a tool its
+ * permission mode does not allow is denied: both limited modes fail closed.
+ * - read-only: agy's default request-review policy; built-in reads and search run,
+ *   edits and every terminal command are denied (an allow rule for a command
+ *   matches its prefix, so even `git log --output=f` would write).
+ * - workspace-write: edits accepted and commands run in agy's terminal sandbox,
+ *   which keeps writes in the workspace; a bypass of the sandbox is denied.
+ * - full-access: every tool runs without asking.
+ * Both limited modes trust the working directory (otherwise agy denies even its
+ * reads and edits there) and allow ALP's own MCP server, which carries alp_*.
+ */
+export function antigravityModeArgs(sandbox: unknown, cwd: string): string[] {
+  const mode = modeOf(sandbox);
+  if (mode === 'full-access') return ['--dangerously-skip-permissions'];
+  if (!MODES.includes(mode)) throw new Error(`Antigravity does not support mode '${String(sandbox)}'`);
+  let real = cwd;
+  try { real = realpathSync(cwd); } catch {}
+  const settings = {
+    toolPermission: mode === 'workspace-write' ? 'proceed-in-sandbox' : 'request-review',
+    enableTerminalSandbox: true,
+    trustedWorkspaces: [...new Set([cwd, real])],
+    permissions: { allow: ['mcp(alp/*)'] },
+  };
+  return [...(mode === 'workspace-write' ? ['--mode', 'accept-edits'] : []), '--sandbox', '--settings', JSON.stringify(settings)];
+}
+
+/** What each mode lets an Antigravity agent do, for its instructions. */
+export function antigravityModeText(sandbox: unknown): string {
+  const mode = modeOf(sandbox);
+  if (mode === 'read-only') return 'agy enforces read-only: its own file reading and search tools work, and ALP\'s tools; it denies every file edit and every terminal command. A denied tool ends your turn, so do not attempt one: report work that needs changes to your requester.';
+  if (mode === 'workspace-write') return 'agy accepts file edits and runs terminal commands in its sandbox, which writes only inside your workspace; anything outside the workspace or the sandbox is denied, and a denied tool ends your turn. Report work that needs more to your requester.';
+  return 'Antigravity runs with full access: every tool runs without asking.';
+}
+
 export function encodePrompt(text: string): string {
   return `${JSON.stringify({ event: 'user', message: { content: text } })}\n`;
 }
@@ -88,6 +126,7 @@ export class AntigravityTransport {
   private messageText = new Map<string, string>();
   private messages = 0;
   private instructionsSent = false;
+  private modeNote?: string;
   private tools: Array<{ name: string; description: string; inputSchema?: unknown }> = [];
   private bridge?: { server: net.Server; socket: string; token: string; connections: Set<net.Socket> };
   private readyPromise?: Promise<void>;
@@ -128,7 +167,7 @@ export class AntigravityTransport {
     if (this.closed) throw new Error('Runtime is closed');
 
     if (method === 'thread/start' || method === 'thread/resume') {
-      if (params.sandbox !== 'full-access' && params.sandbox !== 'danger-full-access') throw new Error('Antigravity currently supports only full-access');
+      antigravityModeArgs(params.sandbox, params.cwd || this.cwd);
       this.config = params;
       this.tools = params.dynamicTools ?? [];
 
@@ -166,6 +205,10 @@ export class AntigravityTransport {
         .map((part: any) => part.text);
       let promptText = parts.join('\n\n');
 
+      if (this.modeNote) {
+        promptText = `${this.modeNote}\n\n${promptText}`;
+        this.modeNote = undefined;
+      }
       if (!this.instructionsSent && this.config?.developerInstructions) {
         promptText = `Instructions from ALP, which runs you. Follow them for this whole session.\n\n${this.config.developerInstructions}\n\n${promptText}`;
         this.instructionsSent = true;
@@ -189,26 +232,21 @@ export class AntigravityTransport {
     if (method === 'turn/interrupt') {
       if (this.child && this.activeTurn) {
         const turnId = this.activeTurn;
-        const child = this.child;
-        // agy exits on SIGINT. Ignore that expected exit, then resume its
-        // conversation in a fresh process when the next prompt arrives.
-        this.child = undefined;
-        this.lines?.close();
-        const kill = (signal: NodeJS.Signals) => {
-          if (process.platform !== 'win32' && child.pid) {
-            try { process.kill(-child.pid, signal); } catch { child.kill(signal); }
-          } else child.kill(signal);
-        };
-        kill('SIGINT');
-        const timer = setTimeout(() => kill('SIGKILL'), 1500);
-        try { await this.exit; } finally { clearTimeout(timer); }
+        await this.stopProcess();
         this.endTurn(turnId, 'interrupted');
       }
       return {};
     }
 
     if (method === 'session/configure' || method === 'thread/delete') {
-      if (method === 'session/configure' && params.sandbox && params.sandbox !== 'full-access') throw new Error('Antigravity currently supports only full-access');
+      if (method === 'session/configure' && params.sandbox && this.config && modeOf(params.sandbox) !== modeOf(this.config.sandbox)) {
+        antigravityModeArgs(params.sandbox, this.config.cwd || this.cwd);
+        if (this.activeTurn) throw new Error('Antigravity changes mode between turns only');
+        // agy takes its mode at launch: the next turn resumes the conversation in a process with the new one.
+        this.config = { ...this.config, sandbox: params.sandbox };
+        this.modeNote = `ALP changed your permission mode to ${modeOf(params.sandbox)}. ${antigravityModeText(params.sandbox)}`;
+        await this.stopProcess();
+      }
       return {};
     }
 
@@ -231,7 +269,7 @@ export class AntigravityTransport {
       '--add-dir',
       params.cwd || this.cwd,
       '--disable-slash-commands',
-      '--dangerously-skip-permissions',
+      ...antigravityModeArgs(params.sandbox, params.cwd || this.cwd),
     ];
 
     if (params.model) {
@@ -610,6 +648,22 @@ export class AntigravityTransport {
 
   private emit(method: string, params: any): void {
     for (const listener of this.listeners) listener(method, params);
+  }
+
+  /** agy exits on SIGINT. Ignore that expected exit; the next prompt resumes its conversation in a fresh process. */
+  private async stopProcess(): Promise<void> {
+    const child = this.child;
+    if (!child) return;
+    this.child = undefined;
+    this.lines?.close();
+    const kill = (signal: NodeJS.Signals) => {
+      if (process.platform !== 'win32' && child.pid) {
+        try { process.kill(-child.pid, signal); } catch { child.kill(signal); }
+      } else child.kill(signal);
+    };
+    kill('SIGINT');
+    const timer = setTimeout(() => kill('SIGKILL'), 1500);
+    try { await this.exit; } finally { clearTimeout(timer); }
   }
 
   private fail(error: Error): void {

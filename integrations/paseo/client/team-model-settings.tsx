@@ -86,6 +86,6 @@ export function TeamModelSettings({ team, theme, onChange }: { team: Team; theme
           setCustomFields(previous => ({ ...previous, [`oracle-${lenses.length}`]: true })); })} /> : null}
       </> : null}
     </Fragment>}
-    {JSON.stringify(team).includes('antigravity:') ? <SettingsSection title="Antigravity"><SettingsRow label="Advisory roles" hint={'Reviewer, Oracle and Supervisor require readOnlyMode: "instructions" in the Antigravity provider. Review copies and custom permission rules are unsupported.'} /></SettingsSection> : null}
+    {JSON.stringify(team).includes('antigravity:') ? <SettingsSection title="Antigravity"><SettingsRow label="Advisory roles" hint={'agy enforces read-only, workspace-write and full-access itself; a tool the mode does not allow is denied. Review copies and custom permission rules are unsupported.'} /></SettingsSection> : null}
   </>;
 }

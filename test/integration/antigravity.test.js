@@ -124,7 +124,7 @@ test('resolveSession resolves antigravity models without elevating permissions',
   await initProject(root);
 
   // 1. antigravity:gemini-3.8-flash-high
-  await assert.rejects(resolveSession({ cwd: root, model: 'antigravity:gemini-3.8-flash-high', mode: 'read-only' }, { library: home }), /Antigravity.*full-access/);
+  for (const mode of ['read-only', 'workspace-write']) assert.equal((await resolveSession({ cwd: root, model: 'antigravity:gemini-3.8-flash-high', mode }, { library: home })).mode, mode);
   const res1 = await resolveSession({ cwd: root, model: 'antigravity:gemini-3.8-flash-high', mode: 'full-access' }, { library: home });
   assert.equal(res1.runtimeKind, 'antigravity');
   assert.equal(res1.model, 'gemini-3.8-flash-high');
@@ -386,10 +386,54 @@ test('interrupt ends one turn and the next prompt resumes the conversation', asy
   assert.equal(transport.conversationId, threadId);
 });
 
-test('Antigravity rejects permission downgrades after opening', async t => {
-  const { root, runtime } = await setup(t);
-  await runtime.open('root', { cwd: root, model: 'antigravity:gemini-3.8-flash-high' });
-  await assert.rejects(runtime.configure('root', { mode: 'read-only' }), /Antigravity.*full-access/);
+const startArgs = async file => (await readFile(file, 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.op === 'start').map(entry => entry.args);
+const settingsOf = args => JSON.parse(args[args.indexOf('--settings') + 1]);
+
+test('Antigravity runs each ALP mode with the agy flags that enforce it', async t => {
+  const { root, runtime, turn, dir } = await setup(t);
+  const log = path.join(dir, 'agy.jsonl');
+  const expected = {
+    'read-only': { mode: undefined, permission: 'request-review' },
+    'workspace-write': { mode: 'accept-edits', permission: 'proceed-in-sandbox' },
+  };
+  for (const [mode, want] of Object.entries(expected)) {
+    await writeFile(log, '');
+    await runtime.open(mode, { cwd: root, model: 'antigravity:gemini-3.8-flash-high', mode });
+    assert.equal((await turn('say ok', mode)).text, 'ok');
+    const [args] = await startArgs(log);
+    assert.ok(!args.includes('--dangerously-skip-permissions'), mode);
+    assert.ok(args.includes('--sandbox'), mode);
+    assert.equal(args.includes('--mode') ? args[args.indexOf('--mode') + 1] : undefined, want.mode);
+    const settings = settingsOf(args);
+    assert.equal(settings.toolPermission, want.permission);
+    assert.equal(settings.enableTerminalSandbox, true);
+    assert.ok(settings.trustedWorkspaces.includes(root));
+    assert.deepEqual(settings.permissions.allow, ['mcp(alp/*)']);
+    assert.match(await readFile(log, 'utf8'), new RegExp(`Your mode is ${mode}`));
+  }
+  await writeFile(log, '');
+  await runtime.open('full', { cwd: root, model: 'antigravity:gemini-3.8-flash-high', mode: 'full-access' });
+  await turn('say ok', 'full');
+  const [args] = await startArgs(log);
+  assert.ok(args.includes('--dangerously-skip-permissions'));
+  assert.ok(!args.includes('--sandbox') && !args.includes('--settings'));
+});
+
+test('Antigravity changes mode between turns by resuming its conversation with new flags', async t => {
+  const { root, runtime, turn, dir } = await setup(t);
+  const log = path.join(dir, 'agy.jsonl');
+  await runtime.open('root', { cwd: root, model: 'antigravity:gemini-3.8-flash-high', mode: 'full-access' });
+  await turn('say one');
+  assert.equal((await runtime.configure('root', { mode: 'read-only' })).mode, 'read-only');
+  assert.equal((await turn('say two')).text, 'two');
+  const starts = await startArgs(log);
+  const last = starts.at(-1);
+  assert.equal(starts.length, 2);
+  assert.ok(last.includes('--conversation'));
+  assert.ok(!last.includes('--dangerously-skip-permissions'));
+  assert.equal(settingsOf(last).toolPermission, 'request-review');
+  assert.match(await readFile(log, 'utf8'), /ALP changed your permission mode to read-only/);
+  assert.equal((await runtime.configure('root', { mode: 'read-only' })).mode, 'read-only');
 });
 
 test('Antigravity definitions use the native provider ID', () => {
@@ -403,9 +447,8 @@ test('Antigravity can be selected in the main agent profile', async t => {
   assert.equal(session.model, 'gemini-3.8-flash-high');
 });
 
-test('Antigravity instruction read-only is opt-in and opens all advisory roles without claiming a sandbox', async t => {
+test('Antigravity advisory roles open read-only, enforced by agy, without any opt-in', async t => {
   const { root, home, runtime, turn, dir } = await setup(t, {
-    provider: { readOnlyMode: 'instructions' },
     settings: { profile: { pho: Object.fromEntries(['main', 'peer', 'oracle', 'reviewer', 'supervisor'].map(name => [name, {
       profiles: ['antigravity:gemini-3.8-flash-high'],
     }])) } },
@@ -417,11 +460,10 @@ test('Antigravity instruction read-only is opt-in and opens all advisory roles w
   }
   await runtime.open('review', { cwd: root, agent: 'reviewer' });
   assert.equal((await turn('say reviewed', 'review')).text, 'reviewed');
-  const prompts = await readFile(path.join(dir, 'agy.jsonl'), 'utf8');
-  assert.match(prompts, /Read-only is emulated by instructions/);
-  assert.match(prompts, /Do not edit, create, delete or rename files/);
-  assert.match(prompts, /not enforced by an OS sandbox/);
-  await assert.rejects(resolveSession({ cwd: root, model: 'antigravity:gemini-3.8-flash-high', mode: 'workspace-write' }, { library: home }), /Antigravity/);
+  const [args] = await startArgs(path.join(dir, 'agy.jsonl'));
+  assert.ok(!args.includes('--dangerously-skip-permissions'));
+  assert.equal(settingsOf(args).toolPermission, 'request-review');
+  assert.match(await readFile(path.join(dir, 'agy.jsonl'), 'utf8'), /agy enforces read-only/);
   await assert.rejects(resolveSession({ cwd: root, agent: 'reviewer', copy: true }, { library: home }), /copy/);
 });
 
@@ -429,7 +471,6 @@ test('a complete Antigravity Cafe team runs its supervisor and delegates to lead
   const model = 'antigravity:gemini-3.8-flash-high';
   const { root, runtime, turn, dir } = await setup(t, {
     supervisor: true,
-    provider: { readOnlyMode: 'instructions' },
     settings: {
       workflow: { mode: 'cafe', supervisor: true },
       profile: { cafe: Object.fromEntries(['main', 'lead', 'peer', 'oracle', 'reviewer', 'supervisor'].map(name => [name, { profiles: [model] }])) },
@@ -446,7 +487,8 @@ test('a complete Antigravity Cafe team runs its supervisor and delegates to lead
   assert.match(nested.text, /peer-done/);
   const log = await readFile(path.join(dir, 'agy.jsonl'), 'utf8');
   assert.match(log, /ALP runtime identity: supervisor/);
-  assert.match(log, /Read-only is emulated by instructions/);
+  assert.match(log, /agy enforces read-only/);
+  assert.doesNotMatch(log, /Read-only is emulated by instructions/);
 });
 
 test('instruction read-only never relaxes custom rules and is not allowed for ACP providers', async t => {
@@ -459,12 +501,9 @@ test('instruction read-only never relaxes custom rules and is not allowed for AC
   await assert.rejects(resolveSession({ cwd: root, model: 'antigravity:gemini-3.8-flash-high' }, { library: home }), /custom permission rules/);
 });
 
-test('Antigravity instruction modes are fixed per session but no-op configuration succeeds', async t => {
-  const { root, runtime } = await setup(t, { provider: { readOnlyMode: 'instructions' } });
-  await runtime.open('root', { cwd: root, model: 'antigravity:gemini-3.8-flash-high', mode: 'read-only' });
-  assert.equal((await runtime.configure('root', { mode: 'read-only' })).mode, 'read-only');
-  await assert.rejects(runtime.configure('root', { mode: 'full-access' }), /new session/);
-  const discovered = await probeAntigravity({ command: process.execPath, args: [FAKE_AGY], readOnlyMode: 'instructions' });
-  assert.deepEqual(discovered.modes.map(mode => mode.id), ['full-access', 'read-only']);
-  assert.match(discovered.modes[1].description, /new sessions.*no OS sandbox/);
+test('Antigravity probe advertises the three enforced modes; legacy readOnlyMode changes nothing', async () => {
+  for (const provider of [{}, { readOnlyMode: 'instructions' }]) {
+    const discovered = await probeAntigravity({ command: process.execPath, args: [FAKE_AGY], ...provider });
+    assert.deepEqual(discovered.modes.map(mode => mode.id), ['read-only', 'workspace-write', 'full-access']);
+  }
 });

@@ -206,7 +206,7 @@ export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
       if (provider.kind === 'antigravity') {
         const result = await probeAntigravity(provider, { cwd: home, timeoutMs: 60_000 });
         lines.push(`Antigravity: ${result.version || 'installed'}`);
-        if (provider.readOnlyMode === 'instructions') lines.push('Read-only: instructions only; agy runs with full access, without an OS sandbox.');
+        lines.push('Modes: read-only, workspace-write and full-access, enforced by agy (--sandbox, --mode, permission settings).');
         lines.push(`Models: ${result.models?.length ? result.models.map((model: Model) => model.id).join(', ') : 'none reported'}`);
         if (result.modes?.length) lines.push(`Modes: ${result.modes.map((mode: Model) => mode.id).join(', ')}`);
         found.set(id, { status: 'ready', models: result.models, currentModel: result.currentModel, modes: result.modes, currentMode: result.currentMode, at: new Date().toISOString() });
