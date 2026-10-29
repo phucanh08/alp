@@ -119,6 +119,9 @@ const CONTEXT_SOON = 0.9;
 const CONTEXT_RESET = 0.5;
 /** After a failed compaction, how long the automatic one waits before it tries again (t-0e56). */
 const COMPACT_RETRY_MS = 10 * 60_000;
+const MAIL_WAITS = 'Mail waits for the session';
+/** How long a runtime may take to report the compaction it was asked for (t-0e56). */
+const COMPACT_NATIVE_MS = 5 * 60_000;
 
 /** How much of an assignment's brief ALP repeats after a compaction. */
 const BRIEF_CHARS = 8000;
@@ -350,6 +353,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
     session.userStopped = false;
     if (session.role === 'supervisor' && session.parent && sessions.get(session.parent)?.reviewPending) review(session.parent);
+    if (session.role === 'supervisor' && session.parent) { const root = sessions.get(session.parent); if (root) queueMicrotask(() => compactAtBoundary(session.parent!, root)); }
     if (!session.parent) void showTasks(sessionId, session);
     if (!session.parent && session.role !== 'supervisor') queueMicrotask(() => compactAtBoundary(sessionId, session, state));
 
@@ -1245,7 +1249,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   /** Whether a session may not start a turn by itself now: parked, or on a paused runtime. */
   const held = (session: Session) => !!session.parked || !!pauseOf(session.runtimeKind) || (session.lifecycleHolds ?? 0) > 0;
   /** Whether mail may not wake a session now: it is held, or it is a new assignment whose brief has not started. */
-  const holdsWake = (session: Session) => held(session) || !!session.awaitingBrief;
+  // Mail waits while main compacts (t-0e56), so it never lands in the checkpoint or the compaction.
+  const holdsWake = (session: Session) => held(session) || !!session.awaitingBrief || !!session.compacting;
 
   /**
    * Marks a session pending (its native process restarting) with a fresh `acknowledged` that resolves
@@ -1511,7 +1516,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const used = usage?.last?.totalTokens;
     const window = usage?.modelContextWindow;
     if (session.role === 'supervisor' || typeof used !== 'number' || typeof window !== 'number' || window <= 0) return;
-    session.contextFill = contextFill(usage);
+    // Against the window main works in, as the advisory measures it; not from the old context right after a compaction.
+    if (!session.compactCooling) session.contextFill = contextFill({ ...usage, modelContextWindow: Math.min(typeof session.mapping.autocompact === 'number' ? session.mapping.autocompact : typeof session.mapping.context === 'number' ? session.mapping.context : window, window) });
     const compactAt = typeof usage.autoCompactTokens === 'number' && usage.autoCompactTokens > 0
       ? usage.autoCompactTokens
       : session.runtimeKind === 'codex' && session.mapping.autocompact
@@ -1574,43 +1580,56 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
   /**
    * Whether a root holds anything a compaction must not cut into (t-0e56): a turn, a restart,
-   * a question to the user, mail that wakes it, a park or the supervisor's review.
+   * a question to the user or a park. Before one starts, also mail that would wake it. The
+   * supervisor's review does not hold it: its mail waits for the compaction's end like any other.
    */
-  function compactHeld(sessionId: string, session: Session) {
-    return session.closed || !!session.active || !!session.pending || session.waiters.length > 0 || hasActiveMail(session) || !!session.wakeHeld
-      || !!session.parked || !!session.parkReason || reviewing(session)
+  function compactHeld(sessionId: string, session: Session, starting: boolean) {
+    return session.closed || !!session.active || !!session.pending || session.waiters.length > 0
+      || !!session.parked || !!session.parkReason
+      || (starting && (hasActiveMail(session) || !!session.wakeHeld))
       || [...userQuestions.values()].some(pending => pending.question.rootId === sessionId && !pending.gate);
   }
 
   /**
-   * Main's compaction at a turn boundary (t-0e56). Once its context fills to the threshold,
-   * or the user asked, main writes a checkpoint by skill compact in a turn of its own; at that
-   * turn's end the runtime compacts natively, or ALP starts a fresh conversation seeded with it.
-   * Anything that holds the session defers it to a later boundary.
+   * Main's compaction (t-0e56). Once its context fills to the threshold, or the user asked,
+   * main writes a checkpoint by skill compact in a turn of its own; after that turn the
+   * runtime compacts natively, or ALP starts a fresh conversation seeded with it. It starts
+   * only at a turn boundary (`ended`, the state of the turn that just ended); without one it
+   * is a retry, after a hold such as the supervisor's review or held mail clears.
    */
-  function compactAtBoundary(sessionId: string, session: Session, state: 'completed' | 'failed' | 'canceled') {
+  function compactAtBoundary(sessionId: string, session: Session, ended?: 'completed' | 'failed' | 'canceled') {
     if (session.closed || sessions.get(sessionId) !== session) return;
     const current = session.compacting;
-    if (current?.phase === 'checkpoint' && current.checkpoint === undefined) {
+    if (ended && current?.phase === 'checkpoint' && current.checkpoint === undefined && current.turn) {
       // The checkpoint turn just ended: its last words are the checkpoint.
       const written = [...session.text.values()].at(-1)?.trim();
-      if (state !== 'completed' || !written) { compactFailed(sessionId, session, state !== 'completed' ? `the checkpoint turn ${state}` : 'main wrote no checkpoint'); return; }
+      if (ended !== 'completed' || !written) { compactFailed(sessionId, session, ended !== 'completed' ? `the checkpoint turn ${ended}` : 'main wrote no checkpoint'); return; }
       current.checkpoint = written;
     }
     // The compaction turn ended without the runtime reporting a compaction.
-    if (current?.phase === 'native') { compactFailed(sessionId, session, 'the runtime reported no compaction'); return; }
-    if (compactHeld(sessionId, session)) return;
-    if (current?.checkpoint !== undefined) { void compactNow(sessionId, session); return; }
-    if (current) return;
+    if (ended && current?.phase === 'native' && current.requested) { compactFailed(sessionId, session, 'the runtime reported no compaction'); return; }
+    if (current) {
+      if (current.checkpoint !== undefined && current.phase === 'checkpoint' && !compactHeld(sessionId, session, false)) void compactNow(sessionId, session);
+      return;
+    }
+    if (compactHeld(sessionId, session, true)) return;
     if (session.compactBuffer?.length) { flushCompactBuffer(sessionId, session); return; }
     const trigger = compactDue(session.mapping.compact ?? { auto: false, threshold: 1 }, session.contextFill, !!session.compactRequested);
     if (!trigger) return;
     if (trigger === 'auto' && session.compactFailedAt && Date.now() - session.compactFailedAt < COMPACT_RETRY_MS) return;
     session.compactRequested = false;
-    session.compacting = { phase: 'checkpoint', trigger, startedAt: Date.now() };
+    const compacting: NonNullable<Session['compacting']> = { phase: 'checkpoint', trigger, startedAt: Date.now() };
+    session.compacting = compacting;
     runLog(rootOf(sessionId), { event: 'compact.started', sessionId, agent: session.mapping.agent.name, trigger, ...(session.contextFill !== undefined ? { fill: Math.round(session.contextFill * 100) / 100 } : {}) });
     const work = queue.then(async () => {
-      if (session.closed || compactHeld(sessionId, session)) { session.compacting = undefined; if (trigger === 'manual') session.compactRequested = true; return; }
+      if (session.compacting !== compacting) return;
+      if (session.closed || compactHeld(sessionId, session, true)) {
+        session.compacting = undefined;
+        if (trigger === 'manual') session.compactRequested = true;
+        compactReleased(sessionId, session);
+        return;
+      }
+      compacting.turn = true;
       await startPrompt(sessionId, { clientMessageId: `alp-wake-compact-${randomUUID()}`, delivery: 'auto', content: [{ type: 'text', text: checkpointPrompt(trigger, session.contextFill) }] }, 'wake');
     }).catch(error => compactFailed(sessionId, session, errorData(error).message));
     queue = work.catch(() => {});
@@ -1620,22 +1639,29 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   async function compactNow(sessionId: string, session: Session) {
     const current = session.compacting!;
     const checkpoint = current.checkpoint!;
-    if (NATIVE_COMPACT.includes(session.runtimeKind) && current.phase === 'checkpoint') {
+    if (NATIVE_COMPACT.includes(session.runtimeKind)) {
       current.phase = 'native';
       try {
         // Codex takes the thread alone; its summary gets the checkpoint back from the note ALP sends after.
         await session.runtime.request('thread/compact/start', { threadId: session.threadId, ...(session.runtimeKind === 'codex' ? {} : { instructions: compactInstructions(checkpoint) }) });
+        if (session.compacting !== current) return;
+        current.requested = true;
+        // A runtime that took the request but never reports a compaction does not hold main for good.
+        const timer = setTimeout(() => { if (session.compacting === current) compactFailed(sessionId, session, 'the runtime reported no compaction in time'); }, COMPACT_NATIVE_MS);
+        timer.unref?.();
         return;
       } catch (error) {
+        if (session.compacting !== current) return;
         runLog(rootOf(sessionId), { event: 'compact.native_failed', sessionId, agent: session.mapping.agent.name, error: errorData(error).message });
-        current.phase = 'fresh';
       }
     }
     current.phase = 'fresh';
-    // A fresh conversation drops the old one: only when nothing runs that it would lose.
-    if (restartRefusal(sessionId, session)) return;
     const work = queue.then(async () => {
-      if (session.closed || restartRefusal(sessionId, session)) return;
+      if (session.compacting !== current || session.closed) return;
+      // A fresh conversation drops the old one: only when nothing runs that it would lose.
+      // Held mail is no reason to wait: it reaches the new conversation after the seed.
+      const refusal = restartRefusal(sessionId, session);
+      if (refusal && refusal !== MAIL_WAITS) { compactFailed(sessionId, session, `a fresh conversation cannot start now: ${refusal}`); return; }
       await restartNative(sessionId, session, undefined);
       emit(sessionId, { type: 'session.updated', session: snapshot(sessionId, session) });
       await startPrompt(sessionId, { clientMessageId: `alp-wake-compact-${randomUUID()}`, delivery: 'auto', content: [{ type: 'text', text: seedPrompt(checkpoint, session.lastUserText) }] }, 'wake');
@@ -1649,11 +1675,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (!current) return;
     session.compacting = undefined;
     session.compactFailedAt = undefined;
+    // Usage reported until main's next turn may still count the old context.
     session.contextFill = undefined;
+    session.compactCooling = true;
     runLog(rootOf(sessionId), { event: 'compact', sessionId, agent: session.mapping.agent.name, trigger: current.trigger, via, checkpointChars: current.checkpoint?.length ?? 0, ms: Date.now() - current.startedAt });
     const text = wordsFor(session).compacted(via === 'native');
     emit(sessionId, { type: 'item', item: { kind: 'notice', id: `notice-${randomUUID().slice(0, 8)}`, level: 'info', text } });
-    queueMicrotask(() => flushCompactBuffer(sessionId, session));
+    compactReleased(sessionId, session);
   }
 
   function compactFailed(sessionId: string, session: Session, reason: string) {
@@ -1662,7 +1690,16 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     session.compactFailedAt = Date.now();
     runLog(rootOf(sessionId), { event: 'compact.failed', sessionId, agent: session.mapping.agent.name, ...(current ? { trigger: current.trigger } : {}), error: reason });
     if (!session.closed) emit(sessionId, { type: 'item', item: { kind: 'notice', id: `notice-${randomUUID().slice(0, 8)}`, level: 'warning', text: wordsFor(session).compactFailed(reason) } });
-    queueMicrotask(() => flushCompactBuffer(sessionId, session));
+    compactReleased(sessionId, session);
+  }
+
+  /** A compaction ended or never started: the user's held words and held mail go on (t-0e56). */
+  function compactReleased(sessionId: string, session: Session) {
+    queueMicrotask(() => {
+      if (session.closed || session.compacting) return;
+      flushCompactBuffer(sessionId, session);
+      if (session.wakeHeld && !holdsWake(session)) { session.wakeHeld = false; deliver(sessionId, session); }
+    });
   }
 
   /** Sends the user's words held during a compaction, in order, once no turn runs (t-0e56). */
@@ -1685,8 +1722,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (session.parent || session.role === 'supervisor') throw new ConversationError('runtime_unsupported', 'Only a root session is compacted');
     if (session.compacting) return { status: 'running' as const };
     session.compactRequested = true;
-    if (compactHeld(sessionId, session)) return { status: 'deferred' as const };
-    compactAtBoundary(sessionId, session, 'completed');
+    if (compactHeld(sessionId, session, true)) return { status: 'deferred' as const };
+    compactAtBoundary(sessionId, session);
     return { status: 'started' as const };
   }
 
@@ -2121,7 +2158,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       void session.acknowledged.then(() => deliver(sessionId, session));
     } else if (session.active) {
       // Deferred mail waits for the turn to end.
-      if (session.mail.some(event => !event.deliveredTurn && !event.passive && !event.defer)) void steerMail(sessionId, session);
+      if (!session.compacting && session.mail.some(event => !event.deliveredTurn && !event.passive && !event.defer)) void steerMail(sessionId, session);
     } else if (!waking) {
       return;
     } else if (!session.wakeBlocked && session.wakeFailures < MAX_WAKES && (session.wakes < MAX_WAKES || session.mail.some(event => !event.deliveredTurn && event.kind === 'checkin'))) {
@@ -3646,7 +3683,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (session.children.size || session.assignments.size) return 'Assignments are still running';
     if ([...userQuestions.values()].some(pending => pending.question.rootId === sessionId && !pending.gate)) return 'A question to the user waits for an answer';
     // Mail a lifecycle hold keeps waits for its release, then reaches the session's new conversation.
-    if ((hasActiveMail(session) || session.wakeHeld) && !session.lifecycleHolds) return 'Mail waits for the session';
+    if ((hasActiveMail(session) || session.wakeHeld) && !session.lifecycleHolds) return MAIL_WAITS;
     if (session.parked || session.parkReason) return 'The session is parked';
     if (reviewing(session)) return 'The supervisor is reviewing the session';
     return undefined;
@@ -4444,6 +4481,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     ) {
       session.text.clear();
       session.toolCalls.clear();
+      if (!/^alp-wake-compact-/.test(prompt.clientMessageId)) session.compactCooling = false;
       session.supervisorWake = !!wake?.length && wake.every(event => event.defer);
 
       // A wake continues the same assignment: keep its handoff and limits.
@@ -4552,7 +4590,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         },
       });
       if (origin === 'user' && !session.parent) session.userWaiting ??= Date.now();
-      if (origin === 'user' && !session.parent && text) session.lastUserText = clip(text, 4000);
+      if (origin === 'user' && !session.parent && text) session.lastUserText = clip(text, 16_000);
       if (session.supervisor && origin === 'user') session.journal.push(stamp(`user ${prompt.delivery === 'steer' ? 'steered' : 'asked'} ${session.mapping.agent.name}: ${clip(text, 1500)}`));
       // The steer reaches the model once its waiting tool returns; return it now, not when the work ends.
       if (prompt.delivery === 'steer' && origin === 'user' && !session.parent) { releaseWaiters(session); releaseQuestions(sessionId); }
