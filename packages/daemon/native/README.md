@@ -115,7 +115,7 @@ on the correction. Ordinary lifecycle tests run separately from daemon/tests.
 Linux is best-effort (user decision 2026-10-29; only macOS is guaranteed). A verified
 helper that fails full protection for ANY reason (ENOSYS, EPERM/EACCES, procfs or
 PID-namespace mismatch) advertises `alp-terminal-owner:1:root-only`; root-only mode
-only signals the unreaped session root and does not use procfs or pidfd, so
+only signals the unreaped session root and, after the startup capability probe, does not use procfs or pidfd, so
 background jobs may survive close. A corrupt/missing binary or manifest, timeout,
 crash or malformed record still refuses capability (no unverified code runs).
 The owner revalidates immediately before fork; a mode change refuses before shell
@@ -163,3 +163,10 @@ when it cannot load, terminals refuse with `terminal_unsupported`. Terminals rep
 revoking or turning off terminals calls node-pty `kill()` (best-effort): the shell
 ends, but processes it started may keep running. This is the only production use of
 node-pty. Windows behavior has NOT been executed here; only injected-owner unit tests ran.
+
+## Termination signals
+
+SIGTERM, SIGINT and SIGHUP sent to the owner (for example to the daemon's process group)
+start the same bound cleanup as closing its control pipe, on every platform including
+macOS (deliberate: previously such a signal killed the owner before cleanup). The shell
+child resets them to default before exec.

@@ -285,6 +285,8 @@ int main(int argc, char **argv) {
   root=forkpty(&master,NULL,NULL,&ws);
   if (root<0) return 71;
   if (!root) {
+    /* The owner's stop handlers must not swallow a hang-up before exec. */
+    signal(SIGTERM,SIG_DFL); signal(SIGINT,SIG_DFL); signal(SIGHUP,SIG_DFL);
     close(gate[1]); close(started[0]);
     char ready=getsid(0)==getpid()?'S':'E';
     if(write(started[1],&ready,1)!=1) _exit(126);

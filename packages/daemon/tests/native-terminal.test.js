@@ -29,6 +29,29 @@ test('native owner cleans exec shell and observed same-session orphan', { skip }
   assert.ok(result.observed >= 3, JSON.stringify(result));
   assert.equal(alive(pty.pid), false);
 });
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) test(`a ${signal} to the owner (e.g. the daemon's process group) runs bound cleanup instead of killing it`, { skip }, async t => {
+  const { execFileSync } = await import('node:child_process');
+  const { pty, text } = await open(t);
+  const exited = new Promise(resolve => pty.onExit(resolve));
+  await until(() => text().includes('NATIVE$ '));
+  const marker = `${process.pid % 1000 + 7}.${signal.length}31`;
+  // The job ignores SIGHUP, so only the owner's bound SIGKILL can end it.
+  pty.write(`(trap '' HUP; exec sleep ${marker}) & echo STARTED\r`);
+  await until(() => /\r?\nSTARTED\r?\n/.test(text()));
+  const rows = () => execFileSync('ps', ['-axo', 'pid=,ppid=,command='], { encoding: 'utf8' }).split('\n').map(line => line.trim().split(/\s+/)).filter(row => row.length >= 3);
+  const owner = rows().find(([, ppid, command]) => Number(ppid) === process.pid && command.endsWith('terminal-owner'));
+  assert.ok(owner, 'the owner is a child of this process');
+  const sleeper = () => rows().filter(row => row.slice(2).join(' ') === `sleep ${marker}`).map(row => Number(row[0]));
+  assert.equal(sleeper().length, 1);
+  const job = sleeper()[0];
+  process.kill(Number(owner[0]), signal);
+  await exited;
+  const result = await pty.cleanup();
+  assert.equal(result.live, 0, JSON.stringify(result));
+  assert.equal(result.uncertain, 0, JSON.stringify(result));
+  await until(() => !alive(job));
+  assert.equal(alive(pty.pid), false);
+});
 test('unrelated process with spoofed terminal marker is never adopted or signaled', { skip }, async t => {
   const stranger = spawn('/bin/sleep', ['60'], { env: { ...process.env, ALP_TERMINAL_ID: 'atm_' + '1'.repeat(32) } });
   await new Promise((r, j) => { stranger.once('spawn', r); stranger.once('error', j); });

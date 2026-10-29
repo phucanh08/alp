@@ -45,7 +45,7 @@ const SHELL_ONLY = 'ALP starts the host account\'s own shell: a command, argumen
   + 'The terminal\'s directory is where it starts, not a sandbox.';
 const REPLACED = 'This terminal was opened in another ALP client; open it again here to take it back';
 const LOST = 'The ALP daemon went away; this terminal is no longer shown';
-/** Paseo's terminal protocol has no notice field: a best-effort host's notice is one dim line in each client's view (never in alpd's output). */
+/** Paseo's terminal protocol has no notice field: a best-effort host's notice is one yellow line in each client's view (never in alpd's output). */
 const PROTECTION_NOTICES: Record<string, string> = {
   'root-only': 'Limited protection on this Linux host: closing the terminal may not stop background processes.',
   none: 'Process cleanup is not guaranteed on Windows: closing the terminal may not stop background processes.',

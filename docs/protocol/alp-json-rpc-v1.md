@@ -192,7 +192,7 @@ runs before all of them pass**:
 | `permission_escalation` | 1003 | `session.configure`: the change would run the session with more permissions (a mode beyond its profile, a higher mode) or a hook or stdio MCP server it did not run (§12.9) |
 | `team_not_found` | 1001 | `session.configure`: no team of that id for the project (§12.9) |
 | `terminal_disabled` | 1005 | `terminal.*`: the host has not opted in (`<ALP_HOME>/terminal.json` `allowRemoteTerminal`), or turned it off (§12.10) |
-| `terminal_unsupported` | 1005 | `terminal.*` on Windows, or where the PTY module does not load (§12.10) |
+| `terminal_unsupported` | 1005 | `terminal.*` where the native owner (macOS/Linux) or node-pty (Windows) is unavailable (§12.10) |
 | `terminal_limit` | 1005 | `terminal.create` over `maxPerPrincipal` or `maxPerDaemon`; `data.limit` names it (§12.10) |
 | `not_attached` | 1004 | `terminal.input`/`terminal.resize` from a connection that has not attached the terminal (§12.10) |
 | `terminal_exited` | 1004 | `terminal.input`/`terminal.resize` to a terminal whose shell ended (§12.10) |
@@ -1349,7 +1349,7 @@ The default is off. `alp terminal allow` writes it (after stating what it grants
 carries it, and a gateway credential cannot imply it. alpd reads the file again at every `terminal.*`
 call and at least every 5 s: once it is off (or unusable) every
 terminal is killed (`exit` reason `disabled`) and new ones are refused (`1005 terminal_disabled`).
-`daemon.hello` lists capability `terminal` with `terminalLimits` only while the switch is on, on
+`daemon.hello` lists capability `terminal` with `terminalLimits` only while the switch is on,
 on macOS and Linux when the shipped native PTY owner passes integrity and capability checks, and on
 Windows when node-pty (ConPTY) loads (best-effort, no protection helper; otherwise `1005 terminal_unsupported`).
 
