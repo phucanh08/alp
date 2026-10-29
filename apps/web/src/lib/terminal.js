@@ -297,7 +297,7 @@ export class TerminalSession {
   /** Cancels opening; a pre-existing terminal remains untouched. */
   cancelProtection() {
     if (this.#view.status !== 'protection-warning') return;
-    this.dispose();
+    this.#stopPending();
     this.#set({ status: 'closed' });
   }
 
@@ -523,13 +523,18 @@ export class TerminalSession {
     try { await this.#options.request('terminal.close', { terminalId }); } catch {}
   }
 
-  /** Stops timers and listeners; the host's terminal is left alone. */
-  dispose() {
+  /** Invalidates async work while preserving a mounted view's output subscription. */
+  #stopPending() {
     this.#attempt += 1;
     if (this.#inputTimer !== undefined) clearTimeout(this.#inputTimer);
     if (this.#resizeTimer !== undefined) clearTimeout(this.#resizeTimer);
     this.#inputTimer = this.#resizeTimer = undefined;
     this.#pending = '';
+  }
+
+  /** Stops timers and listeners; the host's terminal is left alone. */
+  dispose() {
+    this.#stopPending();
     this.#outputs.clear();
   }
 
