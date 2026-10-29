@@ -43,7 +43,8 @@ test('an open human gate shows as a card on main, outside the one-question limit
   const { runtime, main } = await start(t, root);
   await until(() => card(runtime, task.id), 'gate card');
   const question = card(runtime, task.id);
-  assert.deepEqual(question.options, ['Ship it', 'Ship to staging']);
+  assert.deepEqual(question.options.slice(0, 2), ['Ship it', 'Ship to staging']);
+  assert.match(question.options[2], /^(Reject|Từ chối)$/, 'an options card still offers Reject');
   assert.deepEqual(question.gate, { projectRoot: root, taskId: task.id, gateId: 'g1' });
   assert.match(question.body, /Release the beta\?/);
   // The card is not the session's one question: main may still ask the user.
@@ -154,4 +155,26 @@ test('a clear made outside alpd (CLI) settles the card by the timer; alp_task ga
   await resolveGate(root, id, gateId, { by: 'user', channel: 'cli', choice: 'B' });
   await until(() => !card(runtime, id), 'card settled by the timer');
   await until(() => decisions(main()) === 1, 'cli decision mail');
+});
+
+test('an options card: Reject keeps the gate open with no reason, and free text rejects with it as the reason', async t => {
+  const root = await project(t);
+  const task = await createTask(root, { title: 'Pick' }, 'user');
+  await addGate(root, task.id, { kind: 'human', note: 'Which?', options: ['A', 'B'] }, 'main');
+  await addGate(root, task.id, { kind: 'human', note: 'Which else?', options: ['C'] }, 'main');
+  const { runtime, main } = await start(t, root);
+  await until(() => card(runtime, task.id) && card(runtime, task.id, 'g2'), 'cards');
+  const reject = card(runtime, task.id).options.at(-1);
+  runtime.answer(card(runtime, task.id).id, { text: reject, channel: 'web' });
+  runtime.answer(card(runtime, task.id, 'g2').id, { text: 'Neither, ask QA', channel: 'paseo' });
+  await until(async () => { const gates = (await getTask(root, task.id)).gates; return gates[0].rejected?.notified && gates[1].rejected?.notified; }, 'both rejections reported');
+  const gates = (await getTask(root, task.id)).gates;
+  assert.equal(gates[0].resolved, undefined);
+  assert.equal(gates[0].rejected.reason, undefined);
+  assert.equal(gates[1].resolved, undefined);
+  assert.equal(gates[1].rejected.reason, 'Neither, ask QA');
+  await until(() => decisions(main()) === 2, 'two mails');
+  await runtime.syncGates(root);
+  assert.equal(card(runtime, task.id), undefined, 'a rejected gate shows no card again');
+  assert.equal(card(runtime, task.id, 'g2'), undefined);
 });

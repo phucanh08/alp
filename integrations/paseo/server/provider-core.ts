@@ -326,10 +326,10 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
                 id: question.id,
                 name: 'alp_ask',
                 kind: 'question',
-                title: `${question.agent} asks you`,
+                title: question.gate ? `Approval gate ${question.gate.gateId} of ${question.gate.taskId}` : `${question.agent} asks you`,
                 description: question.body,
                 input: { questions: [{ id: '0', header: 'Answer', question: question.body, options: (question.options ?? []).map(label => ({ label })), isOther: true, allowOther: true }] },
-                metadata: { agent: question.agent, alpSessionId: question.sessionId },
+                metadata: { agent: question.agent, alpSessionId: question.sessionId, ...(question.gate ? { gate: question.gate } : {}) },
               },
             });
             return;
