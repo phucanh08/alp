@@ -436,6 +436,12 @@ test('Antigravity changes mode between turns by resuming its conversation with n
   assert.equal((await runtime.configure('root', { mode: 'read-only' })).mode, 'read-only');
 });
 
+test('Antigravity reports the tools agy denied when it ends a turn', async t => {
+  const { root, runtime, turn } = await setup(t);
+  await runtime.open('root', { cwd: root, model: 'antigravity:gemini-3.8-flash-high', mode: 'read-only' });
+  assert.match((await turn('deny write')).text, /Antigravity denied WriteFile in read-only mode and ended the turn\./);
+});
+
 test('Antigravity definitions use the native provider ID', () => {
   assert.throws(() => validateProvider({ kind: 'antigravity', command: 'agy' }, 'test', 'agy-local'), /antigravity/);
 });

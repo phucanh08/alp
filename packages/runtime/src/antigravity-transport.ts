@@ -471,6 +471,12 @@ export class AntigravityTransport {
       const isInterrupted = result.error === 'interrupted';
       this.endTurn(turnId, isInterrupted ? 'interrupted' : 'failed', result.error);
     } else {
+      // Headless agy cannot ask, so it denies a tool the mode does not allow and ends the turn, often with no answer: say so.
+      const denied = Array.isArray(result.denied_actions) ? result.denied_actions.map((action: any) => String(action?.display_name || action?.action || '')).filter(Boolean) : [];
+      if (denied.length) {
+        const text = `Antigravity denied ${[...new Set(denied)].join(', ')} in ${modeOf(this.config?.sandbox)} mode and ended the turn.`;
+        this.emit('item/completed', { threadId: this.conversationId, item: { type: 'agentMessage', id: `agy-denied-${turnId}`, text } });
+      }
       this.endTurn(turnId, 'completed');
     }
   }
