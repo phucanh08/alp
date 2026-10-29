@@ -221,6 +221,27 @@ test('antigravity keeps separate assistant messages within a turn', async t => {
 });
 
 
+test('antigravity never reports an edit as done in read-only mode, even when agy says DONE', async t => {
+  // agy 1.4.10 sometimes marks a denied write_file DONE with no error and writes nothing.
+  for (const [mode, want] of [['read-only', 'failed'], ['workspace-write', 'completed']]) {
+    const transport = new AntigravityTransport();
+    t.after(() => transport.close());
+    transport.config = { sandbox: mode };
+    const completed = [];
+    transport.onNotification((method, params) => { if (method === 'item/completed') completed.push(params.item); });
+    transport.activeTurn = 'test-turn';
+    for (const tool_name of ['write_file', 'view_file']) {
+      transport.receiveLine(JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 2, tool_name, state: 'DONE', tool_info: { name: tool_name, parameters: { Path: '/w/x.txt' } } } }));
+    }
+    assert.equal(completed[0].status, want, mode);
+    assert.equal(completed[1].status, 'completed', mode);
+    if (want === 'failed') {
+      assert.equal(completed[0].exitCode, 1);
+      assert.match(completed[0].error, /denied.*read-only/);
+    }
+  }
+});
+
 /**
  * Removes `dir` after the test's other cleanups, which stop the child processes using it: hooks run in the
  * order registered, and Windows cannot remove a directory a process still holds (nor at once after it ends).

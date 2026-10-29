@@ -72,6 +72,8 @@ const MODES = ['read-only', 'workspace-write', 'full-access'];
  * `git status` refreshes the index), as are rg (`--pre`) and find (`-delete`).
  */
 const READ_ONLY_COMMANDS = ['pwd', 'ls', 'cat', 'head', 'tail', 'wc', 'grep'];
+/** agy's file-editing tools, which read-only always denies. */
+const EDIT_TOOLS = new Set(['write_file', 'write_to_file', 'replace_file_content', 'multi_replace_file_content', 'sed_file', 'notebook_edit']);
 const modeOf = (sandbox: unknown) => sandbox === 'danger-full-access' ? 'full-access' : String(sandbox);
 
 /**
@@ -447,6 +449,11 @@ export class AntigravityTransport {
           },
         });
       } else if (step.state === 'DONE' || step.state === 'ERROR') {
+        // agy 1.4.10 sometimes marks a write_file it denied DONE, with no error and no file written:
+        // read-only denies every edit, so never report one as done.
+        if (step.state === 'DONE' && modeOf(this.config?.sandbox) === 'read-only' && EDIT_TOOLS.has(toolName)) {
+          step = { ...step, state: 'ERROR', tool_info: { ...step.tool_info, output: undefined, error: { message: `Antigravity denied ${toolName} in read-only mode` } } };
+        }
         const output = typeof step.tool_info?.output === 'string'
           ? step.tool_info.output
           : step.tool_info?.error?.message || '';
