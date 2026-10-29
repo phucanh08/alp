@@ -178,9 +178,9 @@ function TerminalView({ session, active, preferences, tabKey }: { session: Termi
         <span className="truncate" title={TERMINAL_NOTICE}>{TERMINAL_HEADER}</span>
       </p>
       {notice ? (
-        <div role="alert" className="m-2 grid shrink-0 grid-cols-[auto_1fr] items-start gap-x-3 gap-y-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-foreground sm:flex sm:gap-3" data-testid="terminal-notice">
+        <div role="alert" className="m-2 grid shrink-0 grid-cols-[auto_1fr] items-start gap-x-3 gap-y-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-2 text-xs text-foreground sm:flex sm:gap-3 sm:p-3 sm:text-sm" data-testid="terminal-notice">
           <ShieldAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-amber-500" />
-          <p className="min-w-0 flex-1 leading-5">{TERMINAL_NOTICE}</p>
+          <p className="min-w-0 flex-1 leading-4 sm:leading-5">{TERMINAL_NOTICE}</p>
           <Button size="sm" variant="secondary" className="col-start-2 justify-self-end" onClick={dismiss}>Got it</Button>
         </div>
       ) : null}
