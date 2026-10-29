@@ -245,19 +245,20 @@ test('directory cursors and captures retain terminal.exec binding and explicit f
   assert.equal(events.length, count, 'unwatched connection receives no invalidation');
 });
 
-test('reduced-protection challenge stays meaningful through gateway and acknowledgment keeps the principal binding', async t => {
+test('reduced protection passes through the gateway without acknowledgment and keeps the principal binding', async t => {
   const { daemon, sdk, ids, ca } = await world(t);
   const { client } = await sdk('exec');
   daemon.state.handlers['terminal.create'] = params => {
-    if (!params.protectionAcknowledgment) throw { code: 1005, message: '/private/host-secret', data: { reason: 'terminal_protection_ack_required', secret: 'must-not-leak' } };
-    assert.equal(params.protectionAcknowledgment, 'linux-root-only-v1');
     assert.equal(params.principalId, ids.exec); assert.deepEqual(params.authorizedRoots, [ca]);
-    return { terminal: info() };
+    return { terminal: info(T1, { protection: params.requestId === 'win' ? 'none' : 'root-only' }) };
   };
-  const params = { workspaceId: 'wks_a', cols: 80, rows: 24, requestId: 'warning' };
-  await assert.rejects(client.request('terminal.create', params), error => error.data?.reason === 'terminal_protection_ack_required' && /continue running/.test(error.message) && !JSON.stringify(error).includes('host-secret') && error.data.secret === undefined);
-  await client.request('terminal.create', { ...params, protectionAcknowledgment: 'linux-root-only-v1' });
+  const params = { workspaceId: 'wks_a', cols: 80, rows: 24, requestId: 'open' };
+  assert.equal((await client.request('terminal.create', params)).terminal.protection, 'root-only', 'opens directly and discloses the limit');
+  assert.equal((await client.request('terminal.create', { ...params, requestId: 'win' })).terminal.protection, 'none');
+  assert.equal((await client.request('terminal.create', { ...params, protectionAcknowledgment: 'linux-root-only-v1' })).terminal.protection, 'root-only', 'the deprecated acknowledgment is still accepted');
   await assert.rejects(client.request('terminal.create', { ...params, protectionAcknowledgment: true }), error => error.code === -32602);
+  daemon.state.handlers['terminal.create'] = () => ({ terminal: info(T1, { protection: 'bogus' }) });
+  await assert.rejects(client.request('terminal.create', { ...params, requestId: 'bogus' }));
   const { client: forbidden } = await sdk('writer');
-  await assert.rejects(forbidden.request('terminal.create', { ...params, protectionAcknowledgment: 'linux-root-only-v1' }), error => error.code === 1003 && error.data.reason === 'grant');
+  await assert.rejects(forbidden.request('terminal.create', params), error => error.code === 1003 && error.data.reason === 'grant');
 });

@@ -155,6 +155,7 @@ export function projectTerminal(raw) {
   if (raw.exitCode !== undefined) { if (!integerOrNull(raw.exitCode)) return undefined; terminal.exitCode = raw.exitCode; }
   if (raw.signal !== undefined) { if (!integerOrNull(raw.signal)) return undefined; terminal.signal = raw.signal; }
   if (raw.endReason !== undefined) { if (!TERMINAL_END.has(raw.endReason)) return undefined; terminal.endReason = raw.endReason; }
+  if (raw.protection !== undefined) { if (raw.protection !== 'root-only' && raw.protection !== 'none') return undefined; terminal.protection = raw.protection; }
   return /** @type {import('@anhlp/alp-protocol').TerminalInfo} */ (/** @type {unknown} */ (terminal));
 }
 
@@ -186,7 +187,6 @@ export const TERMINAL_REFUSALS = Object.freeze({
   not_found: 'No such terminal',
   terminal_disabled: 'The daemon host has not allowed remote terminals (its owner runs alp terminal allow)',
   terminal_unsupported: 'Terminals are not available on the daemon host',
-  terminal_protection_ack_required: 'This Linux host lacks terminal process protection. Closing the terminal ends its shell, but commands it started may continue running after close, access revocation or host shutdown. Continue only if you accept this limit.',
   terminal_limit: 'Too many terminals are open',
   not_attached: 'Attach the terminal on this connection first',
   terminal_exited: 'The terminal has ended',
