@@ -1,0 +1,65 @@
+name: Terminal native helpers
+
+# Builds the four Linux terminal-owner helpers from this exact revision so Linux CI lanes test with
+# the helper (t-9f0d). PR/rehearsal evidence only: releases still require committed prebuilts.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # glibc slots build on the documented glibc 2.28 floor (AlmaLinux 8 based manylinux_2_28).
+          - slot: linux-x64-glibc
+            runner: ubuntu-24.04
+            image: quay.io/pypa/manylinux_2_28_x86_64
+          - slot: linux-arm64-glibc
+            runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64
+          - slot: linux-x64-musl
+            runner: ubuntu-24.04
+            image: alpine:3.20
+          - slot: linux-arm64-musl
+            runner: ubuntu-24.04-arm
+            image: alpine:3.20
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build and execute ${{ matrix.slot }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          SLOT: ${{ matrix.slot }}
+        run: |
+          case "$SLOT" in
+            *-glibc)
+              # The runner's official Node binary supports glibc 2.28, so it runs inside the floor image.
+              docker run --rm -v "$PWD:/w" -v "$(dirname "$(dirname "$(command -v node)")"):/opt/hostnode:ro" -w /w "$IMAGE" \
+                sh -ec 'cc --version; ldd --version | head -1; /opt/hostnode/bin/node scripts/build-terminal-native.mjs' ;;
+            *-musl)
+              docker run --rm -v "$PWD:/w" -w /w "$IMAGE" \
+                sh -ec 'apk add --no-cache build-base linux-headers nodejs >/dev/null; cc --version; node scripts/build-terminal-native.mjs' ;;
+          esac
+          sudo chown -R "$(id -u):$(id -g)" packages/daemon/native/prebuilt
+          dir="packages/daemon/native/prebuilt/$SLOT"
+          test -x "$dir/terminal-owner"
+          grep -q "\"slot\": \"$SLOT\"" "$dir/manifest.json"
+          cat "$dir/manifest.json"
+          # Host-side execution of the produced helper (capability handshake).
+          "$dir/terminal-owner" --capability
+          # tar preserves the executable bit that upload-artifact drops.
+          tar -C packages/daemon/native/prebuilt -cf "$RUNNER_TEMP/$SLOT.tar" "$SLOT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: terminal-native-${{ matrix.slot }}
+          path: ${{ runner.temp }}/${{ matrix.slot }}.tar
+          retention-days: 7
+          if-no-files-found: error

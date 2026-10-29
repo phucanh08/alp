@@ -19,6 +19,9 @@ on:
       - scripts/check-paseo-compat.mjs
       - scripts/use-paseo-sdk.mjs
       - .github/workflows/paseo-compat.yml
+      - .github/workflows/terminal-native.yml
+      - .github/actions/terminal-native/**
+      - packages/daemon/native/**
 
 permissions:
   contents: read
@@ -40,6 +43,7 @@ jobs:
 
   # The plugin's types and tests against the latest release: API breaks, not only the range.
   latest-sdk:
+    needs: terminal-native
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -49,6 +53,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - uses: ./.github/actions/terminal-native
       - run: node scripts/use-paseo-sdk.mjs latest
       - run: npm ci
       - run: node scripts/use-paseo-sdk.mjs --verify
