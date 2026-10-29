@@ -122,8 +122,9 @@ launch, with a fresh acknowledgment challenge when full protection became unavai
 Web Continue/Cancel is deliberate; restore/new shell does not inherit consent
 from storage. Direct clients receive a fixed structured refusal before a shell
 exists. Current Paseo protocol cannot send this acknowledgment, so its bridge
-surfaces the warning and refuses degraded create/attach (consumer decision g6
-pending, not accepted complete fallback).
+surfaces the warning and refuses degraded create/attach. User g6 explicitly accepted
+this temporary consumer limit on 2026-10-29; native-supported Paseo is unchanged.
+This does not waive Linux artifacts, actual platform checks or independent native execution.
 
 Compatibility never scans or explicitly signals descendants or process groups.
 Only its own direct root is signaled, before final reap, with SIGCHLD explicitly
