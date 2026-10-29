@@ -35,7 +35,7 @@ export async function nativePtySpawn(file: string, args: string[], options: { na
   let readyResolve!: () => void, readyReject!: (error: Error) => void, finish!: (result: CleanupResult) => void;
   const ready = new Promise<void>((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
   const finished = new Promise<CleanupResult>(resolve => { finish = resolve; });
-  let result: CleanupResult | undefined, completed = false, closing = false;
+  let result: CleanupResult | undefined, completed = false, closing = false, adapterFailed = false;
   let controlBlocked = false, pendingResize: string | undefined;
   const resizeCommand = (command: string) => {
     if (closing || result) return;
@@ -54,12 +54,13 @@ export async function nativePtySpawn(file: string, args: string[], options: { na
     control.destroy(); child.stdin?.end();
   };
   const fail = (reason: string) => {
+    adapterFailed = true;
     readyReject(new Error(reason));
     // No bare child PID signaling. Closing owner input/control asks native bound cleanup.
     closeOwner();
   };
   const timer = setTimeout(() => fail('Native terminal startup timed out'), 5000);
-  const complete = (value: CleanupResult) => { if (!completed) { completed = true; result = value; finish(value); } };
+  const complete = (value: CleanupResult) => { if (!completed) { completed = true; result = adapterFailed ? { ...value, uncertain: Math.max(1, value.uncertain) } : value; finish(result); } };
   child.on('error', error => { fail(error.message); complete({ observed: 0, live: 0, uncertain: 1 }); });
   child.on('close', () => {
     clearTimeout(timer);
