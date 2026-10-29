@@ -451,7 +451,7 @@ export class AntigravityTransport {
       } else if (step.state === 'DONE' || step.state === 'ERROR') {
         // agy 1.4.10 sometimes marks a write_file it denied DONE, with no error and no file written:
         // read-only denies every edit, so never report one as done.
-        if (step.state === 'DONE' && modeOf(this.config?.sandbox) === 'read-only' && EDIT_TOOLS.has(toolName)) {
+        if (step.state === 'DONE' && modeOf(this.config?.sandbox) === 'read-only' && (EDIT_TOOLS.has(toolName) || EDIT_TOOLS.has(step.tool_info?.name))) {
           step = { ...step, state: 'ERROR', tool_info: { ...step.tool_info, output: undefined, error: { message: `Antigravity denied ${toolName} in read-only mode` } } };
         }
         const output = typeof step.tool_info?.output === 'string'
