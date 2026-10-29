@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { AlpRpcError } from '@anhlp/alp-client/portable';
 import { TERMINAL } from '@anhlp/alp-protocol';
 import { Controller } from '../src/lib/controller.js';
-import { TERMINAL_MESSAGES, TerminalSession, clampSize, exitText, gapMarker, splitUtf8, terminalGate, terminalLimits } from '../src/lib/terminal.js';
+import { TERMINAL_MESSAGES, TerminalSession, clampSize, exitText, gapMarker, splitUtf8, terminalGate, terminalLimits, protectionNotice, TERMINAL_PROTECTION_NOTICES } from '../src/lib/terminal.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 const ID = `term_${'a'.repeat(32)}`;
@@ -481,47 +481,32 @@ test('controller: compatibility getter returns an existing off-workspace session
   assert.equal(host.calls.some(c => c.method === 'terminal.create'), false);
 });
 
-test('reduced process protection waits for deliberate user action before create or saved-terminal attach', async () => {
-  for (const saved of [false, true]) {
+test('reduced protection opens without acknowledgment and carries a non-blocking notice', async () => {
+  for (const [protection, saved] of [['root-only', false], ['root-only', true], ['none', false]]) {
     const state = memoryStorage(); if (saved) state.setItem('k', ID);
-    let creations = 0, attachments = 0;
     const f = rig({ storage: state, handlers: {
-      'terminal.create': p => { creations++; if (!p.protectionAcknowledgment) throw rpcError(1005, 'terminal_protection_ack_required'); return { terminal: info() }; },
-      'terminal.attach': p => { attachments++; if (!p.protectionAcknowledgment) throw rpcError(1005, 'terminal_protection_ack_required'); return { terminal: info(), nextSeq: 1 }; },
+      'terminal.create': () => ({ terminal: info(ID, { protection }) }),
+      'terminal.attach': () => ({ terminal: info(ID, { protection }), nextSeq: 1 }),
     } });
     f.session.start(80, 24);
-    await until(() => f.session.getState().status === 'protection-warning');
-    assert.equal(f.session.accepting, false);
-    f.session.connected(); await tick(10);
-    assert.equal(saved ? attachments : creations, 1, 'reconnect never consents for the user');
-    f.session.acknowledgeProtection();
     await until(() => f.session.getState().status === 'running');
-    assert.equal(f.of('terminal.attach').at(-1).protectionAcknowledgment, 'linux-root-only-v1');
+    assert.equal(f.session.getState().protection, protection, 'the view discloses the protection');
+    assert.equal(f.session.accepting, true, 'the terminal stays usable');
+    assert.ok(protectionNotice(protection), 'a notice exists for this protection');
+    for (const call of [...f.of('terminal.create'), ...f.of('terminal.attach')]) assert.equal(call.protectionAcknowledgment, undefined, 'never sends an acknowledgment');
+    f.session.event(out(1, 'USABLE'));
+    assert.ok(f.screen.join('').includes('USABLE'));
     await f.session.close();
   }
 });
 
-test('canceling a saved-terminal protection warning neither attaches nor kills its existing shell', async () => {
-  const storage = memoryStorage(); storage.setItem('k', ID);
-  const f = rig({ storage, handlers: { 'terminal.attach': () => { throw rpcError(1005, 'terminal_protection_ack_required'); } } });
+test('full protection shows no protection notice', async () => {
+  const f = rig();
   f.session.start(80, 24);
-  await until(() => f.session.getState().status === 'protection-warning');
-  f.session.cancelProtection(); f.session.connected();
-  assert.equal(f.session.getState().status, 'closed');
-  assert.equal(f.of('terminal.close').length, 0);
-  assert.equal(f.of('terminal.attach').length, 1);
-});
-
-test('cancel then restart keeps the mounted terminal output subscriber through acknowledgment', async () => {
-  const f = rig({ handlers: { 'terminal.create': p => { if (!p.protectionAcknowledgment) throw rpcError(1005, 'terminal_protection_ack_required'); return { terminal: info() }; } } });
-  f.session.start(80, 24);
-  await until(() => f.session.getState().status === 'protection-warning');
-  f.session.cancelProtection();
-  f.session.restart();
-  await until(() => f.session.getState().status === 'protection-warning');
-  f.session.acknowledgeProtection();
   await until(() => f.session.getState().status === 'running');
-  f.session.event(out(1, 'AFTER-CANCEL'));
-  assert.ok(f.screen.join('').includes('AFTER-CANCEL'), 'mounted xterm subscriber must receive output after restart');
+  assert.equal(f.session.getState().protection, undefined);
+  assert.equal(protectionNotice(undefined), undefined);
+  assert.match(TERMINAL_PROTECTION_NOTICES['root-only'], /Limited protection on this Linux host/);
+  assert.match(TERMINAL_PROTECTION_NOTICES.none, /not guaranteed on Windows/);
   await f.session.close();
 });

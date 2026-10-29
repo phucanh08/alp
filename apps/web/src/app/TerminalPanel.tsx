@@ -8,7 +8,7 @@ import { openTerminalLink } from '../lib/terminal-links.js';
 import '@xterm/xterm/css/xterm.css';
 import { RotateCcw, ShieldAlert, SquareTerminal } from 'lucide-react';
 import { Button } from '../components/ui/button';
-import { TERMINAL_HEADER, TERMINAL_NOTICE, exitText, type TerminalSession } from '../lib/terminal.js';
+import { TERMINAL_HEADER, TERMINAL_NOTICE, exitText, protectionNotice, type TerminalSession } from '../lib/terminal.js';
 import { useAppState, useController } from './store';
 
 /*
@@ -190,6 +190,12 @@ function TerminalView({ session, active, preferences, tabKey }: { session: Termi
         <button onClick={() => find()} aria-label="Next terminal match">↓</button>
         <span role="status" aria-label="Terminal search result">{searchResult}</span>
       </div>
+      {protectionNotice(view.protection) ? (
+        <p role="note" className="flex shrink-0 items-center gap-1.5 border-b border-amber-500/50 bg-amber-500/10 px-3 py-1 text-xs text-foreground" data-testid="terminal-protection-notice" data-protection={view.protection}>
+          <ShieldAlert aria-hidden className="size-3.5 shrink-0 text-amber-500" />
+          <span className="min-w-0 flex-1">{protectionNotice(view.protection)}</span>
+        </p>
+      ) : null}
       <Status session={session} />
       <div className="relative min-h-0 flex-1 p-1.5" style={{ backgroundColor: preferences.theme === 'light' ? LIGHT_THEME.background : DARK_THEME.background }}>
         <div ref={host} className="h-full w-full" data-testid="terminal-screen" aria-label="Terminal" />
@@ -209,7 +215,6 @@ function Status({ session }: { session: TerminalSession }) {
   );
   const restart = <Button size="sm" variant="secondary" onClick={() => session.restart()}><RotateCcw aria-hidden />New terminal</Button>;
   switch (view.status) {
-    case 'protection-warning': return line(view.error ?? 'This host has reduced terminal protection.', <div className="flex shrink-0 gap-2"><Button size="sm" variant="secondary" onClick={() => session.acknowledgeProtection()}>Continue with limited protection</Button><Button size="sm" variant="ghost" onClick={() => session.cancelProtection()}>Cancel</Button></div>, 'error');
     case 'idle': case 'starting': return line('Starting a shell on the host…');
     case 'attaching': return line('Connecting to the terminal…');
     case 'reconnecting': return line('Reconnecting to the host… input is paused.');

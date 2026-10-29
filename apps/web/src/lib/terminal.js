@@ -36,8 +36,18 @@ export const TERMINAL_MESSAGES = Object.freeze({
 
 /** The honesty notice (the user's product decision): where the shell runs, and that nothing confines it. */
 export const TERMINAL_NOTICE = 'This shell runs on the daemon host as the account that runs alpd. The workspace is not a sandbox: the shell can read and write anything that account can, and use the network.';
-/** The same, as the panel's persistent header line. */
-export const TERMINAL_PROTECTION_NOTICE = 'This Linux host lacks terminal process protection. Closing the terminal ends its shell, but commands it started may continue running after close, access revocation or host shutdown. Continue only if you accept this limit.';
+/** Non-blocking notices for best-effort hosts (`terminal.protection`); the terminal stays usable. */
+export const TERMINAL_PROTECTION_NOTICES = Object.freeze({
+  'root-only': 'Limited protection on this Linux host: closing the terminal may not stop background processes.',
+  none: 'Process cleanup is not guaranteed on Windows: closing the terminal may not stop background processes.',
+});
+/**
+ * The notice for a terminal's protection, or undefined for full protection.
+ * @param {unknown} protection
+ */
+export function protectionNotice(protection) {
+  return protection === 'root-only' || protection === 'none' ? TERMINAL_PROTECTION_NOTICES[protection] : undefined;
+}
 export const TERMINAL_HEADER = 'Runs on the daemon host as the account that runs alpd · the workspace is not a sandbox';
 
 /** alpd's terminal refusals, for people (§12.10 reasons). */
@@ -150,7 +160,7 @@ export function clampSize(cols, rows) {
 }
 
 /**
- * @typedef {'protection-warning' | 'idle' | 'starting' | 'attaching' | 'running' | 'reconnecting' | 'replaced' | 'exited' | 'gone' | 'failed' | 'closed'} TerminalStatus
+ * @typedef {'idle' | 'starting' | 'attaching' | 'running' | 'reconnecting' | 'replaced' | 'exited' | 'gone' | 'failed' | 'closed'} TerminalStatus
  *   idle: not started yet. starting: terminal.create on its way. attaching: terminal.attach on its
  *   way (its replay is buffered). running: attached, input accepted. reconnecting: the connection
  *   dropped; attaches again once it is back. replaced: another client attached it. exited: the
@@ -162,6 +172,7 @@ export function clampSize(cols, rows) {
  *   exit?: { exitCode: number | null, signal: number | null, reason: string },
  *   error?: string,
  *   lost?: string,
+ *   protection?: 'root-only' | 'none',
  * }} TerminalView
  *   lost: input that may not have reached the shell, said once.
  * @typedef {{ getItem(key: string): string | null, setItem(key: string, value: string): void, removeItem(key: string): void }} TerminalStorage
@@ -179,10 +190,11 @@ export function clampSize(cols, rows) {
  * }} TerminalOptions
  */
 
+/** @param {any} terminal */
+const protectionOf = terminal => terminal?.protection === 'root-only' || terminal?.protection === 'none' ? terminal.protection : undefined;
+
 /** One terminal of a workspace tab. */
 export class TerminalSession {
-  #protectionAcknowledged = false;
-  #warningAction = 'create';
   /** @type {TerminalView} */ #view = { status: 'idle' };
   /** @type {Set<() => void>} */ #listeners = new Set();
   /** @type {Set<(text: string) => void>} */ #outputs = new Set();
@@ -276,7 +288,6 @@ export class TerminalSession {
     // An exited terminal is kept by the host for a while: forget it there.
     if (terminalId && status === 'exited') this.#options.request('terminal.close', { terminalId }).catch(() => {});
     this.#store(undefined);
-    this.#protectionAcknowledged = false;
     this.#reset();
     this.#write('\x1bc');
     this.#history = [];
@@ -294,32 +305,16 @@ export class TerminalSession {
     this.#createId = null;
   }
 
-  /** Cancels opening; a pre-existing terminal remains untouched. */
-  cancelProtection() {
-    if (this.#view.status !== 'protection-warning') return;
-    this.#stopPending();
-    this.#set({ status: 'closed' });
-  }
-
-  /** Deliberate user action only; never called by reconnect, restart or storage restore. */
-  acknowledgeProtection() {
-    if (this.#view.status !== 'protection-warning') return;
-    this.#protectionAcknowledged = true;
-    if (this.#warningAction === 'attach') void this.#attach(this.#lastSeq, false);
-    else void this.#create();
-  }
-
   async #create() {
     const attempt = ++this.#attempt;
     this.#createId ??= this.#options.newRequestId();
     this.#set({ status: 'starting', error: undefined });
     let result;
     try {
-      result = await this.#options.request('terminal.create', { workspaceId: this.#options.workspaceId, cols: this.#size.cols, rows: this.#size.rows, requestId: this.#createId, ...(this.#protectionAcknowledged ? { protectionAcknowledgment: 'linux-root-only-v1' } : {}) });
+      result = await this.#options.request('terminal.create', { workspaceId: this.#options.workspaceId, cols: this.#size.cols, rows: this.#size.rows, requestId: this.#createId });
     } catch (error) {
       if (attempt !== this.#attempt) return;
       const failure = describe(error);
-      if (failure.reason === 'terminal_protection_ack_required') { this.#warningAction = 'create'; this.#set({ status: 'protection-warning', error: TERMINAL_PROTECTION_NOTICE }); return; }
       // Its outcome is unknown (the connection dropped): the same requestId again on reconnect.
       if (failure.sent !== 'yes') { this.#set({ status: 'reconnecting' }); if (this.#connected) this.#retrySoon(); return; }
       this.#createId = null;
@@ -339,7 +334,7 @@ export class TerminalSession {
     this.#createId = null;
     this.#sentSize = { cols: result.terminal.cols, rows: result.terminal.rows };
     this.#store(terminalId);
-    this.#set({ terminalId });
+    this.#set({ terminalId, protection: protectionOf(result.terminal) });
     await this.#attach(0, false);
   }
 
@@ -360,12 +355,11 @@ export class TerminalSession {
     this.#set({ status: 'attaching', error: undefined });
     let result;
     try {
-      result = await this.#options.request('terminal.attach', { terminalId, ...(after > 0 ? { after } : {}), ...(this.#protectionAcknowledged ? { protectionAcknowledgment: 'linux-root-only-v1' } : {}) });
+      result = await this.#options.request('terminal.attach', { terminalId, ...(after > 0 ? { after } : {}) });
     } catch (error) {
       if (attempt !== this.#attempt) return;
       this.#buffer = null;
       const failure = describe(error);
-      if (failure.reason === 'terminal_protection_ack_required') { this.#warningAction = 'attach'; this.#buffer = null; this.#set({ status: 'protection-warning', error: TERMINAL_PROTECTION_NOTICE }); return; }
       if (failure.sent !== 'yes') { this.#set({ status: 'reconnecting' }); if (this.#connected) this.#retrySoon(); return; }
       if (failure.code === 1001) {
         this.#store(undefined);
@@ -387,7 +381,7 @@ export class TerminalSession {
     }
     const terminal = result?.terminal;
     if (terminal && Number.isSafeInteger(terminal.cols)) this.#sentSize ??= { cols: terminal.cols, rows: terminal.rows };
-    this.#set({ status: 'running' });
+    this.#set({ status: 'running', protection: protectionOf(terminal) ?? this.#view.protection });
     for (const event of buffered) this.#apply(event);
     if (this.#view.status === 'running' && terminal?.state === 'exited') {
       this.#set({ status: 'exited', exit: { exitCode: terminal.exitCode ?? null, signal: terminal.signal ?? null, reason: terminal.endReason ?? 'exited' } });
