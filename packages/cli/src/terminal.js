@@ -20,12 +20,13 @@ export const TERMINAL_WARNING = (user = os.userInfo().username) => [
 
 const file = home => path.join(home, 'terminal.json');
 
-async function read(home) {
+export async function read(home, platform = process.platform) {
   const info = await lstat(file(home)).catch(() => undefined);
   if (!info) return { exists: false, value: undefined, private: true };
   const own = !process.getuid || info.uid === process.getuid();
   const value = info.isFile() ? await readFile(file(home), 'utf8').then(JSON.parse).catch(() => undefined) : undefined;
-  return { exists: true, value, private: info.isFile() && own && !(info.mode & 0o077) };
+  // Windows has no POSIX group/other mode bits (files report 0o666/0o444).
+  return { exists: true, value, private: info.isFile() && own && (platform === 'win32' || !(info.mode & 0o077)) };
 }
 
 async function write(home, value) {

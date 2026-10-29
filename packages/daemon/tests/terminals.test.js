@@ -138,6 +138,8 @@ test('helpers: frames never split a character; the switch is a private file of t
   await writeFile(file, JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o644 });
   await chmod(file, 0o644);
   assert.deepEqual([(await readTerminalConfig(home)).enabled, (await readTerminalConfig(home)).reason], [false, 'not_private']);
+  // Windows reports every regular file as 0o666: the POSIX mode check must not keep terminals off there.
+  assert.equal((await readTerminalConfig(home, undefined, 'win32')).enabled, true, 'win32 ignores POSIX mode bits');
   await chmod(file, 0o600);
   assert.deepEqual([(await readTerminalConfig(home)).enabled, (await readTerminalConfig(home)).paseo], [true, false], 'Paseo devices need their own opt-in');
   await writeFile(file, JSON.stringify({ version: 1, allowRemoteTerminal: true, allowPaseoTerminal: true }), { mode: 0o600 });
