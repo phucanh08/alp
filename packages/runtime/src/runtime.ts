@@ -2658,7 +2658,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       rootId: rootOf(sessionId),
       agent: 'ALP',
       body: `${vietnamese ? `Cổng phê duyệt ${gate.id} của ${task.id}` : `Approval gate ${gate.id} of ${task.id}`} (${task.title}):\n${gate.note ?? ''}`,
-      options: gate.options?.length ? gate.options : [say.approve, say.reject],
+      // Options approve; Reject (added after them unless one of them is that word) keeps the gate open.
+      options: gate.options?.length ? (gate.options.includes(say.reject) ? gate.options : [...gate.options, say.reject]) : [say.approve, say.reject],
       askedAt: gate.at ?? new Date().toISOString(),
       gate: { projectRoot, taskId: task.id, gateId: gate.id },
     };
@@ -2668,7 +2669,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       userQuestions.delete(question.id);
       emit(sessionId, { type: 'question.resolved', questionId: question.id, outcome, ...(answer !== undefined ? { answer } : {}) });
     };
-    userQuestions.set(question.id, { question, settle, persistent: true, gate: Object.assign(card, { decide: (reply: { text?: string; dismiss?: boolean; reason?: string; channel?: 'paseo' | 'web' }) => decideGate(projectRoot, question, card, reply, !gate.options?.length) }) });
+    userQuestions.set(question.id, { question, settle, persistent: true, gate: Object.assign(card, { decide: (reply: { text?: string; dismiss?: boolean; reason?: string; channel?: 'paseo' | 'web' }) => decideGate(projectRoot, question, card, reply, gate.options?.length ? gate.options : undefined) }) });
     emit(sessionId, { type: 'question', question });
     runLog(rootOf(sessionId), { event: 'gate.card', questionId: question.id, taskId: task.id, gateId: gate.id });
   }
@@ -2679,14 +2680,15 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
    * read again and retried only while the gate is still open and undecided, so a decision another
    * channel made first is never applied or mailed twice.
    */
-  async function decideGate(projectRoot: string, question: UserQuestion, card: { rev: number; deciding: boolean }, reply: { text?: string; dismiss?: boolean; reason?: string; channel?: 'paseo' | 'web' }, defaults: boolean) {
+  async function decideGate(projectRoot: string, question: UserQuestion, card: { rev: number; deciding: boolean }, reply: { text?: string; dismiss?: boolean; reason?: string; channel?: 'paseo' | 'web' }, choices?: string[]) {
+    const defaults = !choices;
     if (card.deciding) return;
     card.deciding = true;
     const { taskId, gateId } = question.gate!;
     const channel = reply.channel ?? 'web';
     const text = reply.text?.trim();
-    const approve = !reply.dismiss && !!text && (defaults ? APPROVALS.includes(text.toLowerCase()) : question.options!.includes(text));
-    const rejectReason = reply.dismiss ? reply.reason : text && defaults && CHOICES_REJECT.includes(text.toLowerCase()) ? undefined : text;
+    const approve = !reply.dismiss && !!text && (defaults ? APPROVALS.includes(text.toLowerCase()) : choices.includes(text));
+    const rejectReason = reply.dismiss ? reply.reason : text && CHOICES_REJECT.includes(text.toLowerCase()) ? undefined : text;
     const write = (ifRev: number) => approve
       ? resolveGate(projectRoot, taskId, gateId, { by: 'user', ifRev, channel, ...(defaults ? {} : { choice: text }) })
       : rejectGate(projectRoot, taskId, gateId, { by: 'user', ifRev, channel, ...(rejectReason ? { reason: rejectReason.slice(0, 2000) } : {}) });
