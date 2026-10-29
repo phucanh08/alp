@@ -53,8 +53,12 @@ jobs:
           test -x "$dir/terminal-owner"
           grep -q "\"slot\": \"$SLOT\"" "$dir/manifest.json"
           cat "$dir/manifest.json"
-          # Host-side execution of the produced helper (capability handshake).
-          "$dir/terminal-owner" --capability
+          # Non-root execution in the slot's own libc (the musl loader is absent on the runner host).
+          docker run --rm --user 1001:1001 -v "$PWD:/w:ro" -w /w "$IMAGE" "$dir/terminal-owner" --capability
+          case "$SLOT" in *-glibc)
+            ls -l /proc/1/ns/pid || true
+            "$dir/terminal-owner" --capability ;;
+          esac
           # tar preserves the executable bit that upload-artifact drops.
           tar -C packages/daemon/native/prebuilt -cf "$RUNNER_TEMP/$SLOT.tar" "$SLOT"
       - uses: actions/upload-artifact@v4
