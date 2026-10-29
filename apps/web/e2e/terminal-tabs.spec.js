@@ -227,6 +227,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 700 
       await expect(notice).toBeHidden();
       await page.clock.resume();
       await page.getByRole('tab', { name: 'Terminal', exact: true }).press('Delete');
+      await expect.poll(async () => (await list()).filter(item => item.state === 'running').length).toBe(0);
     });
   });
 }
