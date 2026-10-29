@@ -95,6 +95,8 @@ jobs:
           git diff --exit-code -- packages/daemon/native/prebuilt
           test "$(node -p "require('./$dir/manifest.json').source")" = "$FRESH_SOURCE" || { echo "::error::Committed $SLOT prebuilt is stale: rebuild all six slots (packages/daemon/native/README.md)"; exit 1; }
           test "$(sha256sum "$dir/terminal-owner" | cut -d' ' -f1)" = "$(node -p "require('./$dir/manifest.json').sha256")"
+          test "$(node -p "require('./$dir/manifest.json').slot")" = "$SLOT"
+          test "$(node -p "require('./$dir/manifest.json').protocol")" = 1
           test -x "$dir/terminal-owner"
           test "$(docker run --rm --user 1001:1001 -v "$PWD:/w:ro" -w /w "$IMAGE" "$dir/terminal-owner" --capability)" = "$full"
           case "$SLOT" in *-glibc)

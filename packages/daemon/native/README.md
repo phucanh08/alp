@@ -103,9 +103,10 @@ When `terminal-owner.c` changes, rebuild ALL six slots in the same commit:
 1. Darwin: on macOS, `node scripts/build-terminal-native.mjs --arch=arm64` and
    `--arch=x64` (x64 capability executes through Rosetta).
 2. Linux: push the source change; the terminal-native jobs fail as stale but still upload
-   `terminal-native-<slot>` artifacts built from that exact revision. Download them
-   (`gh run download <run-id> -p 'terminal-native-*'`) and extract each tar with
-   `tar -C packages/daemon/native/prebuilt -xpf <slot>.tar` (tar keeps the exec bit).
+   `terminal-native-<slot>` artifacts built from that exact revision. Download them into
+   an empty directory (`gh run download <run-id> -p 'terminal-native-*' -D <dir>`; each
+   lands as `<dir>/terminal-native-<slot>/<slot>.tar`) and extract each with
+   `tar -C packages/daemon/native/prebuilt -xpf <tar>` (tar keeps the exec bit).
 3. `node scripts/terminal-native-assets.mjs --require-matrix`, commit all six slots, and
    check the next CI run is green.
 
