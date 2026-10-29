@@ -10,7 +10,10 @@ round, with concrete macOS arm64 execution evidence.
 One standalone C process owns forkpty, the startup gate, every signal and root
 wait/reap. JS sends terminal input on stdin and resize (`R cols rows\n`) / cleanup
 (`C\n`) on fd4. PTY output is stdout; fd3 contains bounded JSON ready, root-exit,
-and cleanup records. Input/output queues and identity storage are bounded.
+and cleanup records. Input/output queues and identity storage are bounded. Resizes coalesce behind
+writable backpressure; cleanup closes the control pipe immediately. Native startup
+polls the handshake/control descriptors with a 3s deadline; failure closes the
+gate and attempts only identity-bound cleanup with a bounded nonblocking reap.
 
 The child reports `getsid(0)==getpid()` before the parent releases its startup
 gate. The owner acquires root identity before release, has default SIGCHLD and no
@@ -26,7 +29,9 @@ missed (the approved g3 limit).
 Linux opens a proc TGID directory with O_RDONLY|O_DIRECTORY (not O_PATH), reads
 stat relative to that SAME descriptor, and uses pidfd_send_signal on that fd with
 flags0/infoNULL. Capability probing checks kernel procfs and that /proc/self PID
-and SID match the caller's namespace coordinates. Linux source has NOT been
+and SID match the caller's namespace coordinates, and compares opened namespace
+objects for /proc/self/ns/pid and the proc mount's PID1 (dev+ino); failure denies
+capability. Linux source has NOT been
 compiled or executed here; permission/race/namespace/minimum-kernel evidence is
 still required.
 
@@ -76,3 +81,10 @@ request IDs, concurrent create limits, revoke/disable during startup, bounded
 readiness, and existing observable descendant/orphan regressions. It must remove
 all JS/node-pty numeric signaling paths before claiming a native security fix.
 Actual Linux/Windows browser keyboard and Linux /proc tests remain NOT_CHECKED.
+
+Explicit developer regressions (require a local C compiler, not end-user startup):
+`node --test packages/daemon/native/tests/lifecycle.mjs` exercises delayed native
+startup and a real stalled control reader. `ALP_NATIVE_BASELINE=8ed11fd` runs the
+same checks against the committed pre-correction C/TS in isolated scratch space.
+This mode does not change the checkout. Both cases fail on that baseline and pass
+on the correction. Ordinary lifecycle tests run separately from daemon/tests.
