@@ -17,6 +17,8 @@ export type TerminalInfo = {
   terminalId: string; workspaceId: string; title: string; cols: number; rows: number; state: 'running' | 'exited';
   attached: boolean; createdAt: string; lastActivityAt: string; expiresAt: string;
   exitCode?: number | null; signal?: number | null; endReason?: TerminalEndReason;
+  /** Absent: full native protection. root-only: best-effort Linux. none: Windows ConPTY, best-effort cleanup. */
+  protection?: 'root-only' | 'none';
 };
 /** Effective terminal limits a daemon.hello advertises with capability `terminal`. */
 export type TerminalLimits = {
@@ -110,12 +112,12 @@ export type ForkBoundary = { throughTurnId: string } | { beforeTurnId: string };
 export type RegistryMutation = { requestId: string; ifRevision: number };
 export type RegistryPage = { revision: number; total: number; nextCursor: string | null };
 export type RpcMethodMap = {
-  'terminal.create': { params: PrincipalContext & { workspaceId: string; cols: number; rows: number; requestId: string; protectionAcknowledgment?: 'linux-root-only-v1' }; result: { terminal: TerminalInfo } };
+  'terminal.create': { params: PrincipalContext & { workspaceId: string; cols: number; rows: number; requestId: string; protectionAcknowledgment?: 'linux-root-only-v1' /* deprecated, ignored */ }; result: { terminal: TerminalInfo } };
   'terminal.list': { params: PrincipalContext & { workspaceId?: string }; result: { terminals: TerminalInfo[] } };
   'terminal.watch': { params: PrincipalContext & { workspaceId?: string; after?: string }; result: { terminals: TerminalInfo[]; watchId: string; cursor: string; reset: boolean } };
   'terminal.unwatch': { params: Empty; result: { closed: true } };
   'terminal.capture': { params: PrincipalContext & { terminalId: string; start?: number; end?: number; stripAnsi?: boolean }; result: { lines: string[]; totalLines: number } };
-  'terminal.attach': { params: PrincipalContext & { terminalId: string; after?: number; protectionAcknowledgment?: 'linux-root-only-v1' }; result: { terminal: TerminalInfo; nextSeq: number; gap?: { fromSeq: number; toSeq: number } } };
+  'terminal.attach': { params: PrincipalContext & { terminalId: string; after?: number; protectionAcknowledgment?: 'linux-root-only-v1' /* deprecated, ignored */ }; result: { terminal: TerminalInfo; nextSeq: number; gap?: { fromSeq: number; toSeq: number } } };
   'terminal.input': { params: PrincipalContext & { terminalId: string; data: string }; result: { bytes: number } };
   'terminal.resize': { params: PrincipalContext & { terminalId: string; cols: number; rows: number }; result: { cols: number; rows: number } };
   'terminal.close': { params: PrincipalContext & { terminalId: string }; result: { closed: true } };

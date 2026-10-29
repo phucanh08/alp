@@ -31,7 +31,7 @@ export function nativeTerminalCapability(): ReturnType<typeof nativeCapabilityOf
     return nativeCapabilityOf(probe, process.platform);
   } catch { return { available: false, reason: 'native_prebuilt_unavailable' }; }
 }
-export async function nativePtySpawn(file: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: Record<string, string>; killGraceMs?: number; signal?: AbortSignal; protection?: 'root-only' }) {
+export async function nativePtySpawn(file: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: Record<string, string>; killGraceMs?: number; signal?: AbortSignal; protection?: 'root-only' | 'none' }) {
   if (options.signal?.aborted) throw new Error('Native terminal startup cancelled');
   const child = spawn(binary(), [...(options.protection === 'root-only' ? ['--root-only'] : []), String(options.cols), String(options.rows), String(options.killGraceMs ?? 1000), options.cwd, file, ...args], { env: options.env, stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'] });
   const control = child.stdio[4] as import('node:stream').Writable;
