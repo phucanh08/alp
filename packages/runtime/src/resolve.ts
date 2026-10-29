@@ -164,12 +164,11 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
     }
   }
   // Main has full access unless the caller limits it; a permission profile caps the mode at its base.
-  // agy runs natively with full access; read-only instructions require an explicit opt-in.
+  // agy enforces each mode itself (antigravityModeArgs): it denies what the mode does not allow.
   const permissions = await profileFor(agent.projectRoot, options.library, agent.name);
   const requested = spec.mode ?? agent.mode ?? (agent.name === main ? 'full-access' : 'read-only');
   const mode = permissions ? capMode(requested, permissions.base) : requested;
   if (runtimeKind === 'antigravity') {
-    if (mode !== 'full-access' && !(mode === 'read-only' && antigravity?.readOnlyMode === 'instructions')) throw new Error('Antigravity currently supports only full-access; read-only requires explicit readOnlyMode: "instructions" and is not sandboxed');
     if (spec.copy || permissions?.workdir === 'copy') throw new Error('Antigravity cannot enforce isolation for a review copy');
     if (permissions && (permissions.deny.length || permissions.ask.length || permissions.allow.length || permissions.beyondMode === 'ask')) {
       throw new Error('Antigravity cannot enforce custom permission rules');

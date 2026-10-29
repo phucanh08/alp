@@ -44,7 +44,7 @@ const USAGE = `Usage:
   alp mcp add <name> [--project [DIR]] (--command C [--arg A]... [--env K=V]... [--cwd D] | --url U [--header K=V]...)
   alp hook add <name> [--project [DIR]] --event E --command C [--blocking] [--timeout SEC] [--match-agent A] [--match-label L]
   alp provider add <id> --command C [--arg A]... [--env K=V]... [--label L] [-d text] [--models a,b]   an ACP agent; use id antigravity for native agy
-  alp provider edit antigravity --read-only-mode instructions|reject   opt into prompt-only read-only for advisory roles
+  alp provider edit antigravity --read-only-mode instructions|reject   legacy, no effect: agy enforces every mode itself
   alp <agent|team|skill|mcp|hook|provider> <rm|show> <name> [--project [DIR]] | <cp|mv> <from> <to> [--project [DIR]]
   alp <mcp|hook|provider> test <name> [--project [DIR]]   list an MCP server's tools; run a hook once; initialize a provider
             without --project, changes go to your library in ~/.alp; built-in agents and teams are never changed
