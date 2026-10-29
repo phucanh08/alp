@@ -233,8 +233,10 @@ test('antigravity never reports an edit as done in read-only mode, even when agy
     for (const tool_name of ['write_file', 'view_file']) {
       transport.receiveLine(JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 2, tool_name, state: 'DONE', tool_info: { name: tool_name, parameters: { Path: '/w/x.txt' } } } }));
     }
+    transport.receiveLine(JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 3, state: 'DONE', tool_info: { name: 'replace_file_content' } } }));
     assert.equal(completed[0].status, want, mode);
     assert.equal(completed[1].status, 'completed', mode);
+    assert.equal(completed[2].status, want, mode);
     if (want === 'failed') {
       assert.equal(completed[0].exitCode, 1);
       assert.match(completed[0].error, /denied.*read-only/);
