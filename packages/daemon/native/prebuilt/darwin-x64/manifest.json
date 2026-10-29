@@ -1,11 +1,11 @@
 {
   "protocol": 1,
   "slot": "darwin-x64",
-  "source": "0a96fe3ee01a94ce88739d5ae2b8f8e39e81a692af6a3fcd08794f68437879f6",
+  "source": "daad51345d0acd2b202ff5e4baff4a33ff14eaf52c33a8036794465837d50679",
   "sha256": "2009a101444d737febbc1e4848357dcba1297266cee219042d0fcf6a1be70f75",
-  "buildHost": "v22.23.4",
+  "buildHost": "v26.3.0",
   "deploymentTarget": "11.0",
   "executionChecked": true,
   "executionProtection": "identity-bound",
-  "executionHost": "darwin-arm64"
+  "executionHost": "darwin-x64"
 }
