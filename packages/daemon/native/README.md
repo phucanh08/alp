@@ -3,7 +3,7 @@
 Task t-d71b. Production `src/terminals.ts` now uses this identity-bound owner,
 with no node-pty fallback. Linux may use the explicitly acknowledged root-only mode described below. This candidate is NOT accepted for release:
 four Linux artifacts and actual Linux/Windows evidence remain missing. Missing or
-unverifiable backends refuse terminal capability explicitly; only a verified ENOSYS bound-signal capability result enables root-only compatibility. No end-user compiler
+unverifiable backends refuse terminal capability explicitly; on Linux a verified helper without full protection (any reason) offers root-only compatibility (best-effort, user decision 2026-10-29). No end-user compiler
 is required. Existing session authentication and host/Paseo opt-ins still apply.
 
 ## Protocol and lifetime
@@ -111,11 +111,12 @@ on the correction. Ordinary lifecycle tests run separately from daemon/tests.
 
 ## Linux root-only compatibility candidate (g5)
 
-Only a verified helper that passes procfs/PID-namespace checks and receives ENOSYS
-from its valid self `pidfd_send_signal` probe advertises `alp-terminal-owner:1:root-only`.
-EPERM/EACCES, proc/namespace failure, corrupt/missing binary or manifest, timeout,
-crash or malformed records refuse capability. ENOSYS may also be returned by a
-policy; we call the capability unavailable rather than assert a kernel version.
+Linux is best-effort (user decision 2026-10-29; only macOS is guaranteed). A verified
+helper that fails full protection for ANY reason (ENOSYS, EPERM/EACCES, procfs or
+PID-namespace mismatch) advertises `alp-terminal-owner:1:root-only`; root-only mode
+only signals the unreaped session root and does not use procfs or pidfd, so
+background jobs may survive close. A corrupt/missing binary or manifest, timeout,
+crash or malformed record still refuses capability (no unverified code runs).
 The owner revalidates immediately before fork; a mode change refuses before shell
 launch, with a fresh acknowledgment challenge when full protection became unavailable.
 
