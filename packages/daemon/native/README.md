@@ -30,9 +30,11 @@ missed (the approved g3 limit).
 Linux opens a proc TGID directory with O_RDONLY|O_DIRECTORY (not O_PATH), reads
 stat relative to that SAME descriptor, and uses pidfd_send_signal on that fd with
 flags0/infoNULL. Capability probing checks kernel procfs and that /proc/self PID
-and SID match the caller's namespace coordinates, and compares opened namespace
-objects for /proc/self/ns/pid and the proc mount's PID1 (dev+ino); failure denies
-capability. Linux source has NOT been
+and SID match the caller's namespace coordinates, and requires /proc/self/status
+NSpid to have exactly one field equal to getpid() (proves the procfs PID namespace
+is our active one without reading PID1, so it works for non-root users; missing
+NSpid denies). A mount-privileged actor remounting /proc is outside this guarantee;
+failure denies capability. Linux source has NOT been
 compiled or executed here; permission/race/namespace/minimum-kernel evidence is
 still required.
 

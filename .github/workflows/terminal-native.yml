@@ -56,8 +56,13 @@ jobs:
           # Non-root execution in the slot's own libc (the musl loader is absent on the runner host).
           docker run --rm --user 1001:1001 -v "$PWD:/w:ro" -w /w "$IMAGE" "$dir/terminal-owner" --capability
           case "$SLOT" in *-glibc)
-            ls -l /proc/1/ns/pid || true
-            "$dir/terminal-owner" --capability ;;
+            # Non-root on the real host (cannot read /proc/1/ns/pid).
+            "$dir/terminal-owner" --capability
+            # Own PID namespace with its own procfs: capable.
+            sudo unshare --pid --fork --mount-proc "$dir/terminal-owner" --capability
+            # New PID namespace still seeing the ancestor procfs must be refused (exit 78).
+            rc=0; sudo unshare --pid --fork "$dir/terminal-owner" --capability || rc=$?
+            test "$rc" = 78 ;;
           esac
           # tar preserves the executable bit that upload-artifact drops.
           tar -C packages/daemon/native/prebuilt -cf "$RUNNER_TEMP/$SLOT.tar" "$SLOT"

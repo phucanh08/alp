@@ -183,13 +183,25 @@ static int capability(void) {
   int statfd=openat(self,"stat",O_RDONLY|O_CLOEXEC); char buf[128]={0};
   ssize_t n=statfd<0?-1:read(statfd,buf,sizeof(buf)-1);
   if(statfd>=0) close(statfd);
-  int ownns=openat(self,"ns/pid",O_RDONLY|O_CLOEXEC);
-  int mountns=open("/proc/1/ns/pid",O_RDONLY|O_CLOEXEC);
-  struct stat a,b;
-  int same_namespace=ownns>=0 && mountns>=0 && !fstat(ownns,&a) && !fstat(mountns,&b) && a.st_dev==b.st_dev && a.st_ino==b.st_ino;
-  if(ownns>=0) close(ownns);
-  if(mountns>=0) close(mountns);
-  int namespace_ok=same_namespace && n>0 && strtol(buf,NULL,10)==getpid() && !fstatfs(self,&fs) && fs.f_type==PROC_SUPER_MAGIC && proc_stat(self,&sid,&state) && sid==getsid(0);
+  /* NSpid lists PIDs from the procfs PID namespace down to ours: exactly one field
+   * proves this procfs is our active namespace (ancestor procfs => more fields;
+   * unrelated procfs => no /proc/self). Needs no access to PID1; missing => deny. */
+  int nspid_ok=0; int statusfd=openat(self,"status",O_RDONLY|O_CLOEXEC);
+  if(statusfd>=0) {
+    static char st[16384]; size_t len=0; ssize_t k;
+    while(len<sizeof(st)-1 && ((k=read(statusfd,st+len,sizeof(st)-1-len))>0 || (k<0 && errno==EINTR))) if(k>0) len+=(size_t)k;
+    close(statusfd); st[len]=0;
+    char *line=strstr(st,"\nNSpid:");
+    if(line && len<sizeof(st)-1) {
+      line+=7; char *eol=strchr(line,'\n');
+      if(eol) { *eol=0; int fields=0; long v=0; char *q=line, *end;
+        for(;;) { while(*q==' '||*q=='\t') q++; if(!*q) break; errno=0; long x=strtol(q,&end,10); if(end==q||errno||(*end&&*end!=' '&&*end!='\t')) { fields=-1; break; } v=x; fields++; q=end; }
+        nspid_ok=fields==1 && v==getpid(); }
+    }
+  }
+  char link[32]; ssize_t ln=readlink("/proc/self",link,sizeof(link)-1);
+  int link_ok=ln>0 && (link[ln]=0, strtol(link,NULL,10)==getpid());
+  int namespace_ok=nspid_ok && link_ok && n>0 && strtol(buf,NULL,10)==getpid() && !fstatfs(self,&fs) && fs.f_type==PROC_SUPER_MAGIC && proc_stat(self,&sid,&state) && sid==getsid(0);
   close(self); if(!namespace_ok) return 0;
   identity id; pid_t saved=root; root=getsid(0);
   int ok=acquire(getpid(), &id, 1); root=saved;
