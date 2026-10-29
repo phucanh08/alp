@@ -65,6 +65,8 @@ test('stalled control reader bounds resize queue and cleanup bypasses pending re
   t.after(() => pty.cleanup());
   for (let i = 0; i < 100000; i++) pty.resize(1 + i % 1000, 24);
   assert.ok(owner.stdio[4].writableLength <= owner.stdio[4].writableHighWaterMark + 32, `queued ${owner.stdio[4].writableLength} bytes`);
+  let exit; pty.onExit(value => { exit = value; });
   const cleanup = pty.cleanup(); assert.equal(owner.stdio[4].destroyed, true);
   assert.equal((await cleanup).uncertain, 1); // Fake owner deliberately lacks cleanup result.
+  if (!baseline) assert.equal(exit?.exitCode, null, 'unexpected owner death must notify service with unknown root exit');
 });

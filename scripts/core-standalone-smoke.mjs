@@ -66,6 +66,7 @@ try {
     for (const name of Object.keys(pkg.devDependencies ?? {})) if (name.startsWith('@anhlp/alp-') && !copied.has(name)) delete pkg.devDependencies[name];
     writeFileSync(path.join(source, location, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);
     cpSync(path.join(root, location, 'src'), path.join(source, location, 'src'), { recursive: true });
+    if (location === 'packages/daemon') cpSync(path.join(root, location, 'native'), path.join(source, location, 'native'), { recursive: true });
   }
   for (const location of ['scripts', 'templates', 'packages/protocol/schema', 'packages/protocol/fixtures', 'packages/protocol/conformance']) cpSync(path.join(root, location), path.join(source, location), { recursive: true });
   mkdirSync(path.join(source, 'docs'));

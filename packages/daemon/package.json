@@ -6,7 +6,10 @@
   "files": [
     "src",
     "dist",
-    "NOTICE"
+    "NOTICE",
+    "native/terminal-owner.c",
+    "native/README.md",
+    "native/prebuilt"
   ],
   "exports": {
     "./index": {

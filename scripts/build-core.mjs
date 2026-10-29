@@ -3,6 +3,7 @@
 // only ALP's own templates, never the optional Paseo plugin's client or SDK, so the core six
 // workspaces stay buildable, testable and installable on their own. The optional plugin build
 // calls this too; root `npm run build` and prepack use only the neutral build path.
+import { copyTerminalNative } from './terminal-native-assets.mjs';
 import { build as esbuild } from 'esbuild';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -36,6 +37,8 @@ export async function buildCore({ log = console.log } = {}) {
   record('dist/acp/agent.js', await build({ entryPoints: ['packages/cli/src/acp/agent.ts'], outfile: 'dist/acp/agent.js', bundle: true, format: 'esm', platform: 'node', target: 'node20' }));
   record('dist/alpd.js', await build({ entryPoints: ['packages/daemon/src/main.ts'], outfile: 'dist/alpd.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', external: ['@anthropic-ai/claude-agent-sdk', 'node-pty'], define: { __ALP_VERSION__: JSON.stringify(version) }, banner: requireShim }));
 
+  await copyTerminalNative(path.join(root, 'dist/terminal-native'));
+  await copyTerminalNative(path.join(root, 'dist/daemon/terminal-native'));
   await writeBuildManifest(path.join(root, 'dist/build-manifest.json'), { version, entries });
   // The root package ships dist/alpd.js and dist/acp.js, which inline third-party packages.
   await writeThirdPartyNotices(path.join(root, 'dist', THIRD_PARTY_NOTICES), metafiles, '@anhlp/alp');

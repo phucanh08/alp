@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import { access, lstat, readFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
+import { nativePtySpawn, nativeTerminalCapability, type CleanupResult } from './native-terminal.js';
 import path from 'node:path';
 import { ERROR, RPC_ERROR, TERMINAL, TERMINAL_LIMIT_KEYS, isTerminalId } from '@anhlp/alp-protocol';
 import type { TerminalEndReason, TerminalEvent, TerminalInfo, TerminalLimits } from '@anhlp/alp-protocol/rpc';
@@ -14,7 +14,7 @@ import { TerminalScreen, SCREEN_LIMITS } from './terminal-screen.js';
  * PTY running a shell on this host **as the daemon's account**. A workspace chooses only where the
  * shell starts and who sees the terminal; it is not a sandbox. alpd serves terminals only while the
  * host owner opted in (`<ALP_HOME>/terminal.json` `allowRemoteTerminal`, an owner-private file no RPC
- * writes), on macOS and Linux, when the optional `node-pty` module loads. Lifecycle is audited;
+ * writes), on macOS and Linux, when the shipped native owner validates its capability. Lifecycle is audited;
  * input, output and the environment never are.
  */
 
@@ -23,7 +23,7 @@ export type TerminalPrincipal = { id: string; epoch: string; roots?: readonly st
 /** The connection a terminal streams to: alpd's own IPC connection object. */
 export type TerminalSink = { send(message: unknown): void; socket?: { writableLength: number; destroyed?: boolean } };
 type Disposable = { dispose(): void };
-/** What alpd uses of a node-pty process. */
+/** Native owner interface; injected owners are used only by tests. */
 export type PtyProcess = {
   pid: number;
   /** The PTY's device (node-pty's UnixTerminal), such as /dev/ttys004 or /dev/pts/3. */
@@ -31,10 +31,11 @@ export type PtyProcess = {
   write(data: string): void;
   resize(cols: number, rows: number): void;
   kill(signal?: string): void;
+  cleanup?: () => Promise<CleanupResult>;
   onData(listener: (data: string) => void): Disposable;
-  onExit(listener: (event: { exitCode: number; signal?: number }) => void): Disposable;
+  onExit(listener: (event: { exitCode: number | null; signal?: number }) => void): Disposable;
 };
-export type PtySpawn = (file: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: Record<string, string> }) => PtyProcess;
+export type PtySpawn = (file: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: Record<string, string>; killGraceMs?: number; signal?: AbortSignal }) => PtyProcess | Promise<PtyProcess>;
 /** One process: ids, (Linux) session, controlling tty, age, and the terminal markers in its environment. */
 export type ProcessRow = { pid: number; ppid: number; pgid: number; sid?: number; tty?: string; elapsedMs: number; markers?: string[] };
 type Log = { info(message: string, fields?: Record<string, unknown>): void; warn(message: string, fields?: Record<string, unknown>): void };
@@ -48,7 +49,7 @@ export type TerminalServiceOptions = {
   limits?: Partial<TerminalLimits>;
   now?: () => number;
   platform?: NodeJS.Platform;
-  /** Test hook: the PTY spawner; default node-pty, loaded on first use. */
+  /** Test hook: the PTY owner; production uses only the identity-bound native owner. */
   spawn?: PtySpawn;
   /** Test hook: the process table; default `ps`. */
   processes?: () => Promise<ProcessRow[]>;
@@ -81,11 +82,7 @@ type Terminal = {
   nextSeq: number;
   sink?: TerminalSink;
   detachedAt?: number;
-  /**
-   * A random value in the environment of every process the terminal starts (ALP_TERMINAL_ID): it
-   * finds a job that left the shell's tree (double fork, re-parented, shell already gone) without
-   * remembering any process or group id that could be reused.
-   */
+  /** Informational terminal marker only; NEVER used to discover or signal processes. */
   marker: string;
   ending?: TerminalEndReason;
   exit?: { seq: number; exitCode: number | null; signal: number | null; reason: TerminalEndReason; at: number };
@@ -220,7 +217,6 @@ export function createTerminalService(options: TerminalServiceOptions) {
   const now = options.now ?? Date.now;
   const platform = options.platform ?? process.platform;
   const supported = platform === 'darwin' || platform === 'linux';
-  const listProcesses = options.processes ?? psProcesses(platform);
   const killGraceMs = options.killGraceMs ?? KILL_GRACE_MS;
   const maxBuffered = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
   const terminals = new Map<string, Terminal>();
@@ -238,23 +234,25 @@ export function createTerminalService(options: TerminalServiceOptions) {
     return [...terminals.values()].filter(terminal => terminal.principal.id === principal.id && terminal.principal.epoch === principal.epoch && within(principal, terminal.root) && (workspaceId === undefined || terminal.workspaceId === workspaceId))
       .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? -1 : 1)).map(info);
   }
-  let spawner: PtySpawn | undefined = options.spawn;
-  let loadError: unknown;
   let closed = false;
   let enabled = false;
-
-  /** node-pty, loaded once on first need; its absence only turns terminals off. */
-  function pty(): PtySpawn | undefined {
-    if (spawner || loadError) return spawner;
-    try {
-      const name = 'node-pty';
-      const module = createRequire(import.meta.url)(name);
-      spawner = module.spawn as PtySpawn;
-    } catch (error) {
-      loadError = error;
-      log.warn('the optional node-pty module did not load; terminals are unavailable', { code: 'ALPD_TERMINAL_UNAVAILABLE', error });
+  let cleanupFault = false;
+  type Pending = { principal: TerminalPrincipal; workspaceId: string; controller: AbortController; admitted: boolean; reason?: string; promise: Promise<{ terminal: TerminalInfo }> };
+  const pending = new Map<string, Pending>();
+  // Explicit injected test owners need no host capability. Production never falls back to node-pty.
+  const spawner: PtySpawn = options.spawn ?? nativePtySpawn;
+  let capable: boolean | undefined;
+  function pty() { capable ??= !!options.spawn || nativeTerminalCapability().available; return capable ? spawner : undefined; }
+  const cancel = (entry: Pending, reason: string) => { entry.reason ??= reason; entry.controller.abort(); };
+  const refused = (reason: string) => new RpcError(ERROR.unavailable, 'Terminal startup was cancelled or its native owner is unavailable', { reason });
+  async function cleanup(owner: PtyProcess, id?: string) {
+    if (!owner.cleanup) { owner.kill(); return; } // explicit test owner only
+    const result = await owner.cleanup();
+    if (result.live || result.uncertain) {
+      cleanupFault = true;
+      log.warn('native terminal cleanup could not prove all observed processes exited', { code: 'ALPD_TERMINAL_REAP_FAILED', terminalId: id, ...result });
+      throw refused('terminal_cleanup_uncertain');
     }
-    return spawner;
   }
 
   /** Effective limits: the operator's, then the caller's lower ones. */
@@ -273,7 +271,8 @@ export function createTerminalService(options: TerminalServiceOptions) {
     const limits = effective(config.limits);
     if (enabled && !config.enabled) {
       log.info('terminals turned off on this host; ending every terminal', { code: 'ALPD_TERMINAL_DISABLED' });
-      for (const terminal of terminals.values()) if (!terminal.exit) void end(terminal, 'disabled');
+      for (const entry of pending.values()) cancel(entry, 'terminal_disabled');
+      for (const terminal of terminals.values()) if (!terminal.exit) void end(terminal, 'disabled').catch(() => {});
     }
     enabled = config.enabled;
     return { enabled: config.enabled, limits };
@@ -281,11 +280,12 @@ export function createTerminalService(options: TerminalServiceOptions) {
 
   /** The switch, the platform and the module, or the refusal. */
   async function ready() {
+    if (cleanupFault) throw refused('terminal_cleanup_uncertain');
     if (closed) throw new RpcError(ERROR.unavailable, 'alpd is shutting down', { reason: 'terminal_unsupported' });
     if (!supported) throw new RpcError(ERROR.unavailable, 'Terminals are not supported on this host\'s platform', { reason: 'terminal_unsupported' });
     const current = await state();
     if (!current.enabled) throw new RpcError(ERROR.unavailable, 'The host has not allowed remote terminals (alp terminal allow)', { reason: 'terminal_disabled' });
-    if (!pty()) throw new RpcError(ERROR.unavailable, 'The terminal module is not installed on this host', { reason: 'terminal_unsupported' });
+    if (!pty()) throw new RpcError(ERROR.unavailable, 'The native terminal owner is unavailable on this host', { reason: 'terminal_unsupported' });
     return current.limits;
   }
 
@@ -343,72 +343,11 @@ export function createTerminalService(options: TerminalServiceOptions) {
     }
   }
 
-  /**
-   * Every process of a terminal still running, identified afresh from the process table, never from
-   * a remembered pid or group id (one that may have been reused):
-   * - its marker in the environment (any process the terminal started, wherever it went);
-   * - while the shell runs: the shell itself and every process whose controlling terminal is its PTY;
-   * - on Linux, its session (a session id is not reused while the session has members);
-   * then their descendants, and every member of their process groups (a live group's id is not
-   * reused either). Never alpd itself or its group, never a process older than the terminal.
-   */
-  async function tree(terminal: Terminal): Promise<ProcessRow[]> {
-    // Whether the shell runs is decided before the snapshot, never after it.
-    const running = !terminal.exit;
-    // The terminal's age when the snapshot began: ps (and its /proc reads) may take a while.
-    const lifetime = now() - terminal.createdAt;
-    const rows = await listProcesses();
-    const age = now() - terminal.createdAt + 2_000;
-    const own = rows.find(row => row.pid === process.pid);
-    const children = new Map<number, ProcessRow[]>();
-    for (const row of rows) children.set(row.ppid, [...(children.get(row.ppid) ?? []), row]);
-    const found = new Map<number, ProcessRow>();
-    for (const row of rows) if (row.markers?.includes(terminal.marker)) found.set(row.pid, row);
-    // The process with the shell's pid is our shell only when it is as old as the terminal (etime
-    // counts whole seconds): a younger one got the pid again after our shell had gone.
-    const holder = rows.find(row => row.pid === terminal.pid);
-    const ours = !holder || holder.elapsedMs >= lifetime - 2_000;
-    const shell = running && ours ? holder : undefined;
-    if (shell) found.set(shell.pid, shell);
-    // The PTY's device name counts only while the shell, in this very snapshot, still has it as its
-    // terminal: once node-pty closed it the name may already be another PTY's.
-    const tty = shell && terminal.tty && shell.tty === terminal.tty ? terminal.tty : undefined;
-    // Linux: the session, also once the shell has gone. A pid is not given out again while it is a
-    // live process's session id, so while our session has members its id stays ours; a younger
-    // process holding the shell's pid means it was given out again. (Left open: our session emptied,
-    // and within the reap's second or so a new session leader got the very same pid and exited.)
-    for (const row of rows) {
-      if ((tty && row.tty === tty) || (row.sid !== undefined && row.sid === terminal.pid && ours)) found.set(row.pid, row);
-    }
-    const queue = [...found.values()];
-    while (queue.length) {
-      const row = queue.pop()!;
-      for (const child of children.get(row.pid) ?? []) if (!found.has(child.pid)) { found.set(child.pid, child); queue.push(child); }
-    }
-    const groups = new Set([...found.values()].map(row => row.pgid));
-    for (const row of rows) if (groups.has(row.pgid)) found.set(row.pid, row);
-    return [...found.values()].filter(row => row.pid > 1 && row.pid !== process.pid && (!own || row.pgid !== own.pgid) && row.elapsedMs <= age);
-  }
-
-  function signal(rows: ProcessRow[], name: NodeJS.Signals) {
-    for (const row of rows) { try { process.kill(row.pid, name); } catch {} }
-  }
-
-  /**
-   * Kills what is left of a terminal's tree: SIGHUP, then SIGKILL after the grace. Only processes
-   * the process table shows in the tree now (never a bare group id that may have been reused).
-   */
+  /** Native owns discovery, identity-bound signals, and exclusive root reap. */
   function reap(terminal: Terminal) {
-    terminal.reaped ??= (async () => {
-      signal(await tree(terminal), 'SIGHUP');
-      await new Promise(resolve => setTimeout(resolve, killGraceMs));
-      const left = await tree(terminal);
-      signal(left, 'SIGKILL');
-      if (left.length) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        signal(await tree(terminal), 'SIGKILL');
-      }
-    })().catch(error => log.warn('could not end every process of a terminal', { code: 'ALPD_TERMINAL_REAP_FAILED', terminalId: terminal.id, error }));
+    terminal.reaped ??= cleanup(terminal.pty, terminal.id);
+    // Preserve rejection for close/revoke/shutdown while avoiding unhandled natural-exit errors.
+    void terminal.reaped.catch(() => {});
     return terminal.reaped;
   }
 
@@ -422,7 +361,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
     send(terminal, { terminalId: terminal.id, type: 'exit', seq: terminal.exit.seq, exitCode, signal: signalNumber, reason });
     changed(terminal);
     audit('terminal ended', terminal, { code: 'ALPD_TERMINAL_ENDED', reason, exitCode, signal: signalNumber });
-    void reap(terminal);
+    void reap(terminal).catch(() => {});
   }
 
   /** Ends a running terminal for `reason`; resolves once its tree was killed. */
@@ -430,9 +369,8 @@ export function createTerminalService(options: TerminalServiceOptions) {
     if (terminal.exit) return terminal.reaped;
     terminal.ending ??= reason;
     const reaping = reap(terminal);
-    try { terminal.pty.kill('SIGHUP'); } catch {}
     await reaping;
-    // node-pty reports the exit when the PTY closes; do not wait on it for ever.
+    // A clean native completion includes the root reap; preserve an exit if no callback arrived.
     if (!terminal.exit) exited(terminal, null, null);
   }
 
@@ -452,9 +390,9 @@ export function createTerminalService(options: TerminalServiceOptions) {
         if (at - terminal.exit.at >= limits.reconnectMs) forget(terminal);
         continue;
       }
-      if (at >= terminal.expiresAt) void end(terminal, 'lifetime');
-      else if (at - terminal.lastActivityAt >= limits.idleMs) void end(terminal, 'idle');
-      else if (!terminal.sink && terminal.detachedAt !== undefined && at - terminal.detachedAt >= limits.reconnectMs) void end(terminal, 'detached');
+      if (at >= terminal.expiresAt) void end(terminal, 'lifetime').catch(() => {});
+      else if (at - terminal.lastActivityAt >= limits.idleMs) void end(terminal, 'idle').catch(() => {});
+      else if (!terminal.sink && terminal.detachedAt !== undefined && at - terminal.detachedAt >= limits.reconnectMs) void end(terminal, 'detached').catch(() => {});
     }
   }
   const timer = setInterval(() => void sweep().catch(() => {}), options.sweepMs ?? SWEEP_MS);
@@ -489,53 +427,81 @@ export function createTerminalService(options: TerminalServiceOptions) {
     async advertised(): Promise<TerminalLimits | undefined> {
       if (closed || !supported) return undefined;
       const current = await state().catch(() => undefined);
-      return current?.enabled && pty() ? current.limits : undefined;
+      return !cleanupFault && current?.enabled && pty() ? current.limits : undefined;
     },
 
-    async create(principal: TerminalPrincipal, params: { workspaceId: string; cols: number; rows: number; requestId: string }): Promise<{ terminal: TerminalInfo }> {
-      const limits = await ready();
+    create(principal: TerminalPrincipal, params: { workspaceId: string; cols: number; rows: number; requestId: string }): Promise<{ terminal: TerminalInfo }> {
       const requestKey = JSON.stringify([principal.id, principal.epoch, params.requestId]);
-      let root: string;
-      try { root = await resolveWorkspace(params.workspaceId); } catch (error: any) {
-        if (typeof error?.code === 'number' && error.code !== ERROR.failed) throw new RpcError(error.code === ERROR.forbidden ? ERROR.forbidden : ERROR.notFound, error.code === ERROR.forbidden ? 'The workspace directory changed' : 'No workspace with this workspaceId', { reason: error.data?.reason ?? 'not_found' });
-        throw error;
+      const existing = pending.get(requestKey);
+      if (existing) {
+        if (existing.workspaceId !== params.workspaceId) return Promise.reject(new RpcError(ERROR.conflict, 'This requestId created another terminal', { reason: 'request_conflict' }));
+        return existing.promise.then(result => { own(principal, result.terminal.terminalId); return result; });
       }
-      if (!within(principal, root)) throw new RpcError(ERROR.forbidden, 'The workspace is outside this grant', { reason: 'outside_workspace' });
-      const file = await shell();
-      // From here to the spawn nothing awaits: the requestId, both limits and the new terminal are
-      // checked and recorded in one step, so concurrent creates cannot pass the same check.
-      if (closed) throw new RpcError(ERROR.unavailable, 'alpd is shutting down', { reason: 'terminal_unsupported' });
-      const repeated = terminals.get(requests.get(requestKey) ?? '');
-      if (repeated && !repeated.exit) {
-        if (repeated.workspaceId !== params.workspaceId) throw new RpcError(ERROR.conflict, 'This requestId created another terminal', { reason: 'request_conflict' });
-        return { terminal: info(repeated) };
-      }
-      if (running(terminal => terminal.principal.id === principal.id) >= limits.maxPerPrincipal) throw new RpcError(ERROR.unavailable, `At most ${limits.maxPerPrincipal} terminals run per principal`, { reason: 'terminal_limit', limit: 'principal' });
-      if (running(() => true) >= limits.maxPerDaemon) throw new RpcError(ERROR.unavailable, `At most ${limits.maxPerDaemon} terminals run on this host`, { reason: 'terminal_limit', limit: 'daemon' });
-      // Running terminals are bounded already; exited records must not retain unbounded emulators.
-      const screens = [...terminals.values()].filter(terminal => terminal.screen.available);
-      while (screens.length >= SCREEN_LIMITS.retained) {
-        const oldest = screens.findIndex(terminal => !!terminal.exit);
-        if (oldest < 0) break;
-        screens.splice(oldest, 1)[0]!.screen.dispose();
-      }
-      const at = now();
-      const marker = `atm_${randomBytes(16).toString('hex')}`;
-      const process_ = pty()!(file, [], { name: 'xterm-256color', cols: params.cols, rows: params.rows, cwd: root, env: environment(marker) });
-      const terminal: Terminal = {
-        id: `term_${randomBytes(16).toString('hex')}`, principal: { id: principal.id, epoch: principal.epoch }, workspaceId: params.workspaceId,
-        root, title: path.basename(file).slice(0, 64), cols: params.cols, rows: params.rows, pty: process_, pid: process_.pid, screen: new TerminalScreen(params.cols, params.rows),
-        ...(typeof process_.ptsName === 'string' && process_.ptsName.startsWith('/dev/') ? { tty: process_.ptsName.slice('/dev/'.length) } : {}),
-        createdAt: at, lastActivityAt: at, expiresAt: at + limits.maxLifetimeMs, requestKey, ring: [], ringBytes: 0, nextSeq: 1,
-        detachedAt: at, marker, disposables: [],
-      };
-      terminals.set(terminal.id, terminal);
-      requests.set(requestKey, terminal.id);
-      terminal.disposables.push(process_.onData(data => output(terminal, data, limits)));
-      terminal.disposables.push(process_.onExit(({ exitCode, signal: number }) => exited(terminal, terminal.ending ? null : exitCode, number || null)));
-      changed(terminal);
-      audit('terminal created', terminal, { code: 'ALPD_TERMINAL_CREATED' });
-      return { terminal: info(terminal) };
+      if (pending.size >= TERMINAL.maxPerDaemon * 2) return Promise.reject(refused('terminal_limit'));
+      const entry: Pending = { principal: { ...principal }, workspaceId: params.workspaceId, controller: new AbortController(), admitted: false, promise: undefined! };
+      pending.set(requestKey, entry);
+      entry.promise = (async () => {
+        let process_: PtyProcess | undefined;
+        try {
+          const limits = await ready();
+          const root = await resolveWorkspace(params.workspaceId).catch((error: any) => {
+            if (typeof error?.code === 'number' && error.code !== ERROR.failed) throw new RpcError(error.code === ERROR.forbidden ? ERROR.forbidden : ERROR.notFound, error.code === ERROR.forbidden ? 'The workspace directory changed' : 'No workspace with this workspaceId', { reason: error.data?.reason ?? 'not_found' });
+            throw error;
+          });
+          if (!within(principal, root)) throw new RpcError(ERROR.forbidden, 'The workspace is outside this grant', { reason: 'outside_workspace' });
+          const file = await shell();
+          if (cleanupFault) throw refused('terminal_cleanup_uncertain');
+          if (entry.reason || closed) throw refused(entry.reason ?? 'terminal_unsupported');
+          const repeated = terminals.get(requests.get(requestKey) ?? '');
+          if (repeated && !repeated.exit) {
+            if (repeated.workspaceId !== params.workspaceId) throw new RpcError(ERROR.conflict, 'This requestId created another terminal', { reason: 'request_conflict' });
+            return { terminal: info(repeated) };
+          }
+          const reserved = (id?: string) => [...pending.values()].filter(other => other.admitted && (id === undefined || other.principal.id === id)).length;
+          if (running(terminal => terminal.principal.id === principal.id) + reserved(principal.id) >= limits.maxPerPrincipal) throw new RpcError(ERROR.unavailable, `At most ${limits.maxPerPrincipal} terminals run per principal`, { reason: 'terminal_limit', limit: 'principal' });
+          if (running(() => true) + reserved() >= limits.maxPerDaemon) throw new RpcError(ERROR.unavailable, `At most ${limits.maxPerDaemon} terminals run on this host`, { reason: 'terminal_limit', limit: 'daemon' });
+          entry.admitted = true;
+          const at = now();
+          const marker = `atm_${randomBytes(16).toString('hex')}`;
+          process_ = await spawner(file, [], { name: 'xterm-256color', cols: params.cols, rows: params.rows, cwd: root, env: environment(marker), killGraceMs, signal: entry.controller.signal });
+          const current = await state();
+          if (cleanupFault) throw refused('terminal_cleanup_uncertain');
+          if (entry.reason || closed || !current.enabled) throw refused(entry.reason ?? (closed ? 'terminal_unsupported' : 'terminal_disabled'));
+          const screens = [...terminals.values()].filter(terminal => terminal.screen.available);
+          while (screens.length >= SCREEN_LIMITS.retained) {
+            const oldest = screens.findIndex(terminal => !!terminal.exit);
+            if (oldest < 0) break;
+            screens.splice(oldest, 1)[0]!.screen.dispose();
+          }
+          const terminal: Terminal = {
+            id: `term_${randomBytes(16).toString('hex')}`, principal: { id: principal.id, epoch: principal.epoch }, workspaceId: params.workspaceId,
+            root, title: path.basename(file).slice(0, 64), cols: params.cols, rows: params.rows, pty: process_, pid: process_.pid, screen: new TerminalScreen(params.cols, params.rows),
+            ...(typeof process_.ptsName === 'string' && process_.ptsName.startsWith('/dev/') ? { tty: process_.ptsName.slice('/dev/'.length) } : {}),
+            createdAt: at, lastActivityAt: at, expiresAt: at + limits.maxLifetimeMs, requestKey, ring: [], ringBytes: 0, nextSeq: 1,
+            detachedAt: at, marker, disposables: [],
+          };
+          terminals.set(terminal.id, terminal);
+          requests.set(requestKey, terminal.id);
+          terminal.disposables.push(process_.onData(data => output(terminal, data, limits)));
+          terminal.disposables.push(process_.onExit(({ exitCode, signal: number }) => exited(terminal, terminal.ending ? null : exitCode, number || null)));
+          entry.admitted = false;
+          changed(terminal);
+          audit('terminal created', terminal, { code: 'ALPD_TERMINAL_CREATED' });
+          return { terminal: info(terminal) };
+        } catch (error) {
+          if (process_) await cleanup(process_);
+          const failedCleanup = (error as { cleanupResult?: CleanupResult })?.cleanupResult;
+          if (failedCleanup && (failedCleanup.live || failedCleanup.uncertain)) {
+            cleanupFault = true;
+            log.warn('native startup cleanup was uncertain', { code: 'ALPD_TERMINAL_REAP_FAILED', ...failedCleanup });
+            throw refused('terminal_cleanup_uncertain');
+          }
+          if (entry.reason) throw refused(entry.reason);
+          if (entry.admitted && !(error instanceof RpcError)) throw refused('terminal_unsupported');
+          throw error;
+        } finally { pending.delete(requestKey); }
+      })();
+      return entry.promise;
     },
 
     async list(principal: TerminalPrincipal, params: { workspaceId?: string }) {
@@ -608,7 +574,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
 
     async close(principal: TerminalPrincipal, params: { terminalId: string }) {
       const terminal = own(principal, params.terminalId);
-      if (terminal.exit) { forget(terminal); return { closed: true as const }; }
+      if (terminal.exit) { await terminal.reaped; forget(terminal); return { closed: true as const }; }
       await end(terminal, 'closed');
       forget(terminal);
       return { closed: true as const };
@@ -616,12 +582,15 @@ export function createTerminalService(options: TerminalServiceOptions) {
 
     /** Every terminal of a principal, any epoch: a gateway's revocation. */
     async revoke(principalId: string) {
+      const starting = [...pending.values()].filter(entry => entry.principal.id === principalId && !entry.reason);
+      for (const entry of starting) cancel(entry, 'terminal_revoked');
       const mine = [...terminals.values()].filter(terminal => terminal.principal.id === principalId);
       const live = mine.filter(terminal => !terminal.exit && !terminal.ending);
-      await Promise.all(live.map(terminal => end(terminal, 'revoked')));
+      const outcomes = await Promise.allSettled([...mine.map(terminal => terminal.exit ? terminal.reaped : end(terminal, 'revoked')), ...starting.map(entry => entry.promise.then(() => {}, () => {}))]);
+      if (cleanupFault || outcomes.some(result => result.status === 'rejected')) throw refused('terminal_cleanup_uncertain');
       for (const terminal of mine) forget(terminal);
       if (mine.length) log.info('revoked the terminals of a principal', { code: 'ALPD_TERMINAL_REVOKED', principal: principalId, closed: live.length });
-      return { closed: live.length };
+      return { closed: live.length + starting.length };
     },
 
     /** A connection closed: its terminals keep running for reconnectMs. */
@@ -636,10 +605,14 @@ export function createTerminalService(options: TerminalServiceOptions) {
     async shutdown() {
       closed = true;
       clearInterval(timer);
-      await Promise.all([...terminals.values()].map(terminal => terminal.exit ? terminal.reaped : end(terminal, 'shutdown')));
+      const starting = [...pending.values()];
+      for (const entry of starting) cancel(entry, 'terminal_unsupported');
+      await Promise.all(starting.map(entry => entry.promise.then(() => {}, () => {})));
+      const outcomes = await Promise.allSettled([...terminals.values()].map(terminal => terminal.exit ? terminal.reaped : end(terminal, 'shutdown')));
       for (const terminal of terminals.values()) terminal.screen.dispose();
       terminals.clear();
       watchers.clear();
+      if (cleanupFault || outcomes.some(result => result.status === 'rejected')) throw refused('terminal_cleanup_uncertain');
     },
 
     /** Test hook: pids of every running terminal's shell. */

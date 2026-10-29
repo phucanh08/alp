@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { nativeSlots, verifyTerminalNative } from './terminal-native-assets.mjs';
 import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -7,6 +8,7 @@ import { corePackageProblems } from './core-package-boundary.mjs';
 import { THIRD_PARTY_NOTICES, packageDirectory, packageName } from './third-party-notices.mjs';
 import { shippedWebProblems } from './release-lib.mjs';
 const root = path.resolve(import.meta.dirname, '..');
+await verifyTerminalNative({ requireMatrix: true });
 const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 
 /** Files matched by an export target; a bare target is a single lookup, `*` is a pattern. */
@@ -65,6 +67,10 @@ for (const location of ['.', ...manifest.workspaces]) {
   const start = result.stdout.indexOf('[\n');
   const packed = JSON.parse(result.stdout.slice(start >= 0 ? start : 0))[0];
   const files = new Set(packed.files.map(file => file.path));
+  const nativeDirectory = ({ '@anhlp/alp': 'dist/terminal-native', '@anhlp/alp-daemon': 'dist/terminal-native', '@anhlp/alp-cli': 'dist/terminal-native', '@anhlp/alp-paseo': 'server/dist/terminal-native' })[pkg.name];
+  if (nativeDirectory) for (const slot of nativeSlots) for (const name of ['terminal-owner', 'manifest.json']) {
+    if (!files.has(`${nativeDirectory}/prebuilt/${slot}/${name}`)) throw new Error(`${pkg.name}: missing shipped native ${slot}/${name}`);
+  }
   if (pkg.name !== '@anhlp/alp-paseo') {
     const problems = corePackageProblems(pkg, [...files]);
     if (problems.length) throw new Error(problems.join('\n'));

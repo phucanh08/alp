@@ -78,10 +78,10 @@ async function setup(t, { allow = true, mode = 0o600, terminalOptions = {}, conf
   const runtime = createAlpRuntime({ transport: idleTransport(), runLogDir: path.join(directory, 'runs') });
   const store = createStore(path.join(home, 'state'));
   let spawned = 0;
-  const { spawn: realSpawn } = await import('node-pty');
+  const { nativePtySpawn: realSpawn } = await import('../dist/native-terminal.js');
   const server = createDaemonServer({
     runtime, socketPath: path.join(directory, 's', 'alpd.sock'), version: 'test', store, home,
-    terminalOptions: { sweepMs: 50, killGraceMs: 200, ...terminalOptions, spawn: (...args) => { spawned++; const pty = realSpawn(...args); seen.add(pty.pid); return pty; } },
+    terminalOptions: { sweepMs: 50, killGraceMs: 200, ...terminalOptions, spawn: async (...args) => { spawned++; const pty = await realSpawn(...args); seen.add(pty.pid); return pty; } },
   });
   await server.listen?.();
   const owner = server.local();
@@ -399,109 +399,22 @@ function fakePty({ ptsName } = {}) {
   return { spawn, made };
 }
 
-test('ending a terminal never kills by a remembered or reused id: only processes identified now (marker, live shell and PTY, live groups)', { skip }, async t => {
+test('native cleanup is delegated once; spoofed process rows never authorize JS numeric signals', { skip }, async t => {
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-term-ids-')));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await writeFile(path.join(directory, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
-  const { spawn, made } = fakePty();
-  let table = [];
-  const service = createTerminalService({ home: directory, resolveWorkspace: async () => directory, log: { info() {}, warn() {} }, spawn, processes: async () => table, sweepMs: 60_000, killGraceMs: 10, platform: 'darwin' });
+  const fake = fakePty(); let snapshots = 0, cleanups = 0;
+  const service = createTerminalService({ home: directory, resolveWorkspace: async () => directory, log: { info() {}, warn() {} },
+    spawn: (...args) => { const pty = fake.spawn(...args); pty.cleanup = async () => { cleanups++; pty.kill(); return { observed: 1, live: 0, uncertain: 0 }; }; return pty; },
+    processes: async () => { snapshots++; return [{ pid: 80001, ppid: 1, pgid: 80001, sid: fake.made[0].pid, elapsedMs: 0, markers: [fake.made[0].env.ALP_TERMINAL_ID] }]; }, sweepMs: 60000 });
   t.after(() => service.shutdown());
-  const owner = { id: 'owner', epoch: 'owner' };
-  await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r' });
-  const shell = made[0];
-  const marker = shell.env.ALP_TERMINAL_ID;
-  assert.match(marker, /^atm_[0-9a-f]{32}$/);
-  // Probe processes that are never really signalled: ids far above any live pid would throw ESRCH,
-  // so the test records the kill calls instead.
-  const killed = [];
-  const realKill = process.kill;
-  process.kill = (pid, signal) => { if (pid >= 70_000) { killed.push([pid, signal]); return true; } return realKill.call(process, pid, signal); };
-  t.after(() => { process.kill = realKill; });
-  table = [
-    { pid: shell.pid, ppid: process.pid, pgid: shell.pid, elapsedMs: 0 },
-    { pid: 80_001, ppid: 1, pgid: 80_001, elapsedMs: 0, markers: [marker] }, // a double-forked job: found by its marker
-    { pid: 80_002, ppid: 1, pgid: 80_001, elapsedMs: 0 }, // in that job's live group
-    { pid: 80_003, ppid: 1, pgid: 75_000, elapsedMs: 0 }, // a stranger in a group id the shell's jobs once had
-    { pid: 80_004, ppid: 1, pgid: 80_004, elapsedMs: 0, markers: ['atm_' + '0'.repeat(32)] }, // another terminal's job
-  ];
-  const { terminals } = await service.list(owner, {});
-  await service.close(owner, { terminalId: terminals[0].terminalId });
-  const hit = new Set(killed.map(([pid]) => pid));
-  assert.ok(hit.has(shell.pid) && hit.has(80_001) && hit.has(80_002), JSON.stringify(killed));
-  assert.ok(!hit.has(80_003) && !hit.has(80_004), 'never a stranger or another terminal\'s process');
-  // After the shell exited, neither its pid nor anything else is killed by id alone.
-  killed.length = 0;
-  await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r2' });
-  const second = made[1];
-  table = [{ pid: second.pid, ppid: 1, pgid: second.pid, elapsedMs: 0 }]; // the pid, reused by a stranger after the exit
-  second.kill();
-  await new Promise(resolve => setTimeout(resolve, 100));
-  assert.deepEqual(killed, [], 'an exited shell\'s pid is not trusted');
-});
-
-test('after the shell has gone its Linux session still counts; a younger holder of its pid, or of its PTY name, never does', { skip }, async t => {
-  const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-term-linux-')));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  await writeFile(path.join(directory, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
-  const { spawn, made } = fakePty({ ptsName: '/dev/pts/9' });
-  let clock = 1_000_000_000;
-  let table = [];
-  const service = createTerminalService({ home: directory, resolveWorkspace: async () => directory, log: { info() {}, warn() {} }, spawn, processes: async () => table, sweepMs: 60_000, killGraceMs: 10, platform: 'linux', now: () => clock });
-  t.after(() => service.shutdown());
-  const owner = { id: 'owner', epoch: 'owner' };
-  const killed = [];
-  const realKill = process.kill;
-  process.kill = (pid, signal) => { if (pid >= 70_000) { killed.push([pid, signal]); return true; } return realKill.call(process, pid, signal); };
-  t.after(() => { process.kill = realKill; });
-  const hits = () => new Set(killed.map(([pid]) => pid));
-  const close = async () => { const { terminals } = await service.list(owner, {}); for (const terminal of terminals.filter(row => row.state === 'running')) await service.close(owner, { terminalId: terminal.terminalId }); };
-
-  // The shell exits on its own; a job that cleared its environment and ignores SIGHUP stays in its
-  // session, its parent gone: the SIGKILL pass after the grace still finds it by the session.
-  await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r1' });
-  const first = made[0];
-  clock += 60_000;
-  table = [{ pid: 80_101, ppid: 1, pgid: 80_101, sid: first.pid, elapsedMs: 30_000 }];
-  first.kill();
-  // The reap's passes: SIGHUP, SIGKILL after the grace, and SIGKILL again 100 ms later.
-  await until(() => killed.filter(([pid]) => pid === 80_101).length >= 3, 'the reap to finish');
-  assert.deepEqual(killed.filter(([pid]) => pid === 80_101).map(([, signal]) => signal).slice(0, 2), ['SIGHUP', 'SIGKILL'], JSON.stringify(killed));
-
-  // A process younger than the terminal holds the shell's pid and leads a session of its own: neither
-  // it nor that session is ours.
-  killed.length = 0;
-  await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r2' });
-  const second = made[1];
-  clock += 60_000;
-  table = [
-    { pid: second.pid, ppid: 1, pgid: second.pid, sid: second.pid, elapsedMs: 5_000 },
-    { pid: 80_201, ppid: 1, pgid: 80_201, sid: second.pid, elapsedMs: 4_000 },
-  ];
-  await close();
-  assert.deepEqual(killed, [], 'a reused shell pid and its session are never ours');
-
-  // The PTY's name counts only while the shell row of the same snapshot still has it.
-  await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r3' });
-  const third = made[2];
-  clock += 1_000;
-  table = [
-    { pid: third.pid, ppid: process.pid, pgid: third.pid, sid: third.pid, elapsedMs: 1_000 },
-    { pid: 80_301, ppid: 1, pgid: 80_301, sid: 80_301, tty: 'pts/9', elapsedMs: 500 },
-  ];
-  await close();
-  assert.ok(hits().has(third.pid), JSON.stringify(killed));
-  assert.ok(!hits().has(80_301), 'a PTY name the shell no longer has may be another terminal\'s');
-  killed.length = 0;
-  await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r4' });
-  const fourth = made[3];
-  clock += 1_000;
-  table = [
-    { pid: fourth.pid, ppid: process.pid, pgid: fourth.pid, sid: fourth.pid, tty: 'pts/9', elapsedMs: 1_000 },
-    { pid: 80_401, ppid: 1, pgid: 80_401, sid: 80_401, tty: 'pts/9', elapsedMs: 500 },
-  ];
-  await close();
-  assert.ok(hits().has(fourth.pid) && hits().has(80_401), JSON.stringify(killed));
+  const original = process.kill, signals = [];
+  process.kill = (pid, signal) => { signals.push([pid, signal]); return true; };
+  t.after(() => { process.kill = original; });
+  const owner = { id: 'owner', epoch: 'e' };
+  const { terminal } = await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'one' });
+  await Promise.all([service.close(owner, { terminalId: terminal.terminalId }), service.revoke(owner.id)]);
+  assert.equal(cleanups, 1); assert.equal(snapshots, 0); assert.deepEqual(signals, []);
 });
 
 test('concurrent creates cannot pass the limits or duplicate a requestId', { skip }, async t => {
@@ -686,28 +599,17 @@ test('historical L5: an unresponsive ps executable is killed at the existing ten
   await until(() => pids.every(pid => !alive(pid)), 'both owned fake ps processes killed', 1000);
 });
 
-test('historical L4: running state is sampled before the asynchronous process snapshot', async t => {
+test('historical L4 replacement: an exit racing close still invokes the native owner cleanup once', async t => {
   const home = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-running-snapshot-')));
   t.after(() => rm(home, { recursive: true, force: true }));
   await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
-  const fake = fakePty();
-  let first = true;
-  const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} }, spawn: fake.spawn,
-    processes: async () => {
-      if (!first) return [];
-      first = false;
-      fake.made[0].kill();
-      await Promise.resolve();
-      return [{ pid: fake.made[0].pid, ppid: process.pid, pgid: fake.made[0].pid, elapsedMs: 0 }];
-    }, sweepMs: 60000, killGraceMs: 1, platform: 'darwin' });
+  const fake = fakePty(); let cleanups = 0;
+  const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} },
+    spawn: (...args) => { const pty = fake.spawn(...args); pty.cleanup = async () => { cleanups++; pty.kill(); await Promise.resolve(); return { observed: 1, live: 0, uncertain: 0 }; }; return pty; }, sweepMs: 60000 });
   t.after(() => service.shutdown());
-  const signals = [];
-  const original = process.kill;
-  process.kill = (pid, signal) => { if (pid === fake.made[0]?.pid) { signals.push(signal); return true; } return original.call(process, pid, signal); };
-  t.after(() => { process.kill = original; });
   const principal = { id: 'owner', epoch: 'owner' };
   const { terminal } = await service.create(principal, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'snapshot' });
+  fake.made[0].kill();
   await service.close(principal, { terminalId: terminal.terminalId });
-  assert.deepEqual(signals, ['SIGHUP'], 'the pre-snapshot running state is used, not a later exit callback');
-  // This controlled ordering test is NOT identity-bound signal proof (B4 remains blocked).
+  assert.equal(cleanups, 1);
 });

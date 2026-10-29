@@ -1,9 +1,10 @@
-# Experimental terminal owner — NOT production enabled
+# Terminal native owner — candidate, platform matrix incomplete
 
-Task t-d71b, B3/B4 remain incomplete. `src/terminals.ts` still uses the previous
-backend. This isolated prototype is NOT a shipped six-platform implementation or
-an accepted strict signaling fix. It is retained for the next implementation
-round, with concrete macOS arm64 execution evidence.
+Task t-d71b. Production `src/terminals.ts` now uses this identity-bound owner,
+with no numeric node-pty fallback. This candidate is NOT accepted for release:
+four Linux artifacts and actual Linux/Windows evidence remain missing. Missing or
+unverifiable backends refuse terminal capability explicitly. No end-user compiler
+is required. Existing session authentication and host/Paseo opt-ins still apply.
 
 ## Protocol and lifetime
 
@@ -42,16 +43,17 @@ refresh only a previously known uniqueid and use proc_signal_with_audittoken.
 Unknown/changed identity never authorizes a numeric signal. Cleanup reports
 observed/live/uncertain separately; it does not claim universal containment.
 
-## Unresolved security proof
+## Accepted finite-generation Darwin limit
 
 The Darwin final syscall compares PID + **32-bit global pidversion**, not the
 64-bit private uniqueid. Fork AND exec increment this global generation. If the
 helper is suspended after its last identity check, enough global allocations can
 wrap that generation and a recycled target PID can collide. Keeping a task-name
 port or checking uniqueid again does not atomically bind the eventual syscall.
-This is a source-derived unresolved strict-proof limitation, not an executed
-2^32-operation exploit. Do NOT claim B3/B4 acceptance based on this prototype's
-ordinary exec/orphan tests. No safety waiver was requested or assumed.
+This is a source-derived limitation, not an executed 2^32-operation exploit.
+The user explicitly accepted ONLY this residual in g4 (2026-10-29); ordinary PID
+reuse protection, all native checks, packaging, platform tests and independent
+review remain required. No blanket no-wrong-process waiver is inferred.
 
 Kernel proof anchors (oracle 275c5e36, advice only; not implementation review):
 
@@ -65,22 +67,37 @@ Kernel proof anchors (oracle 275c5e36, advice only; not implementation review):
 - [Linux procdirfd signal dispatch](https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c#L3647)
 - [Linux stat session coordinates](https://github.com/torvalds/linux/blob/v6.12/fs/proc/array.c#L505)
 
-## Build and remaining integration
+## Build, distribution and remaining platform evidence
 
 `node scripts/build-terminal-native.mjs` is an EXPLICIT developer build, never
-terminal startup or postinstall. A source-hash / binary-hash protocol manifest
-accompanies each helper. Only Darwin arm64 has been built and executed.
-`--require-matrix` deliberately FAILS until all six current-source slots exist:
-Darwin arm64/x64, Linux arm64/x64 × glibc/musl. Do not fabricate missing artifacts,
-reduce support, or claim an unexecuted platform passes. Minimum platform floors,
-cross-arch code signing and packaged Node22/24 daemon/Paseo smoke remain pending.
-The prototype's native files are not yet in package distribution allowlists.
+terminal startup or postinstall. Darwin also accepts `--arch=x64`/`--arch=arm64`
+using the existing Apple compiler and ad-hoc codesign; capability execution must
+succeed before a manifest is written. Hashes bind protocol, source and binary.
+`node scripts/terminal-native-assets.mjs --require-matrix` and release pack-check
+FAIL until all six slots exist: Darwin arm64/x64, Linux arm64/x64 × glibc/musl.
+Builds copy only verified prebuilt assets beside root, daemon, CLI and Paseo bundles;
+source-package daemon consumers also carry native source/hash manifests. They do
+not invoke a compiler. A rebuild replaces the generated asset directory wholesale.
 
-Production integration must also preserve async startup reservations, idempotent
-request IDs, concurrent create limits, revoke/disable during startup, bounded
-readiness, and existing observable descendant/orphan regressions. It must remove
-all JS/node-pty numeric signaling paths before claiming a native security fix.
-Actual Linux/Windows browser keyboard and Linux /proc tests remain NOT_CHECKED.
+Current artifacts: Darwin arm64 executed on macOS27, Darwin x64 capability executed
+through existing Rosetta on that same host. Both target macOS11.0 (LC_BUILD_VERSION),
+matching [Node22's macOS floor](https://github.com/nodejs/node/blob/v22.23.0/BUILDING.md#platform-list).
+This deployment target is NOT proof of runtime compatibility on macOS11 or physical
+x64 hardware. Private-ABI capability validation still fails closed. Linux builds
+must retain the existing libc support baseline (Node22 glibc2.28); no Linux artifact
+or minimum-kernel execution has been proved here. pidfd_send_signal capability is
+mandatory (Linux5.1 syscall baseline), a material terminal-capability difference
+from Node22's kernel4.18 floor, escalated to main. No silent numeric fallback.
+
+Async startup reserves request IDs and quota before native readiness. Revoke,
+shutdown and host optout cancel startup and await native cleanup before returning;
+late readiness cannot publish an orphan terminal. Root exit is delivered after
+stdio drains. Cleanup reports observed/live/uncertain, and uncertain/live results
+refuse success and stop further terminal admission. The existing real PTY cleanup
+scenarios now execute through the native owner (including exec, same-session
+orphans and a late child). Never-observed immediate-setsid escapes remain the
+approved g3 discovery limit. Actual Linux/Windows browser keyboard and Linux
+namespace/proc permissions/races remain NOT_CHECKED.
 
 Explicit developer regressions (require a local C compiler, not end-user startup):
 `node --test packages/daemon/native/tests/lifecycle.mjs` exercises delayed native

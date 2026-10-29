@@ -1,3 +1,4 @@
+import { copyTerminalNative } from './terminal-native-assets.mjs';
 import { buildCore } from './build-core.mjs';
 import { build as esbuild } from 'esbuild';
 // Every plugin bundle's metafile is kept: the third-party packages they inline ship their licences.
@@ -77,3 +78,5 @@ const remoteBuild = await build({ entryPoints: ['integrations/paseo/server/remot
 assertRemoteInputs(remoteBuild.metafile, 'integrations/paseo/server/dist/remote/index.js');
 await writeThirdPartyNotices(path.join('integrations/paseo/server/dist', THIRD_PARTY_NOTICES), metafiles, pluginManifest.name ?? '@anhlp/alp-paseo');
 console.log(`Built ${pluginManifest.name ?? '@anhlp/alp-paseo'}`);
+
+await copyTerminalNative(path.resolve('integrations/paseo/server/dist/terminal-native'));

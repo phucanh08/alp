@@ -13,7 +13,7 @@ async function open(t, command = []) {
   t.after(() => pty.cleanup());
   return { pty, text: () => output };
 }
-test('isolated native prototype loads a prebuilt without a runtime compiler or node-pty', { skip }, async () => {
+test('native owner loads a prebuilt without a runtime compiler or node-pty', { skip }, async () => {
   const { nativeTerminalCapability } = await import('../dist/native-terminal.js');
   assert.equal(nativeTerminalCapability().available, true);
 });
@@ -47,4 +47,36 @@ test('natural root exit and cleanup completion are delivered separately', { skip
   const result = await pty.cleanup();
   assert.equal(result.live, 0);
   assert.equal(alive(pty.pid), false);
+});
+test('default service owns a real terminal without node-pty injection', { skip }, async t => {
+  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+  const path = await import('node:path');
+  const home = await mkdtemp(path.join(tmpdir(), 'alpd-native-default-'));
+  await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
+  const { createTerminalService } = await import('../dist/terminals.js');
+  const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} }, killGraceMs: 100 });
+  t.after(async () => { await service.shutdown(); await rm(home, { recursive: true, force: true }); });
+  const owner = { id: 'owner', epoch: 'e' }, sink = { send() {} };
+  const { terminal } = await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'real' });
+  await service.attach(owner, sink, { terminalId: terminal.terminalId });
+  await service.input(owner, sink, { terminalId: terminal.terminalId, data: "printf '\\nDEFAULT_NATIVE_OK\\n'\r" });
+  await until(async () => (await service.capture(owner, { terminalId: terminal.terminalId })).lines.some(line => line === 'DEFAULT_NATIVE_OK'));
+  await service.close(owner, { terminalId: terminal.terminalId });
+  assert.deepEqual(service.pids(), []);
+});
+test('isolated shipped adapter runs with no compiler PATH and rejects a corrupted manifest', { skip }, async t => {
+  const { cp, mkdtemp, readFile, writeFile, rm } = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const { execFile } = await import('node:child_process');
+  const root = await mkdtemp(path.join(tmpdir(), 'alpd-native-consumer-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await cp(fileURLToPath(new URL('../dist/native-terminal.js', import.meta.url)), path.join(root, 'owner.mjs'));
+  await cp(fileURLToPath(new URL('../dist/terminal-native', import.meta.url)), path.join(root, 'terminal-native'), { recursive: true });
+  const run = source => new Promise((resolve, reject) => execFile(process.execPath, ['--input-type=module', '-e', source], { cwd: root, env: { PATH: '' }, timeout: 10000 }, (error, stdout, stderr) => error ? reject(new Error(`${error}\n${stderr}`)) : resolve(stdout)));
+  const source = `import { nativeTerminalCapability, nativePtySpawn } from './owner.mjs'; if (!nativeTerminalCapability().available) throw Error('unavailable'); const p=await nativePtySpawn('/bin/sh',['-c','printf SHIPPED_OK'],{name:'xterm',cols:80,rows:24,cwd:${JSON.stringify(root)},env:{},killGraceMs:100}); let text='';p.onData(v=>text+=v);await new Promise(resolve=>p.onExit(resolve));const r=await p.cleanup();if(r.live||r.uncertain)throw Error(JSON.stringify(r)); console.log(text);`;
+  assert.match(await run(source), /SHIPPED_OK/);
+  const manifest = path.join(root, 'terminal-native/prebuilt', `${process.platform}-${process.arch}${process.platform === 'linux' ? (process.report.getReport().header.glibcVersionRuntime ? '-glibc' : '-musl') : ''}`, 'manifest.json');
+  const value = JSON.parse(await readFile(manifest, 'utf8')); value.sha256 = '0'.repeat(64); await writeFile(manifest, JSON.stringify(value));
+  assert.match(await run("import {nativeTerminalCapability} from './owner.mjs'; console.log(JSON.stringify(nativeTerminalCapability()));"), /"available":false/);
 });
