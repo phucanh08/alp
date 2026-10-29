@@ -6,7 +6,7 @@ import { lstat, mkdtemp, readFile, rm, writeFile, chmod } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { HOME_UNITS } from '@anhlp/alp-core/backup';
-import { terminalCommand, TERMINAL_WARNING } from '../src/terminal.js';
+import { read, terminalCommand, TERMINAL_WARNING } from '../src/terminal.js';
 
 test('allow needs --yes after the warning; the file is private; deny keeps limits; status reads it', async t => {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-terminal-cli-'));
@@ -70,4 +70,14 @@ test('corrupt terminal.json falls back to default off status without throwing Sy
   // allow --yes must overwrite corrupt file cleanly
   await terminalCommand(['allow', '--yes'], { home, out });
   assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { version: 1, allowRemoteTerminal: true });
+});
+
+test('Windows reports files as 0o666: the POSIX mode check does not mark terminal.json non-private there', async t => {
+  const home = await mkdtemp(path.join(tmpdir(), 'alp-terminal-cli-win-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const file = path.join(home, 'terminal.json');
+  await writeFile(file, JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o644 });
+  await chmod(file, 0o644);
+  assert.equal((await read(home, 'linux')).private, false);
+  assert.equal((await read(home, 'win32')).private, true);
 });

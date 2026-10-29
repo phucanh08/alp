@@ -111,12 +111,14 @@ const iso = (ms: number) => new Date(ms).toISOString();
  * The host switch and the operator's lower limits. Anything but a regular, owner-private file of
  * this user saying `"allowRemoteTerminal": true` is off.
  */
-export async function readTerminalConfig(home: string, log?: Log): Promise<{ enabled: boolean; reason?: string; limits: TerminalLimits; paseo: boolean }> {
+export async function readTerminalConfig(home: string, log?: Log, platform: NodeJS.Platform = process.platform): Promise<{ enabled: boolean; reason?: string; limits: TerminalLimits; paseo: boolean }> {
   const defaults = Object.fromEntries(TERMINAL_LIMIT_KEYS.map(key => [key, TERMINAL[key as keyof typeof TERMINAL]])) as TerminalLimits;
   const file = path.join(home, CONFIG_FILE);
   const info = await lstat(file).catch(() => undefined);
   if (!info) return { enabled: false, reason: 'missing', limits: defaults, paseo: false };
-  if (!info.isFile() || (process.getuid && info.uid !== process.getuid()) || (info.mode & 0o077)) {
+  // Windows reports regular files as 0o666/0o444 (no POSIX group/other bits), so the mode check is POSIX-only;
+  // there the file lives in the owner's profile, as do the gateway credentials.
+  if (!info.isFile() || (process.getuid && info.uid !== process.getuid()) || (platform !== 'win32' && (info.mode & 0o077))) {
     log?.warn('terminal.json is not a private file of the daemon user; terminals stay off', { code: 'ALPD_TERMINAL_CONFIG' });
     return { enabled: false, reason: 'not_private', limits: defaults, paseo: false };
   }
@@ -277,7 +279,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
 
   /** The switch now: off kills every terminal (reason `disabled`). */
   async function state() {
-    const config = await readTerminalConfig(home, log);
+    const config = await readTerminalConfig(home, log, platform);
     const limits = effective(config.limits);
     if (enabled && !config.enabled) {
       log.info('terminals turned off on this host; ending every terminal', { code: 'ALPD_TERMINAL_DISABLED' });
