@@ -68,7 +68,8 @@ export function mergeCatalog(base, live) {
   const out = [];
   for (const runtime of CATALOG_RUNTIMES) {
     const known = base.filter(entry => entry.runtime === runtime);
-    const reported = (live?.[runtime] ?? []).filter(model => typeof model?.id === 'string' && model.id.trim());
+    const listed = live?.[runtime];
+    const reported = (Array.isArray(listed) ? listed : []).filter(model => typeof model?.id === 'string' && model.id.trim());
     if (!reported.length) { out.push(...known); continue; }
     const seen = new Set();
     for (const model of reported) {
@@ -77,8 +78,9 @@ export function mergeCatalog(base, live) {
       const prior = known.find(entry => entry.id === model.id);
       const priorEfforts = prior?.efforts ?? [];
       const efforts = [...priorEfforts, ...(Array.isArray(model.efforts) ? model.efforts : []).filter(effort => typeof effort === 'string' && !priorEfforts.includes(effort))];
-      const effort = prior?.effort ?? (model.effort && efforts.includes(model.effort) ? model.effort : undefined);
-      out.push({ runtime, id: model.id, label: model.label || prior?.label || model.id, description: model.description || prior?.description || '', efforts, ...(effort ? { effort } : {}), source: 'live' });
+      const effort = prior?.effort ?? (typeof model.effort === 'string' && efforts.includes(model.effort) ? model.effort : undefined);
+      const text = value => typeof value === 'string' && value ? value : undefined;
+      out.push({ runtime, id: model.id, label: text(model.label) ?? prior?.label ?? model.id, description: text(model.description) ?? prior?.description ?? '', efforts, ...(effort ? { effort } : {}), source: 'live' });
     }
     for (const entry of known) if (!seen.has(entry.id)) out.push({ ...entry, source: 'fallback' });
   }

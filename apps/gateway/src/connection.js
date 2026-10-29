@@ -1338,7 +1338,13 @@ export class ClientConnection {
       const result = await this.#registryCall('project.remove', { ...params, authorizedRoots: await this.#registryRoots(), requestId: this.#registryRequestId(params.requestId) });
       return { project: this.#registryProjection(result.project, 'project'), revision: result.revision };
     },
-    'catalog.get': () => this.#call('catalog.get', {}),
+    // Provider errors can name host paths and exit codes: remote clients get each provider's status only (t-e5ee).
+    'catalog.get': async () => {
+      const { providers, ...catalog } = await this.#call('catalog.get', {});
+      return providers && typeof providers === 'object'
+        ? { ...catalog, providers: Object.fromEntries(Object.entries(providers).map(([runtime, state]) => [runtime, { status: state?.status, ...(typeof state?.fetchedAt === 'string' ? { fetchedAt: state.fetchedAt } : {}) }])) }
+        : catalog;
+    },
 
     'session.list': async params => {
       const only = params.projectRoot === undefined ? undefined : this.#workspace(params.projectRoot);

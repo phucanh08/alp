@@ -62,7 +62,7 @@ const OUT_OF_SCOPE = {
 
   'terminal.capture': null, 'terminal.watch': null, 'terminal.unwatch': null,
   'terminal.create': null, 'terminal.list': null, 'terminal.attach': null, 'terminal.input': null, 'terminal.resize': null, 'terminal.close': null, // terminal.test.js checks terminal.exec, the registry scope, the principal context and event filtering; alpd's binding is tested against real PTYs
-  'catalog.get': null, // global: the static catalogue of models and modes
+  'catalog.get': null, // global: the catalogue of models and modes; provider errors are dropped (catalog projection test)
   'session.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
   'session.get': () => [{ sessionId: 'sb' }, 1001],
   'session.status': () => [{ sessionId: 'mix' }, 1001],

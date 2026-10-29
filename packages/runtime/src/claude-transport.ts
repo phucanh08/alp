@@ -448,13 +448,18 @@ export class ClaudeTransport {
   async initialize() {}
 
   /** The models Claude offers now, from a Claude process that sends no prompt and is closed after (t-e5ee). */
-  async probeModels() {
+  async probeModels(signal?: AbortSignal) {
     const { query } = await import(CLAUDE_SDK);
+    if (signal?.aborted) throw new Error('aborted');
     const probe = query({ prompt: new InputQueue(), options: { cwd: this.cwd, env: this.env, settingSources: [], persistSession: false, strictMcpConfig: true, mcpServers: {}, pathToClaudeCodeExecutable: this.command } }) as ClaudeQuery;
+    // A probe that outlives its bound is closed, so a hanging Claude process never stays behind.
+    const stop = () => probe.close();
+    signal?.addEventListener('abort', stop);
     try {
       const models = await probe.supportedModels();
       return models.map(model => ({ id: model.value, label: model.displayName, description: model.description, efforts: model.supportedEffortLevels ?? undefined }));
     } finally {
+      signal?.removeEventListener('abort', stop);
       probe.close();
     }
   }

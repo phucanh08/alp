@@ -146,6 +146,19 @@ test('a binary message closes with 4003 and an oversized one with 1009', async t
   assert.equal((await two.closed).code, 1009);
 });
 
+test('catalog.get through the gateway keeps each provider\'s status but drops its error text (t-e5ee)', async t => {
+  const { daemon, rawSession } = await setup(t);
+  daemon.state.handlers['catalog.get'] = () => ({ models: [], modes: [], defaultModel: 'codex:x', fetchedAt: 'now', providers: { codex: { status: 'failed', fetchedAt: 'then', error: 'spawn /home/me/bin/codex ENOENT' }, claude: { status: 'ok' } } });
+  const { socket, frames } = await rawSession('alice');
+  socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'h', method: 'daemon.hello', params: { protocolVersion: 1 } }));
+  await until(() => frames.some(frame => frame.id === 'h'), 'hello');
+  socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'c', method: 'catalog.get' }));
+  await until(() => frames.some(frame => frame.id === 'c'), 'catalog');
+  const { result } = frames.find(frame => frame.id === 'c');
+  assert.deepEqual(result.providers, { codex: { status: 'failed', fetchedAt: 'then' }, claude: { status: 'ok' } });
+  assert.equal(JSON.stringify(result).includes('/home/me'), false);
+});
+
 test('a client that never says hello is closed with 4408', async t => {
   const { rawSession } = await setup(t, { config: { limits: { handshakeMs: 100 } } });
   const { closed } = await rawSession('alice');
