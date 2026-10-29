@@ -1685,6 +1685,48 @@
         "additionalProperties": true
       }
     },
+    "session.compact": {
+      "x-alp": {
+        "effect": "mutation",
+        "scope": {
+          "kind": "session",
+          "param": "sessionId"
+        },
+        "risks": [
+          "main writes a checkpoint in a turn of its own, then its context is compacted natively or replaced by a fresh conversation seeded with the checkpoint"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "enum": [
+              "started",
+              "deferred",
+              "running"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    },
     "session.configure": {
       "x-alp": {
         "effect": "mutation",
