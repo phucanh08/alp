@@ -156,7 +156,13 @@ async function validWorktree(directory: string) {
  */
 export async function reattachWorktree(worktree: Worktree): Promise<Worktree & { preserved?: string }> {
   const exists = !!await stat(worktree.path).catch(() => undefined);
-  if (exists && await validWorktree(worktree.path)) return worktree;
+  if (exists && await validWorktree(worktree.path)) {
+    // A crash mid `git add`/`commit` leaves the index locked; nothing else writes this worktree
+    // while its assignment reopens, so the lock is stale and would block every later commit.
+    const gitdir = await git(worktree.path, ['rev-parse', '--absolute-git-dir']);
+    if (gitdir.code === 0) await rm(path.join(gitdir.stdout.trim(), 'index.lock'), { force: true });
+    return worktree;
+  }
   if (!await branchExists(worktree.checkout, worktree.branch)) throw new Error(`Branch ${worktree.branch} of the worktree no longer exists`);
   let preserved: string | undefined;
   if (exists) {
