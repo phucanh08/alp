@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -146,6 +146,19 @@ test('provider snapshots expose native runtimes and ACP agents alongside the int
     assert.ok(entry.models.length > 0);
     assert.ok(entry.models.every(model => model.provider === provider));
   }
+});
+
+test('native providers list the models of alpd\'s live catalog cache (t-e5ee), read fresh on each snapshot', async t => {
+  const { home, ask } = await setup(t);
+  const before = await ask({ type: 'get_providers_snapshot_request' });
+  assert.ok(!before.payload.entries.find(entry => entry.provider === 'codex').models.some(model => model.id === 'gpt-6.1-terra'));
+  await mkdir(path.join(home, 'cache'), { recursive: true });
+  await writeFile(path.join(home, 'cache', 'models.json'), JSON.stringify({ fetchedAt: new Date().toISOString(), providers: { codex: { status: 'ok', models: [{ id: 'gpt-6.1-terra', label: 'GPT-6.1 Terra', efforts: ['low'] }] } } }));
+  const after = await ask({ type: 'get_providers_snapshot_request' });
+  const codex = after.payload.entries.find(entry => entry.provider === 'codex');
+  assert.equal(codex.models[0].id, 'gpt-6.1-terra');
+  assert.equal(codex.models[0].isDefault, true);
+  assert.ok(codex.models.some(model => model.id === 'gpt-6.1-sol'), 'static rows stay as fallback');
 });
 
 test('default provider switches persist and disabled providers cannot open sessions', async t => {
