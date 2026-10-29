@@ -88,9 +88,10 @@ test('independent terminal tabs survive settings, search, links, workspace switc
   await expect(selection).toBeVisible();
   const firstMatch = await selection.boundingBox();
   await panel(page).getByRole('button', { name: 'Next terminal match' }).click();
-  await expect.poll(async () => (await selection.boundingBox()).y).not.toBe(firstMatch.y);
+  // The selection rectangle is briefly absent while xterm re-renders; absent counts as unmoved.
+  await expect.poll(async () => (await selection.boundingBox())?.y ?? firstMatch.y).not.toBe(firstMatch.y);
   await panel(page).getByRole('button', { name: 'Previous terminal match' }).click();
-  await expect.poll(async () => (await selection.boundingBox()).y).toBe(firstMatch.y);
+  await expect.poll(async () => (await selection.boundingBox())?.y).toBe(firstMatch.y);
   await panel(page).getByRole('textbox', { name: 'Search terminal', exact: true }).fill('missing-value');
   await panel(page).getByRole('button', { name: 'Next terminal match' }).click();
   await expect(panel(page).getByRole('status', { name: 'Terminal search result' })).toHaveText('No matches');
