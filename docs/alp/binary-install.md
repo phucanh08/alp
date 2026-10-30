@@ -2,7 +2,7 @@
 
 ALP ships two ways. They behave the same:
 
-- **npm**: `npm install -g @anhlp/alp`. It needs Node 22 or later.
+- **npm**: `npm install -g @anhlp/alp@beta`. Since t-cd7f this installs the same executable: `@anhlp/alp` is a small launcher (plain Node, no dependencies, no postinstall download) and npm installs the executable for the machine as one optional dependency, `@anhlp/alp-<os>-<arch>` (see [npm packages](#npm-packages)). The launcher needs Node 18 or later; ALP itself then runs without Node.
 - **One executable** (`alp`, `alp.exe` on Windows): macOS and Linux (glibc), arm64 and x64, and Windows x64 (P2). It needs no Node. It contains the CLI, alpd, `alp web` with its browser app, the ACP agent, the templates and the native terminal helper.
 
 ## Install
@@ -85,3 +85,39 @@ node --test test/integration/binary-install-ps1.test.js  # changes your user Pat
 - **`binary` in `ci.yml`** (`.github/workflows/binary-build.yml`) runs on every PR and push to main. It builds natively on five runners: macos-14 (darwin-arm64), macos-15-intel (darwin-x64), ubuntu-24.04 (linux-x64), ubuntu-24.04-arm (linux-arm64) and windows-2022 (windows-x64), with a pinned `oven-sh/setup-bun` and Bun 1.4.2. It runs both smokes; on Windows the full smoke opens a ConPTY terminal through the extracted node-pty. The Node-less smoke runs in `debian:bookworm-slim` on Linux, under `env -i PATH=/usr/bin:/bin` on macOS, and on Windows as `scripts/binary-smoke-nodeless.ps1` with `PATH` cut down to the Windows system directories. On Windows it also runs `install.ps1`'s tests (`test/integration/binary-install-ps1.test.js`, against a local mirror; they change the runner's user `Path` and restore it). Then it packs the archive (`.zip` on Windows). A separate job runs shellcheck on `install.sh` and checks that the PowerShell scripts parse.
 - **`release-binaries.yml`** is started by hand with `workflow_dispatch` from main, with a `sha` input that must be a full commit on main. Its `draft` job runs in the `release` environment, which admits deployments from main only. It runs the same build. Then it writes `SHA256SUMS`, attests build provenance for every archive, `install.sh` and `install.ps1`, and creates a **draft** release `v<version>` (the version comes from `packages/cli/package.json`). An existing draft is replaced. A published release is never touched. The workflow never publishes anything. The owner reviews the draft and publishes it, and publishing creates the tag.
 - **Version policy.** npm and the executable share one version, the one in every `package.json` (first: `0.0.1-beta.5`). npm keeps betas on the `beta` dist-tag. The binary release is a normal release, not a prerelease: the workflow creates the draft with `--prerelease=false` and fails if the draft says otherwise, because `releases/latest/download` resolves only to a published release that is not a prerelease. Do not tick "Set as a pre-release" when publishing, or `install.sh` without `--version` keeps installing the previous release.
+
+## npm packages
+
+`@anhlp/alp` (source in `npm/alp`, outside the workspaces) holds only `bin/alp.js` and `lib/launcher.js`. Its `optionalDependencies` pin the five platform packages to its own version:
+
+| Package | `os` / `cpu` / `libc` | Contains |
+|---|---|---|
+| `@anhlp/alp-darwin-arm64` | darwin / arm64 | `bin/alp` |
+| `@anhlp/alp-darwin-x64` | darwin / x64 | `bin/alp` |
+| `@anhlp/alp-linux-x64` | linux / x64 / glibc | `bin/alp` |
+| `@anhlp/alp-linux-arm64` | linux / arm64 / glibc | `bin/alp` |
+| `@anhlp/alp-win32-x64` | win32 / x64 | `bin/alp.exe` |
+
+Each one also carries README.md, LICENSE, NOTICE and the executable's THIRD-PARTY-NOTICES.txt, and it has no `bin`, scripts or dependencies. npm installs only the package that matches the machine. `alp` resolves that package and runs its executable with the same arguments and stdio. It forwards signals to the executable and ends the way the executable ended, with the same exit code or the same signal. If no platform package is installed (`--omit=optional`, musl, an unsupported platform), it exits 1 and suggests `--include=optional`, `install.sh` or the GitHub Releases page. The executable knows that it was installed by npm (it runs from `node_modules/@anhlp/alp-<os>-<arch>/bin/`), so `alp update` prints the npm command and leaves the file to npm. Clients that look for alpd through `alp` on PATH, such as the Paseo plugin, follow the launcher to the platform executable (`findDaemonEntry`).
+
+The libraries (`@anhlp/alp-protocol`, `-core`, `-runtime`, `-client`, `-daemon`, `-cli`) and the Paseo plugin `@anhlp/alp-paseo` remain JavaScript packages. No package imports `@anhlp/alp`. The repository root is the private `alp-monorepo`.
+
+Platform packages are not stored in the repository. `scripts/npm-platform.mjs` generates them at release time from the GitHub release archives, which means npm and `install.sh` install byte-identical executables:
+
+1. `release-binaries.yml` (run name `Release binaries <sha>`) drafts the GitHub release. It keeps the archives and SHA256SUMS as the 90-day artifact `alp-release-binaries`.
+2. `release-acceptance.yml` is run with `sha` and `binaries_run` set to that run's id. It checks that the run is a successful release-binaries run of the same SHA on main, checks the archives against SHA256SUMS, and runs `release:pack --binaries <archives>`. Each platform package's executable is extracted from its archive. `release-manifest.json` records the executable's sha256 and size and the archive's name and sha256 under `binary`. A5 (`release:verify`) fails if a packed executable differs from that record.
+3. Before publishing to npm, compare the `archiveSha256` values in the manifest with the SHA256SUMS asset of the GitHub release.
+   For an already-published GitHub release, `release:pack --binaries-release v<version>` downloads the release's archives and SHA256SUMS with `gh` and refuses a draft or another version. The manifest records `pack.binariesRelease` (repo, tag, target commit), and that ties the platform packages to the release the same way `binariesRun` does. For beta.5 (the GitHub release `v0.0.1-beta.5` from `2b63a7a`), pack the 13 tarballs from a clean clone of the merge commit. The tag `v0.0.1-beta.5` belongs to the binary release, so `release:pack` needs a local tag at HEAD:
+
+   ```sh
+   git clone https://github.com/phucanh08/alp.git alp-npm && cd alp-npm && git checkout <merge sha>
+   git tag npm-v0.0.1-beta.5            # local only, never pushed: release:pack packs a tagged commit
+   npm ci && npm run build:packages
+   npm run release:pack -- --out /tmp/alp-npm-0.0.1-beta.5 --binaries-release v0.0.1-beta.5
+   npm run release:verify -- /tmp/alp-npm-0.0.1-beta.5 --sha <merge sha>
+   npm run release:consumer -- /tmp/alp-npm-0.0.1-beta.5
+   ```
+
+4. Publish order: the seven JavaScript packages, then the five platform packages, then `@anhlp/alp` last, so the launcher never points at a version that is not on the registry.
+
+`binary-build.yml` runs `scripts/npm-launcher-smoke.mjs` on all five runners. It packs that runner's platform package from its own archive, installs it and the launcher with `npm install -g` into a temporary prefix, and then runs `alp --version`, `alp init` and `alp update` through npm's `alp`. `test/integration/npm-wrapper.test.js` covers platform resolution, the missing-package messages, and passthrough of argv, stdio, exit codes and signals.

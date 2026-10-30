@@ -127,6 +127,25 @@ const BIN_DIRECTORIES = [path.join(os.homedir(), '.alp', 'bin'), path.join(os.ho
 const CLI_PACKAGES = ['@anhlp/alp', '@anhlp/alp-cli'];
 
 /**
+ * The ALP executable behind npm's `alp` when that is the @anhlp/alp launcher (t-cd7f): `bin/alp.js`
+ * of a package named @anhlp/alp, which runs @anhlp/alp-<platform>-<arch>/bin/alp. npm puts that
+ * package beside the launcher (a global install) or in its own node_modules.
+ * @param {string} launcher the real path of `alp` on PATH
+ */
+async function npmWrapperExecutable(launcher, platform = process.platform, arch = process.arch) {
+  if (path.basename(launcher) !== 'alp.js') return undefined;
+  const root = path.resolve(path.dirname(launcher), '..');
+  const name = await readFile(path.join(root, 'package.json'), 'utf8').then(text => JSON.parse(text)?.name).catch(() => undefined);
+  if (name !== '@anhlp/alp') return undefined;
+  const id = `alp-${platform}-${arch}`;
+  const file = path.join('bin', platform === 'win32' ? 'alp.exe' : 'alp');
+  for (const candidate of [path.join(root, 'node_modules', '@anhlp', id, file), path.join(root, '..', id, file)]) {
+    if (await isAlpExecutable(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+/**
  * Finds alpd.js for a client that cannot locate it beside itself, such as the Paseo
  * plugin, which Paseo re-bundles: the first existing candidate, then where alpd last
  * recorded itself ($ALP_HOME/alpd.json), then the ALP CLI (`alp`) on PATH.
@@ -143,6 +162,8 @@ export async function findDaemonEntry({ home = alpHome(), env = process.env, can
   for (const directory of [...(env.PATH ?? '').split(path.delimiter).filter(Boolean), ...BIN_DIRECTORIES]) {
     const cli = await realpath(path.join(directory, process.platform === 'win32' ? 'alp.exe' : 'alp')).catch(() => undefined);
     if (cli && await isAlpExecutable(cli)) return cli;
+    const npmExecutable = cli && await npmWrapperExecutable(cli);
+    if (npmExecutable) return npmExecutable;
     if (!cli || path.basename(cli) !== 'cli.js') continue;
     const root = path.resolve(path.dirname(cli), '..');
     const name = await readFile(path.join(root, 'package.json'), 'utf8').then(text => JSON.parse(text)?.name).catch(() => undefined);

@@ -20,7 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
-import { releaseArtifacts } from './release-lib.mjs';
+import { RELEASE_NAMES, installableArtifacts, releaseArtifacts } from './release-lib.mjs';
 import { spawnCommand } from './spawn-command.mjs';
 
 export const ROOT = path.resolve(import.meta.dirname, '..');
@@ -132,10 +132,10 @@ export class Run {
  * <work>/consumer. Returns the manifest, the consumer directory and its bin directory.
  */
 export function install(run, { packs, rehearsal }) {
-  if (!packs) throw new Error('--packs <directory with the 8 tarballs, SHA256SUMS and release-manifest.json> is required');
+  if (!packs) throw new Error(`--packs <directory with the ${RELEASE_NAMES.length} tarballs, SHA256SUMS and release-manifest.json> is required`);
   const directory = path.resolve(packs);
   const artifacts = releaseArtifacts(directory, { rehearsal });
-  if (artifacts.length !== 8) throw new Error(`expected 8 release tarballs, found ${artifacts.length}`);
+  if (artifacts.length !== RELEASE_NAMES.length && !rehearsal) throw new Error(`expected ${RELEASE_NAMES.length} release tarballs, found ${artifacts.length}`);
   const manifest = JSON.parse(readFileSync(path.join(directory, 'release-manifest.json'), 'utf8'));
   if (manifest.version !== VERSION) throw new Error(`release is ${manifest.version}, expected ${VERSION}`);
   run.manifest = manifest;
@@ -144,7 +144,7 @@ export function install(run, { packs, rehearsal }) {
     mkdirSync(consumer, { recursive: true });
     writeFileSync(path.join(consumer, 'package.json'), `${JSON.stringify({ name: 'alp-beta-consumer', private: true }, null, 2)}\n`);
   }
-  const installed = run.exec('install', 'npm', ['install', '--save-exact', '--no-audit', '--no-fund', ...artifacts.map(artifact => artifact.file)], { cwd: consumer });
+  const installed = run.exec('install', 'npm', ['install', '--save-exact', '--no-audit', '--no-fund', ...installableArtifacts(artifacts).map(artifact => artifact.file)], { cwd: consumer });
   if (installed.status !== 0) throw new Error(`npm install of the tarballs failed; see ${run.logs}/install.log`);
   const listed = run.exec('install', 'npm', ['ls', '--all', '--json'], { cwd: consumer });
   const versions = new Map();
@@ -156,7 +156,7 @@ export function install(run, { packs, rehearsal }) {
   })(JSON.parse(listed.stdout || '{}'));
   const stray = [...versions.keys()].filter(entry => !entry.endsWith(`@${VERSION}`));
   if (stray.length) throw new Error(`the install resolves @anhlp packages at other versions: ${stray.join(', ')}`);
-  run.record('install', 'pass', `8 tarballs (SHA256SUMS ${manifest.sha256sums?.slice(0, 12)}…, release SHA ${manifest.git?.sha?.slice(0, 12) ?? '?'}) installed in ${consumer}; every @anhlp/* is ${VERSION}`, { sha256sums: manifest.sha256sums, releaseSha: manifest.git?.sha });
+  run.record('install', 'pass', `${installableArtifacts(artifacts).length} of ${artifacts.length} tarballs (this machine's platform package only; SHA256SUMS ${manifest.sha256sums?.slice(0, 12)}…, release SHA ${manifest.git?.sha?.slice(0, 12) ?? '?'}) installed in ${consumer}; every @anhlp/* is ${VERSION}`, { sha256sums: manifest.sha256sums, releaseSha: manifest.git?.sha });
   return { manifest, consumer, bin: path.join(consumer, 'node_modules', '.bin') };
 }
 
@@ -170,9 +170,12 @@ export function environment({ bin, home, fake }) {
   return env;
 }
 
-/** The `alp` the consumer installed, run by this Node so Windows needs no shell shim. */
+/**
+ * The ALP CLI the consumer installed, run by this Node so Windows needs no shell shim: @anhlp/alp-cli's
+ * JavaScript (@anhlp/alp is the launcher of the executable since t-cd7f; binary-build.yml smokes that).
+ */
 export function alpCommand(consumer) {
-  return path.join(consumer, 'node_modules', '@anhlp', 'alp', 'packages', 'cli', 'dist', 'cli.js');
+  return path.join(consumer, 'node_modules', '@anhlp', 'alp-cli', 'dist', 'cli.js');
 }
 
 /**

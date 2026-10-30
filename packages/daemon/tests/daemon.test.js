@@ -285,6 +285,38 @@ test('finds alpd through the ALP CLI on PATH', { skip: process.platform === 'win
   assert.equal(await findDaemonEntry({ home, env: { PATH: path.join(directory, 'bin') }, candidates: [undefined, path.join(root, 'src', 'cli.js')] }), path.join(root, 'src', 'cli.js'));
 });
 
+test('finds the ALP executable behind the npm launcher @anhlp/alp (t-cd7f)', { skip: process.platform === 'win32' }, async t => {
+  const { EXECUTABLE_MARKER } = await import('@anhlp/alp-core/packaged');
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-npm-wrapper-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const scope = path.join(directory, 'lib', 'node_modules', '@anhlp');
+  const wrapper = path.join(scope, 'alp');
+  await mkdir(path.join(wrapper, 'bin'), { recursive: true });
+  await mkdir(path.join(directory, 'bin'));
+  await writeFile(path.join(wrapper, 'package.json'), JSON.stringify({ name: '@anhlp/alp' }));
+  await writeFile(path.join(wrapper, 'bin', 'alp.js'), '');
+  await symlink(path.join(wrapper, 'bin', 'alp.js'), path.join(directory, 'bin', 'alp'));
+  const env = { PATH: path.join(directory, 'bin') };
+  const home = path.join(directory, 'home');
+  // No platform package (npm skipped optional dependencies): nothing to run.
+  assert.equal(await findDaemonEntry({ home, env }), undefined);
+  const fake = Buffer.concat([Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.alloc(64), Buffer.from(EXECUTABLE_MARKER, 'latin1')]);
+  const platformDir = `alp-${process.platform}-${process.arch}`;
+  // A global install puts the platform package beside the launcher.
+  const sibling = path.join(scope, platformDir, 'bin', 'alp');
+  await mkdir(path.dirname(sibling), { recursive: true });
+  await writeFile(sibling, fake, { mode: 0o755 });
+  assert.equal(await findDaemonEntry({ home, env }), await realpathOf(sibling));
+  // A nested install puts it in the launcher's node_modules, which wins.
+  const nested = path.join(wrapper, 'node_modules', '@anhlp', platformDir, 'bin', 'alp');
+  await mkdir(path.dirname(nested), { recursive: true });
+  await writeFile(nested, fake, { mode: 0o755 });
+  assert.equal(await findDaemonEntry({ home, env }), await realpathOf(nested));
+  // Another package's bin/alp.js is not the launcher.
+  await writeFile(path.join(wrapper, 'package.json'), JSON.stringify({ name: 'not-alp' }));
+  assert.equal(await findDaemonEntry({ home, env }), undefined);
+});
+
 test('findDaemonEntry ignores corrupt package.json without throwing SyntaxError (t-e69f)', { skip: process.platform === 'win32' }, async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-corrupt-pkg-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

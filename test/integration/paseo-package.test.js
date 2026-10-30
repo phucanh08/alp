@@ -12,7 +12,7 @@ import path from 'node:path';
  */
 const root = path.resolve(import.meta.dirname, '..', '..');
 
-test('canonical Paseo plugin and root compatibility distribution remain buildable without legacy folders', async () => {
+test('canonical Paseo plugin remains buildable without legacy folders; the private root and the npm launcher carry no Paseo', async () => {
   const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
   assert.ok(manifest.workspaces.includes('integrations/paseo'));
   assert.ok(!manifest.workspaces.includes('integrations/paseo-plugin'));
@@ -41,7 +41,12 @@ test('canonical Paseo plugin and root compatibility distribution remain buildabl
   assert.equal(pkg.bin['alp-paseo-integration'], 'server/dist/main.js');
   // The pre-rename name stays an alias for one release.
   assert.equal(pkg.bin['alp-web-integration'], 'server/dist/main.js');
-  assert.ok(!manifest.files.some(entry => /integrations/.test(entry)));
+  // The root is private (t-cd7f); @anhlp/alp is the npm launcher (npm/alp) and ships no Paseo.
+  assert.equal(manifest.private, true);
   assert.ok(!manifest.dependencies['@getpaseo/plugin']);
   assert.ok(!manifest.bundledDependencies?.includes('@getpaseo/plugin'));
+  const launcher = JSON.parse(await readFile(path.join(root, 'npm/alp/package.json'), 'utf8'));
+  assert.equal(launcher.name, '@anhlp/alp');
+  assert.equal(launcher.version, manifest.version);
+  assert.ok(!launcher.files.some(entry => /integrations|paseo/i.test(entry)));
 });

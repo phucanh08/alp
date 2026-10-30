@@ -261,7 +261,7 @@ Finished assignments stay recallable for 14 days: main, or the agent that assign
 
 ## The web app
 
-`alp web` opens ALP's own web app (`apps/web`) on this machine. It ships in the CLI (`@anhlp/alp`, `@anhlp/alp-cli`); you do not need Paseo or its plugin:
+`alp web` opens ALP's own web app (`apps/web`) on this machine. It ships in the ALP executable (npm `@anhlp/alp`, `install.sh`) and in the JavaScript CLI `@anhlp/alp-cli`; you do not need Paseo or its plugin:
 
 ```sh
 alp web            # starts the alp-web service if needed and opens its address with its access token
@@ -417,4 +417,4 @@ ALP is organized into npm workspaces for protocol, core, runtime, daemon, client
 
 ## License
 
-ALP is licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE). Packages that bundle third-party code ship a `THIRD-PARTY-NOTICES.txt`. The `alp web` app's third-party licences are in `dist/alp-web/THIRD-PARTY-NOTICES.txt` of `@anhlp/alp-cli` (`packages/cli/dist/alp-web/` in `@anhlp/alp`). `@anhlp/alp-paseo` includes code taken from Paseo (Apache-2.0, © Mohamed Boudra) and ships Paseo's licence as `LICENSE.paseo.txt`; see that package's `NOTICE`. Its bundled third-party licences are in `server/dist/THIRD-PARTY-NOTICES.txt`.
+ALP is licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE). Packages that bundle third-party code ship a `THIRD-PARTY-NOTICES.txt`. The `alp web` app's third-party licences are in `dist/alp-web/THIRD-PARTY-NOTICES.txt` of `@anhlp/alp-cli`; the executable's, including the npm platform packages `@anhlp/alp-<os>-<arch>`, are in its `THIRD-PARTY-NOTICES.txt`. `@anhlp/alp-paseo` includes code taken from Paseo (Apache-2.0, © Mohamed Boudra) and ships Paseo's licence as `LICENSE.paseo.txt`; see that package's `NOTICE`. Its bundled third-party licences are in `server/dist/THIRD-PARTY-NOTICES.txt`.

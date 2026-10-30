@@ -1,21 +1,9 @@
 {
-  "name": "@anhlp/alp",
+  "name": "alp-monorepo",
+  "private": true,
   "version": "0.0.1-beta.5",
-  "description": "ALP command line and alpd, the per-user daemon that runs filesystem-defined Codex and Claude Code agent teams",
+  "description": "ALP monorepo (private): the npm packages are its workspaces and npm/alp, the @anhlp/alp launcher",
   "type": "module",
-  "files": [
-    "packages/cli/dist",
-    "packages/core/dist",
-    "packages/client/dist",
-    "dist/alpd.js",
-    "dist/terminal-native",
-    "dist/acp.js",
-    "templates",
-    "README.md",
-    "docs/modular-monorepo.md",
-    "/NOTICE",
-    "dist/THIRD-PARTY-NOTICES.txt"
-  ],
   "bin": {
     "alp": "packages/cli/dist/cli.js"
   },
@@ -106,11 +94,6 @@
   "homepage": "https://github.com/phucanh08/alp#readme",
   "bugs": {
     "url": "https://github.com/phucanh08/alp/issues"
-  },
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/",
-    "tag": "beta"
   },
   "workspaces": [
     "packages/protocol",
