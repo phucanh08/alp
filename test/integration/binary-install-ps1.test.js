@@ -59,7 +59,7 @@ test('the Windows release archive is alp-<version>-windows-x64.zip holding alp.e
   assert.match(sumsText, /^[0-9a-f]{64} {2}alp-1\.2\.3-windows-x64\.zip$/m);
   assert.match(sumsText, /^[0-9a-f]{64} {2}install\.ps1$/m);
   const x = await temp(t, 'alp-ps-x-');
-  execFileSync('tar', ['-xf', path.join(releases, 'alp-1.2.3-windows-x64.zip'), '-C', x]);
+  execFileSync(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), ['-xf', path.join(releases, 'alp-1.2.3-windows-x64.zip'), '-C', x]);
   for (const file of ['alp.exe', 'LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.txt']) assert.ok(existsSync(path.join(x, 'alp-1.2.3-windows-x64', file)), file);
 });
 
@@ -77,7 +77,7 @@ test('install.ps1 installs to %LOCALAPPDATA%\\Programs\\alp after checking SHA25
   assert.deepEqual(await readFile(exe), await readFile(process.execPath));
   for (const file of ['LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.txt']) assert.ok(existsSync(path.join(dir, file)), file);
   assert.equal(existsSync(`${exe}:Zone.Identifier`), false, 'no Mark of the Web');
-  assert.equal(userPath().split(';').filter(entry => entry.toLowerCase() === dir.toLowerCase()).length, 1);
+  assert.equal(userPath().split(';').filter(entry => entry.toLowerCase() === dir.toLowerCase()).length, 1, `${dir} in ${userPath()}\n${first.stdout}`);
   // Reinstall while the old alp.exe is running: it is renamed aside, and PATH gains no second entry.
   const running = spawn(exe, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
   t.after(() => running.kill());
