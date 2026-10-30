@@ -213,6 +213,27 @@ test('failure while open is pending closes its transport once and reports only f
   assert.equal(s.manager.snapshot('root'), undefined);
 });
 
+test('a transport failure while open is pending waits for the open: it fails with that error and reports it once', async t => {
+  const initialization = deferred();
+  const s = await setup(t, transport => { transport.initialize = () => initialization.promise; });
+  const opening = s.manager.open('root', { cwd: s.root });
+  const rejected = assert.rejects(opening, /process exited/);
+  await until(() => s.transports.length === 1);
+  s.transports[0].failure(new Error('process exited'));
+  await tick();
+  // The open still runs: nothing closed or reported under it yet.
+  assert.equal(s.transports[0].closeCalls, 0);
+  assert.deepEqual(s.lifecycle('root'), []);
+  // The step it waited on settles without an error of its own: the failure fails the open, not 'Session closed'.
+  initialization.resolve();
+  await rejected;
+  assert.equal(s.transports[0].closeCalls, 1);
+  assert.deepEqual(s.lifecycle('root'), ['session.failed']);
+  assert.equal(s.events.find(e => e.event.type === 'session.failed').event.error.message, 'process exited');
+  assert.equal(s.transports[0].calls.filter(call => call.method.startsWith('thread/')).length, 0, 'no thread is asked for after the failure');
+  assert.equal(s.manager.snapshot('root'), undefined);
+});
+
 test('ordinary initialization rejection and normal live close retain their lifecycle', async t => {
   const s = await setup(t, (transport, index) => { if (index === 0) transport.initialize = async () => { throw new Error('bad config'); }; });
   await assert.rejects(s.manager.open('root', { cwd: s.root }), /bad config/);

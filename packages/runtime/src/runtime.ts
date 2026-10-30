@@ -616,6 +616,12 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   // Keep the cleanup with that incarnation, even after its id has been reused.
   const sessionClosures = new WeakMap<Session, Promise<void>>();
   const openedSessions = new WeakSet<Session>();
+  /**
+   * Sessions whose first open is still running, with the process failure that came meanwhile: the
+   * open fails with it and reports it once it stopped using the session, rather than a failure
+   * callback closing the session under it (failSession while openSession still runs).
+   */
+  const openings = new WeakMap<Session, { failure?: unknown }>();
   const assignmentSessions = new WeakMap<Assignment, Session>();
   function closeSession(sessionId: string, session = sessions.get(sessionId), notify = true): Promise<void> {
     if (!session) return Promise.resolve();
@@ -3572,6 +3578,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (assignment) assignmentSessions.set(assignment, session);
     // Pending until its thread exists: mail posted meanwhile waits for it, as in a restart.
     const finishPending = beginPending(session);
+    const opening: { failure?: unknown } = {};
+    openings.set(session, opening);
+    /** A process failure during the open fails it: the step that saw it settle need not have failed. */
+    const failedMeanwhile = () => { if (opening.failure !== undefined) throw opening.failure; };
 
     sessions.set(
       sessionId,
@@ -3582,6 +3592,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     try {
       await runtime.initialize();
+      failedMeanwhile();
 
       if (session.closed || sessions.get(sessionId) !== session) {
         throw new Error(
@@ -3635,6 +3646,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
       session.threadId =
         result.thread.id;
+      failedMeanwhile();
 
       if (session.closed || sessions.get(sessionId) !== session) {
         throw new Error(
@@ -3642,6 +3654,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         );
       }
 
+      // Open from here on: a process failure is the live session's (wire's onFailure).
+      openings.delete(session);
       session.buffered = [];
       finishPending();
 
@@ -3683,8 +3697,12 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       return snapshot(sessionId, session);
     } catch (error) {
       log.error(`${session.mapping.agent.name} could not start its ${session.runtimeKind} session`, { code: 'ALP_PROVIDER_START_FAILED', sessionId, rootId: rootOf(sessionId), agent: session.mapping.agent.name, provider: session.runtimeKind, error });
-      // Share the retirement already started by a process failure, and never
-      // resolve the id to a replacement record when this open finishes late.
+      // A process failure while the open ran is reported now that the open is through, once.
+      const failed = openings.get(session);
+      openings.delete(session);
+      if (failed?.failure !== undefined) failSession(sessionId, session, failed.failure);
+      // Share the retirement the failure started, and never resolve the id to a
+      // replacement record when this open finishes late.
       const cleanup = closeSession(sessionId, session, false);
       finishPending();
       await cleanup;
@@ -3715,6 +3733,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     transport.onFailure((error) => {
       // A transport ALP already replaced reports nothing.
       if (session.closed || session.runtime !== transport || sessions.get(sessionId) !== session) return;
+      // The first open still runs: it fails with this, and reports it when it is through.
+      const opening = openings.get(session);
+      if (opening) { opening.failure ??= error; return; }
       if (revivable(session)) void revive(sessionId, session, error);
       else failSession(sessionId, session, error);
     });
