@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,7 +17,8 @@ const INSTALL = path.join(ROOT, 'install.ps1');
 const windows = process.platform === 'win32';
 
 async function temp(t, prefix) {
-  const directory = await mkdtemp(path.join(os.tmpdir(), prefix));
+  // The long form: the runner's TEMP is an 8.3 short path (RUNNER~1), and the installer writes the long one.
+  const directory = realpathSync.native(await mkdtemp(path.join(os.tmpdir(), prefix)));
   t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }));
   return directory;
 }
