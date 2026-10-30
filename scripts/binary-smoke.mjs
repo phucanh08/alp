@@ -74,8 +74,13 @@ try {
       await client.request('terminal.attach', { terminalId: terminal.terminalId });
       // The typed line echoes back too, so the expected text is one the input does not contain.
       const [input, expected] = windows ? ['set /a 19*19+1000\r', '1361'] : ['echo SMOKE-$((19*19))\r', 'SMOKE-361'];
-      await client.request('terminal.input', { terminalId: terminal.terminalId, data: input });
-      for (let i = 0; !output.join('').includes(expected) && i < 800; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      // Type only once the shell shows its prompt (cmd.exe may drop input sent while ConPTY starts), then retry.
+      const prompt = windows ? />\s*(\u001b\][^\u0007]*\u0007)?(\u001b\[\?25h)?\s*$/ : /./;
+      for (let i = 0; !prompt.test(output.join('')) && i < 400; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      for (let attempt = 0; attempt < 3 && !output.join('').includes(expected); attempt++) {
+        await client.request('terminal.input', { terminalId: terminal.terminalId, data: input });
+        for (let i = 0; !output.join('').includes(expected) && i < 300; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      }
       if (!output.join('').includes(expected)) log(`terminal output so far (${output.length} chunks): ${JSON.stringify(output.join('').slice(-2000))}`);
       check(output.join('').includes(expected), windows ? 'a terminal through the extracted node-pty (ConPTY)' : 'a terminal through the extracted native helper');
       await client.request('terminal.close', { terminalId: terminal.terminalId });
