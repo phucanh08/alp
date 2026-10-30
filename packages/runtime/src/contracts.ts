@@ -175,6 +175,14 @@ export type AlpRuntime = {
   pause(input?: { runtime?: RuntimeKind; now?: boolean; reason?: string }): PauseState;
   /** Lifts a pause and continues the assignments it parked. Without a runtime, lifts every pause. */
   resume(input?: { runtime?: RuntimeKind }): PauseState;
+  /** alpd's disk takes no writes (t-2831): pauses all of ALP and parks running assignments, unless all of ALP is paused already. */
+  holdForDisk(reason: string): PauseState;
+  /** Lifts the pause holdForDisk made, keeping usage-limit pauses; a pause the user made stays. */
+  releaseDisk(by: string): PauseState;
+  /** Whether alpd's disk pause holds ALP now. */
+  diskHeld(): boolean;
+  /** Tells every open root that disk space runs low. */
+  diskLow(free: string): void;
   /** Current pauses and parked assignments. */
   pauses(): PauseState;
   /** Read-only, cached account usage for the web and desktop viewers. */

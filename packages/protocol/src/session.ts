@@ -80,7 +80,7 @@ export type SessionPreview = {
 /** What became of one assignment an earlier alpd left running. */
 export type RecoveryOutcome = { assignmentId: string; agent: string; outcome: 'resumed' | 'parked' | 'failed'; error?: string };
 
-export type Pause = { since: string; by: string; reason: string; resetsAt?: string; /** When alpd last asked the runtime about the limit (ALPD §58). */ checkedAt?: string };
+export type Pause = { since: string; by: string; reason: string; resetsAt?: string; /** Why alpd paused by itself other than a usage limit: its disk takes no writes (t-2831). */ cause?: 'disk'; /** When alpd last asked the runtime about the limit (ALPD §58). */ checkedAt?: string };
 export type PauseState = {
   all?: Pause;
   runtimes: Partial<Record<RuntimeKind, Pause>>;

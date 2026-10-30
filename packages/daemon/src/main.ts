@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { openSync, writeSync } from 'node:fs';
+import { fstatSync, openSync, writeSync } from 'node:fs';
 import { mkdir, open, readFile, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ import { attachmentStageDir, createAlpRuntime, liveProbes, ModelCatalog, reclaim
 import { createDaemonServer } from './server.js';
 import { acquireLock, heartbeat, releaseLock, updateLock } from './lock.js';
 import { createStore } from './store.js';
+import { createDiskGuard, guardOutput, isDiskError } from './disk.js';
 import { readAttachmentConfig } from './attachments.js';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { clearRestoredMarker, readRestoredMarker, recoverInterruptedRestore } from '@anhlp/alp-core/backup';
@@ -213,13 +214,17 @@ async function run(home: string) {
     assignmentResultFile: path.join(home, 'state', 'assignment-results.json'), recallFile: path.join(home, 'state', 'recall.json'), pauseFile: path.join(home, 'state', 'pause.json'), liveFile: path.join(home, 'state', 'live.json'),
     autoResume: settings?.limits?.autoResume !== false, recoveryResume: settings?.recovery?.autoResume !== false && !opened.restored, previousExit: exit,
   });
-  const store = createStore(path.join(home, 'state'));
+  // A full disk pauses ALP's work instead of stopping alpd (t-2831).
+  const disk = createDiskGuard({ home, runtime, log });
+  diskReport = error => { disk.report(error); };
+  const store = createStore(path.join(home, 'state'), { onWriteError: error => { disk.report(error); } });
   let stopping: Promise<void> | undefined;
   const shutdown = (code = 0) => {
     stopping ??= (async () => {
       const force = setTimeout(() => process.exit(code), 10_000);
       force.unref();
       clearInterval(beat);
+      disk.stop();
       modelCatalog?.stop();
       await server.close().catch(() => {});
       await runtime.shutdown().catch(() => {});
@@ -248,8 +253,9 @@ async function run(home: string) {
   }, 30_000);
   beat.unref();
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => void shutdown());
-  process.on('uncaughtException', error => { log.error('uncaught exception; alpd stops', { code: 'ALP_FATAL', error }); void shutdown(1); });
-  process.on('unhandledRejection', error => { log.error('unhandled rejection; alpd stops', { code: 'ALP_FATAL', error }); void shutdown(1); });
+  // A write the disk refused is no reason to stop: the disk guard pauses work until it takes writes again.
+  process.on('uncaughtException', error => { if (disk.report(error)) return; log.error('uncaught exception; alpd stops', { code: 'ALP_FATAL', error }); void shutdown(1); });
+  process.on('unhandledRejection', error => { if (disk.report(error)) return; log.error('unhandled rejection; alpd stops', { code: 'ALP_FATAL', error }); void shutdown(1); });
   phase = 'listen';
   try {
     await server.listen();
@@ -266,11 +272,16 @@ async function run(home: string) {
     .then(() => rename(`${install}.tmp`, install))
     .catch(error => log.warn('could not record alpd\'s location', { code: 'ALP_INSTALL_RECORD_FAILED', error }));
   if (opened.restored) await clearRestoredMarker(home).catch(error => log.warn('could not clear the restore marker', { code: 'ALP_STATE_RESTORED', error }));
+  disk.start();
   if (process.connected) process.send?.('alpd.ready');
   log.info(`alpd ${VERSION} ready on ${socket} (pid ${process.pid})`, { event: 'ready', version: VERSION, pid: process.pid });
 }
 
 const home = alpHome();
+/** Where a failed write to alpd's own output goes once the disk guard exists. */
+let diskReport = (_error: unknown) => {};
+// Before anything logs: a log write the full disk refused must not end alpd (t-2831).
+guardOutput(error => { if (isDiskError(error)) diskReport(error); }, { fstatSync, writeSync });
 try {
   if (process.argv.includes('--detach')) await detach(home);
   else {

@@ -44,6 +44,8 @@ const en = {
   /** The web app's answer to a Paseo feature ALP has not got yet (ALPD §62). */
   inDevelopment: 'This feature is in development',
   resumed: (what: string, by: string, parked: boolean) => `${what} resumed by ${by}.${parked ? ' Parked assignments continue.' : ''}`,
+  diskFull: (reason: string) => `Disk full: ${reason}. ALP paused its work and parked running assignments; it keeps answering. Free some space (alp doctor lists leftover worktrees); ALP checks every minute and continues by itself, or run alp resume.`,
+  diskLow: (free: string) => `Disk space is low: ${free} free. Free some space before it fills (alp doctor lists leftover worktrees); when it is full, ALP pauses its work.`,
   paused: (what: string, reason: string | undefined, runtime: string | undefined, now: boolean) =>
     `${what} paused by the user${reason ? `: ${reason}` : ''}. Delegation${runtime ? ` to ${runtime} agents` : ''} waits${now ? ', and running assignments park where they are' : '; running turns finish'}. alp resume continues.`,
 };
@@ -90,6 +92,8 @@ const vi: Words = {
   usageWarning: (runtime, used, resetsAt) => `${runtime} đã dùng ${used} hạn mức của kỳ này${resetsAt ? `, kỳ đặt lại lúc ${resetsAt}` : ''}.`,
   inDevelopment: 'Tính năng đang phát triển',
   resumed: (what, by, parked) => `${what} đã chạy lại, bởi ${by}.${parked ? ' Các việc đang tạm giữ được làm tiếp.' : ''}`,
+  diskFull: reason => `Đĩa đầy: ${reason === 'the disk is full' ? 'đĩa hết dung lượng' : reason === 'the disk is read-only' ? 'đĩa chỉ đọc' : reason}. ALP đã tạm dừng công việc và tạm giữ các việc đang chạy; ALP vẫn trả lời. Hãy giải phóng dung lượng (alp doctor liệt kê các worktree còn sót); ALP kiểm tra mỗi phút và tự làm tiếp, hoặc chạy alp resume.`,
+  diskLow: free => `Đĩa sắp đầy: còn ${free} trống. Hãy giải phóng dung lượng trước khi đầy (alp doctor liệt kê các worktree còn sót); khi đĩa đầy, ALP sẽ tạm dừng công việc.`,
   paused: (what, reason, runtime, now) =>
     `${what} đã bị người dùng tạm dừng${reason ? `: ${reason}` : ''}. Việc giao${runtime ? ` cho các agent ${runtime}` : ''} phải chờ${now ? ', các việc đang chạy được tạm giữ tại chỗ' : '; các lượt đang chạy vẫn chạy hết'}. Chạy alp resume để tiếp tục.`,
 };
