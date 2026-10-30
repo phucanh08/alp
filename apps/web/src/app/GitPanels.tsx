@@ -41,11 +41,10 @@ const REFRESH_AFTER_MS = 15_000;
 const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset';
 const tool = cn('flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50 [&_svg]:size-4', focusRing);
 
-function Note({ testId, reason, kind, children }: { testId: string; reason?: string; kind: 'changes' | 'diff'; children: React.ReactNode }) {
-  const Icon = kind === 'diff' ? GitCompareArrows : FileDiff;
+function Note({ testId, reason, children }: { testId: string; reason?: string; children: React.ReactNode }) {
   return (
     <div className="flex min-h-full flex-col items-center justify-center gap-2 p-6 text-center" role="note" data-testid={testId} data-reason={reason}>
-      <Icon aria-hidden strokeWidth={1.5} className="size-6 text-extra-muted" />
+      <FileDiff aria-hidden strokeWidth={1.5} className="size-6 text-extra-muted" />
       {children}
     </div>
   );
@@ -281,7 +280,7 @@ function GitPanel({ variant, onOpenDiff }: { variant: 'changes' | 'diff'; onOpen
   const testId = `${variant}-panel`;
   if (!access.status) {
     return (
-      <Note testId={`panel-unavailable-${variant}`} reason={access.reason} kind={variant}>
+      <Note testId={`panel-unavailable-${variant}`} reason={access.reason}>
         {access.reason === 'projectRead' ? <p className="flex max-w-[300px] items-start gap-2 text-sm text-foreground"><Lock aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />{access.message}</p> : <p className="max-w-[300px] text-sm text-muted-foreground">{access.message}</p>}
       </Note>
     );
@@ -301,7 +300,7 @@ function GitPanel({ variant, onOpenDiff }: { variant: 'changes' | 'diff'; onOpen
   }
   if (status.status.state !== 'repository') {
     return (
-      <Note testId="changes-not-git" reason={status.status.state} kind={variant}>
+      <Note testId="changes-not-git" reason={status.status.state}>
         <p className="max-w-[300px] text-sm text-muted-foreground">{status.status.state === 'unsupported' ? 'This workspace is inside a Git repository but is not its top level, so its changes are not shown.' : 'Not a git repository'}</p>
         <button type="button" className="text-xs text-highlight hover:underline" onClick={refresh}>Refresh</button>
       </Note>
