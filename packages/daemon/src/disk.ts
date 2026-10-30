@@ -35,6 +35,8 @@ export type DiskGuardOptions = {
   criticalBytes?: number;
   /** Free space alpd needs to resume work it held (256 MiB); above criticalBytes, so it does not flap. */
   resumeBytes?: number;
+  /** How long one statfs or probe may take (10 s). */
+  checkTimeoutMs?: number;
   /** Free bytes on the disk of a directory; undefined when unknown. */
   free?: (directory: string) => Promise<number | undefined>;
   /** Writes and removes a small file; rejects when the disk takes no writes. */
@@ -78,11 +80,19 @@ export function createDiskGuard(options: DiskGuardOptions) {
   let timer: ReturnType<typeof setInterval> | undefined;
   let checking: Promise<void> | undefined;
   let last: { at: string; free?: number; writable: boolean } | undefined;
+  /** Set from the first disk error until space returns: a log line about it, itself failing, must not hold again (and recurse). */
+  let full = false;
+  /** Checks in a row that found the disk writable; two are needed to resume, so a borderline disk does not flap. */
+  let good = 0;
 
   function hold(reason: string) {
-    if (runtime.diskHeld()) return;
-    log.warn(`${reason}; ALP pauses its work until the disk takes writes again`, { code: 'ALP_DISK_FULL' });
+    good = 0;
+    if (full && runtime.diskHeld()) return;
+    const first = !full;
+    full = true;
+    // Hold first: the log line below may fail on this disk and report again, which now returns at once.
     runtime.holdForDisk(reason);
+    if (first) log.warn(`${reason}; ALP pauses its work until the disk takes writes again`, { code: 'ALP_DISK_FULL' });
   }
 
   /** A write failed; returns whether it was a disk error that alpd now handles. */
@@ -94,16 +104,18 @@ export function createDiskGuard(options: DiskGuardOptions) {
   }
 
   async function checkOnce() {
-    const bytes = await free(home);
-    const writable = await probe(home).then(() => true, error => isDiskError(error) ? false : true);
+    const bytes = await bounded(free(home), undefined);
+    const writable = await bounded(probe(home).then(() => true, error => isDiskError(error) ? false : true), !full);
     last = { at: new Date().toISOString(), ...(bytes === undefined ? {} : { free: bytes }), writable };
     const shown = bytes === undefined ? 'unknown' : formatBytes(bytes);
-    if (runtime.diskHeld()) {
-      if (writable && (bytes === undefined || bytes >= resumeBytes)) {
-        log.info(`the disk takes writes again (${shown} free); ALP resumes its work`, { code: 'ALP_DISK_BACK', free: bytes });
-        runtime.releaseDisk('alpd, after disk space returned');
-        warnedLow = false;
-      }
+    if (full) {
+      if (!writable || (bytes !== undefined && bytes < resumeBytes)) { good = 0; if (!runtime.diskHeld()) runtime.holdForDisk(writable ? `the disk is almost full (${shown} free)` : 'the disk is full'); return; }
+      if (++good < 2) return;
+      full = false;
+      good = 0;
+      warnedLow = false;
+      log.info(`the disk takes writes again (${shown} free); ALP resumes its work`, { code: 'ALP_DISK_BACK', free: bytes });
+      runtime.releaseDisk('alpd, after disk space returned');
       return;
     }
     if (!writable) { hold('the disk is full'); return; }
@@ -111,6 +123,13 @@ export function createDiskGuard(options: DiskGuardOptions) {
     if (bytes !== undefined && bytes < lowBytes) {
       if (!warnedLow) { warnedLow = true; log.warn(`disk space is low: ${shown} free`, { code: 'ALP_DISK_LOW', free: bytes }); runtime.diskLow(shown); }
     } else if (bytes !== undefined && bytes >= lowBytes * 1.25) warnedLow = false;
+  }
+
+  /** A statfs or probe that hangs (a stuck network disk) gives `fallback` after 10 s, so checks go on. */
+  function bounded<T>(work: Promise<T>, fallback: T): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<T>(resolve => { timer = setTimeout(() => resolve(fallback), options.checkTimeoutMs ?? 10_000); timer.unref?.(); });
+    return Promise.race([work, late]).finally(() => clearTimeout(timer));
   }
 
   /** Checks space now; concurrent calls share one check. */
@@ -122,7 +141,7 @@ export function createDiskGuard(options: DiskGuardOptions) {
   return {
     report,
     check,
-    status: () => ({ held: runtime.diskHeld(), ...(last ? { last } : {}) }),
+    status: () => ({ held: runtime.diskHeld(), full, ...(last ? { last } : {}) }),
     start() {
       if (timer) return;
       timer = setInterval(() => void check(), options.intervalMs ?? 60_000);

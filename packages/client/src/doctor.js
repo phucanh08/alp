@@ -610,7 +610,8 @@ export async function diskCheck(home, { run = runCommand, env = process.env, fre
   }
   const hint = details.length ? 'ALP deletes none of these: some may belong to running assignments or hold uncommitted work. Remove those you no longer need (git worktree remove, or rm -rf).' : undefined;
   const where = bytes === undefined ? 'free space unknown' : `${formatSize(bytes)} free`;
-  const status = bytes !== undefined && bytes < 2 * GIB ? 'warn' : details.length ? 'info' : 'ok';
+  // Leftovers are listed, not judged: some may be live.
+  const status = bytes !== undefined && bytes < 2 * GIB ? 'warn' : 'ok';
   const summary = bytes !== undefined && bytes < 2 * GIB
     ? `${where} where ALP_HOME lives; when the disk is full, alpd pauses all work until space returns`
     : `${where} where ALP_HOME lives`;
