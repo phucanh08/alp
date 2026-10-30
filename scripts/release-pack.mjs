@@ -61,7 +61,7 @@ mkdirSync(out, { recursive: true });
 // The platform packages first, from the release archives (npm pack of a generated directory).
 const platforms = new Map();
 // --binaries-release: the archives and SHA256SUMS of a PUBLISHED GitHub release, downloaded with gh
-// (t-cd7f: npm 0.0.1-beta.5 carries the executables of the GitHub release v0.0.1-beta.5).
+// (t-cd7f): npm <version> carries the executables of the GitHub release v<version>, e.g. 0.0.1-beta.6.
 let releaseSource = null;
 if (binariesRelease) {
   const repo = process.env.ALP_INSTALL_REPO || 'phucanh08/alp';

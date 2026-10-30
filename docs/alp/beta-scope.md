@@ -2,7 +2,7 @@
 
 > **Beta.6 (`0.0.1-beta.6`, t-693e):** sửa lỗi của beta.5: file thực thi không nhúng Claude Agent SDK, nên mọi phiên Claude đều lỗi `Cannot find package '@anthropic-ai/claude-agent-sdk'`. npm bỏ qua beta.5; beta.6 phát hành cả npm lẫn GitHub release từ cùng một SHA của main. Chưa phát hành (t-36f6). Xem [beta-release-notes.md](beta-release-notes.md).
 
-> **Beta.5 (`0.0.1-beta.5`, t-1e02):** cùng version cho npm (dist-tag `beta`) và binary GitHub release (release thường, không prerelease); xem [beta-release-notes.md](beta-release-notes.md) và [binary-install.md](binary-install.md). GitHub release đã publish (từ `2b63a7a`). Trên npm (t-cd7f), `@anhlp/alp` là launcher, đi cùng 5 package platform (13 tarball, thứ tự ở §7.4). File thực thi trong các package platform lấy từ asset của release `v0.0.1-beta.5`, pack bằng `release:pack --binaries-release v0.0.1-beta.5` ([binary-install.md](binary-install.md#npm-packages)). npm chưa publish.
+> **Beta.5 (`0.0.1-beta.5`, t-1e02):** cùng version cho npm (dist-tag `beta`) và binary GitHub release (release thường, không prerelease); xem [beta-release-notes.md](beta-release-notes.md) và [binary-install.md](binary-install.md). GitHub release đã publish (từ `2b63a7a`). Trên npm (t-cd7f), `@anhlp/alp` là launcher, đi cùng 5 package platform (13 tarball, thứ tự ở §7.4). File thực thi trong các package platform lấy từ asset của release `v0.0.1-beta.5`, pack bằng `release:pack --binaries-release v0.0.1-beta.5` ([binary-install.md](binary-install.md#npm-packages)). **Đã thay thế:** npm không bao giờ publish beta.5; npm phát hành từ beta.6 (`--binaries-release v0.0.1-beta.6`), xem dòng Beta.6 ở trên.
 >
 > **Beta.4 (`0.0.1-beta.4`):** phạm vi và gate ở **§13**; chưa publish.
 
@@ -218,7 +218,7 @@ Thứ tự publish: protocol → core → runtime → client → daemon → cli 
 
 ## 6. Acceptance
 
-Mọi dòng chạy trên **cùng release SHA** và, với các dòng cài đặt, trên **đúng các tarball đã lưu** (13 từ beta.5 trên npm; mỗi máy cài 9: 7 package JS, package platform của máy đó và launcher)
+Mọi dòng chạy trên **cùng release SHA** và, với các dòng cài đặt, trên **đúng các tarball đã lưu** (13 tarball của beta.6 trên npm — beta.5 không lên npm; mỗi máy cài 9: 7 package JS, package platform của máy đó và launcher)
 (§7.2). Ghi SHA, link CI, SHA-256 tarball đã dùng và kết quả vào bảng §6.4.
 
 ### 6.1 Pre-publish gate
@@ -235,7 +235,7 @@ Mọi dòng chạy trên **cùng release SHA** và, với các dòng cài đặt
 | L1 | License, trường `license`, metadata repo trỏ `phucanh08/alp` | — | task T4 | Có |
 | S1 | Phân loại `npm audit` mức high/critical trong dependency runtime của 8 package | — | task T6 | Có |
 
-**Artifact** (trên các tarball đã lưu, 13 từ beta.5 trên npm):
+**Artifact** (trên các tarball đã lưu, 13 tarball của beta.6 trên npm — beta.5 không lên npm):
 
 | # | Kiểm tra | Môi trường | Người chạy | Chặn |
 |---|---|---|---|---|
