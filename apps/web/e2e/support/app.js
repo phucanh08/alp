@@ -50,10 +50,10 @@ export async function send(page, text) {
   await composer.press('Enter');
 }
 
-/** Opens a panel in the explorer dock: + then the panel in the New tab's launcher. */
+/** Opens a panel in the explorer dock: + then the panel in its New tab menu, as Paseo's. */
 export async function openDockPanel(page, kind, label) {
   await page.getByRole('button', { name: 'New explorer tab' }).click();
-  await page.getByTestId(`workspace-new-tab-${kind}`).click();
+  await page.getByTestId(`workspace-new-tab-menu-${kind}`).click();
   await expect(page.getByRole('complementary', { name: 'Explorer' }).getByRole('tab', { name: new RegExp(`^${label}`) })).toHaveAttribute('aria-selected', 'true');
 }
 

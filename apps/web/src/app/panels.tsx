@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Bot, FileDiff, FolderTree, GitCompareArrows, ListTodo, SquareTerminal } from 'lucide-react';
+import { Bot, FileDiff, Files, ListTodo, SquareTerminal } from 'lucide-react';
 import { members } from '../lib/timeline.js';
 import { modeLabel } from '../lib/format';
 import { cn } from '../lib/utils';
@@ -23,11 +23,12 @@ const TerminalPanel = React.lazy(() => import('./TerminalPanel').then(module => 
 
 export type PanelKind = 'changes' | 'terminal' | 'diff' | 'files' | 'agents' | 'tasks';
 
+/** Paseo's presentations: Changes and Diff share FileDiff, Files is Files. */
 export const PANELS: Record<PanelKind, { label: string; icon: typeof Bot; unavailable?: string }> = {
   changes: { label: 'Changes', icon: FileDiff },
   terminal: { label: 'Terminal', icon: SquareTerminal },
-  diff: { label: 'Diff', icon: GitCompareArrows },
-  files: { label: 'Files', icon: FolderTree },
+  diff: { label: 'Diff', icon: FileDiff },
+  files: { label: 'Files', icon: Files },
   agents: { label: 'Agents', icon: Bot },
   tasks: { label: 'Tasks', icon: ListTodo },
 };

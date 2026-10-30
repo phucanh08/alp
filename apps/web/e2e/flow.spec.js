@@ -91,11 +91,19 @@ test('create, stream, tool call, questions, stop, rename', async ({ page }) => {
   await expect(page.getByRole('heading', { level: 1, name: 'Release 1.0' })).toBeVisible();
   await expect(page.getByTestId('session-row')).toContainText('Release 1.0');
 
-  // The dock opens on Paseo's Changes (this workspace is no Git repository, so it says so) and Files; + adds Agents, which lists main.
+  // The dock opens on Paseo's Files and Changes, neither closable (this workspace is no Git
+  // repository, so Changes says so); + is a menu of the panels not open yet, and adds Agents, which lists main.
   const dock = page.getByRole('complementary', { name: 'Explorer' });
-  await expect(dock.getByRole('tab')).toHaveText(['Changes', 'Files']);
+  await expect(dock.getByRole('tab')).toHaveText(['Files', 'Changes']);
+  await expect(dock.getByRole('tab', { name: 'Files' })).toHaveAttribute('aria-selected', 'true');
+  await expect(dock.getByRole('button', { name: /^Close (Files|Changes)$/ })).toHaveCount(0);
+  await dock.getByRole('tab', { name: 'Changes' }).click();
   await expect(dock.getByTestId('changes-not-git')).toHaveAttribute('data-reason', 'not_repository');
+  await dock.getByRole('button', { name: 'New explorer tab' }).click();
+  await expect(page.getByRole('menu', { name: 'New explorer tab' }).getByRole('menuitem')).toHaveText(['Diff', 'Agents', 'Tasks']);
+  await page.keyboard.press('Escape');
   await openDockPanel(page, 'agents', 'Agents');
+  await expect(dock.getByRole('button', { name: 'Close Agents' })).toBeAttached();
   await expect(page.getByTestId('agent-row').first()).toContainText('main');
 
   // The center + menu: Agent, Paseo's Terminal and Diff, then ALP's panels; Terminal opens a tab,
