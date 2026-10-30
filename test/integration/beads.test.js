@@ -14,12 +14,22 @@ import { createAlpRuntime } from '../../dist/runtime/index.js';
 
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
 
+/**
+ * A throwaway directory for one test, deleted after it. node:test runs t.after hooks in the order
+ * they were added, so a later t.after(() => runtime.shutdown()) would run after this delete, while
+ * the runtime's 5 s gate-watch timer could still write a gate card into runs/ (t-d29a). Teardowns
+ * given to `cleanup` run first, last added first, and the directory goes once they have finished.
+ */
 async function project(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-beads-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const cleanups = [];
+  t.after(async () => {
+    try { for (const cleanup of cleanups.reverse()) await cleanup(); }
+    finally { await rm(directory, { recursive: true, force: true }); }
+  });
   const root = path.join(directory, 'project');
   await mkdir(path.join(root, '.alp'), { recursive: true });
-  return { directory, root };
+  return { directory, root, cleanup: fn => cleanups.push(fn) };
 }
 
 const jsonl = records => records.map(record => JSON.stringify(record)).join('\n') + '\n';
@@ -204,7 +214,7 @@ test('formulas are found by name, checked, and poured into an epic with a task p
 });
 
 test('main lists and pours formulas with alp_task; the CLI pours, exports and imports', async t => {
-  const { directory, root } = await project(t);
+  const { directory, root, cleanup } = await project(t);
   await initProject(root);
   const home = path.join(directory, 'home');
   await mkdir(path.join(root, '.alp', 'formulas'), { recursive: true });
@@ -212,7 +222,8 @@ test('main lists and pours formulas with alp_task; the CLI pours, exports and im
 
   const runtimes = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), libraryDir: home, runLogDir: path.join(directory, 'runs') });
-  t.after(() => runtime.shutdown());
+  // Shut down before the directory goes: shutdown stops the gate watch and waits for the run log.
+  cleanup(() => runtime.shutdown());
   await runtime.open('root', { cwd: root });
   await until(() => runtimes.length === 2);
   const [main] = runtimes;
