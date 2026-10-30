@@ -526,8 +526,14 @@ test('a client that announces principal.agent has its own alpd connection say so
   const listedAgain = late.call('task.list', { projectRoot: path.join(tmpdir(), 'alp-e706-a') });
   await new Promise(resolve => setTimeout(resolve, 50));
   assert.ok(!daemon.state.calls.some(call => call.link === lateLink && call.method === 'task.list'), 'nor behind a later unmarked hello');
+  // Nor behind a malformed hello, which fails at once.
+  const malformed = late.call('daemon.hello', { protocolVersion: 99 });
+  const listedThird = late.call('task.list', { projectRoot: path.join(tmpdir(), 'alp-e706-a') });
+  assert.ok((await malformed).error);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.ok(!daemon.state.calls.some(call => call.link === lateLink && call.method === 'task.list'), 'nor behind a malformed hello');
   release();
-  await marking; await listed; await unmarked; await listedAgain;
+  await marking; await listed; await unmarked; await listedAgain; await listedThird;
   const order = daemon.state.calls.filter(call => call.link === lateLink).map(call => call.params?.capabilities ? 'mark' : call.method);
   assert.ok(order.indexOf('mark') < order.indexOf('task.list'), order.join(','));
 
