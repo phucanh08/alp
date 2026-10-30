@@ -22,7 +22,7 @@ const log = message => console.log(`[binary-smoke] ${message}`);
 const run = promisify(execFile);
 const work = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-binary-smoke-')));
 const home = path.join(work, 'home');
-const env = { ...process.env, ALP_HOME: home, SHELL: '/bin/sh', ALP_CODEX_BIN: path.join(ROOT, 'packages/daemon/tests/support/fake-codex.js'), ALP_DAEMON_ENTRY: '', ALP_WEB_APP: '' };
+const env = { ...process.env, ALP_HOME: home, SHELL: '/bin/sh', ALP_CODEX_BIN: path.join(ROOT, 'packages/daemon/tests/support/fake-codex.js'), ALP_CLAUDE_BIN: path.join(ROOT, 'packages/daemon/tests/support/fake-claude.js'), ALP_DAEMON_ENTRY: '', ALP_WEB_APP: '' };
 delete env.ALP_DAEMON_ENTRY; delete env.ALP_WEB_APP;
 const alp = async (args, cwd = work) => (await run(binary, args, { env, cwd, timeout: 60_000 })).stdout.trim();
 const check = (condition, message) => { if (!condition) throw new Error(message); log(`ok: ${message}`); };
@@ -62,8 +62,8 @@ try {
   try {
     const greeting = await hello(client, { name: 'binary-smoke', version: '0' });
     check(greeting.capabilities.includes('terminal.watch'), 'WebSocket upgrade and hello through the gateway');
-    const events = [], output = [];
-    client.onEvent(envelope => events.push(envelope.event.type));
+    const events = [], output = [], payloads = [];
+    client.onEvent(envelope => { events.push(envelope.event.type); payloads.push(JSON.stringify(envelope.event)); });
     const exits = [];
     client.onNotification((method, event) => {
       if (method === 'terminal.event' && event.type === 'output') output.push(event.data);
@@ -101,6 +101,12 @@ try {
     await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'smoke-1', content: [{ type: 'text', text: 'hello' }] });
     for (let i = 0; !events.includes('turn.ended') && i < 400; i++) await new Promise(resolve => setTimeout(resolve, 25));
     check(events.includes('turn.ended'), 'a provider turn with the fake Codex');
+    // beta.5 regression: the executable must load the embedded Claude Agent SDK (no node_modules in $bunfs).
+    events.length = 0;
+    const claude = await client.request('session.create', { spec: { cwd: project, model: 'claude:claude-opus-5-5' }, history: 'skip' });
+    await client.request('session.prompt', { sessionId: claude.session.id, clientMessageId: 'smoke-2', content: [{ type: 'text', text: 'hello' }] });
+    for (let i = 0; !events.includes('turn.ended') && i < 400; i++) await new Promise(resolve => setTimeout(resolve, 25));
+    check(events.includes('turn.ended') && payloads.some(text => text.includes('ok 1: hello')), 'a provider turn with the fake Claude through the embedded Claude Agent SDK');
   } finally { client.close(); }
 
   // alp bridge acp: speaks MCP on stdio to alpd's bridge socket; here a stand-in socket that accepts the token.
