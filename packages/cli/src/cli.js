@@ -15,7 +15,7 @@ import { backupCommand, restoreCommand } from './backup.js';
 import { terminalCommand } from './terminal.js';
 import { bridgeCommand } from './roles.js';
 import { cleanupOldExecutable, selfUpdate } from './self-update.js';
-import { packagedInfo } from '@anhlp/alp-core/packaged';
+import { executablePath, packagedInfo } from '@anhlp/alp-core/packaged';
 import { connect, lockAlive, readLock } from '@anhlp/alp-client/index';
 
 /** The version of this alp: the executable's, the build's, or the package's. */
@@ -47,7 +47,7 @@ async function updateCommand(args) {
 }
 
 // A Windows update leaves the previous alp.exe as alp.old.exe: it can only go once that process ended.
-if (packagedInfo()) cleanupOldExecutable(process.execPath);
+{ const executable = executablePath(); if (executable) cleanupOldExecutable(executable); }
 
 const commands = { schedule: scheduleCommand, setup: args => setup(args, alpHome()), init: args => project('init', args), 'update-template': args => project('upgrade', args), upgrade: args => project('upgrade', args), update: updateCommand, daemon, doctor, run, ps, top, attach, send, questions, answer, log, board, tasks: tasksCommand, task: taskCommand, formula: formulaCommand, permissions: permissionsCommand, agents: args => libraryCommand('agents', args), skills: args => libraryCommand('skills', args), mcp: args => ['add', 'rm', 'mv', 'cp', 'test', 'show', 'edit'].includes(args[0]) ? editCommand('mcp', args) : libraryCommand('mcp', args), hooks: args => libraryCommand('hooks', args), providers: args => libraryCommand('providers', args), provider: args => editCommand('providers', args), teams: teamsCommand, trust: trustCommand, agent: args => editCommand('agents', args), team: args => editCommand('teams', args), skill: args => editCommand('skills', args), hook: args => editCommand('hooks', args), verify, recall, pause, resume, language, models, interrupt, compact, acp: acpCommand, web: webCommand, backup: backupCommand, restore: restoreCommand, terminal: terminalCommand, bridge: bridgeCommand };
 const [command, ...args] = process.argv.slice(2);
