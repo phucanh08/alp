@@ -135,6 +135,12 @@ test('install.sh refuses a corrupted archive, a malformed SHA256SUMS, bad option
   const absent = await install(['--base-url', pathToFileURL(path.join(releases, 'none')).href], { home });
   assert.match(absent.stderr, /could not download/);
   assert.equal(existsSync(path.join(home, '.alp/bin/alp')), false);
+  const injected = await install(['--dir', `${home}/a"; touch pwned; "`, '--base-url', releases], { home });
+  assert.match(injected.stderr, /unsupported characters in --dir/);
+  const http = await install(['--base-url', 'http://example.invalid/r'], { home });
+  assert.match(http.stderr, /must be https:\/\/ or file:\/\//);
+  const empty = await install(['--version', 'v'], { home });
+  assert.match(empty.stderr, /--version needs a value/);
   const help = await install(['--help'], { home });
   assert.equal(help.code, 0);
   assert.match(help.stdout, /^Usage: install\.sh/);
@@ -151,5 +157,6 @@ test('the execPath lint catches property and element access and destructuring of
   assert.equal(hits("spawn(process['execPath'], [x]); spawn(process[`execPath`]);"), 2);
   assert.equal(hits('const { execPath } = process; const { execPath: bin } = process; const { "execPath": q } = globalThis.process;'), 3);
   assert.equal(hits('globalThis.process.execPath;'), 1);
+  assert.equal(hits("import { execPath } from 'node:process'; import { execPath as e } from 'process'; import { execPath as f } from 'other';"), 2);
   assert.equal(hits('const { argv } = process; other.execPath; process.argv0; const { execPath } = other;'), 0);
 });

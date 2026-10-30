@@ -11,5 +11,10 @@ export function namesExecPath(node) {
     const key = node.propertyName ?? node.name;
     return (ts.isIdentifier(key) || ts.isStringLiteralLike(key)) && key.text === 'execPath';
   }
+  // import { execPath } from 'node:process' (or 'process').
+  if (ts.isImportSpecifier(node) && (node.propertyName ?? node.name).text === 'execPath') {
+    const declaration = node.parent?.parent?.parent;
+    return Boolean(declaration && ts.isImportDeclaration(declaration) && ts.isStringLiteral(declaration.moduleSpecifier) && /^(node:)?process$/.test(declaration.moduleSpecifier.text));
+  }
   return false;
 }

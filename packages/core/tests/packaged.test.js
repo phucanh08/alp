@@ -181,15 +181,17 @@ test('assetDir refuses a group-writable cache parent and sweeps stale staging di
   const parent = path.join(home, 'cache');
   await mkdir(parent, { mode: 0o700 });
   // A dead process's staging directory and a live one's recent one.
-  const dead = path.join(parent, `1.5.0.tmp-999999-${Date.now()}`);
+  const dead = path.join(parent, `1.5.0.tmp-999999-${Date.now() - 11 * 60 * 1000}`);
+  const fresh = path.join(parent, `1.5.0.tmp-999998-${Date.now()}`);
   const live = path.join(parent, `1.5.0.tmp-${process.ppid}-${Date.now()}`);
   const old = path.join(parent, `1.5.0.tmp-${process.ppid}-${Date.now() - 2 * 60 * 60 * 1000}`);
-  for (const directory of [dead, live, old]) await mkdir(directory);
+  for (const directory of [dead, fresh, live, old]) await mkdir(directory);
   assetDir({ env, info: { version: '1.5.0', assets } });
   const { existsSync } = await import('node:fs');
   assert.equal(existsSync(dead), false, 'a dead process\'s staging is removed');
   assert.equal(existsSync(old), false, 'an hour-old staging is removed even when its pid is alive');
   assert.equal(existsSync(live), true, 'a running extraction is left alone');
+  assert.equal(existsSync(fresh), true, 'a recent staging is kept even when its pid looks dead (another pid namespace)');
   await chmod(parent, 0o770);
   assert.throws(() => assetDir({ env, info: { version: '1.6.0', assets } }), /parent must belong to the current user/);
 });
