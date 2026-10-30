@@ -18,7 +18,8 @@ described under [Restoring](#restoring). Nothing outside these units is read or 
 | | `sessions/` | one record per session: status, title, the native thread it resumes, its spec |
 | | `timeline/` | every event of each session tree, with its replay cursor |
 | | `receipts/` | one receipt per delivered prompt, so a retried prompt is never sent twice |
-| | `assignment-results.json`, `assignment-results.json.initialized` | retained assignment owners and checkout birth records; restore keeps owners and clears births |
+| | `assignment-results.json`, `assignment-results.json.initialized` | retained assignment owners, with a shared writer's result evidence, and checkout birth records; restore keeps owners and their evidence, clears births, and drops how a result was handled, so a restored result needs `alp_resolve` again |
+| | `assignment-archive/` | results resolved with `alp_resolve`, one JSON line each in a file per month, kept 365 days after the month ends |
 | | `worktree-destinations.json` | host destination mappings; restored only as inactive evidence |
 | | `recall.json`, `pause.json`, `trust.json`, `web-workspaces.json` | finished assignments you can recall, pauses, trusted projects, Paseo workspaces |
 | `$ALP_HOME` | `settings.json`, `library.json`, `role-skills.json`, `lessons.md` | your settings and your library's bookkeeping |
