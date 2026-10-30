@@ -110,6 +110,21 @@ test('remembered New session choices: thinking per model, the team default under
   assert.deepEqual(choices, { model: 'codex:gpt', thinkingByModel: { default: 'medium' } });
 });
 
+test('thinking per model never keeps a model named after an Object.prototype member', () => {
+  const raw = `{"v":${PREFERENCES_VERSION},"newSession":{"thinkingByModel":{"__proto__":"high","constructor":"low","toString":"medium","codex:a":"high"}}}`;
+  const thinking = parsePreferences(raw).newSession.thinkingByModel;
+  assert.deepEqual(thinking, { 'codex:a': 'high' });
+  for (const key of ['__proto__', 'constructor', 'toString']) assert.equal(Object.hasOwn(thinking, key), false, key);
+  assert.equal(Object.getPrototypeOf(thinking), Object.prototype);
+  assert.deepEqual(parsePreferences(`{"v":${PREFERENCES_VERSION},"newSession":{"model":"codex:a","thinkingByModel":{"constructor":"low","toString":"low"}}}`).newSession, { model: 'codex:a' });
+  for (const model of ['__proto__', 'constructor', 'toString']) {
+    const remembered = rememberChoices({ thinkingByModel: { 'codex:a': 'high' } }, { model, thinking: 'low' });
+    assert.deepEqual(remembered.thinkingByModel, { 'codex:a': 'high' }, model);
+    assert.equal(Object.getPrototypeOf(remembered.thinkingByModel), Object.prototype, model);
+  }
+  assert.equal(({}).polluted, undefined);
+});
+
 test('sidebar display preferences: Paseo\'s choices kept, anything else its default, filters de-duplicated and bounded', () => {
   const display = parse({ sidebarDisplay: { grouping: 'status', sort: 'lastPrompt', titleSource: 'branch', rowItems: { branch: true, host: false, checks: true, labels: 'yes' }, trailing: 'none', projectFilters: ['/a', '/a', '', 7, '/b'] } }).sidebarDisplay;
   assert.deepEqual(display, { grouping: 'status', sort: 'lastPrompt', titleSource: 'branch', rowItems: { branch: true, project: false, host: false, labels: true }, trailing: 'none', projectFilters: ['/a', '/b'] });
