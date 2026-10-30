@@ -54,6 +54,27 @@ test('the boundary checker rejects Paseo deps, imports, createRequire aliases an
   assert.match(output, /packages\/daemon\/src\/escape\.ts: relative import escapes package: \.\.\/\.\.\/outside\.js/);
 });
 
+test('the boundary checker rejects process.execPath outside the runtime-neutral launch helpers (t-1e02)', async t => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), 'alp-execpath-'));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const write = async (relative, contents) => { await mkdir(path.dirname(path.join(fixture, relative)), { recursive: true }); await writeFile(path.join(fixture, relative), contents); };
+  await write('package.json', JSON.stringify({ private: true, workspaces: ['packages/core', 'packages/daemon'] }));
+  await write('packages/core/package.json', JSON.stringify({ name: '@anhlp/alp-core', version: '0.0.0' }));
+  await write('packages/daemon/package.json', JSON.stringify({ name: '@anhlp/alp-daemon', version: '0.0.0' }));
+  await write('packages/core/src/packaged.js', "export const self = () => process.execPath;\n");
+  await write('packages/daemon/src/ok.ts', "export function start({ execPath = process.execPath } = {}) { return execPath; }\nexport const shown = { nodePath: process.execPath /* alp-allow-execpath: reported only */ };\n");
+  await write('packages/daemon/tests/spawn.test.js', "import { spawn } from 'node:child_process';\nspawn(process.execPath, ['x.js']);\n");
+  const check = () => { const result = spawnSync(process.execPath, ['scripts/check-boundaries.mjs', '--root', fixture], { cwd: root, encoding: 'utf8' }); return { status: result.status, output: (result.stdout + result.stderr).replaceAll('\\', '/') }; };
+  const clean = check();
+  assert.equal(clean.status, 0, clean.output);
+  await write('packages/daemon/src/main.ts', "import { spawn } from 'node:child_process';\nspawn(process.execPath, [import.meta.filename]);\nspawn(process.execPath, ['-e', 'code']);\n");
+  const stray = check();
+  assert.equal(stray.status, 1, stray.output);
+  assert.match(stray.output, /packages\/daemon\/src\/main\.ts:2: process\.execPath outside @anhlp\/alp-core\/packaged/);
+  assert.match(stray.output, /packages\/daemon\/src\/main\.ts:3: process\.execPath outside/);
+  assert.doesNotMatch(stray.output, /ok\.ts|spawn\.test\.js|packaged\.js/);
+});
+
 test('the CLI may bundle the private gateway only as a devDependency; other packages may not depend on it', async t => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), 'alp-bundled-app-'));
   t.after(() => rm(fixture, { recursive: true, force: true }));

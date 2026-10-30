@@ -142,7 +142,7 @@ export function createDaemonConfig({ relay, providers, serverId, broadcast, inDe
 
     'daemon.get_status.request': (message: Inbound<'daemon.get_status.request'>) => ({
       type: 'daemon.get_status.response',
-      payload: { requestId: message.requestId, serverId: serverId(), version, pid: process.pid, nodePath: process.execPath, startedAt, listen: listen(), relay: relay.config(), providers: [] },
+      payload: { requestId: message.requestId, serverId: serverId(), version, pid: process.pid, nodePath: process.execPath /* alp-allow-execpath: reported, never spawned */, startedAt, listen: listen(), relay: relay.config(), providers: [] },
     }),
 
     'daemon.get_pairing_offer.request': async (message: Inbound<'daemon.get_pairing_offer.request'>) => {

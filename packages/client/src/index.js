@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { scrubText } from '@anhlp/alp-core/log';
-import { entryCommand, isPackaged, isScript } from '@anhlp/alp-core/packaged';
+import { entryCommand, executablePath, isScript } from '@anhlp/alp-core/packaged';
 import { createSocketTransport } from './ipc.js';
 import { AlpRpcClient } from './rpc/client.js';
 import { hello } from './rpc/handshake.js';
@@ -121,7 +121,8 @@ const CLI_PACKAGES = ['@anhlp/alp', '@anhlp/alp-cli'];
 export async function findDaemonEntry({ home = alpHome(), env = process.env, candidates = /** @type {Array<string | undefined>} */ ([]) } = {}) {
   for (const candidate of candidates) if (candidate && await isFile(candidate)) return candidate;
   // The ALP executable carries alpd itself (`alp daemon run`).
-  if (isPackaged()) return process.execPath;
+  const own = executablePath();
+  if (own) return own;
   try {
     const { entry } = JSON.parse(await readFile(daemonPaths(home).install, 'utf8'));
     if (typeof entry === 'string' && await isFile(entry)) return entry;
@@ -720,7 +721,7 @@ export async function startIntegration(nameOrOptions = 'web') {
   // is the generic contract: the entry writes its own log (the path its error messages advertise) and
   // keeps the process alive as a service. `--register` still prints to stdout and is not passed here.
   // alp-web may be the ALP executable itself (`alp web serve`); other integrations are scripts.
-  const launch = name === 'web' ? entryCommand(entry, 'web', ['--service', ...args]) : entryCommand(entry, 'web', ['--service', ...args], process.execPath, { scriptOnly: true });
+  const launch = name === 'web' ? entryCommand(entry, 'web', ['--service', ...args]) : entryCommand(entry, 'web', ['--service', ...args], undefined, { scriptOnly: true });
   const child = spawn(launch.command, launch.args, { stdio: 'ignore', detached: true, env: { ...process.env, ALP_HOME: home } });
   let spawnError = null;
   child.on('error', error => { spawnError = error; });

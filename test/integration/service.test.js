@@ -54,6 +54,35 @@ test('the service keeps alpd up after a crash but not after a clean stop, with t
   }
 });
 
+test('a service for the ALP executable runs `alp daemon run --service`, and alpd is found as the executable (t-1e02)', async t => {
+  const home = '/tmp/alp-binary-home';
+  const env = { PATH: '/usr/bin' };
+  const plist = serviceDefinition(serviceFor({ home, env, platform: 'darwin', uid: 501 }), { home, entry: '/Users/u/.alp/bin/alp', execPath: '/opt/node', env });
+  assert.match(plist, /<key>ProgramArguments<\/key>\s*<array>\s*<string>\/Users\/u\/\.alp\/bin\/alp<\/string>\s*<string>daemon<\/string>\s*<string>run<\/string>\s*<string>--service<\/string>\s*<\/array>/);
+  assert.doesNotMatch(plist, /\/opt\/node/);
+  const unit = serviceDefinition(serviceFor({ home, env, platform: 'linux' }), { home, entry: '/home/u/.alp/bin/alp', execPath: '/opt/node', env });
+  assert.match(unit, /^ExecStart="\/home\/u\/\.alp\/bin\/alp" "daemon" "run" "--service"$/m);
+
+  // findDaemonEntry: an install record naming the executable, else the executable on PATH (not a shell wrapper named alp).
+  const directory = await (await import('node:fs/promises')).realpath(await mkdtemp(path.join(tmpdir(), 'alp-find-binary-')));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { findDaemonEntry } = await import('../../packages/client/src/index.js');
+  const bin = path.join(directory, 'bin');
+  const alp = path.join(bin, process.platform === 'win32' ? 'alp.exe' : 'alp');
+  await (await import('node:fs/promises')).mkdir(bin);
+  await writeFile(alp, '#!/bin/sh\nexec node /somewhere/cli.js "$@"\n');
+  const empty = path.join(directory, 'home');
+  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), undefined, 'a shell wrapper is not the ALP executable');
+  await writeFile(alp, Buffer.concat([Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.alloc(64)]));
+  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), alp, 'a Mach-O alp on PATH');
+  await writeFile(alp, Buffer.concat([Buffer.from('\x7fELF', 'latin1'), Buffer.alloc(64)]));
+  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), alp, 'an ELF alp on PATH');
+  const recorded = path.join(directory, 'recorded');
+  await (await import('node:fs/promises')).mkdir(recorded, { mode: 0o700 });
+  await writeFile(path.join(recorded, 'alpd.json'), JSON.stringify({ entry: alp, version: '1' }));
+  assert.equal(await findDaemonEntry({ home: recorded, env: { PATH: '' } }), alp, 'the install record may name the executable');
+});
+
 test('alp daemon install runs alpd under its service until uninstall', { timeout: 30_000, skip: process.platform === 'win32' && 'Windows has no service manager here (serviceFor is undefined) and the stand-in manager is an sh script' }, async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-svc-'));
   const home = path.join(directory, 'home');

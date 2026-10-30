@@ -93,6 +93,9 @@ export function scriptCommand(script, args = []) {
   return { command: process.execPath, args: [script, ...args] };
 }
 
+/** The ALP executable's path when this process is it, else undefined. */
+export function executablePath() { return isPackaged() ? process.execPath : undefined; }
+
 /** Where this process's own entry lives: the executable when packaged, else `script`. @param {string} script */
 export function selfEntry(script) { return isPackaged() ? process.execPath : script; }
 
