@@ -2,6 +2,7 @@ import * as React from 'react';
 import { cn } from '../../lib/utils';
 import { LINE_LIMIT, asText, clipLines, detailKind, editDiff, relativePath, safeLink, splitLines, type DiffLine } from '../../lib/tool-calls.js';
 import { RichText } from '../RichText';
+import { Tokens, useHighlightedLines } from '../../lib/syntax';
 
 /**
  * The open body of a tool call, per detail type as Paseo's tool-call-details.tsx (b63a325): a
@@ -16,7 +17,7 @@ type Item = { name?: string; status?: 'running' | 'completed' | 'failed'; error?
 /** A monospace block as Paseo's tool detail shows one: full bleed on surface 1, scrolls both ways. */
 export function Code({ children, tone }: { children: React.ReactNode; tone?: 'error' }) {
   return (
-    <pre className={cn('max-h-[360px] overflow-auto bg-card p-3 font-mono text-[12px] leading-[18px] whitespace-pre', tone === 'error' ? 'text-destructive' : 'text-foreground')}>{children}</pre>
+    <pre className={cn('max-h-[360px] overflow-auto bg-card p-3 font-mono text-(length:--code-font-size) leading-[1.5] whitespace-pre', tone === 'error' ? 'text-destructive' : 'text-foreground')}>{children}</pre>
   );
 }
 
@@ -33,11 +34,13 @@ function useClip<T>(lines: T[]) {
   return { shown, more };
 }
 
-const scroller = 'max-h-[360px] overflow-auto bg-card font-mono text-[12px] leading-[18px] text-foreground';
+const scroller = 'max-h-[360px] overflow-auto bg-card font-mono text-(length:--code-font-size) leading-[1.5] text-foreground';
 
-/** Text as lines, with a line-number gutter from `startLine` when given (Paseo's HighlightedLines without the syntax colours). */
-function TextLines({ text, startLine, testId }: { text: string; startLine?: number; testId?: string }) {
+/** Text as lines, with a line-number gutter from `startLine` when given; a file's lines in its syntax colors (Paseo's HighlightedLines). */
+function TextLines({ text, startLine, testId, filename }: { text: string; startLine?: number; testId?: string; filename?: string }) {
   const lines = React.useMemo(() => splitLines(text), [text]);
+  const highlighted = useHighlightedLines(React.useMemo(() => lines.join('\n'), [lines]), filename);
+  const tokens = highlighted?.length === lines.length ? highlighted : null;
   const { shown, more } = useClip(lines);
   const width = startLine != null ? String(startLine + lines.length - 1).length : 0;
   return (
@@ -46,7 +49,7 @@ function TextLines({ text, startLine, testId }: { text: string; startLine?: numb
         {shown.map((line, index) => (
           <div key={index} className="flex whitespace-pre px-3">
             {startLine != null ? <span aria-hidden className="mr-3 shrink-0 select-none text-right text-muted-foreground tabular-nums" style={{ minWidth: `${width}ch` }}>{startLine + index}</span> : null}
-            <span>{line || ' '}</span>
+            <span>{tokens?.[index]?.length ? <Tokens tokens={tokens[index]} /> : line || ' '}</span>
           </div>
         ))}
       </div>
@@ -68,6 +71,14 @@ const SIGN: Record<DiffLine['type'], string> = { add: '+', remove: '-', context:
 /** Paseo's DiffViewer: removed and added lines tinted, with old and new line numbers when they are the file's. */
 function DiffView({ detail }: { detail: any }) {
   const { lines, numbered } = React.useMemo(() => editDiff(detail), [detail]);
+  // The code lines highlighted together, in the file's syntax (meta, hunk and file rows stay plain).
+  const code = React.useMemo(() => lines.filter(line => line.type === 'add' || line.type === 'remove' || line.type === 'context'), [lines]);
+  const highlighted = useHighlightedLines(React.useMemo(() => code.map(line => line.text).join('\n'), [code]), typeof detail?.filePath === 'string' ? detail.filePath : null);
+  const tokensOf = React.useMemo(() => {
+    const map = new Map<DiffLine, NonNullable<typeof highlighted>[number]>();
+    if (highlighted?.length === code.length) code.forEach((line, index) => map.set(line, highlighted[index]));
+    return map;
+  }, [code, highlighted]);
   const { shown, more } = useClip(lines);
   if (!lines.length) return <Empty>No changes to show.</Empty>;
   const width = numbered ? String(Math.max(0, ...lines.map(line => Math.max(line.oldLine ?? 0, line.newLine ?? 0)))).length : 0;
@@ -83,7 +94,7 @@ function DiffView({ detail }: { detail: any }) {
           <div key={index} className={cn('flex whitespace-pre px-3', DIFF_ROW[line.type])} data-diff={line.type}>
             {gutter(line.oldLine)}{gutter(line.newLine)}
             <span aria-hidden className={cn('w-[2ch] shrink-0 select-none', line.type === 'add' ? 'text-dot-success' : line.type === 'remove' ? 'text-destructive' : 'text-muted-foreground')}>{SIGN[line.type]}</span>
-            <span>{line.text || ' '}</span>
+            <span>{tokensOf.get(line)?.length ? <Tokens tokens={tokensOf.get(line)!} /> : line.text || ' '}</span>
           </div>
         ))}
       </div>
@@ -144,7 +155,7 @@ function FetchBody({ detail }: { detail: any }) {
   const result = typeof detail.result === 'string' ? detail.result : '';
   return (
     <>
-      <p className="bg-card px-3 py-2.5 font-mono text-[12px] leading-[18px]">
+      <p className="bg-card px-3 py-2.5 font-mono text-(length:--code-font-size) leading-[1.5]">
         <OutLink url={String(detail.url ?? '')} />{typeof detail.code === 'number' ? <span className="ml-2 text-muted-foreground">{detail.code}</span> : null}
       </p>
       {typeof detail.prompt === 'string' && detail.prompt.trim() ? <Section title="Prompt"><p className="bg-card px-3 pb-2.5 pt-1 text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">{detail.prompt}</p></Section> : null}
@@ -193,10 +204,10 @@ export function ToolCallBody({ item, roots }: { item: Item; roots: string[] }) {
       break;
     }
     case 'read':
-      if (hasBody(kind, detail)) body = <TextLines text={detail.content} startLine={Number.isInteger(detail.offset) && detail.offset > 0 ? detail.offset : 1} testId="tool-file-content" />;
+      if (hasBody(kind, detail)) body = <TextLines text={detail.content} startLine={Number.isInteger(detail.offset) && detail.offset > 0 ? detail.offset : 1} testId="tool-file-content" filename={detail.filePath} />;
       break;
     case 'write':
-      if (hasBody(kind, detail)) body = <TextLines text={detail.content} startLine={1} testId="tool-file-content" />;
+      if (hasBody(kind, detail)) body = <TextLines text={detail.content} startLine={1} testId="tool-file-content" filename={detail.filePath} />;
       break;
     case 'edit':
       if (hasBody(kind, detail)) body = <DiffView detail={detail} />;

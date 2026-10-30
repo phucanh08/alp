@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { WorktreeActions } from './WorktreeActions';
-import { Archive, ChevronDown, ChevronRight, History, LogOut, MoreVertical, Pencil, Plus, Pin, RefreshCw, Search, Server, Settings, Settings2, X } from 'lucide-react';
+import { Archive, ChevronDown, ChevronRight, History, ListChecks, LogOut, MoreVertical, Pencil, Plus, Pin, RefreshCw, Search, Server, Settings, Settings2, X } from 'lucide-react';
 import { attentionReason, needsInput, type SessionSummary } from '../lib/controller.js';
 import { sessionBucket } from '../lib/attention.js';
 import { can } from '../lib/gateway.js';
@@ -9,6 +9,7 @@ import { Spinner } from '../components/ui/spinner';
 import { baseName, relativeTime, sessionName } from '../lib/format';
 import { cn } from '../lib/utils';
 import { isMacPlatform, shortcutLabel } from '../lib/shortcuts.js';
+import type { SidebarItemId } from '../lib/preferences.js';
 import { useAppState, useController } from './store';
 import { StatusIndicator, type Bucket } from './status';
 
@@ -42,7 +43,7 @@ function NavRow({ icon: Icon, label, onClick, disabled, title, active, shortcut,
         <Icon aria-hidden className="size-[18px] shrink-0 md:size-3.5" />
         <span className="min-w-0 flex-1 truncate">{label}</span>
         {/* Paseo's shortcut badge: shown while the row is hovered, on screens with a keyboard. */}
-        {shortcut ? <kbd aria-hidden className="hidden rounded-md bg-secondary/50 px-1 py-px font-sans text-[11px] leading-4 text-muted-foreground md:group-hover:inline">{shortcut}</kbd> : null}
+        {shortcut ? <kbd aria-hidden className="hidden rounded-md bg-secondary/50 px-1 py-px font-sans text-[length:calc(11px*var(--ui-scale))] leading-4 text-muted-foreground md:group-hover:inline">{shortcut}</kbd> : null}
       </button>
     </div>
   );
@@ -119,7 +120,7 @@ function ProjectRow({ path, expanded, canWrite, onToggle, onNewSession }: {
       <button type="button" onClick={onToggle} aria-expanded={expanded} title={path} data-testid="project-row" data-workspace={path}
         className={cn('flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg p-2 text-left md:min-h-9', canWrite && 'pr-9', focusRing)}>
         <span aria-hidden className="flex h-5 w-4 shrink-0 items-center justify-center">
-          <span className="flex size-4 items-center justify-center rounded-[4px] text-[9px] font-medium leading-none text-white group-hover:hidden group-focus-within:hidden"
+          <span className="flex size-4 items-center justify-center rounded-[4px] text-[length:calc(9px*var(--ui-scale))] font-medium leading-none text-white group-hover:hidden group-focus-within:hidden"
             style={{ backgroundColor: identityColor(path) }}>{name.slice(0, 1).toUpperCase()}</span>
           {expanded ? <ChevronDown className="hidden size-3.5 text-muted-foreground group-hover:block group-focus-within:block" />
             : <ChevronRight className="hidden size-3.5 text-muted-foreground group-hover:block group-focus-within:block" />}
@@ -146,8 +147,11 @@ function FooterButton({ label, title, onClick, children }: { label: string; titl
   );
 }
 
-export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavigate, onClose, onHistory, historyOpen, onOpenSession, searchRequest, onSearchRequestHandled }: {
+export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavigate, onClose, onHistory, historyOpen, onTasks, tasksOpen, onOpenSession, searchRequest, onSearchRequestHandled }: {
   onNewSession: () => void;
+  /** The footer's Tasks row (Settings › Sidebar): ALP's tasks full screen. */
+  onTasks?: () => void;
+  tasksOpen?: boolean;
   onHistory: () => void;
   historyOpen: boolean;
   /** A session row was chosen: the workspace shows it (History closes). */
@@ -202,14 +206,23 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavig
   }, [searchRequest]);
   const host = `${principal?.label ?? 'Access token'} · ${connection.hostname ?? connection.gateway.replace(/^https?:\/\//, '')}${online ? '' : ' · reconnecting'}`;
 
+  const navItem = (id: SidebarItemId) => {
+    switch (id) {
+      case 'new-session': return <NavRow icon={Plus} label="New session" onClick={() => { onNewSession(); onNavigate(); }} disabled={!workspace || !canWrite || !online}
+        title={!canWrite ? 'Your access token cannot start sessions.' : undefined} shortcut={shortcutLabel('session.new', mac)} />;
+      case 'history': return <NavRow icon={History} label="History" onClick={() => { onHistory(); onNavigate(); }} active={historyOpen} disabled={!workspace} testId="sidebar-history" />;
+      case 'search': return <SearchRow query={query} onQuery={setQuery} open={searching} onOpen={() => { setSearching(true); setCollapsed(false); }} onClose={closeSearch}
+        focusRequest={searchFocus} />;
+      case 'tasks': return <NavRow icon={ListChecks} label="Tasks" onClick={() => { onTasks?.(); onNavigate(); }} active={tasksOpen} disabled={!workspace || !onTasks} testId="sidebar-tasks" />;
+    }
+  };
+  const footerItems = state.preferences.sidebar.footer.filter(item => item.visible);
+
   return (
     <nav aria-label="Workspaces and sessions" className="relative flex h-full min-h-0 flex-col bg-sidebar">
       <div className="flex shrink-0 flex-col gap-0.5 border-b border-border pb-1.5 pt-2">
-        <NavRow icon={Plus} label="New session" onClick={() => { onNewSession(); onNavigate(); }} disabled={!workspace || !canWrite || !online}
-          title={!canWrite ? 'Your access token cannot start sessions.' : undefined} shortcut={shortcutLabel('session.new', mac)} />
-        <NavRow icon={History} label="History" onClick={() => { onHistory(); onNavigate(); }} active={historyOpen} disabled={!workspace} testId="sidebar-history" />
-        <SearchRow query={query} onQuery={setQuery} open={searching} onOpen={() => { setSearching(true); setCollapsed(false); }} onClose={closeSearch}
-          focusRequest={searchFocus} />
+        {/* Settings › Sidebar › Header orders these and hides any of them (Paseo's sidebar nav items). */}
+        {state.preferences.sidebar.header.filter(item => item.visible).map(item => <React.Fragment key={item.id}>{navItem(item.id)}</React.Fragment>)}
       </div>
       {onClose ? (
         <button type="button" aria-label="Close sessions" onClick={onClose}
@@ -302,6 +315,11 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onNavig
         })}
       </div>
 
+      {footerItems.length ? (
+        <div className="flex shrink-0 flex-col gap-0.5 border-t border-border py-1.5" data-testid="sidebar-footer-items">
+          {footerItems.map(item => <React.Fragment key={item.id}>{navItem(item.id)}</React.Fragment>)}
+        </div>
+      ) : null}
       <div className="flex shrink-0 items-center border-t border-border px-2 py-1.5">
         <FooterButton label="Host connection" title={host} onClick={onSettings}>
           <Server aria-hidden className="!size-[19px] md:!size-[15px]" />

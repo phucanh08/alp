@@ -11,7 +11,7 @@
  *   version: string,
  *   connection: { phase: string, gateway: string, attempt: number, daemonVersion?: string, hostname?: string, capabilities: string[] },
  *   principal?: { id?: string, label?: string, permissions?: string[], modes?: string[] | null, workspaces?: string[] } | null,
- *   preferences: { theme: string, contentWidth: string, toolCalls: string, sendBehavior: string },
+ *   preferences: { theme: string, contentMaxWidth: number | null, chatDisplay: string, sendBehavior: string },
  *   browser?: { userAgent?: string, language?: string, online?: boolean, secure?: boolean, viewport?: string, colorScheme?: string },
  *   now?: Date,
  * }} DiagnosticsInput
@@ -25,8 +25,8 @@ export function diagnosticsSections({ version, connection, principal, preference
     { title: 'App', rows: [
       ['Version', `ALP web v${version}`],
       ['Theme', preferences.theme],
-      ['Content width', preferences.contentWidth],
-      ['Tool calls', preferences.toolCalls],
+      ['Content width', preferences.contentMaxWidth === null ? 'default' : `${preferences.contentMaxWidth}px`],
+      ['Chat display', preferences.chatDisplay],
       ['Default send', preferences.sendBehavior],
     ] },
     { title: 'Browser', rows: [

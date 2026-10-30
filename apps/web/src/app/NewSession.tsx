@@ -231,6 +231,7 @@ export function NewSessionScreen() {
       </div>
       <Composer
         onSend={start}
+        sendShortcut={preferences.sendShortcut}
         onQueue={() => {}}
         onStop={() => {}}
         queued={[]}

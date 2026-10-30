@@ -120,7 +120,7 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
             <li key={entry.path} role="treeitem" aria-expanded={directory ? row.open : undefined} aria-selected={current || undefined}>
               <button type="button" style={indent} title={entry.path}
                 onClick={() => { if (directory) toggle(entry.path); else { openFile(entry.path); onPicked?.(); } }}
-                className={cn('flex w-full min-w-0 items-center gap-1.5 py-1 pr-3 text-left text-[13px]', current ? 'bg-sidebar-selected text-foreground' : 'text-foreground/85 hover:bg-sidebar-hover', focusRing)}
+                className={cn('flex w-full min-w-0 items-center gap-1.5 py-1 pr-3 text-left text-[length:calc(13px*var(--ui-scale))]', current ? 'bg-sidebar-selected text-foreground' : 'text-foreground/85 hover:bg-sidebar-hover', focusRing)}
                 data-testid="files-entry" data-path={entry.path} data-kind={entry.kind}>
                 <ChevronRight aria-hidden className={cn('size-3.5 shrink-0 text-extra-muted transition-transform', !directory && 'invisible', row.open && 'rotate-90')} />
                 <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />

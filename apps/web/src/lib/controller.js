@@ -2946,6 +2946,21 @@ export class Controller {
     this.#set(state => ({ queued: [...state.queued, { id: newMessageId(), rootId: root, text: body }] }));
   }
 
+  /**
+   * Default send Interrupt: the message goes first in the queue and the running turn stops; the
+   * queue sends it once the root is idle (Paseo's send that interrupts the active run).
+   * @param {string} text
+   */
+  interruptAndSend(text) {
+    const root = this.#state.selected;
+    const body = String(text ?? '');
+    if (!root || !body.trim()) return;
+    const blocked = this.driveBlock();
+    if (blocked) throw new ConfigurationError(blocked);
+    this.#set(state => ({ queued: [{ id: newMessageId(), rootId: root, text: body }, ...state.queued] }));
+    void this.interrupt();
+  }
+
   /** Takes a queued message back out, for the composer to edit. @param {string} id @returns {string | null} */
   editQueued(id) {
     const entry = this.#state.queued.find(item => item.id === id);
@@ -3325,27 +3340,22 @@ export class Controller {
   // ---- settings ----------------------------------------------------------------------------
 
   /**
-   * What Enter does while the agent works (Paseo's Sending setting): steer the running turn, or
-   * queue; Cmd/Ctrl+Enter does the other. Kept for this tab only.
-   * @param {'steer' | 'queue'} sendBehavior
+   * What sending does while the agent works (Paseo's Default send): interrupt it, steer the
+   * running turn, or queue. Saved in this browser.
+   * @param {import('./preferences.js').SendBehavior} sendBehavior
    */
   setSendBehavior(sendBehavior) {
     this.#setPreferences({ sendBehavior });
   }
 
-  /** Paseo's Appearance › Theme: light, dark, or the system's. @param {'system' | 'light' | 'dark'} theme */
+  /** Paseo's Appearance › Theme. @param {import('./preferences.js').ThemePreference} theme */
   setTheme(theme) {
     this.#setPreferences({ theme });
   }
 
-  /** Appearance › Content width: the chat column's maximum width. @param {import('./preferences.js').ContentWidth} contentWidth */
-  setContentWidth(contentWidth) {
-    this.#setPreferences({ contentWidth });
-  }
-
-  /** Chat › Tool calls: whether tool call rows start open. @param {import('./preferences.js').ToolCallDisplay} toolCalls */
-  setToolCalls(toolCalls) {
-    this.#setPreferences({ toolCalls });
+  /** Any app setting, as Paseo's updateSettings: validated as stored, unknown fields dropped. @param {Partial<import('./preferences.js').Preferences>} change */
+  updatePreferences(change) {
+    this.#setPreferences(change);
   }
 
   /** @param {Partial<import('./preferences.js').Preferences>} change */
@@ -3359,11 +3369,6 @@ export class Controller {
   /** The New session choices that started a session, for the next one (as Paseo's form preferences). @param {{ team?: string, mode?: string, model?: string, thinking?: string }} used */
   #rememberNewSession(used) {
     this.#setPreferences({ newSession: rememberChoices(this.#state.preferences.newSession, used) });
-  }
-
-  /** @param {Partial<import('./preferences.js').TerminalPreferences>} change */
-  setTerminalPreferences(change) {
-    this.#setPreferences({ terminal: { ...this.#state.preferences.terminal, ...change } });
   }
 
   /** Back to the defaults, in state and storage (Paseo's reset settings). */

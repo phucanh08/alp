@@ -1,12 +1,17 @@
 import * as React from 'react';
 import {
-  ArrowLeft, Ban, Blocks, BookOpen, Bot, Boxes, ChevronRight, CircleCheck, Code, FolderGit2, Gauge, Info, MessageSquare, Network,
-  PanelLeft, Palette, Pin, Plug, Server, Settings as SettingsIcon, Smartphone, Sparkles, SquareTerminal, Stethoscope, Users, Webhook,
+  ArrowDown, ArrowLeft, ArrowUp, Ban, Blocks, BookOpen, Bot, Boxes, ChevronRight, CircleCheck, Code, Files as FilesIcon, FolderGit2, Gauge, History, Info,
+  ListChecks, MessageSquare, Network, PanelLeft, Palette, Pin, Plug, Plus, Search, Server, Settings as SettingsIcon, Smartphone, Sparkles, SquareTerminal,
+  Stethoscope, Users, Webhook,
 } from 'lucide-react';
 import { can } from '../lib/gateway.js';
-import { diagnosticsSections, diagnosticsText } from '../lib/diagnostics.js';
-import type { ContentWidth, TerminalPreferences, ToolCallDisplay } from '../lib/preferences.js';
-import { TERMINAL_MESSAGES, TERMINAL_NOTICE, terminalGate } from '../lib/terminal.js';
+import { diagnosticsSections, diagnosticsText, type DiagnosticsInput } from '../lib/diagnostics.js';
+import { LIMITS, type ChatDisplay, type SendBehavior, type SendShortcut, type SidebarItem, type SidebarItemId, type SyntaxTheme, type ThemePreference } from '../lib/preferences.js';
+import { DEFAULT_MONO_FONT_STACK, DEFAULT_UI_FONT_STACK, THEME_OPTIONS, contentWidth } from '../lib/theme';
+import { SYNTAX_THEME_OPTIONS } from '../lib/syntax';
+import { TERMINAL_MESSAGES, terminalGate } from '../lib/terminal.js';
+import { Switch } from '../components/ui/switch';
+import { RichText } from './RichText';
 import { describe } from '../lib/errors.js';
 import { Button } from '../components/ui/button';
 import { Input, NativeSelect } from '../components/ui/input';
@@ -26,7 +31,7 @@ import { useNotificationPermission } from './attention';
 
 type Icon = typeof Server;
 type Page =
-  | 'general' | 'appearance' | 'sidebar' | 'chat' | 'terminal' | 'editor' | 'diagnostics' | 'about'
+  | 'general' | 'appearance' | 'sidebar' | 'chat' | 'terminal' | 'editor' | 'files' | 'diagnostics' | 'about'
   | 'host' | 'projects' | 'connections' | 'pair-device' | 'alp-templates' | 'alp-agents' | 'alp-skills' | 'alp-hooks' | 'alp-mcp'
   | 'metadata' | 'workspaces' | 'providers' | 'usage' | 'terminals' | 'plugins';
 
@@ -37,6 +42,7 @@ const APP_PAGES: Array<{ id: Page; label: string; icon: Icon }> = [
   { id: 'chat', label: 'Chat', icon: MessageSquare },
   { id: 'terminal', label: 'Terminal', icon: SquareTerminal },
   { id: 'editor', label: 'Editor', icon: Code },
+  { id: 'files', label: 'Files', icon: FilesIcon },
   { id: 'diagnostics', label: 'Diagnostics', icon: Stethoscope },
   { id: 'about', label: 'About', icon: Info },
 ];
@@ -60,6 +66,25 @@ const HOST_PAGES: Array<{ id: Page; label: string; icon: Icon }> = [
 ];
 
 const LABEL = Object.fromEntries([...APP_PAGES, ...HOST_PAGES].map(page => [page.id, page.label])) as Record<Page, string>;
+
+/** The rows Settings › Sidebar lists, as the sidebar shows them. */
+const SIDEBAR_ITEM_LABELS: Record<SidebarItemId, { label: string; icon: Icon }> = {
+  'new-session': { label: 'New session', icon: Plus },
+  history: { label: 'History', icon: History },
+  search: { label: 'Search', icon: Search },
+  tasks: { label: 'Tasks', icon: ListChecks },
+};
+
+/** Paseo's appearance preview: content text, a code block in the highlight theme and the code font. */
+const PREVIEW = 'Readable **content** and `code` preview.\n\n```ts\n// The highlight theme, code font and code size\nexport function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n```';
+
+function AppearancePreview() {
+  return (
+    <section className="mb-6 rounded-lg border border-border bg-background p-4" aria-label="Live preview of content typography, syntax theme, and code font" data-testid="appearance-preview">
+      <RichText text={PREVIEW} />
+    </section>
+  );
+}
 
 const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset';
 
@@ -132,7 +157,21 @@ function NotificationsRow() {
   );
 }
 
-function General() {
+/** Paseo's sending copy (en.ts settings.general.defaultSend), per send shortcut. */
+function sendHint(behavior: SendBehavior, shortcut: SendShortcut, mod: string) {
+  if (shortcut === 'mod-enter') {
+    return behavior === 'interrupt' ? `When the agent is running, ${mod}+Enter interrupts. Enter inserts a new line.`
+      : behavior === 'queue' ? `When the agent is running, ${mod}+Enter queues. Enter inserts a new line.`
+      : `When the agent is running, ${mod}+Enter steers the active turn. Enter inserts a new line.`;
+  }
+  return behavior === 'interrupt' ? 'When the agent is running, Enter interrupts. Command/Ctrl+Enter queues.'
+    : behavior === 'queue' ? 'When the agent is running, Enter queues. Command/Ctrl+Enter submits.'
+    : 'When the agent is running, Enter steers the active turn. Command/Ctrl+Enter queues.';
+}
+
+const MOD_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl';
+
+function General({ mobile }: { mobile: boolean }) {
   const controller = useController();
   const { preferences } = useAppState();
   return (
@@ -143,15 +182,20 @@ function General() {
         </Row>
       </Section>
       <Section title="Sending">
-        <Row first title="Default send" hint={`${preferences.sendBehavior === 'steer'
-          ? 'When the agent is running, Enter steers the active turn. Command/Ctrl+Enter queues.'
-          : 'When the agent is running, Enter queues. Command/Ctrl+Enter steers the active turn.'} Saved in this browser.`}>
-          <Select label="Default send" value={preferences.sendBehavior} onChange={value => controller.setSendBehavior(value)}
-            options={[{ value: 'steer', label: 'Steer' }, { value: 'queue', label: 'Queue' }]} />
+        {/* Paseo offers the send shortcut where keyboard shortcuts are (not on a phone). */}
+        {!mobile ? (
+          <Row first title="Send shortcut">
+            <Select<SendShortcut> label="Send shortcut" value={preferences.sendShortcut} onChange={sendShortcut => controller.updatePreferences({ sendShortcut })}
+              options={[{ value: 'enter', label: 'Enter' }, { value: 'mod-enter', label: `${MOD_KEY}+Enter` }]} />
+          </Row>
+        ) : null}
+        <Row first={mobile} title="Default send" hint={sendHint(preferences.sendBehavior, mobile ? 'enter' : preferences.sendShortcut, MOD_KEY)}>
+          <Select<SendBehavior> label="Default send" value={preferences.sendBehavior} onChange={value => controller.setSendBehavior(value)}
+            options={[{ value: 'interrupt', label: 'Interrupt' }, { value: 'steer', label: 'Steer' }, { value: 'queue', label: 'Queue' }]} />
         </Row>
       </Section>
       <Section title="This browser">
-        <Row first title="Saved preferences" hint="Default send, the theme, content width, tool call and terminal display, and your last New session choices (team, model, thinking, permissions) stay in this browser. The access token never does.">
+        <Row first title="Saved settings" hint="Every App setting and your last New session choices (team, model, thinking, permissions) stay in this browser. The access token never does.">
           <Button size="sm" variant="secondary" onClick={() => controller.resetPreferences()}>Reset</Button>
         </Row>
         <NotificationsRow />
@@ -160,24 +204,128 @@ function General() {
   );
 }
 
+/**
+ * A text or number field that commits on blur or Enter (Paseo's settings fields): a number is
+ * clamped to its limits, an invalid one goes back to the value in effect.
+ */
+function CommitField({ label, value, placeholder, numeric, limits, width = 'w-28', onCommit }: {
+  label: string; value: string; placeholder?: string; numeric?: boolean; limits?: readonly number[]; width?: string; onCommit: (value: string) => void;
+}) {
+  const [draft, setDraft] = React.useState(value);
+  React.useEffect(() => setDraft(value), [value]);
+  const commit = () => {
+    if (!numeric || !limits) { if (draft.trim() !== value) onCommit(draft.trim()); else setDraft(value); return; }
+    const parsed = Number.parseInt(draft, 10);
+    if (!Number.isFinite(parsed)) { setDraft(value); return; }
+    const next = String(Math.min(limits[1], Math.max(limits[0], parsed)));
+    setDraft(next);
+    if (next !== value) onCommit(next);
+  };
+  return (
+    <Input aria-label={label} value={draft} placeholder={placeholder} inputMode={numeric ? 'numeric' : undefined}
+      onChange={event => setDraft(numeric ? event.target.value.replace(/[^\d]/g, '') : event.target.value)}
+      onBlur={commit} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); commit(); } }}
+      onFocus={event => event.target.select()} className={cn('h-8', width, numeric && 'text-right tabular-nums')} />
+  );
+}
+
+function SizeRow({ title, hint, label, value, limits, onCommit }: { title: string; hint: string; label: string; value: number; limits: readonly number[]; onCommit: (value: number) => void }) {
+  return (
+    <Row title={title} hint={hint}>
+      <span className="flex items-center gap-2">
+        <CommitField label={label} value={String(value)} numeric limits={limits} width="w-16" onCommit={next => onCommit(Number(next))} />
+        <span className="text-xs">px</span>
+      </span>
+    </Row>
+  );
+}
+
 function Appearance() {
   const controller = useController();
   const { preferences } = useAppState();
+  const swatch = THEME_OPTIONS.find(option => option.value === preferences.theme)?.swatch;
   return (
     <>
       <Section title="Theme">
-        <Row first title="Theme" hint="Paseo's light and dark themes; System follows this device. Saved in this browser.">
-          <Select label="Theme" value={preferences.theme} onChange={value => controller.setTheme(value)}
-            options={[{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} />
+        <Row first title="Theme">
+          <span className="flex items-center gap-2">
+            {swatch ? <span aria-hidden className="size-3 rounded-full border border-border" style={{ backgroundColor: swatch }} data-testid="theme-swatch" /> : null}
+            <NativeSelect aria-label="Theme" value={preferences.theme} onChange={event => controller.setTheme(event.target.value as ThemePreference)}
+              className="h-8 w-auto rounded-lg border-border bg-transparent pl-3 text-sm text-foreground">
+              {THEME_OPTIONS.filter(option => option.group === 'primary').map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+              <option disabled>──────</option>
+              {THEME_OPTIONS.filter(option => option.group === 'variant').map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </NativeSelect>
+          </span>
         </Row>
+      </Section>
+      <Section title="Fonts">
+        <Row first title="Interface font" hint="Used across the app. Leave empty for the system default">
+          <CommitField label="Interface font family" value={preferences.uiFontFamily} placeholder={DEFAULT_UI_FONT_STACK} width="w-64 max-w-full"
+            onCommit={uiFontFamily => controller.updatePreferences({ uiFontFamily })} />
+        </Row>
+        <SizeRow title="Interface size" hint="Used for navigation, controls, and labels" label="Interface font size" value={preferences.uiFontSize} limits={LIMITS.uiFontSize}
+          onCommit={uiFontSize => controller.updatePreferences({ uiFontSize })} />
+        <SizeRow title="Content size" hint="Used for chat text and rendered Markdown" label="Content font size" value={preferences.contentFontSize} limits={LIMITS.contentFontSize}
+          onCommit={contentFontSize => controller.updatePreferences({ contentFontSize })} />
+        <Row title="Code font" hint="Used in code, diffs, and the terminal output. Leave empty for the system default">
+          <CommitField label="Code font family" value={preferences.monoFontFamily} placeholder={DEFAULT_MONO_FONT_STACK} width="w-64 max-w-full"
+            onCommit={monoFontFamily => controller.updatePreferences({ monoFontFamily })} />
+        </Row>
+        <SizeRow title="Code size" hint="Used for code, diffs, and terminal output" label="Code font size" value={preferences.codeFontSize} limits={LIMITS.codeFontSize}
+          onCommit={codeFontSize => controller.updatePreferences({ codeFontSize })} />
       </Section>
       <Section title="Layout">
-        <Row first title="Content width" hint="How wide the chat, history, task and file columns grow on a large screen. Saved in this browser.">
-          <Select<ContentWidth> label="Content width" value={preferences.contentWidth} onChange={value => controller.setContentWidth(value)}
-            options={[{ value: 'default', label: 'Default' }, { value: 'wide', label: 'Wide' }, { value: 'full', label: 'Full width' }]} />
+        <Row first title="Content width" hint="Max width of chat and Markdown files on wide screens">
+          <span className="flex items-center gap-2">
+            {preferences.contentMaxWidth !== null ? <Button size="sm" variant="ghost" aria-label="Reset content width to default" onClick={() => controller.updatePreferences({ contentMaxWidth: null })}>Reset</Button> : null}
+            <CommitField label="Content width in pixels" value={String(contentWidth(preferences))} numeric limits={LIMITS.contentMaxWidth} width="w-20"
+              onCommit={next => controller.updatePreferences({ contentMaxWidth: Number(next) })} />
+            <span className="text-xs">px</span>
+          </span>
         </Row>
       </Section>
-      <Unavailable what="Paseo's other themes, fonts, text sizes and code highlighting" why="This beta keeps Paseo's defaults for them." />
+      <Section title="Syntax">
+        <Row first title="Highlight theme" hint="Colors for code, independent of the app theme">
+          <Select<SyntaxTheme> label="Highlight theme" value={preferences.syntaxTheme} onChange={syntaxTheme => controller.updatePreferences({ syntaxTheme })} options={SYNTAX_THEME_OPTIONS} />
+        </Row>
+      </Section>
+      <AppearancePreview />
+    </>
+  );
+}
+
+/** Paseo's Settings › Sidebar: per section, each row with Move up, Move down and a show switch. */
+function SidebarSettings() {
+  const controller = useController();
+  const { preferences } = useAppState();
+  const change = (section: 'header' | 'footer', rows: SidebarItem[]) => controller.updatePreferences({ sidebar: { ...preferences.sidebar, [section]: rows } });
+  const move = (section: 'header' | 'footer', index: number, by: -1 | 1) => {
+    const rows = [...preferences.sidebar[section]];
+    [rows[index], rows[index + by]] = [rows[index + by], rows[index]];
+    change(section, rows);
+  };
+  const card = (section: 'header' | 'footer', title: string, info: string) => (
+    <Section title={title}>
+      <p className="px-4 pt-3 text-xs text-muted-foreground">{info}</p>
+      {preferences.sidebar[section].map((row, index, rows) => {
+        const item = SIDEBAR_ITEM_LABELS[row.id];
+        return (
+          <div key={row.id} className={cn('flex items-center gap-2 p-4', index > 0 && 'border-t border-border')} data-testid={`sidebar-nav-item-${row.id}`}>
+            <item.icon aria-hidden strokeWidth={1.75} className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-sm text-foreground">{item.label}</span>
+            <Button size="icon" variant="ghost" className="size-7" aria-label={`Move ${item.label} up`} disabled={index === 0} onClick={() => move(section, index, -1)}><ArrowUp aria-hidden /></Button>
+            <Button size="icon" variant="ghost" className="size-7" aria-label={`Move ${item.label} down`} disabled={index === rows.length - 1} onClick={() => move(section, index, 1)}><ArrowDown aria-hidden /></Button>
+            <Switch checked={row.visible} aria-label={item.label} onCheckedChange={visible => change(section, rows.map(other => other.id === row.id ? { ...other, visible } : other))} />
+          </div>
+        );
+      })}
+    </Section>
+  );
+  return (
+    <>
+      {card('header', 'Header', 'Choose which items appear at the top of the sidebar and in what order')}
+      {card('footer', 'Footer', 'Choose which rows appear at the bottom of the sidebar and in what order. The host and Settings row always shows')}
     </>
   );
 }
@@ -187,47 +335,39 @@ function Chat() {
   const { preferences } = useAppState();
   return (
     <>
-      <Section title="Tool calls">
-        <Row first title="Tool call details" hint={`${preferences.toolCalls === 'expanded'
-          ? 'Tool calls open with their command, diff or output shown; click one to close it.'
-          : 'Each tool call is one quiet line; click it to see its command, diff or output.'} Saved in this browser.`}>
-          <Select<ToolCallDisplay> label="Tool call details" value={preferences.toolCalls} onChange={value => controller.setToolCalls(value)}
-            options={[{ value: 'collapsed', label: 'Collapsed' }, { value: 'expanded', label: 'Expanded' }]} />
+      <Section title="Detail level">
+        <Row first title="Chat display" hint="How much of an agent's work the chat shows">
+          <Select<ChatDisplay> label="Chat display" value={preferences.chatDisplay} onChange={chatDisplay => controller.updatePreferences({ chatDisplay })}
+            options={[{ value: 'full', label: 'Full' }, { value: 'collapseToolCalls', label: 'Collapse tool calls' }, { value: 'collapseTurns', label: 'Collapse turns' }]} />
+        </Row>
+        <Row title="Chat outline" hint="Show an outline for jumping between prompts">
+          <Switch checked={preferences.chatOutline} aria-label="Chat outline" onCheckedChange={chatOutline => controller.updatePreferences({ chatOutline })} />
         </Row>
       </Section>
-      <Unavailable what="Paseo's other chat display settings" why="Reasoning and the chat outline show as Paseo's defaults." />
+      <Unavailable what="Always expand reasoning" why="ALP's hosts do not send the agents' reasoning, so there is nothing to expand." />
     </>
   );
 }
 
-const TERMINAL_FONTS: Array<{ value: TerminalPreferences['fontFamily']; label: string }> = [
-  { value: 'mono', label: 'Monospace' }, { value: 'menlo', label: 'Menlo' }, { value: 'consolas', label: 'Consolas' },
-];
-const TERMINAL_SIZES = Array.from({ length: 15 }, (_, index) => String(index + 10));
-
 function Terminal() {
   const controller = useController();
   const { preferences } = useAppState();
-  const prefs = preferences.terminal;
   return (
-    <>
-      <Section title="Display">
-        <Row first title="Font" hint="Every open terminal follows at once. Saved in this browser.">
-          <Select label="Terminal font" value={prefs.fontFamily} onChange={value => controller.setTerminalPreferences({ fontFamily: value })} options={TERMINAL_FONTS} />
-        </Row>
-        <Row title="Font size">
-          <Select label="Terminal font size" value={String(prefs.fontSize)} onChange={value => controller.setTerminalPreferences({ fontSize: Number(value) })}
-            options={TERMINAL_SIZES.map(size => ({ value: size, label: `${size} px` }))} />
-        </Row>
-        <Row title="Colors">
-          <Select<TerminalPreferences['theme']> label="Terminal theme" value={prefs.theme} onChange={value => controller.setTerminalPreferences({ theme: value })}
-            options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }]} />
-        </Row>
-      </Section>
-      <Section title="Where it runs">
-        <Row first title="Shell on the host" hint={`${TERMINAL_NOTICE} Open one from the + menu (Terminal). Whether this host allows it is under Host › Terminals.`} />
-      </Section>
-    </>
+    <Section title="Terminal">
+      <Row first title="Terminal scrollback" hint="Lines kept in the built-in terminal buffer">
+        <CommitField label="Terminal scrollback lines" value={String(preferences.terminalScrollback)} numeric limits={LIMITS.terminalScrollback}
+          onCommit={next => controller.updatePreferences({ terminalScrollback: Number(next) })} />
+      </Row>
+    </Section>
+  );
+}
+
+/** Paseo 0.14's Settings › Files: which panel opens each file type, for types several panels claim. */
+function Files() {
+  return (
+    <Section title="Files">
+      <div className="p-4 text-center text-sm text-muted-foreground" data-testid="file-panel-settings-empty">File panels appear here when a plugin adds one</div>
+    </Section>
   );
 }
 
@@ -244,27 +384,39 @@ function browserFacts() {
   };
 }
 
+/** Paseo's App diagnostic: Run collects a report, shown below with Copy and Refresh. */
 function Diagnostics() {
   const { connection, principal, preferences } = useAppState();
+  const [report, setReport] = React.useState<DiagnosticsInput | null>(null);
   const [copied, setCopied] = React.useState<'idle' | 'copied' | 'failed'>('idle');
-  const input = { version: __ALP_WEB_VERSION__, connection, principal, preferences, browser: browserFacts() };
+  const run = () => { setCopied('idle'); setReport({ version: __ALP_WEB_VERSION__, connection, principal, preferences, browser: browserFacts(), now: new Date() }); };
   const copy = async () => {
-    try { await navigator.clipboard.writeText(diagnosticsText(input)); setCopied('copied'); }
+    if (!report) return;
+    try { await navigator.clipboard.writeText(diagnosticsText(report)); setCopied('copied'); }
     catch { setCopied('failed'); }
   };
   return (
     <>
-      <Section title="Report" action={<Button size="sm" variant="secondary" className="h-7 text-xs" data-testid="settings-diagnostics-copy" onClick={() => { void copy(); }}>{copied === 'copied' ? 'Copied' : 'Copy report'}</Button>}>
-        <Row first title="What this browser sees" hint="Copy it into a bug report. It holds no access token, prompts or files. For providers, logs and the daemon itself, run alp doctor on the host." />
-        {copied === 'failed' ? <p role="alert" className="border-t border-border px-4 py-3 text-xs text-destructive">This browser did not allow copying. Select the values below instead.</p> : null}
+      <Section title="Diagnostics">
+        <Row first title="App diagnostic" hint="Collect connection, host and browser details. Providers, logs and the daemon itself: run alp doctor on the host.">
+          <Button size="sm" variant="secondary" data-testid="settings-diagnostics-run" onClick={run}>{report ? 'Refresh' : 'Run'}</Button>
+        </Row>
       </Section>
-      {diagnosticsSections(input).map(section => (
-        <Section key={section.title} title={section.title}>
-          {section.rows.map(([key, value], index) => (
-            <Row key={key} first={index === 0} title={key}><span className="break-all font-mono text-xs" data-testid={`diagnostics-${key.toLowerCase().replace(/\W+/g, '-')}`}>{value}</span></Row>
+      {report ? (
+        <>
+          <Section title={`Diagnostic, ${report.now?.toLocaleTimeString() ?? ''}`} action={<Button size="sm" variant="ghost" className="h-7 text-xs" data-testid="settings-diagnostics-copy" onClick={() => { void copy(); }}>{copied === 'copied' ? 'Copied' : 'Copy diagnostic'}</Button>}>
+            {copied === 'failed' ? <p role="alert" className="px-4 py-3 text-xs text-destructive">Failed to copy diagnostic. Select the values below instead.</p> : null}
+            <p className="px-4 py-3 text-xs text-muted-foreground">It holds no access token, prompts or files.</p>
+          </Section>
+          {diagnosticsSections(report).map(section => (
+            <Section key={section.title} title={section.title}>
+              {section.rows.map(([key, value], index) => (
+                <Row key={key} first={index === 0} title={key}><span className="break-all font-mono text-xs" data-testid={`diagnostics-${key.toLowerCase().replace(/\W+/g, '-')}`}>{value}</span></Row>
+              ))}
+            </Section>
           ))}
-        </Section>
-      ))}
+        </>
+      ) : null}
     </>
   );
 }
@@ -274,16 +426,29 @@ function hostLabel(connection: { gateway: string; hostname?: string }) {
   return connection.hostname ?? connection.gateway.replace(/^https?:\/\//, '');
 }
 
+const normalizeVersion = (version: string | undefined) => version?.trim().replace(/^v/i, '') || null;
+
+/** ALP's release notes, as Paseo's What's new opens its changelog. */
+const RELEASES_URL = 'https://github.com/phucanh08/alp/releases';
+
 function About() {
   const { connection } = useAppState();
   const host = hostLabel(connection);
+  const hostVersion = normalizeVersion(connection.daemonVersion);
+  const offline = connection.phase !== 'open';
+  const differs = !!hostVersion && hostVersion !== normalizeVersion(__ALP_WEB_VERSION__);
   return (
     <>
       <Section title="About">
-        <Row first title="App version" hint="This device, ALP web beta">v{__ALP_WEB_VERSION__}</Row>
+        <Row first title="App version" hint="This device">v{__ALP_WEB_VERSION__}</Row>
+        <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer" data-testid="settings-whats-new" className={cn('block hover:bg-sidebar-hover', focusRing)}>
+          <Row title="What's new" hint="Release notes for every version"><ChevronRight aria-hidden className="size-4" /></Row>
+        </a>
       </Section>
       <Section title="Connected hosts">
-        <Row first title={host} hint="ALP on the host, through the gateway (ALP JSON-RPC v1)">{connection.daemonVersion ? `v${connection.daemonVersion.replace(/^v/, '')}` : 'unknown'}</Row>
+        <Row first title={host} hint={offline ? 'Offline' : differs ? 'Version differs from this device' : 'ALP on the host, through the gateway (ALP JSON-RPC v1)'}>
+          <span data-testid="connected-host-version">{hostVersion ? `v${hostVersion}` : 'unknown'}</span>
+        </Row>
       </Section>
     </>
   );
@@ -313,7 +478,7 @@ function Overview() {
             {settings.models.map(model => (
               <li key={model.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm">
                 <span className="min-w-0 truncate">{model.label}</span>
-                <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{model.id}</span>
+                <span className="shrink-0 font-mono text-[length:calc(11px*var(--ui-scale))] text-muted-foreground">{model.id}</span>
               </li>
             ))}
           </ul>
@@ -415,7 +580,7 @@ function WorkspaceRow({ row, first, writable, online, busy }: { row: RegistryRow
           <div className="flex items-center gap-2 text-sm text-foreground">
             <span className="truncate">{name}</span>
             {row.pinnedAt ? <Pin aria-label="Pinned" className="size-3 shrink-0 text-muted-foreground" /> : null}
-            {row.managedWorktree ? <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] text-muted-foreground">Worktree</span> : null}
+            {row.managedWorktree ? <span className="rounded-full bg-secondary px-2 py-0.5 text-[length:calc(11px*var(--ui-scale))] text-muted-foreground">Worktree</span> : null}
           </div>
           <div className="mt-1 break-all font-mono text-xs text-muted-foreground">{row.directory}</div>
           {row.branch !== undefined ? <div className="mt-1 text-xs text-muted-foreground">{row.branch || 'Detached HEAD'}</div> : null}
@@ -638,7 +803,7 @@ function Library({ kind, noun }: { kind: LibraryKind; noun: string }) {
           <button key={`${entry.source}:${entry.name}`} type="button" onClick={() => setOpen(current => current === entry.name ? null : entry.name)}
             aria-expanded={open === entry.name} data-testid={`library-row-${entry.name}`}
             className={cn('block w-full text-left hover:bg-sidebar-hover', focusRing, open === entry.name && 'bg-sidebar-hover')}>
-            <Row first={index === 0} title={<span className="font-mono text-[13px]">{entry.name}</span>}
+            <Row first={index === 0} title={<span className="font-mono text-[length:calc(13px*var(--ui-scale))]">{entry.name}</span>}
               hint={[entry.description, entry.usedBy?.length ? `Used by ${entry.usedBy.join(', ')}` : ''].filter(Boolean).join(' · ') || undefined}>
               <span className="text-xs">{entry.source}{entry.overrides ? ` · overrides ${entry.overrides}` : ''}</span>
             </Row>
@@ -652,13 +817,14 @@ function Library({ kind, noun }: { kind: LibraryKind; noun: string }) {
   );
 }
 
-function PageContent({ page }: { page: Page }) {
+function PageContent({ page, mobile }: { page: Page; mobile: boolean }) {
   switch (page) {
-    case 'general': return <General />;
+    case 'general': return <General mobile={mobile} />;
     case 'appearance': return <Appearance />;
-    case 'sidebar': return <Unavailable what="Arranging the sidebar" why="This beta's sidebar has a fixed layout: New session, then the workspaces and their sessions." />;
+    case 'sidebar': return <SidebarSettings />;
     case 'chat': return <Chat />;
     case 'terminal': return <Terminal />;
+    case 'files': return <Files />;
     case 'editor': return <Unavailable what="Editor" why="This app opens a workspace's files read only (the Files panel); changing them is the agents' work, or yours on the host." />;
     case 'diagnostics': return <Diagnostics />;
     case 'about': return <About />;
@@ -735,8 +901,8 @@ export function SettingsScreen({ onClose, mobile }: { onClose: () => void; mobil
   const detail = page ? (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-[720px] p-4 pt-14">
-        <h2 className="mb-6 ml-1 text-[26px] font-semibold text-foreground" data-testid="settings-detail-header-title">{LABEL[page]}</h2>
-        <PageContent page={page} />
+        <h2 className="mb-6 ml-1 text-[length:calc(26px*var(--ui-scale))] font-semibold text-foreground" data-testid="settings-detail-header-title">{LABEL[page]}</h2>
+        <PageContent page={page} mobile={mobile} />
       </div>
     </div>
   ) : null;

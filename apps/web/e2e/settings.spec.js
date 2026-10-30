@@ -21,19 +21,19 @@ test('Default send and the theme survive a reload; the token does not; garbage a
   await connect(page, world);
   let settings = await openSettings(page);
   await expect(settings.getByLabel('Default send')).toHaveValue('steer');
-  await expect(settings).toContainText('Saved in this browser');
+  await expect(settings).toContainText('Enter steers the active turn. Command/Ctrl+Enter queues.');
   await settings.getByLabel('Default send').selectOption('queue');
   await settings.getByTestId('settings-appearance').click();
-  await expect(settings.getByLabel('Theme')).toHaveValue('system');
+  await expect(settings.getByLabel('Theme', { exact: true })).toHaveValue('system');
   expect(await theme(page)).toBe('dark');
-  await settings.getByLabel('Theme').selectOption('light');
+  await settings.getByLabel('Theme', { exact: true }).selectOption('light');
   expect(await theme(page)).toBe('light');
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
 
   // What storage holds: the versioned preferences; the token nowhere (the connect form keeps only
   // the gateway address, as before).
   const preferences = JSON.parse(await page.evaluate(() => localStorage.getItem('alp-web:preferences')));
-  expect(preferences).toEqual({ v: 1, sendBehavior: 'queue', theme: 'light', contentWidth: 'default', toolCalls: 'collapsed', newSession: {}, terminal: { fontFamily: 'mono', fontSize: 13, theme: 'dark' } });
+  expect(preferences).toMatchObject({ v: 1, sendBehavior: 'queue', theme: 'light', chatDisplay: 'collapseTurns', newSession: {} });
   const stored = await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }));
   expect(stored).not.toContain(world.tokens.owner);
   expect(stored).not.toContain(world.tokens.owner.split('.').at(-1));
@@ -45,12 +45,12 @@ test('Default send and the theme survive a reload; the token does not; garbage a
   await connect(page, world);
   settings = await openSettings(page);
   await expect(settings.getByLabel('Default send')).toHaveValue('queue');
-  await expect(settings).toContainText('Enter queues. Command/Ctrl+Enter steers');
+  await expect(settings).toContainText('Enter queues. Command/Ctrl+Enter submits.');
   await settings.getByTestId('settings-appearance').click();
-  await expect(settings.getByLabel('Theme')).toHaveValue('light');
+  await expect(settings.getByLabel('Theme', { exact: true })).toHaveValue('light');
 
   // System follows the device.
-  await settings.getByLabel('Theme').selectOption('system');
+  await settings.getByLabel('Theme', { exact: true }).selectOption('system');
   expect(await theme(page)).toBe('dark');
   await page.emulateMedia({ colorScheme: 'light' });
   await expect.poll(() => theme(page)).toBe('light');
@@ -72,53 +72,119 @@ test('Default send and the theme survive a reload; the token does not; garbage a
 });
 
 const stored = page => page.evaluate(() => JSON.parse(localStorage.getItem('alp-web:preferences') ?? '{}'));
-const contentWidth = page => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--content-width').trim());
 
-test('content width, tool calls and the terminal display are set in Settings and survive a reload', async ({ page }) => {
+const css = (page, name) => page.evaluate(variable => getComputedStyle(document.documentElement).getPropertyValue(variable).trim(), name);
+
+test('Appearance as Paseo 0.14: every theme, fonts and sizes, content width in px with Reset, highlight theme with a live preview', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'dark' });
   await connect(page, world);
   let settings = await openSettings(page);
   await settings.getByTestId('settings-appearance').click();
-  expect(await contentWidth(page)).toBe('820px');
-  await settings.getByLabel('Content width').selectOption('wide');
-  await expect.poll(() => contentWidth(page)).toBe('1100px');
-  // The columns read it: Tailwind's max-w-(--content-width) is in the built CSS and resolves.
+  // Paseo's theme menu: Light, Dark, System, then the variants.
+  const themes = await settings.getByLabel('Theme', { exact: true }).locator('option:not([disabled])').allTextContents();
+  expect(themes).toEqual(['Light', 'Dark', 'System', 'Zinc', 'Midnight', 'Claude', 'Ghostty', 'Pure black']);
+  for (const [value, background] of [['zinc', 'rgb(24, 24, 27)'], ['midnight', 'rgb(22, 24, 32)'], ['claude', 'rgb(31, 31, 30)'], ['ghostty', 'rgb(40, 44, 52)'], ['pureBlack', 'rgb(0, 0, 0)']]) {
+    await settings.getByLabel('Theme', { exact: true }).selectOption(value);
+    expect(await theme(page)).toBe(value);
+    await expect(page.locator('body')).toHaveCSS('background-color', background);
+  }
+  await page.screenshot({ path: test.info().outputPath('settings-appearance-pure-black.png') });
+
+  // Fonts and sizes commit on blur or Enter, clamped to Paseo's limits.
+  await settings.getByLabel('Interface font size').fill('16');
+  await settings.getByLabel('Interface font size').press('Enter');
+  await expect.poll(() => css(page, '--ui-scale')).toBe(String(16 / 14));
+  await settings.getByLabel('Content font size').fill('99');
+  await settings.getByLabel('Content font size').press('Enter');
+  await expect(settings.getByLabel('Content font size')).toHaveValue('21');
+  await expect.poll(() => css(page, '--content-font-size')).toBe('21px');
+  await settings.getByLabel('Code font family').fill('"Fira Code", monospace');
+  await settings.getByLabel('Code font family').blur();
+  await expect.poll(() => css(page, '--app-font-mono')).toBe('"Fira Code", monospace');
+  await settings.getByLabel('Code font size').fill('14');
+  await settings.getByLabel('Code font size').press('Enter');
+  await expect.poll(() => css(page, '--code-font-size')).toBe('14px');
+
+  // Content width: px, clamped, with Reset back to 820.
+  await expect(settings.getByLabel('Content width in pixels')).toHaveValue('820');
+  await expect(settings.getByRole('button', { name: 'Reset content width to default' })).toHaveCount(0);
+  await settings.getByLabel('Content width in pixels').fill('1100');
+  await settings.getByLabel('Content width in pixels').press('Enter');
+  await expect.poll(() => css(page, '--content-width')).toBe('1100px');
   expect(await page.evaluate(() => {
     const probe = Object.assign(document.createElement('div'), { className: 'max-w-(--content-width)' });
     document.body.append(probe);
     try { return getComputedStyle(probe).maxWidth; } finally { probe.remove(); }
   })).toBe('1100px');
 
-  await settings.getByTestId('settings-chat').click();
-  await expect(settings.getByLabel('Tool call details')).toHaveValue('collapsed');
-  await settings.getByLabel('Tool call details').selectOption('expanded');
-  await expect(settings).toContainText('Tool calls open with their command');
-
-  await settings.getByTestId('settings-terminal').click();
-  await settings.getByLabel('Terminal font size').selectOption('16');
-  await settings.getByLabel('Terminal font', { exact: true }).selectOption('menlo');
-  await settings.getByLabel('Terminal theme').selectOption('light');
-  await expect(settings).toContainText('not a sandbox');
-  expect(await stored(page)).toMatchObject({ contentWidth: 'wide', toolCalls: 'expanded', terminal: { fontSize: 16, fontFamily: 'menlo', theme: 'light' } });
+  // The highlight theme colors the preview's code once the highlighter is in.
+  await settings.getByLabel('Highlight theme').selectOption('dracula');
+  const keyword = settings.getByTestId('appearance-preview').locator('pre span').filter({ hasText: /^export$/ });
+  await expect(keyword).toHaveCSS('color', 'rgb(255, 121, 198)');
+  expect(await stored(page)).toMatchObject({ theme: 'pureBlack', uiFontSize: 16, contentFontSize: 21, codeFontSize: 14, monoFontFamily: '"Fira Code", monospace', contentMaxWidth: 1100, syntaxTheme: 'dracula' });
 
   await page.reload();
-  expect(await contentWidth(page)).toBe('1100px');
+  expect(await css(page, '--content-width')).toBe('1100px');
   await connect(page, world);
   settings = await openSettings(page);
-  await settings.getByTestId('settings-chat').click();
-  await expect(settings.getByLabel('Tool call details')).toHaveValue('expanded');
-  await settings.getByTestId('settings-terminal').click();
-  await expect(settings.getByLabel('Terminal font size')).toHaveValue('16');
+  await settings.getByTestId('settings-appearance').click();
+  await settings.getByRole('button', { name: 'Reset content width to default' }).click();
+  await expect.poll(() => css(page, '--content-width')).toBe('820px');
   await settings.getByTestId('settings-general').click();
   await settings.getByRole('button', { name: 'Reset' }).click();
-  await expect.poll(() => contentWidth(page)).toBe('820px');
-  expect(await stored(page)).toMatchObject({ contentWidth: 'default', toolCalls: 'collapsed', terminal: { fontSize: 13 } });
+  expect(await theme(page)).toBe('dark');
+  expect(await stored(page)).toMatchObject({ theme: 'system', uiFontSize: 14, contentMaxWidth: null, syntaxTheme: 'one' });
 });
 
-test('Diagnostics shows and copies what this browser sees, without the token; Host › Terminals says why none opens', async ({ page, context }) => {
+test('General, Chat, Terminal, Files and Sidebar pages hold Paseo 0.14\'s settings', async ({ page }) => {
+  await connect(page, world);
+  const settings = await openSettings(page);
+  // General › Sending: Send shortcut and Default send with Interrupt.
+  expect(await settings.getByLabel('Default send').locator('option').allTextContents()).toEqual(['Interrupt', 'Steer', 'Queue']);
+  await settings.getByLabel('Send shortcut').selectOption('mod-enter');
+  await settings.getByLabel('Default send').selectOption('interrupt');
+  await expect(settings).toContainText('+Enter interrupts. Enter inserts a new line.');
+
+  await settings.getByTestId('settings-chat').click();
+  await expect(settings.getByLabel('Chat display')).toHaveValue('collapseTurns');
+  expect(await settings.getByLabel('Chat display').locator('option').allTextContents()).toEqual(['Full', 'Collapse tool calls', 'Collapse turns']);
+  await expect(settings.getByRole('switch', { name: 'Chat outline' })).toHaveAttribute('aria-checked', 'true');
+  await settings.getByRole('switch', { name: 'Chat outline' }).click();
+  await expect(settings.getByRole('switch', { name: 'Chat outline' })).toHaveAttribute('aria-checked', 'false');
+
+  await settings.getByTestId('settings-terminal').click();
+  await expect(settings.getByLabel('Terminal scrollback lines')).toHaveValue('10000');
+  await settings.getByLabel('Terminal scrollback lines').fill('2000000');
+  await settings.getByLabel('Terminal scrollback lines').press('Enter');
+  await expect(settings.getByLabel('Terminal scrollback lines')).toHaveValue('1000000');
+
+  await settings.getByTestId('settings-files').click();
+  await expect(settings.getByTestId('file-panel-settings-empty')).toHaveText('File panels appear here when a plugin adds one');
+
+  // Sidebar: hide History, move Search to the top, show the footer's Tasks row.
+  await settings.getByRole('button', { name: 'Sidebar', exact: true }).click();
+  await settings.getByTestId('sidebar-nav-item-history').getByRole('switch').click();
+  await settings.getByRole('button', { name: 'Move Search up' }).click();
+  await settings.getByRole('button', { name: 'Move Search up' }).click();
+  await settings.getByTestId('sidebar-nav-item-tasks').getByRole('switch').click();
+  expect(await stored(page)).toMatchObject({ sendShortcut: 'mod-enter', sendBehavior: 'interrupt', chatOutline: false, terminalScrollback: 1_000_000,
+    sidebar: { header: [{ id: 'search', visible: true }, { id: 'new-session', visible: true }, { id: 'history', visible: false }], footer: [{ id: 'tasks', visible: true }] } });
+  await settings.getByRole('button', { name: 'Back' }).click();
+  const nav = page.getByRole('navigation', { name: 'Workspaces and sessions' });
+  await expect(nav.getByTestId('sidebar-history')).toHaveCount(0);
+  await expect(nav.getByTestId('sidebar-footer-items').getByTestId('sidebar-tasks')).toBeVisible();
+  await nav.getByTestId('sidebar-tasks').click();
+  await expect(page.getByTestId('alp-tasks-screen')).toBeVisible();
+  await expect(nav.getByTestId('sidebar-tasks')).toHaveAttribute('aria-current', 'page');
+  await page.evaluate(() => localStorage.removeItem('alp-web:preferences'));
+});
+
+test('Diagnostics runs, shows and copies what this browser sees, without the token; About and Host › Terminals', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await connect(page, world);
   const settings = await openSettings(page);
   await settings.getByTestId('settings-diagnostics').click();
+  await settings.getByTestId('settings-diagnostics-run').click();
   await expect(settings.getByTestId('diagnostics-gateway')).toHaveText(world.gatewayUrl);
   await expect(settings.getByTestId('diagnostics-state')).toHaveText('open');
   await settings.getByTestId('settings-diagnostics-copy').click();
@@ -128,6 +194,10 @@ test('Diagnostics shows and copies what this browser sees, without the token; Ho
   expect(copied).toContain('## Connection');
   expect(copied).not.toContain(world.tokens.owner);
   expect(copied).not.toContain(world.tokens.owner.split('.').at(-1));
+
+  await settings.getByTestId('settings-about').click();
+  await expect(settings.getByTestId('settings-whats-new')).toHaveAttribute('href', 'https://github.com/phucanh08/alp/releases');
+  await expect(settings.getByTestId('connected-host-version')).toHaveText(/^v/);
 
   await settings.getByTestId('settings-terminals').click();
   await expect(settings.getByTestId('terminals-host')).toContainText('Not allowed');
