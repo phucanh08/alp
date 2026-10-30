@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ArrowDownUp, ChevronRight, Eye, EyeOff, File, Folder, FolderOpen, FolderTree, Lock, RefreshCw } from 'lucide-react';
+import { ArrowDownUp, ChevronRight, Eye, EyeOff, File, Files, Folder, FolderOpen, Lock, RefreshCw } from 'lucide-react';
 import { FILES_READ_FORBIDDEN, FILES_READ_UNAVAILABLE } from '../lib/controller.js';
 import { FileAccessError } from '../lib/errors.js';
 import { SORT_LABELS, flattenTree, nextSort, toggleExpanded, type Listing, type SortOption } from '../lib/file-tree.js';
@@ -22,7 +22,7 @@ const tool = cn('flex size-7 items-center justify-center rounded-md text-muted-f
 function Note({ testId, children }: { testId: string; children: React.ReactNode }) {
   return (
     <div className="flex min-h-full flex-col items-center justify-center gap-2 p-6 text-center" role="note" data-testid={testId}>
-      <FolderTree aria-hidden strokeWidth={1.5} className="size-6 text-extra-muted" />
+      <Files aria-hidden strokeWidth={1.5} className="size-6 text-extra-muted" />
       {children}
     </div>
   );
