@@ -11,11 +11,15 @@ import { inputLimitError, POUR_VARS, VAR_NAME, type InputLimits } from './input-
 import { claudeToolDetail, resultText } from './tool-detail.js';
 import { CLOSE_REASONS, GATE_KINDS, TASK_STATUSES, TASK_TYPES } from '@anhlp/alp-core/tasks';
 import { commandDecision } from '@anhlp/alp-core/permissions';
+import { packagedInfo } from '@anhlp/alp-core/packaged';
 
 // Keep the Claude SDK behind the runtime boundary. Paseo inspects static
 // imports while compiling plugin entrypoints, including their declaration
 // graph; the SDK is a daemon-only optional runtime dependency.
 const CLAUDE_SDK = ['@anthropic-ai', 'claude-agent-sdk'].join('/');
+// The ALP executable has no node_modules to resolve CLAUDE_SDK from: its entry embeds the SDK and
+// registers the import under the package name (scripts/build-binary.mjs).
+const claudeSdk = (): Promise<any> => packagedInfo()?.modules?.[CLAUDE_SDK]?.() ?? import(CLAUDE_SDK);
 
 type SDKUserMessage = any;
 type SDKMessage = any;
@@ -384,7 +388,7 @@ const BOOT_MS = 15_000;
  * resumed or forked from another directory). Empty when the session has no transcript yet.
  */
 export async function claudeChain(sessionId: string, dir?: string): Promise<Array<{ uuid: string; type: 'user' | 'assistant'; toolResult?: boolean }>> {
-  const { getSessionMessages } = await import(CLAUDE_SDK);
+  const { getSessionMessages } = await claudeSdk();
   let messages: any[] = dir ? await getSessionMessages(sessionId, { dir }) : [];
   if (!messages.length) messages = await getSessionMessages(sessionId);
   return messages.filter(message => (message.type === 'user' || message.type === 'assistant') && typeof message.uuid === 'string').map(message => {
@@ -463,7 +467,7 @@ export class ClaudeTransport {
 
   /** The models Claude offers now, from a Claude process that sends no prompt and is closed after (t-e5ee). */
   async probeModels(signal?: AbortSignal) {
-    const { query } = await import(CLAUDE_SDK);
+    const { query } = await claudeSdk();
     if (signal?.aborted) throw new Error('aborted');
     const probe = query({ prompt: new InputQueue(), options: { cwd: this.cwd, env: this.env, settingSources: [], persistSession: false, strictMcpConfig: true, mcpServers: {}, pathToClaudeCodeExecutable: this.command } }) as ClaudeQuery;
     // A probe that outlives its bound is closed, so a hanging Claude process never stays behind.
@@ -481,7 +485,7 @@ export class ClaudeTransport {
   /** The plan's usage windows before a session starts, from a Claude process that sends no prompt and is closed after. */
   private async probeUsage() {
     if (this.closed) return undefined;
-    const { query } = await import(CLAUDE_SDK);
+    const { query } = await claudeSdk();
     const probe = query({ prompt: new InputQueue(), options: { cwd: this.cwd, env: this.env, settingSources: [], persistSession: false, strictMcpConfig: true, mcpServers: {}, pathToClaudeCodeExecutable: this.command } }) as ClaudeQuery;
     try {
       return await probe.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true });
@@ -517,7 +521,7 @@ export class ClaudeTransport {
     if (method === 'thread/chain') return { entries: await claudeChain(params.threadId, params.cwd ?? this.cwd) };
 
     if (method === 'thread/delete') {
-      const { deleteSession } = await import(CLAUDE_SDK);
+      const { deleteSession } = await claudeSdk();
       await deleteSession(params.threadId, params.cwd ? { dir: params.cwd } : {});
       return {};
     }
@@ -626,7 +630,7 @@ export class ClaudeTransport {
   }
 
   private async start(from?: { resume: string; fork: boolean; at?: string }) {
-    const { createSdkMcpServer, query, tool } = await import(CLAUDE_SDK);
+    const { createSdkMcpServer, query, tool } = await claudeSdk();
     const config = this.config!;
     const mcpServers = this.convertMcp(config.mcpServers);
 
