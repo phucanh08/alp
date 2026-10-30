@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  cleanupOldExecutable, compareVersions, npmMessage, oldPath, releaseBaseUrl, releasePlatform, replaceExecutable,
+  allowedHop, cleanupOldExecutable, compareVersions, fetchBytes, npmMessage, oldPath, releaseBaseUrl, releasePlatform, replaceExecutable,
   selectAsset, selfUpdate, sha256, verifyChecksum, verifyProvenance,
 } from '../src/self-update.js';
 
@@ -47,6 +47,35 @@ test('the release mirror must be https, file or loopback http', () => {
   assert.equal(releaseBaseUrl({ repo: 'o/r', baseUrl: 'http://127.0.0.1:9/m/' }), 'http://127.0.0.1:9/m');
   assert.match(releaseBaseUrl({ repo: 'o/r', baseUrl: path.resolve('/tmp/mirror') }), /^file:\/\//);
   assert.throws(() => releaseBaseUrl({ repo: 'o/r', baseUrl: 'http://example.com/m' }), /https:\/\/ or file:\/\//);
+});
+
+/** A fetch that serves `routes`: url → [status, location] for a redirect, or a body string. */
+const fakeFetch = (routes, seen = []) => async (url, init) => {
+  seen.push(url);
+  assert.equal(init.redirect, 'manual');
+  const route = routes[url];
+  if (route === undefined) return new Response('missing', { status: 404 });
+  if (Array.isArray(route)) return new Response(null, { status: route[0], headers: { location: route[1] } });
+  return new Response(route);
+};
+
+test('every redirect hop of a download must be https; only an explicit loopback http mirror may use loopback http', async () => {
+  assert.equal(allowedHop('https://github.com/a', 'https://objects.githubusercontent.com/b'), true);
+  assert.equal(allowedHop('https://github.com/a', 'http://objects.githubusercontent.com/b'), false);
+  assert.equal(allowedHop('https://github.com/a', 'http://127.0.0.1/b'), false);
+  assert.equal(allowedHop('http://127.0.0.1:9/a', 'http://localhost:9/b'), true);
+  assert.equal(allowedHop('http://127.0.0.1:9/a', 'http://example.com/b'), false);
+  assert.equal(allowedHop('http://127.0.0.1:9/a', 'https://example.com/b'), true);
+  const ok = await fetchBytes('https://a.test/x', { fetch: fakeFetch({ 'https://a.test/x': [302, 'https://b.test/y'], 'https://b.test/y': [307, '/z'], 'https://b.test/z': 'payload' }) });
+  assert.equal(new TextDecoder().decode(ok), 'payload');
+  // https → http → https: refused at the http hop, which is never requested.
+  const seen = [];
+  await assert.rejects(fetchBytes('https://a.test/x', { fetch: fakeFetch({ 'https://a.test/x': [302, 'http://mitm.test/y'], 'http://mitm.test/y': [302, 'https://b.test/z'], 'https://b.test/z': 'evil' }, seen) }), /redirected to http:\/\/mitm\.test\/y, which is not https; refused/);
+  assert.deepEqual(seen, ['https://a.test/x']);
+  await assert.rejects(fetchBytes('http://example.com/x', { fetch: fakeFetch({}) }), /not https/);
+  await assert.rejects(fetchBytes('https://a.test/loop', { fetch: fakeFetch({ 'https://a.test/loop': [302, 'https://a.test/loop'] }) }), /more than 10 times/);
+  await assert.rejects(fetchBytes('https://a.test/big', { max: 4, fetch: fakeFetch({ 'https://a.test/big': 'too large' }) }), /larger than 4 bytes/);
+  await assert.rejects(fetchBytes('https://a.test/none', { fetch: fakeFetch({}) }), /HTTP 404/);
 });
 
 test('a checksum mismatch is refused', () => {
