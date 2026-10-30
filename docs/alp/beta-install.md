@@ -302,7 +302,7 @@ plugin ID, `alp-provider`, is the same).
    ```
 
 7. If you used `alp daemon install`, run it again so the service names this installation.
-8. Projects made with an older scaffold: `alp upgrade [directory]`. That updates the project's
+8. Projects made with an older scaffold: `alp update-template [directory]`. That updates the project's
    ALP files, not the npm package.
 
 Codex and Claude keep their own threads; the upgrade does not touch them.

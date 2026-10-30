@@ -2,7 +2,9 @@
 import path from 'node:path';
 
 const USAGE = `Usage:
-  alp <init|upgrade|update> [directory]
+  alp <init|update-template> [directory]   create a project, or upgrade an older project's ALP template (upgrade is an alias)
+  alp update [--check] [--yes] [--version X]   update the ALP executable from GitHub Releases (checksum and provenance checked)
+  alp --version
   alp setup [directory] [--runtime codex|claude|mix] [--prefer claude|codex]
             [--claude-model M] [--codex-model M] [--claude-supervisor M] [--codex-supervisor M]
             [--claude-oracle M] [--codex-oracle M]   write Phở/Cafe's agent profiles to .alp/settings.json

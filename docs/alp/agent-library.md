@@ -17,7 +17,7 @@ entry of the same name from an earlier one:
   hooks/<name>.json            one hook
 ```
 
-Projects no longer get copies of the built-in agents. `alp upgrade` puts away copies that
+Projects no longer get copies of the built-in agents. `alp update-template` puts away copies that
 are still as ALP shipped them, with a backup in `.alp/backups/`. A copy you edited, or added
 skills, MCP servers or hooks to, stays and keeps overriding the built-in.
 
