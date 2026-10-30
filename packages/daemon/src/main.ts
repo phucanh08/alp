@@ -215,7 +215,7 @@ async function run(home: string) {
     autoResume: settings?.limits?.autoResume !== false, recoveryResume: settings?.recovery?.autoResume !== false && !opened.restored, previousExit: exit,
   });
   // A full disk pauses ALP's work instead of stopping alpd (t-2831).
-  const disk = createDiskGuard({ home, runtime, log });
+  const disk = createDiskGuard({ home, runtime, log, ...(Number(process.env.ALP_DISK_CHECK_MS) > 0 ? { intervalMs: Number(process.env.ALP_DISK_CHECK_MS) } : {}) });
   diskReport = error => { disk.report(error); };
   const store = createStore(path.join(home, 'state'), { onWriteError: error => { disk.report(error); } });
   let stopping: Promise<void> | undefined;

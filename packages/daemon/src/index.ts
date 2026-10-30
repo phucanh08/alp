@@ -9,3 +9,4 @@ export { createScheduler, duration, renderPrompt, SCHEDULE_GRACE_MS, SCHEDULE_TI
 export type { ScheduleDelivery, Scheduler } from './scheduler.js';
 export { attachmentLimits, attachmentName, createAttachmentStore, readAttachmentConfig, sniffMimeType } from './attachments.js';
 export type { AttachmentReader, AttachmentRuntime, AttachmentStore, Principal } from './attachments.js';
+export { createDiskGuard, isDiskError } from './disk.js';
