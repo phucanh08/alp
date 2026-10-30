@@ -159,3 +159,50 @@ test('fork through a turn, rewind before one, reload, restore the branch, fork i
   expect(Buffer.compare(await readFile(fixture), fixtureBytes)).toBe(0);
   expect(await topLevel()).toEqual(namesBefore);
 });
+
+test('another browser\'s rewind resets this one\'s view through history.reset, without a reload', async ({ page, browser }) => {
+  test.setTimeout(180_000);
+  await connect(page, world);
+  await newSession(page, 'Two views');
+  expect(await ask(page, 'codeword ALPHA')).toBe('Echo: codeword ALPHA');
+  expect(await ask(page, 'codeword BRAVO')).toBe('Echo: codeword BRAVO');
+
+  // A second browser (its own context: storage, connection and gateway session) watches the same root.
+  const other = await browser.newContext();
+  try {
+    const watcher = await other.newPage();
+    await connect(watcher, world);
+    await watcher.getByTestId('session-row').filter({ has: watcher.getByText('Two views', { exact: true }) }).click();
+    await expect(header(watcher)).toHaveText('Two views');
+    await expect(users(watcher)).toHaveText(['codeword ALPHA', 'codeword BRAVO']);
+    await expect(assistant(watcher)).toHaveText(['Echo: codeword ALPHA', 'Echo: codeword BRAVO']);
+    const loads = [];
+    watcher.on('load', () => loads.push(Date.now()));
+
+    await test.step('the first browser rewinds to before BRAVO', async () => {
+      const bravo = page.locator('[data-entry-key]').filter({ has: users(page).filter({ hasText: /^codeword BRAVO$/ }) });
+      await bravo.hover();
+      await bravo.getByTestId('rewind-action').click();
+      await page.getByTestId('rewind-confirm').click();
+      await expect(page.getByTestId('rewind-dialog')).toBeHidden();
+      await expect(users(page)).toHaveText(['codeword ALPHA']);
+    });
+
+    await test.step('the second browser drops the set-aside turns and shows the marker by itself', async () => {
+      await expect(users(watcher)).toHaveText(['codeword ALPHA']);
+      await expect(assistant(watcher)).toHaveText(['Echo: codeword ALPHA']);
+      await expect(watcher.getByTestId('rewind-marker')).toContainText('Conversation rewound here — 1 later turn kept in a branch. Files were not changed.');
+      // Its own composer is untouched: only the browser that rewound gets the message back.
+      await expect(watcher.getByLabel('Message', { exact: true })).toHaveValue('');
+      expect(loads, 'the page was not reloaded').toEqual([]);
+    });
+
+    await test.step('the second browser continues the rewound conversation; the first sees it', async () => {
+      expect(await ask(watcher, '[codewords]')).toBe('Codewords: ALPHA');
+      await expect(users(page)).toHaveText(['codeword ALPHA', '[codewords]']);
+      await expect(assistant(page)).toHaveText(['Echo: codeword ALPHA', 'Codewords: ALPHA']);
+    });
+  } finally {
+    await other.close();
+  }
+});

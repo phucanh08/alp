@@ -51,6 +51,7 @@ export const CONVERSATION_MESSAGES = Object.freeze(/** @type {Record<string, str
   attachment_forbidden: 'This conversation holds an attachment your access token may not use.',
   request_conflict: 'A session with that id already exists.',
   persistence_failed: 'The host could not finish saving it. Trying again finishes it.',
+  invalid_params: 'The host did not accept this request for this session. Reload the page and try again; if it keeps happening, this app and the host may run different versions of ALP.',
 }));
 
 const reasonOf = (/** @type {any} */ error) => typeof error?.data?.reason === 'string' ? error.data.reason : undefined;
@@ -76,6 +77,11 @@ export function describeConversationError(error) {
     const permission = typeof any?.data?.permission === 'string' ? any.data.permission : 'session.write';
     return { message: `Your access token cannot do this (it needs ${permission}).`, reason, code, retrySame: false, reload: false };
   }
+  // A token limited to modes drives only sessions in them; the gateway names the modes it may use.
+  if (code === 1003 && reason === 'mode') {
+    const modes = Array.isArray(any?.data?.modes) ? any.data.modes.filter((/** @type {unknown} */ mode) => typeof mode === 'string') : [];
+    return { message: `Your access token cannot drive this conversation in its mode${modes.length ? ` (it may use ${modes.join(', ')})` : ''}. Ask the host owner for a token with that mode.`, reason, code, retrySame: false, reload: false };
+  }
   if (reason && CONVERSATION_MESSAGES[reason]) {
     // The gateway answers a fixed sentence per reason, which says what CONVERSATION_MESSAGES says: nothing is appended.
     return { message: CONVERSATION_MESSAGES[reason], reason, code, retrySame: false, reload };
@@ -85,6 +91,7 @@ export function describeConversationError(error) {
     return { message: `${failure.message}${failure.terminal ? '' : tail}`, ...(reason ? { reason } : {}), code, retrySame: !failure.terminal, reload: false };
   }
   if (code === -32601) return { message: 'This host does not offer it. Update ALP on the host.', code, retrySame: false, reload: false };
+  if (code === -32602) return { message: CONVERSATION_MESSAGES.invalid_params, ...(reason ? { reason } : {}), code, retrySame: false, reload: false };
   return { message: error instanceof Error && error.message ? error.message : 'Something went wrong.', ...(reason ? { reason } : {}), code, retrySame: false, reload };
 }
 

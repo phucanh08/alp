@@ -303,6 +303,8 @@ export class Controller {
   #forkWorktrees = new Map();
   /** The worktree.create params of a fork, by its request id, sent unchanged again on a retry. @type {Map<string, any>} */
   #forkWorktreeRequests = new Map();
+  /** The worktree key a fork request id went to, while its answer may still come: a retry goes there again. @type {Map<string, string>} */
+  #forkDestinations = new Map();
   /** Viewer operations are ordered per link; an old link cannot delay a new connection.
    * @type {WeakMap<AlpRpcClient, Promise<unknown>>} */
   #viewerTails = new WeakMap();
@@ -2318,30 +2320,42 @@ export class Controller {
    * workspaceId. The worktree is a clean checkout of the committed HEAD: no file of this workspace
    * is copied, and the conversation's past files are not restored.
    * `worktreeKey` names the worktree for the whole attempt (the dialog): a fork refused after its
-   * worktree was made forks into that one next time, rather than making another.
+   * worktree was made forks into that one next time, rather than making another. A request id whose
+   * answer was lost (describeConversationError().retrySame) goes again to the worktree it went to
+   * first, whatever `worktreeKey` says now: another destination would make a worktree no fork uses.
    * @param {{ requestId: string, worktreeKey?: string, mappingId: string, boundary?: { throughTurnId: string } | { beforeTurnId: string }, branchId?: string, title?: string }} input
    */
   async forkIntoWorktree({ requestId, worktreeKey = requestId, mappingId, boundary, branchId, title }) {
     const source = this.worktreeForkSource();
     if (!source) throw new ConfigurationError('Worktrees are not available for this workspace.');
-    let made = this.#forkWorktrees.get(worktreeKey);
-    if (!made) {
-      let params = this.#forkWorktreeRequests.get(worktreeKey);
-      if (!params) { params = { workspaceId: source.id, mappingId, ifRevision: this.#state.registry.revision, requestId: `${worktreeKey}:worktree` }; this.#forkWorktreeRequests.set(worktreeKey, params); }
-      /** @type {import('@anhlp/alp-protocol').RpcMethodMap['workspace.worktree.create']['result']} */
-      let created;
-      try {
-        created = await this.#client().request('workspace.worktree.create', params, { timeoutMs: this.#options.createTimeoutMs });
-      } catch (error) {
-        if (/** @type {any} */ (error)?.data?.reason === 'stale_revision' || describe(error).sent === 'yes') this.#forkWorktreeRequests.delete(worktreeKey);
-        throw error;
+    const key = this.#forkDestinations.get(requestId) ?? worktreeKey;
+    this.#forkDestinations.set(requestId, key);
+    try {
+      let made = this.#forkWorktrees.get(key);
+      if (!made) {
+        let params = this.#forkWorktreeRequests.get(key);
+        if (!params) { params = { workspaceId: source.id, mappingId, ifRevision: this.#state.registry.revision, requestId: `${key}:worktree` }; this.#forkWorktreeRequests.set(key, params); }
+        /** @type {import('@anhlp/alp-protocol').RpcMethodMap['workspace.worktree.create']['result']} */
+        let created;
+        try {
+          created = await this.#client().request('workspace.worktree.create', params, { timeoutMs: this.#options.createTimeoutMs });
+        } catch (error) {
+          if (/** @type {any} */ (error)?.data?.reason === 'stale_revision' || describe(error).sent === 'yes') this.#forkWorktreeRequests.delete(key);
+          throw error;
+        }
+        made = { id: created.workspace.id, directory: created.workspace.directory };
+        this.#forkWorktrees.set(key, made);
+        this.#forkWorktreeRequests.delete(key);
+        await this.refreshRegistry();
       }
-      made = { id: created.workspace.id, directory: created.workspace.directory };
-      this.#forkWorktrees.set(worktreeKey, made);
-      this.#forkWorktreeRequests.delete(worktreeKey);
-      await this.refreshRegistry();
+      const result = await this.forkConversation({ requestId, boundary, branchId, workspaceId: made.id, directory: made.directory, title });
+      this.#forkDestinations.delete(requestId);
+      return result;
+    } catch (error) {
+      // Answered (or never to be sent again): the next attempt takes a new request id and its own destination.
+      if (!describeConversationError(error).retrySame) this.#forkDestinations.delete(requestId);
+      throw error;
     }
-    return this.forkConversation({ requestId, boundary, branchId, workspaceId: made.id, directory: made.directory, title });
   }
 
   /** The worktree destinations of the open workspace (Create worktree's). */
