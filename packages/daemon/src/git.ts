@@ -1,11 +1,11 @@
 import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { lstat, realpath } from 'node:fs/promises';
+import { lstat, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { user_worktree } from '@anhlp/alp-core';
 import { ERROR, RPC_ERROR, WORKSPACE_GIT, blockedFilePath } from '@anhlp/alp-protocol';
-import type { GitChange, GitCompare, GitDiffFile, GitDiffHunk, GitDiffPage, GitStatus, GitStatusFile } from '@anhlp/alp-protocol';
+import type { GitChange, GitCompare, GitDiffFile, GitDiffHunk, GitDiffPage, GitFacts, GitStatus, GitStatusFile } from '@anhlp/alp-protocol';
 import { FileAccessError, PRIVATE_KEY, likelyBinary, readConfinedFile, relativeSegments } from './files.js';
 import { IgnoreUnknown, resolveGit, searchPathOutside } from './gitignore.js';
 import { RegistryError } from './registry.js';
@@ -38,6 +38,10 @@ import { RpcError } from './rpc-error.js';
  * (files.ts PRIVATE_KEY), historical and deleted ones included; untracked files are read by alpd
  * itself, confined as workspace.files.read confines a read. Errors carry fixed messages; the
  * cause is logged, never answered.
+ *
+ * `workspace.git.facts` reads in the same box for an owner's host directory that need not be a
+ * registry workspace (a project-only, preflight or nested folder): its repository's root, branch,
+ * HEAD, origin and whether anything changed, never a file list or content.
  */
 
 export const GIT_READ = Object.freeze({
@@ -73,6 +77,10 @@ const FIXED = Object.freeze({
   stale: 'The checkout changed since the cursor was given; ask again without a cursor',
   invalidCursor: 'cursor is not one alpd gave for this workspace and comparison',
   notFound: 'No workspace with this workspaceId',
+  noRegistry: 'Registry needs ALP_HOME',
+  invalidDirectory: 'directory must be an absolute, normalised path with no . or .. segment',
+  noDirectory: 'No directory at this path',
+  notDirectory: 'The path is not a directory',
 });
 
 /** A Git read that failed: answered as `1000 git_failed` with a fixed message; `cause` is logged only. */
@@ -209,7 +217,8 @@ function recentEnough(box: Box): Promise<boolean> {
 
 // ---- The workspace and its repository ----
 
-type Located = { kind: 'not_repository' } | { kind: 'unsupported' } | { kind: 'repository'; root: string; gitDir: string };
+/** `top`, when unsupported: the nearest directory above the root that holds a `.git` entry. */
+type Located = { kind: 'not_repository' } | { kind: 'unsupported'; top: string } | { kind: 'repository'; root: string; gitDir: string };
 
 const missing = (error: unknown) => ['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException)?.code ?? '');
 
@@ -219,7 +228,7 @@ async function locate(root: string): Promise<Located> {
   try { await lstat(path.join(root, '.git')); } catch (error) { if (!missing(error)) failed('cannot examine .git'); entry = false; }
   if (!entry) {
     for (let directory = path.dirname(root); ; directory = path.dirname(directory)) {
-      try { await lstat(path.join(directory, '.git')); return { kind: 'unsupported' }; } catch (error) { if (!missing(error)) failed('cannot examine .git above the workspace'); }
+      try { await lstat(path.join(directory, '.git')); return { kind: 'unsupported', top: directory }; } catch (error) { if (!missing(error)) failed('cannot examine .git above the workspace'); }
       if (path.dirname(directory) === directory) return { kind: 'not_repository' };
     }
   }
@@ -569,7 +578,8 @@ const PAGE_BYTES = WORKSPACE_GIT.maxTotalBytes - 16 * 1024;
 // ---- The service ----
 
 export type GitReaderOptions = {
-  registry: { resolve(workspaceId: string): Promise<string> };
+  /** Resolves a workspaceId for status and diff; without it they are unavailable (facts needs none). */
+  registry?: { resolve(workspaceId: string): Promise<string> };
   /** Which git: a name looked up on PATH (outside the workspace), or an absolute path (tests). */
   binary?: string;
   timeoutMs?: number;
@@ -587,6 +597,7 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
   /** The workspace's real path, or the registry's refusal (its messages are fixed). */
   async function workspaceRoot(workspaceId: unknown): Promise<string> {
     if (typeof workspaceId !== 'string' || !workspaceId) throw new RpcError(RPC_ERROR.invalidParams, 'workspaceId is required', { reason: 'invalid_params' });
+    if (!registry) throw new RpcError(ERROR.unavailable, FIXED.noRegistry);
     try {
       return await registry.resolve(workspaceId);
     } catch (error) {
@@ -731,6 +742,81 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
     return {
       state: 'repository', branch: current, detached, head, upstream, baseRef, aheadBehind, hasRemote: repo.remoteUrl !== null,
       remoteUrl: scrubRemoteUrl(repo.remoteUrl), dirty, files, hiddenCount, truncated, snapshot: `s1.${digest.digest('hex').slice(0, 40)}`,
+    };
+  }
+
+  /**
+   * The directory workspace.git.facts is asked about, as its real path: absolute, already
+   * normalised (no empty, `.` or `..` segment, no trailing separator), and a directory.
+   */
+  async function requestedDirectory(directory: unknown): Promise<string> {
+    const invalid = () => new RpcError(RPC_ERROR.invalidParams, FIXED.invalidDirectory, { reason: 'invalid_path' });
+    if (typeof directory !== 'string' || !directory || [...directory].length > 4096 || directory.includes('\0')) throw invalid();
+    if (!path.isAbsolute(directory) || path.normalize(directory) !== directory) throw invalid();
+    const { root } = path.parse(directory);
+    const rest = directory.slice(root.length);
+    if (rest && rest.split(/[\\/]/).some(segment => segment === '' || segment === '.' || segment === '..')) throw invalid();
+    const absent = () => new RpcError(ERROR.notFound, FIXED.noDirectory, { reason: 'not_found' });
+    let real: string;
+    try { real = await realpath(directory); } catch (error) { if (missing(error)) throw absent(); throw error; }
+    let info;
+    try { info = await stat(real); } catch (error) { if (missing(error)) throw absent(); throw error; }
+    if (!info.isDirectory()) throw new RpcError(ERROR.notFound, FIXED.notDirectory, { reason: 'not_directory' });
+    return real;
+  }
+
+  /**
+   * workspace.git.facts: what the directory's checkout is, each answer explicit. Its repository's
+   * top level (`ok`), a folder inside one (`not_repository_root`, the enclosing repository's
+   * facts), no `.git` at or above it (`unknown`, before any Git runs), or a repository alpd does
+   * not read (`unsupported`). One porcelain status, stopped at its first change row.
+   */
+  async function facts(directory: unknown): Promise<GitFacts> {
+    const real = await requestedDirectory(directory);
+    const deadline = Date.now() + timeoutMs;
+    let located = await locate(real);
+    if (located.kind === 'not_repository') return { kind: 'unknown' };
+    let kind: 'ok' | 'not_repository_root' = 'ok';
+    if (located.kind === 'unsupported') {
+      // Inside a .git directory is no work tree of the repository above it.
+      if (path.relative(located.top, real).split(path.sep).includes('.git')) return { kind: 'unsupported', reason: 'inside_git_dir' };
+      located = await locate(located.top);
+      if (located.kind !== 'repository') failed('the enclosing repository changed during the read');
+      kind = 'not_repository_root';
+    }
+    const found = located as Extract<Located, { kind: 'repository' }>;
+    let git: string | undefined;
+    try { git = resolveGit(binary, undefined, found.root); } catch (error) { if (error instanceof IgnoreUnknown) failed('the directory cannot be examined'); throw error; }
+    if (!git) throw new RpcError(ERROR.unavailable, FIXED.unavailable, { reason: 'git_unavailable' });
+    const repo = await boxFor(found, git, deadline);
+    if (repo === 'unsupported') return { kind: 'unsupported', reason: 'worktree_elsewhere' };
+    const branch: { oid?: string; head?: string } = {};
+    let dirty = false;
+    let pending = '';
+    const { stopped } = await runGit(repo, ['status', '--porcelain=v2', '-z', '--branch', '--no-ahead-behind', '--untracked-files=all', '--ignored=no', '--ignore-submodules=dirty'], {
+      onData: chunk => {
+        const fields = (pending + chunk.toString('utf8')).split('\0');
+        pending = fields.pop()!;
+        for (const field of fields) {
+          if (!field) continue;
+          if (!field.startsWith('# ')) { dirty = true; return true; }
+          const [name, ...rest] = field.slice(2).split(' ');
+          if (name === 'branch.oid') branch.oid = rest.join(' ');
+          else if (name === 'branch.head') branch.head = rest.join(' ');
+        }
+        // Headers come first: a row begun is a change, however long its path.
+        if (pending && !pending.startsWith('#')) { dirty = true; return true; }
+        if (pending.length > 64 * 1024) failed('status header over its bound');
+        return false;
+      },
+    });
+    if (!stopped && pending) failed('unterminated status');
+    await sameConfig(repo);
+    const detached = branch.head === '(detached)';
+    return {
+      kind, repoRoot: repo.root, branch: !detached && branch.head && validBranchName(branch.head) ? branch.head : null, detached,
+      head: branch.oid && /^[0-9a-f]{40,64}$/.test(branch.oid) ? branch.oid : null,
+      hasRemote: repo.remoteUrl !== null, remoteUrl: scrubRemoteUrl(repo.remoteUrl), dirty,
     };
   }
 
@@ -1047,6 +1133,7 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
   return {
     status: (workspaceId: unknown) => guarded('workspace.git.status', () => status(workspaceId)),
     diff: (params: DiffParams) => guarded('workspace.git.diff', () => diff(params)),
+    facts: (directory: unknown) => guarded('workspace.git.facts', () => facts(directory)),
   };
 }
 

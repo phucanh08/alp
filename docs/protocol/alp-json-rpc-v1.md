@@ -952,6 +952,38 @@ The gateway exposes `workspace.git.status` with `project.read` and `workspace.gi
 `project.read` plus `files.read` (docs/alp/remote-gateway.md), for a workspace the credential's
 grant names exactly.
 
+**`workspace.git.facts { directory }`** (capability `workspace.git.facts`, listed by every alpd,
+with or without a home). It is the owner's read of a host directory that need not be a registry
+workspace: a project with no workspace yet, a directory checked before it is registered, a folder
+nested in a repository. It is read-only and touches no registry state. It is **owner-only**: a
+gateway classifies it `prohibited` (`-32601`, never forwarded, capability withheld), and alpd
+refuses a connection an ALP agent opened (`1003 user_only`).
+
+- `directory` must be an absolute path that is already normalised: no empty, `.` or `..` segment,
+  and no trailing separator except the filesystem root. Otherwise the call fails with
+  `-32602 invalid_path`. The schema allows no other parameter. alpd reads at the directory's real
+  path. A missing directory is `1001 not_found`, and a path that is not a directory is
+  `1001 not_directory`.
+- The answer is one explicit `kind`:
+  - `ok`: the real path is a repository's top level.
+  - `not_repository_root`: the real path is inside a repository but is not its top level. The
+    facts are the enclosing repository's, with `repoRoot` naming that top level.
+  - `unknown`: no `.git` was found at the real path or above it. This is answered before any Git
+    runs.
+  - `unsupported`, with a `reason`: `worktree_elsewhere` means `core.worktree` names another
+    directory; `inside_git_dir` means the directory is inside a `.git` directory.
+
+  `ok` and `not_repository_root` carry `{ repoRoot, branch, detached, head, hasRemote, remoteUrl,
+  dirty }`, with the same meanings as in the status. `repoRoot` is a real host path, which is why
+  this method is never remote. alpd lists no files and reads no content.
+- Git runs in the same box as for the status, rooted at the repository's top level. A single
+  `status --porcelain=v2 --branch --no-ahead-behind` is stopped at its first change row, and the
+  configuration is re-checked afterwards.
+- Errors follow the status: `1005 git_unavailable` and `1000 git_failed`, with fixed messages that
+  never name a host path.
+- A client that finds the method missing (`-32601`, an older alpd) may read these facts itself.
+  It must never do so for any other answer or error.
+
 ### 12.6 Attachments (`attachment.*`)
 
 Capability `attachments` (issue #121, branch I). Daemon-owned immutable objects holding files a
