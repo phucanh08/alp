@@ -99,3 +99,40 @@ test('an agent connection cannot close a task with an open human gate; the user 
   assert.equal(closed.status, 'closed');
   assert.deepEqual([closed.gates[0].resolved.overridden, closed.gates[0].resolved.channel, !!closed.gates[0].tampered], [true, 'web', false]);
 });
+
+test('session.create from an agent connection drops spec.restore; the owner\'s reaches the runtime', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alpd-restore-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const savedHome = process.env.ALP_HOME;
+  process.env.ALP_HOME = path.join(directory, 'alp-home');
+  t.after(() => { if (savedHome === undefined) delete process.env.ALP_HOME; else process.env.ALP_HOME = savedHome; });
+  const home = path.join(directory, 'home');
+  await mkdir(home, { mode: 0o700 });
+  const project = path.join(directory, 'project');
+  await initProject(project);
+  const threads = [];
+  const runtime = createAlpRuntime({ libraryDir: home, transport: () => ({
+    async initialize() {}, onNotification() {}, onFailure() {}, onRequest() {}, async close() {},
+    async request(method, params) {
+      if (method === 'thread/start' || method === 'thread/resume') threads.push({ method, threadId: params.threadId });
+      return method.startsWith('thread/') ? { thread: { id: params.threadId ?? 'thread-new' } } : {};
+    },
+  }) });
+  const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', home });
+  await server.listen();
+  t.after(async () => { await server.close(); await runtime.shutdown(); });
+  const restore = { agent: 'main', threadId: 'thread-of-the-owner' };
+
+  const agent = await connectAs(daemonPaths(directory).socket, true);
+  t.after(() => agent.close());
+  const made = await agent.request('session.create', { sessionId: 'ses_agent', spec: { cwd: project, persist: true, restore } });
+  // The agent's root starts a conversation of its own: the named thread is never opened for it.
+  assert.deepEqual(threads, [{ method: 'thread/start', threadId: undefined }]);
+  assert.equal(made.session.threadId, 'thread-new');
+
+  const user = await connectAs(daemonPaths(directory).socket, false);
+  t.after(() => user.close());
+  const resumed = await user.request('session.create', { sessionId: 'ses_owner', spec: { cwd: project, persist: true, restore } });
+  assert.deepEqual(threads.at(-1), { method: 'thread/resume', threadId: 'thread-of-the-owner' });
+  assert.equal(resumed.session.threadId, 'thread-of-the-owner');
+});

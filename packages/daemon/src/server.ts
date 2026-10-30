@@ -1347,6 +1347,12 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         if (prior && prior !== workspaceId) throw new RpcError(ERROR.conflict, 'Session belongs to another workspace', { reason: 'workspace_mismatch' });
       }
       if (!spec || typeof spec !== 'object' || typeof spec.cwd !== 'string') throw new RpcError(-32602, 'spec.cwd is required');
+      // spec.restore opens a named native thread (or a Claude base) as this root's conversation: the
+      // owner's alone. A connection an ALP agent opened never passes it on (a gateway refuses it).
+      if (connection.agent && spec.restore !== undefined) {
+        const { restore: _restore, ...owned } = spec;
+        spec = owned;
+      }
       if (worktrees) await registryCall(() => worktrees.assertAvailable(spec.cwd));
       if (sessionId !== undefined && (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId))) throw new RpcError(-32602, 'Invalid session id');
       if (history !== 'replay' && history !== 'skip') throw new RpcError(-32602, 'history must be replay or skip');
