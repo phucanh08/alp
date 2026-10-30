@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp-client",
-  "version": "0.0.1-beta.4",
+  "version": "0.0.1-beta.5",
   "type": "module",
   "description": "ALP client: portable JSON-RPC SDK, WebSocket and Node IPC transports, daemon discovery and setup",
   "files": [
@@ -150,8 +150,8 @@
     "node": ">=22.12"
   },
   "dependencies": {
-    "@anhlp/alp-core": "0.0.1-beta.4",
-    "@anhlp/alp-protocol": "0.0.1-beta.4"
+    "@anhlp/alp-core": "0.0.1-beta.5",
+    "@anhlp/alp-protocol": "0.0.1-beta.5"
   },
   "scripts": {
     "build": "node ../../scripts/build-workspace.mjs client",
