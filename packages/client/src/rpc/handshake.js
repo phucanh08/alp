@@ -12,10 +12,10 @@ export const AGENT_CAPABILITY = 'principal.agent';
  * @param {{ request(method: string, params?: unknown, options?: import('./client.js').RequestOptions): Promise<any> }} client
  * @param {ClientInfo} [info]
  * @param {import('./client.js').RequestOptions} [options]
+ * @param {{ agent?: boolean }} [principal] `agent`: an ALP agent started this process (the Node entry reads ALP_AGENT_SESSION).
  * @returns {Promise<{ protocolVersion: number } & Record<string, unknown>>}
  */
-export function hello(client, info = { name: 'alp', version: '0' }, options) {
+export function hello(client, info = { name: 'alp', version: '0' }, options, { agent = false } = {}) {
   // A process an ALP agent started says so (t-ca1f): alpd then refuses it what only the user may do.
-  const agent = typeof process !== 'undefined' && typeof process.env?.ALP_AGENT_SESSION === 'string' && process.env.ALP_AGENT_SESSION !== '';
   return client.request('daemon.hello', { protocolVersion: PROTOCOL_VERSION, client: info, ...(agent ? { capabilities: [AGENT_CAPABILITY] } : {}) }, options);
 }

@@ -131,7 +131,7 @@ test('mapping resolves defaults/custom, combines instructions, normalizes MCP an
 test('lifecycle: open, prompt, steering, cancellation, persistence/reload preserve project files', async t => {
   const root = await fixture(t);
   const { conn, events, runtimes, environments } = await connection(t, root);
-  assert.deepEqual(environments[0], { PATH: 'baseline', ALP_TEST: 'session' });
+  assert.deepEqual(environments[0], { PATH: 'baseline', ALP_TEST: 'session', ALP_AGENT_SESSION: '1' });
   const start = runtimes[0].calls[0]; assert.equal(start.method, 'thread/start');
   assert.equal(start.params.approvalPolicy, 'never'); assert.equal(start.params.sandbox, 'full-access');
   assert.equal(start.params.model, 'claude-opus-5-5'); assert.equal(start.params.thinking, 'high');

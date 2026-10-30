@@ -749,6 +749,37 @@ project, ALP asks GitHub about the open `gh:pr` and `gh:run` gates with the `gh`
 CLI and clears those that are done. `alp tasks gates` does the same and lists
 the open gates. Main's turn context lists tasks that only a gate holds back.
 
+#### Who decides a human gate
+
+Only the user approves, rejects or removes a human gate, and only the user
+answers a question an agent asked. ALP enforces this on every path it controls:
+
+- ALP sets `ALP_AGENT_SESSION` in the environment of every agent process it
+  starts, so every shell and program the agent runs inherits it.
+- Under that variable, `alp task gate clear|reject|rm` on a human gate and
+  `alp answer` refuse to run.
+- A client started under it announces `principal.agent` in `daemon.hello`, and
+  alpd then refuses that connection `task.gate.resolve` on a human gate and
+  `question.answer` (alp_ask questions, approvals and gate cards). Agent mail
+  (`alp_send` answers) does not go through `question.answer` and is unaffected.
+- A ledger in `$ALP_HOME/gates/` records each human gate ALP opened and each
+  clear or removal ALP made. When a task file shows a ledgered human gate
+  cleared or gone without a record there, ALP reopens it on read and marks it
+  `tampered`; `alp task show` warns that it was changed outside ALP.
+
+The user's own paths are unchanged: Paseo cards and the Tasks panel, ALP Web,
+and the CLI in any terminal (including a Paseo or Web terminal) that an agent
+did not start. There is no TTY requirement.
+
+Residual risk: this raises the bar and detects naive bypasses; it is not a
+security boundary. A full-access agent runs as the same OS user as you, so it
+can unset `ALP_AGENT_SESSION`, speak to the daemon socket directly without
+announcing `principal.agent`, edit the ledger in `$ALP_HOME` as well as the task
+file, or fake a TTY. Human gates opened before the ledger existed are not in it
+and are taken as they are. Only OS-level separation (running agents as another
+user, or in a sandbox that cannot reach `$ALP_HOME`, the daemon socket and
+`.alp/tasks`) prevents it. Give full access only to agents you trust with that.
+
 ### Compaction
 
 `alp tasks compact [--days 30] [--dry-run]` shrinks tasks closed more than
