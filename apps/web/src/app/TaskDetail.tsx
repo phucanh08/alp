@@ -86,7 +86,7 @@ export function TaskDetail({ id, onOpenTask }: { id: string; onOpenTask?: (id: s
         </div>
 
         {row.description ? (
-          <section aria-label="Description" className="mt-6 text-[15px] leading-[1.5]"><RichText text={row.description} /></section>
+          <section aria-label="Description" className="mt-6 text-(length:--content-font-size) leading-[1.5]"><RichText text={row.description} /></section>
         ) : <p className="mt-6 text-sm text-muted-foreground">No description.</p>}
 
         {row.handoff ? (

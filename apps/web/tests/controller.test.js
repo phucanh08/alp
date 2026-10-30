@@ -9,6 +9,7 @@ import { AlpRpcError } from '@anhlp/alp-client/portable';
 import { Controller, needsInput } from '../src/lib/controller.js';
 import { AuthenticationError } from '../src/lib/errors.js';
 import { entriesOf } from '../src/lib/timeline.js';
+import { parsePreferences } from '../src/lib/preferences.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 function setup(t, hostOptions, controllerOptions = {}) {
@@ -384,6 +385,23 @@ test('cancel interrupts the running turn', async t => {
   assert.equal(w.state().tree.projection.entries.at(-1).item.state, 'canceled');
 });
 
+test('Default send Interrupt: the message goes ahead of the queue, the turn stops, then it starts the next turn', async t => {
+  const w = setup(t);
+  w.host.seed('ses_a');
+  await connected(w);
+  w.controller.selectSession('ses_a');
+  await until(() => attached(w.state), 'attached');
+  await w.controller.sendPrompt('long [hold]');
+  await until(() => 'ses_a' in w.state().tree.projection.running, 'running');
+  w.controller.queuePrompt('queued earlier');
+  w.controller.interruptAndSend('stop and do this');
+  assert.deepEqual(w.state().queued.map(item => item.text), ['stop and do this', 'queued earlier']);
+  await until(() => texts(w.state, 'ses_a').includes('echo: stop and do this'), 'sent once the turn stopped');
+  const canceled = w.state().tree.projection.entries.find(entry => entry.item.kind === 'turn_end' && entry.item.state === 'canceled');
+  assert.ok(canceled, 'the running turn was interrupted');
+  await until(() => texts(w.state, 'ses_a').includes('echo: queued earlier'), 'the rest of the queue follows');
+});
+
 test('a queued message waits for the turn, then goes once by itself; edit takes it back', async t => {
   const w = setup(t);
   w.host.seed('ses_a');
@@ -731,12 +749,11 @@ const memoryStorage = () => {
 test('preferences survive a new controller (a reload) and connect/disconnect; the token never reaches storage', async t => {
   const storage = memoryStorage();
   const w = setup(t, undefined, { storage });
-  assert.deepEqual(w.state().preferences, { sendBehavior: 'steer', theme: 'system', contentWidth: 'default', toolCalls: 'collapsed', newSession: {}, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } });
+  assert.deepEqual(w.state().preferences, parsePreferences(null));
   await connected(w);
   w.controller.setSendBehavior('queue');
   w.controller.setTheme('light');
-  w.controller.setContentWidth('wide');
-  w.controller.setToolCalls('expanded');
+  w.controller.updatePreferences({ contentMaxWidth: 1100, chatDisplay: 'full', codeFontSize: 99, token: 'alpgw1.secret' });
   w.controller.disconnect();
   assert.equal(w.state().preferences.sendBehavior, 'queue', 'disconnecting keeps them');
   await connected(w);
@@ -744,10 +761,10 @@ test('preferences survive a new controller (a reload) and connect/disconnect; th
   const stored = [...storage.entries.values()].join('\n');
   assert.doesNotMatch(stored, /alpgw1|secret|127\.0\.0\.1/);
   const reloaded = setup(t, undefined, { storage });
-  assert.deepEqual(reloaded.state().preferences, { sendBehavior: 'queue', theme: 'light', contentWidth: 'wide', toolCalls: 'expanded', newSession: {}, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } });
+  assert.deepEqual(reloaded.state().preferences, { ...parsePreferences(null), sendBehavior: 'queue', theme: 'light', contentMaxWidth: 1100, chatDisplay: 'full', codeFontSize: 22 });
   reloaded.controller.resetPreferences();
   assert.equal(JSON.parse(storage.entries.get('alp-web:preferences')).sendBehavior, 'steer');
-  assert.equal(JSON.parse(storage.entries.get('alp-web:preferences')).contentWidth, 'default');
+  assert.equal(JSON.parse(storage.entries.get('alp-web:preferences')).contentMaxWidth, null);
   // Another tab wrote something: reloadPreferences follows it; garbage gives the defaults.
   storage.setItem('alp-web:preferences', JSON.stringify({ v: 1, sendBehavior: 'queue', theme: 'dark' }));
   reloaded.controller.reloadPreferences();

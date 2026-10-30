@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Tokens, fenceFilename, useHighlightedLines } from '../lib/syntax';
 import { cn } from '../lib/utils';
 import { parseBlocks, type Block } from './chat/markdown';
 import type { FileTarget } from '../lib/file-links.js';
@@ -50,7 +51,7 @@ function Inline({ text }: { text: string }) {
     if (code) {
       const inner = code.slice(1, -1);
       const target = links?.resolve(inner, 'code');
-      const element = <code className={cn('rounded-md bg-muted px-1 py-0.5 font-mono text-[12px]', target ? 'text-highlight' : 'text-foreground')}>{inner}</code>;
+      const element = <code className={cn('rounded-md bg-muted px-1 py-0.5 font-mono text-(length:--code-font-size)', target ? 'text-highlight' : 'text-foreground')}>{inner}</code>;
       out.push(target && links ? <FileLinkButton key={key++} target={target} links={links} title={`Open ${target.path}${target.line ? `:${target.line}` : ''}`}>{element}</FileLinkButton> : <React.Fragment key={key++}>{element}</React.Fragment>);
     }
     else if (strong) out.push(<strong key={key++} className="font-semibold text-foreground"><Inline text={strong.slice(2, -2)} /></strong>);
@@ -69,9 +70,9 @@ function Inline({ text }: { text: string }) {
   return <>{out}</>;
 }
 
-const HEADING = ['', 'mt-6 mb-3 border-b border-border pb-2 text-[28px] leading-[36px] font-bold', 'mt-6 mb-3 border-b border-border pb-2 text-[24px] leading-[31px] font-bold',
-  'mt-4 mb-2 text-[21px] leading-[28px] font-semibold', 'mt-4 mb-2 text-[19px] leading-[25px] font-semibold', 'mt-3 mb-1 text-[17px] leading-[22px] font-semibold',
-  'mt-3 mb-1 text-[17px] leading-[22px] font-semibold uppercase tracking-[0.5px] text-muted-foreground'];
+const HEADING = ['', 'mt-6 mb-3 border-b border-border pb-2 text-[1.867em] leading-[1.286] font-bold', 'mt-6 mb-3 border-b border-border pb-2 text-[1.6em] leading-[1.292] font-bold',
+  'mt-4 mb-2 text-[1.4em] leading-[1.333] font-semibold', 'mt-4 mb-2 text-[1.267em] leading-[1.316] font-semibold', 'mt-3 mb-1 text-[1.133em] leading-[1.294] font-semibold',
+  'mt-3 mb-1 text-[1.133em] leading-[1.294] font-semibold uppercase tracking-[0.5px] text-muted-foreground'];
 
 function Blocks({ blocks, nested }: { blocks: Block[]; nested?: boolean }) {
   return (
@@ -80,11 +81,7 @@ function Blocks({ blocks, nested }: { blocks: Block[]; nested?: boolean }) {
         const next = blocks[index + 1];
         switch (block.kind) {
           case 'code':
-            return (
-              <pre key={index} className="my-3 overflow-x-auto rounded-md border border-border bg-muted p-3 font-mono text-[12px] leading-[18px] text-foreground">
-                <code>{block.text}</code>
-              </pre>
-            );
+            return <CodeBlock key={index} text={block.text} lang={block.lang} />;
           case 'heading': {
             const Tag = `h${Math.min(block.level + 1, 6)}` as 'h2';
             return <Tag key={index} className={cn('text-foreground first:mt-0', HEADING[block.level])}><Inline text={block.text} /></Tag>;
@@ -139,10 +136,20 @@ function Blocks({ blocks, nested }: { blocks: Block[]; nested?: boolean }) {
   );
 }
 
+/** A fenced code block in its language's syntax colors (Paseo's HighlightedCodeBlock). */
+function CodeBlock({ text, lang }: { text: string; lang: string }) {
+  const lines = useHighlightedLines(text, fenceFilename(lang));
+  return (
+    <pre className="my-3 overflow-x-auto rounded-md border border-border bg-muted p-3 font-mono text-(length:--code-font-size) leading-[1.5] text-foreground" data-language={lang || undefined}>
+      <code>{lines ? lines.map((line, index) => <React.Fragment key={index}>{index ? '\n' : null}<Tokens tokens={line} /></React.Fragment>) : text}</code>
+    </pre>
+  );
+}
+
 export function RichText({ text, className }: { text: string; className?: string }) {
   const blocks = React.useMemo(() => parseBlocks(text), [text]);
   return (
-    <div className={cn('min-w-0 break-words text-[15px] leading-[21px] text-foreground [overflow-wrap:anywhere]', className)}>
+    <div className={cn('min-w-0 break-words text-(length:--content-font-size) leading-[1.4] text-foreground [overflow-wrap:anywhere]', className)}>
       <Blocks blocks={blocks} />
     </div>
   );

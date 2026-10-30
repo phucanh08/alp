@@ -6,7 +6,7 @@
 // plan details have no Codex item; tests/tool-calls.test.js covers their rows.
 import { expect, test } from '@playwright/test';
 import { startWorld } from './support/world.js';
-import { assistant, connect, idle, newSession, send } from './support/app.js';
+import { assistant, connect, fullChat, idle, newSession, send } from './support/app.js';
 
 /** @type {Awaited<ReturnType<typeof startWorld>>} */
 let world;
@@ -22,6 +22,7 @@ async function open(row) {
 }
 
 test('each tool kind: its row and its view', async ({ page }) => {
+  await fullChat(page);
   await connect(page, world);
   await newSession(page, 'Tool views');
   await send(page, 'Use every tool [tools]');
@@ -73,6 +74,7 @@ test('each tool kind: its row and its view', async ({ page }) => {
 });
 
 test('a shell command keeps its view', async ({ page }) => {
+  await fullChat(page);
   await connect(page, world);
   await newSession(page, 'Shell view');
   await send(page, 'List the files [tool]');
@@ -84,19 +86,41 @@ test('a shell command keeps its view', async ({ page }) => {
   await expect(shell).toContainText('util.ts');
 });
 
-test('Settings › Chat › Tool call details: Expanded opens new rows with their view; a click closes one', async ({ page }) => {
+test('Chat display as Paseo 0.14: Collapse turns folds a finished turn under the message, Full shows each call; the chat outline jumps between prompts', async ({ page }) => {
   await connect(page, world);
+  await newSession(page, 'Chat display');
+  await send(page, 'List the files [tool]');
+  await idle(page);
+  // Collapse turns (Paseo's default): the work before the reply is one line under the message.
+  const turn = page.getByTestId('turn-summary');
+  await expect(turn).toHaveCount(1);
+  await expect(turn).toContainText('Ran 1 command');
+  await expect(tool(page, 'shell')).toHaveCount(0);
+  await turn.getByRole('button').click();
+  await expect(tool(page, 'shell')).toBeVisible();
+  await expect(page.locator('[data-nested]').first()).toBeVisible();
+  await turn.getByRole('button').click();
+  await expect(tool(page, 'shell')).toHaveCount(0);
+
+  // Full: every call is its own row again.
   await page.getByRole('button', { name: 'Settings' }).click();
   const settings = page.getByRole('region', { name: 'Settings' });
   await settings.getByTestId('settings-chat').click();
-  await settings.getByLabel('Tool call details').selectOption('expanded');
+  await settings.getByLabel('Chat display').selectOption('full');
   await settings.getByRole('button', { name: 'Back' }).click();
-  await newSession(page, 'Expanded tools');
-  await send(page, 'List the files [tool]');
+  await expect(page.getByTestId('turn-summary')).toHaveCount(0);
+  await expect(tool(page, 'shell')).toContainText('ls -1 src');
+
+  // Chat outline: with two prompts on a panel at least 918 px wide, a rail of ticks; one jumps to its prompt.
+  await expect(page.getByTestId('chat-outline-rail')).toHaveCount(0);
+  await page.setViewportSize({ width: 1920, height: 900 });
+  await send(page, 'And now the second prompt');
   await idle(page);
-  const shell = tool(page, 'shell');
-  await expect(shell.getByRole('button').first()).toHaveAttribute('aria-expanded', 'true');
-  await expect(shell).toContainText('util.ts');
-  await shell.getByRole('button').first().click();
-  await expect(shell.getByRole('button').first()).toHaveAttribute('aria-expanded', 'false');
+  const rail = page.getByTestId('chat-outline-rail');
+  await expect(rail.getByRole('button')).toHaveCount(2);
+  await rail.getByRole('button').first().hover();
+  await expect(rail.getByRole('tooltip')).toContainText('List the files');
+  await rail.getByRole('button').first().click();
+  await expect(rail.getByRole('button').first()).toHaveAttribute('aria-current', 'true');
+  await page.evaluate(() => localStorage.removeItem('alp-web:preferences'));
 });

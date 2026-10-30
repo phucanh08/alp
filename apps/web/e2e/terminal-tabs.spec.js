@@ -69,12 +69,19 @@ test('independent terminal tabs survive settings, search, links, workspace switc
   const originalIds = (await list()).map(t => t.terminalId).sort();
   expect(originalIds).toHaveLength(2);
 
-  // Change real xterm metrics and theme without replacing either shell.
-  await page.getByLabel('Terminal font', { exact: true }).selectOption('consolas');
-  await page.getByLabel('Terminal font size', { exact: true }).selectOption('16');
-  await page.getByLabel('Terminal theme', { exact: true }).selectOption('light');
+  // Change real xterm metrics and colors without replacing either shell: as Paseo, the terminal
+  // follows Appearance's Code font and Code size and the app theme.
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const settings = page.getByRole('region', { name: 'Settings' });
+  await settings.getByTestId('settings-appearance').click();
+  await settings.getByLabel('Code font family').fill('Consolas, monospace');
+  await settings.getByLabel('Code font size').fill('16');
+  await settings.getByLabel('Code font size').press('Enter');
+  await settings.getByLabel('Theme', { exact: true }).selectOption('light');
+  await settings.getByRole('button', { name: 'Back' }).click();
   await expect(screen(page).locator('.xterm-rows')).toHaveCSS('font-size', '16px');
-  await expect(screen(page).locator('.xterm-scrollable-element')).toHaveCSS('background-color', 'rgb(246, 248, 247)');
+  await expect(screen(page).locator('.xterm-rows')).toHaveCSS('font-family', 'Consolas, monospace');
+  await expect(screen(page).locator('.xterm-scrollable-element')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   expect((await list()).map(t => t.terminalId).sort()).toEqual(originalIds);
 
   // SearchAddon selects actual buffer matches; next/previous moves the rendered selection.
@@ -134,9 +141,8 @@ test('independent terminal tabs survive settings, search, links, workspace switc
   await connect(page, world, token);
   await expect(panel(page)).toHaveAttribute('data-terminal-key', secondKey);
   await expect(panel(page)).toHaveAttribute('data-status', 'running');
-  await expect(page.getByLabel('Terminal font', { exact: true })).toHaveValue('consolas');
-  await expect(page.getByLabel('Terminal font size', { exact: true })).toHaveValue('16');
-  await expect(page.getByLabel('Terminal theme', { exact: true })).toHaveValue('light');
+  await expect(screen(page).locator('.xterm-rows')).toHaveCSS('font-size', '16px');
+  await expect(screen(page).locator('.xterm-scrollable-element')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   await expect.poll(async () => (await list()).filter(t => t.state === 'running').map(t => t.terminalId).sort()).toEqual(originalIds);
   await world.restartGateway();
   await expect(panel(page)).toHaveAttribute('data-status', 'running', { timeout: 30_000 });
@@ -202,13 +208,11 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 700 
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
       await page.screenshot({ path: test.info().outputPath(`terminal-full-notice-${viewport.width}.png`) });
       await dismiss(page);
-      await page.getByLabel('Terminal theme', { exact: true }).selectOption('light');
       await panel(page).getByRole('textbox', { name: 'Search terminal', exact: true }).fill('still usable');
       await expect(notice).toBeVisible();
       await expect(panel(page).getByRole('textbox', { name: 'Search terminal', exact: true })).toBeFocused();
       // Every toolbar target must have its own hit area, including the shell close and +.
-      const targets = [page.getByRole('tab', { name: 'Shell 1', exact: true }), page.getByRole('button', { name: 'Close shell 1', exact: true }), page.getByRole('button', { name: 'Add terminal', exact: true }),
-        page.getByLabel('Terminal font', { exact: true }), page.getByLabel('Terminal font size', { exact: true }), page.getByLabel('Terminal theme', { exact: true })];
+      const targets = [page.getByRole('tab', { name: 'Shell 1', exact: true }), page.getByRole('button', { name: 'Close shell 1', exact: true }), page.getByRole('button', { name: 'Add terminal', exact: true })];
       const boxes = await Promise.all(targets.map(target => target.boundingBox()));
       for (let a = 0; a < boxes.length; a++) for (let b = a + 1; b < boxes.length; b++) {
         const one = boxes[a], two = boxes[b];

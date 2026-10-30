@@ -6,7 +6,8 @@ import { FileAccessError, type Failure } from '../lib/errors.js';
 import { formatSize, isMarkdown, lineCount } from '../lib/file-tree.js';
 import { cn } from '../lib/utils';
 import { RichText } from './RichText';
-import { useController } from './store';
+import { useAppState, useController } from './store';
+import { Tokens, useHighlightedLines } from '../lib/syntax';
 import { useTabs } from './tabs';
 
 /*
@@ -22,7 +23,8 @@ import { useTabs } from './tabs';
  * preview, no live watch; it reads again when the tab comes back to the front, or with Refresh.
  */
 
-const LINE_HEIGHT = 20;
+/** The source's line height: 20 px at Paseo's default 12 px code size, growing with Code size. */
+const lineHeightFor = (codeFontSize: number) => Math.round(codeFontSize * 5 / 3);
 /** Markdown larger than this shows its source only: the preview parses every line on the main thread. */
 const PREVIEW_MAX_BYTES = 200 * 1024;
 
@@ -40,6 +42,7 @@ export function FileView({ path }: { path: string }) {
   const [copied, setCopied] = React.useState(false);
   const [attempt, setAttempt] = React.useState(0);
   const scroller = React.useRef<HTMLDivElement>(null);
+  const LINE_HEIGHT = lineHeightFor(useAppState().preferences.codeFontSize);
 
   React.useEffect(() => {
     let live = true;
@@ -59,7 +62,7 @@ export function FileView({ path }: { path: string }) {
   React.useEffect(() => {
     if (!ready || !showSource || !target?.line || !scroller.current) return;
     scroller.current.scrollTop = Math.max(0, (target.line - 1) * LINE_HEIGHT - 3 * LINE_HEIGHT);
-  }, [ready, showSource, target?.line, target?.nonce]);
+  }, [ready, showSource, target?.line, target?.nonce, LINE_HEIGHT]);
 
   const copy = () => {
     void navigator.clipboard?.writeText(path).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }, () => controller.notify('error', `Could not copy ${path}.`));
@@ -67,10 +70,11 @@ export function FileView({ path }: { path: string }) {
   const refresh = () => setAttempt(value => value + 1);
 
   const lines = read.status === 'ready' ? lineCount(read.content) : 0;
+  const highlighted = useHighlightedLines(read.status === 'ready' && showSource ? read.content : '', path);
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="file-view" data-path={path}>
       <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-1.5 text-xs text-muted-foreground">
-        <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground" title={path} data-testid="file-view-path">{path}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-(length:--code-font-size) text-foreground" title={path} data-testid="file-view-path">{path}</span>
         {read.status === 'ready' ? (
           <span data-testid="file-view-meta">{formatSize(read.size)} · {lines} {lines === 1 ? 'line' : 'lines'}</span>
         ) : null}
@@ -93,14 +97,16 @@ export function FileView({ path }: { path: string }) {
         </div>
       ) : (
         <div ref={scroller} className="relative min-h-0 flex-1 overflow-auto" data-testid="file-view-source">
-          <div className="relative flex min-w-max font-mono text-[12px]" style={{ lineHeight: `${LINE_HEIGHT}px` }}>
+          <div className="relative flex min-w-max font-mono text-(length:--code-font-size)" style={{ lineHeight: `${LINE_HEIGHT}px` }}>
             {target?.line && target.line <= lines ? (
               <div aria-hidden className="pointer-events-none absolute inset-x-0 bg-highlight/10" style={{ top: 8 + (target.line - 1) * LINE_HEIGHT, height: LINE_HEIGHT }} data-testid="file-view-target-line" />
             ) : null}
             <pre aria-hidden className="sticky left-0 z-[1] select-none border-r border-border bg-background py-2 pl-3 pr-3 text-right text-extra-muted" data-testid="file-view-gutter">
               {Array.from({ length: Math.max(lines, 1) }, (_, index) => index + 1).join('\n')}
             </pre>
-            <pre className="relative py-2 pl-4 pr-6 text-foreground" data-testid="file-view-content">{read.content}</pre>
+            <pre className="relative py-2 pl-4 pr-6 text-foreground" data-testid="file-view-content">
+              {highlighted ? highlighted.map((line, index) => <React.Fragment key={index}>{index ? '\n' : null}<Tokens tokens={line} /></React.Fragment>) : read.content}
+            </pre>
           </div>
         </div>
       )}

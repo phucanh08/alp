@@ -247,6 +247,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             addText={refill}
             onSend={(text, images, files) => controller.sendPrompt(text, undefined, images, files)}
             onQueue={text => controller.queuePrompt(text)}
+            onInterruptSend={text => controller.interruptAndSend(text)}
             onStop={() => void controller.interrupt()}
             queued={queued.filter(item => item.rootId === root)}
             onEditQueued={id => controller.editQueued(id)}
@@ -257,6 +258,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             disabledReason={connection.phase !== 'open' ? 'Reconnecting…' : loading ? 'Loading…' : undefined}
             placeholder={`Message ${agentOf(root)}…`}
             sendBehavior={preferences.sendBehavior}
+            sendShortcut={preferences.sendShortcut}
             onCycleMode={canCycle ? cycleMode : undefined}
             tracks={<TasksPill worked={worked} />}
             controls={<>
@@ -267,7 +269,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         </>
       ) : (
         <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-4 md:pb-4">
-          <div className="mx-auto flex w-full max-w-(--content-width) items-center gap-3 rounded-2xl border border-dotted border-input bg-card px-3 py-2 text-[15px] leading-[21px] text-muted-foreground md:px-4 md:py-3">
+          <div className="mx-auto flex w-full max-w-(--content-width) items-center gap-3 rounded-2xl border border-dotted border-input bg-card px-3 py-2 text-(length:--content-font-size) leading-[1.4] text-muted-foreground md:px-4 md:py-3">
             <span className="min-w-0 flex-1">{agentOf(viewing)} works on an assignment from main. Talk to main to steer it.</span>
             <ContextMeter usage={projection.sessions[viewing]?.usage} />
             <Button size="sm" variant="secondary" onClick={() => openAgent(root)}><ArrowLeft aria-hidden /> Main</Button>

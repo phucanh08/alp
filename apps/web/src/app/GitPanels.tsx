@@ -142,7 +142,7 @@ function Hunks({ file }: { file: GitDiffFile }) {
   const width = String(Math.max(0, ...rows.map(row => ('oldLine' in row ? Math.max(row.oldLine ?? 0, row.newLine ?? 0) : 0)))).length;
   const gutter = (value: number | undefined) => <span aria-hidden className="shrink-0 select-none pr-2 text-right text-muted-foreground tabular-nums" style={{ minWidth: `${width + 1}ch` }}>{value ?? ''}</span>;
   return (
-    <div className="overflow-auto bg-card font-mono text-[12px] leading-[18px] text-foreground" data-testid="git-hunks">
+    <div className="overflow-auto bg-card font-mono text-(length:--code-font-size) leading-[1.5] text-foreground" data-testid="git-hunks">
       <div className="min-w-max py-1">
         {shown.map((row, index) => row.type === 'hunk' ? (
           <div key={index} className={cn('whitespace-pre px-3', ROW.hunk)} data-diff="hunk">{row.text}</div>
@@ -168,13 +168,13 @@ function Hunks({ file }: { file: GitDiffFile }) {
 /** The change letter of a row, coloured as Paseo's file-change icon. */
 function ChangeBadge({ change }: { change: GitStatusFile['change'] }) {
   const tone = change === 'deleted' ? 'text-destructive' : change === 'added' || change === 'untracked' ? 'text-dot-success' : change === 'conflicted' ? 'text-destructive' : 'text-highlight';
-  return <span aria-label={CHANGE_LABELS[change]} title={CHANGE_LABELS[change]} className={cn('w-3 shrink-0 text-center font-mono text-[11px] font-semibold', tone)}>{CHANGE_LETTERS[change]}</span>;
+  return <span aria-label={CHANGE_LABELS[change]} title={CHANGE_LABELS[change]} className={cn('w-3 shrink-0 text-center font-mono text-[length:calc(11px*var(--ui-scale))] font-semibold', tone)}>{CHANGE_LETTERS[change]}</span>;
 }
 
 function FileName({ path, oldPath }: { path: string; oldPath?: string }) {
   const slash = path.lastIndexOf('/');
   return (
-    <span className="min-w-0 flex-1 truncate text-[13px]" title={oldPath ? `${oldPath} → ${path}` : path}>
+    <span className="min-w-0 flex-1 truncate text-[length:calc(13px*var(--ui-scale))]" title={oldPath ? `${oldPath} → ${path}` : path}>
       {oldPath ? <span className="text-muted-foreground">{oldPath} → </span> : null}
       <span className="text-foreground">{slash >= 0 ? path.slice(slash + 1) : path}</span>
       {slash >= 0 ? <span className="ml-1.5 text-xs text-muted-foreground">{path.slice(0, slash)}</span> : null}
@@ -207,7 +207,7 @@ function StatusRow({ file }: { file: GitStatusFile }) {
     <li className="flex items-center gap-1.5 border-b border-border/60 py-1.5 pl-7 pr-2" data-testid="git-status-file" data-path={file.path} data-change={file.change}>
       <ChangeBadge change={file.change} />
       <FileName path={file.path} oldPath={file.oldPath} />
-      <span className="shrink-0 text-[11px] text-muted-foreground">{[file.staged ? 'staged' : '', file.unstaged ? 'unstaged' : ''].filter(Boolean).join(' · ')}</span>
+      <span className="shrink-0 text-[length:calc(11px*var(--ui-scale))] text-muted-foreground">{[file.staged ? 'staged' : '', file.unstaged ? 'unstaged' : ''].filter(Boolean).join(' · ')}</span>
     </li>
   );
 }

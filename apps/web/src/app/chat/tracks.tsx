@@ -22,7 +22,7 @@ const MENU_LIMIT = 8;
 const PILL_POLL_MS = 20_000;
 type Worked = { id: string; text: string; status: string };
 
-export const pillClass = 'inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-border bg-card px-3 text-[13px] text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-expanded:bg-muted aria-expanded:text-foreground [&_svg]:size-3.5 [&_svg]:shrink-0';
+export const pillClass = 'inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-border bg-card px-3 text-[length:calc(13px*var(--ui-scale))] text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring aria-expanded:bg-muted aria-expanded:text-foreground [&_svg]:size-3.5 [&_svg]:shrink-0';
 
 /** ALP's Tasks pill, for the open session's main agent. */
 export function TasksPill({ worked }: { worked: Worked[] }) {

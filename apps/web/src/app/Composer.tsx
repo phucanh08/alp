@@ -9,9 +9,11 @@ import { usePaneFocused } from './pane';
  * The message box, with Paseo's composer logic and layout: one rounded surface with the text on
  * top and a row of controls below (agent controls on the left, the primary action on the right).
  *
- * - Enter sends. While the agent works it sends and steers: the message joins the running turn
- *   (or queues, when the Sending setting says so).
- * - Cmd/Ctrl+Enter while the agent works does the other one. Queued messages wait above
+ * - Enter sends. While the agent works it does the Default send setting: steer (the message joins
+ *   the running turn), interrupt (the turn stops, then the message starts the next one) or queue.
+ * - Cmd/Ctrl+Enter while the agent works does the alternate (queue; for queue, send and steer).
+ *   With the Send shortcut set to Cmd/Ctrl+Enter, Enter is a new line and only Cmd/Ctrl+Enter
+ *   sends, always the default (Paseo's resolveMessageInputEnterAction). Queued messages wait above
  *   the box, each with Edit (back into the box) and Send now; the queue sends itself, one at a
  *   time, once the agent is idle.
  * - The primary action is Send when there is text, Interrupt while the agent works with an empty
@@ -39,7 +41,7 @@ import { usePaneFocused } from './pane';
  */
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
-export function Composer({ meter, imageLimits, images: takesImages = false, imagesUnavailable, files: takesFiles = false, fileLimits, filesUnavailable, onSend, onQueue, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', startLabel, startHold, initialText, addText, autoFocus, inputId }: {
+export function Composer({ meter, imageLimits, images: takesImages = false, imagesUnavailable, files: takesFiles = false, fileLimits, filesUnavailable, onSend, onQueue, onInterruptSend, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', sendShortcut = 'enter', startLabel, startHold, initialText, addText, autoFocus, inputId }: {
   /** Paseo's context window meter, before the primary action (t-7679.12). */
   meter?: React.ReactNode;
   /** The session takes images: the + button, paste and drop add them. */
@@ -54,6 +56,8 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
   filesUnavailable?: string;
   onSend: (text: string, images: ImageAttachment[], files: FileAttachment[]) => Promise<unknown>;
   onQueue: (text: string) => void;
+  /** Default send Interrupt: stop the running turn, then send this as the next one. */
+  onInterruptSend?: (text: string) => void;
   onStop: () => void;
   queued: QueuedPrompt[];
   onEditQueued: (id: string) => string | null;
@@ -68,8 +72,10 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
   tracks?: React.ReactNode;
   /** Shift+Tab in the box: the next permissions mode, as Paseo's mode control. */
   onCycleMode?: () => void;
-  /** What Enter does while the agent works; Cmd/Ctrl+Enter does the other. */
-  sendBehavior?: 'steer' | 'queue';
+  /** What sending does while the agent works; Cmd/Ctrl+Enter does the alternate. */
+  sendBehavior?: 'interrupt' | 'steer' | 'queue';
+  /** Which key sends: Enter (Shift+Enter is a new line) or Cmd/Ctrl+Enter (Enter is a new line). */
+  sendShortcut?: 'enter' | 'mod-enter';
   /**
    * The New session screen's composer: the primary action is always this (e.g. Start session)
    * and may go with an empty box (a session without a first message).
@@ -96,7 +102,10 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
   const area = React.useRef<HTMLTextAreaElement>(null);
   const reason = blocked ?? disabledReason;
   const hasText = !!text.trim() || attached.length > 0 || attachedFiles.length > 0;
-  const queues = running && sendBehavior === 'queue' && !attached.length && !attachedFiles.length;
+  // A message with images or files is sent and steered: only text queues or waits for a stop.
+  const textOnly = !attached.length && !attachedFiles.length;
+  const queues = running && sendBehavior === 'queue' && textOnly;
+  const interrupts = running && sendBehavior === 'interrupt' && textOnly && !!onInterruptSend;
   // The attached images as of now, set together with the state: a read that ends after a send, a
   // Remove or another paste joins what is attached then, never an earlier copy.
   const attachedRef = React.useRef(attached);
@@ -203,6 +212,20 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
     if (!body || reason) return;
     try { onQueue(body); setText(''); setError(null); } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
   };
+  const interruptSend = () => {
+    const body = text.trim();
+    if (attachedRef.current.length || filesRef.current.length || !onInterruptSend) return void send();
+    if (!body || reason) return;
+    try { onInterruptSend(body); setText(''); setError(null); } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+  };
+  /** The Default send setting, while the agent works; plain send when it is idle. */
+  const defaultSend = () => !running ? void send() : sendBehavior === 'queue' ? queue() : sendBehavior === 'interrupt' ? interruptSend() : void send();
+  /** Cmd/Ctrl+Enter while the agent works: queue, or for queue send and steer. */
+  const alternateSend = () => sendBehavior === 'queue' ? void send() : queue();
+  const modKey = isMac ? '⌘' : 'Ctrl';
+  const sendLabel = !running ? 'Send' : queues ? 'Queue message' : interrupts ? 'Interrupt and send' : 'Send and steer';
+  const sendTitle = !running || sendShortcut === 'mod-enter' ? sendLabel
+    : `${sendLabel} (${modKey}+Enter ${sendBehavior === 'queue' ? 'sends and steers' : 'queues'})`;
   const edit = (id: string) => {
     const body = onEditQueued(id);
     if (body == null) return;
@@ -256,7 +279,7 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
           {attachedFiles.length ? (
             <ul aria-label="Attached files" className="flex flex-wrap gap-2">
               {attachedFiles.map(file => (
-                <li key={file.id} data-testid="composer-file" className="flex h-9 max-w-[16rem] items-center gap-2 rounded-lg border border-border bg-muted pl-2 pr-1 text-[13px] text-foreground">
+                <li key={file.id} data-testid="composer-file" className="flex h-9 max-w-[16rem] items-center gap-2 rounded-lg border border-border bg-muted pl-2 pr-1 text-[length:calc(13px*var(--ui-scale))] text-foreground">
                   <FileText aria-hidden className="size-4 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 truncate" title={file.name}>{file.name}</span>
                   <span className="shrink-0 text-muted-foreground">{fileSize(file.size)}</span>
@@ -297,12 +320,13 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
                 return;
               }
               if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+              const modifier = event.metaKey || event.ctrlKey;
+              if (sendShortcut === 'mod-enter' && !modifier) return;
               event.preventDefault();
-              const alternate = event.metaKey || event.ctrlKey;
-              if (running && (sendBehavior === 'queue') !== alternate) queue();
-              else void send();
+              if (sendShortcut === 'enter' && modifier && running) alternateSend();
+              else defaultSend();
             }}
-            className="max-h-[280px] min-h-[21px] w-full resize-none bg-transparent text-[15px] leading-[21px] text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+            className="max-h-[280px] min-h-[21px] w-full resize-none bg-transparent text-(length:--content-font-size) leading-[1.4] text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
           />
           <div className="-mx-1.5 flex min-h-7 shrink-0 items-end justify-between">
             <div className="flex min-w-0 flex-1 items-end">
@@ -326,9 +350,8 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
                   <ArrowUp aria-hidden />
                 </button>
               ) : hasText ? (
-                <button type="button" aria-label={!running ? 'Send' : queues ? 'Queue message' : 'Send and steer'}
-                  title={!running ? 'Send' : queues ? 'Queue (⌘/Ctrl+Enter sends and steers)' : 'Send and steer (⌘/Ctrl+Enter queues)'}
-                  onClick={() => queues ? queue() : void send()} disabled={!!reason}
+                <button type="button" aria-label={sendLabel} title={sendTitle}
+                  onClick={defaultSend} disabled={!!reason}
                   className={cn(round, 'ml-1 bg-primary text-primary-foreground hover:bg-primary/85')}>
                   <ArrowUp aria-hidden />
                 </button>

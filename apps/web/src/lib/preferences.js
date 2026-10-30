@@ -13,35 +13,86 @@
 export const PREFERENCES_KEY = 'alp-web:preferences';
 export const PREFERENCES_VERSION = 1;
 
-/** @typedef {'steer' | 'queue'} SendBehavior */
-/** @typedef {'system' | 'light' | 'dark'} ThemePreference */
+/** Paseo's Default send: what sending does while the agent works. @typedef {'interrupt' | 'steer' | 'queue'} SendBehavior */
+/** Paseo's Send shortcut: Enter, or Cmd/Ctrl+Enter (Enter is then a new line). @typedef {'enter' | 'mod-enter'} SendShortcut */
+/** Paseo's themes ("system" is Paseo's "auto"). @typedef {'system' | 'light' | 'dark' | 'zinc' | 'midnight' | 'claude' | 'ghostty' | 'pureBlack'} ThemePreference */
+/** Paseo's Chat display: how much of an agent's work the chat shows. @typedef {'full' | 'collapseToolCalls' | 'collapseTurns'} ChatDisplay */
+/** Paseo's syntax highlight themes (@getpaseo/highlight SYNTAX_THEME_OPTIONS). @typedef {'github' | 'catppuccin' | 'dracula' | 'tokyo-night' | 'one' | 'nord' | 'gruvbox' | 'solarized'} SyntaxTheme */
+/** The sidebar rows Settings › Sidebar orders and shows. @typedef {'new-session' | 'history' | 'search' | 'tasks'} SidebarItemId */
+/** @typedef {{ id: SidebarItemId, visible: boolean }} SidebarItem */
+/** @typedef {{ header: SidebarItem[], footer: SidebarItem[] }} SidebarItems */
 /**
  * The last choices of the New session screen, as Paseo remembers provider, model, mode and the
  * thinking option per model. Empty strings never stored: absent means the host's default.
  * @typedef {{ team?: string, mode?: string, model?: string, thinkingByModel?: Record<string, string> }} NewSessionChoices
  */
-/** @typedef {{ fontSize: number, fontFamily: 'mono' | 'menlo' | 'consolas', theme: 'dark' | 'light' }} TerminalPreferences */
-/** Paseo's Appearance › Content width: the chat column's maximum width. @typedef {'default' | 'wide' | 'full'} ContentWidth */
-/** Paseo's Chat › tool detail: tool call rows start closed or open. @typedef {'collapsed' | 'expanded'} ToolCallDisplay */
-/** @typedef {{ sendBehavior: SendBehavior, theme: ThemePreference, contentWidth: ContentWidth, toolCalls: ToolCallDisplay, newSession: NewSessionChoices, terminal: TerminalPreferences }} Preferences */
-export const DEFAULT_TERMINAL_PREFERENCES = Object.freeze(/** @type {TerminalPreferences} */ ({ fontSize: 13, fontFamily: 'mono', theme: 'dark' }));
-/** @param {unknown} value @returns {TerminalPreferences} */
-function parseTerminal(value) {
-  const row = /** @type {any} */ (value && typeof value === 'object' ? value : {});
-  return {
-    fontSize: Number.isInteger(row.fontSize) && row.fontSize >= 10 && row.fontSize <= 24 ? row.fontSize : 13,
-    fontFamily: ['mono', 'menlo', 'consolas'].includes(row.fontFamily) ? row.fontFamily : 'mono',
-    theme: row.theme === 'light' ? 'light' : 'dark',
-  };
-}
+/**
+ * Paseo 0.14's app settings that apply in a browser (hooks/use-settings/storage.ts), with its
+ * defaults and limits. `contentMaxWidth` null follows the default width.
+ * @typedef {{
+ *   sendBehavior: SendBehavior, sendShortcut: SendShortcut, theme: ThemePreference,
+ *   uiFontFamily: string, monoFontFamily: string, uiFontSize: number, contentFontSize: number, codeFontSize: number,
+ *   contentMaxWidth: number | null, syntaxTheme: SyntaxTheme,
+ *   chatDisplay: ChatDisplay, chatOutline: boolean, terminalScrollback: number,
+ *   sidebar: SidebarItems, newSession: NewSessionChoices,
+ * }} Preferences
+ */
 
-export const SEND_BEHAVIORS = /** @type {const} */ (['steer', 'queue']);
-export const THEMES = /** @type {const} */ (['system', 'light', 'dark']);
-export const CONTENT_WIDTHS = /** @type {const} */ (['default', 'wide', 'full']);
-export const TOOL_CALL_DISPLAYS = /** @type {const} */ (['collapsed', 'expanded']);
+export const SEND_BEHAVIORS = /** @type {const} */ (['interrupt', 'steer', 'queue']);
+export const SEND_SHORTCUTS = /** @type {const} */ (['enter', 'mod-enter']);
+export const THEMES = /** @type {const} */ (['system', 'light', 'dark', 'zinc', 'midnight', 'claude', 'ghostty', 'pureBlack']);
+export const CHAT_DISPLAYS = /** @type {const} */ (['full', 'collapseToolCalls', 'collapseTurns']);
+export const SYNTAX_THEMES = /** @type {const} */ (['github', 'catppuccin', 'dracula', 'tokyo-night', 'one', 'nord', 'gruvbox', 'solarized']);
+
+/** Paseo's limits (storage.ts): [min, max, default]. */
+export const LIMITS = Object.freeze({
+  uiFontSize: [10, 21, 14],
+  contentFontSize: [10, 21, 15],
+  codeFontSize: [9, 22, 12],
+  contentMaxWidth: [600, 4000, 820],
+  terminalScrollback: [0, 1_000_000, 10_000],
+});
+export const MAX_FONT_FAMILY_LENGTH = 200;
+
+/** Paseo's sidebar sections: the header rows on, the footer's off until chosen. */
+export const SIDEBAR_ITEMS = Object.freeze({ header: /** @type {SidebarItemId[]} */ (['new-session', 'history', 'search']), footer: /** @type {SidebarItemId[]} */ (['tasks']) });
+const SIDEBAR_HIDDEN_BY_DEFAULT = new Set(['tasks']);
+/** @param {'header' | 'footer'} section */
+const defaultSidebarSection = section => SIDEBAR_ITEMS[section].map(id => ({ id, visible: !SIDEBAR_HIDDEN_BY_DEFAULT.has(id) }));
 
 /** @type {Preferences} */
-export const DEFAULT_PREFERENCES = Object.freeze({ sendBehavior: 'steer', theme: 'system', contentWidth: 'default', toolCalls: 'collapsed', newSession: Object.freeze({}), terminal: DEFAULT_TERMINAL_PREFERENCES });
+export const DEFAULT_PREFERENCES = Object.freeze({
+  sendBehavior: 'steer', sendShortcut: 'enter', theme: 'system',
+  uiFontFamily: '', monoFontFamily: '', uiFontSize: 14, contentFontSize: 15, codeFontSize: 12,
+  contentMaxWidth: null, syntaxTheme: 'one',
+  chatDisplay: 'collapseTurns', chatOutline: true, terminalScrollback: 10_000,
+  sidebar: Object.freeze({ header: defaultSidebarSection('header'), footer: defaultSidebarSection('footer') }),
+  newSession: Object.freeze({}),
+});
+
+/** A whole number within [min, max] (clamped, as Paseo's clampedNumber), else the default. @param {unknown} value @param {readonly number[]} limits */
+function clamped(value, [min, max, fallback]) {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : fallback;
+}
+
+/** A font family as typed (trimmed, at most 200 characters; no CSS-breaking characters), else "". @param {unknown} value */
+function fontFamily(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  return trimmed.length <= MAX_FONT_FAMILY_LENGTH && !/[;{}<>\\]/.test(trimmed) ? trimmed : '';
+}
+
+/** One sidebar section: the known rows in the stored order, any missing one at its default. @param {unknown} value @param {'header' | 'footer'} section */
+function parseSidebarSection(value, section) {
+  const known = SIDEBAR_ITEMS[section];
+  /** @type {SidebarItem[]} */
+  const rows = [];
+  for (const row of Array.isArray(value) ? value : []) {
+    if (isRecord(row) && known.includes(row.id) && !rows.some(kept => kept.id === row.id)) rows.push({ id: row.id, visible: typeof row.visible === 'boolean' ? row.visible : !SIDEBAR_HIDDEN_BY_DEFAULT.has(row.id) });
+  }
+  for (const missing of defaultSidebarSection(section)) if (!rows.some(row => row.id === missing.id)) rows.push(missing);
+  return rows;
+}
 
 const ID_CHARS = 200;
 const MAX_THINKING_ENTRIES = 64;
@@ -78,19 +129,34 @@ function parseNewSession(value) {
  * @param {unknown} raw @returns {Preferences}
  */
 export function parsePreferences(raw) {
-  if (typeof raw !== 'string' || !raw) return { ...DEFAULT_PREFERENCES, newSession: {} };
+  const defaults = () => ({ ...DEFAULT_PREFERENCES, sidebar: { header: defaultSidebarSection('header'), footer: defaultSidebarSection('footer') }, newSession: {} });
+  if (typeof raw !== 'string' || !raw) return defaults();
   let value;
-  try { value = JSON.parse(raw); } catch { return { ...DEFAULT_PREFERENCES, newSession: {} }; }
-  if (!isRecord(value) || value.v !== PREFERENCES_VERSION) return { ...DEFAULT_PREFERENCES, newSession: {} };
+  try { value = JSON.parse(raw); } catch { return defaults(); }
+  if (!isRecord(value) || value.v !== PREFERENCES_VERSION) return defaults();
+  const pick = (/** @type {readonly string[]} */ allowed, /** @type {string} */ key) => allowed.includes(value[key]) ? value[key] : /** @type {any} */ (DEFAULT_PREFERENCES)[key];
+  const sidebar = isRecord(value.sidebar) ? value.sidebar : {};
   return {
-    sendBehavior: SEND_BEHAVIORS.includes(value.sendBehavior) ? value.sendBehavior : DEFAULT_PREFERENCES.sendBehavior,
-    theme: THEMES.includes(value.theme) ? value.theme : DEFAULT_PREFERENCES.theme,
-    contentWidth: CONTENT_WIDTHS.includes(value.contentWidth) ? value.contentWidth : DEFAULT_PREFERENCES.contentWidth,
-    toolCalls: TOOL_CALL_DISPLAYS.includes(value.toolCalls) ? value.toolCalls : DEFAULT_PREFERENCES.toolCalls,
+    sendBehavior: pick(SEND_BEHAVIORS, 'sendBehavior'),
+    sendShortcut: pick(SEND_SHORTCUTS, 'sendShortcut'),
+    theme: pick(THEMES, 'theme'),
+    uiFontFamily: fontFamily(value.uiFontFamily),
+    monoFontFamily: fontFamily(value.monoFontFamily),
+    uiFontSize: clamped(value.uiFontSize, LIMITS.uiFontSize),
+    contentFontSize: clamped(value.contentFontSize, LIMITS.contentFontSize),
+    codeFontSize: clamped(value.codeFontSize, LIMITS.codeFontSize),
+    contentMaxWidth: typeof value.contentMaxWidth === 'number' && Number.isFinite(value.contentMaxWidth) ? clamped(value.contentMaxWidth, LIMITS.contentMaxWidth) : null,
+    syntaxTheme: pick(SYNTAX_THEMES, 'syntaxTheme'),
+    chatDisplay: pick(CHAT_DISPLAYS, 'chatDisplay'),
+    chatOutline: typeof value.chatOutline === 'boolean' ? value.chatOutline : DEFAULT_PREFERENCES.chatOutline,
+    terminalScrollback: clamped(value.terminalScrollback, LIMITS.terminalScrollback),
+    sidebar: { header: parseSidebarSection(sidebar.header, 'header'), footer: parseSidebarSection(sidebar.footer, 'footer') },
     newSession: parseNewSession(value.newSession),
-    terminal: parseTerminal(value.terminal),
   };
 }
+
+/** The fields stored, in order: the known ones only, never anything else on the object. */
+const STORED_FIELDS = /** @type {const} */ (['sendBehavior', 'sendShortcut', 'theme', 'uiFontFamily', 'monoFontFamily', 'uiFontSize', 'contentFontSize', 'codeFontSize', 'contentMaxWidth', 'syntaxTheme', 'chatDisplay', 'chatOutline', 'terminalScrollback', 'sidebar', 'newSession']);
 
 /**
  * The string stored for `preferences`: its known fields only, re-validated.
@@ -98,7 +164,7 @@ export function parsePreferences(raw) {
  */
 export function serializePreferences(preferences) {
   const clean = parsePreferences(JSON.stringify({ ...preferences, v: PREFERENCES_VERSION }));
-  return JSON.stringify({ v: PREFERENCES_VERSION, sendBehavior: clean.sendBehavior, theme: clean.theme, contentWidth: clean.contentWidth, toolCalls: clean.toolCalls, newSession: clean.newSession, terminal: clean.terminal });
+  return JSON.stringify({ v: PREFERENCES_VERSION, ...Object.fromEntries(STORED_FIELDS.map(key => [key, clean[key]])) });
 }
 
 /**

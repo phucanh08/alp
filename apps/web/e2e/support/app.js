@@ -12,6 +12,20 @@ export async function connect(page, world, token = world.tokens.owner) {
 }
 
 /**
+ * Shows every tool call as its own row (Settings › Chat › Chat display: Full) in this page, for
+ * specs about the rows themselves; the app's default, as Paseo's, folds finished turns. Runs
+ * before the app's scripts on every load of the page, so it holds across reloads.
+ */
+export async function fullChat(page) {
+  await page.addInitScript(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('alp-web:preferences') ?? 'null');
+      localStorage.setItem('alp-web:preferences', JSON.stringify({ ...(stored?.v === 1 ? stored : { v: 1 }), chatDisplay: 'full' }));
+    } catch {}
+  });
+}
+
+/**
  * Starts a session from the New session screen (Paseo's new agent tab) with a title and, when
  * given, a first message; waits until it is ready for a message.
  */

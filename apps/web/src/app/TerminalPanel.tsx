@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import type { TerminalPreferences } from '../lib/preferences.js';
+import { DEFAULT_MONO_FONT_STACK, terminalTheme } from '../lib/theme';
 import { openTerminalLink } from '../lib/terminal-links.js';
 import '@xterm/xterm/css/xterm.css';
 import { RotateCcw, ShieldAlert, SquareTerminal } from 'lucide-react';
@@ -27,15 +27,29 @@ const NOTICE_KEY = 'alp-web.terminal-notice-seen';
 const seenNotice = () => { try { return globalThis.sessionStorage?.getItem(NOTICE_KEY) === '1'; } catch { return false; } };
 
 /** Terminal colors that read on both app themes. */
-const DARK_THEME = { background: '#101211', foreground: '#e4e7e5', cursor: '#e4e7e5', selectionBackground: '#3a4a44' };
+/**
+ * What the terminal draws with, as Paseo: the Code font and Code size (Settings › Appearance),
+ * the app theme's terminal palette, and Settings › Terminal › Terminal scrollback.
+ */
+type TerminalLook = { fontSize: number; fontFamily: string; scrollback: number; theme: string };
 
-const LIGHT_THEME = { background: '#f6f8f7', foreground: '#18251e', cursor: '#18251e', selectionBackground: '#b8d4c4' };
-const FONTS = { mono: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', menlo: 'Menlo, monospace', consolas: 'Consolas, monospace' };
+/** The `<html data-theme>` on the page now; System changes it with the device. */
+function useResolvedTheme() {
+  return React.useSyncExternalStore(React.useCallback(listener => {
+    const observer = new MutationObserver(listener);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []), () => document.documentElement.dataset.theme ?? 'dark');
+}
 
 export function TerminalPanel() {
   const controller = useController();
   const state = useAppState();
   const gate = controller.terminalGate();
+  const theme = useResolvedTheme();
+  const { codeFontSize, monoFontFamily, terminalScrollback } = state.preferences;
+  const look = React.useMemo<TerminalLook>(() => ({ fontSize: codeFontSize, fontFamily: monoFontFamily || DEFAULT_MONO_FONT_STACK, scrollback: terminalScrollback, theme }),
+    [codeFontSize, monoFontFamily, terminalScrollback, theme]);
   if (!gate.ok) {
     return (
       <div className="flex min-h-full flex-col items-center justify-center gap-2 p-6 text-center" role="note" data-testid="terminal-refused">
@@ -46,7 +60,6 @@ export function TerminalPanel() {
     );
   }
   const group = controller.terminalTabs(gate.workspaceId);
-  const prefs = state.preferences.terminal;
   const pending = group.tabs.some(tab => ['starting', 'attaching', 'reconnecting'].includes(tab.session.getState().status));
   const available = pending ? [] : state.terminalDirectory.items.filter(item => item.workspaceId === gate.workspaceId && item.state === 'running' && !group.tabs.some(tab => tab.session.getState().terminalId === item.terminalId));
   return <div className="flex h-full min-h-0 flex-col" key={`${state.connection.gateway}|${gate.workspaceId}`}>
@@ -71,22 +84,11 @@ export function TerminalPanel() {
       </div>
       <Button size="sm" variant="ghost" disabled={group.tabs.length >= 32} onClick={() => controller.addTerminal(gate.workspaceId)} aria-label="Add terminal">+</Button>
       </div>
-      <div className="flex max-w-full flex-wrap items-center gap-2">
-      <label className="text-xs">Font <select aria-label="Terminal font" value={prefs.fontFamily} onChange={event => controller.setTerminalPreferences({ fontFamily: event.target.value as TerminalPreferences['fontFamily'] })}>
-        <option value="mono">Monospace</option><option value="menlo">Menlo</option><option value="consolas">Consolas</option>
-      </select></label>
-      <label className="text-xs">Size <select aria-label="Terminal font size" value={prefs.fontSize} onChange={event => controller.setTerminalPreferences({ fontSize: Number(event.target.value) })}>
-        {Array.from({ length: 15 }, (_, index) => index + 10).map(size => <option key={size} value={size}>{size}</option>)}
-      </select></label>
-      <label className="text-xs">Theme <select aria-label="Terminal theme" value={prefs.theme} onChange={event => controller.setTerminalPreferences({ theme: event.target.value as TerminalPreferences['theme'] })}>
-        <option value="dark">Dark</option><option value="light">Light</option>
-      </select></label>
-      </div>
     </div>
     {state.terminalDirectory.mode === 'polling' ? <p role="status" className="px-2 text-xs text-muted-foreground">This host refreshes the terminal list every five seconds.</p> : null}
     {state.terminalDirectory.error ? <p role="status" className="px-2 text-xs text-destructive">Terminal list: {state.terminalDirectory.error}</p> : null}
     {available.length ? <div className="flex shrink-0 flex-wrap gap-1 px-2 py-1" aria-label="Available host terminals">{available.map(item => <Button key={item.terminalId} size="sm" variant="secondary" onClick={() => controller.openListedTerminal(gate.workspaceId, item.terminalId)}>Open {item.title}</Button>)}</div> : null}
-    {group.tabs.length ? group.tabs.map(tab => <TerminalView key={tab.key} tabKey={tab.key} active={group.active === tab.key} preferences={prefs} session={tab.session} />) : <div className="p-4 text-sm text-muted-foreground">No terminals open. Use + to start a shell.</div>}
+    {group.tabs.length ? group.tabs.map(tab => <TerminalView key={tab.key} tabKey={tab.key} active={group.active === tab.key} look={look} session={tab.session} />) : <div className="p-4 text-sm text-muted-foreground">No terminals open. Use + to start a shell.</div>}
   </div>;
 }
 
@@ -94,7 +96,7 @@ function useSession(session: TerminalSession) {
   return React.useSyncExternalStore(React.useCallback(listener => session.subscribe(listener), [session]), () => session.getState());
 }
 
-function TerminalView({ session, active, preferences, tabKey }: { session: TerminalSession, active: boolean, preferences: TerminalPreferences, tabKey: string }) {
+function TerminalView({ session, active, look, tabKey }: { session: TerminalSession, active: boolean, look: TerminalLook, tabKey: string }) {
   const view = useSession(session);
   const host = React.useRef<HTMLDivElement | null>(null);
   const terminal = React.useRef<Terminal | null>(null);
@@ -109,7 +111,7 @@ function TerminalView({ session, active, preferences, tabKey }: { session: Termi
   React.useEffect(() => {
     const element = host.current;
     if (!element) return;
-    const term = new Terminal({ cursorBlink: true, convertEol: false, fontSize: preferences.fontSize, fontFamily: FONTS[preferences.fontFamily], scrollback: 5000, theme: preferences.theme === 'light' ? LIGHT_THEME : DARK_THEME, disableStdin: !session.accepting });
+    const term = new Terminal({ cursorBlink: true, convertEol: false, fontSize: look.fontSize, fontFamily: look.fontFamily, scrollback: look.scrollback, theme: terminalTheme(), disableStdin: !session.accepting });
     const fit = new FitAddon();
     const finder = new SearchAddon();
     term.loadAddon(fit);
@@ -153,11 +155,12 @@ function TerminalView({ session, active, preferences, tabKey }: { session: Termi
   React.useEffect(() => {
     const term = terminal.current;
     if (!term) return;
-    term.options.fontSize = preferences.fontSize;
-    term.options.fontFamily = FONTS[preferences.fontFamily];
-    term.options.theme = preferences.theme === 'light' ? LIGHT_THEME : DARK_THEME;
+    term.options.fontSize = look.fontSize;
+    term.options.fontFamily = look.fontFamily;
+    term.options.scrollback = look.scrollback;
+    term.options.theme = terminalTheme();
     if (active) { fitTerminal.current(); term.focus(); }
-  }, [active, preferences]);
+  }, [active, look]);
 
   const find = (backward = false) => {
     if (!query) { terminal.current?.clearSelection(); search.current?.clearDecorations(); setSearchResult(''); return; }
@@ -173,7 +176,7 @@ function TerminalView({ session, active, preferences, tabKey }: { session: Termi
 
   return (
     <div id={`terminal-view-${tabKey}`} role="tabpanel" aria-labelledby={`terminal-tab-${tabKey}`} hidden={!active} className={active ? "flex min-h-0 flex-1 flex-col" : "hidden"} data-testid="terminal-panel" data-status={view.status} data-terminal-key={tabKey}>
-      <p className="flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-1 text-[11px] leading-4 text-muted-foreground" data-testid="terminal-header">
+      <p className="flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-1 text-[length:calc(11px*var(--ui-scale))] leading-4 text-muted-foreground" data-testid="terminal-header">
         <ShieldAlert aria-hidden className="size-3 shrink-0 text-amber-500" />
         <span className="truncate" title={TERMINAL_NOTICE}>{TERMINAL_HEADER}</span>
       </p>
@@ -197,7 +200,7 @@ function TerminalView({ session, active, preferences, tabKey }: { session: Termi
         </p>
       ) : null}
       <Status session={session} />
-      <div className="relative min-h-0 flex-1 p-1.5" style={{ backgroundColor: preferences.theme === 'light' ? LIGHT_THEME.background : DARK_THEME.background }}>
+      <div className="relative min-h-0 flex-1 bg-background p-1.5">
         <div ref={host} className="h-full w-full" data-testid="terminal-screen" aria-label="Terminal" />
       </div>
     </div>

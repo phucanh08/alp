@@ -164,7 +164,7 @@ export function ArchivedCallout({ sessionId }: { sessionId: string }) {
     <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-4 md:pb-4">
       <div className="mx-auto flex w-full max-w-(--content-width) flex-col gap-2">
         <div className="flex items-center justify-center gap-3 rounded-2xl border border-border bg-card px-4 py-3 md:px-6 md:py-4" data-testid="archived-callout">
-          <span className="text-[15px] text-muted-foreground">This session is archived</span>
+          <span className="text-(length:--content-font-size) text-muted-foreground">This session is archived</span>
           <Button size="sm" variant="secondary" disabled={pending || connection.phase !== 'open'} onClick={() => void unarchive()}>Unarchive</Button>
         </div>
         {error ? <p role="alert" className="text-center text-sm text-destructive">{error}</p> : null}
