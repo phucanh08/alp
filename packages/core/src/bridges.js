@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { isExecutableName, isPackaged, ROLE_ARGS } from './packaged.js';
+import { isExecutableName, isPackaged, isSelf, ROLE_ARGS } from './packaged.js';
 
 /**
  * The stdio MCP bridges an agent CLI starts to reach alpd's tools (ACP agents and Antigravity).
@@ -109,5 +109,5 @@ export function isBridgeArgs(kind, args, command = undefined) {
   if (!Array.isArray(args)) return false;
   const marker = kind === 'antigravity' ? '// ALP Antigravity bridge v1' : undefined;
   if (marker && args.some(arg => typeof arg === 'string' && arg.startsWith(marker))) return true;
-  return typeof command === 'string' && isExecutableName(command) && args.length === 2 && args[0] === 'bridge' && args[1] === kind;
+  return typeof command === 'string' && (isExecutableName(command) || isSelf(command)) && args.length === 2 && args[0] === 'bridge' && args[1] === kind;
 }
