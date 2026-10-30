@@ -1,7 +1,7 @@
 # Installs the ALP executable on Windows x64 (t-1e02 P2, docs/alp/binary-install.md).
 #
 #   irm https://github.com/phucanh08/alp/releases/latest/download/install.ps1 | iex
-#   & ([scriptblock]::Create((irm https://github.com/phucanh08/alp/releases/latest/download/install.ps1))) -Version 0.0.1-beta.5
+#   & ([scriptblock]::Create((irm https://github.com/phucanh08/alp/releases/latest/download/install.ps1))) -Version 0.0.1-beta.6
 #
 # Options (or the environment variables in brackets, which also work with `| iex`):
 #   -Version <v>     install release v<v> instead of the latest      [ALP_INSTALL_VERSION]

@@ -24,7 +24,7 @@ import { RELEASE_NAMES, installableArtifacts, releaseArtifacts } from './release
 import { spawnCommand } from './spawn-command.mjs';
 
 export const ROOT = path.resolve(import.meta.dirname, '..');
-export const VERSION = '0.0.1-beta.5';
+export const VERSION = '0.0.1-beta.6';
 export const FAKE_CODEX = path.join(ROOT, 'packages/daemon/tests/support/fake-codex.js');
 export const FAKE_CLAUDE = path.join(ROOT, 'packages/daemon/tests/support/fake-claude.js');
 /** The choices of a permission question, in either language alpd may ask in (ALPD §54). */

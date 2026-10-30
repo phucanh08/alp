@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp",
-  "version": "0.0.1-beta.5",
+  "version": "0.0.1-beta.6",
   "description": "ALP command line: installs the ALP executable for this machine (@anhlp/alp-<os>-<arch>) and runs it",
   "type": "module",
   "bin": {
@@ -17,11 +17,11 @@
     "node": ">=18"
   },
   "optionalDependencies": {
-    "@anhlp/alp-darwin-arm64": "0.0.1-beta.5",
-    "@anhlp/alp-darwin-x64": "0.0.1-beta.5",
-    "@anhlp/alp-linux-x64": "0.0.1-beta.5",
-    "@anhlp/alp-linux-arm64": "0.0.1-beta.5",
-    "@anhlp/alp-win32-x64": "0.0.1-beta.5"
+    "@anhlp/alp-darwin-arm64": "0.0.1-beta.6",
+    "@anhlp/alp-darwin-x64": "0.0.1-beta.6",
+    "@anhlp/alp-linux-x64": "0.0.1-beta.6",
+    "@anhlp/alp-linux-arm64": "0.0.1-beta.6",
+    "@anhlp/alp-win32-x64": "0.0.1-beta.6"
   },
   "license": "Apache-2.0",
   "repository": {
