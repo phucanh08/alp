@@ -1,13 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { closeSync, openSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createTask, getTask, loadTasks } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime, reclaimWorktrees } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
-import { connect, daemonPaths, bootTime } from '@anhlp/alp-client';
+import { connect, daemonPaths, bootTime, readLock } from '@anhlp/alp-client';
 
 import { fakeTransport, until, git, workspace } from '../../../test/support/recovery.js';
 
@@ -36,7 +41,7 @@ test('a worktree assignment alpd stopped under continues in the next alpd: same 
   assert.equal((await getTask(root, task.id)).status, 'in_progress');
   assert.ok((await runLog(directory, 'root')).some(entry => entry.event === 'assignment.interrupted' && entry.assignmentId === id));
   // As alpd does at start: work left in worktrees goes to their branches.
-  assert.deepEqual(await reclaimWorktrees(options.worktreeDir), [`alp/${id}`]);
+  assert.deepEqual(await reclaimWorktrees(options.worktreeDir), { kept: [`alp/${id}`], left: [] });
 
   const second = createAlpRuntime({ ...options, transport: fakeTransport(runtimes), previousExit: { kind: 'crash', at: '2026-10-09T03:00:00.000Z' } });
   t.after(() => second.shutdown());
@@ -471,8 +476,8 @@ test('t-eae4: a recovery that fails to reopen a worktree assignment never delete
   await writeFile(path.join(peer.cwd, 'new.txt'), 'untracked\n');
   const snapshot = first.snapshot('root');
   await first.shutdown();
-  // The peer switched branches, so reclaim must leave its worktree as it is.
-  assert.deepEqual(await reclaimWorktrees(options.worktreeDir), []);
+  // The peer switched branches, so reclaim must leave its worktree as it is, and says why.
+  assert.deepEqual(await reclaimWorktrees(options.worktreeDir), { kept: [], left: [{ name: delegated.assignmentId, path: path.join(options.worktreeDir, delegated.assignmentId), reason: 'other-branch', branch: 'fix/own-branch' }] });
 
   // The next alpd cannot reopen the peer's session (say the disk is still full).
   const failing = fakeTransport(runtimes);
@@ -486,4 +491,42 @@ test('t-eae4: a recovery that fails to reopen a worktree assignment never delete
   assert.equal(await readFile(path.join(peer.cwd, 'notes.txt'), 'utf8'), 'uncommitted\n');
   assert.equal(await readFile(path.join(peer.cwd, 'new.txt'), 'utf8'), 'untracked\n');
   assert.equal(git(peer.cwd, 'rev-parse', '--abbrev-ref', 'HEAD'), 'fix/own-branch');
+});
+
+test('t-22be: alpd logs each worktree it leaves in place at start, with the reason', async t => {
+  const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-reclaim-')));
+  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  const home = path.join(directory, 'home');
+  await mkdir(home, { mode: 0o700 });
+  await writeFile(path.join(home, 'settings.json'), '{}');
+  // A directory without git metadata (a crash while it was created): reclaim never deletes it.
+  const stray = path.join(home, 'worktrees', 'stray');
+  await mkdir(stray, { recursive: true });
+  await writeFile(path.join(stray, 'wip.txt'), 'unsaved\n');
+  const logFile = path.join(directory, 'alpd.log');
+  const output = openSync(logFile, 'a');
+  const alpd = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
+  const child = spawn(process.execPath, [alpd], { stdio: ['ignore', output, output], env: { ...process.env, ALP_HOME: home, ALP_MODEL_CATALOG: 'static' } });
+  closeSync(output);
+  const exited = once(child, 'exit');
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
+  let gone = false;
+  void exited.then(() => { gone = true; });
+  for (let i = 0; ; i++) {
+    if (gone || i > 800) assert.fail(`alpd did not become ready:\n${await readFile(logFile, 'utf8')}`);
+    const lock = await readLock(home);
+    if (lock?.ready && lock.pid === child.pid) break;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  const client = await connect((await readLock(home)).socket, { name: 'reclaim-test', version: '0' });
+  await client.request('daemon.shutdown').catch(() => {});
+  client.close();
+  await exited;
+  const records = (await readFile(logFile, 'utf8')).split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line));
+  const left = records.filter(record => record.event === 'worktree.left');
+  assert.equal(left.length, 1, JSON.stringify(records));
+  assert.equal(left[0].reason, 'invalid');
+  assert.equal(left[0].path, stray);
+  assert.match(left[0].msg, /stray/);
+  assert.equal(await readFile(path.join(stray, 'wip.txt'), 'utf8'), 'unsaved\n');
 });

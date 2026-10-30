@@ -157,10 +157,11 @@ async function validWorktree(directory: string) {
 export async function reattachWorktree(worktree: Worktree): Promise<Worktree & { preserved?: string }> {
   const exists = !!await stat(worktree.path).catch(() => undefined);
   if (exists && await validWorktree(worktree.path)) {
-    // A crash mid `git add`/`commit` leaves the index locked; nothing else writes this worktree
-    // while its assignment reopens, so the lock is stale and would block every later commit.
-    const gitdir = await git(worktree.path, ['rev-parse', '--absolute-git-dir']);
-    if (gitdir.code === 0) await rm(path.join(gitdir.stdout.trim(), 'index.lock'), { force: true });
+    // A crash mid `git add`/`commit` leaves the index, HEAD or the branch locked; nothing else
+    // writes this worktree while its assignment reopens, so the locks are stale and would block
+    // every later commit.
+    const dirs = await gitDirs(worktree.path);
+    if (dirs) await clearStaleLocks(dirs, worktree.branch);
     return worktree;
   }
   if (!await branchExists(worktree.checkout, worktree.branch)) throw new Error(`Branch ${worktree.branch} of the worktree no longer exists`);
@@ -254,36 +255,114 @@ export async function removeWorktree(worktree: Worktree, { deleteBranch = false 
   if (deleteBranch) await git(worktree.checkout, ['branch', '-D', worktree.branch]);
 }
 
+/** A linked worktree's own git directory and the repository's common one, both absolute. */
+type GitDirs = { own: string; common: string };
+
+async function gitDirs(target: string): Promise<GitDirs | undefined> {
+  const result = await git(target, ['rev-parse', '--path-format=absolute', '--absolute-git-dir', '--git-common-dir']);
+  if (result.code !== 0) return undefined;
+  const [own, common] = result.stdout.trim().split('\n').map(line => path.resolve(line.trim()));
+  return own && common ? { own, common } : undefined;
+}
+
+/**
+ * How old the branch's lock in the shared repository must be before ALP treats it as left by
+ * a crash. The user's own git commands in their checkout lock that ref too (`git gc`, `git branch
+ * -D`), but only for the moment a ref update takes.
+ */
+const SHARED_LOCK_STALE_MS = 10_000;
+
+/**
+ * Removes the locks a git command killed mid-write left in a worktree, which would fail every
+ * later `git add` or `git commit` there: `index.lock`, `HEAD.lock` and any other lock directly in
+ * the worktree's own git directory, and every `*.lock` under its `refs/`. Callers run this only
+ * where no ALP git command can be at work in that worktree (alpd's start, once it has stopped what
+ * a crashed alpd left running, and an assignment reopening): only ALP works in its worktrees, so
+ * those locks are stale, as `index.lock` always was. In the repository the worktree shares with
+ * the user's checkout, only the lock of the worktree's own branch is touched, and only once it is
+ * older than SHARED_LOCK_STALE_MS; every other lock there is the user's business.
+ */
+async function clearStaleLocks(dirs: GitDirs, branch: string) {
+  if (dirs.own === dirs.common) return;
+  const own = (await readdir(dirs.own).catch(() => [] as string[])).filter(name => name.endsWith('.lock'));
+  const refs = (await readdir(path.join(dirs.own, 'refs'), { recursive: true }).catch(() => [] as string[])).filter(name => name.endsWith('.lock')).map(name => path.join('refs', name));
+  for (const name of [...own, ...refs]) await unlink(path.join(dirs.own, name)).catch(() => {});
+  const shared = `${path.join(dirs.common, 'refs', 'heads', ...branch.split('/'))}.lock`;
+  const info = await lstat(shared).catch(() => undefined);
+  if (info?.isFile() && Date.now() - info.mtimeMs >= SHARED_LOCK_STALE_MS) await unlink(shared).catch(() => {});
+}
+
+/** Ignored files that may hold what exists nowhere else, such as credentials: `.env`, `.env.local`. */
+const KEEP_IGNORED = /^\.env/;
+
+/**
+ * The ignored entries of a worktree that removing it would lose for good. git lists them, and an
+ * ignored directory (node_modules, build output) is one entry it does not look into.
+ */
+async function ignoredToKeep(target: string) {
+  const result = await git(target, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory']);
+  if (result.code !== 0) return undefined;
+  return result.stdout.split('\0').filter(Boolean).map(entry => entry.replace(/\/$/, '')).filter(entry => KEEP_IGNORED.test(path.posix.basename(entry))).sort();
+}
+
+/**
+ * Why reclaimWorktrees left a directory in place: `invalid`, not the top level of a working git
+ * worktree; `not-linked`, a repository of its own rather than a worktree of one; `other-branch`,
+ * another branch or a detached HEAD, which does not hold this work; `commit-failed`, its work could
+ * not be committed (`detail` says why); `uncommitted`, something was still not committed after
+ * that; `ignored-files`, its work is committed but it holds ignored files that exist nowhere else.
+ */
+export type LeftWorktree = {
+  name: string;
+  path: string;
+  reason: 'invalid' | 'not-linked' | 'other-branch' | 'commit-failed' | 'uncommitted' | 'ignored-files';
+  branch?: string;
+  detail?: string;
+  files?: string[];
+};
+
+const firstLine = (result: GitResult) => (result.stderr || result.stdout).trim().split('\n')[0] ?? '';
+
 /**
  * After a crash: commits work left in worktrees under `root` to their branches and
- * removes the directories. Returns the branches that were kept. A directory is removed
- * only once everything in it is committed to its own `alp/<name>` branch; any other one
- * (invalid git metadata, a failed commit, another branch checked out, a detached HEAD)
- * stays untouched, so recovery reuses or preserves it and nothing uncommitted is lost.
+ * removes the directories. Returns the branches that were kept, and the directories left in
+ * place with the reason. A directory is removed only once everything in it is committed to
+ * its own `alp/<name>` branch and it holds no ignored file to keep (`.env*`); any other one
+ * stays, so recovery reuses or preserves it and nothing uncommitted is lost. Stale locks a
+ * killed git command left in such a worktree are removed first (clearStaleLocks).
  */
-export async function reclaimWorktrees(root: string) {
+export async function reclaimWorktrees(root: string): Promise<{ kept: string[]; left: LeftWorktree[] }> {
   const kept: string[] = [];
+  const left: LeftWorktree[] = [];
   const entries = await readdir(root).catch(() => [] as string[]);
   for (const name of entries) {
     const target = path.join(root, name);
+    const leave = (reason: LeftWorktree['reason'], extra: Omit<LeftWorktree, 'name' | 'path' | 'reason'> = {}) => { left.push({ name, path: target, reason, ...extra }); };
     if (!(await stat(target).catch(() => undefined))?.isDirectory()) continue;
-    if (!await validWorktree(target)) continue;
-    const common = await git(target, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
-    if (common.code !== 0) continue;
-    const checkout = path.dirname(common.stdout.trim());
+    if (!await validWorktree(target)) { leave('invalid'); continue; }
+    const dirs = await gitDirs(target);
+    if (!dirs) { leave('invalid'); continue; }
+    if (dirs.own === dirs.common) { leave('not-linked'); continue; }
+    const checkout = path.dirname(dirs.common);
     const ref = await git(target, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
     const branch = ref.stdout.trim();
-    if (ref.code !== 0 || branch !== `alp/${name}`) continue;
-    if ((await git(target, ['add', '-A'])).code !== 0) continue;
+    if (ref.code !== 0 || branch !== `alp/${name}`) { leave('other-branch', ref.code === 0 && branch ? { branch } : {}); continue; }
+    await clearStaleLocks(dirs, branch);
+    const added = await git(target, ['add', '-A']);
+    if (added.code !== 0) { leave('commit-failed', { branch, detail: firstLine(added) }); continue; }
     if ((await git(target, ['diff', '--cached', '--quiet'])).code === 1) {
-      if ((await git(target, [...IDENTITY, 'commit', '--quiet', '--no-verify', '-m', 'alp: work left by an interrupted assignment'])).code !== 0) continue;
+      const committed = await git(target, [...IDENTITY, 'commit', '--quiet', '--no-verify', '-m', 'alp: work left by an interrupted assignment']);
+      if (committed.code !== 0) { leave('commit-failed', { branch, detail: firstLine(committed) }); continue; }
     }
     const status = await git(target, ['status', '--porcelain', '--ignored=no']);
-    if (status.code !== 0 || status.stdout.trim()) continue;
+    if (status.code !== 0 || status.stdout.trim()) { leave('uncommitted', { branch }); continue; }
+    const ignored = await ignoredToKeep(target);
+    if (!ignored) { leave('ignored-files', { branch, detail: 'git could not list its ignored files' }); continue; }
+    if (ignored.length) { leave('ignored-files', { branch, files: ignored }); continue; }
     await removeWorktree({ checkout, path: target, workdir: target, branch, base: '' });
     kept.push(branch);
   }
-  return kept;
+  return { kept, left };
 }
 
 /**

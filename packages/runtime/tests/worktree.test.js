@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -203,7 +203,7 @@ test('unmerged work stays on its branch when the requester closes, and after a c
   // A worktree a crash left behind: its work is committed to its branch and the directory removed.
   git(project, 'worktree', 'add', '--quiet', '-b', 'alp/crashed', path.join(worktreeDir, 'crashed'));
   await writeFile(path.join(worktreeDir, 'crashed', 'e.txt'), 'e\n');
-  assert.deepEqual(await reclaimWorktrees(worktreeDir), ['alp/crashed']);
+  assert.deepEqual(await reclaimWorktrees(worktreeDir), { kept: ['alp/crashed'], left: [] });
   assert.deepEqual(await readdir(worktreeDir), []);
   assert.equal(git(project, 'show', 'alp/crashed:e.txt'), 'e');
 });
@@ -299,16 +299,30 @@ test('t-eae4: reclaim never deletes work it could not commit or read', async t =
   const partial = path.join(worktreeDir, 'partial');
   await mkdir(partial, { recursive: true });
   await writeFile(path.join(partial, 'wip.txt'), 'unsaved\n');
-  // A worktree whose commit fails: its index is locked, so `git commit` cannot run.
+  // A worktree whose commit fails: its branch is locked in the shared repository by a lock too
+  // fresh to call stale (a git command in the user's checkout may hold it), so `git commit` cannot run.
   git(project, 'worktree', 'add', '--quiet', '-b', 'alp/locked', path.join(worktreeDir, 'locked'));
   await writeFile(path.join(worktreeDir, 'locked', 'dirty.txt'), 'dirty\n');
-  const gitdir = git(path.join(worktreeDir, 'locked'), 'rev-parse', '--absolute-git-dir');
-  await writeFile(path.join(gitdir, 'index.lock'), '');
+  await writeFile(path.join(project, '.git', 'refs', 'heads', 'alp', 'locked.lock'), '');
   // A worktree the assignment switched to its own branch: the alp branch does not hold that work.
   git(project, 'worktree', 'add', '--quiet', '-b', 'alp/switched', path.join(worktreeDir, 'switched'));
   git(path.join(worktreeDir, 'switched'), 'checkout', '--quiet', '-b', 'fix/own');
   await writeFile(path.join(worktreeDir, 'switched', 'untracked.txt'), 'u\n');
-  await reclaimWorktrees(worktreeDir);
+  // A detached worktree: there is no branch to commit its work to.
+  git(project, 'worktree', 'add', '--quiet', '--detach', path.join(worktreeDir, 'detached'));
+  // t-22be: what reclaim leaves in place it reports, with the reason, so alpd can log it.
+  const { kept, left } = await reclaimWorktrees(worktreeDir);
+  assert.deepEqual(kept, []);
+  const byName = Object.fromEntries(left.map(entry => [entry.name, entry]));
+  assert.deepEqual(Object.keys(byName).sort(), ['detached', 'locked', 'partial', 'switched']);
+  assert.equal(byName.partial.reason, 'invalid');
+  assert.equal(byName.partial.path, partial);
+  assert.equal(byName.locked.reason, 'commit-failed');
+  assert.match(byName.locked.detail, /alp\/locked\.lock/);
+  assert.equal(byName.switched.reason, 'other-branch');
+  assert.equal(byName.switched.branch, 'fix/own');
+  assert.equal(byName.detached.reason, 'other-branch');
+  assert.equal(byName.detached.branch, undefined);
   assert.equal(await readFile(path.join(partial, 'wip.txt'), 'utf8'), 'unsaved\n');
   assert.equal(await readFile(path.join(worktreeDir, 'locked', 'dirty.txt'), 'utf8'), 'dirty\n');
   assert.equal(await readFile(path.join(worktreeDir, 'switched', 'untracked.txt'), 'utf8'), 'u\n');
@@ -321,9 +335,17 @@ test('t-eae4: reattaching reuses a valid worktree and preserves an invalid one b
   git(project, 'worktree', 'add', '--quiet', '-b', 'alp/live', path.join(worktreeDir, 'live'));
   const live = { checkout: project, path: path.join(worktreeDir, 'live'), workdir: path.join(worktreeDir, 'live'), branch: 'alp/live', base };
   await writeFile(path.join(live.path, 'dirty.txt'), 'dirty\n');
-  await writeFile(path.join(git(live.path, 'rev-parse', '--absolute-git-dir'), 'index.lock'), '');
+  const liveGitdir = git(live.path, 'rev-parse', '--absolute-git-dir');
+  await writeFile(path.join(liveGitdir, 'index.lock'), '');
+  // t-22be: a crash mid commit also leaves HEAD and the branch locked; reopening clears those too.
+  await writeFile(path.join(liveGitdir, 'HEAD.lock'), '');
+  const branchLock = path.join(project, '.git', 'refs', 'heads', 'alp', 'live.lock');
+  await writeFile(branchLock, '');
+  const old = new Date(Date.now() - 60 * 60 * 1000);
+  await utimes(branchLock, old, old);
   const reused = await reattachWorktree(live);
   git(live.path, 'add', '-A');
+  git(live.path, '-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'after reopening');
   assert.equal(reused.preserved, undefined);
   assert.equal(await readFile(path.join(live.path, 'dirty.txt'), 'utf8'), 'dirty\n');
 
@@ -335,4 +357,74 @@ test('t-eae4: reattaching reuses a valid worktree and preserves an invalid one b
   assert.ok(recreated.preserved, 'the invalid directory was preserved');
   assert.equal(await readFile(path.join(recreated.preserved, 'wip.txt'), 'utf8'), 'unsaved\n');
   assert.equal(git(broken.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'alp/broken');
+});
+
+/** A worktree under `worktreeDir` on its own `alp/<name>` branch, as an assignment leaves it. */
+function addWorktree(project, worktreeDir, name) {
+  const target = path.join(worktreeDir, name);
+  git(project, 'worktree', 'add', '--quiet', '-b', `alp/${name}`, target);
+  return { target, gitdir: git(target, 'rev-parse', '--absolute-git-dir') };
+}
+
+test('t-22be: reclaim keeps a worktree that holds ignored .env files, and removes one with only build output', async t => {
+  const { project, worktreeDir } = await setup(t);
+  await writeFile(path.join(project, '.gitignore'), '.env*\nout/\nmodules/\n');
+  git(project, 'add', '.gitignore');
+  git(project, '-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'ignore');
+  // An assignment that wrote secrets beside its work: committing never takes them, removing would delete them.
+  const secrets = addWorktree(project, worktreeDir, 'secrets');
+  await writeFile(path.join(secrets.target, 'work.txt'), 'work\n');
+  await writeFile(path.join(secrets.target, '.env'), 'API=1\n');
+  await mkdir(path.join(secrets.target, 'app'));
+  await writeFile(path.join(secrets.target, 'app', '.env.local'), 'LOCAL=1\n');
+  await mkdir(path.join(secrets.target, 'out'));
+  await writeFile(path.join(secrets.target, 'out', 'bundle.js'), 'built\n');
+  // An ignored directory is listed as one entry: reclaim does not look inside it.
+  await mkdir(path.join(secrets.target, 'modules', 'pkg'), { recursive: true });
+  await writeFile(path.join(secrets.target, 'modules', 'pkg', '.env'), 'PKG=1\n');
+  // An assignment that only built: its output is rebuilt from the committed work.
+  const built = addWorktree(project, worktreeDir, 'built');
+  await writeFile(path.join(built.target, 'src.txt'), 'src\n');
+  await mkdir(path.join(built.target, 'out'));
+  await writeFile(path.join(built.target, 'out', 'bundle.js'), 'built\n');
+
+  const { kept, left } = await reclaimWorktrees(worktreeDir);
+  assert.deepEqual(kept, ['alp/built']);
+  assert.deepEqual(await readdir(worktreeDir), ['secrets']);
+  assert.equal(git(project, 'show', 'alp/built:src.txt'), 'src');
+  assert.equal(left.length, 1);
+  assert.equal(left[0].name, 'secrets');
+  assert.equal(left[0].reason, 'ignored-files');
+  assert.equal(left[0].branch, 'alp/secrets');
+  assert.deepEqual(left[0].files, ['.env', 'app/.env.local']);
+  // The work itself is committed to the branch, and the ignored files stay where they were.
+  assert.equal(git(project, 'show', 'alp/secrets:work.txt'), 'work');
+  assert.equal(await readFile(path.join(secrets.target, '.env'), 'utf8'), 'API=1\n');
+  assert.equal(await readFile(path.join(secrets.target, 'app', '.env.local'), 'utf8'), 'LOCAL=1\n');
+});
+
+test('t-22be: reclaim clears the stale ref and HEAD locks a crashed commit left, and commits the work', async t => {
+  const { project, worktreeDir } = await setup(t);
+  const crashed = addWorktree(project, worktreeDir, 'crashed');
+  await writeFile(path.join(crashed.target, 'work.txt'), 'work\n');
+  // Locks in the worktree's own git directory: only ALP's git commands work there.
+  await writeFile(path.join(crashed.gitdir, 'index.lock'), '');
+  await writeFile(path.join(crashed.gitdir, 'HEAD.lock'), '');
+  await mkdir(path.join(crashed.gitdir, 'refs', 'bisect'), { recursive: true });
+  await writeFile(path.join(crashed.gitdir, 'refs', 'bisect', 'bad.lock'), '');
+  // The branch's lock in the shared repository, old enough that no git command still holds it.
+  const branchLock = path.join(project, '.git', 'refs', 'heads', 'alp', 'crashed.lock');
+  await writeFile(branchLock, '');
+  const old = new Date(Date.now() - 60 * 60 * 1000);
+  await utimes(branchLock, old, old);
+  // Any other lock in the shared repository belongs to the user's checkout, whatever its age.
+  const userLock = path.join(project, '.git', 'refs', 'heads', 'main.lock');
+  await writeFile(userLock, '');
+  await utimes(userLock, old, old);
+
+  assert.deepEqual(await reclaimWorktrees(worktreeDir), { kept: ['alp/crashed'], left: [] });
+  assert.deepEqual(await readdir(worktreeDir), []);
+  assert.equal(git(project, 'show', 'alp/crashed:work.txt'), 'work');
+  assert.equal(existsSync(branchLock), false);
+  assert.equal(existsSync(userLock), true);
 });
