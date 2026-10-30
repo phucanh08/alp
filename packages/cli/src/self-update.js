@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { executablePath } from '@anhlp/alp-core/packaged';
 
 /**
  * `alp update` (t-1e02 P3): replaces the ALP executable with a release from GitHub Releases, after
@@ -211,7 +212,7 @@ async function confirm(question) {
 export async function selfUpdate(args, overrides = {}) {
   /** @type {UpdateDeps} */
   const deps = {
-    packaged: false, version: '0.0.0', execPath: process.execPath, env: process.env, platform: process.platform, arch: process.arch,
+    packaged: false, version: '0.0.0', execPath: executablePath() ?? '', env: process.env, platform: process.platform, arch: process.arch,
     log: line => console.log(line), warn: line => console.error(line), interactive: !!(process.stdin.isTTY && process.stdout.isTTY),
     fetchBytes, confirm, extract,
     provenance: (file, repo) => verifyProvenance(file, { repo }),
