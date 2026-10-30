@@ -489,3 +489,30 @@ test('socket closing before upgrade cleans up perPrincipal entry without memory 
   await until(() => !gateway.perPrincipal.has(ids.alice), 'perPrincipal cleaned up after session close');
   assert.equal(gateway.perPrincipal.size, 0);
 });
+
+test('a client that announces principal.agent has its own alpd connection say so before hello answers; a failure closes it (t-e706)', async t => {
+  const daemon = fakeDaemon();
+  const h = await startGateway(t, { daemon, credentials: { alice: { workspaces: [path.join(tmpdir(), 'alp-e706-a')] } } });
+  const hellos = () => daemon.state.calls.filter(call => call.method === 'daemon.hello');
+
+  const web = await h.rawSession('alice');
+  assert.ok((await web.call('daemon.hello', { protocolVersion: 1, client: { name: 'web', version: '0' } })).result);
+  const webLinks = new Set(hellos().map(call => call.link));
+  assert.ok(hellos().every(call => !call.params?.capabilities), 'the Web user is not marked');
+
+  const agent = await h.rawSession('alice');
+  assert.ok((await agent.call('daemon.hello', { protocolVersion: 1, client: { name: 'agent', version: '0' }, capabilities: ['principal.agent'] })).result);
+  const marked = hellos().filter(call => call.params?.capabilities?.includes('principal.agent'));
+  assert.equal(marked.length, 1);
+  assert.ok(!webLinks.has(marked[0].link), 'only the agent client\'s own alpd connection is marked');
+  // Once is enough: alpd keeps the mark.
+  await agent.call('daemon.hello', { protocolVersion: 1, client: { name: 'agent', version: '0' }, capabilities: ['principal.agent'] });
+  assert.equal(hellos().filter(call => call.params?.capabilities?.includes('principal.agent')).length, 1);
+
+  daemon.state.handlers['daemon.hello'] = params => { if (params.capabilities) throw { code: 1005, message: 'down' }; return { protocolVersion: 1, capabilities: [] }; };
+  const failing = await h.rawSession('alice');
+  const answer = failing.call('daemon.hello', { protocolVersion: 1, client: { name: 'agent', version: '0' }, capabilities: ['principal.agent'] });
+  assert.equal((await failing.closed).code, 1011);
+  assert.ok(!failing.frames.some(frame => frame.result), 'no hello answer without the mark');
+  void answer;
+});
