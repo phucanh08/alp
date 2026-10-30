@@ -1103,6 +1103,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       let poured: Awaited<ReturnType<typeof pourFormula>> | undefined;
       // A blocking task.close hook can refuse the close; its output is the reason.
       const hookedClose = async (id: string) => {
+        // Refused before any hook runs: no agent closes around a human gate (t-f438); core checks again under the lock.
+        const current = (await loadTasks(project)).tasks.find(candidate => candidate.id === id);
+        if (current && (current.step?.human || current.gates.some(gate => gate.kind === 'human' && !gate.resolved))) throw new Error(`Only the user closes ${id}: it waits on the user's decision. Ask the user to decide it`);
         const refused = await runHooks(sessionId, session, 'task.close', { reason, ...(summary ? { summary } : {}) }, id);
         if (refused) throw new Error(`A task.close hook refused to close ${id}: ${refused}`);
         return closeTask(project, id, { reason, summary, unverified }, by);

@@ -108,22 +108,15 @@ export function applyLedger(tasks, ledger) {
 }
 
 /**
- * Drops the entries that no longer guard anything (t-f438): every cleared one (applyLedger skips
- * them), and the open ones of a closed task whose file still shows that gate open and untampered.
- * When every task file read (`complete`), also those of tasks that are gone: applyLedger cannot
- * restore a gate without its task. Called from compaction, under the task lock. Returns how many.
+ * Drops the entries that no longer guard anything (t-f438): the cleared ones, which applyLedger
+ * skips. An open entry stays even for a closed or missing task: status and presence are file
+ * state an agent can edit, so only a clear ALP recorded ends an entry. Called from compaction.
  */
-export async function ledgerPrune(projectRoot, tasks, { complete = false } = {}) {
+export async function ledgerPrune(projectRoot) {
   const ledger = await readLedger(projectRoot, { strict: true });
-  const byId = new Map(tasks.map(task => [task.id, task]));
   let dropped = 0;
   for (const [name, entry] of Object.entries(ledger.gates)) {
-    const match = /^(.+)\/(g\d+)@(.+)$/.exec(name);
-    const task = match ? byId.get(match[1]) : undefined;
-    const gate = task?.gates?.find(item => item.id === match[2]);
-    const settled = !entry || entry.resolved
-      || (task ? task.status === 'closed' && gate?.kind === 'human' && gate.at === match[3] && !gate.resolved && !gate.tampered : complete && !!match);
-    if (!settled) continue;
+    if (entry && !entry.resolved) continue;
     delete ledger.gates[name];
     dropped += 1;
   }
