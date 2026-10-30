@@ -769,6 +769,8 @@ answers a question an agent asked. ALP enforces this on every path it controls:
 - An agent's connection may not open, attach to or type into a daemon terminal
   (`terminal.create`, `terminal.attach`, `terminal.input`): those shells carry no
   `ALP_AGENT_SESSION`.
+- `session.create` on an agent's connection drops `spec.restore`: a new root it
+  starts begins its own conversation, never one of your native threads.
 - A ledger in `$ALP_HOME/gates/` records each open human gate ALP writes (with
   `alp_task`/`alp task gate add`, a formula's human step, or a beads import) and
   each clear or removal ALP makes. When a task file shows a ledgered human gate
