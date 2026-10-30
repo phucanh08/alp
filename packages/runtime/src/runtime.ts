@@ -597,7 +597,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (state === 'failed' && LIMIT_ERRORS.includes(params.turn.error?.codexErrorInfo)) {
         if (session.role !== 'supervisor') {
           session.parkReason = `the ${label(session.runtimeKind)} usage limit was reached`;
-          session.parkPause = { scope: paused.all ? 'all' : session.runtimeKind };
+          session.parkPause = { scope: paused.all ? 'all' : session.runtimeKind, ...(paused.all?.cause === 'disk' ? { disk: true } : {}) };
         }
         void limitReached(session, params.turn.error);
       }
@@ -1395,7 +1395,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         // A process restart already owns its continuation; this pause must not replace its cause.
         if (session.parkReason && !session.parkPause) continue;
         session.parkReason = pause.cause === 'disk' ? pause.reason : `paused by ${pause.by}`;
-        session.parkPause = { scope };
+        session.parkPause = { scope, ...(pause.cause === 'disk' ? { disk: true } : {}) };
         void session.runtime.request('turn/interrupt', { threadId: session.threadId, turnId: session.active }).catch(() => {});
         runLog(rootOf(id), { event: 'assignment.parking', assignmentId: id, agent: session.mapping.agent.name, reason: session.parkReason });
       }
@@ -1439,7 +1439,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     emit(session.parent!, { type: 'assignment', assignment: assignmentSnapshot(assignment, 'parked') });
     // One that continues by itself is information; one held until the user resumes needs the requester's decision, so it wakes it.
     if (then) post(session.parent!, { kind: 'note', from: assignment.agent, assignment: sessionId, passive: true, body: `Parked: ${session.parked.reason}. ${then} Wait for it, or start other work.` });
-    else if (paused.all?.cause === 'disk' && session.parked.pause?.scope === 'all') post(session.parent!, { kind: 'stalled', from: assignment.agent, assignment: sessionId, body: `Parked: ${session.parked.reason}. ALP continues this assignment where it stopped as soon as the disk takes writes again (alpd checks every minute), or when the user frees space and runs alp resume. Wait for it, or tell the user the disk is full; what it changed stays in your checkout or its worktree.` });
+    else if (session.parked.pause?.disk) post(session.parent!, { kind: 'stalled', from: assignment.agent, assignment: sessionId, body: `Parked: ${session.parked.reason}. ALP continues this assignment where it stopped as soon as the disk takes writes again (alpd checks every minute), or when the user frees space and runs alp resume. Wait for it, or tell the user the disk is full; what it changed stays in your checkout or its worktree.` });
     else post(session.parent!, { kind: 'stalled', from: assignment.agent, assignment: sessionId, body: `Parked: ${session.parked.reason}. ALP continues this assignment where it stopped when ${label(session.runtimeKind)} is resumed (${options.autoResume !== false && (pauseOf(session.runtimeKind)?.by ?? 'alpd') === 'alpd' ? `ALP resumes it as soon as ${label(session.runtimeKind)} says the limit lifted` : 'the user runs alp resume'}). Wait for it, start other work, or stop it with alp_cancel and give the rest to an agent on another runtime (pass model claude:… or codex:…); what it changed stays in your checkout or its worktree.` });
   }
 

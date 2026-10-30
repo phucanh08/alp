@@ -7,7 +7,7 @@ import type { Handoff } from './handoff.js';
 import type { SessionUsage } from './events.js';
 
 /** The pause that stopped a turn; a matching resume may arrive before its interruption settles. */
-export type ParkPause = { scope: RuntimeKind | 'all'; resumed?: boolean };
+export type ParkPause = { scope: RuntimeKind | 'all'; resumed?: boolean; /** The pause was alpd's, for a full disk (t-2831). */ disk?: boolean };
 export type Parked = { reason: string; since: number; prompt?: string; pause?: ParkPause };
 
 export type Session = {

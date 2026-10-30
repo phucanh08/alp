@@ -60,10 +60,37 @@ test('the disk guard holds on a disk error, ignores others, and releases once wr
   await guard.check();
   assert.equal(runtime.diskHeld(), true);
   free = 5 * 1024 ** 3;
+  // Two good checks in a row resume, so a borderline disk does not flap.
+  await guard.check();
+  assert.equal(runtime.diskHeld(), true);
   await guard.check();
   assert.deepEqual(runtime.calls.at(-1), ['release', 'alpd, after disk space returned']);
   assert.equal(guard.status().held, false);
   assert.equal(guard.status().last.free, free);
+});
+
+test('a log line about the full disk that itself fails does not hold again or recurse (review of t-2831)', () => {
+  const runtime = fakeRuntime();
+  let guard;
+  let depth = 0;
+  // The log writes to the full disk: its failure is reported straight back, as guardOutput does.
+  const log = { warn() { if (++depth > 50) throw new Error('recursion'); guard.report(enospc()); }, info() {} };
+  guard = createDiskGuard({ home: '/nowhere', runtime, log, free: async () => 0, probe: async () => { throw enospc(); } });
+  assert.equal(guard.report(enospc()), true);
+  assert.deepEqual(runtime.calls, [['hold', 'the disk is full']]);
+  assert.equal(depth, 1);
+  // While the user's pause keeps ALP's hold a no-op, further errors log nothing more.
+  runtime.resumeByUser();
+  guard.report(enospc());
+  assert.equal(depth, 1);
+});
+
+test('a hanging disk check gives up and checks go on', async () => {
+  const runtime = fakeRuntime();
+  const guard = createDiskGuard({ home: '/nowhere', runtime, log: quiet, checkTimeoutMs: 20, free: () => new Promise(() => {}), probe: () => new Promise(() => {}) });
+  await guard.check();
+  await guard.check();
+  assert.deepEqual(runtime.calls, []);
 });
 
 test('the disk guard warns once when space runs low and holds before it runs out', async () => {

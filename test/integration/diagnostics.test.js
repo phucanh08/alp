@@ -180,7 +180,8 @@ test('alp doctor reports free disk space and the worktrees earlier runs left, de
   assert.match(low.details[1], /^1 left in .*alp-\*/);
   assert.match(low.hint, /ALP deletes none of these/);
   const plenty = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp] });
-  assert.equal(plenty.status, 'info');
+  assert.equal(plenty.status, 'ok');
+  assert.equal(plenty.details.length, 2);
   assert.equal(plenty.summary, '50.0 GB free where ALP_HOME lives');
   assert.equal((await diskCheck(path.join(directory, 'empty-home'), { free: 50 * 1024 ** 3, tempDirs: [] })).status, 'ok');
   // Nothing was removed.

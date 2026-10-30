@@ -77,7 +77,7 @@ async function detach(home: string) {
  * log at start as the detached launcher does, then writes its output there itself. The
  * manager's own file keeps only what Node prints when it dies.
  */
-async function serviceLog(home: string) {
+async function serviceLog(home: string, onError: (error: unknown) => void) {
   await assertPrivateDirectory(home, { create: true });
   const { log } = daemonPaths(home);
   await assertPrivateDirectory(path.dirname(log), { create: true });
@@ -85,7 +85,7 @@ async function serviceLog(home: string) {
   const fd = openSync(log, 'a', 0o600);
   for (const stream of [process.stdout, process.stderr]) {
     stream.write = ((chunk: string | Uint8Array, encoding?: unknown, callback?: unknown) => {
-      try { if (typeof chunk === 'string') writeSync(fd, chunk); else writeSync(fd, chunk); } catch {}
+      try { if (typeof chunk === 'string') writeSync(fd, chunk); else writeSync(fd, chunk); } catch (error) { onError(error); }
       const done = typeof encoding === 'function' ? encoding : callback;
       if (typeof done === 'function') done();
       return true;
@@ -288,7 +288,7 @@ try {
     // A direct foreground/login invocation is an explicit start. Do this before
     // admission registration, so a stop published during startup is preserved.
     if (!process.connected) await unlink(path.join(home, 'state', 'alpd.held')).catch(() => {});
-    if (process.argv.includes('--service')) await serviceLog(home);
+    if (process.argv.includes('--service')) await serviceLog(home, error => { if (isDiskError(error)) diskReport(error); });
     if (process.connected) await run(home);
     else {
       // Retain admission through readiness even if the requesting service client
