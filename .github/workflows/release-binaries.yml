@@ -84,14 +84,13 @@ jobs:
         run: |
           tag="v$VERSION"
           state=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo none)
-          case "$state" in
-            false) echo "release $tag is already published; refusing to touch it"; exit 1 ;;
-            true)
-              echo "refreshing the existing draft $tag"
-              gh release upload "$tag" release/* --clobber --repo "$GITHUB_REPOSITORY" ;;
-            none)
-              gh release create "$tag" release/* --draft --target "$RELEASE_SHA" --repo "$GITHUB_REPOSITORY" \
-                --title "ALP $VERSION" \
-                --notes "Draft binary release built from $RELEASE_SHA by run $GITHUB_RUN_ID. Install: curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/install.sh | sh -s -- --version $VERSION. Verify provenance: gh attestation verify <archive> --repo $GITHUB_REPOSITORY." ;;
-          esac
+          if [ "$state" = false ]; then echo "release $tag is already published; refusing to touch it"; exit 1; fi
+          if [ "$state" = true ]; then
+            # A draft has no tag yet; replace it so its target and assets are this SHA's.
+            echo "replacing the existing draft $tag"
+            gh release delete "$tag" --yes --repo "$GITHUB_REPOSITORY"
+          fi
+          gh release create "$tag" release/* --draft --target "$RELEASE_SHA" --repo "$GITHUB_REPOSITORY" \
+            --title "ALP $VERSION" \
+            --notes "Draft binary release built from $RELEASE_SHA by run $GITHUB_RUN_ID. Install: curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/install.sh | sh -s -- --version $VERSION. Verify provenance: gh attestation verify <archive> --repo $GITHUB_REPOSITORY."
           gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName,targetCommitish,assets --jq '{isDraft, tagName, targetCommitish, assets: [.assets[].name]}'
