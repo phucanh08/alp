@@ -91,7 +91,7 @@ const TAIL_CHUNK = 64 * 1024;
 
 export type Store = ReturnType<typeof createStore>;
 
-export function createStore(root: string) {
+export function createStore(root: string, options: { onWriteError?: (error: unknown) => void } = {}) {
   const sessionsDir = path.join(root, 'sessions');
   const timelineDir = path.join(root, 'timeline');
   const historyIndexes = new Map<string, ReturnType<typeof createHistoryIndex>>();
@@ -136,6 +136,7 @@ export function createStore(root: string) {
         health.failures++;
         health.lastError = { at: new Date().toISOString(), operation, message: error?.message ?? String(error) };
         log.error(`${operation} failed`, { code: 'ALP_PERSISTENCE_WRITE_FAILED', operation, error, ...ids });
+        options.onWriteError?.(error);
       });
     map.set(key, settled);
     void settled.then(() => { if (map.get(key) === settled) map.delete(key); });
