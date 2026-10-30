@@ -1,3 +1,4 @@
+import { AGENT_MARKER } from '@anhlp/alp-core/tasks';
 import { CodexTransport } from './transport.js';
 import { ClaudeTransport } from './claude-transport.js';
 import { AcpTransport, type AcpProvider } from './acp-transport.js';
@@ -12,6 +13,8 @@ export function nativeEnvironment(options: RuntimeOptions, extra: Record<string,
     // Markers of an enclosing Paseo, Codex or Claude Code session would make the native harness think it is nested.
     if (/^(PASEO_|CODEX_THREAD_ID$|CODEX_INTERNAL_|CODEX_PARENT_|CLAUDECODE$|CLAUDE_CODE_|ANTHROPIC_AGENT_)/.test(key)) delete environment[key];
   }
+  // Every process the agent runs inherits it: the CLI and alpd refuse it what only the user may do (t-ca1f).
+  environment[AGENT_MARKER] = '1';
   return environment;
 }
 

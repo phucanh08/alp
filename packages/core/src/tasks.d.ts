@@ -50,6 +50,8 @@ export type TaskGate = {
   /** A human gate's answers; choosing any of them approves it. */
   options?: string[];
   resolved?: { at: string; by: string; note?: string; choice?: string; channel?: GateChannel; notified?: string };
+  /** A human gate ALP opened that a task file edit showed cleared or removed: reopened (t-ca1f). */
+  tampered?: { at?: string | null; by?: string | null; removed?: true };
   /** The user's latest rejection; the gate stays open. */
   rejected?: { at: string; by: string; reason?: string; channel?: GateChannel; notified?: string };
 };
@@ -138,3 +140,7 @@ export type EpicReport = { id: string; title: string; status: TaskStatus; tasks:
 export function epicReport(id: string, tasks: Task[]): EpicReport;
 export function landedParents(tasks: Task[]): Array<{ task: Task; children: number }>;
 export function withTaskLock<T>(projectRoot: string, work: () => Promise<T>): Promise<T>;
+
+/** Set in every agent process ALP starts (t-ca1f). */
+export const AGENT_MARKER: 'ALP_AGENT_SESSION';
+export function isAgentProcess(env?: NodeJS.ProcessEnv): boolean;
