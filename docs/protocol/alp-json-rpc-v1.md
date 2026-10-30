@@ -157,6 +157,8 @@ runs before all of them pass**:
 | `linked` | 1003 | `workspace.files.list`/`read`: a symbolic link on the way or at the end, a file with more than one name (hard link), a real path other than the one asked for, or a file or directory that changed while it was read (§12.4) |
 | `binary` | 1000 | `workspace.files.read`: the file is not UTF-8 text (§12.4) |
 | `too_large` | 1000 | `workspace.files.read`: the file is over 1 MiB (§12.4) |
+| `outside` | 1003 | `workspace.files.list`/`preview` with `internalLinks`: the path goes through a link whose real path is outside the workspace (§12.11) |
+| `changed` | 1004 | `workspace.files.preview`: a later chunk's `revision` is not the file's now; read it again from offset 0 (§12.11) |
 | `unsafe_path` | 1003 | a symlink where a project's `.alp`, its tasks or a library entry would be read or written |
 | `revision_conflict` | 1004 | a library `revision` or task `ifRev` that is no longer current; an entry that already exists where a new one was asked |
 | `task_state` | 1004 | the task's state refuses the change: already closed or open, open children, a closed parent, a gate already clear or missing |
@@ -642,6 +644,8 @@ connection on the local socket acts as the owner.
 | `session.attention.clear` | acknowledges a root's attention for every client; told as an `attention` event (§12.2) | yes (a second call answers `cleared: false`) | -32602, 1001, `persistence_failed` | session.read (a look is a read) |
 | `workspace.files.search` | read: file names under `projectRoot` (§12.3) | yes | -32602, 1001 | project.read |
 | `workspace.files.list` / `workspace.files.read` | read: a directory's entries; a text file's content (§12.4) | yes | -32602, 1000, 1001, 1003 | files.read (never a default; docs/alp/remote-gateway.md §5.10) |
+| `workspace.files.find` / `workspace.files.preview` | read: every name under `projectRoot` in pages; a file's preview in chunks (§12.11) | yes (`find` pages one snapshot) | -32602, 1000, 1001, 1003, 1004 `changed` | none: the daemon host's own clients only (the gateway denies both) |
+| `host.directories.search` | read: the host's directory names for a typed path or a word under home (§12.11) | yes | -32602 | none: never remote (host) |
 | `attachment.begin` | reserves quota, creates an upload bound to the caller (§12.6) | with `requestId` (same params answer the same upload and what it holds) | -32602, 1001, 1004, 1005, `persistence_failed` | attachments.write + session.write |
 | `attachment.chunk` | writes decoded bytes at `offset` | yes (the same bytes at the same offset) | -32602, 1001, 1004, `persistence_failed` | attachments.write + session.write |
 | `attachment.commit` | verifies SHA-256, publishes the object | yes (same digest answers the same attachment) | 1001, 1004, `persistence_failed` | attachments.write + session.write |
@@ -1442,6 +1446,88 @@ The gateway exposes the methods only with the opt-in permission `terminal.exec` 
 implied by nothing, `session.write` included), for workspaces in the grant, and forwards
 `terminal.event` notifications only for terminals the connection attached (docs/alp/remote-gateway.md
 §5.18).
+
+### 12.11 Browsing for the host's own clients (`workspace.files.find`, `workspace.files.preview`, `host.directories.search`)
+
+Capabilities `workspace.files.browse` and `host.directories` (t-bb87). What the Paseo bridge
+(integrations/paseo/server/paseo/files.ts) needs to answer Paseo's `directory_suggestions` and
+file explorer from alpd alone, so the bridge reads no file itself: every name of a workspace for
+its own ranking, a file of any kind as a preview, and the host's folders for "add a project".
+**No remote grant covers them**: the gateway denies `workspace.files.find` and
+`workspace.files.preview` and prohibits `host.directories.search`, and drops `cursor` and
+`internalLinks` from `workspace.files.list` (its params allow-list; remote clients keep §12.3 and
+§12.4). On the local socket every connection acts as the owner, as for every method.
+
+- `workspace.files.find { projectRoot, query?, kinds?, matchMode?, limit?, cursor? }` answers
+  `{ entries: [{ path, kind: 'file' | 'directory' }], nextCursor?, truncated? }`: every file and
+  directory (`kinds`, default `['file']`) under `projectRoot` whose path, case-insensitively, holds
+  `query`'s characters in order (`matchMode: 'subsequence'`, the default: every name Paseo's ranking
+  can match) or is `query` or ends with `/query` (`'suffix'`); every name for an empty `query` (a
+  leading `./` is not part of it). In path order (UTF-16 code units). It does not rank: the client
+  ranks the complete set.
+  - **What it lists**, as `git ls-files --cached --others --exclude-standard` lists a repository: dot
+    names included, `.gitignore`'d paths left out (Git's answer, as §12.4 asks it, one request per
+    breadth-first level; a level Git cannot answer **fails closed**: `{ entries: [], truncated:
+    true }`), the block list never. Outside a repository (or without Git), names starting with `.`
+    and the directories `node_modules`, `Library`, `dist`, `build`, `target`, `venv`, `__pycache__`
+    are skipped, as the bridge's own walk skipped them. A link whose real path is inside the root
+    and not blocked is listed as what it leads to and never entered; any other link is left out.
+    Each directory is checked before and after it is read, as §12.3.
+  - **Limits**: 64 directory levels, 100 000 entries looked at, 10 s (`FIND_LIMITS` in
+    packages/daemon/src/files.ts), checked per entry; then `truncated: true`.
+  - **Pages**: the first call (no `cursor`) walks and keeps the result as a snapshot; it answers
+    `limit` entries (1–1000, default 1000, `WORKSPACE_FILES.maxFindEntries`) and, while more
+    follow, `nextCursor`. The next call sends it with the same `projectRoot`, `query`, `kinds` and
+    `matchMode`, on the same connection; anything else, a cursor alpd did not give, or one whose
+    snapshot is gone answers `-32602 invalid_cursor` (ask again without a cursor). A snapshot is
+    dropped after its last page, 60 s after its last use, or when more than 16 are kept (the oldest
+    first). Every page is of one walk: a file created meanwhile is in none of them.
+- `workspace.files.list` takes, with this capability, `cursor` and `internalLinks`: past
+  `WORKSPACE_FILES.maxListEntries` entries the answer has `nextCursor` (and `truncated: true`) and
+  `cursor` answers the entries after it, in the same order. With `internalLinks: true`, a link whose
+  real path is inside the root and not blocked is listed as what it leads to (`kind`, `size` and
+  `modifiedAt` of its target) with that real path as `target`; `path` may go through such links,
+  and the answer's `target` then names the directory listed (its entries are under it). A path
+  through a link that leads outside is refused `1003 outside`. `.gitignore` (without
+  `includeIgnored`) is asked about both the path as given (up to its first link, beyond which Git
+  judges nothing) and its real path; a link's entry about both its path and its target.
+- `workspace.files.preview { projectRoot, path, includeIgnored?, internalLinks?, maxBytes?, offset?,
+  revision? }` answers `{ path, target?, kind: 'text' | 'image' | 'binary', mimeType, size,
+  modifiedAt, revision, encoding: 'base64' | 'none', content?, offset?, nextOffset? }`, as the
+  bridge's Files panel showed a file: `image` by extension (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`,
+  `.svg`), else `text` when the whole file has no NUL byte, at most 30% control characters in its
+  first 16 KiB and is valid UTF-8 (`mimeType` `application/json` for `.json`, else `text/plain`),
+  else `binary`, answered without content (`encoding: 'none'`). Text and image bytes come as
+  base64 in chunks of at most 8 MiB decoded (`WORKSPACE_FILES.maxPreviewChunkBytes`; one chunk fits
+  a frame): the first from offset 0; each next one from the `nextOffset` before, sent with the
+  `revision` the first answered. `revision` is opaque (a hash of the file's identity, size, times
+  and kind): a file that changed since answers `1004 changed`, and a later chunk without it, or past
+  the end, `-32602 invalid_params`. At most `maxBytes` (1–50 MiB, default 50 MiB,
+  `WORKSPACE_FILES.maxPreviewBytes`), else `1000 too_large`.
+  - **Refused as §12.4 refuses a read**: the block list (`1003 blocked_path`), `.gitignore` unless
+    `includeIgnored` (`1003 ignored`), missing or not a regular file (`1001 not_found`), a link on
+    the way or at the end without `internalLinks`, more than one name, a change while it is read
+    (`1003 linked`). A text file holding a private-key header anywhere, and any chunk holding one
+    (with the 256 bytes before it), is refused `1003 blocked_path`. With `internalLinks`, `path` may
+    go through links whose real path is inside the root: that real path, answered as `target`, is
+    what is checked and read (no link on its way), and `1003 outside` otherwise.
+- `host.directories.search { query, limit? }` answers `{ entries: [{ path }], truncated? }`,
+  absolute paths of the daemon host's directories: a `query` that is a path (absolute, or `~` and
+  `~/…` under the home of the account alpd runs as) answers the directories of its parent whose name
+  starts with what follows the last separator (case-insensitively; dot names only when that starts
+  with `.`), by name; any other word answers the directories under home whose name equals it, starts
+  with it, holds it or holds its letters in order, best then nearest first, down 4 levels and 5 000
+  directories (dot names and the folders find skips left out), then `truncated: true`. `limit` 1–100
+  (default 30). Names only; a link is neither listed nor entered; a directory that cannot be read
+  answers nothing.
+
+**For the Paseo bridge** this replaces its local file backend: suggestions are
+`workspace.files.find` pages ranked by the bridge's own ranking (so its order is unchanged), the
+empty query lists the root with `workspace.files.list`, and its Files panel uses
+`workspace.files.list` and `workspace.files.preview` with `includeIgnored` and `internalLinks`.
+A refusal or a lost daemon is the bridge's error, never a local read. Unlike that backend, alpd
+never lists or reads a blocked path (`.git`, `.env*`, keys) nor a hard-linked file, and never
+follows a link out of the workspace.
 
 ## 13. Compatibility notes for this revision
 

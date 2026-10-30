@@ -28,6 +28,8 @@
     "session.attention": "question.watch accepts `attention`: its answer holds each watched root's finished or error attention, kept by alpd for every client, and the connection is told when one is set or cleared (an `attention` event); session.attention.clear acknowledges one.",
     "workspace.files": "workspace.files.search: files under a directory whose relative path matches a query; read-only, names only, links never followed.",
     "workspace.files.read": "workspace.files.list and workspace.files.read: the entries of a directory and the content of a UTF-8 text file (at most 1 MiB) under a directory; read-only, links never followed, .git, .env* and key or credential files refused, .gitignore'd paths hidden unless asked.",
+    "workspace.files.browse": "workspace.files.find (every file and directory name under a directory, in pages of a snapshot, by its letters in order or by suffix), workspace.files.preview (a text, image or binary file of at most 50 MiB, its bytes in chunks of at most 8 MiB) and workspace.files.list's cursor and internalLinks (pages past 1000 entries; links whose real path is inside the directory, never outside); read-only, the block list and .gitignore as workspace.files.read. For the daemon host's own clients: the gateway exposes none of it.",
+    "host.directories": "host.directories.search: directories of the daemon host whose path completes a typed path (absolute or under ~) or whose name matches a word under the home directory; names only, links never listed, bounded. For the daemon host's own clients: never remote.",
     "prompt.images": "session.prompt takes inline image parts { type: \"image\", mimeType, data } (base64, no paths or URLs) within the image limits; a session snapshot says whether its runtime takes them in promptImages.",
     "library.project.write": "library save/delete/duplicate/rename accept policy project-data: only project-only pure-data agents and skills, no executable configuration, sidecars or library/built-in collisions.",
     "schedule": "schedule.create/list/get/cancel: one-shot continuations of a root session. alpd opens the turn by itself when the time comes; a job that comes due late says how late it is, and a job that cannot run says why.",
@@ -3018,6 +3020,14 @@
           },
           "includeIgnored": {
             "type": "boolean"
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "internalLinks": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -3054,6 +3064,10 @@
                 },
                 "modifiedAt": {
                   "type": "string"
+                },
+                "target": {
+                  "type": "string",
+                  "minLength": 1
                 }
               },
               "required": [
@@ -3066,6 +3080,15 @@
           },
           "truncated": {
             "type": "boolean"
+          },
+          "nextCursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [
@@ -3132,6 +3155,286 @@
           "path",
           "content",
           "size"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "workspace.files.find": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": true
+        },
+        "idempotent": true,
+        "capability": "workspace.files.browse",
+        "risks": [
+          "lists every file and directory name of the directory (not contents)"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "kinds": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "file",
+                "directory"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true
+          },
+          "matchMode": {
+            "enum": [
+              "subsequence",
+              "suffix"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "projectRoot"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "enum": [
+                    "file",
+                    "directory"
+                  ]
+                }
+              },
+              "required": [
+                "path",
+                "kind"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "workspace.files.preview": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "project",
+          "param": "projectRoot",
+          "required": true
+        },
+        "idempotent": true,
+        "capability": "workspace.files.browse",
+        "risks": [
+          "returns the bytes of a file under the directory, text, image or binary, up to 50 MiB in chunks"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "projectRoot": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "includeIgnored": {
+            "type": "boolean"
+          },
+          "internalLinks": {
+            "type": "boolean"
+          },
+          "maxBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 52428800
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 52428800
+          },
+          "revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "projectRoot",
+          "path"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "enum": [
+              "text",
+              "image",
+              "binary"
+            ]
+          },
+          "mimeType": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 52428800
+          },
+          "modifiedAt": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "encoding": {
+            "enum": [
+              "base64",
+              "none"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 11184812
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nextOffset": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "path",
+          "kind",
+          "mimeType",
+          "size",
+          "modifiedAt",
+          "revision",
+          "encoding"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "host.directories.search": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "host"
+        },
+        "idempotent": true,
+        "capability": "host.directories",
+        "risks": [
+          "lists names of directories on the daemon host outside any workspace"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": true
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entries"
         ],
         "additionalProperties": true
       }

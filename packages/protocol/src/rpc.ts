@@ -38,7 +38,7 @@ export type TerminalNotification = { jsonrpc: '2.0'; method: 'terminal.event'; p
 export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
 export type HistoryPage = { generation: string; items: HistoryItem[]; olderCursor?: string; hasOlder: boolean; tipCursor: number };
 
-export type Capability = 'session.interrupt.turn' | 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.configure.live' | 'terminal' | 'terminal.capture' | 'terminal.watch' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule' | 'catalog.live';
+export type Capability = 'session.interrupt.turn' | 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.configure.live' | 'terminal' | 'terminal.capture' | 'terminal.watch' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'workspace.files.browse' | 'host.directories' | 'prompt.images' | 'schedule' | 'catalog.live';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -51,6 +51,8 @@ export type ErrorReason =
   | 'library_policy' | 'unsafe_path' | 'revision_conflict' | 'task_state' | 'in_use' | 'busy' | 'unreadable'
   // workspace.files.search (§12.3); workspace.files.list and read (§12.4).
   | 'not_directory' | 'blocked_path' | 'ignored' | 'linked' | 'binary' | 'too_large'
+  // workspace.files.find, workspace.files.preview and internal links (§12.11).
+  | 'outside' | 'changed'
   // workspace.git.status and workspace.git.diff (§12.5).
   | 'not_repository' | 'unknown_ref' | 'invalid_compare' | 'stale_snapshot' | 'git_unavailable' | 'git_failed'
   // Attachments (§12.6).
@@ -169,10 +171,16 @@ export type RpcMethodMap = {
   'session.attention.clear': { params: { sessionId: string; at?: string }; result: { cleared: boolean } };
   /** Capability `workspace.files`: files under `projectRoot` whose relative path matches `query`, best first; read-only, links not followed. */
   'workspace.files.search': { params: { projectRoot: string; query?: string; limit?: number }; result: { files: Array<{ path: string }>; truncated?: boolean } };
-  /** Capability `workspace.files.read`: the entries of a directory under `projectRoot` (its root when `path` is left out); links, blocked and (unless `includeIgnored`) .gitignore'd entries left out. */
-  'workspace.files.list': { params: { projectRoot: string; path?: string; includeIgnored?: boolean }; result: { entries: Array<{ name: string; path: string; kind: 'file' | 'directory'; size?: number; modifiedAt?: string }>; truncated?: boolean } };
+  /** Capability `workspace.files.read`: the entries of a directory under `projectRoot` (its root when `path` is left out); links, blocked and (unless `includeIgnored`) .gitignore'd entries left out. With `workspace.files.browse`: `cursor` pages past 1000 entries; `internalLinks` lists links inside the root as what they lead to (`target`). */
+  'workspace.files.list': { params: { projectRoot: string; path?: string; includeIgnored?: boolean; cursor?: string; internalLinks?: boolean }; result: { entries: Array<{ name: string; path: string; kind: 'file' | 'directory'; size?: number; modifiedAt?: string; target?: string }>; truncated?: boolean; nextCursor?: string; target?: string } };
   /** Capability `workspace.files.read`: a UTF-8 text file under `projectRoot`, at most 1 MiB; read-only, links not followed. */
   'workspace.files.read': { params: { projectRoot: string; path: string; includeIgnored?: boolean }; result: { path: string; content: string; size: number; modifiedAt?: string } };
+  /** Capability `workspace.files.browse`: every name under `projectRoot` holding `query`'s letters in order (or ending with it), in path order, in pages of a snapshot; read-only, links not entered. */
+  'workspace.files.find': { params: { projectRoot: string; query?: string; kinds?: Array<'file' | 'directory'>; matchMode?: 'subsequence' | 'suffix'; limit?: number; cursor?: string }; result: { entries: Array<{ path: string; kind: 'file' | 'directory' }>; nextCursor?: string; truncated?: boolean } };
+  /** Capability `workspace.files.browse`: a file under `projectRoot` as a preview, text, image or binary, at most 50 MiB, its bytes in chunks from `offset`. */
+  'workspace.files.preview': { params: { projectRoot: string; path: string; includeIgnored?: boolean; internalLinks?: boolean; maxBytes?: number; offset?: number; revision?: string }; result: { path: string; target?: string; kind: 'text' | 'image' | 'binary'; mimeType: string; size: number; modifiedAt: string; revision: string; encoding: 'base64' | 'none'; content?: string; offset?: number; nextOffset?: number } };
+  /** Capability `host.directories`: directories of the daemon host whose path completes `query` (absolute or under ~), or whose name matches it under the home directory. */
+  'host.directories.search': { params: { query: string; limit?: number }; result: { entries: Array<{ path: string }>; truncated?: boolean } };
   'question.answer': { params: { questionId: string; text?: string; dismiss?: boolean; reason?: string }; result: { questionId: string } };
   'session.create': {
     params: { sessionId?: string; history?: 'skip' | 'replay'; delegation?: boolean; resume?: boolean } & ({ workspaceId: string; spec: Omit<SessionSpec, 'cwd'> & { cwd?: string } } | { workspaceId?: undefined; spec: SessionSpec });

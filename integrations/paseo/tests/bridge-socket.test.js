@@ -534,11 +534,12 @@ test("a checkout's branch, its changes as the Changes panel shows them, and its 
   assert.deepEqual(base.files.map(file => file.path).sort(), ['README.md', 'blob.bin', 'dot.png', 'moved.txt', 'new.txt', 'outside']);
   client.send({ type: 'session', message: { type: 'unsubscribe_checkout_diff_request', subscriptionId: 'legacy:2' } });
 
-  // The Files panel: entries with their kind, text, images, binaries; nothing outside the workspace.
+  // The Files panel, as alpd answers it (t-bb87): entries with their kind, text, images, binaries;
+  // nothing outside the workspace, and never a blocked path such as .git (alpd's block list).
   const listing = (await ask(client, { type: 'file_explorer_request', requestId: 'f1', cwd: repo, path: '.', mode: 'list' })).payload;
   assert.equal(listing.directory.path, '.');
   const names = listing.directory.entries.map(entry => entry.name);
-  assert.ok(names.includes('docs') && names.includes('.git') && !names.includes('outside'));
+  assert.ok(names.includes('docs') && !names.includes('.git') && !names.includes('outside'), names.join());
   assert.equal(listing.directory.entries.find(entry => entry.name === 'docs').kind, 'directory');
   const docs = (await ask(client, { type: 'file_explorer_request', requestId: 'f2', cwd: repo, path: 'docs', mode: 'list' })).payload.directory;
   assert.deepEqual([docs.path, docs.entries.map(entry => entry.path)], ['docs', ['docs/guide.md']]);

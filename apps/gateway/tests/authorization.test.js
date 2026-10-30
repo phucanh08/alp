@@ -473,7 +473,7 @@ test('workspace.files.list and read: files.read only, never a default; canonical
   assert.ok((await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('workspace.files.read'));
   daemon.state.handlers['workspace.files.list'] = ({ path: directory }) => ({
     entries: [
-      { name: 'server.ts', path: directory ? `${directory}/server.ts` : 'server.ts', kind: 'file', size: 3, modifiedAt: '2026-10-17T00:00:00.000Z', inode: 42, host: '/etc' },
+      { name: 'server.ts', path: directory ? `${directory}/server.ts` : 'server.ts', kind: 'file', size: 3, modifiedAt: '2026-10-17T00:00:00.000Z', inode: 42, host: '/etc', target: 'elsewhere/server.ts' },
       { name: 'deep', path: directory ? `${directory}/deep` : 'deep', kind: 'directory' },
       // Planted by a faulty alpd: other directories, blocked names, links, absolute paths, bad kinds.
       { name: 'x.ts', path: 'elsewhere/x.ts', kind: 'file' },
@@ -485,8 +485,10 @@ test('workspace.files.list and read: files.read only, never a default; canonical
       { name: 'a/b', path: directory ? `${directory}/a/b` : 'a/b', kind: 'file' },
     ],
     truncated: true,
+    // workspace.files.browse's pages and internal links (t-bb87) are for the host's own clients only.
+    nextCursor: 'WzEsInNlcnZlci50cyJd', target: 'elsewhere',
   });
-  const listed = await client.request('workspace.files.list', { projectRoot: a, path: 'src', includeIgnored: true, extra: 'dropped' });
+  const listed = await client.request('workspace.files.list', { projectRoot: a, path: 'src', includeIgnored: true, extra: 'dropped', cursor: 'WzEsImEiXQ', internalLinks: true });
   assert.deepEqual(listed, { entries: [{ name: 'server.ts', path: 'src/server.ts', kind: 'file', size: 3, modifiedAt: '2026-10-17T00:00:00.000Z' }, { name: 'deep', path: 'src/deep', kind: 'directory' }], truncated: true });
   assert.deepEqual(daemon.calls('workspace.files.list').at(-1).params, { projectRoot: canonicalA, path: 'src', includeIgnored: true }, 'the canonical path, no unknown params');
   assert.deepEqual((await client.request('workspace.files.list', { projectRoot: a })).entries.map(entry => entry.path), ['server.ts', 'deep']);

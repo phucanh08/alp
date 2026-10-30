@@ -18,7 +18,7 @@ import type { PromptContent, SessionSummary } from '@anhlp/alp-protocol/session'
 import type { ScheduleJob, TurnAttention } from '@anhlp/alp-protocol/index';
 import { RpcError } from './rpc-error.js';
 import { createOperations, type OperationsOptions } from './operations.js';
-import { FileAccessError, FilesError, listWorkspaceDirectory, readWorkspaceFile, searchWorkspaceFiles } from './files.js';
+import { createFindPages, FileAccessError, FilesError, listWorkspaceDirectory, previewWorkspaceFile, readWorkspaceFile, searchHostDirectories, searchWorkspaceFiles } from './files.js';
 import { createGitReader } from './git.js';
 import { createScheduleStore, projectKey } from './schedules.js';
 import { createAttachmentStore, type AttachmentRuntime, type AttachmentStoreOptions, type Principal } from './attachments.js';
@@ -1116,6 +1116,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   };
   const operations = createOperations({ home, templates, knownProjects: () => new Set([...records.values()].flatMap(record => record.session?.projectRoot ? [record.session.projectRoot] : [])), onGateChange: root => runtime.syncGates?.(root) });
   const extensionOwners = new Map<string, Connection>();
+  /** workspace.files.find's snapshots, each for the connection that asked. */
+  const findPages = createFindPages();
   const handlers: Record<string, (connection: Connection, params: any) => Promise<unknown> | unknown> = {
     'extension.register': async (connection, params) => {
       const method = params?.method;
@@ -1237,11 +1239,28 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
      * read-only, confined to it, no link followed, blocked paths always refused, .gitignore'd ones
      * unless includeIgnored (docs/protocol/alp-json-rpc-v1.md §12.4, ALPD §15).
      */
-    async 'workspace.files.list'(_connection, { projectRoot, path: relative, includeIgnored } = {}) {
-      return filesCall(projectRoot, () => listWorkspaceDirectory(projectRoot, { path: relative, includeIgnored: includeIgnored === true }));
+    async 'workspace.files.list'(_connection, { projectRoot, path: relative, includeIgnored, cursor, internalLinks } = {}) {
+      return filesCall(projectRoot, () => listWorkspaceDirectory(projectRoot, { path: relative, includeIgnored: includeIgnored === true, cursor, internalLinks: internalLinks === true }));
     },
     async 'workspace.files.read'(_connection, { projectRoot, path: relative, includeIgnored } = {}) {
       return filesCall(projectRoot, () => readWorkspaceFile(projectRoot, { path: relative, includeIgnored: includeIgnored === true }));
+    },
+
+    /**
+     * Every name under projectRoot in pages of a snapshot kept for this connection, and a file's
+     * preview in chunks (docs/protocol/alp-json-rpc-v1.md §12.11): what the Paseo bridge's Files
+     * panel and suggestions read, confined as workspace.files.read is. The gateway exposes neither.
+     */
+    async 'workspace.files.find'(connection, { projectRoot, query, kinds, matchMode, limit, cursor } = {}) {
+      return filesCall(projectRoot, () => findPages(connection, projectRoot, { query, kinds, matchMode, limit, cursor }));
+    },
+    async 'workspace.files.preview'(_connection, { projectRoot, path: relative, includeIgnored, internalLinks, maxBytes, offset, revision } = {}) {
+      return filesCall(projectRoot, () => previewWorkspaceFile(projectRoot, { path: relative, includeIgnored: includeIgnored === true, internalLinks: internalLinks === true, maxBytes, offset, revision }));
+    },
+
+    /** The host's directories for the folder to add as a project (§12.11): the owner's own names, never remote. */
+    async 'host.directories.search'(_connection, { query, limit } = {}) {
+      return searchHostDirectories(query, { limit });
     },
 
     /** The project board: live claims, decisions and findings (ALPD §18). */
@@ -1859,7 +1878,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [...(runtime.interruptTurn ? [CAPABILITY.sessionInterruptTurn] : []), CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...(conversation?.reloads ? [CAPABILITY.sessionReload] : []), ...(conversation?.configures ? [CAPABILITY.sessionConfigureLive] : []), ...(conversation ? [CAPABILITY.sessionResumeCommand] : []), ...(modelCatalog ? [CAPABILITY.catalogLive] : []), ...operations.capabilities];
+  const capabilities = [...(runtime.interruptTurn ? [CAPABILITY.sessionInterruptTurn] : []), CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.workspaceFilesBrowse, CAPABILITY.hostDirectories, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...(conversation?.reloads ? [CAPABILITY.sessionReload] : []), ...(conversation?.configures ? [CAPABILITY.sessionConfigureLive] : []), ...(conversation ? [CAPABILITY.sessionResumeCommand] : []), ...(modelCatalog ? [CAPABILITY.catalogLive] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {

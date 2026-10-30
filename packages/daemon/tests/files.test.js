@@ -2,12 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
-import { chmod, copyFile, link, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, link, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, truncate, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
-import { GIT_CHECK, gitChecksRunning, listWorkspaceDirectory, readWorkspaceFile, relativeSegments, resolveGit, searchWorkspaceFiles } from '@anhlp/alp-daemon/files';
+import { FIND_LIMITS, GIT_CHECK, createFindPages, findWorkspaceEntries, gitChecksRunning, listWorkspaceDirectory, previewWorkspaceFile, readWorkspaceFile, relativeSegments, resolveGit, searchHostDirectories, searchWorkspaceFiles } from '@anhlp/alp-daemon/files';
 
 /** A workspace and a directory beside it ("outside"), both removed after the test. */
 async function workspace(t) {
@@ -634,4 +634,288 @@ test('a timeout kills git and whatever it started (its process group)', { skip: 
   }
   if (alive) process.kill(pid, 'SIGKILL');
   assert.equal(alive, false, 'the grandchild was killed with git');
+});
+
+// ---- workspace.files.browse (docs/protocol/alp-json-rpc-v1.md §12.11) ----
+
+const owner = {};
+/** Every page of a find, as the Paseo bridge reads one. */
+async function allPages(page, root, params, who = owner) {
+  const entries = [];
+  let cursor;
+  do {
+    const answer = await page(who, root, { ...params, ...(cursor ? { cursor } : {}) });
+    entries.push(...answer.entries);
+    cursor = answer.nextCursor;
+  } while (cursor);
+  return entries;
+}
+
+test('find: pages of one snapshot cover every name once; a cursor is bound to its connection, params and lifetime', async t => {
+  const { root } = await workspace(t);
+  for (let index = 0; index < 2500; index++) await put(path.join(root, `d${index % 5}`, `f${String(index).padStart(4, '0')}.txt`), '');
+  let clock = 0;
+  const page = createFindPages({ now: () => clock });
+  const first = await page(owner, root, { limit: 1000 });
+  assert.equal(first.entries.length, 1000);
+  assert.match(first.nextCursor, /^[A-Za-z0-9_-]{22}\.1000$/);
+  // A file added after the first page is not in this snapshot: the pages stay one consistent set.
+  await put(path.join(root, 'late.txt'), '');
+  const second = await page(owner, root, { limit: 1000, cursor: first.nextCursor });
+  const third = await page(owner, root, { limit: 1000, cursor: second.nextCursor });
+  assert.equal(third.nextCursor, undefined);
+  const paths = [...first.entries, ...second.entries, ...third.entries].map(entry => entry.path);
+  assert.equal(paths.length, 2500);
+  assert.equal(new Set(paths).size, 2500, 'no name twice');
+  assert.deepEqual(paths, [...paths].sort(), 'path order');
+  assert.ok(!paths.includes('late.txt'));
+  // Its last page dropped the snapshot; a new walk sees the new file.
+  assert.deepEqual(await refusal(page(owner, root, { limit: 1000, cursor: second.nextCursor })), { code: -32602, reason: 'invalid_cursor' });
+  assert.ok((await allPages(page, root, {})).some(entry => entry.path === 'late.txt'));
+  const again = await page(owner, root, { limit: 1000 });
+  for (const [who, params] of [[{}, {}], [owner, { query: 'f1' }], [owner, { kinds: ['directory'] }], [owner, { matchMode: 'suffix' }]]) {
+    assert.deepEqual(await refusal(page(who, root, { limit: 1000, ...params, cursor: again.nextCursor })), { code: -32602, reason: 'invalid_cursor' }, JSON.stringify(params));
+  }
+  for (const cursor of ['x', `${again.nextCursor}0`, again.nextCursor.replace(/\.\d+$/, '.99999')]) {
+    assert.deepEqual(await refusal(page(owner, root, { limit: 1000, cursor })), { code: -32602, reason: 'invalid_cursor' }, cursor);
+  }
+  assert.equal((await page(owner, root, { limit: 1000, cursor: again.nextCursor })).entries.length, 1000, 'the right owner and params page on');
+  clock += FIND_LIMITS.ttlMs + 1;
+  const stale = await page(owner, root, { limit: 1000 });
+  clock += FIND_LIMITS.ttlMs + 1;
+  assert.deepEqual(await refusal(page(owner, root, { limit: 1000, cursor: stale.nextCursor })), { code: -32602, reason: 'invalid_cursor' }, 'expired');
+  // At most FIND_LIMITS.snapshots are kept: the oldest go first.
+  const cursors = [];
+  for (let index = 0; index <= FIND_LIMITS.snapshots; index++) cursors.push((await page(owner, root, { limit: 1 })).nextCursor);
+  assert.deepEqual(await refusal(page(owner, root, { limit: 1, cursor: cursors[0] })), { code: -32602, reason: 'invalid_cursor' });
+  assert.equal((await page(owner, root, { limit: 1, cursor: cursors.at(-1) })).entries.length, 1);
+});
+
+test('find: subsequence and suffix modes, files and directories, every name for an empty query', async t => {
+  const { root } = await workspace(t);
+  for (const file of ['README.md', 'docs/intro.md', 'docs/guide/intro.md', 'docs/guide/introduction.md', 'src/server.ts', 'src/deep/server-utils.ts', 'Sửa lỗi/ghi chú.md']) await put(path.join(root, file), 'x');
+  const page = createFindPages();
+  const find = params => allPages(page, root, params);
+  assert.deepEqual((await find({})).map(entry => entry.path), ['README.md', 'Sửa lỗi/ghi chú.md', 'docs/guide/intro.md', 'docs/guide/introduction.md', 'docs/intro.md', 'src/deep/server-utils.ts', 'src/server.ts']);
+  assert.deepEqual(await find({ kinds: ['directory'] }), [{ path: 'Sửa lỗi', kind: 'directory' }, { path: 'docs', kind: 'directory' }, { path: 'docs/guide', kind: 'directory' }, { path: 'src', kind: 'directory' }, { path: 'src/deep', kind: 'directory' }]);
+  assert.deepEqual((await find({ query: 'SRV', kinds: ['file', 'directory'] })).map(entry => entry.path), ['src/deep/server-utils.ts', 'src/server.ts'], 'letters in order, without case');
+  assert.deepEqual((await find({ query: 'dgi', kinds: ['directory', 'file'] })).map(entry => entry.path), ['docs/guide', 'docs/guide/intro.md', 'docs/guide/introduction.md']);
+  assert.deepEqual((await find({ query: './sửa', kinds: ['directory'] })).map(entry => entry.path), ['Sửa lỗi'], 'a leading ./ is not part of the name; Unicode case folded');
+  assert.deepEqual((await find({ query: 'intro.md', matchMode: 'suffix' })).map(entry => entry.path), ['docs/guide/intro.md', 'docs/intro.md'], 'a whole last segment, not a part of one');
+  assert.deepEqual((await find({ query: 'GUIDE/intro.md', matchMode: 'suffix' })).map(entry => entry.path), ['docs/guide/intro.md']);
+  assert.deepEqual((await find({ query: 'guide', matchMode: 'suffix', kinds: ['directory'] })).map(entry => entry.path), ['docs/guide']);
+  assert.deepEqual(await find({ query: 'zzz' }), []);
+});
+
+test('find lists a repository as git ls-files does: dot names, deep paths, internal links; never ignored, blocked or outside', { skip: noGit }, async t => {
+  const { root, outside } = await workspace(t);
+  repo(root);
+  await put(path.join(outside, 'secret.ts'), 'SENTINEL');
+  const deep = `${Array.from({ length: 20 }, (_, index) => `l${index}`).join('/')}/deep.ts`;
+  for (const file of ['.gitignore', '.eslintrc.json', '.github/workflows/ci.yml', 'dist/app.js', 'vendor/lib.js', 'src/a.ts', 'ignored/x.ts', deep, '.env', 'id_rsa', 'node_modules/pkg/index.js']) await put(path.join(root, file), file === '.gitignore' ? 'ignored/\nnode_modules/\n' : 'x');
+  await symlink(path.join(root, 'src', 'a.ts'), path.join(root, 'inside-link.ts'));
+  await symlink(path.join(root, 'src'), path.join(root, 'src-link'));
+  await symlink(path.join(outside, 'secret.ts'), path.join(root, 'outside-link.ts'));
+  await symlink(path.join(root, '.env'), path.join(root, 'env-link'));
+  const found = await findWorkspaceEntries(root, { kinds: ['file', 'directory'] });
+  const paths = found.entries.map(entry => entry.path);
+  for (const expected of ['.gitignore', '.eslintrc.json', '.github/workflows/ci.yml', 'dist/app.js', 'vendor/lib.js', 'src/a.ts', deep, 'inside-link.ts', 'src-link']) assert.ok(paths.includes(expected), expected);
+  for (const absent of ['ignored', 'ignored/x.ts', 'node_modules', '.env', 'id_rsa', '.git', 'outside-link.ts', 'env-link', 'src-link/a.ts']) assert.ok(!paths.includes(absent), absent);
+  assert.ok(!paths.some(entry => entry.startsWith('.git/')));
+  assert.deepEqual(found.entries.find(entry => entry.path === 'src-link'), { path: 'src-link', kind: 'directory' }, 'a link is listed as what it leads to, never entered');
+  assert.equal(found.truncated, undefined);
+  // Search keeps its own, smaller walk.
+  assert.deepEqual((await searchWorkspaceFiles(root, { query: 'deep.ts' })).files, []);
+});
+
+test('find outside a repository skips what the Paseo bridge skipped: dot names and heavy folders', async t => {
+  const { root } = await workspace(t);
+  for (const file of ['.hidden.md', '.config/a.md', 'node_modules/a.md', 'Library/a.md', 'dist/a.md', 'build/a.md', 'target/a.md', 'venv/a.md', '__pycache__/a.md', 'vendor/a.md', 'out/a.md', 'src/a.md']) await put(path.join(root, file), 'x');
+  const paths = (await findWorkspaceEntries(root, { kinds: ['file', 'directory'] })).entries.map(entry => entry.path);
+  assert.deepEqual(paths, ['out', 'out/a.md', 'src', 'src/a.md', 'vendor', 'vendor/a.md']);
+});
+
+test('find fails closed when Git cannot say what is ignored', { skip: noFakeGit }, async t => {
+  const { root } = await workspace(t);
+  repo(root);
+  await put(path.join(root, 'a.ts'), 'x');
+  const { binary } = await fakeGit(t, 'process.exit(128);');
+  assert.deepEqual(await findWorkspaceEntries(root, { git: { binary } }), { entries: [], truncated: true });
+  await assert.rejects(findWorkspaceEntries('relative'), /absolute/);
+  await assert.rejects(findWorkspaceEntries(path.join(root, 'a.ts')), /not a directory/);
+});
+
+test('list: pages past maxListEntries with nextCursor, each entry once; a cursor alpd did not give is refused', async t => {
+  const { root } = await workspace(t);
+  await mkdir(path.join(root, 'many'));
+  const total = WORKSPACE_FILES.maxListEntries * 2 + 5;
+  for (let index = 0; index < total; index++) await writeFile(path.join(root, 'many', `f${String(index).padStart(4, '0')}.txt`), '');
+  await mkdir(path.join(root, 'many', 'zz-dir'));
+  const seen = [];
+  let cursor;
+  let pages = 0;
+  do {
+    const listed = await listWorkspaceDirectory(root, { path: 'many', ...(cursor ? { cursor } : {}) });
+    assert.ok(listed.entries.length <= WORKSPACE_FILES.maxListEntries);
+    assert.equal(listed.truncated, listed.nextCursor ? true : undefined);
+    seen.push(...listed.entries.map(entry => entry.path));
+    cursor = listed.nextCursor;
+    pages++;
+  } while (cursor);
+  assert.equal(pages, 3);
+  assert.equal(seen.length, total + 1);
+  assert.equal(new Set(seen).size, total + 1);
+  assert.equal(seen[0], 'many/zz-dir', 'directories first, across pages too');
+  for (const bad of ['x', Buffer.from('[2,"a"]').toString('base64url'), Buffer.from('[1,""]').toString('base64url')]) {
+    assert.deepEqual(await refusal(listWorkspaceDirectory(root, { path: 'many', cursor: bad }), root), { code: -32602, reason: 'invalid_cursor' }, bad);
+  }
+});
+
+test('internal links: listed and read through as what they lead to inside the workspace; outside, blocked or ignored never', { skip: noGit }, async t => {
+  const { root, outside } = await workspace(t);
+  repo(root);
+  await put(path.join(root, '.gitignore'), 'private/\n');
+  await put(path.join(outside, 'secret.txt'), 'SENTINEL-outside');
+  await put(path.join(outside, 'notes.md'), 'SENTINEL-outside');
+  await put(path.join(root, 'real', 'ok.txt'), 'ok');
+  await put(path.join(root, 'private', 'p.txt'), 'SENTINEL-ignored');
+  await put(path.join(root, '.env'), 'SENTINEL-env');
+  await symlink(path.join(root, 'real'), path.join(root, 'dir-link'));
+  await symlink(path.join(root, 'real', 'ok.txt'), path.join(root, 'file-link.txt'));
+  await symlink(path.join(outside, 'secret.txt'), path.join(root, 'outside-link.txt'));
+  await symlink(outside, path.join(root, 'outside-dir'));
+  await symlink(path.join(root, '.env'), path.join(root, 'env-link'));
+  await symlink(path.join(root, 'private'), path.join(root, 'private-link'));
+  await symlink('missing', path.join(root, 'dangling'));
+  const listed = await listWorkspaceDirectory(root, { internalLinks: true });
+  const byName = Object.fromEntries(listed.entries.map(({ modifiedAt, ...entry }) => [entry.name, entry]));
+  assert.deepEqual(byName['dir-link'], { name: 'dir-link', path: 'dir-link', kind: 'directory', target: 'real' });
+  assert.deepEqual(byName['file-link.txt'], { name: 'file-link.txt', path: 'file-link.txt', kind: 'file', size: 2, target: 'real/ok.txt' });
+  for (const absent of ['outside-link.txt', 'outside-dir', 'env-link', 'private-link', 'private', 'dangling', '.env']) assert.ok(!byName[absent], absent);
+  assert.ok(!JSON.stringify(listed).includes(outside));
+  // Without internalLinks nothing changes: links are neither listed nor followed.
+  assert.ok(!(await listWorkspaceDirectory(root)).entries.some(entry => entry.name.includes('link')));
+  assert.deepEqual(await refusal(listWorkspaceDirectory(root, { path: 'dir-link' }), root), { code: 1003, reason: 'linked' });
+  // Through a link: the directory it leads to, named as target; its entries under their real path.
+  const through = await listWorkspaceDirectory(root, { path: 'dir-link', internalLinks: true });
+  assert.deepEqual([through.target, through.entries.map(entry => entry.path)], ['real', ['real/ok.txt']]);
+  assert.deepEqual(await refusal(listWorkspaceDirectory(root, { path: 'outside-dir', internalLinks: true }), root), { code: 1003, reason: 'outside' });
+  assert.deepEqual(await refusal(listWorkspaceDirectory(root, { path: 'private-link', internalLinks: true }), root), { code: 1003, reason: 'ignored' });
+  assert.equal((await listWorkspaceDirectory(root, { path: 'private-link', internalLinks: true, includeIgnored: true })).target, 'private');
+  const read = await previewWorkspaceFile(root, { path: 'file-link.txt', internalLinks: true });
+  assert.deepEqual([read.path, read.target, Buffer.from(read.content, 'base64').toString()], ['file-link.txt', 'real/ok.txt', 'ok']);
+  assert.equal((await previewWorkspaceFile(root, { path: 'dir-link/ok.txt', internalLinks: true })).target, 'real/ok.txt');
+  for (const [file, reason] of [['outside-link.txt', 'outside'], ['outside-dir/notes.md', 'outside'], ['env-link', 'blocked_path'], ['private-link/p.txt', 'ignored'], ['dangling', 'not_found'], ['dir-link', 'not_found']]) {
+    assert.deepEqual(await refusal(previewWorkspaceFile(root, { path: file, internalLinks: true }), root), { code: reason === 'not_found' ? 1001 : 1003, reason }, file);
+  }
+  assert.deepEqual(await refusal(previewWorkspaceFile(root, { path: 'file-link.txt' }), root), { code: 1003, reason: 'linked' }, 'only with internalLinks');
+});
+
+const PNG = Buffer.from('89504e470d0a1a0a', 'hex');
+
+test('preview: text, JSON, images and binaries as the Files panel shows them; refusals as read', async t => {
+  const { root, outside } = await workspace(t);
+  await put(path.join(root, 'docs', 'sửa lỗi.md'), '﻿# Tiêu đề\n');
+  await put(path.join(root, 'data.json'), '{"a":1}');
+  await put(path.join(root, 'dot.png'), PNG);
+  await put(path.join(root, 'logo.svg'), '<svg/>');
+  await put(path.join(root, 'blob.bin'), Buffer.from([1, 2, 0, 3]));
+  await put(path.join(root, 'latin1.txt'), Buffer.from([0x63, 0x61, 0x66, 0xe9]));
+  await put(path.join(root, 'control.txt'), Buffer.alloc(100, 1));
+  await put(path.join(root, 'empty.txt'), '');
+  await put(path.join(root, 'id.txt'), 'note\n-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n');
+  await put(path.join(root, 'key.png'), Buffer.concat([PNG, Buffer.from('-----BEGIN RSA PRIVATE KEY-----')]));
+  await put(path.join(root, '.env'), 'SENTINEL');
+  await put(path.join(outside, 'secret.txt'), 'SENTINEL-outside');
+  await link(path.join(outside, 'secret.txt'), path.join(root, 'hard.txt'));
+  const preview = file => previewWorkspaceFile(root, { path: file });
+  const text = await preview('docs/sửa lỗi.md');
+  const bytes = Buffer.from('﻿# Tiêu đề\n');
+  assert.deepEqual({ ...text, modifiedAt: typeof text.modifiedAt, revision: typeof text.revision }, { path: 'docs/sửa lỗi.md', kind: 'text', mimeType: 'text/plain', size: bytes.length, modifiedAt: 'string', revision: 'string', encoding: 'base64', content: bytes.toString('base64'), offset: 0 });
+  assert.deepEqual([(await preview('data.json')).mimeType, (await preview('empty.txt')).content], ['application/json', '']);
+  const image = await preview('dot.png');
+  assert.deepEqual([image.kind, image.mimeType, image.content], ['image', 'image/png', PNG.toString('base64')]);
+  assert.deepEqual([(await preview('logo.svg')).kind, (await preview('logo.svg')).mimeType], ['image', 'image/svg+xml']);
+  for (const file of ['blob.bin', 'latin1.txt', 'control.txt']) {
+    const binary = await preview(file);
+    assert.deepEqual([binary.kind, binary.encoding, binary.mimeType, binary.content, binary.nextOffset], ['binary', 'none', 'application/octet-stream', undefined, undefined], file);
+  }
+  for (const [file, code, reason] of [['id.txt', 1003, 'blocked_path'], ['key.png', 1003, 'blocked_path'], ['.env', 1003, 'blocked_path'], ['hard.txt', 1003, 'linked'], ['missing.txt', 1001, 'not_found'], ['docs', 1001, 'not_found'], ['../outside/secret.txt', -32602, 'invalid_path']]) {
+    assert.deepEqual(await refusal(preview(file), root), { code, reason }, file);
+  }
+  assert.deepEqual(await refusal(previewWorkspaceFile(root, { path: 'data.json', maxBytes: 3 }), root), { code: 1000, reason: 'too_large' });
+});
+
+test('preview: a large file comes in chunks of one revision; a change between chunks is refused; at most maxPreviewBytes', async t => {
+  const { root } = await workspace(t);
+  const size = WORKSPACE_FILES.maxPreviewChunkBytes * 2 + 123;
+  const body = Buffer.alloc(size, 'abcdefghij');
+  await put(path.join(root, 'big.log'), body);
+  const first = await previewWorkspaceFile(root, { path: 'big.log' });
+  assert.deepEqual([first.kind, first.size, first.offset, first.nextOffset], ['text', size, 0, WORKSPACE_FILES.maxPreviewChunkBytes]);
+  assert.ok(Buffer.byteLength(JSON.stringify(first)) < 16 * 1024 * 1024, 'a chunk fits one frame');
+  const chunks = [Buffer.from(first.content, 'base64')];
+  for (let offset = first.nextOffset; offset !== undefined;) {
+    const chunk = await previewWorkspaceFile(root, { path: 'big.log', offset, revision: first.revision });
+    assert.equal(chunk.revision, first.revision);
+    chunks.push(Buffer.from(chunk.content, 'base64'));
+    offset = chunk.nextOffset;
+  }
+  assert.equal(chunks.length, 3);
+  assert.ok(Buffer.concat(chunks).equals(body));
+  assert.deepEqual(await refusal(previewWorkspaceFile(root, { path: 'big.log', offset: first.nextOffset }), root), { code: -32602, reason: 'invalid_params' }, 'a later chunk needs the revision');
+  assert.deepEqual(await refusal(previewWorkspaceFile(root, { path: 'big.log', offset: size, revision: first.revision }), root), { code: -32602, reason: 'invalid_params' });
+  // A binary file's revision does not read it as text.
+  await put(path.join(root, 'blob.bin'), Buffer.concat([Buffer.from([0]), body]));
+  const binary = await previewWorkspaceFile(root, { path: 'blob.bin' });
+  assert.deepEqual(await refusal(previewWorkspaceFile(root, { path: 'blob.bin', offset: 1, revision: binary.revision }), root), { code: 1004, reason: 'changed' });
+  await writeFile(path.join(root, 'big.log'), Buffer.concat([body, Buffer.from('more')]));
+  assert.deepEqual(await refusal(previewWorkspaceFile(root, { path: 'big.log', offset: first.nextOffset, revision: first.revision }), root), { code: 1004, reason: 'changed' });
+  // A private key past the first chunk refuses the whole text file.
+  await put(path.join(root, 'late-key.txt'), Buffer.concat([body, Buffer.from('-----BEGIN PRIVATE KEY-----')]));
+  assert.deepEqual(await refusal(previewWorkspaceFile(root, { path: 'late-key.txt' }), root), { code: 1003, reason: 'blocked_path' });
+  // The cap: 50 MiB, whatever maxBytes asks.
+  const huge = path.join(root, 'huge.bin');
+  await writeFile(huge, '');
+  await truncate(huge, WORKSPACE_FILES.maxPreviewBytes + 1);
+  assert.deepEqual(await refusal(previewWorkspaceFile(root, { path: 'huge.bin', maxBytes: WORKSPACE_FILES.maxPreviewBytes * 2 }), root), { code: 1000, reason: 'too_large' });
+  await truncate(huge, WORKSPACE_FILES.maxPreviewBytes);
+  const capped = await previewWorkspaceFile(root, { path: 'huge.bin' });
+  assert.deepEqual([capped.kind, capped.size, capped.content], ['binary', WORKSPACE_FILES.maxPreviewBytes, undefined]);
+});
+
+test('preview: .gitignore\'d files only with includeIgnored, and a race on the file is refused', { skip: noGit }, async t => {
+  const { root, outside } = await workspace(t);
+  repo(root);
+  await put(path.join(root, '.gitignore'), 'out/\n');
+  await put(path.join(root, 'out', 'app.js'), 'compiled');
+  await put(path.join(root, 'a.txt'), 'inside');
+  await put(path.join(outside, 'secret.txt'), 'SENTINEL-outside');
+  assert.deepEqual(await refusal(previewWorkspaceFile(root, { path: 'out/app.js' }), root), { code: 1003, reason: 'ignored' });
+  assert.equal(Buffer.from((await previewWorkspaceFile(root, { path: 'out/app.js', includeIgnored: true })).content, 'base64').toString(), 'compiled');
+  const swapped = await refusal(previewWorkspaceFile(root, { path: 'a.txt', probe: async step => {
+    if (step !== 'read') return;
+    await rename(path.join(root, 'a.txt'), path.join(root, 'a.old'));
+    await symlink(path.join(outside, 'secret.txt'), path.join(root, 'a.txt'));
+  } }), root);
+  assert.deepEqual(swapped, { code: 1003, reason: 'linked' });
+});
+
+test('host directories: a typed path completes in its parent, a word is found under home, nearest and best first; links never', async t => {
+  const { root: home, outside } = await workspace(t);
+  for (const directory of ['Code/alp', 'Code/alpha', 'Code/Alpine', 'Code/.alp-hidden', 'Code/other', 'work/clients/alp', 'work/alp-tools', 'node_modules/alp', '.cache/alp', 'Library/alp', 'deep/a/b/c/alp']) await mkdir(path.join(home, directory), { recursive: true });
+  await put(path.join(home, 'Code', 'alp.txt'), 'a file');
+  await symlink(outside, path.join(home, 'Code', 'alp-link'));
+  const search = (query, options = {}) => searchHostDirectories(query, { home, ...options }).then(result => result.entries.map(entry => entry.path));
+  const code = names => names.map(name => path.join(home, 'Code', name));
+  assert.deepEqual(await search(`${home}/Code/al`), code(['alp', 'alpha', 'Alpine']), 'by name, links and files left out');
+  assert.deepEqual(await search('~/Code/AL'), code(['alp', 'alpha', 'Alpine']), 'under ~, without case');
+  assert.deepEqual(await search('~/Code/.al'), code(['.alp-hidden']), 'dot names only when asked');
+  assert.deepEqual(await search('~/Code/'), code(['alp', 'alpha', 'Alpine', 'other']));
+  assert.deepEqual(await search('~/Code/al', { limit: 1 }), code(['alp']));
+  assert.deepEqual(await search('/no/such/dir/x'), []);
+  assert.deepEqual(await search('alp'), [path.join(home, 'Code', 'alp'), path.join(home, 'work', 'clients', 'alp'), path.join(home, 'Code', 'alpha'), path.join(home, 'Code', 'Alpine'), path.join(home, 'work', 'alp-tools')], 'equal, then starts with; nearer first; heavy, hidden and deeper than 4 levels left out');
+  assert.deepEqual(await search('ohr'), code(['other']), 'letters in order');
+  assert.deepEqual(await search('   '), []);
+  assert.deepEqual(await search(42), []);
 });
