@@ -12,7 +12,7 @@ import { gzipSync } from 'node:zlib';
 import { PLATFORMS, PLATFORM_NAMES, platformManifest, platformOf } from '../../scripts/npm-platform.mjs';
 import {
   GATE_PHASES, GATE_ROWS, MANIFEST_FILE, RELEASE_NAMES, RELEASE_PACKAGES, SUMS_FILE, createReleaseManifest, digests, evaluateGate,
-  formatSha256Sums, gateTemplate, hostPlatformName, installableArtifacts, installedProblems, parseSha256Sums, readTarball, releaseArtifacts, shippedWebProblems, SHIPPED_WEB_FILES, sourceProblems, tarballFilename, verifyRelease,
+  formatSha256Sums, gateTemplate, hostPlatformName, installableArtifacts, installedProblems, parseSha256Sums, readTarball, releaseArtifacts, SAVED_INSTALL_FLAGS, shippedWebProblems, SHIPPED_WEB_FILES, sourceProblems, tarballFilename, verifyRelease,
 } from '../../scripts/release-lib.mjs';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
@@ -405,6 +405,37 @@ test('a consumer installs only its own platform package, and the lockfile check 
   const published = structuredClone(lock);
   published.packages['node_modules/@anhlp/alp-win32-x64'] = { version: VERSION, integrity: 'sha512-registry', resolved: 'https://registry.npmjs.org/@anhlp/alp-win32-x64/-/alp-win32-x64.tgz', optional: true };
   assert.deepEqual(installedProblems(published, manifest, '@anhlp/alp-darwin-arm64'), []);
+}));
+
+test('a consumer of saved tarballs never takes a published platform package from the registry (t-cd7f)', () => withRelease({}, (directory, manifest) => {
+  const host = '@anhlp/alp-linux-x64';
+  const key = `node_modules/${host}`;
+  const resolved = `https://registry.npmjs.org/${host}/-/alp-linux-x64-${VERSION}.tgz`;
+  const saved = entry => [`node_modules/${entry.name}`, { version: VERSION, resolved: `file:${path.join(directory, entry.filename)}`, integrity: entry.integrity }];
+  // The saved tarballs are the consumer's own dependencies, so --omit=optional still installs them;
+  // what it leaves out is what only the launcher's optionalDependencies reach: the registry's platform packages.
+  assert.ok(SAVED_INSTALL_FLAGS.includes('--omit=optional'));
+  // A rehearsal packed without the release archives: npm still locks every platform package from the
+  // registry (optional), but installs none of them.
+  const rehearsal = { ...manifest, packages: manifest.packages.filter(entry => !PLATFORM_NAMES.includes(entry.name)) };
+  const lock = { packages: Object.fromEntries([...rehearsal.packages.map(saved), ...PLATFORM_NAMES.map(name => [`node_modules/${name}`, { version: VERSION, resolved: `https://registry.npmjs.org/${name}/-/x.tgz`, integrity: 'sha512-registry', optional: true }])]) };
+  lock.packages[key].resolved = resolved;
+  assert.deepEqual(installedProblems(lock, rehearsal, host, { installed: () => false }), []);
+  // Installed from the registry, the launcher would run a published executable instead of failing as packed.
+  const taken = [`${key}: ${host} is not part of the release (installed from ${resolved})`];
+  assert.deepEqual(installedProblems(lock, rehearsal, host, { installed: entry => entry === key }), taken);
+  assert.deepEqual(installedProblems(lock, rehearsal, host), taken, 'an entry counts as installed unless the caller shows it is not');
+  const required = structuredClone(lock);
+  delete required.packages[key].optional;
+  assert.deepEqual(installedProblems(required, rehearsal, host, { installed: () => false }), taken, 'only an optional entry can be left out');
+  // A release that carries the host's platform package must install that saved tarball, never the registry's.
+  const release = { packages: Object.fromEntries(manifest.packages.map(saved)) };
+  release.packages[key] = structuredClone(lock.packages[key]);
+  const carried = manifest.packages.find(entry => entry.name === host);
+  assert.deepEqual(installedProblems(release, manifest, host, { installed: () => false }), [
+    `${key}: integrity sha512-registry is not the saved tarball's ${carried.integrity}`,
+    `${key}: resolved from ${resolved}, not the saved ${carried.filename}`,
+  ]);
 }));
 
 test('platform packages count as gate evidence only when tied to a release-binaries run and its SHA256SUMS (t-cd7f)', () => {

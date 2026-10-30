@@ -4,17 +4,18 @@
 // got installed is those files:
 //   1. A5 (release-verify) passes on the directory, and the CLI's alp web files are in its tarballs;
 //   2. a fresh project installs the eight tarballs; its package-lock.json resolves every @anhlp/*
-//      package to a local file with the manifest's integrity, at the release version, gateway absent;
+//      package to a local file with the manifest's integrity, at the release version, gateway absent,
+//      and no platform package comes from the registry (SAVED_INSTALL_FLAGS omit optional dependencies);
 //   3. tarball-consumer.mjs and package-smoke.mjs run against the same files (--packs);
 //   4. afterwards the tarballs still match SHA256SUMS.
 //
 //   release-consumer.mjs <directory> [--rehearsal] [--install-only]
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnCommand } from './spawn-command.mjs';
-import { hostPlatformName, installableArtifacts, installedProblems, shippedWebProblems, verifyRelease } from './release-lib.mjs';
+import { SAVED_INSTALL_FLAGS, hostPlatformName, installableArtifacts, installedProblems, shippedWebProblems, verifyRelease } from './release-lib.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
@@ -37,11 +38,11 @@ if (missingWeb.length) throw new Error(`the saved tarballs cannot run alp web:\n
 const work = mkdtempSync(path.join(os.tmpdir(), 'alp-release-consumer-'));
 try {
   writeFileSync(path.join(work, 'package.json'), `${JSON.stringify({ name: 'alp-release-consumer', private: true, version: '0.0.0', type: 'module' }, null, 2)}\n`);
-  const install = spawnSync(...spawnCommand('npm', ['install', '--save-exact', '--ignore-scripts', '--no-audit', '--no-fund', '--legacy-peer-deps', ...installableArtifacts(before.artifacts).map(artifact => artifact.file)]), { cwd: work, stdio: 'inherit' });
+  const install = spawnSync(...spawnCommand('npm', ['install', '--save-exact', '--ignore-scripts', '--no-audit', '--no-fund', '--legacy-peer-deps', ...SAVED_INSTALL_FLAGS, ...installableArtifacts(before.artifacts).map(artifact => artifact.file)]), { cwd: work, stdio: 'inherit' });
   if (install.status !== 0) throw new Error(`npm install of the saved tarballs exited ${install.status}`);
-  const problems = installedProblems(JSON.parse(readFileSync(path.join(work, 'package-lock.json'), 'utf8')), before.manifest);
+  const problems = installedProblems(JSON.parse(readFileSync(path.join(work, 'package-lock.json'), 'utf8')), before.manifest, hostPlatformName(), { installed: key => existsSync(path.join(work, key)) });
   if (problems.length) throw new Error(`the consumer did not install the saved tarballs:\n- ${problems.join('\n- ')}`);
-  console.log(`[release-consumer] installed the ${installableArtifacts(before.artifacts).length} saved tarballs for this machine (platform package: ${hostPlatformName() ?? 'none'}); lockfile integrity matches ${path.basename(directory)}/release-manifest.json`);
+  console.log(`[release-consumer] installed the ${installableArtifacts(before.artifacts).length} saved tarballs for this machine (platform package: ${before.artifacts.some(artifact => artifact.name === hostPlatformName()) ? hostPlatformName() : 'none'}); lockfile integrity matches ${path.basename(directory)}/release-manifest.json`);
 } finally {
   rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 }

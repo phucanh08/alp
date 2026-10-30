@@ -41,6 +41,17 @@ export function hostPlatformName({ platform = process.platform, arch = process.a
 
 /** The tarballs a consumer on this machine installs: npm refuses another platform's package outright. */
 export const installableArtifacts = (artifacts, host = hostPlatformName()) => artifacts.filter(artifact => !PLATFORM_NAMES.includes(artifact.name) || artifact.name === host);
+
+/**
+ * The `npm install` flags of every consumer that installs the launcher from saved tarballs
+ * (release-consumer, package-smoke). The saved tarballs are the consumer's own dependencies, so
+ * `--omit=optional` still installs them, the host's platform package included when the release
+ * carries it. What it leaves out is what only the launcher's optionalDependencies reach: once the
+ * platform packages are published, npm would otherwise install this machine's from the registry,
+ * and a rehearsal packed without the archives would run a published executable. npm still locks
+ * those packages (optional), so installedProblems needs to know they are not in node_modules.
+ */
+export const SAVED_INSTALL_FLAGS = Object.freeze(['--omit=optional']);
 export const PLUGIN = '@anhlp/alp-paseo';
 export const MANIFEST_FILE = 'release-manifest.json';
 export const SUMS_FILE = 'SHA256SUMS';
@@ -353,8 +364,9 @@ export function releaseArtifacts(directory, options = {}) {
 /**
  * Problems with what a consumer's package-lock.json installed, against the release manifest. Of the
  * platform packages only the host's is installed (`host`; none on an unsupported machine).
+ * `installed(key)` says whether a lockfile entry is in the consumer's node_modules (unknown: yes).
  */
-export function installedProblems(lock, manifest, host = hostPlatformName()) {
+export function installedProblems(lock, manifest, host = hostPlatformName(), { installed = () => true } = {}) {
   const problems = [];
   const expected = new Map(manifest.packages.map(entry => [entry.name, entry]));
   const seen = new Set();
@@ -366,7 +378,11 @@ export function installedProblems(lock, manifest, host = hostPlatformName()) {
     // (once published) or skips it; it is never installed on this machine, so its entry is not checked.
     if (PLATFORM_NAMES.includes(name) && name !== host) continue;
     const release = expected.get(name);
-    if (!release) { problems.push(`${key}: ${name} is not part of the release`); continue; }
+    // The host's platform package when the release does not carry it (a rehearsal packed without the
+    // archives): npm locks the launcher's optional dependency from the registry, and SAVED_INSTALL_FLAGS
+    // keep it out of node_modules, so the launcher has no executable, as packed.
+    if (!release && name === host && entry.optional && !installed(key)) continue;
+    if (!release) { problems.push(`${key}: ${name} is not part of the release${entry.resolved ? ` (installed from ${entry.resolved})` : ''}`); continue; }
     if (entry.version !== manifest.version) problems.push(`${key}: installed ${entry.version}, expected ${manifest.version}`);
     if (entry.integrity !== release.integrity) problems.push(`${key}: integrity ${entry.integrity} is not the saved tarball's ${release.integrity}`);
     if (!entry.resolved?.startsWith('file:') || !entry.resolved.endsWith(release.filename)) problems.push(`${key}: resolved from ${entry.resolved}, not the saved ${release.filename}`);

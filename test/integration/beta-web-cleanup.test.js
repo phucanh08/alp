@@ -89,6 +89,7 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
       await writeFile(path.join(scripts, 'release-lib.mjs'), `export const LAUNCHER = '@anhlp/alp';
       export const LAUNCHER_LOCATION = 'npm/alp';
       export const PLATFORM_NAMES = [];
+      export const SAVED_INSTALL_FLAGS = ['--omit=optional'];
       export const hostPlatformName = () => undefined;
       export const releaseArtifacts = () => [
         { name: '@anhlp/alp', file: 'unused.tgz', files: new Map(['package.json', 'bin/alp.js', 'lib/launcher.js'].map(p => [p, ''])) },
