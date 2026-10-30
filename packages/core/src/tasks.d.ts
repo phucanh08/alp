@@ -117,12 +117,13 @@ export function gatesOf(task: Task, tasks: Task[]): string[];
 export const GATE_OPTIONS: number;
 export const GATE_OPTION_CHARS: number;
 export const GATE_CHANNELS: GateChannel[];
+export const GATE_REJECT_LABELS: string[];
 export function addGate(projectRoot: string, id: string, gate: { kind: GateKind; note?: string; until?: string; ref?: string | number; options?: string[] }, by: string): Promise<Task>;
 export function resolveGate(projectRoot: string, id: string, gateId: string, resolve: { by: string; note?: string; remove?: boolean; ifRev?: number; choice?: string; channel?: GateChannel }): Promise<Task>;
 export function rejectGate(projectRoot: string, id: string, gateId: string, reject: { by: string; reason?: string; ifRev?: number; channel?: GateChannel }): Promise<Task>;
 export type GateDecision = { task: Task; gate: TaskGate; decision: 'approved' | 'rejected'; record: NonNullable<TaskGate['resolved'] | TaskGate['rejected']> };
 export function gateDecisions(tasks: Task[]): GateDecision[];
-export function markGateNotified(projectRoot: string, id: string, gateId: string, decision: 'approved' | 'rejected'): Promise<boolean>;
+export function markGateNotified(projectRoot: string, id: string, gateId: string, decision: 'approved' | 'rejected', at?: string): Promise<boolean>;
 export function checkGates(projectRoot: string, gh: (args: string[], options: { cwd: string }) => Promise<string>): Promise<{ cleared: Array<{ task: string; gate: string; detail: string }>; pending: Array<{ task: string; gate: string; detail: string }>; errors: Array<{ task: string; gate: string; error: string }> }>;
 export function compactTasks(projectRoot: string, options: { days?: number; dryRun?: boolean }, by: string): Promise<Array<{ id: string; before: number; after: number }>>;
 export type TaskBatch = {

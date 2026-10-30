@@ -652,7 +652,7 @@ connection on the local socket acts as the owner.
 | `attachment.abort` | drops an upload and its reservation | no (second → 1001) | 1001 | attachments.write + session.write |
 | `attachment.get` | read: metadata only | yes | 1001 | attachments.write + session.read |
 | `attachment.delete` | deletes an unreferenced attachment | no (second → 1001) | 1001, 1004 `attachment_referenced` | attachments.write + session.write |
-| `question.answer` | answers or dismisses; a unique id prefix is accepted | no (second answer → 1001) | 1001, -32602 | session.write |
+| `question.answer` | answers or dismisses; a unique id prefix is accepted; a gate card's answer returns once its decision is written | no (second answer → 1001; to a gate card while another answer is written, or after another channel decided it → 1004 `task_state`) | 1001, 1004, -32602; a gate decision that could not be written fails as `task.gate.resolve` does | session.write |
 | `session.create` | creates or resumes a root, attaches | no (an existing live root is attached: `attached: true`) | -32602, 1000, 1001, `persistence_failed` | session.write |
 | `session.preview` | read (no files written) | yes | -32602, 1000 | session.read |
 | `session.attach` | attaches; replays | yes | 1001, -32602 | session.read |

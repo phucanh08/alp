@@ -170,9 +170,14 @@ export type AlpRuntime = {
   status(sessionId: string): TreeStatus | undefined;
   /** Questions agents asked the user that wait for an answer. */
   questions(): UserQuestion[];
-  /** Answers or dismisses a question to the user. */
-  answer(questionId: string, reply: { text?: string; dismiss?: boolean; reason?: string; /** Where the user answered a gate card: paseo or web. */ channel?: 'paseo' | 'web' }): void;
-  /** Mirrors the project's open human gates as cards on its main session and tells main of the user's gate decisions, once each (t-ccac). */
+  /**
+   * Answers or dismisses a question to the user. A gate card's answer returns a promise that
+   * settles once the decision is written, and rejects when it decides nothing: another answer is
+   * being recorded or another channel decided first (code GATE_BUSY or GATE_DECIDED), or the
+   * write failed (t-595d).
+   */
+  answer(questionId: string, reply: { text?: string; dismiss?: boolean; reason?: string; /** Where the user answered a gate card: paseo or web. */ channel?: 'paseo' | 'web' }): void | Promise<void>;
+  /** Mirrors the project's open human gates as cards on its main session and tells main of the user's gate decisions, at least once each (t-ccac, t-595d). */
   syncGates?(projectRoot: string): Promise<void>;
   /** Mails a note from the user to any live session, such as an assignment the user wants to redirect. */
   message(sessionId: string, text: string): void;

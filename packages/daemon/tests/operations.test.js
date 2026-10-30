@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
-import { addGate, getTask, loadTasks } from '@anhlp/alp-core/tasks';
+import { addGate, getTask, loadTasks, resolveGate } from '@anhlp/alp-core/tasks';
 import { getEntry } from '@anhlp/alp-core/library-edit';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
@@ -15,20 +15,32 @@ import { createDaemonServer } from '@anhlp/alp-daemon';
 import { CAPABILITY } from '@anhlp/alp-protocol';
 import { validateResult } from '@anhlp/alp-protocol/contract';
 
+/** Agents whose turns complete by themselves, so mail they take counts as taken. */
 function fakeTransport() {
-  return () => ({
-    async initialize() {}, onNotification() {}, onFailure() {}, onRequest() {}, async close() {},
-    async request(method) { return method.startsWith('thread/') ? { thread: { id: 'thread-1' } } : {}; },
-  });
+  return () => {
+    let notify = () => {};
+    let turns = 0;
+    return {
+      async initialize() {}, onNotification(fn) { notify = fn; }, onFailure() {}, onRequest() {}, async close() {},
+      async request(method) {
+        if (method === 'turn/start') {
+          const id = `turn-${++turns}`;
+          setTimeout(() => notify('turn/completed', { threadId: 'thread-1', turn: { id, status: 'completed' } }), 5);
+          return { turn: { id } };
+        }
+        return method.startsWith('thread/') ? { thread: { id: 'thread-1' } } : {};
+      },
+    };
+  };
 }
 
-async function setup(t, { home: withHome = true } = {}) {
+async function setup(t, { home: withHome = true, runtimeOptions = {} } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-ops-'));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
   const project = path.join(directory, 'project');
   await initProject(project);
-  const runtime = createAlpRuntime({ transport: fakeTransport(), libraryDir: home });
+  const runtime = createAlpRuntime({ transport: fakeTransport(), libraryDir: home, ...runtimeOptions });
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', ...(withHome ? { home } : {}) });
   await server.listen();
   t.after(async () => { await server.close(); await runtime.shutdown(); });
@@ -73,6 +85,8 @@ test('gates (t-ccac): task.gate.resolve approves with a choice or rejects, recor
   list = await call('task.list', { projectRoot: project });
   assert.equal(list.tasks[0].approvals[0].rejected.reason, 'Not yet');
   assert.ok(!cards().some(question => question.id === `gate-${id}-g1`), 'a rejected gate has no card');
+  // Marked reported once main's turn took the mail (t-595d).
+  for (let i = 0; i < 200 && !(await getTask(project, id)).gates[0].rejected?.notified; i++) await new Promise(resolve => setTimeout(resolve, 10));
   let stored = await getTask(project, id);
   assert.deepEqual([stored.gates[0].rejected.channel, !!stored.gates[0].rejected.notified], ['web', true]);
 
@@ -87,9 +101,41 @@ test('gates (t-ccac): task.gate.resolve approves with a choice or rejects, recor
 
   const approved = await call('task.gate.resolve', { projectRoot: project, id, gate: 'g1', choice: 'B', channel: 'paseo' });
   assert.equal(approved.status, 'open');
+  for (let i = 0; i < 200 && !(await getTask(project, id)).gates[0].resolved?.notified; i++) await new Promise(resolve => setTimeout(resolve, 10));
   stored = await getTask(project, id);
   assert.deepEqual([stored.gates[0].resolved.choice, stored.gates[0].resolved.channel, !!stored.gates[0].resolved.notified], ['B', 'paseo', true]);
   await fails('task.gate.resolve', { projectRoot: project, id, gate: 'g1', choice: 'A' }, 1004, 'task_state');
+});
+
+test('question.answer refuses a gate card answer that decides nothing, with the reason (t-595d)', async t => {
+  // No file watch or timer: the card stays up after a decision made behind alpd's back.
+  const { project, call, socket } = await setup(t, { runtimeOptions: { gateSyncMs: 0 } });
+  const { id } = await call('task.create', { projectRoot: project, title: 'Ship' });
+  const { id: other } = await call('task.create', { projectRoot: project, title: 'Broken' });
+  await addGate(project, id, { kind: 'human', note: 'Go?' }, 'main');
+  await addGate(project, other, { kind: 'human', note: 'Fix?' }, 'main');
+  const viewer = await connect(socket, { name: 'alp-web-test', version: '1' });
+  t.after(() => viewer.close());
+  const { session } = await viewer.request('session.create', { spec: { cwd: project } });
+  await viewer.request('session.attach', { sessionId: session.id });
+  const open = async () => (await viewer.request('question.list', {})).questions.map(question => question.id);
+  for (let i = 0; i < 200 && (await open()).length < 2; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual((await open()).sort(), [`gate-${id}-g1`, `gate-${other}-g1`].sort());
+
+  // The CLI approved it without alpd: the card's answer says so instead of vanishing.
+  await resolveGate(project, id, 'g1', { by: 'user', channel: 'cli' });
+  await assert.rejects(viewer.request('question.answer', { questionId: `gate-${id}-g1`, text: 'Từ chối' }), error => {
+    assert.deepEqual([error.code, error.data?.reason], [1004, 'task_state'], error.message);
+    assert.match(error.message, /already approved in cli/);
+    return true;
+  });
+  assert.equal((await getTask(project, id)).gates[0].rejected, undefined);
+  // The write fails: the task file is unreadable.
+  await writeFile(path.join(project, '.alp', 'tasks', `${other}.json`), '{ not json');
+  await assert.rejects(viewer.request('question.answer', { questionId: `gate-${other}-g1`, text: 'Duyệt' }), error => {
+    assert.deepEqual([error.code, error.data?.reason], [1001, 'unknown_task'], error.message);
+    return true;
+  });
 });
 
 test('capabilities name only what this daemon serves; unserved methods are unknown', async t => {

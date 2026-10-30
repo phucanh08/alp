@@ -17,7 +17,7 @@ import type { Receipt, SessionRecord, SessionStatus, Store, UnreadableReceipt } 
 import type { PromptContent, SessionSummary } from '@anhlp/alp-protocol/session';
 import type { ScheduleJob, TurnAttention } from '@anhlp/alp-protocol/index';
 import { RpcError } from './rpc-error.js';
-import { createOperations, type OperationsOptions } from './operations.js';
+import { createOperations, fromCore, type OperationsOptions } from './operations.js';
 import { createFindPages, FileAccessError, FilesError, listWorkspaceDirectory, previewWorkspaceFile, readWorkspaceFile, searchHostDirectories, searchWorkspaceFiles } from './files.js';
 import { createGitReader } from './git.js';
 import { createScheduleStore, projectKey } from './schedules.js';
@@ -1298,7 +1298,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       }
     },
 
-    'question.answer'(connection, { questionId, text, dismiss = false, reason }) {
+    async 'question.answer'(connection, { questionId, text, dismiss = false, reason }) {
       // An answer speaks for the user (a gate card's answer decides the gate): never from a connection an ALP agent opened (t-ca1f).
       if (connection.agent) throw new RpcError(ERROR.forbidden, 'Only the user answers a question; this connection was opened by an ALP agent', { reason: 'user_only' });
       if (typeof questionId !== 'string') throw new RpcError(-32602, 'questionId is required');
@@ -1307,7 +1307,13 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       const matches = runtime.questions().filter(question => question.id === questionId || question.id.startsWith(questionId));
       if (matches.length !== 1) throw new RpcError(ERROR.notFound, matches.length ? `Question id ${questionId} is ambiguous` : `No question ${questionId} waits for an answer`);
       const channel = connection.client?.startsWith('alp-paseo') ? 'paseo' as const : 'web' as const;
-      runtime.answer(matches[0].id, dismiss === true ? { dismiss: true, reason, channel } : { text, channel });
+      // A gate card's answer settles once its decision is written; one that decides nothing is refused (t-595d).
+      const decided = runtime.answer(matches[0].id, dismiss === true ? { dismiss: true, reason, channel } : { text, channel });
+      if (decided) await decided.catch((error: any) => {
+        // Another answer is being recorded, or another channel decided first: as task.gate.resolve says it.
+        if (error?.code === 'GATE_BUSY' || error?.code === 'GATE_DECIDED') throw new RpcError(ERROR.conflict, error.message, { reason: 'task_state' });
+        throw fromCore(error);
+      });
       return { questionId: matches[0].id };
     },
 

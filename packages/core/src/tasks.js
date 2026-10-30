@@ -743,12 +743,22 @@ export function addGate(projectRoot, id, { kind, note, until, ref, options } = {
 export const GATE_OPTIONS = 10;
 export const GATE_OPTION_CHARS = 200;
 export const GATE_CHANNELS = ['paseo', 'web', 'cli'];
+/**
+ * The Reject answer a gate card adds after its options, in every language ALP writes it
+ * (packages/runtime/src/language.ts, `reject`). An option that is one would hide that Reject
+ * and approve the gate instead, so no option may be one (t-595d).
+ */
+export const GATE_REJECT_LABELS = ['Reject', 'Từ chối'];
+const labelKey = text => text.normalize('NFC').trim().toLowerCase();
+const REJECT_KEYS = new Set(GATE_REJECT_LABELS.map(labelKey));
 
-/** The answers a human gate offers its approver: at most 10 distinct, nonempty, each at most 200 characters. */
+/** The answers a human gate offers its approver: at most 10 distinct, nonempty, each at most 200 characters, none of them Reject. */
 function gateOptions(value) {
   if (!Array.isArray(value) || value.length > GATE_OPTIONS || !value.every(item => typeof item === 'string' && !!item.trim() && item.trim().length <= GATE_OPTION_CHARS)) {
     fail('INVALID_TASK', `options must list at most ${GATE_OPTIONS} nonempty answers of at most ${GATE_OPTION_CHARS} characters`);
   }
+  const reserved = value.find(item => REJECT_KEYS.has(labelKey(item)));
+  if (reserved !== undefined) fail('INVALID_TASK', `"${reserved.trim()}" is the Reject answer every gate card already offers; name the options for approving only`);
   return [...new Set(value.map(item => item.trim()))];
 }
 
@@ -828,17 +838,18 @@ export function gateDecisions(tasks) {
 }
 
 /**
- * Marks a decision reported, under the lock, and returns whether this call marked it: the one
- * caller that gets true tells main, so card, panel and CLI never report one decision twice.
+ * Marks a decision reported, under the lock, and returns whether this call marked it. alpd marks
+ * it once main has taken the mail (t-595d), so a decision is reported at least once; with `at`,
+ * only the decision made then is marked, never a later one that replaced it.
  * Marking does not change the task's rev, so an open card's ifRev stays valid.
  */
-export function markGateNotified(projectRoot, id, gateId, decision) {
+export function markGateNotified(projectRoot, id, gateId, decision, at) {
   return locked(projectRoot, async () => {
     const { tasks } = await loadTasks(projectRoot);
     const task = tasks.find(entry => entry.id === id);
     const gate = task?.gates?.find(entry => entry.id === gateId);
     const record = decision === 'approved' ? gate?.resolved : gate?.rejected;
-    if (!task || !record?.channel || record.notified) return false;
+    if (!task || !record?.channel || record.notified || (at !== undefined && record.at !== at)) return false;
     record.notified = now();
     await save(projectRoot, task);
     return true;
