@@ -2271,3 +2271,23 @@ A task timer gate merely makes a task eligible when its time passes; it does not
 main. Assignment notes describe work and may ride with a later turn; they are not
 scheduled continuations. Jobs are local to alpd; the remote gateway prohibits all
 `schedule.*` methods. There is no recurring/cron support.
+
+## 72. Shared assignment results: lifecycle and archive (2026-10-30)
+
+Goal (t-c44a): a writer's result outside a worktree is evidence until someone handles it. Recall expiry (§27, 14 days) proves nothing about handling, so it neither releases the removal guard nor loses the evidence; and a handled result never holds its checkout for good.
+
+**States** of an entry in the result ledger (`assignment-results.ts`, `$ALP_HOME/state/assignment-results.json`):
+- *owned*: `alp_delegate` records `{ assignmentId, checkout }` before the writer starts.
+- *produced*: `finishAssignment` (or `abandonEntry`) rewrites it with `result`: agent, status, finishedAt, project, requesters (the lineage, nearest first), taskId, and up to 2000 characters each of the brief and of the handoff and output. Worktree results carry no `result`; `alp_merge`/`alp_discard` release them as before.
+- *handled*: `resolve` first saves `handled: { outcome, by, at, note? }`, outcome `applied`, `discarded` or `acknowledged`.
+- *archived*: it then appends `{ ...entry, handled, archivedAt }`, fsynced, to `state/assignment-archive/<yyyy-mm>.jsonl` and drops every handled entry from the ledger. A crash between the two archives it again with the next resolution (at least once); a torn last line is skipped and never joins the next record.
+
+Ledger entries never expire. Archive months are deleted 365 days after they end (`ARCHIVE_KEEP_MS`), when a later resolution runs.
+
+**Who resolves.** `alp_resolve { assignmentId, outcome, note? }`, offered beside `alp_merge`, to the result's requesters and to any root of its project, so a closed requester never leaves it held; an entry from before `result` existed may be resolved by a root whose project overlaps its checkout. It is refused while the assignment runs or can be recovered, and for a worktree change still waiting for `alp_merge`/`alp_discard`. `by` is `<agent> in <session>`; the run log gets `result.resolved`.
+
+**Guard** (`withWorkspaceMutation`): an owned or produced entry refuses its paths; a handled one does not; a recall entry (on disk or in memory) of a handled or archived result no longer refuses. A ledger or archive that cannot be read refuses.
+
+**Backups.** `state/assignment-archive` is a state unit. A restore keeps every owner with its `result` (the current data's first, a malformed one dropped) but never `handled`, so a result restored from before its resolution is resolved again.
+
+**Evidence.** `packages/runtime/tests/workspace-mutation.test.js`: a shared writer's result holds its checkout after recall is gone and a restart, a root resolves it after its requester closed, it is archived and its recall entry no longer refuses; the ledger archives a crash-left handled entry, survives a torn line, prunes only old months, and fails closed on an invalid handling. `packages/daemon/tests/backup-authority.test.js`: a restore keeps evidence and the archive and drops handling.

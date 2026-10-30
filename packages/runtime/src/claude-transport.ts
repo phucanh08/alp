@@ -6,6 +6,7 @@ import { optionalRead, claudeUsage } from './runtime-context.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { BOARD_KINDS_INPUT, PIN_BODY_CHARS, PIN_KINDS, PIN_PATH_CHARS, PIN_PATHS, PIN_PATHS_INPUT } from './board.js';
+import { RESULT_OUTCOMES } from './assignment-results.js';
 import { inputLimitError, POUR_VARS, VAR_NAME, type InputLimits } from './input-limits.js';
 import { claudeToolDetail, resultText } from './tool-detail.js';
 import { CLOSE_REASONS, GATE_KINDS, TASK_STATUSES, TASK_TYPES } from '@anhlp/alp-core/tasks';
@@ -137,6 +138,11 @@ export const toolShapes: Record<string, Record<string, z.ZodType>> = {
   },
   alp_discard: {
     assignmentId: z.string().min(1),
+  },
+  alp_resolve: {
+    assignmentId: z.string().min(1),
+    outcome: z.enum(RESULT_OUTCOMES),
+    note: z.string().min(1).max(2000).optional(),
   },
   alp_cancel: {
     assignmentId: z.string().min(1),

@@ -90,6 +90,33 @@ test('snapshot rollback cannot erase newer retained owners or choose conflicting
   assert.deepEqual(JSON.parse(await readFile(f.file, 'utf8')), f.ledger);
 });
 
+test('restore keeps result evidence and the archive, but never how a result was handled', async t => {
+  const f = await fixture(t);
+  const result = { agent: 'peer', status: 'completed', finishedAt: '2026-10-30T00:00:00.000Z', project: f.target, requesters: ['root'], brief: 'Write', summary: '{}' };
+  const handled = { outcome: 'applied', by: 'main in root', at: '2026-10-30T01:00:00.000Z' };
+  f.ledger.results.push({ assignmentId: 'shared', checkout: f.target, result, handled }, { assignmentId: 'forged', checkout: f.target, result: { agent: 1 } });
+  await writeFile(f.file, JSON.stringify(f.ledger));
+  const archived = path.join(f.home, 'state', 'assignment-archive');
+  await mkdir(archived);
+  await writeFile(path.join(archived, '2026-10.jsonl'), JSON.stringify({ assignmentId: 'earlier', handled }) + '\n');
+  const archive = path.join(f.root, 'evidence.alpbackup');
+  await backup.createBackup({ home: f.home, out: archive });
+  assert.ok((await backup.verifyBackup(archive)).units.includes('state/assignment-archive'));
+  // The current data's evidence wins over the snapshot's.
+  f.ledger.results[1] = { assignmentId: 'shared', checkout: f.target, result: { ...result, status: 'failed' } };
+  await writeFile(f.file, JSON.stringify(f.ledger));
+  for (const home of [f.home, path.join(f.root, 'fresh')]) {
+    await mkdir(home, { recursive: true });
+    await backup.restoreBackup({ home, file: archive, safety: false });
+    const restored = JSON.parse(await readFile(path.join(home, 'state', 'assignment-results.json'), 'utf8')).results;
+    assert.deepEqual(restored.find(owner => owner.assignmentId === 'shared'), { assignmentId: 'shared', checkout: f.target, result: { ...result, status: home === f.home ? 'failed' : 'completed' } });
+    assert.deepEqual(restored.find(owner => owner.assignmentId === 'forged'), { assignmentId: 'forged', checkout: f.target });
+    assert.match(await readFile(path.join(home, 'state', 'assignment-archive', '2026-10.jsonl'), 'utf8'), /"earlier"/);
+    const runtime = createAlpRuntime(f.options(home));
+    try { await refused(runtime, f.target); } finally { await runtime.shutdown(); }
+  }
+});
+
 test('malformed, truncated, missing and linked security evidence fails before changing authority', async t => {
   const { symlink } = await import('node:fs/promises');
   const f = await fixture(t);

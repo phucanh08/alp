@@ -242,6 +242,21 @@ leased. Work is never deleted silently: changes not merged when their requester
 closes stay on their branch, and after a crash alpd commits work left in worktrees
 to their branches and removes the directories.
 
+A shared writer's change stays in the checkout, so its result has no merge or
+discard. alpd keeps it as an open result in its result ledger, with the writer's
+brief, handoff and output, and refuses to remove a managed worktree that holds it.
+Recall expiry (14 days) does not release it. The requester, or any root session of
+the project, records how it was handled with `alp_resolve`:
+
+```json
+{ "assignmentId": "<id>", "outcome": "applied", "note": "committed as 1a2b3c" }
+```
+
+The outcome is `applied` (kept or committed), `discarded` (reverted) or
+`acknowledged` (reviewed, nothing to do). alpd then moves the result to
+`$ALP_HOME/state/assignment-archive/<yyyy-mm>.jsonl`, one JSON line each, and the
+checkout can be removed. Archive months are deleted 365 days after they end.
+
 ## Verification gates
 
 A project can name the commands that prove a change works, in

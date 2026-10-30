@@ -4,6 +4,7 @@ import { READ_ONLY_AGENTS, type ResolvedSession } from './resolve.js';
 import { PIN_KINDS, PIN_PATH_CHARS, PIN_PATHS } from './board.js';
 import { POUR_VARS } from './input-limits.js';
 import { RECALL_KEEP_MS } from './recall.js';
+import { RESULT_OUTCOMES } from './assignment-results.js';
 import { HANDOFF_OUTCOMES, VERDICT_RESULTS, CRITERION_RESULTS, SEVERITIES } from './handoff.js';
 
 export const handoffList = (description: string) => ({ type: 'array', items: { type: 'string' }, description });
@@ -130,6 +131,22 @@ export const DISCARD_TOOL = {
     type: 'object',
     properties: { assignmentId: { type: 'string' } },
     required: ['assignmentId'],
+    additionalProperties: false,
+  },
+};
+
+export const RESOLVE_TOOL = {
+  type: 'function',
+  name: 'alp_resolve',
+  description: "Record how you handled a finished writer's change in your checkout: applied (you kept or committed it), discarded (you reverted it) or acknowledged (you reviewed it; nothing to do). Until then ALP keeps its result and will not let that checkout be removed; then it archives the result.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      assignmentId: { type: 'string' },
+      outcome: { type: 'string', enum: RESULT_OUTCOMES },
+      note: { type: 'string', description: 'What you did with it, for the archive and the run log.' },
+    },
+    required: ['assignmentId', 'outcome'],
     additionalProperties: false,
   },
 };
