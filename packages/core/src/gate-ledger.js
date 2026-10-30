@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { alpHome } from './library.js';
+import { AlpError } from './errors.js';
 
 /**
  * A record of the human gates ALP opened and the clears ALP itself made, kept in
@@ -12,7 +13,7 @@ import { alpHome } from './library.js';
  *
  * This detects an edit of the task file only. It is not a security boundary: an
  * agent running as the same OS user can edit this file too (t-ca1f residual risk).
- * Human gates from before the ledger are not in it and are taken as they are.
+ * Human gates from before the ledger enter it the next time ALP writes their task.
  */
 
 const key = (taskId, gate) => `${taskId}/${gate.id}@${gate.at}`;
@@ -27,15 +28,23 @@ function ledgerFile(projectRoot) {
   return path.join(alpHome(), 'gates', `${hash}.json`);
 }
 
-export async function readLedger(projectRoot) {
+/**
+ * The project's ledger. A missing one is empty. On read (`strict` false) an unreadable or corrupt
+ * one detects nothing and never blocks the task graph; a writer (`strict`) refuses it instead,
+ * so it never overwrites entries it could not read.
+ */
+export async function readLedger(projectRoot, { strict = false } = {}) {
+  let data;
   try {
-    const data = JSON.parse(await readFile(ledgerFile(projectRoot), 'utf8'));
-    return data && typeof data.gates === 'object' && data.gates ? data : { gates: {} };
+    data = JSON.parse(await readFile(ledgerFile(projectRoot), 'utf8'));
   } catch (error) {
     if (error.code === 'ENOENT') return { gates: {} };
-    // An unreadable ledger detects nothing; it never blocks the task graph.
+    if (strict) throw new AlpError('GATE_LEDGER_UNREADABLE', `The gate ledger ${ledgerFile(projectRoot)} is unreadable (${error.message}); fix or remove it`);
     return { gates: {} };
   }
+  if (data && typeof data === 'object' && data.gates && typeof data.gates === 'object') return data;
+  if (strict) throw new AlpError('GATE_LEDGER_UNREADABLE', `The gate ledger ${ledgerFile(projectRoot)} is not a ledger; fix or remove it`);
+  return { gates: {} };
 }
 
 async function writeLedger(projectRoot, ledger) {
@@ -46,17 +55,24 @@ async function writeLedger(projectRoot, ledger) {
   await rename(temporary, file);
 }
 
-/** Records a human gate ALP opened. */
-export async function ledgerOpen(projectRoot, taskId, gate) {
-  const ledger = await readLedger(projectRoot);
+/** Records the open human gates of a task ALP just wrote (addGate, a formula's human step, a beads import) that it does not hold yet. */
+export async function ledgerAdopt(projectRoot, task) {
+  const open = (task.gates ?? []).filter(gate => gate.kind === 'human' && !gate.resolved && typeof gate.at === 'string' && /^g\d+$/.test(gate.id));
+  if (!open.length) return;
+  const ledger = await readLedger(projectRoot, { strict: true });
+  const missing = open.filter(gate => !ledger.gates[key(task.id, gate)]);
+  if (!missing.length) return;
   ledger.project = realRoot(projectRoot);
-  ledger.gates[key(taskId, gate)] = { opened: gate.at };
+  for (const gate of missing) ledger.gates[key(task.id, gate)] = { opened: gate.at };
   await writeLedger(projectRoot, ledger);
 }
 
-/** Records that ALP cleared or removed a human gate; written before the task file, so a failure leaves the gate open. */
+/**
+ * Records that ALP cleared or removed a human gate. Written under the task lock once every check
+ * passed and before the task file: should the file write fail, the gate stays open in the file.
+ */
 export async function ledgerResolve(projectRoot, taskId, gate, { by, channel, removed = false }) {
-  const ledger = await readLedger(projectRoot);
+  const ledger = await readLedger(projectRoot, { strict: true });
   const entry = ledger.gates[key(taskId, gate)];
   if (!entry) return;
   entry.resolved = { at: new Date().toISOString(), by, ...(channel ? { channel } : {}), ...(removed ? { removed: true } : {}) };

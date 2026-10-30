@@ -5,7 +5,7 @@ import path from 'node:path';
 import { AlpError } from './errors.js';
 import { assertNoSymlinks } from './safe-path.js';
 import { describeVerification } from './verify.js';
-import { applyLedger, ledgerOpen, ledgerResolve, readLedger } from './gate-ledger.js';
+import { applyLedger, ledgerAdopt, ledgerResolve, readLedger } from './gate-ledger.js';
 
 /**
  * ALP sets this in the environment of every agent process it starts (t-ca1f). The CLI and
@@ -293,6 +293,10 @@ async function save(projectRoot, task) {
   const temporary = `${file}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(temporary, JSON.stringify(task, null, 2) + '\n');
   await moveFile(temporary, file);
+  // Every writer saves here, under the task lock: an open human gate it wrote enters the gate
+  // ledger (t-ca1f). Detection is best-effort: an unwritable ledger leaves the gate unprotected
+  // rather than failing a write that already happened.
+  await ledgerAdopt(projectRoot, task).catch(() => {});
   return task;
 }
 
@@ -342,7 +346,7 @@ export function createTask(projectRoot, input, by) {
  * Changes one task under the lock. `change` edits the task in place and may
  * throw an AlpError; `ifRev` refuses the write when the task changed since read.
  */
-function mutate(projectRoot, id, change, { ifRev, after } = {}) {
+function mutate(projectRoot, id, change, { ifRev } = {}) {
   return locked(projectRoot, async () => {
     const { tasks } = await loadTasks(projectRoot);
     const task = requireTask(tasks, id, 'id');
@@ -352,10 +356,7 @@ function mutate(projectRoot, id, change, { ifRev, after } = {}) {
     if (JSON.stringify(task) === before) return task;
     task.rev += 1;
     task.updatedAt = now();
-    const saved = await save(projectRoot, task);
-    // Still under the lock: `after` records what the write did elsewhere (the gate ledger).
-    if (after) await after(saved);
-    return saved;
+    return save(projectRoot, task);
   });
 }
 
@@ -696,7 +697,6 @@ const GH_REF = /^(?:([\w.-]+\/[\w.-]+)#)?(\d+)$/;
  * or gh:run (a workflow run succeeds); refs are 123 or owner/repo#123.
  */
 export function addGate(projectRoot, id, { kind, note, until, ref, options } = {}, by) {
-  let opened = null;
   return mutate(projectRoot, id, task => {
     if (!GATE_KINDS.includes(kind)) fail('INVALID_TASK', `kind must be one of ${GATE_KINDS.join(', ')}`);
     if (task.status === 'closed') fail('INVALID_TASK', `${id} is closed`);
@@ -725,8 +725,7 @@ export function addGate(projectRoot, id, { kind, note, until, ref, options } = {
     gate.by = by;
     task.gates = [...(task.gates ?? []), gate];
     addLog(task, by, 'gated', { gate: describeGate(gate) });
-    if (kind === 'human') opened = gate;
-  }, { after: saved => opened ? ledgerOpen(projectRoot, saved.id, opened) : undefined });
+  });
 }
 
 export const GATE_OPTIONS = 10;
@@ -751,11 +750,12 @@ const checkChannel = channel => {
  * `choice` records which of a human gate's options the user picked; `channel` (paseo, web or cli) where they decided.
  */
 export function resolveGate(projectRoot, id, gateId, { by, note, remove = false, ifRev, choice, channel } = {}) {
-  let human = null;
-  return mutate(projectRoot, id, task => {
+  return mutate(projectRoot, id, async task => {
     const gate = (task.gates ?? []).find(entry => entry.id === gateId) ?? fail('INVALID_TASK', `${id} has no gate ${gateId}`);
-    if (gate.kind === 'human') human = gate;
+    // Recorded once every check passed and before the task file is written (t-ca1f).
+    const record = () => gate.kind === 'human' ? ledgerResolve(projectRoot, task.id, gate, { by, channel, removed: remove }) : undefined;
     if (remove) {
+      await record();
       task.gates = task.gates.filter(entry => entry !== gate);
       addLog(task, by, 'ungated', { gate: describeGate(gate) });
       return;
@@ -770,6 +770,7 @@ export function resolveGate(projectRoot, id, gateId, { by, note, remove = false,
       }
     }
     const picked = choice?.trim();
+    await record();
     task.gates = task.gates.map(entry => entry === gate ? { ...entry, resolved: { at: now(), by, ...(text ? { note: text } : {}), ...(picked ? { choice: picked } : {}), ...(channel ? { channel } : {}) } } : entry);
     addLog(task, by, 'gate cleared', { gate: describeGate(gate), ...(picked ? { choice: picked } : {}), ...(channel ? { channel } : {}), ...(text ? { note: text } : {}) });
     // A formula's human step is the user's to do: approving its gate completes it.
@@ -780,8 +781,7 @@ export function resolveGate(projectRoot, id, gateId, { by, note, remove = false,
       task.closed = { at: now(), by, reason: 'done', summary };
       addLog(task, by, 'closed', { reason: 'done', summary });
     }
-  // Recorded under the lock once the file is written; should that fail, the next read reopens the gate (fail-safe).
-  }, { ifRev, after: saved => human ? ledgerResolve(projectRoot, saved.id, human, { by, channel, removed: remove }) : undefined });
+  }, { ifRev });
 }
 
 /**

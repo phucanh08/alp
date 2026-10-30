@@ -46,10 +46,14 @@ test('an agent connection cannot clear a human gate or answer a question; the us
 
   const agent = await connectAs(daemonPaths(directory).socket, true);
   t.after(() => agent.close());
-  const refused = error => { assert.equal(error.code, 1003); assert.equal(error.data?.reason, 'user_only'); return true; };
+  const refused = error => { assert.equal(error.code, 1003, error.message + JSON.stringify(error.data)); assert.equal(error.data?.reason, 'user_only'); return true; };
   await assert.rejects(agent.request('task.gate.resolve', { projectRoot: project, id: task.id, gate: 'g1' }), refused);
   await assert.rejects(agent.request('task.gate.resolve', { projectRoot: project, id: task.id, gate: 'g1', reject: true, note: 'no' }), refused);
   await assert.rejects(agent.request('question.answer', { questionId: 'q-any', text: 'yes' }), refused);
+  // A daemon shell carries no mark: an agent may not open, attach to or type into one.
+  await assert.rejects(agent.request('terminal.create', { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r1' }), refused);
+  await assert.rejects(agent.request('terminal.attach', { terminalId: 'term_' + '0'.repeat(32) }), refused);
+  await assert.rejects(agent.request('terminal.input', { terminalId: 'term_' + '0'.repeat(32), data: 'alp answer q yes\n' }), refused);
   // A second hello does not shed the mark.
   await agent.request('daemon.hello', { protocolVersion: 1 });
   await assert.rejects(agent.request('task.gate.resolve', { projectRoot: project, id: task.id, gate: 'g1' }), refused);

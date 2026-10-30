@@ -292,6 +292,8 @@ export class AntigravityTransport {
       ...this.env,
       ...(this.provider?.env ?? {}),
       ...(params.env ?? {}),
+      // Provider or session env never sheds the agent mark (t-ca1f).
+      ...(this.env.ALP_AGENT_SESSION ? { ALP_AGENT_SESSION: this.env.ALP_AGENT_SESSION } : {}),
       // Session credentials are inherited by this agy's MCP child only, never persisted.
       ALP_BRIDGE_SOCKET: this.bridge?.socket ?? '',
       ALP_BRIDGE_TOKEN: this.bridge?.token ?? '',

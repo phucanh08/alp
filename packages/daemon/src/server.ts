@@ -131,6 +131,11 @@ type Connection = {
 const TREE_LOG_LIMIT = 20_000;
 /** The daemon.hello capability a process an ALP agent started announces (t-ca1f; the client's handshake sends it). */
 const AGENT_CAPABILITY = 'principal.agent';
+/** A shell alpd opens carries no ALP_AGENT_SESSION, so an agent's connection may not open, attach to or type into one (t-ca1f). */
+const agentRefused = (connection: { agent?: boolean }, method: string): undefined => {
+  if (connection.agent) throw new RpcError(ERROR.forbidden, `${method} is the user's; this connection was opened by an ALP agent`, { reason: 'user_only' });
+  return undefined;
+};
 const SESSION_ID = /^[\w.:-]{1,128}$/;
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -1316,13 +1321,13 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     // store, or Windows) alpd does not serve them, as for any method it does not know.
     // terminal.* (§12.10): each call acts for its principal context; input, resize and the stream
     // belong to the connection that attached the terminal.
-    'terminal.create': (_c, p) => terminalCall(service => service.create(principalOf(p), p)),
+    'terminal.create': (c, p) => agentRefused(c, 'terminal.create') ?? terminalCall(service => service.create(principalOf(p), p)),
     'terminal.watch': (c, p) => terminalCall(service => service.watch(principalOf(p), c, p)),
     'terminal.unwatch': (c) => terminalCall(service => service.unwatch(c)),
     'terminal.capture': (_c, p) => terminalCall(service => service.capture(principalOf(p), p)),
     'terminal.list': (_c, p) => terminalCall(service => service.list(principalOf(p), p)),
-    'terminal.attach': (c, p) => terminalCall(service => service.attach(principalOf(p), c, p)),
-    'terminal.input': (c, p) => terminalCall(service => service.input(principalOf(p), c, p)),
+    'terminal.attach': (c, p) => agentRefused(c, 'terminal.attach') ?? terminalCall(service => service.attach(principalOf(p), c, p)),
+    'terminal.input': (c, p) => agentRefused(c, 'terminal.input') ?? terminalCall(service => service.input(principalOf(p), c, p)),
     'terminal.resize': (c, p) => terminalCall(service => service.resize(principalOf(p), c, p)),
     'terminal.close': (_c, p) => terminalCall(service => service.close(principalOf(p), p)),
     'terminal.revoke': (_c, p) => terminalCall(service => service.revoke(p.principalId)),

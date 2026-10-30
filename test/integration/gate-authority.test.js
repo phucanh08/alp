@@ -3,13 +3,14 @@
 // and undone. (The daemon's refusal is in packages/daemon/tests/gate-authority.test.js.)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initProject } from '../../packages/core/src/init.js';
-import { addGate, createTask, gateOpen, loadTasks, resolveGate } from '../../packages/core/src/tasks.js';
+import { addGate, createTask, gateOpen, loadTasks, resolveGate, updateTask } from '../../packages/core/src/tasks.js';
+import { pourFormula } from '../../packages/core/src/formulas.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
@@ -88,6 +89,44 @@ test('a human gate cleared or removed by editing the task file opens again, mark
   // A user removal through ALP is not taken for tampering.
   assert.equal(run({}, 'task', 'gate', 'rm', removed.id, 'g1').status, 0);
   assert.equal((await loadTasks(root)).tasks.find(task => task.id === removed.id).gates.length, 0);
+});
+
+test('a formula human step and an older human gate are ledgered too; an unreadable ledger blocks clears, never reads', async t => {
+  const { root, home, run } = await setup(t);
+  const formula = { formula: 'ship', description: '', vars: {}, steps: [{ id: 'build', title: 'Build', type: 'task', needs: [] }, { id: 'approve', title: 'Approve the release', type: 'human', needs: ['build'] }] };
+  const poured = await pourFormula(root, formula, {}, 'main');
+  const step = (await loadTasks(root)).tasks.find(task => task.step?.human);
+  assert.ok(step, JSON.stringify(poured));
+  let data = JSON.parse(await readFile(taskFile(root, step.id), 'utf8'));
+  data.gates[0].resolved = { at: new Date().toISOString(), by: 'user' };
+  data.status = 'closed';
+  data.closed = { at: new Date().toISOString(), by: 'user', reason: 'done', summary: 'forged' };
+  await writeFile(taskFile(root, step.id), JSON.stringify(data));
+  const reopened = (await loadTasks(root)).tasks.find(task => task.id === step.id);
+  assert.ok(gateOpen(reopened.gates[0]) && reopened.gates[0].tampered);
+  assert.equal(reopened.status, 'open');
+
+  // A human gate written before the ledger existed enters it the next time ALP writes its task.
+  const old = await createTask(root, { title: 'Old' }, 'main');
+  data = JSON.parse(await readFile(taskFile(root, old.id), 'utf8'));
+  data.gates = [{ id: 'g1', kind: 'human', note: 'Old approval', at: new Date().toISOString(), by: 'main' }];
+  await writeFile(taskFile(root, old.id), JSON.stringify(data));
+  await updateTask(root, old.id, { note: 'touch' }, 'main');
+  data = JSON.parse(await readFile(taskFile(root, old.id), 'utf8'));
+  data.gates[0].resolved = { at: new Date().toISOString(), by: 'user' };
+  await writeFile(taskFile(root, old.id), JSON.stringify(data));
+  assert.ok((await loadTasks(root)).tasks.find(task => task.id === old.id).gates[0].tampered);
+
+  // A corrupt ledger: reads go on (detecting nothing), a clear refuses rather than overwrite it.
+  const fresh = await createTask(root, { title: 'Fresh' }, 'main');
+  await addGate(root, fresh.id, { kind: 'human', note: 'Fresh approval' }, 'main');
+  const [ledger] = await readdir(path.join(home, 'gates'));
+  await writeFile(path.join(home, 'gates', ledger), '{not json');
+  assert.ok((await loadTasks(root)).tasks.length >= 3);
+  const refused = run({}, 'task', 'gate', 'clear', fresh.id, 'g1');
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /gate ledger .* unreadable/);
+  assert.equal(await readFile(path.join(home, 'gates', ledger), 'utf8'), '{not json');
 });
 
 test('every agent process ALP starts carries ALP_AGENT_SESSION', async t => {
