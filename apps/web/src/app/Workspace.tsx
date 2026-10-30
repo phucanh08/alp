@@ -1,11 +1,11 @@
 import * as React from 'react';
-import { ArrowLeftToLine, ArrowRightToLine, Bot, CircleAlert, CircleDot, Columns2, Copy, CopyX, Ellipsis, FileText, ListTodo, Maximize, Minimize, PanelLeft, PanelRight, Pencil, Plus, RotateCw, Rows2, ShieldAlert, SquarePen, Archive, X } from 'lucide-react';
+import { ArrowLeftToLine, ArrowRightToLine, Bot, CircleAlert, CircleDot, Columns2, Copy, CopyX, Ellipsis, FileText, ListTodo, Maximize, Minimize, PanelBottom, PanelLeft, PanelRight, PanelTop, Pencil, Plus, RotateCw, Rows2, ShieldAlert, SquarePen, Archive, X } from 'lucide-react';
 import type { SessionSummary } from '../lib/controller.js';
 import { can } from '../lib/gateway.js';
 import { ContextMenu, Menu, type MenuItem } from '../components/ui/menu';
 import { moveKey, orderTabs } from '../lib/layout.js';
 import { closeRange } from '../lib/tab-close.js';
-import { MAIN_PANE, MIN_SPLIT_SIZE, dropPosition, paneIds, type GroupNode, type SplitNode, type SplitPosition } from '../lib/panes.js';
+import { MAIN_PANE, MIN_SPLIT_SIZE, dropPosition, paneIds, splitPane, type GroupNode, type SplitNode, type SplitPosition } from '../lib/panes.js';
 import { isMacPlatform, shortcutLabel } from '../lib/shortcuts.js';
 import { baseName, sessionName } from '../lib/format';
 import { cn } from '../lib/utils';
@@ -416,8 +416,27 @@ function DropOverlay({ position }: { position: 'center' | SplitPosition }) {
 
 type RowProps = { onNewSession: () => void; onRename: (session: SessionSummary) => void; menuRequest?: number; onMenuRequestHandled?: () => void };
 
+/** The pane menu's sides, in the order the menu lists them. */
+const PANE_SPLITS: Array<{ position: SplitPosition; label: string; icon: React.ReactNode }> = [
+  { position: 'left', label: 'Split pane left', icon: <PanelLeft aria-hidden /> },
+  { position: 'top', label: 'Split pane up', icon: <PanelTop aria-hidden /> },
+  { position: 'right', label: 'Split pane right', icon: <PanelRight aria-hidden /> },
+  { position: 'bottom', label: 'Split pane down', icon: <PanelBottom aria-hidden /> },
+];
+
+/**
+ * Whether a right click at `target` keeps the browser's own menu: with text selected, in a field,
+ * on a link or in a terminal (which has its own), and with Shift held.
+ */
+function nativeMenuWanted(event: React.MouseEvent) {
+  const target = event.target as HTMLElement;
+  if (event.shiftKey || !!window.getSelection()?.toString()) return true;
+  return !!target.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"], a[href], .xterm');
+}
+
 function PaneView({ id, props, whole = false }: { id: string; props: RowProps; whole?: boolean }) {
-  const { focusedPane, focusPane, panes } = useTabs();
+  const { focusedPane, focusPane, panes, splitEmpty, canSplitEmpty } = useTabs();
+  const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
   const drop = React.useContext(DropContext);
   const focused = id === focusedPane;
   const many = paneIds(panes.root).length > 1;
@@ -431,10 +450,22 @@ function PaneView({ id, props, whole = false }: { id: string; props: RowProps; w
         onPointerDownCapture={claim} onFocusCapture={claim}
         className={cn('relative flex min-h-0 min-w-0 flex-1 flex-col bg-background', many && !focused && '[&_[role=tab][aria-selected=true]]:text-muted-foreground')}>
         <TabsRow paneId={id} whole={whole} {...props} />
-        <div className="relative flex min-h-0 flex-1 flex-col" data-pane-body={id}>
+        <div className="relative flex min-h-0 flex-1 flex-col" data-pane-body={id}
+          onContextMenu={drop.splits && canSplitEmpty ? event => {
+            if (nativeMenuWanted(event)) return;
+            event.preventDefault();
+            setMenu({ x: event.clientX, y: event.clientY });
+          } : undefined}>
           <TabContent paneId={id} onNewSession={props.onNewSession} />
           {zone ? <DropOverlay position={zone} /> : null}
         </div>
+        <ContextMenu label="Pane actions" at={menu} onClose={() => setMenu(null)} testId={menu ? `workspace-pane-context-${id}` : undefined}
+          items={menu ? PANE_SPLITS.map(({ position, label, icon }) => ({
+            id: `split-${position}`, label, icon, testId: `workspace-pane-split-${position}`,
+            // A split past the deepest nesting is refused (lib/panes.js): its row is off.
+            disabled: !splitPane(panes, { target: id, position }),
+            onSelect: () => splitEmpty(position, id),
+          })) : []} />
       </section>
     </PaneContext.Provider>
   );
