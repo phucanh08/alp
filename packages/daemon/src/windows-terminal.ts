@@ -48,11 +48,11 @@ export const windowsPtySpawn: PtySpawn = (file, args, options) => {
   const pty = loadNodePty();
   if (!pty) throw new Error('node-pty is unavailable on this host');
   const spawnOptions = { name: options.name, cols: options.cols, rows: options.rows, cwd: options.cwd, env: options.env, useConpty: true };
-  const { child, write } = typeof process.versions.bun === 'string' ? spawnUnderBun(pty, file, args, spawnOptions) : { child: pty.spawn(file, args, spawnOptions), write: undefined };
+  const child = typeof process.versions.bun === 'string' ? spawnUnderBun(pty, file, args, spawnOptions) : pty.spawn(file, args, spawnOptions);
   let killed = false;
   return {
     pid: child.pid,
-    write(data: string) { if (!killed) (write ?? (text => child.write(text)))(data); },
+    write(data: string) { if (!killed) child.write(data); },
     resize(cols: number, rows: number) { if (!killed) try { child.resize(cols, rows); } catch { /* exited */ } },
     // Best-effort: node-pty ends the ConPTY session and its shell; descendants are not guaranteed.
     kill() { if (killed) return; killed = true; try { child.kill(); } catch { /* already exited */ } },
@@ -62,34 +62,55 @@ export const windowsPtySpawn: PtySpawn = (file, args, options) => {
 };
 
 /**
- * The ALP executable runs on Bun (t-1e02), where node-pty's input stream, a net.Socket around the fd
- * it opens on ConPTY's input pipe, accepts writes but never delivers them (output, read by a worker,
- * works). Capture that fd while node-pty opens it, synchronously inside spawn, and write the input
- * to it directly, in order. The fd stays node-pty's: closing the terminal releases it with its socket.
+ * The ALP executable runs on Bun (t-1e02), where node-pty's input stream, `new net.Socket({ fd })`
+ * around the fd it opens on ConPTY's input pipe, takes the fd but never writes to it (output, read
+ * by a worker, works; probed on windows-2022 with Bun 1.4.2). While node-pty spawns (synchronously),
+ * hand it a small writer for that fd instead: the same calls node-pty makes on its input socket
+ * (setEncoding, write, destroy, readable), with writes in order through fs.write and the fd closed
+ * once on destroy.
  */
 function spawnUnderBun(pty: NodePty, file: string, args: string[], options: Record<string, unknown>) {
-  const fs = createRequire(import.meta.url)('node:fs') as typeof import('node:fs');
-  const open = fs.openSync;
-  let conin: number | undefined;
-  (fs as { openSync: typeof open }).openSync = ((target: import('node:fs').PathLike, flags?: import('node:fs').OpenMode, mode?: import('node:fs').Mode | null) => {
-    const fd = open(target, flags ?? 'r', mode);
-    if (typeof target === 'string' && flags === 'w' && /^\\\\[.?]\\pipe\\/i.test(target)) conin = fd;
-    return fd;
-  }) as typeof open;
-  let child: ReturnType<NodePty['spawn']>;
-  try { child = pty.spawn(file, args, options); } finally { (fs as { openSync: typeof open }).openSync = open; }
-  if (conin === undefined) return { child, write: undefined };
-  const fd = conin;
+  const load = createRequire(import.meta.url);
+  const fs = load('node:fs') as typeof import('node:fs');
+  const net = load('node:net') as { Socket: new (...args: unknown[]) => unknown };
+  const Socket = net.Socket;
+  function InputSocket(this: unknown, ...rest: unknown[]) {
+    const [opts] = rest as [{ fd?: unknown; writable?: boolean; readable?: boolean } | undefined];
+    if (opts && typeof opts.fd === 'number' && opts.writable === true && opts.readable === false) return fdWriter(fs, opts.fd);
+    return new Socket(...rest);
+  }
+  InputSocket.prototype = Socket.prototype;
+  net.Socket = InputSocket as unknown as typeof Socket;
+  try { return pty.spawn(file, args, options); } finally { net.Socket = Socket; }
+}
+
+/** A write-only stand-in for net.Socket over a pipe fd: ordered writes, closed once. */
+function fdWriter(fs: typeof import('node:fs'), fd: number) {
   let queue: Promise<void> = Promise.resolve();
-  const write = (data: string) => {
-    const bytes = Buffer.from(data, 'utf8');
-    queue = queue.then(() => new Promise<void>(resolve => {
-      const rest = (offset: number): void => {
-        if (offset >= bytes.length) return resolve();
-        fs.write(fd, bytes, offset, bytes.length - offset, null, (error, written) => error ? resolve() : rest(offset + written));
-      };
-      rest(0);
-    }));
+  let closed = false;
+  const writer = {
+    readable: false,
+    writable: true,
+    setEncoding() { return writer; },
+    write(data: string | Uint8Array) {
+      if (closed) return false;
+      const bytes = typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(data);
+      queue = queue.then(() => new Promise<void>(resolve => {
+        const rest = (offset: number): void => {
+          if (closed || offset >= bytes.length) return resolve();
+          fs.write(fd, bytes, offset, bytes.length - offset, null, (error, written) => (error ? resolve() : rest(offset + written)));
+        };
+        rest(0);
+      }));
+      return true;
+    },
+    destroy() {
+      if (closed) return writer;
+      closed = true;
+      writer.writable = false;
+      void queue.then(() => fs.close(fd, () => {}));
+      return writer;
+    },
   };
-  return { child, write };
+  return writer;
 }
