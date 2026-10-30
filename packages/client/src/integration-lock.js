@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, rename, rmdir, unlink } from 'node:fs/promises';
+import { mkdir, open, rmdir, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { moveFile } from '@anhlp/alp-core/atomic';
 import { assertIntegrationName, bootId, bootTime, isSameBoot } from './index.js';
 
 /**
@@ -173,7 +174,9 @@ export function createIntegrationLock(home, name) {
           try {
             try { await handle.writeFile(JSON.stringify(value)); info = await handle.stat(); }
             finally { await handle.close(); }
-            await rename(tmp, file);
+            // Readers (alp web status, a polling client) may hold the lock open; Windows then refuses the
+            // replace with EPERM/EACCES/EBUSY for a moment, so moveFile retries it there.
+            await moveFile(tmp, file);
             owned = { owner: value.owner, dev: info.dev, ino: info.ino };
             return true;
           } finally { await unlink(tmp).catch(error => { if (error?.code !== 'ENOENT') throw error; }); }

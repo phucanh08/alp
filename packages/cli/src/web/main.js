@@ -260,8 +260,11 @@ async function run() {
       }
       catch (error) {
         await candidate.close().catch(() => {});
-        if (/** @type {any} */ (error)?.code !== 'EADDRINUSE' || attempt + 1 >= PORT_TRIES) throw error;
-        log.info(`port ${port} is in use; trying ${port + 1}`, { code: 'ALP_WEB_PORT_BUSY' });
+        // Windows answers EACCES for a port in an excluded range (Hyper-V, WinNAT) or held exclusively by
+        // another socket: as unusable as a busy one, so the next port is tried for both.
+        const code = /** @type {any} */ (error)?.code;
+        if ((code !== 'EADDRINUSE' && code !== 'EACCES') || attempt + 1 >= PORT_TRIES) throw error;
+        log.info(`port ${port} is ${code === 'EACCES' ? 'not available' : 'in use'}; trying ${port + 1}`, { code: 'ALP_WEB_PORT_BUSY' });
       }
     }
     if (shuttingDown) return;
