@@ -41,6 +41,15 @@ export function packagedInfo() { return /** @type {any} */ (globalThis)[KEY]; }
 /** Whether this process is the self-contained ALP executable. */
 export function isPackaged() { return packagedInfo() !== undefined; }
 
+/**
+ * A string only ALP's executable carries: its generated entry embeds it, so discovery can tell ALP
+ * from an unrelated native program that happens to be called `alp` without running it.
+ */
+export const EXECUTABLE_MARKER = 'alp-standalone-executable:v1:2b6f0c1e';
+
+/** Whether `file` is named like the ALP executable (alp, alp.exe). @param {string} file */
+export const isExecutableName = file => /^alp(\.exe)?$/i.test(file.split(/[\\/]/).pop() ?? '');
+
 /** A file path that names a JavaScript entry rather than an executable. @param {string} file */
 export const isScript = file => /\.[cm]?js$/i.test(file);
 
@@ -74,7 +83,8 @@ export function selfCommand(role, { script, args = [] }) {
  * @returns {{ command: string, args: string[] }}
  */
 export function entryCommand(entry, role, args = [], execPath = process.execPath, { scriptOnly = false } = {}) {
-  if (isScript(entry) || scriptOnly) {
+  // Only a file named alp/alp.exe is the executable; anything else (alpd.js, alpd.ts, a launcher) is a script.
+  if (scriptOnly || isScript(entry) || !isExecutableName(entry)) {
     // The executable cannot run a script itself; a script entry then needs a real Node.
     if (isPackaged() && execPath === process.execPath) return { command: 'node', args: [entry, ...args] };
     return { command: execPath, args: [entry, ...args] };

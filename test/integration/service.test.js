@@ -73,10 +73,18 @@ test('a service for the ALP executable runs `alp daemon run --service`, and alpd
   await writeFile(alp, '#!/bin/sh\nexec node /somewhere/cli.js "$@"\n');
   const empty = path.join(directory, 'home');
   assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), undefined, 'a shell wrapper is not the ALP executable');
-  await writeFile(alp, Buffer.concat([Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.alloc(64)]));
-  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), alp, 'a Mach-O alp on PATH');
-  await writeFile(alp, Buffer.concat([Buffer.from('\x7fELF', 'latin1'), Buffer.alloc(64)]));
-  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), alp, 'an ELF alp on PATH');
+  const { EXECUTABLE_MARKER } = await import('../../packages/core/src/packaged.js');
+  // An unrelated native tool called alp is not ALP: no marker.
+  await writeFile(alp, Buffer.concat([Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.alloc(3 << 20)]));
+  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), undefined, 'a foreign native alp is not ALP');
+  // The marker is found anywhere, including across the scan's 1 MiB chunk boundary.
+  const split = (1 << 20) - 10;
+  await writeFile(alp, Buffer.concat([Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.alloc(split - 4), Buffer.from(EXECUTABLE_MARKER), Buffer.alloc(64)]));
+  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), alp, 'a Mach-O ALP executable on PATH');
+  await writeFile(alp, Buffer.concat([Buffer.from('\x7fELF', 'latin1'), Buffer.alloc(64), Buffer.from(EXECUTABLE_MARKER)]));
+  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), alp, 'an ELF ALP executable on PATH');
+  await writeFile(alp, Buffer.concat([Buffer.from('#!/bin/sh\n'), Buffer.from(EXECUTABLE_MARKER)]));
+  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), undefined, 'a script mentioning the marker is not native');
   const recorded = path.join(directory, 'recorded');
   await (await import('node:fs/promises')).mkdir(recorded, { mode: 0o700 });
   await writeFile(path.join(recorded, 'alpd.json'), JSON.stringify({ entry: alp, version: '1' }));

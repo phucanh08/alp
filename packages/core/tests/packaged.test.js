@@ -32,6 +32,9 @@ test('an entry found on disk runs by its kind: a script under execPath, the ALP 
   // A third-party integration entry is always a script, whatever its name.
   assert.deepEqual(entryCommand('/usr/bin/alp-x-integration', 'web', ['--service'], '/opt/node', { scriptOnly: true }), { command: '/opt/node', args: ['/usr/bin/alp-x-integration', '--service'] });
   assert.throws(() => entryCommand('/bin/alp', /** @type {any} */ ('nope')), /Unknown ALP role/);
+  // Only alp/alp.exe is the executable: a TypeScript or extensionless entry still runs under execPath.
+  assert.deepEqual(entryCommand('/src/alp/packages/daemon/src/main.ts', 'daemon', ['--detach'], '/opt/node'), { command: '/opt/node', args: ['/src/alp/packages/daemon/src/main.ts', '--detach'] });
+  assert.deepEqual(entryCommand('/opt/alp/bin/alpd', 'daemon', [], '/opt/node'), { command: '/opt/node', args: ['/opt/alp/bin/alpd'] });
 });
 
 test('packaged, ALP starts itself through subcommands and never passes a script or -e to its own executable', t => {
@@ -52,8 +55,12 @@ test('packaged, ALP starts itself through subcommands and never passes a script 
 
 test('an Antigravity MCP entry is recognised as ALP\'s in both launcher forms, and nothing else is', () => {
   assert.equal(isBridgeArgs('antigravity', ['-e', ANTIGRAVITY_BRIDGE]), true);
-  assert.equal(isBridgeArgs('antigravity', ['bridge', 'antigravity']), true);
-  assert.equal(isBridgeArgs('antigravity', ['bridge', 'acp']), false);
+  assert.equal(isBridgeArgs('antigravity', ['bridge', 'antigravity'], '/Users/u/.alp/bin/alp'), true);
+  assert.equal(isBridgeArgs('antigravity', ['bridge', 'antigravity'], 'C:\\Users\\u\\.alp\\bin\\alp.exe'), true);
+  // Another server that happens to take the same arguments is not ALP's.
+  assert.equal(isBridgeArgs('antigravity', ['bridge', 'antigravity'], '/usr/bin/other'), false);
+  assert.equal(isBridgeArgs('antigravity', ['bridge', 'antigravity']), false);
+  assert.equal(isBridgeArgs('antigravity', ['bridge', 'acp'], '/bin/alp'), false);
   assert.equal(isBridgeArgs('antigravity', ['server.js']), false);
   assert.equal(isBridgeArgs('antigravity', undefined), false);
 });

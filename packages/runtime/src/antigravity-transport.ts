@@ -535,7 +535,7 @@ export class AntigravityTransport {
       }
       config.mcpServers ??= {};
       const existing = config.mcpServers.alp;
-      if (existing && !isBridgeArgs('antigravity', existing.args)) {
+      if (existing && !isBridgeArgs('antigravity', existing.args, existing.command)) {
         throw new Error('Antigravity already has an MCP server named alp; rename it before using ALP');
       }
       const launcher = { ...bridgeCommand('antigravity'), ...(process.versions.electron ? { env: { ELECTRON_RUN_AS_NODE: '1' } } : {}) };

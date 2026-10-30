@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { scrubText } from '@anhlp/alp-core/log';
-import { entryCommand, executablePath, isScript } from '@anhlp/alp-core/packaged';
+import { EXECUTABLE_MARKER, entryCommand, executablePath, isExecutableName, isScript } from '@anhlp/alp-core/packaged';
 import { createSocketTransport } from './ipc.js';
 import { AlpRpcClient } from './rpc/client.js';
 import { hello } from './rpc/handshake.js';
@@ -91,19 +91,32 @@ const isFile = file => stat(file).then(info => info.isFile(), () => false);
 
 /**
  * Whether `file` is the self-contained ALP executable (t-1e02) rather than a script or a shell
- * wrapper: a native image (Mach-O, ELF or PE) whose name is alp.
+ * wrapper: a native image (Mach-O, ELF or PE) named alp that carries ALP's executable marker.
  * @param {string} file
  */
 async function isAlpExecutable(file) {
-  if (isScript(file) || !/^alp(\.exe)?$/i.test(path.basename(file)) || !await isFile(file)) return false;
+  if (isScript(file) || !isExecutableName(file) || !await isFile(file)) return false;
   const handle = await open(file, 'r').catch(() => undefined);
   if (!handle) return false;
   try {
     const { buffer, bytesRead } = await handle.read(Buffer.alloc(4), 0, 4, 0);
     if (bytesRead < 4) return false;
     const magic = buffer.readUInt32BE(0);
-    return buffer.toString('latin1') === '\x7fELF' || buffer.subarray(0, 2).toString('latin1') === 'MZ'
+    const native = buffer.toString('latin1') === '\x7fELF' || buffer.subarray(0, 2).toString('latin1') === 'MZ'
       || [0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe, 0xcafebabe].includes(magic);
+    if (!native) return false;
+    // Identity without running it: ALP's generated entry embeds EXECUTABLE_MARKER (an unrelated `alp` does not).
+    const marker = Buffer.from(EXECUTABLE_MARKER, 'latin1');
+    const chunk = Buffer.alloc(1 << 20);
+    let tail = Buffer.alloc(0);
+    for (let position = 0; ;) {
+      const { bytesRead: read } = await handle.read(chunk, 0, chunk.length, position);
+      if (!read) return false;
+      const window = Buffer.concat([tail, chunk.subarray(0, read)]);
+      if (window.includes(marker)) return true;
+      tail = window.subarray(Math.max(0, window.length - marker.length + 1));
+      position += read;
+    }
   } finally { await handle.close(); }
 }
 
