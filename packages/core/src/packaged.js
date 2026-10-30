@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -51,7 +51,17 @@ export const EXECUTABLE_MARKER = 'alp-standalone-executable:v1:2b6f0c1e';
 export const isExecutableName = file => /^alp(\.exe)?$/i.test(file.split(/[\\/]/).pop() ?? '');
 
 /** Whether `file` is this process's own ALP executable, whatever it is called (alp-darwin-arm64, a rename). @param {unknown} file */
-export const isSelf = file => isPackaged() && typeof file === 'string' && path.resolve(file) === path.resolve(process.execPath);
+export const isSelf = file => isPackaged() && typeof file === 'string' && samePath(file, process.execPath);
+
+/** The canonical form of a path: symlinks resolved when it exists, case-folded where the filesystem usually is. @param {string} file */
+const canonical = file => {
+  let resolved = path.resolve(file);
+  try { resolved = realpathSync.native(resolved); } catch {}
+  return process.platform === 'darwin' || process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+};
+
+/** Whether two paths name the same file (a symlink such as ~/.alp/bin/alp, or a differently cased path on macOS/Windows). @param {string} a @param {string} b */
+export const samePath = (a, b) => canonical(a) === canonical(b);
 
 /** A file path that names a JavaScript entry rather than an executable. @param {string} file */
 export const isScript = file => /\.[cm]?js$/i.test(file);
@@ -139,12 +149,43 @@ function assertPrivate(directory) {
   if (process.platform !== 'win32' && (info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0)) throw new Error(`ALP asset cache must be private to the current user (0700): ${directory}`);
 }
 
-/** Whether `directory` holds exactly this manifest's extraction. */
+/** The cache parent (<ALP_HOME>/cache): a real directory of ours that nobody else may write into. @param {string} directory */
+function assertParent(directory) {
+  const info = lstatSync(directory);
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new Error(`ALP asset cache parent is not a directory: ${directory}`);
+  if (process.platform !== 'win32' && (info.uid !== process.getuid?.() || (info.mode & 0o022) !== 0)) throw new Error(`ALP asset cache parent must belong to the current user and not be group- or world-writable: ${directory}`);
+}
+
+/** Whether `directory` holds exactly this manifest's extraction: every file's size and sha256 match. */
 function extracted(/** @type {string} */ directory, /** @type {string} */ digest, /** @type {Record<string, PackagedAsset>} */ assets) {
   try {
     if (JSON.parse(readFileSync(path.join(directory, MARKER), 'utf8')).digest !== digest) return false;
-    return Object.entries(assets).every(([name, asset]) => { const info = lstatSync(path.join(directory, name)); return info.isFile() && info.size === asset.size; });
+    return Object.entries(assets).every(([name, asset]) => {
+      const file = path.join(directory, name);
+      const info = lstatSync(file);
+      return info.isFile() && info.size === asset.size && sha256(readFileSync(file)) === asset.sha256;
+    });
   } catch { return false; }
+}
+
+const STAGING = /^(.+)\.tmp-(\d+)-(\d+)$/;
+const STALE_MS = 60 * 60 * 1000;
+
+/** Removes staging directories another process left behind (it crashed, or was killed mid-extraction). @param {string} parent */
+function sweepStaging(parent) {
+  let names;
+  try { names = readdirSync(parent); } catch { return; }
+  for (const name of names) {
+    const match = STAGING.exec(name);
+    if (!match) continue;
+    const pid = Number(match[2]);
+    if (pid === process.pid) continue;
+    let alive = false;
+    try { process.kill(pid, 0); alive = true; } catch (error) { alive = /** @type {any} */ (error)?.code === 'EPERM'; }
+    // A live pid may be reused; past an hour no extraction is still running.
+    if (alive && Date.now() - Number(match[3]) < STALE_MS) continue;
+    try { rmSync(path.join(parent, name), { recursive: true, force: true }); } catch {}
+  }
 }
 
 /**
@@ -174,6 +215,8 @@ const verified = new Set();
 function extract(directory, digest, assets, version) {
   const parent = path.dirname(directory);
   mkdirSync(parent, { recursive: true, mode: 0o700 });
+  assertParent(parent);
+  sweepStaging(parent);
   if (existsSync(directory)) {
     assertPrivate(directory);
     if (extracted(directory, digest, assets)) return directory;
