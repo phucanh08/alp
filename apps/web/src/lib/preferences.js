@@ -21,7 +21,9 @@ export const PREFERENCES_VERSION = 1;
  * @typedef {{ team?: string, mode?: string, model?: string, thinkingByModel?: Record<string, string> }} NewSessionChoices
  */
 /** @typedef {{ fontSize: number, fontFamily: 'mono' | 'menlo' | 'consolas', theme: 'dark' | 'light' }} TerminalPreferences */
-/** @typedef {{ sendBehavior: SendBehavior, theme: ThemePreference, newSession: NewSessionChoices, terminal: TerminalPreferences }} Preferences */
+/** Paseo's Appearance › Content width: the chat column's maximum width. @typedef {'default' | 'wide' | 'full'} ContentWidth */
+/** Paseo's Chat › tool detail: tool call rows start closed or open. @typedef {'collapsed' | 'expanded'} ToolCallDisplay */
+/** @typedef {{ sendBehavior: SendBehavior, theme: ThemePreference, contentWidth: ContentWidth, toolCalls: ToolCallDisplay, newSession: NewSessionChoices, terminal: TerminalPreferences }} Preferences */
 export const DEFAULT_TERMINAL_PREFERENCES = Object.freeze(/** @type {TerminalPreferences} */ ({ fontSize: 13, fontFamily: 'mono', theme: 'dark' }));
 /** @param {unknown} value @returns {TerminalPreferences} */
 function parseTerminal(value) {
@@ -35,9 +37,11 @@ function parseTerminal(value) {
 
 export const SEND_BEHAVIORS = /** @type {const} */ (['steer', 'queue']);
 export const THEMES = /** @type {const} */ (['system', 'light', 'dark']);
+export const CONTENT_WIDTHS = /** @type {const} */ (['default', 'wide', 'full']);
+export const TOOL_CALL_DISPLAYS = /** @type {const} */ (['collapsed', 'expanded']);
 
 /** @type {Preferences} */
-export const DEFAULT_PREFERENCES = Object.freeze({ sendBehavior: 'steer', theme: 'system', newSession: Object.freeze({}), terminal: DEFAULT_TERMINAL_PREFERENCES });
+export const DEFAULT_PREFERENCES = Object.freeze({ sendBehavior: 'steer', theme: 'system', contentWidth: 'default', toolCalls: 'collapsed', newSession: Object.freeze({}), terminal: DEFAULT_TERMINAL_PREFERENCES });
 
 const ID_CHARS = 200;
 const MAX_THINKING_ENTRIES = 64;
@@ -81,6 +85,8 @@ export function parsePreferences(raw) {
   return {
     sendBehavior: SEND_BEHAVIORS.includes(value.sendBehavior) ? value.sendBehavior : DEFAULT_PREFERENCES.sendBehavior,
     theme: THEMES.includes(value.theme) ? value.theme : DEFAULT_PREFERENCES.theme,
+    contentWidth: CONTENT_WIDTHS.includes(value.contentWidth) ? value.contentWidth : DEFAULT_PREFERENCES.contentWidth,
+    toolCalls: TOOL_CALL_DISPLAYS.includes(value.toolCalls) ? value.toolCalls : DEFAULT_PREFERENCES.toolCalls,
     newSession: parseNewSession(value.newSession),
     terminal: parseTerminal(value.terminal),
   };
@@ -92,7 +98,7 @@ export function parsePreferences(raw) {
  */
 export function serializePreferences(preferences) {
   const clean = parsePreferences(JSON.stringify({ ...preferences, v: PREFERENCES_VERSION }));
-  return JSON.stringify({ v: PREFERENCES_VERSION, sendBehavior: clean.sendBehavior, theme: clean.theme, newSession: clean.newSession, terminal: clean.terminal });
+  return JSON.stringify({ v: PREFERENCES_VERSION, sendBehavior: clean.sendBehavior, theme: clean.theme, contentWidth: clean.contentWidth, toolCalls: clean.toolCalls, newSession: clean.newSession, terminal: clean.terminal });
 }
 
 /**

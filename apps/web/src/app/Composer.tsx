@@ -213,7 +213,7 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
   const round = 'inline-flex size-7 shrink-0 items-center justify-center rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4';
   return (
     <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-4 md:pb-4">
-      <div className="mx-auto flex w-full max-w-[820px] flex-col gap-3">
+      <div className="mx-auto flex w-full max-w-(--content-width) flex-col gap-3">
         {tracks ? <div className="-mb-1 flex min-w-0 flex-wrap items-center gap-2" data-testid="composer-tracks">{tracks}</div> : null}
         {queued.length ? (
           <ul aria-label="Queued messages" className="flex flex-col gap-2">

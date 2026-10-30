@@ -731,10 +731,12 @@ const memoryStorage = () => {
 test('preferences survive a new controller (a reload) and connect/disconnect; the token never reaches storage', async t => {
   const storage = memoryStorage();
   const w = setup(t, undefined, { storage });
-  assert.deepEqual(w.state().preferences, { sendBehavior: 'steer', theme: 'system', newSession: {}, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } });
+  assert.deepEqual(w.state().preferences, { sendBehavior: 'steer', theme: 'system', contentWidth: 'default', toolCalls: 'collapsed', newSession: {}, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } });
   await connected(w);
   w.controller.setSendBehavior('queue');
   w.controller.setTheme('light');
+  w.controller.setContentWidth('wide');
+  w.controller.setToolCalls('expanded');
   w.controller.disconnect();
   assert.equal(w.state().preferences.sendBehavior, 'queue', 'disconnecting keeps them');
   await connected(w);
@@ -742,9 +744,10 @@ test('preferences survive a new controller (a reload) and connect/disconnect; th
   const stored = [...storage.entries.values()].join('\n');
   assert.doesNotMatch(stored, /alpgw1|secret|127\.0\.0\.1/);
   const reloaded = setup(t, undefined, { storage });
-  assert.deepEqual(reloaded.state().preferences, { sendBehavior: 'queue', theme: 'light', newSession: {}, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } });
+  assert.deepEqual(reloaded.state().preferences, { sendBehavior: 'queue', theme: 'light', contentWidth: 'wide', toolCalls: 'expanded', newSession: {}, terminal: { fontSize: 13, fontFamily: 'mono', theme: 'dark' } });
   reloaded.controller.resetPreferences();
   assert.equal(JSON.parse(storage.entries.get('alp-web:preferences')).sendBehavior, 'steer');
+  assert.equal(JSON.parse(storage.entries.get('alp-web:preferences')).contentWidth, 'default');
   // Another tab wrote something: reloadPreferences follows it; garbage gives the defaults.
   storage.setItem('alp-web:preferences', JSON.stringify({ v: 1, sendBehavior: 'queue', theme: 'dark' }));
   reloaded.controller.reloadPreferences();
@@ -1087,6 +1090,30 @@ test('credential-wide registry load survives workspace switch and subsequent sha
   await w.controller.pinWorkspace('wks_a', true);
   assert.equal(w.state().registry.workspaces[0].pinnedAt, 'pin');
   assert.ok(reads >= 2);
+});
+
+test('renaming a shared workspace sends its title (blank clears it) and re-reads the registry; no workspace.write sends nothing', async t => {
+  const w = setup(t);
+  w.host.capabilities.push('workspace.registry');
+  w.host.principal.permissions.push('workspace.write');
+  let title = null;
+  const updates = [];
+  const row = () => ({ id: 'wks_a', projectId: 'prj_a', directory: '/w/a', title, pinnedAt: null, labels: [], createdAt: 'old' });
+  w.host.intercept.set('workspace.list', (_params, _connection, { answer }) => { answer({ workspaces: [row()], revision: 1 + updates.length, total: 1, nextCursor: null }); return 'handled'; });
+  w.host.intercept.set('workspace.update', (params, _connection, { answer }) => { updates.push(params); title = params.title; answer({ workspace: row(), revision: 1 + updates.length }); return 'handled'; });
+  await connected(w);
+  await w.controller.refreshRegistry();
+  assert.equal(await w.controller.renameWorkspace('wks_a', '  Main app  '), true);
+  assert.equal(updates[0].title, 'Main app');
+  assert.equal(updates[0].ifRevision, 1);
+  assert.equal(typeof updates[0].requestId, 'string');
+  assert.equal(w.state().registry.workspaces[0].title, 'Main app');
+  assert.equal(await w.controller.renameWorkspace('wks_a', '   '), true);
+  assert.equal(updates[1].title, null);
+  w.host.principal.permissions.splice(w.host.principal.permissions.indexOf('workspace.write'), 1);
+  await connected(w);
+  assert.equal(await w.controller.renameWorkspace('wks_a', 'Other'), false);
+  assert.equal(updates.length, 2);
 });
 
 for (const reconnect of [false, true]) test(`Stop retains a delayed prompt identity through timeout${reconnect ? ' and replay' : ''}`, async t => {

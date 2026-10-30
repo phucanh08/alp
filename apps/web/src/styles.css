@@ -42,6 +42,8 @@
   --input: #2f3534;
   --ring: #7ccba0;
   --radius: 0.625rem;
+  /* The chat column's maximum width: Appearance › Content width (lib/theme.ts applyContentWidth). */
+  --content-width: 820px;
   /* Surfaces that were literal colors: the composer's focused border, the error toast, scrollbars, the connect glow. */
   --input-focus: #3d4544;
   --notice-error: #2a1515;

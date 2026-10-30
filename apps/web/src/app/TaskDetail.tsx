@@ -50,7 +50,7 @@ export function TaskDetail({ id, onOpenTask }: { id: string; onOpenTask?: (id: s
   const busy = !!tasks.busy[row.id];
   return (
     <div className="min-h-0 flex-1 overflow-y-auto" data-testid="task-detail">
-      <article className="mx-auto w-full max-w-[820px] px-4 py-6 sm:px-6">
+      <article className="mx-auto w-full max-w-(--content-width) px-4 py-6 sm:px-6">
         <p className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span className="font-mono">{row.id}</span>
           {row.type ? <span>· {row.type}</span> : null}
