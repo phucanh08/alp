@@ -19,7 +19,8 @@ $env:ALP_HOME = Join-Path $work 'home'
 $env:USERPROFILE = Join-Path $work 'user'
 $env:HOME = $env:USERPROFILE
 New-Item -ItemType Directory -Path $env:ALP_HOME, $env:USERPROFILE, (Join-Path $work 'project') | Out-Null
-function Alp { $out = & $Binary @args 2>&1 | Out-String; if ($LASTEXITCODE -ne 0) { Fail "alp $args exited $LASTEXITCODE`: $out" }; $out.Trim() }
+# Continue inside: Windows PowerShell 5.1 turns a native command's stderr into an error record under Stop.
+function Alp { $ErrorActionPreference = 'Continue'; $out = & $Binary @args 2>&1 | Out-String; if ($LASTEXITCODE -ne 0) { Fail "alp $args exited $LASTEXITCODE`: $out" }; $out.Trim() }
 try {
   $version = Alp --version
   if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+') { Fail "alp --version printed '$version'" }
