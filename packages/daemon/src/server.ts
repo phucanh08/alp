@@ -1080,7 +1080,11 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   const worktrees = home && registry && process.platform !== 'win32' ? createWorkspaceWorktrees(home, registry, async (directory, run) => {
     if (!runtime.withWorkspaceMutation) throw new RegistryError(1005, 'Runtime cannot prove safe worktree removal', { reason: 'guard_unavailable' });
     try { return await runtime.withWorkspaceMutation(directory, run); } catch (error: any) { if (error?.data?.reason) throw new RegistryError(1004, 'Workspace is in use or has retained assignment results', error.data); throw error; }
-  }, async directory => { if (!runtime.registerWorkspace) throw new RegistryError(1005, 'Runtime cannot register safe workspace ownership', { reason: 'guard_unavailable' }); await runtime.registerWorkspace(directory); }) : undefined;
+  }, async directory => { if (!runtime.registerWorkspace) throw new RegistryError(1005, 'Runtime cannot register safe workspace ownership', { reason: 'guard_unavailable' }); await runtime.registerWorkspace(directory); },
+  // Owner-audited adoption (t-c1ba); no RPC exposes it yet, so the default stays refusal.
+  runtime.adoptWorkspace ? async (directory, verify) => {
+    try { await runtime.adoptWorkspace!(directory, verify); } catch (error: any) { if (error?.data?.reason && !(error instanceof RegistryError)) throw new RegistryError(1004, 'Workspace is in use, has retained assignment results or changed identity', error.data); throw error; }
+  } : undefined) : undefined;
   const workspaceDescriptor = async (w: any) => worktrees ? worktrees.describe(w) : w;
   // workspace.git.status and workspace.git.diff (§12.5): read-only, by registry workspaceId.
   const gitReader = registry ? createGitReader({ registry, log: (message, fields) => log.warn(message, { code: 'ALPD_GIT_READ_FAILED', ...fields }) }) : undefined;
