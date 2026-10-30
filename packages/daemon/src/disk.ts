@@ -114,8 +114,9 @@ export function createDiskGuard(options: DiskGuardOptions) {
       full = false;
       good = 0;
       warnedLow = false;
-      log.info(`the disk takes writes again (${shown} free); ALP resumes its work`, { code: 'ALP_DISK_BACK', free: bytes });
+      // Release first: a log line failing on a disk that filled again holds again, rightly.
       runtime.releaseDisk('alpd, after disk space returned');
+      log.info(`the disk takes writes again (${shown} free); ALP resumes its work`, { code: 'ALP_DISK_BACK', free: bytes });
       return;
     }
     if (!writable) { hold('the disk is full'); return; }
