@@ -31,7 +31,8 @@ export const ROLE_ARGS = Object.freeze({
 /** Called once by the executable's entry. @param {PackagedRegistration} registration */
 export function registerPackaged(registration) {
   if (!registration || typeof registration.version !== 'string') throw new TypeError('registerPackaged needs a version');
-  Object.defineProperty(globalThis, KEY, { value: Object.freeze({ ...registration }), configurable: true, enumerable: false, writable: false });
+  // assetDir rides along so dependency-free adapters (native-terminal.js) can reach the cache via globalThis alone.
+  Object.defineProperty(globalThis, KEY, { value: Object.freeze({ ...registration, assetDir: () => assetDir() }), configurable: true, enumerable: false, writable: false });
 }
 
 /** The registration when this process is the ALP executable, else undefined. @returns {PackagedRegistration | undefined} */

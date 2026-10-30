@@ -5,7 +5,6 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
-import { assetDir } from '@anhlp/alp-core/packaged';
 export type CleanupResult = { observed: number; live: number; uncertain: number; coverage?: 'root-only'; outputOpen?: boolean };
 type Exit = { exitCode: number | null; signal?: number };
 type Listener<T> = (event: T) => void;
@@ -13,7 +12,9 @@ const sha = (value: Buffer) => createHash('sha256').update(value).digest('hex');
 function binary() {
   const libc = process.platform === 'linux' ? (process.report?.getReport() as { header?: { glibcVersionRuntime?: string } })?.header?.glibcVersionRuntime ? 'glibc' : 'musl' : undefined;
   const slot = [process.platform, process.arch, libc].filter(Boolean).join('-');
-  const assets = assetDir();
+  // The ALP executable (t-1e02) extracts its helper; registerPackaged in @anhlp/alp-core/packaged publishes assetDir here.
+  // Read through globalThis so this shipped adapter stays free of package imports.
+  const assets = (globalThis as { [key: symbol]: { assetDir?: () => string | undefined } | undefined })[Symbol.for('alp.packaged')]?.assetDir?.();
   const adjacent = assets ? path.join(assets, 'terminal-native') : path.join(path.dirname(fileURLToPath(import.meta.url)), 'terminal-native');
   const dir = assets || existsSync(adjacent) ? adjacent : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../native');
   const file = path.join(dir, 'prebuilt', slot, 'terminal-owner');
