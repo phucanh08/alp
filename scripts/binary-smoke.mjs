@@ -76,6 +76,7 @@ try {
       const [input, expected] = windows ? ['set /a 19*19+1000\r', '1361'] : ['echo SMOKE-$((19*19))\r', 'SMOKE-361'];
       await client.request('terminal.input', { terminalId: terminal.terminalId, data: input });
       for (let i = 0; !output.join('').includes(expected) && i < 800; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      if (!output.join('').includes(expected)) log(`terminal output so far (${output.length} chunks): ${JSON.stringify(output.join('').slice(-2000))}`);
       check(output.join('').includes(expected), windows ? 'a terminal through the extracted node-pty (ConPTY)' : 'a terminal through the extracted native helper');
       await client.request('terminal.close', { terminalId: terminal.terminalId });
       const extracted = windows ? ['node-pty', 'prebuilds', 'win32-x64', 'conpty', 'conpty.dll'] : ['terminal-native'];
