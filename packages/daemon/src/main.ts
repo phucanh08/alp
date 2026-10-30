@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import templates from 'alp:templates';
 import { alpHome, daemonPaths, assertPrivateDirectory, PROTOCOL_VERSION, withDaemonLifecycle } from '@anhlp/alp-client/index';
 import { attachmentStageDir, createAlpRuntime, liveProbes, ModelCatalog, reclaimCopies, reclaimWorktrees, setActiveCatalog } from '@anhlp/alp-runtime/index';
+import type { LeftWorktree } from '@anhlp/alp-runtime/index';
 import { createDaemonServer } from './server.js';
 import { acquireLock, heartbeat, releaseLock, updateLock } from './lock.js';
 import { createStore } from './store.js';
@@ -22,6 +23,18 @@ const VERSION = typeof __ALP_VERSION__ === 'string' ? __ALP_VERSION__ : '0.0.0-d
 const LOG_BYTES = 10 * 1024 * 1024;
 const LOG_FILES = 3;
 const log = createLogger({ component: 'alpd' });
+
+/** Why reclaimWorktrees left a directory in $ALP_HOME/worktrees, for the `worktree.left` line. */
+const LEFT_REASONS: Record<LeftWorktree['reason'], (entry: LeftWorktree) => string> = {
+  invalid: () => 'it is not a working git worktree (its git metadata is missing or broken)',
+  'not-linked': () => 'it is a git repository of its own, not a worktree of one',
+  'other-branch': entry => entry.branch ? `it is on branch ${entry.branch}, not its alp branch` : 'its HEAD is detached, so no branch holds its work',
+  'commit-failed': entry => `its work could not be committed${entry.detail ? ` (${entry.detail})` : ''}`,
+  uncommitted: () => 'it still has changes that are not committed',
+  'ignored-files': entry => entry.files?.length
+    ? `its work is committed to ${entry.branch}, but it holds ignored files that exist nowhere else: ${entry.files.join(', ')}`
+    : `its ignored files could not be checked${entry.detail ? ` (${entry.detail})` : ''}`,
+};
 
 async function rotate(log: string) {
   const size = await stat(log).then(info => info.size, () => 0);
@@ -201,8 +214,16 @@ async function run(home: string) {
   await writeFile(marker, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), groupLeader: leadsGroup() }), { mode: 0o600 });
   const runLogDir = process.env.ALP_RUN_LOG_DIR || path.join(home, 'runs');
   const worktreeDir = path.join(home, 'worktrees');
-  // Worktrees of assignments a crash interrupted: their work goes to their branches.
-  for (const branch of await reclaimWorktrees(worktreeDir).catch(() => [] as string[])) log.info(`kept interrupted work on branch ${branch}`, { event: 'worktree.kept', branch });
+  // Worktrees of assignments a crash interrupted: their work goes to their branches. What
+  // reclaim leaves in place stays in $ALP_HOME/worktrees until the user looks: say where and why.
+  const reclaimed = await reclaimWorktrees(worktreeDir).catch(() => ({ kept: [] as string[], left: [] }));
+  for (const branch of reclaimed.kept) log.info(`kept interrupted work on branch ${branch}`, { event: 'worktree.kept', branch });
+  for (const entry of reclaimed.left) {
+    log.warn(`left worktree ${entry.path} in place: ${LEFT_REASONS[entry.reason](entry)}`, {
+      event: 'worktree.left', path: entry.path, reason: entry.reason,
+      ...(entry.branch ? { branch: entry.branch } : {}), ...(entry.detail ? { detail: entry.detail } : {}), ...(entry.files ? { files: entry.files } : {}),
+    });
+  }
   // Review copies of interrupted assignments hold nothing to keep.
   const copyDir = path.join(home, 'copies');
   await reclaimCopies(copyDir).catch(() => 0);

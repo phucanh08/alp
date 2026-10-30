@@ -23,6 +23,7 @@ export { ClaudeTransport, claudePermissions, claudeSandboxAvailable, skillPlugin
 export { MAIL_BATCH_CHARS, MAIL_BODY_CHARS, publicEvent, renderMail, takeBatch, USER } from './mailbox.js';
 export type { MailEvent, MailKind } from './mailbox.js';
 export { createCopy, gitEnvironment, reattachWorktree, reclaimCopies, reclaimWorktrees, removeCopy } from './workspace.js';
+export type { LeftWorktree } from './workspace.js';
 export { OWN_START, processStartedAt, sameProcessAlive } from './process-info.js';
 export type { Worktree, WorktreeChange } from './workspace.js';
 export { PIN_KINDS, renderBoard, renderPin } from './board.js';
