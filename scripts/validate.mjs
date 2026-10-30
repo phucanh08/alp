@@ -11,6 +11,15 @@ const scope = process.argv[2] ?? 'all';
 if (!['all', 'core', 'paseo', 'packages', 'web'].includes(scope) || process.argv.length > 3) {
   throw new Error('Usage: validate.mjs [all|core|paseo|packages|web]');
 }
+/** The commit this run checks, and whether the checkout differs from it, so a gate log names what it ran on. */
+function commit() {
+  const git = (...args) => spawnSync('git', args, { cwd: ROOT, encoding: 'utf8' });
+  const head = git('rev-parse', 'HEAD');
+  if (head.status !== 0 || !head.stdout.trim()) return 'commit unknown (not a git checkout)';
+  const changes = git('status', '--porcelain', '--untracked-files=no');
+  return `commit ${head.stdout.trim()}${changes.status !== 0 ? ' (uncommitted changes unknown)' : changes.stdout.trim() ? ' with uncommitted changes' : ''}`;
+}
+console.log(`[validate:${scope}] ${commit()}`);
 function node(script, ...args) {
   console.log(`\n[validate:${scope}] ${script} ${args.join(' ')}`);
   const result = spawnSync(process.execPath, [script, ...args], { cwd: ROOT, stdio: 'inherit' });
