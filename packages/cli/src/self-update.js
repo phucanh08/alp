@@ -194,13 +194,30 @@ export const oldPath = (target, platform = process.platform) => {
   return p.join(p.dirname(target), `${p.basename(target, p.extname(target))}.old${p.extname(target) || '.exe'}`);
 };
 
+const TRANSIENT = new Set(['EBUSY', 'EPERM', 'EACCES']);
+const pause = (/** @type {number} */ ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/**
+ * Runs `action`, again after a pause while Windows reports the file busy: a virus scanner holds an
+ * executable it just saw run (the staged file's --version) for a moment. About 6 s in all.
+ * @template T @param {() => T} action @param {(ms: number) => void} [sleep]
+ */
+export function retryBusy(action, sleep = pause, attempts = 25) {
+  for (let attempt = 1; ; attempt++) {
+    try { return action(); } catch (error) {
+      if (attempt >= attempts || !TRANSIENT.has(error?.code)) throw error;
+      sleep(Math.min(50 * attempt, 400));
+    }
+  }
+}
+
 /**
  * Puts `staged` in place of `target`. Unix: rename over the running file. Windows: the running
  * alp.exe cannot be overwritten but can be renamed, so it becomes alp.old.exe (deleted on the next
  * start) and the new file takes its name; a failure puts the old one back.
- * @param {string} staged @param {string} target @param {{ platform?: string, fs?: Pick<typeof nodeFs, 'renameSync' | 'rmSync' | 'existsSync'> }} [options]
+ * @param {string} staged @param {string} target @param {{ platform?: string, fs?: Pick<typeof nodeFs, 'renameSync' | 'rmSync' | 'existsSync'>, unique?: () => string, sleep?: (ms: number) => void }} [options]
  */
-export function replaceExecutable(staged, target, { platform = process.platform, fs = nodeFs, unique = () => randomBytes(4).toString('hex') } = {}) {
+export function replaceExecutable(staged, target, { platform = process.platform, fs = nodeFs, unique = () => randomBytes(4).toString('hex'), sleep = pause } = {}) {
   if (platform !== 'win32') { fs.renameSync(staged, target); return { old: undefined }; }
   const old = oldPath(target, platform);
   if (fs.existsSync(old)) {
@@ -213,11 +230,11 @@ export function replaceExecutable(staged, target, { platform = process.platform,
       }
     }
   }
-  fs.renameSync(target, old);
+  retryBusy(() => fs.renameSync(target, old), sleep);
   try {
-    fs.renameSync(staged, target);
+    retryBusy(() => fs.renameSync(staged, target), sleep);
   } catch (error) {
-    try { fs.renameSync(old, target); } catch (restore) {
+    try { retryBusy(() => fs.renameSync(old, target), sleep); } catch (restore) {
       throw new Error(`Could not put the new executable at ${target} (${error.code ?? error.message}), and could not move the previous one back (${restore.code ?? restore.message}): rename ${old} to ${target} yourself`);
     }
     throw error;
@@ -360,8 +377,9 @@ export async function selfUpdate(args, overrides = {}) {
     replaceExecutable(staged, target, { platform: deps.platform });
     staged = undefined;
   } finally {
-    if (staged) nodeFs.rmSync(staged, { force: true });
-    nodeFs.rmSync(work, { recursive: true, force: true });
+    // A cleanup failure must not hide why the update failed; a leftover .alp.update.* is harmless.
+    if (staged) try { nodeFs.rmSync(staged, { force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
+    try { nodeFs.rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
   }
   deps.log(`Updated ${target}: ${deps.version} → ${asset.version}`);
 

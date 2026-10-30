@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  allowedHop, cleanupOldExecutable, compareVersions, fetchBytes, npmMessage, oldPath, releaseBaseUrl, releasePlatform, replaceExecutable,
+  allowedHop, cleanupOldExecutable, retryBusy, compareVersions, fetchBytes, npmMessage, oldPath, releaseBaseUrl, releasePlatform, replaceExecutable,
   selectAsset, selfUpdate, sha256, verifyChecksum, verifyProvenance,
 } from '../src/self-update.js';
 
@@ -116,7 +116,7 @@ test('Windows: the running alp.exe becomes alp.old.exe, the new one takes its na
   const old = oldPath(target, 'win32');
   assert.equal(path.win32.basename(old), 'alp.old.exe');
   const fs = memoryFs(new Map([[target, 'v1'], [staged, 'v2'], [old, 'v0']]));
-  assert.deepEqual(replaceExecutable(staged, target, { platform: 'win32', fs }), { old });
+  assert.deepEqual(replaceExecutable(staged, target, { platform: 'win32', fs, sleep: () => {} }), { old });
   assert.deepEqual(fs.calls, [['rm', old], ['rename', target, old], ['rename', staged, target]]);
   assert.equal(fs.files.get(target), 'v2');
   assert.equal(fs.files.get(old), 'v1');
@@ -129,7 +129,7 @@ test('Windows: the running alp.exe becomes alp.old.exe, the new one takes its na
 test('Windows: a failed second rename puts the old executable back', () => {
   const target = 'C:\\bin\\alp.exe', staged = 'C:\\bin\\.alp.update.2.exe';
   const fs = memoryFs(new Map([[target, 'v1'], [staged, 'v2']]), { failRename: (from) => from === staged });
-  assert.throws(() => replaceExecutable(staged, target, { platform: 'win32', fs }), /EBUSY/);
+  assert.throws(() => replaceExecutable(staged, target, { platform: 'win32', fs, sleep: () => {} }), /EBUSY/);
   assert.equal(fs.files.get(target), 'v1');
   assert.equal(fs.files.has(oldPath(target, 'win32')), false);
 });
@@ -146,14 +146,30 @@ test('Windows: a locked alp.old.exe (an alpd not restarted) is moved aside and s
   assert.deepEqual([...fs.files.keys()].sort(), ['C:\\bin\\alp.exe', 'C:\\bin\\alp.other.exe']);
   // Locked and not even movable: a clear error before anything moved.
   const stuck = memoryFs(new Map([[target, 'v2'], [staged, 'v3'], [old, 'v1']]), { locked: new Set([old]), failRename: 'locked' });
-  assert.throws(() => replaceExecutable(staged, target, { platform: 'win32', fs: stuck }), /alp\.old\.exe is in use.*alp daemon stop/);
+  assert.throws(() => replaceExecutable(staged, target, { platform: 'win32', fs: stuck, sleep: () => {} }), /alp\.old\.exe is in use.*alp daemon stop/);
   assert.equal(stuck.files.get(target), 'v2');
 });
 
 test('Windows: a failed rollback says how to recover', () => {
   const target = 'C:\\bin\\alp.exe', staged = 'C:\\bin\\.alp.update.4.exe';
   const fs = memoryFs(new Map([[target, 'v1'], [staged, 'v2']]), { failRename: from => from === staged || from === oldPath(target, 'win32') });
-  assert.throws(() => replaceExecutable(staged, target, { platform: 'win32', fs }), /rename C:\\bin\\alp\.old\.exe to C:\\bin\\alp\.exe yourself/);
+  assert.throws(() => replaceExecutable(staged, target, { platform: 'win32', fs, sleep: () => {} }), /rename C:\\bin\\alp\.old\.exe to C:\\bin\\alp\.exe yourself/);
+});
+
+test('Windows: a briefly busy staged file (a virus scan after its --version run) is retried, a lasting one is not hidden', () => {
+  const target = 'C:\\bin\\alp.exe', staged = 'C:\\bin\\.alp.update.5.exe';
+  let busy = 3;
+  const sleeps = [];
+  const fs = memoryFs(new Map([[target, 'v1'], [staged, 'v2']]), { failRename: from => from === staged && busy-- > 0 });
+  replaceExecutable(staged, target, { platform: 'win32', fs, sleep: ms => sleeps.push(ms) });
+  assert.equal(fs.files.get(target), 'v2');
+  assert.deepEqual(sleeps, [50, 100, 150]);
+  let calls = 0;
+  assert.throws(() => retryBusy(() => { calls++; throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); }, () => {}, 4), /EBUSY/);
+  assert.equal(calls, 4);
+  calls = 0;
+  assert.throws(() => retryBusy(() => { calls++; throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }, () => {}), /ENOENT/);
+  assert.equal(calls, 1, 'only busy errors are retried');
 });
 
 test('Unix: one rename over the running file', () => {
