@@ -2,6 +2,8 @@ import * as React from 'react';
 import type { SyntaxTheme } from './preferences.js';
 import { SYNTAX_THEME_OPTIONS as PALETTE_OPTIONS, resolveSyntaxColors, type HighlightStyle, type HighlightToken } from './highlight/palettes';
 
+export { fenceFilename } from './code-fence.js';
+
 /**
  * Code highlighting as Paseo does it, with Paseo's highlighter carried in lib/highlight: Lezer
  * parsers chosen by file extension and its eight highlight themes. The parsers load on first
@@ -39,19 +41,6 @@ function useHighlighter(): Highlighter | null {
     return () => { waiting.delete(rerender); };
   }, []);
   return loaded;
-}
-
-/** Paseo's fence names that are not already file extensions (highlighted-code-block.tsx). */
-const LANGUAGE_ALIASES: Record<string, string> = {
-  typescript: 'ts', javascript: 'js', python: 'py', rust: 'rs', golang: 'go', 'c++': 'cpp', csharp: 'cs', 'c#': 'cs',
-  objc: 'm', 'objective-c': 'm', markdown: 'md', elixir: 'ex',
-};
-
-/** A file name for a fence's info string ("ts", "typescript {1,3}"), so the extension picks the parser. */
-export function fenceFilename(info: string | null | undefined): string | null {
-  const first = info?.trim().split(/\s+/)[0]?.toLowerCase().replace(/^\./, '');
-  if (!first) return null;
-  return `code.${LANGUAGE_ALIASES[first] ?? first}`;
 }
 
 /** Paseo's highlighting budget (HIGHLIGHT_MAX_SOURCE_BYTES): larger sources stay plain. */

@@ -151,7 +151,9 @@ function parseNewSession(value) {
     const thinking = {};
     for (const [model, effort] of Object.entries(/** @type {Record<string, unknown>} */ (record.thinkingByModel)).slice(0, MAX_THINKING_ENTRIES)) {
       const parsed = id(effort);
-      if (id(model) && parsed) thinking[model] = parsed;
+      // A model named after an Object.prototype member (`__proto__`, `constructor`) is dropped:
+      // as a key it would set the prototype or shadow Object's own, and no model is named so.
+      if (id(model) && parsed && !Object.hasOwn(Object.prototype, model)) thinking[model] = parsed;
     }
     if (Object.keys(thinking).length) choices.thinkingByModel = thinking;
   }
