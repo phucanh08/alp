@@ -37,6 +37,8 @@ test('asset selection picks this os/arch from SHA256SUMS and reads the version f
   assert.equal(compareVersions('1.10.0', '1.9.9'), 1);
   assert.equal(compareVersions('0.0.1-beta.5', '0.0.1-beta.10'), -1);
   assert.equal(compareVersions('0.0.1', '0.0.1-beta.5'), 1);
+  assert.equal(compareVersions('1.0.0+b7', '1.0.0'), 0);
+  assert.throws(() => compareVersions('1.x.0', '1.0.0'), /Invalid version/);
 });
 
 test('the release mirror must be https, file or loopback http', () => {
@@ -63,15 +65,16 @@ test('provenance: gh absent warns, gh present runs attestation verify with the r
 });
 
 /** An in-memory filesystem with the calls it saw. */
-function memoryFs(files, { failRename } = {}) {
+function memoryFs(files, { failRename, locked = new Set() } = {}) {
   const calls = [];
   return {
     calls, files,
     existsSync: f => files.has(f),
-    rmSync: f => { calls.push(['rm', f]); files.delete(f); },
+    readdirSync: dir => [...files.keys()].filter(f => path.win32.dirname(f) === dir).map(f => path.win32.basename(f)),
+    rmSync: f => { calls.push(['rm', f]); if (locked.has(f)) throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); files.delete(f); },
     renameSync: (from, to) => {
       calls.push(['rename', from, to]);
-      if (failRename?.(from, to)) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+      if (failRename?.(from, to) || (locked.has(from) && failRename === 'locked')) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
       if (!files.has(from)) throw Object.assign(new Error(`ENOENT ${from}`), { code: 'ENOENT' });
       files.set(to, files.get(from)); files.delete(from);
     },
@@ -100,6 +103,28 @@ test('Windows: a failed second rename puts the old executable back', () => {
   assert.throws(() => replaceExecutable(staged, target, { platform: 'win32', fs }), /EBUSY/);
   assert.equal(fs.files.get(target), 'v1');
   assert.equal(fs.files.has(oldPath(target, 'win32')), false);
+});
+
+test('Windows: a locked alp.old.exe (an alpd not restarted) is moved aside and swept on the next start', () => {
+  const target = 'C:\\bin\\alp.exe', staged = 'C:\\bin\\.alp.update.3.exe', old = oldPath(target, 'win32');
+  const fs = memoryFs(new Map([[target, 'v2'], [staged, 'v3'], [old, 'v1']]), { locked: new Set([old]) });
+  replaceExecutable(staged, target, { platform: 'win32', fs, unique: () => 'ab12' });
+  assert.equal(fs.files.get(target), 'v3');
+  assert.equal(fs.files.get(old), 'v2');
+  assert.equal(fs.files.get('C:\\bin\\alp.old.ab12.exe'), 'v1');
+  fs.files.set('C:\\bin\\alp.other.exe', 'keep');
+  assert.equal(cleanupOldExecutable(target, { platform: 'win32', fs: memoryFs(fs.files) }), true);
+  assert.deepEqual([...fs.files.keys()].sort(), ['C:\\bin\\alp.exe', 'C:\\bin\\alp.other.exe']);
+  // Locked and not even movable: a clear error before anything moved.
+  const stuck = memoryFs(new Map([[target, 'v2'], [staged, 'v3'], [old, 'v1']]), { locked: new Set([old]), failRename: 'locked' });
+  assert.throws(() => replaceExecutable(staged, target, { platform: 'win32', fs: stuck }), /alp\.old\.exe is in use.*alp daemon stop/);
+  assert.equal(stuck.files.get(target), 'v2');
+});
+
+test('Windows: a failed rollback says how to recover', () => {
+  const target = 'C:\\bin\\alp.exe', staged = 'C:\\bin\\.alp.update.4.exe';
+  const fs = memoryFs(new Map([[target, 'v1'], [staged, 'v2']]), { failRename: from => from === staged || from === oldPath(target, 'win32') });
+  assert.throws(() => replaceExecutable(staged, target, { platform: 'win32', fs }), /rename C:\\bin\\alp\.old\.exe to C:\\bin\\alp\.exe yourself/);
 });
 
 test('Unix: one rename over the running file', () => {
@@ -170,6 +195,12 @@ test('packaged: --check reports only; --yes replaces the executable from a file:
   const text = out2.join('\n');
   assert.match(text, /only the SHA256SUMS checksum was verified/);
   assert.match(text, /alpd 1\.0\.0 is still running with 2 live sessions; .*alp daemon restart/);
+  const unknown = [];
+  assert.equal(await selfUpdate(['--version', '9.9.9'], { ...baseDeps(m, unknown), interactive: true, daemon: async () => ({ version: '1.0.0' }), confirm: async q => /^Replace/.test(q) || assert.fail('no restart offer when the sessions are unknown') }), 0);
+  assert.match(unknown.join('\n'), /its live sessions could not be read/);
+  const older = [];
+  assert.equal(await selfUpdate(['--check'], { ...baseDeps(m, older), version: '10.0.0' }), 0);
+  assert.match(older.join('\n'), /10\.0\.0 is newer than the latest release 9\.9\.9/);
   const out3 = [];
   assert.equal(await selfUpdate(['--yes'], { ...baseDeps(m, out3), version: '9.9.9' }), 0);
   assert.match(out3.join('\n'), /up to date/);
