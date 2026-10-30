@@ -1050,6 +1050,45 @@ test('workspace.files.list and read over the socket: capability, confined answer
   await assert.rejects(client.request('workspace.files.list', { projectRoot: path.join(project, 'missing') }), { code: 1001, data: { reason: 'not_directory' } });
 });
 
+test('workspace.files.find, preview and host.directories.search over the socket: capabilities, pages bound to their connection, chunks within a frame', async t => {
+  const { project, open } = await setup(t);
+  const { client } = await open();
+  const { client: other } = await open();
+  const { capabilities } = await client.request('daemon.hello', { protocolVersion: 1 });
+  assert.ok(capabilities.includes('workspace.files.browse') && capabilities.includes('host.directories'));
+  await mkdir(path.join(project, 'src'), { recursive: true });
+  for (let index = 0; index < 1205; index++) await writeFile(path.join(project, 'src', `m${String(index).padStart(4, '0')}.ts`), '');
+  await writeFile(path.join(project, 'dot.png'), Buffer.from('89504e470d0a1a0a', 'hex'));
+  await writeFile(path.join(project, 'big.log'), Buffer.alloc(9 * 1024 * 1024, 'x'));
+  await writeFile(path.join(project, '.env'), 'SENTINEL-env');
+  await symlink(path.join(project, 'src'), path.join(project, 'src-link'));
+  const first = await client.request('workspace.files.find', { projectRoot: project, query: 'm', kinds: ['file'] });
+  assert.equal(first.entries.length, 1000);
+  await assert.rejects(other.request('workspace.files.find', { projectRoot: project, query: 'm', kinds: ['file'], cursor: first.nextCursor }), { code: -32602, data: { reason: 'invalid_cursor' } }, 'another connection cannot page through it');
+  const rest = await client.request('workspace.files.find', { projectRoot: project, query: 'm', kinds: ['file'], cursor: first.nextCursor });
+  assert.equal(rest.nextCursor, undefined);
+  assert.equal(new Set([...first.entries, ...rest.entries].map(entry => entry.path).filter(file => file.startsWith('src/m'))).size, 1205);
+  assert.deepEqual((await client.request('workspace.files.find', { projectRoot: project, query: 'src', kinds: ['directory'], matchMode: 'suffix' })).entries, [{ path: 'src', kind: 'directory' }], 'a suffix is a whole last segment: not src-link');
+  await assert.rejects(client.request('workspace.files.find', { projectRoot: project, limit: 1001 }), { code: -32602 });
+  await assert.rejects(client.request('workspace.files.find', { projectRoot: project, matchMode: 'fuzzy' }), { code: -32602 });
+  await assert.rejects(client.request('workspace.files.find', { projectRoot: 'relative' }), { code: -32602, data: { reason: 'invalid_path' } });
+  const image = await client.request('workspace.files.preview', { projectRoot: project, path: 'dot.png' });
+  assert.deepEqual([image.kind, image.mimeType, image.content], ['image', 'image/png', 'iVBORw0KGgo=']);
+  const big = await client.request('workspace.files.preview', { projectRoot: project, path: 'big.log' });
+  assert.deepEqual([big.kind, big.size, big.nextOffset], ['text', 9 * 1024 * 1024, 8 * 1024 * 1024]);
+  const tail = await client.request('workspace.files.preview', { projectRoot: project, path: 'big.log', offset: big.nextOffset, revision: big.revision });
+  assert.equal(Buffer.from(tail.content, 'base64').length, 1024 * 1024);
+  const refused = await client.request('workspace.files.preview', { projectRoot: project, path: '.env' }).then(() => assert.fail('expected a refusal'), error => error);
+  assert.deepEqual([refused.code, refused.data?.reason], [1003, 'blocked_path']);
+  assert.ok(!refused.message.includes(project) && !JSON.stringify(refused).includes('SENTINEL'));
+  await assert.rejects(client.request('workspace.files.preview', { projectRoot: project, path: 'big.log', maxBytes: 50 * 1024 * 1024 + 1 }), { code: -32602 });
+  const listed = await client.request('workspace.files.list', { projectRoot: project, internalLinks: true, includeIgnored: true });
+  assert.deepEqual(listed.entries.find(entry => entry.name === 'src-link')?.target, 'src');
+  const parent = path.dirname(project);
+  assert.deepEqual(await client.request('host.directories.search', { query: `${parent}${path.sep}proj` }), { entries: [{ path: project }] });
+  await assert.rejects(client.request('host.directories.search', {}), { code: -32602 });
+});
+
 test('session.list finds sessions across symlink and canonical projectRoot paths', async t => {
   const { project, open } = await setup(t);
   const { client } = await open();

@@ -2180,6 +2180,345 @@
    }
   },
   {
+   "name": "workspace.files.list a later page, with internal links",
+   "check": "params",
+   "method": "workspace.files.list",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "path": "docs",
+    "cursor": "WzEsImIubWQiXQ",
+    "internalLinks": true
+   }
+  },
+  {
+   "name": "workspace.files.list with an empty cursor",
+   "check": "params",
+   "method": "workspace.files.list",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "cursor": ""
+   }
+  },
+  {
+   "name": "workspace.files.list result with a link and a next page",
+   "check": "result",
+   "method": "workspace.files.list",
+   "valid": true,
+   "value": {
+    "entries": [
+     {
+      "name": "guide",
+      "path": "docs/guide",
+      "kind": "directory",
+      "modifiedAt": "2026-10-15T00:00:00.000Z",
+      "target": "src/guide"
+     }
+    ],
+    "truncated": true,
+    "nextCursor": "WzAsImd1aWRlIl0",
+    "target": "docs"
+   }
+  },
+  {
+   "name": "workspace.files.find params",
+   "check": "params",
+   "method": "workspace.files.find",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "query": "srv",
+    "kinds": [
+     "file",
+     "directory"
+    ],
+    "matchMode": "subsequence",
+    "limit": 1000
+   }
+  },
+  {
+   "name": "workspace.files.find a later page of a suffix search",
+   "check": "params",
+   "method": "workspace.files.find",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "query": "guide/intro.md",
+    "matchMode": "suffix",
+    "cursor": "c0ffee.1000"
+   }
+  },
+  {
+   "name": "workspace.files.find with an unknown matchMode",
+   "check": "params",
+   "method": "workspace.files.find",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "matchMode": "fuzzy"
+   }
+  },
+  {
+   "name": "workspace.files.find with no kinds",
+   "check": "params",
+   "method": "workspace.files.find",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "kinds": []
+   }
+  },
+  {
+   "name": "workspace.files.find with a link kind",
+   "check": "params",
+   "method": "workspace.files.find",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "kinds": [
+     "link"
+    ]
+   }
+  },
+  {
+   "name": "workspace.files.find with a limit over 1000",
+   "check": "params",
+   "method": "workspace.files.find",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "limit": 1001
+   }
+  },
+  {
+   "name": "workspace.files.find result",
+   "check": "result",
+   "method": "workspace.files.find",
+   "valid": true,
+   "value": {
+    "entries": [
+     {
+      "path": "docs",
+      "kind": "directory"
+     },
+     {
+      "path": "docs/sửa lỗi.md",
+      "kind": "file"
+     }
+    ],
+    "nextCursor": "c0ffee.2",
+    "truncated": true
+   }
+  },
+  {
+   "name": "workspace.files.find result without a kind",
+   "check": "result",
+   "method": "workspace.files.find",
+   "valid": false,
+   "value": {
+    "entries": [
+     {
+      "path": "docs"
+     }
+    ]
+   }
+  },
+  {
+   "name": "workspace.files.preview params",
+   "check": "params",
+   "method": "workspace.files.preview",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "path": "assets/logo.png",
+    "includeIgnored": true,
+    "internalLinks": true,
+    "maxBytes": 52428800
+   }
+  },
+  {
+   "name": "workspace.files.preview a later chunk",
+   "check": "params",
+   "method": "workspace.files.preview",
+   "valid": true,
+   "value": {
+    "projectRoot": "/work/project",
+    "path": "big.log",
+    "offset": 8388608,
+    "revision": "r0123456789abcdef"
+   }
+  },
+  {
+   "name": "workspace.files.preview with maxBytes over 50 MiB",
+   "check": "params",
+   "method": "workspace.files.preview",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "path": "big.log",
+    "maxBytes": 52428801
+   }
+  },
+  {
+   "name": "workspace.files.preview with a negative offset",
+   "check": "params",
+   "method": "workspace.files.preview",
+   "valid": false,
+   "value": {
+    "projectRoot": "/work/project",
+    "path": "big.log",
+    "offset": -1
+   }
+  },
+  {
+   "name": "workspace.files.preview result",
+   "check": "result",
+   "method": "workspace.files.preview",
+   "valid": true,
+   "value": {
+    "path": "assets/logo.png",
+    "target": "brand/logo.png",
+    "kind": "image",
+    "mimeType": "image/png",
+    "size": 8,
+    "modifiedAt": "2026-10-15T00:00:00.000Z",
+    "revision": "r0123456789abcdef",
+    "encoding": "base64",
+    "content": "iVBORw0KGgo=",
+    "offset": 0
+   }
+  },
+  {
+   "name": "workspace.files.preview result of a first chunk",
+   "check": "result",
+   "method": "workspace.files.preview",
+   "valid": true,
+   "value": {
+    "path": "big.log",
+    "kind": "text",
+    "mimeType": "text/plain",
+    "size": 9437184,
+    "modifiedAt": "2026-10-15T00:00:00.000Z",
+    "revision": "r0123456789abcdef",
+    "encoding": "base64",
+    "content": "aGk=",
+    "offset": 0,
+    "nextOffset": 8388608
+   }
+  },
+  {
+   "name": "workspace.files.preview result of a binary file",
+   "check": "result",
+   "method": "workspace.files.preview",
+   "valid": true,
+   "value": {
+    "path": "blob.bin",
+    "kind": "binary",
+    "mimeType": "application/octet-stream",
+    "size": 3,
+    "modifiedAt": "2026-10-15T00:00:00.000Z",
+    "revision": "r0123456789abcdef",
+    "encoding": "none"
+   }
+  },
+  {
+   "name": "workspace.files.preview result over 50 MiB",
+   "check": "result",
+   "method": "workspace.files.preview",
+   "valid": false,
+   "value": {
+    "path": "huge.bin",
+    "kind": "binary",
+    "mimeType": "application/octet-stream",
+    "size": 52428801,
+    "modifiedAt": "2026-10-15T00:00:00.000Z",
+    "revision": "r1",
+    "encoding": "none"
+   }
+  },
+  {
+   "name": "workspace.files.preview result with a link kind",
+   "check": "result",
+   "method": "workspace.files.preview",
+   "valid": false,
+   "value": {
+    "path": "x",
+    "kind": "link",
+    "mimeType": "text/plain",
+    "size": 0,
+    "modifiedAt": "2026-10-15T00:00:00.000Z",
+    "revision": "r1",
+    "encoding": "none"
+   }
+  },
+  {
+   "name": "host.directories.search params",
+   "check": "params",
+   "method": "host.directories.search",
+   "valid": true,
+   "value": {
+    "query": "~/Code/al",
+    "limit": 30
+   }
+  },
+  {
+   "name": "host.directories.search a name under home",
+   "check": "params",
+   "method": "host.directories.search",
+   "valid": true,
+   "value": {
+    "query": "projects"
+   }
+  },
+  {
+   "name": "host.directories.search without a query",
+   "check": "params",
+   "method": "host.directories.search",
+   "valid": false,
+   "value": {}
+  },
+  {
+   "name": "host.directories.search with a limit over 100",
+   "check": "params",
+   "method": "host.directories.search",
+   "valid": false,
+   "value": {
+    "query": "x",
+    "limit": 101
+   }
+  },
+  {
+   "name": "host.directories.search result",
+   "check": "result",
+   "method": "host.directories.search",
+   "valid": true,
+   "value": {
+    "entries": [
+     {
+      "path": "/home/user/Code/alp"
+     },
+     {
+      "path": "/home/user/Code/sửa lỗi"
+     }
+    ],
+    "truncated": true
+   }
+  },
+  {
+   "name": "host.directories.search result with an empty path",
+   "check": "result",
+   "method": "host.directories.search",
+   "valid": false,
+   "value": {
+    "entries": [
+     {
+      "path": ""
+     }
+    ]
+   }
+  },
+  {
    "name": "question.answer params",
    "check": "params",
    "method": "question.answer",

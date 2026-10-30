@@ -1,14 +1,20 @@
-import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
-import { git } from './git.js';
+import { WORKSPACE_FILES } from '@anhlp/alp-protocol';
+import { nameRank } from '@anhlp/alp-daemon/files';
 
 /**
  * Finding directories and files for the app (D31 step 6, ALPD §62): the folder to add as a
  * project, typed as a path or a name under home, and a workspace's files for `@` mentions, the
  * command center and file links, as Paseo's daemon answers `directory_suggestions`; and the
  * read-only Files panel (step 8).
+ *
+ * Everything is alpd's answer (docs/protocol/alp-json-rpc-v1.md §12.11): workspace.files.find for
+ * every name of a workspace, workspace.files.list for a directory, workspace.files.preview for a
+ * file, host.directories.search for the host's folders. The bridge reads no file itself, so alpd's
+ * confinement, block list and .gitignore apply, and a refusal or a lost daemon is the answer's
+ * error, never a local fallback.
  */
 
 type Inbound<T extends SessionInboundMessage['type']> = Extract<SessionInboundMessage, { type: T }>;
@@ -16,115 +22,51 @@ type Outbound = SessionOutboundMessage;
 type Rpc = (method: string, params: any) => Promise<any>;
 type Entry = { path: string; kind: 'file' | 'directory' };
 
-/** Folders a search never walks into: big, generated, or (on macOS) behind a consent prompt. */
-const SKIPPED = new Set(['node_modules', 'Library', '.git', 'dist', 'build', '.cache', 'target', '.venv', 'venv', '__pycache__']);
-const HOME_SCAN_LIMIT = 5_000;
-const HOME_DEPTH = 4;
-const WORKSPACE_SCAN_LIMIT = 20_000;
+/** More pages than any bounded alpd answer has: a daemon that keeps answering a cursor is refused. */
+const MAX_PAGES = 1_000;
+/** The longest query workspace.files.find takes (its schema's maxLength, in code points). */
+const FIND_QUERY_LENGTH = 200;
 
-const children = (directory: string) => readdir(directory, { withFileTypes: true }).catch(() => []);
 const expand = (query: string) => query === '~' ? os.homedir() : query.startsWith('~/') ? path.join(os.homedir(), query.slice(2)) : query;
 
-/** How well a name matches: lower is better, undefined is no match. */
-function rank(candidate: string, query: string) {
-  const name = candidate.toLowerCase();
-  const wanted = query.toLowerCase();
-  if (name === wanted) return 0;
-  if (name.startsWith(wanted)) return 1;
-  if (name.includes(wanted)) return 2;
-  let at = 0;
-  for (const char of name) if (char === wanted[at]) at += 1;
-  return at === wanted.length ? 3 : undefined;
+/** Every page of a paged alpd answer, in order: `ask` is given each `nextCursor` until none is left. */
+async function pages<T extends { nextCursor?: string }>(ask: (cursor?: string) => Promise<T>): Promise<T[]> {
+  const answers: T[] = [];
+  let cursor: string | undefined;
+  do {
+    if (answers.length >= MAX_PAGES) throw new Error('The ALP daemon answered more pages than it can have');
+    const page = await ask(cursor);
+    answers.push(page);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return answers;
 }
 
-/** A path typed by the user: the folders in its parent that start with what follows the last slash. */
-async function pathCompletions(query: string, limit: number): Promise<Entry[]> {
-  const typed = expand(query.trim());
-  const folder = typed.endsWith('/') || typed.endsWith(path.sep);
-  const parent = folder ? typed : path.dirname(typed);
-  const prefix = folder ? '' : path.basename(typed).toLowerCase();
-  return (await children(parent))
-    .filter(entry => entry.isDirectory() && entry.name.toLowerCase().startsWith(prefix) && (!entry.name.startsWith('.') || prefix.startsWith('.')))
-    .map(entry => entry.name)
-    .sort((a, b) => a.localeCompare(b))
-    .slice(0, limit)
-    .map(name => ({ path: path.join(parent, name), kind: 'directory' as const }));
-}
-
-/** A name: folders under home whose name matches, nearest and best first. */
-async function homeSearch(query: string, limit: number): Promise<Entry[]> {
-  const found: Array<{ path: string; score: number; depth: number }> = [];
-  let queue = [os.homedir()];
-  let scanned = 0;
-  for (let depth = 1; depth <= HOME_DEPTH && queue.length && scanned < HOME_SCAN_LIMIT; depth += 1) {
-    const next: string[] = [];
-    for (const directory of queue) {
-      for (const entry of await children(directory)) {
-        if (!entry.isDirectory() || entry.name.startsWith('.') || SKIPPED.has(entry.name)) continue;
-        const full = path.join(directory, entry.name);
-        scanned += 1;
-        const score = rank(entry.name, query);
-        if (score !== undefined) found.push({ path: full, score, depth });
-        next.push(full);
-        if (scanned >= HOME_SCAN_LIMIT) break;
-      }
-      if (scanned >= HOME_SCAN_LIMIT) break;
-    }
-    queue = next;
-  }
-  return found.sort((a, b) => a.score - b.score || a.depth - b.depth || a.path.localeCompare(b.path)).slice(0, limit).map(entry => ({ path: entry.path, kind: 'directory' }));
-}
-
-/** A workspace's files and folders, relative to it: git's list when it is a repository (so ignored files stay out), else a walk. */
-async function workspaceEntries(root: string): Promise<Entry[]> {
-  const listed = await git(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { maxBuffer: 64 * 1024 * 1024 }).catch(() => undefined);
-  if (listed !== undefined) {
-    const files = listed.split('\0').filter(Boolean).slice(0, WORKSPACE_SCAN_LIMIT);
-    const directories = new Set<string>();
-    for (const file of files) for (let dir = path.posix.dirname(file); dir !== '.'; dir = path.posix.dirname(dir)) directories.add(dir);
-    return [...[...directories].map(dir => ({ path: dir, kind: 'directory' as const })), ...files.map(file => ({ path: file, kind: 'file' as const }))];
-  }
-  const entries: Entry[] = [];
-  const walk = async (relative: string) => {
-    for (const entry of await children(path.join(root, relative))) {
-      if (entries.length >= WORKSPACE_SCAN_LIMIT) return;
-      if (entry.name.startsWith('.') || SKIPPED.has(entry.name)) continue;
-      const child = relative ? `${relative}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) { entries.push({ path: child, kind: 'directory' }); await walk(child); }
-      else if (entry.isFile()) entries.push({ path: child, kind: 'file' });
-    }
-  };
-  await walk('');
-  return entries;
-}
-
-async function workspaceSearch(message: Inbound<'directory_suggestions_request'>, root: string, limit: number, rpc?: Rpc): Promise<Entry[]> {
-  const wantFiles = message.includeFiles === true;
-  const wantDirectories = message.includeDirectories !== false;
-  const keep = (entry: Entry) => entry.kind === 'file' ? wantFiles : wantDirectories;
+async function workspaceSearch(message: Inbound<'directory_suggestions_request'>, root: string, limit: number, rpc: Rpc): Promise<Entry[]> {
+  const kinds = [...(message.includeFiles === true ? ['file' as const] : []), ...(message.includeDirectories !== false ? ['directory' as const] : [])];
+  if (!kinds.length) return [];
   const query = message.query.trim().replace(/^\.\//, '');
   if (!query) {
-    return (await children(root)).filter(entry => !entry.name.startsWith('.'))
-      .map((entry): Entry => ({ path: entry.name, kind: entry.isDirectory() ? 'directory' : 'file' })).filter(keep)
+    // The workspace's own entries, as the app shows it before anything is typed.
+    const listed = await pages<{ entries: Array<{ name: string; kind: Entry['kind'] }>; nextCursor?: string }>(cursor => rpc('workspace.files.list', { projectRoot: root, includeIgnored: true, internalLinks: true, ...(cursor ? { cursor } : {}) }));
+    return listed.flatMap(page => page.entries).filter(entry => !entry.name.startsWith('.') && kinds.includes(entry.kind))
+      .map((entry): Entry => ({ path: entry.name, kind: entry.kind }))
       .sort((a, b) => a.path.localeCompare(b.path)).slice(0, limit);
   }
-  let all: Entry[];
-  if (rpc && wantFiles && !wantDirectories && message.matchMode !== 'suffix') {
-    // The daemon's ranking differs from this adapter's. Only a complete name set
-    // can be ranked here without losing a better match beyond its result limit.
-    const result = await rpc('workspace.files.search', { projectRoot: root, query: '', limit: 100 });
-    // Truncation is an unsupported completeness boundary, never an authorization
-    // error. Keep the legacy bounded enumeration in that case; refusals propagate.
-    all = result.truncated ? (await workspaceEntries(root)).filter(keep)
-      : result.files.map((file: { path: string }): Entry => ({ path: file.path, kind: 'file' }));
-  } else all = (await workspaceEntries(root)).filter(keep);
+  // alpd answers every name the ranking below can match, of a whole-tree snapshot, page by page:
+  // the ranking is this adapter's own, over a complete set. A query longer than alpd takes is
+  // narrowed to its first characters in order, which every match still holds.
+  const long = [...query].length > FIND_QUERY_LENGTH;
+  const narrowed = long ? [...query].slice(0, FIND_QUERY_LENGTH).join('') : query;
+  const found = await pages<{ entries: Entry[]; nextCursor?: string }>(cursor => rpc('workspace.files.find', { projectRoot: root, query: narrowed, kinds, matchMode: message.matchMode === 'suffix' && !long ? 'suffix' : 'subsequence', ...(cursor ? { cursor } : {}) }));
+  const all = found.flatMap(page => page.entries).map((entry): Entry => ({ path: entry.path, kind: entry.kind }));
   if (message.matchMode === 'suffix') {
     const wanted = query.toLowerCase();
     return all.filter(entry => entry.path.toLowerCase() === wanted || entry.path.toLowerCase().endsWith(`/${wanted}`)).sort((a, b) => a.path.length - b.path.length).slice(0, limit);
   }
   return all.map(entry => {
-    const byName = rank(path.posix.basename(entry.path), query);
-    const byPath = rank(entry.path, query);
+    const byName = nameRank(path.posix.basename(entry.path), query);
+    const byPath = nameRank(entry.path, query);
     const score = byName ?? (byPath === undefined ? undefined : byPath + 4);
     return { entry, score };
   }).filter((row): row is { entry: Entry; score: number } => row.score !== undefined)
@@ -132,81 +74,77 @@ async function workspaceSearch(message: Inbound<'directory_suggestions_request'>
     .slice(0, limit).map(row => row.entry);
 }
 
-export async function directorySuggestions(message: Inbound<'directory_suggestions_request'>, rpc?: Rpc): Promise<Outbound> {
+export async function directorySuggestions(message: Inbound<'directory_suggestions_request'>, rpc: Rpc): Promise<Outbound> {
   const limit = message.limit ?? 30;
   try {
     const cwd = message.cwd?.trim();
     const query = message.query.trim();
-    const entries = cwd ? await workspaceSearch(message, path.resolve(expand(cwd)), limit, rpc)
+    const entries: Entry[] = cwd ? await workspaceSearch(message, path.resolve(expand(cwd)), limit, rpc)
       : !query ? []
-      : path.isAbsolute(query) || query.startsWith('~') ? await pathCompletions(query, limit)
-      : await homeSearch(query, limit);
+      // A path typed by the user, or a name under home: the host's folders, as alpd finds them.
+      : (await rpc('host.directories.search', { query, limit })).entries.map((entry: { path: string }): Entry => ({ path: entry.path, kind: 'directory' }));
     return { type: 'directory_suggestions_response', payload: { requestId: message.requestId, directories: entries.filter(entry => entry.kind === 'directory').map(entry => entry.path), entries, error: null } };
   } catch (error: any) {
     return { type: 'directory_suggestions_response', payload: { requestId: message.requestId, directories: [], entries: [], error: error?.message ?? String(error) } };
   }
 }
 
-const IMAGES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
-/** The most a preview reads when the app names no limit. */
-const PREVIEW_BYTES = 50 * 1024 * 1024;
-
-/** A path inside the workspace, links followed; anything that leads outside is refused. */
-async function inside(root: string, relative: string) {
-  const realRoot = await realpath(root);
-  const target = path.resolve(realRoot, relative || '.');
-  const real = await realpath(target);
-  if (real !== realRoot && !real.startsWith(realRoot + path.sep)) throw new Error('Access outside of workspace is not allowed');
-  return { realRoot, real, target };
+/** The app's path as alpd takes it: relative to the workspace, '/'-separated, '' for its root; one that leads out of it is refused here. */
+function workspacePath(root: string, requested: string): string {
+  const relative = path.relative(root, path.resolve(root, requested || '.'));
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('Access outside of workspace is not allowed');
+  return relative.split(path.sep).join('/');
 }
 
-const posixRelative = (root: string, target: string) => path.relative(root, target).split(path.sep).join('/') || '.';
-
-function textOf(buffer: Buffer) {
-  if (buffer.includes(0)) return undefined;
-  let control = 0;
-  const head = buffer.subarray(0, 16 * 1024);
-  for (const byte of head) if (byte < 9 || (byte > 13 && byte < 32)) control++;
-  if (head.length && control / head.length > 0.3) return undefined;
-  try { return new TextDecoder('utf-8', { fatal: true }).decode(buffer); } catch { return undefined; }
+/** alpd's refusal in the words the Files panel showed before, else alpd's own message (it names only the workspace's relative path). */
+function explorerError(error: any): string {
+  switch (error?.data?.reason) {
+    case 'not_found': return 'No such file or directory';
+    case 'too_large': return 'File is too large to display';
+    case 'outside': case 'invalid_path': return 'Access outside of workspace is not allowed';
+  }
+  return error?.message ?? String(error);
 }
 
 /**
  * The Files panel, read-only (D31 step 8): a directory's entries, links that stay inside included,
- * and a file's content as text, an image, or only its size for anything binary. Editing, and new,
- * renamed or deleted files, answer "in development".
+ * and a file's content as text, an image, or only its size for anything binary, as alpd answers
+ * them; every directory .gitignore'd or not, never a blocked path (.git, .env files, keys). Editing,
+ * and new, renamed or deleted files, answer "in development".
  */
-export async function fileExplorer(message: Inbound<'file_explorer_request'>): Promise<Outbound> {
+export async function fileExplorer(message: Inbound<'file_explorer_request'>, rpc: Rpc): Promise<Outbound> {
   const reply = (fields: Partial<Extract<Outbound, { type: 'file_explorer_response' }>['payload']>): Outbound =>
     ({ type: 'file_explorer_response', payload: { requestId: message.requestId, cwd: message.cwd, path: message.path ?? '.', mode: message.mode, directory: null, file: null, error: null, ...fields } });
   try {
     const root = path.resolve(expand(message.cwd));
-    const { realRoot, real, target } = await inside(root, message.path ?? '.');
-    const relative = posixRelative(realRoot, real);
+    const relative = workspacePath(root, message.path ?? '.');
+    const options = { projectRoot: root, includeIgnored: true, internalLinks: true };
     if (message.mode === 'list') {
-      const entries = [];
-      for (const entry of await readdir(real, { withFileTypes: true })) {
-        const child = path.join(real, entry.name);
-        const resolved = entry.isSymbolicLink() ? await inside(realRoot, path.relative(realRoot, child)).then(found => found.real, () => undefined) : child;
-        if (!resolved) continue;
-        const info = await stat(resolved).catch(() => undefined);
-        if (!info) continue;
-        entries.push({ name: entry.name, path: posixRelative(realRoot, child), kind: info.isDirectory() ? 'directory' as const : 'file' as const, size: info.size, modifiedAt: info.mtime.toISOString() });
-      }
+      const listed = await pages<{ entries: Array<{ name: string; path: string; kind: Entry['kind']; size?: number; modifiedAt?: string }>; nextCursor?: string; target?: string }>(cursor => rpc('workspace.files.list', { ...options, ...(relative ? { path: relative } : {}), ...(cursor ? { cursor } : {}) }));
+      // Through a link the directory listed is where it leads, as its entries' paths say.
+      const shown = listed[0]?.target ?? (relative || '.');
+      const entries = listed.flatMap(page => page.entries).map(entry => ({ name: entry.name, path: entry.path, kind: entry.kind, size: entry.size ?? 0, modifiedAt: entry.modifiedAt ?? '' }));
       entries.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
-      return reply({ path: relative, directory: { path: relative, entries } });
+      return reply({ path: shown, directory: { path: shown, entries } });
     }
-    const info = await stat(real);
-    if (!info.isFile()) throw new Error(`${posixRelative(root, target)} is not a file`);
-    if (info.size > (message.maxBytes ?? PREVIEW_BYTES)) throw new Error('File is too large to display');
-    const buffer = await readFile(real);
-    const base = { path: relative, size: info.size, modifiedAt: info.mtime.toISOString(), revision: `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}` };
-    const image = IMAGES[path.extname(real).toLowerCase()];
-    if (image) return reply({ path: relative, file: { ...base, kind: 'image', encoding: 'base64', content: buffer.toString('base64'), mimeType: image } });
-    const text = textOf(buffer);
-    if (text === undefined) return reply({ path: relative, file: { ...base, kind: 'binary', encoding: 'none', mimeType: 'application/octet-stream' } });
-    return reply({ path: relative, file: { ...base, kind: 'text', encoding: 'utf-8', content: text, mimeType: path.extname(real).toLowerCase() === '.json' ? 'application/json' : 'text/plain' } });
+    if (!relative) throw new Error('. is not a file');
+    const maxBytes = Math.min(message.maxBytes ?? WORKSPACE_FILES.maxPreviewBytes, WORKSPACE_FILES.maxPreviewBytes);
+    const first = await rpc('workspace.files.preview', { ...options, path: relative, maxBytes });
+    const chunks: Buffer[] = first.content === undefined ? [] : [Buffer.from(first.content, 'base64')];
+    // The rest in chunks of the same revision: alpd refuses them if the file changed meanwhile.
+    for (let offset: number | undefined = first.nextOffset, count = 0; offset !== undefined; count++) {
+      if (count >= MAX_PAGES) throw new Error('The ALP daemon answered more chunks than a preview has');
+      const chunk = await rpc('workspace.files.preview', { ...options, path: relative, maxBytes, offset, revision: first.revision });
+      chunks.push(Buffer.from(chunk.content ?? '', 'base64'));
+      offset = chunk.nextOffset;
+    }
+    const bytes = Buffer.concat(chunks);
+    const shown: string = first.target ?? first.path;
+    const base = { path: shown, size: first.size, modifiedAt: first.modifiedAt, revision: first.revision };
+    if (first.kind === 'image') return reply({ path: shown, file: { ...base, kind: 'image', encoding: 'base64', content: bytes.toString('base64'), mimeType: first.mimeType } });
+    if (first.kind === 'binary') return reply({ path: shown, file: { ...base, kind: 'binary', encoding: 'none', mimeType: first.mimeType } });
+    return reply({ path: shown, file: { ...base, kind: 'text', encoding: 'utf-8', content: new TextDecoder('utf-8').decode(bytes), mimeType: first.mimeType } });
   } catch (error: any) {
-    return reply({ error: error?.code === 'ENOENT' ? 'No such file or directory' : error?.message ?? String(error) });
+    return reply({ error: explorerError(error) });
   }
 }
