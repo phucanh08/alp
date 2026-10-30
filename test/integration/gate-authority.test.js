@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initProject } from '../../packages/core/src/init.js';
-import { addGate, createTask, gateOpen, loadTasks, resolveGate, updateTask } from '../../packages/core/src/tasks.js';
+import { addGate, closeTask, compactTasks, createTask, gateOpen, loadTasks, resolveGate, updateTask } from '../../packages/core/src/tasks.js';
 import { pourFormula } from '../../packages/core/src/formulas.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 
@@ -116,6 +116,15 @@ test('a formula human step and an older human gate are ledgered too; an unreadab
   data.gates[0].resolved = { at: new Date().toISOString(), by: 'user' };
   await writeFile(taskFile(root, old.id), JSON.stringify(data));
   assert.ok((await loadTasks(root)).tasks.find(task => task.id === old.id).gates[0].tampered);
+
+  // Compaction keeps what names a gate in the ledger: a compacted closed task is not taken for tampering.
+  const shelved = await createTask(root, { title: 'Shelved' }, 'main');
+  await addGate(root, shelved.id, { kind: 'human', note: 'Never asked' }, 'main');
+  await closeTask(root, shelved.id, { reason: 'wontfix' }, 'user');
+  await compactTasks(root, { days: 0 }, 'user');
+  const compacted = (await loadTasks(root)).tasks.find(task => task.id === shelved.id);
+  assert.ok(compacted.compacted && !compacted.gates[0].tampered, JSON.stringify(compacted.gates));
+  assert.equal(compacted.status, 'closed');
 
   // A corrupt ledger: reads go on (detecting nothing), a clear refuses rather than overwrite it.
   const fresh = await createTask(root, { title: 'Fresh' }, 'main');

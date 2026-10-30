@@ -891,7 +891,8 @@ export async function compactTasks(projectRoot, { days = 30, dryRun = false } = 
         ...task,
         description: clipText(task.description, COMPACT_TEXT),
         handoff: task.handoff ? { outcome: task.handoff.outcome, summary: clipText(String(task.handoff.summary ?? ''), COMPACT_TEXT), agent: task.handoff.agent, at: task.handoff.at } : null,
-        gates: task.gates.map(({ id, kind, resolved }) => ({ id, kind, ...(resolved ? { resolved: { at: resolved.at, by: resolved.by } } : {}) })),
+        // `at` stays: it names the gate in the gate ledger (t-ca1f); an open human gate keeps its note too.
+        gates: task.gates.map(({ id, kind, at, note, resolved }) => ({ id, kind, ...(at ? { at } : {}), ...(kind === 'human' && !resolved && note ? { note } : {}), ...(resolved ? { resolved: { at: resolved.at, by: resolved.by } } : {}) })),
         log: [created, closed].filter(Boolean),
         rev: task.rev + 1,
         updatedAt: now(),
