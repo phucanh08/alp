@@ -38,7 +38,7 @@ export type TerminalNotification = { jsonrpc: '2.0'; method: 'terminal.event'; p
 export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
 export type HistoryPage = { generation: string; items: HistoryItem[]; olderCursor?: string; hasOlder: boolean; tipCursor: number };
 
-export type Capability = 'session.interrupt.turn' | 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.configure.live' | 'terminal' | 'terminal.capture' | 'terminal.watch' | 'attachments' | 'workspace.git' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule' | 'catalog.live';
+export type Capability = 'session.interrupt.turn' | 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.configure.live' | 'terminal' | 'terminal.capture' | 'terminal.watch' | 'attachments' | 'workspace.git' | 'workspace.git.facts' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'prompt.images' | 'schedule' | 'catalog.live';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -94,6 +94,16 @@ export type GitDiffHunk = { oldStart: number; oldCount: number; newStart: number
 export type GitDiffFile = { path: string; oldPath?: string; change: GitChange; kind: 'text' | 'binary' | 'too_large' | 'withheld' | 'symlink' | 'submodule'; additions: number; deletions: number; hunks: GitDiffHunk[] };
 export type GitDiffPage = { compare: { mode: GitCompare['mode']; baseRef?: string; ignoreWhitespace: boolean }; snapshot: string; files: GitDiffFile[]; hiddenCount: number; truncated: boolean; nextCursor?: string };
 /**
+ * workspace.git.facts (capability `workspace.git.facts`, §12.5): an owner-only answer for a host
+ * directory, so `repoRoot` is a host path (the directory's real path, or the enclosing repository's
+ * top level for `not_repository_root`). Never forwarded by a gateway.
+ */
+export type GitCheckoutFacts = { repoRoot: string; branch: string | null; detached: boolean; head: string | null; hasRemote: boolean; remoteUrl: string | null; dirty: boolean };
+export type GitFacts =
+  | ({ kind: 'ok' | 'not_repository_root' } & GitCheckoutFacts)
+  | { kind: 'unknown' }
+  | { kind: 'unsupported'; reason: 'worktree_elsewhere' | 'inside_git_dir' };
+/**
  * Capability `attachments` (§12.6). Principal context is set only by a trusted gateway on its own
  * connection; a local client leaves it out and acts as the owner.
  */
@@ -131,6 +141,7 @@ export type RpcMethodMap = {
   'attachment.delete': { params: PrincipalContext & { attachmentId: string }; result: { deleted: true } };
   'workspace.git.status': { params: { workspaceId: string }; result: GitStatus };
   'workspace.git.diff': { params: { workspaceId: string; compare: GitCompare; path?: string; cursor?: string }; result: GitDiffPage };
+  'workspace.git.facts': { params: { directory: string }; result: GitFacts };
   'workspace.worktree.options': { params: { workspaceId: string }; result: { mappingIds: string[] } };
   'workspace.worktree.create': { params: RegistryMutation & { workspaceId: string; mappingId: string }; result: { workspace: RegistryWorkspace; revision: number } };
   'workspace.worktree.remove': { params: RegistryMutation & { workspaceId: string }; result: { workspace: RegistryWorkspace; revision: number; filesRemoved: true; branchRetained: true } };

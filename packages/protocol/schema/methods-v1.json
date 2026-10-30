@@ -35,6 +35,7 @@
     "workspace.registry": "Daemon-owned project/workspace registry, durable pins, revision CAS and requestId replay.",
     "workspace.worktree": "Host-approved managed user worktrees; opt-in workspace.manage and named destination mappings.",
     "workspace.git": "workspace.git.status and workspace.git.diff: a registered workspace's read-only Git status and structured diff hunks by workspaceId; enumerated comparisons only, bounded (1 MiB per file, 2 MiB per page, 200 untracked files) with an opaque snapshot and next cursor; blocked secret paths withheld on both sides of a rename; no Git mutation.",
+    "workspace.git.facts": "workspace.git.facts: the read-only Git checkout facts (repository root, branch, HEAD, remote, dirty) of an absolute host directory that need not be a registry workspace: a repository's top level (ok), a folder nested in one (not_repository_root, facts of the enclosing repository), no repository at or above it (unknown) or one alpd will not read (unsupported); owner only, never forwarded by a gateway; no Git mutation.",
     "attachments": "attachment.begin/chunk/commit/abort/get/delete: daemon-owned immutable non-image attachments by opaque id, uploaded in bounded chunks, and session.prompt content parts `{ type: \"attachment\", attachmentId }`; daemon.hello carries `attachmentLimits`. Listed only with a home and a store, on macOS and Linux.",
     "session.fork": "session.fork: a new root whose conversation is a root's up to a completed turn (or a branch a rewind set aside), by native fork of Codex and Claude sessions; files are never copied or changed. Listed with a store and a runtime that forks native conversations, on macOS and Linux (not Windows).",
     "session.rewind": "session.rewind: a root's conversation from before a turn on, under the same session id; the later turns stay a recoverable branch, files are never changed, history generation advances (`history.reset` event). Same condition as session.fork.",
@@ -4076,6 +4077,169 @@
           "snapshot"
         ],
         "additionalProperties": false
+      }
+    },
+    "workspace.git.facts": {
+      "x-alp": {
+        "effect": "query",
+        "scope": {
+          "kind": "host",
+          "param": "directory"
+        },
+        "capability": "workspace.git.facts",
+        "idempotent": true,
+        "risks": [
+          "names the host path, branch and remote of a directory's enclosing Git checkout (owner only, never remote)"
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "directory"
+        ],
+        "additionalProperties": false
+      },
+      "result": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "ok"
+              },
+              "repoRoot": {
+                "type": "string",
+                "minLength": 1
+              },
+              "branch": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "detached": {
+                "type": "boolean"
+              },
+              "head": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hasRemote": {
+                "type": "boolean"
+              },
+              "remoteUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dirty": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "kind",
+              "repoRoot",
+              "branch",
+              "detached",
+              "head",
+              "hasRemote",
+              "remoteUrl",
+              "dirty"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "not_repository_root"
+              },
+              "repoRoot": {
+                "type": "string",
+                "minLength": 1
+              },
+              "branch": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "detached": {
+                "type": "boolean"
+              },
+              "head": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hasRemote": {
+                "type": "boolean"
+              },
+              "remoteUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dirty": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "kind",
+              "repoRoot",
+              "branch",
+              "detached",
+              "head",
+              "hasRemote",
+              "remoteUrl",
+              "dirty"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "unsupported"
+              },
+              "reason": {
+                "enum": [
+                  "worktree_elsewhere",
+                  "inside_git_dir"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        ]
       }
     },
     "workspace.git.diff": {
