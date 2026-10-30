@@ -6,7 +6,7 @@
 //   node scripts/binary-smoke.mjs [path/to/alp]   (default dist/bin/alp; build it with scripts/build-binary.mjs)
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -31,6 +31,16 @@ try {
   await mkdir(home, { mode: 0o700 });
   await writeFile(path.join(home, 'settings.json'), JSON.stringify({ web: { permissions: ['terminal.exec'] } }));
   check(/^\d+\.\d+\.\d+/.test(await alp(['--version'])), 'alp --version');
+  const { findDaemonEntry } = await import('@anhlp/alp-client/index');
+  check(await findDaemonEntry({ home: path.join(work, 'none'), env: { PATH: path.dirname(binary) } }) === binary, 'discovery recognises the built executable by its marker');
+  // A renamed copy (a release asset name) still starts its own roles.
+  const renamed = path.join(work, 'alp-renamed');
+  await copyFile(binary, renamed);
+  const renamedHome = path.join(work, 'renamed-home');
+  await mkdir(renamedHome, { mode: 0o700 });
+  const renamedEnv = { ...env, ALP_HOME: renamedHome };
+  check(/running \(pid \d+\)/.test((await run(renamed, ['daemon', 'start'], { env: renamedEnv, timeout: 60_000 })).stdout), 'a renamed executable starts alpd as itself');
+  await run(renamed, ['daemon', 'stop'], { env: renamedEnv, timeout: 30_000 });
   const project = path.join(work, 'project');
   await mkdir(project);
   await alp(['init', project]);

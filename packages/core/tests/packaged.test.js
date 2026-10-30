@@ -33,7 +33,7 @@ test('an entry found on disk runs by its kind: a script under execPath, the ALP 
   assert.deepEqual(entryCommand('/usr/bin/alp-x-integration', 'web', ['--service'], '/opt/node', { scriptOnly: true }), { command: '/opt/node', args: ['/usr/bin/alp-x-integration', '--service'] });
   assert.throws(() => entryCommand('/bin/alp', /** @type {any} */ ('nope')), /Unknown ALP role/);
   // Only alp/alp.exe is the executable: a TypeScript or extensionless entry still runs under execPath.
-  assert.deepEqual(entryCommand('/src/alp/packages/daemon/src/main.ts', 'daemon', ['--detach'], '/opt/node'), { command: '/opt/node', args: ['/src/alp/packages/daemon/src/main.ts', '--detach'] });
+  assert.deepEqual(entryCommand('/src/alp/alpd.ts', 'daemon', ['--detach'], '/opt/node'), { command: '/opt/node', args: ['/src/alp/alpd.ts', '--detach'] });
   assert.deepEqual(entryCommand('/opt/alp/bin/alpd', 'daemon', [], '/opt/node'), { command: '/opt/node', args: ['/opt/alp/bin/alpd'] });
 });
 
@@ -49,6 +49,10 @@ test('packaged, ALP starts itself through subcommands and never passes a script 
   assert.deepEqual(bridgeCommand('antigravity'), { command: process.execPath, args: ['bridge', 'antigravity'] });
   // A user's JavaScript runs with the executable acting as its Bun runtime.
   assert.deepEqual(scriptCommand('/x/fake.js'), { command: process.execPath, args: ['/x/fake.js'], env: { BUN_BE_BUN: '1' } });
+  // Renamed (a release asset name): its own executable is still native, and its bridge entry still ALP's.
+  assert.deepEqual(entryCommand(process.execPath, 'daemon', ['--detach']), { command: process.execPath, args: ['daemon', 'run', '--detach'] });
+  assert.equal(isBridgeArgs('antigravity', bridgeCommand('antigravity').args, process.execPath), true);
+  assert.deepEqual(entryCommand('/elsewhere/alp-darwin-arm64', 'daemon', [], '/opt/node'), { command: '/opt/node', args: ['/elsewhere/alp-darwin-arm64'] }, 'another renamed file is not this executable');
   // The packaged CLI cannot run an npm alpd.js itself: it needs a real node.
   assert.deepEqual(entryCommand('/opt/alp/dist/alpd.js', 'daemon', ['--detach']), { command: 'node', args: ['/opt/alp/dist/alpd.js', '--detach'] });
 });

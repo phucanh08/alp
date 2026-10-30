@@ -50,6 +50,9 @@ export const EXECUTABLE_MARKER = 'alp-standalone-executable:v1:2b6f0c1e';
 /** Whether `file` is named like the ALP executable (alp, alp.exe). @param {string} file */
 export const isExecutableName = file => /^alp(\.exe)?$/i.test(file.split(/[\\/]/).pop() ?? '');
 
+/** Whether `file` is this process's own ALP executable, whatever it is called (alp-darwin-arm64, a rename). @param {unknown} file */
+export const isSelf = file => isPackaged() && typeof file === 'string' && path.resolve(file) === path.resolve(process.execPath);
+
 /** A file path that names a JavaScript entry rather than an executable. @param {string} file */
 export const isScript = file => /\.[cm]?js$/i.test(file);
 
@@ -83,8 +86,9 @@ export function selfCommand(role, { script, args = [] }) {
  * @returns {{ command: string, args: string[] }}
  */
 export function entryCommand(entry, role, args = [], execPath = process.execPath, { scriptOnly = false } = {}) {
-  // Only a file named alp/alp.exe is the executable; anything else (alpd.js, alpd.ts, a launcher) is a script.
-  if (scriptOnly || isScript(entry) || !isExecutableName(entry)) {
+  // Only a file named alp/alp.exe, or this very executable under any name, is native; anything else
+  // (alpd.js, alpd.ts, a launcher) is a script.
+  if (scriptOnly || isScript(entry) || !(isExecutableName(entry) || isSelf(entry))) {
     // The executable cannot run a script itself; a script entry then needs a real Node.
     if (isPackaged() && execPath === process.execPath) return { command: 'node', args: [entry, ...args] };
     return { command: execPath, args: [entry, ...args] };
