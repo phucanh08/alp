@@ -339,8 +339,8 @@ export class ClientConnection {
   /** @type {Array<{ frame: string | null | undefined }>} */ #queue = [];
   #queuedBytes = 0;
   #helloed = false;
-  /** The client said in daemon.hello that an ALP agent started it; its alpd connection says so too (t-e706). */
-  #agent = false;
+  /** The client said in daemon.hello that an ALP agent started it: the re-hello that says so on its alpd connection (t-e706). */
+  /** @type {Promise<unknown> | undefined} */ #agent;
   /** A hello waiting for alpd: requests pipelined behind it wait too, as alpd answers hello at once. */
   /** @type {Promise<unknown> | undefined} */ #helloing;
   #closed = false;
@@ -708,7 +708,8 @@ export class ClientConnection {
       this.#helloing = greeting.catch(() => {});
       return greeting;
     }
-    if (!this.#helloed && this.#helloing) await this.#helloing;
+    // Behind every hello, even a later one: a hello that marks an agent lands before what follows it (t-e706).
+    if (this.#helloing) await this.#helloing;
     if (!this.#helloed) throw new GatewayError(ERROR.protocol, 'daemon.hello is required first', { reason: 'hello_required' });
     await this.#refreshWorktrees();
     const exposure = exposureOf(method);
@@ -736,13 +737,14 @@ export class ClientConnection {
     await this.#ready.catch(() => { throw new GatewayError(GATEWAY_ERROR.unavailable, 'alpd is unavailable', { reason: GATEWAY_REASON.daemonDisconnected }); });
     // A client an ALP agent started says so (t-ca1f): this connection's own alpd connection then says
     // so too (alpd keeps the mark for good), so alpd refuses it what only the user may do (t-e706).
-    if (!this.#agent && Array.isArray(params.capabilities) && params.capabilities.includes(AGENT_CAPABILITY)) {
-      try { await this.#call('daemon.hello', { protocolVersion: PROTOCOL_VERSION, client: { name: 'alp-gateway', version: '0' }, capabilities: [AGENT_CAPABILITY] }); }
+    if (Array.isArray(params.capabilities) && params.capabilities.includes(AGENT_CAPABILITY)) {
+      // Once per connection, shared by hellos that overlap.
+      this.#agent ??= this.#call('daemon.hello', { protocolVersion: PROTOCOL_VERSION, client: { name: 'alp-gateway', version: '0' }, capabilities: [AGENT_CAPABILITY] });
+      try { await this.#agent; }
       catch {
         this.close(CLOSE_CODE.internal, 'Could not mark the agent connection to alpd; reconnect');
         throw new GatewayError(GATEWAY_ERROR.unavailable, 'alpd is unavailable', { reason: GATEWAY_REASON.daemonDisconnected });
       }
-      this.#agent = true;
     }
     this.#helloed = true;
     return {

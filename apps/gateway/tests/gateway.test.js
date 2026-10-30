@@ -509,6 +509,23 @@ test('a client that announces principal.agent has its own alpd connection say so
   await agent.call('daemon.hello', { protocolVersion: 1, client: { name: 'agent', version: '0' }, capabilities: ['principal.agent'] });
   assert.equal(hellos().filter(call => call.params?.capabilities?.includes('principal.agent')).length, 1);
 
+  // A mark in a later hello lands on alpd before a request sent right behind it.
+  const late = await h.rawSession('alice');
+  await late.call('daemon.hello', { protocolVersion: 1, client: { name: 'late', version: '0' } });
+  const lateLink = hellos().at(-1).link;
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  daemon.state.handlers['daemon.hello'] = async params => { if (params.capabilities) await held; return { protocolVersion: 1, capabilities: [] }; };
+  const marking = late.call('daemon.hello', { protocolVersion: 1, client: { name: 'late', version: '0' }, capabilities: ['principal.agent'] });
+  const listed = late.call('task.list', { projectRoot: path.join(tmpdir(), 'alp-e706-a') });
+  await until(() => daemon.state.calls.some(call => call.link === lateLink && call.params?.capabilities), 'the re-mark');
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.ok(!daemon.state.calls.some(call => call.link === lateLink && call.method === 'task.list'), 'nothing passes the mark while it is pending');
+  release();
+  await marking; await listed;
+  const order = daemon.state.calls.filter(call => call.link === lateLink).map(call => call.params?.capabilities ? 'mark' : call.method);
+  assert.ok(order.indexOf('mark') < order.indexOf('task.list'), order.join(','));
+
   daemon.state.handlers['daemon.hello'] = params => { if (params.capabilities) throw { code: 1005, message: 'down' }; return { protocolVersion: 1, capabilities: [] }; };
   const failing = await h.rawSession('alice');
   const answer = failing.call('daemon.hello', { protocolVersion: 1, client: { name: 'agent', version: '0' }, capabilities: ['principal.agent'] });
