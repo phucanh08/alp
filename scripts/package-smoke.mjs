@@ -5,7 +5,7 @@
 import { cleanupFakeWeb, freeWebPort } from './beta-web-lifecycle.mjs';
 import { spawnSync } from 'node:child_process';
 import { spawnCommand } from './spawn-command.mjs';
-import { LAUNCHER, LAUNCHER_LOCATION, PLATFORM_NAMES, hostPlatformName, releaseArtifacts } from './release-lib.mjs';
+import { LAUNCHER, LAUNCHER_LOCATION, PLATFORM_NAMES, SAVED_INSTALL_FLAGS, hostPlatformName, releaseArtifacts } from './release-lib.mjs';
 import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -59,7 +59,8 @@ try {
   }
   await writeFile(path.join(directory, 'package.json'), JSON.stringify({ private: true, type: 'module', dependencies }));
   // Client-side plugin peers are supplied by Paseo; no React Native host is needed for this server smoke.
-  run('npm', ['install', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund']);
+  // SAVED_INSTALL_FLAGS: the launcher gets only the platform package installed here, never the registry's.
+  run('npm', ['install', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund', ...SAVED_INSTALL_FLAGS]);
   const imports = workspaceNames.filter(name => name !== '@anhlp/alp-paseo');
   run(process.execPath, ['--input-type=module', '-e', `for (const name of ${JSON.stringify(imports)}) await import(name).catch(error => { if (error?.code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw error; }); await import('./node_modules/@anhlp/alp-paseo/server/dist/index.js'); await import('./node_modules/@anhlp/alp-cli/dist/acp.js'); `]);
   await writeFile(path.join(directory, 'consumer.ts'), `import { createAlpRuntime, createProviderRegistry, type RuntimeOptions } from '@anhlp/alp-runtime';
