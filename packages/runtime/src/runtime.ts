@@ -2970,6 +2970,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   const gateMail = new WeakMap<MailEvent, { key: string; taken: () => void }>();
   /** Decisions main took whose mark is being written, or was. */
   const gateTaken = new Set<string>();
+  /** Marks being written; shutdown waits for them, so nothing writes the task files after it. */
+  const gateMarks = new Set<Promise<unknown>>();
   const gateCardId = (taskId: string, gateId: string) => `gate-${taskId}-${gateId}`;
 
   /** The project's live main root session, if any. */
@@ -3008,11 +3010,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         key,
         taken: () => {
           gateTaken.add(key);
-          markGateNotified(projectRoot, task.id, gate.id, decision, record.at).catch(error => {
+          const mark = markGateNotified(projectRoot, task.id, gate.id, decision, record.at).catch(error => {
             // Unmarked, it is mailed again: once more is better than never.
             gateTaken.delete(key);
             runLog(main.id, { event: 'gate.mark.failed', projectRoot, taskId: task.id, gateId: gate.id, error: errorData(error).message });
           });
+          gateMarks.add(mark);
+          void mark.finally(() => gateMarks.delete(mark));
         },
       });
       runLog(main.id, { event: 'gate.decision', projectRoot, taskId: task.id, gateId: gate.id, decision, channel: record.channel, ...(choice ? { choice } : {}) });
@@ -5337,6 +5341,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (gateWatch) clearInterval(gateWatch);
       for (const root of [...gateFiles.keys()]) unwatchGateFiles(root);
       await Promise.all(gateSyncs.values());
+      await Promise.all(gateMarks);
 
       // Claims released by the closes above are written before the board is left.
       await Promise.all(boards.values());
