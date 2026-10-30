@@ -143,8 +143,8 @@ export function createBoardDomain({ options, sessions, boards, loadedBoards, roo
   }
 
   async function boardTool(session: Session, args: unknown) {
-    if (!plainObject(args, ['kinds', 'limit']) || (args.kinds !== undefined && (!Array.isArray(args.kinds) || !args.kinds.every((kind: unknown) => PIN_KINDS.includes(kind as PinKind)))) || (args.limit !== undefined && (!Number.isSafeInteger(args.limit) || args.limit < 1))) {
-      return toolResult(false, { error: 'kinds lists claim, decision or finding; limit is a positive integer' });
+    if (!plainObject(args, ['kinds', 'limit']) || (args.kinds !== undefined && (!Array.isArray(args.kinds) || args.kinds.length > PIN_KINDS.length || !args.kinds.every((kind: unknown) => PIN_KINDS.includes(kind as PinKind)))) || (args.limit !== undefined && (!Number.isSafeInteger(args.limit) || args.limit < 1))) {
+      return toolResult(false, { error: `kinds lists at most ${PIN_KINDS.length} of claim, decision and finding; limit is a positive integer` });
     }
     const kinds: string[] = args.kinds ?? [...PIN_KINDS];
     const pins = (await boardOf(session.mapping.agent.projectRoot)).filter(pin => live(pin) && kinds.includes(pin.kind));

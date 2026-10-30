@@ -222,6 +222,11 @@ test('main lists and pours formulas with alp_task; the CLI pours, exports and im
   assert.ok(listed.searched.includes(path.join(home, 'formulas')));
   assert.match((await main.call('alp_task', { action: 'pour', formula: 'release' })).error, /release needs --var version/);
   assert.match((await main.call('alp_task', { action: 'pour', formula: 'release', vars: { version: 4 } })).error, /pour needs formula, and vars as an object of text values/);
+  // vars are bounded before the formula reads them: count, value length and names.
+  for (const vars of [Object.fromEntries(Array.from({ length: 51 }, (_, i) => [`v${i}`, '1'])), { version: 'x'.repeat(2001) }, { ['v'.repeat(65)]: '1' }, { version: { nested: '1' } }]) {
+    assert.match((await main.call('alp_task', { action: 'pour', formula: 'release', vars })).error, /pour needs formula, and vars as an object of text values: at most 50/);
+  }
+  assert.equal((await loadTasks(root)).tasks.length, 0);
   const poured = await main.call('alp_task', { action: 'pour', formula: 'release', vars: { version: '0.4.0' } });
   assert.deepEqual([poured.task.type, poured.steps.map(step => step.title)], ['epic', ['Write the changelog for 0.4.0', 'Approve the 0.4.0 changelog', 'Publish 0.4.0 from main']]);
   assert.equal((await getTask(root, poured.task.id)).createdBy, 'main');

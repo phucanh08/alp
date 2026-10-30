@@ -144,7 +144,14 @@ test('pins are checked: kinds, bodies, project-relative paths and owners', async
     [{ kind: 'claim', body: 'x', paths: ['/etc/passwd'] }, /outside the project/],
     [{ kind: 'claim', body: 'x', paths: [''] }, /nonempty strings/],
     [{ kind: 'decision', body: 'x', extra: 1 }, /A pin needs kind/],
-  ]) assert.match((await main.call('alp_pin', args)).error, error, JSON.stringify(args));
+    [{ kind: 'claim', body: 'x', paths: Array.from({ length: 51 }, (_, i) => `src/${i}`) }, /paths must list 1 to 50/],
+    [{ kind: 'claim', body: 'x', paths: ['a/'.repeat(513)] }, /at most 1024 characters each/],
+    // Every tool's arguments are bounded before the tool reads them.
+    [{ kind: 'claim', body: 'x', paths: [[[[[[[[['src']]]]]]]]] }, /alp_pin input is too large: nested over 8 levels deep/],
+    [{ kind: 'finding', body: 'x'.repeat(128 * 1024 + 1) }, /alp_pin input is too large: a text over 131072 characters/],
+  ]) assert.match((await main.call('alp_pin', args)).error, error, JSON.stringify(args).slice(0, 200));
+  assert.match((await main.call('alp_board', { kinds: ['claim', 'claim', 'decision', 'finding'] })).error, /kinds lists at most 3/);
+  assert.ok(Array.isArray((await main.call('alp_board', { kinds: ['claim', 'decision', 'finding'] })).claims));
   assert.deepEqual((await main.call('alp_pin', { kind: 'claim', body: 'Everything', paths: ['.', 'src/../src'] })).paths, ['.', 'src']);
   assert.match((await main.call('alp_unpin', { pinId: 'p-missing' })).error, /No such pin/);
   assert.match((await main.call('alp_board', { kinds: ['task'] })).error, /kinds lists/);

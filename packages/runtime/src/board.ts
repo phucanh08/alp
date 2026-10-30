@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { realpathSync } from 'node:fs';
+import type { InputLimits } from './input-limits.js';
 
 /**
  * The project board (plans/reference/ALPD.md §18): one group channel per project that every
@@ -16,6 +17,11 @@ export type { PinKind, Pin } from '@anhlp/alp-protocol/dto';
 
 export const PIN_BODY_CHARS = 2000;
 export const PIN_PATHS = 50;
+/** One claimed path; macOS's PATH_MAX. Each segment of a path is one more realpath call. */
+export const PIN_PATH_CHARS = 1024;
+/** alp_pin's paths and alp_board's kinds, checked before any schema walks them. */
+export const PIN_PATHS_INPUT: InputLimits = { bytes: PIN_PATHS * (3 * PIN_PATH_CHARS + 3), items: PIN_PATHS, depth: 1, string: PIN_PATH_CHARS };
+export const BOARD_KINDS_INPUT: InputLimits = { bytes: 64, items: PIN_KINDS.length, depth: 1, string: 16 };
 /** Decisions and findings kept per project; live claims are always kept. */
 export const BOARD_KEEP = 200;
 const DIGEST_CHARS = 3000;
@@ -38,6 +44,7 @@ export function normalizePaths(paths: unknown, project: string, roots: string[] 
   const normalized: string[] = [];
   for (const entry of paths) {
     if (typeof entry !== 'string' || !entry.trim()) return 'paths must be nonempty strings';
+    if (entry.length > PIN_PATH_CHARS) return `paths must be at most ${PIN_PATH_CHARS} characters each`;
     const absolute = canonicalPath(path.resolve(project, entry.trim()));
     if (!roots.some(root => containsPath(canonicalPath(root), absolute))) return `${entry} is outside the project or declared write root`;
     const relative = path.relative(canonicalPath(project), absolute).split(path.sep).join('/');

@@ -26,6 +26,8 @@ export { createCopy, gitEnvironment, reattachWorktree, reclaimCopies, reclaimWor
 export { OWN_START, processStartedAt, sameProcessAlive } from './process-info.js';
 export type { Worktree, WorktreeChange } from './workspace.js';
 export { PIN_KINDS, renderBoard, renderPin } from './board.js';
+export { inputLimitError, TOOL_INPUT, POUR_VARS } from './input-limits.js';
+export type { InputLimits } from './input-limits.js';
 export { CHOICES, isVietnamese, languageInstruction, words } from './language.js';
 export type { Words } from './language.js';
 export type { Pin, PinKind } from './board.js';

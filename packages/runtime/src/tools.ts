@@ -1,7 +1,8 @@
 import { CLOSE_REASONS, GATE_KINDS, TASK_STATUSES, TASK_TYPES, TASKS_DIR, type Task } from '@anhlp/alp-core/tasks';
 import { READ_ONLY_AGENTS, type ResolvedSession } from './resolve.js';
 
-import { PIN_KINDS } from './board.js';
+import { PIN_KINDS, PIN_PATH_CHARS, PIN_PATHS } from './board.js';
+import { POUR_VARS } from './input-limits.js';
 import { RECALL_KEEP_MS } from './recall.js';
 import { HANDOFF_OUTCOMES, VERDICT_RESULTS, CRITERION_RESULTS, SEVERITIES } from './handoff.js';
 
@@ -173,7 +174,7 @@ export const PIN_TOOL = {
     properties: {
       kind: { type: 'string', enum: PIN_KINDS },
       body: { type: 'string', description: 'For a claim, what you are changing; otherwise the decision or finding itself.' },
-      paths: { type: 'array', items: { type: 'string' }, description: 'Project-relative files or directories. Required for a claim.' },
+      paths: { type: 'array', items: { type: 'string', maxLength: PIN_PATH_CHARS }, maxItems: PIN_PATHS, description: `Project-relative files or directories, at most ${PIN_PATHS}. Required for a claim.` },
     },
     required: ['kind', 'body'],
     additionalProperties: false,
@@ -187,7 +188,7 @@ export const BOARD_TOOL = {
   inputSchema: {
     type: 'object',
     properties: {
-      kinds: { type: 'array', items: { type: 'string', enum: PIN_KINDS } },
+      kinds: { type: 'array', items: { type: 'string', enum: PIN_KINDS }, maxItems: PIN_KINDS.length },
       limit: { type: 'integer', description: 'Most recent decisions and findings to return. Default 30.' },
     },
     additionalProperties: false,
@@ -383,7 +384,7 @@ export function taskTool(actions: TaskAction[]) {
           options: { type: 'array', items: { type: 'string', maxLength: 200 }, maxItems: 10, description: 'For a human gate: up to 10 answers the user picks from, each at most 200 characters; picking any approves it, and you get the choice by mail. Default approve or reject.' },
           gate: { type: 'string', description: 'For clear: the gate id, such as g1. You cannot clear a human gate; the user does.' },
           formula: { type: 'string', description: 'For pour: the formula name, from action formulas.' },
-          vars: { type: 'object', additionalProperties: { type: 'string' }, description: 'For pour: values of the formula variables.' },
+          vars: { type: 'object', additionalProperties: { type: 'string', maxLength: POUR_VARS.string }, description: `For pour: values of the formula variables (at most ${POUR_VARS.items}), each at most ${POUR_VARS.string} characters.` },
           summary: { type: 'string', description: 'For close: the outcome and its evidence.' },
           unverified: { type: 'string', description: "For close as done when the task's last verification failed: why it is done anyway. Recorded on the task." },
           note: { type: 'string', description: 'For update and reopen: why.' },
