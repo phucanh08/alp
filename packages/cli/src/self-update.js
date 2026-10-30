@@ -259,11 +259,20 @@ export function cleanupOldExecutable(target, { platform = process.platform, fs =
   return removed;
 }
 
+/**
+ * Whether the executable is the one npm installed for @anhlp/alp (t-cd7f): it lives in a platform
+ * package, node_modules/@anhlp/alp-<os>-<arch>/bin/. npm owns that file; updating it in place would
+ * leave npm's records behind, so npm updates it. @param {string} execPath
+ */
+export function isNpmExecutable(execPath) {
+  return /[\\/]node_modules[\\/]@anhlp[\\/]alp-(?:darwin|linux|win32)-(?:arm64|x64)[\\/]bin[\\/]alp(?:\.exe)?$/i.test(execPath ?? '');
+}
+
 /** What to say outside the executable (an npm install). @param {string[]} positionals */
 export function npmMessage(positionals = []) {
   const lines = [];
   if (positionals.length) lines.push(`alp: ${TEMPLATE_HINT}`);
-  lines.push(`This alp runs from npm, not as the ALP executable; update it with npm:\n  npm install -g ${NPM_PACKAGE}@beta\nThen restart alpd when no sessions are running: alp daemon restart\n(The project template upgrade is \`alp update-template [directory]\`.)`);
+  lines.push(`This alp was installed with npm; update it with npm:\n  npm install -g ${NPM_PACKAGE}@beta\nThen restart alpd when no sessions are running: alp daemon restart\n(The project template upgrade is \`alp update-template [directory]\`.)`);
   return lines.join('\n');
 }
 
@@ -320,7 +329,7 @@ export async function selfUpdate(args, overrides = {}) {
   }
   const { values, positionals } = parsed;
   if (values.help) { deps.log(UPDATE_USAGE); return 0; }
-  if (!deps.packaged) { deps.log(npmMessage(positionals)); return 0; }
+  if (!deps.packaged || isNpmExecutable(deps.execPath)) { deps.log(npmMessage(positionals)); return 0; }
   if (positionals.length) { deps.warn(`alp: ${TEMPLATE_HINT}`); return 1; }
 
   const wanted = values.version?.replace(/^v/, '');

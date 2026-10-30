@@ -109,20 +109,13 @@ try {
   if (status !== 0 || !output.includes('STANDALONE_CORE_SMOKE_PASSED')) {
     throw new Error(`standalone core driver exited ${status} without passing\n${output}`);
   }
-  // Exercise the actual CLI/ACP executable in both distributions. Root gets only its three
-  // declared ALP dependencies, not the CLI/daemon/runtime workspaces that could mask omissions.
-  const [packedRoot] = JSON.parse(run('npm', ['pack', '--json', '--pack-destination', packs], { cwd: source, capture: true }).replace(/^[\s\S]*?(?=\[\n)/, ''));
-  const problems = corePackageProblems(manifest, packedRoot.files.map(file => file.path));
-  if (problems.length) throw new Error(problems.join('\n'));
-  const distribution = path.join(work, 'distribution');
-  mkdirSync(distribution);
-  writeFileSync(path.join(distribution, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
-  run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', path.join(packs, packedRoot.filename), ...Object.keys(manifest.dependencies).filter(name => byName.has(name)).map(name => byName.get(name))], { cwd: distribution, timeout: 420_000 });
+  // Exercise the actual CLI/ACP entry of the installed @anhlp/alp-cli. (@anhlp/alp is the npm
+  // launcher of the ALP executable since t-cd7f and carries no JavaScript of ALP's; package-smoke runs it.)
   mkdirSync(path.join(core, 'test/support'), { recursive: true });
   mkdirSync(path.join(core, 'test/integration'), { recursive: true });
   copyFileSync(path.join(root, 'test/support/recovery.js'), path.join(core, 'test/support/recovery.js'));
   copyFileSync(path.join(root, 'test/integration/recovery-cli.test.js'), path.join(core, 'test/integration/recovery-cli.test.js'));
-  for (const [directory, cli] of [[core, 'node_modules/@anhlp/alp-cli/dist/cli.js'], [distribution, 'node_modules/@anhlp/alp/packages/cli/dist/cli.js']]) {
+  for (const [directory, cli] of [[core, 'node_modules/@anhlp/alp-cli/dist/cli.js']]) {
     // Installs use --legacy-peer-deps, so only missing peers of an installed package are expected.
     const { stdout: tree } = run('npm', ['ls', '--all', '--json'], { cwd: directory, capture: true, allowFailure: true });
     const unexpected = (JSON.parse(tree).problems ?? []).filter(problem => {
@@ -146,7 +139,7 @@ try {
     // Installed CLI -> installed daemon/runtime, with disposable state and scripted native turns.
     run(process.execPath, ['--test', '--test-name-pattern=explicit CLI prompt', 'test/integration/recovery-cli.test.js'], { cwd: core, timeout: 60_000, env: { HOME: noHome, USERPROFILE: noHome, ALP_HOME: path.join(directory, 'recovery-home'), ALP_TEST_RECOVERY_CLI: path.join(directory, cli), NODE_PATH: '' } });
   }
-  console.log('Standalone core and main distribution smoke passed');
+  console.log('Standalone core smoke passed');
 } finally {
   rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 }

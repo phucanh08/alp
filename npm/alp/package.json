@@ -1,0 +1,41 @@
+{
+  "name": "@anhlp/alp",
+  "version": "0.0.1-beta.5",
+  "description": "ALP command line: installs the ALP executable for this machine (@anhlp/alp-<os>-<arch>) and runs it",
+  "type": "module",
+  "bin": {
+    "alp": "bin/alp.js"
+  },
+  "files": [
+    "bin/alp.js",
+    "lib/launcher.js",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@anhlp/alp-darwin-arm64": "0.0.1-beta.5",
+    "@anhlp/alp-darwin-x64": "0.0.1-beta.5",
+    "@anhlp/alp-linux-x64": "0.0.1-beta.5",
+    "@anhlp/alp-linux-arm64": "0.0.1-beta.5",
+    "@anhlp/alp-win32-x64": "0.0.1-beta.5"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phucanh08/alp.git",
+    "directory": "npm/alp"
+  },
+  "homepage": "https://github.com/phucanh08/alp#readme",
+  "bugs": {
+    "url": "https://github.com/phucanh08/alp/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "tag": "beta"
+  }
+}

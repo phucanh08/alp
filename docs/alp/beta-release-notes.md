@@ -3,8 +3,16 @@
 Prepared 2026-10-30 (task t-1e02). This is the first version shipped two ways, with the same
 version number in both:
 
-- **npm**: all eight public packages use `0.0.1-beta.5`, internal dependencies pinned to it, published
-  under the `beta` dist-tag (`npm install -g @anhlp/alp@beta`), never `latest`.
+- **npm** (t-cd7f): `@anhlp/alp` is now a small launcher (plain Node, no dependencies, no
+  postinstall). npm installs the ALP executable for the machine as one optional dependency,
+  `@anhlp/alp-<os>-<arch>` (darwin-arm64, darwin-x64, linux-x64, linux-arm64 with glibc, win32-x64).
+  That executable is byte for byte the one in the GitHub release `v0.0.1-beta.5` (built from
+  `2b63a7a`), checked against that release's `SHA256SUMS` ([binary-install.md](binary-install.md#npm-packages)).
+  There are thirteen npm packages at `0.0.1-beta.5` under the `beta` dist-tag: the seven JavaScript
+  packages (`@anhlp/alp-protocol`, `-core`, `-runtime`, `-client`, `-daemon`, `-cli`, `-paseo`), the five
+  platform packages, then `@anhlp/alp` (`npm install -g @anhlp/alp@beta`). musl (Alpine) and other
+  unsupported platforms use the JavaScript CLI: `npm install -g @anhlp/alp-cli@beta` (uninstall
+  `@anhlp/alp` first, because both provide `alp`).
 - **Standalone executable**: a GitHub release `v0.0.1-beta.5` with archives for macOS and Linux
   (glibc), arm64 and x64, `SHA256SUMS`, build provenance and `install.sh`
   ([binary-install.md](binary-install.md)). The release is a normal release, not a prerelease, so
@@ -12,6 +20,11 @@ version number in both:
 
 `release-binaries.yml` only creates the draft; the owner reviews it and publishes it by hand, and
 publishes npm separately. Nothing else changes from `0.0.1-beta.4` below.
+
+Known issue (npm install): the beta.5 executables predate the npm-aware `alp update` (t-cd7f, after
+`2b63a7a`). In an npm install, update with npm (`npm install -g @anhlp/alp@beta`), not `alp update`.
+`alp update` would replace the file inside `node_modules/@anhlp/alp-<os>-<arch>/` behind npm's back.
+From the next executable release on, `alp update` prints the npm command instead.
 
 # ALP 0.0.1-beta.4 — release notes
 

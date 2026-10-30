@@ -2,7 +2,8 @@
 # native runner per target, smoked there with Node (scripts/binary-smoke.mjs) and without it
 # (scripts/binary-smoke-nodeless.sh: debian:bookworm-slim on Linux, `env -i PATH=/usr/bin:/bin` on
 # macOS; scripts/binary-smoke-nodeless.ps1 with a system-only PATH on Windows), then packed as
-# alp-<version>-<os>-<arch>.tar.gz (alp-<version>-windows-x64.zip on Windows, P2). Called by ci.yml
+# alp-<version>-<os>-<arch>.tar.gz (alp-<version>-windows-x64.zip on Windows, P2), whose executable
+# is then installed the npm way (@anhlp/alp launcher + platform package, t-cd7f). Called by ci.yml
 # and release-binaries.yml.
 name: Binary build
 
@@ -96,6 +97,10 @@ jobs:
         run: node --test test/integration/binary-install-ps1.test.js
       - name: Pack
         run: node scripts/package-binary.mjs pack --binary dist/bin/${{ matrix.exe }} --target ${{ matrix.target }} --out dist/release
+      # t-cd7f: the npm install of this archive's executable: its platform package and the @anhlp/alp
+      # launcher, installed with npm install -g into a temporary prefix; alp --version/init/update through npm's `alp`.
+      - name: npm launcher (@anhlp/alp + this platform's package)
+        run: node scripts/npm-launcher-smoke.mjs dist/release
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: alp-binary-${{ matrix.platform }}

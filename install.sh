@@ -78,7 +78,7 @@ if [ "$os" = darwin ] && [ "$arch" = x64 ] && [ "$(sysctl -n sysctl.proc_transla
 fi
 if [ "$os" = linux ]; then
   if ls /lib/ld-musl-* >/dev/null 2>&1 || (ldd --version 2>&1 | grep -qi musl); then
-    die "musl libc (Alpine) is not supported yet; use a glibc distribution or npm install -g @anhlp/alp"
+    die "musl libc (Alpine) is not supported yet; use a glibc distribution, or the JavaScript CLI on Node 22+: npm install -g @anhlp/alp-cli@beta"
   fi
 fi
 

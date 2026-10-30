@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawnCommand } from './spawn-command.mjs';
 import { corePackageProblems } from './core-package-boundary.mjs';
 import { THIRD_PARTY_NOTICES, packageDirectory, packageName } from './third-party-notices.mjs';
-import { shippedWebProblems } from './release-lib.mjs';
+import { LAUNCHER, LAUNCHER_LOCATION, launcherProblems, shippedWebProblems } from './release-lib.mjs';
 const root = path.resolve(import.meta.dirname, '..');
 await verifyTerminalNative({ requireMatrix: true });
 const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
@@ -58,16 +58,18 @@ async function licenceProblems(location, pkg, files) {
   return problems;
 }
 
-for (const location of ['.', ...manifest.workspaces]) {
+// The workspaces and the npm launcher (npm/alp, outside the workspaces). The platform packages are
+// generated from the release archives when packing (npm-platform.mjs, release-pack --binaries).
+for (const location of ['.', ...manifest.workspaces, LAUNCHER_LOCATION]) {
   const pkg = JSON.parse(await readFile(path.join(root, location, 'package.json'), 'utf8'));
   if (pkg.private) continue;
-  const result = spawnSync(...spawnCommand('npm', ['pack', ...(location === '.' ? [] : ['--workspace', pkg.name]), '--dry-run', '--json', ...(process.argv.includes('--ignore-scripts') ? ['--ignore-scripts'] : [])]), { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  const result = spawnSync(...spawnCommand('npm', ['pack', ...(location === LAUNCHER_LOCATION ? [`./${location}`] : ['--workspace', pkg.name]), '--dry-run', '--json', ...(process.argv.includes('--ignore-scripts') ? ['--ignore-scripts'] : [])]), { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   if (result.status !== 0) { console.error(result.stdout + result.stderr); process.exit(result.status ?? 1); }
   // npm lifecycle progress appears before the JSON array on some npm versions.
   const start = result.stdout.indexOf('[\n');
   const packed = JSON.parse(result.stdout.slice(start >= 0 ? start : 0))[0];
   const files = new Set(packed.files.map(file => file.path));
-  const nativeDirectory = ({ '@anhlp/alp': 'dist/terminal-native', '@anhlp/alp-daemon': 'dist/terminal-native', '@anhlp/alp-cli': 'dist/terminal-native', '@anhlp/alp-paseo': 'server/dist/terminal-native' })[pkg.name];
+  const nativeDirectory = ({ '@anhlp/alp-daemon': 'dist/terminal-native', '@anhlp/alp-cli': 'dist/terminal-native', '@anhlp/alp-paseo': 'server/dist/terminal-native' })[pkg.name];
   if (nativeDirectory) for (const slot of nativeSlots) for (const name of ['terminal-owner', 'manifest.json']) {
     if (!files.has(`${nativeDirectory}/prebuilt/${slot}/${name}`)) throw new Error(`${pkg.name}: missing shipped native ${slot}/${name}`);
   }
@@ -89,7 +91,7 @@ for (const location of ['.', ...manifest.workspaces]) {
     }
   }
   for (const bin of Object.values(pkg.bin ?? {})) if (!files.has(bin)) throw new Error(`${pkg.name}: missing executable ${bin}`);
-  const problems = [...await licenceProblems(location, pkg, files), ...shippedWebProblems(pkg.name, files)];
+  const problems = [...await licenceProblems(location, pkg, files), ...shippedWebProblems(pkg.name, files), ...(pkg.name === LAUNCHER ? launcherProblems(pkg, manifest.version) : [])];
   if (problems.length) throw new Error(problems.join('\n'));
   console.log(`${pkg.name}@${pkg.version}: ${files.size} packed files, public exports and licences verified`);
 }

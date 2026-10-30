@@ -7,19 +7,40 @@ import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { corePackageProblems } from './core-package-boundary.mjs';
 import { THIRD_PARTY_NOTICES, packageDirectory, packageName } from './third-party-notices.mjs';
+import { PLATFORMS, PLATFORM_NAMES, platformOf } from './npm-platform.mjs';
 
-/** The eight public packages, in publish order (§7.4). Every other workspace must be private. */
+export { PLATFORM_NAMES };
+/** The npm launcher (t-cd7f): `alp` runs the ALP executable from the platform package for the machine. */
+export const LAUNCHER = '@anhlp/alp';
+export const LAUNCHER_LOCATION = 'npm/alp';
+
+/**
+ * The thirteen public packages, in publish order (§7.4): the seven JavaScript workspaces, the five
+ * platform packages generated from the GitHub release archives (npm-platform.mjs; `location` null),
+ * and last the launcher, whose optional dependencies they are. Every other workspace must be private.
+ */
 export const RELEASE_PACKAGES = [
-  { name: '@anhlp/alp-protocol', location: 'packages/protocol' },
-  { name: '@anhlp/alp-core', location: 'packages/core' },
-  { name: '@anhlp/alp-runtime', location: 'packages/runtime' },
-  { name: '@anhlp/alp-client', location: 'packages/client' },
-  { name: '@anhlp/alp-daemon', location: 'packages/daemon' },
-  { name: '@anhlp/alp-cli', location: 'packages/cli' },
-  { name: '@anhlp/alp-paseo', location: 'integrations/paseo' },
-  { name: '@anhlp/alp', location: '.' },
+  { name: '@anhlp/alp-protocol', location: 'packages/protocol', kind: 'workspace' },
+  { name: '@anhlp/alp-core', location: 'packages/core', kind: 'workspace' },
+  { name: '@anhlp/alp-runtime', location: 'packages/runtime', kind: 'workspace' },
+  { name: '@anhlp/alp-client', location: 'packages/client', kind: 'workspace' },
+  { name: '@anhlp/alp-daemon', location: 'packages/daemon', kind: 'workspace' },
+  { name: '@anhlp/alp-cli', location: 'packages/cli', kind: 'workspace' },
+  { name: '@anhlp/alp-paseo', location: 'integrations/paseo', kind: 'workspace' },
+  ...PLATFORMS.map(platform => ({ name: platform.name, location: null, kind: 'platform' })),
+  { name: LAUNCHER, location: LAUNCHER_LOCATION, kind: 'launcher' },
 ];
 export const RELEASE_NAMES = RELEASE_PACKAGES.map(pkg => pkg.name);
+/** A rehearsal packed without release archives has every package but the platform ones. */
+export const releaseNames = ({ platforms = true } = {}) => RELEASE_NAMES.filter(name => platforms || !PLATFORM_NAMES.includes(name));
+
+/** The platform package npm installs on this machine (none on an unsupported one). */
+export function hostPlatformName({ platform = process.platform, arch = process.arch } = {}) {
+  return PLATFORMS.find(entry => entry.os === platform && entry.cpu === arch)?.name;
+}
+
+/** The tarballs a consumer on this machine installs: npm refuses another platform's package outright. */
+export const installableArtifacts = (artifacts, host = hostPlatformName()) => artifacts.filter(artifact => !PLATFORM_NAMES.includes(artifact.name) || artifact.name === host);
 export const PLUGIN = '@anhlp/alp-paseo';
 export const MANIFEST_FILE = 'release-manifest.json';
 export const SUMS_FILE = 'SHA256SUMS';
@@ -95,10 +116,38 @@ export function internalDependencyProblems(pkg, version) {
   return problems;
 }
 
+/** The launcher's own rules: no dependencies or install scripts, and exactly the five platform packages, pinned. */
+export function launcherProblems(pkg, version) {
+  const problems = [];
+  if (Object.keys(pkg.dependencies ?? {}).length || Object.keys(pkg.peerDependencies ?? {}).length) problems.push(`${LAUNCHER}: the launcher must have no dependencies`);
+  for (const script of ['preinstall', 'install', 'postinstall', 'prepare']) if (pkg.scripts?.[script]) problems.push(`${LAUNCHER}: no ${script} script (nothing is downloaded after install)`);
+  const expected = Object.fromEntries(PLATFORM_NAMES.map(name => [name, version]));
+  if (JSON.stringify(pkg.optionalDependencies ?? {}) !== JSON.stringify(expected)) problems.push(`${LAUNCHER}: optionalDependencies must be exactly ${PLATFORM_NAMES.map(name => `${name}@${version}`).join(', ')}`);
+  if (JSON.stringify(pkg.bin) !== JSON.stringify({ alp: 'bin/alp.js' })) problems.push(`${LAUNCHER}: bin must be { alp: bin/alp.js }`);
+  return problems;
+}
+
+/** A platform package's own rules: its os/cpu/libc, only its executable, nothing else to run. */
+export function platformProblems(pkg, files) {
+  const platform = platformOf(pkg.name);
+  if (!platform) return [`${pkg.name}: not a platform package`];
+  const problems = [];
+  if (JSON.stringify(pkg.os) !== JSON.stringify([platform.os]) || JSON.stringify(pkg.cpu) !== JSON.stringify([platform.cpu])) problems.push(`${pkg.name}: os/cpu must be [${platform.os}]/[${platform.cpu}]`);
+  if (JSON.stringify(pkg.libc) !== JSON.stringify(platform.libc ? [platform.libc] : undefined)) problems.push(`${pkg.name}: libc must be ${platform.libc ? `[${platform.libc}]` : 'absent'}`);
+  for (const field of ['bin', 'scripts', 'dependencies', 'optionalDependencies', 'peerDependencies', 'main', 'exports']) if (pkg[field] !== undefined) problems.push(`${pkg.name}: must have no ${field}`);
+  if (files && !files.has(`bin/${platform.executable}`)) problems.push(`${pkg.name}: no bin/${platform.executable}`);
+  const allowed = ['package.json', 'README.md', 'LICENSE', 'NOTICE', THIRD_PARTY_NOTICES, `bin/${platform.executable}`];
+  const extra = files ? [...files.keys()].filter(file => !allowed.includes(file)) : [];
+  if (extra.length) problems.push(`${pkg.name}: a platform package ships only its executable and licence files, found ${extra.join(', ')}`);
+  if (files && !files.has(THIRD_PARTY_NOTICES)) problems.push(`${pkg.name}: no ${THIRD_PARTY_NOTICES}`);
+  return problems;
+}
+
 /**
- * Source checks before packing: exactly the eight release packages are public, all at `version`
- * with internal dependencies pinned to it, and package-lock.json agrees with the manifests.
- * `workspaces` is `[{ location, pkg }]` for the root (`.`) and every workspace.
+ * Source checks before packing: exactly the release packages are public, all at `version` with
+ * internal dependencies pinned to it, and package-lock.json agrees with the workspace manifests.
+ * `workspaces` is `[{ location, pkg }]` for the root (`.`), every workspace and the launcher
+ * (npm/alp, outside the workspaces). The platform packages are generated at pack time.
  */
 export function sourceProblems({ workspaces, lock, version }) {
   const problems = [];
@@ -106,12 +155,14 @@ export function sourceProblems({ workspaces, lock, version }) {
   const publicNames = workspaces.filter(({ pkg }) => !pkg.private).map(({ pkg }) => pkg.name);
   for (const name of publicNames) if (!RELEASE_NAMES.includes(name)) problems.push(`${name} is public but not a release package; mark it "private": true`);
   for (const expected of RELEASE_PACKAGES) {
+    if (expected.kind === 'platform') continue;
     const found = workspaces.find(({ pkg }) => pkg.name === expected.name);
     if (!found) { problems.push(`${expected.name}: no workspace has this name`); continue; }
     if (found.location !== expected.location) problems.push(`${expected.name}: found at ${found.location}, expected ${expected.location}`);
     if (found.pkg.private) problems.push(`${expected.name}: is private, but it is released`);
     if (found.pkg.version !== version) problems.push(`${expected.name}: version ${found.pkg.version}, expected ${version}`);
     problems.push(...internalDependencyProblems(found.pkg, version));
+    if (expected.kind === 'launcher') { problems.push(...launcherProblems(found.pkg, version)); continue; }
     const locked = lock?.packages?.[expected.location === '.' ? '' : expected.location];
     if (!locked) { problems.push(`${expected.name}: package-lock.json has no entry for ${expected.location}`); continue; }
     if (locked.version !== version) problems.push(`${expected.name}: package-lock.json records ${locked.version}, expected ${version}`);
@@ -134,19 +185,18 @@ export function createReleaseManifest({ version, git, build, pack, artifacts, sh
     build,
     pack,
     sha256sums,
-    packages: artifacts.map(({ name, version, filename, size, sha256, integrity, shasum, entryCount }) => ({ name, version, filename, size, sha256, integrity, shasum, entryCount })),
+    packages: artifacts.map(({ name, version, filename, size, sha256, integrity, shasum, entryCount, binary }) => ({ name, version, filename, size, sha256, integrity, shasum, entryCount, ...(binary ? { binary } : {}) })),
   };
 }
 
 /**
  * `alp web` runs alp-web (docs/alp/web.md): its service bundle, the browser app and their notices
- * ship inside the CLI, so both packages that carry the CLI must have them. The gateway it inlines
- * stays private (A5 refuses a ninth tarball); this list is checked beside A5, not as part of it.
+ * ship inside the CLI package (the executable embeds them too). The gateway it inlines stays private
+ * (A5 refuses a tarball outside the release); this list is checked beside A5, not as part of it.
  */
 const ALP_WEB_FILES = ['dist/alp-web.js', 'dist/alp-web/index.html', `dist/alp-web/${THIRD_PARTY_NOTICES}`, `dist/${THIRD_PARTY_NOTICES}`];
 export const SHIPPED_WEB_FILES = Object.freeze({
   '@anhlp/alp-cli': ALP_WEB_FILES,
-  '@anhlp/alp': ALP_WEB_FILES.map(file => `packages/cli/${file}`),
 });
 
 /**
@@ -156,13 +206,13 @@ export const SHIPPED_WEB_FILES = Object.freeze({
 export function shippedWebProblems(name, files) {
   const packed = new Set(files);
   const problems = (SHIPPED_WEB_FILES[name] ?? []).filter(file => !packed.has(file)).map(file => `${name}: ${file} is not packed; alp web cannot run (build the CLI with apps/gateway and apps/web present)`);
-  const sourcePrefix = name === '@anhlp/alp-cli' ? 'src/web/' : name === '@anhlp/alp' ? 'packages/cli/src/web/' : undefined;
+  const sourcePrefix = name === '@anhlp/alp-cli' ? 'src/web/' : undefined;
   if (sourcePrefix && [...packed].some(file => file.startsWith(sourcePrefix))) problems.push(`${name}: bundled-only ${sourcePrefix} is packed; it imports the unpublished gateway (ship dist/alp-web.js instead)`);
   return problems;
 }
 
 /** Problems a single packed package has, from its own files (no repository source involved). */
-function contentProblems(name, files, version, rootFiles) {
+function contentProblems(name, files, version, rootFiles, entry = {}) {
   const problems = [];
   const text = file => files.get(file)?.toString('utf8');
   let pkg;
@@ -177,6 +227,17 @@ function contentProblems(name, files, version, rootFiles) {
   if (!files.has('NOTICE')) problems.push(`${name}: no NOTICE`);
   for (const bin of Object.values(typeof pkg.bin === 'string' ? { [name]: pkg.bin } : pkg.bin ?? {})) {
     if (!files.has(bin.replace(/^\.\//, ''))) problems.push(`${name}: missing executable ${bin}`);
+  }
+  if (name === LAUNCHER) {
+    problems.push(...launcherProblems(pkg, version));
+    const extra = [...files.keys()].filter(file => !['package.json', 'README.md', 'LICENSE', 'NOTICE', 'bin/alp.js', 'lib/launcher.js'].includes(file));
+    if (extra.length) problems.push(`${name}: the launcher ships only bin/alp.js and lib/launcher.js, found ${extra.join(', ')}`);
+  }
+  if (PLATFORM_NAMES.includes(name)) {
+    problems.push(...platformProblems(pkg, files));
+    const binary = files.get(`bin/${platformOf(name).executable}`);
+    if (!entry.binary?.sha256) problems.push(`${name}: ${MANIFEST_FILE} records no binary sha256`);
+    else if (binary && createHash('sha256').update(binary).digest('hex') !== entry.binary.sha256) problems.push(`${name}: bin/${platformOf(name).executable} is not the executable ${MANIFEST_FILE} recorded from ${entry.binary.archive}`);
   }
   if (name === PLUGIN) {
     // The plugin carries code taken from Paseo (the bridge in server/dist): Paseo's licence ships with it.
@@ -205,8 +266,8 @@ function contentProblems(name, files, version, rootFiles) {
 }
 
 /**
- * Reads a release directory and checks only what is in it (A5): exactly the manifest's eight
- * tarballs, each matching SHA256SUMS and the manifest's sha256/integrity/shasum/size/entryCount,
+ * Reads a release directory and checks only what is in it (A5): exactly the manifest's thirteen
+ * tarballs (eight in a rehearsal packed without release archives), each matching SHA256SUMS and the manifest's sha256/integrity/shasum/size/entryCount,
  * at one version, with their licences and without Paseo in the core packages.
  * Returns `{ manifest, artifacts, problems, checksumProblems, notes }`: `checksumProblems` (also in
  * `problems`) are the files that are not the ones the manifest pinned; `artifacts` carry each packed package.json.
@@ -234,10 +295,18 @@ export function verifyRelease(directory, { sha, version, rehearsal = false } = {
   if (manifest.git?.dirty !== false) rehearsalOnly.push('packed from a checkout with uncommitted changes');
   if (!manifest.git?.tag) rehearsalOnly.push('no release tag at the packed commit');
   if (manifest.pack?.ignoreScripts !== false) rehearsalOnly.push('packed with --ignore-scripts (prepack did not run as for publish)');
+  const platforms = manifest.pack?.platforms !== false;
+  if (!platforms) rehearsalOnly.push('packed without the release archives: no platform packages, so the launcher has no executable');
+  else {
+    // The archives must be tied to the release-binaries run that drafted the GitHub release (release-acceptance sets it).
+    if (!/^\d+$/.test(String(manifest.pack?.binariesRun ?? '')) && !/^v\d/.test(manifest.pack?.binariesRelease?.tag ?? '')) rehearsalOnly.push('platform packages not tied to a release-binaries run (pack.binariesRun) or a published GitHub release (pack.binariesRelease)');
+    if (!/^[0-9a-f]{64}$/.test(manifest.pack?.archiveSha256Sums ?? '')) rehearsalOnly.push('no SHA256SUMS digest of the release archives (pack.archiveSha256Sums)');
+  }
   for (const reason of rehearsalOnly) (rehearsal ? notes : problems).push(`${MANIFEST_FILE}: ${reason}`);
 
   const listed = (manifest.packages ?? []).map(entry => entry.name);
-  if (JSON.stringify(listed) !== JSON.stringify(RELEASE_NAMES)) problems.push(`${MANIFEST_FILE}: packages are ${listed.join(', ')}; expected ${RELEASE_NAMES.join(', ')} in publish order`);
+  const expectedNames = releaseNames({ platforms });
+  if (JSON.stringify(listed) !== JSON.stringify(expectedNames)) problems.push(`${MANIFEST_FILE}: packages are ${listed.join(', ')}; expected ${expectedNames.join(', ')} in publish order`);
   const tarballs = readdirSync(directory).filter(file => file.endsWith('.tgz')).sort();
   const expectedFiles = (manifest.packages ?? []).map(entry => entry.filename).sort();
   for (const file of tarballs) if (!expectedFiles.includes(file)) checksumProblems.push(`${file}: tarball not in ${MANIFEST_FILE}`);
@@ -257,11 +326,11 @@ export function verifyRelease(directory, { sha, version, rehearsal = false } = {
     try { files = readTarball(buffer); } catch (error) { checksumProblems.push(`${label}: unreadable tarball: ${error.message}`); continue; }
     artifacts.push({ ...entry, file: path.join(directory, entry.filename), files });
   }
-  const rootFiles = artifacts.find(artifact => artifact.name === '@anhlp/alp')?.files;
+  const rootFiles = artifacts.find(artifact => artifact.name === LAUNCHER)?.files;
   for (const artifact of artifacts) {
     // npm's entryCount is the number of files it packed.
     if (artifact.files.size !== artifact.entryCount) problems.push(`${artifact.name}: ${artifact.files.size} files, but npm packed ${artifact.entryCount}`);
-    const { problems: found, pkg } = contentProblems(artifact.name, artifact.files, expectedVersion, rootFiles);
+    const { problems: found, pkg } = contentProblems(artifact.name, artifact.files, expectedVersion, rootFiles, artifact);
     problems.push(...found);
     artifact.manifest = pkg;
   }
@@ -276,12 +345,16 @@ export function releaseArtifacts(directory, options = {}) {
   const { checksumProblems, artifacts } = verifyRelease(directory, options);
   if (checksumProblems.length) throw new Error(`release artifacts in ${directory} do not match their checksums:\n${checksumProblems.join('\n')}`);
   const names = artifacts.map(artifact => artifact.name);
-  if (JSON.stringify(names) !== JSON.stringify(RELEASE_NAMES)) throw new Error(`release artifacts in ${directory} are ${names.join(', ')}, not the ${RELEASE_NAMES.length} release packages`);
+  const expected = names.some(name => PLATFORM_NAMES.includes(name)) ? RELEASE_NAMES : releaseNames({ platforms: false });
+  if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`release artifacts in ${directory} are ${names.join(', ')}, not the ${RELEASE_NAMES.length} release packages`);
   return artifacts;
 }
 
-/** Problems with what a consumer's package-lock.json installed, against the release manifest. */
-export function installedProblems(lock, manifest) {
+/**
+ * Problems with what a consumer's package-lock.json installed, against the release manifest. Of the
+ * platform packages only the host's is installed (`host`; none on an unsupported machine).
+ */
+export function installedProblems(lock, manifest, host = hostPlatformName()) {
   const problems = [];
   const expected = new Map(manifest.packages.map(entry => [entry.name, entry]));
   const seen = new Set();
@@ -289,19 +362,22 @@ export function installedProblems(lock, manifest) {
     const name = /(?:^|\/)node_modules\/(@anhlp\/[^/]+)$/.exec(key)?.[1];
     if (!name) continue;
     seen.add(name);
+    // Another platform's package: npm resolves the launcher's optional dependency from the registry
+    // (once published) or skips it; it is never installed on this machine, so its entry is not checked.
+    if (PLATFORM_NAMES.includes(name) && name !== host) continue;
     const release = expected.get(name);
     if (!release) { problems.push(`${key}: ${name} is not part of the release`); continue; }
     if (entry.version !== manifest.version) problems.push(`${key}: installed ${entry.version}, expected ${manifest.version}`);
     if (entry.integrity !== release.integrity) problems.push(`${key}: integrity ${entry.integrity} is not the saved tarball's ${release.integrity}`);
     if (!entry.resolved?.startsWith('file:') || !entry.resolved.endsWith(release.filename)) problems.push(`${key}: resolved from ${entry.resolved}, not the saved ${release.filename}`);
   }
-  for (const name of RELEASE_NAMES) if (!seen.has(name)) problems.push(`${name}: not installed`);
+  for (const { name } of manifest.packages) if (!seen.has(name) && (!PLATFORM_NAMES.includes(name) || name === host)) problems.push(`${name}: not installed`);
   return problems;
 }
 
 /**
  * The acceptance rows of §6.1 and §7.5. `binds` says what a pass must name: `sha` the release SHA,
- * `artifacts` also the SHA-256 of the saved SHA256SUMS (the exact eight tarballs).
+ * `artifacts` also the SHA-256 of the saved SHA256SUMS (the exact thirteen tarballs).
  */
 export const GATE_ROWS = [
   { id: 'H1', title: 'CI core + paseo (validate:core, validate:paseo), Ubuntu, Node 22 and 24', blocking: true, binds: 'sha' },
@@ -311,7 +387,7 @@ export const GATE_ROWS = [
   { id: 'H5', title: 'CI alp-web, Ubuntu and macOS', blocking: false, binds: 'sha' },
   { id: 'L1', title: 'Licence, license field, repository metadata (T4)', blocking: true, binds: 'sha' },
   { id: 'S1', title: 'npm audit high/critical triage of runtime dependencies (T6)', blocking: true, binds: 'sha' },
-  { id: 'A5', title: 'Saved artifacts: SHA256SUMS, 8 tarballs, version, licences, no gateway, no Paseo in core (release-verify)', blocking: true, binds: 'artifacts' },
+  { id: 'A5', title: 'Saved artifacts: SHA256SUMS, 13 tarballs (5 platform packages holding the release archives\' executables), version, licences, no gateway, no Paseo in core (release-verify)', blocking: true, binds: 'artifacts' },
   { id: 'R1', title: 'macOS, Codex, CLI/alpd C1–C9 on the tarballs', blocking: true, binds: 'artifacts' },
   { id: 'R2', title: 'macOS, Claude Code, CLI/alpd C1–C9 on the tarballs', blocking: true, binds: 'artifacts' },
   // D7: macOS is the primary test platform; Linux rows are run when possible and do not block.
@@ -320,10 +396,10 @@ export const GATE_ROWS = [
   { id: 'R5', title: 'macOS, Codex and Claude, plugin in Paseo 0.11.x + alp web W1–W6 on the tarballs', blocking: true, binds: 'artifacts' },
   { id: 'R6', title: 'Linux, Codex or Claude, plugin in Paseo 0.11.x + alp web W1–W6 on the tarballs', blocking: false, binds: 'artifacts' },
   { id: 'R7', title: 'macOS (Linux when possible), Codex and Claude, test/e2e/worktree-e2e.mjs at the release SHA', blocking: true, binds: 'sha' },
-  { id: 'Q1', title: 'Registry: beta dist-tag and integrity of all 8 match the manifest', blocking: true, binds: 'artifacts', phase: 'post' },
+  { id: 'Q1', title: 'Registry: beta dist-tag and integrity of all 13 match the manifest', blocking: true, binds: 'artifacts', phase: 'post' },
   { id: 'Q2', title: 'Clean install from the registry on macOS (Linux when possible); lockfile integrity matches', blocking: true, binds: 'artifacts', phase: 'post' },
   { id: 'Q3', title: 'Smoke on the registry install: C1, C2, C4, W2, W6', blocking: true, binds: 'artifacts', phase: 'post' },
-  { id: 'Q4', title: 'latest moved to the release for all 8 (D2: only after Q1–Q3)', blocking: true, binds: 'artifacts', phase: 'post' },
+  { id: 'Q4', title: 'latest moved to the release for all 13 (D2: only after Q1–Q3)', blocking: true, binds: 'artifacts', phase: 'post' },
   { id: 'Q5', title: 'Untagged install resolves every @anhlp/* to the release', blocking: true, binds: 'artifacts', phase: 'post' },
 ];
 

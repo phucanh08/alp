@@ -5,7 +5,7 @@
 import { cleanupFakeWeb, freeWebPort } from './beta-web-lifecycle.mjs';
 import { spawnSync } from 'node:child_process';
 import { spawnCommand } from './spawn-command.mjs';
-import { releaseArtifacts } from './release-lib.mjs';
+import { LAUNCHER, LAUNCHER_LOCATION, PLATFORM_NAMES, hostPlatformName, releaseArtifacts } from './release-lib.mjs';
 import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -26,9 +26,12 @@ try {
   const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
   const dependencies = {};
   const workspaceNames = [];
+  // Of the platform packages only this machine's installs (npm refuses another platform's outright).
+  const host = hostPlatformName();
   for (const artifact of saved ?? []) {
+    if (PLATFORM_NAMES.includes(artifact.name) && artifact.name !== host) continue;
     dependencies[artifact.name] = `file:${artifact.file}`;
-    if (artifact.name !== manifest.name) workspaceNames.push(artifact.name);
+    if (artifact.name !== LAUNCHER && !PLATFORM_NAMES.includes(artifact.name)) workspaceNames.push(artifact.name);
   }
   for (const location of saved ? [] : manifest.workspaces) {
     const pkg = JSON.parse(await readFile(path.join(root, location, 'package.json'), 'utf8'));
@@ -37,17 +40,15 @@ try {
     dependencies[pkg.name] = `file:${path.join(directory, packed.filename)}`;
     workspaceNames.push(pkg.name);
   }
-  const savedRoot = saved?.find(artifact => artifact.name === manifest.name);
-  const legacy = savedRoot ? undefined : JSON.parse(run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', directory], { cwd: root }))[0];
-  if (legacy) dependencies[manifest.name] = `file:${path.join(directory, legacy.filename)}`;
-  // Core distribution stays neutral even in a checkout with built plugin artifacts.
-  const shipped = new Set(savedRoot ? savedRoot.files.keys() : legacy.files.map(file => file.path));
-  for (const file of ['packages/cli/dist/cli.js', 'packages/core/dist/index.js', 'packages/client/dist/index.js', 'dist/alpd.js']) {
-    if (!shipped.has(file)) throw new Error(`the root distribution must ship ${file}`);
-  }
+  // @anhlp/alp is the npm launcher (t-cd7f): only bin/alp.js and lib/launcher.js, no JavaScript of ALP's.
+  const savedLauncher = saved?.find(artifact => artifact.name === LAUNCHER);
+  const launcherPack = savedLauncher ? undefined : JSON.parse(run('npm', ['pack', `./${LAUNCHER_LOCATION}`, '--ignore-scripts', '--json', '--pack-destination', directory], { cwd: root }))[0];
+  if (launcherPack) dependencies[LAUNCHER] = `file:${path.join(directory, launcherPack.filename)}`;
+  const shipped = new Set(savedLauncher ? savedLauncher.files.keys() : launcherPack.files.map(file => file.path));
   for (const file of shipped) {
-    if (/integrations\/|@getpaseo\//.test(file)) throw new Error(`core tarball leaks ${file}`);
+    if (!['package.json', 'README.md', 'LICENSE', 'NOTICE', 'bin/alp.js', 'lib/launcher.js'].includes(file)) throw new Error(`the launcher ${LAUNCHER} must ship only its launcher, found ${file}`);
   }
+  const withExecutable = Boolean(host && dependencies[host]);
   // The plugin package's server entry needs its host SDK peers; pin the versions this repository
   // resolved. The React client-host peers stay out of this server-only smoke.
   const plugin = saved?.find(artifact => artifact.name === '@anhlp/alp-paseo')?.manifest ?? JSON.parse(await readFile(path.join(root, 'integrations/paseo/package.json'), 'utf8'));
@@ -60,7 +61,7 @@ try {
   // Client-side plugin peers are supplied by Paseo; no React Native host is needed for this server smoke.
   run('npm', ['install', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund']);
   const imports = workspaceNames.filter(name => name !== '@anhlp/alp-paseo');
-  run(process.execPath, ['--input-type=module', '-e', `for (const name of ${JSON.stringify(imports)}) await import(name).catch(error => { if (error?.code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw error; }); await import('./node_modules/@anhlp/alp-paseo/server/dist/index.js'); await import('./node_modules/@anhlp/alp-cli/dist/acp.js'); await import('./node_modules/@anhlp/alp/packages/core/dist/index.js'); await import('./node_modules/@anhlp/alp/packages/client/dist/index.js');`]);
+  run(process.execPath, ['--input-type=module', '-e', `for (const name of ${JSON.stringify(imports)}) await import(name).catch(error => { if (error?.code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw error; }); await import('./node_modules/@anhlp/alp-paseo/server/dist/index.js'); await import('./node_modules/@anhlp/alp-cli/dist/acp.js'); `]);
   await writeFile(path.join(directory, 'consumer.ts'), `import { createAlpRuntime, createProviderRegistry, type RuntimeOptions } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { connect } from '@anhlp/alp-client';
@@ -87,8 +88,17 @@ void frame; void observe;
   alp('daemon', 'start');
   alp('daemon', 'status');
   alp('daemon', 'stop');
-  const legacyCli = path.join(directory, 'node_modules/@anhlp/alp/packages/cli/dist/cli.js');
-  for (const args of [['init', path.join(directory, 'legacy-project')], ['upgrade', path.join(directory, 'legacy-project')], ['language'], ['daemon', 'start'], ['daemon', 'status'], ['daemon', 'stop']]) run(process.execPath, [legacyCli, ...args], { env });
+  // The launcher: with this machine's platform package it runs the ALP executable from the release
+  // archive; without one (a rehearsal packed without archives) it fails with the install hints.
+  const launcher = path.join(directory, 'node_modules', LAUNCHER, 'bin', 'alp.js');
+  if (withExecutable) {
+    const version = run(process.execPath, [launcher, '--version'], { env }).trim();
+    if (version !== manifest.version) throw new Error(`alp --version through ${LAUNCHER} printed ${JSON.stringify(version)}, expected ${manifest.version}`);
+    run(process.execPath, [launcher, 'init', path.join(directory, 'launcher-project')], { env });
+  } else {
+    const missing = spawnSync(process.execPath, [launcher, '--version'], { cwd: directory, env, encoding: 'utf8', timeout: 60_000 });
+    if (missing.status !== 1 || !/install\.sh/.test(missing.stderr)) throw new Error(`${LAUNCHER} without a platform package must exit 1 with the install hints; exited ${missing.status}: ${missing.stderr}`);
+  }
   // `alp web` runs alp-web, which ships in the CLI: it needs no plugin. It starts from an unrelated
   // directory through a symlink, as its own process, with the alpgw1 token of a live credential.
   const bin = path.join(directory, 'bin');
@@ -96,7 +106,7 @@ void frame; void observe;
   await mkdir(bin, { recursive: true });
   await mkdir(elsewhere, { recursive: true });
   const alpLink = path.join(bin, 'alp');
-  await symlink(path.relative(bin, legacyCli), alpLink);
+  await symlink(path.relative(bin, cli), alpLink);
   const fromElsewhere = (...args) => run(process.execPath, [alpLink, ...args], { cwd: elsewhere, env });
   const line = fromElsewhere('web', '--print').trim().split('\n').pop();
   const match = /^(http:\/\/127\.0\.0\.1:\d+)\/#token=(alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43})$/.exec(line);
@@ -117,7 +127,7 @@ void frame; void observe;
   run(process.execPath, [path.join(directory, 'node_modules/@anhlp/alp-paseo/server/dist/main.js'), '--register'], { env });
   const paired = fromElsewhere('web', 'pair', '--off');
   if (!/relay is off/i.test(paired)) throw new Error(`alp web pair --off did not report the relay off: ${paired}`);
-  console.log(`Standalone installation verified: ${imports.length} module APIs, Paseo server, ACP, CLI and daemon lifecycle, the legacy @anhlp/alp distribution, alp web (alp-web, no plugin) and the separately installed Paseo integration.`);
+  console.log(`Standalone installation verified: ${imports.length} module APIs, Paseo server, ACP, CLI and daemon lifecycle, the ${LAUNCHER} launcher (${withExecutable ? `running the ${host} executable` : 'no platform package: install hints'}), alp web (alp-web, no plugin) and the separately installed Paseo integration.`);
 } finally {
   await cleanupFakeWeb(env.ALP_HOME, () => {
     if (cli) spawnSync(process.execPath, [cli, 'daemon', 'stop'], { cwd: directory, env, stdio: 'ignore', timeout: 20_000 });

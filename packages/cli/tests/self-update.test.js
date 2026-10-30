@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  allowedHop, cleanupOldExecutable, retryBusy, compareVersions, fetchBytes, npmMessage, oldPath, releaseBaseUrl, releasePlatform, replaceExecutable,
+  allowedHop, cleanupOldExecutable, isNpmExecutable, retryBusy, compareVersions, fetchBytes, npmMessage, oldPath, releaseBaseUrl, releasePlatform, replaceExecutable,
   selectAsset, selfUpdate, sha256, verifyChecksum, verifyProvenance,
 } from '../src/self-update.js';
 
@@ -195,6 +195,22 @@ test('npm mode prints how to update with npm and exits 0; template arguments get
   const packaged = [];
   assert.equal(await selfUpdate(['.'], { packaged: true, log: l => packaged.push(l), warn: l => packaged.push(l) }), 1);
   assert.match(packaged.join('\n'), /did you mean `alp update-template`/);
+});
+
+test('the executable npm installed (@anhlp/alp-<os>-<arch>) is updated with npm, never in place (t-cd7f)', async () => {
+  for (const execPath of [
+    '/usr/local/lib/node_modules/@anhlp/alp-darwin-arm64/bin/alp',
+    '/home/u/.npm-global/lib/node_modules/@anhlp/alp-linux-x64/bin/alp',
+    'C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules\\@anhlp\\alp-win32-x64\\bin\\alp.exe',
+  ]) {
+    assert.equal(isNpmExecutable(execPath), true, execPath);
+    const out = [];
+    const fetched = [];
+    assert.equal(await selfUpdate(['--yes'], { packaged: true, execPath, fetchBytes: async url => { fetched.push(url); throw new Error('no fetch'); }, log: l => out.push(l), warn: l => out.push(l) }), 0);
+    assert.match(out.join('\n'), /installed with npm; update it with npm:\n {2}npm install -g @anhlp\/alp@beta/);
+    assert.deepEqual(fetched, []);
+  }
+  for (const execPath of ['/Users/u/.alp/bin/alp', '/opt/node_modules/@anhlp/alp-cli/bin/alp', '/x/node_modules/@anhlp/alp-darwin-arm64/alp', '']) assert.equal(isNpmExecutable(execPath), false, execPath);
 });
 
 /** A file:// mirror with one real archive for this host holding a fake executable. */
