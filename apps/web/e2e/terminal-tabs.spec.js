@@ -271,7 +271,13 @@ test('terminal directory events show external shells without stealing their stre
     await expect.poll(async () => (await list()).filter(item => item.state === 'running').length).toBe(0);
   } finally { remote.close(); }
   // New gateway connection => new scoped cursor/reset snapshot, no stale subscription IDs.
+  // The page comes back on its reconnect backoff (0.5 s doubling to 15 s), not when the gateway
+  // does: wait until the restarted gateway answered a new socket and the page is open again, so
+  // the shell below starts on that connection and its 15 s wait covers the shell alone.
+  const reconnected = new Promise(resolve => page.on('websocket', socket => socket.on('framereceived', () => resolve(undefined))));
   await world.restartGateway();
+  await reconnected;
+  await expect(page.getByText(/Connection to the host lost/)).toBeHidden();
   await page.getByRole('button', { name: 'New tab', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
   await page.getByRole('button', { name: 'Add terminal', exact: true }).click();
