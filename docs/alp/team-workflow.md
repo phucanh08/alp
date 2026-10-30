@@ -762,10 +762,21 @@ answers a question an agent asked. ALP enforces this on every path it controls:
   alpd then refuses that connection `task.gate.resolve` on a human gate and
   `question.answer` (alp_ask questions, approvals and gate cards). Agent mail
   (`alp_send` answers) does not go through `question.answer` and is unaffected.
-- A ledger in `$ALP_HOME/gates/` records each human gate ALP opened and each
-  clear or removal ALP made. When a task file shows a ledgered human gate
-  cleared or gone without a record there, ALP reopens it on read and marks it
-  `tampered`; `alp task show` warns that it was changed outside ALP.
+- An agent's connection may not open, attach to or type into a daemon terminal
+  (`terminal.create`, `terminal.attach`, `terminal.input`): those shells carry no
+  `ALP_AGENT_SESSION`.
+- A ledger in `$ALP_HOME/gates/` records each open human gate ALP writes (with
+  `alp_task`/`alp task gate add`, a formula's human step, or a beads import) and
+  each clear or removal ALP makes. When a task file shows a ledgered human gate
+  cleared, changed or gone without a record there, ALP reopens it on read and
+  marks it `tampered`; `alp task show` warns that it was changed outside ALP.
+  An unreadable ledger detects nothing on read, and ALP refuses to clear a human
+  gate until you fix or remove it.
+
+The ledger is per machine, while task files travel with Git. A human gate you
+clear in another clone or on another machine, then pull, or a checkout of a
+commit from before the gate, looks like a change outside ALP here: ALP reopens
+the gate, and you clear (or `alp task gate rm`) it again on this machine.
 
 The user's own paths are unchanged: Paseo cards and the Tasks panel, ALP Web,
 and the CLI in any terminal (including a Paseo or Web terminal) that an agent
@@ -775,8 +786,9 @@ Residual risk: this raises the bar and detects naive bypasses; it is not a
 security boundary. A full-access agent runs as the same OS user as you, so it
 can unset `ALP_AGENT_SESSION`, speak to the daemon socket directly without
 announcing `principal.agent`, edit the ledger in `$ALP_HOME` as well as the task
-file, or fake a TTY. Human gates opened before the ledger existed are not in it
-and are taken as they are. Only OS-level separation (running agents as another
+file, or fake a TTY. An older alpd does not enforce the daemon refusals. Human
+gates opened before the ledger existed enter it only the next time ALP writes
+their task; until then a file edit that clears them goes undetected. Only OS-level separation (running agents as another
 user, or in a sandbox that cannot reach `$ALP_HOME`, the daemon socket and
 `.alp/tasks`) prevents it. Give full access only to agents you trust with that.
 
