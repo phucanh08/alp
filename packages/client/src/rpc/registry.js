@@ -207,6 +207,11 @@ export function conversation(client) {
      */
     resumeCommand: params => client.request('session.resumeCommand', params),
     /**
+     * The slash commands and skills the session's composer offers after "/" (capability `session.commands`, §12.12).
+     * @param {Map['session.commands']['params']} params @returns {Promise<Map['session.commands']['result']>}
+     */
+    commands: params => client.request('session.commands', params),
+    /**
      * Changes a live root's model, effort or team (capability `session.configure.live`, §12.9) at the
      * idle barrier, through a restart of its native process on the same conversation; `configured` says
      * what it runs with now. Sent once: repeat the same `requestId` after a lost answer. A change to

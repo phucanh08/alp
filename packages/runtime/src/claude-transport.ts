@@ -25,6 +25,7 @@ type SDKUserMessage = any;
 type SDKMessage = any;
 type ClaudeQuery = AsyncGenerator<SDKMessage, void> & {
   supportedModels(): Promise<Array<{ value: string; displayName: string; description: string; supportedEffortLevels?: string[] }>>;
+  supportedCommands(): Promise<Array<{ name: string; description: string; argumentHint?: string }>>;
   usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(options: { skipBehaviors: boolean }): Promise<any>;
   getContextUsage(options: { detail: 'summary' | 'full' }): Promise<any>;
   interrupt(): Promise<unknown>;
@@ -462,6 +463,15 @@ export class ClaudeTransport {
     return { runtime: 'claude', observedAt: new Date().toISOString(), catalogAvailable: Array.isArray(catalog),
       models: (catalog ?? []).map(model => ({ id: `claude:${model.value}`, label: model.displayName,
         description: model.description, thinking: model.supportedEffortLevels })), usage: claudeUsage(usage) };
+  }
+  /** Claude's slash commands, skills included, for the composer (t-f628); none before the session starts. */
+  async commands() {
+    const listed = this.query ? await optionalRead(async () => this.query!.supportedCommands(), 10_000) : undefined;
+    return (Array.isArray(listed) ? listed : []).filter(command => typeof command?.name === 'string' && command.name).map(command => ({
+      name: command.name, description: typeof command.description === 'string' ? command.description : '',
+      ...(command.argumentHint ? { argumentHint: command.argumentHint } : {}),
+      kind: command.name.startsWith(`${SKILL_PLUGIN}:`) ? 'skill' as const : 'command' as const,
+    }));
   }
   async initialize() {}
 

@@ -255,6 +255,7 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 | `session.rewind` | `session.rewind`: a root's conversation from before a turn, same id, later turns kept as a recoverable branch, files never changed; the `history.reset` event (§12.7). Same condition as `session.fork`. |
 | `session.reload` | `session.reload`: a live root's native process restarts on its own conversation and configuration, same id, history and receipts (§12.8). Listed with a store and a runtime that restarts a root on its own conversation, on macOS and Linux (not Windows). |
 | `session.resumeCommand` | `session.resumeCommand`: the `alp attach <sessionId>` command for the clipboard, as argv and POSIX/cmd.exe lines (§12.8). Listed with a store. |
+| `session.commands` | `session.commands`: the slash commands and skills a live session's composer offers after "/" (§12.12). Listed when the runtime lists commands. |
 | `session.configure.live` | `session.configure` also takes `model`, `thinking` and `team` (with `requestId` and `ifGeneration`): a live root's configuration changes at the idle barrier through a restart on the same conversation, written only after the runtime took it; `session.configure.preview` (§12.9). Listed with a store and a runtime that restarts a root with a new configuration, on macOS and Linux (not Windows). |
 
 alpd before this revision already had the first three without listing them; the others are new. A method whose
@@ -1560,6 +1561,22 @@ empty query lists the root with `workspace.files.list`, and its Files panel uses
 A refusal or a lost daemon is the bridge's error, never a local read. Unlike that backend, alpd
 never lists or reads a blocked path (`.git`, `.env*`, keys) nor a hard-linked file, and never
 follows a link out of the workspace.
+
+### 12.12 Slash commands (`session.commands`)
+
+Capability `session.commands` (t-f628). **`session.commands { sessionId }`** → `{ commands: [{ name,
+description, argumentHint?, kind }] }`: what a live session's composer offers after "/". First the
+runtime's own commands and skills (Claude's `supportedCommands()`; Codex lists none), then each ALP
+skill of the session's agent the runtime did not list, named as the runtime runs it (`alp:<name>` on
+Claude, `<name>` otherwise), `kind: "skill"`, with its SKILL.md description. Names have no whitespace or
+control character; no path is ever answered. A runtime that cannot answer leaves the skills; a session
+alpd does not hold is `1001`, one that is not open `1005`. A client inserts `/<name> ` and sends the text
+as an ordinary prompt.
+
+The gateway exposes it with `session.read` (the session in the grant) and passes on only the known fields.
+The Paseo provider sends the list as `session.commands` when a root is ready and after each of its turns
+(only when it changed), declares `prompt.command`, and sends a command chosen in Paseo as the text
+`/<name> <arguments>`, as Paseo's ACP adapter does.
 
 ## 13. Compatibility notes for this revision
 

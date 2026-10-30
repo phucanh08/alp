@@ -245,6 +245,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
             fileLimits={connection.attachmentLimits}
             filesUnavailable={fileGate ?? undefined}
             addText={refill}
+            commands={() => controller.listCommands(root)}
             onSend={(text, images, files) => controller.sendPrompt(text, undefined, images, files)}
             onQueue={text => controller.queuePrompt(text)}
             onInterruptSend={text => controller.interruptAndSend(text)}
