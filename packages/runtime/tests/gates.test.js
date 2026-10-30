@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { initProject } from '@anhlp/alp-core/init';
 import { addGate, createTask, getTask, resolveGate } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
+import { words } from '@anhlp/alp-runtime/language';
 import { fakeTransport, until } from '../../../test/support/fake-agent.js';
 
 // Human gates mirrored as cards on main (t-ccac): the task files stay the source of truth.
@@ -20,9 +21,9 @@ async function project(t) {
 }
 const homes = new Map();
 
-async function start(t, root, { prompt = true } = {}) {
+async function start(t, root, { prompt = true, gateSyncMs = 20 } = {}) {
   const agents = [];
-  const runtime = createAlpRuntime({ transport: fakeTransport(agents), supervisor: false, gateSyncMs: 20, libraryDir: homes.get(root) });
+  const runtime = createAlpRuntime({ transport: fakeTransport(agents), supervisor: false, gateSyncMs, libraryDir: homes.get(root) });
   let stopped = false;
   const stop = async () => { if (!stopped) { stopped = true; await runtime.shutdown(); } };
   t.after(stop);
@@ -59,13 +60,15 @@ test('an open human gate shows as a card on main, outside the one-question limit
   await until(() => !runtime.snapshot('root').activeTurnId);
   assert.ok(card(runtime, task.id));
 
-  runtime.answer(question.id, { text: 'Ship to staging', channel: 'paseo' });
-  await until(async () => (await getTask(root, task.id)).gates[0].resolved?.notified, 'decision reported');
+  await runtime.answer(question.id, { text: 'Ship to staging', channel: 'paseo' });
   const gate = (await getTask(root, task.id)).gates[0];
   assert.equal(gate.resolved.choice, 'Ship to staging');
   assert.equal(gate.resolved.channel, 'paseo');
   assert.equal(gate.resolved.by, 'user');
   await until(() => decisions(main()) === 1, 'decision mail');
+  // Marked reported once main's turn took the mail (t-595d).
+  main().finish();
+  await until(async () => (await getTask(root, task.id)).gates[0].resolved?.notified, 'decision reported');
   assert.match(said(main()), /approved human gate g1 of .* in paseo, choosing "Ship to staging"/);
   assert.equal(card(runtime, task.id), undefined);
   await runtime.syncGates(root);
@@ -80,12 +83,13 @@ test('dismissing a card rejects the gate: it stays open, the reason is recorded,
   const { runtime, main } = await start(t, root);
   await until(() => card(runtime, task.id), 'gate card');
   assert.deepEqual(card(runtime, task.id).options, ['Duyệt', 'Từ chối']);
-  runtime.answer(`gate-${task.id}-g1`, { dismiss: true, reason: 'Wait for QA', channel: 'web' });
+  await runtime.answer(`gate-${task.id}-g1`, { dismiss: true, reason: 'Wait for QA', channel: 'web' });
+  await until(() => decisions(main()) === 1, 'rejection mail');
+  main().finish();
   await until(async () => (await getTask(root, task.id)).gates[0].rejected?.notified, 'rejection reported');
   const gate = (await getTask(root, task.id)).gates[0];
   assert.equal(gate.resolved, undefined);
   assert.deepEqual([gate.rejected.reason, gate.rejected.channel], ['Wait for QA', 'web']);
-  await until(() => decisions(main()) === 1, 'rejection mail');
   assert.match(said(main()), /rejected human gate g1 .* in web: Wait for QA\. The gate stays open/);
   await runtime.syncGates(root);
   assert.equal(card(runtime, task.id), undefined);
@@ -99,15 +103,17 @@ test('the default Reject answer rejects; the panel and the card racing on one ga
   await addGate(root, task.id, { kind: 'human', note: 'Also?' }, 'main');
   const { runtime, main } = await start(t, root);
   await until(() => card(runtime, task.id, 'g1') && card(runtime, task.id, 'g2'), 'two cards');
-  runtime.answer(`gate-${task.id}-g2`, { text: 'Từ chối' });
+  await runtime.answer(`gate-${task.id}-g2`, { text: 'Từ chối' });
   // The web panel (task.gate.resolve) clears g1 while the card answer for it is in flight.
   const before = (await getTask(root, task.id)).rev;
   const panel = resolveGate(root, task.id, 'g1', { by: 'user', channel: 'web', ifRev: before });
-  runtime.answer(`gate-${task.id}-g1`, { text: 'Duyệt', channel: 'paseo' });
-  const outcomes = await Promise.allSettled([panel, runtime.syncGates(root)]);
-  assert.ok(outcomes.length === 2);
-  await until(async () => { const gates = (await getTask(root, task.id)).gates; return gates[0].resolved?.notified && gates[1].rejected?.notified; }, 'both reported');
+  const answered = runtime.answer(`gate-${task.id}-g1`, { text: 'Duyệt', channel: 'paseo' });
+  const outcomes = await Promise.allSettled([panel, answered, runtime.syncGates(root)]);
+  // One of the two wins; the one that lost is told so (t-595d).
+  assert.equal(outcomes.slice(0, 2).filter(outcome => outcome.status === 'fulfilled').length, 1, JSON.stringify(outcomes));
   await until(() => decisions(main()) === 2, 'two decision mails');
+  main().finish();
+  await until(async () => { const gates = (await getTask(root, task.id)).gates; return gates[0].resolved?.notified && gates[1].rejected?.notified; }, 'both reported');
   const gates = (await getTask(root, task.id)).gates;
   assert.ok(['web', 'paseo'].includes(gates[0].resolved.channel));
   assert.equal(gates[1].rejected.reason, undefined, 'the Reject option itself is not a reason');
@@ -132,10 +138,12 @@ test('cards are rebuilt after a restart, and a decision made with no main live r
   const second = await start(t, root, { prompt: false });
   await until(() => card(second.runtime, task.id, 'g1'), 'card rebuilt');
   assert.equal(card(second.runtime, task.id, 'g2'), undefined);
-  await until(async () => (await getTask(root, task.id)).gates[1].resolved?.notified, 'reported to the next main');
-  await second.runtime.prompt('root', { clientMessageId: 'm2', delivery: 'auto', content: [{ type: 'text', text: 'Hi' }] });
   await until(() => decisions(second.main()) === 1, 'mail to the next main');
   assert.match(said(second.main()), /approved human gate g2 .* in cli: fine/);
+  second.main().finish();
+  await until(async () => (await getTask(root, task.id)).gates[1].resolved?.notified, 'reported to the next main');
+  await until(() => !second.runtime.snapshot('root').activeTurnId);
+  await second.runtime.prompt('root', { clientMessageId: 'm2', delivery: 'auto', content: [{ type: 'text', text: 'Hi' }] });
   await second.runtime.syncGates(root);
   assert.equal(decisions(second.main()), 1);
 });
@@ -168,16 +176,97 @@ test('an options card: Reject keeps the gate open with no reason, and free text 
   const { runtime, main } = await start(t, root);
   await until(() => card(runtime, task.id) && card(runtime, task.id, 'g2'), 'cards');
   const reject = card(runtime, task.id).options.at(-1);
-  runtime.answer(card(runtime, task.id).id, { text: reject, channel: 'web' });
-  runtime.answer(card(runtime, task.id, 'g2').id, { text: 'Neither, ask QA', channel: 'paseo' });
+  await Promise.all([
+    runtime.answer(card(runtime, task.id).id, { text: reject, channel: 'web' }),
+    runtime.answer(card(runtime, task.id, 'g2').id, { text: 'Neither, ask QA', channel: 'paseo' }),
+  ]);
+  await until(() => decisions(main()) === 2, 'two mails');
+  main().finish();
   await until(async () => { const gates = (await getTask(root, task.id)).gates; return gates[0].rejected?.notified && gates[1].rejected?.notified; }, 'both rejections reported');
   const gates = (await getTask(root, task.id)).gates;
   assert.equal(gates[0].resolved, undefined);
   assert.equal(gates[0].rejected.reason, undefined);
   assert.equal(gates[1].resolved, undefined);
   assert.equal(gates[1].rejected.reason, 'Neither, ask QA');
-  await until(() => decisions(main()) === 2, 'two mails');
   await runtime.syncGates(root);
   assert.equal(card(runtime, task.id), undefined, 'a rejected gate shows no card again');
   assert.equal(card(runtime, task.id, 'g2'), undefined);
+});
+
+test('an option that is the Reject label, in any language ALP writes it, is refused when the gate is made (t-595d)', async t => {
+  const root = await project(t);
+  const task = await createTask(root, { title: 'Pick' }, 'user');
+  // Trimmed, without case, and in either Unicode form: each would hide Reject and approve instead.
+  for (const label of [words('en').reject, words('vi').reject, ' reject ', 'REJECT', 'TỪ CHỐI', ' từ chối '.normalize('NFD')]) {
+    await assert.rejects(addGate(root, task.id, { kind: 'human', note: 'Which?', options: ['Ship', label] }, 'main'), /Reject/, JSON.stringify(label));
+  }
+  assert.equal((await getTask(root, task.id)).gates.length, 0);
+  const { main } = await start(t, root);
+  assert.match((await main().call('alp_task', { action: 'gate', id: task.id, kind: 'human', note: 'Which?', options: ['Ship', 'Từ chối'] })).error ?? '', /Reject/);
+  // A word that only contains it is an ordinary option.
+  await main().call('alp_task', { action: 'gate', id: task.id, kind: 'human', note: 'Which?', options: ['Ship', 'Reject the beta'] });
+  assert.deepEqual((await getTask(root, task.id)).gates.map(gate => gate.options), [['Ship', 'Reject the beta']]);
+});
+
+test('a decision main never took is mailed again after a restart, and is not mailed twice while it waits (t-595d)', async t => {
+  const root = await project(t);
+  const task = await createTask(root, { title: 'Crash' }, 'user');
+  await addGate(root, task.id, { kind: 'human', note: 'Go?' }, 'main');
+  const first = await start(t, root);
+  await until(() => card(first.runtime, task.id), 'gate card');
+  await first.runtime.answer(`gate-${task.id}-g1`, { text: 'Duyệt', channel: 'web' });
+  await until(() => decisions(first.main()) === 1, 'decision steered into the running turn');
+  // The timer syncs many times while main's turn runs: the mail on its way is not sent again.
+  await new Promise(resolve => setTimeout(resolve, 120));
+  assert.equal(decisions(first.main()), 1, 'one mail while it waits');
+  // alpd stops before main's turn completes: main never acknowledged the mail.
+  await first.stop();
+  assert.equal((await getTask(root, task.id)).gates[0].resolved.notified, undefined, 'not marked before main took it');
+
+  const second = await start(t, root, { prompt: false });
+  await until(() => decisions(second.main()) === 1, 'the decision, mailed to the next main');
+  second.main().finish();
+  await until(async () => (await getTask(root, task.id)).gates[0].resolved?.notified, 'marked once main took it');
+  await second.runtime.syncGates(root);
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(decisions(second.main()), 1, 'mailed once to this main');
+});
+
+test('a decision written outside alpd reaches main at once, not on the next timer sync (t-595d)', async t => {
+  const root = await project(t);
+  const task = await createTask(root, { title: 'Prompt' }, 'user');
+  await addGate(root, task.id, { kind: 'human', note: 'Go?' }, 'main');
+  const { runtime, main } = await start(t, root, { gateSyncMs: 60_000 });
+  await until(() => card(runtime, task.id), 'gate card');
+  // The CLI (or Paseo's local Tasks panel) writes the task file without alpd.
+  await resolveGate(root, task.id, 'g1', { by: 'user', channel: 'cli', note: 'go' });
+  await until(() => decisions(main()) === 1, 'the cli decision, long before the timer');
+  await until(() => !card(runtime, task.id), 'card settled');
+});
+
+test('a second answer to a gate card, an answer another channel beat, and a failed write are refused to the caller (t-595d)', async t => {
+  const root = await project(t);
+  const task = await createTask(root, { title: 'Twice' }, 'user');
+  const other = await createTask(root, { title: 'Broken' }, 'user');
+  await addGate(root, task.id, { kind: 'human', note: 'Go?' }, 'main');
+  await addGate(root, task.id, { kind: 'human', note: 'Also?' }, 'main');
+  await addGate(root, other.id, { kind: 'human', note: 'Fix?' }, 'main');
+  const { runtime } = await start(t, root, { gateSyncMs: 60_000 });
+  await until(() => card(runtime, task.id) && card(runtime, task.id, 'g2') && card(runtime, other.id), 'cards');
+
+  // Two answers to one card: the first decides, the second is refused, not dropped.
+  const first = runtime.answer(`gate-${task.id}-g1`, { text: 'Duyệt', channel: 'web' });
+  await assert.rejects(Promise.resolve().then(() => runtime.answer(`gate-${task.id}-g1`, { text: 'Từ chối', channel: 'paseo' })), /already/);
+  await first;
+  const gate = (await getTask(root, task.id)).gates[0];
+  assert.deepEqual([!!gate.resolved, gate.resolved.channel, gate.rejected], [true, 'web', undefined]);
+
+  // Another channel decided g2 first: the card's answer says so.
+  await resolveGate(root, task.id, 'g2', { by: 'user', channel: 'cli' });
+  await assert.rejects(Promise.resolve().then(() => runtime.answer(`gate-${task.id}-g2`, { text: 'Từ chối', channel: 'web' })), /already/);
+  assert.equal((await getTask(root, task.id)).gates[1].rejected, undefined);
+
+  // The write fails: the caller gets the error.
+  await writeFile(path.join(root, '.alp', 'tasks', `${other.id}.json`), '{ not json');
+  await assert.rejects(Promise.resolve().then(() => runtime.answer(`gate-${other.id}-g1`, { text: 'Duyệt', channel: 'web' })));
 });

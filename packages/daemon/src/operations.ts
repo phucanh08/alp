@@ -51,7 +51,7 @@ const SECRET_MAPS: Record<string, string[][]> = {
 const failure = (code: number, reason: string, message: string, extra: object = {}) => new RpcError(code, message, { reason, ...extra });
 
 /** Core refusals (AlpError codes) as protocol errors; `context` decides what an ambiguous one means. */
-function fromCore(error: any, context: { notFound?: 'not_found' | 'invalid_entry' } = {}): unknown {
+export function fromCore(error: any, context: { notFound?: 'not_found' | 'invalid_entry' } = {}): unknown {
   if (error instanceof RpcError || typeof error?.code !== 'string' || error?.name !== 'AlpError') return error;
   const message = error.message as string;
   switch (error.code) {
@@ -208,7 +208,7 @@ export function createOperations({ home, templates, knownProjects = () => [], on
     }),
 
     // Approves a gate, or with reject records the user's rejection and leaves it open. Either way
-    // the runtime is told, so main gets the decision by mail once and the gate's card settles.
+    // the runtime is told, so main gets the decision by mail (at least once) and the gate's card settles.
     'task.gate.resolve': guard(async ({ projectRoot, id, gate, note, ifRev, choice, reject, channel = 'web' }, caller) => {
       const root = await project(projectRoot);
       // Only the user decides a human gate: never a connection an ALP agent opened (t-ca1f).

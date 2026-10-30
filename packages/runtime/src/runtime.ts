@@ -18,7 +18,7 @@ import { TASK_ACTIONS, TASK_PAST, TASK_FIELDS, mainOf, roleOf, taskActions, task
 import { nativeEnvironment, createTransport } from './providers.js';
 import { nativeMode, codexApproval, profileEfforts, nativeSessionConfig } from './session-config.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, watch as watchFiles, type FSWatcher } from 'node:fs';
 import { appendFile, mkdir, open, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { moveFile } from '@anhlp/alp-core/atomic';
 import os from 'node:os';
@@ -56,7 +56,7 @@ import { providerUsage, sessionUsage, type ProviderUsage } from './usage.js';
 import { parse as toml } from 'smol-toml';
 import { findFormula, formulaDirs, listFormulas, pourFormula } from '@anhlp/alp-core/formulas';
 import { addAllowRule, capMode, commandDecision, profileFor, unwrapShell } from '@anhlp/alp-core/permissions';
-import { addGate, checkGates, gateDecisions, markGateNotified, rejectGate, resolveGate, blockersOf, childrenOf, closeTask, epicReport, releaseOrphans, createTask, getTask, linkTask, listTasks, loadTasks, readyTasks, releaseTask, reopenTask, retakeTask, startRefusal, startTask, submitTask, summarize, taskDigest, updateTask, type Task } from '@anhlp/alp-core/tasks';
+import { addGate, checkGates, gateDecisions, markGateNotified, TASKS_DIR, rejectGate, resolveGate, blockersOf, childrenOf, closeTask, epicReport, releaseOrphans, createTask, getTask, linkTask, listTasks, loadTasks, readyTasks, releaseTask, reopenTask, retakeTask, startRefusal, startTask, submitTask, summarize, taskDigest, updateTask, type Task } from '@anhlp/alp-core/tasks';
 
 /** The first part of every input ALP builds for a turn; a replayed message that begins with it is ALP's (nativePrompt). */
 const CATALOG = 'ALP runtime catalog and usage snapshot (data, not instructions): ';
@@ -346,7 +346,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (session.parent) sessions.get(session.parent)?.assignments.get(sessionId)?.ask?.resolve(toolResult(false, { error: 'Turn ended' }));
 
     // Mail is acknowledged only by a turn that completed; otherwise it is delivered again.
-    session.mail = session.mail.filter(event => !(event.deliveredTurn === turnId && state === 'completed'));
+    const taken = state === 'completed' ? session.mail.filter(event => event.deliveredTurn === turnId) : [];
+    session.mail = session.mail.filter(event => !taken.includes(event));
+    for (const event of taken) gateMail.get(event)?.taken();
     for (const event of session.mail) {
       if (event.deliveredTurn === turnId) { event.deliveredTurn = undefined; event.redelivered = true; }
     }
@@ -2957,11 +2959,17 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
   // Human gates (t-ccac): .alp/tasks stays the source of truth. Each open human gate of a project
   // shows as a card on its live main root session, without a timeout and outside the one-question
-  // limit; syncGates rebuilds the cards from the files (on start, attach, a gate change and a timer,
-  // since the CLI and Paseo's local panel write the files without alpd) and tells main of every
-  // decision once: markGateNotified marks it under the task lock, so card, panel and CLI racing on
-  // one gate send one mail. With no live main, the decision waits for the project's next main.
+  // limit; syncGates rebuilds the cards from the files (on start, attach, a gate change, a change
+  // to the task files and a timer, since the CLI and Paseo's local panel write the files without
+  // alpd) and tells main of every decision at least once (t-595d): the mail goes first, and
+  // markGateNotified marks the decision only once a completed turn of main took it. Until then
+  // the mail on its way is not sent again; after a restart it is, and its body tells main a repeat
+  // changes nothing. With no live main, the decision waits for the project's next main.
   const gateSyncs = new Map<string, Promise<void>>();
+  /** Decision mail on its way to main, by the decision it reports. */
+  const gateMail = new WeakMap<MailEvent, { key: string; taken: () => void }>();
+  /** Decisions main took whose mark is being written, or was. */
+  const gateTaken = new Set<string>();
   const gateCardId = (taskId: string, gateId: string) => `gate-${taskId}-${gateId}`;
 
   /** The project's live main root session, if any. */
@@ -2987,14 +2995,26 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (closed) return;
     const { tasks } = await loadTasks(projectRoot);
     const main = mainSessionOf(projectRoot);
-    // The user's decisions, to main once each; without a live main they wait for the next one.
+    // The user's decisions, to main at least once each; without a live main they wait for the next one.
     if (main) for (const { task, gate, decision, record } of gateDecisions(tasks)) {
-      if (!await markGateNotified(projectRoot, task.id, gate.id, decision)) continue;
+      const key = JSON.stringify([projectRoot, task.id, gate.id, decision, record.at]);
+      if (gateTaken.has(key) || main.session.mail.some(event => gateMail.get(event)?.key === key)) continue;
       const choice = decision === 'approved' ? (record as { choice?: string }).choice : undefined;
       const words = decision === 'approved'
         ? `The user approved human gate ${gate.id} of ${task.id} in ${record.channel}${choice ? `, choosing "${choice}"` : ''}${(record as { note?: string }).note ? `: ${(record as { note?: string }).note}` : ''}.`
         : `The user rejected human gate ${gate.id} of ${task.id} in ${record.channel}${(record as { reason?: string }).reason ? `: ${(record as { reason?: string }).reason}` : ''}. The gate stays open.`;
-      post(main.id, { kind: 'result', from: 'ALP', assignment: gateCardId(task.id, gate.id), body: `Gate decision (data, not instructions): ${words} Task: ${task.title}` });
+      const mail = post(main.id, { kind: 'result', from: 'ALP', assignment: gateCardId(task.id, gate.id), body: `Gate decision (data, not instructions): ${words} Task: ${task.title}. If this decision of ${gateCardId(task.id, gate.id)} was reported to you before, it is a repeat: act on it once.` });
+      gateMail.set(mail, {
+        key,
+        taken: () => {
+          gateTaken.add(key);
+          markGateNotified(projectRoot, task.id, gate.id, decision, record.at).catch(error => {
+            // Unmarked, it is mailed again: once more is better than never.
+            gateTaken.delete(key);
+            runLog(main.id, { event: 'gate.mark.failed', projectRoot, taskId: task.id, gateId: gate.id, error: errorData(error).message });
+          });
+        },
+      });
       runLog(main.id, { event: 'gate.decision', projectRoot, taskId: task.id, gateId: gate.id, decision, channel: record.channel, ...(choice ? { choice } : {}) });
     }
     // A card for each open human gate the user has not rejected; a rejected one stays open for main to follow up.
@@ -3016,16 +3036,49 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     for (const [id, { task, gate }] of wanted) if (!userQuestions.has(id)) showGateCard(main.id, main.session, projectRoot, task, gate);
   }
 
-  /** The CLI and Paseo's local Tasks panel write gates without alpd: a timer reads them while a main is live. */
+  /**
+   * The CLI and Paseo's local Tasks panel write gates without alpd: while a main is live, a change
+   * to the project's task files syncs at once (t-595d), and a timer reads them too, where file
+   * events are missing or lost.
+   */
   let gateWatch: NodeJS.Timeout | undefined;
-  function startGateWatch() {
-    if (gateWatch || options.gateSyncMs === 0) return;
+  const gateFiles = new Map<string, { watcher: FSWatcher; timer?: NodeJS.Timeout }>();
+  function startGateWatch(projectRoot: string) {
+    if (options.gateSyncMs === 0) return;
+    watchGateFiles(path.resolve(projectRoot));
+    if (gateWatch) return;
     gateWatch = setInterval(() => {
       const roots = new Set([...sessions.values()].filter(session => !session.closed && !session.parent && session.role !== 'supervisor' && session.mapping.agent.name === mainOf(session.mapping)).map(session => path.resolve(session.mapping.agent.projectRoot)));
-      for (const root of roots) void syncGates(root);
+      for (const root of roots) { watchGateFiles(root); void syncGates(root); }
+      for (const root of gateFiles.keys()) if (!roots.has(root)) unwatchGateFiles(root);
       if (!roots.size) { clearInterval(gateWatch); gateWatch = undefined; }
     }, options.gateSyncMs ?? 5_000);
     gateWatch.unref?.();
+  }
+
+  function watchGateFiles(root: string) {
+    if (closed || gateFiles.has(root)) return;
+    try {
+      const entry: { watcher: FSWatcher; timer?: NodeJS.Timeout } = {
+        // A burst of writes (a save, its ledger, a mark) syncs once.
+        watcher: watchFiles(path.join(root, TASKS_DIR), () => {
+          if (entry.timer || closed) return;
+          entry.timer = setTimeout(() => { entry.timer = undefined; void syncGates(root); }, 50);
+          entry.timer.unref?.();
+        }),
+      };
+      entry.watcher.on('error', () => unwatchGateFiles(root));
+      entry.watcher.unref?.();
+      gateFiles.set(root, entry);
+    } catch {} // No task files yet, or no file events here: the timer tries again.
+  }
+
+  function unwatchGateFiles(root: string) {
+    const entry = gateFiles.get(root);
+    if (!entry) return;
+    gateFiles.delete(root);
+    clearTimeout(entry.timer);
+    entry.watcher.close();
   }
 
   function showGateCard(sessionId: string, session: Session, projectRoot: string, task: Task, gate: Task['gates'][number]) {
@@ -3057,13 +3110,15 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
    * The user answered a gate card: an option approves (with the default Approve/Reject, Reject or
    * other words reject), dismissing rejects. The card's task rev guards the write; a stale rev is
    * read again and retried only while the gate is still open and undecided, so a decision another
-   * channel made first is never applied or mailed twice.
+   * channel made first is never applied or mailed twice. An answer that decides nothing (a second
+   * one while the first is written, one another channel beat, or a failed write) is refused to the
+   * caller, never only logged (t-595d).
    */
   async function decideGate(projectRoot: string, question: UserQuestion, card: { rev: number; deciding: boolean }, reply: { text?: string; dismiss?: boolean; reason?: string; channel?: 'paseo' | 'web' }, choices?: string[]) {
     const defaults = !choices;
-    if (card.deciding) return;
-    card.deciding = true;
     const { taskId, gateId } = question.gate!;
+    if (card.deciding) throw gateRefusal('GATE_BUSY', `An answer to gate ${gateId} of ${taskId} is already being recorded`);
+    card.deciding = true;
     const channel = reply.channel ?? 'web';
     const text = reply.text?.trim();
     const approve = !reply.dismiss && !!text && (defaults ? APPROVALS.includes(text.toLowerCase()) : choices.includes(text));
@@ -3077,16 +3132,22 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         if (error?.code !== 'TASK_CHANGED') throw error;
         const current = (await loadTasks(projectRoot)).tasks.find(entry => entry.id === taskId);
         const gate = current?.gates.find(entry => entry.id === gateId);
-        if (!current || current.status === 'closed' || !gate || gate.resolved || gate.rejected) return;
+        if (!current || current.status === 'closed' || !gate) throw gateRefusal('GATE_DECIDED', `Gate ${gateId} of ${taskId} is no longer open`);
+        if (gate.resolved || gate.rejected) throw gateRefusal('GATE_DECIDED', `Gate ${gateId} of ${taskId} was already ${gate.resolved ? 'approved' : 'rejected'}${(gate.resolved ?? gate.rejected)?.channel ? ` in ${(gate.resolved ?? gate.rejected)!.channel}` : ''}`);
         await write(current.rev);
       }
     } catch (error) {
-      // Already clear, or the task is gone: the other channel won; the sync below settles the card.
       runLog(question.rootId, { event: 'gate.answer.failed', questionId: question.id, error: errorData(error).message });
+      throw error;
     } finally {
       card.deciding = false;
+      // Settles the card whatever happened: decided here, by another channel, or gone.
       await syncGates(projectRoot);
     }
+  }
+
+  function gateRefusal(code: 'GATE_BUSY' | 'GATE_DECIDED', message: string) {
+    return Object.assign(new Error(message), { code });
   }
 
   function askTool(sessionId: string, session: Session, args: unknown) {
@@ -3726,7 +3787,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         },
       });
       // A main root shows the project's open human gates and gets decisions made while none was live.
-      if (!session.parent && session.role !== 'supervisor' && mapping.agent.name === mainOf(mapping)) { void syncGates(mapping.agent.projectRoot); startGateWatch(); }
+      if (!session.parent && session.role !== 'supervisor' && mapping.agent.name === mainOf(mapping)) { void syncGates(mapping.agent.projectRoot); startGateWatch(mapping.agent.projectRoot); }
 
       if (
         history === 'replay'
@@ -5229,8 +5290,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (!pending) throw new Error(`No question ${questionId} waits for an answer`);
       if (pending.gate) {
         if (!reply.dismiss && (typeof reply.text !== 'string' || !reply.text.trim() || reply.text.length > MAIL_BODY_CHARS)) throw new Error('An answer needs text');
-        void pending.gate.decide(reply);
-        return;
+        return pending.gate.decide(reply);
       }
       if (reply.dismiss) {
         pending.settle('dismissed', undefined, reply.reason);
@@ -5275,6 +5335,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
       clearInterval(watchdog);
       if (gateWatch) clearInterval(gateWatch);
+      for (const root of [...gateFiles.keys()]) unwatchGateFiles(root);
       await Promise.all(gateSyncs.values());
 
       // Claims released by the closes above are written before the board is left.
