@@ -24,29 +24,26 @@ test('gateway browser creates approved worktree, shows branch after restart, del
     local.close();
   }
   await connect(page, world, world.tokens.worktreeWriter);
-  await page.getByRole('button', { name: 'Add project', exact: true }).click();
-  await page.getByLabel('Existing granted directory').selectOption(world.projects.main);
-  await page.getByRole('button', { name: 'Register project', exact: true }).click();
-  const source = page.getByTestId('shared-workspace-row').filter({ hasText: 'shop' });
-  await expect(source).toHaveCount(1);
-  // The sidebar shows the checkout's branch, not "Detached HEAD", for that non-canonical record.
+  const source = page.locator(`[data-testid="sidebar-project"][data-path="${world.projects.main}"]`);
+  await expect(source).toHaveAttribute('data-workspace-id', /.+/);
+  // The project carries the checkout's branch, not "Detached HEAD", for that non-canonical record.
   const sourceBranch = execFileSync('/usr/bin/git', ['symbolic-ref', '--short', 'HEAD'], {
     cwd: world.projects.main,
     encoding: 'utf8'
   }).trim();
-  await expect(source.getByTestId('workspace-branch')).toHaveText(sourceBranch);
-  await source.getByRole('button', { name: 'Create worktree', exact: true }).click();
+  await expect(source).toHaveAttribute('data-branch', sourceBranch);
+  // Paseo's project actions hold the worktree commands.
+  const actions = project => project.getByTestId('project-actions');
+  await source.getByTestId('project-row').hover();
+  await actions(source).click();
+  await page.getByTestId('project-create-worktree').click();
   await page
     .getByRole('dialog', { name: 'Create managed worktree' })
     .getByRole('button', { name: 'Create checkout', exact: true })
     .click();
-  const generated = page.getByTestId('shared-workspace-row').filter({ hasText: 'Worktree ·' });
+  const generated = page.locator('[data-testid="sidebar-project"][data-worktree="true"]');
   await expect(generated).toHaveCount(1);
-  await expect(generated.getByTestId('workspace-branch')).toContainText('alp/workspace/wks_');
-  const rowBox = await generated.boundingBox(),
-    removeBox = await generated.getByRole('button', { name: 'Remove worktree', exact: true }).boundingBox();
-  expect(removeBox.x + removeBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width);
-  expect(removeBox.x).toBeGreaterThanOrEqual(rowBox.x);
+  await expect(generated).toHaveAttribute('data-branch', /alp\/workspace\/wks_/);
   const id = await generated.getAttribute('data-workspace-id');
   const owner = await hostConnect(world.socket);
   let directory, branch;
@@ -61,8 +58,10 @@ test('gateway browser creates approved worktree, shows branch after restart, del
   await world.restartDaemon();
   await connect(page, world, world.tokens.worktreeWriter);
   await expect(generated).toHaveCount(1);
-  await expect(generated.getByTestId('workspace-branch')).toContainText(branch);
-  await generated.getByRole('button', { name: 'Remove worktree', exact: true }).click();
+  await expect(generated).toHaveAttribute('data-branch', branch);
+  await generated.getByTestId('project-row').hover();
+  await actions(generated).click();
+  await page.getByTestId('project-remove-worktree').click();
   await page
     .getByRole('dialog', { name: 'Remove managed worktree' })
     .getByRole('button', { name: 'Delete checkout files', exact: true })
@@ -80,8 +79,13 @@ test('gateway browser creates approved worktree, shows branch after restart, del
   try {
     const read = await other.newPage();
     await connect(read, world);
-    await expect(read.getByRole('button', { name: 'Create worktree', exact: true })).toHaveCount(0);
-    await expect(read.getByRole('button', { name: 'Remove worktree', exact: true })).toHaveCount(0);
+    // Without workspace.manage the project actions offer no worktree command.
+    const project = read.getByTestId('sidebar-project').first();
+    await project.getByTestId('project-row').hover();
+    await project.getByTestId('project-actions').click();
+    await expect(read.getByTestId('project-copy-path')).toBeVisible();
+    await expect(read.getByTestId('project-create-worktree')).toHaveCount(0);
+    await expect(read.getByTestId('project-remove-worktree')).toHaveCount(0);
   } finally {
     await other.close();
   }

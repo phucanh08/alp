@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Check } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 export type MenuItem = {
@@ -14,23 +14,43 @@ export type MenuItem = {
   /** Short text at the row's end (Paseo's hint: the first characters of an id). */ hint?: string;
   /** The row's tooltip. */ title?: string;
   testId?: string;
+  /** Opens this page of the menu (Paseo's MenuSubTrigger): the row shows `value` and a chevron. */
+  page?: string;
+  /** The current choice, muted at the row's end (a page's row). */
+  value?: string;
+  /** A dot on the row: a filter in that page is on. */
+  indicator?: boolean;
+  /** Runs without closing the menu (a toggle, as Paseo's closeOnSelect={false}). */
+  keepOpen?: boolean;
 };
+
+/** A page a row opens (Paseo's MenuSurface pages): its title over its rows, with Back. */
+export type MenuPage = { title: string; items: MenuItem[] };
 
 const listClass = 'fixed z-50 max-h-[min(60vh,28rem)] min-w-40 max-w-[min(92vw,26rem)] overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-xl shadow-[var(--shadow)]';
 
-/** The menu's rows; a click runs the item after `close`. */
-function MenuItems({ items, close }: { items: MenuItem[]; close: () => void }) {
+/** The menu's rows; a click runs the item after `close`, opens its page, or runs and stays open. */
+function MenuItems({ items, close, openPage }: { items: MenuItem[]; close: () => void; openPage?: (page: string) => void }) {
   return (
     <>
       {items.map(item => (
         <React.Fragment key={item.id ?? item.label}>
         {item.group ? <div role="separator" className="-mx-1 my-1 h-px bg-border" /> : null}
-        <button type="button" role={item.checked === undefined ? 'menuitem' : 'menuitemradio'} aria-checked={item.checked} disabled={item.disabled} title={item.title} data-testid={item.testId}
-          onClick={event => { event.stopPropagation(); close(); item.onSelect(); }}
+        <button type="button" role={item.checked === undefined ? 'menuitem' : item.keepOpen ? 'menuitemcheckbox' : 'menuitemradio'} aria-checked={item.checked} disabled={item.disabled} title={item.title} data-testid={item.testId}
+          aria-haspopup={item.page ? 'menu' : undefined}
+          onClick={event => {
+            event.stopPropagation();
+            if (item.page && openPage) { openPage(item.page); return; }
+            if (!item.keepOpen) close();
+            item.onSelect();
+          }}
           className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent focus-visible:bg-accent disabled:opacity-45 [&_svg]:size-3.5',
             item.destructive ? 'text-destructive' : 'text-foreground')}>
           {item.icon}<span className="min-w-0 flex-1 truncate">{item.label}</span>
+          {item.indicator ? <span aria-label="On" className="size-1.5 shrink-0 rounded-full bg-highlight" /> : null}
           {item.hint ? <span className="ml-3 font-mono text-xs text-muted-foreground">{item.hint}</span> : null}
+          {item.value ? <span className="ml-3 max-w-[50%] truncate text-xs text-muted-foreground">{item.value}</span> : null}
+          {item.page ? <ChevronRight aria-hidden className="text-muted-foreground" /> : null}
           {item.checked ? <Check aria-hidden className="ml-2 text-foreground" /> : null}
         </button>
         </React.Fragment>
@@ -114,8 +134,12 @@ export function ContextMenu({ label, at, items, onClose, testId, fallbackFocus }
  * A small dropdown menu (WAI-ARIA menu button): the trigger opens a list of actions below it,
  * arrow keys move between them, Escape or a click elsewhere closes it and focus goes back.
  */
-export function Menu({ label, title, trigger, triggerClassName, items, align = 'end', onOpenChange, disabled, openRequest, onOpenRequestHandled, testId }: {
+export function Menu({ label, title, trigger, triggerClassName, items, pages, width, align = 'end', onOpenChange, disabled, openRequest, onOpenRequestHandled, testId }: {
   label: string;
+  /** The pages rows open (`MenuItem.page`): one at a time in place of the root, with Back. */
+  pages?: Record<string, MenuPage>;
+  /** A fixed width in px (Paseo's display menu is 232). */
+  width?: number;
   /** The trigger's tooltip; the label by default. */
   title?: string;
   disabled?: boolean;
@@ -133,11 +157,12 @@ export function Menu({ label, title, trigger, triggerClassName, items, align = '
   testId?: string;
 }) {
   const [open, setOpenState] = React.useState(false);
+  const [page, setPage] = React.useState<string | null>(null);
   const [place, setPlace] = React.useState<React.CSSProperties>({});
   const button = React.useRef<HTMLButtonElement>(null);
   const list = React.useRef<HTMLDivElement>(null);
   const id = React.useId();
-  const setOpen = React.useCallback((value: boolean) => { setOpenState(value); onOpenChange?.(value); }, [onOpenChange]);
+  const setOpen = React.useCallback((value: boolean) => { setOpenState(value); if (!value) setPage(null); onOpenChange?.(value); }, [onOpenChange]);
   React.useEffect(() => {
     if (!openRequest) return;
     if (!disabled) setOpen(true);
@@ -158,9 +183,10 @@ export function Menu({ label, title, trigger, triggerClassName, items, align = '
     });
   }, [open, align]);
 
+  // A page opening or closing moves focus to its first row.
+  React.useEffect(() => { if (open) entries()[0]?.focus(); }, [open, page]);
   React.useEffect(() => {
     if (!open) return;
-    entries()[0]?.focus();
     const dismiss = () => setOpen(false);
     // Only a scroll that moves the trigger closes it; the conversation streaming beside it does not.
     const scrolled = (event: Event) => { if (event.target instanceof Node && event.target.contains(button.current)) setOpen(false); };
@@ -178,7 +204,13 @@ export function Menu({ label, title, trigger, triggerClassName, items, align = '
   }, [open, setOpen]);
 
   const close = (focus = true) => { setOpen(false); if (focus) button.current?.focus(); };
-  const onKey = menuKeys(list, close);
+  const shown = page ? pages?.[page] : undefined;
+  const menuKey = menuKeys(list, close);
+  // In a page, Escape and ArrowLeft go back to the root first.
+  const onKey = (event: React.KeyboardEvent) => {
+    if (shown && (event.key === 'Escape' || event.key === 'ArrowLeft')) { event.preventDefault(); event.stopPropagation(); setPage(null); return; }
+    menuKey(event);
+  };
 
   return (
     <>
@@ -189,8 +221,17 @@ export function Menu({ label, title, trigger, triggerClassName, items, align = '
         {trigger}
       </button>
       {open ? (
-        <div ref={list} id={id} role="menu" aria-label={label} onKeyDown={onKey} style={place} className={listClass}>
-          <MenuItems items={items} close={() => close()} />
+        <div ref={list} id={id} role="menu" aria-label={shown ? shown.title : label} onKeyDown={onKey} style={width ? { ...place, width } : place} className={listClass} data-page={page ?? undefined}>
+          {shown ? (
+            <>
+              <button type="button" role="menuitem" onClick={event => { event.stopPropagation(); setPage(null); }} aria-label={`Back from ${shown.title}`}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground outline-none hover:bg-accent focus-visible:bg-accent [&_svg]:size-3.5">
+                <ChevronLeft aria-hidden />{shown.title}
+              </button>
+              <div role="separator" className="-mx-1 my-1 h-px bg-border" />
+              <MenuItems items={shown.items} close={() => close()} />
+            </>
+          ) : <MenuItems items={items} close={() => close()} openPage={pages ? setPage : undefined} />}
         </div>
       ) : null}
     </>

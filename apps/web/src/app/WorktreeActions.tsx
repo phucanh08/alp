@@ -2,23 +2,30 @@ import * as React from 'react';
 import { useController } from './store';
 import { Dialog } from '../components/ui/dialog';
 
-export function WorktreeActions({
+/**
+ * Create or remove a managed worktree (workspace.worktree.*), opened from the project's actions
+ * menu in the sidebar: the dialog asks for a destination mapping (create) or confirms the removal.
+ */
+export function WorktreeDialog({
   workspaceId,
   managed,
-  online
+  online,
+  open,
+  onClose
 }: {
   workspaceId: string;
   managed: boolean;
   online: boolean;
+  open: boolean;
+  onClose: () => void;
 }) {
   const controller = useController();
-  const [open, setOpen] = React.useState(false),
-    [busy, setBusy] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const setOpen = (value: boolean) => { if (!value) onClose(); };
   const [mappings, setMappings] = React.useState<string[]>([]),
     [mapping, setMapping] = React.useState(''),
     [error, setError] = React.useState('');
   const prepare = async () => {
-    setOpen(true);
     setError('');
     if (managed) return;
     setBusy(true);
@@ -43,16 +50,9 @@ export function WorktreeActions({
       setBusy(false);
     }
   };
+  // Each opening reads the destinations afresh.
+  React.useEffect(() => { if (open) void prepare(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className="shrink-0">
-      <button
-        type="button"
-        disabled={!online || busy}
-        onClick={() => void prepare()}
-        className="min-h-7 whitespace-nowrap rounded px-1 hover:bg-sidebar-hover"
-      >
-        {managed ? 'Remove worktree' : 'Create worktree'}
-      </button>
       <Dialog
         open={open}
         onClose={() => {
@@ -102,6 +102,5 @@ export function WorktreeActions({
           </button>
         </div>
       </Dialog>
-    </div>
   );
 }

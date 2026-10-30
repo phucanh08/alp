@@ -1109,6 +1109,28 @@ test('credential-wide registry load survives workspace switch and subsequent sha
   assert.ok(reads >= 2);
 });
 
+test('a pin refused for a stale list reads the list again and asks once more', async t => {
+  const w = setup(t);
+  w.host.capabilities.push('workspace.registry');
+  w.host.principal.permissions.push('workspace.write');
+  let revision = 1;
+  let pinned = false;
+  const updates = [];
+  const row = () => ({ id: 'wks_a', projectId: 'prj_a', directory: '/w/a', title: null, pinnedAt: pinned ? 'pin' : null, labels: [], createdAt: 'old' });
+  w.host.intercept.set('workspace.list', (_params, _connection, { answer }) => { answer({ workspaces: [row()], revision, total: 1, nextCursor: null }); return 'handled'; });
+  w.host.intercept.set('workspace.update', (params, _connection, { answer, fail }) => {
+    updates.push(params.ifRevision);
+    if (params.ifRevision !== revision) { fail(1008, 'Registry changed; refresh', { reason: 'stale_revision' }); return 'handled'; }
+    pinned = params.pinned; revision += 1; answer({ workspace: row(), revision }); return 'handled';
+  });
+  await connected(w);
+  await w.controller.refreshRegistry();
+  revision = 5; // another client changed the list
+  await w.controller.pinWorkspace('wks_a', true);
+  assert.deepEqual(updates, [1, 5]);
+  assert.equal(w.state().registry.workspaces[0].pinnedAt, 'pin');
+});
+
 test('renaming a shared workspace sends its title (blank clears it) and re-reads the registry; no workspace.write sends nothing', async t => {
   const w = setup(t);
   w.host.capabilities.push('workspace.registry');

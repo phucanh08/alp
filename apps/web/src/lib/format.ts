@@ -35,3 +35,19 @@ export function sessionName(session: { id: string; title?: string; teamLabel?: s
   const id = session?.id ?? fallbackId ?? '';
   return `Session ${id.replace(/^(web_|ses_)/, '').slice(0, 6)}`;
 }
+
+/**
+ * Paseo's compact time ago (utils/time.ts describeCompactTimeAgo): "now", "5m", "3h", "2d", then
+ * the date ("Oct 3") after a week. For the sidebar's Last activity.
+ */
+export function compactTime(iso: string | undefined, now = Date.now()) {
+  const time = Date.parse(iso ?? '');
+  if (!Number.isFinite(time)) return '';
+  const elapsed = Math.max(0, now - time);
+  if (elapsed < 60_000) return 'now';
+  if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)}m`;
+  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h`;
+  if (elapsed < 7 * 86_400_000) return `${Math.floor(elapsed / 86_400_000)}d`;
+  const date = new Date(time);
+  return `${date.toLocaleDateString('en-US', { month: 'short' })} ${date.getDate()}`;
+}

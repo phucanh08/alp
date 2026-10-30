@@ -7,7 +7,7 @@ import { ConnectScreen } from './ConnectScreen';
 import { ArchiveDialog, RenameDialog } from './Dialogs';
 import { SettingsScreen } from './Settings';
 import { SidePanel, useDock } from './SidePanel';
-import { Sidebar } from './Sidebar';
+import { Sidebar, type SettingsTarget } from './Sidebar';
 import { useAppState, useController } from './store';
 import { HistoryScreen } from './History';
 import { ShortcutsDialog, useShortcuts } from './Shortcuts';
@@ -280,7 +280,8 @@ function Shell() {
   const dock = useDock();
   const sidebarWidth = usePanelWidth('sidebar');
   const [draftRequest, setDraftRequest] = React.useState(0);
-  const [settings, setSettings] = React.useState(false);
+  // Settings is open when set: true for its first page, or the page the sidebar asked for.
+  const [settings, setSettings] = React.useState<boolean | SettingsTarget>(false);
   const [renaming, setRenaming] = React.useState<SessionSummary | null>(null);
   const [archiving, setArchiving] = React.useState<SessionSummary | null>(null);
   const [history, setHistory] = React.useState(false);
@@ -390,7 +391,7 @@ function Shell() {
           style={medium ? { width: sidebarWidth.width } : undefined} data-testid="sidebar-column"
           {...(!medium && !navOpen ? { inert: true } : {})}>
           {medium ? <ResizeHandle which="sidebar" side="right" width={sidebarWidth.width} onWidth={sidebarWidth.setWidth} onCommit={sidebarWidth.save} testId="left-sidebar-resize-handle" /> : null}
-          <Sidebar onNewSession={() => { toWorkspace(); newSession(); }} onRename={setRenaming} onArchive={setArchiving} onSettings={() => setSettings(true)} onNavigate={() => setNavOpen(false)} onClose={medium ? undefined : () => setNavOpen(false)}
+          <Sidebar onNewSession={() => { toWorkspace(); newSession(); }} onRename={setRenaming} onArchive={setArchiving} onSettings={page => setSettings(page ?? true)} onShortcuts={() => setShortcuts(true)} onNavigate={() => setNavOpen(false)} onClose={medium ? undefined : () => setNavOpen(false)}
             onHistory={() => openHistory()} historyOpen={history} onTasks={() => { if (workspace) { setHistory(false); setTasksScreen(true); } }} tasksOpen={tasksScreen} onOpenSession={() => toWorkspace()} searchRequest={searchRequest} onSearchRequestHandled={() => setSearchRequest(0)} />
         </div>
       )}
@@ -437,9 +438,9 @@ function Shell() {
       <ShortcutsDialog open={shortcuts} onClose={() => setShortcuts(false)} />
       <CommandCenterHost open={!!commandCenter} scope={commandCenter ? commandCenter.scope : null} onClose={() => setCommandCenter(false)} history={away} splits={medium} onAction={onShortcut}
         onOpenSession={id => { controller.selectSession(id); toWorkspace(); setNavOpen(false); }} />
-      <ShellShortcuts settings={settings} history={away} splits={medium} onAction={onShortcut} />
+      <ShellShortcuts settings={!!settings} history={away} splits={medium} onAction={onShortcut} />
     </div>
-    {settings ? <div className="fixed inset-0 z-50" data-modal-overlay><SettingsScreen mobile={!medium} onClose={() => setSettings(false)} /></div> : null}
+    {settings ? <div className="fixed inset-0 z-50" data-modal-overlay><SettingsScreen mobile={!medium} initialPage={typeof settings === 'string' ? settings : undefined} onClose={() => setSettings(false)} /></div> : null}
     </TabsProvider>
   );
 }

@@ -21,6 +21,7 @@ const DEFAULTS = {
     header: [{ id: 'new-session', visible: true }, { id: 'history', visible: true }, { id: 'search', visible: true }],
     footer: [{ id: 'tasks', visible: false }],
   },
+  sidebarDisplay: { grouping: 'project', sort: 'created', titleSource: 'title', rowItems: { branch: false, project: false, host: true, labels: true }, trailing: 'timestamp', projectFilters: [] },
   newSession: {},
 };
 
@@ -107,4 +108,11 @@ test('remembered New session choices: thinking per model, the team default under
   assert.deepEqual(choices, { mode: 'full-access', thinkingByModel: { 'codex:gpt': 'high', default: 'medium' } });
   choices = rememberChoices(choices, { model: 'codex:gpt' });
   assert.deepEqual(choices, { model: 'codex:gpt', thinkingByModel: { default: 'medium' } });
+});
+
+test('sidebar display preferences: Paseo\'s choices kept, anything else its default, filters de-duplicated and bounded', () => {
+  const display = parse({ sidebarDisplay: { grouping: 'status', sort: 'lastPrompt', titleSource: 'branch', rowItems: { branch: true, host: false, checks: true, labels: 'yes' }, trailing: 'none', projectFilters: ['/a', '/a', '', 7, '/b'] } }).sidebarDisplay;
+  assert.deepEqual(display, { grouping: 'status', sort: 'lastPrompt', titleSource: 'branch', rowItems: { branch: true, project: false, host: false, labels: true }, trailing: 'none', projectFilters: ['/a', '/b'] });
+  assert.deepEqual(parse({ sidebarDisplay: { grouping: 'labels', sort: 'manual', trailing: 'diff' } }).sidebarDisplay, DEFAULTS.sidebarDisplay);
+  assert.equal(parse({ sidebarDisplay: { projectFilters: Array.from({ length: 100 }, (_, index) => `/p${index}`) } }).sidebarDisplay.projectFilters.length, 64);
 });
