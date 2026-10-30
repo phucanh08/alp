@@ -146,7 +146,7 @@ Thứ tự publish: protocol → core → runtime → client → daemon → cli 
 ## 4. Tính năng
 
 **Included** (nằm trong acceptance gate; coverage ở §6.2):
-- CLI và alpd: `init`, `upgrade`, `setup`, `doctor`, `daemon start|stop|restart|status`, `run`,
+- CLI và alpd: `init`, `update-template`, `update`, `setup`, `doctor`, `daemon start|stop|restart|status`, `run`,
   `ps`, `top`, `attach`, `send`, `questions`, `answer`, `log`, `interrupt`, `board`, `tasks`/`task`,
   `formula`, `verify`, `recall`, `pause`/`resume`, `backup`/`restore`.
 - Teams Phở và Cafe, team tự định nghĩa, permission profiles và duyệt quyền (Allow once / Always

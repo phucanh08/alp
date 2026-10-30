@@ -22,7 +22,7 @@ async function codexTemplate(library) {
   content.team.oracleModels = ['codex:gpt-6.1-sol']; content.team.oracleThinking = { 'codex:gpt-6.1-sol': 'low' };
   await saveEntry('teams', 'pho', content, { library, scope: 'library' });
 }
-for (const command of ['init', 'upgrade', 'update']) test(`${command} refreshes a project's generated model profiles from the saved template`, async t => {
+for (const command of ['init', 'update-template', 'upgrade']) test(`${command} refreshes a project's generated model profiles from the saved template`, async t => {
   const { root, library } = await fixture(t);
   await initProject(root, { library });
   await codexTemplate(library);

@@ -80,7 +80,7 @@ void frame; void observe;
   const alp = (...args) => run(process.execPath, [cli, ...args], { env });
   const project = path.join(directory, 'project');
   alp('init', project);
-  alp('upgrade', project);
+  alp('update-template', project);
   alp('language');
   alp('agents', '--project', project, '--json');
   alp('teams', '--project', project, '--json');

@@ -15,7 +15,7 @@ const run = (...args) => execFileSync(process.execPath, [cli, ...args], { encodi
 let child;
 try {
   run('init', project);
-  run('upgrade', project);
+  run('update-template', project);
   run('language');
   await mkdir(home, { recursive: true });
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ defaultAgent: 'main', workflow: { mode: 'pho', supervisor: false }, team: { pho: { main: { profiles: ['acp:fake'] } } } }));

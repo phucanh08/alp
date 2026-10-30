@@ -59,7 +59,7 @@ Six [role skills](docs/alp/role-skills.md) cover intake, research, planning, del
 
 Repeated runs fill in missing files and preserve existing file contents, including custom settings. Conflicting filesystem entry types cause an error; files already created before an error remain available for a later retry. Run `npm run test:init` to verify initialization independently.
 
-For projects created with an earlier scaffold, run `alp upgrade [directory]` (or the built CLI above). This backs up and updates recognized original instructions, adds team settings, renames the old `smart`/`supervised` profiles to `pho`/`cafe`, and archives project copies of skills that still match the shipped ones, so the library applies. Copies of the built-in agents that are still as ALP shipped them are put away too, so the project uses the built-ins; a copy you edited, or added skills, MCP servers or hooks to, stays as the project's override. The old shipped graph migrates to Cafe; custom graphs and customized instructions/skills remain unchanged.
+For projects created with an earlier scaffold, run `alp update-template [directory]` (or the built CLI above). This backs up and updates recognized original instructions, adds team settings, renames the old `smart`/`supervised` profiles to `pho`/`cafe`, and archives project copies of skills that still match the shipped ones, so the library applies. Copies of the built-in agents that are still as ALP shipped them are put away too, so the project uses the built-ins; a copy you edited, or added skills, MCP servers or hooks to, stays as the project's override. The old shipped graph migrates to Cafe; custom graphs and customized instructions/skills remain unchanged.
 
 ## Development
 
@@ -104,7 +104,7 @@ your-project/
 
 `alp init` now writes editable `team.pho` and `team.cafe` choices into
 `.alp/settings.json`, taking a snapshot of your current user team configuration.
-`alp upgrade` migrates the old `profile` key to `team` and adds these team settings to older projects, backs up the settings it changes,
+`alp update-template` migrates the old `profile` key to `team` and adds these team settings to older projects, backs up the settings it changes,
 and converts earlier single-model choices to lists without changing their values.
 Every agent (main, lead, peer, reviewer, supervisor, oracle, or a custom member) has
 `profiles`: a list of `"provider:model:effort"` (the effort may be left out), or
@@ -133,7 +133,7 @@ says why; a listed effort is only the usual one. ALP refuses an assignment witho
 or with a model they do not offer. An agent with one named profile runs on it. A list
 does not enable automatic fallback. Oracle still requires an explicit lens selection.
 An effort a model does not take is refused (GPT-6 Astra takes only low). The earlier
-form, `{ "provider", "model", "effort" }`, still works; `alp upgrade` rewrites it as
+form, `{ "provider", "model", "effort" }`, still works; `alp update-template` rewrites it as
 `"provider:model:effort"`.
 
 `autocompact` belongs to the agent, beside `profiles`, and applies to every model in

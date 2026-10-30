@@ -49,7 +49,7 @@ Skills and the skills each role gets live in the user's library in `$ALP_HOME`
 ```
 
 alpd seeds the library from its templates the first time it opens a session, and
-`alp init` / `alp upgrade` seed it too. The canonical source is `templates/skills/`,
+`alp init` / `alp update-template` seed it too. The canonical source is `templates/skills/`,
 with the starter assignments in `templates/role-skills.json`; oracle, reviewer and
 supervisor get no skills by default.
 
@@ -85,13 +85,13 @@ project skills unless `role-skills.json` lists skills under their name. A runtim
 
 ```sh
 alp init /absolute/new-project
-alp upgrade /absolute/existing-project
+alp update-template /absolute/existing-project
 ```
 
-Projects created before 0.4 carry a copy of each role's skills. `alp upgrade` moves
+Projects created before 0.4 carry a copy of each role's skills. `alp update-template` moves
 copies that are identical to the shipped skills into its backup under
 `.alp/backups/upgrade-*`, so the library applies, and reports customized copies,
-which stay and keep overriding. `upgrade` also updates recognized original main-only
+which stay and keep overriding. `update-template` also updates recognized original main-only
 or team-v1 role definitions, saving their previous contents in the same backup.
 Customized definitions are preserved; the CLI identifies custom role instructions
 needing manual reconciliation.

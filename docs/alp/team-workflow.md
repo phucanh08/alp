@@ -42,7 +42,7 @@ can use. New project `.alp/settings.json`:
 team's peer limit for this project.
 
 `workflow.mode` also accepts `smart` and `supervised`, the profiles' names before
-0.4; `alp upgrade` renames them. Set `workflow.supervisor` to `false` to start no
+0.4; `alp update-template` renames them. Set `workflow.supervisor` to `false` to start no
 supervisor. A project with a custom `delegation` graph and no `workflow` has no
 profile and no supervisor. Through the public Paseo client, a profile is the model:
 
@@ -1267,13 +1267,13 @@ Claude's experimental usage API may be unavailable for some versions/accounts.
 
 ```sh
 alp init /absolute/project
-alp upgrade /absolute/existing-project
+alp update-template /absolute/existing-project
 npm run build
 paseo plugin reload alp-provider
 ```
 
 `init` fills missing files without replacing user content and seeds the user's skill
-library. `upgrade` backs up and updates recognized shipped instructions, adds
+library. `update-template` backs up and updates recognized shipped instructions, adds
 oracle, reviewer and supervisor, renames `smart`/`supervised` settings to
 `pho`/`cafe`, archives project skill copies identical to the shipped skills (so the
 library applies), and preserves custom instructions and skills. Projects with the old

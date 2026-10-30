@@ -14,14 +14,47 @@ import { webCommand, acpCommand } from './interfaces.js';
 import { backupCommand, restoreCommand } from './backup.js';
 import { terminalCommand } from './terminal.js';
 import { bridgeCommand } from './roles.js';
+import { cleanupOldExecutable, selfUpdate } from './self-update.js';
+import { packagedInfo } from '@anhlp/alp-core/packaged';
+import { connect, lockAlive, readLock } from '@anhlp/alp-client/index';
 
-const commands = { schedule: scheduleCommand, setup: args => setup(args, alpHome()), init: args => project('init', args), upgrade: args => project('upgrade', args), update: args => project('upgrade', args), daemon, doctor, run, ps, top, attach, send, questions, answer, log, board, tasks: tasksCommand, task: taskCommand, formula: formulaCommand, permissions: permissionsCommand, agents: args => libraryCommand('agents', args), skills: args => libraryCommand('skills', args), mcp: args => ['add', 'rm', 'mv', 'cp', 'test', 'show', 'edit'].includes(args[0]) ? editCommand('mcp', args) : libraryCommand('mcp', args), hooks: args => libraryCommand('hooks', args), providers: args => libraryCommand('providers', args), provider: args => editCommand('providers', args), teams: teamsCommand, trust: trustCommand, agent: args => editCommand('agents', args), team: args => editCommand('teams', args), skill: args => editCommand('skills', args), hook: args => editCommand('hooks', args), verify, recall, pause, resume, language, models, interrupt, compact, acp: acpCommand, web: webCommand, backup: backupCommand, restore: restoreCommand, terminal: terminalCommand, bridge: bridgeCommand };
+/** The version of this alp: the executable's, the build's, or the package's. */
+function alpVersion() {
+  /* global __ALP_VERSION__ */
+  return packagedInfo()?.version ?? (typeof __ALP_VERSION__ === 'string' ? __ALP_VERSION__ : JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
+}
+
+/** The running alpd's version and live sessions, if one runs for this ALP_HOME. */
+async function runningDaemon() {
+  const lock = await readLock(alpHome());
+  if (!lockAlive(lock)) return undefined;
+  const client = await connect(lock.socket, { name: 'alp-cli', version: '1' }).catch(() => undefined);
+  if (!client) return { version: lock.version };
+  try {
+    const status = await client.request('daemon.status');
+    return { version: status.version ?? lock.version, sessions: status.sessions };
+  } catch {
+    return { version: lock.version };
+  } finally {
+    client.close();
+  }
+}
+
+/** alp update: the executable's self-update (t-1e02 P3); the template upgrade is alp update-template. */
+async function updateCommand(args) {
+  const code = await selfUpdate(args, { packaged: packagedInfo() !== undefined, version: alpVersion(), daemon: runningDaemon });
+  if (code) process.exitCode = code;
+}
+
+// A Windows update leaves the previous alp.exe as alp.old.exe: it can only go once that process ended.
+if (packagedInfo()) cleanupOldExecutable(process.execPath);
+
+const commands = { schedule: scheduleCommand, setup: args => setup(args, alpHome()), init: args => project('init', args), 'update-template': args => project('upgrade', args), upgrade: args => project('upgrade', args), update: updateCommand, daemon, doctor, run, ps, top, attach, send, questions, answer, log, board, tasks: tasksCommand, task: taskCommand, formula: formulaCommand, permissions: permissionsCommand, agents: args => libraryCommand('agents', args), skills: args => libraryCommand('skills', args), mcp: args => ['add', 'rm', 'mv', 'cp', 'test', 'show', 'edit'].includes(args[0]) ? editCommand('mcp', args) : libraryCommand('mcp', args), hooks: args => libraryCommand('hooks', args), providers: args => libraryCommand('providers', args), provider: args => editCommand('providers', args), teams: teamsCommand, trust: trustCommand, agent: args => editCommand('agents', args), team: args => editCommand('teams', args), skill: args => editCommand('skills', args), hook: args => editCommand('hooks', args), verify, recall, pause, resume, language, models, interrupt, compact, acp: acpCommand, web: webCommand, backup: backupCommand, restore: restoreCommand, terminal: terminalCommand, bridge: bridgeCommand };
 const [command, ...args] = process.argv.slice(2);
 try {
   if (command === '--version') {
     // Published builds inject their package version; source execution reads the same metadata.
-    /* global __ALP_VERSION__ */
-    console.log(typeof __ALP_VERSION__ === 'string' ? __ALP_VERSION__ : JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
+    console.log(alpVersion());
   } else {
     if (!Object.hasOwn(commands, command)) throw new UsageError();
     await commands[command](args);

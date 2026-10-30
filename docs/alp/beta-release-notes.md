@@ -427,7 +427,7 @@ All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned t
 
 **Included** (covered by the beta's acceptance gate):
 
-- CLI and alpd: `init`, `upgrade`, `setup`, `doctor`, `daemon start|stop|restart|status`, `run`,
+- CLI and alpd: `init`, `update-template`, `update`, `setup`, `doctor`, `daemon start|stop|restart|status`, `run`,
   `ps`, `top`, `attach`, `send`, `questions`, `answer`, `log`, `interrupt`, `board`,
   `tasks`/`task`, `formula`, `verify`, `recall`, `pause`/`resume`, `backup`/`restore`.
 - Teams Phở and Cafe, your own teams, permission profiles and permission questions (Allow once /
