@@ -521,8 +521,13 @@ test('a client that announces principal.agent has its own alpd connection say so
   await until(() => daemon.state.calls.some(call => call.link === lateLink && call.params?.capabilities), 'the re-mark');
   await new Promise(resolve => setTimeout(resolve, 50));
   assert.ok(!daemon.state.calls.some(call => call.link === lateLink && call.method === 'task.list'), 'nothing passes the mark while it is pending');
+  // An unmarked hello right behind the marked one does not let a request past the mark either.
+  const unmarked = late.call('daemon.hello', { protocolVersion: 1, client: { name: 'late', version: '0' } });
+  const listedAgain = late.call('task.list', { projectRoot: path.join(tmpdir(), 'alp-e706-a') });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.ok(!daemon.state.calls.some(call => call.link === lateLink && call.method === 'task.list'), 'nor behind a later unmarked hello');
   release();
-  await marking; await listed;
+  await marking; await listed; await unmarked; await listedAgain;
   const order = daemon.state.calls.filter(call => call.link === lateLink).map(call => call.params?.capabilities ? 'mark' : call.method);
   assert.ok(order.indexOf('mark') < order.indexOf('task.list'), order.join(','));
 
