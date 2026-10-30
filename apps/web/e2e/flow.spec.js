@@ -115,6 +115,14 @@ test('create, stream, tool call, questions, stop, rename', async ({ page }) => {
   expect(stored).not.toContain(world.tokens.owner.split('.')[2]);
   expect(await world.gatewayLog()).not.toContain(world.tokens.owner.split('.')[2]);
 
+  // Paseo's footer line: Add project, Usage, Hosts, Help, Settings; Usage opens Settings › Usage.
+  const footer = page.getByTestId('sidebar-footer-bottom-line');
+  expect(await footer.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))).toEqual(['Add project', 'Usage', 'Hosts', 'Help and support', 'Settings']);
+  await footer.getByTestId('sidebar-usage-icon').click();
+  const settings = page.getByRole('region', { name: 'Settings' });
+  await expect(settings.getByTestId('settings-detail-header-title')).toHaveText('Usage');
+  await settings.getByRole('button', { name: 'Back', exact: true }).click();
+
   // Disconnect (the footer's Hosts menu, as Paseo's host picker) forgets it.
   await page.getByTestId('sidebar-hosts-trigger').click();
   await page.getByTestId('sidebar-disconnect').click();
