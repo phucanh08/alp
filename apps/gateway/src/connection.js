@@ -705,7 +705,8 @@ export class ClientConnection {
   async #handle(method, params) {
     if (method === 'daemon.hello') {
       const greeting = this.#hello(params);
-      this.#helloing = greeting.catch(() => {});
+      // Chained: what follows waits for every hello before it, so none can hide a pending mark (t-e706).
+      this.#helloing = Promise.all([this.#helloing, greeting.catch(() => {})]);
       return greeting;
     }
     // Behind every hello, even a later one: a hello that marks an agent lands before what follows it (t-e706).
